@@ -1461,30 +1461,41 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   margin: 0;
   font-size: 0.8125rem;
   color: var(--wb-muted-foreground);
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
 }
 
 /* --- Dictation --------------------------------------------------------------
-   The microphone sits with the composer's hint line rather than inside the
-   input, whose layout belongs to the component library. While listening the
-   button pulses and the hint says so, because a live microphone must never be
-   ambiguous. */
-.dictation {
-  display: inline-flex;
-  align-items: center;
+   The microphone stands to the left of the composer, level with its send
+   button, rather than inside the input, whose layout belongs to the component
+   library. While listening the button pulses and a line under the composer
+   says so, because a live microphone must never be ambiguous. */
+.dictated {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.dictated-row {
+  display: flex;
+  align-items: flex-end;
   gap: var(--space-2);
   min-width: 0;
 }
 
+.dictated-row > :last-child {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The input's send button is 36px inside 8px of padding; the same size and
+   the same inset puts the two on one line. */
 .dictate {
-  width: 28px;
-  height: 28px;
+  width: 36px;
+  height: 36px;
+  margin-bottom: var(--space-2);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 999px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--wb-border);
   background: var(--wb-card);
   color: var(--wb-foreground);
@@ -1493,8 +1504,8 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 }
 
 .dictate svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 
 .dictate:hover:not(:disabled) {
@@ -1529,6 +1540,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 }
 
 .dictation-state {
+  margin: 0;
   font-size: 0.8125rem;
   color: var(--wb-muted-foreground);
 }

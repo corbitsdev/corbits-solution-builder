@@ -22,7 +22,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, ApiFailure, type ProjectSummary } from "../client.js";
 import { Banner, StageRing, StateLabel, stageName } from "../components.jsx";
 import { DEFAULT_POLICY } from "./onboarding.jsx";
-import { DictationButton } from "../dictation.jsx";
+import { Dictated } from "../dictation.jsx";
 
 export function Projects({
   projects,
@@ -79,17 +79,18 @@ export function Projects({
           specialist will ask about what it does not know.
         </p>
         {error ? <Banner tone="error" title={error} /> : null}
-        <ChatInput
-          className="start-input"
-          value={problem}
-          onValueChange={setProblem}
-          onSend={() => void start()}
-          working={busy}
-          disabled={busy}
-          placeholder="The thing that keeps eating your afternoons…"
-        />
+        <Dictated value={problem} onValueChange={setProblem} disabled={busy}>
+          <ChatInput
+            className="start-input"
+            value={problem}
+            onValueChange={setProblem}
+            onSend={() => void start()}
+            working={busy}
+            disabled={busy}
+            placeholder="The thing that keeps eating your afternoons…"
+          />
+        </Dictated>
         <p className="start-hint">
-          <DictationButton value={problem} onValueChange={setProblem} disabled={busy} />
           {problem.trim().length > 0 && problem.trim().length < 10
             ? "A little more. A sentence is enough."
             : "Enter to start. Rough is fine."}

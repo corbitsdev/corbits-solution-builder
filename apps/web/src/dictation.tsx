@@ -12,7 +12,7 @@
  * typed stays; dictation appends to it.
  */
 import { Mic, Square } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 type RecognitionResult = ArrayLike<{ transcript: string }> & { isFinal: boolean };
 type RecognitionEvent = { results: ArrayLike<RecognitionResult> };
@@ -102,46 +102,56 @@ export function useDictation(value: string, onValueChange: (value: string) => vo
 }
 
 /**
- * The microphone control for a composer. Renders nothing where the browser
- * has no speech recognition: a control that does not exist is absent.
+ * A composer with a microphone beside it, on the left, level with the send
+ * button. Where the browser has no speech recognition the composer is
+ * rendered alone: a control that does not exist is absent.
+ *
+ * What the microphone is doing is said under the composer only while there
+ * is something to say, listening or a refusal, so the row itself never
+ * changes shape.
  */
-export function DictationButton({
+export function Dictated({
   value,
   onValueChange,
   disabled = false,
+  children,
 }: {
   value: string;
   onValueChange: (value: string) => void;
   /** The composer is busy; dictation into it would be lost. */
   disabled?: boolean;
+  children: ReactNode;
 }) {
   const { supported, listening, refusal, start, stop } = useDictation(value, onValueChange);
   useEffect(() => {
     if (disabled && listening) stop();
   }, [disabled, listening, stop]);
-  if (!supported) return null;
+  if (!supported) return <>{children}</>;
   return (
-    <span className="dictation">
-      <button
-        type="button"
-        className="dictate"
-        aria-pressed={listening}
-        aria-label={listening ? "Stop dictating" : "Dictate"}
-        title={listening ? "Stop dictating" : "Dictate instead of typing"}
-        disabled={disabled}
-        onClick={listening ? stop : start}
-      >
-        {listening ? <Square aria-hidden="true" /> : <Mic aria-hidden="true" />}
-      </button>
+    <div className="dictated">
+      <div className="dictated-row">
+        <button
+          type="button"
+          className="dictate"
+          aria-pressed={listening}
+          aria-label={listening ? "Stop dictating" : "Dictate"}
+          title={listening ? "Stop dictating" : "Dictate instead of typing"}
+          disabled={disabled}
+          onClick={listening ? stop : start}
+        >
+          {listening ? <Square aria-hidden="true" /> : <Mic aria-hidden="true" />}
+        </button>
+        {children}
+      </div>
       {listening ? (
-        <span className="dictation-state" aria-live="polite">
+        <p className="dictation-state" aria-live="polite">
           Listening…
-        </span>
+        </p>
       ) : refusal ? (
-        <span className="dictation-state" role="alert">
+        <p className="dictation-state" role="alert">
           {refusal}
-        </span>
+        </p>
       ) : null}
-    </span>
+    </div>
   );
 }
