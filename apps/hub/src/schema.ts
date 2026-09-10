@@ -79,19 +79,6 @@ export const artifactEdge = builder.table(
   (table) => [primaryKey({ columns: [table.childNodeId, table.sourceNodeId] })],
 );
 
-export const decisionFlag = builder.table("decision_flag", {
-  id: id(),
-  projectId: text("project_id").notNull(),
-  runId: text("run_id").notNull(),
-  trigger: text("trigger").notNull(),
-  classification: text("classification").notNull(),
-  evidence: jsonb("evidence").notNull(),
-  chosenRoute: integer("chosen_route"),
-  rejectedRoutes: jsonb("rejected_routes"),
-  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
-  createdAt: createdAt(),
-});
-
 export const buildPacket = builder.table("build_packet", {
   id: id(),
   projectId: text("project_id").notNull(),

@@ -17,8 +17,8 @@
  *   3. The client cannot write persistence: `apps/web` never imports the hub,
  *      the database, the schema, or the command engine.
  *   4. Run state moves in exactly one place. Only `engine.ts` (and
- *      `projects.ts`, opening the first run) writes a run's state, through the
- *      executor's `StoredRun`, so there is no second state machine.
+ *      `projects.ts`, opening the first run) records a run mutation on the
+ *      ledger, so there is no second state machine.
  */
 import { readdir, readFile } from "node:fs/promises";
 import { extname, join, relative } from "node:path";
@@ -168,18 +168,17 @@ for (const file of files) {
     }
   }
 
-  // The single-state-machine rule. A project's stage and state live in the
-  // runtime executor's in-memory `StoredRun`, and `putRunRecord` and
-  // `updateRunRecord` (defined in `hub-executor.ts`) are the only ways to
-  // write one. Only `engine.ts` moves a run through the ledger; `projects.ts`
-  // opens the first run when a project is created, which is the one write the
-  // engine does not make. Anywhere else is a second state machine starting.
-  const STATE_WRITERS = [`${HUB}/engine.ts`, `${HUB}/projects.ts`, `${HUB}/hub-executor.ts`];
-  if (!STATE_WRITERS.includes(path) && /\b(putRunRecord|updateRunRecord)\s*\(/.test(text)) {
+  // The single-state-machine rule. A run's record is folded from the run
+  // mutations on the ledger thread (`runs.ts`), and only `engine.ts` records
+  // them; `projects.ts` opens the first run when a project is created, which
+  // is the one write the engine does not make. Anywhere else is a second
+  // state machine starting.
+  const STATE_WRITERS = [`${HUB}/engine.ts`, `${HUB}/projects.ts`];
+  if (!STATE_WRITERS.includes(path) && /\bnew RunDraft\s*\(|\bop: "create"|\bop: "patch"/.test(text) && path !== `${HUB}/runs.ts`) {
     violations.push({
       file: path,
       rule: "only apps/hub/src/engine.ts and apps/hub/src/projects.ts move a run's state",
-      detail: "calls putRunRecord/updateRunRecord",
+      detail: "records run mutations",
     });
   }
 }

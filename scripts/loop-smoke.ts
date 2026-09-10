@@ -23,7 +23,8 @@ import {
   projectDetail,
   writeArtifact,
 } from "../apps/hub/src/projects.js";
-import { execute, HOST_PRINCIPAL, rehydrateRun, submitAndApprove } from "../apps/hub/src/engine.js";
+import { execute, HOST_PRINCIPAL, submitAndApprove } from "../apps/hub/src/engine.js";
+import { activeRun } from "../apps/hub/src/runs.js";
 import { newId } from "../apps/hub/src/ids.js";
 import { HostError } from "../apps/hub/src/errors.js";
 import type { ArtifactKind } from "../apps/hub/src/domain.js";
@@ -889,7 +890,9 @@ let buildRunId = "";
     runId: detail.current!.id,
     versions: [{ artifactId: node.artifactId, versionId: node.nodeId, contentHash: node.contentHash }],
   });
-  const recovered = await rehydrateRun(fresh.projectId);
+  // Nothing about the run is in process memory: the same read a fresh host
+  // makes folds the ledger thread and finds the parked stage.
+  const recovered = await activeRun(fresh.projectId);
   check(
     "a restart still finds the stage waiting on the decision",
     recovered?.state === "waiting_approval" && recovered.stage === 1,

@@ -23,6 +23,7 @@ import {
 } from "./hub-gaps.js";
 import { sha256 } from "./ids.js";
 import type { CommandOutcome } from "./engine.js";
+import type { RunMutation } from "./runs.js";
 
 /** The `agent_session` id for a project's ledger, deterministic in the project id. */
 export function ledgerSessionIdFor(projectId: string): Promise<string> {
@@ -60,6 +61,20 @@ export type LedgerEntry = {
   assumptions?: unknown;
   stage?: number;
   runId?: string;
+  /** The run set changes this command made; `runs.ts` folds them into the run record. */
+  runs?: RunMutation[];
+  /** A decision flag raised by this command (a route back, a material change). */
+  flag?: DecisionFlag;
+};
+
+export type DecisionFlag = {
+  id: string;
+  runId: string;
+  trigger: string;
+  classification: string;
+  evidence: unknown;
+  chosenRoute: number | null;
+  rejectedRoutes: unknown;
 };
 
 function summarize(entry: LedgerEntry): string {
@@ -99,6 +114,8 @@ export async function recordCommand(entry: LedgerEntry): Promise<void> {
   if (entry.assumptions !== undefined) metadata.assumptions = entry.assumptions;
   if (entry.stage !== undefined) metadata.stage = entry.stage;
   if (entry.runId !== undefined) metadata.runId = entry.runId;
+  if (entry.runs !== undefined && entry.runs.length > 0) metadata.runs = entry.runs;
+  if (entry.flag !== undefined) metadata.flag = entry.flag;
 
   await writeConversationTurn({
     sessionId,
@@ -128,12 +145,36 @@ export async function receiptFor(
   return match ? ({ ...(match.metadata!.result as CommandOutcome), replayed: true }) : null;
 }
 
-/** The command that most recently committed on this project, if any. */
-export async function lastCommittedCommand(projectId: string): Promise<string | undefined> {
+export type LedgerCommand = {
+  id: string;
+  command: string;
+  runs: unknown[];
+  flag: DecisionFlag | null;
+  createdAt: string;
+};
+
+/** Every committed command on this project, oldest first, with the run mutations and flag it carried. */
+export async function ledgerCommands(projectId: string): Promise<LedgerCommand[]> {
   const sessionId = await ledgerSessionIdFor(projectId);
   const parts = commandParts(await listConversationTurns(sessionId));
-  const last = parts.at(-1);
-  return last ? String(last.metadata!.command) : undefined;
+  return parts.map((part) => ({
+    id: part.id,
+    command: String(part.metadata!.command),
+    runs: Array.isArray(part.metadata?.runs) ? (part.metadata!.runs as unknown[]) : [],
+    flag: (part.metadata?.flag as DecisionFlag | undefined) ?? null,
+    createdAt: part.startedAt,
+  }));
+}
+
+/** The decision flags raised on this project, newest first — the shape `projectDetail` returns. */
+export async function projectFlags(
+  projectId: string,
+): Promise<(DecisionFlag & { projectId: string; createdAt: string; resolvedAt: null })[]> {
+  const commands = await ledgerCommands(projectId);
+  return commands
+    .filter((command) => command.flag !== null)
+    .map((command) => ({ ...command.flag!, projectId, createdAt: command.createdAt, resolvedAt: null }))
+    .reverse();
 }
 
 /** Every `audience.decide` decision recorded for a run. */

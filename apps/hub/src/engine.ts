@@ -21,14 +21,9 @@ import { newId, sha256 } from "./ids.js";
 import { database, type Db } from "./db.js";
 import * as table from "./schema.js";
 import type { Authority } from "@solutions-builder/app/ledger";
-import {
-  activeRunRecord,
-  getRunRecord,
-  launchProjectLifecycle,
-  putRunRecord,
-  updateRunRecord,
-} from "./hub-executor.js";
+import { launchProjectLifecycle } from "./hub-executor.js";
 import { loadRun } from "./engine-views.js";
+import { RunDraft, activeRun, readRun, runsForProject } from "./runs.js";
 import {
   authoritiesFor,
   versionHashesMatch,
@@ -36,7 +31,7 @@ import {
   packetExists,
   waitingOrigin,
 } from "./engine-approvals.js";
-import { recordCommand, receiptFor, lastCommittedCommand, audienceDecisions } from "./engine-ledger.js";
+import { recordCommand, receiptFor, audienceDecisions, type DecisionFlag } from "./engine-ledger.js";
 import { runGateSideEffects } from "./engine-recovery.js";
 import { notifyDecision } from "./notify.js";
 import { readProject, updateProject, type ProjectPolicy } from "./project-tenant.js";
@@ -94,17 +89,20 @@ export type CommandOutcome = {
 
 type VersionRef = { artifactId: string; versionId: string; contentHash: string };
 
-function createRun(args: {
-  projectId: string;
-  kind: "stage" | "build";
-  stage: Stage;
-  state: string;
-  sourceRunId?: string | null;
-  packetId?: string | null;
-  checkpointRef?: string | null;
-}): string {
+function createRun(
+  draft: RunDraft,
+  args: {
+    projectId: string;
+    kind: "stage" | "build";
+    stage: Stage;
+    state: string;
+    sourceRunId?: string | null;
+    packetId?: string | null;
+    checkpointRef?: string | null;
+  },
+): string {
   const id = newId.run();
-  putRunRecord({
+  return draft.create({
     id,
     projectId: args.projectId,
     kind: args.kind,
@@ -121,67 +119,6 @@ function createRun(args: {
     createdAt: new Date(),
     endedAt: null,
   });
-  return id;
-}
-
-/**
- * Rebuilds a project's run from what is durable.
- *
- * Run state lives in the runtime, in memory, so a restart loses it — and a
- * project the person can see but not open is a worse answer than any position
- * we might recover. The artifacts and approvals are durable, and between them
- * they say where the work got to: the furthest stage that produced something,
- * and whether that stage is waiting on a decision.
- *
- * Deliberately not a guess about the middle of a stage. It recovers the stage
- * and whether it is waiting, which is what every screen needs; the
- * conversation on that stage is durable too and comes back with it.
- */
-/** The gates that leave a run parked on a person, by the command that parked it. */
-const PARKED_BY: Record<string, { state: RunView["state"]; stage: Stage }> = {
-  "stage.submit": { state: "waiting_approval", stage: 1 },
-  "cost.approve": { state: "cost_approved", stage: 7 },
-  "build.wait_for_human": { state: "waiting_human", stage: 8 },
-  "build.accept_evidence": { state: "delivery_review", stage: 9 },
-};
-
-export async function rehydrateRun(projectId: string) {
-  const { db } = database();
-  const project = await readProject(projectId);
-  if (!project) return undefined;
-
-  const nodes = await db
-    .select({ stage: table.artifactNode.stage })
-    .from(table.artifactNode)
-    .where(eq(table.artifactNode.projectId, projectId));
-  const reached = nodes.reduce<number>((high, row) => Math.max(high, row.stage), 1) as Stage;
-
-  // Whether the stage was waiting on a person is read from the last committed
-  // command: the gates that park a run are the only ones that leave it there.
-  // A stopgap until the parked run itself is durable through the platform.
-  const lastCommand = await lastCommittedCommand(projectId);
-  const parked = lastCommand ? PARKED_BY[lastCommand] : undefined;
-
-  const now = new Date();
-  const runId = newId.run();
-  const record = {
-    id: runId,
-    projectId,
-    kind: "stage" as const,
-    stage: parked ? Math.max(reached, parked.stage) as Stage : reached,
-    state: (parked?.state ?? "in_progress") as RunView["state"],
-    sourceRunId: null,
-    originId: runId,
-    terminalReason: null,
-    costApprovalVersionId: null,
-    routeTargetStage: null,
-    packetId: null,
-    checkpointRef: null,
-    createdAt: now,
-    endedAt: null,
-  };
-  putRunRecord(record);
-  return record;
 }
 
 /**
@@ -245,8 +182,8 @@ export async function submitAndApprove(input: {
   readonly correlationId: string;
   readonly expectedRevision?: number;
 }): Promise<CommandOutcome> {
-  const before = getRunRecord(input.runId);
-  if (!before || before.projectId !== input.projectId) throw notFound("That run");
+  const before = await readRun(input.runId, input.projectId);
+  if (!before) throw notFound("That run");
 
   const submitted = await execute({
     type: "stage.submit",
@@ -310,7 +247,7 @@ async function runProjectDelete(input: CommandInput, authorities: Authority[]): 
   expectRevision(input, project.revision);
   await updateProject(input.projectId, { deletedAt });
 
-  const open = activeRunRecord(input.projectId);
+  const open = await activeRun(input.projectId);
   const result: CommandOutcome = {
     runId: open?.id ?? "",
     stage: (open?.stage ?? 1) as Stage,
@@ -347,7 +284,11 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
 
   const runId = String(input.payload.runId ?? "");
   if (!runId) throw new HostError("validation_failed", "The command must name a run.");
-  const run = loadRun(runId, input.projectId);
+  const run = await loadRun(runId, input.projectId);
+  // The run mutations this command makes are collected here and written to
+  // the ledger after the transaction returns, since the ledger mail lives on
+  // the same single-writer connection as `tx`.
+  const draft = new RunDraft(await runsForProject(input.projectId));
 
   const versions = Array.isArray(input.payload.versions) ? (input.payload.versions as VersionRef[]) : [];
   const needsExactVersions = (
@@ -420,7 +361,7 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
       throw new HostError("transition_refused", verdict.message, { refusal: verdict.code });
     }
 
-    const applied = await apply(tx, {
+    const applied = await apply(tx, draft, {
       input,
       run,
       policy,
@@ -462,6 +403,8 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
     result: outcome.result,
     stage: run.stage,
     runId: outcome.applied.runId,
+    runs: draft.mutations,
+    ...(outcome.applied.flag ? { flag: outcome.applied.flag } : {}),
     ...(outcome.applied.approval ?? {}),
   });
 
@@ -494,6 +437,8 @@ export type AppliedCommand = {
   approval?: AppliedApproval;
   /** Set when this transition parks a run on a person; notified after commit. */
   notifyRunId?: string;
+  /** Set when this transition raises a decision flag, recorded on the ledger turn. */
+  flag?: DecisionFlag;
 };
 
 /**
@@ -502,6 +447,7 @@ export type AppliedCommand = {
  */
 async function apply(
   tx: Tx,
+  draft: RunDraft,
   args: {
     input: CommandInput;
     run: RunView;
@@ -524,7 +470,7 @@ async function apply(
   });
 
   const terminalize = (state: string, reason: string) => {
-    updateRunRecord(run.id, { state: state as RunView["state"], terminalReason: reason, endedAt: now });
+    draft.patch(run.id, { state: state as RunView["state"], terminalReason: reason, endedAt: now });
   };
 
   switch (input.type) {
@@ -543,13 +489,13 @@ async function apply(
     }
 
     case "stage.submit": {
-      updateRunRecord(run.id, { state: "waiting_approval" });
+      draft.patch(run.id, { state: "waiting_approval" });
       return { runId: run.id, stage: run.stage, state: "waiting_approval", notifyRunId: run.id };
     }
 
     case "stage.approve": {
       terminalize("approved", "approved and advanced");
-      const next = createRun({
+      const next = createRun(draft, {
         projectId: input.projectId,
         kind: "stage",
         stage: toStage,
@@ -562,7 +508,7 @@ async function apply(
     case "cost.approve": {
       // No stage advance. The cost approval is a field on this run, and
       // build.freeze is the only thing that reads it.
-      updateRunRecord(run.id, {
+      draft.patch(run.id, {
         state: "cost_approved",
         costApprovalVersionId: args.versions[0]?.versionId ?? null,
       });
@@ -590,7 +536,7 @@ async function apply(
       // Stage 7 is terminal from here. It never returns to in_progress;
       // a material change re-enters through stage.backtracked routing.
       terminalize("approved_frozen", "packet frozen");
-      const buildRun = createRun({
+      const buildRun = createRun(draft, {
         projectId: input.projectId,
         kind: "build",
         stage: 8,
@@ -603,12 +549,12 @@ async function apply(
 
     case "build.start_attempt": {
       if (run.state === "queued") {
-        updateRunRecord(run.id, { state: "running" });
+        draft.patch(run.id, { state: "running" });
         return { runId: run.id, stage: 8, state: "running" };
       }
       // From a terminal build run: a new queued run linked to the unchanged source.
-      const source = getRunRecord(run.id);
-      const next = createRun({
+      const source = draft.get(run.id);
+      const next = createRun(draft, {
         projectId: input.projectId,
         kind: "build",
         stage: 8,
@@ -620,7 +566,7 @@ async function apply(
     }
 
     case "build.wait_for_human": {
-      updateRunRecord(run.id, { state: "waiting_human" });
+      draft.patch(run.id, { state: "waiting_human" });
       await tx.insert(table.buildQuestion).values({
         id: newId.question(),
         projectId: input.projectId,
@@ -646,7 +592,7 @@ async function apply(
           and(eq(table.buildQuestion.runId, run.id), isNull(table.buildQuestion.answeredAt)),
         );
       // The same queued-origin attempt resumes. No new run, no origin change.
-      updateRunRecord(run.id, { state: "running" });
+      draft.patch(run.id, { state: "running" });
       return { runId: run.id, stage: 8, state: "running" };
     }
 
@@ -663,7 +609,7 @@ async function apply(
         exceptions: (input.payload.exceptions as unknown) ?? null,
         manifestHash: await sha256(manifestBody),
       });
-      const delivery = createRun({
+      const delivery = createRun(draft, {
         projectId: input.projectId,
         kind: "stage",
         stage: 9,
@@ -699,37 +645,38 @@ async function apply(
     case "delivery.revise":
     case "build.route_material_change": {
       const reason = String(input.payload.reason ?? "");
-      await tx.insert(table.decisionFlag).values({
+      const flag: DecisionFlag = {
         id: newId.flag(),
-        projectId: input.projectId,
         runId: run.id,
         trigger: input.type,
         classification: input.type.startsWith("build.") ? "material_change" : "review_outcome",
         evidence: { reason, fromStage: run.stage },
         chosenRoute: toStage,
-      });
+        rejectedRoutes: null,
+      };
       // The source run keeps its own history; the route lives on a new run so
       // the backtrack is visible rather than an edit of what was decided.
       terminalize("backtracked", reason || "routed back");
-      const routed = createRun({
+      const routed = createRun(draft, {
         projectId: input.projectId,
         kind: "stage",
         stage: toStage,
         state: "backtracked",
         sourceRunId: run.id,
       });
-      updateRunRecord(routed, { routeTargetStage: toStage });
+      draft.patch(routed, { routeTargetStage: toStage });
       return {
         runId: routed,
         stage: toStage,
         state: "backtracked",
         approval: approvalOf(input.type.endsWith("reject") ? "reject" : "revise"),
+        flag,
       };
     }
 
     case "stage.select_route": {
       terminalize("routed", "route selected");
-      const next = createRun({
+      const next = createRun(draft, {
         projectId: input.projectId,
         kind: "stage",
         stage: toStage,
@@ -751,8 +698,8 @@ async function apply(
 
     case "stage.retry":
     case "build.resume": {
-      const source = getRunRecord(run.id);
-      const next = createRun({
+      const source = draft.get(run.id);
+      const next = createRun(draft, {
         projectId: input.projectId,
         kind: run.kind,
         stage: run.stage,

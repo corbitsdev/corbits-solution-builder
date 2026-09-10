@@ -134,10 +134,13 @@ try {
   // shim normalises the query builder but not a raw execute.
   const returned = (rows as unknown as { rows?: { conname: string }[] }).rows ??
     (rows as unknown as { conname: string }[]);
-  const names = returned.map((row) => row.conname);
+  const names = returned.map((row) => row.conname).sort();
+  const expected = ["artifact_node", "build_packet", "build_question", "delivery_manifest"].map(
+    (name) => `${name}_project_tenant_fk`,
+  );
   check(
     "every project_id in the builder schema references the hub's tenant table",
-    names.length === 5,
+    JSON.stringify(names) === JSON.stringify(expected),
     names.join(", ") || "none",
   );
 

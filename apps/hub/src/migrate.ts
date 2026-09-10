@@ -564,6 +564,12 @@ const MIGRATIONS: readonly Migration[] = [
       sql`DROP TABLE IF EXISTS "builder"."project"`,
     ],
   },
+  {
+    // A decision flag is a field on the ledger turn of the command that
+    // raised it; the run record is folded from those turns too.
+    id: "0007_drop_decision_flag",
+    statements: [sql`DROP TABLE IF EXISTS "builder"."decision_flag"`],
+  },
 ];
 
 async function checksum(migration: Migration): Promise<string> {

@@ -13,9 +13,8 @@ import { STAGE_TITLES } from "@solutions-builder/app/ledger";
 import { database } from "./db.js";
 import * as table from "./schema.js";
 import { requiredAuthorityFor } from "./engine-approvals.js";
-import { rehydrateRun } from "./engine.js";
 import { listProjectRecords } from "./project-tenant.js";
-import { activeRunRecord, type StoredRun } from "./hub-executor.js";
+import { activeRun, type RunRecord } from "./runs.js";
 
 export type Decision = {
   /** Stable for as long as this run sits in this state. */
@@ -70,16 +69,16 @@ export function announcementFor(decisionId: string) {
   return announced.get(decisionId);
 }
 
-export function decisionIdFor(run: Pick<StoredRun, "id" | "state">): string {
+export function decisionIdFor(run: Pick<RunRecord, "id" | "state">): string {
   return `${run.id}:${run.state}`;
 }
 
 /** The decision waiting on this project, or null when the next move is not a person's. */
 export async function openDecisionFor(
   projectId: string,
-  current?: StoredRun | null,
+  current?: RunRecord | null,
 ): Promise<Decision | null> {
-  const run = current ?? activeRunRecord(projectId) ?? (await rehydrateRun(projectId)) ?? null;
+  const run = current ?? (await activeRun(projectId));
   if (!run || !DECIDING_STATES.has(run.state)) return null;
 
   const { db } = database();

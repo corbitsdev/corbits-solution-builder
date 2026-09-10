@@ -8,99 +8,18 @@
  * and reads where the run stands by folding the run's own committed events.
  * Nothing here executes a workflow; that is the sidecar's job.
  *
- * The run *record* below (`StoredRun`) is the one piece still in process
- * memory: the product fields the engine reads off a run (`routeTargetStage`,
- * `costApprovalVersionId`, `packetId`, `checkpointRef`, ...) have no home on
- * the hub run yet. Moving them onto the ledger thread is the remaining slice
- * of CL-7627.
+ * The product's own run record (origin, source, cost approval, packet,
+ * checkpoint, why it ended) is folded from the ledger thread in `runs.ts`;
+ * nothing about a run lives in process memory.
  */
 import { applyEvent, emptyState, type WorkflowEvent } from "@intx/workflow";
-import type { Command, RunKind, RunState, Stage } from "@solutions-builder/app/ledger";
+import type { Command, Stage } from "@solutions-builder/app/ledger";
 import { stageOfStepId, stageSignal } from "@solutions-builder/app/workflows/stage-loop";
 import { deploymentRuns } from "./hub-client.js";
 import { ensureLifecycleDeployment } from "./workflow-deploy.js";
 
 /** What a signal delivery actually did, so a caller can tell nothing from broken. */
 export type DeliveryOutcome = "delivered" | "no_execution" | "failed";
-
-/**
- * The run record — everything `table.run` used to persist, now kept here
- * instead. Stage and state are the ledger's own vocabulary, resolved against
- * this store rather than a database row; the rest (`sourceRunId`, `originId`,
- * `routeTargetStage`, `costApprovalVersionId`, `packetId`, `checkpointRef`)
- * are product-specific fields the platform has no column for, carried
- * forward unchanged because `engine.ts` and `store/projects.ts` both still
- * read every one of them (grepped, not assumed — `stage.retry`/`build.resume`
- * read `checkpointRef` and `packetId` off the prior run; `build.answer` reads
- * `originId`; `stage.select_route` reads `routeTargetStage`; `build.freeze`
- * reads `costApprovalVersionId`; the UI's `Run` type reads `packetId` and
- * `terminalReason`).
- *
- * In-memory only, same as the rest of this module: a host restart loses
- * in-flight runs, which is accepted for this pass. There is deliberately no
- * second table standing in for `table.run` — that would just move the "two
- * runners" problem sideways instead of ending it.
- */
-export type StoredRun = {
-  readonly id: string;
-  readonly projectId: string;
-  readonly kind: RunKind;
-  readonly stage: Stage;
-  readonly state: RunState;
-  readonly sourceRunId: string | null;
-  readonly originId: string;
-  readonly terminalReason: string | null;
-  readonly costApprovalVersionId: string | null;
-  readonly routeTargetStage: number | null;
-  readonly packetId: string | null;
-  readonly checkpointRef: string | null;
-  readonly createdAt: Date;
-  readonly endedAt: Date | null;
-};
-
-const runsById = new Map<string, StoredRun>();
-/** Append-only per project, in creation order — mirrors `ORDER BY created_at`. */
-const runsByProject = new Map<string, string[]>();
-
-/** Records a new run. The id is minted by the caller, same as `table.run` before. */
-export function putRunRecord(record: StoredRun): void {
-  runsById.set(record.id, record);
-  const ids = runsByProject.get(record.projectId);
-  if (ids) ids.push(record.id);
-  else runsByProject.set(record.projectId, [record.id]);
-}
-
-export function getRunRecord(runId: string): StoredRun | undefined {
-  return runsById.get(runId);
-}
-
-/** Merges a patch into an existing run record. Throws on an unknown id — a coding error, not a user one. */
-export function updateRunRecord(
-  runId: string,
-  patch: Partial<Omit<StoredRun, "id" | "projectId">>,
-): StoredRun {
-  const existing = runsById.get(runId);
-  if (!existing) throw new Error(`executor: no run record ${runId}`);
-  const updated: StoredRun = { ...existing, ...patch };
-  runsById.set(runId, updated);
-  return updated;
-}
-
-/** The most recently created run for a project that has not ended. */
-export function activeRunRecord(projectId: string): StoredRun | undefined {
-  const ids = runsByProject.get(projectId) ?? [];
-  for (let i = ids.length - 1; i >= 0; i -= 1) {
-    const run = runsById.get(ids[i]!);
-    if (run && run.endedAt === null) return run;
-  }
-  return undefined;
-}
-
-/** Every run for a project, oldest first — the full history a project detail view shows. */
-export function runRecordsForProject(projectId: string): StoredRun[] {
-  return (runsByProject.get(projectId) ?? []).map((id) => runsById.get(id)!);
-}
-
 
 // --- The deployment behind a project -------------------------------------------
 
