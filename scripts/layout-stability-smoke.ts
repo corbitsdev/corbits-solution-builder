@@ -5,7 +5,7 @@
  * about to click. It reads as the interface flinching, and it is how a
  * mis-click happens right after a mistake.
  *
- * This renders the onboarding markup with and without an error and compares the
+ * This renders the shared provider list with and without an error and compares the
  * vertical position of every provider row. It is a DOM measurement, not a
  * screenshot diff, so it runs in the same second as the rest of the gates.
  *
@@ -15,7 +15,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const root = join(import.meta.dir, "..");
-const source = await readFile(join(root, "src", "ui", "views", "onboarding.tsx"), "utf8");
+const source = await readFile(join(root, "src", "ui", "views", "providers.tsx"), "utf8");
+const onboarding = await readFile(join(root, "src", "ui", "views", "onboarding.tsx"), "utf8");
 
 const checks: { name: string; ok: boolean; detail: string }[] = [];
 function check(name: string, ok: boolean, detail = "") {
@@ -40,7 +41,7 @@ check("nothing above the list is conditional on an error", !conditionalAbove);
 // The step track and heading are fixed content, so the card's top never moves.
 check(
   "the step track is unconditional",
-  /<div className="step-track"/.test(source) && !/\{[^}]*\?\s*<div className="step-track"/.test(source),
+  /<div className="step-track"/.test(onboarding) && !/\{[^}]*\?\s*<div className="step-track"/.test(onboarding),
 );
 
 
