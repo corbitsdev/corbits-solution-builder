@@ -29,7 +29,10 @@ function token(name: string, fallback: string): string {
   return value || fallback;
 }
 
-const STEPS: Step[] = [
+/** The width under which the stylesheet stacks the document over the conversation. */
+const STACKED_BELOW = 1080;
+
+const steps = (): Step[] => [
   {
     target: '[data-tour="next-step"]',
     placement: "left",
@@ -45,6 +48,12 @@ const STEPS: Step[] = [
   },
   {
     target: '[data-tour="document"]',
+    // The document fills its pane top to bottom, so there is no room above or
+    // below it: left unset, the callout was pushed past the window's top edge
+    // and could not be read. Beside it, over the conversation, it fits; once
+    // the panes stack there is no beside either, and the centre of the
+    // spotlight is the one place that is always on screen.
+    placement: window.innerWidth > STACKED_BELOW ? "left" : "center",
     title: "The draft, beside the conversation",
     content:
       "It is rewritten with every answer you give. Select any passage in it and that passage attaches to your next message, so the specialist has exactly what you meant.",
@@ -88,7 +97,7 @@ export function StageTour({ enabled }: { enabled: boolean }) {
   return (
     <Joyride
       run={run}
-      steps={STEPS}
+      steps={steps()}
       continuous
       onEvent={finish}
       locale={{ back: "Back", close: "Close", last: "Got it", next: "Next", skip: "Skip" }}
