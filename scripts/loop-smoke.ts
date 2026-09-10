@@ -27,6 +27,14 @@ import { execute, HOST_PRINCIPAL, submitAndApprove } from "../apps/hub/src/engin
 import { activeRun } from "../apps/hub/src/runs.js";
 import { newId } from "../apps/hub/src/ids.js";
 import { HostError } from "../apps/hub/src/errors.js";
+import { openDecisionFor } from "../apps/hub/src/decisions.js";
+import { workspaceFor } from "../apps/hub/src/corbits-exec.js";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { createHash } from "node:crypto";
+
+const DELIVERED_BYTES = Buffer.from("the delivered application bytes\n");
+const DELIVERED_SHA = createHash("sha256").update(DELIVERED_BYTES).digest("hex");
 import type { ArtifactKind } from "../apps/hub/src/domain.js";
 import { AUTHORITIES, type Command, type Stage } from "@solutions-builder/app/ledger";
 
@@ -471,24 +479,43 @@ let buildRunId = "";
     () => command("build.resume", projectId, { runId: buildRunId }),
   );
 
+  // The manifest names bytes that are not in the workspace yet, so the
+  // verification recorded with it is incomplete and stage 9 must refuse.
   const accepted = await command("build.accept_evidence", projectId, {
     runId: buildRunId,
     versions: [],
-    descriptors: [{ name: "chess.app", sha256: "a".repeat(64), sizeBytes: 1024 }],
+    descriptors: [
+      { category: "source", path: "dist/chess.app", sha256: DELIVERED_SHA, sizeBytes: DELIVERED_BYTES.byteLength, mediaType: "application/octet-stream", access: "local", required: true },
+      { category: "docs", path: "https://example.invalid/README", sha256: "b".repeat(64), sizeBytes: 12, mediaType: "text/markdown", access: "remote", required: false },
+    ],
     verification: { requiredChecks: "recorded by the loop smoke" },
+    actualCost: 12.5,
   });
   check("accepting evidence opens delivery review at stage 9", accepted.stage === 9);
+  const opened = await openDecisionFor(projectId);
+  check(
+    "the stage 9 decision names the missing byte",
+    (opened?.blockers ?? "").includes("missing: dist/chess.app"),
+    opened?.blockers ?? "no blockers",
+  );
 }
 
 // --- Stage 9: delivery ---
 {
   const detail = await projectDetail(projectId, ACTOR.principalId);
   const run = detail.current!;
-  const delivered = await command("delivery.accept", projectId, {
-    runId: run.id,
-    manifestVersion: { artifactId: "-", versionId: "-", contentHash: "0".repeat(64) },
-  });
-  check("delivery.accept completes the project", delivered.state === "delivered");
+  const acceptDelivery = () =>
+    command("delivery.accept", projectId, {
+      runId: run.id,
+      manifestVersion: { artifactId: "-", versionId: "-", contentHash: "0".repeat(64) },
+    });
+  await refuses("delivery.accept is refused while a required byte is missing", "transition_refused", acceptDelivery);
+  await mkdir(join(await workspaceFor(buildRunId), "dist"), { recursive: true });
+  await writeFile(join(await workspaceFor(buildRunId), "dist", "chess.app"), Buffer.from("not the bytes"));
+  await refuses("delivery.accept is refused while a required byte does not match its hash", "transition_refused", acceptDelivery);
+  await writeFile(join(await workspaceFor(buildRunId), "dist", "chess.app"), DELIVERED_BYTES);
+  const delivered = await acceptDelivery();
+  check("delivery.accept completes the project once the bytes match", delivered.state === "delivered");
 
   const final = await projectDetail(projectId, ACTOR.principalId);
   check(

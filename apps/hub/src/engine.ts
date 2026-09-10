@@ -36,9 +36,18 @@ import {
   type BuildAnswer,
   type BuildQuestion,
   type DecisionFlag,
+  type RetentionReceipt,
 } from "./engine-ledger.js";
+import { eq } from "drizzle-orm";
+import * as table from "./schema.js";
 import { writeArtifact } from "./projects.js";
 import type { ArtifactDraft } from "./domain.js";
+import { describeBlockers, normalizeDescriptor, type DeliveryManifest } from "@solutions-builder/app/delivery";
+import { latestManifest, verifyAndRecord } from "./delivery.js";
+import { existsSync } from "node:fs";
+import { rm } from "node:fs/promises";
+import { join } from "node:path";
+import { dataDirectory } from "./paths.js";
 import { runGateSideEffects } from "./engine-recovery.js";
 import { notifyDecision } from "./notify.js";
 import { readProject, updateProject, type ProjectPolicy } from "./project-tenant.js";
@@ -254,6 +263,12 @@ async function runProjectDelete(input: CommandInput, authorities: Authority[]): 
   expectRevision(input, project.revision);
   await updateProject(input.projectId, { deletedAt });
 
+  // The retention receipt: what this deletion removed, recorded on the same
+  // turn as the deletion so it cannot be lost or edited apart from it. The
+  // document versions stay in the artifact store (the tenant row is marked,
+  // never dropped); the build workspaces on disk are removed here.
+  const receipt = await retentionReceipt(input.projectId, deletedAt);
+
   const open = await activeRun(input.projectId);
   const result: CommandOutcome = {
     runId: open?.id ?? "",
@@ -274,9 +289,30 @@ async function runProjectDelete(input: CommandInput, authorities: Authority[]): 
     after: { deletedAt: deletedAt.toISOString(), effects: PROJECT_DELETE.effects },
     idempotencyKey: input.idempotencyKey,
     result,
+    receipt,
   });
 
   return result;
+}
+
+async function retentionReceipt(projectId: string, deletedAt: Date): Promise<RetentionReceipt> {
+  const { db } = database();
+  const nodes = await db
+    .select({ id: table.artifactNode.id })
+    .from(table.artifactNode)
+    .where(eq(table.artifactNode.projectId, projectId));
+  const removedWorkspaces: string[] = [];
+  for (const run of await runsForProject(projectId)) {
+    const workspace = join(dataDirectory(), "builds", run.id);
+    if (!existsSync(workspace)) continue;
+    await rm(workspace, { recursive: true, force: true });
+    removedWorkspaces.push(workspace);
+  }
+  return {
+    deletedAt: deletedAt.toISOString(),
+    retainedArtifactNodeIds: nodes.map((node) => node.id),
+    removedWorkspaces,
+  };
 }
 
 async function runCommand(input: CommandInput): Promise<CommandOutcome> {
@@ -336,6 +372,21 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
   // The open worker question is a ledger fact too, so it is read here for the
   // same reason: build.answer resumes exactly the attempt that asked.
   const waiting = input.type === "build.answer" ? await openQuestion(input.projectId, run.id) : undefined;
+
+  // Stage 9 accepts bytes, not a manifest: the latest manifest is verified
+  // again now, and a required descriptor that is missing, mismatched or
+  // unreachable refuses the acceptance and names itself.
+  if (input.type === "delivery.accept") {
+    const version = await latestManifest(input.projectId);
+    if (!version) throw new HostError("transition_refused", "There is no delivery manifest to accept.");
+    const report = await verifyAndRecord(input.projectId, version, input.actor);
+    if (!report.complete) {
+      throw new HostError("transition_refused", describeBlockers(report) ?? "Delivery evidence is incomplete.", {
+        failed: report.failed,
+        items: report.items,
+      });
+    }
+  }
 
   const outcome = await db.transaction(async (tx) => {
     const context: GuardContext = {
@@ -408,6 +459,12 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
     const written = await writeArtifact(outcome.applied.artifact.draft, input.actor);
     const carrier = outcome.applied.artifact.setPacketOn;
     if (carrier) draft.patch(carrier, { packetId: written.nodeId });
+    // A manifest is checked the moment it exists, so the stage 9 decision
+    // opens knowing what is missing rather than discovering it on accept.
+    if (outcome.applied.artifact.verifyDelivery) {
+      const version = await latestManifest(input.projectId);
+      if (version) await verifyAndRecord(input.projectId, version, input.actor);
+    }
   }
 
   await recordCommand({
@@ -470,7 +527,7 @@ export type AppliedCommand = {
    * delivery manifest). Written after commit; `setPacketOn` names the run whose
    * `packetId` becomes the written version.
    */
-  artifact?: { draft: ArtifactDraft; setPacketOn?: string };
+  artifact?: { draft: ArtifactDraft; setPacketOn?: string; verifyDelivery?: boolean };
 };
 
 /**
@@ -632,10 +689,20 @@ async function apply(
     case "build.accept_evidence": {
       terminalize("evidence_accepted", "evidence accepted");
       // The manifest is an artifact version produced by the build run.
-      const manifest = {
-        descriptors: (input.payload.descriptors as unknown) ?? [],
+      const rawDescriptors = Array.isArray(input.payload.descriptors) ? input.payload.descriptors : [];
+      const descriptors = rawDescriptors.map(normalizeDescriptor);
+      if (descriptors.some((entry) => entry === null)) {
+        throw new HostError("validation_failed", "Every delivery descriptor needs a path, a 64-hex SHA-256 and a size.");
+      }
+      const actualCost = typeof input.payload.actualCost === "number" ? input.payload.actualCost : null;
+      const manifest: DeliveryManifest = {
+        descriptors: descriptors as NonNullable<(typeof descriptors)[number]>[],
+        costForecast: typeof input.payload.costForecast === "number" ? input.payload.costForecast : null,
+        costActual: actualCost,
+        // The bounded bridge meters nothing, so an absent actual is recorded as
+        // absent with the reason, never as zero.
+        costActualReason: actualCost === null ? "the build worker reported no metered cost" : null,
         verification: (input.payload.verification as unknown) ?? {},
-        actualCost: (input.payload.actualCost as unknown) ?? null,
         exceptions: (input.payload.exceptions as unknown) ?? null,
       };
       const draftManifest: ArtifactDraft = {
@@ -660,7 +727,7 @@ async function apply(
         state: "delivery_review",
         approval: approvalOf("accept"),
         notifyRunId: delivery,
-        artifact: { draft: draftManifest },
+        artifact: { draft: draftManifest, verifyDelivery: true },
       };
     }
 

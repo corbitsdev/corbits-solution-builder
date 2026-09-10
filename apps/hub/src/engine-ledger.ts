@@ -70,6 +70,14 @@ export type LedgerEntry = {
   question?: BuildQuestion;
   /** The answer this command gave to an open worker question (build.answer). */
   answer?: BuildAnswer;
+  /** What a project.delete removed and what it kept, recorded with the deletion. */
+  receipt?: RetentionReceipt;
+};
+
+export type RetentionReceipt = {
+  deletedAt: string;
+  retainedArtifactNodeIds: string[];
+  removedWorkspaces: string[];
 };
 
 export type BuildQuestion = {
@@ -151,6 +159,7 @@ export async function recordCommand(entry: LedgerEntry): Promise<void> {
   if (entry.flag !== undefined) metadata.flag = entry.flag;
   if (entry.question !== undefined) metadata.question = entry.question;
   if (entry.answer !== undefined) metadata.answer = entry.answer;
+  if (entry.receipt !== undefined) metadata.receipt = entry.receipt;
 
   await writeConversationTurn({
     sessionId,
