@@ -434,6 +434,7 @@ export async function redesignFromFeedback(args: {
       commentId: comment.id,
       disposition: "addressed" as const,
     })),
+    actor: args.actor,
   });
 
   return { ...result, stale };

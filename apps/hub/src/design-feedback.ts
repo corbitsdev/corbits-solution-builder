@@ -15,7 +15,7 @@
  * path plus a role and text fingerprint where one does not. A stale anchor is
  * reported as stale, never silently dropped.
  */
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { database } from "./db.js";
 import * as table from "./schema.js";
 import { newId, sha256 } from "./ids.js";
@@ -148,7 +148,27 @@ function resolvesTestId(content: string, testId: string): boolean {
   );
 }
 
-const FEEDBACK_PREFERENCE = (nodeId: string) => `design_feedback:${nodeId}`;
+// Guards a design node's feedback thread against a concurrent second
+// submission within this process. The desktop host is single-process, so
+// this is sufficient without a database-level claim.
+const submissionsInFlight = new Set<string>();
+
+/** The latest `design_feedback` artifact node for a design node, if any. */
+async function feedbackNodeRow(designNodeId: string) {
+  const { db } = database();
+  const [row] = await db
+    .select()
+    .from(table.artifactNode)
+    .where(
+      and(
+        eq(table.artifactNode.kind, "design_feedback"),
+        eq(table.artifactNode.variant, designNodeId),
+      ),
+    )
+    .orderBy(desc(table.artifactNode.version))
+    .limit(1);
+  return row;
+}
 
 /**
  * Submits immutable feedback against an exact design version, and records the
@@ -180,93 +200,87 @@ export async function submitFeedback(args: {
     throw new HostError("validation_failed", "Feedback attaches to a design artifact.");
   }
 
-  // Submitted feedback is immutable, and reading first to decide that is a
-  // check-then-act: two submissions against the same version both passed it,
-  // both wrote a real artifact, and the loser hit a raw key violation. The row
-  // is claimed up front instead, so exactly one submission proceeds.
-  const claimed = await db
-    .insert(table.hostPreference)
-    .values({ key: FEEDBACK_PREFERENCE(args.designNodeId), value: { claimed: true } })
-    .onConflictDoNothing()
-    .returning({ key: table.hostPreference.key });
-  if (claimed.length === 0) {
-    // A second round attaches to the version the designer produced, not to the
-    // one already reviewed.
+  // Submitted feedback is immutable. A second round attaches to the version
+  // the designer produced, not to the one already reviewed, so a design node
+  // that already has a feedback thread refuses another submission. The
+  // in-flight set closes the check-then-act window within this process.
+  if (submissionsInFlight.has(args.designNodeId)) {
     throw new HostError(
       "conflict",
       "Feedback was already submitted against this design version. " +
         "Comment on the revision it produced instead.",
     );
   }
+  submissionsInFlight.add(args.designNodeId);
+  try {
+    if (await feedbackNodeRow(args.designNodeId)) {
+      throw new HostError(
+        "conflict",
+        "Feedback was already submitted against this design version. " +
+          "Comment on the revision it produced instead.",
+      );
+    }
 
-  const comments: Comment[] = args.comments.map((comment) => ({
-    id: newId.flag(),
-    anchor: comment.anchor,
-    body: comment.body,
-    author: args.author,
-    disposition: "open",
-  }));
+    const comments: Comment[] = args.comments.map((comment) => ({
+      id: newId.flag(),
+      anchor: comment.anchor,
+      body: comment.body,
+      author: args.author,
+      disposition: "open",
+    }));
 
-  const prompt = revisionPrompt({
-    designTitle: design.title,
-    designVersion: design.version,
-    designContentHash: design.contentHash,
-    direction: args.direction,
-    overallNote: args.overallNote,
-    comments,
-    acceptanceCriteria: args.acceptanceCriteria ?? [],
-  });
+    const prompt = revisionPrompt({
+      designTitle: design.title,
+      designVersion: design.version,
+      designContentHash: design.contentHash,
+      direction: args.direction,
+      overallNote: args.overallNote,
+      comments,
+      acceptanceCriteria: args.acceptanceCriteria ?? [],
+    });
 
-  const feedback: Feedback = {
-    id: newId.flag(),
-    designNodeId: args.designNodeId,
-    direction: args.direction,
-    comments,
-    overallNote: args.overallNote,
-    submittedAt: new Date().toISOString(),
-    promptHash: await sha256(prompt),
-  };
+    const feedback: Feedback = {
+      id: newId.flag(),
+      designNodeId: args.designNodeId,
+      direction: args.direction,
+      comments,
+      overallNote: args.overallNote,
+      submittedAt: new Date().toISOString(),
+      promptHash: await sha256(prompt),
+    };
 
-  // The feedback is itself a versioned artifact, so it carries the same
-  // lineage, hash and provenance guarantees as anything else at this stage.
-  const node = await writeArtifact(
-    {
-      projectId: args.projectId,
-      branchId: args.branchId,
-      kind: "design_feedback",
-      title: `Design feedback on ${design.title} v${design.version}`,
-      content: JSON.stringify({ feedback, prompt }, null, 2),
-      mediaType: "application/json",
-      sourceVersionIds: [args.designNodeId],
-      provenance: { producer: "human" },
-    },
-    { principalId: args.author },
-  ).catch(async (cause: unknown) => {
-    // The claim exists to stop a second submission, not to block this version
-    // forever because the write failed.
-    await db
-      .delete(table.hostPreference)
-      .where(eq(table.hostPreference.key, FEEDBACK_PREFERENCE(args.designNodeId)));
-    throw cause;
-  });
+    // The feedback is itself a versioned artifact, so it carries the same
+    // lineage, hash and provenance guarantees as anything else at this stage.
+    // `variant` scopes it to this exact design node, so later dispositions
+    // append versions to the same thread instead of colliding with another
+    // design node's feedback.
+    const node = await writeArtifact(
+      {
+        projectId: args.projectId,
+        branchId: args.branchId,
+        kind: "design_feedback",
+        variant: args.designNodeId,
+        title: `Design feedback on ${design.title} v${design.version}`,
+        content: JSON.stringify({ feedback, prompt }, null, 2),
+        mediaType: "application/json",
+        sourceVersionIds: [args.designNodeId],
+        provenance: { producer: "human" },
+      },
+      { principalId: args.author },
+    );
 
-  await db
-    .update(table.hostPreference)
-    .set({ value: { feedback, prompt } })
-    .where(eq(table.hostPreference.key, FEEDBACK_PREFERENCE(args.designNodeId)));
-
-  return { feedback, prompt, feedbackNodeId: node.nodeId };
+    return { feedback, prompt, feedbackNodeId: node.nodeId };
+  } finally {
+    submissionsInFlight.delete(args.designNodeId);
+  }
 }
 
 export async function feedbackFor(designNodeId: string): Promise<{ feedback: Feedback; prompt: string } | null> {
-  const { db } = database();
-  const [row] = await db
-    .select()
-    .from(table.hostPreference)
-    .where(eq(table.hostPreference.key, FEEDBACK_PREFERENCE(designNodeId)));
-  // A row holding only the claim is a submission still in flight, not feedback.
-  const value = row?.value as { feedback?: Feedback; prompt?: string } | undefined;
-  return value?.feedback && value.prompt
+  const row = await feedbackNodeRow(designNodeId);
+  if (!row) return null;
+  const { content } = await readArtifactNode(row.id);
+  const value = JSON.parse(content) as { feedback?: Feedback; prompt?: string };
+  return value.feedback && value.prompt
     ? { feedback: value.feedback, prompt: value.prompt }
     : null;
 }
@@ -280,8 +294,10 @@ export async function recordDisposition(args: {
   designNodeId: string;
   newDesignNodeId: string;
   dispositions: { commentId: string; disposition: Disposition; note?: string }[];
+  actor: { principalId: string };
 }): Promise<{ carried: Comment[]; stale: string[] }> {
-  const { db } = database();
+  const node = await feedbackNodeRow(args.designNodeId);
+  if (!node) throw notFound("Feedback for that design version");
   const stored = await feedbackFor(args.designNodeId);
   if (!stored) throw notFound("Feedback for that design version");
 
@@ -304,18 +320,27 @@ export async function recordDisposition(args: {
     )
     .map((comment) => `${comment.id} (${comment.anchor.testId})`);
 
-  await db
-    .update(table.hostPreference)
-    .set({
-      value: {
-        ...stored,
-        feedback: { ...stored.feedback, comments: carried },
-        supersededBy: args.newDesignNodeId,
-        stale,
-      },
-      updatedAt: new Date(),
-    })
-    .where(eq(table.hostPreference.key, FEEDBACK_PREFERENCE(args.designNodeId)));
+  // Dispositioning writes a new version onto the same feedback thread —
+  // `variant` keeps it scoped to this design node so it revises rather than
+  // starting a sibling artifact.
+  await writeArtifact(
+    {
+      projectId: node.projectId,
+      branchId: node.branchId,
+      kind: "design_feedback",
+      variant: args.designNodeId,
+      title: node.title,
+      content: JSON.stringify(
+        { feedback: { ...stored.feedback, comments: carried }, prompt: stored.prompt, supersededBy: args.newDesignNodeId, stale },
+        null,
+        2,
+      ),
+      mediaType: "application/json",
+      sourceVersionIds: [args.designNodeId],
+      provenance: { producer: "agent" },
+    },
+    { principalId: args.actor.principalId },
+  );
 
   return { carried, stale };
 }

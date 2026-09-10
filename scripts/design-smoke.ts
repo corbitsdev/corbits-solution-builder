@@ -159,6 +159,7 @@ const disposed = await recordDisposition({
     { commentId: submitted.feedback.comments[1]!.id, disposition: "addressed" },
     { commentId: submitted.feedback.comments[2]!.id, disposition: "declined" },
   ],
+  actor: ACTOR,
 });
 check(
   "every comment carries a disposition into the next version",

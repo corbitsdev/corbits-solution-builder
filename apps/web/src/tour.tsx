@@ -7,12 +7,11 @@
  * time someone opens a drafted stage the tour shows them, anchored to the real
  * screen rather than a mocked one.
  *
- * Seen-ness lives in host preferences, not localStorage: it is a fact about
- * the person, and it should not repeat because they opened a new window.
+ * Seen-ness lives in this browser's localStorage: the host only persists
+ * start-at-login, so a window on another machine sees the tour again.
  */
 import { useEffect, useState } from "react";
 import { Joyride, STATUS, type EventData, type Status, type Step } from "react-joyride";
-import { api } from "./client.js";
 
 export const TOUR_PREFERENCE = "tour.stage.completed";
 
@@ -63,19 +62,12 @@ export function StageTour({ enabled }: { enabled: boolean }) {
 
   useEffect(() => {
     if (!enabled) return;
-    let cancelled = false;
-    void api
-      .preferences()
-      .then((result) => {
-        if (!cancelled && result.preferences[TOUR_PREFERENCE] !== true) setRun(true);
-      })
-      .catch(() => {
-        // A tour that cannot check whether it already ran should stay quiet
-        // rather than risk repeating itself on every open.
-      });
-    return () => {
-      cancelled = true;
-    };
+    try {
+      if (localStorage.getItem(TOUR_PREFERENCE) !== "true") setRun(true);
+    } catch {
+      // A tour that cannot check whether it already ran should stay quiet
+      // rather than risk repeating itself on every open.
+    }
   }, [enabled]);
 
   const finish = (data: EventData) => {
@@ -84,7 +76,11 @@ export function StageTour({ enabled }: { enabled: boolean }) {
     setRun(false);
     // Skipping counts as seen. Being shown it twice after saying no is worse
     // than never showing it.
-    void api.setPreference(TOUR_PREFERENCE, true).catch(() => {});
+    try {
+      localStorage.setItem(TOUR_PREFERENCE, "true");
+    } catch {
+      // Best effort; nothing to fall back to.
+    }
   };
 
   if (!enabled) return null;
