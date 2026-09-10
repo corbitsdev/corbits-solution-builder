@@ -5,7 +5,7 @@
  * then a refresh, so what the interface shows is what the host durably holds
  * rather than an optimistic guess.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import {
   api,
   ApiFailure,
@@ -65,6 +65,14 @@ function initialView(): View {
  * because which one is right is exactly what is unknown. One line, and after a
  * while an admission that it is taking longer than it should.
  */
+/** The hub's "install first" conflict is not a failure of the request: there is nothing yet. */
+function emptyUntilInstalled<T>(empty: T): (cause: unknown) => T {
+  return (cause) => {
+    if (cause instanceof ApiFailure && cause.detail.install) return empty;
+    throw cause;
+  };
+}
+
 function Booting({ offline }: { offline: boolean }) {
   const [slow, setSlow] = useState(false);
   useEffect(() => {
@@ -255,11 +263,16 @@ export function App() {
 
   const refresh = useCallback(async () => {
     try {
-      const [statusResult, decisionsResult, projectsResult, providersResult] = await Promise.all([
-        api.status(),
-        api.decisions(),
-        api.projects(),
-        api.providers(),
+      // Status and providers answer before the workspace exists. Decisions and
+      // projects do not: until the client has installed the app the hub
+      // refuses them with a conflict marked `install`, and the install runs
+      // only once `status` is set. Fetching all four together meant a first
+      // run never set `status` and the boot screen never went away. Until the
+      // install, an uninstalled workspace is an empty one.
+      const [statusResult, providersResult] = await Promise.all([api.status(), api.providers()]);
+      const [decisionsResult, projectsResult] = await Promise.all([
+        api.decisions().catch(emptyUntilInstalled({ decisions: [] })),
+        api.projects().catch(emptyUntilInstalled({ projects: [] })),
       ]);
       setStatus(statusResult);
       setDecisions(decisionsResult.decisions);
@@ -274,13 +287,19 @@ export function App() {
     }
   }, []);
 
+  // Runs once, when the host first answers. Deliberately not keyed on
+  // `installed`: the effect sets that state itself, and re-running on its own
+  // state change cancelled the install it was awaiting, so a first run stayed
+  // on "Setting up your workspace…" until someone reloaded. A ref rather than
+  // a cancellation flag, so StrictMode's second mount neither starts a second
+  // install nor abandons the first.
+  const installStarted = useRef(false);
   useEffect(() => {
-    if (status === null || installed !== "checking") return;
-    let cancelled = false;
+    if (status === null || installStarted.current) return;
+    installStarted.current = true;
     void (async () => {
       try {
         const state = await api.installState();
-        if (cancelled) return;
         if (!state.installed) {
           setInstalled("installing");
           await api.install();
@@ -291,13 +310,10 @@ export function App() {
         // host says why it could not install.
         setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
       } finally {
-        if (!cancelled) setInstalled("ready");
+        setInstalled("ready");
       }
     })();
-    return () => {
-      cancelled = true;
-    };
-  }, [status === null, installed, refresh]);
+  }, [status === null, refresh]);
 
   useEffect(() => {
     void refresh();
