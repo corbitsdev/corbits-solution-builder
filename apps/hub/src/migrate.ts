@@ -570,6 +570,17 @@ const MIGRATIONS: readonly Migration[] = [
     id: "0007_drop_decision_flag",
     statements: [sql`DROP TABLE IF EXISTS "builder"."decision_flag"`],
   },
+  {
+    // The frozen packet and the delivery manifest are artifact versions; a
+    // worker question, its answer and the bridge's events are ledger turns.
+    id: "0008_drop_build_tables",
+    statements: [
+      sql`DROP TABLE IF EXISTS "builder"."build_event"`,
+      sql`DROP TABLE IF EXISTS "builder"."build_question"`,
+      sql`DROP TABLE IF EXISTS "builder"."build_packet"`,
+      sql`DROP TABLE IF EXISTS "builder"."delivery_manifest"`,
+    ],
+  },
 ];
 
 async function checksum(migration: Migration): Promise<string> {

@@ -23,6 +23,7 @@ import {
 } from "./hub-gaps.js";
 import { sha256 } from "./ids.js";
 import type { CommandOutcome } from "./engine.js";
+import { HOST_PRINCIPAL } from "./engine.js";
 import type { RunMutation } from "./runs.js";
 
 /** The `agent_session` id for a project's ledger, deterministic in the project id. */
@@ -65,6 +66,38 @@ export type LedgerEntry = {
   runs?: RunMutation[];
   /** A decision flag raised by this command (a route back, a material change). */
   flag?: DecisionFlag;
+  /** A worker question raised by this command (build.wait_for_human). */
+  question?: BuildQuestion;
+  /** The answer this command gave to an open worker question (build.answer). */
+  answer?: BuildAnswer;
+};
+
+export type BuildQuestion = {
+  id: string;
+  runId: string;
+  /** The attempt that raised it; build.answer resumes exactly this origin. */
+  originId: string;
+  kind: string;
+  prompt: string;
+  scopeImpact: unknown;
+};
+
+export type BuildAnswer = {
+  questionId: string;
+  answer: string;
+  grantedCapabilities: unknown;
+};
+
+/** Typed worker progress. Events are never approvals and never carry bytes. */
+export type BuildEvent = {
+  id: string;
+  runId: string;
+  idempotencyKey: string;
+  cursor: number;
+  type: string;
+  severity: string;
+  payload: unknown;
+  occurredAt: string;
 };
 
 export type DecisionFlag = {
@@ -116,6 +149,8 @@ export async function recordCommand(entry: LedgerEntry): Promise<void> {
   if (entry.runId !== undefined) metadata.runId = entry.runId;
   if (entry.runs !== undefined && entry.runs.length > 0) metadata.runs = entry.runs;
   if (entry.flag !== undefined) metadata.flag = entry.flag;
+  if (entry.question !== undefined) metadata.question = entry.question;
+  if (entry.answer !== undefined) metadata.answer = entry.answer;
 
   await writeConversationTurn({
     sessionId,
@@ -148,8 +183,11 @@ export async function receiptFor(
 export type LedgerCommand = {
   id: string;
   command: string;
+  actorPrincipalId: string;
   runs: unknown[];
   flag: DecisionFlag | null;
+  question: BuildQuestion | null;
+  answer: BuildAnswer | null;
   createdAt: string;
 };
 
@@ -160,8 +198,11 @@ export async function ledgerCommands(projectId: string): Promise<LedgerCommand[]
   return parts.map((part) => ({
     id: part.id,
     command: String(part.metadata!.command),
+    actorPrincipalId: String(part.metadata!.actorPrincipalId ?? ""),
     runs: Array.isArray(part.metadata?.runs) ? (part.metadata!.runs as unknown[]) : [],
     flag: (part.metadata?.flag as DecisionFlag | undefined) ?? null,
+    question: (part.metadata?.question as BuildQuestion | undefined) ?? null,
+    answer: (part.metadata?.answer as BuildAnswer | undefined) ?? null,
     createdAt: part.startedAt,
   }));
 }
@@ -221,4 +262,84 @@ export async function projectApprovals(projectId: string): Promise<
         ? (part.metadata!.versions as { versionId: string; contentHash: string }[])
         : [],
     }));
+}
+
+export type ProjectQuestion = BuildQuestion & {
+  projectId: string;
+  createdAt: string;
+  answeredAt: string | null;
+  answer: string | null;
+  answeredBy: string | null;
+  grantedCapabilities: unknown;
+};
+
+/**
+ * The worker questions raised on this project, oldest first, each joined to
+ * the build.answer turn that answered it. A question is the outcome of the
+ * command that asked it; the answer is the outcome of the command that gave it.
+ */
+export async function projectQuestions(projectId: string): Promise<ProjectQuestion[]> {
+  const commands = await ledgerCommands(projectId);
+  const answers = new Map(
+    commands
+      .filter((command) => command.answer !== null)
+      .map((command) => [command.answer!.questionId, command] as const),
+  );
+  return commands
+    .filter((command) => command.question !== null)
+    .map((command) => {
+      const answered = answers.get(command.question!.id);
+      return {
+        ...command.question!,
+        projectId,
+        createdAt: command.createdAt,
+        answeredAt: answered?.createdAt ?? null,
+        answer: answered?.answer!.answer ?? null,
+        answeredBy: answered?.actorPrincipalId ?? null,
+        grantedCapabilities: answered?.answer!.grantedCapabilities ?? null,
+      };
+    });
+}
+
+/** The newest unanswered worker question on a run, if any. */
+export async function openQuestion(projectId: string, runId: string): Promise<ProjectQuestion | undefined> {
+  const questions = await projectQuestions(projectId);
+  return questions.filter((question) => question.runId === runId && question.answeredAt === null).at(-1);
+}
+
+/**
+ * Records one worker event as its own ledger turn. A bridge finishes after
+ * the command that started it has already been recorded, and a mail turn is
+ * never rewritten, so the event is a turn of its own on the same thread.
+ */
+export async function recordBuildEvent(projectId: string, event: BuildEvent): Promise<void> {
+  const sessionId = await ensureLedgerSession(projectId);
+  const existing = await buildEvents(projectId, event.runId);
+  // At-least-once delivery is assumed; the idempotency key is the dedupe.
+  if (existing.some((row) => row.idempotencyKey === event.idempotencyKey)) return;
+  await ensureUserPrincipal(tenantId(), HOST_PRINCIPAL);
+  await writeConversationTurn({
+    sessionId,
+    tenantId: tenantId(),
+    runId: event.runId,
+    role: "specialist",
+    body: `${event.type}: ${event.severity}`,
+    fromPrincipalId: HOST_PRINCIPAL,
+    toPrincipalId: SPECIALIST_PRINCIPAL_ID,
+    metadata: { kind: "build_event", ...event },
+    model: "worker",
+  });
+}
+
+/** The worker events recorded for a run, newest cursor first. */
+export async function buildEvents(projectId: string, runId: string): Promise<BuildEvent[]> {
+  const sessionId = await ledgerSessionIdFor(projectId);
+  const parts = await listConversationTurns(sessionId);
+  return parts
+    .filter((part) => part.metadata?.kind === "build_event" && part.metadata.runId === runId)
+    .map((part) => {
+      const { kind: _kind, ...event } = part.metadata as Record<string, unknown>;
+      return event as unknown as BuildEvent;
+    })
+    .sort((a, b) => b.cursor - a.cursor);
 }

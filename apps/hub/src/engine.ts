@@ -12,14 +12,12 @@
  * Step 4 is why this is one module and not several: the atomicity claim is only
  * true if there is a single place that writes.
  */
-import { and, eq, isNull } from "drizzle-orm";
 import type { Command, Stage } from "@solutions-builder/app/ledger";
 import { PROJECT_DELETE } from "@solutions-builder/app/ledger";
 import { evaluate, evaluateAudienceDecision, type GuardContext, type RunView } from "./guard.js";
 import { HostError, notFound } from "./errors.js";
-import { newId, sha256 } from "./ids.js";
+import { newId } from "./ids.js";
 import { database, type Db } from "./db.js";
-import * as table from "./schema.js";
 import type { Authority } from "@solutions-builder/app/ledger";
 import { launchProjectLifecycle } from "./hub-executor.js";
 import { loadRun } from "./engine-views.js";
@@ -29,9 +27,18 @@ import {
   versionHashesMatch,
   audienceTally,
   packetExists,
-  waitingOrigin,
 } from "./engine-approvals.js";
-import { recordCommand, receiptFor, audienceDecisions, type DecisionFlag } from "./engine-ledger.js";
+import {
+  recordCommand,
+  receiptFor,
+  audienceDecisions,
+  openQuestion,
+  type BuildAnswer,
+  type BuildQuestion,
+  type DecisionFlag,
+} from "./engine-ledger.js";
+import { writeArtifact } from "./projects.js";
+import type { ArtifactDraft } from "./domain.js";
 import { runGateSideEffects } from "./engine-recovery.js";
 import { notifyDecision } from "./notify.js";
 import { readProject, updateProject, type ProjectPolicy } from "./project-tenant.js";
@@ -326,6 +333,10 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
     }
   }
 
+  // The open worker question is a ledger fact too, so it is read here for the
+  // same reason: build.answer resumes exactly the attempt that asked.
+  const waiting = input.type === "build.answer" ? await openQuestion(input.projectId, run.id) : undefined;
+
   const outcome = await db.transaction(async (tx) => {
     const context: GuardContext = {
       actorAuthorities: authorities,
@@ -341,9 +352,7 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
           }
         : {}),
       ...(audienceGuard ? { audience: audienceGuard } : {}),
-      ...(input.type === "build.answer"
-        ? { waitingRequestOriginId: (await waitingOrigin(tx, run.id)) ?? "" }
-        : {}),
+      ...(input.type === "build.answer" ? { waitingRequestOriginId: waiting?.originId ?? "" } : {}),
       // Checkpoint resume is verified only when a worker actually returned a
       // checkpoint it advertises as resumable. The bounded bridge returns none,
       // so resume is refused there rather than faked.
@@ -369,6 +378,7 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
       transitionId: verdict.transition.id,
       toStage: verdict.toStage,
       authority: authorities[0] ?? "project_owner",
+      ...(waiting ? { openQuestionId: waiting.id } : {}),
     });
 
     const result: CommandOutcome = {
@@ -390,6 +400,16 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
   // on archive could never catch a stale decision.
   await updateProject(input.projectId, input.type === "project.archive" ? { archivedAt: new Date() } : {});
 
+  // A frozen packet or a delivery manifest is an artifact version, written
+  // after the transaction because the artifact store opens its own. The run
+  // that carries the packet learns the version id before the ledger turn is
+  // written, so the fold sees both together.
+  if (outcome.applied.artifact) {
+    const written = await writeArtifact(outcome.applied.artifact.draft, input.actor);
+    const carrier = outcome.applied.artifact.setPacketOn;
+    if (carrier) draft.patch(carrier, { packetId: written.nodeId });
+  }
+
   await recordCommand({
     projectId: input.projectId,
     actorPrincipalId: input.actor.principalId,
@@ -405,6 +425,8 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
     runId: outcome.applied.runId,
     runs: draft.mutations,
     ...(outcome.applied.flag ? { flag: outcome.applied.flag } : {}),
+    ...(outcome.applied.question ? { question: outcome.applied.question } : {}),
+    ...(outcome.applied.answer ? { answer: outcome.applied.answer } : {}),
     ...(outcome.applied.approval ?? {}),
   });
 
@@ -439,6 +461,16 @@ export type AppliedCommand = {
   notifyRunId?: string;
   /** Set when this transition raises a decision flag, recorded on the ledger turn. */
   flag?: DecisionFlag;
+  /** Set when this transition asks a person something on the worker's behalf. */
+  question?: BuildQuestion;
+  /** Set when this transition answers an open worker question. */
+  answer?: BuildAnswer;
+  /**
+   * Set when this transition produces an artifact version (a frozen packet, a
+   * delivery manifest). Written after commit; `setPacketOn` names the run whose
+   * `packetId` becomes the written version.
+   */
+  artifact?: { draft: ArtifactDraft; setPacketOn?: string };
 };
 
 /**
@@ -456,6 +488,7 @@ async function apply(
     transitionId: string;
     toStage: Stage;
     authority: Authority;
+    openQuestionId?: string;
   },
 ): Promise<AppliedCommand> {
   const { input, run, toStage } = args;
@@ -516,23 +549,25 @@ async function apply(
     }
 
     case "build.freeze": {
-      const packetId = newId.packet();
-      const packetBody = JSON.stringify({
+      // The frozen packet is an artifact version of its own: the exact
+      // versions it freezes are its sources, the freezing person its producer,
+      // and the stage 7 run its producer run, which is what a second freeze
+      // for the same source is refused against.
+      const packet = {
         versions: args.versions,
-        placement: input.payload.placement,
-        targets: input.payload.targets,
-        costApprovalVersionId: run.costApprovalVersionId,
-      });
-      await tx.insert(table.buildPacket).values({
-        id: packetId,
-        projectId: input.projectId,
-        sourceRunId: run.id,
-        versions: args.versions,
-        costApproval: { versionId: run.costApprovalVersionId },
         placement: String(input.payload.placement ?? "local"),
         targets: (input.payload.targets as unknown) ?? [],
-        packetHash: await sha256(packetBody),
-      });
+        costApproval: { versionId: run.costApprovalVersionId },
+      };
+      const draftPacket: ArtifactDraft = {
+        projectId: input.projectId,
+        kind: "build_packet",
+        title: "Build packet",
+        content: JSON.stringify(packet, null, 2),
+        mediaType: "application/json",
+        sourceVersionIds: args.versions.map((version) => version.versionId),
+        provenance: { producer: "human", runId: run.id },
+      };
       // Stage 7 is terminal from here. It never returns to in_progress;
       // a material change re-enters through stage.backtracked routing.
       terminalize("approved_frozen", "packet frozen");
@@ -542,9 +577,13 @@ async function apply(
         stage: 8,
         state: "queued",
         sourceRunId: run.id,
-        packetId,
       });
-      return { runId: buildRun, stage: 8, state: "queued" };
+      return {
+        runId: buildRun,
+        stage: 8,
+        state: "queued",
+        artifact: { draft: draftPacket, setPacketOn: buildRun },
+      };
     }
 
     case "build.start_attempt": {
@@ -567,48 +606,47 @@ async function apply(
 
     case "build.wait_for_human": {
       draft.patch(run.id, { state: "waiting_human" });
-      await tx.insert(table.buildQuestion).values({
+      const question: BuildQuestion = {
         id: newId.question(),
-        projectId: input.projectId,
         runId: run.id,
         originId: run.originId,
         kind: String(input.payload.kind ?? "question"),
         prompt: String(input.payload.prompt ?? ""),
         scopeImpact: (input.payload.scopeImpact as unknown) ?? null,
-      });
-      return { runId: run.id, stage: 8, state: "waiting_human", notifyRunId: run.id };
+      };
+      return { runId: run.id, stage: 8, state: "waiting_human", notifyRunId: run.id, question };
     }
 
     case "build.answer": {
-      await tx
-        .update(table.buildQuestion)
-        .set({
-          answeredAt: now,
-          answer: String(input.payload.answer ?? ""),
-          answeredBy: input.actor.principalId,
-          grantedCapabilities: (input.payload.grantedCapabilities as unknown) ?? null,
-        })
-        .where(
-          and(eq(table.buildQuestion.runId, run.id), isNull(table.buildQuestion.answeredAt)),
-        );
-      // The same queued-origin attempt resumes. No new run, no origin change.
+      // The answer is the outcome of this command, joined to the question by
+      // id. The same queued-origin attempt resumes. No new run, no origin change.
+      const answer: BuildAnswer = {
+        questionId: args.openQuestionId ?? "",
+        answer: String(input.payload.answer ?? ""),
+        grantedCapabilities: (input.payload.grantedCapabilities as unknown) ?? null,
+      };
       draft.patch(run.id, { state: "running" });
-      return { runId: run.id, stage: 8, state: "running" };
+      return { runId: run.id, stage: 8, state: "running", answer };
     }
 
     case "build.accept_evidence": {
       terminalize("evidence_accepted", "evidence accepted");
-      const manifestBody = JSON.stringify(input.payload.descriptors ?? []);
-      await tx.insert(table.deliveryManifest).values({
-        id: newId.manifest(),
-        projectId: input.projectId,
-        buildRunId: run.id,
+      // The manifest is an artifact version produced by the build run.
+      const manifest = {
         descriptors: (input.payload.descriptors as unknown) ?? [],
         verification: (input.payload.verification as unknown) ?? {},
         actualCost: (input.payload.actualCost as unknown) ?? null,
         exceptions: (input.payload.exceptions as unknown) ?? null,
-        manifestHash: await sha256(manifestBody),
-      });
+      };
+      const draftManifest: ArtifactDraft = {
+        projectId: input.projectId,
+        kind: "delivery_manifest",
+        title: "Delivery manifest",
+        content: JSON.stringify(manifest, null, 2),
+        mediaType: "application/json",
+        sourceVersionIds: args.versions.map((version) => version.versionId),
+        provenance: { producer: "human", runId: run.id },
+      };
       const delivery = createRun(draft, {
         projectId: input.projectId,
         kind: "stage",
@@ -622,14 +660,13 @@ async function apply(
         state: "delivery_review",
         approval: approvalOf("accept"),
         notifyRunId: delivery,
+        artifact: { draft: draftManifest },
       };
     }
 
     case "delivery.accept": {
-      await tx
-        .update(table.deliveryManifest)
-        .set({ acceptedAt: now, acceptedBy: input.actor.principalId })
-        .where(eq(table.deliveryManifest.projectId, input.projectId));
+      // Acceptance is this command's own ledger turn; the manifest version
+      // it accepts is unchanged.
       terminalize("delivered", "accepted by the recipient");
       return { runId: run.id, stage: 9, state: "delivered", approval: approvalOf("accept") };
     }

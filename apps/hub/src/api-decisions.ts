@@ -1,5 +1,4 @@
 import type { Hono } from "hono";
-import { desc, eq } from "drizzle-orm";
 import {
   AudienceDecidePayload,
   BuildAnswerPayload,
@@ -14,9 +13,8 @@ import { COMMANDS, type Command } from "@solutions-builder/app/ledger";
 import { submitAndApprove } from "./engine.js";
 import { HostError } from "./errors.js";
 import { newId } from "./ids.js";
-import { database } from "./db.js";
-import * as table from "./schema.js";
 import { projectDetail, readArtifactNode } from "./projects.js";
+import { buildEvents, recordBuildEvent } from "./engine-ledger.js";
 import { BRIDGE_CAPABILITIES, runBuildAttempt } from "./corbits-exec.js";
 import { commandFrom, parsed } from "./api.js";
 import { localActor } from "./hub-client.js";
@@ -113,12 +111,9 @@ export function registerDecisionRoutes(api: Hono) {
 
     const detail = await projectDetail(projectId, localActor().principalId);
     const packetRun = detail.runs.find((run) => run.id === started.runId);
-    const [packet] = packetRun?.packetId
-      ? await database()
-          .db.select()
-          .from(table.buildPacket)
-          .where(eq(table.buildPacket.id, packetRun.packetId))
-      : [];
+    // The frozen packet is an artifact version; its hash is the version's.
+    const packet = packetRun?.packetId ? await readArtifactNode(packetRun.packetId) : null;
+    const targets = packet ? ((JSON.parse(packet.content) as { targets?: unknown }).targets ?? []) : [];
 
     const plan = detail.nodes.find((node) => node.kind === "build_plan");
     const planText = plan ? (await readArtifactNode(plan.id)).content : "";
@@ -130,33 +125,31 @@ export function registerDecisionRoutes(api: Hono) {
         ``,
         planText,
         ``,
-        `Frozen packet: ${packet?.packetHash ?? "unknown"}.`,
-        `Targets: ${JSON.stringify(packet?.targets ?? [])}.`,
+        `Frozen packet: ${packet?.node.contentHash ?? "unknown"}.`,
+        `Targets: ${JSON.stringify(targets)}.`,
       ].join("\n"),
     });
 
-    // The bridge's result is recorded as an event, not as approval or evidence.
-    await database()
-      .db.insert(table.buildEvent)
-      .values({
-        id: newId.event(),
-        runId: started.runId,
-        idempotencyKey: `${started.runId}:bridge-final`,
-        cursor: 1,
-        type: "bridge.final",
-        severity: outcome.exitStatus === 0 ? "info" : "error",
-        payload: {
-          bridgeId: outcome.bridgeId,
-          available: outcome.available,
-          exitStatus: outcome.exitStatus,
-          workspace: outcome.workspace,
-          finalText: outcome.finalText.slice(0, 20_000),
-          stderrTail: outcome.stderrTail,
-          capabilities: BRIDGE_CAPABILITIES,
-        },
-        occurredAt: new Date(outcome.endedAt),
-      })
-      .onConflictDoNothing();
+    // The bridge's result is recorded as a run event on the ledger thread,
+    // not as approval or evidence.
+    await recordBuildEvent(projectId, {
+      id: newId.event(),
+      runId: started.runId,
+      idempotencyKey: `${started.runId}:bridge-final`,
+      cursor: 1,
+      type: "bridge.final",
+      severity: outcome.exitStatus === 0 ? "info" : "error",
+      payload: {
+        bridgeId: outcome.bridgeId,
+        available: outcome.available,
+        exitStatus: outcome.exitStatus,
+        workspace: outcome.workspace,
+        finalText: outcome.finalText.slice(0, 20_000),
+        stderrTail: outcome.stderrTail,
+        capabilities: BRIDGE_CAPABILITIES,
+      },
+      occurredAt: new Date(outcome.endedAt).toISOString(),
+    });
 
     return context.json({ run: started, bridge: outcome });
   });
@@ -166,11 +159,7 @@ export function registerDecisionRoutes(api: Hono) {
     const detail = await projectDetail(projectId, localActor().principalId);
     const buildRuns = detail.runs.filter((run) => run.kind === "build").map((run) => run.id);
     if (buildRuns.length === 0) return context.json({ events: [] });
-    const events = await database()
-      .db.select()
-      .from(table.buildEvent)
-      .where(eq(table.buildEvent.runId, buildRuns.at(-1)!))
-      .orderBy(desc(table.buildEvent.cursor));
+    const events = await buildEvents(projectId, buildRuns.at(-1)!);
     return context.json({ events });
   });
 }

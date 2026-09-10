@@ -29,10 +29,9 @@ const id = () => text("id").primaryKey();
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 
 /**
- * There is no `run` table. A project's stage and state are read from the
- * runtime executor (`hub-executor.ts`), which is now the sole
- * authority for where a project is — see that module's `StoredRun` for the
- * record that used to live here, kept in-memory instead of in Postgres.
+ * There is no `run` table. A project's run record folds from the ledger
+ * thread (`runs.ts`); where it stands in the runtime is the hub's own
+ * workflow run on the project's deployment (`hub-executor.ts`).
  */
 
 /**
@@ -78,76 +77,6 @@ export const artifactEdge = builder.table(
   },
   (table) => [primaryKey({ columns: [table.childNodeId, table.sourceNodeId] })],
 );
-
-export const buildPacket = builder.table("build_packet", {
-  id: id(),
-  projectId: text("project_id").notNull(),
-  sourceRunId: text("source_run_id").notNull(),
-  /** Immutable once written. A second freeze for the same source is refused. */
-  versions: jsonb("versions").notNull(),
-  costApproval: jsonb("cost_approval").notNull(),
-  placement: text("placement").notNull(),
-  targets: jsonb("targets").notNull(),
-  packetHash: text("packet_hash").notNull(),
-  createdAt: createdAt(),
-});
-
-export const buildQuestion = builder.table(
-  "build_question",
-  {
-    id: id(),
-    projectId: text("project_id").notNull(),
-    runId: text("run_id").notNull(),
-    /** The attempt that raised it; build.answer resumes exactly this origin. */
-    originId: text("origin_id").notNull(),
-    kind: text("kind").notNull(),
-    prompt: text("prompt").notNull(),
-    scopeImpact: jsonb("scope_impact"),
-    deadline: timestamp("deadline", { withTimezone: true }),
-    answeredAt: timestamp("answered_at", { withTimezone: true }),
-    answer: text("answer"),
-    answeredBy: text("answered_by"),
-    grantedCapabilities: jsonb("granted_capabilities"),
-    createdAt: createdAt(),
-  },
-  (table) => [index("build_question_run_idx").on(table.runId, table.answeredAt)],
-);
-
-/** Typed worker progress. Events are never approvals and never carry bytes. */
-export const buildEvent = builder.table(
-  "build_event",
-  {
-    id: id(),
-    runId: text("run_id").notNull(),
-    /** Dedupe key; at-least-once delivery is assumed. */
-    idempotencyKey: text("idempotency_key").notNull(),
-    /** Monotonic per-run cursor so gaps are detectable, not merely unlikely. */
-    cursor: integer("cursor").notNull(),
-    type: text("type").notNull(),
-    severity: text("severity").notNull().default("info"),
-    payload: jsonb("payload").notNull(),
-    occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
-    createdAt: createdAt(),
-  },
-  (table) => [
-    uniqueIndex("build_event_dedupe_idx").on(table.runId, table.idempotencyKey),
-    index("build_event_cursor_idx").on(table.runId, table.cursor),
-  ],
-);
-
-export const deliveryManifest = builder.table("delivery_manifest", {
-  id: id(),
-  projectId: text("project_id").notNull(),
-  buildRunId: text("build_run_id").notNull(),
-  descriptors: jsonb("descriptors").notNull(),
-  verification: jsonb("verification").notNull(),
-  actualCost: jsonb("actual_cost"),
-  exceptions: jsonb("exceptions"),
-  manifestHash: text("manifest_hash").notNull(),
-  acceptedAt: timestamp("accepted_at", { withTimezone: true }),
-  acceptedBy: text("accepted_by"),
-  createdAt: createdAt(),
-});
 
 /**
  * A durable human wait. Committed *before* the notification is sent, so a

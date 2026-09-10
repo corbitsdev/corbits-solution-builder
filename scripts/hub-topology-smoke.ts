@@ -135,7 +135,7 @@ try {
   const returned = (rows as unknown as { rows?: { conname: string }[] }).rows ??
     (rows as unknown as { conname: string }[]);
   const names = returned.map((row) => row.conname).sort();
-  const expected = ["artifact_node", "build_packet", "build_question", "delivery_manifest"].map(
+  const expected = ["artifact_node"].map(
     (name) => `${name}_project_tenant_fk`,
   );
   check(

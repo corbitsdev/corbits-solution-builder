@@ -4,7 +4,7 @@
  * Nothing here writes run state; it only reads what the guard needs to
  * decide.
  */
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { Stage } from "@solutions-builder/app/ledger";
 import type { Authority } from "@solutions-builder/app/ledger";
 import * as table from "./schema.js";
@@ -116,20 +116,16 @@ export async function audienceTally(
   };
 }
 
+/**
+ * Whether a build packet was already frozen from this source run. The packet
+ * is an artifact version of kind build_packet whose producer is the source run.
+ */
 export async function packetExists(tx: Tx, sourceRunId: string): Promise<boolean> {
   const [row] = await tx
-    .select({ id: table.buildPacket.id })
-    .from(table.buildPacket)
-    .where(eq(table.buildPacket.sourceRunId, sourceRunId));
+    .select({ id: table.artifactNode.id })
+    .from(table.artifactNode)
+    .where(
+      and(eq(table.artifactNode.kind, "build_packet"), eq(table.artifactNode.producerRunId, sourceRunId)),
+    );
   return Boolean(row);
-}
-
-export async function waitingOrigin(tx: Tx, runId: string): Promise<string | undefined> {
-  const [row] = await tx
-    .select({ originId: table.buildQuestion.originId })
-    .from(table.buildQuestion)
-    .where(and(eq(table.buildQuestion.runId, runId), isNull(table.buildQuestion.answeredAt)))
-    .orderBy(desc(table.buildQuestion.createdAt))
-    .limit(1);
-  return row?.originId;
 }

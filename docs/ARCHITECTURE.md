@@ -64,7 +64,6 @@ issue first.
 | Table | Why it is not native yet |
 | --- | --- |
 | `artifact_node`, `artifact_edge` | `@corbits/artifacts` versions have no metadata or parent-version fields. Stage, lineage, exact hash and provenance ride here until that PR lands upstream. |
-| `build_packet`, `build_question`, `build_event`, `delivery_manifest` | Stage 8 and 9 records. They become the frozen deployment, parked signals, run events and a manifest artifact once stage 8 runs through the hub's supervisor. |
 
 A project is a child tenant of the workspace tenant; its policy and revision
 live in the tenant config, and its participants are principals holding roles
@@ -73,6 +72,9 @@ per-project ledger agent session (`engine-ledger.ts`). The product's run record
 (origin, source, cost approval, packet, checkpoint, why it ended) is folded
 from the run mutations those turns carry (`runs.ts`); where the run stands in
 the runtime is the hub's own workflow run on the project's deployment
-(`hub-executor.ts`). Decision flags are fields on the ledger turn that raised
-them. Every direct table write that remains is named in
+(`hub-executor.ts`). Decision flags, worker questions and their answers are fields on the ledger
+turn of the command that raised them; a build attempt's events are turns of
+their own on the same thread. The frozen build packet and the delivery
+manifest are artifact versions, produced by the run that froze or delivered
+them; acceptance is the `delivery.accept` turn. Every direct table write that remains is named in
 `hub-gaps.ts` as an upstream gap.
