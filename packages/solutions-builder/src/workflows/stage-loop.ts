@@ -53,18 +53,42 @@ export function loopExits(stage: Stage): Command[] {
 }
 
 /**
- * Commands that keep a stage in progress: the loop continues after one of
- * these, and ends after anything else. Read from the ledger.
+ * Commands that keep a stage open: the loop continues after one of these,
+ * and ends after anything else. Read from the ledger: a stage command that
+ * lands back in `in_progress`, or a build command that stays inside the
+ * build (stage 8 is one build run with many rounds: attempts, questions,
+ * answers, failures).
  */
 export function continuingCommands(): Command[] {
   const commands = LEDGER.filter(
     (row) =>
-      row.from?.kind === "stage" &&
-      row.from.state === "in_progress" &&
-      row.to?.kind === "stage" &&
-      row.to.state === "in_progress",
+      (row.from?.kind === "stage" &&
+        row.from.state === "in_progress" &&
+        row.to?.kind === "stage" &&
+        row.to.state === "in_progress") ||
+      (row.from?.kind === "build" && row.to?.kind === "build"),
   ).map((row) => row.command);
   return [...new Set(commands)];
+}
+
+/** The step inside a stage 8 round that runs the build agent under the sidecar. */
+export const BUILD_STEP_ID = "build";
+/** How long one build attempt may run before the runtime fails the step. */
+export const BUILD_STEP_TIMEOUT_MS = 30 * 60 * 1000;
+
+/**
+ * Whether a command is a round of its stage rather than the gate out of it.
+ * A stage command out of `in_progress` is a round; so is every build command
+ * that stays inside the build, since stage 8 is one build run with many
+ * rounds and only the evidence hand-off leaves it.
+ */
+function isRoundCommand(command: Command): boolean {
+  return LEDGER.some(
+    (row) =>
+      row.command === command &&
+      ((row.from?.kind === "stage" && row.from.state === "in_progress") ||
+        (row.from?.kind === "build" && row.to?.kind === "build")),
+  );
 }
 
 /** The signal a stage's revise loop consumes once per iteration. */
@@ -89,19 +113,16 @@ export function exhaustedSignal(stage: Stage): string {
 export type StageSignal = { readonly name: string; readonly payload: { readonly command: Command } };
 
 /**
- * The signal a ledger command lands as. A command out of `in_progress` ends
- * the current round; every other stage command resolves the gate. The command
- * rides in the payload so the loop's own functions can read it.
+ * The signal a ledger command lands as. A round command ends the current
+ * round; every other stage command resolves the gate. The command rides in the
+ * payload so the loop's own functions can read it.
  */
 export function stageSignal(
   stage: Stage,
   command: Command,
   gate: "gate" | "exhausted" = "gate",
 ): StageSignal {
-  const leavesProgress = LEDGER.some(
-    (row) => row.command === command && row.from?.kind === "stage" && row.from.state === "in_progress",
-  );
-  const name = leavesProgress
+  const name = isRoundCommand(command)
     ? roundSignal(stage)
     : gate === "gate"
       ? approveSignal(stage)

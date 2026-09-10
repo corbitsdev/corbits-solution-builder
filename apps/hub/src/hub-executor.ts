@@ -213,6 +213,11 @@ export async function debugRuns(projectId: string): Promise<unknown> {
         kinds: events.map((event) => `${event.seq}:${event.type}`),
         steps: [...state.steps.values()].map((step) => `${step.stepId}=${step.phase}${step.awaitingSignal ? `(${step.awaitingSignal.name})` : ""}`),
         children: [...state.children.entries()].map(([id, child]) => `${id}<-${child.spawnedBy}`),
+        // A failed or cancelled step carries its reason in the event body; the
+        // kinds list alone cannot say why a step ended.
+        failures: events
+          .filter((event) => /fail|error|cancel|timeout/i.test(event.type))
+          .map((event) => ({ seq: event.seq, type: event.type, body: event.body })),
       };
     } catch (cause) {
       out[runId] = { error: cause instanceof Error ? cause.message : String(cause) };

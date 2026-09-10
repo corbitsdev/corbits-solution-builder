@@ -14,7 +14,14 @@
  * drift fails the gate rather than the probe.
  */
 import { PROJECT_LIFECYCLE_ID } from "./project-lifecycle.js";
-import { MAX_REVISIONS, ROUND_STEP_ID, STAGE_WORKFLOW_ID } from "./stage-loop.js";
+import {
+  BUILD_STEP_ID,
+  BUILD_STEP_TIMEOUT_MS,
+  MAX_REVISIONS,
+  ROUND_STEP_ID,
+  STAGE_WORKFLOW_ID,
+} from "./stage-loop.js";
+import { agentFor } from "../kit.js";
 import { STAGES } from "../ledger.js";
 
 /**
@@ -26,30 +33,86 @@ import { STAGES } from "../ledger.js";
  */
 export const WORKFLOW_PACKAGE_DEPENDENCIES: Readonly<Record<string, string>> = {
   "@intx/workflow": "workspace:*",
+  "@intx/agent": "workspace:*",
+  "@intx/tools-posix": "workspace:*",
   hono: "^4.0.0",
 };
+
+/**
+ * The inference source the stage 8 build agent declares: a (provider plugin,
+ * canonical model) pair the deploy pins against the tenant's offerings. Absent
+ * when no offering exists yet; the lifecycle then carries no agent step and
+ * stage 8 is gates only, which is what the in-process definition builds.
+ */
+export type BuildSource = { readonly provider: string; readonly model: string };
+
+export type LifecycleSourceOptions = { readonly buildSource?: BuildSource };
+
+/** The stage whose rounds run the build agent. */
+export const BUILD_STAGE = 8;
 
 export const LIFECYCLE_ENTRY_PATH = "workflow.js";
 
 /** The entry module the workflow package ships, as source. */
-export function lifecycleEntrySource(): string {
-  return `import { awaitSignal, defineWorkflow, loop } from "@intx/workflow/definition";
-
+export function lifecycleEntrySource(options: LifecycleSourceOptions = {}): string {
+  const build = options.buildSource;
+  // The rendered package imports these; this module does not. Interpolated so
+  // the boundary check reads the package's own imports, not the template's.
+  const buildImports = build
+    ? `import { defineAgent } from ${JSON.stringify("@intx/agent")};
+import { posix } from ${JSON.stringify("@intx/tools-posix/sidecar-bundle")};
+`
+    : "";
+  // The build agent is the kit's stage 8 specialist, given a workspace. Every
+  // posix tool asks before it acts, so a tool call parks the step and the hub
+  // records an approval a person resolves; the agent cannot act on its own.
+  const buildAgent = build
+    ? `
+const BUILD_SOURCE = ${JSON.stringify(build)};
+const buildAgent = defineAgent({
+  id: ${JSON.stringify(agentFor(BUILD_STAGE).id)},
+  systemPrompt: ${JSON.stringify(agentFor(BUILD_STAGE).system)},
+  tools: [posix],
+  capabilities: [],
+  inference: { sources: [BUILD_SOURCE] },
+});
+`
+    : "";
+  const buildStep = build
+    ? `
+      ${JSON.stringify(BUILD_STEP_ID)}: step({
+        agent: buildAgent,
+        input: { from: "steps." + ROUND + ".output" },
+        timeout: ${BUILD_STEP_TIMEOUT_MS},
+        triggers: 1,
+        drainBehavior: "wait",
+        after: [ROUND],
+      }),`
+    : "";
+  return `import { awaitSignal, defineWorkflow, loop, step } from "@intx/workflow/definition";
+${buildImports}
 const STAGES = ${JSON.stringify([...STAGES])};
 const STAGE_ID = ${JSON.stringify(STAGE_WORKFLOW_ID)};
 const MAX_REVISIONS = ${MAX_REVISIONS};
 const ROUND = ${JSON.stringify(ROUND_STEP_ID)};
-
+const BUILD_STAGE = ${BUILD_STAGE};
+${buildAgent}
 // One iteration: the workflow waits to hear what the person did. One gate, so
 // the first command to arrive ends the round; the loops module decides whether
-// the loop goes on.
+// the loop goes on. At the build stage the round is followed by the build
+// agent, which runs under the sidecar on what the person asked for.
 function iteration(stage) {
+  const steps = {
+    [ROUND]: awaitSignal({ name: STAGE_ID + "." + stage + ".round", drainBehavior: "wait" }),
+  };
+  if (stage === BUILD_STAGE) {
+    Object.assign(steps, {${buildStep}
+    });
+  }
   return defineWorkflow({
     id: STAGE_ID + ".iteration." + stage,
     triggers: [{ type: "manual" }],
-    steps: {
-      [ROUND]: awaitSignal({ name: STAGE_ID + "." + stage + ".round", drainBehavior: "wait" }),
-    },
+    steps,
   });
 }
 

@@ -212,25 +212,66 @@ for (const terminal of TERMINAL_STATES) {
   // probe sidecar evaluates. Evaluate it here against the workspace's own
   // `@intx/workflow` and compare, so the two shapes cannot drift apart.
   {
-    const { mkdtemp, mkdir, symlink, writeFile, rm } = await import("node:fs/promises");
+    const { mkdtemp, mkdir, symlink, writeFile, rm, realpath } = await import("node:fs/promises");
     const { tmpdir } = await import("node:os");
-    const { join, dirname } = await import("node:path");
-    const { fileURLToPath } = await import("node:url");
+    const { join } = await import("node:path");
     const { LIFECYCLE_ENTRY_PATH, lifecycleEntrySource, withoutStateSchemas } = await import(
       "@solutions-builder/app/workflows/lifecycle-source"
     );
     const dir = await mkdtemp(join(tmpdir(), "sb-lifecycle-source-"));
     try {
-      const workflowPackage = dirname(fileURLToPath(import.meta.resolve("@intx/workflow/package.json")));
       await mkdir(join(dir, "node_modules", "@intx"), { recursive: true });
-      await symlink(workflowPackage, join(dir, "node_modules", "@intx", "workflow"), "dir");
+      // The workspace's own copies, by path: a bare-specifier resolve from this
+      // script can land on a published tarball in Bun's cache instead.
+      for (const name of ["workflow", "agent", "tools-posix"]) {
+        const pkg = await realpath(join(import.meta.dir, "..", "node_modules", "@intx", name));
+        await symlink(pkg, join(dir, "node_modules", "@intx", name), "dir");
+      }
       await writeFile(join(dir, "package.json"), JSON.stringify({ name: "check", type: "module" }));
       await writeFile(join(dir, LIFECYCLE_ENTRY_PATH), lifecycleEntrySource());
+      // Written before the first import: Bun caches a directory's listing on
+      // first resolution, so a module added afterwards is not found.
+      const withBuild = join(dir, "with-build.js");
+      await writeFile(withBuild, lifecycleEntrySource({ buildSource: { provider: "openai-compatible", model: "probe" } }));
       const evaluated = (await import(join(dir, LIFECYCLE_ENTRY_PATH))) as { default: unknown };
       const rendered = JSON.stringify(evaluated.default);
       const inProcess = JSON.stringify(withoutStateSchemas(definition));
       if (rendered !== inProcess) {
         problems.push("The rendered lifecycle source evaluates to a different definition than the package builds in-process");
+      }
+
+      // With an offering the build stage's round is followed by the build
+      // agent: a real step under the sidecar, with the kit's stage 8 prompt,
+      // the posix tools, and the offering as its declared source. Everything
+      // else must be the same definition.
+      const { BUILD_STAGE } = await import("@solutions-builder/app/workflows/lifecycle-source");
+      const { BUILD_STEP_ID, reviseStepId: revise } = await import("@solutions-builder/app/workflows/stage-loop");
+      const { agentFor } = await import("@solutions-builder/app/kit");
+      const built = (await import(withBuild)) as {
+        default: { steps: Record<string, { body?: { steps?: Record<string, { kind?: string; agent?: { id?: string; toolFactories?: { id?: string }[]; inference?: { sources?: { provider?: string; model?: string }[] } }; after?: string[] }> } }> };
+      };
+      const buildBody = built.default.steps[revise(BUILD_STAGE as never)]?.body?.steps ?? {};
+      const buildStep = buildBody[BUILD_STEP_ID];
+      if (!buildStep || buildStep.kind !== "step" || buildStep.agent?.id !== agentFor(BUILD_STAGE as never).id) {
+        problems.push("The build stage's iteration has no agent step for the kit's stage 8 specialist");
+      } else {
+        if (!buildStep.after?.includes("round")) problems.push("The build agent does not run after the round gate");
+        if (!buildStep.agent?.toolFactories?.some((tool) => tool.id === "@intx/tools-posix/sidecar-bundle")) {
+          problems.push("The build agent carries no posix tools");
+        }
+        const source = buildStep.agent?.inference?.sources?.[0];
+        if (source?.provider !== "openai-compatible" || source?.model !== "probe") {
+          problems.push("The build agent does not declare the offering it was rendered with");
+        }
+      }
+      const withoutBuild = JSON.parse(JSON.stringify(built.default)) as {
+        steps: Record<string, { body?: { steps?: Record<string, unknown>; stepOrder?: string[] } }>;
+      };
+      const buildIteration = withoutBuild.steps[revise(BUILD_STAGE as never)]?.body;
+      delete buildIteration?.steps?.[BUILD_STEP_ID];
+      if (buildIteration?.stepOrder) buildIteration.stepOrder = buildIteration.stepOrder.filter((id) => id !== BUILD_STEP_ID);
+      if (JSON.stringify(withoutBuild) !== inProcess) {
+        problems.push("The lifecycle with a build agent differs from the package beyond the build step itself");
       }
     } finally {
       await rm(dir, { recursive: true, force: true });

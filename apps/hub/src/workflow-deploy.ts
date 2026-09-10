@@ -14,6 +14,7 @@ import {
   LIFECYCLE_ENTRY_PATH,
   lifecycleEntrySource,
   WORKFLOW_PACKAGE_DEPENDENCIES,
+  type BuildSource,
 } from "@solutions-builder/app/workflows/lifecycle-source";
 import { continuingCommands, ROUND_STEP_ID } from "@solutions-builder/app/workflows/stage-loop";
 import { assets, catalog, workflows, type HubDeployment } from "./hub-client.js";
@@ -72,7 +73,7 @@ export function lifecycleAssetName(projectId?: string): string {
  * closure resolves to the vendored revision rather than npm. A digest of every
  * file sits at the root so a changed byte anywhere is a new deployment.
  */
-export function renderLifecycleSource(projectId?: string): LifecycleSource {
+export function renderLifecycleSource(projectId?: string, buildSource?: BuildSource): LifecycleSource {
   const name = lifecycleAssetName(projectId);
   const root = {
     name: `${name}-workspace`,
@@ -93,12 +94,31 @@ export function renderLifecycleSource(projectId?: string): LifecycleSource {
   const files: Record<string, string> = {
     "package.json": `${JSON.stringify(root, null, 2)}\n`,
     [`${LIFECYCLE_DIR}/package.json`]: `${JSON.stringify(member, null, 2)}\n`,
-    [`${LIFECYCLE_DIR}/${ENTRY_PATH}`]: lifecycleEntrySource(),
+    [`${LIFECYCLE_DIR}/${ENTRY_PATH}`]: lifecycleEntrySource(buildSource ? { buildSource } : {}),
     [`${LIFECYCLE_DIR}/${LOOPS_PATH}`]: loopsModule(),
+    // The build agent's tools ride beside the workflow runtime; the two
+    // closures overlap on @intx/agent and @intx/types, which is fine.
     ...closureFiles("workflow"),
+    ...closureFiles("tools-posix"),
   };
   files[DIGEST_PATH] = `${treeDigest(files)}\n`;
   return files;
+}
+
+/**
+ * The (provider plugin, canonical model) pair the hub pins a step's source by,
+ * for the operator's first offering. The deploy resolves each offering to a
+ * harness source keyed exactly this way, so the agent's declared preference
+ * matches an approved source rather than falling back to the default.
+ */
+async function buildSourceFor(offering: { providerId: string; modelId: string }): Promise<BuildSource | undefined> {
+  // An offering points at a model provider (the catalog's `mpv_` row, whose
+  // plugin names the inference adapter), not at the credential provider.
+  const [providers, models] = await Promise.all([catalog.modelProviders(), catalog.models()]);
+  const provider = providers.find((row) => row.id === offering.providerId);
+  const model = models.find((row) => row.id === offering.modelId);
+  if (!provider || !model) return undefined;
+  return { provider: provider.plugin, model: model.canonicalName };
 }
 
 export type LifecycleDeployment =
@@ -141,7 +161,7 @@ export async function ensureLifecycleDeployment(projectId?: string): Promise<Lif
     .sort((a, b) => a.priority - b.priority);
   if (offerings.length === 0) return { status: "no_offering" };
 
-  const source = renderLifecycleSource(projectId);
+  const source = renderLifecycleSource(projectId, await buildSourceFor(offerings[0]!));
   const assetId = await lifecycleAsset(projectId);
   const head = await readWorkflowSourceBlob(assetId, DIGEST_PATH);
   const [latest] = (await workflows.deployments()).filter(

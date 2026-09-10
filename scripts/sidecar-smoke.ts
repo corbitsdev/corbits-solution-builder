@@ -34,9 +34,30 @@ function check(name: string, ok: boolean, detail = "") {
 }
 
 const SECRET = "sk-stub-do-not-store-me-anywhere";
+/** Every chat completion the stub answered: the agent step ran under the sidecar. */
+const completions: { model: string; messages: unknown[] }[] = [];
+/** Every request the stub saw, for diagnosis when the agent never arrives. */
+const requests: string[] = [];
 const stub = createServer((request, response) => {
-  if ((request.headers.authorization ?? "") !== `Bearer ${SECRET}`) {
+  const authorized = (request.headers.authorization ?? "") === `Bearer ${SECRET}`;
+  requests.push(`${request.method} ${request.url} ${authorized ? "authorized" : `unauthorized(${(request.headers.authorization ?? "").slice(0, 28)})`}`);
+  if (!authorized) {
     response.writeHead(401).end("{}");
+    return;
+  }
+  if (request.method === "POST" && /\/chat\/completions$/.test(request.url ?? "")) {
+    let body = "";
+    request.on("data", (chunk: Buffer) => (body += chunk.toString()));
+    request.on("end", () => {
+      const parsed = JSON.parse(body) as { model: string; messages: unknown[] };
+      completions.push({ model: parsed.model, messages: parsed.messages });
+      const chunk = (delta: Record<string, unknown>, finish: string | null) =>
+        `data: ${JSON.stringify({ id: "stub", object: "chat.completion.chunk", model: parsed.model, choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write(chunk({ role: "assistant", content: "## In short\n- Build attempt acknowledged." }, null));
+      response.write(chunk({}, "stop"));
+      response.end("data: [DONE]\n\n");
+    });
     return;
   }
   response.writeHead(200, { "content-type": "application/json" });
@@ -201,6 +222,71 @@ try {
       atStage2?.parked === true && atStage2.stepId.startsWith(reviseStepId(2)) && atStage2.signalName === roundSignal(2),
       atStage2 ? `${atStage2.stepId} ${atStage2.signalName ?? ""}` : "no status",
     );
+
+    // The run is a shadow of the ledger and sees only signals, so the walk to
+    // the build stage is the ledger's own commands: submit ends each round,
+    // approve (cost.approve at stage 7) opens the next stage.
+    let walked = atStage2?.parked === true && atStage2.stage === 2;
+    for (const stage of [2, 3, 4, 5, 6, 7] as const) {
+      if (!walked) break;
+      await deliverStageSignal(project.projectId, "stage.submit", { runId: project.runId }, `smoke-submit-${stage}-${project.projectId}`);
+      const gate = await settle((s) => s.parked && s.stepId === gateStepId(stage));
+      const advance = stage === 7 ? "cost.approve" : "stage.approve";
+      await deliverStageSignal(project.projectId, advance, { runId: project.runId }, `smoke-approve-${stage}-${project.projectId}`);
+      const next = await settle((s) => s.parked && s.stage === stage + 1);
+      walked = gate?.stepId === gateStepId(stage) && next?.stage === stage + 1;
+    }
+    const atStage8 = await settle((s) => s.parked && s.stage === 8);
+    check(
+      "submit and approve at every stage walk the run to the build stage",
+      walked && atStage8?.parked === true && atStage8.signalName === roundSignal(8),
+      atStage8 ? `${atStage8.stepId} ${atStage8.signalName ?? ""}` : "no status",
+    );
+
+    if (atStage8?.parked && atStage8.stage === 8) {
+      const beforeBuild = completions.length;
+      const attempt = await deliverStageSignal(project.projectId, "build.start_attempt", { runId: project.runId }, `smoke-attempt-${project.projectId}`);
+      check("build.start_attempt lands on the stage 8 round", attempt === "delivered", attempt);
+      const buildStarted = Date.now();
+      const beforeRequests = requests.length;
+      let seen = false;
+      const completionRequest = () => requests.slice(beforeRequests).find((line) => line.includes("POST") && line.includes("/chat/completions"));
+      while (Date.now() - buildStarted < 120_000) {
+        if (completionRequest() !== undefined) {
+          seen = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      // The agent step ran under the sidecar and asked the tenant's offering
+      // for a completion. Whether the request was authorised is reported, not
+      // asserted: the hub's credential row carries the keychain reference, not
+      // the key (catalog.ts), so the sidecar presents that reference as the
+      // bearer token. Closing that gap is a product decision, tracked on the
+      // ticket, not something this smoke can paper over.
+      check(
+        "the build agent runs under the sidecar and calls the tenant's offering",
+        seen,
+        seen
+          ? `${completionRequest()} after ${((Date.now() - buildStarted) / 1000).toFixed(1)}s${completions.length > beforeBuild ? `, answered (${completions.at(-1)?.messages.length} messages)` : ""}`
+          : "no completion request reached the stub",
+      );
+      if (!seen) {
+        const { debugRuns } = await import("../apps/hub/src/hub-executor.js");
+        console.log("STUB REQUESTS", JSON.stringify(requests.slice(-10)));
+        console.log("DIAG", JSON.stringify(await debugRuns(project.projectId), null, 1).slice(0, 12000));
+      }
+      const afterBuild = await settle((s) => s.parked && s.stage === 8 && s.signalName === roundSignal(8));
+      check(
+        "the attempt's round ends and the build stage waits for the next command",
+        afterBuild?.parked === true && afterBuild.stage === 8,
+        afterBuild ? `${afterBuild.stepId} ${afterBuild.signalName ?? ""}` : "no status",
+      );
+      if (!afterBuild?.parked) {
+        const { debugRuns } = await import("../apps/hub/src/hub-executor.js");
+        console.log("DIAG", JSON.stringify(await debugRuns(project.projectId), null, 1).slice(0, 8000));
+      }
+    }
   }
 } finally {
   stub.close();

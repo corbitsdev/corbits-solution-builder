@@ -71,6 +71,7 @@
     "@intx/inference-catalog": "workspace:*",
     "@intx/log": "workspace:*",
     "@intx/mail-memory": "workspace:*",
+    "@intx/tools-posix": "workspace:*",
     "@intx/mailbox": "workspace:*",
     "@intx/mime": "workspace:*",
     "@intx/sidecar-app": "workspace:*",
