@@ -1,0 +1,1169 @@
+// Supervisor-level coverage for the substrate.write IPC layer.
+//
+// Four review concerns are pinned here:
+//
+//   1. The terminal-write watchdog timeout. The supervisor holds the
+//      `substrate.write.response` back to the child until the
+//      dispatch loop's `markConsumed` settles for a matching terminal
+//      event. A bug in `markConsumed`, a torn-down cohort, or a
+//      stalled inbox primitive would deadlock the child's write, the
+//      runtime body, and the dispatch loop itself. The watchdog
+//      surfaces such a stall as a structured `{ ok: false, reason }`
+//      response rather than an unbounded wait.
+//
+//   2. Authz under the new IPC. The supervisor executes substrate
+//      writes on behalf of the child under
+//      `WorkflowRunWorkflowProcessPrincipal`; nothing in the existing
+//      tests pinned the supervisor's behaviour when the child claims
+//      a principal it shouldn't have or a anchorRunId that doesn't
+//      match the supervisor's. The supervisor's handler intentionally
+//      ignores any principal/anchorRunId the child might smuggle in:
+//      the principal is constructed by the supervisor at write time
+//      from `bindings.anchorRunId`. Pin that override so a future
+//      change does not quietly let the child influence the on-disk
+//      audit subject.
+//
+//   3. A repoId.kind other than `workflow-run` -- the only kind the
+//      child's proxy is supposed to forward through this IPC -- must
+//      be rejected at the handler boundary. Pin that here.
+//
+//   4. The supervisor's crash handler must interpolate the crash reason
+//      into its log record. A malformed substrate.write.request reaches
+//      the crash handler on the live cohort; a non-JSON line during the
+//      pre-ready handshake reaches it in a non-running phase. Both log
+//      the reason, and both are pinned here because this file already
+//      owns the harness that drives a child through the IPC.
+
+import {
+  describe,
+  test,
+  expect,
+  beforeAll,
+  afterAll,
+  beforeEach,
+} from "bun:test";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
+import { type } from "arktype";
+
+import { generateKeyPair } from "@intx/crypto";
+import { configureSync, getConfig, resetSync } from "@intx/log";
+import { hexEncode } from "@intx/types";
+import type { NewlyTerminalRun, RepoId, RepoStore } from "@intx/hub-sessions";
+
+import {
+  createWorkflowSupervisor,
+  type InboxPrimitives,
+  type MailBusBindings,
+  type SignedPayload,
+  type SubprocessHandle,
+  type SubprocessSpawner,
+  type WorkflowSupervisorBindings,
+} from "./index";
+import { defaultStepRepoId, STEP_GRANTS_PATH } from "./credentials";
+import {
+  ControlPayload,
+  SignedEnvelope,
+  createControlChannelSender,
+  type FrameReader,
+  type NdjsonReader,
+  type NdjsonWriter,
+} from "../ipc/index";
+
+async function makeTempDir(prefix: string): Promise<string> {
+  return fs.mkdtemp(path.join(os.tmpdir(), prefix));
+}
+
+function createMemoryNdjsonStream() {
+  const buffer: string[] = [];
+  let waiter: (() => void) | null = null;
+  let done = false;
+  function wake() {
+    const w = waiter;
+    waiter = null;
+    if (w) w();
+  }
+  const reader: NdjsonReader = {
+    read(): AsyncIterableIterator<string> {
+      return (async function* () {
+        while (true) {
+          if (buffer.length > 0) {
+            const next = buffer.shift();
+            if (next === undefined) {
+              throw new Error("buffer shift returned undefined");
+            }
+            yield next;
+            continue;
+          }
+          if (done) return;
+          await new Promise<void>((resolve) => {
+            waiter = resolve;
+          });
+        }
+      })();
+    },
+  };
+  const writer: NdjsonWriter = {
+    write(line: string) {
+      buffer.push(line.replace(/\n$/, ""));
+      wake();
+    },
+  };
+  return {
+    writer,
+    reader,
+    inject(line: string) {
+      buffer.push(line.replace(/\n$/, ""));
+      wake();
+    },
+    flushed(): readonly string[] {
+      return buffer.slice();
+    },
+    close() {
+      done = true;
+      wake();
+    },
+  };
+}
+
+function createMemoryFrameStream() {
+  const buffer: Uint8Array[] = [];
+  let done = false;
+  const reader: FrameReader = {
+    read(): AsyncIterableIterator<Uint8Array> {
+      return (async function* () {
+        while (true) {
+          if (buffer.length > 0) {
+            const next = buffer.shift();
+            if (next === undefined) {
+              throw new Error("frame buffer shift returned undefined");
+            }
+            yield next;
+            continue;
+          }
+          if (done) return;
+          await new Promise<void>((resolve) => setTimeout(resolve, 1));
+        }
+      })();
+    },
+  };
+  return {
+    reader,
+    close() {
+      done = true;
+    },
+  };
+}
+
+function createMockMailBus(): MailBusBindings & {
+  registered(): readonly string[];
+  deliver(address: string, message: Uint8Array): void;
+} {
+  const registered: string[] = [];
+  const subscribers = new Map<
+    string,
+    Set<(rawMessage: Uint8Array) => Promise<void>>
+  >();
+  return {
+    registerAddress(address: string) {
+      registered.push(address);
+    },
+    unregisterAddress(address: string) {
+      const idx = registered.lastIndexOf(address);
+      if (idx >= 0) registered.splice(idx, 1);
+      subscribers.delete(address);
+    },
+    subscribeMailForAddress(address, handler) {
+      let set = subscribers.get(address);
+      if (set === undefined) {
+        set = new Set();
+        subscribers.set(address, set);
+      }
+      set.add(handler);
+      return () => {
+        const current = subscribers.get(address);
+        current?.delete(handler);
+      };
+    },
+    sendOutbound() {
+      throw new Error("sendOutbound not exercised in this test");
+    },
+    registered(): readonly string[] {
+      return registered.slice();
+    },
+    deliver(address: string, message: Uint8Array) {
+      const set = subscribers.get(address);
+      if (set === undefined) return;
+      for (const handler of set) void handler(message).catch(() => undefined);
+    },
+  };
+}
+
+type WriteCapture = {
+  principal: { kind: string; anchorRunId?: string };
+  repoId: RepoId;
+  ref: string;
+  preservePrefix: string;
+  message: string;
+};
+
+// Mirror the workflow-run kind handler's terminal detection for the stub
+// substrate: a run is newly terminal when the merge produced a terminal
+// event blob under its `events/` prefix. The real handler scopes this to
+// events newly added against the prior tree; the stub's merge always runs
+// against an empty prior, so every terminal event it emits is new.
+const STUB_TERMINAL_EVENT_STATUS = new Map<
+  string,
+  "completed" | "failed" | "cancelled"
+>([
+  ["RunCompleted", "completed"],
+  ["RunFailed", "failed"],
+  ["RunCancelled", "cancelled"],
+]);
+const STUB_RUN_EVENT_PATH_RE = /^runs\/([^/]+)\/events\/[0-9]+\.json$/;
+function deriveNewlyTerminalRuns(
+  merged: Record<string, string | Uint8Array>,
+): NewlyTerminalRun[] {
+  const out: NewlyTerminalRun[] = [];
+  for (const [blobPath, content] of Object.entries(merged)) {
+    const match = STUB_RUN_EVENT_PATH_RE.exec(blobPath);
+    if (match === null || match[1] === undefined) continue;
+    const json =
+      typeof content === "string" ? content : new TextDecoder().decode(content);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(json);
+    } catch {
+      continue;
+    }
+    if (typeof parsed !== "object" || parsed === null || !("type" in parsed)) {
+      continue;
+    }
+    const eventType = (parsed as { type?: unknown }).type;
+    if (typeof eventType !== "string") continue;
+    const status = STUB_TERMINAL_EVENT_STATUS.get(eventType);
+    if (status !== undefined) {
+      out.push({ runId: match[1], status, terminalEventJson: json });
+    }
+  }
+  return out;
+}
+
+function createStubRepoStore(opts: {
+  baseDir: string;
+  /**
+   * When supplied, every write invokes this callback with the principal
+   * and routing the supervisor presented to the substrate. The test
+   * captures the principal here so it can pin the override behaviour.
+   */
+  onWriteAttempt?: (cap: WriteCapture) => void;
+  /**
+   * When true the merge callback is invoked synchronously with an empty
+   * `existing` map; on supervisor-side writes that need to round-trip
+   * the child the supervisor's merge callback drives the IPC and the
+   * substrate's per-repo lock is held until the response arrives.
+   * Default is true (single-shot merge).
+   */
+  invokeMerge?: boolean;
+}): RepoStore {
+  const stub: Partial<RepoStore> = {
+    getRepoDir(repoId: RepoId): string {
+      return path.join(opts.baseDir, repoId.kind, repoId.id);
+    },
+    async writeTreePreservingPrefix(principal, repoId, ref, args) {
+      opts.onWriteAttempt?.({
+        principal: principal as { kind: string; anchorRunId?: string },
+        repoId,
+        ref,
+        preservePrefix: args.preservePrefix,
+        message: args.message,
+      });
+      let newlyTerminalRuns: NewlyTerminalRun[] = [];
+      if (opts.invokeMerge !== false) {
+        const merged = await args.merge(new Map());
+        // Stand in for the real workflow-run kind handler's terminal
+        // detection: surface any run whose terminal event the merge
+        // produced, the way the handler's validation walk would.
+        newlyTerminalRuns = deriveNewlyTerminalRuns(merged);
+      }
+      return { commitSha: "deadbeefcafef00d", newlyTerminalRuns };
+    },
+  };
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- test stub; missing methods surface as a precise failure via the proxy
+  return new Proxy(stub as RepoStore, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (value !== undefined) return value;
+      return () => {
+        throw new Error(
+          `stub RepoStore: ${String(prop)} not implemented for this test`,
+        );
+      };
+    },
+  });
+}
+
+type MemoryEntry = {
+  messageId: string;
+  receivedAt: number;
+  mailAuditRef: { store: string; path: string };
+};
+
+function createMemoryInboxPrimitives(opts: {
+  /**
+   * When supplied, `markConsumed` awaits this promise before resolving.
+   * The watchdog tests inject a never-resolving promise so the
+   * dispatch loop's `markConsumed` hangs and the supervisor's
+   * watchdog has to surface the deadlock as a structured response.
+   */
+  blockMarkConsumed?: Promise<void>;
+}): InboxPrimitives & { snapshotConsumed(): readonly string[] } {
+  const state = new Map<
+    string,
+    {
+      inbox: Map<string, MemoryEntry>;
+      processing: Map<string, MemoryEntry>;
+      consumed: Map<string, MemoryEntry>;
+    }
+  >();
+  function getOrCreate(address: string) {
+    let entry = state.get(address);
+    if (entry === undefined) {
+      entry = { inbox: new Map(), processing: new Map(), consumed: new Map() };
+      state.set(address, entry);
+    }
+    return entry;
+  }
+  function key(receivedAt: number, messageId: string): string {
+    return `${String(receivedAt)}-${messageId}`;
+  }
+  return {
+    snapshotConsumed() {
+      const out: string[] = [];
+      for (const s of state.values()) {
+        for (const v of s.consumed.values()) {
+          out.push(v.messageId);
+        }
+      }
+      return out;
+    },
+    async enqueueInbox(_store, _principal, _repoId, args) {
+      const s = getOrCreate(args.address);
+      const k = key(args.receivedAt, args.messageId);
+      const envelope: MemoryEntry = {
+        messageId: args.messageId,
+        receivedAt: args.receivedAt,
+        mailAuditRef: args.mailAuditRef,
+      };
+      s.inbox.set(k, envelope);
+      return {
+        outcome: "enqueued",
+        commitSha: "memory",
+        inboxKey: k,
+        envelope: {
+          messageId: args.messageId,
+          receivedAt: args.receivedAt,
+          address: args.address,
+          mailAuditRef: args.mailAuditRef,
+        },
+      };
+    },
+    async dequeueToProcessing(_store, _principal, _repoId, address) {
+      const s = getOrCreate(address);
+      const entries = [...s.inbox.entries()].sort(([, a], [, b]) => {
+        if (a.receivedAt !== b.receivedAt) return a.receivedAt - b.receivedAt;
+        if (a.messageId < b.messageId) return -1;
+        if (a.messageId > b.messageId) return 1;
+        return 0;
+      });
+      if (entries.length === 0) return null;
+      const head = entries[0];
+      if (head === undefined) throw new Error("unreachable");
+      const [k, envelope] = head;
+      s.inbox.delete(k);
+      s.processing.set(k, envelope);
+      return {
+        commitSha: "memory",
+        key: k,
+        envelope: {
+          messageId: envelope.messageId,
+          receivedAt: envelope.receivedAt,
+          address,
+          mailAuditRef: envelope.mailAuditRef,
+        },
+      };
+    },
+    async markConsumed(_store, _principal, _repoId, args) {
+      if (opts.blockMarkConsumed !== undefined) {
+        await opts.blockMarkConsumed;
+      }
+      const s = getOrCreate(args.address);
+      let foundKey: string | null = null;
+      let envelope: MemoryEntry | null = null;
+      for (const [k, value] of s.processing) {
+        if (value.messageId === args.messageId) {
+          foundKey = k;
+          envelope = value;
+          break;
+        }
+      }
+      if (foundKey === null || envelope === null) {
+        throw new Error("processing entry not found");
+      }
+      s.processing.delete(foundKey);
+      s.consumed.set(args.messageId, envelope);
+      return {
+        commitSha: "memory",
+        envelope: {
+          messageId: envelope.messageId,
+          receivedAt: envelope.receivedAt,
+          address: args.address,
+          runId: args.runId,
+          consumedAt: args.consumedAt,
+          mailAuditRef: envelope.mailAuditRef,
+        },
+        watermark: 0,
+        prunedMessageIds: [],
+      };
+    },
+    async replayProcessingToInbox(_store, _principal, _repoId, address) {
+      const s = getOrCreate(address);
+      const replayedKeys: string[] = [];
+      for (const [k, value] of s.processing) {
+        s.inbox.set(k, value);
+        replayedKeys.push(k);
+      }
+      s.processing.clear();
+      return { commitSha: "memory", replayedKeys };
+    },
+  };
+}
+
+async function seedStepGrants(
+  baseDir: string,
+  repoId: RepoId,
+  grants: unknown[],
+): Promise<void> {
+  const dir = path.join(baseDir, repoId.kind, repoId.id);
+  await fs.mkdir(path.join(dir, "state"), { recursive: true });
+  await fs.writeFile(
+    path.join(dir, STEP_GRANTS_PATH),
+    JSON.stringify({ grants }),
+  );
+}
+
+type SupervisorHarness = {
+  supervisor: ReturnType<typeof createWorkflowSupervisor>;
+  channelId: string;
+  childToSupervisor: ReturnType<typeof createMemoryNdjsonStream>;
+  supervisorToChild: ReturnType<typeof createMemoryNdjsonStream>;
+  childSender: ReturnType<typeof createControlChannelSender>;
+  mailBus: ReturnType<typeof createMockMailBus>;
+  inboxPrimitives: ReturnType<typeof createMemoryInboxPrimitives>;
+  bindings: WorkflowSupervisorBindings;
+  spawnResult: { pid: number; channelId: string };
+};
+
+type BootSupervisorOpts = {
+  prefix: string;
+  inboxOpts?: Parameters<typeof createMemoryInboxPrimitives>[0];
+  onWriteAttempt?: (cap: WriteCapture) => void;
+  /**
+   * The merge callback the substrate runs is the supervisor's
+   * IPC-bridging closure; set this to `false` so the stub does not
+   * pre-invoke the merge callback synchronously with an empty existing
+   * map. Tests that exercise the merge round-trip set this to true.
+   */
+  invokeMerge?: boolean;
+  onSelfTerminate?: (info: {
+    phase: "stopped" | "crash-looping";
+    reason: string;
+  }) => void;
+};
+
+// The supervisor after spawn but before the child's `ready` frame: the
+// receiver is already draining the child's control stream, yet the phase
+// is still `starting`. Tests that need to observe a pre-ready crash inject
+// into `childToSupervisor` and await `spawnPromise`; `sendReady` completes
+// the handshake for the running-phase harness below.
+type SupervisorSeam = Omit<SupervisorHarness, "spawnResult"> & {
+  spawnPromise: Promise<{ pid: number; channelId: string }>;
+  sendReady: () => Promise<void>;
+};
+
+async function bootSupervisorToReady(
+  opts: BootSupervisorOpts,
+): Promise<SupervisorSeam> {
+  const baseDir = await makeTempDir(opts.prefix);
+  await seedStepGrants(
+    baseDir,
+    defaultStepRepoId({ runId: "deployment-x", stepId: "step-1" }),
+    [{ resource: "thing", action: "read" }],
+  );
+  const supervisorIpcKeyPair = await generateKeyPair();
+  const childIpcKeyPair = await generateKeyPair();
+
+  const supervisorToChild = createMemoryNdjsonStream();
+  const childToSupervisor = createMemoryNdjsonStream();
+  const eventChildToSupervisor = createMemoryFrameStream();
+  let resolveExit: ((code: number) => void) | undefined;
+  const exited = new Promise<number>((resolve) => {
+    resolveExit = resolve;
+  });
+  let observedEnv: Record<string, string> | undefined;
+  const spawner: SubprocessSpawner = ({ env }) => {
+    observedEnv = env;
+    const handle: SubprocessHandle = {
+      pid: 7777,
+      controlWriter: supervisorToChild.writer,
+      controlReader: childToSupervisor.reader,
+      eventReader: eventChildToSupervisor.reader,
+      kill: () => {
+        childToSupervisor.close();
+        eventChildToSupervisor.close();
+        resolveExit?.(0);
+      },
+      exited,
+    };
+    return handle;
+  };
+
+  const mailBus = createMockMailBus();
+  const inboxPrimitives = createMemoryInboxPrimitives(opts.inboxOpts ?? {});
+  const repoStore = createStubRepoStore({
+    baseDir,
+    ...(opts.onWriteAttempt !== undefined
+      ? { onWriteAttempt: opts.onWriteAttempt }
+      : {}),
+    ...(opts.invokeMerge !== undefined
+      ? { invokeMerge: opts.invokeMerge }
+      : {}),
+  });
+
+  const bindings: WorkflowSupervisorBindings = {
+    repoStore,
+    signAsPrincipal: async (): Promise<SignedPayload> => ({
+      sig: new Uint8Array(64),
+      principalKind: "supervisor",
+    }),
+    mailBus,
+    subprocessSpawner: spawner,
+    binaryPath: "/fake/bin/workflow-child",
+    substrateEnv: { DATA_DIR: baseDir },
+    dynamicSpawnEnv: () => ({}),
+    workflowRunRepoId: { kind: "workflow-run", id: "deployment-x" },
+    workflowRunRef: "refs/heads/main",
+    anchorRunId: "deployment-x",
+    stepCount: 1,
+    deploymentMailAddress: "deployment-x@example.com",
+    readPrincipal: { kind: "supervisor" },
+    deriveStepAddress: ({ runId, stepId }) => `${runId}-${stepId}@example.com`,
+    ipcKeyPairFactory: () => Promise.resolve(supervisorIpcKeyPair),
+    inboxPrimitives,
+    ...(opts.onSelfTerminate !== undefined
+      ? { onSelfTerminate: opts.onSelfTerminate }
+      : {}),
+  };
+
+  const supervisor = createWorkflowSupervisor(bindings);
+  const spawnPromise = supervisor.spawn({
+    stepOrder: ["step-1"],
+    definitionHash: "def-hash-abc",
+    warmKeep: false,
+
+    onInferenceEvent: () => {
+      /* unused */
+    },
+  });
+  while (observedEnv === undefined) {
+    await new Promise((r) => setTimeout(r, 1));
+  }
+  const channelId = observedEnv.IPC_CHANNEL_ID;
+  if (channelId === undefined) {
+    throw new Error("IPC_CHANNEL_ID not set in spawn-time env");
+  }
+  const childSender = createControlChannelSender({
+    privateKeySeed: childIpcKeyPair.privateKey,
+    channelId,
+    writer: {
+      write(line: string) {
+        childToSupervisor.inject(line);
+      },
+    },
+  });
+  while (!mailBus.registered().includes("deployment-x@example.com")) {
+    await new Promise((r) => setTimeout(r, 1));
+  }
+  const sendReady = (): Promise<void> =>
+    childSender.send({
+      type: "ready",
+      data: {
+        childPid: 7777,
+        childPublicKey: hexEncode(childIpcKeyPair.publicKey),
+      },
+    });
+  return {
+    supervisor,
+    channelId,
+    childToSupervisor,
+    supervisorToChild,
+    childSender,
+    mailBus,
+    inboxPrimitives,
+    bindings,
+    spawnPromise,
+    sendReady,
+  };
+}
+
+async function bootSupervisor(
+  opts: BootSupervisorOpts,
+): Promise<SupervisorHarness> {
+  const seam = await bootSupervisorToReady(opts);
+  await seam.sendReady();
+  const spawnResult = await seam.spawnPromise;
+  return {
+    supervisor: seam.supervisor,
+    channelId: seam.channelId,
+    childToSupervisor: seam.childToSupervisor,
+    supervisorToChild: seam.supervisorToChild,
+    childSender: seam.childSender,
+    mailBus: seam.mailBus,
+    inboxPrimitives: seam.inboxPrimitives,
+    bindings: seam.bindings,
+    spawnResult,
+  };
+}
+
+/**
+ * Parse every signed envelope on the supervisor-to-child stream that
+ * decodes to a payload of the supplied type. Returns the matching
+ * payloads in arrival order. Skips frames that fail envelope/payload
+ * validation so a test asserting on a specific payload kind is not
+ * fooled by an unrelated frame (e.g. an unrelated `grants-updated`).
+ */
+function readPayloadsOfType<T extends string>(
+  lines: readonly string[],
+  type_: T,
+): Extract<typeof ControlPayload.infer, { type: T }>[] {
+  const out: Extract<typeof ControlPayload.infer, { type: T }>[] = [];
+  for (const line of lines) {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const signed = SignedEnvelope(raw);
+    if (signed instanceof type.errors) continue;
+    const payload = ControlPayload(signed.envelope.payload);
+    if (payload instanceof type.errors) continue;
+    if (payload.type !== type_) continue;
+    // The `Extract` narrow above pins T to a known discriminator; the
+    // payload's runtime type matches by construction.
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- arktype narrow above pins the discriminator; the cast walks the union to the matching branch
+    out.push(payload as Extract<typeof ControlPayload.infer, { type: T }>);
+  }
+  return out;
+}
+
+describe("substrate-write authz: supervisor overrides the child's claim", () => {
+  test("the supervisor presents its bindings-pinned workflow-process principal regardless of what the child claims", async () => {
+    // The substrate.write.request wire frame does not carry a
+    // principal field (the supervisor's handler constructs the
+    // workflow-process principal from `bindings.anchorRunId` at write
+    // time). Pin that override here by observing the principal the
+    // supervisor presents to the substrate's writeTreePreservingPrefix.
+    const writes: WriteCapture[] = [];
+    const harness = await bootSupervisor({
+      prefix: "authz-override-",
+      onWriteAttempt: (cap) => writes.push(cap),
+      invokeMerge: true,
+    });
+
+    const requestId = "authz-req-1";
+    await harness.childSender.send({
+      type: "substrate.write.request",
+      data: {
+        requestId,
+        repoId: { kind: "workflow-run", id: "deployment-x" },
+        ref: "refs/heads/main",
+        preservePrefix: "state/some-step/",
+        message: "child write",
+      },
+    });
+    // Wait for the supervisor's substrate write attempt to land on
+    // the stub. The substrate's per-repo lock window is held inside
+    // the merge round-trip; with `invokeMerge: true` the stub
+    // synchronously drives the supervisor's merge closure with an
+    // empty existing map, which forwards a `substrate.merge.request`
+    // upstream. We satisfy it immediately with an empty file set so
+    // the substrate's writeTreePreservingPrefix resolves and the
+    // captured principal is observable.
+    const mergeDeadline = Date.now() + 2_000;
+    while (Date.now() < mergeDeadline) {
+      const merges = readPayloadsOfType(
+        harness.supervisorToChild.flushed(),
+        "substrate.merge.request",
+      );
+      if (merges.some((m) => m.data.requestId === requestId)) break;
+      await new Promise((r) => setTimeout(r, 1));
+    }
+    await harness.childSender.send({
+      type: "substrate.merge.response",
+      data: {
+        requestId,
+        result: { ok: true, files: [] },
+      },
+    });
+    const writeDeadline = Date.now() + 2_000;
+    while (writes.length === 0 && Date.now() < writeDeadline) {
+      await new Promise((r) => setTimeout(r, 1));
+    }
+    expect(writes.length).toBeGreaterThanOrEqual(1);
+    const first = writes[0];
+    if (first === undefined) throw new Error("no write captured");
+    // The supervisor's handler constructs the principal as
+    // `{ kind: "workflow-process", anchorRunId: bindings.anchorRunId }`.
+    // The on-disk audit subject is therefore pinned to the deployment
+    // the supervisor was bound to at construction; the child has no
+    // way to influence it through the IPC.
+    expect(first.principal.kind).toBe("workflow-process");
+    expect(first.principal.anchorRunId).toBe("deployment-x");
+
+    await harness.supervisor.shutdown();
+  });
+
+  test("a substrate.write.request with a non-workflow-run repoId.kind is rejected", async () => {
+    // The supervisor's handler explicitly rejects any write whose
+    // repoId.kind is not `workflow-run` -- the only kind the child's
+    // proxy is supposed to forward through this IPC. A child that
+    // smuggled a `kind: "agent-state"` request through would be
+    // attempting to write outside the supervisor's audit boundary;
+    // the handler responds with `{ ok: false }` and never reaches the
+    // underlying substrate.
+    const writes: WriteCapture[] = [];
+    const harness = await bootSupervisor({
+      prefix: "authz-kind-reject-",
+      onWriteAttempt: (cap) => writes.push(cap),
+      invokeMerge: false,
+    });
+
+    const requestId = "authz-req-2";
+    await harness.childSender.send({
+      type: "substrate.write.request",
+      data: {
+        requestId,
+        repoId: { kind: "agent-state", id: "deployment-x" },
+        ref: "refs/heads/main",
+        preservePrefix: "state/x/",
+        message: "wrong-kind write",
+      },
+    });
+    const responseDeadline = Date.now() + 2_000;
+    let rejection: {
+      requestId: string;
+      result: { ok: boolean; reason?: string };
+    } | null = null;
+    while (rejection === null && Date.now() < responseDeadline) {
+      const responses = readPayloadsOfType(
+        harness.supervisorToChild.flushed(),
+        "substrate.write.response",
+      );
+      const matched = responses.find((r) => r.data.requestId === requestId);
+      if (matched !== undefined) {
+        rejection = {
+          requestId: matched.data.requestId,
+          result: matched.data.result,
+        };
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 1));
+    }
+    if (rejection === null) {
+      throw new Error(
+        "supervisor did not surface a rejection response in time",
+      );
+    }
+    expect(rejection.result.ok).toBe(false);
+    expect(rejection.result.reason).toMatch(/workflow-run/);
+    expect(writes.length).toBe(0);
+
+    await harness.supervisor.shutdown();
+  });
+});
+
+describe("substrate-write cohort abort cleanup", () => {
+  test("a substrate.write.request mid-merge is rejected with cohort abort reason when the supervisor shuts down", async () => {
+    // The HIGH cleanup the supervisor commits when a cohort tears down:
+    // every pending merge round-trip registered against the dying cohort
+    // must resolve with a failure so handler closures awaiting them do
+    // not leak past the shutdown. Pin the observable result here by
+    // driving a substrate.write.request to mid-merge, then issuing
+    // shutdown without sending the matching substrate.merge.response.
+    // The supervisor's `substrate.write.response` to the child must
+    // surface the abort reason rather than sit forever on the merge
+    // resolver the dying control channel will never invoke.
+    const harness = await bootSupervisor({
+      prefix: "supv-cohort-abort-",
+      invokeMerge: true,
+    });
+
+    const requestId = "cohort-abort-req-1";
+    await harness.childSender.send({
+      type: "substrate.write.request",
+      data: {
+        requestId,
+        repoId: { kind: "workflow-run", id: "deployment-x" },
+        ref: "refs/heads/main",
+        preservePrefix: `runs/some-run/events/`,
+        message: "test write that will be aborted",
+      },
+    });
+
+    // Wait for the supervisor's substrate.merge.request to land in the
+    // supervisor-to-child stream, then trigger shutdown without
+    // sending the matching response. The merge resolver is what the
+    // HIGH cleanup must reject through `rejectCohortAwaiters`.
+    const mergeDeadline = Date.now() + 2_000;
+    let mergeRequestSeen = false;
+    while (!mergeRequestSeen && Date.now() < mergeDeadline) {
+      const merges = readPayloadsOfType(
+        harness.supervisorToChild.flushed(),
+        "substrate.merge.request",
+      );
+      if (merges.some((m) => m.data.requestId === requestId)) {
+        mergeRequestSeen = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 1));
+    }
+    expect(mergeRequestSeen).toBe(true);
+
+    // Issue shutdown. The HIGH cleanup runs inside `shutdownInternal`
+    // after the cohort abort; it iterates `pendingMerges` and resolves
+    // each entry with `{ ok: false, reason: "cohort aborted: ..." }`.
+    // The handler's `await result` returns the failure, the
+    // try/catch's `cause` path runs, and the substrate.write.response
+    // lands on the supervisor-to-child stream with the abort reason.
+    const shutdownPromise = harness.supervisor.shutdown();
+
+    const responseDeadline = Date.now() + 5_000;
+    let abortResponse: {
+      requestId: string;
+      result: { ok: boolean; reason?: string };
+    } | null = null;
+    while (abortResponse === null && Date.now() < responseDeadline) {
+      const responses = readPayloadsOfType(
+        harness.supervisorToChild.flushed(),
+        "substrate.write.response",
+      );
+      const matched = responses.find((r) => r.data.requestId === requestId);
+      if (matched !== undefined) {
+        abortResponse = {
+          requestId: matched.data.requestId,
+          result: matched.data.result,
+        };
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    if (abortResponse === null) {
+      throw new Error(
+        "supervisor did not surface a cohort-aborted substrate.write.response in time",
+      );
+    }
+    expect(abortResponse.result.ok).toBe(false);
+    expect(abortResponse.result.reason).toMatch(/cohort aborted/);
+
+    await shutdownPromise;
+  });
+});
+
+describe("substrate-write malformed merge response", () => {
+  test("a malformed contentBase64 fails the pending merge without tearing down the upstream pump", async () => {
+    // The supervisor decodes the child's `substrate.merge.response`
+    // `contentBase64` from inside `pumpUpstreamControl`'s `for await`.
+    // A malformed value makes the decoder throw; that throw must be
+    // caught and surfaced as a FAILED merge (a structured
+    // substrate.write.response) instead of escaping the loop and
+    // stopping the supervisor from draining every other upstream
+    // control frame for the cohort.
+    const harness = await bootSupervisor({
+      prefix: "supv-merge-decode-",
+      invokeMerge: true,
+    });
+
+    // First write: drive its merge round-trip, then answer with a
+    // malformed contentBase64.
+    const badRequestId = "merge-decode-bad-1";
+    await harness.childSender.send({
+      type: "substrate.write.request",
+      data: {
+        requestId: badRequestId,
+        repoId: { kind: "workflow-run", id: "deployment-x" },
+        ref: "refs/heads/main",
+        preservePrefix: "state/some-step/",
+        message: "write whose merge response carries malformed base64",
+      },
+    });
+    const badMergeDeadline = Date.now() + 2_000;
+    let badMergeSeen = false;
+    while (!badMergeSeen && Date.now() < badMergeDeadline) {
+      const merges = readPayloadsOfType(
+        harness.supervisorToChild.flushed(),
+        "substrate.merge.request",
+      );
+      if (merges.some((m) => m.data.requestId === badRequestId)) {
+        badMergeSeen = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 1));
+    }
+    expect(badMergeSeen).toBe(true);
+    await harness.childSender.send({
+      type: "substrate.merge.response",
+      data: {
+        requestId: badRequestId,
+        result: {
+          ok: true,
+          files: [
+            { path: "state/some-step/x", contentBase64: "@@@not-valid@@@" },
+          ],
+        },
+      },
+    });
+
+    const badResponseDeadline = Date.now() + 2_000;
+    let badResponse: {
+      requestId: string;
+      result: { ok: boolean; reason?: string };
+    } | null = null;
+    while (badResponse === null && Date.now() < badResponseDeadline) {
+      const responses = readPayloadsOfType(
+        harness.supervisorToChild.flushed(),
+        "substrate.write.response",
+      );
+      const matched = responses.find((r) => r.data.requestId === badRequestId);
+      if (matched !== undefined) {
+        badResponse = {
+          requestId: matched.data.requestId,
+          result: matched.data.result,
+        };
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 1));
+    }
+    if (badResponse === null) {
+      throw new Error(
+        "supervisor did not surface a substrate.write.response for the malformed merge in time",
+      );
+    }
+    expect(badResponse.result.ok).toBe(false);
+    expect(badResponse.result.reason).toMatch(/decode failed/);
+
+    // Liveness: a SUBSEQUENT upstream frame must still be processed. If
+    // the malformed decode had escaped the `for await`, the pump would
+    // be dead and this second write would never receive a merge.request.
+    const goodRequestId = "merge-decode-good-1";
+    await harness.childSender.send({
+      type: "substrate.write.request",
+      data: {
+        requestId: goodRequestId,
+        repoId: { kind: "workflow-run", id: "deployment-x" },
+        ref: "refs/heads/main",
+        preservePrefix: "state/other-step/",
+        message: "subsequent write proving the pump survived",
+      },
+    });
+    const goodMergeDeadline = Date.now() + 2_000;
+    let goodMergeSeen = false;
+    while (!goodMergeSeen && Date.now() < goodMergeDeadline) {
+      const merges = readPayloadsOfType(
+        harness.supervisorToChild.flushed(),
+        "substrate.merge.request",
+      );
+      if (merges.some((m) => m.data.requestId === goodRequestId)) {
+        goodMergeSeen = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 1));
+    }
+    expect(goodMergeSeen).toBe(true);
+    await harness.childSender.send({
+      type: "substrate.merge.response",
+      data: {
+        requestId: goodRequestId,
+        result: { ok: true, files: [] },
+      },
+    });
+    const goodResponseDeadline = Date.now() + 2_000;
+    let goodResponse: {
+      requestId: string;
+      result: { ok: boolean; reason?: string };
+    } | null = null;
+    while (goodResponse === null && Date.now() < goodResponseDeadline) {
+      const responses = readPayloadsOfType(
+        harness.supervisorToChild.flushed(),
+        "substrate.write.response",
+      );
+      const matched = responses.find((r) => r.data.requestId === goodRequestId);
+      if (matched !== undefined) {
+        goodResponse = {
+          requestId: matched.data.requestId,
+          result: matched.data.result,
+        };
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 1));
+    }
+    if (goodResponse === null) {
+      throw new Error(
+        "upstream pump did not process the subsequent write; it appears to have torn down",
+      );
+    }
+    expect(goodResponse.result.ok).toBe(true);
+
+    await harness.supervisor.shutdown();
+  });
+});
+
+// Capture LogTape records file-wide so the crash-handler tests can assert
+// on the interpolated reason. configureSync is process-global, so the
+// prior config is saved and restored around this file.
+const captured: {
+  category: readonly string[];
+  level: string;
+  message: string;
+}[] = [];
+
+const savedConfig = getConfig();
+
+beforeAll(() => {
+  configureSync({
+    reset: true,
+    sinks: {
+      capture: (record) => {
+        const message = Array.isArray(record.message)
+          ? record.message
+              .map((part) =>
+                typeof part === "string" ? part : JSON.stringify(part),
+              )
+              .join("")
+          : String(record.message);
+        captured.push({
+          category: record.category,
+          level: record.level,
+          message,
+        });
+      },
+    },
+    loggers: [
+      { category: [], lowestLevel: "debug", sinks: ["capture"] },
+      {
+        category: ["logtape", "meta"],
+        lowestLevel: "warning",
+        sinks: ["capture"],
+      },
+    ],
+  });
+});
+
+afterAll(() => {
+  if (savedConfig) {
+    configureSync({ reset: true, ...savedConfig });
+  } else {
+    resetSync();
+  }
+});
+
+beforeEach(() => {
+  captured.length = 0;
+});
+
+function capturedErrors(): string[] {
+  return captured.filter((r) => r.level === "error").map((r) => r.message);
+}
+
+async function waitForCapturedError(
+  needle: string,
+): Promise<string | undefined> {
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    const match = capturedErrors().find((m) => m.includes(needle));
+    if (match !== undefined) return match;
+    await new Promise((r) => setTimeout(r, 1));
+  }
+  return undefined;
+}
+
+describe("onChildCrash logs the interpolated crash reason", () => {
+  test("running-phase crash logs the reason, not a literal placeholder", async () => {
+    const harness = await bootSupervisor({ prefix: "crash-running-" });
+
+    // A repoId whose kind is outside RepoKind passes the permissive wire
+    // schema (kind: string) but fails the handler's RepoId() domain check,
+    // driving the direct onChildCrash call on the live cohort.
+    await harness.childSender.send({
+      type: "substrate.write.request",
+      data: {
+        requestId: "crash-req-1",
+        repoId: { kind: "bogus-kind", id: "deployment-x" },
+        ref: "refs/heads/main",
+        preservePrefix: "state/x/",
+        message: "malformed repoId",
+      },
+    });
+
+    const record = await waitForCapturedError(
+      "forcing child down to respawn: substrate.write.request repoId failed validation",
+    );
+    expect(record).toBeDefined();
+    expect(capturedErrors().some((m) => m.includes("{reason}"))).toBe(false);
+
+    // Cancel the respawn backoff the kill() scheduled.
+    await harness.supervisor.shutdown();
+  });
+
+  test("pre-ready crash logs the reason, not a literal placeholder", async () => {
+    const seam = await bootSupervisorToReady({ prefix: "crash-starting-" });
+
+    // A non-JSON line reaches the receiver before the ready handshake,
+    // while the phase is still `starting`, driving onChildCrash's
+    // non-running branch (shutdownInternal).
+    seam.childToSupervisor.inject("not-json{{{");
+
+    await expect(seam.spawnPromise).rejects.toThrow();
+
+    const record = await waitForCapturedError(
+      "channel crash: control channel received non-JSON line",
+    );
+    expect(record).toBeDefined();
+    expect(capturedErrors().some((m) => m.includes("{reason}"))).toBe(false);
+  });
+
+  test("a pre-ready channel crash does not fire onSelfTerminate", async () => {
+    const selfTerminations: {
+      phase: "stopped" | "crash-looping";
+      reason: string;
+    }[] = [];
+    const seam = await bootSupervisorToReady({
+      prefix: "crash-starting-noselfterm-",
+      onSelfTerminate: (info) => selfTerminations.push(info),
+    });
+
+    // A non-JSON line before the ready handshake drives onChildCrash while the
+    // phase is still `starting`. That is the INITIAL spawn failing -- which the
+    // deploy unwind owns -- not a self-termination of a registered deployment
+    // the host must reclaim, so the sink must stay silent even though the
+    // teardown lands in `stopped`.
+    seam.childToSupervisor.inject("not-json{{{");
+    await expect(seam.spawnPromise).rejects.toThrow();
+
+    // Give any errant fire a chance to land before asserting silence.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(selfTerminations).toEqual([]);
+  });
+});

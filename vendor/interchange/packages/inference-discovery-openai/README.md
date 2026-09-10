@@ -1,0 +1,137 @@
+# @intx/inference-discovery-openai
+
+OpenAI-protocol provider plug-in for the discovery rig. The package
+is organised in two layers:
+
+- `protocol/` — the OpenAI Chat Completions wire format. Auth
+  header construction, endpoint URL assembly, request-body builder,
+  and the multi-step iterator. Reusable across any relay that
+  speaks the OpenAI surface.
+- `deployments/` — concrete deployments built on the protocol
+  layer. Each deployment names a provider, lists its models,
+  declares its auth and redaction policy, and (where needed)
+  overrides reasoning extraction. Three deployments ship today: the
+  OpenCode Zen relay, first-party OpenAI, and first-party xAI.
+
+See [`@intx/inference-discovery`](../inference-discovery/README.md)
+for the runtime, the plug-in contract, and the `discover` CLI.
+
+## OpenCode Zen
+
+OpenCode Zen is an OpenAI-compatible Chat Completions relay that
+fronts upstream model providers behind a single endpoint. The
+`/zen/v1` tier exposes hosted GPT, Claude, and Gemini alongside the
+open-weights catalog (Moonshot, Z.AI, DeepSeek, Alibaba, Xiaomi
+MiMo). Earlier captures targeted the narrower `/zen/go/v1` open-
+weights tier; the v1 endpoint is a superset and existing fixtures
+re-run unchanged against it.
+
+```ts
+import { createOpencodeZenPlugin } from "@intx/inference-discovery-openai";
+
+const plugin = createOpencodeZenPlugin({
+  apiKey: process.env.OPENCODE_API_KEY,
+  baseUrl: process.env.OPENCODE_BASE_URL,
+});
+// Hand off to runCapture from @intx/inference-discovery.
+```
+
+Models: `kimi-k2.6`, `kimi-k2.7-code`, `kimi-k3`, `glm-5.2`,
+`deepseek-v4-pro`, `deepseek-v4-flash`, `qwen3.7-plus`, `mimo-v2.5`,
+`gpt-5.4-mini`.
+
+For the per-model, per-capability behaviour observed at capture
+time — including the discrepancies between vendor documentation
+and the actual wire bytes — see
+[`docs/discovery.md`](./docs/discovery.md).
+The matrix entries for this deployment live in `SUPPORT_MATRIX`.
+`deepseek-v4-pro` vision-input is `http-error` and produces no
+fixture; other non-vision models simply omit vision rows.
+
+### Environment
+
+| Variable            | Purpose                                                      |
+| ------------------- | ------------------------------------------------------------ |
+| `OPENCODE_API_KEY`  | Sent as `Authorization: Bearer <key>`. Redacted in fixtures. |
+| `OPENCODE_BASE_URL` | Relay base URL (e.g. `https://opencode.ai/zen/v1`).          |
+
+## OpenAI
+
+The `openai` deployment probes first-party `api.openai.com` directly,
+under provider name `openai` (distinct from `opencode-zen`, though both
+write sessions into this package's `sessions/` tree). The base URL is fixed
+to `https://api.openai.com/v1`; the deployment reads only `OPENAI_API_KEY`.
+
+```ts
+import { createOpenAIPlugin } from "@intx/inference-discovery-openai";
+
+const plugin = createOpenAIPlugin({ apiKey: process.env.OPENAI_API_KEY });
+// Hand off to runCapture from @intx/inference-discovery.
+```
+
+Models: `gpt-5.5`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`.
+
+Each first-party model captures `plain-text`, `function-calling`,
+`function-calling-multi-turn`, `vision-input`, `document-input`, and
+`structured-output` (plus the streaming variants the OpenAI-protocol body
+builder emits). `reasoning-content` is marked `unsupported`: first-party
+`api.openai.com` Chat Completions responses carry no reasoning field for
+the gpt-5 series (OpenAI surfaces reasoning only via the Responses API,
+which this plug-in does not probe). The `function-calling-multi-turn`,
+`vision-input`, and `document-input` streaming variants carry no rows
+because the body builder does not build them — a rig gap, not a provider
+limitation.
+
+### Environment
+
+| Variable         | Purpose                                                      |
+| ---------------- | ------------------------------------------------------------ |
+| `OPENAI_API_KEY` | Sent as `Authorization: Bearer <key>`. Redacted in fixtures. |
+
+## xAI
+
+The `xai` deployment probes first-party `api.x.ai` directly, under provider
+name `xai` (distinct from `openai` and `opencode-zen`, though all three write
+sessions into this package's `sessions/` tree). The base URL is fixed to
+`https://api.x.ai/v1`; the deployment reads only `XAI_API_KEY`.
+
+```ts
+import { createXaiPlugin } from "@intx/inference-discovery-openai";
+
+const plugin = createXaiPlugin({ apiKey: process.env.XAI_API_KEY });
+// Hand off to runCapture from @intx/inference-discovery.
+```
+
+Models: `grok-4.20-0309-non-reasoning`, `grok-4.20-0309-reasoning`, `grok-4.3`,
+`grok-4.5`, `grok-4.6`, `grok-build-0.1`.
+
+Each model captures `plain-text`, `function-calling`,
+`function-calling-multi-turn`, `vision-input`, and `structured-output` (plus
+the streaming variants the OpenAI-protocol body builder emits).
+`reasoning-content` captures on every model except
+`grok-4.20-0309-non-reasoning`, xAI's explicit non-reasoning variant, which
+returns text with no `reasoning_content` field and so is marked `unsupported`.
+`structured-output-refusal-streaming` is `misled`: under a strict `json_schema`
+plus a declining prompt, the model streams schema-conformant JSON carrying a
+textual decline rather than a `delta.refusal` field. `document-input` is
+`http-error`: xAI Chat Completions rejects file content parts and directs
+callers to the Responses API, which this plug-in does not probe.
+
+### Environment
+
+| Variable      | Purpose                                                      |
+| ------------- | ------------------------------------------------------------ |
+| `XAI_API_KEY` | Sent as `Authorization: Bearer <key>`. Redacted in fixtures. |
+
+## Adding a new deployment
+
+A new OpenAI-compatible relay is a new file under `deployments/`
+that imports the protocol-layer helpers, declares the provider
+name + model list + redaction policy, and exports a factory that
+returns a plug-in for the runtime.
+
+Then register the new plug-in in `bin/discover.ts` and add its
+(model, capability) entries to `SUPPORT_MATRIX` in
+`@intx/inference-discovery/catalog`. Run `bin/discover --provider
+<new-name> --all` against a funded account to produce
+the fixture corpus.

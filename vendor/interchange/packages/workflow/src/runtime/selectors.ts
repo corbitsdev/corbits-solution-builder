@@ -1,0 +1,136 @@
+// Runtime evaluator for the path-selector DSL.
+//
+// Resolves a `Selector` against a `SelectorContext` rooted at the
+// run's trigger payload and the captured outputs of completed steps.
+// Used by the step executor to materialize a step's `input` and to
+// resolve declared `reads` against the run-state subtree.
+
+import {
+  isFromSelector,
+  isLiteralSelector,
+  isMergeSelector,
+  isProjectSelector,
+  splitPath,
+  type Selector,
+} from "../definition/selectors";
+
+export interface SelectorContext {
+  trigger: { payload: unknown };
+  steps: Record<string, { output: unknown }>;
+}
+
+export class SelectorError extends Error {
+  readonly selector: Selector;
+  constructor(message: string, selector: Selector) {
+    super(message);
+    this.name = "SelectorError";
+    this.selector = selector;
+  }
+}
+
+export function evaluate(selector: Selector, ctx: SelectorContext): unknown {
+  if (isLiteralSelector(selector)) {
+    return selector.literal;
+  }
+  if (isFromSelector(selector)) {
+    return resolvePath(selector.from, ctx, selector);
+  }
+  if (isProjectSelector(selector)) {
+    const source = evaluate(selector.project, ctx);
+    if (!isRecord(source)) {
+      throw new SelectorError(
+        "project selector requires the source to be an object",
+        selector,
+      );
+    }
+    const projected: Record<string, unknown> = {};
+    for (const field of selector.fields) {
+      projected[field] = source[field];
+    }
+    return projected;
+  }
+  if (isMergeSelector(selector)) {
+    const merged: Record<string, unknown> = {};
+    for (const inner of selector.merge) {
+      const value = evaluate(inner, ctx);
+      if (!isRecord(value)) {
+        throw new SelectorError(
+          "merge selector requires each operand to be an object",
+          selector,
+        );
+      }
+      Object.assign(merged, value);
+    }
+    return merged;
+  }
+  throw new SelectorError("unknown selector shape", selector);
+}
+
+function resolvePath(
+  path: string,
+  ctx: SelectorContext,
+  selector: Selector,
+): unknown {
+  if (path === "") {
+    throw new SelectorError(
+      "from selector requires a non-empty path",
+      selector,
+    );
+  }
+  const segments = splitPath(path);
+  let cursor: unknown = ctx;
+  for (const segment of segments) {
+    if (segment.kind === "index") {
+      if (!Array.isArray(cursor)) {
+        throw new SelectorError(
+          `cannot index into non-array at segment [${String(segment.index)}] of ${path}`,
+          selector,
+        );
+      }
+      // An out-of-range index silently returning `undefined` is the
+      // same failure mode the key branch guards against with `in`:
+      // the runtime would feed `undefined` to a step or to a
+      // subsequent path segment as though the array author had
+      // supplied a hole. Surface the path so the author can see
+      // which index missed.
+      if (segment.index < 0 || segment.index >= cursor.length) {
+        throw new SelectorError(
+          `index [${String(segment.index)}] out of range (length ${String(cursor.length)}) in path ${path}`,
+          selector,
+        );
+      }
+      cursor = cursor[segment.index];
+    } else {
+      if (cursor === null || cursor === undefined) {
+        throw new SelectorError(
+          `cannot read ${segment.key} from ${cursor === null ? "null" : "undefined"} in path ${path}`,
+          selector,
+        );
+      }
+      if (!isRecord(cursor)) {
+        throw new SelectorError(
+          `cannot read ${segment.key} from non-object in path ${path}`,
+          selector,
+        );
+      }
+      // Distinguish a missing key from a key whose value is `null` or
+      // `undefined`. `in` checks the key's presence on the object;
+      // bracket-indexing alone would silently return `undefined` for
+      // a typo and let the runtime feed `undefined` into a step as
+      // though no input were supplied. Surface the missing key with a
+      // path so the author can spot the typo.
+      if (!(segment.key in cursor)) {
+        throw new SelectorError(
+          `missing key ${segment.key} in path ${path}`,
+          selector,
+        );
+      }
+      cursor = cursor[segment.key];
+    }
+  }
+  return cursor;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
