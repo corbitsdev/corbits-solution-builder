@@ -224,11 +224,13 @@ async function completeWith(
     model,
   };
 
-  // Some models reject `temperature` outright. The hand-rolled client used to
-  // notice the 400, drop the parameter and remember not to send it again; that
-  // went with it, and without it such a model fails every call forever. The
-  // memory is per-process and per-model, so the cost is one wasted call.
-  const withoutTemperature = rejectsTemperature.has(`${provider.id}:${model}`);
+  // Anthropic has deprecated `temperature` on its current models, so it is
+  // never sent there; every specialist carries one, and sending it cost a
+  // refused call per model per launch. Other models may reject it too: the
+  // first refusal naming the parameter drops it and is remembered for the
+  // life of the process, so the cost is one wasted call.
+  const withoutTemperature =
+    provider.providerId === "anthropic" || rejectsTemperature.has(`${provider.id}:${model}`);
   try {
     return await attempt(withoutTemperature);
   } catch (cause) {
@@ -251,7 +253,9 @@ async function completeWith(
     inferenceOptions: {
       systemPrompt: request.system,
       maxTokens: request.maxTokens ?? 4096,
-      ...(dropTemperature ? {} : { temperature: request.temperature ?? 0.4 }),
+      ...(!dropTemperature && typeof request.temperature === "number"
+        ? { temperature: request.temperature }
+        : {}),
       totalTimeoutMs: request.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     },
     readMaterial: () => ({ secret: secret ?? "" }),
