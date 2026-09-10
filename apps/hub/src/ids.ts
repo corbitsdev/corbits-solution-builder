@@ -25,7 +25,6 @@ export const newId = {
   correlation: () => `cor_${token()}`,
   command: () => `cmd_${token()}`,
   message: () => `msg_${token()}`,
-  agentRun: () => `arr_${token()}`,
   inferenceTurn: () => `itn_${token()}`,
   turnPart: () => `tpt_${token()}`,
 };

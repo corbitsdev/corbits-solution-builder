@@ -157,6 +157,13 @@ export const ArtifactDraft = type({
     "providerId?": "string > 0",
     "model?": "string > 0",
     "runId?": id,
+    /** The exact prompt and model binding the specialist ran under. */
+    "promptKey?": "string > 0",
+    "promptVersion?": "number",
+    "modelKey?": "string > 0",
+    /** Stated by the agent, lifted from the draft's own headings. */
+    "assumptions?": "string[]",
+    "questions?": "string[]",
   },
 });
 export type ArtifactDraft = typeof ArtifactDraft.infer;

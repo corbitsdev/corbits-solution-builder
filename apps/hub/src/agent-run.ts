@@ -7,7 +7,6 @@
  */
 import { agentFor, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
 import { assumptionsIn, questionsIn, summaryIn } from "@solutions-builder/app/document";
-import { recordAgentRun } from "./agent-runs.js";
 import { renderStageContext, stageContext, type StageContext } from "./agent-conversation.js";
 import { appendHumanTurn, appendSpecialistTurn, type Quote } from "./hub-conversation.js";
 import { beginLiveDraft, endLiveDraft, updateLiveDraft } from "./live-drafts.js";
@@ -191,6 +190,11 @@ async function draftWith(
       providerId: result.providerId,
       model: result.model,
       runId: args.runId,
+      promptKey: agent.promptKey,
+      promptVersion: 1,
+      modelKey: agent.modelKey ?? `sb-model-${agent.id}`,
+      assumptions: assumptionsIn(cleaned),
+      questions: questionsIn(cleaned),
     },
   });
   if (draft instanceof type.errors) {
@@ -198,28 +202,6 @@ async function draftWith(
   }
 
   const written = await writeArtifact(draft, args.actor);
-
-  // §8: every invocation leaves a record of what produced this draft — the
-  // prompt version and binding, not only the model, plus what the specialist
-  // filled in for itself and what it still wanted to know. An artifact whose
-  // provenance is only "some model" cannot be judged after the fact.
-  await recordAgentRun({
-    projectId: args.projectId,
-    branchId: args.branchId,
-    runId: args.runId,
-    stage: args.stage,
-    agentId: agent.id,
-    promptKey: agent.promptKey,
-    promptVersion: 1,
-    modelKey: agent.modelKey ?? `sb-model-${agent.id}`,
-    providerId: result.providerId,
-    model: result.model,
-    inputVersionIds: inputs.map((input) => (input.node as { id: string }).id),
-    producedNodeId: written.nodeId,
-    assumptions: assumptionsIn(cleaned),
-    questions: questionsIn(cleaned),
-    outcome: "drafted",
-  });
 
   return {
     ...written,
