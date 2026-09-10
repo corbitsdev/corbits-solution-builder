@@ -217,8 +217,18 @@ export function StageDocument({
     };
   }, [turns.length, busy]);
 
+  // Sent while the specialist is still writing, a message waits here and
+  // goes the moment the draft lands. Typing is never blocked: a person who
+  // has more to say should not have to hold it in their head until a spinner
+  // stops. Only one run at a time, though, so the send itself waits.
+  const [queued, setQueued] = useState(false);
   const send = () => {
     if (message.trim().length === 0 && attached.length === 0) return;
+    if (busy !== null) {
+      setQueued(true);
+      return;
+    }
+    setQueued(false);
     onRevise(message.trim(), attached);
     setMessage("");
     setAttached([]);
@@ -226,6 +236,12 @@ export function StageDocument({
     // After the pending turn has rendered, so the scroll reaches it.
     requestAnimationFrame(scrollToBottom);
   };
+
+  useEffect(() => {
+    if (busy === null && queued) send();
+    // `send` reads the current message and attachments; it is not a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busy, queued]);
 
   return (
     <div className={draftOpen ? "document-layout" : "document-layout is-solo"}>
@@ -345,16 +361,15 @@ export function StageDocument({
               </span>
             </div>
           ) : null}
-          <Dictated value={message} onValueChange={setMessage} disabled={busy !== null}>
+          <Dictated value={message} onValueChange={setMessage}>
           <ChatInput
             value={message}
             onValueChange={setMessage}
             onSend={send}
             working={busy === "draft"}
-            disabled={busy !== null}
             placeholder={
               busy === "draft"
-                ? "The specialist is writing…"
+                ? "The specialist is writing. Say more meanwhile; it goes when the draft lands."
                 : redrafting && choosing
                   ? "What should be different about the approaches?"
                   : attached.length > 0
@@ -373,6 +388,11 @@ export function StageDocument({
             textareaRef={composer}
           />
           </Dictated>
+          {queued && busy !== null ? (
+            <p className="composer-cue" aria-live="polite">
+              Held until the specialist finishes, then sent.
+            </p>
+          ) : null}
         </div>
       </section>
 
