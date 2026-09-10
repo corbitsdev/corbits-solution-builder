@@ -123,6 +123,21 @@ input[type="file"]:not(:disabled) {
   outline-offset: 3px;
 }
 
+/* ChatInput's textarea sits inside a rounded wrapper; a plain focus-visible
+   outline on the textarea itself draws a sharp rectangle inside that curve.
+   Ring the rounded wrapper instead via :focus-within, and drop the inner
+   textarea's own ring so only one outline ever shows. */
+form:has(> textarea):focus-within,
+form:has(> div > textarea):focus-within {
+  outline: 2px solid var(--wb-ring);
+  outline-offset: 2px;
+}
+
+form:has(> textarea) textarea:focus-visible,
+form:has(> div > textarea) textarea:focus-visible {
+  outline: none;
+}
+
 /* The rail has one left edge. SidebarContent is `py-2` and SidebarFooter is
    `p-2`, so the footer's section label would otherwise sit 8px further in than
    the group above it — the same defect as the pinned decision's inset, one row
@@ -1052,6 +1067,16 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
     order: 2;
     border-right: 0;
     border-top: 1px solid var(--wb-border);
+  }
+  /* Stacked full-width, the quoted question reads as a banner. Cap its
+     measure so it still reads as a question. */
+  .turn-question {
+    max-width: 60ch;
+  }
+  /* Stacked, the composer runs to the window edge where the guide dock is
+     fixed. Reserve the dock (44px button plus its offset) on the right. */
+  .composer {
+    padding-right: calc(var(--space-4) + 44px + var(--space-6));
   }
 }
 
