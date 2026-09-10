@@ -10,7 +10,8 @@
  * property to design against, not a bug: writes go through `transact` so a
  * state change, its audit row and its outbox row land together or not at all.
  */
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 // pglite loads its WASM image and filesystem bundle from disk at runtime, which
 // `bun build --compile` does not follow. Importing them as assets embeds them
@@ -62,6 +63,66 @@ export type HostDatabase = {
 
 let open: HostDatabase | null = null;
 
+/** Real pid of the host that currently owns this directory. Sibling of PGDATA: pglite treats a non-empty data dir as an existing cluster, and its own lock file records `-42`. */
+const HOST_PID_FILE_SUFFIX = ".host.pid";
+
+function processExists(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as { code?: string }).code === "EPERM";
+  }
+}
+
+/**
+ * pglite is single-writer. It writes `postmaster.pid` with a fake pid and
+ * WASM-aborts on the next create if that file is still there, so a host that
+ * was killed would otherwise brick the workspace. The host records its real
+ * pid so a live second process is refused rather than becoming a second writer.
+ */
+async function claimDataDir(dataDir: string): Promise<{ root: string; release: () => Promise<void> }> {
+  const root = resolve(dataDir);
+  await mkdir(root, { recursive: true });
+  const pidPath = `${root}${HOST_PID_FILE_SUFFIX}`;
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await writeFile(pidPath, `${process.pid}\n`, { flag: "wx" });
+      await unlink(join(root, "postmaster.pid")).catch(() => undefined);
+      return {
+        root,
+        release: async () => {
+          await unlink(pidPath).catch(() => undefined);
+        },
+      };
+    } catch (error) {
+      if ((error as { code?: string }).code !== "EEXIST") throw error;
+      const existing = Number((await readFile(pidPath, "utf8").catch(() => "")).trim());
+      if (processExists(existing)) {
+        throw new Error(
+          `Solutions Builder is already running (process ${existing}). ` +
+            "Stop that host, or set SOLUTIONS_BUILDER_DATA_DIR to a different directory.",
+        );
+      }
+      await unlink(pidPath).catch(() => undefined);
+    }
+  }
+
+  throw new Error(`Could not claim the database directory at ${root}.`);
+}
+
+function openFailure(dataDir: string, cause: unknown): Error {
+  return new Error(
+    `Could not open the host database at ${dataDir}. ` +
+      "A previous run may not have shut down cleanly. " +
+      "Stop any other Solutions Builder using this workspace, " +
+      "move that directory aside, or set SOLUTIONS_BUILDER_DATA_DIR to a different directory.",
+    { cause: cause instanceof Error ? cause : undefined },
+  );
+}
+
 /**
  * `dataDir` omitted means in-memory, which is what tests and the boundary
  * checker want. A packaged host always passes its application-support path.
@@ -69,12 +130,20 @@ let open: HostDatabase | null = null;
 export async function openDatabase(dataDir?: string): Promise<HostDatabase> {
   if (open) return open;
   const bundled = await assets();
-  // pglite will not create a missing parent, so the handle owns that rather
-  // than every caller remembering to.
-  if (dataDir) await mkdir(dataDir, { recursive: true });
-  const client = dataDir
-    ? await PGlite.create(dataDir, bundled)
-    : await PGlite.create(bundled);
+  let release: (() => Promise<void>) | undefined;
+  let client: PGlite;
+  if (dataDir) {
+    const claimed = await claimDataDir(dataDir);
+    release = claimed.release;
+    try {
+      client = await PGlite.create(claimed.root, bundled);
+    } catch (cause) {
+      await release();
+      throw openFailure(claimed.root, cause);
+    }
+  } else {
+    client = await PGlite.create(bundled);
+  }
   const db = drizzle(client) as Db;
   open = {
     db,
@@ -82,7 +151,11 @@ export async function openDatabase(dataDir?: string): Promise<HostDatabase> {
     artifactDb: withPostgresJsResultShape(db) as unknown as ArtifactDb,
     close: async () => {
       open = null;
-      await client.close();
+      try {
+        await client.close();
+      } finally {
+        await release?.();
+      }
     },
   };
   return open;
