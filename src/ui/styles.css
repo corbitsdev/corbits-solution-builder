@@ -928,9 +928,11 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 .document-tools {
   margin-left: auto;
   display: flex;
-  align-items: center;
-  gap: var(--space-4);
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-2);
   font-size: 0.8125rem;
+  flex: none;
 }
 
 .changes-toggle {
@@ -2224,4 +2226,54 @@ button[aria-disabled="true"] {
   color: var(--wb-muted-foreground);
   max-width: 44ch;
   animation: settle-in 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* --- Transcript scrolling (CL-7604) -------------------------------------
+   ChatThread owns the scroll box; this wraps it so a way back down can sit
+   over its bottom edge without touching the composer. */
+.thread-scroll {
+  position: relative;
+  display: grid;
+  min-height: 0;
+}
+
+.jump-down {
+  position: absolute;
+  right: var(--space-4);
+  bottom: var(--space-3);
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid var(--wb-border);
+  background: var(--wb-card);
+  color: var(--wb-foreground);
+  cursor: pointer;
+  animation: settle-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  transition: transform var(--duration-standard, 200ms) var(--ease-out, ease),
+    background var(--duration-standard, 200ms) var(--ease-out, ease);
+}
+
+.jump-down svg {
+  width: 16px;
+  height: 16px;
+  transition: transform var(--duration-standard, 200ms) var(--ease-out, ease);
+}
+
+.jump-down:hover {
+  background: var(--wb-muted);
+  transform: translateY(1px);
+}
+
+.jump-down:hover svg {
+  transform: translateY(2px);
+}
+
+/* --- Sidebar width (CL-7606) --------------------------------------------
+   The rail's default is a fifth of a laptop window; the conversation needs
+   it more than the two labels do. */
+[data-slot="sidebar"]:not([data-collapsed="true"]) {
+  width: 12.75rem;
 }

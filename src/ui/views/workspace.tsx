@@ -36,7 +36,7 @@ import {
   type ChatMessage,
   Switch,
 } from "@corbits/react-ui";
-import { ArrowUp, Check } from "lucide-react";
+import { ArrowDown, ArrowUp, Check } from "lucide-react";
 import { Markdown } from "../markdown.jsx";
 import { approachName, sectionsIn, splitOptions } from "../../contracts/document.js";
 import { markChanges } from "../revisions.js";
@@ -842,12 +842,38 @@ export function StageDocument({
     };
   }, [messages.length === 0]);
 
+  // The transcript is ChatThread's scroll box, and it only follows the bottom
+  // when the reader is already there. Sending is the one moment they want to
+  // be taken down anyway, and reading back up needs a way back.
+  const [awayFromBottom, setAwayFromBottom] = useState(false);
+  const transcript = () => pane.current?.querySelector<HTMLElement>(".thread-turns") ?? null;
+  const scrollToBottom = () => {
+    const box = transcript();
+    box?.scrollTo({ top: box.scrollHeight, behavior: "smooth" });
+  };
+  useEffect(() => {
+    const box = transcript();
+    if (!box) return;
+    const measure = () =>
+      setAwayFromBottom(box.scrollHeight - box.scrollTop - box.clientHeight > 96);
+    measure();
+    box.addEventListener("scroll", measure, { passive: true });
+    const sized = new ResizeObserver(measure);
+    sized.observe(box);
+    return () => {
+      box.removeEventListener("scroll", measure);
+      sized.disconnect();
+    };
+  }, [turns.length, busy]);
+
   const send = () => {
     if (message.trim().length === 0 && attached.length === 0) return;
     onRevise(message.trim(), attached);
     setMessage("");
     setAttached([]);
     setRedrafting(false);
+    // After the pending turn has rendered, so the scroll reaches it.
+    requestAnimationFrame(scrollToBottom);
   };
 
   return (
@@ -870,6 +896,7 @@ export function StageDocument({
           </span>
         </header>
 
+        <div className="thread-scroll">
         <ChatThread
           className="thread-turns"
           messages={messages}
@@ -899,6 +926,16 @@ export function StageDocument({
             </div>
           }
         />
+        <button
+          type="button"
+          className="jump-down"
+          hidden={!awayFromBottom}
+          onClick={scrollToBottom}
+          aria-label="Jump to the latest message"
+        >
+          <ArrowDown aria-hidden="true" />
+        </button>
+        </div>
 
         <div className="composer" data-tour="composer" data-working={busy === "draft" || undefined}>
           {/* The specialist has gone quiet without asking anything. Whose move
@@ -993,27 +1030,29 @@ export function StageDocument({
               Version {newer.version} is ready
             </button>
           ) : null}
+          {/* Stacked, picker over toggle: on one line they fought the title for
+              width and the title wrapped. */}
           <div className="document-tools">
-          {previous ? (
-            <label className="changes-toggle" htmlFor="show-changes">
-              <Switch id="show-changes" checked={showChanges} onCheckedChange={setShowChanges} />
-              <span>Changes since v{previous.version}</span>
-            </label>
-          ) : null}
-          {versions.length > 1 ? (
-            <select
-              aria-label="Version"
-              value={node.id}
-              onChange={(event) => onSelectVersion(event.target.value)}
-            >
-              {versions.map((version) => (
-                <option key={version.id} value={version.id}>
-                  Version {version.version}
-                  {version.supersededByNodeId ? " (superseded)" : ""}
-                </option>
-              ))}
-            </select>
-          ) : null}
+            {versions.length > 1 ? (
+              <select
+                aria-label="Version"
+                value={node.id}
+                onChange={(event) => onSelectVersion(event.target.value)}
+              >
+                {versions.map((version) => (
+                  <option key={version.id} value={version.id}>
+                    Version {version.version}
+                    {version.supersededByNodeId ? " (superseded)" : ""}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+            {previous ? (
+              <label className="changes-toggle" htmlFor="show-changes">
+                <Switch id="show-changes" checked={showChanges} onCheckedChange={setShowChanges} />
+                <span>Changes since v{previous.version}</span>
+              </label>
+            ) : null}
           </div>
         </header>
         <div className="document-body" data-tour="document-body" onMouseUp={attachSelection}>
