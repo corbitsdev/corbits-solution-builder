@@ -261,8 +261,12 @@ export function StageDocument({
                 text={(message.parts[0] as { text: string }).text}
                 note={notes.get(message.id) ?? null}
                 onOpenVersion={onSelectVersion}
+                // Tapping a choice sends it, exactly as typing it would. That
+                // holds outside the interview too: a brainstormer proposing
+                // options is asking for a choice, whether or not a question
+                // is queued.
                 onAnswer={
-                  openQuestion && busy === null && message.id === messages.at(-1)?.id
+                  busy === null && message.id === messages.at(-1)?.id
                     ? (answer) => onRevise(answer, [])
                     : undefined
                 }
