@@ -63,13 +63,13 @@ issue first.
 
 | Table | Why it is not native yet |
 | --- | --- |
-| `project` | A project is a child tenant with a policy. Interchange tenants carry `config`; the move waits on participants becoming roles in that tenant. |
-| `participant` | Roles are tenant-wide in Interchange, so "on this project" cannot be asked until the project is its own tenant. |
 | `artifact_node`, `artifact_edge` | `@corbits/artifacts` versions have no metadata or parent-version fields. Stage, lineage, exact hash and provenance ride here until that PR lands upstream. |
 | `decision_flag` | A flag on a decision is a comment on a parked run. It moves when runs are registered with the hub and can carry mail. |
 | `build_packet`, `build_question`, `build_event`, `delivery_manifest` | Stage 8 and 9 records. They become the frozen deployment, parked signals, run events and a manifest artifact once stage 8 runs through the hub's supervisor. |
 
-Commands, approvals, audience decisions and their audit trail are turns in a
+A project is a child tenant of the workspace tenant; its policy and revision
+live in the tenant config, and its participants are principals holding roles
+there (`project-tenant.ts`). Commands, approvals, audience decisions and their audit trail are turns in a
 per-project ledger agent session (`engine-ledger.ts`). Run state is process
 memory (`hub-executor.ts`) until runs are registered with the hub; that is the
 gap behind most rows above. Every direct table write that remains is named in
