@@ -9,5 +9,5 @@ export const HOST_COMMAND = [
   "bun",
   "--conditions",
   "intx-src",
-  join(import.meta.dir, "..", "apps", "hub", "server.ts"),
+  join(import.meta.dir, "..", "apps", "hub", "src", "server.ts"),
 ];

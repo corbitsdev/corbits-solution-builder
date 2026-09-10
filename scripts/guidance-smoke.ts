@@ -8,7 +8,7 @@
  */
 import { BUILD_STATES, STAGE_STATES, type RunState } from "@solutions-builder/app/ledger";
 import { activityHeadline, nextStep } from "@solutions-builder/app/next-step";
-import { deterministicGuidance } from "../apps/hub/guide.js";
+import { deterministicGuidance } from "../apps/hub/src/guide.js";
 import { AGENT_KIT, panelPrincipals } from "@solutions-builder/app/kit";
 import { assumptionsIn, questionIn, questionsIn, summaryIn } from "@solutions-builder/app/document";
 

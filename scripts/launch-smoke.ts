@@ -121,7 +121,7 @@ if (await Bun.file(sidecar).exists()) {
 {
   const dataDir = await mkdtemp(join(tmpdir(), "solutions-builder-reload-"));
   const child = Bun.spawn(
-    ["bun", "--conditions", "intx-src", join(root, "apps", "hub", "server.ts"), "--port", "8212"],
+    ["bun", "--conditions", "intx-src", join(root, "apps", "hub", "src", "server.ts"), "--port", "8212"],
     {
       cwd: root,
       env: {
@@ -188,7 +188,7 @@ if (await Bun.file(sidecar).exists()) {
   const dataDir = await mkdtemp(join(tmpdir(), "solutions-builder-login-"));
   const marker = join(dataDir, "start-at-login");
   const child = Bun.spawn(
-    ["bun", "--conditions", "intx-src", join(root, "apps", "hub", "server.ts"), "--port", "8213"],
+    ["bun", "--conditions", "intx-src", join(root, "apps", "hub", "src", "server.ts"), "--port", "8213"],
     {
       cwd: root,
       env: { ...process.env, SOLUTIONS_BUILDER_DATA_DIR: dataDir },

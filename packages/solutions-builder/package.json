@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Solutions Builder as an installable Interchange app: the transition ledger, the workflow definitions generated from it, the specialist kit, and the document format.",
   "exports": {
-    ".": "./index.ts",
-    "./*": "./*.ts"
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
   }
 }

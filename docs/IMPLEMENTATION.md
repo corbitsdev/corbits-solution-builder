@@ -30,13 +30,13 @@ ship no `dist`. Every command that runs the host passes
 `--conditions intx-src`. Without it the hub cannot be resolved and the host
 exits before the handshake.
 
-The hub's migrations are copied into `apps/hub/hub-migrations.generated.ts` so
+The hub's migrations are copied into `apps/hub/src/hub-migrations.generated.ts` so
 the compiled single-file host carries them. `bun run check:hub-migrations`
 fails when that file is behind the vendor.
 
 ## Host process
 
-`apps/hub/server.ts` opens the database, applies Interchange's migrations then
+`apps/hub/src/server.ts` opens the database, applies Interchange's migrations then
 the builder schema, mounts the hub, and listens. Boot seeds nothing.
 
 The client installs the app. On launch it reads `GET /api/install`, which

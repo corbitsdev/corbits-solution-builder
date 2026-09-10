@@ -11,13 +11,13 @@
  *
  * Usage: bun scripts/agent-smoke.ts [--base-url http://127.0.0.1:11434]
  */
-import { openDatabase } from "../apps/hub/db.js";
-import { prepareDatabase } from "../apps/hub/migrate.js";
-import { createProject, projectDetail } from "../apps/hub/projects.js";
-import { connectProvider } from "../apps/hub/providers.js";
-import { draftStageArtifact } from "../apps/hub/agent-run.js";
-import { execute } from "../apps/hub/engine.js";
-import { newId } from "../apps/hub/ids.js";
+import { openDatabase } from "../apps/hub/src/db.js";
+import { prepareDatabase } from "../apps/hub/src/migrate.js";
+import { createProject, projectDetail } from "../apps/hub/src/projects.js";
+import { connectProvider } from "../apps/hub/src/providers.js";
+import { draftStageArtifact } from "../apps/hub/src/agent-run.js";
+import { execute } from "../apps/hub/src/engine.js";
+import { newId } from "../apps/hub/src/ids.js";
 
 const index = process.argv.indexOf("--base-url");
 const baseUrl = index >= 0 ? process.argv[index + 1]! : "http://127.0.0.1:11434";
@@ -67,7 +67,7 @@ const preferred =
   process.env.AGENT_SMOKE_MODEL ??
   provider.models.find((model) => model.includes("llama3")) ??
   provider.models[0]!;
-const { selectModel } = await import("../apps/hub/providers.js");
+const { selectModel } = await import("../apps/hub/src/providers.js");
 await selectModel("local", preferred);
 console.log(`PASS  model selected explicitly - ${preferred}`);
 
@@ -124,7 +124,7 @@ console.log(draft.content.slice(0, 900));
   const afterApproval = await projectDetail(created.projectId, ACTOR.principalId);
   // Fast-forward to stage 4 by approving stages 2 and 3 with placeholder
   // artifacts; the point of this section is the designer's output shape.
-  const { writeArtifact } = await import("../apps/hub/projects.js");
+  const { writeArtifact } = await import("../apps/hub/src/projects.js");
   for (const [stage, kind] of [
     [2, "solution_constraints"],
     [3, "chosen_approach"],

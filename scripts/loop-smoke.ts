@@ -12,22 +12,22 @@
  *
  * Usage: bun scripts/loop-smoke.ts [--port 7788]
  */
-import { openDatabase } from "../apps/hub/db.js";
-import { prepareDatabase } from "../apps/hub/migrate.js";
-import { ensureHub } from "../apps/hub/hub-endpoint.js";
-import { install } from "../apps/hub/install.js";
+import { openDatabase } from "../apps/hub/src/db.js";
+import { prepareDatabase } from "../apps/hub/src/migrate.js";
+import { ensureHub } from "../apps/hub/src/hub-endpoint.js";
+import { install } from "../apps/hub/src/install.js";
 import {
   createProject,
   listProjects,
   LOCAL_TENANT,
   projectDetail,
   writeArtifact,
-} from "../apps/hub/projects.js";
-import { execute, HOST_PRINCIPAL, rehydrateRun, submitAndApprove } from "../apps/hub/engine.js";
-import { newId } from "../apps/hub/ids.js";
-import { HostError } from "../apps/hub/errors.js";
-import { drainOutbox } from "../apps/hub/outbox.js";
-import type { ArtifactKind } from "../apps/hub/domain.js";
+} from "../apps/hub/src/projects.js";
+import { execute, HOST_PRINCIPAL, rehydrateRun, submitAndApprove } from "../apps/hub/src/engine.js";
+import { newId } from "../apps/hub/src/ids.js";
+import { HostError } from "../apps/hub/src/errors.js";
+import { drainOutbox } from "../apps/hub/src/outbox.js";
+import type { ArtifactKind } from "../apps/hub/src/domain.js";
 import type { Command, Stage } from "@solutions-builder/app/ledger";
 
 const checks: { name: string; ok: boolean; detail: string }[] = [];
@@ -785,7 +785,7 @@ let buildRunId = "";
   const run = detail.current!;
   const node = await produce(1, theirs.projectId, theirs.branchId, run.id);
 
-  const holds = await import("../apps/hub/hub-authority.js").then((module) =>
+  const holds = await import("../apps/hub/src/hub-authority.js").then((module) =>
     module.authoritiesFor(ACTOR.principalId),
   );
   check(
@@ -866,9 +866,9 @@ let buildRunId = "";
   // A genuine second holder: a real `principal`, a real platform grant
   // (`principal_role` against the same `project_owner` role `seedRoles`
   // already created), and a `participant` row on this project.
-  const { hub } = await import("../apps/hub/hub-mount.js");
-  const { database } = await import("../apps/hub/db.js");
-  const table = await import("../apps/hub/schema.js");
+  const { hub } = await import("../apps/hub/src/hub-mount.js");
+  const { database } = await import("../apps/hub/src/db.js");
+  const table = await import("../apps/hub/src/schema.js");
   const { sql } = await import("drizzle-orm");
   const second = "p_second_owner";
   const db = hub().db.db;

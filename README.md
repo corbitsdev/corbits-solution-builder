@@ -47,10 +47,10 @@ bun run check          # every invariant checker and smoke, the gate before a co
 ## How it is put together
 
 ```
-apps/hub/                    the host: loopback API, guard, engine, persistence, the embedded Interchange hub
+apps/hub/src/                    the host: loopback API, guard, engine, persistence, the embedded Interchange hub
 apps/web/                    the client
 apps/desktop/                the native shell and tray
-packages/solutions-builder/  the app package: the transition ledger, the workflows generated from it,
+packages/solutions-builder/src/  the app package: the transition ledger, the workflows generated from it,
                              the specialist kit, the document format
 vendor/interchange/          the Interchange control plane, vendored (LGPL-2.1)
 ```

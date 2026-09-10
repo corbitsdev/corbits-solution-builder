@@ -11,7 +11,7 @@
  * The host exposes a change stream at `/api/dev/reload` when
  * `SOLUTIONS_BUILDER_DEV_RELOAD` is set, and `main.tsx` subscribes to it in
  * development bundles, so the page reloads itself when a build lands. Editing
- * `apps/hub/**` still needs a restart, because that is the process being run.
+ * `apps/hub/src/**` still needs a restart, because that is the process being run.
  *
  * `--fresh` points the host at a new temporary directory rather than deleting
  * anything: a development workspace is still somebody's work. The directory is

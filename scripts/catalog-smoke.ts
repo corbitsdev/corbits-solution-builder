@@ -12,11 +12,11 @@
  * anyone's API key is valid.
  */
 import { createServer } from "node:http";
-import { openDatabase } from "../apps/hub/db.js";
-import { prepareDatabase } from "../apps/hub/migrate.js";
-import { mountHub, hub } from "../apps/hub/hub-mount.js";
-import { install } from "../apps/hub/install.js";
-import { connectProvider } from "../apps/hub/providers.js";
+import { openDatabase } from "../apps/hub/src/db.js";
+import { prepareDatabase } from "../apps/hub/src/migrate.js";
+import { mountHub, hub } from "../apps/hub/src/hub-mount.js";
+import { install } from "../apps/hub/src/install.js";
+import { connectProvider } from "../apps/hub/src/providers.js";
 
 const checks: { name: string; ok: boolean; detail: string }[] = [];
 function check(name: string, ok: boolean, detail = "") {
@@ -133,7 +133,7 @@ check(
 // The failure this file was written to catch was invisible because it was
 // logged. The binding must say so instead.
 const { listProviders, setProviderOrder, disconnectProvider, selectModel } = await import(
-  "../apps/hub/providers.js"
+  "../apps/hub/src/providers.js"
 );
 const bindings = await listProviders();
 check(
@@ -228,7 +228,7 @@ stub2.close();
 
   // The rollback itself, on a connection that really was written. This is the
   // path `connectProvider`'s catch takes.
-  const { disconnectCatalogProvider } = await import("../apps/hub/hub-catalog.js");
+  const { disconnectCatalogProvider } = await import("../apps/hub/src/hub-catalog.js");
   const recorded = await rows("select * from public.credential");
   check(
     "the stub provider's credential is on record before the rollback",
@@ -307,7 +307,7 @@ stub.close();
   const localPort = (local.address() as { port: number }).port;
 
   const { connectProvider, listProviders, setProviderOrder, selectModel, disconnectProvider } =
-    await import("../apps/hub/providers.js");
+    await import("../apps/hub/src/providers.js");
 
   const connected = await connectProvider({
     providerId: "local",

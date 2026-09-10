@@ -14,11 +14,11 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openDatabase } from "../apps/hub/db.js";
-import { prepareDatabase } from "../apps/hub/migrate.js";
-import { ensureHub } from "../apps/hub/hub-endpoint.js";
-import { ensureWorkspace } from "../apps/hub/projects.js";
-import { seedWorkflows } from "../apps/hub/workflow-seed.js";
+import { openDatabase } from "../apps/hub/src/db.js";
+import { prepareDatabase } from "../apps/hub/src/migrate.js";
+import { ensureHub } from "../apps/hub/src/hub-endpoint.js";
+import { ensureWorkspace } from "../apps/hub/src/projects.js";
+import { seedWorkflows } from "../apps/hub/src/workflow-seed.js";
 import { projectLifecycleDefinition } from "@solutions-builder/app/workflows/project-lifecycle";
 import { stageDefinition, MAX_REVISIONS } from "@solutions-builder/app/workflows/stage-loop";
 import { STAGES } from "@solutions-builder/app/ledger";
@@ -105,7 +105,7 @@ check(
 // table of ours. A row without a committed body is a job posting with no
 // instructions behind it.
 {
-  const { deployDefinitionBodies, deployedPack } = await import("../apps/hub/hub-deploy.js");
+  const { deployDefinitionBodies, deployedPack } = await import("../apps/hub/src/hub-deploy.js");
   const { agentFor } = await import("@solutions-builder/app/kit");
 
   const stageDefinitions = second.filter((entry) => /\.stage\.\d+$/.test(entry.name));

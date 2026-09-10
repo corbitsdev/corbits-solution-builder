@@ -23,9 +23,9 @@ import { readdir, readFile } from "node:fs/promises";
 import { extname, join, relative } from "node:path";
 
 const root = join(import.meta.dir, "..");
-const PACKAGE = "packages/solutions-builder";
-const HUB = "apps/hub";
-const WEB = "apps/web";
+const PACKAGE = "packages/solutions-builder/src";
+const HUB = "apps/hub/src";
+const WEB = "apps/web/src";
 
 type Violation = { file: string; rule: string; detail: string };
 const violations: Violation[] = [];
@@ -100,7 +100,7 @@ const RUNTIME_PACKAGES = ["@intx/inference", "@intx/inference-catalog", "@intx/a
 /** What the app package may take from the platform: authoring, not internals. */
 const PACKAGE_ALLOWED = ["@intx/workflow", "@intx/types", "arktype"];
 
-const PLATFORM_FILE = /^apps\/hub\/(hub-[^/]+|db|schema|migrate)\.ts$/;
+const PLATFORM_FILE = /^apps\/hub\/src\/(hub-[^/]+|db|schema|migrate)\.ts$/;
 
 const files = (await Promise.all([PACKAGE, HUB, WEB].map((area) => walk(join(root, area))))).flat();
 
@@ -177,7 +177,7 @@ for (const file of files) {
   if (!STATE_WRITERS.includes(path) && /\b(putRunRecord|updateRunRecord)\s*\(/.test(text)) {
     violations.push({
       file: path,
-      rule: "only apps/hub/engine.ts and apps/hub/projects.ts move a run's state",
+      rule: "only apps/hub/src/engine.ts and apps/hub/src/projects.ts move a run's state",
       detail: "calls putRunRecord/updateRunRecord",
     });
   }

@@ -18,8 +18,8 @@ import {
   cancelLogin,
   hasSession,
   loginInFlight,
-} from "../apps/hub/oauth.js";
-import { HostError } from "../apps/hub/errors.js";
+} from "../apps/hub/src/oauth.js";
+import { HostError } from "../apps/hub/src/errors.js";
 
 const checks: { name: string; ok: boolean; detail: string }[] = [];
 function check(name: string, ok: boolean, detail = "") {
@@ -185,7 +185,7 @@ for (const id of OAUTH_PROVIDERS) {
 // sealed under it — every provider credential, every signed commit — is gone.
 {
   const { classifySecurityExit } = await import(
-    "../apps/hub/provider-credentials.js"
+    "../apps/hub/src/provider-credentials.js"
   );
   check(
     "a successful read is not a problem",

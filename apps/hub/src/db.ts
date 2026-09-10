@@ -19,8 +19,8 @@ import { PGlite } from "@electric-sql/pglite";
 // The package does not export these two files, so they are reached by path.
 // `scripts/build-sidecar.ts` asserts they exist before compiling, so a hoisting
 // change fails the build rather than the packaged app.
-import wasmPath from "../../node_modules/@electric-sql/pglite/dist/pglite.wasm" with { type: "file" };
-import dataPath from "../../node_modules/@electric-sql/pglite/dist/pglite.data" with { type: "file" };
+import wasmPath from "../../../node_modules/@electric-sql/pglite/dist/pglite.wasm" with { type: "file" };
+import dataPath from "../../../node_modules/@electric-sql/pglite/dist/pglite.data" with { type: "file" };
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
 import { withPostgresJsResultShape } from "./pg-compat.js";
 import type { ArtifactDb } from "@corbits/artifacts";

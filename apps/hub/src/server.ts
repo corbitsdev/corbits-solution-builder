@@ -84,7 +84,7 @@ async function resolveDist(): Promise<string> {
   const candidates = [
     process.env.SOLUTIONS_BUILDER_DIST_DIR?.trim(),
     join(dirname(process.execPath), "dist"),
-    join(import.meta.dir, "..", "web", "dist"),
+    join(import.meta.dir, "..", "..", "web", "dist"),
   ].filter((value): value is string => Boolean(value));
   for (const candidate of candidates) {
     if (await Bun.file(join(candidate, "index.html")).exists()) return candidate;

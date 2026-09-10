@@ -9,7 +9,7 @@
  * human crosses the gate. No profile here carries approval authority, and none
  * can widen a grant or spend.
  */
-import type { ArtifactKind } from "../../apps/hub/domain.js";
+import type { ArtifactKind } from "./artifacts.js";
 import type { Stage } from "./ledger.js";
 
 /** Applied to every role, ahead of its own prompt. Section 8, "Shared prompt rules". */

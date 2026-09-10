@@ -12,8 +12,8 @@
  *
  * Usage: bun --conditions intx-src scripts/failure-smoke.ts
  */
-import { describeProviderFailure, humanDuration } from "../apps/hub/failure.js";
-import { aggregateRefusal } from "../apps/hub/inference.js";
+import { describeProviderFailure, humanDuration } from "../apps/hub/src/failure.js";
+import { aggregateRefusal } from "../apps/hub/src/inference.js";
 
 const checks: { name: string; ok: boolean; detail: string }[] = [];
 function check(name: string, ok: boolean, detail = "") {
@@ -115,7 +115,7 @@ check("a short reset reads as words", humanDuration(30) === "in under a minute")
 // parameter without another wasted round trip.
 {
   const { retriesWithoutTemperature } = await import(
-    "../apps/hub/inference.js"
+    "../apps/hub/src/inference.js"
   );
   check(
     "a refusal naming temperature is recognised as one",

@@ -13,9 +13,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sql } from "drizzle-orm";
-import { openDatabase } from "../apps/hub/db.js";
-import { prepareDatabase } from "../apps/hub/migrate.js";
-import { ensureWorkspace, LOCAL_TENANT } from "../apps/hub/projects.js";
+import { openDatabase } from "../apps/hub/src/db.js";
+import { prepareDatabase } from "../apps/hub/src/migrate.js";
+import { ensureWorkspace, LOCAL_TENANT } from "../apps/hub/src/projects.js";
 
 const checks: { name: string; ok: boolean; detail: string }[] = [];
 function check(name: string, ok: boolean, detail = "") {
@@ -23,7 +23,7 @@ function check(name: string, ok: boolean, detail = "") {
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? ` - ${detail}` : ""}`);
 }
 
-const ENTRY = join(import.meta.dir, "..", "apps", "hub", "server.ts");
+const ENTRY = join(import.meta.dir, "..", "apps", "hub", "src", "server.ts");
 
 type Host = { process: Bun.Subprocess; token: string; port: number };
 
@@ -84,7 +84,7 @@ try {
   check("the hub answers an authorised client", authorised.status === "ok");
 
   // --- Topology 2: the hub hosted in another process ---
-  const { setRemoteToken } = await import("../apps/hub/hub-endpoint.js");
+  const { setRemoteToken } = await import("../apps/hub/src/hub-endpoint.js");
   await setRemoteToken(hubHost.token);
 
   clientHost = await startHost(8141, clientDir, `http://127.0.0.1:8140/hub`);

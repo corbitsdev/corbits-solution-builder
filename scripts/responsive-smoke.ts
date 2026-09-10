@@ -59,7 +59,7 @@ const host = Bun.spawn(
   // No fixed port: a dev host or a leftover process holding it made this gate
   // probe someone else's server and report "the probe did not run" — a flake
   // that looked like a layout failure. The host picks a port and says which.
-  ["bun", "--conditions", "intx-src", join(root, "apps", "hub", "server.ts"), "--port", "0"],
+  ["bun", "--conditions", "intx-src", join(root, "apps", "hub", "src", "server.ts"), "--port", "0"],
   { cwd: root, env: { ...process.env, SOLUTIONS_BUILDER_DATA_DIR: dataDir }, stdout: "pipe", stderr: "pipe" },
 );
 

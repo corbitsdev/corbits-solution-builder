@@ -9,11 +9,11 @@
  * `agent_session`'s `session_mail` / `turn_part` rows rather than the retired
  * `stage_message` / `stage_brief` tables.
  */
-import { buildDraftPrompt } from "../apps/hub/agent-run.js";
+import { buildDraftPrompt } from "../apps/hub/src/agent-run.js";
 import {
   VERBATIM_BUDGET,
   splitForCompaction,
-} from "../apps/hub/agent-conversation.js";
+} from "../apps/hub/src/agent-conversation.js";
 import {
   appendHumanTurn,
   appendSpecialistTurn,
@@ -22,13 +22,13 @@ import {
   threadTurns,
   sessionIdFor,
   type StageTurn,
-} from "../apps/hub/hub-conversation.js";
-import { nextQuestion } from "../apps/hub/questions.js";
-import { openDatabase } from "../apps/hub/db.js";
-import { prepareDatabase } from "../apps/hub/migrate.js";
-import { mountHub } from "../apps/hub/hub-mount.js";
-import { createProject } from "../apps/hub/projects.js";
-import { install } from "../apps/hub/install.js";
+} from "../apps/hub/src/hub-conversation.js";
+import { nextQuestion } from "../apps/hub/src/questions.js";
+import { openDatabase } from "../apps/hub/src/db.js";
+import { prepareDatabase } from "../apps/hub/src/migrate.js";
+import { mountHub } from "../apps/hub/src/hub-mount.js";
+import { createProject } from "../apps/hub/src/projects.js";
+import { install } from "../apps/hub/src/install.js";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -299,7 +299,7 @@ const ACTOR = { principalId: "p_owner" };
   // to a constant fails this gate.
   {
     const { turnPart } = await import("@intx/db/schema");
-    const { hub } = await import("../apps/hub/hub-mount.js");
+    const { hub } = await import("../apps/hub/src/hub-mount.js");
     const { eq } = await import("drizzle-orm");
     const rows = (await (hub().db.db as never as {
       select: () => { from: (t: unknown) => { where: (p: unknown) => Promise<unknown[]> } };
@@ -341,7 +341,7 @@ const ACTOR = { principalId: "p_owner" };
 // nowhere — so stage 1 opened by asking for the problem they had just
 // described, and the words themselves were gone.
 {
-  const { titleFromProblem } = await import("../apps/hub/title.js");
+  const { titleFromProblem } = await import("../apps/hub/src/title.js");
   const problem = "Cold outbound is rebuilt by hand every Monday and it eats my week.";
   const opened = await createProject({
     title: titleFromProblem(problem),
