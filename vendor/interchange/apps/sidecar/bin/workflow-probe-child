@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --conditions=intx-src
+#!/usr/bin/env bun
 // One-shot workflow-probe child. The sidecar host spawns this by path
 // (`Bun.spawn([binaryPath])`); `--conditions` is not inherited, so it is
 // set on the shebang to resolve @intx/* to TypeScript source in the dev

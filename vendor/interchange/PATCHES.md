@@ -65,3 +65,29 @@ grant set it pins steps with and freezes into the bundle.
 
 **Upstream-able.** Yes; it is an addition to the approval set with a stated
 rationale, and it touches no other path.
+
+## `apps/sidecar/bin/workflow-child`, `apps/sidecar/bin/workflow-probe-child` — no `intx-src` on the shebang
+
+**Why.** The sidecar evaluates deployed workflow packages from a materialized
+closure. A published `@intx/*` tarball carries the `intx-src` export condition
+pointing at source it does not ship, so under that condition
+`import "@intx/workflow/definition"` from a closure fails with "Cannot find
+module". The sidecar and its children must therefore run without the
+condition, which needs the vendored packages to have the `dist/` their
+`default` export names: `bun run vendor:build` (`scripts/vendor-build.ts`)
+emits it, and `apps/hub/bin/sidecar-runtime` no longer adds the condition.
+
+**What changed.** The two shebangs are `#!/usr/bin/env bun`.
+
+**Upstream-able.** No; upstream's dev loop deliberately runs from source and
+its deployments run a bundle. This is the cost of vendoring source.
+
+## `packages/workflow-host/src/workflow-definition-loader.ts` — the import failure names its cause
+
+**Why.** The probe child ships only the error message; `{ cause }` never
+reaches the hub, so a deploy failed with "failed to import interchange.workflow
+entry" and nothing else.
+
+**What changed.** The workflow-entry import error appends the cause's message.
+
+**Upstream-able.** Yes.

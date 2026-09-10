@@ -208,6 +208,35 @@ for (const terminal of TERMINAL_STATES) {
     );
   }
 
+  // The deployed package is source, not this object: an entry module the
+  // probe sidecar evaluates. Evaluate it here against the workspace's own
+  // `@intx/workflow` and compare, so the two shapes cannot drift apart.
+  {
+    const { mkdtemp, mkdir, symlink, writeFile, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join, dirname } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const { LIFECYCLE_ENTRY_PATH, lifecycleEntrySource, withoutStateSchemas } = await import(
+      "@solutions-builder/app/workflows/lifecycle-source"
+    );
+    const dir = await mkdtemp(join(tmpdir(), "sb-lifecycle-source-"));
+    try {
+      const workflowPackage = dirname(fileURLToPath(import.meta.resolve("@intx/workflow/package.json")));
+      await mkdir(join(dir, "node_modules", "@intx"), { recursive: true });
+      await symlink(workflowPackage, join(dir, "node_modules", "@intx", "workflow"), "dir");
+      await writeFile(join(dir, "package.json"), JSON.stringify({ name: "check", type: "module" }));
+      await writeFile(join(dir, LIFECYCLE_ENTRY_PATH), lifecycleEntrySource());
+      const evaluated = (await import(join(dir, LIFECYCLE_ENTRY_PATH))) as { default: unknown };
+      const rendered = JSON.stringify(evaluated.default);
+      const inProcess = JSON.stringify(withoutStateSchemas(definition));
+      if (rendered !== inProcess) {
+        problems.push("The rendered lifecycle source evaluates to a different definition than the package builds in-process");
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
   // The stage-7 interlock has to survive into the native definition: cost
   // approval, not stage approval, is what leaves that gate.
   if (commandsAtStage(7).includes("stage.approve")) {

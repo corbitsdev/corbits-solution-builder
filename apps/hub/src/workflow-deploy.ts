@@ -9,6 +9,7 @@
  * anchor `workflow_run`. That row is what stage gates will park on once the
  * in-process executor (`hub-executor.ts`) retires; until then both exist.
  */
+import { LIFECYCLE_ENTRY_PATH, withoutStateSchemas } from "@solutions-builder/app/workflows/lifecycle-source";
 import { projectLifecycleDefinition } from "@solutions-builder/app/workflows/project-lifecycle";
 import { continuingCommands, ROUND_STEP_ID } from "@solutions-builder/app/workflows/stage-loop";
 import { assets, catalog, workflows, type HubDeployment } from "./hub-client.js";
@@ -16,7 +17,7 @@ import { readWorkflowSourceBlob, writeWorkflowSourceTree } from "./hub-gaps.js";
 import { canPlaceSidecars } from "./hub-mount.js";
 
 export const LIFECYCLE_ASSET_NAME = "solutions-builder-project-lifecycle";
-const ENTRY_PATH = "workflow.js";
+const ENTRY_PATH = LIFECYCLE_ENTRY_PATH;
 const ENTRY = `./${ENTRY_PATH}`;
 const LOOPS_PATH = "loops.js";
 
@@ -56,7 +57,13 @@ export function lifecycleAssetName(projectId?: string): string {
   return projectId ? `${LIFECYCLE_ASSET_NAME}-${projectId.toLowerCase().replace(/[^a-z0-9]+/g, "-")}` : LIFECYCLE_ASSET_NAME;
 }
 
-/** The package the sidecar evaluates: a manifest and an inert-JSON entry. */
+/**
+ * The package the sidecar evaluates: a manifest, an inert-JSON entry and the
+ * loops module. A code entry (`lifecycleEntrySource`) is ready and verified
+ * by check:ledger, but the published `@intx/workflow` cannot build this
+ * lifecycle (its loop validator predates signal relay), so the code entry
+ * waits until `@intx/*` resolves from the vendored tree (CL-7628).
+ */
 export function renderLifecycleSource(projectId?: string): LifecycleSource {
   const manifest = {
     name: lifecycleAssetName(projectId),
@@ -149,23 +156,4 @@ export async function ensureLifecycleDeployment(projectId?: string): Promise<Lif
     deploymentId: deployment.id,
     deploymentStatus: deployment.status,
   };
-}
-
-/**
- * The sidecar's live-to-inert projector reifies `state.schema` through an
- * arktype `Type`, which inert JSON cannot carry; ours are arktype *definitions*
- * (plain objects) that the runtime never validates against. The deployed
- * package leaves state unschema'd; the ledger remains the statement of shape.
- */
-function withoutStateSchemas<T>(value: T): T {
-  if (Array.isArray(value)) return value.map((entry) => withoutStateSchemas(entry)) as T;
-  if (value && typeof value === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-      if (key === "state" && entry && typeof entry === "object" && "schema" in (entry as object)) continue;
-      out[key] = withoutStateSchemas(entry);
-    }
-    return out as T;
-  }
-  return value;
 }

@@ -112,7 +112,7 @@ export async function loadWorkflowDefinitionFromClosure(
     mod = await importModule(importUrl);
   } catch (cause) {
     throw new Error(
-      `failed to import interchange.workflow entry ${JSON.stringify(entryRel)} for workflow package at ${args.packageDir}`,
+      `failed to import interchange.workflow entry ${JSON.stringify(entryRel)} for workflow package at ${args.packageDir}: ${cause instanceof Error ? cause.message : String(cause)}`,
       { cause },
     );
   }
