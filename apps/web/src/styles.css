@@ -1461,6 +1461,80 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   margin: 0;
   font-size: 0.8125rem;
   color: var(--wb-muted-foreground);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* --- Dictation --------------------------------------------------------------
+   The microphone sits with the composer's hint line rather than inside the
+   input, whose layout belongs to the component library. While listening the
+   button pulses and the hint says so, because a live microphone must never be
+   ambiguous. */
+.dictation {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.dictate {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid var(--wb-border);
+  background: var(--wb-card);
+  color: var(--wb-foreground);
+  cursor: pointer;
+  flex: none;
+}
+
+.dictate svg {
+  width: 14px;
+  height: 14px;
+}
+
+.dictate:hover:not(:disabled) {
+  border-color: var(--wb-primary);
+}
+
+.dictate:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.dictate[aria-pressed="true"] {
+  border-color: var(--wb-primary);
+  color: var(--wb-primary);
+  animation: listening 1.6s ease-in-out infinite;
+}
+
+@keyframes listening {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--wb-primary) 45%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--wb-primary) 0%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dictate[aria-pressed="true"] {
+    animation: none;
+  }
+}
+
+.dictation-state {
+  font-size: 0.8125rem;
+  color: var(--wb-muted-foreground);
+}
+
+.dictation-state[role="alert"] {
+  color: var(--wb-destructive);
 }
 
 .project-grid-section {

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Dictation in the composer uses WebKit's speech recognition, which is
+	     the system recognizer. macOS refuses both, and ends the process,
+	     unless the app says why it wants them. -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Solutions Builder listens while you dictate into a composer instead of typing.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Solutions Builder turns what you dictate into text with the system speech recognizer.</string>
+</dict>
+</plist>

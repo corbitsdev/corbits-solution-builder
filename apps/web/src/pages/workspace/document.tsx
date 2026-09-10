@@ -13,6 +13,7 @@ import {
 } from "@corbits/react-ui";
 import { ArrowDown, ArrowUp, Check } from "lucide-react";
 import { Markdown } from "../../markdown.jsx";
+import { DictationButton } from "../../dictation.jsx";
 import { approachName, sectionsIn } from "@solutions-builder/app/document";
 import { markChanges } from "../../revisions.js";
 import { Button, documentName, RollingNumber } from "../../components.jsx";
@@ -366,6 +367,7 @@ export function StageDocument({
             }
             textareaRef={composer}
           />
+          <DictationButton value={message} onValueChange={setMessage} disabled={busy !== null} />
         </div>
       </section>
 

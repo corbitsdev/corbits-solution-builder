@@ -22,6 +22,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, ApiFailure, type ProjectSummary } from "../client.js";
 import { Banner, StageRing, StateLabel, stageName } from "../components.jsx";
 import { DEFAULT_POLICY } from "./onboarding.jsx";
+import { DictationButton } from "../dictation.jsx";
 
 export function Projects({
   projects,
@@ -88,6 +89,7 @@ export function Projects({
           placeholder="The thing that keeps eating your afternoons…"
         />
         <p className="start-hint">
+          <DictationButton value={problem} onValueChange={setProblem} disabled={busy} />
           {problem.trim().length > 0 && problem.trim().length < 10
             ? "A little more. A sentence is enough."
             : "Enter to start. Rough is fine."}
