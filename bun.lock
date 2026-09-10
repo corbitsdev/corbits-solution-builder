@@ -9,6 +9,7 @@
         "@corbits/codex-provider": "github:corbitsdev/corbits-codex-provider",
         "@corbits/oauth-core": "github:corbitsdev/corbits-oauth-core",
         "@corbits/openai-responses": "github:corbitsdev/corbits-openai-responses",
+        "@corbits/process-provisioner": "workspace:*",
         "@corbits/react-ui": "github:corbitsdev/react-ui",
         "@corbits/xai-provider": "github:corbitsdev/corbits-xai-provider",
         "@electric-sql/pglite": "^0.3.16",
@@ -26,9 +27,12 @@
         "@intx/mail-memory": "workspace:*",
         "@intx/mailbox": "workspace:*",
         "@intx/mime": "workspace:*",
+        "@intx/sidecar-app": "workspace:*",
         "@intx/storage-isogit": "workspace:*",
         "@intx/types": "workspace:*",
         "@intx/workflow": "workspace:*",
+        "@intx/workflow-deploy": "workspace:*",
+        "@intx/workflow-host": "workspace:*",
         "@radix-ui/react-dialog": "^1.1.23",
         "@radix-ui/react-dropdown-menu": "^2.1.24",
         "@radix-ui/react-slot": "^1.3.3",
@@ -75,6 +79,38 @@
     "packages/solutions-builder": {
       "name": "@solutions-builder/app",
       "version": "0.1.0",
+    },
+    "vendor/interchange/apps/sidecar": {
+      "name": "@intx/sidecar-app",
+      "version": "0.3.0",
+      "bin": {
+        "workflow-child": "./bin/workflow-child",
+      },
+      "dependencies": {
+        "@intx/agent": "workspace:*",
+        "@intx/authz": "workspace:*",
+        "@intx/crypto": "workspace:*",
+        "@intx/harness": "workspace:*",
+        "@intx/hub-agent": "workspace:*",
+        "@intx/hub-sessions": "workspace:*",
+        "@intx/inference": "workspace:*",
+        "@intx/log": "workspace:*",
+        "@intx/mail-memory": "workspace:*",
+        "@intx/pack-transport": "workspace:*",
+        "@intx/storage-isogit": "workspace:*",
+        "@intx/tool-packaging": "workspace:*",
+        "@intx/tools-lsp": "workspace:*",
+        "@intx/tools-mail": "workspace:*",
+        "@intx/tools-posix": "workspace:*",
+        "@intx/types": "workspace:*",
+        "@intx/workflow": "workspace:*",
+        "@intx/workflow-deploy": "workspace:*",
+        "@intx/workflow-host": "workspace:*",
+        "arktype": "catalog:",
+      },
+      "devDependencies": {
+        "isomorphic-git": "catalog:",
+      },
     },
     "vendor/interchange/packages/agent": {
       "name": "@intx/agent",
@@ -474,6 +510,35 @@
         "arktype": "catalog:",
       },
     },
+    "vendor/workbench/packages/error-sink": {
+      "name": "@corbits/error-sink",
+      "version": "0.0.1",
+      "dependencies": {
+        "@intx/log": "workspace:*",
+        "arktype": "catalog:",
+      },
+    },
+    "vendor/workbench/packages/process-provisioner": {
+      "name": "@corbits/process-provisioner",
+      "version": "0.0.1",
+      "dependencies": {
+        "@corbits/error-sink": "workspace:*",
+        "@corbits/sandbox-sidecar": "workspace:*",
+        "@intx/hub-sessions": "workspace:*",
+        "arktype": "catalog:",
+      },
+    },
+    "vendor/workbench/packages/sandbox-sidecar": {
+      "name": "@corbits/sandbox-sidecar",
+      "version": "0.0.1",
+      "dependencies": {
+        "@intx/crypto": "workspace:*",
+        "@intx/hub-sessions": "workspace:*",
+        "@intx/log": "workspace:*",
+        "@intx/types": "workspace:*",
+        "arktype": "catalog:",
+      },
+    },
   },
   "trustedDependencies": [
     "@corbits/react-ui",
@@ -556,11 +621,17 @@
 
     "@corbits/codex-provider": ["@corbits/codex-provider@github:corbitsdev/corbits-codex-provider#bf07850", { "dependencies": { "@corbits/oauth-core": "github:corbitsdev/corbits-oauth-core", "@corbits/openai-responses": "github:corbitsdev/corbits-openai-responses", "arktype": "2.2.3" }, "peerDependencies": { "@intx/inference": ">=0.3.0", "@intx/types": ">=0.3.0" } }, "corbitsdev-corbits-codex-provider-bf07850", "sha512-5dVtVXd/CjWcXp4AitJAhcxky5mjhAq6G77q0t0iWs1bnms54VDLDnjN9oSqPJiD3nEiXmAoRbxiH1CxJkwTrA=="],
 
+    "@corbits/error-sink": ["@corbits/error-sink@workspace:vendor/workbench/packages/error-sink"],
+
     "@corbits/oauth-core": ["@corbits/oauth-core@github:corbitsdev/corbits-oauth-core#e1e69e6", { "dependencies": { "arktype": "2.2.3" } }, "corbitsdev-corbits-oauth-core-e1e69e6", "sha512-wUrD73iVyk/Dtb4yRn3hCh6N8syfsEvAkRz4XYqT0FIB3sYDSMYEWHcDMJx9nq64my/HBOeN1J6PHIOtpjhtPg=="],
 
     "@corbits/openai-responses": ["@corbits/openai-responses@github:corbitsdev/corbits-openai-responses#adcde69", { "dependencies": { "arktype": "2.2.3" }, "peerDependencies": { "@intx/inference": ">=0.3.0", "@intx/types": ">=0.3.0" } }, "corbitsdev-corbits-openai-responses-adcde69", "sha512-AuWgVdjKlNgFu0/9/iw5ruI8UEzd2ZfGlMSlTHrd7ln07VoDV0IO+Njg0LFoENIwdjA6pQYMYTW2DjMXmblEPg=="],
 
+    "@corbits/process-provisioner": ["@corbits/process-provisioner@workspace:vendor/workbench/packages/process-provisioner"],
+
     "@corbits/react-ui": ["@corbits/react-ui@github:corbitsdev/react-ui#3b12281", { "dependencies": { "class-variance-authority": "^0.7.1", "clsx": "^2.1.1", "tailwind-merge": "^3.3.1" }, "peerDependencies": { "@radix-ui/react-dialog": "^1.1.15", "@radix-ui/react-dropdown-menu": "^2.1.16", "@radix-ui/react-slot": "^1.2.3", "@radix-ui/react-tooltip": "^1.2.8", "@tanstack/react-query": "^5.90.2", "lucide-react": "^0.545.0 || ^1.0.0", "react": "^18.2.0 || ^19.0.0", "react-dom": "^18.2.0 || ^19.0.0", "sonner": "^2.0.7" }, "optionalPeers": ["@tanstack/react-query"] }, "corbitsdev-react-ui-3b12281", "sha512-Abvm/DO0Gqg0ITHGT9355ZxyKRPMVJLSSQSjpd3a8qt4JPrSMOLIOS4sX8ZMNNaArIbnY9F+VKrOWkUJUyO4Nw=="],
+
+    "@corbits/sandbox-sidecar": ["@corbits/sandbox-sidecar@workspace:vendor/workbench/packages/sandbox-sidecar"],
 
     "@corbits/xai-provider": ["@corbits/xai-provider@github:corbitsdev/corbits-xai-provider#cadf9b9", { "dependencies": { "@corbits/oauth-core": "github:corbitsdev/corbits-oauth-core", "@corbits/openai-responses": "github:corbitsdev/corbits-openai-responses", "arktype": "2.2.3" }, "peerDependencies": { "@intx/inference": ">=0.3.0", "@intx/types": ">=0.3.0" } }, "corbitsdev-corbits-xai-provider-cadf9b9", "sha512-dVY4lQJWdCVPxwnK4pQNc3JgfgASaNj/GACKTnR22Y/s6CKSwlcZyGzZ0QEjIr21SZRk4+QP6ehOBf/OtHSJRw=="],
 
@@ -703,6 +774,8 @@
     "@intx/mime": ["@intx/mime@workspace:vendor/interchange/packages/mime"],
 
     "@intx/pack-transport": ["@intx/pack-transport@workspace:vendor/interchange/packages/pack-transport"],
+
+    "@intx/sidecar-app": ["@intx/sidecar-app@workspace:vendor/interchange/apps/sidecar"],
 
     "@intx/storage-isogit": ["@intx/storage-isogit@workspace:vendor/interchange/packages/storage-isogit"],
 

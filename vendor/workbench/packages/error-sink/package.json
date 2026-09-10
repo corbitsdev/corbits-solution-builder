@@ -1,0 +1,15 @@
+{
+  "name": "@corbits/error-sink",
+  "private": true,
+  "description": "The structured error-reporting convention every catch block calls instead of swallowing a failure (CL-6496): operation + tenant/room/agent context, a refId a person can quote to support, and secret redaction, all delivered through @intx/log so OTEL/Sentry attach later as a LogTape sink -- no call site changes",
+  "version": "0.0.1",
+  "license": "LGPL-2.1-or-later",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@intx/log": "workspace:*",
+    "arktype": "catalog:"
+  }
+}

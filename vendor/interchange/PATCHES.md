@@ -37,3 +37,12 @@ whose tests we do not run; nothing at runtime references it.
 
 **Upstream.** Worth reporting: either the dependency should name `@intx/harness`
 or the package is missing from the published tree.
+
+## `apps/sidecar` — vendored alongside the packages
+
+**Why.** Interchange ships no sidecar binary in a package; `apps/sidecar` is
+the canonical host process that runs hub-orchestrated workflows. The embedded
+hub spawns it through a local-process provisioner, so it is vendored at the
+same revision as the packages (`VENDORED_REVISION`), unmodified, minus build
+artefacts. It runs from source, which is why the provisioner's runtime is
+`apps/hub/bin/sidecar-runtime` (adds `--conditions intx-src`).
