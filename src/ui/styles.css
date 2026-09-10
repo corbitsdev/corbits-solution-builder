@@ -1179,13 +1179,12 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   margin: 0 0 var(--space-4);
   padding: 0;
   border: 1px solid var(--wb-border);
+  border-radius: var(--radius-control);
 }
 
 .provider-row {
   display: grid;
-  /* The action column is a fixed width so every button is the same size and
-     the right edge of the list is straight, whatever the label says. */
-  grid-template-columns: minmax(0, 1fr) auto 116px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: var(--space-4);
   padding: var(--space-2) var(--space-3);
@@ -1230,8 +1229,33 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   display: block;
   margin-top: var(--space-1);
   color: var(--wb-muted-foreground);
-  font-family: var(--wb-font-mono);
-  font-size: 0.6875rem;
+  font-size: 0.75rem;
+}
+
+.provider-state {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.provider-model select {
+  height: 32px;
+  max-width: 200px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--wb-border-strong);
+  border-radius: var(--radius-control);
+  background: var(--wb-background);
+  font-size: 0.8125rem;
+}
+
+@media (max-width: 720px) {
+  .provider-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .provider-state,
+  .provider-model {
+    display: none;
+  }
 }
 
 /* The one place the company's name appears in the product. It reads as a
@@ -1636,89 +1660,16 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   color: var(--wb-muted-foreground);
 }
 
-.settings-note,
-.settings-empty {
+.settings-note {
   margin: 0;
   font-size: 0.875rem;
   color: var(--wb-muted-foreground);
 }
 
 /* Providers as an ordered list: the order is the fallback chain. */
-.provider-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  border: 1px solid var(--wb-border);
-  border-radius: var(--radius-control);
-}
-
-.provider-row {
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1.2fr) auto;
-  align-items: center;
-  gap: var(--space-4);
-  padding: var(--space-3) var(--space-4);
-}
-
-.provider-row + .provider-row {
-  border-top: 1px solid var(--wb-border);
-}
-
-.provider-order {
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 999px;
-  background: var(--wb-muted);
-  font-family: var(--wb-font-mono);
-  font-size: 0.75rem;
-  color: var(--wb-muted-foreground);
-}
-
-.provider-row:first-child .provider-order {
-  background: color-mix(in srgb, var(--wb-primary) 18%, transparent);
-  color: var(--wb-primary-emphasis, var(--wb-foreground));
-}
-
-.provider-name {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.provider-name span {
-  font-size: 0.8125rem;
-  color: var(--wb-muted-foreground);
-}
-
-.provider-problem {
-  color: var(--wb-destructive);
-}
-
-.provider-model {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.provider-model select {
-  height: 32px;
-  max-width: 100%;
-  padding: 0 var(--space-2);
-  border: 1px solid var(--wb-border-strong);
-  border-radius: var(--radius-control);
-  background: var(--wb-background);
-  font-size: 0.8125rem;
-}
-
-.provider-model-count {
-  font-size: 0.75rem;
-  color: var(--wb-muted-foreground);
-}
-
 .provider-actions {
   display: flex;
+  align-items: center;
   gap: var(--space-1);
 }
 
@@ -1745,44 +1696,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 .icon-button svg {
   width: 16px;
   height: 16px;
-}
-
-.add-provider {
-  display: grid;
-  gap: var(--space-3);
-  padding-top: var(--space-2);
-  border-top: 1px solid var(--wb-border);
-}
-
-.add-provider h3 {
-  font-size: 0.9375rem;
-}
-
-.add-provider-form {
-  display: grid;
-  gap: var(--space-3);
-  max-width: 480px;
-}
-
-.account-list {
-  display: grid;
-  border: 1px solid var(--wb-border);
-  border-radius: var(--radius-control);
-}
-
-.account-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-}
-
-.account-row + .account-row {
-  border-top: 1px solid var(--wb-border);
-}
-
-.account-actions {
-  margin-left: auto;
 }
 
 /* One setting, one row: the words on the left, the control on the right. */
@@ -2226,3 +2139,89 @@ button[aria-disabled="true"] {
   }
 }
 
+
+/* --- Stage 3 side by side, and the likely answers under a question (CL-7599, CL-7600) --- */
+
+/* Two approaches at one glance. The document body is the container, so the
+   split follows the pane's width, not the window's. */
+.document-body {
+  container-type: inline-size;
+}
+
+.approaches {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-6);
+  margin: var(--space-4) 0;
+}
+
+.approach {
+  min-width: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--radius-panel);
+}
+
+.approach > .prose > h2:first-child,
+.approach h2:first-child {
+  margin-top: 0;
+}
+
+@container (max-width: 760px) {
+  .approaches {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* The gate at stage 3 names the approaches; it wraps when the names are long. */
+.composer-choose {
+  flex-wrap: wrap;
+  row-gap: var(--space-2);
+}
+
+/* Likely answers, as things to tap. Answering by typing is still the default,
+   so these are quiet: outlined, small, and gone once the question is answered. */
+.turn-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+.turn-option {
+  font: inherit;
+  font-size: 0.8125rem;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--radius-control);
+  background: var(--wb-card);
+  color: var(--wb-foreground);
+  cursor: pointer;
+  text-align: left;
+}
+
+.turn-option:hover:not(:disabled) {
+  border-color: var(--wb-primary);
+}
+
+.turn-option:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+
+/* --- Pending turn (CL-7602) ------------------------------------------------
+   The bubble stamps every message with a relative time. The one turn the host
+   has not recorded is the specialist still working; a time under it is noise. */
+.thread-turns div:has(> div > .thinking) time {
+  display: none;
+}
+
+/* Nothing back from the model for a while: said once, quietly. */
+.preparing-stall {
+  margin: var(--space-3) 0 0;
+  font-size: 0.8125rem;
+  color: var(--wb-muted-foreground);
+  max-width: 44ch;
+  animation: settle-in 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}

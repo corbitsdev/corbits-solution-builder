@@ -38,6 +38,7 @@ import {
 } from "@corbits/react-ui";
 import { ArrowUp, Check } from "lucide-react";
 import { Markdown } from "../markdown.jsx";
+import { approachName, sectionsIn, splitOptions } from "../../contracts/document.js";
 import { markChanges } from "../revisions.js";
 import { AudiencePackages } from "./audiences.jsx";
 import { DesignFeedbackView } from "./design.jsx";
@@ -57,7 +58,7 @@ const UNREADABLE = "_This version could not be read. It is still on disk — try
 const STAGE_GOAL: Record<number, string> = {
   1: "Describe what hurts. The Brainstormer interviews the problem, not a solution.",
   2: "Bound the shape: platforms, privacy, integrations, installation, and non-goals.",
-  3: "Compare at most two approaches and select one to execute.",
+  3: "Two approaches, compared on the same criteria. You pick one.",
   4: "Work out surfaces, flows, states, and the criteria a build will be measured against.",
   5: "Prepare a package for each audience that must answer: is this worth pursuing?",
   6: "Turn the approved concept into a plan the code builder can execute, then review it four ways.",
@@ -105,16 +106,30 @@ export function StageWorkspace({
   // The draft as the model writes it. Open while a draft is in flight, so the
   // document forms on screen instead of arriving whole a minute later.
   const [writing, setWriting] = useState<string | null>(null);
+  // "begun" is the host saying the model has the prompt; until then the request
+  // is still on its way. "stalled" is nothing back for a while after that.
+  const [begun, setBegun] = useState(false);
+  const [stalled, setStalled] = useState(false);
   useEffect(() => {
     if (busy !== "draft") {
       setWriting(null);
+      setBegun(false);
+      setStalled(false);
       return;
     }
     const source = new EventSource(`/api/projects/${detail.project.id}/stages/${stage}/live`);
+    const stall = setTimeout(() => setStalled(true), STALL_AFTER_MS);
+    source.addEventListener("begin", () => setBegun(true));
     source.addEventListener("text", (event) => {
+      clearTimeout(stall);
+      setStalled(false);
+      setBegun(true);
       setWriting(JSON.parse((event as MessageEvent<string>).data) as string);
     });
-    return () => source.close();
+    return () => {
+      source.close();
+      clearTimeout(stall);
+    };
   }, [busy, detail.project.id, stage]);
   const latest = stageNodes.find((node) => node.supersededByNodeId === null) ?? stageNodes.at(-1) ?? null;
   const active = stageNodes.find((node) => node.id === selectedNode) ?? latest;
@@ -272,7 +287,14 @@ export function StageWorkspace({
             </div>
           </Screen>
         ) : (
-          <Preparing stage={stage} said={said} writing={writing} busy={busy === "draft"} />
+          <Preparing
+            stage={stage}
+            said={said}
+            writing={writing}
+            busy={busy === "draft"}
+            begun={begun}
+            stalled={stalled}
+          />
         )
       ) : null}
 
@@ -697,6 +719,14 @@ export function StageDocument({
 }) {
   const [message, setMessage] = useState("");
   const [attached, setAttached] = useState<Quote[]>([]);
+  // Stage 3 is a choice, not an approval: the gate names the approaches.
+  const sections = useMemo(() => sectionsIn(content), [content]);
+  const approaches = node.kind === "chosen_approach"
+    ? sections.filter((section) => approachName(section.heading) !== null)
+    : [];
+  const chosen = sections.some((section) => /^chosen approach\b/i.test(section.heading));
+  const choosing = approaches.length > 0 && !chosen;
+  const [redrafting, setRedrafting] = useState(false);
   // Against the version before this one, like tracked changes: what a revision
   // did is otherwise something the reader has to find by rereading the whole
   // document.
@@ -755,6 +785,8 @@ export function StageDocument({
     // unchanged after the person hits send. This is the one message the thread
     // shows that the host has not recorded.
     if (busy === "draft") {
+      // Its time is hidden in CSS: "6s ago" under a turn that has not happened
+      // is noise, and the bubble always stamps one.
       list.push({
         id: "pending",
         role: "agent",
@@ -815,6 +847,7 @@ export function StageDocument({
     onRevise(message.trim(), attached);
     setMessage("");
     setAttached([]);
+    setRedrafting(false);
   };
 
   return (
@@ -845,12 +878,17 @@ export function StageDocument({
           // it is the point — it is what a reader takes in first.
           renderBody={(message) =>
             message.id === "pending" ? (
-              <span className="thinking">Writing</span>
+              <WorkingLabel stage={node.stage} />
             ) : message.role === "agent" ? (
               <SpecialistTurn
                 text={(message.parts[0] as { text: string }).text}
                 note={notes.get(message.id) ?? null}
                 onOpenVersion={onSelectVersion}
+                onAnswer={
+                  openQuestion && busy === null && message.id === messages.at(-1)?.id
+                    ? (answer) => onRevise(answer, [])
+                    : undefined
+                }
               />
             ) : undefined
           }
@@ -870,7 +908,41 @@ export function StageDocument({
               Nothing more to ask. Approve it, or say what should change and it will redraft.
             </p>
           ) : null}
-          {canSubmit ? (
+          {canSubmit && choosing ? (
+            <div className="composer-approve composer-choose">
+              <span>Which approach?</span>
+              {approaches.map((section) => {
+                const letter = /^approach\s+([ab])/i.exec(section.heading)?.[1]?.toUpperCase() ?? "A";
+                const name = approachName(section.heading) ?? `Approach ${letter}`;
+                return (
+                  <Button
+                    key={section.heading}
+                    variant="primary"
+                    disabled={busy !== null}
+                    onClick={() =>
+                      onRevise(
+                        `Chosen: Approach ${letter} (${name}). Rewrite the document so the top says which approach was chosen and why, keep the other as the rejected alternative, keep Side by side.`,
+                        [],
+                        true,
+                      )
+                    }
+                  >
+                    {name}
+                  </Button>
+                );
+              })}
+              <Button
+                variant="ghost"
+                disabled={busy !== null}
+                onClick={() => {
+                  setRedrafting(true);
+                  composer.current?.focus();
+                }}
+              >
+                Neither, redraft
+              </Button>
+            </div>
+          ) : canSubmit ? (
             <div className="composer-approve">
               <span>{soloApproval ? "Happy with it?" : "Nothing more to say?"}</span>
               <span data-tour="submit">
@@ -890,7 +962,9 @@ export function StageDocument({
             placeholder={
               busy === "draft"
                 ? "The specialist is writing…"
-                : attached.length > 0
+                : redrafting && choosing
+                  ? "What should be different about the approaches?"
+                  : attached.length > 0
                   ? "What should change about this?"
                   : openQuestion
                     ? "Your answer. Rough is fine."
@@ -948,10 +1022,11 @@ export function StageDocument({
               <Markdown source={live} />
             </div>
           ) : content ? (
-            <Markdown
+            <DocumentBody
               source={
                 showChanges && previousContent !== null ? markChanges(previousContent, content) : content
               }
+              sideBySide={approaches.length >= 2}
             />
           ) : (
             <p className="inline-note">Loading…</p>
@@ -982,14 +1057,18 @@ function SpecialistTurn({
   text,
   note,
   onOpenVersion,
+  onAnswer,
 }: {
   text: string;
   note: TurnNote | null;
   onOpenVersion: (nodeId: string) => void;
+  /** Set while this question is the one waiting; a tapped option answers it. */
+  onAnswer?: ((answer: string) => void) | undefined;
 }) {
   const cut = text.lastIndexOf("\n\n");
   const last = (cut >= 0 ? text.slice(cut + 2) : text).trim();
-  const question = last.endsWith("?") ? last : null;
+  const { question: asked, options } = splitOptions(last);
+  const question = asked.endsWith("?") ? asked : null;
   const before = question ? text.slice(0, Math.max(cut, 0)) : text;
   return (
     <>
@@ -1006,7 +1085,89 @@ function SpecialistTurn({
       ) : null}
       {before.trim() ? <Markdown source={before} /> : null}
       {question ? <p className="turn-question">{question}</p> : null}
+      {question && options.length > 0 ? (
+        <div className="turn-options" role="group" aria-label="Likely answers">
+          {options.map((option) => (
+            <button
+              key={option}
+              type="button"
+              className="turn-option"
+              disabled={!onAnswer}
+              onClick={() => onAnswer?.(option)}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      ) : null}
     </>
+  );
+}
+
+/**
+ * The document, with stage 3's two approaches laid side by side so the
+ * comparison is one glance rather than a scroll. The same markdown, grouped by
+ * heading; anything that is not an approach renders in order as before.
+ */
+function DocumentBody({ source, sideBySide }: { source: string; sideBySide: boolean }) {
+  if (!sideBySide) return <Markdown source={source} />;
+  const sections = sectionsIn(source);
+  const first = sections.findIndex((section) => approachName(section.heading) !== null);
+  const isApproach = (section: { heading: string }) => approachName(section.heading) !== null;
+  const text = (section: { heading: string; body: string }) =>
+    section.heading ? `## ${section.heading}\n${section.body}` : section.body;
+  return (
+    <>
+      {sections.slice(0, first).map((section, index) => (
+        <Markdown key={`pre-${index}`} source={text(section)} />
+      ))}
+      <div className="approaches">
+        {sections.filter(isApproach).map((section) => (
+          <section key={section.heading} className="approach">
+            <Markdown source={text(section)} />
+          </section>
+        ))}
+      </div>
+      {sections
+        .slice(first)
+        .filter((section) => !isApproach(section))
+        .map((section, index) => (
+          <Markdown key={`post-${index}`} source={text(section)} />
+        ))}
+    </>
+  );
+}
+
+/** Nothing back from the model for this long counts as a stall worth naming. */
+const STALL_AFTER_MS = 25_000;
+
+/**
+ * What the specialist is doing while it writes, in its own stage's terms. One
+ * word for every stage read as a spinner; these say what the wait is for.
+ */
+const STAGE_VERBS: Record<number, string[]> = {
+  1: ["Listening", "Sharpening the problem", "Finding the real pain", "Writing the brief"],
+  2: ["Drawing the boundaries", "Weighing constraints", "Naming the non-goals", "Writing"],
+  3: ["Weighing trade-offs", "Comparing approaches", "Testing each against your criteria", "Writing"],
+  4: ["Sketching", "Walking the flows", "Working out the states", "Writing"],
+  5: ["Writing for each audience", "Making the case", "Writing"],
+  6: ["Sequencing the work", "Sizing the steps", "Checking dependencies", "Writing"],
+  7: ["Counting", "Costing the plan", "Checking the numbers", "Writing"],
+};
+
+/** The shimmering "working" word, rotating through the stage's verbs. */
+function WorkingLabel({ stage }: { stage: number }) {
+  const verbs = STAGE_VERBS[stage] ?? ["Writing"];
+  const [at, setAt] = useState(0);
+  useEffect(() => {
+    if (verbs.length < 2) return;
+    const timer = setInterval(() => setAt((current) => (current + 1) % verbs.length), 3_200);
+    return () => clearInterval(timer);
+  }, [verbs.length]);
+  return (
+    <span className="thinking" key={at}>
+      {verbs[at]}
+    </span>
   );
 }
 
@@ -1022,9 +1183,9 @@ const STAGE_TIPS: Record<number, string[]> = {
     "If a constraint feels obvious, say it anyway. The specialist only knows what the approved brief says.",
   ],
   3: [
-    "At most two approaches are compared, and one is selected. More options is not more clarity.",
+    "At most two approaches, side by side on the same criteria. You choose one; the specialist only recommends.",
     "The comparison is against the success criteria from stage 1, so weak criteria make a weak choice.",
-    "You can reject the selection and ask for the other approach. That is a normal outcome, not a failure.",
+    "Not happy with either? Say what should be different and both are redrafted. That is a normal outcome.",
   ],
   4: [
     "Design works out surfaces, flows and states, and the criteria the build is measured against.",
@@ -1059,11 +1220,17 @@ function Preparing({
   said,
   writing,
   busy,
+  begun,
+  stalled,
 }: {
   stage: number;
   said: StageTurn[];
   writing: string | null;
   busy: boolean;
+  /** The host has handed the prompt to the model. */
+  begun: boolean;
+  /** Nothing has come back for a while. */
+  stalled: boolean;
 }) {
   const tips = STAGE_TIPS[stage] ?? STAGE_TIPS[1]!;
   const [tip, setTip] = useState(0);
@@ -1088,16 +1255,24 @@ function Preparing({
         </div>
       ) : (
         <div className="preparing-activity">
-          <span className="thinking">
-            {busy
-              ? said.length > 0
-                ? "Reading what you wrote"
-                : "Reading the approved work from earlier stages"
-              : "Starting"}
-          </span>
+          {!busy ? (
+            <span className="thinking">Starting</span>
+          ) : begun ? (
+            <WorkingLabel stage={stage} />
+          ) : (
+            <span className="thinking">
+              {said.length > 0 ? "Reading what you wrote" : "Reading the approved work from earlier stages"}
+            </span>
+          )}
           <p key={tip} className="preparing-tip">
             {tips[tip]}
           </p>
+          {stalled ? (
+            <p className="preparing-stall" role="status">
+              Still waiting on the model. A first draft can take a minute or two; if this keeps
+              happening, try another provider in Settings.
+            </p>
+          ) : null}
         </div>
       )}
     </section>

@@ -38,6 +38,21 @@ const seed = kitSeed();
 // --- The shapes §8 names ---
 check("every role has a prompt record", seed.prompts.length === AGENT_KIT.length);
 check("every role has an agent seed", seed.agents.length === AGENT_KIT.length);
+{
+  // CL-7600: whoever interviews asks in plain words and offers likely answers.
+  const interviewing = AGENT_KIT.filter((role) => role.system.includes("What I need from you"));
+  const silent = interviewing.filter((role) => !role.system.includes("Offer two or three likely answers"));
+  check(
+    "every interviewing specialist offers likely answers in plain words",
+    interviewing.length > 0 && silent.length === 0,
+    silent.map((role) => role.id).join(", "),
+  );
+}
+{
+  // CL-7603: no quota of questions; ask what matters, and none is allowed.
+  const quota = AGENT_KIT.filter((role) => !role.system.includes("none is a fine answer"));
+  check("no specialist targets a number of questions", quota.length === 0, quota.map((role) => role.id).join(", "));
+}
 check("§8's ten default skills are present", seed.skills.length >= 10, `${seed.skills.length} skills`);
 check("the three stable directors exist", seed.directors.length === 3, seed.directors.map((d) => d.key).join(", "));
 check(
