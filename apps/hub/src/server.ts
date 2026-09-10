@@ -140,7 +140,10 @@ const CSP = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data:",
   "font-src 'self' data:",
-  "connect-src 'self'",
+  // The desktop shell's IPC: the page calls the shell over the `ipc` scheme
+  // on macOS and `http://ipc.localhost` elsewhere. Meaningless to a browser,
+  // which has neither, and harmless there.
+  "connect-src 'self' ipc: http://ipc.localhost",
   "object-src 'none'",
   "frame-ancestors 'none'",
   "base-uri 'none'",

@@ -1,7 +1,17 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The window loads the host's loopback URL directly; no extra IPC surface is needed.",
-  "windows": ["main"],
-  "permissions": ["core:default"]
+  "description": "The window loads the host's loopback URL, so that origin is the page: it needs the IPC to ask the shell for dictation and to hear its events.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default"
+  ],
+  "remote": {
+    "urls": [
+      "http://127.0.0.1:*",
+      "http://localhost:*"
+    ]
+  }
 }

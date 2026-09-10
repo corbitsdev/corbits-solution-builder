@@ -41,6 +41,8 @@ const REFUSALS: Record<string, string> = {
 const QUIET_ENDS = new Set(["stopped", "silence", "final"]);
 
 const inShell = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+/** After the shell says it has started, sound has this long to reach the page. */
+const FIRST_SOUND_WAIT_MS = 20_000;
 
 type Recognition = {
   continuous: boolean;
@@ -78,7 +80,12 @@ export function useDictation(value: string, onValueChange: (value: string) => vo
   const change = useRef(onValueChange);
   change.current = onValueChange;
 
-  const supported = inShell() || browserRecognizer() !== null;
+  // In the shell, only the shell: its webview also exposes the browser speech
+  // API, which starts nothing there and never reports back. In a browser the
+  // speech API stands in only where the microphone can be read beside it,
+  // since without a level there is no waveform and no silence rule.
+  const supported =
+    inShell() || (browserRecognizer() !== null && typeof navigator.mediaDevices?.getUserMedia === "function");
 
   const pushLevel = useCallback((level: number) => {
     setLive(true);
@@ -102,31 +109,48 @@ export function useDictation(value: string, onValueChange: (value: string) => vo
 
     if (inShell()) {
       let over = false;
-      const unlisten = await listen<DictationEvent>("dictation", ({ payload }) => {
+      let heardLevel = false;
+      let unlisten: (() => void) | null = null;
+      const end = (reason: string) => {
         if (over) return;
-        if (payload.kind === "level") pushLevel(payload.level);
-        else if (payload.kind === "text") change.current(base + payload.text);
-        else {
-          over = true;
-          unlisten();
-          finish(payload.reason);
-        }
-      });
+        over = true;
+        unlisten?.();
+        finish(reason);
+      };
+      try {
+        unlisten = await listen<DictationEvent>("dictation", ({ payload }) => {
+          if (over) return;
+          if (payload.kind === "level") {
+            heardLevel = true;
+            pushLevel(payload.level);
+          } else if (payload.kind === "text") change.current(base + payload.text);
+          else end(payload.reason);
+        });
+      } catch (cause) {
+        end(`The page could not reach the shell: ${String(cause)}`);
+        return;
+      }
       session.current = {
-        stop: () => void invoke("dictation_stop"),
+        stop: () => void invoke("dictation_stop").catch((cause) => end(String(cause))),
         abort: () => {
-          over = true;
-          unlisten();
-          void invoke("dictation_stop");
+          end("stopped");
+          void invoke("dictation_stop").catch(() => undefined);
         },
       };
       try {
         await invoke("dictation_start");
       } catch (cause) {
-        over = true;
-        unlisten();
-        finish(String(cause));
+        end(String(cause));
+        return;
       }
+      // The shell has opened the microphone. If no sound reaches the page in
+      // a reasonable time, say so rather than sit on "starting" for good.
+      window.setTimeout(() => {
+        if (!over && !heardLevel) {
+          void invoke("dictation_stop").catch(() => undefined);
+          end("The microphone opened but no sound reached the app.");
+        }
+      }, FIRST_SOUND_WAIT_MS);
       return;
     }
 
