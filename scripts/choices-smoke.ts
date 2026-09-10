@@ -62,6 +62,11 @@ check(
   JSON.stringify(wrapped),
 );
 
+check(
+  "a digest's plain bullets under a question are not choices",
+  choicesIn("Nothing I need to ask. Anything to change before you approve it?\n\n- Approach A: Strength-matched engine\n- Explanation of moves where the game turned\n- Requires tuning for a close game") === null,
+);
+
 check("a list with no question is not a choice", choicesIn("Done so far:\n- Read the brief\n- Drafted the scope") === null);
 check("one item is not a choice", choicesIn("Which?\n- Only this") === null);
 check("a question on its own is not a choice", choicesIn("Is that right?") === null);
