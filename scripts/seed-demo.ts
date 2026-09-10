@@ -11,15 +11,15 @@
  *
  * Usage: bun scripts/seed-demo.ts
  */
-import { openDatabase } from "../src/host/db/client.js";
-import { prepareDatabase } from "../src/host/db/migrate.js";
-import { createProject, projectDetail, writeArtifact } from "../src/host/store/projects.js";
-import { execute } from "../src/host/engine.js";
-import { drainOutbox } from "../src/host/outbox.js";
-import { newId } from "../src/host/ids.js";
-import { databaseDirectory } from "../src/host/paths.js";
-import type { ArtifactKind } from "../src/contracts/domain.js";
-import type { Command, Stage } from "../src/contracts/ledger.js";
+import { openDatabase } from "../apps/hub/db.js";
+import { prepareDatabase } from "../apps/hub/migrate.js";
+import { createProject, projectDetail, writeArtifact } from "../apps/hub/projects.js";
+import { execute } from "../apps/hub/engine.js";
+import { drainOutbox } from "../apps/hub/outbox.js";
+import { newId } from "../apps/hub/ids.js";
+import { databaseDirectory } from "../apps/hub/paths.js";
+import type { ArtifactKind } from "../apps/hub/domain.js";
+import type { Command, Stage } from "@solutions-builder/app/ledger";
 
 const ACTOR = { principalId: "p_owner", displayName: "You" };
 

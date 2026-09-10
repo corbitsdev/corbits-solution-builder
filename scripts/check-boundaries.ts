@@ -1,24 +1,31 @@
 /**
- * Dependency-direction check — BUILD_PLAN_V3 sections 1 and 3.
+ * Dependency-direction check.
  *
- * The plan draws three lines. This script is what makes them true rather than
- * aspirational, in the spirit of the Alpha spike's `check-boundaries`:
+ * The tree is a Bun workspace: `packages/solutions-builder` is the app package
+ * (what will be installed into an Interchange tenant), `apps/hub` is the host,
+ * `apps/web` is the client. This script is what makes the lines between them
+ * true rather than aspirational:
  *
- *   1. Domain logic contains no provider SDK calls. Only `orchestration/`
- *      talks to a provider or to `@intx/*`.
- *   2. Clients cannot write persistence. `ui/` never imports the database,
- *      the schema, or the command engine.
- *   3. Contracts depend on nothing. `contracts/` is the root of the graph.
+ *   1. The package depends on nothing in `apps/` and on no platform internals.
+ *      It may use the workflow authoring surface and the platform's types,
+ *      because the definitions it generates are Interchange workflows.
+ *   2. Only the hub talks to a provider or an agent runtime, and only the
+ *      hub's platform files (`hub-*.ts`, `db.ts`, `schema.ts`, `migrate.ts`)
+ *      import Interchange's internals. A second module reaching into the hub
+ *      is how a parallel control plane starts.
+ *   3. The client cannot write persistence: `apps/web` never imports the hub,
+ *      the database, the schema, or the command engine.
  *   4. Run state moves in exactly one place. Only `engine.ts` (and
- *      `store/projects.ts`, opening the first run) writes a run's state,
- *      through the executor's `StoredRun`, so there is no second state
- *      machine.
+ *      `projects.ts`, opening the first run) writes a run's state, through the
+ *      executor's `StoredRun`, so there is no second state machine.
  */
 import { readdir, readFile } from "node:fs/promises";
 import { extname, join, relative } from "node:path";
 
 const root = join(import.meta.dir, "..");
-const source = join(root, "src");
+const PACKAGE = "packages/solutions-builder";
+const HUB = "apps/hub";
+const WEB = "apps/web";
 
 type Violation = { file: string; rule: string; detail: string };
 const violations: Violation[] = [];
@@ -28,7 +35,7 @@ async function walk(directory: string): Promise<string[]> {
   const files = await Promise.all(
     entries.map(async (entry) => {
       const path = join(directory, entry.name);
-      if (entry.isDirectory()) return walk(path);
+      if (entry.isDirectory()) return ["node_modules", "dist"].includes(entry.name) ? [] : walk(path);
       return [".ts", ".tsx"].includes(extname(entry.name)) ? [path] : [];
     }),
   );
@@ -48,9 +55,12 @@ function importsOf(text: string): string[] {
   );
 }
 
+const startsWithAny = (name: string, prefixes: readonly string[]) =>
+  prefixes.some((prefix) => name === prefix || name.startsWith(`${prefix}/`) || name.startsWith(prefix));
+
 /**
- * Provider SDKs and agent runtimes. Only `orchestration/` may reach these: a
- * provider call inside domain logic is exactly the coupling section 3 forbids.
+ * Provider SDKs and agent runtimes. Only the hub may reach these: a provider
+ * call inside the package or the client is exactly the coupling forbidden.
  *
  * The platform's own inference runtime is deliberately NOT on this list: using
  * it is the goal, and forbidding it is what produced a second one.
@@ -66,10 +76,9 @@ const PROVIDER_PACKAGES = [
 ];
 
 /**
- * The Interchange platform: the hub, its database and its identity. This is
- * infrastructure the host mounts and owns, not a provider it talks to, so it
- * belongs to `host/hub/` — and nowhere else, because a second module reaching
- * into hub internals is how a parallel control plane starts.
+ * The Interchange platform's internals: the hub, its database and its
+ * identity. Infrastructure the host mounts and owns, not a provider it talks
+ * to, so it belongs to the hub's platform files and nowhere else.
  */
 const PLATFORM_PACKAGES = [
   "@intx/db",
@@ -85,104 +94,92 @@ const PLATFORM_PACKAGES = [
   "@intx/storage-isogit",
 ];
 
-const files = await walk(source);
+/** The runtime surface the hub's product code may use without being a platform file. */
+const RUNTIME_PACKAGES = ["@intx/inference", "@intx/inference-catalog", "@intx/agent", "@intx/types", "@intx/workflow"];
+
+/** What the app package may take from the platform: authoring, not internals. */
+const PACKAGE_ALLOWED = ["@intx/workflow", "@intx/types", "arktype"];
+
+const PLATFORM_FILE = /^apps\/hub\/(hub-[^/]+|db|schema|migrate)\.ts$/;
+
+const files = (await Promise.all([PACKAGE, HUB, WEB].map((area) => walk(join(root, area))))).flat();
 
 for (const file of files) {
   const path = relative(root, file);
   const text = await readFile(file, "utf8");
   const imports = importsOf(text);
-  const area = path.startsWith("src/contracts")
-    ? "contracts"
-    : path.startsWith("src/orchestration")
-      ? "orchestration"
-      : path.startsWith("src/ui")
-        ? "ui"
-        : "host";
+  const area = path.startsWith(PACKAGE) ? "package" : path.startsWith(HUB) ? "hub" : "web";
+  const external = imports.filter((name) => !name.startsWith("."));
 
-  if (area === "contracts") {
-    const local = imports.filter((name) => name.startsWith("."));
-    const outside = local.filter((name) => !name.startsWith("./"));
+  if (area === "package") {
+    const outside = external.filter(
+      (name) => !startsWithAny(name, PACKAGE_ALLOWED) && !name.startsWith("node:"),
+    );
     if (outside.length > 0) {
       violations.push({
         file: path,
-        rule: "contracts depend on nothing outside contracts/",
+        rule: "the app package depends on nothing outside itself, the workflow authoring surface and the platform's types",
         detail: outside.join(", "),
       });
     }
   }
 
-  if (area === "host" || area === "contracts") {
-    const provider = imports.filter((name) =>
-      PROVIDER_PACKAGES.some((prefix) => name.startsWith(prefix)),
-    );
+  if (area !== "hub") {
+    const provider = external.filter((name) => startsWithAny(name, PROVIDER_PACKAGES));
     if (provider.length > 0) {
       violations.push({
         file: path,
-        rule: "only orchestration/ may import a provider or agent runtime",
+        rule: "only apps/hub may import a provider or agent runtime",
         detail: provider.join(", "),
       });
     }
   }
 
-  // The platform is mounted in one place. `contracts/` never touches it at all.
+  // The platform is mounted in one place.
   {
-    const platform = imports.filter((name) =>
-      PLATFORM_PACKAGES.some((prefix) => name === prefix || name.startsWith(`${prefix}/`)),
-    );
-    const mountsTheHub = path.startsWith("src/host/hub/");
-    // The inference runtime and its catalog are the provider layer, not hub
-    // internals: `orchestration/` is exactly where they belong, and keeping
-    // them out was what pushed us into hand-rolling a second one.
-    const runtimeOnly = platform.every((name) =>
-      ["@intx/inference", "@intx/inference-catalog", "@intx/agent", "@intx/types"].some(
-        (prefix) => name === prefix || name.startsWith(`${prefix}/`),
-      ),
-    );
-    if (platform.length > 0 && !mountsTheHub && !(area === "orchestration" && runtimeOnly)) {
+    const platform = external.filter((name) => startsWithAny(name, PLATFORM_PACKAGES));
+    const runtimeOnly = platform.every((name) => startsWithAny(name, RUNTIME_PACKAGES));
+    const allowed = PLATFORM_FILE.test(path) || (area === "hub" && runtimeOnly);
+    if (platform.length > 0 && !allowed) {
       violations.push({
         file: path,
-        rule: "only src/host/hub/ may import the Interchange platform",
+        rule: "only the hub's platform files (hub-*.ts, db.ts, schema.ts, migrate.ts) may import the Interchange platform",
         detail: platform.join(", "),
       });
     }
   }
 
-  if (area === "ui") {
+  if (area === "web") {
     const forbidden = imports.filter(
       (name) =>
-        name.includes("db/client") ||
-        name.includes("db/schema") ||
-        name.includes("host/engine") ||
+        name.includes("apps/hub") ||
+        name.includes("@solutions-builder/hub") ||
         name.startsWith("drizzle-orm") ||
-        name.includes("@electric-sql/pglite"),
+        name.includes("@electric-sql/pglite") ||
+        name.includes("@intx/"),
     );
     if (forbidden.length > 0) {
       violations.push({
         file: path,
-        rule: "clients never write persistence",
+        rule: "the client never imports the hub or writes persistence",
         detail: forbidden.join(", "),
       });
     }
   }
 
-  // The single-state-machine rule. There is no `run` table any more — a
-  // project's stage and state live in the runtime executor's in-memory
-  // `StoredRun`, and `putRunRecord`/`updateRunRecord` (both defined in
-  // `src/host/hub/executor.ts`) are the only ways to write one. Only
-  // `engine.ts` moves a run through the ledger; `store/projects.ts` opens the
-  // first run when a project is created, which is the one write the engine
-  // does not make — everywhere else calling either function is a second state
-  // machine starting.
-  const STATE_WRITERS = ["src/host/engine.ts", "src/host/store/projects.ts", "src/host/hub/executor.ts"];
-  if (!STATE_WRITERS.includes(path)) {
-    const writesRunRecord = /\b(putRunRecord|updateRunRecord)\s*\(/.test(text);
-    if (writesRunRecord) {
-      violations.push({
-        file: path,
-        rule: "only src/host/engine.ts and src/host/store/projects.ts move a run's state",
-        detail: "calls putRunRecord/updateRunRecord",
-      });
-    }
+  // The single-state-machine rule. A project's stage and state live in the
+  // runtime executor's in-memory `StoredRun`, and `putRunRecord` and
+  // `updateRunRecord` (defined in `hub-executor.ts`) are the only ways to
+  // write one. Only `engine.ts` moves a run through the ledger; `projects.ts`
+  // opens the first run when a project is created, which is the one write the
+  // engine does not make. Anywhere else is a second state machine starting.
+  const STATE_WRITERS = [`${HUB}/engine.ts`, `${HUB}/projects.ts`, `${HUB}/hub-executor.ts`];
+  if (!STATE_WRITERS.includes(path) && /\b(putRunRecord|updateRunRecord)\s*\(/.test(text)) {
+    violations.push({
+      file: path,
+      rule: "only apps/hub/engine.ts and apps/hub/projects.ts move a run's state",
+      detail: "calls putRunRecord/updateRunRecord",
+    });
   }
 }
 

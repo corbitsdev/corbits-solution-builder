@@ -12,10 +12,10 @@
  *
  * Usage: bun scripts/loop-smoke.ts [--port 7788]
  */
-import { openDatabase } from "../src/host/db/client.js";
-import { prepareDatabase } from "../src/host/db/migrate.js";
-import { ensureHub } from "../src/host/hub/endpoint.js";
-import { seedRoles } from "../src/host/hub/roles.js";
+import { openDatabase } from "../apps/hub/db.js";
+import { prepareDatabase } from "../apps/hub/migrate.js";
+import { ensureHub } from "../apps/hub/hub-endpoint.js";
+import { seedRoles } from "../apps/hub/hub-roles.js";
 import {
   createProject,
   ensureWorkspace,
@@ -23,13 +23,13 @@ import {
   LOCAL_TENANT,
   projectDetail,
   writeArtifact,
-} from "../src/host/store/projects.js";
-import { execute, HOST_PRINCIPAL, submitAndApprove } from "../src/host/engine.js";
-import { newId } from "../src/host/ids.js";
-import { HostError } from "../src/host/errors.js";
-import { drainOutbox } from "../src/host/outbox.js";
-import type { ArtifactKind } from "../src/contracts/domain.js";
-import type { Command, Stage } from "../src/contracts/ledger.js";
+} from "../apps/hub/projects.js";
+import { execute, HOST_PRINCIPAL, submitAndApprove } from "../apps/hub/engine.js";
+import { newId } from "../apps/hub/ids.js";
+import { HostError } from "../apps/hub/errors.js";
+import { drainOutbox } from "../apps/hub/outbox.js";
+import type { ArtifactKind } from "../apps/hub/domain.js";
+import type { Command, Stage } from "@solutions-builder/app/ledger";
 
 const checks: { name: string; ok: boolean; detail: string }[] = [];
 
@@ -789,7 +789,7 @@ let buildRunId = "";
   const run = detail.current!;
   const node = await produce(1, theirs.projectId, theirs.branchId, run.id);
 
-  const holds = await import("../src/host/hub/authority.js").then((module) =>
+  const holds = await import("../apps/hub/hub-authority.js").then((module) =>
     module.authoritiesFor(ACTOR.principalId),
   );
   check(
@@ -870,9 +870,9 @@ let buildRunId = "";
   // A genuine second holder: a real `principal`, a real platform grant
   // (`principal_role` against the same `project_owner` role `seedRoles`
   // already created), and a `participant` row on this project.
-  const { hub } = await import("../src/host/hub/mount.js");
-  const { database } = await import("../src/host/db/client.js");
-  const table = await import("../src/host/db/schema.js");
+  const { hub } = await import("../apps/hub/hub-mount.js");
+  const { database } = await import("../apps/hub/db.js");
+  const table = await import("../apps/hub/schema.js");
   const { sql } = await import("drizzle-orm");
   const second = "p_second_owner";
   const db = hub().db.db;

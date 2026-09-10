@@ -27,7 +27,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-const SHEET = "src/ui/styles.css";
+const SHEET = "apps/web/src/styles.css";
 const raw = await readFile(SHEET, "utf8");
 /**
  * Comments are prose about the code, never the code.
@@ -65,7 +65,7 @@ async function sources(): Promise<{ file: string; text: string }[]> {
       }
     }
   }
-  await walk("src/ui");
+  await walk("apps/web/src");
   await walk("scripts");
   return found;
 }

@@ -13,13 +13,13 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openDatabase } from "../src/host/db/client.js";
-import { prepareDatabase } from "../src/host/db/migrate.js";
-import { seedKit, storedKit } from "../src/host/store/kit.js";
-import { kitSeed } from "../src/orchestration/agents/seed-kit.js";
-import { AGENT_KIT } from "../src/orchestration/agents/kit.js";
-import { baseTemplate, SLOTS, violationsIn } from "../src/contracts/template.js";
-import { knownCompatibility } from "../src/host/store/compatibility.js";
+import { openDatabase } from "../apps/hub/db.js";
+import { prepareDatabase } from "../apps/hub/migrate.js";
+import { seedKit, storedKit } from "../apps/hub/kit-records.js";
+import { kitSeed } from "@solutions-builder/app/seed-kit";
+import { AGENT_KIT } from "@solutions-builder/app/kit";
+import { baseTemplate, SLOTS, violationsIn } from "@solutions-builder/app/template";
+import { knownCompatibility } from "../apps/hub/compatibility.js";
 
 let passed = 0;
 const failures: string[] = [];

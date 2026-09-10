@@ -6,11 +6,11 @@
  * ledger's own state list rather than a copy of it, so adding a state to the
  * ledger and forgetting to guide it fails here.
  */
-import { BUILD_STATES, STAGE_STATES, type RunState } from "../src/contracts/ledger.js";
-import { activityHeadline, nextStep } from "../src/contracts/next-step.js";
-import { deterministicGuidance } from "../src/orchestration/agents/guide.js";
-import { AGENT_KIT, panelPrincipals } from "../src/orchestration/agents/kit.js";
-import { assumptionsIn, questionIn, questionsIn, summaryIn } from "../src/contracts/document.js";
+import { BUILD_STATES, STAGE_STATES, type RunState } from "@solutions-builder/app/ledger";
+import { activityHeadline, nextStep } from "@solutions-builder/app/next-step";
+import { deterministicGuidance } from "../apps/hub/guide.js";
+import { AGENT_KIT, panelPrincipals } from "@solutions-builder/app/kit";
+import { assumptionsIn, questionIn, questionsIn, summaryIn } from "@solutions-builder/app/document";
 
 let passed = 0;
 const failures: string[] = [];

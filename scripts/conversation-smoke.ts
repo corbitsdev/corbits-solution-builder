@@ -9,11 +9,11 @@
  * `agent_session`'s `session_mail` / `turn_part` rows rather than the retired
  * `stage_message` / `stage_brief` tables.
  */
-import { buildDraftPrompt } from "../src/orchestration/agents/run.js";
+import { buildDraftPrompt } from "../apps/hub/agent-run.js";
 import {
   VERBATIM_BUDGET,
   splitForCompaction,
-} from "../src/orchestration/agents/conversation.js";
+} from "../apps/hub/agent-conversation.js";
 import {
   appendHumanTurn,
   appendSpecialistTurn,
@@ -22,18 +22,18 @@ import {
   threadTurns,
   sessionIdFor,
   type StageTurn,
-} from "../src/host/hub/conversation.js";
+} from "../apps/hub/hub-conversation.js";
 import {
   answerQuestion,
   nextQuestion,
   recordQuestions,
   retireQuestions,
-} from "../src/host/store/questions.js";
-import { openDatabase } from "../src/host/db/client.js";
-import { prepareDatabase } from "../src/host/db/migrate.js";
-import { mountHub } from "../src/host/hub/mount.js";
-import { createProject, ensureWorkspace } from "../src/host/store/projects.js";
-import { seedWorkflows } from "../src/orchestration/workflows/seed.js";
+} from "../apps/hub/questions.js";
+import { openDatabase } from "../apps/hub/db.js";
+import { prepareDatabase } from "../apps/hub/migrate.js";
+import { mountHub } from "../apps/hub/hub-mount.js";
+import { createProject, ensureWorkspace } from "../apps/hub/projects.js";
+import { seedWorkflows } from "../apps/hub/workflow-seed.js";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -298,7 +298,7 @@ const ACTOR = { principalId: "p_owner" };
   // to a constant fails this gate.
   {
     const { turnPart } = await import("@intx/db/schema");
-    const { hub } = await import("../src/host/hub/mount.js");
+    const { hub } = await import("../apps/hub/hub-mount.js");
     const { eq } = await import("drizzle-orm");
     const rows = (await (hub().db.db as never as {
       select: () => { from: (t: unknown) => { where: (p: unknown) => Promise<unknown[]> } };
@@ -340,7 +340,7 @@ const ACTOR = { principalId: "p_owner" };
 // nowhere — so stage 1 opened by asking for the problem they had just
 // described, and the words themselves were gone.
 {
-  const { titleFromProblem } = await import("../src/orchestration/agents/title.js");
+  const { titleFromProblem } = await import("../apps/hub/title.js");
   const problem = "Cold outbound is rebuilt by hand every Monday and it eats my week.";
   const opened = await createProject({
     title: titleFromProblem(problem),

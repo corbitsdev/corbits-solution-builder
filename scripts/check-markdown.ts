@@ -3,7 +3,7 @@
  * reads as a document, and that nothing in a draft can become markup.
  */
 import { renderToStaticMarkup } from "react-dom/server";
-import { Markdown } from "../src/ui/markdown.js";
+import { Markdown } from "../apps/web/src/markdown.js";
 
 let passed = 0;
 const failures: string[] = [];

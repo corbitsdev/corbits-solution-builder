@@ -16,10 +16,10 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const root = join(import.meta.dir, "..");
-const css = await readFile(join(root, "src", "ui", "styles.css"), "utf8");
+const css = await readFile(join(root, "apps", "web", "src", "styles.css"), "utf8");
 
 async function views(): Promise<{ path: string; body: string }[]> {
-  const dir = join(root, "src", "ui");
+  const dir = join(root, "apps", "web", "src");
   const out: { path: string; body: string }[] = [];
   const walk = async (at: string) => {
     for (const entry of await readdir(at, { withFileTypes: true })) {

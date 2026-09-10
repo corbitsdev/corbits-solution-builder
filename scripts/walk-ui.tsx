@@ -14,13 +14,13 @@ import { cp } from "node:fs/promises";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ComponentProps, ReactNode } from "react";
 import type { ChatMessage } from "@corbits/react-ui";
-import { Button, GuideDock } from "../src/ui/components.js";
-import { StageDocument } from "../src/ui/views/workspace.js";
-import { ArtifactGraph } from "../src/ui/views/graph.js";
-import { AppRail } from "../src/ui/app.js";
-import { nextStep } from "../src/contracts/next-step.js";
-import { Projects } from "../src/ui/views/projects.js";
-import { Onboarding } from "../src/ui/views/onboarding.js";
+import { Button, GuideDock } from "../apps/web/src/components.js";
+import { StageDocument } from "../apps/web/src/pages/workspace.js";
+import { ArtifactGraph } from "../apps/web/src/pages/graph.js";
+import { AppRail } from "../apps/web/src/app.js";
+import { nextStep } from "@solutions-builder/app/next-step";
+import { Projects } from "../apps/web/src/pages/projects.js";
+import { Onboarding } from "../apps/web/src/pages/onboarding.js";
 
 const now = "2026-09-08T12:00:00.000Z";
 

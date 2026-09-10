@@ -16,7 +16,7 @@ import {
   STAGE_STATES,
   TERMINAL_STATES,
   isTerminal,
-} from "../src/contracts/ledger.js";
+} from "@solutions-builder/app/ledger";
 
 const problems: string[] = [];
 const seen = new Set<string>();
@@ -148,7 +148,7 @@ for (const terminal of TERMINAL_STATES) {
 // These assert the properties that matter if it ever does.
 {
   const { projectLifecycleDefinition, commandsAtStage, stageStepId } = await import(
-    "../src/orchestration/workflows/project-lifecycle.js"
+    "@solutions-builder/app/workflows/project-lifecycle"
   );
   const definition = projectLifecycleDefinition();
 

@@ -33,6 +33,7 @@
         "@radix-ui/react-dropdown-menu": "^2.1.24",
         "@radix-ui/react-slot": "^1.3.3",
         "@radix-ui/react-tooltip": "^1.2.16",
+        "@solutions-builder/app": "workspace:*",
         "@tanstack/react-query": "^5.102.8",
         "@tauri-apps/api": "^2.8.0",
         "arktype": "^2.1.29",
@@ -56,6 +57,24 @@
         "typescript": "^5.9.3",
         "vite": "^7.1.9",
       },
+    },
+    "apps/hub": {
+      "name": "@solutions-builder/hub",
+      "version": "0.1.0",
+      "dependencies": {
+        "@solutions-builder/app": "workspace:*",
+      },
+    },
+    "apps/web": {
+      "name": "@solutions-builder/web",
+      "version": "0.1.0",
+      "dependencies": {
+        "@solutions-builder/app": "workspace:*",
+      },
+    },
+    "packages/solutions-builder": {
+      "name": "@solutions-builder/app",
+      "version": "0.1.0",
     },
     "vendor/interchange/packages/agent": {
       "name": "@intx/agent",
@@ -846,6 +865,12 @@
     "@rollup/rollup-win32-x64-gnu": ["@rollup/rollup-win32-x64-gnu@4.63.1", "", { "os": "win32", "cpu": "x64" }, "sha512-RgroPfMmKlD1RzSDxvwgcPiy2HNQKoYV7OmwIXDsk73uKW5t6B/V8KIy27SMv/FNXFo/oSBtWc9J0X7t91ezZg=="],
 
     "@rollup/rollup-win32-x64-msvc": ["@rollup/rollup-win32-x64-msvc@4.63.1", "", { "os": "win32", "cpu": "x64" }, "sha512-at8QVep6S3h5Y6gSbdGU06bRY5WJkf6WUduM9YtvYMbYhB1MOFfUgc6kehitQXzOtMSaT70q7f9ydPhpqu821w=="],
+
+    "@solutions-builder/app": ["@solutions-builder/app@workspace:packages/solutions-builder"],
+
+    "@solutions-builder/hub": ["@solutions-builder/hub@workspace:apps/hub"],
+
+    "@solutions-builder/web": ["@solutions-builder/web@workspace:apps/web"],
 
     "@standard-community/standard-json": ["@standard-community/standard-json@0.3.6", "", { "dependencies": { "quansync": "^0.2.11" }, "peerDependencies": { "@standard-schema/spec": "^1.0.0", "@types/json-schema": "^7.0.15", "@valibot/to-json-schema": "^1.3.0", "arktype": "^2.1.20", "effect": "^3.20.0", "sury": "^10.0.0", "typebox": "^1.0.17", "valibot": "^1.4.2", "zod": "^3.25.0 || ^4.0.0", "zod-to-json-schema": "^3.24.5" }, "optionalPeers": ["@valibot/to-json-schema", "arktype", "effect", "sury", "typebox", "valibot", "zod", "zod-to-json-schema"] }, "sha512-tuXKz1Ps4al0W4xhfwii7v4lskKtOv3QE7mcouRVThrBdOR6JzY4Vea3nsxcEnte84bOJvMvXGmOMWE3IBbHyA=="],
 

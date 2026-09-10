@@ -40,7 +40,7 @@ async function reachesHandshake(
     env: {
       ...process.env,
       SOLUTIONS_BUILDER_DATA_DIR: dataDir,
-      ...(options.serveInterface ? { SOLUTIONS_BUILDER_DIST_DIR: join(root, "dist") } : {}),
+      ...(options.serveInterface ? { SOLUTIONS_BUILDER_DIST_DIR: join(root, "apps", "web", "dist") } : {}),
     },
     stdout: "pipe",
     stderr: "pipe",
@@ -85,7 +85,8 @@ async function reachesHandshake(
 // check would make the gate slow enough that people stop running it.
 const sidecar = join(
   root,
-  "src-tauri",
+  "apps",
+  "desktop",
   "binaries",
   `solutions-builder-host-${process.arch === "arm64" ? "aarch64" : "x86_64"}-apple-darwin`,
 );
@@ -120,13 +121,13 @@ if (await Bun.file(sidecar).exists()) {
 {
   const dataDir = await mkdtemp(join(tmpdir(), "solutions-builder-reload-"));
   const child = Bun.spawn(
-    ["bun", "--conditions", "intx-src", join(root, "src", "host", "server.ts"), "--port", "8212"],
+    ["bun", "--conditions", "intx-src", join(root, "apps", "hub", "server.ts"), "--port", "8212"],
     {
       cwd: root,
       env: {
         ...process.env,
         SOLUTIONS_BUILDER_DATA_DIR: dataDir,
-        SOLUTIONS_BUILDER_DIST_DIR: join(root, "dist"),
+        SOLUTIONS_BUILDER_DIST_DIR: join(root, "apps", "web", "dist"),
         SOLUTIONS_BUILDER_DEV_RELOAD: "1",
       },
       stdout: "pipe",
@@ -163,7 +164,7 @@ if (await Bun.file(sidecar).exists()) {
     // and a single write racing the watcher's registration made this fail
     // intermittently — a flaky check is worse than no check, because it
     // teaches people to rerun rather than to look.
-    const probe = join(root, "dist", ".reload-probe");
+    const probe = join(root, "apps", "web", "dist", ".reload-probe");
     const touch = setInterval(() => {
       void writeFile(probe, String(Date.now())).catch(() => {});
     }, 1_000);
@@ -187,7 +188,7 @@ if (await Bun.file(sidecar).exists()) {
   const dataDir = await mkdtemp(join(tmpdir(), "solutions-builder-login-"));
   const marker = join(dataDir, "start-at-login");
   const child = Bun.spawn(
-    ["bun", "--conditions", "intx-src", join(root, "src", "host", "server.ts"), "--port", "8213"],
+    ["bun", "--conditions", "intx-src", join(root, "apps", "hub", "server.ts"), "--port", "8213"],
     {
       cwd: root,
       env: { ...process.env, SOLUTIONS_BUILDER_DATA_DIR: dataDir },

@@ -17,7 +17,7 @@ import { join } from "node:path";
 
 const root = join(import.meta.dir, "..");
 const source = join(root, "vendor", "interchange", "packages", "db", "migrations");
-const target = join(root, "src", "host", "hub", "migrations.generated.ts");
+const target = join(root, "apps", "hub", "hub-migrations.generated.ts");
 
 const files = (await readdir(source)).filter((name) => name.endsWith(".sql")).sort();
 const entries: string[] = [];
@@ -50,7 +50,7 @@ if (process.argv.includes("--check")) {
   const current = await readFile(target, "utf8").catch(() => "");
   if (current !== generated) {
     console.error(
-      "src/host/hub/migrations.generated.ts is stale.\n" +
+      "apps/hub/hub-migrations.generated.ts is stale.\n" +
         "Run `bun run generate:hub-migrations` after refreshing the vendored Interchange tree.",
     );
     process.exit(1);

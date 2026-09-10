@@ -11,7 +11,7 @@
  * The host exposes a change stream at `/api/dev/reload` when
  * `SOLUTIONS_BUILDER_DEV_RELOAD` is set, and `main.tsx` subscribes to it in
  * development bundles, so the page reloads itself when a build lands. Editing
- * `src/host/**` still needs a restart, because that is the process being run.
+ * `apps/hub/**` still needs a restart, because that is the process being run.
  *
  * `--fresh` points the host at a new temporary directory rather than deleting
  * anything: a development workspace is still somebody's work. The directory is
@@ -28,7 +28,7 @@ const fresh = process.argv.includes("--fresh");
 
 const env: Record<string, string | undefined> = {
   ...process.env,
-  SOLUTIONS_BUILDER_DIST_DIR: join(root, "dist"),
+  SOLUTIONS_BUILDER_DIST_DIR: join(root, "apps", "web", "dist"),
   // Mounts the change stream, and only here; a packaged app never sets it.
   SOLUTIONS_BUILDER_DEV_RELOAD: "1",
 };
@@ -37,13 +37,13 @@ if (fresh) {
   console.log(`A new workspace: ${env.SOLUTIONS_BUILDER_DATA_DIR}\n`);
 }
 
-function run(command: string[]) {
-  return Bun.spawn(command, { cwd: root, stdout: "inherit", stderr: "inherit", stdin: "inherit", env });
+function run(command: string[], cwd = root) {
+  return Bun.spawn(command, { cwd, stdout: "inherit", stderr: "inherit", stdin: "inherit", env });
 }
 
 // Development mode, so `import.meta.env.DEV` is true and the reload client is
 // compiled in. `bun run ui:build` stays a production build.
-const UI_BUILD = ["bunx", "vite", "build", "--mode", "development"];
+const UI_BUILD = ["bunx", "vite", "build", "-c", join(root, "apps", "web", "vite.config.ts"), "--mode", "development"];
 
 console.log("Building the interface…");
 if ((await run(UI_BUILD).exited) !== 0) {
@@ -66,7 +66,7 @@ if (desktop) {
     "dev",
     "--config",
     JSON.stringify({ bundle: { resources: null } }),
-  ]).exited;
+  ], join(root, "apps", "desktop")).exited;
 } else {
   console.log("Starting the host…\n");
   status = await run([...HOST_COMMAND, "--open"]).exited;

@@ -1,0 +1,622 @@
+/**
+ * The app shell.
+ *
+ * State lives here and flows down; every mutation goes back through the API and
+ * then a refresh, so what the interface shows is what the host durably holds
+ * rather than an optimistic guess.
+ */
+import { useCallback, useEffect, useState } from "react";
+import {
+  api,
+  ApiFailure,
+  type HostStatus,
+  type ProjectDetail,
+  type ProjectSummary,
+  type Provider,
+  type Wait,
+  type Guidance,
+} from "./client.js";
+import { CircleCheck, FolderKanban, PanelRight, PanelRightClose, Settings as SettingsIcon } from "lucide-react";
+import { Banner, Button, Mark, StateLabel } from "./components.jsx";
+import { DecisionQueue } from "./pages/decisions.jsx";
+import { Projects } from "./pages/projects.jsx";
+import { Settings } from "./pages/settings.jsx";
+import { ArtifactGraph } from "./pages/graph.jsx";
+import { nextStep } from "@solutions-builder/app/next-step";
+import { StageTour } from "./tour.jsx";
+import type { RunState } from "@solutions-builder/app/ledger";
+import { GuideDock } from "./components.jsx";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarHeader,
+  SidebarItem,
+  SidebarSection,
+  Tabs,
+  BootScreen,
+} from "@corbits/react-ui";
+import { Onboarding } from "./pages/onboarding.jsx";
+import { StageWorkspace } from "./pages/workspace.jsx";
+
+/**
+ * Where you are. A project is not a separate destination from its stage: you
+ * open a project and you are in it, with a breadcrumb back to the list. What
+ * used to be "Stage workspace" and "Artifacts" in the rail were two views of
+ * one open project, which is why neither name explained itself.
+ */
+type View = "decisions" | "projects" | "project" | "settings";
+
+/** Sections within an open project. */
+type ProjectTab = "stage" | "artifacts";
+
+const VIEWS: View[] = ["decisions", "projects", "project", "settings"];
+
+/** Deep link, so a screen can be opened directly: `/?view=settings`. */
+function initialView(): View {
+  const requested = new URLSearchParams(window.location.search).get("view");
+  return VIEWS.includes(requested as View) ? (requested as View) : "projects";
+}
+
+/**
+ * The first moments, before the host has said anything.
+ *
+ * Deliberately not a spinner over a half-built layout: there is no layout yet,
+ * because which one is right is exactly what is unknown. One line, and after a
+ * while an admission that it is taking longer than it should.
+ */
+function Booting({ offline }: { offline: boolean }) {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setSlow(true), 12_000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  return (
+    <BootScreen
+      message={
+        offline
+          ? "The host is not answering yet."
+          : slow
+            ? "Still starting — the first run migrates the database."
+            : "Starting…"
+      }
+      brand={<Mark size={26} />}
+      footer={<span>Powered by Corbits</span>}
+    />
+  );
+}
+
+
+/**
+ * The navigation rail.
+ *
+ * Its own component so `scripts/walk-ui.tsx` renders the product's rail rather
+ * than a hand-kept copy of it. The copy had already drifted twice — it carried
+ * no pinned decision at all, so a fix to that surface was invisible to every
+ * screenshot, and its icons were empty `<svg>` elements, which made a working
+ * rail look broken and sent me fixing a bug that did not exist.
+ */
+export function AppRail({
+  view,
+  decisions,
+  projects,
+  collapsed,
+  offline,
+  connected,
+  onNavigate,
+  onInspect,
+}: {
+  view: View;
+  decisions: Wait[];
+  projects: ProjectSummary[];
+  collapsed: boolean;
+  offline: boolean;
+  connected: boolean;
+  onNavigate: (view: View) => void;
+  onInspect: (projectId: string) => void;
+}) {
+  return (
+      <Sidebar collapsed={collapsed}>
+        <SidebarHeader className="gap-2.5">
+          <Mark />
+          <p className="min-w-0 truncate text-sm font-semibold">Solutions Builder</p>
+        </SidebarHeader>
+
+        <SidebarContent>
+          <SidebarSection label="Work">
+              <SidebarItem
+                active={view === "projects" || view === "project"}
+                icon={<FolderKanban aria-hidden="true" />}
+                count={projects.length}
+                href="#projects"
+                onClick={(event) => {
+                  event.preventDefault();
+                  onNavigate("projects");
+                }}
+              >
+                Projects
+              </SidebarItem>
+              <SidebarItem
+                active={view === "decisions"}
+                icon={<CircleCheck aria-hidden="true" />}
+                count={decisions.length}
+                href="#decisions"
+                onClick={(event) => {
+                  event.preventDefault();
+                  onNavigate("decisions");
+                }}
+              >
+                Decision queue
+              </SidebarItem>
+          </SidebarSection>
+
+          {/* One pending decision, pinned. More than one is a queue, and the
+              queue has a screen of its own. */}
+          {decisions[0] ? (
+            <div className="rail-decision">
+              <StateLabel tone="warning">Action required</StateLabel>
+              <p className="rail-decision-title">{decisions[0].title}</p>
+              <p className="rail-decision-meta">{decisions[0].projectTitle}</p>
+              <Button
+                variant="link"
+                onClick={() => onInspect(decisions[0]!.projectId)}
+              >
+                Inspect evidence
+              </Button>
+            </div>
+          ) : null}
+        </SidebarContent>
+
+        <SidebarFooter>
+          <SidebarSection label="Settings">
+              <SidebarItem
+                active={view === "settings"}
+                icon={<SettingsIcon aria-hidden="true" />}
+                href="#settings"
+                onClick={(event) => {
+                  event.preventDefault();
+                  onNavigate("settings");
+                }}
+              >
+                Settings
+              </SidebarItem>
+          </SidebarSection>
+
+          {/* Says only what someone would act on. A healthy host is not news. */}
+          {offline ? (
+            <p className="rail-note">
+              <StateLabel tone="error">Reconnecting</StateLabel>
+            </p>
+          ) : !connected ? (
+            <Button variant="link" onClick={() => onNavigate("settings")}>
+              Connect a model
+            </Button>
+          ) : null}
+        </SidebarFooter>
+      </Sidebar>
+  );
+}
+
+export function App() {
+  const [view, setView] = useState<View>(initialView);
+  const [projectTab, setProjectTab] = useState<ProjectTab>("stage");
+  // The conversation and the artifact library fill the window; every other
+  // view scrolls. Computed here rather than inline so a class list stays a
+  // class list.
+  const fills = view === "project" && (projectTab === "stage" || projectTab === "artifacts");
+  // Below this width the rail is icons only: two full columns of chrome plus a
+  // conversation does not fit, and stacking the rail on top buries the work.
+  const [narrow, setNarrow] = useState(
+    () => globalThis.matchMedia?.("(max-width: 1080px)").matches ?? false,
+  );
+  useEffect(() => {
+    const query = globalThis.matchMedia?.("(max-width: 1080px)");
+    if (!query) return;
+    const update = () => setNarrow(query.matches);
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+
+  const [guidance, setGuidance] = useState<Guidance | null>(null);
+  const [explaining, setExplaining] = useState(false);
+  const [draftOpen, setDraftOpen] = useState(true);
+
+  const [status, setStatus] = useState<HostStatus | null>(null);
+  const [decisions, setDecisions] = useState<Wait[]>([]);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [providers, setProviders] = useState<Provider[]>([]);
+  const [apiKeyProviders, setApiKeyProviders] = useState<
+    { providerId: string; label: string; needsBaseUrl: boolean }[]
+  >([]);
+  const [oauthCandidates, setOauthCandidates] = useState<
+    { providerId: string; label: string; redirectUri: string }[]
+  >([]);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [detail, setDetail] = useState<ProjectDetail | null>(null);
+  // Guidance describes one project at one moment. Showing yesterday's
+  // orientation against today's state is worse than showing none.
+  useEffect(() => {
+    setGuidance(null);
+  }, [selected, detail?.current?.state, detail?.nodes.length]);
+  const [graph, setGraph] = useState<{
+    nodes: import("./client.js").ArtifactNode[];
+    edges: { childNodeId: string; sourceNodeId: string }[];
+  }>({ nodes: [], edges: [] });
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [offline, setOffline] = useState(false);
+  const [skippedSetup, setSkippedSetup] = useState(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      const [statusResult, decisionsResult, projectsResult, providersResult] = await Promise.all([
+        api.status(),
+        api.decisions(),
+        api.projects(),
+        api.providers(),
+      ]);
+      setStatus(statusResult);
+      setDecisions(decisionsResult.decisions);
+      setProjects(projectsResult.projects);
+      setProviders(providersResult.providers);
+      setApiKeyProviders(providersResult.apiKeyProviders);
+      setOauthCandidates(providersResult.oauthCandidates);
+      setOffline(false);
+    } catch {
+      // The host going away is a visible state, not a blank screen.
+      setOffline(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+    const timer = setInterval(() => void refresh(), 5_000);
+    return () => clearInterval(timer);
+  }, [refresh]);
+
+  // The Decision Queue renders the exact versions a gate would freeze, and it
+  // reads them from the open project. Without this the primary action on the
+  // primary screen is disabled on first load, because nothing is selected yet.
+  // Nothing selected is not a state worth showing anyone: prefer the project
+  // with a gate open, then the most recent one.
+  useEffect(() => {
+    if (selected !== null) return;
+    const next = decisions[0]?.projectId ?? projects[0]?.id;
+    if (next) setSelected(next);
+  }, [decisions, projects, selected]);
+
+  useEffect(() => {
+    if (!selected) {
+      setDetail(null);
+      return;
+    }
+    let cancelled = false;
+    void api
+      .project(selected)
+      .then((result) => {
+        if (!cancelled) setDetail(result);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [selected, projects]);
+
+  useEffect(() => {
+    if (view !== "project" || !selected) return;
+    void api
+      .graph(selected)
+      .then(setGraph)
+      .catch(() => setGraph({ nodes: [], edges: [] }));
+  }, [view, selected, detail]);
+
+  const reloadDetail = useCallback(async () => {
+    // Both at once: the stage view cannot start its draft until the detail
+    // lands, so a serial refresh here was dead time on every approval.
+    const [, next] = await Promise.all([
+      refresh(),
+      selected ? api.project(selected).catch(() => null) : Promise.resolve(null),
+    ]);
+    if (selected) setDetail(next);
+  }, [refresh, selected]);
+
+  const openProject = (projectId: string) => {
+    setSelected(projectId);
+    setProjectTab("stage");
+    setView("project");
+  };
+
+  const decide = async (
+    wait: Wait,
+    decision: "approve" | "reject" | "revise",
+    reason: string,
+  ) => {
+    setBusy(decision);
+    setError(null);
+    try {
+      const project = await api.project(wait.projectId);
+      const versions = project.nodes
+        .filter((node) => node.stage === wait.stage && node.supersededByNodeId === null)
+        .map((node) => ({
+          artifactId: node.artifactId,
+          versionId: node.id,
+          contentHash: node.contentHash,
+        }));
+
+      // The command depends on the stage, because the ledger says so: stage 7
+      // approves a cost, stage 9 accepts a manifest, everything else approves.
+      const command =
+        decision === "approve"
+          ? wait.stage === 7
+            ? "cost.approve"
+            : wait.stage === 9
+              ? "delivery.accept"
+              : "stage.approve"
+          : wait.stage === 9
+            ? decision === "reject"
+              ? "delivery.reject"
+              : "delivery.revise"
+            : decision === "reject"
+              ? "stage.reject"
+              : "stage.revise";
+
+      const payload: Record<string, unknown> = {
+        runId: wait.runId,
+        versions,
+        rationale: reason,
+      };
+      if (decision !== "approve") {
+        payload.reason = reason || "Routed back without a stated reason.";
+        payload.targetStage = Math.max(1, wait.stage - 1);
+      }
+      if (command === "cost.approve") {
+        payload.forecastUsd = 0;
+        payload.assumptions = ["Recorded from the approved estimate artifact."];
+      }
+      if (command === "delivery.accept" || command === "delivery.reject" || command === "delivery.revise") {
+        payload.manifestVersion = versions[0] ?? {
+          artifactId: "-",
+          versionId: "-",
+          contentHash: "0".repeat(64),
+        };
+      }
+
+      await api.command(wait.projectId, command, payload);
+      setSelected(wait.projectId);
+      await reloadDetail();
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // Nothing is decided until the host has answered. Rendering the app shell
+  // while `status` is still null and correcting to onboarding a moment later is
+  // how a first launch flashes the wrong screen — the person sees an app they
+  // do not have access to yet, then watches it be taken away.
+  //
+  // The host is slow to start on purpose: pglite unpacks a WASM image and the
+  // hub applies its schema. Saying so is better than guessing at a layout.
+  if (status === null) {
+    return <Booting offline={offline} />;
+  }
+
+  // Held until there is both somewhere to draft from and something to work on.
+  // Connecting a model and then landing on an empty app is not an onboarding.
+  // Inference is required — the product cannot draft a stage without it, so
+  // step 1 is not skippable. Only the first-project step can be deferred.
+  const showOnboarding =
+    !status.inference.connected || (projects.length === 0 && !skippedSetup);
+
+  if (showOnboarding) {
+    return (
+      <Onboarding
+        providers={providers}
+        apiKeyProviders={apiKeyProviders}
+        oauthCandidates={oauthCandidates}
+        onConnected={refresh}
+        onCreated={(projectId) => {
+          setSkippedSetup(true);
+          void refresh();
+          openProject(projectId);
+        }}
+      />
+    );
+  }
+
+  return (
+    <div className="app">
+      <AppRail
+        view={view}
+        decisions={decisions}
+        projects={projects}
+        collapsed={narrow}
+        offline={offline}
+        connected={status?.inference.connected ?? false}
+        onNavigate={setView}
+        onInspect={(projectId: string) => {
+          setSelected(projectId);
+          setView("decisions");
+        }}
+      />
+
+      <main className="canvas">
+        <div className="canvas-head">
+          {view === "project" && detail ? (
+            <>
+              <button type="button" className="crumb" onClick={() => setView("projects")}>
+                Projects
+              </button>
+              <span className="crumb-sep" aria-hidden="true">
+                /
+              </span>
+              <h1>{detail.project.title}</h1>
+            </>
+          ) : (
+            <h1>
+              {view === "decisions"
+                ? "Decision queue"
+                : view === "projects"
+                  ? "Projects"
+                  : "Settings"}
+            </h1>
+          )}
+
+          <div className="head-actions">
+          {view === "project" && detail ? (
+            <>
+              <Tabs
+                className="head-tabs"
+                label="This project"
+                active={projectTab}
+                onChange={(id) => setProjectTab(id as ProjectTab)}
+                tabs={[
+                  { id: "stage", label: "Conversation" },
+                  {
+                    id: "artifacts",
+                    label: "Artifacts",
+                    ...(graph.nodes.length > 0 ? { count: graph.nodes.length } : {}),
+                  },
+                ]}
+              >
+                {() => null}
+              </Tabs>
+              {/* Always in the bar so the tabs never shift when it toggles. */}
+              <button
+                type="button"
+                className="head-toggle"
+                aria-pressed={draftOpen}
+                aria-label={draftOpen ? "Hide the draft" : "Show the draft"}
+                disabled={projectTab !== "stage"}
+                onClick={() => setDraftOpen((open) => !open)}
+              >
+                {draftOpen ? <PanelRightClose aria-hidden="true" /> : <PanelRight aria-hidden="true" />}
+              </button>
+            </>
+          ) : null}
+
+          {/* Bottom right, over the canvas: always to hand, never competing
+              with the toolbar, and never a band of the window given to one
+              sentence. */}
+          {view === "project" && detail ? (
+            <GuideDock
+              stage={detail.current?.stage ?? 1}
+              step={nextStep({
+                state: (detail.current?.state ?? null) as RunState | null,
+                stage: detail.current?.stage ?? 1,
+                // So the guide and the composer name the same act. Two words
+                // for one decision is how a person stops trusting either.
+                soloApproval: detail.soloApproval,
+                hasDraft: detail.nodes.some(
+                  (node) => node.stage === (detail.current?.stage ?? 1),
+                ),
+                ...(detail.current?.stage === 5
+                  ? {
+                      quorum: {
+                        recorded: detail.approvals.filter(
+                          (approval) => approval.command === "audience.decide",
+                        ).length,
+                        needed:
+                          (detail.project.policy as { audienceQuorum?: number })
+                            .audienceQuorum ?? 0,
+                        blocked: detail.approvals.filter(
+                          (approval) =>
+                            approval.command === "audience.decide" &&
+                            approval.decision !== "proceed",
+                        ).length,
+                      },
+                    }
+                  : {}),
+              })}
+              guidance={guidance}
+              explaining={explaining}
+              at={projectTab === "artifacts" ? "artifacts" : "stage"}
+              onExplain={() => {
+                setExplaining(true);
+                void api
+                  .guidance(detail.project.id)
+                  .then((result) => setGuidance(result.guidance))
+                  .catch(() => setGuidance(null))
+                  .finally(() => setExplaining(false));
+              }}
+              onGo={(where) => {
+                if (where === "settings") setView("settings");
+                else if (where === "decisions") setView("decisions");
+                else setProjectTab(where === "artifacts" ? "artifacts" : "stage");
+              }}
+            />
+          ) : null}
+          </div>
+        </div>
+
+        <div className={fills ? "canvas-body is-fill" : "canvas-body"}>
+
+        {offline ? (
+          <Banner tone="error" title="The host is not answering" />
+        ) : null}
+
+        {error ? (
+          <Banner tone="error" title="That decision was refused">
+            {error}
+          </Banner>
+        ) : null}
+
+        {view === "decisions" ? (
+          <DecisionQueue
+            decisions={decisions}
+            detail={detail}
+            busy={busy}
+            selectedProjectId={selected}
+            onOpen={(wait) => setSelected(wait.projectId)}
+            onInspect={(wait) => openProject(wait.projectId)}
+            onStart={() => setView("projects")}
+            onDecide={decide}
+          />
+        ) : null}
+
+        {view === "projects" ? (
+          <Projects projects={projects} onOpen={openProject} onChanged={refresh} />
+        ) : null}
+
+        {view === "project" ? (
+          detail ? (
+            <>
+              {projectTab === "stage" ? (
+                <>
+                  {/* Imported and never rendered, so the walkthrough simply
+                      did not exist. It runs once, on the surface it describes,
+                      and remembers that it has. */}
+                  <StageTour enabled={detail.current !== null} />
+                  <StageWorkspace
+                    detail={detail}
+                    draftOpen={draftOpen}
+                    onChanged={reloadDetail}
+                    onOpenSettings={() => setView("settings")}
+                    onOpenDecisions={() => setView("decisions")}
+                  />
+                </>
+              ) : (
+                <ArtifactGraph nodes={graph.nodes} edges={graph.edges} />
+              )}
+            </>
+          ) : (
+            <Banner title="No project open" />
+          )
+        ) : null}
+
+        {view === "settings" ? (
+          <Settings
+            status={status}
+            providers={providers}
+            apiKeyProviders={apiKeyProviders}
+            oauthCandidates={oauthCandidates}
+            onChanged={refresh}
+          />
+        ) : null}
+        </div>
+      </main>
+    </div>
+  );
+}

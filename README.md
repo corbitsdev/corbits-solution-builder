@@ -47,12 +47,12 @@ bun run check          # every invariant checker and smoke, the gate before a co
 ## How it is put together
 
 ```
-src/contracts/     the sole transition ledger and the typed boundaries
-src/host/          API, persistence, guard, engine, lifecycle, the embedded hub
-src/orchestration/ providers, the agent kit, the bounded build bridge
-src/ui/            the client
-src-tauri/         the native shell and tray
-vendor/interchange the Interchange control plane, vendored (LGPL-2.1)
+apps/hub/                    the host: loopback API, guard, engine, persistence, the embedded Interchange hub
+apps/web/                    the client
+apps/desktop/                the native shell and tray
+packages/solutions-builder/  the app package: the transition ledger, the workflows generated from it,
+                             the specialist kit, the document format
+vendor/interchange/          the Interchange control plane, vendored (LGPL-2.1)
 ```
 
 Three rules are enforced by `bun run check` rather than documented:
@@ -60,8 +60,9 @@ Three rules are enforced by `bun run check` rather than documented:
 - **One state machine.** The ledger is the single machine-readable contract,
   the guard is its only enforcement point, and the engine is the only writer of
   a run's state. The Interchange workflow definitions are generated from it.
-- **One direction.** Contracts depend on nothing. Only orchestration may reach
-  a provider. The client never touches persistence.
+- **One direction.** The app package depends on nothing in the apps. Only the
+  hub may reach a provider. The client never imports the hub or touches
+  persistence.
 - **Exact versions.** An approval names a version and the hash the approver
   saw. If the bytes moved, the approval is refused.
 

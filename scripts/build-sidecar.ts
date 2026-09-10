@@ -7,7 +7,7 @@ import { chmod, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
 const root = join(import.meta.dir, "..");
-const outputRoot = join(root, "src-tauri", "binaries");
+const outputRoot = join(root, "apps", "desktop", "binaries");
 
 const TARGETS = {
   arm64: { bun: "bun-darwin-arm64", triple: "aarch64-apple-darwin" },
@@ -26,7 +26,7 @@ async function build(architecture: keyof typeof TARGETS) {
       // compile resolves them the same way the runtime does.
       "--conditions",
       "intx-src",
-      "src/host/server.ts",
+      "apps/hub/server.ts",
       "--compile",
       `--target=${target.bun}`,
       `--outfile=${output}`,
@@ -47,7 +47,7 @@ for (const asset of ["pglite.wasm", "pglite.data"]) {
   if (!(await Bun.file(path).exists())) {
     throw new Error(
       `Expected pglite asset is missing: ${path}. ` +
-        `Update the import paths in src/host/db/client.ts to match.`,
+        `Update the import paths in apps/hub/db.ts to match.`,
     );
   }
 }

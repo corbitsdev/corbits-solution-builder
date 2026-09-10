@@ -15,8 +15,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const root = join(import.meta.dir, "..");
-const source = await readFile(join(root, "src", "ui", "views", "providers.tsx"), "utf8");
-const onboarding = await readFile(join(root, "src", "ui", "views", "onboarding.tsx"), "utf8");
+const source = await readFile(join(root, "apps", "web", "src", "pages", "providers.tsx"), "utf8");
+const onboarding = await readFile(join(root, "apps", "web", "src", "pages", "onboarding.tsx"), "utf8");
 
 const checks: { name: string; ok: boolean; detail: string }[] = [];
 function check(name: string, ok: boolean, detail = "") {
@@ -54,7 +54,7 @@ check(
   const views = ["onboarding.tsx", "settings.tsx", "design.tsx", "workspace.tsx", "audiences.tsx"];
   const offenders: string[] = [];
   for (const view of views) {
-    const text = await readFile(join(root, "src", "ui", "views", view), "utf8").catch(() => "");
+    const text = await readFile(join(root, "apps", "web", "src", "pages", view), "utf8").catch(() => "");
     for (const tag of ["<input", "<textarea"]) {
       if (text.includes(tag)) offenders.push(`${view}${tag}`);
     }

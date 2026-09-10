@@ -13,10 +13,10 @@
     "dev": "bun scripts/dev.ts",
     "dev:desktop": "bun scripts/dev.ts --desktop",
     "dev:fresh": "bun scripts/dev.ts --desktop --fresh",
-    "host": "bun --conditions intx-src src/host/server.ts",
-    "ui:build": "vite build",
-    "ui:watch": "vite build --watch",
-    "desktop:build": "bunx @tauri-apps/cli@2 build",
+    "host": "bun --conditions intx-src apps/hub/server.ts",
+    "ui:build": "vite build -c apps/web/vite.config.ts",
+    "ui:watch": "vite build -c apps/web/vite.config.ts --watch",
+    "desktop:build": "cd apps/desktop && bunx @tauri-apps/cli@2 build",
     "sidecar:build": "bun run generate:hub-migrations && bun scripts/build-sidecar.ts",
     "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
     "check": "bun run check:hub-migrations && bun run check:ledger && bun run check:boundaries && bun run check:slop && bun run check:tokens && bun run check:layout && bun run typecheck && bun run smoke && bun run smoke:upgrade && bun run smoke:launch && bun run smoke:design && bun run smoke:oauth && bun run smoke:failure && bun run smoke:hub && bun run smoke:workflows && bun run smoke:kit && bun run check:markdown && bun run smoke:conversation && bun run smoke:guidance && bun run smoke:responsive && bun run smoke:catalog && bun run smoke:executor",
@@ -86,7 +86,8 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-joyride": "^3.2.0",
-    "sonner": "^2.0.8"
+    "sonner": "^2.0.8",
+    "@solutions-builder/app": "workspace:*"
   },
   "devDependencies": {
     "@electric-sql/pglite-socket": "^0.2.11",
@@ -102,6 +103,8 @@
     "bun": ">=1.4.0"
   },
   "workspaces": [
+    "apps/*",
+    "packages/*",
     "vendor/interchange/packages/*"
   ],
   "catalog": {

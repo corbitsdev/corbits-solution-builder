@@ -21,10 +21,10 @@ import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { sql } from "drizzle-orm";
-import { withPostgresJsResultShape } from "../src/host/db/pg-compat.js";
-import { HUB_MIGRATIONS } from "../src/host/hub/migrations.generated.js";
-import { migrateHub, PreHubDatabaseError } from "../src/host/hub/migrate.js";
-import type { HostDatabase } from "../src/host/db/client.js";
+import { withPostgresJsResultShape } from "../apps/hub/pg-compat.js";
+import { HUB_MIGRATIONS } from "../apps/hub/hub-migrations.generated.js";
+import { migrateHub, PreHubDatabaseError } from "../apps/hub/hub-migrate.js";
+import type { HostDatabase } from "../apps/hub/db.js";
 
 const checks: { name: string; ok: boolean; detail: string }[] = [];
 function check(name: string, ok: boolean, detail = "") {

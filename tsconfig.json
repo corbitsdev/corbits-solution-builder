@@ -19,6 +19,6 @@
     "skipLibCheck": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["src", "scripts", "types", "vite.config.ts"],
-  "exclude": ["node_modules", "dist", "src-tauri"]
+  "include": ["apps", "packages", "scripts", "types"],
+  "exclude": ["node_modules", "apps/web/dist", "apps/desktop", "vendor"]
 }

@@ -1,8 +1,8 @@
 node_modules
-dist
+apps/web/dist
 scratch
-src-tauri/target
-src-tauri/binaries
+apps/desktop/target
+apps/desktop/binaries
+apps/desktop/gen
 *.log
-src-tauri/gen
 vendor/interchange/**/dist

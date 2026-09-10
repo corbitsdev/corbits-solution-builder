@@ -35,7 +35,7 @@ if (!(await Bun.file(CHROME).exists())) {
   process.exit(0);
 }
 
-const index = join(root, "dist", "index.html");
+const index = join(root, "apps", "web", "dist", "index.html");
 if (!(await Bun.file(index).exists())) {
   console.log("SKIP  responsive smoke - no built interface (run `bun run ui:build`)");
   process.exit(0);
@@ -52,14 +52,14 @@ const probe = `window.addEventListener("load", function () {
 
 const dataDir = await mkdtemp(join(tmpdir(), "sb-responsive-"));
 const original = await readFile(index, "utf8");
-await writeFile(join(root, "dist", "probe.js"), probe);
+await writeFile(join(root, "apps", "web", "dist", "probe.js"), probe);
 await writeFile(index, original.replace("</body>", '<script src="/probe.js"></script></body>'));
 
 const host = Bun.spawn(
   // No fixed port: a dev host or a leftover process holding it made this gate
   // probe someone else's server and report "the probe did not run" — a flake
   // that looked like a layout failure. The host picks a port and says which.
-  ["bun", "--conditions", "intx-src", join(root, "src", "host", "server.ts"), "--port", "0"],
+  ["bun", "--conditions", "intx-src", join(root, "apps", "hub", "server.ts"), "--port", "0"],
   { cwd: root, env: { ...process.env, SOLUTIONS_BUILDER_DATA_DIR: dataDir }, stdout: "pipe", stderr: "pipe" },
 );
 
@@ -111,7 +111,7 @@ try {
 } finally {
   host.kill();
   await writeFile(index, original);
-  await rm(join(root, "dist", "probe.js"), { force: true });
+  await rm(join(root, "apps", "web", "dist", "probe.js"), { force: true });
   await rm(dataDir, { recursive: true, force: true });
 }
 

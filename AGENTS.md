@@ -13,13 +13,16 @@ These are enforced by `scripts/check-ledger.ts` and `scripts/check-boundaries.ts
 If you need to break one, the honest move is to change the checker deliberately
 and say why, not to route around it.
 
-- **One state machine.** `src/contracts/ledger.ts` is the contract.
-  `src/host/guard.ts` is the only place it is enforced. `src/host/engine.ts` is
+- **One state machine.** `packages/solutions-builder/ledger.ts` is the contract.
+  `apps/hub/guard.ts` is the only place it is enforced. `apps/hub/engine.ts` is
   the only place a run's state is written.
-- **Contracts depend on nothing.** `src/contracts/` imports no other area.
-- **Only `src/orchestration/` touches a provider** or an agent runtime.
+- **The app package depends on nothing in the apps.** `packages/solutions-builder/`
+  imports only the workflow authoring surface and the platform's types.
+- **Only `apps/hub/` touches a provider** or an agent runtime, and only its
+  platform files (`hub-*.ts`, `db.ts`, `schema.ts`, `migrate.ts`) import
+  Interchange internals.
 - **The client never writes persistence.** No database, schema or engine import
-  in `src/ui/`.
+  in `apps/web/`.
 
 ## Honesty rules that are product requirements, not style
 

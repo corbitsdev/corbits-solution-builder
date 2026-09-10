@@ -20,7 +20,7 @@
  * The one thing `runLocal` does NOT give a caller is a handle on a spawned
  * child's own `WorkflowRun`/`RepoStore` -- its `childWorkflow` resolution is a
  * private closure. `project-lifecycle` models every stage as an inline
- * `childWorkflow` (see src/orchestration/workflows/project-lifecycle.ts), and
+ * `childWorkflow` (see packages/solutions-builder/workflows/project-lifecycle.ts), and
  * proving "parked at stage 1's gate" means inspecting stage 1's OWN committed
  * event log for a durable `SignalAwaited` -- so this script reimplements
  * `runLocal`'s top-level wiring (the same ~10 lines, same exported functions)
@@ -49,12 +49,12 @@ import {
 } from "@intx/workflow";
 import { createDefaultDirectorRegistry } from "@intx/agent";
 
-import { openDatabase } from "../src/host/db/client.js";
-import { prepareDatabase } from "../src/host/db/migrate.js";
-import { ensureHub } from "../src/host/hub/endpoint.js";
-import { ensureWorkspace } from "../src/host/store/projects.js";
-import { seedWorkflows } from "../src/orchestration/workflows/seed.js";
-import { projectLifecycleDefinition, stageStepId } from "../src/orchestration/workflows/project-lifecycle.js";
+import { openDatabase } from "../apps/hub/db.js";
+import { prepareDatabase } from "../apps/hub/migrate.js";
+import { ensureHub } from "../apps/hub/hub-endpoint.js";
+import { ensureWorkspace } from "../apps/hub/projects.js";
+import { seedWorkflows } from "../apps/hub/workflow-seed.js";
+import { projectLifecycleDefinition, stageStepId } from "@solutions-builder/app/workflows/project-lifecycle";
 
 let passed = 0;
 const failures: string[] = [];
@@ -256,7 +256,7 @@ if (sawParkEvent !== undefined) {
 // these three the executor could be wholly broken and every gate still green.
 {
   const { launchProjectLifecycle, deliverStageSignal, hasExecution, divergentProjects } =
-    await import("../src/host/hub/executor.js");
+    await import("../apps/hub/hub-executor.js");
 
   const projectId = `prj_gate_${Math.random().toString(36).slice(2, 10)}`;
   check("a project has no execution before it is launched", !hasExecution(projectId));

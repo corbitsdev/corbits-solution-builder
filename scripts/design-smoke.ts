@@ -6,16 +6,16 @@
  * carry-forward and stale-anchor reporting. No provider is needed — the design
  * versions are written directly, so the flow is testable on its own.
  */
-import { openDatabase } from "../src/host/db/client.js";
-import { prepareDatabase } from "../src/host/db/migrate.js";
-import { createProject, writeArtifact } from "../src/host/store/projects.js";
+import { openDatabase } from "../apps/hub/db.js";
+import { prepareDatabase } from "../apps/hub/migrate.js";
+import { createProject, writeArtifact } from "../apps/hub/projects.js";
 import {
   feedbackFor,
   recordDisposition,
   revisionPrompt,
   submitFeedback,
-} from "../src/host/store/design-feedback.js";
-import { HostError } from "../src/host/errors.js";
+} from "../apps/hub/design-feedback.js";
+import { HostError } from "../apps/hub/errors.js";
 
 const checks: { name: string; ok: boolean; detail: string }[] = [];
 function check(name: string, ok: boolean, detail = "") {

@@ -14,14 +14,14 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openDatabase } from "../src/host/db/client.js";
-import { prepareDatabase } from "../src/host/db/migrate.js";
-import { ensureHub } from "../src/host/hub/endpoint.js";
-import { ensureWorkspace } from "../src/host/store/projects.js";
-import { seedWorkflows } from "../src/orchestration/workflows/seed.js";
-import { projectLifecycleDefinition } from "../src/orchestration/workflows/project-lifecycle.js";
-import { stageDefinition, MAX_REVISIONS } from "../src/orchestration/workflows/stage-loop.js";
-import { STAGES } from "../src/contracts/ledger.js";
+import { openDatabase } from "../apps/hub/db.js";
+import { prepareDatabase } from "../apps/hub/migrate.js";
+import { ensureHub } from "../apps/hub/hub-endpoint.js";
+import { ensureWorkspace } from "../apps/hub/projects.js";
+import { seedWorkflows } from "../apps/hub/workflow-seed.js";
+import { projectLifecycleDefinition } from "@solutions-builder/app/workflows/project-lifecycle";
+import { stageDefinition, MAX_REVISIONS } from "@solutions-builder/app/workflows/stage-loop";
+import { STAGES } from "@solutions-builder/app/ledger";
 
 let passed = 0;
 const failures: string[] = [];
@@ -105,8 +105,8 @@ check(
 // table of ours. A row without a committed body is a job posting with no
 // instructions behind it.
 {
-  const { deployDefinitionBodies, deployedPack } = await import("../src/host/hub/deploy.js");
-  const { agentFor } = await import("../src/orchestration/agents/kit.js");
+  const { deployDefinitionBodies, deployedPack } = await import("../apps/hub/hub-deploy.js");
+  const { agentFor } = await import("@solutions-builder/app/kit");
 
   const stageDefinitions = second.filter((entry) => /\.stage\.\d+$/.test(entry.name));
   check("every stage has a definition to carry a body", stageDefinitions.length === STAGES.length);
