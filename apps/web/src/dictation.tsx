@@ -69,6 +69,9 @@ export function useDictation(value: string, onValueChange: (value: string) => vo
   const [listening, setListening] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [levels, setLevels] = useState<number[]>(() => Array(WAVE_BARS).fill(0));
+  // Sound has reached the page. Before that the microphone is being asked
+  // for, which can take as long as a permission dialog takes.
+  const [live, setLive] = useState(false);
   const session = useRef<Session | null>(null);
   const current = useRef(value);
   current.current = value;
@@ -78,12 +81,14 @@ export function useDictation(value: string, onValueChange: (value: string) => vo
   const supported = inShell() || browserRecognizer() !== null;
 
   const pushLevel = useCallback((level: number) => {
+    setLive(true);
     setLevels((history) => [...history.slice(1), Math.max(0, Math.min(1, level))]);
   }, []);
 
   const finish = useCallback((reason: string) => {
     session.current = null;
     setListening(false);
+    setLive(false);
     setLevels(Array(WAVE_BARS).fill(0));
     if (!QUIET_ENDS.has(reason)) setRefusal(reason);
   }, []);
@@ -218,7 +223,7 @@ export function useDictation(value: string, onValueChange: (value: string) => vo
   // Leaving the screen mid-sentence must not leave the microphone open.
   useEffect(() => () => session.current?.abort(), []);
 
-  return { supported, listening, levels, refusal, start, stop };
+  return { supported, listening, live, levels, refusal, start, stop };
 }
 
 /**
@@ -242,7 +247,7 @@ export function Dictated({
   disabled?: boolean;
   children: ReactNode;
 }) {
-  const { supported, listening, levels, refusal, start, stop } = useDictation(value, onValueChange);
+  const { supported, listening, live, levels, refusal, start, stop } = useDictation(value, onValueChange);
   useEffect(() => {
     if (disabled && listening) stop();
   }, [disabled, listening, stop]);
@@ -263,7 +268,7 @@ export function Dictated({
         </button>
         {children}
       </div>
-      {listening ? (
+      {listening && live ? (
         <p className="dictation-state" aria-live="polite">
           <span>Listening:</span>
           <span className="waveform" aria-hidden="true">
@@ -271,6 +276,10 @@ export function Dictated({
               <i key={at} style={{ transform: `scaleY(${Math.max(0.08, level)})` }} />
             ))}
           </span>
+        </p>
+      ) : listening ? (
+        <p className="dictation-state" aria-live="polite">
+          Starting the microphone… If macOS asks, allow it.
         </p>
       ) : refusal ? (
         <p className="dictation-state" role="alert">

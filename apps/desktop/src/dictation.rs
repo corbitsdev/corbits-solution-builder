@@ -14,7 +14,7 @@
 //! all, the recognizer delivering its final result, or the recognizer
 //! reporting an error. Every end is an event with a reason.
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -128,8 +128,20 @@ impl Inner {
     }
 }
 
+/// Managed state. Cloned into the thread a command runs on, so the command
+/// itself never blocks the main thread: the permission dialogs need that
+/// thread to appear, and a command waiting on them from it waited forever.
+#[derive(Default, Clone)]
+pub struct Dictation(Arc<Shared>);
+
 #[derive(Default)]
-pub struct Dictation(Mutex<Option<Arc<Inner>>>);
+struct Shared {
+    session: Mutex<Option<Arc<Inner>>>,
+    /// Counts starts. A stop records the start it is answering, so a start
+    /// still waiting on a permission dialog learns it has been stopped.
+    generation: AtomicU64,
+    stopped_through: AtomicU64,
+}
 
 /// Asks, and waits for the answer, which can take as long as a person takes.
 fn microphone_allowed() -> bool {
@@ -188,17 +200,30 @@ impl Running {
 /// `emit`. Returns once the engine is running, or with the reason it could
 /// not start.
 pub fn start(emit: Emit) -> Result<Running, String> {
-    start_session(emit).map(Running)
+    match start_session(emit, || false)? {
+        Some(inner) => Ok(Running(inner)),
+        None => Err("stopped before it started".into()),
+    }
 }
 
-fn start_session(emit: Emit) -> Result<Arc<Inner>, String> {
+/// `None` means a stop arrived while the permissions were being asked; the
+/// end has been told and there is nothing to run.
+fn start_session(emit: Emit, stopped: impl Fn() -> bool) -> Result<Option<Arc<Inner>>, String> {
     if !microphone_allowed() {
         return Err(
             "The microphone was not allowed. Turn it on for Solutions Builder in System Settings, Privacy & Security."
                 .into(),
         );
     }
+    if stopped() {
+        emit(Event::End { reason: "stopped".into() });
+        return Ok(None);
+    }
     speech_allowed()?;
+    if stopped() {
+        emit(Event::End { reason: "stopped".into() });
+        return Ok(None);
+    }
 
     let (recognizer, request, engine, input) = unsafe {
         let recognizer = SFSpeechRecognizer::new();
@@ -347,31 +372,49 @@ fn start_session(emit: Emit) -> Result<Arc<Inner>, String> {
         }
     });
 
-    Ok(inner)
+    Ok(Some(inner))
 }
 
 /// Opens the microphone and starts recognising. Returns once the engine is
-/// running, or with the reason it could not start. Events follow.
+/// running, or with the reason it could not start. Events follow. Runs on a
+/// worker thread: the permission dialogs need the main thread free.
 #[tauri::command]
-pub fn dictation_start(app: AppHandle, state: State<'_, Dictation>) -> Result<(), String> {
-    if let Ok(mut slot) = state.0.lock() {
-        if let Some(previous) = slot.take() {
-            previous.close("stopped");
+pub async fn dictation_start(app: AppHandle, state: State<'_, Dictation>) -> Result<(), String> {
+    let shared = Arc::clone(&state.0);
+    tauri::async_runtime::spawn_blocking(move || {
+        let generation = shared.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        if let Ok(mut slot) = shared.session.lock() {
+            if let Some(previous) = slot.take() {
+                previous.close("stopped");
+            }
         }
-    }
-    let session = start_session(Box::new(move |event| {
-        let _ = app.emit(EVENT, event);
-    }))?;
-    if let Ok(mut slot) = state.0.lock() {
-        *slot = Some(session);
-    }
-    Ok(())
+        let emitter = app.clone();
+        let emit: Emit = Box::new(move |event| {
+            let _ = emitter.emit(EVENT, event);
+        });
+        let watch = Arc::clone(&shared);
+        let session = start_session(emit, move || {
+            watch.stopped_through.load(Ordering::SeqCst) >= generation
+        })?;
+        if let Some(session) = session {
+            if let Ok(mut slot) = shared.session.lock() {
+                *slot = Some(session);
+            }
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
-/// The person tapped the microphone again.
+/// The person tapped the microphone again, or the composer went busy.
 #[tauri::command]
-pub fn dictation_stop(state: State<'_, Dictation>) -> Result<(), String> {
-    if let Ok(mut slot) = state.0.lock() {
+pub async fn dictation_stop(state: State<'_, Dictation>) -> Result<(), String> {
+    let shared = Arc::clone(&state.0);
+    shared
+        .stopped_through
+        .store(shared.generation.load(Ordering::SeqCst), Ordering::SeqCst);
+    if let Ok(mut slot) = shared.session.lock() {
         if let Some(session) = slot.take() {
             session.close("stopped");
         }
