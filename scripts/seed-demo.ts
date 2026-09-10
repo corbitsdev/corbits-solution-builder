@@ -13,6 +13,8 @@
  */
 import { openDatabase } from "../apps/hub/src/db.js";
 import { prepareDatabase } from "../apps/hub/src/migrate.js";
+import { ensureHub, localActor } from "../apps/hub/src/hub-client.js";
+import { install } from "../apps/hub/src/install.js";
 import { createProject, projectDetail, writeArtifact } from "../apps/hub/src/projects.js";
 import { execute } from "../apps/hub/src/engine.js";
 import { drainOutbox } from "../apps/hub/src/outbox.js";
@@ -21,10 +23,11 @@ import { databaseDirectory } from "../apps/hub/src/paths.js";
 import type { ArtifactKind } from "../apps/hub/src/domain.js";
 import type { Command, Stage } from "@solutions-builder/app/ledger";
 
-const ACTOR = { principalId: "p_owner", displayName: "You" };
-
 const host = await openDatabase(databaseDirectory());
 await prepareDatabase(host);
+await ensureHub();
+await install();
+const ACTOR = { ...localActor(), displayName: "You" };
 
 async function command(type: Command, projectId: string, payload: Record<string, unknown>) {
   const outcome = await execute({

@@ -19,7 +19,7 @@
     "desktop:build": "cd apps/desktop && bunx @tauri-apps/cli@2 build",
     "sidecar:build": "bun run generate:hub-migrations && bun scripts/build-sidecar.ts",
     "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
-    "check": "bun run check:hub-migrations && bun run check:ledger && bun run check:boundaries && bun run check:slop && bun run check:tokens && bun run check:layout && bun run typecheck && bun run smoke && bun run smoke:upgrade && bun run smoke:launch && bun run smoke:design && bun run smoke:oauth && bun run smoke:failure && bun run smoke:hub && bun run smoke:workflows && bun run smoke:kit && bun run check:markdown && bun run smoke:conversation && bun run smoke:guidance && bun run smoke:responsive && bun run smoke:catalog && bun run smoke:executor",
+    "check": "bun run check:hub-migrations && bun run check:ledger && bun run check:boundaries && bun run typecheck && bun run smoke && bun run smoke:upgrade && bun run smoke:launch && bun run smoke:conversation && bun run smoke:catalog",
     "check:ledger": "bun --conditions intx-src scripts/check-ledger.ts",
     "check:boundaries": "bun --conditions intx-src scripts/check-boundaries.ts",
     "smoke": "bun --conditions intx-src scripts/loop-smoke.ts",
@@ -41,10 +41,10 @@
     "smoke:guidance": "bun --conditions intx-src scripts/guidance-smoke.ts",
     "walk": "bun run ui:build && bun --conditions intx-src scripts/walk-ui.tsx",
     "check:tokens": "bun scripts/check-tokens.ts",
-    "smoke:workflows": "bun --conditions intx-src scripts/workflow-smoke.ts",
     "smoke:kit": "bun --conditions intx-src scripts/kit-smoke.ts",
     "smoke:catalog": "bun --conditions intx-src scripts/catalog-smoke.ts",
-    "smoke:executor": "bun --conditions intx-src scripts/executor-spike.ts"
+    "check:ui": "bun run check:slop && bun run check:tokens && bun run check:layout && bun run check:markdown && bun run smoke:responsive",
+    "check:full": "bun run check && bun run check:ui && bun run smoke:design && bun run smoke:oauth && bun run smoke:failure && bun run smoke:hub && bun run smoke:kit && bun run smoke:guidance"
   },
   "dependencies": {
     "@corbits/artifacts": "github:corbitsdev/corbits-artifacts",

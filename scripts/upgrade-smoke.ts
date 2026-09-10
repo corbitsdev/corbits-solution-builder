@@ -26,7 +26,7 @@ import { HUB_MIGRATIONS } from "../apps/hub/src/hub-migrations.generated.js";
 import { migrateHub, PreHubDatabaseError } from "../apps/hub/src/hub-migrate.js";
 import { openDatabase, type HostDatabase } from "../apps/hub/src/db.js";
 import { prepareDatabase } from "../apps/hub/src/migrate.js";
-import { ensureHub } from "../apps/hub/src/hub-endpoint.js";
+import { ensureHub } from "../apps/hub/src/hub-client.js";
 import { hub } from "../apps/hub/src/hub-mount.js";
 import { install, installState } from "../apps/hub/src/install.js";
 import { expectedDefinitions } from "@solutions-builder/app/manifest";
