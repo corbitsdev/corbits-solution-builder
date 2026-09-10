@@ -52,3 +52,25 @@ names and the document format, and never the hub.
 URL it prints, keeps a tray presence, and leaves the hub running when the
 window closes.
 
+
+## What still lives beside Interchange
+
+Everything the product records is meant to be one of two things: the outcome
+of a workflow step, or a version of an artifact. Where neither primitive can
+carry a field yet, a row stays in the `builder` schema with the reason. The
+list shrinks with every release; nothing is added to it without an upstream
+issue first.
+
+| Table | Why it is not native yet |
+| --- | --- |
+| `project` | A project is a child tenant with a policy. Interchange tenants carry `config`; the move waits on participants becoming roles in that tenant. |
+| `participant` | Roles are tenant-wide in Interchange, so "on this project" cannot be asked until the project is its own tenant. |
+| `artifact_node`, `artifact_edge` | `@corbits/artifacts` versions have no metadata or parent-version fields. Stage, lineage, exact hash and provenance ride here until that PR lands upstream. |
+| `decision_flag` | A flag on a decision is a comment on a parked run. It moves when runs are registered with the hub and can carry mail. |
+| `build_packet`, `build_question`, `build_event`, `delivery_manifest` | Stage 8 and 9 records. They become the frozen deployment, parked signals, run events and a manifest artifact once stage 8 runs through the hub's supervisor. |
+
+Commands, approvals, audience decisions and their audit trail are turns in a
+per-project ledger agent session (`engine-ledger.ts`). Run state is process
+memory (`hub-executor.ts`) until runs are registered with the hub; that is the
+gap behind most rows above. Every direct table write that remains is named in
+`hub-gaps.ts` as an upstream gap.
