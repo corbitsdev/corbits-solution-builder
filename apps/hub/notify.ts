@@ -1,26 +1,25 @@
 /**
- * Desktop notification for a durable human wait.
+ * Desktop notification for an open decision.
  *
- * The wait is already committed before this runs. A notification that fails is
- * a missed ping and never a lost decision — which is why the failure is
- * recorded on the wait row and then dropped, rather than retried into a
+ * The run parked at its gate is the record; this is the ping. A notification
+ * that fails is a missed ping and never a lost decision, so the failure is
+ * remembered for the status line and then dropped, never retried into a
  * duplicate request.
  */
-import { eq } from "drizzle-orm";
-import { database } from "./db.js";
-import * as table from "./schema.js";
+import { announcementFor, openDecisionFor, recordAnnouncement } from "./decisions.js";
 
 function escapeForOsa(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
-export async function notifyWait(waitId: string): Promise<void> {
-  const { db } = database();
-  const [wait] = await db.select().from(table.humanWait).where(eq(table.humanWait.id, waitId));
-  if (!wait) return;
+export async function notifyDecision(projectId: string, runId: string): Promise<void> {
+  const decision = await openDecisionFor(projectId);
+  // The gate has moved on since the effect was queued: nothing to announce.
+  if (!decision || decision.runId !== runId) return;
+  if (announcementFor(decision.id)) return;
 
   const title = "Solutions Builder";
-  const body = `${wait.title}. ${wait.consequence}`;
+  const body = `${decision.title}. ${decision.consequence}`;
 
   let error: string | null = null;
   if (process.platform === "darwin") {
@@ -34,8 +33,5 @@ export async function notifyWait(waitId: string): Promise<void> {
     error = `No notification transport on ${process.platform}; the decision is still waiting in the app.`;
   }
 
-  await db
-    .update(table.humanWait)
-    .set({ notifiedAt: error ? null : new Date(), notifyError: error })
-    .where(eq(table.humanWait.id, waitId));
+  recordAnnouncement(decision.id, { at: error ? null : new Date(), error });
 }

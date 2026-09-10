@@ -23,12 +23,7 @@ import {
   sessionIdFor,
   type StageTurn,
 } from "../apps/hub/hub-conversation.js";
-import {
-  answerQuestion,
-  nextQuestion,
-  recordQuestions,
-  retireQuestions,
-} from "../apps/hub/questions.js";
+import { nextQuestion } from "../apps/hub/questions.js";
 import { openDatabase } from "../apps/hub/db.js";
 import { prepareDatabase } from "../apps/hub/migrate.js";
 import { mountHub } from "../apps/hub/hub-mount.js";
@@ -56,6 +51,7 @@ const turn = (id: string, role: "human" | "specialist", body: string): StageTurn
   body,
   quotes: [],
   resultNodeId: null,
+  questions: null,
   createdAt: new Date().toISOString(),
 });
 
@@ -226,21 +222,27 @@ const ACTOR = { principalId: "p_owner" };
   };
 
   const asked = ["Which channel?", "Send or draft?", "How many leads?"];
-  await recordQuestions({ ...key, sourceNodeId: "nod_1", questions: asked });
+  // The round opens on the specialist's own turn: the questions ride on the
+  // mail, and which one is open is read back from the thread.
+  await appendSpecialistTurn({ ...key, body: asked[0]!, actor: ACTOR, questions: asked });
 
   let open = await nextQuestion(key.projectId, key.branchId, 1);
   check("the first question is asked first", open?.body === "Which channel?", String(open?.body));
   check("it knows how many follow", open?.remaining === 2, `${open?.remaining} remaining`);
 
   const answer = await appendHumanTurn({ ...key, body: "Email.", actor: ACTOR });
-  await answerQuestion(open!.id, answer);
 
   open = await nextQuestion(key.projectId, key.branchId, 1);
   check("answering asks the next one", open?.body === "Send or draft?", String(open?.body));
   check("the count comes down", open?.remaining === 1, `${open?.remaining} remaining`);
+  check("the follow-up question is a turn that does not reopen the round", (await (async () => {
+    await appendSpecialistTurn({ ...key, body: open!.body, actor: ACTOR });
+    return (await nextQuestion(key.projectId, key.branchId, 1))?.ordinal;
+  })()) === 1);
 
-  // Choosing to move on ends the interview without answering the rest.
-  await retireQuestions(key.projectId, key.branchId, 1);
+  // Choosing to move on redrafts, and the new draft opens a new round: that is
+  // what retires what was left of the old one.
+  await appendSpecialistTurn({ ...key, body: "Here is the revised draft.", actor: ACTOR, questions: [] });
   check(
     "moving on retires what is left",
     (await nextQuestion(key.projectId, key.branchId, 1)) === null,
@@ -252,8 +254,8 @@ const ACTOR = { principalId: "p_owner" };
 
   // A new draft's questions replace an older draft's unanswered ones: a
   // question about superseded text is not worth asking.
-  await recordQuestions({ ...key, sourceNodeId: "nod_1", questions: ["Stale?"] });
-  await recordQuestions({ ...key, sourceNodeId: "nod_2", questions: ["Fresh?"] });
+  await appendSpecialistTurn({ ...key, body: "Stale?", actor: ACTOR, questions: ["Stale?"] });
+  await appendSpecialistTurn({ ...key, body: "Fresh?", actor: ACTOR, questions: ["Fresh?"] });
   check(
     "a new draft supersedes the old draft's questions",
     (await nextQuestion(key.projectId, key.branchId, 1))?.body === "Fresh?",

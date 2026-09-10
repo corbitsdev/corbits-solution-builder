@@ -48,6 +48,12 @@ export type StageTurn = {
   body: string;
   quotes: Quote[];
   resultNodeId: string | null;
+  /**
+   * The questions a specialist turn opened a round with, in the order they
+   * are asked; null on every other turn. The thread is where the interview
+   * lives, so this is where its questions are.
+   */
+  questions: string[] | null;
   createdAt: string;
 };
 
@@ -193,6 +199,7 @@ async function writeTurn(args: {
   principalId: string;
   quotes?: Quote[];
   resultNodeId?: string | null;
+  questions?: string[];
 }): Promise<string> {
   if (args.role === "specialist") await ensureSpecialistPrincipal();
 
@@ -214,6 +221,7 @@ async function writeTurn(args: {
   const metadata: Record<string, unknown> = { role: args.role };
   if (args.quotes && args.quotes.length > 0) metadata.quotes = args.quotes;
   if (args.resultNodeId) metadata.resultNodeId = args.resultNodeId;
+  if (args.questions) metadata.questions = args.questions;
 
   const { sessionMail, inferenceTurn, turnPart } = await import("@intx/db/schema");
   const db = hub().db.db as unknown as InsertHandle;
@@ -325,6 +333,8 @@ export async function appendSpecialistTurn(args: {
   actor: { principalId: string };
   /** The version this turn produced, when it produced one. */
   resultNodeId?: string | null;
+  /** Set when this turn opens a round of questions, even an empty one. */
+  questions?: string[];
 }): Promise<string> {
   return writeTurn({
     projectId: args.projectId,
@@ -335,6 +345,7 @@ export async function appendSpecialistTurn(args: {
     body: args.body,
     principalId: args.actor.principalId,
     ...(args.resultNodeId !== undefined ? { resultNodeId: args.resultNodeId } : {}),
+    ...(args.questions !== undefined ? { questions: args.questions } : {}),
   });
 }
 
@@ -388,6 +399,9 @@ async function sessionTurns(
       const role = metadata.role === "specialist" ? "specialist" : "human";
       const quotes = Array.isArray(metadata.quotes) ? (metadata.quotes as Quote[]) : [];
       const resultNodeId = typeof metadata.resultNodeId === "string" ? metadata.resultNodeId : null;
+      const questions = Array.isArray(metadata.questions)
+        ? (metadata.questions as unknown[]).filter((entry): entry is string => typeof entry === "string")
+        : null;
       const when = startedAt.get(part.turnId) ?? new Date(0);
       return {
         id: part.id,
@@ -395,6 +409,7 @@ async function sessionTurns(
         body: part.content ?? "",
         quotes,
         resultNodeId,
+        questions,
         createdAt: when instanceof Date ? when.toISOString() : String(when),
         kind: metadata.kind as string | undefined,
         when,

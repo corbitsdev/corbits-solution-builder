@@ -218,7 +218,7 @@ try {
   await ensureHub();
 
   const before = await installState();
-  check("a booted workspace is not installed", !before.installed && before.installedVersion === null);
+  check("a booted workspace is not installed", !before.installed);
   check(
     "and every definition is reported missing",
     before.missing.length === expectedDefinitions().length,
@@ -349,6 +349,16 @@ try {
     WHERE table_schema = 'builder' AND table_name = 'local_provider'
   `);
   check("builder.local_provider is gone after the migration", tableRows.rows.length === 0);
+
+  const derived = await host.db.execute<{ table_name: string }>(sql`
+    SELECT table_name FROM information_schema.tables
+    WHERE table_schema = 'builder' AND table_name IN ('human_wait', 'stage_question')
+  `);
+  check(
+    "human_wait and stage_question are gone: decisions and questions are derived",
+    derived.rows.length === 0,
+    derived.rows.map((row) => row.table_name).join(", "),
+  );
 
   // Idempotent: re-running finds nothing left to migrate and does not choke
   // on the now-missing table.

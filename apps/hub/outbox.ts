@@ -9,14 +9,14 @@
 import { asc, isNull, and, eq, lt } from "drizzle-orm";
 import { database } from "./db.js";
 import * as table from "./schema.js";
-import { notifyWait } from "./notify.js";
+import { notifyDecision } from "./notify.js";
 
 const MAX_ATTEMPTS = 5;
 
 async function deliver(entry: typeof table.outboxEntry.$inferSelect): Promise<void> {
-  if (entry.topic === "human_wait.opened") {
-    const payload = entry.payload as { waitId?: string };
-    if (payload.waitId) await notifyWait(payload.waitId);
+  if (entry.topic === "decision.opened") {
+    const payload = entry.payload as { projectId?: string; runId?: string };
+    if (payload.projectId && payload.runId) await notifyDecision(payload.projectId, payload.runId);
   }
   // Other topics are read models with no external effect yet; recording the
   // delivery is the whole job.

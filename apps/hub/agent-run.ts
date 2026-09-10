@@ -10,7 +10,6 @@ import { assumptionsIn, questionsIn, summaryIn } from "@solutions-builder/app/do
 import { recordAgentRun } from "./agent-runs.js";
 import { renderStageContext, stageContext, type StageContext } from "./agent-conversation.js";
 import { appendHumanTurn, appendSpecialistTurn, type Quote } from "./hub-conversation.js";
-import { recordQuestions } from "./questions.js";
 import { beginLiveDraft, endLiveDraft, updateLiveDraft } from "./live-drafts.js";
 import { complete } from "./inference.js";
 import { readArtifactNode, writeArtifact } from "./projects.js";
@@ -293,24 +292,15 @@ export async function draftStageArtifact(args: {
       ...(args.quotes && args.quotes.length > 0 ? { quotes: args.quotes } : {}),
     });
   }
-  // Every question the draft ended with, held in order. The first has just
-  // been spoken; the rest are asked one per exchange.
-  const asked = args.mode === "interview" ? [] : questionsIn(result.content);
-  if (asked.length > 0) {
-    await recordQuestions({
-      projectId: args.projectId,
-      branchId: args.branchId,
-      stage: args.stage,
-      runId: args.runId,
-      sourceNodeId: result.nodeId,
-      questions: asked,
-    });
-  }
-
   if (args.mode === "interview") {
     // The caller speaks next, with the following question.
     return result;
   }
+
+  // Every question the draft ended with, in order, rides on the turn that
+  // opens the round. The first is spoken now; the rest are asked one per
+  // exchange, and `nextQuestion` counts the answers on the thread.
+  const asked = questionsIn(result.content);
 
   await appendSpecialistTurn({
     projectId: args.projectId,
@@ -323,7 +313,6 @@ export async function draftStageArtifact(args: {
     // read as one more bullet. The turn is the question; the document is the
     // document.
     body: (() => {
-      const asked = questionsIn(result.content);
       if (asked[0]) return `The draft is beside this. Before I revise it:\n\n${asked[0]}`;
       // Nothing to ask is still a turn: the reader has to be told the ball is
       // theirs, or a finished draft and a stalled one look the same.
@@ -331,6 +320,7 @@ export async function draftStageArtifact(args: {
       return `${summary}\n\nNothing I need to ask. Anything to change before you approve it?`;
     })(),
     resultNodeId: result.nodeId,
+    questions: asked,
   });
 
   return result;

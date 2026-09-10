@@ -19,7 +19,6 @@ export const newId = {
   question: () => `qst_${token()}`,
   event: () => `evt_${token()}`,
   manifest: () => `man_${token()}`,
-  wait: () => `wai_${token()}`,
   provider: () => `prv_${token()}`,
   audit: () => `aud_${token()}`,
   outbox: () => `obx_${token()}`,

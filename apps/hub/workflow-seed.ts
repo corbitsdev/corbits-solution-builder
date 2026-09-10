@@ -136,6 +136,20 @@ function definitions(): { name: string; description: string; definition: Workflo
   ];
 }
 
+/**
+ * What the package would deploy right now, without deploying it. Identity is
+ * the wire hash, so comparing these ids against the tenant's rows says whether
+ * the installed definitions are current, missing or stale.
+ */
+export async function expectedWorkflowDefinitions(): Promise<{ name: string; id: string }[]> {
+  const expected: { name: string; id: string }[] = [];
+  for (const entry of definitions()) {
+    const wireHash = await sha256(JSON.stringify(entry.definition));
+    expected.push({ name: entry.name, id: `wfd_${wireHash.slice(0, 24)}` });
+  }
+  return expected;
+}
+
 export async function seedWorkflows(): Promise<SeededWorkflow[]> {
   const seeded: SeededWorkflow[] = [];
   for (const entry of definitions()) {

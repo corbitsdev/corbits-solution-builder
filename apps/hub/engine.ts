@@ -11,7 +11,7 @@
  * Step 4 is why this is one module and not several: the atomicity claim is only
  * true if there is a single place that writes.
  */
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import type { Command, Stage } from "@solutions-builder/app/ledger";
 import { PROJECT_DELETE } from "@solutions-builder/app/ledger";
 import { evaluate, evaluateAudienceDecision, type GuardContext, type RunView } from "./guard.js";
@@ -35,7 +35,7 @@ import {
   packetExists,
   waitingOrigin,
 } from "./engine-approvals.js";
-import { audit, enqueue, openWait, closeWait } from "./engine-audit.js";
+import { audit, enqueue } from "./engine-audit.js";
 import { runGateSideEffects } from "./engine-recovery.js";
 
 export { requiredAuthorityFor, soloApprovalFor } from "./engine-approvals.js";
@@ -94,7 +94,6 @@ export type CommandOutcome = {
   readonly state: string;
   readonly transitionId: string;
   readonly replayed: boolean;
-  readonly waitId?: string;
 };
 
 type VersionRef = { artifactId: string; versionId: string; contentHash: string };
@@ -144,6 +143,14 @@ function createRun(args: {
  * and whether it is waiting, which is what every screen needs; the
  * conversation on that stage is durable too and comes back with it.
  */
+/** The gates that leave a run parked on a person, by the command that parked it. */
+const PARKED_BY: Record<string, { state: RunView["state"]; stage: Stage }> = {
+  "stage.submit": { state: "waiting_approval", stage: 1 },
+  "cost.approve": { state: "cost_approved", stage: 7 },
+  "build.wait_for_human": { state: "waiting_human", stage: 8 },
+  "build.accept_evidence": { state: "delivery_review", stage: 9 },
+};
+
 export async function rehydrateRun(projectId: string) {
   const { db } = database();
   const [project] = await db
@@ -158,10 +165,16 @@ export async function rehydrateRun(projectId: string) {
     .where(eq(table.artifactNode.projectId, projectId));
   const reached = nodes.reduce<number>((high, row) => Math.max(high, row.stage), 1) as Stage;
 
-  const open = await db
-    .select({ id: table.humanWait.id })
-    .from(table.humanWait)
-    .where(and(eq(table.humanWait.projectId, projectId), isNull(table.humanWait.resolvedAt)));
+  // Whether the stage was waiting on a person is read from the last committed
+  // command: the gates that park a run are the only ones that leave it there.
+  // A stopgap until the parked run itself is durable through the platform.
+  const [last] = await db
+    .select({ command: table.auditEvent.command })
+    .from(table.auditEvent)
+    .where(and(eq(table.auditEvent.projectId, projectId), eq(table.auditEvent.outcome, "committed")))
+    .orderBy(desc(table.auditEvent.createdAt))
+    .limit(1);
+  const parked = last ? PARKED_BY[last.command] : undefined;
 
   const now = new Date();
   const runId = newId.run();
@@ -170,8 +183,8 @@ export async function rehydrateRun(projectId: string) {
     projectId,
     branchId: project.activeBranchId ?? "",
     kind: "stage" as const,
-    stage: reached,
-    state: (open.length > 0 ? "waiting_approval" : "in_progress") as RunView["state"],
+    stage: parked ? Math.max(reached, parked.stage) as Stage : reached,
+    state: (parked?.state ?? "in_progress") as RunView["state"],
     sourceRunId: null,
     originId: runId,
     terminalReason: null,
@@ -428,7 +441,6 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
       state: applied.state,
       transitionId: verdict.transition.id,
       replayed: false,
-      ...(applied.waitId ? { waitId: applied.waitId } : {}),
     };
     // The project moves on with every command that commits, which is what
     // makes the expected-revision check above mean anything: a revision that
@@ -491,10 +503,17 @@ async function apply(
     toStage: Stage;
     authority: Authority;
   },
-): Promise<{ runId: string; stage: Stage; state: string; waitId?: string }> {
+): Promise<{ runId: string; stage: Stage; state: string }> {
   const { input, run, toStage } = args;
   const branchId = args.branchId || run.id;
   const now = new Date();
+
+  /**
+   * The run is parked on a person from here. The parked run is the record;
+   * this queues the ping, delivered after the transaction commits.
+   */
+  const announce = (runId: string) =>
+    enqueue(tx, "decision.opened", { projectId: input.projectId, runId }, input.correlationId);
 
   const recordApproval = async (decision: string, audienceName?: string) => {
     await tx.insert(table.approvalRecord).values({
@@ -549,19 +568,12 @@ async function apply(
 
     case "stage.submit": {
       updateRunRecord(run.id, { state: "waiting_approval" });
-      const waitId = await openWait(tx, {
-        projectId: input.projectId,
-        runId: run.id,
-        stage: run.stage,
-        versions: input.payload.versions ?? [],
-        correlationId: input.correlationId,
-      });
-      return { runId: run.id, stage: run.stage, state: "waiting_approval", waitId };
+      await announce(run.id);
+      return { runId: run.id, stage: run.stage, state: "waiting_approval" };
     }
 
     case "stage.approve": {
       await recordApproval("approve");
-      await closeWait(tx, run.id);
       terminalize("approved", "approved and advanced");
       const next = createRun({
         projectId: input.projectId,
@@ -576,7 +588,6 @@ async function apply(
 
     case "cost.approve": {
       await recordApproval("approve");
-      await closeWait(tx, run.id);
       // No stage advance. The cost approval is a field on this run, and
       // build.freeze is the only thing that reads it.
       updateRunRecord(run.id, {
@@ -649,14 +660,8 @@ async function apply(
         prompt: String(input.payload.prompt ?? ""),
         scopeImpact: (input.payload.scopeImpact as unknown) ?? null,
       });
-      const waitId = await openWait(tx, {
-        projectId: input.projectId,
-        runId: run.id,
-        stage: 8,
-        versions: [],
-        correlationId: input.correlationId,
-      });
-      return { runId: run.id, stage: 8, state: "waiting_human", waitId };
+      await announce(run.id);
+      return { runId: run.id, stage: 8, state: "waiting_human" };
     }
 
     case "build.answer": {
@@ -671,7 +676,6 @@ async function apply(
         .where(
           and(eq(table.buildQuestion.runId, run.id), isNull(table.buildQuestion.answeredAt)),
         );
-      await closeWait(tx, run.id);
       // The same queued-origin attempt resumes. No new run, no origin change.
       updateRunRecord(run.id, { state: "running" });
       return { runId: run.id, stage: 8, state: "running" };
@@ -679,7 +683,6 @@ async function apply(
 
     case "build.accept_evidence": {
       await recordApproval("accept");
-      await closeWait(tx, run.id);
       terminalize("evidence_accepted", "evidence accepted");
       const manifestBody = JSON.stringify(input.payload.descriptors ?? []);
       await tx.insert(table.deliveryManifest).values({
@@ -700,19 +703,12 @@ async function apply(
         state: "delivery_review",
         sourceRunId: run.id,
       });
-      const waitId = await openWait(tx, {
-        projectId: input.projectId,
-        runId: delivery,
-        stage: 9,
-        versions: [],
-        correlationId: input.correlationId,
-      });
-      return { runId: delivery, stage: 9, state: "delivery_review", waitId };
+      await announce(delivery);
+      return { runId: delivery, stage: 9, state: "delivery_review" };
     }
 
     case "delivery.accept": {
       await recordApproval("accept");
-      await closeWait(tx, run.id);
       await tx
         .update(table.deliveryManifest)
         .set({ acceptedAt: now, acceptedBy: input.actor.principalId })
@@ -737,7 +733,6 @@ async function apply(
     case "build.route_material_change": {
       const reason = String(input.payload.reason ?? "");
       await recordApproval(input.type.endsWith("reject") ? "reject" : "revise");
-      await closeWait(tx, run.id);
       await tx.insert(table.decisionFlag).values({
         id: newId.flag(),
         projectId: input.projectId,
@@ -782,7 +777,6 @@ async function apply(
     case "build.interrupt": {
       const state = input.type.split(".")[1] === "interrupt" ? "interrupted" : `${input.type.split(".")[1]}ed`;
       terminalize(state, String(input.payload.reason ?? input.type));
-      await closeWait(tx, run.id);
       return { runId: run.id, stage: run.stage, state };
     }
 

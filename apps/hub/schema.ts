@@ -235,25 +235,6 @@ export const deliveryManifest = builder.table("delivery_manifest", {
  * A durable human wait. Committed *before* the notification is sent, so a
  * failed notification loses a ping and never a decision request.
  */
-export const humanWait = builder.table(
-  "human_wait",
-  {
-    id: id(),
-    projectId: text("project_id").notNull(),
-    runId: text("run_id").notNull(),
-    stage: integer("stage").notNull(),
-    title: text("title").notNull(),
-    consequence: text("consequence").notNull(),
-    requiredAuthority: text("required_authority").notNull(),
-    versions: jsonb("versions").notNull(),
-    notifiedAt: timestamp("notified_at", { withTimezone: true }),
-    notifyError: text("notify_error"),
-    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
-    createdAt: createdAt(),
-  },
-  (table) => [index("human_wait_open_idx").on(table.resolvedAt, table.createdAt)],
-);
-
 // `local_provider` is gone: a local endpoint (Ollama and compatible) is now
 // registered through Interchange's own catalog rows — `provider`,
 // `model_provider`, `model`, `model_offering` — via `hub-catalog.ts`'s
@@ -326,28 +307,6 @@ export const hostPreference = builder.table("host_preference", {
  * can hold it. Everything else — the turns themselves, and their compaction —
  * moved to `hub-conversation.ts`.
  */
-export const stageQuestion = builder.table(
-  "stage_question",
-  {
-    id: id(),
-    projectId: text("project_id").notNull(),
-    branchId: text("branch_id").notNull(),
-    stage: integer("stage").notNull(),
-    runId: text("run_id").notNull(),
-    /** The version that asked it. Questions do not outlive their draft. */
-    sourceNodeId: text("source_node_id").notNull(),
-    /** Order within that draft. */
-    ordinal: integer("ordinal").notNull(),
-    body: text("body").notNull(),
-    /** The `session_mail` id of the human turn that answered it, once one has. */
-    answerMessageId: text("answer_message_id"),
-    /** Set when a later draft supersedes the version that asked. */
-    retiredAt: timestamp("retired_at", { withTimezone: true }),
-    createdAt: createdAt(),
-  },
-  (table) => [index("stage_question_thread_idx").on(table.projectId, table.branchId, table.stage)],
-);
-
 /**
  * What an agent invocation was, and what it produced — BUILD_PLAN_V3 §8.
  *

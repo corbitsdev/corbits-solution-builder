@@ -1,11 +1,11 @@
 import type { Hono } from "hono";
 import { ProjectCreatePayload } from "./domain.js";
 import { HostError } from "./errors.js";
+import { openDecisions } from "./decisions.js";
 import {
   artifactGraph,
   createProject,
   listProjects,
-  openDecisions,
   projectDetail,
   readArtifactNode,
   renameProject,

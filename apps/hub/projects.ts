@@ -19,6 +19,7 @@ import type { ProjectPolicy } from "./engine.js";
 import { launchProjectRun, rehydrateRun, soloApprovalFor } from "./engine.js";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { nextQuestion } from "./questions.js";
+import { openDecisionFor } from "./decisions.js";
 import { liveDraft } from "./live-drafts.js";
 import { activityHeadline } from "@solutions-builder/app/next-step";
 import {
@@ -345,12 +346,8 @@ export async function listProjects() {
   return Promise.all(
     projects.map(async (row) => {
       const current = activeRunRecord(row.id) ?? (await rehydrateRun(row.id)) ?? null;
-      const waits = await db
-        .select()
-        .from(table.humanWait)
-        .where(
-          and(eq(table.humanWait.projectId, row.id), isNull(table.humanWait.resolvedAt)),
-        );
+      const decision = await openDecisionFor(row.id, current);
+      const waits = decision ? [decision] : [];
       // Whose move it is on the current stage. "In progress" alone cannot tell
       // a list apart: the model writing, a question waiting on the person and
       // a draft waiting to be approved are all "in progress".
@@ -417,10 +414,6 @@ export async function projectDetail(projectId: string, actorPrincipalId: string)
     .from(table.approvalRecord)
     .where(eq(table.approvalRecord.projectId, projectId))
     .orderBy(asc(table.approvalRecord.createdAt));
-  const waits = await db
-    .select()
-    .from(table.humanWait)
-    .where(and(eq(table.humanWait.projectId, projectId), isNull(table.humanWait.resolvedAt)));
   const flags = await db
     .select()
     .from(table.decisionFlag)
@@ -445,6 +438,8 @@ export async function projectDetail(projectId: string, actorPrincipalId: string)
     runs.at(-1) ??
     (await rehydrateRun(projectId)) ??
     null;
+  const decision = await openDecisionFor(projectId, current);
+  const waits = decision ? [decision] : [];
 
   // "What is happening right now", not just the state enum: the runtime
   // executor is asked where its own run for this stage actually is, and that
@@ -521,18 +516,3 @@ export async function artifactGraph(projectId: string) {
   return { nodes, edges };
 }
 
-export async function openDecisions() {
-  const { db } = database();
-  const waits = await db
-    .select()
-    .from(table.humanWait)
-    .where(isNull(table.humanWait.resolvedAt))
-    .orderBy(asc(table.humanWait.createdAt));
-  if (waits.length === 0) return [];
-  const projects = await db.select().from(table.project);
-  const byId = new Map(projects.map((row) => [row.id, row]));
-  return waits.map((wait) => ({
-    ...wait,
-    projectTitle: byId.get(wait.projectId)?.title ?? "Unknown project",
-  }));
-}

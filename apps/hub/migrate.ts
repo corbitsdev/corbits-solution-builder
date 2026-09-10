@@ -492,6 +492,16 @@ const MIGRATIONS: readonly Migration[] = [
       sql`DROP TABLE IF EXISTS "builder"."local_provider"`,
     ],
   },
+  {
+    // The open decision is derived from the parked run and the ledger, and the
+    // open question from the specialist's own turn in the thread. Neither
+    // needs a row beside the record it restated.
+    id: "0004_drop_wait_and_question_tables",
+    statements: [
+      sql`DROP TABLE IF EXISTS "builder"."human_wait"`,
+      sql`DROP TABLE IF EXISTS "builder"."stage_question"`,
+    ],
+  },
 ];
 
 async function checksum(migration: Migration): Promise<string> {

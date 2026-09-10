@@ -23,7 +23,7 @@ import {
   projectDetail,
   writeArtifact,
 } from "../apps/hub/projects.js";
-import { execute, HOST_PRINCIPAL, submitAndApprove } from "../apps/hub/engine.js";
+import { execute, HOST_PRINCIPAL, rehydrateRun, submitAndApprove } from "../apps/hub/engine.js";
 import { newId } from "../apps/hub/ids.js";
 import { HostError } from "../apps/hub/errors.js";
 import { drainOutbox } from "../apps/hub/outbox.js";
@@ -140,9 +140,9 @@ for (const stage of [1, 2, 3, 4] as Stage[]) {
   if (stage === 1) {
     const waiting = await projectDetail(projectId, ACTOR.principalId);
     check(
-      "submitting opens a durable human wait before any notification",
-      waiting.waits.length === 1,
-      `${waiting.waits.length} open wait(s)`,
+      "submitting puts a decision in the queue, derived from the parked run",
+      waiting.waits.length === 1 && waiting.waits[0]!.requiredAuthority.length > 0,
+      `${waiting.waits.length} open decision(s)`,
     );
 
     await refuses(
@@ -166,7 +166,7 @@ for (const stage of [1, 2, 3, 4] as Stage[]) {
 
   if (stage === 1) {
     const closed = await projectDetail(projectId, ACTOR.principalId);
-    check("approving closes the wait", closed.waits.length === 0);
+    check("approving takes the decision out of the queue", closed.waits.length === 0);
   }
 }
 
@@ -456,7 +456,7 @@ let buildRunId = "";
   );
   const waiting = await projectDetail(projectId, ACTOR.principalId);
   check(
-    "a worker question opens a durable wait at stage 8",
+    "a worker question puts a stage 8 decision in the queue",
     waiting.waits.length === 1 && waiting.current!.state === "waiting_human",
   );
 
@@ -611,7 +611,7 @@ let buildRunId = "";
   );
 
   const waits = await projectDetail(third.projectId, ACTOR.principalId);
-  check("the replay did not open a second wait", waits.waits.length === 1);
+  check("the replay did not produce a second decision", waits.waits.length === 1);
 
   // The retry that arrives while the original is still in flight. Sequential
   // replay is the easy half; this is the one that used to hand the loser the
@@ -892,6 +892,36 @@ let buildRunId = "";
     "a project with a second participant holding the authority reports false",
     afterSecond.soloApproval === false,
     String(afterSecond.soloApproval),
+  );
+}
+
+// --- A restart still finds the decision ---
+// The executor's run map is process memory. Recovery reads the position back
+// from what is durable, and the decision waiting on the person has to come
+// back with it — on its own project, so the history counts above stay exact.
+{
+  const fresh = await createProject({
+    title: "Smoke: recovered after a restart",
+    owner: ACTOR,
+    policy: {
+      costTolerancePercent: 15,
+      costToleranceAbsolute: 500,
+      audiences: [{ name: "Project owner", role: "project_owner" }],
+      audienceQuorum: 1,
+      allowExternalProviders: false,
+    },
+  });
+  const detail = await projectDetail(fresh.projectId, ACTOR.principalId);
+  const node = await produce(1, fresh.projectId, fresh.branchId, detail.current!.id);
+  await command("stage.submit", fresh.projectId, {
+    runId: detail.current!.id,
+    versions: [{ artifactId: node.artifactId, versionId: node.nodeId, contentHash: node.contentHash }],
+  });
+  const recovered = await rehydrateRun(fresh.projectId);
+  check(
+    "a restart still finds the stage waiting on the decision",
+    recovered?.state === "waiting_approval" && recovered.stage === 1,
+    `${recovered?.state} at stage ${recovered?.stage}`,
   );
 }
 

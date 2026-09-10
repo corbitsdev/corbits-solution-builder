@@ -33,6 +33,15 @@ agent runs, and the mounted Interchange hub. Only its platform files
 internals. It is the only place a run's state is written and the only area
 allowed to reach a provider.
 
+**What is not stored.** The decision waiting on a person is derived from the
+run parked at its gate plus the ledger: title, consequence, required authority
+and the exact versions it would freeze all follow from the run's state and
+stage. The open question in a stage is read from the thread: the specialist's
+turn that opened the round carries its questions as mail, and the human turns
+after it are the answers. Neither has a table, so neither can drift from the
+record it would restate. The desktop notification is a ping off the parked
+run, never the record.
+
 **The client** (`apps/web`) renders and asks. It imports the app package for
 names and the document format, and never the hub.
 

@@ -272,7 +272,7 @@ export type StageTurn = {
 export type InstallState = {
   installed: boolean;
   appVersion: string;
-  installedVersion: string | null;
+  stale: string[];
   missing: string[];
   detail: string;
 };

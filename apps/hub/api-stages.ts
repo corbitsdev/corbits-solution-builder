@@ -5,7 +5,7 @@ import { notFound } from "./errors.js";
 import { projectDetail } from "./projects.js";
 import { draftAudiencePackages, draftStageArtifact, runEngineeringReview } from "./agent-run.js";
 import { appendHumanTurn, appendSpecialistTurn, threadTurns } from "./hub-conversation.js";
-import { answerQuestion, nextQuestion, retireQuestions } from "./questions.js";
+import { nextQuestion } from "./questions.js";
 import { liveDraft, liveDraftBegun, subscribeLiveDraft } from "./live-drafts.js";
 import { LOCAL_ACTOR } from "./api.js";
 
@@ -86,7 +86,7 @@ export function registerStageRoutes(api: Hono) {
         actor: LOCAL_ACTOR,
         ...(quotes.length > 0 ? { quotes } : {}),
       });
-      await answerQuestion(open.id, messageId);
+      void messageId;
 
       const following = await nextQuestion(projectId, branchId, stage);
       if (following) {
@@ -118,8 +118,9 @@ export function registerStageRoutes(api: Hono) {
       }
     }
 
-    // Nothing left to ask: fold everything said into one new version.
-    if (body.revise) await retireQuestions(projectId, branchId, stage);
+    // Nothing left to ask, or the person chose to move on: fold everything
+    // said into one new version. The new draft opens a new round, which is
+    // what retires whatever was left of the old one.
     const draft = await draftStageArtifact({
       projectId,
       branchId,
