@@ -1,0 +1,32 @@
+[package]
+name = "solutions-builder-desktop"
+version = "0.1.0"
+description = "Native desktop host for Solutions Builder"
+authors = ["Corbits"]
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "solutions_builder_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+libc = "0.2"
+# `webview-data-url` is what lets the startup-failure window render its own
+# self-contained HTML. The host serves every other asset, and the host is
+# exactly what has failed at that point, so the message cannot be fetched.
+tauri = { version = "2", features = ["tray-icon", "webview-data-url"] }
+# Start-at-login is a §3 acceptance item and must be reversible from inside the
+# app. The plugin owns the per-platform registration; the choice itself is the
+# host's, so the UI can explain it and turn it off.
+tauri-plugin-autostart = "2"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
