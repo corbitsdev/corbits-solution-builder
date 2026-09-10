@@ -6,7 +6,9 @@
     "main"
   ],
   "permissions": [
-    "core:default"
+    "core:default",
+    "allow-dictation-start",
+    "allow-dictation-stop"
   ],
   "remote": {
     "urls": [
