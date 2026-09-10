@@ -163,23 +163,43 @@ try {
     status ? `${status.stepId} ${status.signalName ?? ""} in ${((Date.now() - parkedAt) / 1000).toFixed(1)}s` : "no run",
   );
   if (status?.parked) {
-    const { stageSignal } = await import("@solutions-builder/app/workflows/stage-loop");
-    const submit = stageSignal("stage.submit");
+    const { roundSignal, approveSignal, gateStepId, reviseStepId } = await import(
+      "@solutions-builder/app/workflows/stage-loop"
+    );
     const before = await parkedSignalNames(project.projectId);
-    check("the iteration awaits the submit exit among its exits", before.includes(submit), before.map((n) => n.split(".").at(-1)).join(","));
-    const delivered = await deliverStageSignal(project.projectId, "stage.submit", { runId: project.runId }, `smoke-${project.projectId}`);
-    check("a gate command lands on the parked run as a signal", delivered === "delivered", delivered);
-    const movedAt = Date.now();
-    let after = before;
-    while (Date.now() - movedAt < 60_000) {
-      after = await parkedSignalNames(project.projectId).catch(() => before);
-      if (!after.includes(submit)) break;
-      await new Promise((resolve) => setTimeout(resolve, 500));
+    check("the stage 1 loop awaits its round signal", before.includes(roundSignal(1)), before.join(","));
+
+    const settle = async (until: (status: NonNullable<Awaited<ReturnType<typeof projectExecutionStatus>>>) => boolean) => {
+      const started = Date.now();
+      let latest: Awaited<ReturnType<typeof projectExecutionStatus>> = null;
+      while (Date.now() - started < 60_000) {
+        latest = await projectExecutionStatus(project.projectId).catch(() => null);
+        if (latest && until(latest)) break;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      return latest;
+    };
+
+    const submitted = await deliverStageSignal(project.projectId, "stage.submit", { runId: project.runId }, `smoke-submit-${project.projectId}`);
+    check("stage.submit lands on the parked loop as its round signal", submitted === "delivered", submitted);
+    const atGate = await settle((s) => s.parked && s.stepId === gateStepId(1));
+    if (!atGate) {
+      const { debugRuns } = await import("../apps/hub/src/hub-executor.js");
+      console.log("DIAG", JSON.stringify(await debugRuns(project.projectId), null, 1).slice(0, 6000));
     }
     check(
-      "the step awaiting that signal is no longer parked once it is consumed",
-      !after.includes(submit),
-      `still parked on: ${after.map((n) => n.split(".").at(-1)).join(",")}`,
+      "the submit ends the round and the run parks at the stage 1 gate",
+      atGate?.parked === true && atGate.stepId === gateStepId(1) && atGate.signalName === approveSignal(1),
+      atGate ? `${atGate.stepId} ${atGate.signalName ?? ""}` : "no status",
+    );
+
+    const approved = await deliverStageSignal(project.projectId, "stage.approve", { runId: project.runId }, `smoke-approve-${project.projectId}`);
+    check("stage.approve lands on the gate", approved === "delivered", approved);
+    const atStage2 = await settle((s) => s.parked && s.stage === 2);
+    check(
+      "the approval opens stage 2, parked on its first round",
+      atStage2?.parked === true && atStage2.stepId.startsWith(reviseStepId(2)) && atStage2.signalName === roundSignal(2),
+      atStage2 ? `${atStage2.stepId} ${atStage2.signalName ?? ""}` : "no status",
     );
   }
 } finally {

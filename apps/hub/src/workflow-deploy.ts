@@ -10,6 +10,7 @@
  * in-process executor (`hub-executor.ts`) retires; until then both exist.
  */
 import { projectLifecycleDefinition } from "@solutions-builder/app/workflows/project-lifecycle";
+import { continuingCommands, ROUND_STEP_ID } from "@solutions-builder/app/workflows/stage-loop";
 import { assets, catalog, workflows, type HubDeployment } from "./hub-client.js";
 import { readWorkflowSourceBlob, writeWorkflowSourceTree } from "./hub-gaps.js";
 import { canPlaceSidecars } from "./hub-mount.js";
@@ -21,18 +22,32 @@ const LOOPS_PATH = "loops.js";
 
 /**
  * The stage loop's `while` and `carry` refs, resolved by export name from the
- * package's own loops module. Pure data functions: an iteration ends when the
- * person submitted, and the current version rides between iterations.
+ * package's own loops module. Pure data functions over the iteration's output,
+ * which the runtime hands over as a record keyed by body step id: the one
+ * `round` step's output is the signal payload, and the payload names the
+ * ledger command a person issued. The loop goes on only while that command
+ * keeps the stage in progress; a submit ends it and the run moves to the gate.
+ * A terminal command (cancel, fail) ends it the same way and the run then
+ * parks at the gate — the run is a shadow of the ledger, which is what
+ * refuses or allows what happens next.
  */
-const LOOPS_MODULE = `export function stillOpen(childOutput) {
-  return !(childOutput && typeof childOutput === "object" && childOutput.submitted === true);
+function loopsModule(): string {
+  const continues = JSON.stringify(continuingCommands());
+  return `const CONTINUES = new Set(${continues});
+function roundCommand(childOutput) {
+  const round = childOutput && typeof childOutput === "object" ? childOutput[${JSON.stringify(ROUND_STEP_ID)}] : null;
+  return round && typeof round === "object" && typeof round.command === "string" ? round.command : null;
 }
-export function carryVersion(childOutput, carry) {
-  return childOutput && typeof childOutput === "object" && typeof childOutput.versionId === "string"
-    ? childOutput.versionId
-    : carry;
+export function stillOpen(childOutput) {
+  const command = roundCommand(childOutput);
+  return command !== null && CONTINUES.has(command);
+}
+export function carryRound(childOutput, carry) {
+  const round = childOutput && typeof childOutput === "object" ? childOutput[${JSON.stringify(ROUND_STEP_ID)}] : null;
+  return round ?? carry;
 }
 `;
+}
 
 export type LifecycleSource = Readonly<Record<string, string>>;
 
@@ -53,7 +68,7 @@ export function renderLifecycleSource(projectId?: string): LifecycleSource {
   return {
     "package.json": `${JSON.stringify(manifest, null, 2)}\n`,
     [ENTRY_PATH]: `export default ${JSON.stringify(withoutStateSchemas(projectLifecycleDefinition()))};\n`,
-    [LOOPS_PATH]: LOOPS_MODULE,
+    [LOOPS_PATH]: loopsModule(),
   };
 }
 

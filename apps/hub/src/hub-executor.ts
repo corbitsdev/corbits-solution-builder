@@ -16,7 +16,7 @@
  */
 import { applyEvent, emptyState, type WorkflowEvent } from "@intx/workflow";
 import type { Command, RunKind, RunState, Stage } from "@solutions-builder/app/ledger";
-import { stageSignal } from "@solutions-builder/app/workflows/stage-loop";
+import { stageOfStepId, stageSignal } from "@solutions-builder/app/workflows/stage-loop";
 import { deploymentRuns } from "./hub-client.js";
 import { ensureLifecycleDeployment } from "./workflow-deploy.js";
 
@@ -144,10 +144,11 @@ async function foldRuns(anchorRunId: string): Promise<FoldedRun[]> {
 type Parked = { readonly runId: string; readonly stepId: string; readonly stage: Stage; readonly signalName: string | null };
 
 /**
- * The steps waiting on a person. An iteration parks one step per exit the
- * ledger allows, each on its own signal, so several are parked at once; the
- * stage is named by the top-level step (`stage-N`) that spawned the child run
- * they live in. A gate inside the top-level run reports under its own step id.
+ * The steps waiting on a person. Every gate lives on the top-level run: a
+ * stage's revise loop awaits its round signal through the loop's relay, and
+ * its gate awaits the approve signal directly. Both step ids carry the stage.
+ * A loop iteration's own run also parks on the round signal; it reports under
+ * the loop step that spawned it.
  */
 function parkedSteps(runs: FoldedRun[]): Parked[] {
   const spawnedBy = new Map<string, string>();
@@ -159,25 +160,20 @@ function parkedSteps(runs: FoldedRun[]): Parked[] {
     for (const step of run.state.steps.values()) {
       if (step.phase !== "awaiting-signal") continue;
       const stepId = spawnedBy.get(run.runId) ?? step.stepId;
-      const stage = Number(stepId.replace("stage-", ""));
-      parked.push({
-        runId: run.runId,
-        stepId,
-        stage: (Number.isFinite(stage) ? stage : 1) as Stage,
-        signalName: step.awaitingSignal?.name ?? null,
-      });
+      const stage = stageOfStepId(stepId);
+      if (stage === null) continue;
+      parked.push({ runId: run.runId, stepId, stage, signalName: step.awaitingSignal?.name ?? null });
     }
   }
   return parked;
 }
 
-/** The top-level step currently running, when nothing is parked. */
+/** The top-level stage step currently running, when nothing is parked. */
 function currentStep(runs: FoldedRun[]): { stepId: string; stage: Stage } | null {
   for (const run of runs) {
     for (const step of run.state.steps.values()) {
-      if (step.phase === "in-flight" && /^stage-\d+$/.test(step.stepId)) {
-        return { stepId: step.stepId, stage: Number(step.stepId.slice(6)) as Stage };
-      }
+      const stage = stageOfStepId(step.stepId);
+      if (step.phase === "in-flight" && stage !== null) return { stepId: step.stepId, stage };
     }
   }
   return null;
@@ -229,23 +225,28 @@ export async function deliverStageSignal(
 ): Promise<DeliveryOutcome> {
   const anchor = anchors.get(projectId) ?? (await anchorFor(projectId));
   if (!anchor) return "no_execution";
-  const signalName = stageSignal(command);
-  const parked = parkedSteps(await foldRuns(anchor)).find((step) => step.signalName === signalName);
-  if (!parked) return "no_execution";
-  // Signals address the deployment's top-level run; the runtime relays them by
-  // name into the child run and loop iteration whose step awaits them.
+  const parked = parkedSteps(await foldRuns(anchor));
+  // The command lands on whichever stage the run is parked at; the ledger has
+  // already decided it is allowed there.
+  const signal = parked
+    .flatMap((step) => [stageSignal(step.stage, command, "gate"), stageSignal(step.stage, command, "exhausted")]
+      .map((candidate) => ({ step, signal: candidate })))
+    .find(({ step, signal }) => step.signalName === signal.name)?.signal;
+  if (!signal) return "no_execution";
+  // Signals address the deployment's top-level run; a loop relays a named
+  // signal into the iteration that awaits it.
   const response = await deploymentRuns.signal(anchor, {
     runId: anchor,
-    signalName,
+    signalName: signal.name,
     signalId,
-    payload,
+    payload: { ...payload, ...signal.payload },
   });
   if (response.ok) {
     divergent.delete(projectId);
     return "delivered";
   }
   console.error(
-    `[executor] ${projectId}: the hub did not accept ${stageSignal(command)} (${response.status}); ` +
+    `[executor] ${projectId}: the hub did not accept ${signal.name} (${response.status}); ` +
       `the ledger has moved and the run has not. ${(await response.text()).slice(0, 300)}`,
   );
   divergent.add(projectId);
@@ -274,4 +275,29 @@ export async function parkedSignalNames(projectId: string): Promise<string[]> {
   const anchor = anchors.get(projectId) ?? (await anchorFor(projectId));
   if (!anchor) return [];
   return parkedSteps(await foldRuns(anchor)).flatMap((step) => (step.signalName ? [step.signalName] : []));
+}
+
+/** Diagnostic view of every run under the project's deployment: step phases and any read error. */
+export async function debugRuns(projectId: string): Promise<unknown> {
+  const anchor = anchors.get(projectId) ?? (await anchorFor(projectId));
+  if (!anchor) return { anchor: null };
+  const runIds = await deploymentRuns.list(anchor);
+  const out: Record<string, unknown> = { anchor, runIds };
+  for (const runId of runIds) {
+    try {
+      const events = await deploymentRuns.events(anchor, runId);
+      let state = emptyState(runId);
+      for (const event of events) {
+        state = applyEvent(state, { ...event.body, seq: event.seq, kind: event.type } as unknown as WorkflowEvent);
+      }
+      out[runId] = {
+        kinds: events.map((event) => `${event.seq}:${event.type}`),
+        steps: [...state.steps.values()].map((step) => `${step.stepId}=${step.phase}${step.awaitingSignal ? `(${step.awaitingSignal.name})` : ""}`),
+        children: [...state.children.entries()].map(([id, child]) => `${id}<-${child.spawnedBy}`),
+      };
+    } catch (cause) {
+      out[runId] = { error: cause instanceof Error ? cause.message : String(cause) };
+    }
+  }
+  return out;
 }

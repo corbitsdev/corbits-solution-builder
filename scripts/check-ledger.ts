@@ -150,48 +150,62 @@ for (const terminal of TERMINAL_STATES) {
   const { projectLifecycleDefinition, commandsAtStage, stageStepId } = await import(
     "@solutions-builder/app/workflows/project-lifecycle"
   );
+  const { reviseStepId, exhaustedStepId, roundSignal, approveSignal, exhaustedSignal, loopExits, stageSignal } = await import(
+    "@solutions-builder/app/workflows/stage-loop"
+  );
   const definition = projectLifecycleDefinition();
+  const steps = definition.steps as Record<
+    string,
+    { kind?: string; name?: string; maxIterations?: number; onExhausted?: string; after?: string[]; body?: { steps?: Record<string, { kind?: string; name?: string }> } }
+  >;
 
+  // Every stage is a bounded revise loop followed by a human gate, both on the
+  // top-level run so the hub can signal them. A stage that could complete
+  // without a person is an automatic advancement, which section 7 forbids.
   for (const stage of STAGES) {
-    if (!definition.stepOrder.includes(stageStepId(stage))) {
-      problems.push(`The native workflow has no step for stage ${stage}`);
+    const revise = steps[reviseStepId(stage)];
+    const gate = steps[stageStepId(stage)];
+    if (!revise || revise.kind !== "loop") {
+      problems.push(`The native workflow has no revise loop for stage ${stage}`);
+      continue;
+    }
+    if (typeof revise.maxIterations !== "number" || revise.maxIterations <= 0) {
+      problems.push(`Loop ${reviseStepId(stage)} is not bounded`);
+    }
+    if (revise.onExhausted !== exhaustedStepId(stage)) {
+      problems.push(`Loop ${reviseStepId(stage)} does not route to a gate when exhausted`);
+    }
+    const exhausted = steps[exhaustedStepId(stage)];
+    if (!exhausted || exhausted.kind !== "awaitSignal" || exhausted.name !== exhaustedSignal(stage)) {
+      problems.push(`Stage ${stage}'s exhaustion does not end at a human gate`);
+    }
+    const round = Object.values(revise.body?.steps ?? {});
+    if (round.length !== 1 || round[0]?.kind !== "awaitSignal" || round[0]?.name !== roundSignal(stage)) {
+      problems.push(`Stage ${stage}'s iteration is not a single round gate`);
+    }
+    if (!gate || gate.kind !== "awaitSignal" || gate.name !== approveSignal(stage)) {
+      problems.push(`The native workflow has no human gate for stage ${stage}`);
+    } else if (!gate.after?.includes(reviseStepId(stage))) {
+      problems.push(`Stage ${stage}'s gate does not follow its revise loop`);
+    }
+    // Every command the ledger allows out of the stage lands on one of its two
+    // signals, so the run can never be asked for something it cannot consume.
+    for (const command of loopExits(stage)) {
+      if (stageSignal(stage, command).name !== roundSignal(stage)) {
+        problems.push(`${command} leaves in_progress but is not a round signal at stage ${stage}`);
+      }
+    }
+    for (const command of commandsAtStage(stage)) {
+      const { name } = stageSignal(stage, command);
+      if (name !== roundSignal(stage) && name !== approveSignal(stage)) {
+        problems.push(`${command} has no signal on stage ${stage}'s run`);
+      }
     }
   }
-  if (definition.stepOrder.length !== STAGES.length) {
+  if (definition.stepOrder.length !== STAGES.length * 3) {
     problems.push(
       `The native workflow has ${definition.stepOrder.length} steps for ${STAGES.length} stages`,
     );
-  }
-
-  // Every stage still ends at a human gate, and the check follows the child
-  // workflow to prove it rather than trusting the shape of the parent. A stage
-  // that could complete without a person is an automatic advancement, which
-  // section 7 forbids outright; hiding one inside a child would be the easiest
-  // way to lose that guarantee.
-  for (const [id, primitive] of Object.entries(definition.steps)) {
-    const step = primitive as {
-      kind?: string;
-      definition?: { inline?: { steps?: Record<string, { kind?: string; after?: string[] }> } };
-    };
-    if (step.kind === "awaitSignal") continue;
-    if (step.kind !== "childWorkflow") {
-      problems.push(`Workflow step ${id} is neither a gate nor a stage workflow`);
-      continue;
-    }
-    const inner = step.definition?.inline?.steps ?? {};
-    const gates = Object.entries(inner).filter(([, child]) => child.kind === "awaitSignal");
-    if (gates.length === 0) {
-      problems.push(`Stage workflow ${id} contains no human gate`);
-    }
-    // And the loop inside it must be bounded: an unbounded revise loop is a
-    // way to spend somebody's money until they notice.
-    for (const [childId, child] of Object.entries(inner)) {
-      if (child.kind !== "loop") continue;
-      const bound = (child as { maxIterations?: number }).maxIterations;
-      if (typeof bound !== "number" || bound <= 0) {
-        problems.push(`Loop ${id}.${childId} is not bounded`);
-      }
-    }
   }
 
   // The stage-7 interlock has to survive into the native definition: cost
