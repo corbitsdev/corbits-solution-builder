@@ -46,6 +46,22 @@ check(
   JSON.stringify(named),
 );
 
+const trailing = choicesIn(
+  "The draft is beside this. Before I revise it:\n\nIs this for you alone, or is another maintainer a real user you intend to serve? It's the difference between a config file and a distributable tool.\n\n- Option: Just me for now\n- Option: Build it so other maintainers can adopt it\n- Option: Me first, but don't paint us into a corner",
+);
+check(
+  "a question paragraph that ends in a statement",
+  trailing !== null && trailing.question.startsWith("Is this for you alone") && trailing.question.endsWith("distributable tool.") && trailing.options.length === 3 && trailing.before === "The draft is beside this. Before I revise it:",
+  JSON.stringify(trailing),
+);
+
+const wrapped = choicesIn("Two things.\n\nWhich fits,\nthe batch or the stream?\n1. Batch\n2. Stream");
+check(
+  "a question over two lines",
+  wrapped !== null && wrapped.question === "Which fits,\nthe batch or the stream?" && wrapped.before === "Two things.",
+  JSON.stringify(wrapped),
+);
+
 check("a list with no question is not a choice", choicesIn("Done so far:\n- Read the brief\n- Drafted the scope") === null);
 check("one item is not a choice", choicesIn("Which?\n- Only this") === null);
 check("a question on its own is not a choice", choicesIn("Is that right?") === null);

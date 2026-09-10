@@ -58,12 +58,19 @@ export function choicesIn(text: string): Choices | null {
   }
   if (options.length < MIN_OPTIONS || options.length > MAX_OPTIONS) return null;
 
-  let above = at;
-  while (above > 0 && blank(above - 1)) above--;
-  const asked = (lines[above - 1] ?? "").trim();
   if (closing !== null) {
     return { before: lines.slice(0, at).join("\n").trimEnd(), question: closing, options };
   }
-  if (!asked.endsWith("?") || itemOf(asked) !== null) return null;
-  return { before: lines.slice(0, above - 1).join("\n").trimEnd(), question: asked, options };
+
+  // The paragraph above the list is the question. It asks somewhere in it,
+  // not necessarily at its end: the kit wants a clause on why the answer
+  // matters, and a specialist often makes that clause its own sentence, so
+  // "…serve? It decides the scope." is a question that ends in a full stop.
+  let end_ = at;
+  while (end_ > 0 && blank(end_ - 1)) end_--;
+  let start = end_;
+  while (start > 0 && !blank(start - 1) && itemOf(lines[start - 1]!) === null) start--;
+  const asked = lines.slice(start, end_).join("\n").trim();
+  if (!asked.includes("?")) return null;
+  return { before: lines.slice(0, start).join("\n").trimEnd(), question: asked, options };
 }
