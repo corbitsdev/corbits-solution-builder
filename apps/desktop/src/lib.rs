@@ -44,12 +44,17 @@ type AppResult<T> = Result<T, Box<dyn Error>>;
 struct HostProcess {
     child: Mutex<Option<Child>>,
     launch_url: tauri::Url,
+    /// The host leads its own process group, as it does in a packaged app.
+    /// In development it stays in the launcher's, so Ctrl-C reaches it.
+    detached: bool,
 }
 
 impl HostProcess {
     fn launch(app: &AppHandle) -> AppResult<Self> {
         let resource_dir = app.path().resource_dir()?;
-        let mut command = match development_host_command()? {
+        let development = development_host_command()?;
+        let detached = development.is_none();
+        let mut command = match development {
             Some(command) => command,
             None => Command::new(resolve_host_executable()?),
         };
@@ -61,16 +66,25 @@ impl HostProcess {
             .map(PathBuf::from)
             .unwrap_or_else(|| resource_dir.join("dist"));
 
-        // No `--host-pid`: the sidecar deliberately does not monitor this
-        // process, because the window going away must not end the host.
         command
             .env("SOLUTIONS_BUILDER_DIST_DIR", dist_dir)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        #[cfg(unix)]
-        command.process_group(0);
+        if detached {
+            // The packaged host outlives this process on purpose: the window
+            // going away must not end it, so it leads its own process group
+            // and is told nothing about its parent.
+            #[cfg(unix)]
+            command.process_group(0);
+        } else {
+            // The development host is the launcher's to end. It stays in the
+            // terminal's process group, so Ctrl-C reaches it, and it watches
+            // this process, so a rebuild that kills the window outright does
+            // not leave it holding the workspace against the next one.
+            command.arg("--parent-pid").arg(std::process::id().to_string());
+        }
 
         let mut child = command.spawn().map_err(|error| {
             io::Error::new(
@@ -80,11 +94,11 @@ impl HostProcess {
         })?;
 
         let Some(stdout) = child.stdout.take() else {
-            terminate_and_reap(&mut child);
+            terminate_and_reap(&mut child, detached);
             return Err(invalid_input("host stdout handshake pipe is unavailable"));
         };
         let Some(stderr) = child.stderr.take() else {
-            terminate_and_reap(&mut child);
+            terminate_and_reap(&mut child, detached);
             return Err(invalid_input("host stderr pipe is unavailable"));
         };
         let stderr_tail = forward(stderr);
@@ -136,9 +150,10 @@ impl HostProcess {
             Ok(launch_url) => Ok(Self {
                 child: Mutex::new(Some(child)),
                 launch_url,
+                detached,
             }),
             Err(error) => {
-                terminate_and_reap(&mut child);
+                terminate_and_reap(&mut child, detached);
                 let detail = stderr_tail
                     .lock()
                     .map(|lines| lines.join("\n"))
@@ -152,7 +167,7 @@ impl HostProcess {
     fn shutdown(&self) {
         if let Ok(mut slot) = self.child.lock() {
             if let Some(mut child) = slot.take() {
-                terminate_and_reap(&mut child);
+                terminate_and_reap(&mut child, self.detached);
             }
         }
     }
@@ -160,9 +175,10 @@ impl HostProcess {
 
 impl Drop for HostProcess {
     fn drop(&mut self) {
+        let detached = self.detached;
         if let Ok(slot) = self.child.get_mut() {
             if let Some(mut child) = slot.take() {
-                terminate_and_reap(&mut child);
+                terminate_and_reap(&mut child, detached);
             }
         }
     }
@@ -290,7 +306,7 @@ fn forward(stream: impl io::Read + Send + 'static) -> Arc<Mutex<Vec<String>>> {
     tail
 }
 
-fn terminate_and_reap(child: &mut Child) {
+fn terminate_and_reap(child: &mut Child, detached: bool) {
     if matches!(child.try_wait(), Ok(Some(_))) {
         return;
     }
@@ -298,7 +314,7 @@ fn terminate_and_reap(child: &mut Child) {
     // SIGTERM is the host's explicit-stop signal: it drains committed effects
     // before exiting, which is why it gets a grace period rather than a kill.
     #[cfg(unix)]
-    signal_process_group(child.id(), libc::SIGTERM);
+    signal_host(child.id(), detached, libc::SIGTERM);
     #[cfg(not(unix))]
     let _ = child.kill();
 
@@ -312,17 +328,22 @@ fn terminate_and_reap(child: &mut Child) {
     }
 
     #[cfg(unix)]
-    signal_process_group(child.id(), libc::SIGKILL);
+    signal_host(child.id(), detached, libc::SIGKILL);
     let _ = child.kill();
     let _ = child.wait();
 }
 
+/// A detached host leads its own process group, so the group is signalled
+/// and the desktop process cannot be. A development host shares the
+/// launcher's group, so only the host itself is.
 #[cfg(unix)]
-fn signal_process_group(process_group: u32, signal: libc::c_int) {
-    // The host starts as its own process-group leader, so this cannot signal
-    // the desktop process.
+fn signal_host(pid: u32, detached: bool, signal: libc::c_int) {
     unsafe {
-        libc::killpg(process_group as libc::pid_t, signal);
+        if detached {
+            libc::killpg(pid as libc::pid_t, signal);
+        } else {
+            libc::kill(pid as libc::pid_t, signal);
+        }
     }
 }
 

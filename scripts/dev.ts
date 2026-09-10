@@ -13,6 +13,11 @@
  * development bundles, so the page reloads itself when a build lands. Editing
  * `apps/hub/src/**` still needs a restart, because that is the process being run.
  *
+ * Ctrl-C here ends everything, the host included. The debug shell keeps the
+ * development host in this terminal's process group and tells it the shell's
+ * pid, so a rebuild that kills the window cannot leave a host behind holding
+ * the workspace. A packaged app's host is detached and outlives its window.
+ *
  * `--fresh` points the host at a new temporary directory rather than deleting
  * anything: a development workspace is still somebody's work. The directory is
  * printed so it can be reused with `SOLUTIONS_BUILDER_DATA_DIR=…`.

@@ -322,6 +322,22 @@ onHostStop(() => {
   void stop().finally(() => process.exit(0));
 });
 
+// Development only: the desktop shell passes its own pid, and the host ends
+// when that process is gone. A rebuild kills the window outright, without a
+// chance to stop the host, and an orphaned host would hold the workspace
+// against the next one. A packaged app passes nothing here.
+const parentPid = numberFlag("--parent-pid");
+if (parentPid !== undefined && parentPid > 0) {
+  const watch = setInterval(() => {
+    try {
+      process.kill(parentPid, 0);
+    } catch {
+      clearInterval(watch);
+      void stop().finally(() => process.exit(0));
+    }
+  }, 1000);
+}
+
 // SIGTERM is an explicit stop. There is deliberately no parent-process monitor:
 // the window going away must not end the host.
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
