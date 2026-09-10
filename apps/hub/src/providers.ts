@@ -328,8 +328,9 @@ async function validateApiKey(
 /**
  * Connects a provider and validates it before recording it as ready.
  *
- * An API-key secret is handed to secure storage and dropped here; it is never
- * written to a row, never returned, and never logged.
+ * An API-key secret is validated, stored in the keychain for host-side
+ * reads, and sealed into Interchange's credential row so the sidecar can
+ * present it as the bearer. Plaintext never lands in a log or a response.
  */
 export async function connectProvider(
   request: ProviderConnectRequest,
@@ -390,8 +391,8 @@ export async function connectProvider(
   const baseUrl = request.baseUrl?.replace(/\/+$/, "") || CATALOG[providerId].baseUrl;
   const credentialRef = await storeSecret(`provider:${request.providerId}`, request.secret);
 
-  // §5: the hub learns the connection exists, by reference, and the catalog
-  // the credential authenticates. Without these rows there is nothing for a
+  // §5: the hub learns the connection exists, and the catalog the
+  // credential authenticates. Without these rows there is nothing for a
   // workflow definition to resolve a canonical model name against — the
   // connection would be a secret the host holds privately rather than a
   // capability the platform can deploy. There is no host-side fallback left
@@ -404,6 +405,7 @@ export async function connectProvider(
       label: request.label,
       kind: request.kind,
       credentialRef,
+      secret: request.secret,
       baseUrl,
     });
     if (!link) throw new Error("the hub did not return a credential reference");

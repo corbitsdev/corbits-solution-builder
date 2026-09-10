@@ -7,9 +7,11 @@
  * validates, authorises and records each row the same way it would for any
  * other client.
  *
- * The secret never comes here. A `credential` row carries the keychain
- * reference in its metadata and in its (encrypted) secret column; the key
- * itself stays in the OS keychain.
+ * The API key is sealed into the credential row with Interchange's own
+ * credential cipher (the encryption key lives in the OS keychain). The
+ * sidecar decrypts that column and sends it as the bearer. A keychain
+ * copy remains for host-side reads (refresh, disconnect); it is not what
+ * the sidecar authenticates with.
  */
 import { catalogModels, catalogProviders } from "@intx/inference-catalog";
 import {
@@ -92,28 +94,35 @@ async function credentialFor(providerId: string): Promise<HubCredential | null> 
 }
 
 /**
- * Records a connection's credential: a reference to the keychain entry, never
- * the key. A keyless connection (a local endpoint) gets the smallest honest
- * stand-in the platform's "exactly one credential per model provider" rule
- * allows: a credential typed `other`, holding no material, tagged keyless so
- * every reader tells it apart from a real one.
+ * Records a connection's credential. An API key is sealed into the row so
+ * Interchange can deliver it to the sidecar as the bearer; a keychain
+ * reference is kept in metadata for host-side reads. A keyless connection
+ * (a local endpoint) gets the smallest honest stand-in the platform's
+ * "exactly one credential per model provider" rule allows: a credential
+ * typed `other`, holding no material, tagged keyless so every reader tells
+ * it apart from a real one.
  */
 export async function upsertCredential(input: {
   providerId: string;
   label: string;
   kind: "api_key" | "oauth" | "local_endpoint";
   credentialRef: string | null;
+  /** The material Interchange seals. API keys pass the key; omit for OAuth. */
+  secret?: string | null;
   baseUrl?: string;
   scopes?: string[];
 }): Promise<HubCredential> {
   const provider = await ensureProviderRow(input.providerId, input.label, input.baseUrl);
   const keyless = input.kind === "local_endpoint" || !input.credentialRef;
+  const sealed = keyless ? KEYLESS_SECRET : (input.secret ?? input.credentialRef!);
   const row = {
     type: keyless ? ("other" as const) : input.kind === "oauth" ? ("oauth_token" as const) : ("api_key" as const),
-    secret: keyless ? KEYLESS_SECRET : input.credentialRef!,
+    secret: sealed,
     description: keyless
       ? "Placeholder for a keyless local endpoint — carries no secret material."
-      : `${input.label}, held in the OS keychain. This row carries the reference, never the secret.`,
+      : input.secret
+        ? `${input.label}, sealed at rest. The encryption key lives in the OS keychain.`
+        : `${input.label}, held in the OS keychain. This row carries the reference, never the secret.`,
     metadata: keyless ? { keyless: true } : { ref: input.credentialRef! },
     ...(input.scopes ? { scopes: input.scopes } : {}),
   };

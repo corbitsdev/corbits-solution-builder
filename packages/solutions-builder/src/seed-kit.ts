@@ -45,10 +45,10 @@ const SKILLS: readonly { id: string; instructions: string; tools: readonly strin
   {
     id: "interchange-platform",
     instructions: [
-      "Check what the platform already provides before planning to build it. In this revision that means: workflows and their runs, agents deployed as workflow definitions rather than rows in an agent table, grants as a requirement manifest the hub resolves at launch, credentials as tenant-owned rows whose secret is a reference, mail as sessions and messages, sidecars and their allocation for placement, and tenants, principals and roles for authority.",
+      "Check what the platform already provides before planning to build it. In this revision that means: workflows and their runs, agents deployed as workflow definitions rather than rows in an agent table, grants as a requirement manifest the hub resolves at launch, credentials as tenant-owned rows whose secret is sealed at rest, mail as sessions and messages, sidecars and their allocation for placement, and tenants, principals and roles for authority.",
       "Name the primitive you are using. A plan that says \"a queue\" where the platform has one is a plan to write a second queue.",
       "Do not model authority twice. Tenant and principal are the platform's; reference them rather than keeping a parallel copy, and let grants resolve against whoever launched the run.",
-      "Secrets live in an OS keychain where the machine has one. What is stored centrally is a reference, never the material.",
+      "Secrets live in an OS keychain where the machine has one. The hub's credential row holds the sealed key, never plaintext; the sidecar decrypts it to authenticate.",
       "Where the platform genuinely lacks something, say so plainly and scope it as work — a substitute that pretends to be the primitive is worse than an admitted gap.",
     ].join(" "),
     tools: ["artifact-read", "plan-validate"],

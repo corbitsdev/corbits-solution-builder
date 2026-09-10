@@ -250,26 +250,26 @@ try {
       const buildStarted = Date.now();
       const beforeRequests = requests.length;
       let seen = false;
-      const completionRequest = () => requests.slice(beforeRequests).find((line) => line.includes("POST") && line.includes("/chat/completions"));
+      const authorizedCompletion = () =>
+        requests
+          .slice(beforeRequests)
+          .find((line) => line.includes("POST") && line.includes("/chat/completions") && line.endsWith(" authorized"));
       while (Date.now() - buildStarted < 120_000) {
-        if (completionRequest() !== undefined) {
+        if (authorizedCompletion() !== undefined && completions.length > beforeBuild) {
           seen = true;
           break;
         }
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
-      // The agent step ran under the sidecar and asked the tenant's offering
-      // for a completion. Whether the request was authorised is reported, not
-      // asserted: the hub's credential row carries the keychain reference, not
-      // the key (catalog.ts), so the sidecar presents that reference as the
-      // bearer token. Closing that gap is a product decision, tracked on the
-      // ticket, not something this smoke can paper over.
+      // The agent step ran under the sidecar, presented the sealed key as the
+      // bearer, and the stub answered. A 401 here means the credential row
+      // still holds a keychain reference instead of the key.
       check(
         "the build agent runs under the sidecar and calls the tenant's offering",
         seen,
         seen
-          ? `${completionRequest()} after ${((Date.now() - buildStarted) / 1000).toFixed(1)}s${completions.length > beforeBuild ? `, answered (${completions.at(-1)?.messages.length} messages)` : ""}`
-          : "no completion request reached the stub",
+          ? `${authorizedCompletion()} after ${((Date.now() - buildStarted) / 1000).toFixed(1)}s, answered (${completions.at(-1)?.messages.length} messages)`
+          : `no authorised completion reached the stub (${requests.slice(beforeRequests).join("; ") || "no requests"})`,
       );
       if (!seen) {
         const { debugRuns } = await import("../apps/hub/src/hub-executor.js");

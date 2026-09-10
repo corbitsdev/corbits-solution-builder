@@ -6,7 +6,7 @@
  * capabilities being deployed, in Interchange's own tables rather than in a
  * private copy of them. Connecting a provider must produce a `model_provider`
  * row pointing at the `credential` row, a `model` row per model it serves, and
- * a `model_offering` joining them — and the secret must appear in none of it.
+ * a `model_offering` joining them — and the plaintext secret must appear in none of it.
  *
  * A stub provider stands in for a vendor: this proves the wiring, not that
  * anyone's API key is valid.
@@ -81,8 +81,9 @@ check(
   String(credential?.secret).slice(0, 24),
 );
 
-// The whole point of the reference: the secret must not be recoverable from
-// any row the hub keeps.
+// The plaintext key must not be recoverable from any row the hub keeps.
+// The sealed column is Interchange ciphertext; metadata.ref is the keychain
+// copy the host uses for its own reads.
 const everything = JSON.stringify([...providers, ...credentials, ...(await rows("select * from public.model_offering")), ...(await rows("select * from public.model"))]);
 check("the secret appears in none of the catalog rows", !everything.includes(SECRET));
 

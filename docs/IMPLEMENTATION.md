@@ -90,9 +90,12 @@ The database is in `pglite/` under it. Build workspaces are in `builds/<run>`.
 
 Secrets go to the OS keychain through `security(1)` on macOS. Where no keychain
 is available the host falls back to a file with `0600` permissions in the data
-directory and reports that it did. What lands in the database is a reference
-such as `keychain:provider:anthropic`, never the material. One function reads a
-secret back, on the path to an outbound request.
+directory and reports that it did. The host keeps a keychain copy for its own
+reads. Interchange's credential row seals the key with the hub's credential
+encryption key (also in the keychain), so the sidecar receives the real bearer
+rather than a `keychain:` reference. Plaintext never lands in a log, a
+response, or an unencrypted column. One function reads a
+secret back, on the path to an outbound host request.
 
 An API key is validated against the provider's own model listing before it is
 stored. That connection becomes Interchange's catalog: a `provider`, a
