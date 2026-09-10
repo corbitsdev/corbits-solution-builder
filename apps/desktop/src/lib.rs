@@ -494,7 +494,8 @@ pub fn run() {
         .manage(dictation::Dictation::default())
         .invoke_handler(tauri::generate_handler![
             dictation::dictation_start,
-            dictation::dictation_stop
+            dictation::dictation_stop,
+            dictation::dictation_open_settings
         ])
         .setup(|app| {
             // §3: reconcile the OS registration with the choice the person

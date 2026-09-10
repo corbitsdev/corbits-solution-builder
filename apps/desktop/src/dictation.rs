@@ -59,7 +59,80 @@ pub enum Event {
         is_final: bool,
     },
     /// Why it stopped: `stopped`, `silence`, `final`, or the recognizer's message.
-    End { reason: String },
+    /// When the reason is a setting the person can change, `help` says which.
+    End {
+        reason: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        help: Option<Help>,
+    },
+}
+
+/// A reason turned into something to do: what is wrong, and the System
+/// Settings pane that fixes it.
+#[derive(Clone, Debug, Serialize)]
+pub struct Help {
+    pub title: String,
+    pub detail: String,
+    /// The button's label.
+    pub action: String,
+    /// A key `dictation_open_settings` understands.
+    pub pane: String,
+}
+
+impl Event {
+    fn end(reason: &str) -> Event {
+        Event::End { reason: reason.to_owned(), help: help_for(reason) }
+    }
+}
+
+/// The recognizer's and the permissions' failures that are settings, with
+/// where to change them. Anything else is shown as it came.
+fn help_for(reason: &str) -> Option<Help> {
+    let lower = reason.to_lowercase();
+    let help = |title: &str, detail: &str, action: &str, pane: &str| {
+        Some(Help {
+            title: title.into(),
+            detail: detail.into(),
+            action: action.into(),
+            pane: pane.into(),
+        })
+    };
+    if lower.contains("siri and dictation") {
+        return help(
+            "Turn on Dictation or Siri",
+            "Speech recognition on this Mac runs through Siri or Dictation, and both are off. Turn on Dictation in the Keyboard settings, or turn on Siri, then tap the microphone again.",
+            "Open Keyboard settings",
+            "dictation",
+        );
+    }
+    if lower.contains("microphone was not allowed") {
+        return help(
+            "Allow the microphone",
+            "macOS is not letting Solutions Builder use the microphone. Turn it on under Privacy & Security, Microphone, then tap the microphone again.",
+            "Open Microphone privacy settings",
+            "microphone",
+        );
+    }
+    if lower.contains("speech recognition was not allowed") {
+        return help(
+            "Allow speech recognition",
+            "macOS is not letting Solutions Builder use speech recognition. Turn it on under Privacy & Security, Speech Recognition, then tap the microphone again.",
+            "Open Speech Recognition privacy settings",
+            "speech",
+        );
+    }
+    None
+}
+
+/// The System Settings panes `Help::pane` can name.
+fn settings_url(pane: &str) -> Option<&'static str> {
+    match pane {
+        "dictation" => Some("x-apple.systempreferences:com.apple.Keyboard-Settings.extension?Dictation"),
+        "siri" => Some("x-apple.systempreferences:com.apple.Siri-Settings.extension"),
+        "microphone" => Some("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"),
+        "speech" => Some("x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition"),
+        _ => None,
+    }
 }
 
 
@@ -124,7 +197,7 @@ impl Inner {
             return;
         }
         self.closing.store(true, Ordering::SeqCst);
-        (self.emit)(Event::End { reason: reason.to_owned() });
+        (self.emit)(Event::end(reason));
     }
 }
 
@@ -216,12 +289,12 @@ fn start_session(emit: Emit, stopped: impl Fn() -> bool) -> Result<Option<Arc<In
         );
     }
     if stopped() {
-        emit(Event::End { reason: "stopped".into() });
+        emit(Event::end("stopped"));
         return Ok(None);
     }
     speech_allowed()?;
     if stopped() {
-        emit(Event::End { reason: "stopped".into() });
+        emit(Event::end("stopped"));
         return Ok(None);
     }
 
@@ -420,4 +493,20 @@ pub async fn dictation_stop(state: State<'_, Dictation>) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Opens the System Settings pane a `Help` named. Only the panes this file
+/// knows are opened; the page cannot name an arbitrary URL.
+#[tauri::command]
+pub async fn dictation_open_settings(pane: String) -> Result<(), String> {
+    let url = settings_url(&pane).ok_or_else(|| format!("No settings pane is known as {pane}."))?;
+    let status = std::process::Command::new("open")
+        .arg(url)
+        .status()
+        .map_err(|error| format!("System Settings could not be opened: {error}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err("System Settings could not be opened.".into())
+    }
 }

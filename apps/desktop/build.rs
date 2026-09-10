@@ -5,7 +5,11 @@ fn main() {
     // to name.
     tauri_build::try_build(
         tauri_build::Attributes::new().app_manifest(
-            tauri_build::AppManifest::new().commands(&["dictation_start", "dictation_stop"]),
+            tauri_build::AppManifest::new().commands(&[
+                "dictation_start",
+                "dictation_stop",
+                "dictation_open_settings",
+            ]),
         ),
     )
     .expect("the desktop shell's build script failed");

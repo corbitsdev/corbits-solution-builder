@@ -16,6 +16,16 @@
  */
 import { Mic } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@corbits/react-ui";
+import { Button } from "./components.jsx";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
@@ -25,10 +35,14 @@ const WAVE_BARS = 24;
 const SILENCE_AFTER_SPEECH_MS = 1500;
 const SOUND_FLOOR = 0.015;
 
+/** A failure that is a setting: what to do, and the pane that does it. */
+type Help = { title: string; detail: string; action: string; pane: string };
 type DictationEvent =
   | { kind: "level"; level: number }
   | { kind: "text"; text: string; final: boolean }
-  | { kind: "end"; reason: string };
+  | { kind: "end"; reason: string; help?: Help };
+/** Why the last session refused or failed, with help where the shell gave it. */
+type Refusal = { message: string; help: Help | null };
 
 /** Why it stopped, in words a person can act on. Anything else is shown as is. */
 const REFUSALS: Record<string, string> = {
@@ -69,7 +83,7 @@ type Session = { stop: () => void; abort: () => void };
 
 export function useDictation(value: string, onValueChange: (value: string) => void) {
   const [listening, setListening] = useState(false);
-  const [refusal, setRefusal] = useState<string | null>(null);
+  const [refusal, setRefusal] = useState<Refusal | null>(null);
   const [levels, setLevels] = useState<number[]>(() => Array(WAVE_BARS).fill(0));
   // Sound has reached the page. Before that the microphone is being asked
   // for, which can take as long as a permission dialog takes.
@@ -92,13 +106,14 @@ export function useDictation(value: string, onValueChange: (value: string) => vo
     setLevels((history) => [...history.slice(1), Math.max(0, Math.min(1, level))]);
   }, []);
 
-  const finish = useCallback((reason: string) => {
+  const finish = useCallback((reason: string, help: Help | null = null) => {
     session.current = null;
     setListening(false);
     setLive(false);
     setLevels(Array(WAVE_BARS).fill(0));
-    if (!QUIET_ENDS.has(reason)) setRefusal(reason);
+    if (!QUIET_ENDS.has(reason)) setRefusal({ message: reason, help });
   }, []);
+  const dismiss = useCallback(() => setRefusal(null), []);
 
   const start = useCallback(async () => {
     if (session.current) return;
@@ -111,11 +126,11 @@ export function useDictation(value: string, onValueChange: (value: string) => vo
       let over = false;
       let heardLevel = false;
       let unlisten: (() => void) | null = null;
-      const end = (reason: string) => {
+      const end = (reason: string, help: Help | null = null) => {
         if (over) return;
         over = true;
         unlisten?.();
-        finish(reason);
+        finish(reason, help);
       };
       try {
         unlisten = await listen<DictationEvent>("dictation", ({ payload }) => {
@@ -124,7 +139,7 @@ export function useDictation(value: string, onValueChange: (value: string) => vo
             heardLevel = true;
             pushLevel(payload.level);
           } else if (payload.kind === "text") change.current(base + payload.text);
-          else end(payload.reason);
+          else end(payload.reason, payload.help ?? null);
         });
       } catch (cause) {
         end(`The page could not reach the shell: ${String(cause)}`);
@@ -247,7 +262,46 @@ export function useDictation(value: string, onValueChange: (value: string) => vo
   // Leaving the screen mid-sentence must not leave the microphone open.
   useEffect(() => () => session.current?.abort(), []);
 
-  return { supported, listening, live, levels, refusal, start, stop };
+  return { supported, listening, live, levels, refusal, dismiss, start, stop };
+}
+
+/**
+ * A refusal that is a setting, put in front of the person with the button
+ * that opens the pane. The shell opens it: a page cannot open System
+ * Settings, and the panes it may ask for are the ones the shell names.
+ */
+function SettingsHelp({ help, onClose }: { help: Help; onClose: () => void }) {
+  const [failure, setFailure] = useState<string | null>(null);
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{help.title}</DialogTitle>
+          <DialogDescription>{help.detail}</DialogDescription>
+        </DialogHeader>
+        {failure ? (
+          <DialogBody>
+            <p role="alert">{failure}</p>
+          </DialogBody>
+        ) : null}
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose}>
+            Not now
+          </Button>
+          <Button
+            variant="primary"
+            onClick={() =>
+              void invoke("dictation_open_settings", { pane: help.pane })
+                .then(onClose)
+                .catch((cause) => setFailure(String(cause)))
+            }
+          >
+            {help.action}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 /**
@@ -271,7 +325,7 @@ export function Dictated({
   disabled?: boolean;
   children: ReactNode;
 }) {
-  const { supported, listening, live, levels, refusal, start, stop } = useDictation(value, onValueChange);
+  const { supported, listening, live, levels, refusal, dismiss, start, stop } = useDictation(value, onValueChange);
   useEffect(() => {
     if (disabled && listening) stop();
   }, [disabled, listening, stop]);
@@ -305,9 +359,11 @@ export function Dictated({
         <p className="dictation-state" aria-live="polite">
           Starting the microphone… If macOS asks, allow it.
         </p>
+      ) : refusal?.help ? (
+        <SettingsHelp help={refusal.help} onClose={dismiss} />
       ) : refusal ? (
         <p className="dictation-state" role="alert">
-          {refusal}
+          {refusal.message}
         </p>
       ) : null}
     </div>

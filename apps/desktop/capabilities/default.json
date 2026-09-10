@@ -8,7 +8,8 @@
   "permissions": [
     "core:default",
     "allow-dictation-start",
-    "allow-dictation-stop"
+    "allow-dictation-stop",
+    "allow-dictation-open-settings"
   ],
   "remote": {
     "urls": [
