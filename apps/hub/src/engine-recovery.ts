@@ -50,7 +50,7 @@ export async function runGateSideEffects(input: CommandInput): Promise<void> {
       console.error(`[executor] ${input.projectId}: could not relaunch after restart:`, cause);
     });
   }
-  await deliverStageSignal(input.projectId, input.type, input.payload).catch((cause: unknown) => {
+  await deliverStageSignal(input.projectId, input.type, input.payload, input.idempotencyKey).catch((cause: unknown) => {
     console.error(`[executor] ${input.projectId}: signal delivery threw:`, cause);
   });
 }

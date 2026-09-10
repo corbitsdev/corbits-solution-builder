@@ -83,9 +83,11 @@ export function stageDefinition(stage: Stage): WorkflowDefinition {
       revise: loop({
         body: iteration(stage),
         // Carried between iterations: which version is current. The prompt is
-        // rebuilt from it each time rather than replayed.
-        carry: "$.state.versionId",
-        while: "$.state.open",
+        // rebuilt from it each time rather than replayed. Both refs are export
+        // names in the package's loops module (`interchange.loops`), which the
+        // deploy renders beside the definition.
+        carry: "carryVersion",
+        while: "stillOpen",
         maxIterations: MAX_REVISIONS,
         // Not a failure. Exhaustion means this has been drafted many times
         // without anyone submitting it, and the answer to that is a person,

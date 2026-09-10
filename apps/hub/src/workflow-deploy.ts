@@ -17,21 +17,43 @@ import { canPlaceSidecars } from "./hub-mount.js";
 export const LIFECYCLE_ASSET_NAME = "solutions-builder-project-lifecycle";
 const ENTRY_PATH = "workflow.js";
 const ENTRY = `./${ENTRY_PATH}`;
+const LOOPS_PATH = "loops.js";
+
+/**
+ * The stage loop's `while` and `carry` refs, resolved by export name from the
+ * package's own loops module. Pure data functions: an iteration ends when the
+ * person submitted, and the current version rides between iterations.
+ */
+const LOOPS_MODULE = `export function stillOpen(childOutput) {
+  return !(childOutput && typeof childOutput === "object" && childOutput.submitted === true);
+}
+export function carryVersion(childOutput, carry) {
+  return childOutput && typeof childOutput === "object" && typeof childOutput.versionId === "string"
+    ? childOutput.versionId
+    : carry;
+}
+`;
 
 export type LifecycleSource = Readonly<Record<string, string>>;
 
+/** One asset per project, in the workspace tenant, named so a listing reads. */
+export function lifecycleAssetName(projectId?: string): string {
+  return projectId ? `${LIFECYCLE_ASSET_NAME}-${projectId.toLowerCase().replace(/[^a-z0-9]+/g, "-")}` : LIFECYCLE_ASSET_NAME;
+}
+
 /** The package the sidecar evaluates: a manifest and an inert-JSON entry. */
-export function renderLifecycleSource(): LifecycleSource {
+export function renderLifecycleSource(projectId?: string): LifecycleSource {
   const manifest = {
-    name: LIFECYCLE_ASSET_NAME,
+    name: lifecycleAssetName(projectId),
     version: "0.0.0",
     private: true,
     type: "module",
-    interchange: { workflow: ENTRY },
+    interchange: { workflow: ENTRY, loops: `./${LOOPS_PATH}` },
   };
   return {
     "package.json": `${JSON.stringify(manifest, null, 2)}\n`,
     [ENTRY_PATH]: `export default ${JSON.stringify(withoutStateSchemas(projectLifecycleDefinition()))};\n`,
+    [LOOPS_PATH]: LOOPS_MODULE,
   };
 }
 
@@ -46,10 +68,11 @@ export type LifecycleDeployment =
       deploymentStatus: string;
     };
 
-async function lifecycleAsset(): Promise<string> {
-  const existing = (await assets.list("workflow")).find((asset) => asset.name === LIFECYCLE_ASSET_NAME);
+async function lifecycleAsset(projectId?: string): Promise<string> {
+  const name = lifecycleAssetName(projectId);
+  const existing = (await assets.list("workflow")).find((asset) => asset.name === name);
   if (existing) return existing.id;
-  return (await assets.create({ kind: "workflow", name: LIFECYCLE_ASSET_NAME, displayName: "Project lifecycle" })).id;
+  return (await assets.create({ kind: "workflow", name, displayName: "Project lifecycle" })).id;
 }
 
 // The deployment projection carries no commit sha, so the sha is remembered
@@ -61,16 +84,21 @@ const commitsByAsset = new Map<string, string>();
  * Makes sure the tenant holds a deployment of the lifecycle at the package's
  * current shape. Safe to call on every install: an unchanged tree with a
  * deployment behind it is a read, not a write.
+ *
+ * A project gets its own deployment: a deployment has one stable top-level
+ * run, and that run is the project's lifecycle. The asset is named after
+ * the project and lives in the workspace tenant, where the catalog offerings
+ * are; a project tenant holds none of its own.
  */
-export async function ensureLifecycleDeployment(): Promise<LifecycleDeployment> {
+export async function ensureLifecycleDeployment(projectId?: string): Promise<LifecycleDeployment> {
   if (!canPlaceSidecars()) return { status: "no_host" };
   const offerings = (await catalog.offerings())
     .filter((offering) => !offering.disabled)
     .sort((a, b) => a.priority - b.priority);
   if (offerings.length === 0) return { status: "no_offering" };
 
-  const source = renderLifecycleSource();
-  const assetId = await lifecycleAsset();
+  const source = renderLifecycleSource(projectId);
+  const assetId = await lifecycleAsset(projectId);
   const head = await readWorkflowSourceBlob(assetId, ENTRY_PATH);
   const [latest] = (await workflows.deployments()).filter(
     (deployment: HubDeployment) => deployment.definitionAssetId === assetId,

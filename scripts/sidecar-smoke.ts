@@ -113,10 +113,16 @@ try {
     : [];
   check("an anchor workflow_run exists for the deployment", runs.length > 0, runs.map((row) => `${row.id}:${row.status}`).join(","));
 
-  const allocations = await rows(sql`SELECT "status", "failure_message" FROM "public"."sidecar_allocation"`);
+  const waitStarted = Date.now();
+  let allocations: Record<string, unknown>[] = [];
+  while (Date.now() - waitStarted < 90_000) {
+    allocations = await rows(sql`SELECT "status", "failure_message", "sidecar_id" FROM "public"."sidecar_allocation"`);
+    if (allocations.some((row) => row.status === "allocated" && hub().sidecars.connected().some((id) => id === row.sidecar_id))) break;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
   check(
-    "a sidecar allocation backs the deployment",
-    allocations.length > 0 && allocations.some((row) => row.status === "allocated" || row.status === "provisioning" || row.status === "pending"),
+    "the deployment sidecar is allocated and connected",
+    allocations.some((row) => row.status === "allocated" && hub().sidecars.connected().some((id) => id === row.sidecar_id)),
     allocations.map((row) => `${row.status}${row.failure_message ? `: ${row.failure_message}` : ""}`).join(" | ").slice(0, 300),
   );
 
@@ -124,8 +130,62 @@ try {
     const again = await ensureLifecycleDeployment();
     check("a second install is a read, not a second deployment", again.status === "current", again.status);
   }
+
+  // A project runs on its own deployment. Creating one fires the run; the
+  // first stage parks on the person, and a gate command lands as a signal.
+  const { createProject } = await import("../apps/hub/src/projects.js");
+  const { localActor } = await import("../apps/hub/src/hub-client.js");
+  const { projectExecutionStatus, deliverStageSignal, parkedSignalNames } = await import("../apps/hub/src/hub-executor.js");
+  const project = await createProject({
+    title: "Smoke: runs on the hub",
+    owner: { ...localActor(), displayName: "Smoke" },
+    policy: {
+      costTolerancePercent: 15,
+      costToleranceAbsolute: 500,
+      audiences: [{ name: "Project owner", role: "project_owner" }],
+      audienceQuorum: 1,
+      allowExternalProviders: false,
+    },
+  });
+  const parkedAt = Date.now();
+  let status: Awaited<ReturnType<typeof projectExecutionStatus>> = null;
+  while (Date.now() - parkedAt < 90_000) {
+    status = await projectExecutionStatus(project.projectId).catch((cause: unknown) => {
+      console.error("status read failed:", cause instanceof Error ? cause.message : String(cause));
+      return null;
+    });
+    if (status?.parked) break;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  check(
+    "the project's run parks at stage 1 waiting on a person",
+    status?.parked === true && status.stage === 1,
+    status ? `${status.stepId} ${status.signalName ?? ""} in ${((Date.now() - parkedAt) / 1000).toFixed(1)}s` : "no run",
+  );
+  if (status?.parked) {
+    const { stageSignal } = await import("@solutions-builder/app/workflows/stage-loop");
+    const submit = stageSignal("stage.submit");
+    const before = await parkedSignalNames(project.projectId);
+    check("the iteration awaits the submit exit among its exits", before.includes(submit), before.map((n) => n.split(".").at(-1)).join(","));
+    const delivered = await deliverStageSignal(project.projectId, "stage.submit", { runId: project.runId }, `smoke-${project.projectId}`);
+    check("a gate command lands on the parked run as a signal", delivered === "delivered", delivered);
+    const movedAt = Date.now();
+    let after = before;
+    while (Date.now() - movedAt < 60_000) {
+      after = await parkedSignalNames(project.projectId).catch(() => before);
+      if (!after.includes(submit)) break;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    check(
+      "the step awaiting that signal is no longer parked once it is consumed",
+      !after.includes(submit),
+      `still parked on: ${after.map((n) => n.split(".").at(-1)).join(",")}`,
+    );
+  }
 } finally {
   stub.close();
+  const { stopSpawnedSidecars } = await import("../apps/hub/src/sidecar-processes.js");
+  await stopSpawnedSidecars(join(dataDir, "hub"));
   await server.stop(true);
   await host.close().catch(() => undefined);
   await rm(dataDir, { recursive: true, force: true });

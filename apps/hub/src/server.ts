@@ -19,6 +19,7 @@ import { API_VERSION, createApi } from "./api.js";
 import { openDatabase } from "./db.js";
 import { prepareDatabase } from "./migrate.js";
 import { databaseDirectory, dataDirectory } from "./paths.js";
+import { stopSpawnedSidecars } from "./sidecar-processes.js";
 import { ensureHub, hubFetch, resolveWorkspace } from "./hub-client.js";
 import { hub, hubWebSocket, setHostPort, SIDECAR_WS_PATH } from "./hub-mount.js";
 import {
@@ -310,6 +311,7 @@ async function stop(): Promise<void> {
   if (stopping) return stopping;
   stopping = (async () => {
     await server.stop(true);
+    await stopSpawnedSidecars(join(dataDirectory(), "hub")).catch(() => 0);
     await host.close();
     markStopped();
   })();
