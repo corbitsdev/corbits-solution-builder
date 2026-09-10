@@ -12,6 +12,7 @@ export const ARTIFACT_KINDS = [
   "build_packet",
   "build_evidence",
   "delivery_manifest",
+  "delivery_verification",
 ] as const;
 export type ArtifactKind = (typeof ARTIFACT_KINDS)[number];
 
@@ -29,5 +30,6 @@ export const ARTIFACT_STAGE: Readonly<Record<ArtifactKind, number>> = {
   build_packet: 7,
   build_evidence: 8,
   delivery_manifest: 9,
+  delivery_verification: 9,
 };
 

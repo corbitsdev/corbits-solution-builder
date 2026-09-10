@@ -656,9 +656,35 @@ export const workflows = {
    * call takes as long as spawning that process does.
    */
   deploy: (input: {
-    source: { kind: "asset"; assetId: string; package: { format: "source"; commitSha: string } };
+    source: {
+      kind: "asset";
+      assetId: string;
+      package: { format: "source"; commitSha: string; packageName?: string };
+    };
     entry: string;
     sourceOfferingIds: string[];
     defaultSourceOfferingId: string;
   }) => hubPost<HubDeployment>(tenantPath("/workflows/deployments"), input),
+};
+
+// --- Runs on a deployment ------------------------------------------------------
+
+export type HubRunEvent = { seq: number; type: string; body: Record<string, unknown> };
+
+export const deploymentRuns = {
+  /** Every run under the deployment: the stable top-level run and its children. */
+  list: (anchorRunId: string) =>
+    hubGet<{ runIds: string[] }>(tenantPath(`/workflows/${anchorRunId}/runs`)).then((r) => r.runIds),
+  events: (anchorRunId: string, runId: string) =>
+    hubGet<{ runId: string; events: HubRunEvent[] }>(
+      tenantPath(`/workflows/${anchorRunId}/runs/${runId}/events`),
+    ).then((r) => r.events),
+  /** The first message fires the deployment's top-level run. */
+  trigger: (anchorRunId: string, content: string) =>
+    hubPost<{ runId: string; address: string; messageId: string }>(
+      tenantPath(`/workflows/${anchorRunId}/mail`),
+      { content },
+    ),
+  signal: (anchorRunId: string, input: { runId: string; signalName: string; signalId: string; payload?: unknown }) =>
+    hubApi(tenantPath(`/workflows/${anchorRunId}/signals`), { method: "POST", body: JSON.stringify(input) }),
 };

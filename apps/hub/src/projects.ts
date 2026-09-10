@@ -16,19 +16,15 @@ import { HostError, notFound } from "./errors.js";
 import { origin } from "./guard.js";
 import { ARTIFACT_STAGE, type ArtifactDraft } from "./domain.js";
 import type { ProjectPolicy } from "./engine.js";
-import { launchProjectRun, rehydrateRun, soloApprovalFor } from "./engine.js";
-import { recordCommand, projectApprovals } from "./engine-ledger.js";
+import { launchProjectRun, soloApprovalFor } from "./engine.js";
+import { ledgerCommands, recordCommand, projectApprovals, projectFlags, projectQuestions } from "./engine-ledger.js";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { nextQuestion } from "./questions.js";
 import { openDecisionFor } from "./decisions.js";
 import { liveDraft } from "./live-drafts.js";
 import { activityHeadline } from "@solutions-builder/app/next-step";
-import {
-  activeRunRecord,
-  projectExecutionStatus,
-  putRunRecord,
-  runRecordsForProject,
-} from "./hub-executor.js";
+import { projectExecutionStatus } from "./hub-executor.js";
+import { activeRun, runsForProject, type RunRecord } from "./runs.js";
 import { tenantId } from "./hub-client.js";
 import {
   createProjectRecord,
@@ -64,31 +60,27 @@ export async function createProject(args: {
   // first principal and `createProjectRecord` gives that principal every
   // human authority as a role there.
   const project = await createProjectRecord({ title: args.title, policy: args.policy });
-  const created = (() => {
-    const projectId = project.id;
-    const runId = newId.run();
-
-    // The one run-opening write outside `engine.ts` — `project.create` has no
-    // source run to guard, so it never reaches `execute()`.
-    putRunRecord({
-      id: runId,
-      projectId,
-      kind: opening.kind,
-      stage,
-      state: opening.state,
-      sourceRunId: null,
-      originId: runId,
-      terminalReason: null,
-      costApprovalVersionId: null,
-      routeTargetStage: null,
-      packetId: null,
-      checkpointRef: null,
-      createdAt: new Date(),
-      endedAt: null,
-    });
-
-    return { projectId, runId };
-  })();
+  const runId = newId.run();
+  const created = { projectId: project.id, runId };
+  // The one run-opening write outside `engine.ts` — `project.create` has no
+  // source run to guard, so it never reaches `execute()`. The run is recorded
+  // on the project's first ledger turn, below.
+  const opened: RunRecord = {
+    id: runId,
+    projectId: project.id,
+    kind: opening.kind,
+    stage,
+    state: opening.state,
+    sourceRunId: null,
+    originId: runId,
+    terminalReason: null,
+    costApprovalVersionId: null,
+    routeTargetStage: null,
+    packetId: null,
+    checkpointRef: null,
+    createdAt: new Date(),
+    endedAt: null,
+  };
 
   await recordCommand({
     projectId: created.projectId,
@@ -109,6 +101,7 @@ export async function createProject(args: {
     },
     stage,
     runId: created.runId,
+    runs: [{ op: "create", run: opened }],
   });
   await launchProjectRun({ projectId: created.projectId });
 
@@ -267,7 +260,7 @@ export async function listProjects() {
 
   return Promise.all(
     projects.map(async (row) => {
-      const current = activeRunRecord(row.id) ?? (await rehydrateRun(row.id)) ?? null;
+      const current = await activeRun(row.id);
       const decision = await openDecisionFor(row.id, current);
       const waits = decision ? [decision] : [];
       // Whose move it is on the current stage. "In progress" alone cannot tell
@@ -319,37 +312,18 @@ export async function projectDetail(projectId: string, actorPrincipalId: string)
   const { db } = database();
   const row = await requireProject(projectId);
 
-  const runs = runRecordsForProject(projectId);
+  const runs = await runsForProject(projectId);
   const nodes = await db
     .select()
     .from(table.artifactNode)
     .where(eq(table.artifactNode.projectId, projectId))
     .orderBy(asc(table.artifactNode.createdAt));
   const approvals = await projectApprovals(projectId);
-  const flags = await db
-    .select()
-    .from(table.decisionFlag)
-    .where(eq(table.decisionFlag.projectId, projectId))
-    .orderBy(desc(table.decisionFlag.createdAt));
-  const questions = await db
-    .select()
-    .from(table.buildQuestion)
-    .where(eq(table.buildQuestion.projectId, projectId))
-    .orderBy(asc(table.buildQuestion.createdAt));
-  const manifests = await db
-    .select()
-    .from(table.deliveryManifest)
-    .where(eq(table.deliveryManifest.projectId, projectId));
+  const flags = await projectFlags(projectId);
+  const questions = await projectQuestions(projectId);
+  const manifests = await deliveryManifests(projectId, nodes);
 
-  // Run state lives in the runtime, in memory, so a restart leaves a project
-  // that exists with nothing open on it. Recovering the position from the
-  // artifacts and decisions that are durable beats showing somebody a project
-  // they can see and cannot open.
-  const current =
-    runs.filter((run) => run.endedAt === null).at(-1) ??
-    runs.at(-1) ??
-    (await rehydrateRun(projectId)) ??
-    null;
+  const current = runs.filter((run) => run.endedAt === null).at(-1) ?? runs.at(-1) ?? null;
   const decision = await openDecisionFor(projectId, current);
   const waits = decision ? [decision] : [];
 
@@ -428,3 +402,34 @@ export async function artifactGraph(projectId: string) {
   return { nodes, edges };
 }
 
+
+/**
+ * The delivery manifests are the artifact versions of that kind; acceptance
+ * is the delivery.accept command recorded on the ledger after the manifest.
+ */
+async function deliveryManifests(
+  projectId: string,
+  nodes: (typeof table.artifactNode.$inferSelect)[],
+): Promise<
+  { id: string; manifestHash: string; acceptedAt: string | null; acceptedBy: string | null; descriptors: unknown }[]
+> {
+  const manifestNodes = nodes.filter((node) => node.kind === "delivery_manifest");
+  if (manifestNodes.length === 0) return [];
+  const { artifactDb } = database();
+  const { getArtifactVersion } = await import("@corbits/artifacts");
+  const acceptances = (await ledgerCommands(projectId)).filter((command) => command.command === "delivery.accept");
+  return Promise.all(
+    manifestNodes.map(async (node) => {
+      const stored = await getArtifactVersion(artifactDb, node.artifactId, node.version);
+      const body = stored ? (JSON.parse(stored.content) as { descriptors?: unknown }) : {};
+      const accepted = acceptances.find((command) => command.createdAt >= node.createdAt.toISOString());
+      return {
+        id: node.id,
+        manifestHash: node.contentHash,
+        acceptedAt: accepted?.createdAt ?? null,
+        acceptedBy: accepted?.actorPrincipalId ?? null,
+        descriptors: body.descriptors ?? [],
+      };
+    }),
+  );
+}

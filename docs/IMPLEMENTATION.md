@@ -140,3 +140,26 @@ OAuth sign-in uses PKCE over a loopback redirect. Tokens live in the keychain.
 host as an external binary with `dist/` as a resource. The shell resolves the
 interface from `SOLUTIONS_BUILDER_DIST_DIR`, then a `dist/` beside the
 executable, then the repository's own, in that order.
+
+## Releasing the desktop app
+
+`desktop:build` is `scripts/desktop-release.ts`, a wrapper around
+`tauri build`. It reads Apple's own env contract for macOS signing and
+notarisation — `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD` (an
+app-specific password), `APPLE_TEAM_ID` — which `tauri-cli` reads directly;
+the script never puts them on a command line. When all four are set it
+signs and notarises, then verifies with `codesign --verify --deep --strict`,
+`spctl -a -vv`, and `xcrun stapler validate` before calling anything
+notarised. When any is missing it builds unsigned instead.
+
+Either way it writes `release/RELEASE.md` and `release/SHA256SUMS`: artefact
+names, sizes, SHA-256, a signing status of `signed-and-notarised`,
+`signed-not-notarised`, or `unsigned` with the reason, Tauri and Bun
+versions, and the git sha. The honesty rule: a status of
+`signed-and-notarised` is only ever written after every verification command
+above has exited 0 — a missing variable or a failed verification is recorded
+as such, never silently upgraded.
+
+`--target universal-apple-darwin` passes through to `tauri build` for a
+universal binary. `desktop:build:dry` (`--dry-run`) prints the plan —
+signed or unsigned, and why — without building.

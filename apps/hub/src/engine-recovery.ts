@@ -7,7 +7,7 @@
  * Nothing here writes run state; `hasExecution`/`launchProjectLifecycle`/
  * `deliverStageSignal` all live in the executor itself.
  */
-import type { Command } from "@solutions-builder/app/ledger";
+import { LEDGER, type Command } from "@solutions-builder/app/ledger";
 import {
   deliverStageSignal,
   hasExecution,
@@ -22,10 +22,7 @@ import type { CommandInput } from "./engine.js";
  * that talks to the runtime executor.
  */
 export const GATE_COMMANDS: readonly Command[] = [
-  "stage.approve",
-  "stage.reject",
-  "stage.revise",
-  "stage.route_back",
+  ...new Set(LEDGER.filter((row) => row.from?.kind === "stage").map((row) => row.command)),
 ];
 
 /**
@@ -50,7 +47,7 @@ export async function runGateSideEffects(input: CommandInput): Promise<void> {
       console.error(`[executor] ${input.projectId}: could not relaunch after restart:`, cause);
     });
   }
-  await deliverStageSignal(input.projectId, input.type, input.payload).catch((cause: unknown) => {
+  await deliverStageSignal(input.projectId, input.type, input.payload, input.idempotencyKey).catch((cause: unknown) => {
     console.error(`[executor] ${input.projectId}: signal delivery threw:`, cause);
   });
 }

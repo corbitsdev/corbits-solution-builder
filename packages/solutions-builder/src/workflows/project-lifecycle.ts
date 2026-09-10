@@ -8,19 +8,17 @@
  * not written alongside it — so the workflow Interchange runs and the guard the
  * host enforces cannot drift. `scripts/check-ledger.ts` asserts they agree.
  *
- * Shape: each of the nine stages is a child workflow — the `stage` definition
- * §9 names, which is the draft-and-revise loop ending at that stage's gate.
- * This one owns the order of the nine and nothing else. Inside a stage, the
- * commands that can leave a state become the signals a step accepts, which is
- * a direct reading of the ledger rather than a re-modelling of it: a gate in
- * the product is a gate in the workflow.
+ * Shape: each of the nine stages is two top-level steps — the bounded
+ * draft-and-revise loop and the approval gate the `stage` definition §9 names.
+ * They live on the top-level run rather than in a child workflow because the
+ * hub signals only that run and a loop, unlike a child, relays a named signal
+ * into the iteration awaiting it. This one owns the order of the nine and
+ * nothing else. The commands that can leave a state become the signals a step
+ * accepts, which is a direct reading of the ledger rather than a re-modelling
+ * of it: a gate in the product is a gate in the workflow.
  */
-import {
-  childWorkflow,
-  defineWorkflow,
-  type WorkflowDefinition,
-} from "@intx/workflow";
-import { stageDefinition } from "./stage-loop.js";
+import { defineWorkflow, type WorkflowDefinition } from "@intx/workflow";
+import { gateStepId, stageEnds, stageSteps } from "./stage-loop.js";
 import {
   LEDGER,
   STAGES,
@@ -30,9 +28,9 @@ import {
 
 export const PROJECT_LIFECYCLE_ID = "solutions-builder.project-lifecycle";
 
-/** The step id for a stage. Stable, and referenced by the run projection. */
+/** The step a stage ends at: its gate. Stable, and referenced by the run projection. */
 export function stageStepId(stage: Stage): string {
-  return `stage-${stage}`;
+  return gateStepId(stage);
 }
 
 /**
@@ -55,23 +53,15 @@ export function commandsAtStage(stage: Stage): Command[] {
  * humans decide" true at the workflow layer and not only in the UI.
  */
 export function projectLifecycleDefinition(): WorkflowDefinition {
-  const steps: Record<string, unknown> = {};
-  const stepOrder: string[] = [];
+  let steps: Record<string, unknown> = {};
+  let previousEnds: string[] | null = null;
 
   for (const stage of STAGES) {
-    const id = stageStepId(stage);
-    stepOrder.push(id);
-    // Each stage is a child workflow — its own bounded draft-and-revise loop
-    // ending at its own gate — rather than a single signal. §9 puts that loop
-    // in the `stage` definition, and the lifecycle's job is the order of the
-    // nine, not what happens inside one.
-    steps[id] = childWorkflow({
-      definition: stageDefinition(stage),
-      // The child owns a human gate, so cancelling it on drain would discard a
-      // decision somebody is in the middle of making.
-      drainBehavior: "wait",
-      ...(stepOrder.length > 1 ? { after: [stepOrder[stepOrder.length - 2]!] } : {}),
-    });
+    // A stage's loop starts after the previous stage's gate — whichever of its
+    // two gates ran — so the nine run in order and every one of them waits for
+    // a person before the next.
+    steps = { ...steps, ...stageSteps(stage, previousEnds) };
+    previousEnds = stageEnds(stage);
   }
 
   return defineWorkflow({

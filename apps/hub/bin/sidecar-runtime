@@ -1,6 +1,6 @@
 #!/bin/sh
-# The runtime the process provisioner spawns a sidecar with. The vendored
-# Interchange tree is consumed from source, which needs Bun's `intx-src`
-# export condition; the provisioner passes only [runtime, entry], so the
-# condition lives here.
-exec bun --conditions intx-src "$@"
+# The runtime the process provisioner spawns a sidecar with. No `intx-src`
+# condition here: the sidecar evaluates deployed workflow packages whose
+# published `@intx/*` dependencies ship only `dist/`, and the vendored
+# packages have their own `dist/` from `vendor:build`, so both resolve alike.
+exec bun "$@"

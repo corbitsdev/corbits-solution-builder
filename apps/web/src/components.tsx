@@ -447,6 +447,7 @@ const DOCUMENT_NAMES: Record<string, string> = {
   build_packet: "Build packet",
   build_evidence: "Build evidence",
   delivery_manifest: "Delivery manifest",
+  delivery_verification: "Delivery verification",
 };
 
 /**

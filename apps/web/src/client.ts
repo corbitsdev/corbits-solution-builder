@@ -124,6 +124,7 @@ export type Wait = {
   stage: number;
   title: string;
   consequence: string;
+  blockers: string | null;
   requiredAuthority: string;
   notifiedAt: string | null;
   notifyError: string | null;

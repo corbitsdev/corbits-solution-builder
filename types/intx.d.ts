@@ -514,9 +514,17 @@ declare module "@intx/workflow" {
     awaitingTimerId?: string;
     [key: string]: unknown;
   }
+  export interface ChildState {
+    childRunId: string;
+    spawnedBy: string;
+    cancelRequested: boolean;
+    terminalStatus?: "completed" | "failed" | "cancelled";
+  }
   export interface RunState {
     runId: string;
+    phase: "pending" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
     steps: Map<string, StepState>;
+    children: Map<string, ChildState>;
     [key: string]: unknown;
   }
   export function emptyState(runId: string): RunState;

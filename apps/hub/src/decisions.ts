@@ -13,9 +13,9 @@ import { STAGE_TITLES } from "@solutions-builder/app/ledger";
 import { database } from "./db.js";
 import * as table from "./schema.js";
 import { requiredAuthorityFor } from "./engine-approvals.js";
-import { rehydrateRun } from "./engine.js";
 import { listProjectRecords } from "./project-tenant.js";
-import { activeRunRecord, type StoredRun } from "./hub-executor.js";
+import { activeRun, type RunRecord } from "./runs.js";
+import { deliveryBlockers } from "./delivery.js";
 
 export type Decision = {
   /** Stable for as long as this run sits in this state. */
@@ -26,6 +26,8 @@ export type Decision = {
   stage: Stage;
   title: string;
   consequence: string;
+  /** Why the decision cannot be taken yet, or null when it can. */
+  blockers: string | null;
   requiredAuthority: string;
   /** The exact versions the decision would freeze. */
   versions: { artifactId: string; versionId: string; contentHash: string }[];
@@ -70,16 +72,16 @@ export function announcementFor(decisionId: string) {
   return announced.get(decisionId);
 }
 
-export function decisionIdFor(run: Pick<StoredRun, "id" | "state">): string {
+export function decisionIdFor(run: Pick<RunRecord, "id" | "state">): string {
   return `${run.id}:${run.state}`;
 }
 
 /** The decision waiting on this project, or null when the next move is not a person's. */
 export async function openDecisionFor(
   projectId: string,
-  current?: StoredRun | null,
+  current?: RunRecord | null,
 ): Promise<Decision | null> {
-  const run = current ?? activeRunRecord(projectId) ?? (await rehydrateRun(projectId)) ?? null;
+  const run = current ?? (await activeRun(projectId));
   if (!run || !DECIDING_STATES.has(run.state)) return null;
 
   const { db } = database();
@@ -103,14 +105,19 @@ export async function openDecisionFor(
   const id = decisionIdFor(run);
   const said = announced.get(id);
   const since = nodes[0]?.createdAt ?? run.createdAt;
+  // Stage 9 is a decision about bytes. When the latest verification found a
+  // required item missing, mismatched or unreachable, the queue says which,
+  // so nobody is asked to accept evidence that is not there.
+  const blockers = run.stage === 9 ? await deliveryBlockers(projectId) : null;
   return {
+    blockers,
     id,
     projectId,
     runId: run.id,
     stage: run.stage,
     title: `${STAGE_TITLES[run.stage]} awaits a decision`,
     consequence:
-      STATE_CONSEQUENCE[run.state] ?? CONSEQUENCE[run.stage] ?? "A human decision is required to continue.",
+      blockers ?? STATE_CONSEQUENCE[run.state] ?? CONSEQUENCE[run.stage] ?? "A human decision is required to continue.",
     requiredAuthority: requiredAuthorityFor(run.stage),
     versions: nodes.map((node) => ({
       artifactId: node.artifactId,

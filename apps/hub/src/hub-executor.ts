@@ -1,302 +1,114 @@
 /**
- * The in-process workflow executor.
+ * The project lifecycle, running on the hub.
  *
- * The in-process execution path: each
- * project's `project-lifecycle` run executes through the platform's own
- * runtime (`runtimeRun` from `@intx/workflow`), wired to its in-memory
- * adapters exactly the way `runLocal` wires them for tests. Nothing here is a
- * stand-in — it is the platform's own runtime, driving our generated
- * definitions, in-process.
+ * Each project has its own deployment of the generated lifecycle
+ * (`workflow-deploy.ts`); the hub places it on Interchange's own sidecar and
+ * the sidecar runs it. This module is the thin client: it fires the
+ * deployment's top-level run, delivers the ledger's gate commands as signals,
+ * and reads where the run stands by folding the run's own committed events.
+ * Nothing here executes a workflow; that is the sidecar's job.
  *
- * `createWorkflowSupervisor` (a real subprocess, signed IPC, a mail bus) is
- * out of reach and out of scope; `runtimeRun` is the runtime body underneath
- * it, and that is what this module drives directly.
- *
- * This module is now the sole authority for a project's run: which stage,
- * what state, and whether its runtime execution is parked at a signal gate.
- * `table.run` is gone — `engine.ts` and `store/projects.ts` read and write
- * the run record kept here instead. State here is process-memory only: a
- * host restart loses in-flight runs, which is accepted for this pass;
- * `launchProjectLifecycle` is idempotent, so a caller that finds no
- * execution relaunches one on demand.
+ * The product's own run record (origin, source, cost approval, packet,
+ * checkpoint, why it ended) is folded from the ledger thread in `runs.ts`;
+ * nothing about a run lives in process memory.
  */
+import { applyEvent, emptyState, type WorkflowEvent } from "@intx/workflow";
+import type { Command, Stage } from "@solutions-builder/app/ledger";
+import { stageOfStepId, stageSignal } from "@solutions-builder/app/workflows/stage-loop";
+import { deploymentRuns } from "./hub-client.js";
+import { ensureLifecycleDeployment } from "./workflow-deploy.js";
+
 /** What a signal delivery actually did, so a caller can tell nothing from broken. */
 export type DeliveryOutcome = "delivered" | "no_execution" | "failed";
 
-import { createDefaultDirectorRegistry } from "@intx/agent";
-import {
-  applyEvent,
-  createInMemoryBlobSubstrate,
-  createInMemoryRepoStore,
-  createInMemoryScheduler,
-  createInMemorySignalChannel,
-  createNoopDrainController,
-  createSpawnLoopIteration,
-  emptyState,
-  enumerateInlineLoopBodies,
-  rewriteInlineChildWorkflowBodies,
-  runtimeRun,
-  type RepoStore,
-  type SignalChannel,
-  type SpawnChildWorkflow,
-  type WorkflowDefinition,
-  type WorkflowRuntimeEnv,
-} from "@intx/workflow";
-import type { Command, RunKind, RunState, Stage } from "@solutions-builder/app/ledger";
-import { projectLifecycleDefinition } from "@solutions-builder/app/workflows/project-lifecycle";
-import { stageSignal } from "@solutions-builder/app/workflows/stage-loop";
+// --- The deployment behind a project -------------------------------------------
 
-/**
- * The run record — everything `table.run` used to persist, now kept here
- * instead. Stage and state are the ledger's own vocabulary, resolved against
- * this store rather than a database row; the rest (`sourceRunId`, `originId`,
- * `routeTargetStage`, `costApprovalVersionId`, `packetId`, `checkpointRef`)
- * are product-specific fields the platform has no column for, carried
- * forward unchanged because `engine.ts` and `store/projects.ts` both still
- * read every one of them (grepped, not assumed — `stage.retry`/`build.resume`
- * read `checkpointRef` and `packetId` off the prior run; `build.answer` reads
- * `originId`; `stage.select_route` reads `routeTargetStage`; `build.freeze`
- * reads `costApprovalVersionId`; the UI's `Run` type reads `packetId` and
- * `terminalReason`).
- *
- * In-memory only, same as the rest of this module: a host restart loses
- * in-flight runs, which is accepted for this pass. There is deliberately no
- * second table standing in for `table.run` — that would just move the "two
- * runners" problem sideways instead of ending it.
- */
-export type StoredRun = {
-  readonly id: string;
-  readonly projectId: string;
-  readonly kind: RunKind;
-  readonly stage: Stage;
-  readonly state: RunState;
-  readonly sourceRunId: string | null;
-  readonly originId: string;
-  readonly terminalReason: string | null;
-  readonly costApprovalVersionId: string | null;
-  readonly routeTargetStage: number | null;
-  readonly packetId: string | null;
-  readonly checkpointRef: string | null;
-  readonly createdAt: Date;
-  readonly endedAt: Date | null;
-};
+/** Anchor run id (= deployment id) per project, remembered once resolved. */
+const anchors = new Map<string, string>();
+/** Why a project has no execution, for the status line. */
+const unavailable = new Map<string, string>();
 
-const runsById = new Map<string, StoredRun>();
-/** Append-only per project, in creation order — mirrors `ORDER BY created_at`. */
-const runsByProject = new Map<string, string[]>();
-
-/** Records a new run. The id is minted by the caller, same as `table.run` before. */
-export function putRunRecord(record: StoredRun): void {
-  runsById.set(record.id, record);
-  const ids = runsByProject.get(record.projectId);
-  if (ids) ids.push(record.id);
-  else runsByProject.set(record.projectId, [record.id]);
-}
-
-export function getRunRecord(runId: string): StoredRun | undefined {
-  return runsById.get(runId);
-}
-
-/** Merges a patch into an existing run record. Throws on an unknown id — a coding error, not a user one. */
-export function updateRunRecord(
-  runId: string,
-  patch: Partial<Omit<StoredRun, "id" | "projectId">>,
-): StoredRun {
-  const existing = runsById.get(runId);
-  if (!existing) throw new Error(`executor: no run record ${runId}`);
-  const updated: StoredRun = { ...existing, ...patch };
-  runsById.set(runId, updated);
-  return updated;
-}
-
-/** The most recently created run for a project that has not ended. */
-export function activeRunRecord(projectId: string): StoredRun | undefined {
-  const ids = runsByProject.get(projectId) ?? [];
-  for (let i = ids.length - 1; i >= 0; i -= 1) {
-    const run = runsById.get(ids[i]!);
-    if (run && run.endedAt === null) return run;
+async function anchorFor(projectId: string): Promise<string | null> {
+  const known = anchors.get(projectId);
+  if (known) return known;
+  const deployment = await ensureLifecycleDeployment(projectId);
+  if (deployment.status === "no_offering" || deployment.status === "no_host") {
+    unavailable.set(projectId, deployment.status);
+    return null;
   }
-  return undefined;
+  unavailable.delete(projectId);
+  anchors.set(projectId, deployment.deploymentId);
+  return deployment.deploymentId;
 }
 
-/** Every run for a project, oldest first — the full history a project detail view shows. */
-export function runRecordsForProject(projectId: string): StoredRun[] {
-  return (runsByProject.get(projectId) ?? []).map((id) => runsById.get(id)!);
-}
+type FoldedRun = { readonly runId: string; readonly state: ReturnType<typeof emptyState> };
 
-/**
- * One stage's own child run inside a project's lifecycle: its repo store and
- * its own signal channel. `runLocal`'s `childWorkflow` resolution is a
- * private closure that discards both once the child completes — this is the
- * one thing this module reimplements the top-level wiring to keep hold of.
- */
-type StageHandle = {
-  readonly stage: Stage;
-  readonly runId: string;
-  readonly repoStore: RepoStore;
-  readonly signalChannel: SignalChannel;
-};
-
-type Execution = {
-  readonly projectId: string;
-  readonly topRunId: string;
-  /** Keyed by stage-step id ("stage-1", ...), accumulated as stages spawn. */
-  readonly stages: Map<string, StageHandle>;
-  /** The most recently spawned stage — the one a signal should reach. */
-  currentStepId: string | null;
-  settled: { outcome: "completed" | "failed" | "cancelled" | "error"; detail: string } | null;
-};
-
-const executions = new Map<string, Execution>();
-
-// One director registry for the process: stateless configuration, not
-// per-run state, so every project's runtime shares it — same as the spike.
-const directors = createDefaultDirectorRegistry();
-
-function newId(prefix: string): string {
-  return `${prefix}-${crypto.randomUUID()}`;
-}
-
-/**
- * The terminal `SpawnChildWorkflow` for a project's top-level lifecycle run.
- * Mirrors `runLocal`'s private `createInMemorySpawnChild` — same recursive
- * `runtimeRun` call, same in-memory adapters — but stashes each stage's own
- * repo store and signal channel on `execution` instead of discarding them
- * once the child completes.
- */
-function makeSpawnChild(execution: Execution, childBodies: ReadonlyMap<string, WorkflowDefinition>): SpawnChildWorkflow {
-  return async ({ definitionRef, childRunId, input, parentStepId, signal, depth, maxChildSpawnDepth }) => {
-    const resolved = childBodies.get(definitionRef);
-    if (resolved === undefined) {
-      throw new Error(`executor: no lifted definition for childWorkflow ref ${definitionRef}`);
+/** Every run under the deployment, folded from its committed events. */
+async function foldRuns(anchorRunId: string): Promise<FoldedRun[]> {
+  const runIds = await deploymentRuns.list(anchorRunId);
+  const folded: FoldedRun[] = [];
+  for (const runId of runIds) {
+    const events = await deploymentRuns.events(anchorRunId, runId);
+    let state = emptyState(runId);
+    for (const event of events) {
+      // The hub stores the discriminator as `type`; the runtime reads it as
+      // `kind`. The stored body already carries `seq` and `type`.
+      state = applyEvent(state, { ...event.body, seq: event.seq, kind: event.type } as unknown as WorkflowEvent);
     }
-
-    // A stage definition embeds a `loop` but no further inline `childWorkflow`
-    // — checked, not assumed, exactly like the spike.
-    const { workflow: rewrittenChild, bodies: grandchildBodies } = rewriteInlineChildWorkflowBodies(resolved);
-    if (grandchildBodies.length > 0) {
-      throw new Error(
-        `executor: stage definition ${definitionRef} embeds a nested childWorkflow; this executor only wires one level deep`,
-      );
-    }
-
-    const childRepoStore = createInMemoryRepoStore();
-    const childSignalChannel = createInMemorySignalChannel({ newId });
-    const stageNumber = Number(parentStepId.replace("stage-", "")) as Stage;
-    execution.stages.set(parentStepId, {
-      stage: stageNumber,
-      runId: childRunId,
-      repoStore: childRepoStore,
-      signalChannel: childSignalChannel,
-    });
-    execution.currentStepId = parentStepId;
-
-    const childEnv: WorkflowRuntimeEnv = {
-      repoStore: childRepoStore,
-      scheduler: createInMemoryScheduler({ repoStore: childRepoStore, clock: () => new Date() }),
-      signalChannel: childSignalChannel,
-      blobs: createInMemoryBlobSubstrate(),
-      directors,
-      authorize: async () => ({ effect: "allow", matchingGrants: [], resolvedBy: null }),
-      invokeStep: async () => ({ output: null }),
-      spawnChild: async ({ definitionRef: ref }) => {
-        throw new Error(`executor: unexpected childWorkflow spawn (${ref}) inside a stage`);
-      },
-      clock: () => new Date(),
-      newId,
-      drain: createNoopDrainController(rewrittenChild),
-    };
-
-    const loopBodies = new Map<string, WorkflowDefinition>();
-    for (const loopBody of enumerateInlineLoopBodies(rewrittenChild)) {
-      loopBodies.set(loopBody.ref, loopBody.definition);
-    }
-    childEnv.spawnLoopIteration = createSpawnLoopIteration(childEnv, loopBodies);
-
-    const childRun = runtimeRun(rewrittenChild, childEnv, {
-      runId: childRunId,
-      triggerPayload: input,
-      depth,
-      maxChildSpawnDepth,
-    });
-
-    const onParentAbort = () => void childRun.cancel("supervisor-operator", "parent cancelled");
-    signal.addEventListener("abort", onParentAbort);
-    try {
-      const result = await childRun.complete;
-      return { terminalStatus: result.terminalStatus };
-    } finally {
-      signal.removeEventListener("abort", onParentAbort);
-    }
-  };
-}
-
-/**
- * Launches a project's `project-lifecycle` run in-process. Idempotent per
- * project — there is exactly one lifecycle run per project, so a second call
- * for a project that already has a live execution is a no-op.
- */
-export async function launchProjectLifecycle(args: {
-  readonly projectId: string;
-}): Promise<void> {
-  if (executions.has(args.projectId)) return;
-
-  const lifecycle = projectLifecycleDefinition();
-  const { workflow: rewrittenLifecycle, bodies: lifecycleBodies } = rewriteInlineChildWorkflowBodies(lifecycle);
-  const childBodies = new Map(lifecycleBodies.map((body) => [body.ref, body.definition]));
-
-  const topRunId = `lifecycle-${args.projectId}`;
-  const execution: Execution = {
-    projectId: args.projectId,
-    topRunId,
-    stages: new Map(),
-    currentStepId: null,
-    settled: null,
-  };
-  executions.set(args.projectId, execution);
-
-  const topRepoStore = createInMemoryRepoStore();
-  const topEnv: WorkflowRuntimeEnv = {
-    repoStore: topRepoStore,
-    scheduler: createInMemoryScheduler({ repoStore: topRepoStore, clock: () => new Date() }),
-    signalChannel: createInMemorySignalChannel({ newId }),
-    blobs: createInMemoryBlobSubstrate(),
-    directors,
-    authorize: async () => ({ effect: "allow", matchingGrants: [], resolvedBy: null }),
-    invokeStep: async () => ({ output: null }),
-    spawnChild: makeSpawnChild(execution, childBodies),
-    clock: () => new Date(),
-    newId,
-    drain: createNoopDrainController(rewrittenLifecycle),
-  };
-
-  const topRun = runtimeRun(rewrittenLifecycle, topEnv, {
-    runId: topRunId,
-    triggerPayload: { projectId: args.projectId },
-  });
-
-  // The lifecycle run must not settle on its own — stage 1 parks, so its
-  // `complete` stays pending for the run's whole life. If it ever does
-  // settle, that is worth recording rather than leaving an unhandled
-  // rejection.
-  topRun.complete
-    .then((result) => {
-      execution.settled = { outcome: result.terminalStatus, detail: result.terminalStatus };
-    })
-    .catch((cause: unknown) => {
-      execution.settled = {
-        outcome: "error",
-        detail: cause instanceof Error ? cause.message : String(cause),
-      };
-    });
-
-  // Best-effort: give the run a moment to reach its first park so a status
-  // read immediately after launch already sees stage 1, without blocking
-  // forever if something stops it from ever spawning one.
-  const deadline = Date.now() + 2000;
-  while (execution.currentStepId === null && execution.settled === null && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    folded.push({ runId, state });
   }
+  return folded;
+}
+
+type Parked = { readonly runId: string; readonly stepId: string; readonly stage: Stage; readonly signalName: string | null };
+
+/**
+ * The steps waiting on a person. Every gate lives on the top-level run: a
+ * stage's revise loop awaits its round signal through the loop's relay, and
+ * its gate awaits the approve signal directly. Both step ids carry the stage.
+ * A loop iteration's own run also parks on the round signal; it reports under
+ * the loop step that spawned it.
+ */
+function parkedSteps(runs: FoldedRun[]): Parked[] {
+  const spawnedBy = new Map<string, string>();
+  for (const run of runs) {
+    for (const [childRunId, child] of run.state.children) spawnedBy.set(childRunId, child.spawnedBy);
+  }
+  const parked: Parked[] = [];
+  for (const run of runs) {
+    for (const step of run.state.steps.values()) {
+      if (step.phase !== "awaiting-signal") continue;
+      const stepId = spawnedBy.get(run.runId) ?? step.stepId;
+      const stage = stageOfStepId(stepId);
+      if (stage === null) continue;
+      parked.push({ runId: run.runId, stepId, stage, signalName: step.awaitingSignal?.name ?? null });
+    }
+  }
+  return parked;
+}
+
+/** The top-level stage step currently running, when nothing is parked. */
+function currentStep(runs: FoldedRun[]): { stepId: string; stage: Stage } | null {
+  for (const run of runs) {
+    for (const step of run.state.steps.values()) {
+      const stage = stageOfStepId(step.stepId);
+      if (step.phase === "in-flight" && stage !== null) return { stepId: step.stepId, stage };
+    }
+  }
+  return null;
+}
+
+/**
+ * Fires the project's lifecycle on its deployment. Idempotent: a deployment
+ * whose top-level run already has events is left alone, and the hub itself
+ * refuses to fire a terminal run twice.
+ */
+export async function launchProjectLifecycle(args: { readonly projectId: string }): Promise<void> {
+  const anchor = await anchorFor(args.projectId);
+  if (!anchor) return;
+  const runIds = await deploymentRuns.list(anchor);
+  if (runIds.length > 0) return;
+  await deploymentRuns.trigger(anchor, JSON.stringify({ projectId: args.projectId }));
 }
 
 export type StageStatus = {
@@ -306,86 +118,110 @@ export type StageStatus = {
   readonly signalName: string | null;
 };
 
-async function readParkedSignal(handle: StageHandle): Promise<{ parked: boolean; signalName: string | null }> {
-  const events = await handle.repoStore.read(handle.runId);
-  let state = emptyState(handle.runId);
-  for (const event of events) state = applyEvent(state, event);
-  for (const step of state.steps.values()) {
-    if (step.phase === "awaiting-signal") {
-      return { parked: true, signalName: step.awaitingSignal?.name ?? null };
-    }
-  }
-  return { parked: false, signalName: null };
-}
-
-/**
- * Which stage a project's runtime execution is on, and whether it is parked
- * at a signal gate. `null` when the project has no live execution — never
- * launched, or launched in a process that has since restarted.
- */
+/** Where the project's run stands, read from the hub's own event log. */
 export async function projectExecutionStatus(projectId: string): Promise<StageStatus | null> {
-  const execution = executions.get(projectId);
-  if (!execution || execution.currentStepId === null) return null;
-  const handle = execution.stages.get(execution.currentStepId);
-  if (!handle) return null;
-  const { parked, signalName } = await readParkedSignal(handle);
-  return { stage: handle.stage, stepId: execution.currentStepId, parked, signalName };
+  const anchor = anchors.get(projectId) ?? (await anchorFor(projectId));
+  if (!anchor) return null;
+  const runs = await foldRuns(anchor);
+  const [parked] = parkedSteps(runs);
+  if (parked) return { stage: parked.stage, stepId: parked.stepId, parked: true, signalName: parked.signalName };
+  const running = currentStep(runs);
+  if (running) return { ...running, parked: false, signalName: null };
+  return null;
 }
 
 /**
- * Delivers the signal a committed gate command corresponds to
- * (`stageSignal` from `stage-loop.ts`) into the project's currently active
- * stage run. Returns `false` — not an error — when the project has no live
- * execution: the ledger transition already moved the project; this is a
- * best-effort shadow of it, not the thing that makes the command valid.
+ * Delivers a gate command as the signal the parked stage waits on. Refused
+ * as `no_execution` when nothing awaits that name, so a command the ledger
+ * accepted but the run cannot consume is visible rather than swallowed. `signalId` is the command's own idempotency key, so a retried
+ * command is a deduplicated signal, never a second one.
  */
 export async function deliverStageSignal(
   projectId: string,
   command: Command,
   payload: Record<string, unknown> = {},
+  signalId: string = crypto.randomUUID(),
 ): Promise<DeliveryOutcome> {
-  const execution = executions.get(projectId);
-  if (!execution || execution.currentStepId === null) return "no_execution";
-  const handle = execution.stages.get(execution.currentStepId);
-  if (!handle) return "no_execution";
-  try {
-    await handle.signalChannel.deliver(stageSignal(command), payload);
+  const anchor = anchors.get(projectId) ?? (await anchorFor(projectId));
+  if (!anchor) return "no_execution";
+  const parked = parkedSteps(await foldRuns(anchor));
+  // The command lands on whichever stage the run is parked at; the ledger has
+  // already decided it is allowed there.
+  const signal = parked
+    .flatMap((step) => [stageSignal(step.stage, command, "gate"), stageSignal(step.stage, command, "exhausted")]
+      .map((candidate) => ({ step, signal: candidate })))
+    .find(({ step, signal }) => step.signalName === signal.name)?.signal;
+  if (!signal) return "no_execution";
+  // Signals address the deployment's top-level run; a loop relays a named
+  // signal into the iteration that awaits it.
+  const response = await deploymentRuns.signal(anchor, {
+    runId: anchor,
+    signalName: signal.name,
+    signalId,
+    payload: { ...payload, ...signal.payload },
+  });
+  if (response.ok) {
+    divergent.delete(projectId);
     return "delivered";
-  } catch (cause) {
-    // Two state machines that disagree and never say so is the failure this
-    // reports rather than swallows. The ledger has already moved; the runtime
-    // has not, and from here it never will on its own.
-    console.error(
-      `[executor] ${projectId}: the runtime did not accept ${stageSignal(command)}; ` +
-        `the ledger has moved and the runtime has not. ` +
-        (cause instanceof Error ? cause.message : String(cause)),
-    );
-    divergent.add(projectId);
-    return "failed";
   }
+  console.error(
+    `[executor] ${projectId}: the hub did not accept ${signal.name} (${response.status}); ` +
+      `the ledger has moved and the run has not. ${(await response.text()).slice(0, 300)}`,
+  );
+  divergent.add(projectId);
+  return "failed";
 }
 
-/**
- * Projects whose runtime run is known to disagree with the ledger.
- *
- * A shadow nobody can see is worse than no shadow. This is what a caller — a
- * status route, a gate — reads to find out that the two have parted company,
- * rather than the divergence sitting silently in a map.
- */
+/** Projects whose last signal the hub refused: the ledger and the run disagree. */
 const divergent = new Set<string>();
 
 export function divergentProjects(): readonly string[] {
   return [...divergent];
 }
 
-/**
- * Whether a project has a live runtime run at all.
- *
- * False after a restart for every project that was mid-flight, which is the
- * honest answer: the runs live in this process's memory and the process is
- * new. `launchProjectLifecycle` is idempotent, so a caller that finds no
- * execution can start one.
- */
+/** Whether the project's deployment has a fired run this process knows of. */
 export function hasExecution(projectId: string): boolean {
-  return executions.has(projectId);
+  return anchors.has(projectId);
+}
+
+/** Why a project has no run: no offering connected yet, or a host that cannot place sidecars. */
+export function executionUnavailable(projectId: string): string | null {
+  return unavailable.get(projectId) ?? null;
+}
+
+/** Every signal name the project's run is currently parked on, for diagnosis. */
+export async function parkedSignalNames(projectId: string): Promise<string[]> {
+  const anchor = anchors.get(projectId) ?? (await anchorFor(projectId));
+  if (!anchor) return [];
+  return parkedSteps(await foldRuns(anchor)).flatMap((step) => (step.signalName ? [step.signalName] : []));
+}
+
+/** Diagnostic view of every run under the project's deployment: step phases and any read error. */
+export async function debugRuns(projectId: string): Promise<unknown> {
+  const anchor = anchors.get(projectId) ?? (await anchorFor(projectId));
+  if (!anchor) return { anchor: null };
+  const runIds = await deploymentRuns.list(anchor);
+  const out: Record<string, unknown> = { anchor, runIds };
+  for (const runId of runIds) {
+    try {
+      const events = await deploymentRuns.events(anchor, runId);
+      let state = emptyState(runId);
+      for (const event of events) {
+        state = applyEvent(state, { ...event.body, seq: event.seq, kind: event.type } as unknown as WorkflowEvent);
+      }
+      out[runId] = {
+        kinds: events.map((event) => `${event.seq}:${event.type}`),
+        steps: [...state.steps.values()].map((step) => `${step.stepId}=${step.phase}${step.awaitingSignal ? `(${step.awaitingSignal.name})` : ""}`),
+        children: [...state.children.entries()].map(([id, child]) => `${id}<-${child.spawnedBy}`),
+        // A failed or cancelled step carries its reason in the event body; the
+        // kinds list alone cannot say why a step ended.
+        failures: events
+          .filter((event) => /fail|error|cancel|timeout/i.test(event.type))
+          .map((event) => ({ seq: event.seq, type: event.type, body: event.body })),
+      };
+    } catch (cause) {
+      out[runId] = { error: cause instanceof Error ? cause.message : String(cause) };
+    }
+  }
+  return out;
 }

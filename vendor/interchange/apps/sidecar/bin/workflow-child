@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --conditions=intx-src
+#!/usr/bin/env bun
 // The intx-src condition resolves @intx/* to TypeScript source. The
 // sidecar spawns this child by path (`Bun.spawn([binaryPath])`) and
 // `--conditions` is not inherited, so it is set on the shebang. The dev

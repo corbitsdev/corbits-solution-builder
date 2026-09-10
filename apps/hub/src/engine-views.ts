@@ -1,12 +1,12 @@
 /**
- * RunView shaping — turning the executor's `StoredRun` into the guard's
- * `RunView`, and the scoped lookup by run id that every command starts from.
+ * RunView shaping — turning a run record into the guard's `RunView`, and the
+ * scoped lookup by run id that every command starts from.
  */
 import type { RunView } from "./guard.js";
 import { notFound } from "./errors.js";
-import { getRunRecord, type StoredRun } from "./hub-executor.js";
+import { readRun, type RunRecord } from "./runs.js";
 
-export function toRunView(record: StoredRun): RunView {
+export function toRunView(record: RunRecord): RunView {
   return {
     id: record.id,
     kind: record.kind,
@@ -19,9 +19,9 @@ export function toRunView(record: StoredRun): RunView {
   };
 }
 
-export function loadRun(runId: string, projectId: string): RunView {
-  const record = getRunRecord(runId);
+export async function loadRun(runId: string, projectId: string): Promise<RunView> {
   // Scoped lookup: a run in another project is not found, not forbidden.
-  if (!record || record.projectId !== projectId) throw notFound("That run");
+  const record = await readRun(runId, projectId);
+  if (!record) throw notFound("That run");
   return toRunView(record);
 }

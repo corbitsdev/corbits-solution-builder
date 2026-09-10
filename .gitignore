@@ -4,5 +4,6 @@ scratch
 apps/desktop/target
 apps/desktop/binaries
 apps/desktop/gen
+release
 *.log
 vendor/interchange/**/dist
