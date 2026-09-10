@@ -502,6 +502,20 @@ const MIGRATIONS: readonly Migration[] = [
       sql`DROP TABLE IF EXISTS "builder"."stage_question"`,
     ],
   },
+  {
+    // Start-at-login is a marker file the shell reads before the database
+    // opens; design feedback is a version on the feedback artifact.
+    // Approvals, audit and receipts are turns in the project ledger thread;
+    // effects fire after commit instead of through an outbox.
+    id: "0005_drop_preference_and_record_tables",
+    statements: [
+      sql`DROP TABLE IF EXISTS "builder"."host_preference"`,
+      sql`DROP TABLE IF EXISTS "builder"."approval_record"`,
+      sql`DROP TABLE IF EXISTS "builder"."audit_event"`,
+      sql`DROP TABLE IF EXISTS "builder"."outbox_entry"`,
+      sql`DROP TABLE IF EXISTS "builder"."command_receipt"`,
+    ],
+  },
 ];
 
 async function checksum(migration: Migration): Promise<string> {

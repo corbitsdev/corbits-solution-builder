@@ -5,13 +5,14 @@
  *   1. dedupes on the envelope's idempotency key (at-least-once is assumed);
  *   2. resolves the actor's real authorities from the platform (`hub/authority.ts`);
  *   3. asks the guard whether the ledger permits the command;
- *   4. commits the state change, its audit row and its outbox row together;
- *   5. opens or closes the durable human wait, *before* any notification.
+ *   4. commits the state change;
+ *   5. records the command as a ledger mail turn and fires any decision
+ *      notification, both after the transaction has committed.
  *
  * Step 4 is why this is one module and not several: the atomicity claim is only
  * true if there is a single place that writes.
  */
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { Command, Stage } from "@solutions-builder/app/ledger";
 import { PROJECT_DELETE } from "@solutions-builder/app/ledger";
 import { evaluate, evaluateAudienceDecision, type GuardContext, type RunView } from "./guard.js";
@@ -35,8 +36,9 @@ import {
   packetExists,
   waitingOrigin,
 } from "./engine-approvals.js";
-import { audit, enqueue } from "./engine-audit.js";
+import { recordCommand, receiptFor, lastCommittedCommand, audienceDecisions } from "./engine-ledger.js";
 import { runGateSideEffects } from "./engine-recovery.js";
+import { notifyDecision } from "./notify.js";
 
 export { requiredAuthorityFor, soloApprovalFor } from "./engine-approvals.js";
 
@@ -168,13 +170,8 @@ export async function rehydrateRun(projectId: string) {
   // Whether the stage was waiting on a person is read from the last committed
   // command: the gates that park a run are the only ones that leave it there.
   // A stopgap until the parked run itself is durable through the platform.
-  const [last] = await db
-    .select({ command: table.auditEvent.command })
-    .from(table.auditEvent)
-    .where(and(eq(table.auditEvent.projectId, projectId), eq(table.auditEvent.outcome, "committed")))
-    .orderBy(desc(table.auditEvent.createdAt))
-    .limit(1);
-  const parked = last ? PARKED_BY[last.command] : undefined;
+  const lastCommand = await lastCommittedCommand(projectId);
+  const parked = lastCommand ? PARKED_BY[lastCommand] : undefined;
 
   const now = new Date();
   const runId = newId.run();
@@ -199,21 +196,39 @@ export async function rehydrateRun(projectId: string) {
   return record;
 }
 
-export async function execute(input: CommandInput): Promise<CommandOutcome> {
-  const { db } = database();
+/**
+ * In-flight commands, keyed by idempotency key. A concurrent retry — one that
+ * arrives while the first call is still running — awaits the same promise
+ * rather than starting a second `runCommand`, which is what a database-backed
+ * receipt row used to guard against. The map only ever holds a command while
+ * it is actually running: nothing here is durable, and it does not need to
+ * be, because the ledger mail turn `runCommand` writes on the way out is what
+ * a *sequential* replay (arriving after the first call has already returned)
+ * reads back.
+ */
+const inflight = new Map<string, Promise<CommandOutcome>>();
 
-  const replayed = await receiptFor(db, input.idempotencyKey);
-  if (replayed) return replayed;
+export function execute(input: CommandInput): Promise<CommandOutcome> {
+  const existing = inflight.get(input.idempotencyKey);
+  if (existing) return existing.then((result) => ({ ...result, replayed: true }));
 
-  try {
-    return await runCommand(input);
-  } catch (cause) {
-    // The retry that lost the race: the winner has already committed, so the
-    // refusal it just got is the wrong answer to give back.
-    const settled = await receiptFor(db, input.idempotencyKey);
-    if (settled) return settled;
-    throw cause;
-  }
+  const attempt = (async (): Promise<CommandOutcome> => {
+    const replayed = await receiptFor(input.projectId, input.idempotencyKey);
+    if (replayed) return replayed;
+
+    try {
+      return await runCommand(input);
+    } catch (cause) {
+      // The retry that lost the race: the winner has already committed, so the
+      // refusal it just got is the wrong answer to give back.
+      const settled = await receiptFor(input.projectId, input.idempotencyKey);
+      if (settled) return settled;
+      throw cause;
+    }
+  })();
+
+  inflight.set(input.idempotencyKey, attempt);
+  return attempt.finally(() => inflight.delete(input.idempotencyKey));
 }
 
 /**
@@ -276,6 +291,67 @@ export async function submitAndApprove(input: {
   });
 }
 
+/**
+ * `project.delete` acts on the project, not on a run, so it never reaches the
+ * run guard. Its authority and effects come from `PROJECT_DELETE`, and
+ * "tombstone" means exactly that: the rows stay, the project stops being
+ * readable. Nothing here removes what a person wrote.
+ */
+async function runProjectDelete(input: CommandInput, authorities: Authority[]): Promise<CommandOutcome> {
+  const { db } = database();
+  const authorised = PROJECT_DELETE.authority.some((role) => authorities.includes(role));
+  if (!authorised) {
+    throw new HostError(
+      "not_authorized",
+      `Deleting a project is ${PROJECT_DELETE.authority.join(" or ")}'s decision.`,
+    );
+  }
+
+  const deletedAt = new Date();
+  await db.transaction(async (tx) => {
+    const [project] = await tx
+      .select()
+      .from(table.project)
+      .where(and(eq(table.project.id, input.projectId), isNull(table.project.deletedAt)));
+    if (!project) throw notFound("That project");
+    if (input.expectedRevision !== undefined && input.expectedRevision !== project.revision) {
+      throw new HostError(
+        "conflict",
+        `This project has changed since you loaded it (revision ${project.revision}, you had ${input.expectedRevision}). Reload and decide again.`,
+        { expected: input.expectedRevision, current: project.revision },
+      );
+    }
+    await tx
+      .update(table.project)
+      .set({ deletedAt, revision: sql`${table.project.revision} + 1` })
+      .where(eq(table.project.id, input.projectId));
+  });
+
+  const open = activeRunRecord(input.projectId);
+  const result: CommandOutcome = {
+    runId: open?.id ?? "",
+    stage: (open?.stage ?? 1) as Stage,
+    state: (open?.state ?? "in_progress") as CommandOutcome["state"],
+    transitionId: "project.delete",
+    replayed: false,
+  };
+
+  await recordCommand({
+    projectId: input.projectId,
+    actorPrincipalId: input.actor.principalId,
+    authority: PROJECT_DELETE.authority[0] ?? null,
+    command: input.type,
+    transitionId: "project.delete",
+    correlationId: input.correlationId,
+    before: { deletedAt: null },
+    after: { deletedAt: deletedAt.toISOString(), effects: PROJECT_DELETE.effects },
+    idempotencyKey: input.idempotencyKey,
+    result,
+  });
+
+  return result;
+}
+
 async function runCommand(input: CommandInput): Promise<CommandOutcome> {
   const { db } = database();
   // Resolved before the transaction opens: the platform's grant tables live
@@ -283,6 +359,49 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
   // querying them from inside an open `db.transaction` callback deadlocks
   // against that same transaction rather than reading through it.
   const authorities = await authoritiesFor(input.projectId, input.actor.principalId);
+
+  if (input.type === "project.delete") return runProjectDelete(input, authorities);
+
+  const runId = String(input.payload.runId ?? "");
+  if (!runId) throw new HostError("validation_failed", "The command must name a run.");
+  const run = loadRun(runId, input.projectId);
+
+  const versions = Array.isArray(input.payload.versions) ? (input.payload.versions as VersionRef[]) : [];
+  const needsExactVersions = (
+    ["stage.approve", "cost.approve", "build.freeze", "audience.decide"] as string[]
+  ).includes(input.type);
+
+  // The guard's ledger-backed inputs, resolved before the transaction opens
+  // for the same reason `authoritiesFor` is: the ledger mail lives on the same
+  // single-writer connection as `tx`, so reading it from inside an open
+  // transaction on that connection deadlocks rather than reading through it.
+  let audienceGuard: { required: number; proceeded: number; blocked: number } | undefined;
+  if (input.type === "stage.approve" && run.stage === 5) {
+    const [projectRow] = await db
+      .select({ policy: table.project.policy })
+      .from(table.project)
+      .where(and(eq(table.project.id, input.projectId), isNull(table.project.deletedAt)));
+    const policyForTally = (projectRow?.policy as ProjectPolicy | undefined) ?? {
+      audienceQuorum: 0,
+    } as ProjectPolicy;
+    audienceGuard = await audienceTally(input.projectId, run.id, policyForTally);
+  }
+  if (input.type === "audience.decide") {
+    const audienceName = String(input.payload.audienceName ?? "");
+    const already = (await audienceDecisions(input.projectId, run.id)).some(
+      (decision) => decision.audienceName === audienceName,
+    );
+    if (already) {
+      // A recorded audience decision is immutable. Changing one means routing
+      // the stage back and reviewing a new package version.
+      throw new HostError(
+        "conflict",
+        `${audienceName} has already recorded a decision on this review. ` +
+          `Route the stage back to review a new package version.`,
+      );
+    }
+  }
+
   const outcome = await db.transaction(async (tx) => {
     const [project] = await tx
       .select()
@@ -304,61 +423,6 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
 
     const policy = project.policy as ProjectPolicy;
 
-    // `project.delete` acts on the project, not on a run, so it never reaches
-    // the run guard. Its authority and effects come from `PROJECT_DELETE`, and
-    // "tombstone" means exactly that: the rows stay, the project stops being
-    // readable. Nothing here removes what a person wrote.
-    if (input.type === "project.delete") {
-      const authorised = PROJECT_DELETE.authority.some((role) => authorities.includes(role));
-      if (!authorised) {
-        throw new HostError(
-          "not_authorized",
-          `Deleting a project is ${PROJECT_DELETE.authority.join(" or ")}'s decision.`,
-        );
-      }
-      const deletedAt = new Date();
-      await tx
-        .update(table.project)
-        .set({ deletedAt, revision: sql`${table.project.revision} + 1` })
-        .where(eq(table.project.id, input.projectId));
-      const open = activeRunRecord(input.projectId);
-      await audit(tx, {
-        projectId: input.projectId,
-        actorPrincipalId: input.actor.principalId,
-        authority: PROJECT_DELETE.authority[0],
-        command: input.type,
-        transitionId: "project.delete",
-        correlationId: input.correlationId,
-        before: { deletedAt: null },
-        after: { deletedAt: deletedAt.toISOString(), effects: PROJECT_DELETE.effects },
-        outcome: "committed",
-      });
-      const result: CommandOutcome = {
-        runId: open?.id ?? "",
-        stage: (open?.stage ?? 1) as Stage,
-        state: (open?.state ?? "in_progress") as CommandOutcome["state"],
-        transitionId: "project.delete",
-        replayed: false,
-      };
-      await tx.insert(table.commandReceipt).values({
-        idempotencyKey: input.idempotencyKey,
-        commandType: input.type,
-        result,
-      });
-      return result;
-    }
-
-    const runId = String(input.payload.runId ?? "");
-    if (!runId) throw new HostError("validation_failed", "The command must name a run.");
-    const run = loadRun(runId, input.projectId);
-
-    const versions = Array.isArray(input.payload.versions)
-      ? (input.payload.versions as VersionRef[])
-      : [];
-    const needsExactVersions = (
-      ["stage.approve", "cost.approve", "build.freeze", "audience.decide"] as string[]
-    ).includes(input.type);
-
     const context: GuardContext = {
       actorAuthorities: authorities,
       ...(typeof input.payload.targetStage === "number"
@@ -372,9 +436,7 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
             frozenPacketExists: await packetExists(tx, run.id),
           }
         : {}),
-      ...(input.type === "stage.approve" && run.stage === 5
-        ? { audience: await audienceTally(tx, run.id, policy) }
-        : {}),
+      ...(audienceGuard ? { audience: audienceGuard } : {}),
       ...(input.type === "build.answer"
         ? { waitingRequestOriginId: (await waitingOrigin(tx, run.id)) ?? "" }
         : {}),
@@ -392,17 +454,6 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
         : evaluate(input.type, run, context);
 
     if (!verdict.ok) {
-      await audit(tx, {
-        projectId: input.projectId,
-        actorPrincipalId: input.actor.principalId,
-        authority: authorities[0] ?? null,
-        command: input.type,
-        transitionId: null,
-        correlationId: input.correlationId,
-        before: { runId: run.id, state: run.state, stage: run.stage },
-        after: null,
-        outcome: `refused:${verdict.code}`,
-      });
       throw new HostError("transition_refused", verdict.message, { refusal: verdict.code });
     }
 
@@ -416,24 +467,6 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
       toStage: verdict.toStage,
       authority: authorities[0] ?? "project_owner",
     });
-
-    await audit(tx, {
-      projectId: input.projectId,
-      actorPrincipalId: input.actor.principalId,
-      authority: authorities[0] ?? null,
-      command: input.type,
-      transitionId: verdict.transition.id,
-      correlationId: input.correlationId,
-      before: { runId: run.id, state: run.state, stage: run.stage },
-      after: { runId: applied.runId, state: applied.state, stage: applied.stage },
-      outcome: "committed",
-    });
-    await enqueue(
-      tx,
-      `run.${verdict.transition.id}`,
-      { projectId: input.projectId, runId: applied.runId, state: applied.state },
-      input.correlationId,
-    );
 
     const result: CommandOutcome = {
       runId: applied.runId,
@@ -450,42 +483,59 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
       .set({ revision: sql`${table.project.revision} + 1` })
       .where(eq(table.project.id, input.projectId));
 
-    await tx.insert(table.commandReceipt).values({
-      idempotencyKey: input.idempotencyKey,
-      commandType: input.type,
+    return {
       result,
-    });
-    return result;
+      applied,
+      before: { runId: run.id, state: run.state, stage: run.stage },
+    };
   });
+
+  await recordCommand({
+    projectId: input.projectId,
+    actorPrincipalId: input.actor.principalId,
+    authority: authorities[0] ?? null,
+    command: input.type,
+    transitionId: outcome.result.transitionId,
+    correlationId: input.correlationId,
+    before: outcome.before,
+    after: { runId: outcome.applied.runId, state: outcome.applied.state, stage: outcome.applied.stage },
+    idempotencyKey: input.idempotencyKey,
+    result: outcome.result,
+    stage: run.stage,
+    runId: outcome.applied.runId,
+    ...(outcome.applied.approval ?? {}),
+  });
+
+  if (outcome.applied.notifyRunId) {
+    await notifyDecision(input.projectId, outcome.applied.notifyRunId).catch(() => undefined);
+  }
 
   // Outside the transaction — the executor is not something the database's
   // single writer connection can be reached from mid-transaction, and this is
   // a best-effort shadow of the transition, not part of what made it valid.
   await runGateSideEffects(input);
 
-  return outcome;
+  return outcome.result;
 }
 
-/**
- * The first result recorded under an idempotency key, if there is one.
- *
- * Checked before the transaction and again after one fails: a retry that
- * arrives while the original is still in flight cannot see the receipt on
- * either side of the guard, so it is the *failure* that has to be re-read as a
- * replay. Without that second look the loser of the race gets the guard's
- * refusal — `wrong_state` against a row the winner has already moved — instead
- * of the first call's result.
- */
-async function receiptFor(
-  runner: Db | Tx,
-  idempotencyKey: string,
-): Promise<CommandOutcome | null> {
-  const [receipt] = await runner
-    .select()
-    .from(table.commandReceipt)
-    .where(eq(table.commandReceipt.idempotencyKey, idempotencyKey));
-  return receipt ? { ...(receipt.result as CommandOutcome), replayed: true } : null;
-}
+/** A decision recorded on this run, carried through to the post-commit ledger write. */
+export type AppliedApproval = {
+  decision: string;
+  audienceName?: string | null;
+  versions?: unknown;
+  rationale?: string | null;
+  assumptions?: unknown;
+};
+
+export type AppliedCommand = {
+  runId: string;
+  stage: Stage;
+  state: string;
+  /** Set when this transition records a decision — the ledger's `approvals` shape. */
+  approval?: AppliedApproval;
+  /** Set when this transition parks a run on a person; notified after commit. */
+  notifyRunId?: string;
+};
 
 /**
  * The durable effects of an allowed transition. Everything here runs inside the
@@ -503,35 +553,18 @@ async function apply(
     toStage: Stage;
     authority: Authority;
   },
-): Promise<{ runId: string; stage: Stage; state: string }> {
+): Promise<AppliedCommand> {
   const { input, run, toStage } = args;
   const branchId = args.branchId || run.id;
   const now = new Date();
 
-  /**
-   * The run is parked on a person from here. The parked run is the record;
-   * this queues the ping, delivered after the transaction commits.
-   */
-  const announce = (runId: string) =>
-    enqueue(tx, "decision.opened", { projectId: input.projectId, runId }, input.correlationId);
-
-  const recordApproval = async (decision: string, audienceName?: string) => {
-    await tx.insert(table.approvalRecord).values({
-      id: newId.approval(),
-      projectId: input.projectId,
-      runId: run.id,
-      stage: run.stage,
-      command: input.type,
-      decision,
-      actorPrincipalId: input.actor.principalId,
-      authority: args.authority,
-      audienceName: audienceName ?? null,
-      versions: args.versions,
-      rationale: (input.payload.rationale as string | undefined) ?? null,
-      assumptions: (input.payload.assumptions as unknown) ?? null,
-      policyVersion: 1,
-    });
-  };
+  const approvalOf = (decision: string, audienceName?: string): AppliedApproval => ({
+    decision,
+    audienceName: audienceName ?? null,
+    versions: args.versions,
+    rationale: (input.payload.rationale as string | undefined) ?? null,
+    assumptions: (input.payload.assumptions as unknown) ?? null,
+  });
 
   const terminalize = (state: string, reason: string) => {
     updateRunRecord(run.id, { state: state as RunView["state"], terminalReason: reason, endedAt: now });
@@ -540,40 +573,24 @@ async function apply(
   switch (input.type) {
     case "audience.decide": {
       const audienceName = String(input.payload.audienceName ?? "");
-      const [already] = await tx
-        .select({ id: table.approvalRecord.id })
-        .from(table.approvalRecord)
-        .where(
-          and(
-            eq(table.approvalRecord.runId, run.id),
-            eq(table.approvalRecord.audienceName, audienceName),
-          ),
-        );
-      if (already) {
-        // A recorded audience decision is immutable. Changing one means routing
-        // the stage back and reviewing a new package version.
-        throw new HostError(
-          "conflict",
-          `${audienceName} has already recorded a decision on this review. ` +
-            `Route the stage back to review a new package version.`,
-        );
-      }
-      await recordApproval(
-        String(input.payload.decision ?? "proceed"),
-        String(input.payload.audienceName ?? ""),
-      );
+      const decision = String(input.payload.decision ?? "proceed");
+      // The immutability rule (an audience only decides once) is checked
+      // before the transaction opens, against the ledger.
       // Record-only: the run does not move, by design.
-      return { runId: run.id, stage: run.stage, state: run.state };
+      return {
+        runId: run.id,
+        stage: run.stage,
+        state: run.state,
+        approval: approvalOf(decision, audienceName),
+      };
     }
 
     case "stage.submit": {
       updateRunRecord(run.id, { state: "waiting_approval" });
-      await announce(run.id);
-      return { runId: run.id, stage: run.stage, state: "waiting_approval" };
+      return { runId: run.id, stage: run.stage, state: "waiting_approval", notifyRunId: run.id };
     }
 
     case "stage.approve": {
-      await recordApproval("approve");
       terminalize("approved", "approved and advanced");
       const next = createRun({
         projectId: input.projectId,
@@ -583,18 +600,17 @@ async function apply(
         state: "in_progress",
         sourceRunId: run.id,
       });
-      return { runId: next, stage: toStage, state: "in_progress" };
+      return { runId: next, stage: toStage, state: "in_progress", approval: approvalOf("approve") };
     }
 
     case "cost.approve": {
-      await recordApproval("approve");
       // No stage advance. The cost approval is a field on this run, and
       // build.freeze is the only thing that reads it.
       updateRunRecord(run.id, {
         state: "cost_approved",
         costApprovalVersionId: args.versions[0]?.versionId ?? null,
       });
-      return { runId: run.id, stage: 7, state: "cost_approved" };
+      return { runId: run.id, stage: 7, state: "cost_approved", approval: approvalOf("approve") };
     }
 
     case "build.freeze": {
@@ -660,8 +676,7 @@ async function apply(
         prompt: String(input.payload.prompt ?? ""),
         scopeImpact: (input.payload.scopeImpact as unknown) ?? null,
       });
-      await announce(run.id);
-      return { runId: run.id, stage: 8, state: "waiting_human" };
+      return { runId: run.id, stage: 8, state: "waiting_human", notifyRunId: run.id };
     }
 
     case "build.answer": {
@@ -682,7 +697,6 @@ async function apply(
     }
 
     case "build.accept_evidence": {
-      await recordApproval("accept");
       terminalize("evidence_accepted", "evidence accepted");
       const manifestBody = JSON.stringify(input.payload.descriptors ?? []);
       await tx.insert(table.deliveryManifest).values({
@@ -703,18 +717,22 @@ async function apply(
         state: "delivery_review",
         sourceRunId: run.id,
       });
-      await announce(delivery);
-      return { runId: delivery, stage: 9, state: "delivery_review" };
+      return {
+        runId: delivery,
+        stage: 9,
+        state: "delivery_review",
+        approval: approvalOf("accept"),
+        notifyRunId: delivery,
+      };
     }
 
     case "delivery.accept": {
-      await recordApproval("accept");
       await tx
         .update(table.deliveryManifest)
         .set({ acceptedAt: now, acceptedBy: input.actor.principalId })
         .where(eq(table.deliveryManifest.projectId, input.projectId));
       terminalize("delivered", "accepted by the recipient");
-      return { runId: run.id, stage: 9, state: "delivered" };
+      return { runId: run.id, stage: 9, state: "delivered", approval: approvalOf("accept") };
     }
 
     case "project.archive": {
@@ -732,7 +750,6 @@ async function apply(
     case "delivery.revise":
     case "build.route_material_change": {
       const reason = String(input.payload.reason ?? "");
-      await recordApproval(input.type.endsWith("reject") ? "reject" : "revise");
       await tx.insert(table.decisionFlag).values({
         id: newId.flag(),
         projectId: input.projectId,
@@ -754,7 +771,12 @@ async function apply(
         sourceRunId: run.id,
       });
       updateRunRecord(routed, { routeTargetStage: toStage });
-      return { runId: routed, stage: toStage, state: "backtracked" };
+      return {
+        runId: routed,
+        stage: toStage,
+        state: "backtracked",
+        approval: approvalOf(input.type.endsWith("reject") ? "reject" : "revise"),
+      };
     }
 
     case "stage.select_route": {

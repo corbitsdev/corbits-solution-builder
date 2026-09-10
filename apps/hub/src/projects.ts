@@ -17,6 +17,7 @@ import { origin } from "./guard.js";
 import { ARTIFACT_STAGE, type ArtifactDraft } from "./domain.js";
 import type { ProjectPolicy } from "./engine.js";
 import { launchProjectRun, rehydrateRun, soloApprovalFor } from "./engine.js";
+import { recordCommand, projectApprovals } from "./engine-ledger.js";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { nextQuestion } from "./questions.js";
 import { openDecisionFor } from "./decisions.js";
@@ -92,19 +93,6 @@ export async function createProject(args: {
       });
     }
 
-    await tx.insert(table.auditEvent).values({
-      id: newId.audit(),
-      projectId,
-      actorPrincipalId: args.owner.principalId,
-      authority: "project_owner",
-      command: transition.command,
-      transitionId: transition.id,
-      correlationId: newId.correlation(),
-      before: null,
-      after: { projectId, runId, stage },
-      outcome: "committed",
-    });
-
     // The one run-opening write outside `engine.ts` — `project.create` has no
     // source run to guard, so it never reaches `execute()`. A plain in-memory
     // op, not a database write, so it is safe inside this transaction.
@@ -129,8 +117,29 @@ export async function createProject(args: {
     return { projectId, branchId, runId };
   });
 
-  // Outside the transaction: the executor is not reachable from inside one
-  // (it would deadlock against the same single-writer connection `tx` holds).
+  // Outside the transaction: the ledger mail write uses the same
+  // single-writer connection `tx` held, and the executor is not reachable
+  // from inside one either.
+  await recordCommand({
+    projectId: created.projectId,
+    actorPrincipalId: args.owner.principalId,
+    authority: "project_owner",
+    command: transition.command,
+    transitionId: transition.id,
+    correlationId: newId.correlation(),
+    before: null,
+    after: { projectId: created.projectId, runId: created.runId, stage },
+    idempotencyKey: newId.command(),
+    result: {
+      runId: created.runId,
+      stage,
+      state: opening.state,
+      transitionId: transition.id,
+      replayed: false,
+    },
+    stage,
+    runId: created.runId,
+  });
   await launchProjectRun({ projectId: created.projectId, branchId: created.branchId });
 
   return created;
@@ -369,11 +378,7 @@ export async function projectDetail(projectId: string, actorPrincipalId: string)
     .from(table.artifactNode)
     .where(eq(table.artifactNode.projectId, projectId))
     .orderBy(asc(table.artifactNode.createdAt));
-  const approvals = await db
-    .select()
-    .from(table.approvalRecord)
-    .where(eq(table.approvalRecord.projectId, projectId))
-    .orderBy(asc(table.approvalRecord.createdAt));
+  const approvals = await projectApprovals(projectId);
   const flags = await db
     .select()
     .from(table.decisionFlag)

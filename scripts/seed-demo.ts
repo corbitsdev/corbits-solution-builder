@@ -17,7 +17,6 @@ import { ensureHub, localActor } from "../apps/hub/src/hub-client.js";
 import { install } from "../apps/hub/src/install.js";
 import { createProject, projectDetail, writeArtifact } from "../apps/hub/src/projects.js";
 import { execute } from "../apps/hub/src/engine.js";
-import { drainOutbox } from "../apps/hub/src/outbox.js";
 import { newId } from "../apps/hub/src/ids.js";
 import { databaseDirectory } from "../apps/hub/src/paths.js";
 import type { ArtifactKind } from "../apps/hub/src/domain.js";
@@ -38,7 +37,6 @@ async function command(type: Command, projectId: string, payload: Record<string,
     correlationId: newId.correlation(),
     payload,
   });
-  await drainOutbox();
   return outcome;
 }
 

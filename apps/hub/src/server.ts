@@ -19,7 +19,6 @@ import { API_VERSION, createApi } from "./api.js";
 import { openDatabase } from "./db.js";
 import { prepareDatabase } from "./migrate.js";
 import { databaseDirectory, dataDirectory } from "./paths.js";
-import { drainOutbox } from "./outbox.js";
 import { ensureHub, hubFetch, resolveWorkspace } from "./hub-client.js";
 import {
   clientConnected,
@@ -286,22 +285,10 @@ const server = Bun.serve({
 startHeartbeat();
 markReady();
 
-// Authorised background work continues while no window is open. This is the
-// loop that carries a project to its next human gate and fires the notification.
-const drain = setInterval(() => {
-  void drainOutbox().catch((cause: unknown) => {
-    console.error("Outbox drain failed:", cause);
-  });
-}, 3_000);
-
 let stopping: Promise<void> | undefined;
 async function stop(): Promise<void> {
   if (stopping) return stopping;
   stopping = (async () => {
-    clearInterval(drain);
-    // Drain what is already committed before going away, so a pending
-    // notification is not silently lost on an explicit stop.
-    await drainOutbox().catch(() => undefined);
     await server.stop(true);
     await host.close();
     markStopped();

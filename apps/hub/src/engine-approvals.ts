@@ -13,6 +13,7 @@ import { AUTHORITIES } from "@solutions-builder/app/ledger";
 import { evaluate } from "./hub-client.js";
 import { HOST_PRINCIPAL } from "./engine.js";
 import type { Tx } from "./engine.js";
+import { audienceDecisions } from "./engine-ledger.js";
 
 export function requiredAuthorityFor(stage: number): Authority {
   if (stage === 7) return "budget_approver";
@@ -113,13 +114,12 @@ export async function versionHashesMatch(tx: Tx, versions: VersionRef[]): Promis
   return true;
 }
 
-export async function audienceTally(tx: Tx, runId: string, policy: { audienceQuorum: number }) {
-  const rows = await tx
-    .select({ decision: table.approvalRecord.decision })
-    .from(table.approvalRecord)
-    .where(
-      and(eq(table.approvalRecord.runId, runId), eq(table.approvalRecord.command, "audience.decide")),
-    );
+export async function audienceTally(
+  projectId: string,
+  runId: string,
+  policy: { audienceQuorum: number },
+) {
+  const rows = await audienceDecisions(projectId, runId);
   return {
     required: policy.audienceQuorum,
     proceeded: rows.filter((row) => row.decision === "proceed").length,

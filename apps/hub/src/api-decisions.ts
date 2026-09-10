@@ -18,7 +18,6 @@ import { database } from "./db.js";
 import * as table from "./schema.js";
 import { projectDetail, readArtifactNode } from "./projects.js";
 import { BRIDGE_CAPABILITIES, runBuildAttempt } from "./corbits-exec.js";
-import { drainOutbox } from "./outbox.js";
 import { commandFrom, parsed } from "./api.js";
 import { localActor } from "./hub-client.js";
 
@@ -65,7 +64,6 @@ export function registerDecisionRoutes(api: Hono) {
     }
 
     const outcome = await commandFrom(command, projectId, body);
-    await drainOutbox();
     return context.json(outcome);
   });
 
@@ -77,7 +75,6 @@ export function registerDecisionRoutes(api: Hono) {
     const projectId = context.req.param("projectId");
     const body = (await context.req.json()) as { runId: string; versions: unknown[] };
     const outcome = await commandFrom("stage.submit", projectId, body as never);
-    await drainOutbox();
     return context.json(outcome);
   });
 
@@ -105,7 +102,6 @@ export function registerDecisionRoutes(api: Hono) {
       correlationId: newId.correlation(),
       ...(typeof body.expectedRevision === "number" ? { expectedRevision: body.expectedRevision } : {}),
     });
-    await drainOutbox();
     return context.json(outcome);
   });
 

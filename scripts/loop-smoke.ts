@@ -26,7 +26,6 @@ import {
 import { execute, HOST_PRINCIPAL, rehydrateRun, submitAndApprove } from "../apps/hub/src/engine.js";
 import { newId } from "../apps/hub/src/ids.js";
 import { HostError } from "../apps/hub/src/errors.js";
-import { drainOutbox } from "../apps/hub/src/outbox.js";
 import type { ArtifactKind } from "../apps/hub/src/domain.js";
 import type { Command, Stage } from "@solutions-builder/app/ledger";
 
@@ -54,7 +53,6 @@ async function command(
     correlationId: newId.correlation(),
     payload,
   });
-  await drainOutbox();
   return outcome;
 }
 
@@ -854,7 +852,6 @@ let buildRunId = "";
     idempotencyKey: newId.command(),
     correlationId: newId.correlation(),
   });
-  await drainOutbox();
   check(
     "the one-action command carries a solo project from in_progress to approved in a single call",
     outcome.stage === 2 && outcome.state === "in_progress",

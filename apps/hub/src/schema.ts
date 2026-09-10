@@ -125,29 +125,6 @@ export const artifactEdge = builder.table(
   (table) => [primaryKey({ columns: [table.childNodeId, table.sourceNodeId] })],
 );
 
-export const approvalRecord = builder.table(
-  "approval_record",
-  {
-    id: id(),
-    projectId: text("project_id").notNull(),
-    runId: text("run_id").notNull(),
-    stage: integer("stage").notNull(),
-    command: text("command").notNull(),
-    decision: text("decision").notNull(),
-    actorPrincipalId: text("actor_principal_id").notNull(),
-    authority: text("authority").notNull(),
-    /** Set for stage-5 per-audience decisions; null for a transitioning approval. */
-    audienceName: text("audience_name"),
-    /** The exact versions reviewed, each with the hash the approver saw. */
-    versions: jsonb("versions").notNull(),
-    rationale: text("rationale"),
-    assumptions: jsonb("assumptions"),
-    policyVersion: integer("policy_version").notNull(),
-    createdAt: createdAt(),
-  },
-  (table) => [index("approval_run_idx").on(table.runId, table.createdAt)],
-);
-
 export const decisionFlag = builder.table("decision_flag", {
   id: id(),
   projectId: text("project_id").notNull(),
@@ -240,56 +217,6 @@ export const deliveryManifest = builder.table("delivery_manifest", {
 // `model_provider`, `model`, `model_offering` — via `hub-catalog.ts`'s
 // `registerProviderCatalog`, using a placeholder `credential` row tagged
 // `{ keyless: true }` in place of a real one. See CL-7573.
-
-export const auditEvent = builder.table(
-  "audit_event",
-  {
-    id: id(),
-    projectId: text("project_id"),
-    actorPrincipalId: text("actor_principal_id").notNull(),
-    authority: text("authority"),
-    command: text("command").notNull(),
-    /** Ledger transition id, so an audit row names the rule it satisfied. */
-    transitionId: text("transition_id"),
-    correlationId: text("correlation_id").notNull(),
-    before: jsonb("before"),
-    after: jsonb("after"),
-    outcome: text("outcome").notNull(),
-    createdAt: createdAt(),
-  },
-  (table) => [index("audit_project_idx").on(table.projectId, table.createdAt)],
-);
-
-/** Transactional outbox. Committed with the state change it describes. */
-export const outboxEntry = builder.table(
-  "outbox_entry",
-  {
-    id: id(),
-    topic: text("topic").notNull(),
-    payload: jsonb("payload").notNull(),
-    correlationId: text("correlation_id").notNull(),
-    attempts: integer("attempts").notNull().default(0),
-    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
-    quarantinedAt: timestamp("quarantined_at", { withTimezone: true }),
-    lastError: text("last_error"),
-    createdAt: createdAt(),
-  },
-  (table) => [index("outbox_pending_idx").on(table.deliveredAt, table.createdAt)],
-);
-
-/** Command dedupe. A replayed envelope returns the first result, never a second effect. */
-export const commandReceipt = builder.table("command_receipt", {
-  idempotencyKey: text("idempotency_key").primaryKey(),
-  commandType: text("command_type").notNull(),
-  result: jsonb("result").notNull(),
-  createdAt: createdAt(),
-});
-
-export const hostPreference = builder.table("host_preference", {
-  key: text("key").primaryKey(),
-  value: jsonb("value").notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
 
 /**
  * The questions a specialist left in a draft, asked one at a time.
