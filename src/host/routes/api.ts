@@ -67,7 +67,7 @@ import {
 import { appendHumanTurn, appendSpecialistTurn, threadTurns } from "../hub/conversation.js";
 import { nameProject, titleFromProblem } from "../../orchestration/agents/title.js";
 import { answerQuestion, nextQuestion, retireQuestions } from "../store/questions.js";
-import { liveDraft, subscribeLiveDraft } from "../store/live-drafts.js";
+import { liveDraft, liveDraftBegun, subscribeLiveDraft } from "../store/live-drafts.js";
 import { runGuidance } from "../../orchestration/agents/guide.js";
 import { AGENT_KIT } from "../../orchestration/agents/kit.js";
 import {
@@ -477,10 +477,13 @@ export function createApi() {
       const send = (event: string, data: string) => stream.writeSSE({ event, data, id: String(id++) });
       const current = liveDraft(projectId, stage);
       if (current !== null) await send("text", JSON.stringify(current));
+      else if (liveDraftBegun(projectId, stage)) await send("begin", "1");
       let closed = false;
       const unsubscribe = subscribeLiveDraft(projectId, stage, (event) => {
         if (closed) return;
-        void (event.type === "text" ? send("text", JSON.stringify(event.text)) : send("done", "1"));
+        void (event.type === "text"
+          ? send("text", JSON.stringify(event.text))
+          : send(event.type, "1"));
       });
       stream.onAbort(() => {
         closed = true;

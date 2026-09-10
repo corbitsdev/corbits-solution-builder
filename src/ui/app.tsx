@@ -312,8 +312,13 @@ export function App() {
   }, [view, selected, detail]);
 
   const reloadDetail = useCallback(async () => {
-    await refresh();
-    if (selected) setDetail(await api.project(selected).catch(() => null));
+    // Both at once: the stage view cannot start its draft until the detail
+    // lands, so a serial refresh here was dead time on every approval.
+    const [, next] = await Promise.all([
+      refresh(),
+      selected ? api.project(selected).catch(() => null) : Promise.resolve(null),
+    ]);
+    if (selected) setDetail(next);
   }, [refresh, selected]);
 
   const openProject = (projectId: string) => {
