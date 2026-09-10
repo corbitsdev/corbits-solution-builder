@@ -57,7 +57,10 @@ if (desktop) {
   // The debug Rust host honours SOLUTIONS_BUILDER_HOST_COMMAND and runs the
   // host from source instead of the compiled sidecar. Bundled resources are
   // disabled because the watcher rewrites `dist/` with new hashed filenames
-  // while cargo is still compiling.
+  // while cargo is still compiling. The sidecar entry is disabled because
+  // Tauri's build script insists the binary exists even in `dev`, and a fresh
+  // checkout has never run `sidecar:build`; the shell resolves the sidecar by
+  // path at runtime, so nothing else depends on the entry here.
   env.SOLUTIONS_BUILDER_HOST_COMMAND = HOST_COMMAND.join(" ");
   console.log("Starting the desktop host…\n");
   status = await run([
@@ -65,7 +68,7 @@ if (desktop) {
     "@tauri-apps/cli@2",
     "dev",
     "--config",
-    JSON.stringify({ bundle: { resources: null } }),
+    JSON.stringify({ bundle: { resources: null, externalBin: null } }),
   ], join(root, "apps", "desktop")).exited;
 } else {
   console.log("Starting the host…\n");
