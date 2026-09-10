@@ -17,6 +17,7 @@
       "@corbits/codex-provider": ["./types/corbits-providers.d.ts"],
       "@corbits/xai-provider": ["./types/corbits-providers.d.ts"],
       "@corbits/artifacts": ["./types/corbits-artifacts.d.ts"],
+      "@corbits/process-provisioner": ["./types/corbits-process-provisioner.d.ts"],
       "@intx/*": ["./types/intx.d.ts"]
     }
   }

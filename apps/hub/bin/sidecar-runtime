@@ -1,0 +1,6 @@
+#!/bin/sh
+# The runtime the process provisioner spawns a sidecar with. The vendored
+# Interchange tree is consumed from source, which needs Bun's `intx-src`
+# export condition; the provisioner passes only [runtime, entry], so the
+# condition lives here.
+exec bun --conditions intx-src "$@"

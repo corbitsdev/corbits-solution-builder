@@ -20,6 +20,7 @@ import { openDatabase } from "./db.js";
 import { prepareDatabase } from "./migrate.js";
 import { databaseDirectory, dataDirectory } from "./paths.js";
 import { ensureHub, hubFetch, resolveWorkspace } from "./hub-client.js";
+import { hub, hubWebSocket, setHostPort, SIDECAR_WS_PATH } from "./hub-mount.js";
 import {
   clientConnected,
   markReady,
@@ -38,8 +39,22 @@ function numberFlag(name: string): number | undefined {
   return value;
 }
 
-const port = numberFlag("--port") ?? 0;
-if (port < 0 || port > 65_535) throw new Error("--port must be between 0 and 65535.");
+const requestedPort = numberFlag("--port") ?? 0;
+if (requestedPort < 0 || requestedPort > 65_535) {
+  throw new Error("--port must be between 0 and 65535.");
+}
+// Sidecars dial back into the hub on this port, and the hub has to know the
+// number before it mounts, so a free port is claimed here rather than left to
+// `Bun.serve` to pick later.
+const port = requestedPort || (await freePort());
+setHostPort(port);
+
+async function freePort(): Promise<number> {
+  const probe = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() });
+  const chosen = probe.port!;
+  await probe.stop(true);
+  return chosen;
+}
 
 await mkdir(dataDirectory(), { recursive: true });
 await mkdir(databaseDirectory(), { recursive: true });
@@ -205,8 +220,13 @@ const server = Bun.serve({
   hostname: "127.0.0.1",
   port,
   idleTimeout: 240,
-  async fetch(request) {
+  websocket: hubWebSocket,
+  async fetch(request, server) {
     const url = new URL(request.url);
+
+    // A sidecar's socket into the hub. It carries the sidecar's own bearer
+    // token, which the hub checks; the host's session token does not apply.
+    if (url.pathname === SIDECAR_WS_PATH) return hub().app.fetch(request, server);
 
     // The handshake URL exchanges the token for an HttpOnly cookie once. Every
     // other query parameter survives the redirect, so a deep link such as
