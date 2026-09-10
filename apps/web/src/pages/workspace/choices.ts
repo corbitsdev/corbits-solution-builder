@@ -20,17 +20,28 @@ export type Choices = {
 
 /** A bullet, a number, or a letter a to h, with or without brackets. */
 const MARKER = /^\s*(?:[-*+•]|\(?(?:\d{1,2}|[a-hA-H])[.)])\s+/;
+/** A number or a letter: a list that is counting is offering. */
+const COUNTED = /^\s*\(?(?:\d{1,2}|[a-hA-H])[.)]\s+/;
 /** The kit's own form. Only the bare prefix goes; "Option A:" is kept, it is the name. */
 const KIT_PREFIX = /^option:\s*/i;
+const NAMED = /^option\b/i;
 const MIN_OPTIONS = 2;
 const MAX_OPTIONS = 6;
 
-function itemOf(line: string): string | null {
+/**
+ * A list item, and whether it is unmistakably a choice. A plain bullet is
+ * not: a specialist's digest is bulleted too, and a summary under "Anything
+ * to change?" was becoming a row of buttons. A bullet that says "Option",
+ * or any numbered or lettered item, is.
+ */
+function itemOf(line: string): { text: string; offered: boolean } | null {
   // Bold is decoration on any part of the item, the marker included.
   const bare = line.replaceAll("**", "");
   if (!MARKER.test(bare)) return null;
-  const text = bare.replace(MARKER, "").trim().replace(KIT_PREFIX, "");
-  return text.length > 0 ? text : null;
+  const body = bare.replace(MARKER, "").trim();
+  const text = body.replace(KIT_PREFIX, "");
+  if (text.length === 0) return null;
+  return { text, offered: COUNTED.test(bare) || NAMED.test(body) };
 }
 
 export function choicesIn(text: string): Choices | null {
@@ -50,13 +61,15 @@ export function choicesIn(text: string): Choices | null {
 
   const options: string[] = [];
   let at = end;
+  let offered = true;
   while (at > 0 && !blank(at - 1)) {
     const item = itemOf(lines[at - 1]!);
     if (item === null) break;
-    options.unshift(item);
+    options.unshift(item.text);
+    offered &&= item.offered;
     at--;
   }
-  if (options.length < MIN_OPTIONS || options.length > MAX_OPTIONS) return null;
+  if (!offered || options.length < MIN_OPTIONS || options.length > MAX_OPTIONS) return null;
 
   if (closing !== null) {
     return { before: lines.slice(0, at).join("\n").trimEnd(), question: closing, options };
