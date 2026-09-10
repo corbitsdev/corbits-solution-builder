@@ -5,7 +5,7 @@
  * then a refresh, so what the interface shows is what the host durably holds
  * rather than an optimistic guess.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import {
   api,
   ApiFailure,
@@ -287,13 +287,19 @@ export function App() {
     }
   }, []);
 
+  // Runs once, when the host first answers. Deliberately not keyed on
+  // `installed`: the effect sets that state itself, and re-running on its own
+  // state change cancelled the install it was awaiting, so a first run stayed
+  // on "Setting up your workspace…" until someone reloaded. A ref rather than
+  // a cancellation flag, so StrictMode's second mount neither starts a second
+  // install nor abandons the first.
+  const installStarted = useRef(false);
   useEffect(() => {
-    if (status === null || installed !== "checking") return;
-    let cancelled = false;
+    if (status === null || installStarted.current) return;
+    installStarted.current = true;
     void (async () => {
       try {
         const state = await api.installState();
-        if (cancelled) return;
         if (!state.installed) {
           setInstalled("installing");
           await api.install();
@@ -304,13 +310,10 @@ export function App() {
         // host says why it could not install.
         setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
       } finally {
-        if (!cancelled) setInstalled("ready");
+        setInstalled("ready");
       }
     })();
-    return () => {
-      cancelled = true;
-    };
-  }, [status === null, installed, refresh]);
+  }, [status === null, refresh]);
 
   useEffect(() => {
     void refresh();
