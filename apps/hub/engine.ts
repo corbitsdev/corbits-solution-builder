@@ -11,39 +11,34 @@
  * Step 4 is why this is one module and not several: the atomicity claim is only
  * true if there is a single place that writes.
  */
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { Command, Stage } from "@solutions-builder/app/ledger";
-import { PROJECT_DELETE, STAGE_TITLES } from "@solutions-builder/app/ledger";
+import { PROJECT_DELETE } from "@solutions-builder/app/ledger";
 import { evaluate, evaluateAudienceDecision, type GuardContext, type RunView } from "./guard.js";
 import { HostError, notFound } from "./errors.js";
 import { newId, sha256 } from "./ids.js";
 import { database, type Db } from "./db.js";
 import * as table from "./schema.js";
 import type { Authority } from "@solutions-builder/app/ledger";
-import { authoritiesFor as platformAuthoritiesFor } from "./hub-authority.js";
 import {
   activeRunRecord,
-  deliverStageSignal,
   getRunRecord,
-  hasExecution,
   launchProjectLifecycle,
   putRunRecord,
   updateRunRecord,
-  type StoredRun,
 } from "./hub-executor.js";
+import { loadRun } from "./engine-views.js";
+import {
+  authoritiesFor,
+  versionHashesMatch,
+  audienceTally,
+  packetExists,
+  waitingOrigin,
+} from "./engine-approvals.js";
+import { audit, enqueue, openWait, closeWait } from "./engine-audit.js";
+import { runGateSideEffects } from "./engine-recovery.js";
 
-/**
- * The commands that correspond to a stage gate — the ones `stage-loop.ts`
- * models as a signal a stage's run waits on. Committing one of these is what
- * "the platform run advances" means for this pass, so it is the one place
- * that talks to the runtime executor.
- */
-const GATE_COMMANDS: readonly Command[] = [
-  "stage.approve",
-  "stage.reject",
-  "stage.revise",
-  "stage.route_back",
-];
+export { requiredAuthorityFor, soloApprovalFor } from "./engine-approvals.js";
 
 /**
  * Launches a project's `project-lifecycle` run in the runtime executor. Called
@@ -76,7 +71,7 @@ export type ProjectPolicy = {
   allowExternalProviders: boolean;
 };
 
-type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 export type CommandInput = {
   readonly type: Command;
@@ -102,215 +97,7 @@ export type CommandOutcome = {
   readonly waitId?: string;
 };
 
-/** What a gate freezes, in the approver's language. Section 10's copy rule. */
-const CONSEQUENCE: Record<number, string> = {
-  1: "Approving accepts the problem brief and opens solution shape. Revisions stay possible.",
-  2: "Approving fixes the solution bounds every later stage is held to.",
-  3: "Approving selects this exact proposal and its branch as the execution path.",
-  4: "Approving fixes the design every build check is measured against.",
-  5: "Approving records that the named audiences agree this is worth pursuing.",
-  6: "Approving accepts the plan as complete and buildable, and sends it to costing.",
-  7: "Approving the cost authorizes spend against this exact plan, then freezes the build packet.",
-  8: "Accepting this evidence ends the build and opens delivery review.",
-  9: "Accepting this manifest completes delivery of the exact versions listed.",
-};
-
-export function requiredAuthorityFor(stage: number): Authority {
-  if (stage === 7) return "budget_approver";
-  if (stage === 6) return "technical_approver";
-  if (stage === 9) return "delivery_recipient";
-  return "project_owner";
-}
-
-/**
- * The actor's ledger authorities, resolved by the platform: `role` and
- * `principal_role` rows (seeded by `hub/roles.ts`), evaluated through
- * `@intx/authz` in `hub/authority.ts`. `system` is the one exception — it is
- * never a role a principal holds, only the host process acting on its own
- * behalf.
- */
-/**
- * What this actor may do *on this project*.
- *
- * Two questions, and both have to be asked. The platform answers the first —
- * does this principal hold `budget_approver` at all — through its own grant
- * evaluator. `builder.participant` answers the second: is that a part they
- * play here. Interchange's `principal_role` is tenant-wide and has no concept
- * of a project, so asking only the platform would let someone approve a
- * budget on a project they were never put on. Asking only the participant
- * table is what this code did before the platform owned authority at all.
- */
-async function authoritiesFor(
-  projectId: string,
-  principalId: string,
-): Promise<Authority[]> {
-  if (principalId === HOST_PRINCIPAL) return ["system"];
-
-  const granted = await platformAuthoritiesFor(principalId);
-  const { db } = database();
-  const parts = await db
-    .select({ role: table.participant.role })
-    .from(table.participant)
-    .where(
-      and(
-        eq(table.participant.projectId, projectId),
-        eq(table.participant.principalId, principalId),
-      ),
-    );
-  const onThisProject = new Set(parts.map((row) => row.role));
-  return granted.filter((name) => onThisProject.has(name));
-}
-
-/**
- * Whether `actorPrincipalId` is the only person who could approve this
- * stage on this project.
- *
- * "Submit for approval" is ceremony when the submitter and the approver are
- * the same human — a local, single-user workspace, today. This is what lets
- * the UI ask the one real question instead of a config flag: is there
- * anyone *else* on this project who actually holds the authority this
- * stage's approval requires, through the same platform grant `authoritiesFor`
- * already resolves for every command. A participant row alone is not
- * enough — someone added to a project without the platform grant does not
- * make the workspace multi-approver.
- */
-export async function soloApprovalFor(
-  projectId: string,
-  stage: Stage,
-  actorPrincipalId: string,
-): Promise<boolean> {
-  const required = requiredAuthorityFor(stage);
-  const { db } = database();
-  const rows = await db
-    .select({ principalId: table.participant.principalId })
-    .from(table.participant)
-    .where(and(eq(table.participant.projectId, projectId), eq(table.participant.role, required)));
-  const others = [...new Set(rows.map((row) => row.principalId))].filter(
-    (principalId) => principalId !== actorPrincipalId,
-  );
-  for (const candidate of others) {
-    const held = await authoritiesFor(projectId, candidate);
-    if (held.includes(required)) return false;
-  }
-  return true;
-}
-
-function toRunView(record: StoredRun): RunView {
-  return {
-    id: record.id,
-    kind: record.kind,
-    stage: record.stage,
-    state: record.state,
-    originId: record.originId,
-    routeTargetStage: record.routeTargetStage,
-    costApprovalVersionId: record.costApprovalVersionId,
-    checkpointRef: record.checkpointRef,
-  };
-}
-
-function loadRun(runId: string, projectId: string): RunView {
-  const record = getRunRecord(runId);
-  // Scoped lookup: a run in another project is not found, not forbidden.
-  if (!record || record.projectId !== projectId) throw notFound("That run");
-  return toRunView(record);
-}
-
 type VersionRef = { artifactId: string; versionId: string; contentHash: string };
-
-/**
- * The exact-version check. An approval names a version *and* the hash the
- * approver saw; if the stored node's hash differs, the draft moved and the
- * approval is refused rather than silently applied to newer bytes.
- */
-async function versionHashesMatch(tx: Tx, versions: VersionRef[]): Promise<boolean> {
-  if (versions.length === 0) return false;
-  for (const reference of versions) {
-    const [node] = await tx
-      .select({ hash: table.artifactNode.contentHash })
-      .from(table.artifactNode)
-      .where(eq(table.artifactNode.id, reference.versionId));
-    if (!node || node.hash !== reference.contentHash) return false;
-  }
-  return true;
-}
-
-async function audienceTally(tx: Tx, runId: string, policy: ProjectPolicy) {
-  const rows = await tx
-    .select({ decision: table.approvalRecord.decision })
-    .from(table.approvalRecord)
-    .where(
-      and(eq(table.approvalRecord.runId, runId), eq(table.approvalRecord.command, "audience.decide")),
-    );
-  return {
-    required: policy.audienceQuorum,
-    proceeded: rows.filter((row) => row.decision === "proceed").length,
-    blocked: rows.filter((row) => row.decision !== "proceed").length,
-  };
-}
-
-async function audit(
-  tx: Tx,
-  entry: {
-    projectId: string | null;
-    actorPrincipalId: string;
-    authority: string | null;
-    command: string;
-    transitionId: string | null;
-    correlationId: string;
-    before: unknown;
-    after: unknown;
-    outcome: string;
-  },
-) {
-  await tx.insert(table.auditEvent).values({ id: newId.audit(), ...entry });
-}
-
-async function enqueue(
-  tx: Tx,
-  topic: string,
-  payload: Record<string, unknown>,
-  correlationId: string,
-) {
-  await tx
-    .insert(table.outboxEntry)
-    .values({ id: newId.outbox(), topic, payload, correlationId });
-}
-
-/**
- * Opens the durable wait for a gate. Committed inside the same transaction as
- * the transition, so a notification that never fires cannot lose the request.
- */
-async function openWait(
-  tx: Tx,
-  args: {
-    projectId: string;
-    runId: string;
-    stage: Stage;
-    versions: unknown;
-    correlationId: string;
-  },
-): Promise<string> {
-  const id = newId.wait();
-  await tx.insert(table.humanWait).values({
-    id,
-    projectId: args.projectId,
-    runId: args.runId,
-    stage: args.stage,
-    title: `${STAGE_TITLES[args.stage]} awaits a decision`,
-    consequence: CONSEQUENCE[args.stage] ?? "A human decision is required to continue.",
-    requiredAuthority: requiredAuthorityFor(args.stage),
-    versions: args.versions ?? [],
-  });
-  await enqueue(tx, "human_wait.opened", { waitId: id, runId: args.runId }, args.correlationId);
-  return id;
-}
-
-async function closeWait(tx: Tx, runId: string) {
-  await tx
-    .update(table.humanWait)
-    .set({ resolvedAt: new Date() })
-    .where(and(eq(table.humanWait.runId, runId), isNull(table.humanWait.resolvedAt)));
-}
 
 function createRun(args: {
   projectId: string;
@@ -662,25 +449,7 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
   // Outside the transaction — the executor is not something the database's
   // single writer connection can be reached from mid-transaction, and this is
   // a best-effort shadow of the transition, not part of what made it valid.
-  if (GATE_COMMANDS.includes(input.type)) {
-    // A restart empties the executor's map, so a project mid-flight has no
-    // live run and every later gate would no-op in silence. Relaunching is
-    // idempotent, and doing it here rather than only at creation is what
-    // makes the runtime survive the window being closed.
-    if (!hasExecution(input.projectId)) {
-      await launchProjectLifecycle({
-        projectId: input.projectId,
-        branchId: String(input.payload.branchId ?? ""),
-      }).catch((cause: unknown) => {
-        console.error(`[executor] ${input.projectId}: could not relaunch after restart:`, cause);
-      });
-    }
-    await deliverStageSignal(input.projectId, input.type, input.payload).catch(
-      (cause: unknown) => {
-        console.error(`[executor] ${input.projectId}: signal delivery threw:`, cause);
-      },
-    );
-  }
+  await runGateSideEffects(input);
 
   return outcome;
 }
@@ -704,24 +473,6 @@ async function receiptFor(
     .from(table.commandReceipt)
     .where(eq(table.commandReceipt.idempotencyKey, idempotencyKey));
   return receipt ? { ...(receipt.result as CommandOutcome), replayed: true } : null;
-}
-
-async function packetExists(tx: Tx, sourceRunId: string): Promise<boolean> {
-  const [row] = await tx
-    .select({ id: table.buildPacket.id })
-    .from(table.buildPacket)
-    .where(eq(table.buildPacket.sourceRunId, sourceRunId));
-  return Boolean(row);
-}
-
-async function waitingOrigin(tx: Tx, runId: string): Promise<string | undefined> {
-  const [row] = await tx
-    .select({ originId: table.buildQuestion.originId })
-    .from(table.buildQuestion)
-    .where(and(eq(table.buildQuestion.runId, runId), isNull(table.buildQuestion.answeredAt)))
-    .orderBy(desc(table.buildQuestion.createdAt))
-    .limit(1);
-  return row?.originId;
 }
 
 /**
