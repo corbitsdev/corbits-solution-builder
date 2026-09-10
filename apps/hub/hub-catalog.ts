@@ -84,14 +84,91 @@ export function catalogCapabilitiesFor(
   if (match) {
     return { capabilities: [...match.offering.capabilities], quirks: match.offering.quirks };
   }
-  // Fallback: this build has not verified anything beyond plain text for a
-  // model the catalog does not carry.
-  return { capabilities: ["plain-text"], quirks: null };
+  // A model the curated catalog does not carry (a local endpoint's own model,
+  // an unlisted relay) gets whatever the discovery probe learned about it —
+  // and the OpenAI-compatible `/models` listing this build probes carries
+  // nothing beyond an id. So there is nothing to claim: recording "plain-text"
+  // here would be a guess dressed as a fact. No capability is asserted; the
+  // summary renders it as "unknown" rather than as a claim.
+  return { capabilities: [], quirks: null };
 }
 
 export function catalogDisplayNameFor(canonicalName: string): string {
   return catalogModels.find((entry) => entry.canonicalName === canonicalName)?.displayName
     ?? canonicalName;
+}
+
+/**
+ * Ensures a `provider` row and a placeholder `credential` row for a keyless
+ * connection — a local endpoint (Ollama and compatible), which has no
+ * account and no key.
+ *
+ * `model_provider` enforces exactly one of `credentialId` or `walletId` non-
+ * null; neither is a lie for a keyless endpoint, so this mints the smallest
+ * honest stand-in: a `credential` row typed `other`, holding no secret
+ * material, tagged `{ keyless: true }` so every reader can tell it apart from
+ * a real one. `hasCredential` on the summary is derived from that tag, never
+ * from this row's mere existence.
+ */
+async function ensureKeylessCredential(
+  providerId: string,
+  label: string,
+  baseUrl: string,
+): Promise<string> {
+  const { provider, credential } = await schemaTables();
+  const db = handle();
+
+  const providerColumns = provider as unknown as { tenantId: Col; name: Col };
+  const [existingProviderRow] = await db
+    .select()
+    .from(provider)
+    .where(and(eq(providerColumns.tenantId, LOCAL_TENANT), eq(providerColumns.name, providerId)));
+
+  const providerRowId = existingProviderRow
+    ? String(existingProviderRow.id)
+    : `prv_${providerId.replace(/[^a-zA-Z0-9]+/g, "_")}`;
+  if (!existingProviderRow) {
+    await db.insert(provider).values({
+      id: providerRowId,
+      tenantId: LOCAL_TENANT,
+      name: providerId,
+      plugin: providerId,
+      apiBaseUrl: baseUrl,
+      metadata: { label },
+    });
+  }
+
+  const credentialColumns = credential as unknown as { tenantId: Col; name: Col };
+  const credentialName = `provider:${providerId}`;
+  const [existingCredential] = await db
+    .select()
+    .from(credential)
+    .where(
+      and(eq(credentialColumns.tenantId, LOCAL_TENANT), eq(credentialColumns.name, credentialName)),
+    );
+
+  if (existingCredential) {
+    await db
+      .update(credential)
+      .set({ status: "active", updatedAt: new Date() })
+      .where(eq((credential as unknown as { id: Col }).id, String(existingCredential.id)));
+    return String(existingCredential.id);
+  }
+
+  const credentialId = `cred_${credentialName.replace(/[^a-zA-Z0-9]+/g, "_")}`;
+  await db.insert(credential).values({
+    id: credentialId,
+    tenantId: LOCAL_TENANT,
+    providerId: providerRowId,
+    name: credentialName,
+    type: "other",
+    description: "Placeholder for a keyless local endpoint — carries no secret material.",
+    secret: "keyless:no-credential-required",
+    status: "active",
+    metadata: { keyless: true },
+    updatedAt: new Date(),
+  });
+  return credentialId;
 }
 
 /**
@@ -101,17 +178,16 @@ export function catalogDisplayNameFor(canonicalName: string): string {
  * `(tenant, canonical model name)` are both unique upstream — so reconnecting
  * a provider updates its row rather than accumulating duplicates.
  *
- * Requires a real credential: `model_provider` enforces exactly one of
- * `credentialId` or `walletId`, and a local endpoint has neither. Callers for
- * a local endpoint do not reach this function at all — see `localProvider` in
- * `host/db/schema.ts`.
+ * `credentialId: null` is a keyless connection (a local endpoint): rather than
+ * fail the platform's XOR requirement, `ensureKeylessCredential` mints the
+ * placeholder described above and this uses that id instead.
  */
 export async function registerProviderCatalog(input: {
   providerId: string;
   label: string;
   plugin: Plugin;
   baseUrl: string;
-  credentialId: string;
+  credentialId: string | null;
   models: readonly string[];
   priority?: number;
 }): Promise<{ providerRowId: string; offerings: number }> {
@@ -125,12 +201,16 @@ export async function registerProviderCatalog(input: {
     .from(modelProvider)
     .where(and(eq(providerColumns.tenantId, LOCAL_TENANT), eq(providerColumns.name, name)));
 
+  const credentialId =
+    input.credentialId ??
+    (await ensureKeylessCredential(input.providerId, input.label, input.baseUrl));
+
   const providerRow = {
     tenantId: LOCAL_TENANT,
     name,
     plugin: input.plugin,
     baseURL: input.baseUrl,
-    credentialId: input.credentialId,
+    credentialId,
     walletId: null,
     disabled: false,
   };
@@ -232,7 +312,7 @@ export type CatalogProviderRow = {
   label: string;
   plugin: Plugin;
   baseUrl: string;
-  kind: "api_key" | "oauth";
+  kind: "api_key" | "oauth" | "local";
   credentialId: string;
   /** From `credential.status`: "active" reads as ready, anything else as-is. */
   status: string;
@@ -298,7 +378,11 @@ export async function listCatalogProviders(): Promise<CatalogProviderRow[]> {
       label: metadata?.label ?? String(row.name),
       plugin: row.plugin as Plugin,
       baseUrl: String(row.baseURL ?? ""),
-      kind: credentialRow?.type === "oauth_token" ? "oauth" : "api_key",
+      kind: (credentialRow?.metadata as { keyless?: boolean } | null)?.keyless
+        ? "local"
+        : credentialRow?.type === "oauth_token"
+          ? "oauth"
+          : "api_key",
       credentialId: String(row.credentialId ?? ""),
       status: credentialRow?.status === "active" ? "ready" : String(credentialRow?.status ?? "error"),
       validatedAt: credentialRow?.updatedAt ? new Date(credentialRow.updatedAt as string) : null,

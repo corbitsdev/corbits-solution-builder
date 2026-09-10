@@ -10,20 +10,16 @@
  * failover, silent or otherwise.
  *
  * Interchange's own catalog (`provider`, `credential`, `model_provider`,
- * `model`, `model_offering`) is the only store for a connected provider that
- * carries a credential — this module never touches those tables directly,
- * only through `hub-catalog.ts`. The one exception is a local
- * endpoint: it has no credential and no wallet, so the platform's
- * `model_provider` cannot represent it (the row requires exactly one of the
- * two). Its record lives in `table.localProvider`, the smallest thing that
- * can hold it — label, base URL, discovered models, ordering.
+ * `model`, `model_offering`) is the only store for a connected provider — this
+ * module never touches those tables directly, only through `hub-catalog.ts`.
+ * A local endpoint has no account and no key, so `model_provider`'s
+ * requirement of exactly one of `credentialId`/`walletId` is met by a
+ * placeholder `credential` row `hub-catalog.ts` mints and tags
+ * `{ keyless: true }` — never a real secret, and never read as one:
+ * `ProviderSummary.hasCredential` is derived from that tag, not from the
+ * row's mere existence.
  */
-import { and, eq } from "drizzle-orm";
-import { database } from "./db.js";
-import * as table from "./schema.js";
-import { newId } from "./ids.js";
 import { HostError, notFound } from "./errors.js";
-import { LOCAL_TENANT } from "./projects.js";
 import { storeSecret, deleteSecret, readSecret } from "./provider-credentials.js";
 import { linkProviderCredential } from "./hub-credentials.js";
 import {
@@ -157,6 +153,7 @@ const PLUGINS: Record<string, Plugin> = {
   compatible: "openai-compatible",
   "codex-oauth": "openai-compatible",
   "xai-oauth": "openai-compatible",
+  local: "openai-compatible",
 };
 
 /** The Ollama-style local endpoint's own single connection slot. */
@@ -182,7 +179,7 @@ function catalogToSummary(row: CatalogProviderRow): ProviderSummary {
     id: row.providerRowId,
     providerId: row.providerId,
     label: row.label,
-    kind: row.kind,
+    kind: row.kind === "local" ? "local_endpoint" : row.kind,
     baseUrl: row.baseUrl || null,
     status: row.status,
     statusDetail: null,
@@ -192,41 +189,8 @@ function catalogToSummary(row: CatalogProviderRow): ProviderSummary {
     priority: row.basePriority,
     validatedAt: row.validatedAt,
     selectedModel: selectedModelOf(row.models),
-    hasCredential: true,
+    hasCredential: row.kind !== "local",
   };
-}
-
-function localToSummary(row: typeof table.localProvider.$inferSelect): ProviderSummary {
-  return {
-    id: row.id,
-    providerId: row.providerId,
-    label: row.label,
-    kind: "local_endpoint",
-    baseUrl: row.baseUrl,
-    status: "ready",
-    statusDetail: null,
-    models: (row.models as string[]) ?? [],
-    capabilities: { text: true, tools: false, streaming: true, structuredOutput: "unknown" },
-    active: true,
-    priority: row.priority,
-    validatedAt: row.validatedAt,
-    selectedModel: row.selectedModel,
-    hasCredential: false,
-  };
-}
-
-async function readLocalProvider() {
-  const { db } = database();
-  const [row] = await db
-    .select()
-    .from(table.localProvider)
-    .where(
-      and(
-        eq(table.localProvider.tenantId, LOCAL_TENANT),
-        eq(table.localProvider.providerId, LOCAL_PROVIDER_ID),
-      ),
-    );
-  return row ?? null;
 }
 
 /**
@@ -239,38 +203,20 @@ async function readLocalProvider() {
  */
 export async function selectModel(providerId: string, model: string): Promise<ProviderSummary> {
   const catalogRow = await getCatalogProvider(providerId);
-  if (catalogRow) {
-    if (!catalogRow.models.some((entry) => entry.canonicalName === model)) {
-      throw new HostError(
-        "validation_failed",
-        `${model} is not in that provider's validated catalogue.`,
-      );
-    }
-    await setCatalogSelectedModel(providerId, model);
-    return catalogToSummary((await getCatalogProvider(providerId))!);
-  }
-
-  const localRow = await readLocalProvider();
-  if (!localRow || localRow.providerId !== providerId) throw notFound("That provider connection");
-  if (!(localRow.models as string[]).includes(model)) {
+  if (!catalogRow) throw notFound("That provider connection");
+  if (!catalogRow.models.some((entry) => entry.canonicalName === model)) {
     throw new HostError(
       "validation_failed",
       `${model} is not in that provider's validated catalogue.`,
     );
   }
-  const { db } = database();
-  await db
-    .update(table.localProvider)
-    .set({ selectedModel: model })
-    .where(eq(table.localProvider.id, localRow.id));
-  return localToSummary((await readLocalProvider())!);
+  await setCatalogSelectedModel(providerId, model);
+  return catalogToSummary((await getCatalogProvider(providerId))!);
 }
 
 export async function listProviders(): Promise<ProviderSummary[]> {
-  const [catalogRows, localRow] = await Promise.all([listCatalogProviders(), readLocalProvider()]);
-  const summaries = catalogRows.map(catalogToSummary);
-  if (localRow) summaries.push(localToSummary(localRow));
-  return summaries.sort((a, b) => a.priority - b.priority);
+  const catalogRows = await listCatalogProviders();
+  return catalogRows.map(catalogToSummary).sort((a, b) => a.priority - b.priority);
 }
 
 /**
@@ -288,22 +234,8 @@ export async function providerOrder(): Promise<ProviderSummary[]> {
 
 /** Reorders the connected providers. The list is the new order, first to last. */
 export async function setProviderOrder(providerIds: string[]): Promise<ProviderSummary[]> {
-  const { db } = database();
   for (const [index, providerId] of providerIds.entries()) {
-    const catalogRow = await getCatalogProvider(providerId);
-    if (catalogRow) {
-      await setCatalogProviderPriority(providerId, index);
-      continue;
-    }
-    await db
-      .update(table.localProvider)
-      .set({ priority: index })
-      .where(
-        and(
-          eq(table.localProvider.tenantId, LOCAL_TENANT),
-          eq(table.localProvider.providerId, providerId),
-        ),
-      );
+    await setCatalogProviderPriority(providerId, index);
   }
   return listProviders();
 }
@@ -414,32 +346,24 @@ export async function connectProvider(
       throw new HostError("validation_failed", "A local endpoint needs a base URL.");
     }
     const models = await validateLocalEndpoint(request.baseUrl);
-    const { db } = database();
-    const existing = await readLocalProvider();
-    const selectedModel =
-      existing?.selectedModel && models.includes(existing.selectedModel)
-        ? existing.selectedModel
-        : null;
-    const values = {
+    const existing = await getCatalogProvider(LOCAL_PROVIDER_ID);
+    const priorSelected = existing ? selectedModelOf(existing.models) : null;
+    const priority = existing ? existing.basePriority : (await listProviders()).length;
+
+    await registerProviderCatalog({
+      providerId: LOCAL_PROVIDER_ID,
       label: request.label,
+      plugin: PLUGINS[LOCAL_PROVIDER_ID] ?? "openai-compatible",
       baseUrl: request.baseUrl,
+      credentialId: null,
       models,
-      selectedModel,
-      validatedAt: new Date(),
-    };
-    if (existing) {
-      await db.update(table.localProvider).set(values).where(eq(table.localProvider.id, existing.id));
-    } else {
-      const priority = (await listProviders()).length;
-      await db.insert(table.localProvider).values({
-        id: newId.provider(),
-        tenantId: LOCAL_TENANT,
-        providerId: LOCAL_PROVIDER_ID,
-        priority,
-        ...values,
-      });
+      priority,
+    });
+    await touchCredentialValidated(LOCAL_PROVIDER_ID);
+    if (priorSelected && !models.includes(priorSelected)) {
+      await setCatalogSelectedModel(LOCAL_PROVIDER_ID, null);
     }
-    return localToSummary((await readLocalProvider())!);
+    return catalogToSummary((await getCatalogProvider(LOCAL_PROVIDER_ID))!);
   }
 
   // A pasted key routinely carries a trailing newline or a stray space, and
@@ -570,59 +494,50 @@ export async function finishOAuthConnect(): Promise<ProviderSummary> {
  */
 export async function refreshProviderModels(providerId: string): Promise<ProviderSummary> {
   const catalogRow = await getCatalogProvider(providerId);
-  if (catalogRow) {
-    const models = (OAUTH_PROVIDERS as readonly string[]).includes(providerId)
+  if (!catalogRow) throw notFound("That provider connection");
+
+  const isLocal = providerId === LOCAL_PROVIDER_ID;
+  const models = isLocal
+    ? await validateLocalEndpoint(catalogRow.baseUrl)
+    : (OAUTH_PROVIDERS as readonly string[]).includes(providerId)
       ? await refreshModels(providerId as OAuthProviderId)
       : await validateApiKey(
           providerId as keyof typeof CATALOG,
           (await readSecret((await getCredentialRef(providerId)) ?? "")) ?? "",
           catalogRow.baseUrl || undefined,
         );
-    await registerProviderCatalog({
-      providerId,
-      label: catalogRow.label,
-      plugin: catalogRow.plugin,
-      baseUrl: catalogRow.baseUrl,
-      credentialId: catalogRow.credentialId,
-      models,
-      priority: catalogRow.basePriority,
-    });
-    await touchCredentialValidated(providerId);
-    return catalogToSummary((await getCatalogProvider(providerId))!);
-  }
 
-  const localRow = await readLocalProvider();
-  if (!localRow || localRow.providerId !== providerId) throw notFound("That provider connection");
-  const models = await validateLocalEndpoint(localRow.baseUrl);
-  const { db } = database();
-  // A model the operator had selected that the endpoint no longer serves is
+  // A model the operator had selected that the provider no longer serves is
   // cleared rather than left pointing at nothing.
-  const selectedModel =
-    localRow.selectedModel && models.includes(localRow.selectedModel) ? localRow.selectedModel : null;
-  await db
-    .update(table.localProvider)
-    .set({ models, selectedModel, validatedAt: new Date() })
-    .where(eq(table.localProvider.id, localRow.id));
-  return localToSummary((await readLocalProvider())!);
+  const priorSelected = selectedModelOf(catalogRow.models);
+
+  await registerProviderCatalog({
+    providerId,
+    label: catalogRow.label,
+    plugin: catalogRow.plugin,
+    baseUrl: catalogRow.baseUrl,
+    credentialId: isLocal ? null : catalogRow.credentialId,
+    models,
+    priority: catalogRow.basePriority,
+  });
+  await touchCredentialValidated(providerId);
+  if (priorSelected && !models.includes(priorSelected)) {
+    await setCatalogSelectedModel(providerId, null);
+  }
+  return catalogToSummary((await getCatalogProvider(providerId))!);
 }
 
 export async function disconnectProvider(providerId: string): Promise<void> {
   const catalogRow = await getCatalogProvider(providerId);
-  if (catalogRow) {
-    if ((OAUTH_PROVIDERS as readonly string[]).includes(providerId)) {
-      await oauthLogout(providerId as OAuthProviderId);
-    } else {
-      const ref = await getCredentialRef(providerId);
-      if (ref) await deleteSecret(ref);
-    }
-    await disconnectCatalogProvider(providerId);
-    return;
-  }
+  if (!catalogRow) throw notFound("That provider connection");
 
-  const localRow = await readLocalProvider();
-  if (!localRow || localRow.providerId !== providerId) throw notFound("That provider connection");
-  const { db } = database();
-  await db.delete(table.localProvider).where(eq(table.localProvider.id, localRow.id));
+  if ((OAUTH_PROVIDERS as readonly string[]).includes(providerId)) {
+    await oauthLogout(providerId as OAuthProviderId);
+  } else if (providerId !== LOCAL_PROVIDER_ID) {
+    const ref = await getCredentialRef(providerId);
+    if (ref) await deleteSecret(ref);
+  }
+  await disconnectCatalogProvider(providerId);
 }
 
 /**

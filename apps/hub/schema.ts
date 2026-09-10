@@ -254,31 +254,11 @@ export const humanWait = builder.table(
   (table) => [index("human_wait_open_idx").on(table.resolvedAt, table.createdAt)],
 );
 
-/**
- * The one connection kind Interchange's own catalog cannot represent: a local
- * endpoint (Ollama and compatible) has no account and no key, so there is
- * nothing to hang a `credential` row on, and `model_provider` requires exactly
- * one of `credentialId` or `walletId`. Minting a fake credential for it would
- * be a lie of tidiness, so it stays here instead — the rest of a connected
- * provider (label, models, ordering) lives in Interchange's tables.
- */
-export const localProvider = builder.table(
-  "local_provider",
-  {
-    id: id(),
-    tenantId: text("tenant_id").notNull(),
-    providerId: text("provider_id").notNull(),
-    label: text("label").notNull(),
-    baseUrl: text("base_url").notNull(),
-    models: jsonb("models").notNull(),
-    selectedModel: text("selected_model"),
-    /** Preference order, lowest first. The operator sets it in Settings. */
-    priority: integer("priority").notNull().default(0),
-    validatedAt: timestamp("validated_at", { withTimezone: true }),
-    createdAt: createdAt(),
-  },
-  (table) => [uniqueIndex("local_provider_idx").on(table.tenantId, table.providerId)],
-);
+// `local_provider` is gone: a local endpoint (Ollama and compatible) is now
+// registered through Interchange's own catalog rows — `provider`,
+// `model_provider`, `model`, `model_offering` — via `hub-catalog.ts`'s
+// `registerProviderCatalog`, using a placeholder `credential` row tagged
+// `{ keyless: true }` in place of a real one. See CL-7573.
 
 export const auditEvent = builder.table(
   "audit_event",

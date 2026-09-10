@@ -128,7 +128,7 @@ try {
          JOIN pg_class t ON t.oid = c.conrelid
          JOIN pg_namespace n ON n.oid = t.relnamespace
         WHERE n.nspname = 'builder' AND c.contype = 'f'
-          AND c.conname IN ('project_tenant_fk','participant_principal_fk','local_provider_tenant_fk')`,
+          AND c.conname IN ('project_tenant_fk','participant_principal_fk')`,
     ),
   );
   // pglite answers `{ rows }` and postgres-js answers an array; the host's
@@ -138,7 +138,7 @@ try {
   const names = returned.map((row) => row.conname);
   check(
     "builder tables reference the hub's tenant and principal",
-    names.length === 3,
+    names.length === 2,
     names.join(", ") || "none",
   );
 

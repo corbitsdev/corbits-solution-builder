@@ -401,6 +401,97 @@ const MIGRATIONS: readonly Migration[] = [
       sql`DROP TABLE IF EXISTS "builder"."change_notice"`,
     ],
   },
+  {
+    // CL-7573: `builder.local_provider` collapses into Interchange's own
+    // catalog rows — the same `provider` / `credential` / `model_provider` /
+    // `model` / `model_offering` tables every other connected provider lives
+    // in, via a placeholder `credential` row tagged `{ keyless: true }` in
+    // place of a real one (a local endpoint has no account and no key, and
+    // `model_provider` requires exactly one of `credentialId`/`walletId`).
+    //
+    // This runs after Interchange's own migrations, so those tables already
+    // exist. Every existing `local_provider` row is carried across — label,
+    // base URL, discovered models, preference order, selected model — before
+    // the table is dropped. IDs mirror exactly what `hub-catalog.ts`'s
+    // `registerProviderCatalog` and `ensureKeylessCredential` derive at
+    // runtime, so a provider reconnected after this migration lands on the
+    // same rows rather than a duplicate set.
+    id: "0003_collapse_local_provider_into_catalog",
+    statements: [
+      sql.raw(`
+        DO $$
+        DECLARE
+          r RECORD;
+          model_name TEXT;
+          idx INT;
+          slug_provider TEXT;
+          slug_model TEXT;
+          prov_row_id TEXT;
+          cred_id TEXT;
+          cred_name TEXT;
+          mpv_id TEXT;
+          mdl_id TEXT;
+          mof_id TEXT;
+        BEGIN
+          IF to_regclass('"builder"."local_provider"') IS NULL THEN
+            RETURN;
+          END IF;
+
+          FOR r IN SELECT * FROM "builder"."local_provider" LOOP
+            slug_provider := regexp_replace(regexp_replace(lower(r.provider_id), '[^a-z0-9]+', '-', 'g'), '(^-+)|(-+$)', '', 'g');
+            prov_row_id := 'prv_' || regexp_replace(r.provider_id, '[^a-zA-Z0-9]+', '_', 'g');
+            cred_name := 'provider:' || r.provider_id;
+            cred_id := 'cred_' || regexp_replace(cred_name, '[^a-zA-Z0-9]+', '_', 'g');
+            mpv_id := 'mpv_' || slug_provider;
+
+            INSERT INTO "public"."provider"
+              ("id","tenant_id","name","plugin","api_base_url","metadata","created_at","updated_at")
+              VALUES (prov_row_id, r.tenant_id, r.provider_id, r.provider_id, r.base_url,
+                      jsonb_build_object('label', r.label), now(), now())
+              ON CONFLICT ("tenant_id","name") DO NOTHING;
+
+            INSERT INTO "public"."credential"
+              ("id","tenant_id","provider_id","name","type","description","secret","status","metadata","created_at","updated_at")
+              VALUES (cred_id, r.tenant_id, prov_row_id, cred_name, 'other',
+                      'Placeholder for a keyless local endpoint — carries no secret material.',
+                      'keyless:no-credential-required', 'active', jsonb_build_object('keyless', true),
+                      now(), COALESCE(r.validated_at, now()))
+              ON CONFLICT ("tenant_id","name") DO NOTHING;
+
+            INSERT INTO "public"."model_provider"
+              ("id","tenant_id","name","plugin","base_url","credential_id","wallet_id","disabled","created_at","updated_at")
+              VALUES (mpv_id, r.tenant_id, slug_provider, 'openai-compatible', r.base_url, cred_id, NULL, false, now(), now())
+              ON CONFLICT ("tenant_id","name") DO NOTHING;
+
+            idx := 0;
+            FOR model_name IN SELECT jsonb_array_elements_text(r.models) LOOP
+              slug_model := regexp_replace(regexp_replace(lower(model_name), '[^a-z0-9]+', '-', 'g'), '(^-+)|(-+$)', '', 'g');
+              mdl_id := 'mdl_' || slug_model;
+              mof_id := 'mof_' || slug_model || '-' || slug_provider;
+
+              INSERT INTO "public"."model"
+                ("id","tenant_id","canonical_name","display_name","disabled","created_at","updated_at")
+                VALUES (mdl_id, r.tenant_id, model_name, model_name, false, now(), now())
+                ON CONFLICT ("tenant_id","canonical_name") DO NOTHING;
+
+              -- Priority mirrors registerProviderCatalog's scheme (base
+              -- priority * 1000 + discovery order). Capabilities are left
+              -- empty: the honest fallback for a model this build has not
+              -- probed for anything beyond its name.
+              INSERT INTO "public"."model_offering"
+                ("id","tenant_id","model_id","provider_id","priority","deployment_tags","capabilities","quirks","disabled","created_at","updated_at")
+                VALUES (mof_id, r.tenant_id, mdl_id, mpv_id, r.priority * 1000 + idx, '{}', '{}', NULL,
+                        (r.selected_model IS NOT NULL AND r.selected_model <> model_name), now(), now())
+                ON CONFLICT ("tenant_id","model_id","provider_id") DO NOTHING;
+
+              idx := idx + 1;
+            END LOOP;
+          END LOOP;
+        END $$;
+      `),
+      sql`DROP TABLE IF EXISTS "builder"."local_provider"`,
+    ],
+  },
 ];
 
 async function checksum(migration: Migration): Promise<string> {
@@ -438,7 +529,6 @@ async function linkAuthzToHub(host: HostDatabase): Promise<void> {
   const constraints: { table: string; column: string; target: string; name: string }[] = [
     { table: "project", column: "tenant_id", target: "tenant", name: "project_tenant_fk" },
     { table: "participant", column: "principal_id", target: "principal", name: "participant_principal_fk" },
-    { table: "local_provider", column: "tenant_id", target: "tenant", name: "local_provider_tenant_fk" },
   ];
 
   for (const constraint of constraints) {

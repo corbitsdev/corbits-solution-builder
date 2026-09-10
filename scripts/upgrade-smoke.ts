@@ -241,6 +241,126 @@ try {
   await host.close();
 }
 
+// --- CL-7573: a `local_provider` row from before the collapse survives it ---
+//
+// A workspace connected a local endpoint before `builder.local_provider`
+// collapsed into Interchange's own catalog rows. The migration must carry
+// that row across — label, base URL, models, priority, selected model — and
+// the table must be gone afterward.
+{
+  const dir = await mkdtemp(join(tmpdir(), "sb-upgrade-"));
+  roots.push(dir);
+  const host = await openDatabase(join(dir, "pglite"));
+
+  // Real Interchange tables first, exactly like a live upgrade would have.
+  await migrateHub(host);
+
+  // The workspace tenant `local_provider.tenant_id` used to point at, seeded
+  // the way `ensureWorkspace` does it.
+  await host.db.execute(sql`
+    INSERT INTO "public"."tenant" ("id","name","slug","domain")
+    VALUES ('t_local', 'Local workspace', 'local', 'local.solutions-builder.invalid')
+    ON CONFLICT ("id") DO NOTHING
+  `);
+
+  // The pre-collapse table, seeded with a connected local endpoint — verbatim
+  // the shape migration 0001 creates, before 0003 ever ran.
+  await host.raw.exec(`
+    CREATE SCHEMA IF NOT EXISTS "builder";
+    CREATE TABLE IF NOT EXISTS "builder"."local_provider" (
+      "id" text PRIMARY KEY,
+      "tenant_id" text NOT NULL,
+      "provider_id" text NOT NULL,
+      "label" text NOT NULL,
+      "base_url" text NOT NULL,
+      "models" jsonb NOT NULL,
+      "selected_model" text,
+      "priority" integer NOT NULL DEFAULT 0,
+      "validated_at" timestamptz,
+      "created_at" timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS "local_provider_idx"
+      ON "builder"."local_provider" ("tenant_id", "provider_id");
+    INSERT INTO "builder"."local_provider"
+      ("id","tenant_id","provider_id","label","base_url","models","selected_model","priority")
+      VALUES ('lp_seed', 't_local', 'local', 'Ollama', 'http://localhost:11434/v1',
+              '["llama3.2","qwen2.5"]', 'qwen2.5', 2);
+  `);
+
+  await prepareDatabase(host);
+
+  const providerRows = await host.db.execute<{ id: string; name: string; base_url: string }>(
+    sql`SELECT * FROM "public"."model_provider" WHERE "name" = 'local'`,
+  );
+  const providerRow = (providerRows.rows as { id: string; name: string; base_url: string }[])[0];
+  check(
+    "the pre-migration row lands as a model_provider, base URL carried across",
+    providerRow?.base_url === "http://localhost:11434/v1",
+    JSON.stringify(providerRow),
+  );
+
+  const credentialRows = await host.db.execute<{ metadata: unknown }>(
+    sql`SELECT * FROM "public"."credential" WHERE "name" = 'provider:local'`,
+  );
+  const credentialRow = (credentialRows.rows as { metadata: { keyless?: boolean } }[])[0];
+  check(
+    "and a keyless placeholder credential, never a real secret",
+    credentialRow?.metadata?.keyless === true,
+    JSON.stringify(credentialRow?.metadata),
+  );
+
+  const providerVendorRows = await host.db.execute<{ metadata: { label?: string } }>(
+    sql`SELECT * FROM "public"."provider" WHERE "name" = 'local'`,
+  );
+  const providerVendorRow = (providerVendorRows.rows as { metadata: { label?: string } }[])[0];
+  check(
+    "the label is carried across on the provider row",
+    providerVendorRow?.metadata?.label === "Ollama",
+    JSON.stringify(providerVendorRow?.metadata),
+  );
+
+  const offeringRows = await host.db.execute<{
+    canonical_name: string;
+    priority: number;
+    disabled: boolean;
+  }>(sql`
+    SELECT m.canonical_name, mo.priority, mo.disabled
+    FROM "public"."model_offering" mo
+    JOIN "public"."model" m ON m.id = mo.model_id
+    JOIN "public"."model_provider" mp ON mp.id = mo.provider_id
+    WHERE mp.name = 'local'
+    ORDER BY mo.priority
+  `);
+  const offerings = offeringRows.rows as { canonical_name: string; priority: number; disabled: boolean }[];
+  check(
+    "every probed model is carried across as an offering",
+    offerings.length === 2 && offerings.every((row) => row.priority >= 2000 && row.priority < 3000),
+    JSON.stringify(offerings),
+  );
+  check(
+    "the previously selected model is carried across as the only enabled offering",
+    offerings.filter((row) => !row.disabled).length === 1 &&
+      offerings.find((row) => !row.disabled)?.canonical_name === "qwen2.5",
+    JSON.stringify(offerings),
+  );
+
+  const tableRows = await host.db.execute<{ table_name: string }>(sql`
+    SELECT table_name FROM information_schema.tables
+    WHERE table_schema = 'builder' AND table_name = 'local_provider'
+  `);
+  check("builder.local_provider is gone after the migration", tableRows.rows.length === 0);
+
+  // Idempotent: re-running finds nothing left to migrate and does not choke
+  // on the now-missing table.
+  let rerunFailed = false;
+  await prepareDatabase(host).catch(() => {
+    rerunFailed = true;
+  });
+  check("running the migration again is a no-op, not a failure", !rerunFailed);
+
+  await host.close();
+}
+
 const failed = checks.filter((entry) => !entry.ok);
 console.log(`\nUpgrade smoke: ${checks.length - failed.length}/${checks.length} checks passed`);
 process.exit(failed.length === 0 ? 0 : 1);

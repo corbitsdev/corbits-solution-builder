@@ -106,17 +106,13 @@ check(
   "offerings carry a resolution order",
   offerings.length > 0 && offerings.every((row) => typeof row.priority === "number"),
 );
-// The stub server's models are not in the real inference catalog, so the
-// honest fallback applies: plain text only, nothing this build has not
-// verified for them.
+// The stub server's models are not in the real inference catalog, and the
+// stub's `/models` listing carries nothing beyond an id, so the honest
+// fallback applies: no capability is claimed, rather than a guess.
 check(
   "and advertise the honest fallback for a model the catalog does not know",
   offerings.length > 0 &&
-    offerings.every(
-      (row) =>
-        (row.capabilities as string[]).includes("plain-text") &&
-        !(row.capabilities as string[]).includes("function-calling"),
-    ),
+    offerings.every((row) => (row.capabilities as string[]).length === 0),
 );
 
 // Reconnecting is what an expired key looks like. It must update the catalog,
@@ -293,6 +289,82 @@ stub2.close();
 }
 
 stub.close();
+
+// CL-7573: a local endpoint (Ollama-style, keyless) must land in exactly the
+// same catalog rows as every other provider — no `builder.local_provider`
+// row survives it.
+{
+  const LOCAL_MODELS = ["llama3.2", "qwen2.5"];
+  const local = createServer((request, response) => {
+    if (request.url !== "/v1/models") {
+      response.writeHead(404).end();
+      return;
+    }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ data: LOCAL_MODELS.map((id) => ({ id })) }));
+  });
+  await new Promise<void>((resolve) => local.listen(0, "127.0.0.1", resolve));
+  const localPort = (local.address() as { port: number }).port;
+
+  const { connectProvider, listProviders, setProviderOrder, selectModel, disconnectProvider } =
+    await import("../apps/hub/providers.js");
+
+  const connected = await connectProvider({
+    providerId: "local",
+    label: "Local endpoint",
+    kind: "local_endpoint",
+    baseUrl: `http://127.0.0.1:${localPort}`,
+  });
+  check(
+    "connecting a local endpoint reports it ready with no credential",
+    connected.status === "ready" && connected.hasCredential === false,
+    `${connected.status}, hasCredential=${connected.hasCredential}`,
+  );
+
+  const providerRowsAfterLocal = await rows("select * from public.model_provider");
+  check(
+    "the local endpoint writes a model_provider row like any other provider",
+    providerRowsAfterLocal.some((row) => row.name === "local"),
+  );
+  const localModelRows = await rows(
+    "select m.canonical_name from public.model m join public.model_offering mo on mo.model_id = m.id " +
+      "join public.model_provider mp on mp.id = mo.provider_id where mp.name = 'local'",
+  );
+  check(
+    "every model the local endpoint probed is in the catalog",
+    localModelRows.length === LOCAL_MODELS.length,
+    localModelRows.map((row) => row.canonical_name).join(", "),
+  );
+  const tableCheck = await rows(
+    "select table_name from information_schema.tables where table_schema = 'builder' and table_name = 'local_provider'",
+  );
+  check("`builder.local_provider` does not exist", tableCheck.length === 0);
+
+  const reorderedWithLocal = await setProviderOrder(["local", "openrouter"]);
+  check(
+    "reordering with the local endpoint round-trips through the catalog",
+    reorderedWithLocal[0]?.providerId === "local" && reorderedWithLocal[1]?.providerId === "openrouter",
+    reorderedWithLocal.map((entry) => entry.providerId).join(", "),
+  );
+
+  const selectedLocal = await selectModel("local", "qwen2.5");
+  check(
+    "selecting a model on the local endpoint round-trips through the catalog",
+    selectedLocal.selectedModel === "qwen2.5",
+    String(selectedLocal.selectedModel),
+  );
+
+  await disconnectProvider("local");
+  const afterLocalDisconnect = await listProviders();
+  check(
+    "disconnecting the local endpoint removes its catalog rows",
+    !afterLocalDisconnect.some((entry) => entry.providerId === "local") &&
+      !(await rows("select * from public.model_provider")).some((row) => row.name === "local"),
+  );
+
+  local.close();
+}
+
 const failed = checks.filter((entry) => !entry.ok);
 console.log(`\nCatalog smoke: ${checks.length - failed.length}/${checks.length} checks passed`);
 process.exit(failed.length === 0 ? 0 : 1);
