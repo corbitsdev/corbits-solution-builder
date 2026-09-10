@@ -10,7 +10,7 @@ import { listProviders } from "./providers.js";
 import { credentialBackend } from "./provider-credentials.js";
 import { BRIDGE_CAPABILITIES, BRIDGE_ID, bridgeAvailable } from "./corbits-exec.js";
 import { hostStatus, requestHostStop } from "./lifecycle.js";
-import { ensureHub, hubFetch } from "./hub-endpoint.js";
+import { ensureHub, hubFetch } from "./hub-client.js";
 import { install, installState } from "./install.js";
 
 export const API_VERSION = "1";

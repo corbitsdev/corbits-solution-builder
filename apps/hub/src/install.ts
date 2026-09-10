@@ -2,18 +2,35 @@
  * Installing the app into the workspace.
  *
  * The hub boots vanilla: migrate, mount, serve. Everything that makes it
- * *Solutions Builder* — the owner principal, the workflow definitions generated
- * from the ledger, the roles and agent bindings, the specialist prompts in the
- * registry — is installed here, on the client's request, after boot. First run
- * and upgrade are the same call, and it is idempotent, so the client can ask
- * again whenever a credential changes.
+ * *Solutions Builder* — the owner as a hub user with a tenant, the workflow
+ * definitions generated from the ledger, the roles and grants, the specialist
+ * prompts in the registry — is installed here, on the client's request, as
+ * the owner, through the hub's API. First run and upgrade are the same call,
+ * and it is idempotent, so the client can ask again whenever a credential
+ * changes.
+ *
+ * "Installed" is a comparison, not a marker: every definition the package
+ * generates exists in the tenant at the hash it would deploy right now.
  */
 import { APP_VERSION } from "@solutions-builder/app/manifest";
 import { agentFor } from "@solutions-builder/app/kit";
-import { hubMode } from "./hub-endpoint.js";
-import { getWorkflowDefinitionId } from "./hub-workflows.js";
-import { expectedWorkflowDefinitions } from "./workflow-seed.js";
-import { ensureWorkspace, LOCAL_TENANT } from "./projects.js";
+import { AUTHORITIES } from "@solutions-builder/app/ledger";
+import {
+  assignRole,
+  createWorkspace,
+  definitionIdFor,
+  ensureOwner,
+  ensureRole,
+  ensureRoleGrant,
+  forgetWorkspace,
+  hubGet,
+  hubMode,
+  ownerPrincipalId,
+  resolveWorkspace,
+  type Workspace,
+} from "./hub-client.js";
+import { adoptLegacyWorkspace, bindAgentRole, deployDefinitionBodies } from "./hub-gaps.js";
+import { expectedWorkflowDefinitions, seedWorkflows } from "./workflow-seed.js";
 
 export type InstallState = {
   readonly installed: boolean;
@@ -25,13 +42,23 @@ export type InstallState = {
   readonly detail: string;
 };
 
-export const OWNER = { principalId: "p_owner", displayName: "You" } as const;
+const SPECIALIST = "specialist";
+
+const ROLE_DESCRIPTIONS: Record<string, string> = {
+  project_owner: "Opens a project, approves stages and accepts delivery.",
+  budget_approver: "Approves a firm estimate before any spend is committed.",
+  technical_approver: "Approves a plan on technical grounds.",
+  audience_member: "Records a proceed, revise or reject on an audience package.",
+  builder_operator: "Answers a build's questions and decides its permissions.",
+  delivery_recipient: "Accepts or rejects the delivered software.",
+  system: "The host acting on its own behalf; never a human decision.",
+  [SPECIALIST]: "Drafts and proposes. Holds no approval, grant or waiver authority of any kind.",
+};
 
 export async function installState(): Promise<InstallState> {
   if (hubMode() !== "embedded") {
     // A hosted hub owns its tenants and definitions; installing into it is
-    // that hub's lifecycle, not this process's. Nothing to do here, and saying
-    // so beats pretending to.
+    // that hub's lifecycle, not this process's.
     return {
       installed: true,
       appVersion: APP_VERSION,
@@ -40,14 +67,22 @@ export async function installState(): Promise<InstallState> {
       detail: "Hosted hub: definitions are managed there.",
     };
   }
-  // Installed is a comparison, not a marker: every definition the package
-  // generates exists in the tenant at the hash it would deploy right now.
+  const expected = await expectedWorkflowDefinitions();
+  if (!(await resolveWorkspace())) {
+    return {
+      installed: false,
+      appVersion: APP_VERSION,
+      missing: expected.map((entry) => entry.name),
+      stale: [],
+      detail: "No workspace yet.",
+    };
+  }
   const missing: string[] = [];
   const stale: string[] = [];
-  for (const expected of await expectedWorkflowDefinitions()) {
-    const current = await getWorkflowDefinitionId(LOCAL_TENANT, expected.name);
-    if (current === null) missing.push(expected.name);
-    else if (current !== expected.id) stale.push(expected.name);
+  for (const entry of expected) {
+    const current = await definitionIdFor(entry.name);
+    if (current === null) missing.push(entry.name);
+    else if (current !== entry.id) stale.push(entry.name);
   }
   const installed = missing.length === 0 && stale.length === 0;
   return {
@@ -63,29 +98,62 @@ export async function installState(): Promise<InstallState> {
   };
 }
 
+/**
+ * The owner as a hub user, in a tenant that is theirs. Creates neither twice.
+ * A workspace from before the hub owned identity is adopted rather than
+ * abandoned, so its projects keep their tenant.
+ */
+export async function ensureWorkspace(): Promise<Workspace | null> {
+  if (hubMode() !== "embedded") return resolveWorkspace();
+  await ensureOwner();
+  const found = await resolveWorkspace();
+  if (found) return found;
+  // The owner exists but holds no tenant: a fresh install, or a legacy one.
+  const me = await hubGet<{ id: string }>("/api/me");
+  if (await adoptLegacyWorkspace(me.id)) {
+    forgetWorkspace();
+    const adopted = await resolveWorkspace();
+    if (adopted) return adopted;
+  }
+  return createWorkspace();
+}
+
 /** Everything the tenant needs, in dependency order. Safe to run any time. */
 export async function install(): Promise<InstallState> {
   if (hubMode() !== "embedded") return installState();
 
-  await ensureWorkspace(OWNER);
-
-  const { seedWorkflows } = await import("./workflow-seed.js");
+  await ensureWorkspace();
   const seeded = await seedWorkflows();
 
   // Authority is the platform's: the ledger's authorities become roles, the
-  // owner holds them, and every stage definition is bound to `specialist`,
-  // the role that approves nothing.
-  const { seedRoles } = await import("./hub-roles.js");
-  await seedRoles({
-    ownerPrincipalId: OWNER.principalId,
-    agentDefinitionIds: seeded
-      .filter((entry) => entry.name.startsWith("solutions-builder.stage."))
-      .map((entry) => entry.id),
-  });
+  // owner holds every human one, and every stage definition is bound to
+  // `specialist`, the role that approves nothing.
+  const roles = new Map<string, string>();
+  for (const name of [...AUTHORITIES, SPECIALIST]) {
+    const role = await ensureRole(name, ROLE_DESCRIPTIONS[name] ?? "");
+    roles.set(name, role.id);
+  }
+  for (const name of AUTHORITIES) {
+    if (name === "system") continue;
+    // Role membership becomes a real platform grant `@intx/authz` can answer
+    // for, not a "role name equals authority name" assumption in a reader.
+    await ensureRoleGrant({
+      roleId: roles.get(name)!,
+      resource: `authority:${name}`,
+      action: "hold",
+      effect: "allow",
+      origin: "role",
+    });
+    await assignRole(ownerPrincipalId(), roles.get(name)!);
+  }
+  for (const entry of seeded) {
+    if (entry.name.startsWith("solutions-builder.stage.")) {
+      await bindAgentRole(entry.id, roles.get(SPECIALIST)!);
+    }
+  }
 
   // The prompt a specialist reads is a commit in the hub's own repo for that
   // definition, which is where a sidecar pulls it from.
-  const { deployDefinitionBodies } = await import("./hub-deploy.js");
   await deployDefinitionBodies(
     seeded
       .filter((entry) => /\.stage\.\d+$/.test(entry.name))

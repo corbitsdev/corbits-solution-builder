@@ -24,7 +24,8 @@ import { nameProject, titleFromProblem } from "./title.js";
 import { runGuidance } from "./guide.js";
 import { notFound } from "./errors.js";
 import { type RunState } from "@solutions-builder/app/ledger";
-import { LOCAL_ACTOR, parsed } from "./api.js";
+import { parsed } from "./api.js";
+import { localActor } from "./hub-client.js";
 
 export function registerProjectRoutes(api: Hono) {
   api.get("/decisions", async (context) =>
@@ -42,7 +43,7 @@ export function registerProjectRoutes(api: Hono) {
     const created = await createProject({
       title: payload.title || titleFromProblem(problem),
       policy: payload.policy,
-      owner: LOCAL_ACTOR,
+      owner: localActor(),
     });
 
     if (problem.length > 0) {
@@ -61,7 +62,7 @@ export function registerProjectRoutes(api: Hono) {
         runId: created.runId,
         stage: 1,
         body: problem,
-        actor: LOCAL_ACTOR,
+        actor: localActor(),
       });
 
       // A name for the thing, not a sentence about the person. Best effort and
@@ -78,13 +79,13 @@ export function registerProjectRoutes(api: Hono) {
   });
 
   api.get("/projects/:projectId", async (context) =>
-    context.json(await projectDetail(context.req.param("projectId"), LOCAL_ACTOR.principalId)),
+    context.json(await projectDetail(context.req.param("projectId"), localActor().principalId)),
   );
 
   /** Stage 4: the design history and any feedback already recorded on it. */
   api.get("/projects/:projectId/design", async (context) => {
     const projectId = context.req.param("projectId");
-    const detail = await projectDetail(projectId, LOCAL_ACTOR.principalId);
+    const detail = await projectDetail(projectId, localActor().principalId);
     const designs = await designHistory(projectId, detail.project.activeBranchId ?? "");
     const feedback = await Promise.all(
       designs.map(async (design) => ({
@@ -105,7 +106,7 @@ export function registerProjectRoutes(api: Hono) {
       comments?: { anchor: Record<string, unknown>; body: string }[];
       acceptanceCriteria?: string[];
     };
-    const detail = await projectDetail(projectId, LOCAL_ACTOR.principalId);
+    const detail = await projectDetail(projectId, localActor().principalId);
     const result = await submitFeedback({
       projectId,
       branchId: detail.project.activeBranchId ?? "",
@@ -113,7 +114,7 @@ export function registerProjectRoutes(api: Hono) {
       direction: body.direction,
       overallNote: body.overallNote ?? "",
       comments: body.comments ?? [],
-      author: LOCAL_ACTOR.principalId,
+      author: localActor().principalId,
       ...(body.acceptanceCriteria ? { acceptanceCriteria: body.acceptanceCriteria } : {}),
     });
     return context.json(result);
@@ -123,14 +124,14 @@ export function registerProjectRoutes(api: Hono) {
   api.post("/projects/:projectId/design/revise", async (context) => {
     const projectId = context.req.param("projectId");
     const body = (await context.req.json()) as { designNodeId: string };
-    const detail = await projectDetail(projectId, LOCAL_ACTOR.principalId);
+    const detail = await projectDetail(projectId, localActor().principalId);
     if (!detail.current) throw notFound("An open run for that project");
     const result = await redesignFromFeedback({
       projectId,
       branchId: detail.project.activeBranchId ?? "",
       designNodeId: body.designNodeId,
       runId: detail.current.id,
-      actor: LOCAL_ACTOR,
+      actor: localActor(),
       projectTitle: detail.project.title,
     });
     return context.json(result);
@@ -152,7 +153,7 @@ export function registerProjectRoutes(api: Hono) {
    */
   api.get("/projects/:projectId/guidance", async (context) => {
     const projectId = context.req.param("projectId");
-    const detail = await projectDetail(projectId, LOCAL_ACTOR.principalId);
+    const detail = await projectDetail(projectId, localActor().principalId);
     const live = detail.nodes.filter((node) => node.supersededByNodeId === null);
     const versions = await Promise.all(
       live.map(async (node) => ({
@@ -193,7 +194,7 @@ export function registerProjectRoutes(api: Hono) {
   /** Housekeeping on a project: its name, whether it is filed away, and removal. */
   api.patch("/projects/:projectId", async (context) => {
     const projectId = context.req.param("projectId");
-    await projectDetail(projectId, LOCAL_ACTOR.principalId);
+    await projectDetail(projectId, localActor().principalId);
     const body = (await context.req.json().catch(() => ({}))) as { title?: string; archived?: boolean };
     const title = body.title?.trim();
     if (title !== undefined) {
@@ -206,7 +207,7 @@ export function registerProjectRoutes(api: Hono) {
 
   api.delete("/projects/:projectId", async (context) => {
     const projectId = context.req.param("projectId");
-    await projectDetail(projectId, LOCAL_ACTOR.principalId);
+    await projectDetail(projectId, localActor().principalId);
     await deleteProject(projectId);
     return context.json({ ok: true });
   });

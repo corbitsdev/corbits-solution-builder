@@ -382,7 +382,7 @@ declare module "@intx/workflow" {
     onFailure?: string;
   }): Primitive;
 
-  // --- Low-level runtime surface (scripts/executor-spike.ts) ---
+  // --- Low-level runtime surface (the in-process executor) ---
   // The in-process runtime body and its in-memory env adapters, exported for
   // driving a definition without the supervisor's subprocess/IPC layer.
 
@@ -516,7 +516,7 @@ declare module "@intx/workflow" {
 
 declare module "@intx/agent" {
   export type AgentHandle = Record<string, unknown>;
-  /** Director registry used to wire a `WorkflowRuntimeEnv.directors` in scripts/executor-spike.ts. */
+  /** Director registry used to wire a `WorkflowRuntimeEnv.directors` in the in-process executor. */
   export function createDefaultDirectorRegistry(): Record<string, unknown>;
 }
 

@@ -13,6 +13,8 @@
  */
 import { openDatabase } from "../apps/hub/src/db.js";
 import { prepareDatabase } from "../apps/hub/src/migrate.js";
+import { ensureHub, localActor } from "../apps/hub/src/hub-client.js";
+import { install } from "../apps/hub/src/install.js";
 import { createProject, projectDetail } from "../apps/hub/src/projects.js";
 import { connectProvider } from "../apps/hub/src/providers.js";
 import { draftStageArtifact } from "../apps/hub/src/agent-run.js";
@@ -21,7 +23,6 @@ import { newId } from "../apps/hub/src/ids.js";
 
 const index = process.argv.indexOf("--base-url");
 const baseUrl = index >= 0 ? process.argv[index + 1]! : "http://127.0.0.1:11434";
-const ACTOR = { principalId: "p_owner", displayName: "Agent smoke" };
 
 const reachable = await fetch(new URL("/v1/models", baseUrl), {
   signal: AbortSignal.timeout(3_000),
@@ -40,6 +41,9 @@ const host = await openDatabase(
     : undefined,
 );
 await prepareDatabase(host);
+await ensureHub();
+await install();
+const ACTOR = { ...localActor(), displayName: "Agent smoke" };
 
 const created = await createProject({
   title: "Agent smoke: a chess game I can actually play",

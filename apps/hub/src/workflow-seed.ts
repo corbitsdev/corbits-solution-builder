@@ -12,9 +12,9 @@
  * creates a new version when it has. A running instance keeps the version it
  * started on.
  */
-import { putWorkflowDefinition } from "./hub-workflows.js";
+import { registerDefinition } from "./hub-gaps.js";
 import { sha256 } from "./ids.js";
-import { LOCAL_TENANT } from "./projects.js";
+import { tenantId } from "./hub-client.js";
 import type { WorkflowDefinition } from "@intx/workflow";
 import { STAGES, type Stage } from "@solutions-builder/app/ledger";
 import type { RequiredGrant } from "@solutions-builder/app/kit";
@@ -156,7 +156,7 @@ export async function seedWorkflows(): Promise<SeededWorkflow[]> {
     // The wire projection is what identity is keyed on upstream, so the hash is
     // taken over the definition exactly as it would be deployed.
     const wireHash = await sha256(JSON.stringify(entry.definition));
-    const written = await putWorkflowDefinition(LOCAL_TENANT, {
+    const written = await registerDefinition(tenantId(), {
       id: `wfd_${wireHash.slice(0, 24)}`,
       name: entry.name,
       description: entry.description,

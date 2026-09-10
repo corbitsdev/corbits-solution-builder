@@ -9,7 +9,8 @@ import type { Stage } from "@solutions-builder/app/ledger";
 import type { Authority } from "@solutions-builder/app/ledger";
 import { database } from "./db.js";
 import * as table from "./schema.js";
-import { authoritiesFor as platformAuthoritiesFor } from "./hub-authority.js";
+import { AUTHORITIES } from "@solutions-builder/app/ledger";
+import { evaluate } from "./hub-client.js";
 import { HOST_PRINCIPAL } from "./engine.js";
 import type { Tx } from "./engine.js";
 
@@ -44,7 +45,7 @@ export async function authoritiesFor(
 ): Promise<Authority[]> {
   if (principalId === HOST_PRINCIPAL) return ["system"];
 
-  const granted = await platformAuthoritiesFor(principalId);
+  const granted = await heldAuthorities(principalId);
   const { db } = database();
   const parts = await db
     .select({ role: table.participant.role })
@@ -142,4 +143,19 @@ export async function waitingOrigin(tx: Tx, runId: string): Promise<string | und
     .orderBy(desc(table.buildQuestion.createdAt))
     .limit(1);
   return row?.originId;
+}
+
+/**
+ * The ledger authorities a principal holds, per the hub's own grant evaluator:
+ * install stamps each role with `allow` on `authority:<name>/hold`, so holding
+ * one is a platform fact the hub answers for, not a name this file assumes.
+ * `system` is never held by a person; it is the host's own authority.
+ */
+async function heldAuthorities(principalId: string): Promise<Authority[]> {
+  const held: Authority[] = [];
+  for (const name of AUTHORITIES) {
+    if (name === "system") continue;
+    if ((await evaluate(principalId, `authority:${name}`, "hold")) === "allow") held.push(name);
+  }
+  return held;
 }

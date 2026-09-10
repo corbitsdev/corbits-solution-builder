@@ -28,10 +28,13 @@ the part of the tree that shrinks as it becomes vanilla.
 
 **The hub** (`apps/hub`) owns the loopback API, the database, the guard that
 enforces the ledger, the engine that applies commands, the providers and the
-agent runs, and the mounted Interchange hub. Only its platform files
-(`hub-*.ts`, `db.ts`, `schema.ts`, `migrate.ts`) import Interchange
-internals. It is the only place a run's state is written and the only area
-allowed to reach a provider.
+agent runs. The Interchange hub is Interchange's own hub app, mounted in this
+process (`hub-mount.ts`). Platform writes go through that hub's HTTP API
+(`hub-client.ts`) — the same calls a hosted hub would serve. Only embedding
+files (`hub-mount`, `hub-keys`, `hub-migrate`, `hub-migrations.generated`,
+`db`, `schema`, `migrate`) plus `hub-executor` and `hub-gaps` import
+Interchange internals. It is the only place a run's state is written and the
+only area allowed to reach a provider.
 
 **What is not stored.** The decision waiting on a person is derived from the
 run parked at its gate plus the ledger: title, consequence, required authority

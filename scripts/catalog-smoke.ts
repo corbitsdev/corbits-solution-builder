@@ -76,8 +76,8 @@ const credentials = await rows("select * from public.credential");
 const credential = credentials.find((row) => row.id === provider.credential_id);
 check("the credential it points at exists", credential !== undefined);
 check(
-  "the credential holds a keychain reference, not the secret",
-  typeof credential?.secret === "string" && credential.secret.startsWith("keychain:"),
+  "the credential row holds the sealed secret, never the plaintext",
+  typeof credential?.secret === "string" && credential.secret.startsWith("enc:") && !credential.secret.includes(SECRET),
   String(credential?.secret).slice(0, 24),
 );
 
@@ -228,7 +228,7 @@ stub2.close();
 
   // The rollback itself, on a connection that really was written. This is the
   // path `connectProvider`'s catch takes.
-  const { disconnectCatalogProvider } = await import("../apps/hub/src/hub-catalog.js");
+  const { disconnectCatalogProvider } = await import("../apps/hub/src/catalog.js");
   const recorded = await rows("select * from public.credential");
   check(
     "the stub provider's credential is on record before the rollback",

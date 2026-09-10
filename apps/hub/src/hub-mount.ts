@@ -1,10 +1,12 @@
 /**
  * Mounts the Interchange hub inside the Solutions Builder host.
  *
- * This composes the same services `apps/hub/src/server.ts` composes upstream —
+ * This composes the same services Interchange's hub server composes —
  * `createAuth`, the sidecar router, session and workflow services, the event
- * collector registry, and `createApp` — with two differences, both required by
- * a desktop app and neither of which forks behaviour:
+ * collector registry, and `createApp` — because the vendored tree has no
+ * `createHubServer` that accepts this process's pglite handle and keychain
+ * keys. Two differences, both required by a desktop app and neither of which
+ * forks behaviour:
  *
  *   1. the database is the host's pglite handle, injected through the vendored
  *      `createDB` patch, so no Postgres server has to be running;
@@ -12,7 +14,7 @@
  *      instead of being demanded from the environment, which still wins when
  *      set.
  *
- * The result is a Hono app. `hub/endpoint.ts` decides whether the rest of the
+ * The result is a Hono app. `hub-client.ts` decides whether the rest of the
  * product talks to *this* app in-process or to a hosted one over HTTP — which
  * is what makes "ships inside the desktop app now, hosted later" a
  * configuration change rather than a rewrite.
@@ -64,6 +66,8 @@ export type MountedHub = {
    * for a stage thread, the same way the sidecar signs mail for a run.
    */
   readonly principalKeyStore: ReturnType<typeof createPrincipalKeyStore>;
+  /** The hub's own auth, so the host can sign the workspace owner in without a browser. */
+  readonly auth: ReturnType<typeof createAuth>;
 };
 
 let mounted: MountedHub | null = null;
@@ -197,6 +201,7 @@ export async function mountHub(): Promise<MountedHub> {
     publicKeyHex: hexEncode(signingKey.publicKey),
     agentRepoStore,
     principalKeyStore,
+    auth,
   };
   return mounted;
 }

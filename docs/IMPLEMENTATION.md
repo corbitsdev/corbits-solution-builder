@@ -7,7 +7,7 @@
 | Runtime | Bun 1.4 or newer |
 | Host API | Hono on a random loopback port, session token in the launch URL |
 | Database | pglite (embedded Postgres), drizzle-orm |
-| Control plane | Interchange, vendored, mounted in process |
+| Control plane | Interchange's hub app, vendored and mounted in process; the host calls its HTTP API |
 | Interface | React 19, Vite, bundled fonts, no remote assets |
 | Desktop shell | Tauri 2, macOS 13 or newer, tray presence |
 | Types at the boundary | ArkType |
@@ -37,7 +37,11 @@ fails when that file is behind the vendor.
 ## Host process
 
 `apps/hub/src/server.ts` opens the database, applies Interchange's migrations then
-the builder schema, mounts the hub, and listens. Boot seeds nothing.
+the builder schema, mounts Interchange's hub app, and listens. Boot seeds
+nothing. The host is a client of that hub: embedded, `hub-client.ts` dispatches
+into the mounted Hono app; hosted (`SOLUTIONS_BUILDER_HUB_URL`), the same
+calls go over HTTPS. Platform writes go through the hub API, not drizzle on
+public tables.
 
 The client installs the app. On launch it reads `GET /api/install`, which
 compares the tenant with the package manifest (version and the workflow
@@ -122,12 +126,10 @@ OAuth sign-in uses PKCE over a loopback redirect. Tokens live in the keychain.
 | `smoke:oauth` | OAuth lifecycle against the real issuers |
 | `smoke:failure` | Provider failure classification and remediation |
 | `smoke:hub` | Embedded and hosted hub topologies |
-| `smoke:workflows` | Generated workflow definitions |
 | `smoke:kit` | Specialist definitions |
 | `smoke:conversation`, `smoke:guidance` | Stage conversation and the product guide |
 | `smoke:responsive` | Layout at narrow widths |
 | `smoke:catalog` | Provider catalog rows |
-| `smoke:executor` | The in-process workflow runtime |
 | `smoke:agent` | Drafts through a real provider; skips cleanly without one |
 | `seed:demo` | A project with a decision waiting |
 | `walk` | Render every screen with fixtures for review |

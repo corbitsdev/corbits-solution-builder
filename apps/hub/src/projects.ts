@@ -28,45 +28,7 @@ import {
   putRunRecord,
   runRecordsForProject,
 } from "./hub-executor.js";
-
-export const LOCAL_TENANT = "t_local";
-
-/**
- * The workspace tenant and its owner principal.
- *
- * These rows belong to the Interchange control plane, so they are written only
- * when the hub is embedded and shares this database. A hosted hub owns its own
- * tenants and principals, and they arrive through its API instead.
- */
-export async function ensureWorkspace(owner: {
-  principalId: string;
-  displayName: string;
-}): Promise<void> {
-  const { hubMode } = await import("./hub-endpoint.js");
-  if (hubMode() !== "embedded") return;
-
-  const { db } = database();
-  await db.execute(
-    // Idempotent: setup, restart and upgrade all call this, and none of them
-    // may overwrite a choice the user already made.
-    // prettier-ignore
-    // Interchange's tenant table: `slug` and `domain` are NOT NULL and unique.
-    // The domain is a reserved-TLD placeholder because a local workspace has no
-    // real one and inventing a routable domain would be worse than admitting it.
-    (await import("drizzle-orm")).sql`
-      INSERT INTO "public"."tenant" ("id","name","slug","domain")
-      VALUES (${LOCAL_TENANT}, 'Local workspace', 'local', 'local.solutions-builder.invalid')
-      ON CONFLICT ("id") DO NOTHING
-    `,
-  );
-  await db.execute(
-    (await import("drizzle-orm")).sql`
-      INSERT INTO "public"."principal" ("id","tenant_id","kind","ref_id","status")
-      VALUES (${owner.principalId}, ${LOCAL_TENANT}, 'user', ${owner.principalId}, 'active')
-      ON CONFLICT ("id") DO NOTHING
-    `,
-  );
-}
+import { tenantId } from "./hub-client.js";
 
 export async function createProject(args: {
   title: string;
@@ -93,8 +55,6 @@ export async function createProject(args: {
     throw new HostError("validation_failed", "An audience quorum cannot be negative.");
   }
 
-  await ensureWorkspace(args.owner);
-
   const created = await db.transaction(async (tx) => {
     const projectId = newId.project();
     const branchId = newId.branch();
@@ -102,7 +62,7 @@ export async function createProject(args: {
 
     await tx.insert(table.project).values({
       id: projectId,
-      tenantId: LOCAL_TENANT,
+      tenantId: tenantId(),
       title: args.title,
       activeBranchId: branchId,
       policy: args.policy,
@@ -193,7 +153,7 @@ export async function writeArtifact(
   const contentHash = await sha256(draft.content);
 
   const scope = {
-    tenantId: LOCAL_TENANT,
+    tenantId: tenantId(),
     principalId: actor.principalId,
     identity: { kind: "user" as const, principalId: actor.principalId },
   };

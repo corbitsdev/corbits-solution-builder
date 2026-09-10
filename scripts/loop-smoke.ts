@@ -14,12 +14,12 @@
  */
 import { openDatabase } from "../apps/hub/src/db.js";
 import { prepareDatabase } from "../apps/hub/src/migrate.js";
-import { ensureHub } from "../apps/hub/src/hub-endpoint.js";
+import { ensureHub, evaluate, listRoles, assignRole, localActor, tenantId } from "../apps/hub/src/hub-client.js";
 import { install } from "../apps/hub/src/install.js";
+import { ensureUserPrincipal } from "../apps/hub/src/hub-gaps.js";
 import {
   createProject,
   listProjects,
-  LOCAL_TENANT,
   projectDetail,
   writeArtifact,
 } from "../apps/hub/src/projects.js";
@@ -36,8 +36,6 @@ function check(name: string, ok: boolean, detail = "") {
   checks.push({ name, ok, detail });
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? ` - ${detail}` : ""}`);
 }
-
-const ACTOR = { principalId: "p_owner", displayName: "Smoke" };
 
 /** The host relays a verified worker request; a human never raises one. */
 const HOST_ACTOR = { principalId: HOST_PRINCIPAL, displayName: "Solutions Builder host" };
@@ -92,6 +90,7 @@ await ensureHub();
 // The actor's ledger authorities come from the platform's roles, which the
 // install writes — the same install the client asks for on first launch.
 await install();
+const ACTOR = { ...localActor(), displayName: "Smoke" };
 
 const created = await createProject({
   title: "Smoke: a chess game I can actually play",
@@ -708,7 +707,7 @@ let buildRunId = "";
       audienceQuorum: 1,
       allowExternalProviders: false,
     },
-    owner: { principalId: "p_owner", displayName: "You" },
+    owner: ACTOR,
   });
   const written = await produce(1, fresh.projectId, fresh.branchId, fresh.runId);
   const brief = [
@@ -770,6 +769,7 @@ let buildRunId = "";
 // under test. A stranger with no grants would fail this for the wrong reason.
 {
   const other = { principalId: "p_other_owner", displayName: "Someone else" };
+  await ensureUserPrincipal(tenantId(), other.principalId);
   const theirs = await createProject({
     title: "Someone else's project",
     owner: other,
@@ -785,13 +785,11 @@ let buildRunId = "";
   const run = detail.current!;
   const node = await produce(1, theirs.projectId, theirs.branchId, run.id);
 
-  const holds = await import("../apps/hub/src/hub-authority.js").then((module) =>
-    module.authoritiesFor(ACTOR.principalId),
-  );
+  const holds = await evaluate(ACTOR.principalId, "authority:project_owner", "hold");
   check(
     "the actor does hold these authorities tenant-wide",
-    holds.includes("project_owner"),
-    holds.join(","),
+    holds === "allow",
+    holds,
   );
 
   let refused = "";
@@ -874,14 +872,12 @@ let buildRunId = "";
   const db = hub().db.db;
   await db.execute(sql`
     INSERT INTO "public"."principal" ("id","tenant_id","kind","ref_id","status")
-    VALUES (${second}, ${LOCAL_TENANT}, 'user', ${second}, 'active')
+    VALUES (${second}, ${tenantId()}, 'user', ${second}, 'active')
     ON CONFLICT ("id") DO NOTHING
   `);
-  await db.execute(sql`
-    INSERT INTO "public"."principal_role" ("principal_id","role_id")
-    VALUES (${second}, 'role_project_owner')
-    ON CONFLICT DO NOTHING
-  `);
+  const ownerRole = (await listRoles()).find((role) => role.name === "project_owner");
+  if (!ownerRole) throw new Error("install did not create the project_owner role");
+  await assignRole(second, ownerRole.id);
   await database().db.insert(table.participant).values({
     projectId: solo.projectId,
     principalId: second,

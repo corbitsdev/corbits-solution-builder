@@ -15,7 +15,6 @@ import { join } from "node:path";
 import { sql } from "drizzle-orm";
 import { openDatabase } from "../apps/hub/src/db.js";
 import { prepareDatabase } from "../apps/hub/src/migrate.js";
-import { ensureWorkspace, LOCAL_TENANT } from "../apps/hub/src/projects.js";
 
 const checks: { name: string; ok: boolean; detail: string }[] = [];
 function check(name: string, ok: boolean, detail = "") {
@@ -84,7 +83,7 @@ try {
   check("the hub answers an authorised client", authorised.status === "ok");
 
   // --- Topology 2: the hub hosted in another process ---
-  const { setRemoteToken } = await import("../apps/hub/src/hub-endpoint.js");
+  const { setRemoteToken } = await import("../apps/hub/src/hub-client.js");
   await setRemoteToken(hubHost.token);
 
   clientHost = await startHost(8141, clientDir, `http://127.0.0.1:8140/hub`);
@@ -158,8 +157,12 @@ try {
       .catch((cause: unknown) => (cause instanceof Error ? cause.message : String(cause)));
 
   // Only the tenant row is needed here; the hub is not mounted in this probe.
-  await ensureWorkspace({ principalId: "p_owner", displayName: "You" });
-  const known = await insert(LOCAL_TENANT, "prj_known");
+  await host.db.execute(sql`
+    INSERT INTO "public"."tenant" ("id","name","slug","domain")
+    VALUES ('t_local', 'Local workspace', 'local', 'local.solutions-builder.invalid')
+    ON CONFLICT ("id") DO NOTHING
+  `);
+  const known = await insert("t_local", "prj_known");
   const unknown = await insert("t_nonexistent", "prj_orphan");
 
   check("a project under a known tenant is allowed", known === "", known.slice(0, 60));

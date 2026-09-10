@@ -1,7 +1,7 @@
 /**
  * The in-process workflow executor.
  *
- * Promotes `scripts/executor-spike.ts` into the real execution path: each
+ * The in-process execution path: each
  * project's `project-lifecycle` run executes through the platform's own
  * runtime (`runtimeRun` from `@intx/workflow`), wired to its in-memory
  * adapters exactly the way `runLocal` wires them for tests. Nothing here is a

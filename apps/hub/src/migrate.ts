@@ -412,7 +412,7 @@ const MIGRATIONS: readonly Migration[] = [
     // This runs after Interchange's own migrations, so those tables already
     // exist. Every existing `local_provider` row is carried across — label,
     // base URL, discovered models, preference order, selected model — before
-    // the table is dropped. IDs mirror exactly what `hub-catalog.ts`'s
+    // the table is dropped. IDs mirror exactly what `catalog.ts`'s
     // `registerProviderCatalog` and `ensureKeylessCredential` derive at
     // runtime, so a provider reconnected after this migration lands on the
     // same rows rather than a duplicate set.
@@ -571,7 +571,7 @@ async function linkAuthzToHub(host: HostDatabase): Promise<void> {
 export async function prepareDatabase(
   host: HostDatabase,
 ): Promise<{ interchange: number; builder: string[] }> {
-  const { hubMode } = await import("./hub-endpoint.js");
+  const { hubMode } = await import("./hub-client.js");
 
   // A hosted hub owns its own schema and its own database. Applying
   // Interchange's migrations locally in that mode would create a second,
@@ -629,7 +629,7 @@ export async function migrate(host: HostDatabase): Promise<{ applied: string[] }
   // does. With an embedded hub that is this database. With a hosted hub it is
   // not, and artifact storage has to move to the hub alongside it. That is
   // future work, not papered over with a second control plane here.
-  const { hubMode } = await import("./hub-endpoint.js");
+  const { hubMode } = await import("./hub-client.js");
   if (hubMode() === "embedded") {
     await runArtifactMigrations(host.artifactDb);
     await linkAuthzToHub(host);

@@ -20,7 +20,7 @@ import { openDatabase } from "./db.js";
 import { prepareDatabase } from "./migrate.js";
 import { databaseDirectory, dataDirectory } from "./paths.js";
 import { drainOutbox } from "./outbox.js";
-import { ensureHub, hubFetch } from "./hub-endpoint.js";
+import { ensureHub, hubFetch, resolveWorkspace } from "./hub-client.js";
 import {
   clientConnected,
   markReady,
@@ -59,6 +59,14 @@ if (migrated.builder.length > 0) {
 
 const hubEndpoint = await ensureHub();
 console.log(`Interchange hub: ${hubEndpoint.detail}`);
+
+// Not seeding: signing in. If the owner and their workspace already exist, the
+// host knows which tenant it serves; if not, the client installs one.
+const known = await resolveWorkspace().catch((cause: unknown) => {
+  console.error("Could not resolve the workspace:", cause);
+  return null;
+});
+console.log(known ? `Workspace: tenant ${known.tenantId}` : "Workspace: not installed yet");
 
 // Boot ends here. Everything that makes this tenant Solutions Builder — the
 // owner principal, workflow definitions, roles, specialist prompts — is

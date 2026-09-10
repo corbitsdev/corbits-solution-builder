@@ -29,6 +29,7 @@ import { prepareDatabase } from "../apps/hub/src/migrate.js";
 import { mountHub } from "../apps/hub/src/hub-mount.js";
 import { createProject } from "../apps/hub/src/projects.js";
 import { install } from "../apps/hub/src/install.js";
+import { localActor } from "../apps/hub/src/hub-client.js";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -134,7 +135,7 @@ await prepareDatabase(await openDatabase(`${dataDir}/pglite`));
 await mountHub();
 await install();
 
-const ACTOR = { principalId: "p_owner" };
+const ACTOR = localActor();
 
 // --- Persistence, on session_mail / turn_part ---
 {
@@ -147,7 +148,7 @@ const ACTOR = { principalId: "p_owner" };
       audienceQuorum: 1,
       allowExternalProviders: false,
     },
-    owner: { principalId: "p_owner", displayName: "Local" },
+    owner: { ...ACTOR, displayName: "Local" },
   });
 
   const key = {
@@ -212,7 +213,7 @@ const ACTOR = { principalId: "p_owner" };
       audienceQuorum: 1,
       allowExternalProviders: false,
     },
-    owner: { principalId: "p_owner", displayName: "Local" },
+    owner: { ...ACTOR, displayName: "Local" },
   });
   const key = {
     projectId: project.projectId,

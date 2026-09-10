@@ -8,6 +8,8 @@
  */
 import { openDatabase } from "../apps/hub/src/db.js";
 import { prepareDatabase } from "../apps/hub/src/migrate.js";
+import { ensureHub, localActor } from "../apps/hub/src/hub-client.js";
+import { install } from "../apps/hub/src/install.js";
 import { createProject, writeArtifact } from "../apps/hub/src/projects.js";
 import {
   feedbackFor,
@@ -23,13 +25,15 @@ function check(name: string, ok: boolean, detail = "") {
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? ` - ${detail}` : ""}`);
 }
 
-const ACTOR = { principalId: "p_owner", displayName: "Design smoke" };
 const host = await openDatabase(
   process.env.SOLUTIONS_BUILDER_DATA_DIR
     ? `${process.env.SOLUTIONS_BUILDER_DATA_DIR}/pglite-design`
     : undefined,
 );
 await prepareDatabase(host);
+await ensureHub();
+await install();
+const ACTOR = { ...localActor(), displayName: "Design smoke" };
 
 const project = await createProject({
   title: "Design smoke",

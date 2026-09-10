@@ -1,0 +1,565 @@
+/**
+ * The host as a client of the Interchange hub.
+ *
+ * Everything Solutions Builder needs from the platform goes through the hub's
+ * own HTTP API, on the hub's own terms: a signed-in user, a tenant, a principal
+ * with grants. Embedded, the request is dispatched into the mounted Hono app
+ * with no socket; pointed at a hosted hub it goes over HTTPS with a token.
+ * Nothing above this file can tell the difference, which is what makes
+ * "ships inside the desktop app now, hosted later" a configuration change.
+ *
+ * The workspace owner is a real hub user. The host mints a password into the
+ * keychain on first install, signs up, and signs in the way a browser would;
+ * the session cookie is what every call below carries. There is no service
+ * token and no direct table write here — if the hub cannot do it through a
+ * route, that is an upstream ask, recorded in `hub-gaps.ts`.
+ *
+ * `SOLUTIONS_BUILDER_HUB_URL` selects a hosted hub. Absent, the hub is embedded.
+ */
+import { hub, hubIsMounted, mountHub } from "./hub-mount.js";
+import { readSecretResult, storeSecret } from "./provider-credentials.js";
+import { HostError } from "./errors.js";
+
+export type HubMode = "embedded" | "remote";
+
+export type HubEndpoint = {
+  readonly mode: HubMode;
+  /** Absent when embedded — there is no address, because there is no socket. */
+  readonly url: string | null;
+  readonly ready: boolean;
+  readonly detail: string;
+};
+
+const REMOTE_TOKEN_ACCOUNT = "hub:remote-token";
+const OWNER_PASSWORD_ACCOUNT = "hub:owner-password";
+
+/** The workspace owner's identity in the hub. One person, one local account. */
+export const OWNER_EMAIL = "owner@solutions-builder.local";
+export const OWNER_DISPLAY_NAME = "You";
+/** The tenant this app installs into; found again by slug on every launch. */
+export const WORKSPACE_SLUG = "solutions-builder";
+/** The tenant id workspaces carried before the hub owned identity. */
+export const LEGACY_TENANT_ID = "t_local";
+
+function configuredUrl(): string | null {
+  const raw = process.env.SOLUTIONS_BUILDER_HUB_URL?.trim();
+  if (!raw) return null;
+  return raw.replace(/\/+$/, "");
+}
+
+export function hubMode(): HubMode {
+  return configuredUrl() ? "remote" : "embedded";
+}
+
+/** Ensures the hub is reachable, mounting the embedded one on first use. */
+export async function ensureHub(): Promise<HubEndpoint> {
+  const url = configuredUrl();
+  if (url) {
+    return {
+      mode: "remote",
+      url,
+      // A remote hub's readiness is its own to report; this host does not
+      // assume it, and `hubFetch` surfaces a failure honestly when it happens.
+      ready: true,
+      detail: `Hosted hub at ${url}.`,
+    };
+  }
+
+  await mountHub();
+  return {
+    mode: "embedded",
+    url: null,
+    ready: hubIsMounted(),
+    detail: "Interchange hub mounted in this process on the local database.",
+  };
+}
+
+export async function setRemoteToken(token: string): Promise<void> {
+  await storeSecret(REMOTE_TOKEN_ACCOUNT, token);
+}
+
+/**
+ * One raw call path to the hub, whichever side of the boundary it is on. No
+ * identity is attached: this is what the `/hub/*` proxy uses, where the caller
+ * brings its own. `hubApi` below is the authenticated one.
+ */
+export async function hubFetch(path: string, init?: RequestInit): Promise<Response> {
+  const url = configuredUrl();
+
+  if (!url) {
+    if (!hubIsMounted()) await mountHub();
+    // `app.fetch` takes a real Request; the origin is a formality the hub's
+    // routing ignores, and no socket is involved.
+    return hub().app.fetch(new Request(`http://hub.local${path}`, init));
+  }
+
+  // A hosted hub without its token is a request that will fail on the other
+  // side with no explanation here. If the keychain cannot answer, say so now.
+  const read = await readSecretResult(`keychain:${REMOTE_TOKEN_ACCOUNT}`);
+  if (read.status === "unavailable") {
+    throw new Error(
+      `The keychain could not be read for the hub token: ${read.detail}. ` +
+        "Unlock it, or allow this app access, and try again.",
+    );
+  }
+  const token = read.status === "found" ? read.secret : null;
+  return fetch(`${url}${path}`, {
+    ...init,
+    headers: {
+      ...init?.headers,
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+  });
+}
+
+// --- The owner's session -------------------------------------------------
+
+type AuthApi = {
+  api: {
+    signUpEmail: (args: { body: { email: string; password: string; name: string } }) => Promise<unknown>;
+    signInEmail: (args: {
+      body: { email: string; password: string };
+      asResponse: true;
+    }) => Promise<Response>;
+  };
+};
+
+let sessionCookie: string | null = null;
+
+/**
+ * The owner's password lives in the keychain beside the provider keys. It is
+ * never shown and never typed: it exists so the hub can have a real user
+ * without the desktop app growing a login screen for a one-person workspace.
+ */
+async function ownerPassword(mintIfMissing: boolean): Promise<string | null> {
+  const stored = await readSecretResult(`keychain:${OWNER_PASSWORD_ACCOUNT}`);
+  if (stored.status === "found") return stored.secret;
+  if (stored.status === "unavailable") {
+    throw new HostError(
+      "provider_unavailable",
+      `The keychain could not be read for the workspace owner: ${stored.detail}. ` +
+        "Unlock it, or allow this app access, and try again.",
+      {},
+      true,
+    );
+  }
+  if (!mintIfMissing) return null;
+  const minted = Array.from(crypto.getRandomValues(new Uint8Array(24)))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  await storeSecret(OWNER_PASSWORD_ACCOUNT, minted);
+  return minted;
+}
+
+async function signIn(password: string): Promise<string | null> {
+  const auth = hub().auth as unknown as AuthApi;
+  const response = await auth.api.signInEmail({
+    body: { email: OWNER_EMAIL, password },
+    asResponse: true,
+  });
+  if (!response.ok) return null;
+  const pair = response.headers.get("set-cookie")?.split(";")[0] ?? null;
+  return pair && pair.includes("=") ? pair : null;
+}
+
+/**
+ * The owner's session cookie, signing in if there is an owner to sign in as.
+ * `null` means no owner exists yet: the workspace has not been installed.
+ */
+export async function ownerSession(): Promise<string | null> {
+  if (hubMode() !== "embedded") return null;
+  if (sessionCookie) return sessionCookie;
+  if (!hubIsMounted()) await mountHub();
+  const password = await ownerPassword(false);
+  if (!password) return null;
+  sessionCookie = await signIn(password);
+  return sessionCookie;
+}
+
+/** Signs the owner up if the hub has never seen them, then in. */
+export async function ensureOwner(): Promise<void> {
+  if (hubMode() !== "embedded") return;
+  if (!hubIsMounted()) await mountHub();
+  const password = (await ownerPassword(true))!;
+  sessionCookie = await signIn(password);
+  if (sessionCookie) return;
+  const auth = hub().auth as unknown as AuthApi;
+  await auth.api.signUpEmail({
+    body: { email: OWNER_EMAIL, password, name: OWNER_DISPLAY_NAME },
+  });
+  sessionCookie = await signIn(password);
+  if (!sessionCookie) {
+    throw new HostError(
+      "internal_error",
+      "The hub accepted the workspace owner but would not sign them in.",
+    );
+  }
+}
+
+// --- The authenticated API -----------------------------------------------
+
+export class HubApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly path: string,
+    readonly body: unknown,
+  ) {
+    super(`Hub ${status} on ${path}: ${typeof body === "string" ? body : JSON.stringify(body)}`);
+    this.name = "HubApiError";
+  }
+}
+
+/** A hub call as the workspace owner. Embedded: the cookie. Hosted: the token. */
+export async function hubApi(path: string, init: RequestInit = {}): Promise<Response> {
+  const cookie = await ownerSession();
+  const headers = new Headers(init.headers);
+  if (cookie) headers.set("cookie", cookie);
+  if (init.body !== undefined && !headers.has("content-type")) {
+    headers.set("content-type", "application/json");
+  }
+  const response = await hubFetch(path, { ...init, headers });
+  // A session that expired underneath us is signed in again, once.
+  if (response.status === 401 && cookie) {
+    sessionCookie = null;
+    const fresh = await ownerSession();
+    if (fresh) {
+      headers.set("cookie", fresh);
+      return hubFetch(path, { ...init, headers });
+    }
+  }
+  return response;
+}
+
+async function body<T>(response: Response, path: string): Promise<T> {
+  const text = await response.text();
+  let parsed: unknown = text;
+  try {
+    parsed = text ? JSON.parse(text) : null;
+  } catch {
+    // Left as text.
+  }
+  if (!response.ok) throw new HubApiError(response.status, path, parsed);
+  return parsed as T;
+}
+
+export async function hubGet<T>(path: string): Promise<T> {
+  return body<T>(await hubApi(path), path);
+}
+
+export async function hubPost<T>(path: string, payload: unknown): Promise<T> {
+  return body<T>(await hubApi(path, { method: "POST", body: JSON.stringify(payload) }), path);
+}
+
+export async function hubPut<T>(path: string, payload: unknown = {}): Promise<T> {
+  return body<T>(await hubApi(path, { method: "PUT", body: JSON.stringify(payload) }), path);
+}
+
+export async function hubPatch<T>(path: string, payload: unknown): Promise<T> {
+  return body<T>(await hubApi(path, { method: "PATCH", body: JSON.stringify(payload) }), path);
+}
+
+export async function hubDelete(path: string): Promise<void> {
+  const response = await hubApi(path, { method: "DELETE" });
+  if (response.status === 404) return;
+  await body<unknown>(response, path);
+}
+
+type Page<T> = { data: T[]; nextCursor: string | null };
+
+/** Every page of a cursor-paginated list. */
+export async function hubList<T>(path: string): Promise<T[]> {
+  const items: T[] = [];
+  let cursor: string | null = null;
+  do {
+    const separator = path.includes("?") ? "&" : "?";
+    const page: Page<T> = await hubGet<Page<T>>(
+      `${path}${separator}limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
+    );
+    items.push(...page.data);
+    cursor = page.nextCursor;
+  } while (cursor);
+  return items;
+}
+
+// --- The workspace ---------------------------------------------------------
+
+export type Workspace = {
+  readonly tenantId: string;
+  readonly principalId: string;
+  readonly userId: string;
+};
+
+let workspace: Workspace | null = null;
+
+type Membership = {
+  principalId: string;
+  tenantId: string;
+  tenantSlug: string;
+  kind: string;
+  status: string;
+};
+
+/**
+ * Finds the workspace the owner belongs to: the tenant with this app's slug,
+ * or the tenant a workspace carried before the hub owned identity. `null`
+ * when the owner does not exist or holds no tenant yet.
+ */
+export async function resolveWorkspace(): Promise<Workspace | null> {
+  if (workspace) return workspace;
+  if (hubMode() === "embedded" && !(await ownerSession())) return null;
+  const me = await hubApi("/api/me");
+  if (!me.ok) return null;
+  const user = (await me.json()) as { id: string };
+  const memberships = await hubList<Membership>("/api/me/principals");
+  const mine = memberships.filter((entry) => entry.kind === "user" && entry.status === "active");
+  const chosen =
+    mine.find((entry) => entry.tenantSlug === WORKSPACE_SLUG) ??
+    mine.find((entry) => entry.tenantId === LEGACY_TENANT_ID);
+  if (!chosen) return null;
+  workspace = { tenantId: chosen.tenantId, principalId: chosen.principalId, userId: user.id };
+  return workspace;
+}
+
+/** Creates the workspace tenant; the hub makes the owner its principal. */
+export async function createWorkspace(): Promise<Workspace> {
+  await hubPost("/api/tenants", { name: "Solutions Builder", slug: WORKSPACE_SLUG });
+  workspace = null;
+  const resolved = await resolveWorkspace();
+  if (!resolved) {
+    throw new HostError("internal_error", "The hub created the workspace but does not list it.");
+  }
+  return resolved;
+}
+
+/** Forgets the cached workspace, so the next read asks the hub again. */
+export function forgetWorkspace(): void {
+  workspace = null;
+}
+
+export function workspaceOrNull(): Workspace | null {
+  return workspace;
+}
+
+function required(): Workspace {
+  if (!workspace) {
+    throw new HostError(
+      "conflict",
+      "The workspace is not installed yet. Install it, then try again.",
+      { install: true },
+    );
+  }
+  return workspace;
+}
+
+/** The workspace tenant. Throws until the workspace is installed. */
+export function tenantId(): string {
+  return required().tenantId;
+}
+
+/** The owner's principal in the workspace tenant. */
+export function ownerPrincipalId(): string {
+  return required().principalId;
+}
+
+/** The local single-user actor every product command runs as. */
+export function localActor(): { principalId: string; displayName: string } {
+  return { principalId: ownerPrincipalId(), displayName: OWNER_DISPLAY_NAME };
+}
+
+export function tenantPath(rest: string): string {
+  return `/api/tenants/${tenantId()}${rest}`;
+}
+
+// --- Roles, grants and authority -----------------------------------------
+
+export type HubRole = { id: string; name: string; description: string | null; isSystem: boolean };
+
+export async function listRoles(): Promise<HubRole[]> {
+  return hubList<HubRole>(tenantPath("/roles"));
+}
+
+/** The role with this name, created if the tenant does not have it. */
+export async function ensureRole(name: string, description: string): Promise<HubRole> {
+  const existing = (await listRoles()).find((role) => role.name === name);
+  if (existing) return existing;
+  return hubPost<HubRole>(tenantPath("/roles"), { name, description });
+}
+
+/** Gives a principal a role. Already holding it is not an error. */
+export async function assignRole(principalId: string, roleId: string): Promise<void> {
+  const response = await hubApi(tenantPath(`/principals/${principalId}/roles/${roleId}`), {
+    method: "POST",
+  });
+  if (response.ok || response.status === 409) return;
+  await body<unknown>(response, `POST roles/${roleId}`);
+}
+
+export type HubGrant = {
+  id: string;
+  roleId: string | null;
+  principalId: string | null;
+  resource: string;
+  action: string;
+  effect: "allow" | "deny" | "ask";
+  origin: string;
+};
+
+export async function listGrants(): Promise<HubGrant[]> {
+  return hubList<HubGrant>(tenantPath("/grants"));
+}
+
+/** A grant on a role, created once. */
+export async function ensureRoleGrant(input: {
+  roleId: string;
+  resource: string;
+  action: string;
+  effect: HubGrant["effect"];
+  origin: "system" | "role";
+}): Promise<HubGrant> {
+  const grants = await listGrants();
+  const existing = grants.find(
+    (grant) =>
+      grant.roleId === input.roleId &&
+      grant.resource === input.resource &&
+      grant.action === input.action &&
+      grant.effect === input.effect,
+  );
+  if (existing) return existing;
+  return hubPost<HubGrant>(tenantPath("/grants"), input);
+}
+
+/** What the hub would decide for this principal on this resource and action. */
+export async function evaluate(
+  principalId: string,
+  resource: string,
+  action: string,
+): Promise<"allow" | "deny" | "ask"> {
+  const result = await hubPost<{ effect: "allow" | "deny" | "ask" }>(
+    tenantPath(`/principals/${principalId}/evaluate`),
+    { resource, action },
+  );
+  return result.effect;
+}
+
+// --- Workflow definitions (read side) --------------------------------------
+
+export type HubDefinition = { id: string; name: string; createdAt: string };
+
+export async function listDefinitions(): Promise<HubDefinition[]> {
+  return hubList<HubDefinition>(tenantPath("/workflows/definitions"));
+}
+
+/**
+ * The current definition for a name, or `null` if none is installed.
+ * "Current" is the newest row: installing never mutates a definition, it adds
+ * a version, so the newest is what a fresh session should key to.
+ */
+export async function definitionIdFor(name: string): Promise<string | null> {
+  const rows = (await listDefinitions()).filter((row) => row.name === name);
+  rows.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+  return rows[0]?.id ?? null;
+}
+
+// --- The model catalog -----------------------------------------------------
+
+export type HubProvider = {
+  id: string;
+  name: string;
+  plugin: string;
+  apiBaseUrl: string | null;
+  metadata: Record<string, unknown> | null;
+};
+
+export type HubCredential = {
+  id: string;
+  providerId: string;
+  name: string;
+  type: string;
+  status: string;
+  metadata: Record<string, unknown> | null;
+  updatedAt: string;
+};
+
+export type HubModelProvider = {
+  id: string;
+  name: string;
+  plugin: string;
+  baseURL: string;
+  credentialId: string | null;
+  disabled: boolean;
+};
+
+export type HubModel = { id: string; canonicalName: string; displayName: string | null };
+
+export type HubOffering = {
+  id: string;
+  modelId: string;
+  providerId: string;
+  priority: number;
+  capabilities: string[];
+  quirks: Record<string, unknown> | null;
+  disabled: boolean;
+};
+
+export const catalog = {
+  providers: () => hubList<HubProvider>(tenantPath("/providers")),
+  createProvider: (input: {
+    name: string;
+    plugin: string;
+    apiBaseUrl?: string;
+    metadata?: Record<string, unknown>;
+  }) => hubPost<HubProvider>(tenantPath("/providers"), input),
+  patchProvider: (id: string, input: { apiBaseUrl?: string; metadata?: Record<string, unknown> }) =>
+    hubPatch<HubProvider>(tenantPath(`/providers/${id}`), input),
+
+  credentials: () => hubList<HubCredential>(tenantPath("/credentials")),
+  createCredential: (input: {
+    providerId: string;
+    name: string;
+    type: "api_key" | "oauth_token" | "other";
+    secret: string;
+    description?: string;
+    scopes?: string[];
+    metadata?: Record<string, unknown>;
+  }) => hubPost<HubCredential>(tenantPath("/credentials"), input),
+  patchCredential: (
+    id: string,
+    input: {
+      secret?: string;
+      status?: "active" | "expired" | "revoked" | "error";
+      description?: string;
+      scopes?: string[] | null;
+      metadata?: Record<string, unknown>;
+    },
+  ) => hubPatch<HubCredential>(tenantPath(`/credentials/${id}`), input),
+  deleteCredential: (id: string) => hubDelete(tenantPath(`/credentials/${id}`)),
+
+  modelProviders: () => hubList<HubModelProvider>(tenantPath("/catalog/providers")),
+  createModelProvider: (input: {
+    name: string;
+    plugin: string;
+    baseURL: string;
+    credentialId: string;
+  }) => hubPost<HubModelProvider>(tenantPath("/catalog/providers"), input),
+  patchModelProvider: (id: string, input: { baseURL?: string; disabled?: boolean }) =>
+    hubPatch<HubModelProvider>(tenantPath(`/catalog/providers/${id}`), input),
+  deleteModelProvider: (id: string) => hubDelete(tenantPath(`/catalog/providers/${id}`)),
+
+  models: () => hubList<HubModel>(tenantPath("/catalog/models")),
+  createModel: (input: { canonicalName: string; displayName?: string | null }) =>
+    hubPost<HubModel>(tenantPath("/catalog/models"), input),
+
+  offerings: () => hubList<HubOffering>(tenantPath("/catalog/offerings")),
+  createOffering: (input: {
+    modelId: string;
+    providerId: string;
+    priority?: number;
+    capabilities?: string[];
+    quirks?: Record<string, unknown>;
+  }) => hubPost<HubOffering>(tenantPath("/catalog/offerings"), input),
+  patchOffering: (
+    id: string,
+    input: { priority?: number; disabled?: boolean; capabilities?: string[]; quirks?: Record<string, unknown> | null },
+  ) => hubPatch<HubOffering>(tenantPath(`/catalog/offerings/${id}`), input),
+  deleteOffering: (id: string) => hubDelete(tenantPath(`/catalog/offerings/${id}`)),
+};

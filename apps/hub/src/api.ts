@@ -17,6 +17,7 @@
 import { Hono } from "hono";
 import { type } from "arktype";
 import { execute } from "./engine.js";
+import { localActor } from "./hub-client.js";
 import { HostError } from "./errors.js";
 import { newId } from "./ids.js";
 import { type Command } from "@solutions-builder/app/ledger";
@@ -28,11 +29,6 @@ import { registerDecisionRoutes } from "./api-decisions.js";
 
 export const API_VERSION = HOST_API_VERSION;
 
-/**
- * The local single-user actor. When hosted mode arrives this is resolved from
- * the session instead; every call site already reads it from one place.
- */
-export const LOCAL_ACTOR = { principalId: "p_owner", displayName: "You" };
 
 export function parsed<T>(result: T | type.errors): T {
   if (result instanceof type.errors) {
@@ -48,7 +44,7 @@ export async function commandFrom(
 ) {
   return execute({
     type: type_,
-    actor: LOCAL_ACTOR,
+    actor: localActor(),
     projectId,
     idempotencyKey: (payload.idempotencyKey as string) ?? newId.command(),
     correlationId: newId.correlation(),

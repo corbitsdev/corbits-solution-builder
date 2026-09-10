@@ -10,9 +10,10 @@
  *      It may use the workflow authoring surface and the platform's types,
  *      because the definitions it generates are Interchange workflows.
  *   2. Only the hub talks to a provider or an agent runtime, and only the
- *      hub's platform files (`hub-*.ts`, `db.ts`, `schema.ts`, `migrate.ts`)
- *      import Interchange's internals. A second module reaching into the hub
- *      is how a parallel control plane starts.
+ *      hub's embedding files (`hub-mount`, `hub-keys`, `hub-migrate`,
+ *      `hub-migrations.generated`, `db`, `schema`, `migrate`) plus
+ *      `hub-executor` and `hub-gaps` import Interchange internals. A second
+ *      module reaching into the hub is how a parallel control plane starts.
  *   3. The client cannot write persistence: `apps/web` never imports the hub,
  *      the database, the schema, or the command engine.
  *   4. Run state moves in exactly one place. Only `engine.ts` (and
@@ -100,7 +101,7 @@ const RUNTIME_PACKAGES = ["@intx/inference", "@intx/inference-catalog", "@intx/a
 /** What the app package may take from the platform: authoring, not internals. */
 const PACKAGE_ALLOWED = ["@intx/workflow", "@intx/types", "arktype"];
 
-const PLATFORM_FILE = /^apps\/hub\/src\/(hub-[^/]+|db|schema|migrate)\.ts$/;
+const PLATFORM_FILE = /^apps\/hub\/src\/(hub-mount|hub-keys|hub-migrate|hub-migrations\.generated|hub-executor|hub-gaps|db|schema|migrate)\.ts$/;
 
 const files = (await Promise.all([PACKAGE, HUB, WEB].map((area) => walk(join(root, area))))).flat();
 
@@ -143,7 +144,7 @@ for (const file of files) {
     if (platform.length > 0 && !allowed) {
       violations.push({
         file: path,
-        rule: "only the hub's platform files (hub-*.ts, db.ts, schema.ts, migrate.ts) may import the Interchange platform",
+        rule: "only the hub's embedding files, hub-executor and hub-gaps may import the Interchange platform",
         detail: platform.join(", "),
       });
     }

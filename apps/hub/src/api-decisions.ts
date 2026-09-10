@@ -19,7 +19,8 @@ import * as table from "./schema.js";
 import { projectDetail, readArtifactNode } from "./projects.js";
 import { BRIDGE_CAPABILITIES, runBuildAttempt } from "./corbits-exec.js";
 import { drainOutbox } from "./outbox.js";
-import { LOCAL_ACTOR, commandFrom, parsed } from "./api.js";
+import { commandFrom, parsed } from "./api.js";
+import { localActor } from "./hub-client.js";
 
 export function registerDecisionRoutes(api: Hono) {
   /** One route per command family; the ledger decides whether each is allowed. */
@@ -93,7 +94,7 @@ export function registerDecisionRoutes(api: Hono) {
     const body = (await context.req.json().catch(() => ({}))) as Record<string, unknown>;
     const payload = parsed(SoloDecidePayload(body));
     const outcome = await submitAndApprove({
-      actor: LOCAL_ACTOR,
+      actor: localActor(),
       projectId,
       runId: payload.runId,
       versions: payload.versions,
@@ -114,7 +115,7 @@ export function registerDecisionRoutes(api: Hono) {
     const body = (await context.req.json()) as { runId: string };
     const started = await commandFrom("build.start_attempt", projectId, body as never);
 
-    const detail = await projectDetail(projectId, LOCAL_ACTOR.principalId);
+    const detail = await projectDetail(projectId, localActor().principalId);
     const packetRun = detail.runs.find((run) => run.id === started.runId);
     const [packet] = packetRun?.packetId
       ? await database()
@@ -166,7 +167,7 @@ export function registerDecisionRoutes(api: Hono) {
 
   api.get("/projects/:projectId/build/events", async (context) => {
     const projectId = context.req.param("projectId");
-    const detail = await projectDetail(projectId, LOCAL_ACTOR.principalId);
+    const detail = await projectDetail(projectId, localActor().principalId);
     const buildRuns = detail.runs.filter((run) => run.kind === "build").map((run) => run.id);
     if (buildRuns.length === 0) return context.json({ events: [] });
     const events = await database()

@@ -11,17 +11,16 @@
  *
  * Interchange's own catalog (`provider`, `credential`, `model_provider`,
  * `model`, `model_offering`) is the only store for a connected provider — this
- * module never touches those tables directly, only through `hub-catalog.ts`.
+ * module never touches those tables directly, only through `catalog.ts`.
  * A local endpoint has no account and no key, so `model_provider`'s
  * requirement of exactly one of `credentialId`/`walletId` is met by a
- * placeholder `credential` row `hub-catalog.ts` mints and tags
+ * placeholder `credential` row `catalog.ts` mints and tags
  * `{ keyless: true }` — never a real secret, and never read as one:
  * `ProviderSummary.hasCredential` is derived from that tag, not from the
  * row's mere existence.
  */
 import { HostError, notFound } from "./errors.js";
 import { storeSecret, deleteSecret, readSecret } from "./provider-credentials.js";
-import { linkProviderCredential } from "./hub-credentials.js";
 import {
   registerProviderCatalog,
   listCatalogProviders,
@@ -34,7 +33,8 @@ import {
   type Plugin,
   type CatalogProviderRow,
   type CatalogModelRow,
-} from "./hub-catalog.js";
+  upsertCredential,
+} from "./catalog.js";
 import { XAI_API_KEY_BASE_URL } from "@corbits/xai-provider";
 import {
   DEFINITIONS,
@@ -350,12 +350,19 @@ export async function connectProvider(
     const priorSelected = existing ? selectedModelOf(existing.models) : null;
     const priority = existing ? existing.basePriority : (await listProviders()).length;
 
+    const link = await upsertCredential({
+      providerId: LOCAL_PROVIDER_ID,
+      label: request.label,
+      kind: "local_endpoint",
+      credentialRef: null,
+      baseUrl: request.baseUrl,
+    });
     await registerProviderCatalog({
       providerId: LOCAL_PROVIDER_ID,
       label: request.label,
       plugin: PLUGINS[LOCAL_PROVIDER_ID] ?? "openai-compatible",
       baseUrl: request.baseUrl,
-      credentialId: null,
+      credentialId: link.id,
       models,
       priority,
     });
@@ -392,7 +399,7 @@ export async function connectProvider(
   // secret is dropped and the caller is told to try again.
   const priority = (await listProviders()).length;
   try {
-    const link = await linkProviderCredential({
+    const link = await upsertCredential({
       providerId: request.providerId,
       label: request.label,
       kind: request.kind,
@@ -457,7 +464,7 @@ export async function finishOAuthConnect(): Promise<ProviderSummary> {
   const priority = (await listProviders()).length;
 
   try {
-    const link = await linkProviderCredential({
+    const link = await upsertCredential({
       providerId: completed.providerId,
       label: definition.label,
       kind: "oauth",
@@ -516,7 +523,7 @@ export async function refreshProviderModels(providerId: string): Promise<Provide
     label: catalogRow.label,
     plugin: catalogRow.plugin,
     baseUrl: catalogRow.baseUrl,
-    credentialId: isLocal ? null : catalogRow.credentialId,
+    credentialId: catalogRow.credentialId,
     models,
     priority: catalogRow.basePriority,
   });

@@ -7,14 +7,14 @@ import { draftAudiencePackages, draftStageArtifact, runEngineeringReview } from 
 import { appendHumanTurn, appendSpecialistTurn, threadTurns } from "./hub-conversation.js";
 import { nextQuestion } from "./questions.js";
 import { liveDraft, liveDraftBegun, subscribeLiveDraft } from "./live-drafts.js";
-import { LOCAL_ACTOR } from "./api.js";
+import { localActor } from "./hub-client.js";
 
 export function registerStageRoutes(api: Hono) {
   /** The conversation with a stage specialist, oldest turn first. */
   api.get("/projects/:projectId/stages/:stage/thread", async (context) => {
     const projectId = context.req.param("projectId");
     const stage = Number(context.req.param("stage"));
-    const detail = await projectDetail(projectId, LOCAL_ACTOR.principalId);
+    const detail = await projectDetail(projectId, localActor().principalId);
     const branchId = detail.project.activeBranchId ?? "";
     const open = await nextQuestion(projectId, branchId, stage);
     return context.json({
@@ -68,7 +68,7 @@ export function registerStageRoutes(api: Hono) {
       /** Set when the person chooses to stop answering and revise now. */
       revise?: boolean;
     };
-    const detail = await projectDetail(projectId, LOCAL_ACTOR.principalId);
+    const detail = await projectDetail(projectId, localActor().principalId);
     if (!detail.current) throw notFound("An open run for that project");
     const branchId = detail.project.activeBranchId ?? "";
     const message = (body.message ?? "").trim();
@@ -83,7 +83,7 @@ export function registerStageRoutes(api: Hono) {
         runId: detail.current.id,
         stage,
         body: message,
-        actor: LOCAL_ACTOR,
+        actor: localActor(),
         ...(quotes.length > 0 ? { quotes } : {}),
       });
       void messageId;
@@ -99,7 +99,7 @@ export function registerStageRoutes(api: Hono) {
           branchId,
           stage,
           runId: detail.current.id,
-          actor: LOCAL_ACTOR,
+          actor: localActor(),
           userInput: "",
           projectTitle: detail.project.title,
           mode: "interview",
@@ -111,7 +111,7 @@ export function registerStageRoutes(api: Hono) {
           runId: detail.current.id,
           stage,
           body: following.body,
-          actor: LOCAL_ACTOR,
+          actor: localActor(),
           resultNodeId: revised.nodeId,
         });
         return context.json({ asked: true, remaining: following.remaining, draft: revised });
@@ -126,7 +126,7 @@ export function registerStageRoutes(api: Hono) {
       branchId,
       stage,
       runId: detail.current.id,
-      actor: LOCAL_ACTOR,
+      actor: localActor(),
       userInput: open ? "" : message,
       projectTitle: detail.project.title,
       ...(quotes.length > 0 && !open ? { quotes } : {}),
@@ -142,7 +142,7 @@ export function registerStageRoutes(api: Hono) {
       input?: string;
       quotes?: { quote: string }[];
     };
-    const detail = await projectDetail(projectId, LOCAL_ACTOR.principalId);
+    const detail = await projectDetail(projectId, localActor().principalId);
     if (!detail.current) throw notFound("An open run for that project");
 
     // Stage 5 fans out: one package per named audience.
@@ -154,7 +154,7 @@ export function registerStageRoutes(api: Hono) {
         projectId,
         branchId: detail.project.activeBranchId ?? "",
         runId: detail.current.id,
-        actor: LOCAL_ACTOR,
+        actor: localActor(),
         projectTitle: detail.project.title,
         audiences: policy.audiences ?? [],
         userInput: body.input ?? "",
@@ -167,7 +167,7 @@ export function registerStageRoutes(api: Hono) {
       branchId: detail.project.activeBranchId ?? "",
       stage,
       runId: detail.current.id,
-      actor: LOCAL_ACTOR,
+      actor: localActor(),
       userInput: body.input ?? "",
       projectTitle: detail.project.title,
       ...(body.quotes && body.quotes.length > 0 ? { quotes: body.quotes } : {}),
@@ -181,7 +181,7 @@ export function registerStageRoutes(api: Hono) {
         projectId,
         branchId: detail.project.activeBranchId ?? "",
         runId: detail.current.id,
-        actor: LOCAL_ACTOR,
+        actor: localActor(),
         projectTitle: detail.project.title,
         plan: result.content,
       });
