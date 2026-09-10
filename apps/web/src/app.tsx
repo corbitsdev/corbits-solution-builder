@@ -65,6 +65,14 @@ function initialView(): View {
  * because which one is right is exactly what is unknown. One line, and after a
  * while an admission that it is taking longer than it should.
  */
+/** The hub's "install first" conflict is not a failure of the request: there is nothing yet. */
+function emptyUntilInstalled<T>(empty: T): (cause: unknown) => T {
+  return (cause) => {
+    if (cause instanceof ApiFailure && cause.detail.install) return empty;
+    throw cause;
+  };
+}
+
 function Booting({ offline }: { offline: boolean }) {
   const [slow, setSlow] = useState(false);
   useEffect(() => {
@@ -255,11 +263,16 @@ export function App() {
 
   const refresh = useCallback(async () => {
     try {
-      const [statusResult, decisionsResult, projectsResult, providersResult] = await Promise.all([
-        api.status(),
-        api.decisions(),
-        api.projects(),
-        api.providers(),
+      // Status and providers answer before the workspace exists. Decisions and
+      // projects do not: until the client has installed the app the hub
+      // refuses them with a conflict marked `install`, and the install runs
+      // only once `status` is set. Fetching all four together meant a first
+      // run never set `status` and the boot screen never went away. Until the
+      // install, an uninstalled workspace is an empty one.
+      const [statusResult, providersResult] = await Promise.all([api.status(), api.providers()]);
+      const [decisionsResult, projectsResult] = await Promise.all([
+        api.decisions().catch(emptyUntilInstalled({ decisions: [] })),
+        api.projects().catch(emptyUntilInstalled({ projects: [] })),
       ]);
       setStatus(statusResult);
       setDecisions(decisionsResult.decisions);

@@ -19,6 +19,8 @@ export type ApiError = {
   refusal?: string;
   /** What the interface can offer beyond the message. */
   remediation?: Remediation;
+  /** The workspace is not installed; the call is valid once it is. */
+  install?: boolean;
 };
 
 export class ApiFailure extends Error {
