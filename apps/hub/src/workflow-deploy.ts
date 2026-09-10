@@ -1,25 +1,33 @@
 /**
  * The project lifecycle as a hub deployment.
  *
- * The lifecycle is rendered to the two-file workflow package the hub's
- * `workflow` asset kind accepts — a manifest naming the entry, and an entry
- * module that default-exports the definition as inert JSON — committed to a
- * workflow asset, and deployed through the hub's own route. The hub probes the
+ * The lifecycle is rendered to a workspace the hub's `workflow` asset kind
+ * accepts: a lifecycle member whose entry builds the definition with
+ * `@intx/workflow`, and the vendored `@intx` packages as sibling members so
+ * the closure resolves to the vendored revision. It is committed to a workflow
+ * asset and deployed through the hub's own route. The hub probes the
  * source in a sidecar, freezes a `workflow_definition`, and creates the
  * anchor `workflow_run`. That row is what stage gates will park on once the
  * in-process executor (`hub-executor.ts`) retires; until then both exist.
  */
-import { LIFECYCLE_ENTRY_PATH, withoutStateSchemas } from "@solutions-builder/app/workflows/lifecycle-source";
-import { projectLifecycleDefinition } from "@solutions-builder/app/workflows/project-lifecycle";
+import {
+  LIFECYCLE_ENTRY_PATH,
+  lifecycleEntrySource,
+  WORKFLOW_PACKAGE_DEPENDENCIES,
+} from "@solutions-builder/app/workflows/lifecycle-source";
 import { continuingCommands, ROUND_STEP_ID } from "@solutions-builder/app/workflows/stage-loop";
 import { assets, catalog, workflows, type HubDeployment } from "./hub-client.js";
 import { readWorkflowSourceBlob, writeWorkflowSourceTree } from "./hub-gaps.js";
 import { canPlaceSidecars } from "./hub-mount.js";
+import { closureFiles, treeDigest, workspaceCatalog } from "./workflow-closure.js";
 
 export const LIFECYCLE_ASSET_NAME = "solutions-builder-project-lifecycle";
 const ENTRY_PATH = LIFECYCLE_ENTRY_PATH;
 const ENTRY = `./${ENTRY_PATH}`;
 const LOOPS_PATH = "loops.js";
+/** The workflow member inside the asset; the vendored @intx packages sit beside it. */
+const LIFECYCLE_DIR = "packages/lifecycle";
+const DIGEST_PATH = "closure.sha256";
 
 /**
  * The stage loop's `while` and `carry` refs, resolved by export name from the
@@ -58,25 +66,39 @@ export function lifecycleAssetName(projectId?: string): string {
 }
 
 /**
- * The package the sidecar evaluates: a manifest, an inert-JSON entry and the
- * loops module. A code entry (`lifecycleEntrySource`) is ready and verified
- * by check:ledger, but the published `@intx/workflow` cannot build this
- * lifecycle (its loop validator predates signal relay), so the code entry
- * waits until `@intx/*` resolves from the vendored tree (CL-7628).
+ * The asset the sidecar evaluates: a workspace whose members are the lifecycle
+ * package (a code entry that builds the definition with `@intx/workflow`, and
+ * the loops module) and the vendored `@intx` packages it imports, so the
+ * closure resolves to the vendored revision rather than npm. A digest of every
+ * file sits at the root so a changed byte anywhere is a new deployment.
  */
 export function renderLifecycleSource(projectId?: string): LifecycleSource {
-  const manifest = {
-    name: lifecycleAssetName(projectId),
+  const name = lifecycleAssetName(projectId);
+  const root = {
+    name: `${name}-workspace`,
     version: "0.0.0",
     private: true,
     type: "module",
+    workspaces: ["packages/*"],
+    catalog: workspaceCatalog(),
+  };
+  const member = {
+    name,
+    version: "0.0.0",
+    private: true,
+    type: "module",
+    dependencies: WORKFLOW_PACKAGE_DEPENDENCIES,
     interchange: { workflow: ENTRY, loops: `./${LOOPS_PATH}` },
   };
-  return {
-    "package.json": `${JSON.stringify(manifest, null, 2)}\n`,
-    [ENTRY_PATH]: `export default ${JSON.stringify(withoutStateSchemas(projectLifecycleDefinition()))};\n`,
-    [LOOPS_PATH]: loopsModule(),
+  const files: Record<string, string> = {
+    "package.json": `${JSON.stringify(root, null, 2)}\n`,
+    [`${LIFECYCLE_DIR}/package.json`]: `${JSON.stringify(member, null, 2)}\n`,
+    [`${LIFECYCLE_DIR}/${ENTRY_PATH}`]: lifecycleEntrySource(),
+    [`${LIFECYCLE_DIR}/${LOOPS_PATH}`]: loopsModule(),
+    ...closureFiles("workflow"),
   };
+  files[DIGEST_PATH] = `${treeDigest(files)}\n`;
+  return files;
 }
 
 export type LifecycleDeployment =
@@ -121,11 +143,11 @@ export async function ensureLifecycleDeployment(projectId?: string): Promise<Lif
 
   const source = renderLifecycleSource(projectId);
   const assetId = await lifecycleAsset(projectId);
-  const head = await readWorkflowSourceBlob(assetId, ENTRY_PATH);
+  const head = await readWorkflowSourceBlob(assetId, DIGEST_PATH);
   const [latest] = (await workflows.deployments()).filter(
     (deployment: HubDeployment) => deployment.definitionAssetId === assetId,
   );
-  if (head === source[ENTRY_PATH] && latest) {
+  if (head === source[DIGEST_PATH] && latest) {
     return {
       status: "current",
       assetId,
@@ -144,7 +166,11 @@ export async function ensureLifecycleDeployment(projectId?: string): Promise<Lif
 
   const ids = offerings.map((offering) => offering.id);
   const deployment = await workflows.deploy({
-    source: { kind: "asset", assetId, package: { format: "source", commitSha } },
+    source: {
+      kind: "asset",
+      assetId,
+      package: { format: "source", commitSha, packageName: lifecycleAssetName(projectId) },
+    },
     entry: ENTRY,
     sourceOfferingIds: ids,
     defaultSourceOfferingId: ids[0]!,

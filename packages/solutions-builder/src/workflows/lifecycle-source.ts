@@ -18,13 +18,14 @@ import { MAX_REVISIONS, ROUND_STEP_ID, STAGE_WORKFLOW_ID } from "./stage-loop.js
 import { STAGES } from "../ledger.js";
 
 /**
- * What the deployed package depends on, fetched from npm by the hub (to pin
- * the closure) and by the sidecar (to lay it out). `hono` is imported by
+ * What the deployed package depends on. `@intx/workflow` is a workspace member
+ * of the asset (the vendored revision, shipped beside the workflow by
+ * `apps/hub/src/workflow-closure.ts`); everything else comes from npm. `hono` is imported by
  * nothing here: it satisfies the peer dependency `@logtape/hono` declares
  * inside `@intx/log`, which the closure resolver refuses to leave unmet.
  */
 export const WORKFLOW_PACKAGE_DEPENDENCIES: Readonly<Record<string, string>> = {
-  "@intx/workflow": "0.3.0",
+  "@intx/workflow": "workspace:*",
   hono: "^4.0.0",
 };
 

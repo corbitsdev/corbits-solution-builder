@@ -656,7 +656,11 @@ export const workflows = {
    * call takes as long as spawning that process does.
    */
   deploy: (input: {
-    source: { kind: "asset"; assetId: string; package: { format: "source"; commitSha: string } };
+    source: {
+      kind: "asset";
+      assetId: string;
+      package: { format: "source"; commitSha: string; packageName?: string };
+    };
     entry: string;
     sourceOfferingIds: string[];
     defaultSourceOfferingId: string;
