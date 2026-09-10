@@ -1,41 +1,34 @@
 /**
  * Dictation: speaking into a composer instead of typing into it.
  *
- * Built on the browser's speech recognition. In the desktop shell that is
- * Apple's recognizer behind WebKit, the same one the system dictation key
- * uses; in Chrome it is Chrome's. Where the API is absent the control is
- * absent too, and where it is present but refused, the refusal is said once
- * rather than left as a button that appears to work.
+ * Two backends behind one hook. In the desktop shell the shell owns the
+ * microphone: Apple's recognizer runs in the app process and the page hears
+ * levels, partial transcripts and the end as `dictation` events. That is the
+ * product path. In a plain browser, for `bun run dev`, the browser's own
+ * speech recognition stands in, with the microphone read alongside it for the
+ * level. Where neither exists the control is absent.
  *
- * Words land in the composer as they are recognised, so a person sees the
- * sentence form and can stop the moment it goes wrong. Whatever was already
- * typed stays; dictation appends to it.
+ * Words land in the composer as they are recognised, appended to whatever
+ * was typed. The microphone goes green while it is open and a waveform
+ * follows the input, because a live microphone must never be ambiguous. A
+ * tap on the microphone ends it, and so does a short silence once something
+ * has been said.
  */
-import { Mic, Square } from "lucide-react";
+import { Mic } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
-type RecognitionResult = ArrayLike<{ transcript: string }> & { isFinal: boolean };
-type RecognitionEvent = { results: ArrayLike<RecognitionResult> };
-type Recognition = {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  start(): void;
-  stop(): void;
-  abort(): void;
-  onresult: ((event: RecognitionEvent) => void) | null;
-  onerror: ((event: { error: string }) => void) | null;
-  onend: (() => void) | null;
-};
+/** How many recent levels the waveform shows. */
+const WAVE_BARS = 24;
+/** Silence after speech that ends a browser session; the shell keeps its own. */
+const SILENCE_AFTER_SPEECH_MS = 1500;
+const SOUND_FLOOR = 0.015;
 
-function recognizer(): (new () => Recognition) | null {
-  if (typeof window === "undefined") return null;
-  const scope = window as unknown as {
-    SpeechRecognition?: new () => Recognition;
-    webkitSpeechRecognition?: new () => Recognition;
-  };
-  return scope.SpeechRecognition ?? scope.webkitSpeechRecognition ?? null;
-}
+type DictationEvent =
+  | { kind: "level"; level: number }
+  | { kind: "text"; text: string; final: boolean }
+  | { kind: "end"; reason: string };
 
 /** Why it stopped, in words a person can act on. Anything else is shown as is. */
 const REFUSALS: Record<string, string> = {
@@ -44,71 +37,198 @@ const REFUSALS: Record<string, string> = {
   "audio-capture": "No microphone was found.",
   network: "Speech recognition could not reach its service.",
 };
+/** Ends that are not failures. */
+const QUIET_ENDS = new Set(["stopped", "silence", "final"]);
+
+const inShell = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+type Recognition = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start(): void;
+  stop(): void;
+  abort(): void;
+  onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+  onerror: ((event: { error: string; message?: string }) => void) | null;
+  onend: (() => void) | null;
+};
+function browserRecognizer(): (new () => Recognition) | null {
+  if (typeof window === "undefined") return null;
+  const scope = window as unknown as {
+    SpeechRecognition?: new () => Recognition;
+    webkitSpeechRecognition?: new () => Recognition;
+  };
+  return scope.SpeechRecognition ?? scope.webkitSpeechRecognition ?? null;
+}
+
+/** A running session, whichever backend: one way to stop it. */
+type Session = { stop: () => void; abort: () => void };
 
 export function useDictation(value: string, onValueChange: (value: string) => void) {
   const [listening, setListening] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
-  const active = useRef<Recognition | null>(null);
-  // What was in the composer when dictation began; every result is appended
-  // to it, so an interim phrase is replaced by its final form, not doubled.
-  const base = useRef("");
+  const [levels, setLevels] = useState<number[]>(() => Array(WAVE_BARS).fill(0));
+  const session = useRef<Session | null>(null);
   const current = useRef(value);
   current.current = value;
   const change = useRef(onValueChange);
   change.current = onValueChange;
 
-  const stop = useCallback(() => active.current?.stop(), []);
-  const start = useCallback(() => {
-    const Recognizer = recognizer();
-    if (!Recognizer || active.current) return;
+  const supported = inShell() || browserRecognizer() !== null;
+
+  const pushLevel = useCallback((level: number) => {
+    setLevels((history) => [...history.slice(1), Math.max(0, Math.min(1, level))]);
+  }, []);
+
+  const finish = useCallback((reason: string) => {
+    session.current = null;
+    setListening(false);
+    setLevels(Array(WAVE_BARS).fill(0));
+    if (!QUIET_ENDS.has(reason)) setRefusal(reason);
+  }, []);
+
+  const start = useCallback(async () => {
+    if (session.current) return;
+    const typed = current.current.trimEnd();
+    const base = typed.length > 0 ? `${typed} ` : "";
+    setRefusal(null);
+    setListening(true);
+
+    if (inShell()) {
+      let over = false;
+      const unlisten = await listen<DictationEvent>("dictation", ({ payload }) => {
+        if (over) return;
+        if (payload.kind === "level") pushLevel(payload.level);
+        else if (payload.kind === "text") change.current(base + payload.text);
+        else {
+          over = true;
+          unlisten();
+          finish(payload.reason);
+        }
+      });
+      session.current = {
+        stop: () => void invoke("dictation_stop"),
+        abort: () => {
+          over = true;
+          unlisten();
+          void invoke("dictation_stop");
+        },
+      };
+      try {
+        await invoke("dictation_start");
+      } catch (cause) {
+        over = true;
+        unlisten();
+        finish(String(cause));
+      }
+      return;
+    }
+
+    const Recognizer = browserRecognizer();
+    if (!Recognizer) {
+      finish("Speech recognition is not available in this browser.");
+      return;
+    }
     const recognition = new Recognizer();
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = navigator.language || "en-US";
-    const typed = current.current.trimEnd();
-    base.current = typed.length > 0 ? `${typed} ` : "";
+    let heardSpeech = false;
+    let lastSound = performance.now();
+    let ended: string | null = null;
+    let stoppedByUs = false;
+
+    // The level, read from the microphone beside the recognizer. A browser
+    // without it still dictates; it just has no waveform to show.
+    let meter: { stream: MediaStream; context: AudioContext; timer: number } | null = null;
+    const closeMeter = () => {
+      if (!meter) return;
+      clearInterval(meter.timer);
+      meter.stream.getTracks().forEach((track) => track.stop());
+      void meter.context.close();
+      meter = null;
+    };
+    if (navigator.mediaDevices?.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const context = new AudioContext();
+        const analyser = context.createAnalyser();
+        analyser.fftSize = 512;
+        context.createMediaStreamSource(stream).connect(analyser);
+        const samples = new Float32Array(analyser.fftSize);
+        const timer = window.setInterval(() => {
+          analyser.getFloatTimeDomainData(samples);
+          let sum = 0;
+          for (const sample of samples) sum += sample * sample;
+          const rms = Math.sqrt(sum / samples.length);
+          pushLevel(rms * 6);
+          if (rms > SOUND_FLOOR) lastSound = performance.now();
+          else if (heardSpeech && performance.now() - lastSound > SILENCE_AFTER_SPEECH_MS) {
+            stoppedByUs = true;
+            recognition.stop();
+          }
+        }, 50);
+        meter = { stream, context, timer };
+      } catch {
+        meter = null;
+      }
+    }
+
     recognition.onresult = (event) => {
       const heard: string[] = [];
       for (let at = 0; at < event.results.length; at++) {
         const text = event.results[at]?.[0]?.transcript.trim();
         if (text) heard.push(text);
       }
-      change.current(base.current + heard.join(" "));
+      if (heard.length > 0) {
+        heardSpeech = true;
+        lastSound = performance.now();
+      }
+      change.current(base + heard.join(" "));
     };
     recognition.onerror = (event) => {
-      // Silence is not a failure, and stopping it ourselves is not one either.
-      if (event.error === "no-speech" || event.error === "aborted") return;
-      setRefusal(REFUSALS[event.error] ?? `Dictation stopped: ${event.error}.`);
+      if (event.error === "aborted" || event.error === "no-speech") return;
+      ended = REFUSALS[event.error] ?? `Dictation stopped: ${event.error}${event.message ? ` (${event.message})` : ""}.`;
     };
     recognition.onend = () => {
-      active.current = null;
-      setListening(false);
+      closeMeter();
+      finish(ended ?? (heardSpeech || stoppedByUs ? "final" : "Dictation ended before anything was heard."));
     };
-    active.current = recognition;
-    setRefusal(null);
-    setListening(true);
+    session.current = {
+      stop: () => {
+        stoppedByUs = true;
+        recognition.stop();
+      },
+      abort: () => {
+        closeMeter();
+        recognition.abort();
+      },
+    };
     try {
       recognition.start();
-    } catch {
-      active.current = null;
-      setListening(false);
+    } catch (cause) {
+      closeMeter();
+      finish(String(cause));
     }
-  }, []);
+  }, [finish, pushLevel]);
+
+  const stop = useCallback(() => session.current?.stop(), []);
 
   // Leaving the screen mid-sentence must not leave the microphone open.
-  useEffect(() => () => active.current?.abort(), []);
+  useEffect(() => () => session.current?.abort(), []);
 
-  return { supported: recognizer() !== null, listening, refusal, start, stop };
+  return { supported, listening, levels, refusal, start, stop };
 }
 
 /**
  * A composer with a microphone beside it, on the left, level with the send
- * button. Where the browser has no speech recognition the composer is
- * rendered alone: a control that does not exist is absent.
+ * button. Where there is no way to dictate the composer is rendered alone: a
+ * control that does not exist is absent.
  *
- * What the microphone is doing is said under the composer only while there
- * is something to say, listening or a refusal, so the row itself never
- * changes shape.
+ * While listening the microphone is green and a line under the composer says
+ * "Listening:" with a waveform of the input beside it. A refusal takes the
+ * same line. Otherwise the line is absent, so the row never changes shape.
  */
 export function Dictated({
   value,
@@ -122,7 +242,7 @@ export function Dictated({
   disabled?: boolean;
   children: ReactNode;
 }) {
-  const { supported, listening, refusal, start, stop } = useDictation(value, onValueChange);
+  const { supported, listening, levels, refusal, start, stop } = useDictation(value, onValueChange);
   useEffect(() => {
     if (disabled && listening) stop();
   }, [disabled, listening, stop]);
@@ -137,15 +257,20 @@ export function Dictated({
           aria-label={listening ? "Stop dictating" : "Dictate"}
           title={listening ? "Stop dictating" : "Dictate instead of typing"}
           disabled={disabled}
-          onClick={listening ? stop : start}
+          onClick={listening ? stop : () => void start()}
         >
-          {listening ? <Square aria-hidden="true" /> : <Mic aria-hidden="true" />}
+          <Mic aria-hidden="true" />
         </button>
         {children}
       </div>
       {listening ? (
         <p className="dictation-state" aria-live="polite">
-          Listening…
+          <span>Listening:</span>
+          <span className="waveform" aria-hidden="true">
+            {levels.map((level, at) => (
+              <i key={at} style={{ transform: `scaleY(${Math.max(0.08, level)})` }} />
+            ))}
+          </span>
         </p>
       ) : refusal ? (
         <p className="dictation-state" role="alert">

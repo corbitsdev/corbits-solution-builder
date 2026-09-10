@@ -23,6 +23,19 @@ tauri = { version = "2", features = ["tray-icon", "webview-data-url"] }
 # app. The plugin owns the per-platform registration; the choice itself is the
 # host's, so the UI can explain it and turn it off.
 tauri-plugin-autostart = "2"
+serde = { version = "1", features = ["derive"] }
+
+# Dictation: Apple's speech recognizer fed by the audio engine, in this
+# process. The webview's own speech API starts the system session in
+# WKWebView and then delivers nothing, and it cannot report the input level
+# the composer's waveform needs, so the shell owns the microphone.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6", features = ["exception"] }
+objc2-foundation = "0.3"
+objc2-speech = "0.3"
+objc2-avf-audio = "0.3"
+objc2-av-foundation = "0.3"
+block2 = "0.6"
 
 [profile.release]
 panic = "abort"

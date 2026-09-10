@@ -1543,32 +1543,40 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   opacity: 0.5;
 }
 
+/* Open: the microphone itself goes green. The waveform beside "Listening:"
+   is the input level, bar by bar, newest on the right; it moves because the
+   room does, never on its own. */
 .dictate[aria-pressed="true"] {
-  border-color: var(--wb-primary);
-  color: var(--wb-primary);
-  animation: listening 1.6s ease-in-out infinite;
-}
-
-@keyframes listening {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--wb-primary) 45%, transparent);
-  }
-  50% {
-    box-shadow: 0 0 0 6px color-mix(in srgb, var(--wb-primary) 0%, transparent);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .dictate[aria-pressed="true"] {
-    animation: none;
-  }
+  border-color: var(--wb-okay);
+  color: var(--wb-okay);
+  background: color-mix(in srgb, var(--wb-okay) 12%, var(--wb-card));
 }
 
 .dictation-state {
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 1.25rem;
   font-size: 0.8125rem;
   color: var(--wb-muted-foreground);
+}
+
+.waveform {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 1rem;
+}
+
+.waveform i {
+  display: block;
+  width: 3px;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--wb-okay);
+  transform-origin: center;
+  transition: transform 60ms linear;
 }
 
 .dictation-state[role="alert"] {

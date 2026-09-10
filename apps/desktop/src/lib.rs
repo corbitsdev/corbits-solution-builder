@@ -14,6 +14,8 @@
 //! place an explicit stop can be chosen. The sidecar is reaped on Quit, and on
 //! Quit alone.
 
+pub mod dictation;
+
 use std::{
     error::Error,
     io::{self, BufRead, BufReader},
@@ -466,6 +468,13 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        // Dictation runs in this process: the page asks to start and stop,
+        // and hears levels, transcripts and the end as events.
+        .manage(dictation::Dictation::default())
+        .invoke_handler(tauri::generate_handler![
+            dictation::dictation_start,
+            dictation::dictation_stop
+        ])
         .setup(|app| {
             // §3: reconcile the OS registration with the choice the person
             // made in the app. The marker is written by the host when the
