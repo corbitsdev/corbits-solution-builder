@@ -36,7 +36,6 @@ export const project = builder.table(
     title: text("title").notNull(),
     /** Optimistic concurrency for existing-project mutations. */
     revision: integer("revision").notNull().default(1),
-    activeBranchId: text("active_branch_id"),
     policy: jsonb("policy").notNull(),
     policyVersion: integer("policy_version").notNull().default(1),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
@@ -59,20 +58,6 @@ export const participant = builder.table(
   (table) => [primaryKey({ columns: [table.projectId, table.principalId, table.role] })],
 );
 
-export const branch = builder.table(
-  "branch",
-  {
-    id: id(),
-    projectId: text("project_id").notNull(),
-    name: text("name").notNull(),
-    /** Branches root at a selected stage-3 proposal version. Null for the root branch. */
-    rootVersionId: text("root_version_id"),
-    archivedAt: timestamp("archived_at", { withTimezone: true }),
-    createdAt: createdAt(),
-  },
-  (table) => [uniqueIndex("branch_project_name_idx").on(table.projectId, table.name)],
-);
-
 /**
  * There is no `run` table. A project's stage and state are read from the
  * runtime executor (`hub-executor.ts`), which is now the sole
@@ -90,7 +75,6 @@ export const artifactNode = builder.table(
   {
     id: id(),
     projectId: text("project_id").notNull(),
-    branchId: text("branch_id").notNull(),
     artifactId: text("artifact_id").notNull(),
     version: integer("version").notNull(),
     kind: text("kind").notNull(),

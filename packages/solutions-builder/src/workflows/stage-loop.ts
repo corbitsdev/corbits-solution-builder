@@ -70,7 +70,7 @@ function iteration(stage: Stage): WorkflowDefinition {
     triggers: [{ type: "manual" }],
     steps: steps as never,
     state: {
-      schema: { projectId: "string", branchId: "string", runId: "string" } as never,
+      schema: { projectId: "string", runId: "string" } as never,
     },
   });
 }
@@ -102,7 +102,6 @@ export function stageDefinition(stage: Stage): WorkflowDefinition {
     state: {
       schema: {
         projectId: "string",
-        branchId: "string",
         runId: "string",
         stage: "number",
         versionId: "string",

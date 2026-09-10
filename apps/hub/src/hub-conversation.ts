@@ -46,13 +46,12 @@ export type StageTurn = {
  * The `agent_session` id for a stage thread, deterministic in its three keys
  * so a second call finds the same session rather than starting another one.
  */
-export function sessionIdFor(projectId: string, branchId: string, stage: number): Promise<string> {
-  return sha256(`${projectId}:${branchId}:${stage}`).then((digest) => `ses_${digest.slice(0, 24)}`);
+export function sessionIdFor(projectId: string, stage: number): Promise<string> {
+  return sha256(`${projectId}:${stage}`).then((digest) => `ses_${digest.slice(0, 24)}`);
 }
 
 async function ensureSession(args: {
   projectId: string;
-  branchId: string;
   stage: number;
   principalId: string;
 }): Promise<string> {
@@ -62,7 +61,7 @@ async function ensureSession(args: {
       `No workflow definition is seeded for stage ${args.stage}. seedWorkflows() must run before a stage conversation can open.`,
     );
   }
-  const sessionId = await sessionIdFor(args.projectId, args.branchId, args.stage);
+  const sessionId = await sessionIdFor(args.projectId, args.stage);
   await ensureAgentSession({
     sessionId,
     tenantId: tenantId(),
@@ -74,7 +73,6 @@ async function ensureSession(args: {
 
 async function writeTurn(args: {
   projectId: string;
-  branchId: string;
   stage: number;
   runId: string;
   role: "human" | "specialist";
@@ -89,7 +87,6 @@ async function writeTurn(args: {
 
   const sessionId = await ensureSession({
     projectId: args.projectId,
-    branchId: args.branchId,
     stage: args.stage,
     principalId: args.principalId,
   });
@@ -117,7 +114,6 @@ async function writeTurn(args: {
 
 export async function appendHumanTurn(args: {
   projectId: string;
-  branchId: string;
   runId: string;
   stage: number;
   body: string;
@@ -126,7 +122,6 @@ export async function appendHumanTurn(args: {
 }): Promise<string> {
   return writeTurn({
     projectId: args.projectId,
-    branchId: args.branchId,
     stage: args.stage,
     runId: args.runId,
     role: "human",
@@ -138,7 +133,6 @@ export async function appendHumanTurn(args: {
 
 export async function appendSpecialistTurn(args: {
   projectId: string;
-  branchId: string;
   runId: string;
   stage: number;
   body: string;
@@ -150,7 +144,6 @@ export async function appendSpecialistTurn(args: {
 }): Promise<string> {
   return writeTurn({
     projectId: args.projectId,
-    branchId: args.branchId,
     stage: args.stage,
     runId: args.runId,
     role: "specialist",
@@ -187,10 +180,9 @@ async function sessionTurns(sessionId: string): Promise<(StageTurn & { kind: str
 /** Every turn on a stage thread, oldest first — what the person reads. Never includes a brief marker. */
 export async function threadTurns(
   projectId: string,
-  branchId: string,
   stage: number,
 ): Promise<StageTurn[]> {
-  const sessionId = await sessionIdFor(projectId, branchId, stage);
+  const sessionId = await sessionIdFor(projectId, stage);
   const all = await sessionTurns(sessionId);
   return all
     .filter((turn) => turn.kind !== "brief")
@@ -207,10 +199,9 @@ export async function threadTurns(
  */
 export async function pendingContext(
   projectId: string,
-  branchId: string,
   stage: number,
 ): Promise<{ brief: string | null; pending: StageTurn[] }> {
-  const sessionId = await sessionIdFor(projectId, branchId, stage);
+  const sessionId = await sessionIdFor(projectId, stage);
   const all = await sessionTurns(sessionId);
 
   let briefIndex = -1;
@@ -242,7 +233,6 @@ export async function pendingContext(
  */
 export async function recordBrief(args: {
   projectId: string;
-  branchId: string;
   stage: number;
   runId: string;
   body: string;
@@ -250,7 +240,6 @@ export async function recordBrief(args: {
 }): Promise<void> {
   await writeTurn({
     projectId: args.projectId,
-    branchId: args.branchId,
     stage: args.stage,
     runId: args.runId,
     role: "specialist",

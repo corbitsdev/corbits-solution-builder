@@ -137,7 +137,6 @@ export const ArtifactKindT = type.enumerated(...ARTIFACT_KINDS);
 
 export const ArtifactDraft = type({
   projectId: id,
-  branchId: id,
   kind: ArtifactKindT,
   /**
    * Distinguishes parallel artifacts of the same kind on one branch — stage 5

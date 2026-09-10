@@ -515,6 +515,9 @@ const MIGRATIONS: readonly Migration[] = [
       sql`DROP TABLE IF EXISTS "builder"."outbox_entry"`,
       sql`DROP TABLE IF EXISTS "builder"."command_receipt"`,
       sql`DROP TABLE IF EXISTS "builder"."agent_run_record"`,
+      sql`DROP TABLE IF EXISTS "builder"."branch"`,
+      sql`ALTER TABLE "builder"."project" DROP COLUMN IF EXISTS "active_branch_id"`,
+      sql`ALTER TABLE "builder"."artifact_node" DROP COLUMN IF EXISTS "branch_id"`,
     ],
   },
 ];

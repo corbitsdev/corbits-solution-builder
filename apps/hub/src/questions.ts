@@ -15,10 +15,9 @@ export type OpenQuestion = { id: string; body: string; ordinal: number; remainin
 /** The next question waiting on an answer, and how many follow it. */
 export async function nextQuestion(
   projectId: string,
-  branchId: string,
   stage: number,
 ): Promise<OpenQuestion | null> {
-  const turns = await threadTurns(projectId, branchId, stage);
+  const turns = await threadTurns(projectId, stage);
   let round = -1;
   for (let at = turns.length - 1; at >= 0; at -= 1) {
     const turn = turns[at]!;

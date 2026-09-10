@@ -153,7 +153,6 @@ const ACTOR = localActor();
 
   const key = {
     projectId: project.projectId,
-    branchId: project.branchId,
     runId: project.runId,
     stage: 1,
   };
@@ -166,13 +165,13 @@ const ACTOR = localActor();
   await appendSpecialistTurn({ ...key, body: "Produced version 1.", actor: ACTOR, resultNodeId: "nod_x" });
   const two = await appendHumanTurn({ ...key, body: "Cut section two.", actor: ACTOR });
 
-  const all = await threadTurns(key.projectId, key.branchId, 1);
+  const all = await threadTurns(key.projectId, 1);
   check("turns persist in order", all.length === 3 && all[0]!.id === one && all[2]!.id === two);
   check("an attached passage is retained", all[0]!.quotes[0]?.quote === "a passage");
 
   check(
     "nothing is compacted until it is",
-    (await pendingContext(key.projectId, key.branchId, 1)).pending.length === 3,
+    (await pendingContext(key.projectId, 1)).pending.length === 3,
   );
 
   // Compaction always folds a chronological prefix — `splitForCompaction`
@@ -180,25 +179,24 @@ const ACTOR = localActor();
   // written before it, and only a turn written after stays pending.
   await recordBrief({
     projectId: key.projectId,
-    branchId: key.branchId,
     stage: 1,
     runId: key.runId,
     body: "- Keep it short.",
     actor: ACTOR,
   });
-  const coveredContext = await pendingContext(key.projectId, key.branchId, 1);
+  const coveredContext = await pendingContext(key.projectId, 1);
   check("a covered turn stops being sent", coveredContext.pending.length === 0);
   check("the brief is readable back", coveredContext.brief === "- Keep it short.");
 
   const three = await appendHumanTurn({ ...key, body: "One more thing.", actor: ACTOR });
-  const afterMore = await pendingContext(key.projectId, key.branchId, 1);
+  const afterMore = await pendingContext(key.projectId, 1);
   check(
     "uncovered turns are still sent",
     afterMore.pending.length === 1 && afterMore.pending[0]!.id === three,
   );
   check(
     "compaction never deletes what the person wrote",
-    (await threadTurns(key.projectId, key.branchId, 1)).length === 4,
+    (await threadTurns(key.projectId, 1)).length === 4,
   );
 }
 
@@ -217,7 +215,6 @@ const ACTOR = localActor();
   });
   const key = {
     projectId: project.projectId,
-    branchId: project.branchId,
     stage: 1,
     runId: project.runId,
   };
@@ -227,18 +224,18 @@ const ACTOR = localActor();
   // mail, and which one is open is read back from the thread.
   await appendSpecialistTurn({ ...key, body: asked[0]!, actor: ACTOR, questions: asked });
 
-  let open = await nextQuestion(key.projectId, key.branchId, 1);
+  let open = await nextQuestion(key.projectId, 1);
   check("the first question is asked first", open?.body === "Which channel?", String(open?.body));
   check("it knows how many follow", open?.remaining === 2, `${open?.remaining} remaining`);
 
   const answer = await appendHumanTurn({ ...key, body: "Email.", actor: ACTOR });
 
-  open = await nextQuestion(key.projectId, key.branchId, 1);
+  open = await nextQuestion(key.projectId, 1);
   check("answering asks the next one", open?.body === "Send or draft?", String(open?.body));
   check("the count comes down", open?.remaining === 1, `${open?.remaining} remaining`);
   check("the follow-up question is a turn that does not reopen the round", (await (async () => {
     await appendSpecialistTurn({ ...key, body: open!.body, actor: ACTOR });
-    return (await nextQuestion(key.projectId, key.branchId, 1))?.ordinal;
+    return (await nextQuestion(key.projectId, 1))?.ordinal;
   })()) === 1);
 
   // Choosing to move on redrafts, and the new draft opens a new round: that is
@@ -246,11 +243,11 @@ const ACTOR = localActor();
   await appendSpecialistTurn({ ...key, body: "Here is the revised draft.", actor: ACTOR, questions: [] });
   check(
     "moving on retires what is left",
-    (await nextQuestion(key.projectId, key.branchId, 1)) === null,
+    (await nextQuestion(key.projectId, 1)) === null,
   );
   check(
     "an answered question is not retired with them",
-    (await threadTurns(key.projectId, key.branchId, 1)).some((t) => t.id === answer),
+    (await threadTurns(key.projectId, 1)).some((t) => t.id === answer),
   );
 
   // A new draft's questions replace an older draft's unanswered ones: a
@@ -259,7 +256,7 @@ const ACTOR = localActor();
   await appendSpecialistTurn({ ...key, body: "Fresh?", actor: ACTOR, questions: ["Fresh?"] });
   check(
     "a new draft supersedes the old draft's questions",
-    (await nextQuestion(key.projectId, key.branchId, 1))?.body === "Fresh?",
+    (await nextQuestion(key.projectId, 1))?.body === "Fresh?",
   );
 }
 
@@ -280,7 +277,6 @@ const ACTOR = localActor();
   });
   const key = {
     projectId: ordering.projectId,
-    branchId: ordering.branchId,
     stage: 3 as const,
     runId: "run_order",
   };
@@ -292,7 +288,7 @@ const ACTOR = localActor();
       await appendSpecialistTurn({ ...key, body, actor: ACTOR });
     }
   }
-  const ordered = await threadTurns(key.projectId, key.branchId, key.stage);
+  const ordered = await threadTurns(key.projectId, key.stage);
 
   // The timestamps alone happen to separate these writes, so asserting the
   // rendered order proves nothing about the tiebreak. The stored positions are
@@ -310,7 +306,7 @@ const ACTOR = localActor();
       .where(
         eq(
           (turnPart as never as { sessionId: never }).sessionId,
-          await sessionIdFor(key.projectId, key.branchId, key.stage),
+          await sessionIdFor(key.projectId, key.stage),
         ),
       )) as {
       ordinal: number | null;
@@ -357,14 +353,13 @@ const ACTOR = localActor();
   });
   await appendHumanTurn({
     projectId: opened.projectId,
-    branchId: opened.branchId,
     runId: opened.runId,
     stage: 1,
     body: problem,
     actor: ACTOR,
   });
 
-  const opening = await threadTurns(opened.projectId, opened.branchId, 1);
+  const opening = await threadTurns(opened.projectId, 1);
   check(
     "the problem someone opened with is the first turn on stage 1",
     opening.length === 1 && opening[0]!.body === problem && opening[0]!.role === "human",

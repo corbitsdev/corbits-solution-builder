@@ -50,7 +50,6 @@ const project = await createProject({
 const design = await writeArtifact(
   {
     projectId: project.projectId,
-    branchId: project.branchId,
     kind: "design_artifact",
     title: "Board screen",
     content: `<main data-testid="board"><h1>Chess</h1><button data-testid="resign">Resign</button></main>`,
@@ -73,7 +72,6 @@ const comments = [
 
 const submitted = await submitFeedback({
   projectId: project.projectId,
-  branchId: project.branchId,
   designNodeId: design.nodeId,
   direction: "revise",
   overallNote: "Close, but the destructive action is too easy to hit.",
@@ -120,7 +118,6 @@ check("the prompt does not depend on the order comments arrived in", shuffled ==
 try {
   await submitFeedback({
     projectId: project.projectId,
-    branchId: project.branchId,
     designNodeId: design.nodeId,
     direction: "reject",
     overallNote: "Changed my mind.",
@@ -140,7 +137,6 @@ try {
 const revised = await writeArtifact(
   {
     projectId: project.projectId,
-    branchId: project.branchId,
     kind: "design_artifact",
     title: "Board screen",
     content: `<main data-testid="board"><h1>Chess vs. Ada</h1><footer><button data-testid="resign-confirm">Resign…</button></footer></main>`,

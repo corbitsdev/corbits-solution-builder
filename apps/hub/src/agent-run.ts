@@ -36,7 +36,7 @@ export type StageDraftResult = {
  * an earlier stage that has not been superseded. Superseded versions are
  * retained for history but are not what a later stage builds on.
  */
-async function approvedInputs(projectId: string, branchId: string, stage: Stage) {
+async function approvedInputs(projectId: string, stage: Stage) {
   const { db } = database();
   const nodes = await db
     .select()
@@ -44,7 +44,6 @@ async function approvedInputs(projectId: string, branchId: string, stage: Stage)
     .where(
       and(
         eq(table.artifactNode.projectId, projectId),
-        eq(table.artifactNode.branchId, branchId),
         isNull(table.artifactNode.supersededByNodeId),
       ),
     )
@@ -118,7 +117,6 @@ async function draftWith(
   agent: AgentRole,
   args: {
     projectId: string;
-    branchId: string;
     stage: Stage;
     runId: string;
     actor: { principalId: string };
@@ -131,7 +129,7 @@ async function draftWith(
     context?: StageContext;
   },
 ): Promise<StageDraftResult> {
-  const inputs = await approvedInputs(args.projectId, args.branchId, args.stage);
+  const inputs = await approvedInputs(args.projectId, args.stage);
 
   const prompt = buildDraftPrompt({
     projectTitle: args.projectTitle,
@@ -173,7 +171,6 @@ async function draftWith(
   // Boundary validation, once, here. Persistence is what makes it an artifact.
   const draft = ArtifactDraft({
     projectId: args.projectId,
-    branchId: args.branchId,
     kind: agent.produces,
     ...(args.variant === undefined ? {} : { variant: args.variant }),
     title: args.titleSuffix
@@ -229,7 +226,6 @@ function stripOuterFence(text: string): string {
  */
 export async function draftStageArtifact(args: {
   projectId: string;
-  branchId: string;
   stage: Stage;
   runId: string;
   actor: { principalId: string };
@@ -245,10 +241,9 @@ export async function draftStageArtifact(args: {
    */
   mode?: "interview" | "final";
 }): Promise<StageDraftResult> {
-  const current = await currentStageDocument(args.projectId, args.branchId, args.stage);
+  const current = await currentStageDocument(args.projectId, args.stage);
   const context = await stageContext({
     projectId: args.projectId,
-    branchId: args.branchId,
     stage: args.stage,
     runId: args.runId,
     actor: args.actor,
@@ -266,7 +261,6 @@ export async function draftStageArtifact(args: {
   if (args.userInput.trim().length > 0 || (args.quotes?.length ?? 0) > 0) {
     await appendHumanTurn({
       projectId: args.projectId,
-      branchId: args.branchId,
       runId: args.runId,
       stage: args.stage,
       body: args.userInput,
@@ -286,7 +280,6 @@ export async function draftStageArtifact(args: {
 
   await appendSpecialistTurn({
     projectId: args.projectId,
-    branchId: args.branchId,
     runId: args.runId,
     stage: args.stage,
     actor: args.actor,
@@ -311,7 +304,6 @@ export async function draftStageArtifact(args: {
 /** The live version of this stage's document, or null before there is one. */
 async function currentStageDocument(
   projectId: string,
-  branchId: string,
   stage: Stage,
 ): Promise<string | null> {
   const { db } = database();
@@ -321,7 +313,6 @@ async function currentStageDocument(
     .where(
       and(
         eq(table.artifactNode.projectId, projectId),
-        eq(table.artifactNode.branchId, branchId),
         eq(table.artifactNode.stage, stage),
         isNull(table.artifactNode.supersededByNodeId),
       ),
@@ -340,7 +331,6 @@ async function currentStageDocument(
  */
 export async function draftAudiencePackages(args: {
   projectId: string;
-  branchId: string;
   runId: string;
   actor: { principalId: string };
   projectTitle: string;
@@ -386,7 +376,6 @@ export async function draftAudiencePackages(args: {
  */
 export async function redesignFromFeedback(args: {
   projectId: string;
-  branchId: string;
   designNodeId: string;
   runId: string;
   actor: { principalId: string };
@@ -428,7 +417,6 @@ export async function redesignFromFeedback(args: {
  */
 export async function runEngineeringReview(args: {
   projectId: string;
-  branchId: string;
   runId: string;
   actor: { principalId: string };
   projectTitle: string;

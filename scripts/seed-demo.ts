@@ -159,7 +159,6 @@ for (const stage of [1, 2, 3] as Stage[]) {
   const node = await writeArtifact(
     {
       projectId: created.projectId,
-      branchId: created.branchId,
       kind: entry.kind,
       title: entry.title,
       content: entry.body,

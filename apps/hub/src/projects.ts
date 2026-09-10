@@ -36,7 +36,7 @@ export async function createProject(args: {
   policy: ProjectPolicy;
   owner: { principalId: string; displayName: string };
   problemStatement?: string;
-}): Promise<{ projectId: string; branchId: string; runId: string }> {
+}): Promise<{ projectId: string; runId: string }> {
   const { db } = database();
 
   // `project.create` is the one command with no state to leave, so `evaluate`
@@ -58,20 +58,13 @@ export async function createProject(args: {
 
   const created = await db.transaction(async (tx) => {
     const projectId = newId.project();
-    const branchId = newId.branch();
     const runId = newId.run();
 
     await tx.insert(table.project).values({
       id: projectId,
       tenantId: tenantId(),
       title: args.title,
-      activeBranchId: branchId,
       policy: args.policy,
-    });
-    await tx.insert(table.branch).values({
-      id: branchId,
-      projectId,
-      name: "main",
     });
 
     // The owner holds every authority a single-user local workspace needs.
@@ -99,7 +92,6 @@ export async function createProject(args: {
     putRunRecord({
       id: runId,
       projectId,
-      branchId,
       kind: opening.kind,
       stage,
       state: opening.state,
@@ -114,7 +106,7 @@ export async function createProject(args: {
       endedAt: null,
     });
 
-    return { projectId, branchId, runId };
+    return { projectId, runId };
   });
 
   // Outside the transaction: the ledger mail write uses the same
@@ -140,7 +132,7 @@ export async function createProject(args: {
     stage,
     runId: created.runId,
   });
-  await launchProjectRun({ projectId: created.projectId, branchId: created.branchId });
+  await launchProjectRun({ projectId: created.projectId });
 
   return created;
 }
@@ -176,7 +168,6 @@ export async function writeArtifact(
     .where(
       and(
         eq(table.artifactNode.projectId, draft.projectId),
-        eq(table.artifactNode.branchId, draft.branchId),
         eq(table.artifactNode.kind, draft.kind),
         // A revision replaces the same variant only; stage 5's audience
         // packages are siblings, not versions of one another.
@@ -227,7 +218,7 @@ export async function writeArtifact(
     await tx.insert(table.artifactNode).values({
       id: nodeId,
       projectId: draft.projectId,
-      branchId: draft.branchId,
+
       artifactId,
       version,
       kind: draft.kind,
@@ -321,7 +312,6 @@ export async function listProjects() {
       // a list apart: the model writing, a question waiting on the person and
       // a draft waiting to be approved are all "in progress".
       const stage = current?.stage ?? null;
-      const branchId = row.activeBranchId ?? "";
       const [drafts, open] = stage
         ? await Promise.all([
             db
@@ -335,7 +325,7 @@ export async function listProjects() {
                 ),
               )
               .limit(1),
-            nextQuestion(row.id, branchId, stage),
+            nextQuestion(row.id, stage),
           ])
         : [[], null];
       const turn: "writing" | "question" | "approve" | "idle" =
@@ -355,7 +345,6 @@ export async function listProjects() {
         turn,
         ...(open ? { question: { ordinal: open.ordinal, remaining: open.remaining } } : {}),
         runId: current?.id ?? null,
-        branchId: row.activeBranchId,
         policy: row.policy,
         needsDecision: waits.length > 0,
         waits,

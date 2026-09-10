@@ -103,13 +103,12 @@ const created = await createProject({
 });
 check("project.create produced a project at stage 1", Boolean(created.projectId));
 
-async function produce(stage: Stage, projectId: string, branchId: string, runId: string) {
+async function produce(stage: Stage, projectId: string, runId: string) {
   const kind = STAGE_ARTIFACT[stage];
   if (!kind) throw new Error(`No artifact kind for stage ${stage}`);
   return writeArtifact(
     {
       projectId,
-      branchId,
       kind,
       title: `Stage ${stage} artifact`,
       content: `# Stage ${stage}\n\nRecorded by the loop smoke at ${new Date().toISOString()}.`,
@@ -121,13 +120,13 @@ async function produce(stage: Stage, projectId: string, branchId: string, runId:
   );
 }
 
-const { projectId, branchId } = created;
+const { projectId } = created;
 
 // --- Stages 1 to 4: draft, submit, approve ---
 for (const stage of [1, 2, 3, 4] as Stage[]) {
   const detail = await projectDetail(projectId, ACTOR.principalId);
   const run = detail.current!;
-  const node = await produce(stage, projectId, branchId, run.id);
+  const node = await produce(stage, projectId, run.id);
 
   await command("stage.submit", projectId, {
     runId: run.id,
@@ -171,7 +170,7 @@ for (const stage of [1, 2, 3, 4] as Stage[]) {
 {
   const detail = await projectDetail(projectId, ACTOR.principalId);
   const run = detail.current!;
-  const node = await produce(5, projectId, branchId, run.id);
+  const node = await produce(5, projectId, run.id);
   const version = {
     artifactId: node.artifactId,
     versionId: node.nodeId,
@@ -226,7 +225,6 @@ for (const stage of [1, 2, 3, 4] as Stage[]) {
   const first = await writeArtifact(
     {
       projectId: many.projectId,
-      branchId: many.branchId,
       kind: "audience_package",
       variant: "Project owner",
       title: "Package for the project owner",
@@ -240,7 +238,6 @@ for (const stage of [1, 2, 3, 4] as Stage[]) {
   const second = await writeArtifact(
     {
       projectId: many.projectId,
-      branchId: many.branchId,
       kind: "audience_package",
       variant: "Security",
       title: "Package for security",
@@ -259,7 +256,7 @@ for (const stage of [1, 2, 3, 4] as Stage[]) {
   // Walk to stage 5.
   let currentRun = (await projectDetail(many.projectId, ACTOR.principalId)).current!;
   for (const stage of [1, 2, 3, 4] as Stage[]) {
-    const node = await produce(stage, many.projectId, many.branchId, currentRun.id);
+    const node = await produce(stage, many.projectId, currentRun.id);
     const stageVersion = {
       artifactId: node.artifactId,
       versionId: node.nodeId,
@@ -342,7 +339,7 @@ for (const stage of [1, 2, 3, 4] as Stage[]) {
 {
   const detail = await projectDetail(projectId, ACTOR.principalId);
   const run = detail.current!;
-  const node = await produce(6, projectId, branchId, run.id);
+  const node = await produce(6, projectId, run.id);
   const version = {
     artifactId: node.artifactId,
     versionId: node.nodeId,
@@ -358,7 +355,7 @@ let buildRunId = "";
 {
   const detail = await projectDetail(projectId, ACTOR.principalId);
   const run = detail.current!;
-  const node = await produce(7, projectId, branchId, run.id);
+  const node = await produce(7, projectId, run.id);
   const version = {
     artifactId: node.artifactId,
     versionId: node.nodeId,
@@ -524,7 +521,7 @@ let buildRunId = "";
   });
   const detail = await projectDetail(second.projectId, ACTOR.principalId);
   const run = detail.current!;
-  const node = await produce(1, second.projectId, second.branchId, run.id);
+  const node = await produce(1, second.projectId, run.id);
   const version = {
     artifactId: node.artifactId,
     versionId: node.nodeId,
@@ -536,7 +533,7 @@ let buildRunId = "";
     versions: [version],
   });
 
-  const node2 = await produce(2, second.projectId, second.branchId, advanced.runId);
+  const node2 = await produce(2, second.projectId, advanced.runId);
   await command("stage.submit", second.projectId, {
     runId: advanced.runId,
     versions: [
@@ -578,7 +575,7 @@ let buildRunId = "";
   });
   const detail = await projectDetail(third.projectId, ACTOR.principalId);
   const run = detail.current!;
-  const node = await produce(1, third.projectId, third.branchId, run.id);
+  const node = await produce(1, third.projectId, run.id);
   const key = newId.command();
   const payload = {
     runId: run.id,
@@ -626,7 +623,7 @@ let buildRunId = "";
   });
   const concurrentRun = (await projectDetail(racer.projectId, ACTOR.principalId)).current;
   if (concurrentRun) {
-    const concurrentNode = await produce(1, racer.projectId, racer.branchId, concurrentRun.id);
+    const concurrentNode = await produce(1, racer.projectId, concurrentRun.id);
     const raced = newId.command();
     const envelope = {
       type: "stage.submit" as const,
@@ -707,7 +704,7 @@ let buildRunId = "";
     },
     owner: ACTOR,
   });
-  const written = await produce(1, fresh.projectId, fresh.branchId, fresh.runId);
+  const written = await produce(1, fresh.projectId, fresh.runId);
   const brief = [
     {
       artifactId: written.artifactId,
@@ -781,7 +778,7 @@ let buildRunId = "";
   });
   const detail = await projectDetail(theirs.projectId, other.principalId);
   const run = detail.current!;
-  const node = await produce(1, theirs.projectId, theirs.branchId, run.id);
+  const node = await produce(1, theirs.projectId, run.id);
 
   const holds = await evaluate(ACTOR.principalId, "authority:project_owner", "hold");
   check(
@@ -841,7 +838,7 @@ let buildRunId = "";
   check("a solo project reports soloApproval true", soloDetail.soloApproval === true);
 
   const run = soloDetail.current!;
-  const node = await produce(1, solo.projectId, solo.branchId, run.id);
+  const node = await produce(1, solo.projectId, run.id);
   const outcome = await submitAndApprove({
     actor: ACTOR,
     projectId: solo.projectId,
@@ -905,7 +902,7 @@ let buildRunId = "";
     },
   });
   const detail = await projectDetail(fresh.projectId, ACTOR.principalId);
-  const node = await produce(1, fresh.projectId, fresh.branchId, detail.current!.id);
+  const node = await produce(1, fresh.projectId, detail.current!.id);
   await command("stage.submit", fresh.projectId, {
     runId: detail.current!.id,
     versions: [{ artifactId: node.artifactId, versionId: node.nodeId, contentHash: node.contentHash }],

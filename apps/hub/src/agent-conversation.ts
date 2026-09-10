@@ -140,12 +140,11 @@ export type StageContext = { brief: string | null; recent: StageTurn[] };
  */
 export async function stageContext(args: {
   projectId: string;
-  branchId: string;
   stage: number;
   runId: string;
   actor: { principalId: string };
 }): Promise<StageContext> {
-  const { brief, pending } = await pendingContext(args.projectId, args.branchId, args.stage);
+  const { brief, pending } = await pendingContext(args.projectId, args.stage);
   const { fold, keep } = splitForCompaction(pending);
   if (fold.length === 0) return { brief, recent: keep };
 
@@ -161,7 +160,6 @@ export async function stageContext(args: {
 
   await recordBrief({
     projectId: args.projectId,
-    branchId: args.branchId,
     stage: args.stage,
     runId: args.runId,
     body,

@@ -58,7 +58,6 @@ export function registerProjectRoutes(api: Hono) {
       // project that has forgotten its own problem is worse than no project.
       await appendHumanTurn({
         projectId: created.projectId,
-        branchId: created.branchId,
         runId: created.runId,
         stage: 1,
         body: problem,
@@ -85,8 +84,7 @@ export function registerProjectRoutes(api: Hono) {
   /** Stage 4: the design history and any feedback already recorded on it. */
   api.get("/projects/:projectId/design", async (context) => {
     const projectId = context.req.param("projectId");
-    const detail = await projectDetail(projectId, localActor().principalId);
-    const designs = await designHistory(projectId, detail.project.activeBranchId ?? "");
+    const designs = await designHistory(projectId);
     const feedback = await Promise.all(
       designs.map(async (design) => ({
         designNodeId: design.id,
@@ -106,10 +104,8 @@ export function registerProjectRoutes(api: Hono) {
       comments?: { anchor: Record<string, unknown>; body: string }[];
       acceptanceCriteria?: string[];
     };
-    const detail = await projectDetail(projectId, localActor().principalId);
     const result = await submitFeedback({
       projectId,
-      branchId: detail.project.activeBranchId ?? "",
       designNodeId: body.designNodeId,
       direction: body.direction,
       overallNote: body.overallNote ?? "",
@@ -128,7 +124,6 @@ export function registerProjectRoutes(api: Hono) {
     if (!detail.current) throw notFound("An open run for that project");
     const result = await redesignFromFeedback({
       projectId,
-      branchId: detail.project.activeBranchId ?? "",
       designNodeId: body.designNodeId,
       runId: detail.current.id,
       actor: localActor(),

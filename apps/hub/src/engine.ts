@@ -50,7 +50,6 @@ export { requiredAuthorityFor, soloApprovalFor } from "./engine-approvals.js";
  */
 export async function launchProjectRun(args: {
   readonly projectId: string;
-  readonly branchId: string;
 }): Promise<void> {
   await launchProjectLifecycle(args);
 }
@@ -102,7 +101,6 @@ type VersionRef = { artifactId: string; versionId: string; contentHash: string }
 
 function createRun(args: {
   projectId: string;
-  branchId: string;
   kind: "stage" | "build";
   stage: Stage;
   state: string;
@@ -114,7 +112,6 @@ function createRun(args: {
   putRunRecord({
     id,
     projectId: args.projectId,
-    branchId: args.branchId,
     kind: args.kind,
     stage: args.stage,
     state: args.state as RunView["state"],
@@ -178,7 +175,6 @@ export async function rehydrateRun(projectId: string) {
   const record = {
     id: runId,
     projectId,
-    branchId: project.activeBranchId ?? "",
     kind: "stage" as const,
     stage: parked ? Math.max(reached, parked.stage) as Stage : reached,
     state: (parked?.state ?? "in_progress") as RunView["state"],
@@ -462,7 +458,6 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
       run,
       policy,
       versions,
-      branchId: project.activeBranchId ?? "",
       transitionId: verdict.transition.id,
       toStage: verdict.toStage,
       authority: authorities[0] ?? "project_owner",
@@ -548,14 +543,12 @@ async function apply(
     run: RunView;
     policy: ProjectPolicy;
     versions: VersionRef[];
-    branchId: string;
     transitionId: string;
     toStage: Stage;
     authority: Authority;
   },
 ): Promise<AppliedCommand> {
   const { input, run, toStage } = args;
-  const branchId = args.branchId || run.id;
   const now = new Date();
 
   const approvalOf = (decision: string, audienceName?: string): AppliedApproval => ({
@@ -594,7 +587,6 @@ async function apply(
       terminalize("approved", "approved and advanced");
       const next = createRun({
         projectId: input.projectId,
-        branchId,
         kind: "stage",
         stage: toStage,
         state: "in_progress",
@@ -636,7 +628,6 @@ async function apply(
       terminalize("approved_frozen", "packet frozen");
       const buildRun = createRun({
         projectId: input.projectId,
-        branchId,
         kind: "build",
         stage: 8,
         state: "queued",
@@ -655,7 +646,6 @@ async function apply(
       const source = getRunRecord(run.id);
       const next = createRun({
         projectId: input.projectId,
-        branchId,
         kind: "build",
         stage: 8,
         state: "queued",
@@ -711,7 +701,6 @@ async function apply(
       });
       const delivery = createRun({
         projectId: input.projectId,
-        branchId,
         kind: "stage",
         stage: 9,
         state: "delivery_review",
@@ -764,7 +753,6 @@ async function apply(
       terminalize("backtracked", reason || "routed back");
       const routed = createRun({
         projectId: input.projectId,
-        branchId,
         kind: "stage",
         stage: toStage,
         state: "backtracked",
@@ -783,7 +771,6 @@ async function apply(
       terminalize("routed", "route selected");
       const next = createRun({
         projectId: input.projectId,
-        branchId,
         kind: "stage",
         stage: toStage,
         state: "in_progress",
@@ -807,7 +794,6 @@ async function apply(
       const source = getRunRecord(run.id);
       const next = createRun({
         projectId: input.projectId,
-        branchId,
         kind: run.kind,
         stage: run.stage,
         state: run.kind === "build" ? "queued" : "in_progress",

@@ -134,7 +134,6 @@ export type ProjectSummary = {
   stage: number | null;
   state: string | null;
   runId: string | null;
-  branchId: string | null;
   archivedAt: string | null;
   needsDecision: boolean;
   waits: Wait[];
@@ -185,7 +184,6 @@ export type ProjectDetail = {
     /** §6's expected mutable revision, sent with every decision. */
     revision: number;
     title: string;
-    activeBranchId: string | null;
     policy: unknown;
     archivedAt: string | null;
   };
@@ -312,7 +310,7 @@ export const api = {
   decisions: () => request<{ decisions: Wait[] }>("/decisions"),
   projects: () => request<{ projects: ProjectSummary[] }>("/projects"),
   createProject: (payload: unknown) =>
-    post<{ projectId: string; branchId: string; runId: string }>("/projects", payload),
+    post<{ projectId: string; runId: string }>("/projects", payload),
   project: (projectId: string) => request<ProjectDetail>(`/projects/${projectId}`),
   updateProject: (projectId: string, payload: { title?: string; archived?: boolean }) =>
     request<{ ok: true }>(`/projects/${projectId}`, { method: "PATCH", body: JSON.stringify(payload) }),

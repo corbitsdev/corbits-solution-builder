@@ -82,7 +82,6 @@ export function projectLifecycleDefinition(): WorkflowDefinition {
     state: {
       schema: {
         projectId: "string",
-        branchId: "string",
         stage: "number",
         state: "string",
       } as never,

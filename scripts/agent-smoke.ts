@@ -78,7 +78,6 @@ console.log(`PASS  model selected explicitly - ${preferred}`);
 const detail = await projectDetail(created.projectId, ACTOR.principalId);
 const draft = await draftStageArtifact({
   projectId: created.projectId,
-  branchId: created.branchId,
   stage: 1,
   runId: detail.current!.id,
   actor: ACTOR,
@@ -137,7 +136,6 @@ console.log(draft.content.slice(0, 900));
     const node = await writeArtifact(
       {
         projectId: created.projectId,
-        branchId: created.branchId,
         kind,
         title: `Stage ${stage}`,
         content: `# Stage ${stage}\n\nA desktop app, local only, macOS.`,
@@ -168,7 +166,6 @@ console.log(draft.content.slice(0, 900));
   const atFour = await projectDetail(created.projectId, ACTOR.principalId);
   const design = await draftStageArtifact({
     projectId: created.projectId,
-    branchId: created.branchId,
     stage: 4,
     runId: atFour.current!.id,
     actor: ACTOR,

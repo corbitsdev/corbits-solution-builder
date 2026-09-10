@@ -176,7 +176,6 @@ async function feedbackNodeRow(designNodeId: string) {
  */
 export async function submitFeedback(args: {
   projectId: string;
-  branchId: string;
   designNodeId: string;
   direction: Direction;
   overallNote: string;
@@ -257,7 +256,6 @@ export async function submitFeedback(args: {
     const node = await writeArtifact(
       {
         projectId: args.projectId,
-        branchId: args.branchId,
         kind: "design_feedback",
         variant: args.designNodeId,
         title: `Design feedback on ${design.title} v${design.version}`,
@@ -326,7 +324,6 @@ export async function recordDisposition(args: {
   await writeArtifact(
     {
       projectId: node.projectId,
-      branchId: node.branchId,
       kind: "design_feedback",
       variant: args.designNodeId,
       title: node.title,
@@ -346,7 +343,7 @@ export async function recordDisposition(args: {
 }
 
 /** Design versions on a branch, oldest first, for the before/after lineage view. */
-export async function designHistory(projectId: string, branchId: string) {
+export async function designHistory(projectId: string) {
   const { db } = database();
   return db
     .select()
@@ -354,7 +351,6 @@ export async function designHistory(projectId: string, branchId: string) {
     .where(
       and(
         eq(table.artifactNode.projectId, projectId),
-        eq(table.artifactNode.branchId, branchId),
         eq(table.artifactNode.kind, "design_artifact"),
       ),
     )

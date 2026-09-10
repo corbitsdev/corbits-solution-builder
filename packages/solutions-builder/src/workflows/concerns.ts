@@ -60,7 +60,6 @@ function definition(
 export function approvalDefinition(): WorkflowDefinition {
   return definition(APPROVAL_WORKFLOW_ID, commandsLeaving("stage", "waiting_approval"), {
     projectId: "string",
-    branchId: "string",
     runId: "string",
     stage: "number",
   });
@@ -74,7 +73,6 @@ export function approvalDefinition(): WorkflowDefinition {
 export function designFeedbackDefinition(): WorkflowDefinition {
   return definition(DESIGN_FEEDBACK_WORKFLOW_ID, commandsLeaving("stage", "in_progress"), {
     projectId: "string",
-    branchId: "string",
     runId: "string",
     designNodeId: "string",
   });
@@ -120,7 +118,6 @@ export function buildSupervisionDefinition(): WorkflowDefinition {
   ];
   return definition(BUILD_SUPERVISION_WORKFLOW_ID, [...new Set(commands)], {
     projectId: "string",
-    branchId: "string",
     runId: "string",
     packetId: "string",
   });
@@ -130,7 +127,6 @@ export function buildSupervisionDefinition(): WorkflowDefinition {
 export function deliveryDefinition(): WorkflowDefinition {
   return definition(DELIVERY_WORKFLOW_ID, commandsLeaving("stage", "delivery_review"), {
     projectId: "string",
-    branchId: "string",
     runId: "string",
     manifestId: "string",
   });

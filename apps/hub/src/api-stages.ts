@@ -14,11 +14,9 @@ export function registerStageRoutes(api: Hono) {
   api.get("/projects/:projectId/stages/:stage/thread", async (context) => {
     const projectId = context.req.param("projectId");
     const stage = Number(context.req.param("stage"));
-    const detail = await projectDetail(projectId, localActor().principalId);
-    const branchId = detail.project.activeBranchId ?? "";
-    const open = await nextQuestion(projectId, branchId, stage);
+    const open = await nextQuestion(projectId, stage);
     return context.json({
-      turns: await threadTurns(projectId, branchId, stage),
+      turns: await threadTurns(projectId, stage),
       open: open ? { remaining: open.remaining, ordinal: open.ordinal } : null,
     });
   });
@@ -70,16 +68,14 @@ export function registerStageRoutes(api: Hono) {
     };
     const detail = await projectDetail(projectId, localActor().principalId);
     if (!detail.current) throw notFound("An open run for that project");
-    const branchId = detail.project.activeBranchId ?? "";
     const message = (body.message ?? "").trim();
     const quotes = body.quotes ?? [];
 
-    const open = body.revise ? null : await nextQuestion(projectId, branchId, stage);
+    const open = body.revise ? null : await nextQuestion(projectId, stage);
 
     if (open && message.length > 0) {
       const messageId = await appendHumanTurn({
         projectId,
-        branchId,
         runId: detail.current.id,
         stage,
         body: message,
@@ -88,7 +84,7 @@ export function registerStageRoutes(api: Hono) {
       });
       void messageId;
 
-      const following = await nextQuestion(projectId, branchId, stage);
+      const following = await nextQuestion(projectId, stage);
       if (following) {
         // The document grows with the answer, before the next question is
         // asked. It used to sit untouched until the last one, so a person
@@ -96,7 +92,6 @@ export function registerStageRoutes(api: Hono) {
         // premise is that this is being written as they talk.
         const revised = await draftStageArtifact({
           projectId,
-          branchId,
           stage,
           runId: detail.current.id,
           actor: localActor(),
@@ -107,7 +102,6 @@ export function registerStageRoutes(api: Hono) {
 
         await appendSpecialistTurn({
           projectId,
-          branchId,
           runId: detail.current.id,
           stage,
           body: following.body,
@@ -123,7 +117,6 @@ export function registerStageRoutes(api: Hono) {
     // what retires whatever was left of the old one.
     const draft = await draftStageArtifact({
       projectId,
-      branchId,
       stage,
       runId: detail.current.id,
       actor: localActor(),
@@ -152,7 +145,6 @@ export function registerStageRoutes(api: Hono) {
       };
       const packages = await draftAudiencePackages({
         projectId,
-        branchId: detail.project.activeBranchId ?? "",
         runId: detail.current.id,
         actor: localActor(),
         projectTitle: detail.project.title,
@@ -164,7 +156,6 @@ export function registerStageRoutes(api: Hono) {
 
     const result = await draftStageArtifact({
       projectId,
-      branchId: detail.project.activeBranchId ?? "",
       stage,
       runId: detail.current.id,
       actor: localActor(),
@@ -179,7 +170,6 @@ export function registerStageRoutes(api: Hono) {
     if (stage === 6) {
       review = await runEngineeringReview({
         projectId,
-        branchId: detail.project.activeBranchId ?? "",
         runId: detail.current.id,
         actor: localActor(),
         projectTitle: detail.project.title,

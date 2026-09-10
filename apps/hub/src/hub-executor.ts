@@ -67,7 +67,6 @@ import { stageSignal } from "@solutions-builder/app/workflows/stage-loop";
 export type StoredRun = {
   readonly id: string;
   readonly projectId: string;
-  readonly branchId: string;
   readonly kind: RunKind;
   readonly stage: Stage;
   readonly state: RunState;
@@ -239,7 +238,6 @@ function makeSpawnChild(execution: Execution, childBodies: ReadonlyMap<string, W
  */
 export async function launchProjectLifecycle(args: {
   readonly projectId: string;
-  readonly branchId: string;
 }): Promise<void> {
   if (executions.has(args.projectId)) return;
 
@@ -274,7 +272,7 @@ export async function launchProjectLifecycle(args: {
 
   const topRun = runtimeRun(rewrittenLifecycle, topEnv, {
     runId: topRunId,
-    triggerPayload: { projectId: args.projectId, branchId: args.branchId },
+    triggerPayload: { projectId: args.projectId },
   });
 
   // The lifecycle run must not settle on its own — stage 1 parks, so its

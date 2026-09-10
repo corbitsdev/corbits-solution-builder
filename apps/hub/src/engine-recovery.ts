@@ -46,7 +46,6 @@ export async function runGateSideEffects(input: CommandInput): Promise<void> {
   if (!hasExecution(input.projectId)) {
     await launchProjectLifecycle({
       projectId: input.projectId,
-      branchId: String(input.payload.branchId ?? ""),
     }).catch((cause: unknown) => {
       console.error(`[executor] ${input.projectId}: could not relaunch after restart:`, cause);
     });
