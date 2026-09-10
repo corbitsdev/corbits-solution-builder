@@ -292,7 +292,16 @@ declare module "@intx/hub-sessions" {
     ): Promise<{ pack: Uint8Array; commitSha: string; ref: string }>;
     getSigningPublicKey(): Uint8Array;
   };
-  export function createAssetService(opts: Record<string, unknown>): unknown;
+  export type AssetService = {
+    populateAsset(params: {
+      assetId: string;
+      ref: string;
+      principal: { kind: "hub" } | { kind: "user"; id: string };
+      tree: { files: Record<string, string | Uint8Array>; message: string; clearPrefix?: string };
+    }): Promise<{ commitSha: string }>;
+    readAssetBlob(params: { assetId: string; path: string; ref?: string }): Promise<Uint8Array>;
+  };
+  export function createAssetService(opts: Record<string, unknown>): AssetService;
   export function createEventCollectorRegistry(opts: Record<string, unknown>): unknown;
   export function createHubSessionLookups(opts: Record<string, unknown>): Record<string, unknown>;
   export function createHubSessionOrchestrator(opts: Record<string, unknown>): unknown;

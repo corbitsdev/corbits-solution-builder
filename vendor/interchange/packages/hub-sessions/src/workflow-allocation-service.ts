@@ -591,9 +591,19 @@ export function createWorkflowAllocationService({
           "prepareProvisionedDeployment: install did not yield an approved definition",
         );
       }
+      // The deploy request names its default source explicitly, and the
+      // deploying authority has just been checked against it, so it is an
+      // operator approval in its own right. Without this a workflow with no
+      // agent step (pure orchestration: gates, signals, child workflows) can
+      // never deploy, because the capability walk approves only sources an
+      // agent declared. Local patch, listed in PATCHES.md.
+      const approvedGrants = new Set([
+        ...approved.approval.approvedGrants,
+        `inference.source:${defaultSource.provider}:${defaultSource.model}`,
+      ]);
       const narrowed = {
         ...approved,
-        approval: approved.approval,
+        approval: { ...approved.approval, approvedGrants },
       };
       const config = createProvisionedHarnessConfig({
         tenantId: args.tenantId,
@@ -607,12 +617,12 @@ export function createWorkflowAllocationService({
       buildInertProjectionStepSources({
         projection: approved.projection,
         config,
-        operatorApprovals: approved.approval.approvedGrants,
+        operatorApprovals: approvedGrants,
       });
       await buildReferencedWorkflowSourcePins({
         projection: approved.projection,
         config,
-        operatorApprovals: approved.approval.approvedGrants,
+        operatorApprovals: approvedGrants,
       });
       const deploymentProvisioner = selectProvisioner(
         await deploymentPlugins.selectProvisioner({

@@ -86,6 +86,8 @@ export type MountedHub = {
   readonly principalKeyStore: ReturnType<typeof createPrincipalKeyStore>;
   /** The hub's own auth, so the host can sign the workspace owner in without a browser. */
   readonly auth: ReturnType<typeof createAuth>;
+  /** The hub's asset store; a workflow source tree is committed through it. */
+  readonly assetService: ReturnType<typeof createAssetService>;
   /**
    * The sidecar router's fence and connection view. The allocation reconciler
    * fences a generation before it spawns; the sidecar smoke does the same for
@@ -108,6 +110,11 @@ let mounted: MountedHub | null = null;
 let hostPort = 0;
 export function setHostPort(port: number): void {
   hostPort = port;
+}
+
+/** Whether a sidecar could dial back in: false when mounted without serving. */
+export function canPlaceSidecars(): boolean {
+  return hostPort !== 0;
 }
 
 /**
@@ -380,6 +387,7 @@ export async function mountHub(): Promise<MountedHub> {
     agentRepoStore,
     principalKeyStore,
     auth,
+    assetService,
     sidecars: {
       fence: (allocationId, generation) => socketRouter.fenceAllocation(allocationId, generation),
       connected: () => socketRouter.getConnectedSidecars(),

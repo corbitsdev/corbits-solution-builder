@@ -629,3 +629,36 @@ export const catalog = {
   ) => hubPatch<HubOffering>(tenantPath(`/catalog/offerings/${id}`), input),
   deleteOffering: (id: string) => hubDelete(tenantPath(`/catalog/offerings/${id}`)),
 };
+
+// --- Assets and workflow deployments ---------------------------------------
+
+export type HubAsset = { id: string; tenantId: string; kind: string; name: string };
+export type HubDeployment = {
+  id: string;
+  tenantId: string;
+  definitionAssetId: string;
+  status: string;
+  createdAt: string;
+};
+
+export const assets = {
+  // Bare arrays, not pages: these two routes do not paginate.
+  list: (kind: string) => hubGet<HubAsset[]>(tenantPath(`/assets?kind=${kind}`)),
+  create: (input: { kind: string; name: string; displayName?: string }) =>
+    hubPost<HubAsset>(tenantPath("/assets"), input),
+};
+
+export const workflows = {
+  deployments: () => hubGet<HubDeployment[]>(tenantPath("/workflows/deployments")),
+  /**
+   * Installs, probes, freezes and places a code-sourced workflow. The hub
+   * answers only once the probe sidecar has evaluated the source, so this
+   * call takes as long as spawning that process does.
+   */
+  deploy: (input: {
+    source: { kind: "asset"; assetId: string; package: { format: "source"; commitSha: string } };
+    entry: string;
+    sourceOfferingIds: string[];
+    defaultSourceOfferingId: string;
+  }) => hubPost<HubDeployment>(tenantPath("/workflows/deployments"), input),
+};

@@ -46,3 +46,22 @@ hub spawns it through a local-process provisioner, so it is vendored at the
 same revision as the packages (`VENDORED_REVISION`), unmodified, minus build
 artefacts. It runs from source, which is why the provisioner's runtime is
 `apps/hub/bin/sidecar-runtime` (adds `--conditions intx-src`).
+
+## `packages/hub-sessions/src/workflow-allocation-service.ts` — the deploy's default source is approved
+
+**Why.** `pinInertStepSources` approval-gates every step, agent or not, and a
+non-agent step falls back to the deploy's `defaultSource`. The approval set is
+whatever the capability walk collected from agent declarations, so a workflow
+with no agent step — pure orchestration of gates, signals and child workflows,
+which is what a project lifecycle is — could never deploy: its default source
+was never "approved" by anyone. The deploy request names the default source
+explicitly and `resolveSourcesByOfferingIds` has just checked the deploying
+authority against it, so treating it as an operator approval is the honest
+reading.
+
+**What changed.** `prepareProvisionedDeployment` adds
+`inference.source:<provider>:<model>` for the default source to the approved
+grant set it pins steps with and freezes into the bundle.
+
+**Upstream-able.** Yes; it is an addition to the approval set with a stated
+rationale, and it touches no other path.

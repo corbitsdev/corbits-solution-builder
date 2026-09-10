@@ -479,3 +479,35 @@ export async function listConversationTurns(sessionId: string): Promise<Conversa
     });
 }
 
+
+// --- 9. writeWorkflowSourceTree / readWorkflowSourceBlob --------------------
+
+/**
+ * UPSTREAM_GAP: the hub creates a `workflow` asset over HTTP but offers no
+ * route that writes its source tree short of git smart-HTTP. The asset
+ * service's own `populateAsset` is the in-process seam, the same one
+ * Workbench's agent directory commits through. Upstream ask: a JSON
+ * "write tree" route on `/assets/:assetId`.
+ */
+export async function writeWorkflowSourceTree(args: {
+  assetId: string;
+  files: Record<string, string>;
+  message: string;
+}): Promise<{ commitSha: string }> {
+  return hub().assetService.populateAsset({
+    assetId: args.assetId,
+    ref: "refs/heads/main",
+    principal: { kind: "hub" },
+    tree: { files: args.files, message: args.message },
+  });
+}
+
+/** The bytes at `path` on the asset's main branch, or null when absent. */
+export async function readWorkflowSourceBlob(assetId: string, path: string): Promise<string | null> {
+  try {
+    const bytes = await hub().assetService.readAssetBlob({ assetId, path });
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return null;
+  }
+}

@@ -32,6 +32,7 @@ import {
 import { adoptLegacyWorkspace, bindAgentRole, deployDefinitionBodies } from "./hub-gaps.js";
 import { expectedWorkflowDefinitions, seedWorkflows } from "./workflow-seed.js";
 import { installProjectAuthority, listProjectRecords } from "./project-tenant.js";
+import { ensureLifecycleDeployment } from "./workflow-deploy.js";
 
 export type InstallState = {
   readonly installed: boolean;
@@ -40,8 +41,18 @@ export type InstallState = {
   readonly missing: string[];
   /** Definition names the tenant holds at a different hash than the package generates. */
   readonly stale: string[];
+  /**
+   * The lifecycle as a hub deployment: `deployed` or `current` once the hub
+   * holds it, `no_offering` until a provider is connected, `failed` with the
+   * hub's reason otherwise. The in-process executor still drives stages
+   * until stage gates move onto this deployment's run.
+   */
+  readonly deployment: { status: string; detail: string };
   readonly detail: string;
 };
+
+// The most recent deployment outcome; installState() is a read and must not deploy.
+let lastDeployment: { status: string; detail: string } = { status: "missing", detail: "Not installed yet." };
 
 const SPECIALIST = "specialist";
 
@@ -65,6 +76,7 @@ export async function installState(): Promise<InstallState> {
       appVersion: APP_VERSION,
       missing: [],
       stale: [],
+      deployment: { status: "hosted", detail: "Managed by the hub." },
       detail: "Hosted hub: definitions are managed there.",
     };
   }
@@ -75,6 +87,7 @@ export async function installState(): Promise<InstallState> {
       appVersion: APP_VERSION,
       missing: expected.map((entry) => entry.name),
       stale: [],
+      deployment: { status: "missing", detail: "No workspace yet." },
       detail: "No workspace yet.",
     };
   }
@@ -91,6 +104,7 @@ export async function installState(): Promise<InstallState> {
     appVersion: APP_VERSION,
     missing,
     stale,
+    deployment: lastDeployment,
     detail: installed
       ? `Installed ${APP_VERSION}.`
       : missing.length > 0
@@ -171,7 +185,33 @@ export async function install(): Promise<InstallState> {
   }
 
   // Model bindings are the catalog rows written when a provider connects, so
-  // there is nothing to rebind here; re-running after a credential change
-  // exists so the definitions and roles are present for it to bind against.
+  // there is nothing to rebind here; re-running after a credential change is
+  // what lets the lifecycle deploy once an offering exists to bind against.
+  void deployLifecycle();
   return installState();
+}
+
+// The hub answers a deploy only after its probe sidecar has evaluated the
+// source, which takes as long as spawning a process. Install returns at once
+// and installState() reports "deploying" until the hub has answered.
+let deploying: Promise<void> | null = null;
+export function deployLifecycle(): Promise<void> {
+  if (deploying) return deploying;
+  lastDeployment = { status: "deploying", detail: "The hub is probing the lifecycle source." };
+  deploying = ensureLifecycleDeployment()
+    .then((deployed) => {
+      lastDeployment =
+        deployed.status === "no_offering"
+          ? { status: "no_offering", detail: "Connect a provider to deploy the lifecycle." }
+          : deployed.status === "no_host"
+            ? { status: "no_host", detail: "The host is not serving, so no sidecar can dial in." }
+            : { status: deployed.status, detail: `${deployed.deploymentId} is ${deployed.deploymentStatus}.` };
+    })
+    .catch((cause: unknown) => {
+      lastDeployment = { status: "failed", detail: cause instanceof Error ? cause.message : String(cause) };
+    })
+    .finally(() => {
+      deploying = null;
+    });
+  return deploying;
 }
