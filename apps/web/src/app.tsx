@@ -247,6 +247,11 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
   const [skippedSetup, setSkippedSetup] = useState(false);
+  // The client is the installer. Once the host answers, the tenant is checked
+  // against the app the client ships with; missing or stale, it is installed
+  // before any screen that depends on it renders. First run and upgrade are
+  // the same call.
+  const [installed, setInstalled] = useState<"checking" | "installing" | "ready">("checking");
 
   const refresh = useCallback(async () => {
     try {
@@ -268,6 +273,31 @@ export function App() {
       setOffline(true);
     }
   }, []);
+
+  useEffect(() => {
+    if (status === null || installed !== "checking") return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const state = await api.installState();
+        if (cancelled) return;
+        if (!state.installed) {
+          setInstalled("installing");
+          await api.install();
+          await refresh();
+        }
+      } catch (cause) {
+        // The app still opens: what is missing shows as it is met, and the
+        // host says why it could not install.
+        setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+      } finally {
+        if (!cancelled) setInstalled("ready");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [status === null, installed, refresh]);
 
   useEffect(() => {
     void refresh();
@@ -401,6 +431,15 @@ export function App() {
   // hub applies its schema. Saying so is better than guessing at a layout.
   if (status === null) {
     return <Booting offline={offline} />;
+  }
+  if (installed !== "ready") {
+    return (
+      <BootScreen
+        message={installed === "installing" ? "Setting up your workspace…" : "Checking your workspace…"}
+        brand={<Mark size={26} />}
+        footer={<span>Powered by Corbits</span>}
+      />
+    );
   }
 
   // Held until there is both somewhere to draft from and something to work on.

@@ -389,6 +389,18 @@ const MIGRATIONS: readonly Migration[] = [
         ON "builder"."local_provider" ("tenant_id", "provider_id")`,
     ],
   },
+  {
+    // The kit is code in the app package and the compatibility matrix was a
+    // planning artifact; nothing read either. Change notices never had a
+    // writer. Dropping them is the first cut toward a hub that holds only
+    // what Interchange does not model.
+    id: "0002_drop_planning_tables",
+    statements: [
+      sql`DROP TABLE IF EXISTS "builder"."kit_record"`,
+      sql`DROP TABLE IF EXISTS "builder"."compatibility_record"`,
+      sql`DROP TABLE IF EXISTS "builder"."change_notice"`,
+    ],
+  },
 ];
 
 async function checksum(migration: Migration): Promise<string> {

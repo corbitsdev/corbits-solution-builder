@@ -15,10 +15,9 @@
 import { openDatabase } from "../apps/hub/db.js";
 import { prepareDatabase } from "../apps/hub/migrate.js";
 import { ensureHub } from "../apps/hub/hub-endpoint.js";
-import { seedRoles } from "../apps/hub/hub-roles.js";
+import { install } from "../apps/hub/install.js";
 import {
   createProject,
-  ensureWorkspace,
   listProjects,
   LOCAL_TENANT,
   projectDetail,
@@ -90,12 +89,9 @@ const dataDir = process.env.SOLUTIONS_BUILDER_DATA_DIR;
 const host = await openDatabase(dataDir ? `${dataDir}/pglite-smoke` : undefined);
 await prepareDatabase(host);
 await ensureHub();
-// §8: the actor's ledger authorities now come from the platform's roles, not
-// a hand-written participant row, so the smoke actor needs the same seeding
-// the real host does on launch. `ensureWorkspace` first, because it is what
-// creates the tenant and principal rows `seedRoles` points at.
-await ensureWorkspace(ACTOR);
-await seedRoles({ ownerPrincipalId: ACTOR.principalId, agentDefinitionIds: [] });
+// The actor's ledger authorities come from the platform's roles, which the
+// install writes — the same install the client asks for on first launch.
+await install();
 
 const created = await createProject({
   title: "Smoke: a chess game I can actually play",

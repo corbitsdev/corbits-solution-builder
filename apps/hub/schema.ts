@@ -369,32 +369,6 @@ export const stageQuestion = builder.table(
 );
 
 /**
- * The curated kit as versioned records — BUILD_PLAN_V3 §8.
- *
- * One table, because these are seven shapes of the same thing: a keyed,
- * versioned record that some part of the kit is. Splitting them into seven
- * tables would buy nothing — nothing joins them, they are written together and
- * read together — and would make "is the kit complete" a seven-way query.
- *
- * `wireHash` is over the record's body, so re-seeding an unchanged kit writes
- * nothing and changing one prompt versions exactly that prompt.
- */
-export const kitRecord = builder.table(
-  "kit_record",
-  {
-    /** `prompt`, `skill`, `tool`, `grant`, `director`, `model` or `agent`. */
-    kind: text("kind").notNull(),
-    /** The stable seed key §8 fixes, e.g. `sb-prompt-brainstormer-v1`. */
-    key: text("key").notNull(),
-    version: integer("version").notNull(),
-    body: jsonb("body").notNull(),
-    wireHash: text("wire_hash").notNull(),
-    createdAt: createdAt(),
-  },
-  (table) => [primaryKey({ columns: [table.kind, table.key, table.version] })],
-);
-
-/**
  * What an agent invocation was, and what it produced — BUILD_PLAN_V3 §8.
  *
  * §8: "Every invocation carries tenant/project/branch/stage, source versions,
@@ -435,58 +409,3 @@ export const agentRunRecord = builder.table(
   },
   (table) => [index("agent_run_record_project_idx").on(table.projectId, table.stage)],
 );
-
-/**
- * The compatibility matrix §4 requires, as rows rather than prose.
- *
- * §4: "For each launch dependency, record exact source revision, package
- * version, types/API evidence, running contract tests, tenant/principal scope,
- * capabilities, limitations and owner. Classify launch-required, optional, or
- * Builder-owned; status is verified, unavailable, or planned-only."
- *
- * The classification is the point: a launch-required dependency that is only
- * planned blocks the gate that depends on it, and a matrix kept in a document
- * is a matrix nobody re-checks.
- */
-export const compatibilityRecord = builder.table(
-  "compatibility_record",
-  {
-    dependency: text("dependency").primaryKey(),
-    /** `launch-required`, `optional` or `builder-owned`. */
-    classification: text("classification").notNull(),
-    /** `verified`, `unavailable` or `planned-only`. */
-    status: text("status").notNull(),
-    revision: text("revision"),
-    version: text("version"),
-    evidence: text("evidence").notNull(),
-    limitations: jsonb("limitations").notNull(),
-    checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-);
-
-/**
- * A material change raised during a build — §6's ChangeNotice.
- *
- * §6: "questions never imply permission". A notice is the worker saying
- * something changed; the decision on it is a separate, authorised act, which
- * is why the route and the decider are nullable until somebody decides.
- */
-export const changeNotice = builder.table(
-  "change_notice",
-  {
-    id: id(),
-    projectId: text("project_id").notNull(),
-    runId: text("run_id").notNull(),
-    raisedBy: text("raised_by").notNull(),
-    summary: text("summary").notNull(),
-    scopeImpact: jsonb("scope_impact").notNull(),
-    /** Null until an authorised human decides; never defaulted. */
-    decision: text("decision"),
-    decidedBy: text("decided_by"),
-    routeTargetStage: integer("route_target_stage"),
-    decidedAt: timestamp("decided_at", { withTimezone: true }),
-    createdAt: createdAt(),
-  },
-  (table) => [index("change_notice_run_idx").on(table.runId, table.decidedAt)],
-);
-

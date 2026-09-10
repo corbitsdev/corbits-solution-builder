@@ -37,17 +37,25 @@ fails when that file is behind the vendor.
 ## Host process
 
 `apps/hub/server.ts` opens the database, applies Interchange's migrations then
-the builder schema, mounts the hub, seeds the workspace, and listens. On first
-launch it seeds:
+the builder schema, mounts the hub, and listens. Boot seeds nothing.
 
-- the specialist kit as versioned records
-- the compatibility matrix
+The client installs the app. On launch it reads `GET /api/install`, which
+compares the tenant with the package manifest (version and the workflow
+definitions it must hold), and calls `POST /api/install` when anything is
+missing or stale. Install is idempotent and does, in order:
+
+- the owner principal and the local tenant
 - the workflow definitions generated from the ledger: `project-lifecycle`,
   one per stage, `approval`, `design-feedback`, `provider-switch`,
   `build-supervision`, `delivery`
 - the roles the ledger names, held by the owner, with every agent bound to
   `specialist`
 - each specialist's prompt as a commit in the hub's git registry
+- the installed version, recorded as a host preference until Interchange has
+  an installed-app record to hold it
+
+The provider list calls install again after any credential change so bindings
+follow credentials. First run and upgrade are the same call.
 
 It prints a launch URL carrying a session token. Every API request must present
 that token. The hub proxy is guarded the same way.

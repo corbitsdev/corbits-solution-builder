@@ -24,7 +24,12 @@ import { sql } from "drizzle-orm";
 import { withPostgresJsResultShape } from "../apps/hub/pg-compat.js";
 import { HUB_MIGRATIONS } from "../apps/hub/hub-migrations.generated.js";
 import { migrateHub, PreHubDatabaseError } from "../apps/hub/hub-migrate.js";
-import type { HostDatabase } from "../apps/hub/db.js";
+import { openDatabase, type HostDatabase } from "../apps/hub/db.js";
+import { prepareDatabase } from "../apps/hub/migrate.js";
+import { ensureHub } from "../apps/hub/hub-endpoint.js";
+import { hub } from "../apps/hub/hub-mount.js";
+import { install, installState } from "../apps/hub/install.js";
+import { expectedDefinitions } from "@solutions-builder/app/manifest";
 
 const checks: { name: string; ok: boolean; detail: string }[] = [];
 function check(name: string, ok: boolean, detail = "") {
@@ -199,6 +204,41 @@ try {
     failure instanceof Error ? failure.message.split("\n")[0]!.slice(0, 60) : "",
   );
   await stale.close();
+}
+
+// --- Boot is vanilla; the client installs ---
+//
+// A workspace that has booted holds no product definitions until it is asked
+// to. The ask is idempotent, so upgrading is the same call as installing.
+{
+  const dir = await mkdtemp(join(tmpdir(), "sb-upgrade-"));
+  roots.push(dir);
+  const host = await openDatabase(join(dir, "pglite"));
+  await prepareDatabase(host);
+  await ensureHub();
+
+  const before = await installState();
+  check("a booted workspace is not installed", !before.installed && before.installedVersion === null);
+  check(
+    "and every definition is reported missing",
+    before.missing.length === expectedDefinitions().length,
+    `${before.missing.length}`,
+  );
+
+  const count = async () => {
+    const rows = await (hub().db.db as unknown as { execute: (q: unknown) => Promise<{ rows: unknown[] }> })
+      .execute(sql`SELECT id FROM "public"."workflow_definition"`);
+    return rows.rows.length;
+  };
+
+  const after = await install();
+  check("install brings it to installed", after.installed && after.missing.length === 0, after.detail);
+  const definitions = await count();
+  check("every expected definition exists", definitions === expectedDefinitions().length, `${definitions}`);
+
+  const again = await install();
+  check("a second install is a no-op", again.installed && (await count()) === definitions);
+  await host.close();
 }
 
 const failed = checks.filter((entry) => !entry.ok);

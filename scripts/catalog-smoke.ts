@@ -15,7 +15,7 @@ import { createServer } from "node:http";
 import { openDatabase } from "../apps/hub/db.js";
 import { prepareDatabase } from "../apps/hub/migrate.js";
 import { mountHub, hub } from "../apps/hub/hub-mount.js";
-import { ensureWorkspace } from "../apps/hub/projects.js";
+import { install } from "../apps/hub/install.js";
 import { connectProvider } from "../apps/hub/providers.js";
 
 const checks: { name: string; ok: boolean; detail: string }[] = [];
@@ -41,7 +41,7 @@ const port = (stub.address() as { port: number }).port;
 const host = await openDatabase();
 await prepareDatabase(host);
 await mountHub();
-await ensureWorkspace({ principalId: "p_owner", displayName: "You" });
+await install();
 
 await connectProvider({
   providerId: "compatible",

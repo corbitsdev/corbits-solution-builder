@@ -19,7 +19,6 @@ import { API_VERSION, createApi } from "./api.js";
 import { openDatabase } from "./db.js";
 import { prepareDatabase } from "./migrate.js";
 import { databaseDirectory, dataDirectory } from "./paths.js";
-import { ensureWorkspace } from "./projects.js";
 import { drainOutbox } from "./outbox.js";
 import { ensureHub, hubFetch } from "./hub-endpoint.js";
 import {
@@ -61,69 +60,9 @@ if (migrated.builder.length > 0) {
 const hubEndpoint = await ensureHub();
 console.log(`Interchange hub: ${hubEndpoint.detail}`);
 
-await ensureWorkspace({ principalId: "p_owner", displayName: "You" });
-
-// Section 8: the curated kit as versioned records, idempotent per record.
-{
-  const { seedKit } = await import("./kit-records.js");
-  const kit = await seedKit();
-  const created = kit.filter((entry) => entry.created);
-  console.log(
-    created.length > 0
-      ? `Seeded ${created.length} kit records (${kit.length} total)`
-      : `Kit records up to date (${kit.length})`,
-  );
-}
-
-// Section 4: the compatibility matrix, recorded rather than described.
-{
-  const { recordCompatibility } = await import("./compatibility.js");
-  const rows = await recordCompatibility();
-  console.log(`Compatibility matrix recorded (${rows} dependencies)`);
-}
-
-// Section 9: reconciliation creates missing definitions and is idempotent.
-if (hubEndpoint.mode === "embedded") {
-  const { seedWorkflows } = await import("./workflow-seed.js");
-  const seeded = await seedWorkflows();
-  const created = seeded.filter((entry) => entry.created);
-  console.log(
-    created.length > 0
-      ? `Seeded workflow definitions: ${created.map((entry) => entry.name).join(", ")}`
-      : `Workflow definitions up to date (${seeded.length})`,
-  );
-
-  // §8: authority is the platform's, not ours. The ledger's authorities become
-  // native roles, the owner is recorded as holding them, and every stage
-  // definition is bound to `specialist` — the role that approves nothing.
-  const { seedRoles } = await import("./hub-roles.js");
-  const roles = await seedRoles({
-    ownerPrincipalId: "p_owner",
-    agentDefinitionIds: seeded
-      .filter((entry) => entry.name.startsWith("solutions-builder.stage."))
-      .map((entry) => entry.id),
-  });
-  console.log(
-    `Authority: ${roles.roles} roles, ${roles.held} held by the owner, ${roles.bound} agent bindings`,
-  );
-
-  // The definition's body. The row says a stage exists; the prompt the
-  // specialist reads is a commit in the hub's own repo for that definition,
-  // which is where a sidecar pulls it from.
-  const { deployDefinitionBodies } = await import("./hub-deploy.js");
-  const { agentFor } = await import("@solutions-builder/app/kit");
-  const bodies = seeded
-    .filter((entry) => /\.stage\.\d+$/.test(entry.name))
-    .map((entry) => ({
-      definitionId: entry.id,
-      systemPrompt: agentFor(Number(entry.name.split(".").at(-1)) as never).system,
-    }));
-  const deployed = await deployDefinitionBodies(bodies).catch((cause: unknown) => {
-    console.error("Could not commit the definition bodies to the hub:", cause);
-    return [];
-  });
-  console.log(`Definition bodies committed: ${deployed.length}`);
-}
+// Boot ends here. Everything that makes this tenant Solutions Builder — the
+// owner principal, workflow definitions, roles, specialist prompts — is
+// installed on the client's request through `POST /api/install`.
 
 /**
  * Held on `globalThis` so `bun --hot` keeps the same token across a reload;

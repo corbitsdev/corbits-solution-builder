@@ -10,16 +10,10 @@
  * whose breach is invisible at runtime — an agent quietly holding a write
  * grant looks exactly like one that does not.
  */
-import { mkdtemp } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { openDatabase } from "../apps/hub/db.js";
-import { prepareDatabase } from "../apps/hub/migrate.js";
-import { seedKit, storedKit } from "../apps/hub/kit-records.js";
 import { kitSeed } from "@solutions-builder/app/seed-kit";
 import { AGENT_KIT } from "@solutions-builder/app/kit";
 import { baseTemplate, SLOTS, violationsIn } from "@solutions-builder/app/template";
-import { knownCompatibility } from "../apps/hub/compatibility.js";
+import { APP_VERSION, expectedDefinitions } from "@solutions-builder/app/manifest";
 
 let passed = 0;
 const failures: string[] = [];
@@ -122,30 +116,15 @@ check(
   );
 }
 
-// --- Persistence, and its versioning ---
+// --- The manifest the installer compares a tenant against ---
 {
-  const dataDir = await mkdtemp(join(tmpdir(), "solutions-builder-kit-"));
-  await prepareDatabase(await openDatabase(`${dataDir}/pglite`));
-
-  const first = await seedKit();
-  check("a fresh workspace seeds the whole kit", first.every((entry) => entry.created));
-  check("every record lands at version 1", first.every((entry) => entry.version === 1));
-
-  const again = await seedKit();
-  check("seeding again writes nothing", again.every((entry) => !entry.created));
-  check(
-    "and versions do not move",
-    again.every((entry) => entry.version === 1),
-    again.find((entry) => entry.version !== 1)?.key ?? "",
-  );
-
-  const stored = await storedKit();
-  check("the stored kit is the seeded kit", stored.length === first.length, `${stored.length}`);
-  check(
-    "every kind is represented",
-    new Set(stored.map((row) => row.kind)).size === 8,
-    [...new Set(stored.map((row) => row.kind))].join(", "),
-  );
+  const declared = (await Bun.file(new URL("../packages/solutions-builder/package.json", import.meta.url)).json()) as {
+    version: string;
+  };
+  check("APP_VERSION matches the package version", APP_VERSION === declared.version, `${APP_VERSION} vs ${declared.version}`);
+  const names = expectedDefinitions();
+  check("the manifest names one definition per stage plus the six concerns", names.length === 15, `${names.length}`);
+  check("and no name twice", new Set(names).size === names.length);
 }
 
 // --- §9's template rules, which a future template will be written against ---
@@ -210,35 +189,6 @@ check(
     "adding steps and approvers is allowed",
     violationsIn(extended).length === 0,
     violationsIn(extended).join(" "),
-  );
-}
-
-// --- §4: the compatibility matrix says what is true, including what is not ---
-{
-  const rows = knownCompatibility();
-  check("the matrix is recorded", rows.length > 0, `${rows.length} dependencies`);
-  check(
-    "every row carries evidence",
-    rows.every((row) => row.evidence.trim().length > 0),
-  );
-  check(
-    "every status is one §4 allows",
-    rows.every((row) => ["verified", "unavailable", "planned-only"].includes(row.status)),
-  );
-  // The row that matters: §4 says a missing launch primitive blocks the gate
-  // depending on it, and a matrix that claimed everything was verified would
-  // be the "fake substitute" it forbids.
-  const blocked = rows.filter(
-    (row) => row.classification === "launch-required" && row.status !== "verified",
-  );
-  check(
-    "unproven launch dependencies are named as unproven",
-    blocked.length > 0,
-    blocked.map((row) => row.dependency).join("; "),
-  );
-  check(
-    "and each says what it blocks",
-    blocked.every((row) => row.limitations.length > 0),
   );
 }
 

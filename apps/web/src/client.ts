@@ -269,8 +269,18 @@ export type StageTurn = {
   createdAt: string;
 };
 
+export type InstallState = {
+  installed: boolean;
+  appVersion: string;
+  installedVersion: string | null;
+  missing: string[];
+  detail: string;
+};
+
 export const api = {
   status: () => request<HostStatus>("/status"),
+  installState: () => request<InstallState>("/install"),
+  install: () => post<InstallState>("/install"),
   agents: () => request<{ agents: { id: string; title: string; mission: string; stages: number[]; boundary: string }[] }>("/agents"),
   providers: () =>
     request<{

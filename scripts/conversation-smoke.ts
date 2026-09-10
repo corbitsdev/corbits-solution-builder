@@ -32,8 +32,8 @@ import {
 import { openDatabase } from "../apps/hub/db.js";
 import { prepareDatabase } from "../apps/hub/migrate.js";
 import { mountHub } from "../apps/hub/hub-mount.js";
-import { createProject, ensureWorkspace } from "../apps/hub/projects.js";
-import { seedWorkflows } from "../apps/hub/workflow-seed.js";
+import { createProject } from "../apps/hub/projects.js";
+import { install } from "../apps/hub/install.js";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -136,8 +136,7 @@ const turn = (id: string, role: "human" | "specialist", body: string): StageTurn
 const dataDir = await mkdtemp(join(tmpdir(), "sb-convo-"));
 await prepareDatabase(await openDatabase(`${dataDir}/pglite`));
 await mountHub();
-await ensureWorkspace({ principalId: "p_owner", displayName: "You" });
-await seedWorkflows();
+await install();
 
 const ACTOR = { principalId: "p_owner" };
 

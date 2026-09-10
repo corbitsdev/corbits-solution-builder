@@ -21,8 +21,10 @@ and the three forbidden cases; the Interchange workflow definitions generated
 from it; the specialist kit and its prompts; and the document format the
 client and the hub both parse. It depends on nothing in the apps and on no
 platform internals. It is what will become the package installed into an
-Interchange tenant. Today the hub still seeds it at boot; that is the part of
-the tree that shrinks as the hub becomes vanilla.
+Interchange tenant. The hub boots vanilla (migrate, mount, serve) and the
+client installs the package into the tenant on first launch and after every
+credential change; what the hub still holds beside Interchange's tables is
+the part of the tree that shrinks as it becomes vanilla.
 
 **The hub** (`apps/hub`) owns the loopback API, the database, the guard that
 enforces the ledger, the engine that applies commands, the providers and the

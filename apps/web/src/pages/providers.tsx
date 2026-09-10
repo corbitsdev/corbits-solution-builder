@@ -85,6 +85,11 @@ export function ProviderList({
     setNotice(null);
     try {
       await work();
+      // Bindings follow credentials: the install is idempotent and cheap, so
+      // any change to what is connected re-runs it.
+      void api.install().catch((cause) => {
+        setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+      });
       if (done) setNotice(done);
       await onChanged();
     } catch (cause) {

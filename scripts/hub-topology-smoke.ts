@@ -157,6 +157,7 @@ try {
       .then(() => "")
       .catch((cause: unknown) => (cause instanceof Error ? cause.message : String(cause)));
 
+  // Only the tenant row is needed here; the hub is not mounted in this probe.
   await ensureWorkspace({ principalId: "p_owner", displayName: "You" });
   const known = await insert(LOCAL_TENANT, "prj_known");
   const unknown = await insert("t_nonexistent", "prj_orphan");
