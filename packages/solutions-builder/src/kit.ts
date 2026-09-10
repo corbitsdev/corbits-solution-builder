@@ -140,7 +140,10 @@ const role = (value: AgentRole) => value;
 const INTERVIEW = `Under "What I need from you", list the questions worth asking, most important
 first, one per line. They are put to the reader one at a time, so each must
 stand alone and be answerable in a sentence. If you genuinely need nothing,
-write "Nothing — correct anything above that is wrong." instead.
+write "Nothing — correct anything above that is wrong." instead. Anything you
+call open, newly open, undecided or still to be confirmed anywhere in the
+document is a question and belongs here, asked; writing "Nothing" below a
+summary that names open points contradicts yourself in front of the reader.
 
 How to ask. The reader may not know your vocabulary. Each question is one
 plain sentence ending in "?"; if it uses a term you introduced, define the term

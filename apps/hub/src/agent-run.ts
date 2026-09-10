@@ -290,9 +290,13 @@ export async function draftStageArtifact(args: {
     body: (() => {
       if (asked[0]) return `The draft is beside this. Before I revise it:\n\n${asked[0]}`;
       // Nothing to ask is still a turn: the reader has to be told the ball is
-      // theirs, or a finished draft and a stalled one look the same.
+      // theirs, or a finished draft and a stalled one look the same. Told
+      // without claiming, in the specialist's voice, that it needs nothing:
+      // its summary sometimes names things "newly open" while its questions
+      // section says none, and "Nothing I need to ask" under that read as a
+      // contradiction. What is true is that no question is queued.
       const summary = summaryIn(result.content) ?? `Here is version ${result.version}.`;
-      return `${summary}\n\nNothing I need to ask. Anything to change before you approve it?`;
+      return `${summary}\n\nAnything to change before you approve it?`;
     })(),
     resultNodeId: result.nodeId,
     questions: asked,
