@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Markdown } from "../../markdown.jsx";
-import { splitOptions } from "@solutions-builder/app/document";
+import { choicesIn } from "./choices.js";
 
 /**
  * What the specialist is doing while it writes, in its own stage's terms. One
@@ -57,14 +57,17 @@ export function SpecialistTurn({
   text: string;
   note: TurnNote | null;
   onOpenVersion: (nodeId: string) => void;
-  /** Set while this question is the one waiting; a tapped option answers it. */
+  /** Set while the turn can be answered; a tapped option is sent as the answer. */
   onAnswer?: ((answer: string) => void) | undefined;
 }) {
+  // A turn that offers choices ends in the question and its options. One that
+  // only asks ends in the question. Either way the question is set apart.
+  const choices = choicesIn(text);
   const cut = text.lastIndexOf("\n\n");
   const last = (cut >= 0 ? text.slice(cut + 2) : text).trim();
-  const { question: asked, options } = splitOptions(last);
-  const question = asked.endsWith("?") ? asked : null;
-  const before = question ? text.slice(0, Math.max(cut, 0)) : text;
+  const question = choices?.question ?? (last.endsWith("?") ? last : null);
+  const before = choices ? choices.before : question ? text.slice(0, Math.max(cut, 0)) : text;
+  const options = choices?.options ?? [];
   return (
     <>
       {note ? (
