@@ -64,7 +64,29 @@ reading.
 grant set it pins steps with and freezes into the bundle.
 
 **Upstream-able.** Yes; it is an addition to the approval set with a stated
-rationale, and it touches no other path.
+rationale, and it touches no other path. Superseded in spirit by the
+placeholder pin below; kept until that lands so a refresh cannot undeploy
+orchestration-only workflows.
+
+## `packages/workflow-deploy/src/orchestrator.ts` — non-agent top-level steps pin as placeholders
+
+**Why.** The same gap as above, at the pin rather than the grant set. Nested
+onTrigger bodies already pin a non-agent step to the deploy default with no
+approval check (`buildReferencedWorkflowSourcePins`). Top-level leaves still
+went through `pickStepInferenceSource`, which requires an `inference.source:`
+grant agents never advertised. Brian Fox's unmerged branch
+`origin/pin-non-agent-top-level-steps-as-placeholders` (`2ee2af74`) gives the
+top-level pin the same rule.
+
+**What changed.** `buildInertProjectionStepSources` skips the picker for
+`!isAgent` leaves and pins `config.defaultSource` as an inert placeholder.
+Agent steps keep the resolver and the operator-approval gate. Fail closed when
+the config carries no default source. This is Brian's hunk only; the rest of
+the vendored tree is untouched.
+
+**Upstream-able.** Yes — it is his commit, waiting on `faremeter/interchange`
+main. Drop this patch (and the grant-set one above) when that lands and the
+vendored revision is refreshed.
 
 ## `apps/sidecar/bin/workflow-child`, `apps/sidecar/bin/workflow-probe-child` — no `intx-src` on the shebang
 

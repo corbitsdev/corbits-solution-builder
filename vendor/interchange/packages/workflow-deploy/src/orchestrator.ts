@@ -202,16 +202,17 @@ export function pinInertStepSources(args: {
 }
 
 /**
- * Pin every step of a frozen inert projection to a single approved inference
+ * Pin every step of a frozen inert projection to a single inference
  * source, producing the `sources` map the source-ref deploy frame carries. The
  * hub holds no live definition, so each step's declared `(provider, model)`
- * preference is read off the inert projection's `modelSources` and resolved
- * through the `pickStepInferenceSource` resolver + operator-approval gate. A
- * step whose preferred source the operator never approved (or that resolves to
- * no approved source at all) throws, failing the whole deploy closed before any
- * frame is sent. Every step -- agent or not -- is approval-gated here: a
- * non-agent step falls back to the approved default, so the sidecar child finds
- * a pinned source for each staged step.
+ * preference is read off the inert projection's `modelSources`. Agent steps
+ * resolve through `pickStepInferenceSource` and the operator-approval gate.
+ * A non-agent primitive never invokes inference, so its pin is an inert
+ * placeholder: the deploy's default source, with no approval check — the
+ * body pin already treats nested non-agent steps this way. A step whose
+ * preferred source the operator never approved (or that resolves to no
+ * approved source at all) throws, failing the whole deploy closed before any
+ * frame is sent.
  *
  * The walk recurses into `loop` bodies via `pinInertStepSources`. onTrigger
  * bodies are NOT walked here -- they are lifted to `referencedDefinitions` with
@@ -227,14 +228,38 @@ export function buildInertProjectionStepSources(args: {
     definition: args.projection,
     workflowId: args.projection.id,
     context: "buildInertProjectionStepSources: ",
-    resolveLeafSource: ({ stepId, preference }) =>
-      pickStepInferenceSource({
+    resolveLeafSource: ({ stepId, isAgent, preference }) => {
+      // A non-agent primitive (action, gate, awaitSignal, sleep, loop,
+      // escalation, onTrigger, childWorkflow) never invokes inference, so
+      // its pinned source is an inert placeholder: the deploy's default
+      // source, exactly as `buildReferencedWorkflowSourcePins` pins a
+      // non-agent BODY step. Routing it through `pickStepInferenceSource`
+      // gated it on an `inference.source:` approval the capability walk
+      // only ever emits for agent definitions, which made a definition
+      // with no agent step -- an all-action workflow -- undeployable
+      // under `approve-probed`. Agent steps keep the full resolver and
+      // the operator-approval gate.
+      //
+      // XXX - Temporary until faremeter/interchange lands
+      // origin/pin-non-agent-top-level-steps-as-placeholders (2ee2af74).
+      if (!isAgent) {
+        const placeholder = args.config.sources.find(
+          (source) => source.id === args.config.defaultSource,
+        );
+        if (placeholder !== undefined) return placeholder;
+        throw new WorkflowDefinitionInvalidError(
+          args.projection.id,
+          `non-agent step ${stepId} needs an inert placeholder source, but the deploy config carries no defaultSource entry to pin`,
+        );
+      }
+      return pickStepInferenceSource({
         preferred: preference,
         stepId,
         workflowId: args.projection.id,
         config: args.config,
         operatorApprovals: args.operatorApprovals,
-      }),
+      });
+    },
   });
 }
 
