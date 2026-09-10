@@ -40,6 +40,9 @@
  *   8. listConversationTurns
  *                           No route lists `turn_part` for a session. The
  *                           me-sessions list is unimplemented.
+ *  10. listChildTenants     `GET /api/tenants` does not exist; `/api/me/principals`
+ *                           lists memberships, not the tenants under a parent.
+ *                           A project is a child tenant, so the list is read here.
  *   9. createHubServer      The vendored tree ships `@intx/hub-api`
  *                           (`createApp`, `createAuth`) and
  *                           `@intx/hub-sessions`, not Interchange's
@@ -234,6 +237,31 @@ export async function ensureSpecialistPrincipal(tenantId: string): Promise<void>
     VALUES (${SPECIALIST_PRINCIPAL_ID}, ${tenantId}, 'workflow', 'solutions-builder.specialist', 'active')
     ON CONFLICT ("id") DO NOTHING
   `);
+}
+
+// --- 10. listChildTenants ----------------------------------------------------
+
+export type ChildTenant = {
+  id: string;
+  name: string;
+  config: Record<string, unknown> | null;
+  createdAt: Date;
+};
+
+/** Every tenant whose parent is `parentId`, oldest first. */
+export async function listChildTenants(parentId: string): Promise<ChildTenant[]> {
+  const rows = (await handle().execute(sql`
+    SELECT "id", "name", "config", "created_at"
+    FROM "public"."tenant"
+    WHERE "parent_id" = ${parentId}
+    ORDER BY "created_at" ASC
+  `)) as unknown as Row[];
+  return rows.map((row) => ({
+    id: String(row.id),
+    name: String(row.name),
+    config: (row.config as Record<string, unknown> | null) ?? null,
+    createdAt: new Date(row.created_at as string),
+  }));
 }
 
 /** A user principal by id. Same gap: nothing creates a principal except signup or invite. */

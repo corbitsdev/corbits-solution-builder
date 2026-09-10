@@ -367,29 +367,94 @@ export function localActor(): { principalId: string; displayName: string } {
 }
 
 export function tenantPath(rest: string): string {
-  return `/api/tenants/${tenantId()}${rest}`;
+  return tenantPathFor(tenantId(), rest);
+}
+
+/** A path under any tenant the owner belongs to — a project is one. */
+export function tenantPathFor(scope: string, rest: string): string {
+  return `/api/tenants/${scope}${rest}`;
+}
+
+// --- Tenants -----------------------------------------------------------------
+
+export type HubTenant = {
+  id: string;
+  name: string;
+  slug: string;
+  parentId: string | null;
+  config?: Record<string, unknown>;
+  createdAt: string;
+};
+
+/** A tenant under the workspace; the hub makes the owner its first principal. */
+export async function createChildTenant(input: { name: string; slug: string }): Promise<HubTenant> {
+  return hubPost<HubTenant>("/api/tenants", { ...input, parentId: tenantId() });
+}
+
+export async function getTenant(scope: string): Promise<HubTenant | null> {
+  const response = await hubApi(`/api/tenants/${scope}`);
+  if (response.status === 404 || response.status === 403) return null;
+  return body<HubTenant>(response, `/api/tenants/${scope}`);
+}
+
+export async function patchTenant(
+  scope: string,
+  input: { name?: string; config?: Record<string, unknown> },
+): Promise<HubTenant> {
+  return hubPatch<HubTenant>(`/api/tenants/${scope}`, input);
+}
+
+export type HubPrincipal = {
+  id: string;
+  tenantId: string;
+  kind: string;
+  refId: string;
+  status: string;
+  roles: { id: string; name: string }[];
+};
+
+export async function listPrincipals(scope: string = tenantId()): Promise<HubPrincipal[]> {
+  return hubList<HubPrincipal>(tenantPathFor(scope, "/principals"));
+}
+
+/** The owner's own principal in a tenant they belong to, or null. */
+export async function myPrincipalIn(scope: string): Promise<string | null> {
+  const memberships = await hubList<Membership>("/api/me/principals");
+  const mine = memberships.find(
+    (entry) => entry.tenantId === scope && entry.kind === "user" && entry.status === "active",
+  );
+  return mine?.principalId ?? null;
 }
 
 // --- Roles, grants and authority -----------------------------------------
 
 export type HubRole = { id: string; name: string; description: string | null; isSystem: boolean };
 
-export async function listRoles(): Promise<HubRole[]> {
-  return hubList<HubRole>(tenantPath("/roles"));
+export async function listRoles(scope: string = tenantId()): Promise<HubRole[]> {
+  return hubList<HubRole>(tenantPathFor(scope, "/roles"));
 }
 
 /** The role with this name, created if the tenant does not have it. */
-export async function ensureRole(name: string, description: string): Promise<HubRole> {
-  const existing = (await listRoles()).find((role) => role.name === name);
+export async function ensureRole(
+  name: string,
+  description: string,
+  scope: string = tenantId(),
+): Promise<HubRole> {
+  const existing = (await listRoles(scope)).find((role) => role.name === name);
   if (existing) return existing;
-  return hubPost<HubRole>(tenantPath("/roles"), { name, description });
+  return hubPost<HubRole>(tenantPathFor(scope, "/roles"), { name, description });
 }
 
 /** Gives a principal a role. Already holding it is not an error. */
-export async function assignRole(principalId: string, roleId: string): Promise<void> {
-  const response = await hubApi(tenantPath(`/principals/${principalId}/roles/${roleId}`), {
-    method: "POST",
-  });
+export async function assignRole(
+  principalId: string,
+  roleId: string,
+  scope: string = tenantId(),
+): Promise<void> {
+  const response = await hubApi(
+    tenantPathFor(scope, `/principals/${principalId}/roles/${roleId}`),
+    { method: "POST" },
+  );
   if (response.ok || response.status === 409) return;
   await body<unknown>(response, `POST roles/${roleId}`);
 }
@@ -404,8 +469,8 @@ export type HubGrant = {
   origin: string;
 };
 
-export async function listGrants(): Promise<HubGrant[]> {
-  return hubList<HubGrant>(tenantPath("/grants"));
+export async function listGrants(scope: string = tenantId()): Promise<HubGrant[]> {
+  return hubList<HubGrant>(tenantPathFor(scope, "/grants"));
 }
 
 /** A grant on a role, created once. */
@@ -415,8 +480,8 @@ export async function ensureRoleGrant(input: {
   action: string;
   effect: HubGrant["effect"];
   origin: "system" | "role";
-}): Promise<HubGrant> {
-  const grants = await listGrants();
+}, scope: string = tenantId()): Promise<HubGrant> {
+  const grants = await listGrants(scope);
   const existing = grants.find(
     (grant) =>
       grant.roleId === input.roleId &&
@@ -425,7 +490,7 @@ export async function ensureRoleGrant(input: {
       grant.effect === input.effect,
   );
   if (existing) return existing;
-  return hubPost<HubGrant>(tenantPath("/grants"), input);
+  return hubPost<HubGrant>(tenantPathFor(scope, "/grants"), input);
 }
 
 /** What the hub would decide for this principal on this resource and action. */
@@ -433,9 +498,10 @@ export async function evaluate(
   principalId: string,
   resource: string,
   action: string,
+  scope: string = tenantId(),
 ): Promise<"allow" | "deny" | "ask"> {
   const result = await hubPost<{ effect: "allow" | "deny" | "ask" }>(
-    tenantPath(`/principals/${principalId}/evaluate`),
+    tenantPathFor(scope, `/principals/${principalId}/evaluate`),
     { resource, action },
   );
   return result.effect;

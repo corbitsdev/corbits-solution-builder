@@ -14,6 +14,7 @@ import { database } from "./db.js";
 import * as table from "./schema.js";
 import { requiredAuthorityFor } from "./engine-approvals.js";
 import { rehydrateRun } from "./engine.js";
+import { listProjectRecords } from "./project-tenant.js";
 import { activeRunRecord, type StoredRun } from "./hub-executor.js";
 
 export type Decision = {
@@ -124,8 +125,7 @@ export async function openDecisionFor(
 
 /** Every open decision across projects, oldest first — the queue. */
 export async function openDecisions(): Promise<Decision[]> {
-  const { db } = database();
-  const projects = await db.select().from(table.project).where(isNull(table.project.deletedAt));
+  const projects = await listProjectRecords();
   const decisions: Decision[] = [];
   for (const project of projects) {
     const decision = await openDecisionFor(project.id);

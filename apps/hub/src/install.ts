@@ -31,6 +31,7 @@ import {
 } from "./hub-client.js";
 import { adoptLegacyWorkspace, bindAgentRole, deployDefinitionBodies } from "./hub-gaps.js";
 import { expectedWorkflowDefinitions, seedWorkflows } from "./workflow-seed.js";
+import { installProjectAuthority, listProjectRecords } from "./project-tenant.js";
 
 export type InstallState = {
   readonly installed: boolean;
@@ -162,6 +163,12 @@ export async function install(): Promise<InstallState> {
         systemPrompt: agentFor(Number(entry.name.split(".").at(-1)) as never).system,
       })),
   );
+
+  // Every project is a tenant of its own with the same roles; a project opened
+  // before roles lived there gets them here.
+  for (const project of await listProjectRecords()) {
+    await installProjectAuthority(project.id, project.policy);
+  }
 
   // Model bindings are the catalog rows written when a provider connects, so
   // there is nothing to rebind here; re-running after a credential change

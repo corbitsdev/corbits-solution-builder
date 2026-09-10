@@ -520,6 +520,50 @@ const MIGRATIONS: readonly Migration[] = [
       sql`ALTER TABLE "builder"."artifact_node" DROP COLUMN IF EXISTS "branch_id"`,
     ],
   },
+  {
+    // A project is a tenant under the workspace. Existing projects become
+    // tenant rows with the same id, so every project_id column keeps its
+    // value and now points at the hub's table. Participants are roles in
+    // that tenant; install() gives the owner theirs on the next launch.
+    id: "0006_project_is_a_tenant",
+    statements: [
+      sql`DO $$
+        DECLARE c record; hub boolean := to_regclass('"public"."tenant"') IS NOT NULL; n int;
+        BEGIN
+        SELECT count(*) INTO n FROM "builder"."project";
+        IF n > 0 AND NOT hub THEN
+          RAISE EXCEPTION 'projects become hub tenants; this database has no hub schema to move them into';
+        END IF;
+        IF hub THEN
+          INSERT INTO "public"."tenant" ("id","name","slug","domain","parent_id","config","created_at","updated_at")
+          SELECT p."id", p."title", 'sb-' || p."id", 'sb-' || p."id" || '.localhost', p."tenant_id",
+            jsonb_build_object('solutionsBuilder', jsonb_build_object(
+              'policy', p."policy", 'policyVersion', p."policy_version", 'revision', p."revision",
+              'archivedAt', p."archived_at", 'deletedAt', p."deleted_at")),
+            p."created_at", now()
+          FROM "builder"."project" p
+          WHERE EXISTS (SELECT 1 FROM "public"."tenant" t WHERE t."id" = p."tenant_id")
+          ON CONFLICT ("id") DO NOTHING;
+        END IF;
+        FOR c IN
+          SELECT con.conname, rel.relname
+          FROM pg_constraint con
+          JOIN pg_class rel ON rel.oid = con.conrelid
+          JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+          WHERE nsp.nspname = 'builder' AND con.contype = 'f'
+            AND con.confrelid = '"builder"."project"'::regclass
+        LOOP
+          EXECUTE format('ALTER TABLE "builder".%I DROP CONSTRAINT %I', c.relname, c.conname);
+          -- Cross-schema, so only where the hub shares the database; a hosted hub cannot be referenced.
+          IF hub AND c.relname <> 'participant' THEN
+            EXECUTE format('ALTER TABLE "builder".%I ADD CONSTRAINT %I FOREIGN KEY ("project_id") REFERENCES "public"."tenant"("id") ON DELETE CASCADE NOT VALID', c.relname, c.relname || '_project_tenant_fk');
+          END IF;
+        END LOOP;
+        END $$`,
+      sql`DROP TABLE IF EXISTS "builder"."participant"`,
+      sql`DROP TABLE IF EXISTS "builder"."project"`,
+    ],
+  },
 ];
 
 async function checksum(migration: Migration): Promise<string> {
@@ -540,52 +584,6 @@ export class MigrationDriftError extends Error {}
  * Every entry point — the host, the smokes, the seeds — calls this rather than
  * remembering the order itself.
  */
-/**
- * Points Builder's tenant and principal columns at the hub's own tables.
- *
- * Authority is Interchange's to own, so the rows that carry it should be the
- * ones the hub already has: a tenant Builder invented, or a principal it kept
- * after the hub forgot it, is a second authorisation story that only diverges.
- *
- * Embedded only, and added after the fact rather than in the table's own
- * migration, because these are cross-schema references: with a hosted hub the
- * control plane is a different database and the constraint cannot exist. The
- * columns are the same either way; what changes is whether the database can
- * enforce them, and that is a property of the deployment, not of the schema.
- */
-async function linkAuthzToHub(host: HostDatabase): Promise<void> {
-  const constraints: { table: string; column: string; target: string; name: string }[] = [
-    { table: "project", column: "tenant_id", target: "tenant", name: "project_tenant_fk" },
-    { table: "participant", column: "principal_id", target: "principal", name: "participant_principal_fk" },
-  ];
-
-  for (const constraint of constraints) {
-    // `NOT VALID` so an existing workspace with rows predating the hub is not
-    // refused at upgrade time; new rows are checked from here on. Adding a
-    // constraint must never be the thing that stops somebody opening their
-    // own project.
-    await host.db
-      .execute(
-        sql.raw(
-          `DO $$ BEGIN
-             ALTER TABLE "builder"."${constraint.table}"
-               ADD CONSTRAINT "${constraint.name}"
-               FOREIGN KEY ("${constraint.column}")
-               REFERENCES "public"."${constraint.target}"("id")
-               NOT VALID;
-           EXCEPTION
-             WHEN duplicate_object THEN NULL;
-             WHEN undefined_table THEN NULL;
-           END $$;`,
-        ),
-      )
-      .catch(() => {
-        // A hub schema that is not there yet is not an error worth failing a
-        // boot over; the next start adds the constraint.
-      });
-  }
-}
-
 export async function prepareDatabase(
   host: HostDatabase,
 ): Promise<{ interchange: number; builder: string[] }> {
@@ -650,7 +648,6 @@ export async function migrate(host: HostDatabase): Promise<{ applied: string[] }
   const { hubMode } = await import("./hub-client.js");
   if (hubMode() === "embedded") {
     await runArtifactMigrations(host.artifactDb);
-    await linkAuthzToHub(host);
   }
 
   return { applied };

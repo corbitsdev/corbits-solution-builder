@@ -27,7 +27,7 @@ import { execute, HOST_PRINCIPAL, rehydrateRun, submitAndApprove } from "../apps
 import { newId } from "../apps/hub/src/ids.js";
 import { HostError } from "../apps/hub/src/errors.js";
 import type { ArtifactKind } from "../apps/hub/src/domain.js";
-import type { Command, Stage } from "@solutions-builder/app/ledger";
+import { AUTHORITIES, type Command, type Stage } from "@solutions-builder/app/ledger";
 
 const checks: { name: string; ok: boolean; detail: string }[] = [];
 
@@ -758,16 +758,21 @@ let buildRunId = "";
   );
 }
 
-// §6: authority is per project, not per tenant. The actor here is the one
-// principal the hub HAS granted every authority to tenant-wide — so if the
-// stage still refuses, it refuses on project scope alone, which is the thing
-// under test. A stranger with no grants would fail this for the wrong reason.
+// §6: authority is per project, not per tenant. A project is its own tenant,
+// so a principal granted every authority in the workspace holds nothing on a
+// project they were never put on. A stranger with no grants would fail this
+// for the wrong reason, so the stranger here is granted everything first.
 {
   const other = { principalId: "p_other_owner", displayName: "Someone else" };
   await ensureUserPrincipal(tenantId(), other.principalId);
-  const theirs = await createProject({
-    title: "Someone else's project",
-    owner: other,
+  for (const role of await listRoles()) {
+    if ((AUTHORITIES as readonly string[]).includes(role.name) && role.name !== "system") {
+      await assignRole(other.principalId, role.id);
+    }
+  }
+  const mine = await createProject({
+    title: "A project the stranger is not on",
+    owner: ACTOR,
     policy: {
       costTolerancePercent: 10,
       costToleranceAbsolute: 100,
@@ -776,22 +781,18 @@ let buildRunId = "";
       allowExternalProviders: false,
     },
   });
-  const detail = await projectDetail(theirs.projectId, other.principalId);
+  const detail = await projectDetail(mine.projectId, ACTOR.principalId);
   const run = detail.current!;
-  const node = await produce(1, theirs.projectId, run.id);
+  const node = await produce(1, mine.projectId, run.id);
 
-  const holds = await evaluate(ACTOR.principalId, "authority:project_owner", "hold");
-  check(
-    "the actor does hold these authorities tenant-wide",
-    holds === "allow",
-    holds,
-  );
+  const holds = await evaluate(other.principalId, "authority:project_owner", "hold");
+  check("the stranger does hold these authorities workspace-wide", holds === "allow", holds);
 
   let refused = "";
   await execute({
     type: "stage.submit",
-    actor: ACTOR,
-    projectId: theirs.projectId,
+    actor: other,
+    projectId: mine.projectId,
     idempotencyKey: newId.command(),
     correlationId: newId.correlation(),
     payload: {
@@ -809,12 +810,8 @@ let buildRunId = "";
     refused || "the command was allowed",
   );
 
-  const still = await projectDetail(theirs.projectId, other.principalId);
-  check(
-    "and the stage did not move",
-    still.current?.state === "in_progress",
-    String(still.current?.state),
-  );
+  const still = await projectDetail(mine.projectId, ACTOR.principalId);
+  check("and the stage did not move", still.current?.state === "in_progress", String(still.current?.state));
 }
 
 // The solo-approver collapse: a workspace with exactly one holder of a
@@ -855,28 +852,13 @@ let buildRunId = "";
     `stage=${outcome.stage} state=${outcome.state}`,
   );
 
-  // A genuine second holder: a real `principal`, a real platform grant
-  // (`principal_role` against the same `project_owner` role `seedRoles`
-  // already created), and a `participant` row on this project.
-  const { hub } = await import("../apps/hub/src/hub-mount.js");
-  const { database } = await import("../apps/hub/src/db.js");
-  const table = await import("../apps/hub/src/schema.js");
-  const { sql } = await import("drizzle-orm");
+  // A genuine second holder: a real `principal` in the project tenant with
+  // the `project_owner` role there, which is what a participant is now.
   const second = "p_second_owner";
-  const db = hub().db.db;
-  await db.execute(sql`
-    INSERT INTO "public"."principal" ("id","tenant_id","kind","ref_id","status")
-    VALUES (${second}, ${tenantId()}, 'user', ${second}, 'active')
-    ON CONFLICT ("id") DO NOTHING
-  `);
-  const ownerRole = (await listRoles()).find((role) => role.name === "project_owner");
-  if (!ownerRole) throw new Error("install did not create the project_owner role");
-  await assignRole(second, ownerRole.id);
-  await database().db.insert(table.participant).values({
-    projectId: solo.projectId,
-    principalId: second,
-    role: "project_owner",
-  });
+  await ensureUserPrincipal(solo.projectId, second);
+  const ownerRole = (await listRoles(solo.projectId)).find((role) => role.name === "project_owner");
+  if (!ownerRole) throw new Error("the project tenant has no project_owner role");
+  await assignRole(second, ownerRole.id, solo.projectId);
   const afterSecond = await projectDetail(solo.projectId, ACTOR.principalId);
   check(
     "a project with a second participant holding the authority reports false",

@@ -6,7 +6,7 @@
  * Artifact writes are here too: they are how a stage produces something, and
  * they never transition anything.
  */
-import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { createArtifact, writeArtifactVersion } from "@corbits/artifacts";
 import { database } from "./db.js";
 import { withPostgresJsResultShape } from "./pg-compat.js";
@@ -30,6 +30,12 @@ import {
   runRecordsForProject,
 } from "./hub-executor.js";
 import { tenantId } from "./hub-client.js";
+import {
+  createProjectRecord,
+  listProjectRecords,
+  requireProject,
+  updateProject,
+} from "./project-tenant.js";
 
 export async function createProject(args: {
   title: string;
@@ -37,8 +43,6 @@ export async function createProject(args: {
   owner: { principalId: string; displayName: string };
   problemStatement?: string;
 }): Promise<{ projectId: string; runId: string }> {
-  const { db } = database();
-
   // `project.create` is the one command with no state to leave, so `evaluate`
   // cannot judge it — but its ledger row still says what opening a project
   // means, and this reads that rather than restating it.
@@ -56,39 +60,16 @@ export async function createProject(args: {
     throw new HostError("validation_failed", "An audience quorum cannot be negative.");
   }
 
-  const created = await db.transaction(async (tx) => {
-    const projectId = newId.project();
+  // The project is a tenant under the workspace; the hub makes the owner its
+  // first principal and `createProjectRecord` gives that principal every
+  // human authority as a role there.
+  const project = await createProjectRecord({ title: args.title, policy: args.policy });
+  const created = (() => {
+    const projectId = project.id;
     const runId = newId.run();
 
-    await tx.insert(table.project).values({
-      id: projectId,
-      tenantId: tenantId(),
-      title: args.title,
-      policy: args.policy,
-    });
-
-    // The owner holds every authority a single-user local workspace needs.
-    // Separate rows rather than one super-role, so an authority check reads the
-    // same way here as it will when these are different people.
-    const roles = [
-      "project_owner",
-      "budget_approver",
-      "technical_approver",
-      "builder_operator",
-      "delivery_recipient",
-      "audience_member",
-    ] as const;
-    for (const role of roles) {
-      await tx.insert(table.participant).values({
-        projectId,
-        principalId: args.owner.principalId,
-        role,
-      });
-    }
-
     // The one run-opening write outside `engine.ts` — `project.create` has no
-    // source run to guard, so it never reaches `execute()`. A plain in-memory
-    // op, not a database write, so it is safe inside this transaction.
+    // source run to guard, so it never reaches `execute()`.
     putRunRecord({
       id: runId,
       projectId,
@@ -107,11 +88,8 @@ export async function createProject(args: {
     });
 
     return { projectId, runId };
-  });
+  })();
 
-  // Outside the transaction: the ledger mail write uses the same
-  // single-writer connection `tx` held, and the executor is not reachable
-  // from inside one either.
   await recordCommand({
     projectId: created.projectId,
     actorPrincipalId: args.owner.principalId,
@@ -254,20 +232,12 @@ export async function writeArtifact(
  * moment later, from a specialist that read the whole problem.
  */
 export async function renameProject(projectId: string, title: string): Promise<void> {
-  const { db } = database();
-  await db
-    .update(table.project)
-    .set({ title, revision: sql`${table.project.revision} + 1` })
-    .where(eq(table.project.id, projectId));
+  await updateProject(projectId, { title });
 }
 
 /** Archived projects stay listed, folded away; nothing about them is lost. */
 export async function archiveProject(projectId: string, archived: boolean): Promise<void> {
-  const { db } = database();
-  await db
-    .update(table.project)
-    .set({ archivedAt: archived ? new Date() : null, revision: sql`${table.project.revision} + 1` })
-    .where(eq(table.project.id, projectId));
+  await updateProject(projectId, { archivedAt: archived ? new Date() : null });
 }
 
 /**
@@ -276,11 +246,7 @@ export async function archiveProject(projectId: string, archived: boolean): Prom
  * should be able to do irreversibly.
  */
 export async function deleteProject(projectId: string): Promise<void> {
-  const { db } = database();
-  await db
-    .update(table.project)
-    .set({ deletedAt: new Date(), revision: sql`${table.project.revision} + 1` })
-    .where(eq(table.project.id, projectId));
+  await updateProject(projectId, { deletedAt: new Date() });
 }
 
 export async function readArtifactNode(nodeId: string) {
@@ -297,11 +263,7 @@ export async function readArtifactNode(nodeId: string) {
 
 export async function listProjects() {
   const { db } = database();
-  const projects = await db
-    .select()
-    .from(table.project)
-    .where(isNull(table.project.deletedAt))
-    .orderBy(desc(table.project.createdAt));
+  const projects = await listProjectRecords();
 
   return Promise.all(
     projects.map(async (row) => {
@@ -355,11 +317,7 @@ export async function listProjects() {
 
 export async function projectDetail(projectId: string, actorPrincipalId: string) {
   const { db } = database();
-  const [row] = await db
-    .select()
-    .from(table.project)
-    .where(and(eq(table.project.id, projectId), isNull(table.project.deletedAt)));
-  if (!row) throw notFound("That project");
+  const row = await requireProject(projectId);
 
   const runs = runRecordsForProject(projectId);
   const nodes = await db

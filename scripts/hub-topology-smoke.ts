@@ -127,7 +127,7 @@ try {
          JOIN pg_class t ON t.oid = c.conrelid
          JOIN pg_namespace n ON n.oid = t.relnamespace
         WHERE n.nspname = 'builder' AND c.contype = 'f'
-          AND c.conname IN ('project_tenant_fk','participant_principal_fk')`,
+          AND c.confrelid = '"public"."tenant"'::regclass`,
     ),
   );
   // pglite answers `{ rows }` and postgres-js answers an array; the host's
@@ -136,8 +136,8 @@ try {
     (rows as unknown as { conname: string }[]);
   const names = returned.map((row) => row.conname);
   check(
-    "builder tables reference the hub's tenant and principal",
-    names.length === 2,
+    "every project_id in the builder schema references the hub's tenant table",
+    names.length === 5,
     names.join(", ") || "none",
   );
 
@@ -149,8 +149,9 @@ try {
     host.db
       .execute(
         sql.raw(
-          `INSERT INTO "builder"."project" ("id","tenant_id","title","policy")
-           VALUES ('${id}','${tenantId}','Probe','{}'::jsonb)`,
+          `INSERT INTO "builder"."artifact_node"
+             ("id","project_id","artifact_id","version","kind","stage","title","media_type","content_hash","size_bytes","provenance")
+           VALUES ('${id}','${tenantId}','art_${id}',1,'problem_statement',1,'Probe','text/markdown','h',1,'{}'::jsonb)`,
         ),
       )
       .then(() => "")
@@ -162,10 +163,10 @@ try {
     VALUES ('t_local', 'Local workspace', 'local', 'local.solutions-builder.invalid')
     ON CONFLICT ("id") DO NOTHING
   `);
-  const known = await insert("t_local", "prj_known");
-  const unknown = await insert("t_nonexistent", "prj_orphan");
+  const known = await insert("t_local", "an_known");
+  const unknown = await insert("t_nonexistent", "an_orphan");
 
-  check("a project under a known tenant is allowed", known === "", known.slice(0, 60));
+  check("a document under a project tenant the hub knows is allowed", known === "", known.slice(0, 60));
   check(
     "and one under a tenant the hub has never seen is refused",
     unknown !== "",

@@ -9,7 +9,7 @@ function token(length = 20): string {
 }
 
 export const newId = {
-  project: () => `prj_${token()}`,
+  projectSlug: () => `sb-${token(12)}`,
   run: () => `run_${token()}`,
   node: () => `nod_${token()}`,
   approval: () => `apr_${token()}`,

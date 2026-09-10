@@ -12,7 +12,7 @@
  * Step 4 is why this is one module and not several: the atomicity claim is only
  * true if there is a single place that writes.
  */
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { Command, Stage } from "@solutions-builder/app/ledger";
 import { PROJECT_DELETE } from "@solutions-builder/app/ledger";
 import { evaluate, evaluateAudienceDecision, type GuardContext, type RunView } from "./guard.js";
@@ -39,6 +39,7 @@ import {
 import { recordCommand, receiptFor, lastCommittedCommand, audienceDecisions } from "./engine-ledger.js";
 import { runGateSideEffects } from "./engine-recovery.js";
 import { notifyDecision } from "./notify.js";
+import { readProject, updateProject, type ProjectPolicy } from "./project-tenant.js";
 
 export { requiredAuthorityFor, soloApprovalFor } from "./engine-approvals.js";
 
@@ -64,13 +65,7 @@ export type Actor = { readonly principalId: string; readonly displayName: string
  */
 export const HOST_PRINCIPAL = "p_host";
 
-export type ProjectPolicy = {
-  costTolerancePercent: number;
-  costToleranceAbsolute: number;
-  audiences: { name: string; role: Authority }[];
-  audienceQuorum: number;
-  allowExternalProviders: boolean;
-};
+export type { ProjectPolicy } from "./project-tenant.js";
 
 export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
@@ -152,10 +147,7 @@ const PARKED_BY: Record<string, { state: RunView["state"]; stage: Stage }> = {
 
 export async function rehydrateRun(projectId: string) {
   const { db } = database();
-  const [project] = await db
-    .select()
-    .from(table.project)
-    .where(and(eq(table.project.id, projectId), isNull(table.project.deletedAt)));
+  const project = await readProject(projectId);
   if (!project) return undefined;
 
   const nodes = await db
@@ -293,8 +285,17 @@ export async function submitAndApprove(input: {
  * "tombstone" means exactly that: the rows stay, the project stops being
  * readable. Nothing here removes what a person wrote.
  */
+function expectRevision(input: CommandInput, current: number): void {
+  if (input.expectedRevision !== undefined && input.expectedRevision !== current) {
+    throw new HostError(
+      "conflict",
+      `This project has changed since you loaded it (revision ${current}, you had ${input.expectedRevision}). Reload and decide again.`,
+      { expected: input.expectedRevision, current },
+    );
+  }
+}
+
 async function runProjectDelete(input: CommandInput, authorities: Authority[]): Promise<CommandOutcome> {
-  const { db } = database();
   const authorised = PROJECT_DELETE.authority.some((role) => authorities.includes(role));
   if (!authorised) {
     throw new HostError(
@@ -304,24 +305,10 @@ async function runProjectDelete(input: CommandInput, authorities: Authority[]): 
   }
 
   const deletedAt = new Date();
-  await db.transaction(async (tx) => {
-    const [project] = await tx
-      .select()
-      .from(table.project)
-      .where(and(eq(table.project.id, input.projectId), isNull(table.project.deletedAt)));
-    if (!project) throw notFound("That project");
-    if (input.expectedRevision !== undefined && input.expectedRevision !== project.revision) {
-      throw new HostError(
-        "conflict",
-        `This project has changed since you loaded it (revision ${project.revision}, you had ${input.expectedRevision}). Reload and decide again.`,
-        { expected: input.expectedRevision, current: project.revision },
-      );
-    }
-    await tx
-      .update(table.project)
-      .set({ deletedAt, revision: sql`${table.project.revision} + 1` })
-      .where(eq(table.project.id, input.projectId));
-  });
+  const project = await readProject(input.projectId);
+  if (!project) throw notFound("That project");
+  expectRevision(input, project.revision);
+  await updateProject(input.projectId, { deletedAt });
 
   const open = activeRunRecord(input.projectId);
   const result: CommandOutcome = {
@@ -371,16 +358,16 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
   // for the same reason `authoritiesFor` is: the ledger mail lives on the same
   // single-writer connection as `tx`, so reading it from inside an open
   // transaction on that connection deadlocks rather than reading through it.
+  // The project is the hub's tenant row, read before the transaction for the
+  // same reason; the revision check is §6's optimistic concurrency.
+  const project = await readProject(input.projectId);
+  if (!project) throw notFound("That project");
+  expectRevision(input, project.revision);
+  const policy = project.policy;
+
   let audienceGuard: { required: number; proceeded: number; blocked: number } | undefined;
   if (input.type === "stage.approve" && run.stage === 5) {
-    const [projectRow] = await db
-      .select({ policy: table.project.policy })
-      .from(table.project)
-      .where(and(eq(table.project.id, input.projectId), isNull(table.project.deletedAt)));
-    const policyForTally = (projectRow?.policy as ProjectPolicy | undefined) ?? {
-      audienceQuorum: 0,
-    } as ProjectPolicy;
-    audienceGuard = await audienceTally(input.projectId, run.id, policyForTally);
+    audienceGuard = await audienceTally(input.projectId, run.id, policy);
   }
   if (input.type === "audience.decide") {
     const audienceName = String(input.payload.audienceName ?? "");
@@ -399,26 +386,6 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
   }
 
   const outcome = await db.transaction(async (tx) => {
-    const [project] = await tx
-      .select()
-      .from(table.project)
-      .where(and(eq(table.project.id, input.projectId), isNull(table.project.deletedAt)));
-    if (!project) throw notFound("That project");
-
-    // §6: optimistic concurrency on the project. Two people looking at the
-    // same stage, one of them acting on what the other has already changed,
-    // is the case this exists for — and the failure is silent without it,
-    // because both commands are individually legal.
-    if (input.expectedRevision !== undefined && input.expectedRevision !== project.revision) {
-      throw new HostError(
-        "conflict",
-        `This project has changed since you loaded it (revision ${project.revision}, you had ${input.expectedRevision}). Reload and decide again.`,
-        { expected: input.expectedRevision, current: project.revision },
-      );
-    }
-
-    const policy = project.policy as ProjectPolicy;
-
     const context: GuardContext = {
       actorAuthorities: authorities,
       ...(typeof input.payload.targetStage === "number"
@@ -470,20 +437,17 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
       transitionId: verdict.transition.id,
       replayed: false,
     };
-    // The project moves on with every command that commits, which is what
-    // makes the expected-revision check above mean anything: a revision that
-    // only changed on archive could never catch a stale decision.
-    await tx
-      .update(table.project)
-      .set({ revision: sql`${table.project.revision} + 1` })
-      .where(eq(table.project.id, input.projectId));
-
     return {
       result,
       applied,
       before: { runId: run.id, state: run.state, stage: run.stage },
     };
   });
+
+  // The project moves on with every command that commits, which is what makes
+  // the expected-revision check mean anything: a revision that only changed
+  // on archive could never catch a stale decision.
+  await updateProject(input.projectId, input.type === "project.archive" ? { archivedAt: new Date() } : {});
 
   await recordCommand({
     projectId: input.projectId,
@@ -724,13 +688,9 @@ async function apply(
       return { runId: run.id, stage: 9, state: "delivered", approval: approvalOf("accept") };
     }
 
-    case "project.archive": {
-      await tx
-        .update(table.project)
-        .set({ archivedAt: now, revision: sql`${table.project.revision} + 1` })
-        .where(eq(table.project.id, input.projectId));
+    case "project.archive":
+      // The tenant write happens after the transaction, with the revision bump.
       return { runId: run.id, stage: run.stage, state: "archived" };
-    }
 
     case "stage.reject":
     case "stage.revise":

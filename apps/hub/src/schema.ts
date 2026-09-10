@@ -28,36 +28,6 @@ const builder = pgSchema(BUILDER_SCHEMA);
 const id = () => text("id").primaryKey();
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 
-export const project = builder.table(
-  "project",
-  {
-    id: id(),
-    tenantId: text("tenant_id").notNull(),
-    title: text("title").notNull(),
-    /** Optimistic concurrency for existing-project mutations. */
-    revision: integer("revision").notNull().default(1),
-    policy: jsonb("policy").notNull(),
-    policyVersion: integer("policy_version").notNull().default(1),
-    archivedAt: timestamp("archived_at", { withTimezone: true }),
-    deletedAt: timestamp("deleted_at", { withTimezone: true }),
-    createdAt: createdAt(),
-  },
-  (table) => [index("project_tenant_idx").on(table.tenantId, table.createdAt)],
-);
-
-export const participant = builder.table(
-  "participant",
-  {
-    projectId: text("project_id").notNull(),
-    principalId: text("principal_id").notNull(),
-    /** One row per role held; authority checks read this set. */
-    role: text("role").notNull(),
-    audienceName: text("audience_name"),
-    createdAt: createdAt(),
-  },
-  (table) => [primaryKey({ columns: [table.projectId, table.principalId, table.role] })],
-);
-
 /**
  * There is no `run` table. A project's stage and state are read from the
  * runtime executor (`hub-executor.ts`), which is now the sole

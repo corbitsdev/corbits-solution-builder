@@ -7,10 +7,9 @@
 import { and, desc, eq, isNull } from "drizzle-orm";
 import type { Stage } from "@solutions-builder/app/ledger";
 import type { Authority } from "@solutions-builder/app/ledger";
-import { database } from "./db.js";
 import * as table from "./schema.js";
 import { AUTHORITIES } from "@solutions-builder/app/ledger";
-import { evaluate } from "./hub-client.js";
+import { evaluate, listPrincipals } from "./hub-client.js";
 import { HOST_PRINCIPAL } from "./engine.js";
 import type { Tx } from "./engine.js";
 import { audienceDecisions } from "./engine-ledger.js";
@@ -23,42 +22,39 @@ export function requiredAuthorityFor(stage: number): Authority {
 }
 
 /**
- * The actor's ledger authorities, resolved by the platform: `role` and
- * `principal_role` rows (seeded by `hub/roles.ts`), evaluated through
- * `@intx/authz` in `hub/authority.ts`. `system` is the one exception — it is
- * never a role a principal holds, only the host process acting on its own
- * behalf.
- */
-/**
  * What this actor may do *on this project*.
  *
- * Two questions, and both have to be asked. The platform answers the first —
- * does this principal hold `budget_approver` at all — through its own grant
- * evaluator. `builder.participant` answers the second: is that a part they
- * play here. Interchange's `principal_role` is tenant-wide and has no concept
- * of a project, so asking only the platform would let someone approve a
- * budget on a project they were never put on. Asking only the participant
- * table is what this code did before the platform owned authority at all.
+ * A project is a tenant, so the question is the hub's to answer: the actor's
+ * principal in that tenant, and the `authority:<name>/hold` grants its roles
+ * carry, evaluated by the hub's own grant evaluator. A workspace principal
+ * that was never put on the project has no principal there and holds nothing.
+ * `system` is the one exception — never a role a person holds, only the host
+ * acting on its own behalf.
  */
 export async function authoritiesFor(
   projectId: string,
   principalId: string,
 ): Promise<Authority[]> {
   if (principalId === HOST_PRINCIPAL) return ["system"];
+  const inProject = await principalInProject(projectId, principalId);
+  if (!inProject) return [];
+  const held: Authority[] = [];
+  for (const name of AUTHORITIES) {
+    if (name === "system") continue;
+    if ((await evaluate(inProject, `authority:${name}`, "hold", projectId)) === "allow") held.push(name);
+  }
+  return held;
+}
 
-  const granted = await heldAuthorities(principalId);
-  const { db } = database();
-  const parts = await db
-    .select({ role: table.participant.role })
-    .from(table.participant)
-    .where(
-      and(
-        eq(table.participant.projectId, projectId),
-        eq(table.participant.principalId, principalId),
-      ),
-    );
-  const onThisProject = new Set(parts.map((row) => row.role));
-  return granted.filter((name) => onThisProject.has(name));
+/**
+ * The actor's principal in the project tenant: the one referring to the same
+ * user as their workspace principal. Nobody there means not on the project.
+ */
+async function principalInProject(projectId: string, principalId: string): Promise<string | null> {
+  const [workspace, members] = await Promise.all([listPrincipals(), listPrincipals(projectId)]);
+  const me = workspace.find((row) => row.id === principalId);
+  if (!me) return null;
+  return members.find((row) => row.kind === "user" && row.refId === me.refId)?.id ?? null;
 }
 
 /**
@@ -67,12 +63,9 @@ export async function authoritiesFor(
  *
  * "Submit for approval" is ceremony when the submitter and the approver are
  * the same human — a local, single-user workspace, today. This is what lets
- * the UI ask the one real question instead of a config flag: is there
- * anyone *else* on this project who actually holds the authority this
- * stage's approval requires, through the same platform grant `authoritiesFor`
- * already resolves for every command. A participant row alone is not
- * enough — someone added to a project without the platform grant does not
- * make the workspace multi-approver.
+ * the UI ask the one real question instead of a config flag: is there anyone
+ * *else* in the project tenant holding the role this stage's approval
+ * requires.
  */
 export async function soloApprovalFor(
   projectId: string,
@@ -80,19 +73,15 @@ export async function soloApprovalFor(
   actorPrincipalId: string,
 ): Promise<boolean> {
   const required = requiredAuthorityFor(stage);
-  const { db } = database();
-  const rows = await db
-    .select({ principalId: table.participant.principalId })
-    .from(table.participant)
-    .where(and(eq(table.participant.projectId, projectId), eq(table.participant.role, required)));
-  const others = [...new Set(rows.map((row) => row.principalId))].filter(
-    (principalId) => principalId !== actorPrincipalId,
+  const actor = await principalInProject(projectId, actorPrincipalId);
+  const members = await listPrincipals(projectId);
+  return !members.some(
+    (row) =>
+      row.id !== actor &&
+      row.kind === "user" &&
+      row.status === "active" &&
+      row.roles.some((role) => role.name === required),
   );
-  for (const candidate of others) {
-    const held = await authoritiesFor(projectId, candidate);
-    if (held.includes(required)) return false;
-  }
-  return true;
 }
 
 type VersionRef = { artifactId: string; versionId: string; contentHash: string };
@@ -143,19 +132,4 @@ export async function waitingOrigin(tx: Tx, runId: string): Promise<string | und
     .orderBy(desc(table.buildQuestion.createdAt))
     .limit(1);
   return row?.originId;
-}
-
-/**
- * The ledger authorities a principal holds, per the hub's own grant evaluator:
- * install stamps each role with `allow` on `authority:<name>/hold`, so holding
- * one is a platform fact the hub answers for, not a name this file assumes.
- * `system` is never held by a person; it is the host's own authority.
- */
-async function heldAuthorities(principalId: string): Promise<Authority[]> {
-  const held: Authority[] = [];
-  for (const name of AUTHORITIES) {
-    if (name === "system") continue;
-    if ((await evaluate(principalId, `authority:${name}`, "hold")) === "allow") held.push(name);
-  }
-  return held;
 }
