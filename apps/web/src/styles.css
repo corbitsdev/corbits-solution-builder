@@ -58,6 +58,10 @@
   --wb-border: var(--border);
   --wb-border-strong: var(--border-strong);
   --wb-primary: var(--primary);
+  /* The library's orange as shipped, read here on the root before `body`
+     lightens it below. */
+  --brand-primary: var(--primary);
+  --brand-primary-active: var(--primary-active);
   --wb-ring: var(--ring);
   --wb-okay: var(--ok);
   --wb-destructive: var(--destructive);
@@ -82,6 +86,22 @@
   font-family: var(--wb-font-ui);
 }
 
+/* The brand orange carries dark grey text, and dark grey on that orange is
+   legible on paper and hard on the eye. It is lightened here: towards the
+   page in light mode, towards the text colour in dark, so the text stays
+   dark on it either way and the ratio roughly doubles. Mixed from the
+   library's value rather than copied, so the library's next orange still
+   comes through. Set on `body`, under the root the library writes to. */
+body {
+  --primary: color-mix(in srgb, var(--brand-primary) 68%, var(--background));
+  --primary-active: color-mix(in srgb, var(--brand-primary-active) 76%, var(--background));
+}
+
+:root.dark body {
+  --primary: color-mix(in srgb, var(--brand-primary) 68%, var(--foreground));
+  --primary-active: color-mix(in srgb, var(--brand-primary-active) 76%, var(--foreground));
+}
+
 * { box-sizing: border-box; }
 
 body {
@@ -92,12 +112,18 @@ body {
   line-height: 1.55;
 }
 
-button,
-input,
-select,
-textarea {
-  font: inherit;
-  color: inherit;
+/* In the library's base layer, so its utilities still win. Unlayered, this
+   reset beat `text-primary-foreground` on every primary button, and the
+   button's text was the page foreground: invisible in light mode, where the
+   two are the same colour, and pale beige on orange in dark. */
+@layer base {
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
 }
 
 /* Clickable controls show a hand. UA styles leave `button` at default, and the

@@ -25,7 +25,8 @@ export const TOUR_PREFERENCE = "tour.stage.completed";
  */
 function token(name: string, fallback: string): string {
   if (typeof globalThis.getComputedStyle !== "function") return fallback;
-  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  // Read on `body`, where the app lightens the brand orange, not on the root.
+  const value = getComputedStyle(document.body).getPropertyValue(name).trim();
   return value || fallback;
 }
 
