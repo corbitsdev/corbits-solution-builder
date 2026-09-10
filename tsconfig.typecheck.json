@@ -1,0 +1,23 @@
+{
+  // Typecheck-only. `bun run typecheck` uses this; Bun's runtime reads
+  // tsconfig.json, which deliberately has no `paths` — a path mapping there
+  // would redirect real imports at runtime to declaration files.
+  //
+  // The mappings point the corbitsdev provider packages and the vendored
+  // Interchange tree at declarations instead of their TypeScript sources.
+  // Those are dependencies: their internals are their own repositories' to
+  // typecheck, and compiling them inside this program only produces errors
+  // about code this build does not own.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noUnusedLocals": true,
+    "baseUrl": ".",
+    "paths": {
+      "@corbits/oauth-core": ["./types/corbits-providers.d.ts"],
+      "@corbits/codex-provider": ["./types/corbits-providers.d.ts"],
+      "@corbits/xai-provider": ["./types/corbits-providers.d.ts"],
+      "@corbits/artifacts": ["./types/corbits-artifacts.d.ts"],
+      "@intx/*": ["./types/intx.d.ts"]
+    }
+  }
+}

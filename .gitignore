@@ -1,0 +1,8 @@
+node_modules
+dist
+scratch
+src-tauri/target
+src-tauri/binaries
+*.log
+src-tauri/gen
+vendor/interchange/**/dist
