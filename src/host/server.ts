@@ -1,0 +1,380 @@
+/**
+ * The Solutions Builder host.
+ *
+ * A Bun process that binds a random loopback port, mints a session token, and
+ * prints a launch URL for the Tauri host to open. The pattern is the proven one
+ * from the AgentFlight Alpha spike; what differs is the lifetime rule:
+ *
+ *   Closing the window does not stop this process. Only an explicit stop does.
+ *
+ * The desktop host therefore does not reap the sidecar on window close, and
+ * this process does not exit when its parent's window goes away.
+ */
+import { timingSafeEqual } from "node:crypto";
+import { dirname, extname, join } from "node:path";
+import { mkdir, stat } from "node:fs/promises";
+import { watch } from "node:fs";
+import { Hono } from "hono";
+import { API_VERSION, createApi } from "./routes/api.js";
+import { openDatabase } from "./db/client.js";
+import { prepareDatabase } from "./db/migrate.js";
+import { databaseDirectory, dataDirectory } from "./paths.js";
+import { ensureWorkspace } from "./store/projects.js";
+import { drainOutbox } from "./outbox.js";
+import { ensureHub, hubFetch } from "./hub/endpoint.js";
+import {
+  clientConnected,
+  markReady,
+  markStopped,
+  onHostStop,
+  startHeartbeat,
+} from "./lifecycle.js";
+
+const HANDSHAKE_PREFIX = "Solutions Builder launch URL: ";
+
+function numberFlag(name: string): number | undefined {
+  const index = process.argv.indexOf(name);
+  if (index < 0) return undefined;
+  const value = Number(process.argv[index + 1]);
+  if (!Number.isInteger(value)) throw new Error(`${name} requires an integer.`);
+  return value;
+}
+
+const port = numberFlag("--port") ?? 0;
+if (port < 0 || port > 65_535) throw new Error("--port must be between 0 and 65535.");
+
+await mkdir(dataDirectory(), { recursive: true });
+await mkdir(databaseDirectory(), { recursive: true });
+
+const host = await openDatabase(databaseDirectory());
+
+// Interchange owns the control plane and its schema is applied first, because
+// Builder's foreign keys point into it. `prepareDatabase` owns that order.
+const migrated = await prepareDatabase(host);
+if (migrated.interchange > 0) {
+  console.log(`Applied ${migrated.interchange} Interchange migrations`);
+}
+if (migrated.builder.length > 0) {
+  console.log(`Applied Builder migrations: ${migrated.builder.join(", ")}`);
+}
+
+const hubEndpoint = await ensureHub();
+console.log(`Interchange hub: ${hubEndpoint.detail}`);
+
+await ensureWorkspace({ principalId: "p_owner", displayName: "You" });
+
+// Section 8: the curated kit as versioned records, idempotent per record.
+{
+  const { seedKit } = await import("./store/kit.js");
+  const kit = await seedKit();
+  const created = kit.filter((entry) => entry.created);
+  console.log(
+    created.length > 0
+      ? `Seeded ${created.length} kit records (${kit.length} total)`
+      : `Kit records up to date (${kit.length})`,
+  );
+}
+
+// Section 4: the compatibility matrix, recorded rather than described.
+{
+  const { recordCompatibility } = await import("./store/compatibility.js");
+  const rows = await recordCompatibility();
+  console.log(`Compatibility matrix recorded (${rows} dependencies)`);
+}
+
+// Section 9: reconciliation creates missing definitions and is idempotent.
+if (hubEndpoint.mode === "embedded") {
+  const { seedWorkflows } = await import("../orchestration/workflows/seed.js");
+  const seeded = await seedWorkflows();
+  const created = seeded.filter((entry) => entry.created);
+  console.log(
+    created.length > 0
+      ? `Seeded workflow definitions: ${created.map((entry) => entry.name).join(", ")}`
+      : `Workflow definitions up to date (${seeded.length})`,
+  );
+
+  // §8: authority is the platform's, not ours. The ledger's authorities become
+  // native roles, the owner is recorded as holding them, and every stage
+  // definition is bound to `specialist` — the role that approves nothing.
+  const { seedRoles } = await import("./hub/roles.js");
+  const roles = await seedRoles({
+    ownerPrincipalId: "p_owner",
+    agentDefinitionIds: seeded
+      .filter((entry) => entry.name.startsWith("solutions-builder.stage."))
+      .map((entry) => entry.id),
+  });
+  console.log(
+    `Authority: ${roles.roles} roles, ${roles.held} held by the owner, ${roles.bound} agent bindings`,
+  );
+
+  // The definition's body. The row says a stage exists; the prompt the
+  // specialist reads is a commit in the hub's own repo for that definition,
+  // which is where a sidecar pulls it from.
+  const { deployDefinitionBodies } = await import("./hub/deploy.js");
+  const { agentFor } = await import("../orchestration/agents/kit.js");
+  const bodies = seeded
+    .filter((entry) => /\.stage\.\d+$/.test(entry.name))
+    .map((entry) => ({
+      definitionId: entry.id,
+      systemPrompt: agentFor(Number(entry.name.split(".").at(-1)) as never).system,
+    }));
+  const deployed = await deployDefinitionBodies(bodies).catch((cause: unknown) => {
+    console.error("Could not commit the definition bodies to the hub:", cause);
+    return [];
+  });
+  console.log(`Definition bodies committed: ${deployed.length}`);
+}
+
+/**
+ * Held on `globalThis` so `bun --hot` keeps the same token across a reload;
+ * re-minting it would invalidate the cookie the loaded webview already holds.
+ * A packaged launch is a fresh process, so this is identical to per-run.
+ */
+const session = globalThis as typeof globalThis & { solutionsBuilderToken?: string };
+const token = (session.solutionsBuilderToken ??= crypto.randomUUID());
+
+/**
+ * Where the built interface lives, in the order the host should look:
+ *   1. what the desktop host passes (Tauri bundles `dist/` as a resource);
+ *   2. a `dist/` beside the executable, for a standalone binary;
+ *   3. the repo's own `dist/`, for `bun run dev`.
+ * The compiled binary's `import.meta.dir` is inside its virtual filesystem, so
+ * step 3 alone would leave a bare binary serving nothing.
+ */
+async function resolveDist(): Promise<string> {
+  const candidates = [
+    process.env.SOLUTIONS_BUILDER_DIST_DIR?.trim(),
+    join(dirname(process.execPath), "dist"),
+    join(import.meta.dir, "..", "..", "dist"),
+  ].filter((value): value is string => Boolean(value));
+  for (const candidate of candidates) {
+    if (await Bun.file(join(candidate, "index.html")).exists()) return candidate;
+  }
+  return candidates.at(-1)!;
+}
+
+const dist = await resolveDist();
+
+const mime: Record<string, string> = {
+  ".html": "text/html",
+  ".js": "text/javascript",
+  ".css": "text/css",
+  ".svg": "image/svg+xml",
+  ".json": "application/json",
+  ".woff2": "font/woff2",
+};
+
+/**
+ * The webview loads this server directly, so Tauri's own CSP never applies and
+ * the policy has to arrive as a response header from here. Everything is
+ * same-origin; `style-src` allows inline because React writes style attributes.
+ */
+/** Set by `bun run dev`; absent in a packaged app. */
+const devReload = process.env.SOLUTIONS_BUILDER_DEV_RELOAD === "1";
+
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data:",
+  "font-src 'self' data:",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+].join("; ");
+
+const app = new Hono();
+
+/**
+ * Authorises a client. A loopback port is not authentication: anything else on
+ * the machine can reach it.
+ *
+ * Two credentials are accepted. The window presents the session cookie it was
+ * handed at the handshake. Another process — a hub client, a future CLI —
+ * presents the same token as a bearer, which is what lets this host be the hub
+ * endpoint for a separate Solutions Builder instance.
+ */
+function authorised(context: { req: { header: (name: string) => string | undefined } }) {
+  const cookie = context.req.header("cookie") ?? "";
+  const presented = cookie
+    .split(/;\s*/)
+    .find((entry) => entry.startsWith("solutions_builder_session="))
+    ?.slice("solutions_builder_session=".length);
+  if (presented !== undefined && sameToken(presented, token)) return true;
+  const authorization = context.req.header("authorization") ?? "";
+  return authorization.startsWith("Bearer ") && sameToken(authorization.slice(7), token);
+}
+
+/** Compared in constant time: the token is the only thing guarding the API. */
+function sameToken(presented: string, expected: string): boolean {
+  const left = Buffer.from(presented);
+  const right = Buffer.from(expected);
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
+const unauthorised = {
+  error: {
+    code: "unauthenticated",
+    message: "This client is not authorised.",
+    correlationId: "-",
+    retryable: false,
+  },
+};
+
+app.use("/api/*", async (context, next) => {
+  if (!authorised(context)) return context.json(unauthorised, 401);
+  await next();
+});
+
+// The hub proxy is guarded too. Without this the host would be an open proxy
+// into the hub for anything on the machine, which is the loopback assumption
+// the rest of the host explicitly rejects. The hub's own auth still applies
+// underneath; this is the outer door, not a replacement for it.
+app.use("/hub/*", async (context, next) => {
+  if (!authorised(context)) return context.json(unauthorised, 401);
+  await next();
+});
+
+app.route("/api", createApi());
+
+// The hub's own API, proxied under /hub so a client reaches it through the same
+// authenticated origin. Embedded, this dispatches in-process; pointed at a
+// hosted hub it forwards. Clients cannot tell the difference, which is the
+// point of the seam.
+app.all("/hub/*", async (context) => {
+  const url = new URL(context.req.url);
+  const path = url.pathname.replace(/^\/hub/, "") + url.search;
+  return hubFetch(path, {
+    method: context.req.method,
+    headers: context.req.raw.headers,
+    ...(context.req.method === "GET" || context.req.method === "HEAD"
+      ? {}
+      : { body: await context.req.raw.arrayBuffer() }),
+  });
+});
+
+const server = Bun.serve({
+  hostname: "127.0.0.1",
+  port,
+  idleTimeout: 240,
+  async fetch(request) {
+    const url = new URL(request.url);
+
+    // The handshake URL exchanges the token for an HttpOnly cookie once. Every
+    // other query parameter survives the redirect, so a deep link such as
+    // `?view=settings` still lands where it was aimed.
+    if (url.pathname === "/" && url.searchParams.get("token") === token) {
+      clientConnected();
+      const onward = new URLSearchParams(url.searchParams);
+      onward.delete("token");
+      const query = onward.toString();
+      return new Response(null, {
+        status: 302,
+        headers: {
+          location: query ? `/?${query}` : "/",
+          "set-cookie": `solutions_builder_session=${token}; HttpOnly; SameSite=Strict; Path=/`,
+        },
+      });
+    }
+
+    // Development only: a stream that says when the interface has been
+    // rebuilt. `bun run dev` rebuilds on every edit but the window
+    // had no way to know, so the loop was "edit, alt-tab, reload by hand".
+    // Never mounted unless the launcher asks for it, so a packaged app has no
+    // such route at all.
+    if (devReload && url.pathname === "/api/dev/reload") {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          const encoder = new TextEncoder();
+          controller.enqueue(encoder.encode(": connected\n\n"));
+          let timer: ReturnType<typeof setTimeout> | null = null;
+          const watcher = watch(dist, { recursive: true }, () => {
+            // The build writes many files; one reload for the burst.
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(() => {
+              controller.enqueue(encoder.encode("event: rebuilt\ndata: 1\n\n"));
+            }, 120);
+          });
+          request.signal.addEventListener("abort", () => {
+            if (timer) clearTimeout(timer);
+            watcher.close();
+            controller.close();
+          });
+        },
+      });
+      return new Response(stream, {
+        headers: { "content-type": "text/event-stream", "cache-control": "no-store" },
+      });
+    }
+
+    // Both the Builder API and the proxied hub go to Hono; everything else is
+    // the built interface.
+    if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/hub/")) {
+      return app.fetch(request);
+    }
+
+    const requested = url.pathname === "/" ? "index.html" : url.pathname.slice(1);
+    const candidate = join(dist, requested);
+    const info = await stat(candidate).catch(() => null);
+    const selected = info?.isFile() ? candidate : join(dist, "index.html");
+    const file = Bun.file(selected);
+    if (!(await file.exists())) {
+      return new Response(
+        "The Solutions Builder interface has not been built. Run `bun run ui:build`.",
+        { status: 503, headers: { "content-type": "text/plain" } },
+      );
+    }
+    return new Response(file, {
+      headers: {
+        "content-type": mime[extname(selected)] ?? "application/octet-stream",
+        "cache-control": "no-store",
+        "content-security-policy": CSP,
+      },
+    });
+  },
+});
+
+startHeartbeat();
+markReady();
+
+// Authorised background work continues while no window is open. This is the
+// loop that carries a project to its next human gate and fires the notification.
+const drain = setInterval(() => {
+  void drainOutbox().catch((cause: unknown) => {
+    console.error("Outbox drain failed:", cause);
+  });
+}, 3_000);
+
+let stopping: Promise<void> | undefined;
+async function stop(): Promise<void> {
+  if (stopping) return stopping;
+  stopping = (async () => {
+    clearInterval(drain);
+    // Drain what is already committed before going away, so a pending
+    // notification is not silently lost on an explicit stop.
+    await drainOutbox().catch(() => undefined);
+    await server.stop(true);
+    await host.close();
+    markStopped();
+  })();
+  return stopping;
+}
+
+onHostStop(() => {
+  void stop().finally(() => process.exit(0));
+});
+
+// SIGTERM is an explicit stop. There is deliberately no parent-process monitor:
+// the window going away must not end the host.
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => {
+    void stop().finally(() => process.exit(0));
+  });
+}
+
+const launchURL = `http://127.0.0.1:${server.port}/?token=${token}`;
+console.log(`Solutions Builder host: http://127.0.0.1:${server.port} (api v${API_VERSION})`);
+console.log(`${HANDSHAKE_PREFIX}${launchURL}`);
+if (process.argv.includes("--open")) Bun.spawn(["open", launchURL]);
