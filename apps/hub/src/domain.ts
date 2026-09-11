@@ -147,7 +147,8 @@ export const ArtifactDraft = type({
   title: type("string > 0").to("string <= 200"),
   /** Rendered bytes as text; binary lives in a sink, never in a workflow row. */
   content: "string",
-  mediaType: "'text/markdown' | 'text/html' | 'application/json'",
+  /** A document's type, or a file's: a spreadsheet or an image the person attached keeps its own. */
+  mediaType: /^[a-z]+\/[a-z0-9.+-]+$/,
   /** Exact versions this draft was generated from. Empty only at a graph root. */
   sourceVersionIds: id.array(),
   provenance: {

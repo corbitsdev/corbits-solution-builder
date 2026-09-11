@@ -435,6 +435,7 @@ export function StageRing({ stage, total = 9 }: { stage: number; total?: number 
  * to know they are looking at a problem brief.
  */
 const DOCUMENT_NAMES: Record<string, string> = {
+  source_material: "Source material",
   problem_brief: "Problem brief",
   solution_constraints: "Constraints",
   chosen_approach: "Chosen approach",

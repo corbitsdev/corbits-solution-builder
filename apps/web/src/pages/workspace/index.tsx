@@ -74,7 +74,10 @@ export function StageWorkspace({
   // the feedback, and a gate that named it would approve the wrong thing.
   const stageNodes = detail.nodes.filter(
     (node) =>
-      node.stage === stage && node.kind !== "engineering_review" && node.kind !== "design_feedback",
+      node.stage === stage &&
+      node.kind !== "engineering_review" &&
+      node.kind !== "design_feedback" &&
+      node.kind !== "source_material",
   );
   const panelReviews = detail.nodes.filter(
     (node) => node.stage === stage && node.kind === "engineering_review",

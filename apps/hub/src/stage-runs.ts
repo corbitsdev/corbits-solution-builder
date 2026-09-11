@@ -40,6 +40,7 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { newId } from "./ids.js";
 import { ArtifactDraft } from "./domain.js";
 import { HostError, ReplyCutShort } from "./errors.js";
+import { MATERIAL_KIND, materialText } from "./source-material.js";
 import {
   cutShortTwice,
   DESIGNER_TOKENS_MAX,
@@ -85,13 +86,20 @@ async function approvedInputs(projectId: string, stage: Stage) {
     )
     .orderBy(asc(table.artifactNode.stage));
 
-  const relevant = nodes.filter((node) => node.stage < stage);
+  // What the person handed over is read at every stage, the first included;
+  // what earlier stages approved is read at the stages after them.
+  const relevant = nodes.filter((node) => node.kind === MATERIAL_KIND || node.stage < stage);
   return Promise.all(
     relevant.map(async (node) => {
       const { content } = await readArtifactNode(node.id);
-      return { node, content };
+      return { node, content: node.kind === MATERIAL_KIND ? await materialText(node, content) : content };
     }),
   );
+}
+
+/** The rendered inputs a stage's specialist would be handed, for a smoke to read. */
+export async function stageInputsForSmoke(projectId: string, stage: Stage): Promise<string> {
+  return renderInputs(await approvedInputs(projectId, stage));
 }
 
 function renderInputs(
@@ -99,9 +107,10 @@ function renderInputs(
 ): string {
   if (inputs.length === 0) return "(No earlier approved artifacts. This is the first stage.)";
   return inputs
-    .map(
-      (input) =>
-        `--- APPROVED INPUT: ${input.node.title} (stage ${input.node.stage}, ${input.node.kind}) ---\n${input.content}`,
+    .map((input) =>
+      input.node.kind === MATERIAL_KIND
+        ? `--- MATERIAL THE PERSON PROVIDED: ${input.node.title} ---\n${input.content}`
+        : `--- APPROVED INPUT: ${input.node.title} (stage ${input.node.stage}, ${input.node.kind}) ---\n${input.content}`,
     )
     .join("\n\n");
 }

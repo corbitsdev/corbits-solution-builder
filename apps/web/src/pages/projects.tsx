@@ -36,6 +36,15 @@ export function Projects({
   const [problem, setProblem] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // What the person hands over with the problem. Held here until the project
+  // exists, then attached before it opens, so the first draft reads it.
+  const [material, setMaterial] = useState<File[]>([]);
+  const [dragging, setDragging] = useState(false);
+  const materialInput = useRef<HTMLInputElement>(null);
+  const addMaterial = (files: FileList | File[]) => {
+    const next = [...files].filter((file) => !material.some((held) => held.name === file.name && held.size === file.size));
+    if (next.length > 0) setMaterial([...material, ...next]);
+  };
   // Where an export landed, or what an import brought in: said once, here.
   const [notice, setNotice] = useState<string | null>(null);
   const importInput = useRef<HTMLInputElement>(null);
@@ -84,7 +93,11 @@ export function Projects({
         problemStatement: problem.trim(),
         policy: DEFAULT_POLICY,
       });
+      // Attached before the project opens: the first draft starts on open
+      // and has to find the material already there.
+      if (material.length > 0) await api.attachMaterial(created.projectId, material);
       setProblem("");
+      setMaterial([]);
       onChanged();
       onOpen(created.projectId);
     } catch (cause) {
@@ -99,11 +112,30 @@ export function Projects({
 
   return (
     <div className="projects">
-      <section className="start" aria-labelledby="start-title">
+      <section
+        className={dragging ? "start is-dragging" : "start"}
+        aria-labelledby="start-title"
+        onDragOver={(event) => {
+          if ([...event.dataTransfer.types].includes("Files")) {
+            event.preventDefault();
+            setDragging(true);
+          }
+        }}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false);
+        }}
+        onDrop={(event) => {
+          if (![...event.dataTransfer.types].includes("Files")) return;
+          event.preventDefault();
+          setDragging(false);
+          addMaterial(event.dataTransfer.files);
+        }}
+      >
         <h2 id="start-title">What are we building?</h2>
         <p className="start-lead">
-          Describe the problem however it comes out. Scoping it is the first stage, and the
-          specialist will ask about what it does not know.
+          Describe your problem in your own words. We will brainstorm with you to find the right
+          solution. If you have any documents or other information you would like to give us, just
+          drag it here.
         </p>
         {error ? <Banner tone="error" title={error} /> : null}
         {notice ? (
@@ -125,6 +157,47 @@ export function Projects({
             ? "A little more. A sentence is enough."
             : "Enter to start. Rough is fine."}
         </p>
+        {/* The material, named, each removable, and a picker for anyone not
+            dragging. What the specialists can read is said plainly. */}
+        <div className="start-material">
+          <input
+            ref={materialInput}
+            type="file"
+            multiple
+            hidden
+            accept=".txt,.md,.csv,.json,.html,.xlsx,.xls,.docx,.doc,.pptx,.ppt,.pdf,.png,.jpg,.jpeg,.gif,.webp"
+            aria-label="Choose documents or images to give the specialists"
+            onChange={(event) => {
+              if (event.target.files) addMaterial(event.target.files);
+              event.target.value = "";
+            }}
+          />
+          {material.length > 0 ? (
+            <ul className="material-list" aria-label="Attached files">
+              {material.map((file) => (
+                <li key={`${file.name}:${file.size}`} className="material-chip">
+                  <span>{file.name}</span>
+                  <span className="material-size">{Math.max(1, Math.round(file.size / 1024))} KB</span>
+                  <button
+                    type="button"
+                    className="material-remove"
+                    aria-label={`Remove ${file.name}`}
+                    onClick={() => setMaterial(material.filter((held) => held !== file))}
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <p className="start-hint">
+            <Button variant="link" disabled={busy} onClick={() => materialInput.current?.click()}>
+              Add documents or images…
+            </Button>
+            {" "}Spreadsheets, text, CSV, JSON, Markdown and HTML are read by the specialists. PDFs,
+            Word files and images are kept with the project and named to them.
+          </p>
+        </div>
         {/* A project from another instance of this app. The file is one of
             its own exports; the input is hidden because the file picker is the
             whole interaction and a bare input reads as a form. */}

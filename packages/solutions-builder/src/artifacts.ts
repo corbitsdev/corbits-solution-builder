@@ -1,5 +1,6 @@
 /** The documents the nine stages produce, and which stage owns which. */
 export const ARTIFACT_KINDS = [
+  "source_material",
   "problem_brief",
   "solution_constraints",
   "chosen_approach",
@@ -18,6 +19,8 @@ export type ArtifactKind = (typeof ARTIFACT_KINDS)[number];
 
 /** Which stage owns which artifact kind. Used to reject cross-stage writes. */
 export const ARTIFACT_STAGE: Readonly<Record<ArtifactKind, number>> = {
+  /** What the person handed over with the problem; read by every stage, owned by none. */
+  source_material: 1,
   problem_brief: 1,
   solution_constraints: 2,
   chosen_approach: 3,

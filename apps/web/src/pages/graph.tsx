@@ -247,7 +247,11 @@ function ArtifactReader({
         {content === null ? (
           <p className="inline-note">Loading…</p>
         ) : content ? (
-          <Markdown source={content} />
+          node.kind === "source_material" ? (
+            <Material node={node} content={content} />
+          ) : (
+            <Markdown source={content} />
+          )
         ) : (
           <p className="inline-note">This version could not be read.</p>
         )}
@@ -292,5 +296,40 @@ function ArtifactReader({
         </footer>
       ) : null}
     </>
+  );
+}
+
+/**
+ * A file the person handed over, shown as what it is: an image as the image,
+ * text as text, anything else by name, type and size. Never rendered as
+ * Markdown — a CSV is not prose, and a data URL is not a document.
+ */
+function Material({ node, content }: { node: ArtifactNode; content: string }) {
+  const mediaType = node.mediaType ?? "";
+  const size = `${Math.max(1, Math.round(node.sizeBytes / 1024))} KB`;
+  if (mediaType.startsWith("image/")) {
+    return (
+      <figure className="material-figure">
+        <img src={content} alt={node.title} />
+        <figcaption>
+          {node.title} · {mediaType} · {size}
+        </figcaption>
+      </figure>
+    );
+  }
+  if (mediaType.startsWith("text/") || mediaType === "application/json") {
+    return (
+      <div className="material-text">
+        <p className="inline-note">
+          {node.title} · {mediaType} · {size}
+        </p>
+        <pre>{content}</pre>
+      </div>
+    );
+  }
+  return (
+    <p className="inline-note">
+      {node.title} · {mediaType} · {size}. Kept with the project; the specialists are told it is here.
+    </p>
   );
 }
