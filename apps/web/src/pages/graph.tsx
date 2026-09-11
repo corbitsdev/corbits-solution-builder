@@ -19,7 +19,16 @@ function documentIdentity(node: ArtifactNode): string {
   return `${node.kind}\0${node.variant ?? ""}`;
 }
 
-function documentLabel(node: ArtifactNode): string {
+/**
+ * What a row is called. A stage-5 package or a piece of material is named by
+ * its variant — the audience, the file. A design's feedback is named for the
+ * design it was given on, not by the node id its variant happens to hold.
+ */
+function documentLabel(node: ArtifactNode, nodes: ArtifactNode[] = []): string {
+  if (node.kind === "design_feedback") {
+    const design = nodes.find((candidate) => candidate.id === node.variant);
+    return design ? `Feedback on Design v${design.version}` : "Design feedback";
+  }
   return node.variant ?? documentName(node.kind);
 }
 
@@ -58,7 +67,7 @@ function groupedRows(nodes: ArtifactNode[]): { stage: number; documents: Artifac
     .map((stage) => ({
       stage,
       documents: (byStage.get(stage) ?? []).sort((left, right) =>
-        documentLabel(left).localeCompare(documentLabel(right)),
+        documentLabel(left, nodes).localeCompare(documentLabel(right, nodes)),
       ),
     }));
 }
@@ -204,7 +213,7 @@ export function ArtifactGraph({
                 aria-current={documentIdentity(row) === selectedKey ? "true" : undefined}
                 onClick={() => openNode(row.id)}
               >
-                <strong>{documentLabel(row)}</strong>
+                <strong>{documentLabel(row, nodes)}</strong>
                 <p>{`Version ${row.version}`}</p>
               </button>
             ))}
@@ -278,7 +287,7 @@ function ArtifactReader({
     <>
       <header className="document-header">
         <div>
-          <h2>{documentLabel(node)}</h2>
+          <h2>{documentLabel(node, nodes)}</h2>
           <p>{kicker}</p>
         </div>
         <PrintButton node={node} content={content} />
@@ -289,6 +298,18 @@ function ArtifactReader({
         ) : content ? (
           node.kind === "source_material" ? (
             <Material node={node} content={content} />
+          ) : node.kind === "design_feedback" ? (
+            <FeedbackRecord content={content} />
+          ) : node.mediaType === "text/html" || node.kind === "design_artifact" ? (
+            // A design is a page. It renders as one, in the same sandbox the
+            // design review uses: no scripts, no origin, nothing reaches out.
+            <iframe
+              className="artifact-page"
+              title={`${documentLabel(node, nodes)} v${node.version}`}
+              srcDoc={content}
+              sandbox=""
+              style={{ background: "#fff" }} // not-our-surface: a generated mockup is its own page
+            />
           ) : (
             <Markdown source={content} />
           )
@@ -308,7 +329,7 @@ function ArtifactReader({
                     className="link-button"
                     onClick={() => onOpen(source.id)}
                   >
-                    {`Built from ${documentLabel(source)} v${source.version}`}
+                    {`Built from ${documentLabel(source, nodes)} v${source.version}`}
                   </button>
                 </span>
               ))}
@@ -371,5 +392,48 @@ function Material({ node, content }: { node: ArtifactNode; content: string }) {
     <p className="inline-note">
       {node.title} · {mediaType} · {size}. Kept with the project; the specialists are told it is here.
     </p>
+  );
+}
+
+/**
+ * A design's feedback as what it says: the direction, the note, and each
+ * anchored comment with its disposition. The record is JSON, and JSON is not
+ * something a person reads.
+ */
+type FeedbackComment = { anchor?: { testId?: string; domPath?: string }; body?: string; disposition?: string };
+type FeedbackRecordJson = {
+  feedback?: { direction?: string; overallNote?: string; submittedAt?: string; comments?: FeedbackComment[] };
+};
+
+function FeedbackRecord({ content }: { content: string }) {
+  let record: FeedbackRecordJson | null = null;
+  try {
+    record = JSON.parse(content) as FeedbackRecordJson;
+  } catch {
+    record = null;
+  }
+  const feedback = record?.feedback;
+  if (!feedback) return <p className="inline-note">This feedback record could not be read.</p>;
+  return (
+    <div className="feedback-record">
+      <p>
+        <strong>Direction:</strong> {feedback.direction ?? "—"}
+        {feedback.submittedAt ? ` · ${new Date(feedback.submittedAt).toLocaleString()}` : ""}
+      </p>
+      <p>{feedback.overallNote?.trim() ? feedback.overallNote : "No overall note."}</p>
+      {feedback.comments && feedback.comments.length > 0 ? (
+        <ul>
+          {feedback.comments.map((comment: FeedbackComment, index: number) => (
+            <li key={index}>
+              <span className="hash">{comment.anchor?.testId ? `#${comment.anchor.testId}` : (comment.anchor?.domPath ?? "whole design")}</span>{" "}
+              {comment.body}
+              {comment.disposition ? <span className="inline-note"> · {comment.disposition}</span> : null}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="inline-note">No anchored comments.</p>
+      )}
+    </div>
   );
 }
