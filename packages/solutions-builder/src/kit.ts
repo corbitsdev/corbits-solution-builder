@@ -319,9 +319,6 @@ Requirements the document must meet:
 - All CSS in one \`<style>\` block in the head. No scripts. No remote fonts,
   stylesheets, images or any other network request — the bundle must render
   offline, and a remote asset is a packaging defect, not a detail.
-- A light surface: near-white page, dark text, colour reserved for meaning.
-  The mockup is reviewed beside a light document, and a dark mockup reads as
-  a different product. Go dark only where the brief itself calls for it.
 - **Every meaningful element carries a stable \`data-testid\`.** Reviewers anchor
   comments to those ids and a build is verified against them, so an element
   without one cannot be commented on or checked. Use readable kebab-case ids

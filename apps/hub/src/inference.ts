@@ -15,7 +15,7 @@
 import { runInference } from "@intx/inference";
 import { createDefaultDependencies } from "@intx/inference/providers";
 import type { InferenceSource } from "@intx/types/runtime";
-import { HostError } from "./errors.js";
+import { HostError, ReplyCutShort } from "./errors.js";
 import {
   catalogEntry,
   credentialFor,
@@ -290,11 +290,9 @@ async function completeWith(
   // discovered when the document fails to render.
   const limit = request.maxTokens ?? 4096;
   if (outputTokens !== null && outputTokens >= limit) {
-    throw new HostError(
-      "provider_unavailable",
-      `${provider.label} stopped at its output limit of ${limit} tokens, so the reply is cut short and nothing was recorded. Try again.`,
-      {},
-      true,
+    throw new ReplyCutShort(
+      `${provider.label} stopped at its output limit of ${limit} tokens, so the reply is cut short and nothing was recorded.`,
+      limit,
     );
   }
 

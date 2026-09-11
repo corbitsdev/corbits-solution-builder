@@ -1829,6 +1829,39 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   padding: var(--space-3) 0;
 }
 
+/* A setting whose control is typed rather than picked: the field goes under
+   its explanation, full width, rather than beside it. */
+.setting-field {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
+}
+
+.setting-field textarea {
+  min-height: 6rem;
+}
+
+/* The row's controls take the app's control shape, and no more width than a
+   choice needs, so the explanation keeps the room. */
+.setting-select,
+.setting-number {
+  flex: none;
+  max-width: 20rem;
+  min-height: 36px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--radius-control);
+  background: var(--wb-card);
+  color: var(--wb-foreground);
+  font: inherit;
+  font-size: 0.875rem;
+}
+
+.setting-number {
+  width: 8rem;
+  text-align: right;
+}
+
 .setting-row + .setting-row {
   border-top: 1px solid var(--wb-border);
 }

@@ -17,7 +17,14 @@ import * as table from "./schema.js";
 import { and, asc, eq, isNull } from "drizzle-orm";
 import { type } from "arktype";
 import { ArtifactDraft } from "./domain.js";
-import { HostError } from "./errors.js";
+import { HostError, ReplyCutShort } from "./errors.js";
+import {
+  DESIGNER_TOKENS_MAX,
+  designerGuidance,
+  designerSettings,
+  lowerResolutionGuidance,
+  saveDesignerSettings,
+} from "./designer-settings.js";
 import type { Stage } from "@solutions-builder/app/ledger";
 
 export type StageDraftResult = {
@@ -29,6 +36,8 @@ export type StageDraftResult = {
   providerId: string;
   model: string;
   content: string;
+  /** Something the person should hear about how this draft came to be. */
+  note?: string;
 };
 
 /**
@@ -140,21 +149,69 @@ async function draftWith(
     ...(args.context === undefined ? {} : { context: args.context }),
   });
 
+  // The designer draws to the person's settings: the surface and design
+  // language go into its instructions, the token limit is theirs, and what
+  // happens when a design is cut short is their policy.
+  const designer = agent.produces === "design_artifact" ? await designerSettings() : null;
+  let system = designer ? `${agent.system}\n\n${designerGuidance(designer)}` : agent.system;
+  let maxTokens = designer?.maxTokens ?? 8000;
+  let note: string | undefined;
+
   beginLiveDraft(args.projectId, args.stage);
   let result: Awaited<ReturnType<typeof complete>>;
+  let cleaned: string;
   try {
-    result = await complete({
-      system: agent.system,
-      prompt,
-      temperature: agent.temperature,
-      maxTokens: 8000,
-      onText: (text) => updateLiveDraft(args.projectId, args.stage, stripOuterFence(text)),
-    });
+    for (let attempt = 0; ; attempt++) {
+      try {
+        result = await complete({
+          system,
+          prompt,
+          temperature: agent.temperature,
+          maxTokens,
+          onText: (text) => updateLiveDraft(args.projectId, args.stage, stripOuterFence(text)),
+        });
+        // Models wrap output in a code fence even when told not to. Stripping
+        // one outer fence is a kindness to the reviewer, not a licence to
+        // reinterpret the draft: nothing else about the text is touched.
+        cleaned = stripOuterFence(result.text);
+        // A design is one HTML document, and one that stops before its
+        // closing tag was cut short on the way here: a dropped stream, a
+        // limit the provider did not report. The preview would show its
+        // background and nothing else, so it is refused rather than recorded.
+        if (/^\s*<(!doctype html|html)\b/i.test(cleaned) && !/<\/html>\s*$/i.test(cleaned)) {
+          throw new ReplyCutShort(
+            `${agent.title} returned a design cut short after ${cleaned.length} characters: the document has no closing tag. Nothing was recorded.`,
+            maxTokens,
+          );
+        }
+        break;
+      } catch (cause) {
+        // One more attempt, and only for a design, and only as the person's
+        // settings say. Anything else is the failure it was.
+        if (!(cause instanceof ReplyCutShort) || !designer || attempt > 0) throw cause;
+        const limit = maxTokens;
+        if (designer.onLimit === "raise") {
+          const raised = Math.min(limit * 2, DESIGNER_TOKENS_MAX);
+          if (raised <= limit) throw cause;
+          await saveDesignerSettings({ maxTokens: raised });
+          maxTokens = raised;
+          note = `The first attempt was cut short at the ${limit}-token limit. The limit is now ${raised} (Settings, Designer), and this version was produced within it.`;
+        } else if (designer.onLimit === "reduce") {
+          system = `${system}\n\n${lowerResolutionGuidance(limit)}`;
+          note = `The first attempt was cut short at the ${limit}-token limit. This version is a lower-resolution design produced within it; raise the limit in Settings, Designer, for a fuller one.`;
+        } else {
+          throw new ReplyCutShort(
+            `${cause.message} In Settings, Designer, you can raise the limit, or have the designer retry at lower resolution.`,
+            cause.limit,
+          );
+        }
+      }
+    }
   } finally {
     endLiveDraft(args.projectId, args.stage);
   }
 
-  if (!result.text.trim()) {
+  if (!cleaned.trim()) {
     throw new HostError(
       "provider_unavailable",
       `${agent.title} returned an empty draft. The model or provider failed; nothing was recorded.`,
@@ -162,27 +219,9 @@ async function draftWith(
       true,
     );
   }
-
-  // Models wrap output in a code fence even when told not to. Stripping one
-  // outer fence is a kindness to the reviewer, not a licence to reinterpret
-  // the draft: nothing else about the text is touched.
-  const cleaned = stripOuterFence(result.text);
   console.log(
     `${agent.title}: ${cleaned.length} characters, ${result.outputTokens ?? "unknown"} output tokens, ${result.model}`,
   );
-
-  // A design is one HTML document, and one that stops before its closing tag
-  // was cut short on the way here: a dropped stream, a limit the provider
-  // did not report. The preview would show its background and nothing else,
-  // so it is refused now, with the size, rather than recorded as a version.
-  if (/^\s*<(!doctype html|html)\b/i.test(cleaned) && !/<\/html>\s*$/i.test(cleaned)) {
-    throw new HostError(
-      "provider_unavailable",
-      `${agent.title} returned a design cut short after ${cleaned.length} characters: the document has no closing tag. Nothing was recorded. Try again.`,
-      {},
-      true,
-    );
-  }
 
   // Boundary validation, once, here. Persistence is what makes it an artifact.
   const draft = ArtifactDraft({
@@ -217,6 +256,7 @@ async function draftWith(
   const written = await writeArtifact(draft, args.actor);
 
   return {
+    ...(note === undefined ? {} : { note }),
     ...written,
     agent: agent.id,
     providerId: result.providerId,
@@ -304,7 +344,10 @@ export async function draftStageArtifact(args: {
     // read as one more bullet. The turn is the question; the document is the
     // document.
     body: (() => {
-      if (asked[0]) return `The draft is beside this. Before I revise it:\n\n${asked[0]}`;
+      // How the draft came to be, when that is worth hearing: a design
+      // produced at lower resolution, a limit that was raised.
+      const lead = result.note ? `${result.note}\n\n` : "";
+      if (asked[0]) return `${lead}The draft is beside this. Before I revise it:\n\n${asked[0]}`;
       // Nothing to ask is still a turn: the reader has to be told the ball is
       // theirs, or a finished draft and a stalled one look the same. Told
       // without claiming, in the specialist's voice, that it needs nothing:
@@ -312,7 +355,7 @@ export async function draftStageArtifact(args: {
       // section says none, and "Nothing I need to ask" under that read as a
       // contradiction. What is true is that no question is queued.
       const summary = summaryIn(result.content) ?? `Here is version ${result.version}.`;
-      return `${summary}\n\nAnything to change before you approve it?`;
+      return `${lead}${summary}\n\nAnything to change before you approve it?`;
     })(),
     resultNodeId: result.nodeId,
     questions: asked,

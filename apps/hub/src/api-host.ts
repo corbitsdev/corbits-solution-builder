@@ -1,6 +1,7 @@
 import { access, rm, writeFile } from "node:fs/promises";
 import type { Hono } from "hono";
 import { startAtLoginMarker } from "./paths.js";
+import { designerSettings, saveDesignerSettings, type DesignerSettings } from "./designer-settings.js";
 import { COMMANDS, LEDGER, STAGE_TITLES } from "@solutions-builder/app/ledger";
 import { AGENT_KIT } from "@solutions-builder/app/kit";
 import { listProviders } from "./providers.js";
@@ -103,15 +104,19 @@ export function registerHostRoutes(api: Hono) {
   });
 
   /**
-   * The only host preference left is start-at-login, and it lives in a
-   * marker file, not the database — the desktop host reads it before the
-   * database is open. Its presence is the opt-in; absence is off.
+   * Two kinds of preference, neither in the database. Start-at-login lives
+   * in a marker file the desktop host reads before the database is open;
+   * its presence is the opt-in. The designer's settings live in a file of
+   * their own and are read once per design, as `designer.*` keys here.
    */
   api.get("/preferences", async (context) => {
     const startAtLogin = await access(startAtLoginMarker())
       .then(() => true)
       .catch(() => false);
-    return context.json({ preferences: { "host.startAtLogin": startAtLogin } });
+    const designer = Object.fromEntries(
+      Object.entries(await designerSettings()).map(([key, value]) => [`designer.${key}`, value]),
+    );
+    return context.json({ preferences: { "host.startAtLogin": startAtLogin, ...designer } });
   });
 
   api.put("/preferences/:key", async (context) => {
@@ -122,6 +127,10 @@ export function registerHostRoutes(api: Hono) {
       const marker = startAtLoginMarker();
       if (value === true) await writeFile(marker, "1");
       else await rm(marker, { force: true });
+    } else if (key.startsWith("designer.")) {
+      const field = key.slice("designer.".length) as keyof DesignerSettings;
+      const saved = await saveDesignerSettings({ [field]: value } as Partial<DesignerSettings>);
+      return context.json({ key, value: saved[field] });
     }
     return context.json({ key, value });
   });

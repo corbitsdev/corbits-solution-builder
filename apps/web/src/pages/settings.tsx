@@ -1,15 +1,17 @@
 /**
- * Settings: three things a person can actually change.
+ * Settings: four things a person can actually change.
  *
  *   1. Inference — which providers answer, in what order, with which model.
- *   2. This computer — whether the host starts at login, and stopping it.
- *   3. Diagnostics — folded away; for when something is wrong.
+ *   2. Designer — the surface and design language it draws to, how much it
+ *      may write, and what happens when a design is cut short.
+ *   3. This computer — whether the host starts at login, and stopping it.
+ *   4. Diagnostics — folded away; for when something is wrong.
  *
  * The secret rule shows up in the markup: a key field is cleared the moment it
  * is handed over, and nothing ever renders it back. What the UI sees is a
  * status and a boolean.
  */
-import { Switch } from "@corbits/react-ui";
+import { Input, Switch, Textarea } from "@corbits/react-ui";
 import { useEffect, useState } from "react";
 import { api, ApiFailure, type HostStatus, type Provider } from "../client.js";
 import { Banner, Button, StateLabel } from "../components.jsx";
@@ -37,6 +39,7 @@ export function Settings({
         oauthCandidates={oauthCandidates}
         onChanged={onChanged}
       />
+      <Designer />
       <ThisComputer status={status} />
       <Diagnostics status={status} />
     </div>
@@ -103,6 +106,156 @@ function Inference({
         oauthCandidates={oauthCandidates}
         onChanged={onChanged}
       />
+    </Section>
+  );
+}
+
+/* ----------------------------------------------------------------- designer */
+
+type DesignerSurface = "light" | "dark" | "brief";
+type DesignerOnLimit = "tell" | "raise" | "reduce";
+type DesignerSettings = {
+  surface: DesignerSurface;
+  language: string;
+  maxTokens: number;
+  onLimit: DesignerOnLimit;
+};
+const TOKENS_MIN = 1000;
+const TOKENS_MAX = 64000;
+
+/**
+ * What the stage-4 designer draws to and how much it may write. Each control
+ * saves on its own as it changes, the way the start-at-login switch does; the
+ * design language saves when the field is left, since it is typed.
+ */
+function Designer() {
+  const [settings, setSettings] = useState<DesignerSettings | null>(null);
+  const [language, setLanguage] = useState("");
+  const [tokens, setTokens] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .preferences()
+      .then(({ preferences }) => {
+        if (cancelled) return;
+        const loaded: DesignerSettings = {
+          surface: (preferences["designer.surface"] as DesignerSurface | undefined) ?? "light",
+          language: String(preferences["designer.language"] ?? ""),
+          maxTokens: Number(preferences["designer.maxTokens"] ?? 8000),
+          onLimit: (preferences["designer.onLimit"] as DesignerOnLimit | undefined) ?? "tell",
+        };
+        setSettings(loaded);
+        setLanguage(loaded.language);
+        setTokens(String(loaded.maxTokens));
+      })
+      .catch((cause) => {
+        if (!cancelled) setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const save = async <K extends keyof DesignerSettings>(key: K, value: DesignerSettings[K]) => {
+    if (!settings) return;
+    setError(null);
+    const before = settings;
+    setSettings({ ...settings, [key]: value });
+    try {
+      await api.setPreference(`designer.${key}`, value);
+    } catch (cause) {
+      setSettings(before);
+      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    }
+  };
+
+  const saveTokens = () => {
+    const value = Number(tokens);
+    if (!Number.isInteger(value) || value < TOKENS_MIN || value > TOKENS_MAX) {
+      setTokens(String(settings?.maxTokens ?? 8000));
+      setError(`The output limit is a whole number between ${TOKENS_MIN} and ${TOKENS_MAX} tokens.`);
+      return;
+    }
+    if (value !== settings?.maxTokens) void save("maxTokens", value);
+  };
+
+  return (
+    <Section title="Designer" lead="What the stage-4 designer draws to, how much it may write, and what happens when that is not enough.">
+      {error ? <Banner tone="error" title={error} /> : null}
+      <div className="setting-row">
+        <div>
+          <strong>Surface</strong>
+          <p>Light mockups sit beside the light documents. Dark is for products that are dark. Or leave it to what the brief calls for.</p>
+        </div>
+        <select
+          className="setting-select"
+          aria-label="Surface"
+          value={settings?.surface ?? "light"}
+          disabled={!settings}
+          onChange={(event) => void save("surface", event.target.value as DesignerSurface)}
+        >
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+          <option value="brief">What the brief calls for</option>
+        </select>
+      </div>
+      <div className="setting-field">
+        <div>
+          <strong>Design language</strong>
+          <p>Palette, type, spacing, tone, what to avoid: anything the designer should follow, in your words. It takes precedence over the defaults. Saved when you leave the field.</p>
+        </div>
+        <Textarea
+          aria-label="Design language"
+          value={language}
+          disabled={!settings}
+          placeholder="e.g. Inter for text, one accent colour, generous whitespace, no gradients, buttons with 6px corners."
+          onChange={(event) => setLanguage(event.target.value)}
+          onBlur={() => {
+            if (settings && language !== settings.language) void save("language", language);
+          }}
+        />
+      </div>
+      <div className="setting-row">
+        <div>
+          <strong>Output limit</strong>
+          <p>How many tokens one design may use, {TOKENS_MIN} to {TOKENS_MAX}. A fuller design needs more; a design that uses them all is cut short.</p>
+        </div>
+        <Input
+          className="setting-number"
+          aria-label="Output limit in tokens"
+          type="number"
+          inputMode="numeric"
+          min={TOKENS_MIN}
+          max={TOKENS_MAX}
+          step={500}
+          value={tokens}
+          disabled={!settings}
+          onChange={(event) => setTokens(event.target.value)}
+          onBlur={saveTokens}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") (event.target as HTMLInputElement).blur();
+          }}
+        />
+      </div>
+      <div className="setting-row">
+        <div>
+          <strong>If a design exceeds the limit</strong>
+          <p>Tell you and stop; raise the limit and try once more; or try once more at lower resolution within the limit, and tell you.</p>
+        </div>
+        <select
+          className="setting-select"
+          aria-label="If a design exceeds the limit"
+          value={settings?.onLimit ?? "tell"}
+          disabled={!settings}
+          onChange={(event) => void save("onLimit", event.target.value as DesignerOnLimit)}
+        >
+          <option value="tell">Tell me and do nothing else</option>
+          <option value="raise">Raise the limit and try again</option>
+          <option value="reduce">Produce a lower-resolution design and tell me</option>
+        </select>
+      </div>
     </Section>
   );
 }

@@ -79,3 +79,19 @@ export class HostError extends Error {
 
 export const notFound = (what: string) =>
   new HostError("not_found", `${what} was not found.`);
+
+/**
+ * A reply that stopped before it was done: it used every output token it
+ * was allowed, or the stream dropped. Retryable, and nothing was recorded.
+ * Its own class so the designer's policy can catch exactly this.
+ */
+export class ReplyCutShort extends HostError {
+  constructor(
+    message: string,
+    /** The output limit in force, when that is what was hit. */
+    readonly limit: number | null,
+  ) {
+    super("provider_unavailable", message, {}, true);
+    this.name = "ReplyCutShort";
+  }
+}

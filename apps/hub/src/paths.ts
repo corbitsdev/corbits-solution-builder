@@ -31,3 +31,8 @@ export function databaseDirectory(): string {
 export function startAtLoginMarker(): string {
   return join(dataDirectory(), "start-at-login");
 }
+
+/** The designer's settings: surface, design language, token limit, policy. */
+export function designerSettingsFile(): string {
+  return join(dataDirectory(), "designer.json");
+}
