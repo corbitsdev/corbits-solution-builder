@@ -96,9 +96,9 @@ export function registerStageRoutes(api: Hono) {
 
     if (mode === "interview") {
       const following = await nextQuestion(projectId, stage);
-      return context.json({ asked: true, remaining: following?.remaining ?? 0, draft: result.draft });
+      return context.json({ asked: true, remaining: following?.remaining ?? 0, draft: result.draft, ...(result.note !== undefined ? { note: result.note } : {}) });
     }
-    return context.json({ asked: false, remaining: 0, draft: result.draft });
+    return context.json({ asked: false, remaining: 0, draft: result.draft, ...(result.note !== undefined ? { note: result.note } : {}) });
   });
 
   /** Runs the stage specialist and records its draft as a new version. */
@@ -126,6 +126,6 @@ export function registerStageRoutes(api: Hono) {
     // Stage 5 fans out into one package per named audience; stage 6's four
     // panel reviews ride the same round as the architect's plan. Every other
     // stage carries neither.
-    return context.json({ draft: result.draft, packages: result.packages, review: result.review });
+    return context.json({ draft: result.draft, ...(result.note !== undefined ? { note: result.note } : {}), packages: result.packages, review: result.review });
   });
 }

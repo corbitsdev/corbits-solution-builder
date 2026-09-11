@@ -240,6 +240,9 @@ function iteration(stage) {
           [spec.id]: step({
             agent: AGENTS[spec.roleId],
             input: spec.input,
+            // The round carries the call's options — the output cap the
+            // person set for a design — since the agent is fixed at deploy.
+            inference: { from: "steps." + ROUND + ".output.inference" },
             timeout: DRAFT_TIMEOUT,
             drainBehavior: "wait",
             after: [previous],

@@ -330,7 +330,7 @@ export const api = {
   /** Where a design is served as a page of its own, for printing. A path, not a request. */
   printPage: (nodeId: string) => `/api/artifacts/${nodeId}/print`,
   draft: (projectId: string, stage: number, input: string, quotes: Quote[] = []) =>
-    post<{ draft: { nodeId: string; contentHash: string; content: string; agent: string; model: string } }>(
+    post<{ draft: { nodeId: string; contentHash: string; content: string; agent: string; model: string }; note?: string }>(
       `/projects/${projectId}/stages/${stage}/draft`,
       { input, quotes },
     ),
@@ -354,7 +354,7 @@ export const api = {
     stage: number,
     payload: { message: string; quotes?: Quote[]; revise?: boolean },
   ) =>
-    post<{ asked: boolean; remaining: number }>(
+    post<{ asked: boolean; remaining: number; note?: string }>(
       `/projects/${projectId}/stages/${stage}/reply`,
       payload,
     ),

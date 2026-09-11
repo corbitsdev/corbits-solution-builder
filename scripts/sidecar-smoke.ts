@@ -37,7 +37,7 @@ function check(name: string, ok: boolean, detail = "") {
 
 const SECRET = "sk-stub-do-not-store-me-anywhere";
 /** Every chat completion the stub answered: the agent step ran under the sidecar. */
-const completions: { model: string; messages: unknown[] }[] = [];
+const completions: { model: string; messages: unknown[]; maxTokens?: number | undefined }[] = [];
 /** Every request the stub saw, for diagnosis when the agent never arrives. */
 const requests: string[] = [];
 
@@ -81,8 +81,8 @@ const stub = createServer((request, response) => {
     let body = "";
     request.on("data", (chunk: Buffer) => (body += chunk.toString()));
     request.on("end", () => {
-      const parsed = JSON.parse(body) as { model: string; messages: unknown[] };
-      completions.push({ model: parsed.model, messages: parsed.messages });
+      const parsed = JSON.parse(body) as { model: string; messages: unknown[]; max_tokens?: number };
+      completions.push({ model: parsed.model, messages: parsed.messages, maxTokens: parsed.max_tokens });
       const chunk = (delta: Record<string, unknown>, finish: string | null) =>
         `data: ${JSON.stringify({ id: "stub", object: "chat.completion.chunk", model: parsed.model, choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
       response.writeHead(200, { "content-type": "text/event-stream" });
@@ -301,6 +301,16 @@ try {
         "a stage.draft round produces a problem_brief version through the run's own agent step",
         "draft" in drafted && drafted.draft.content.includes("In short"),
         "error" in drafted ? drafted.error : drafted.draft.content.slice(0, 200),
+      );
+
+      // The round carried the call's output cap, and the specialist step read
+      // it off the round and sent it to the provider: a written document runs
+      // under the host's document cap, not the runtime's 4096 default.
+      const brainstormerCall = completions.find((call) => JSON.stringify(call.messages).includes("You are the Brainstormer at stage 1."));
+      check(
+        "the draft step's provider call carried the round's output cap",
+        brainstormerCall?.maxTokens === 16_000,
+        `max_tokens ${String(brainstormerCall?.maxTokens)}`,
       );
 
       const thread = "draft" in drafted ? await threadTurns(project.projectId, 1) : [];
