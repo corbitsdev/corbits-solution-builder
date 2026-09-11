@@ -243,7 +243,10 @@ async function verdictIn(iteration: StageIteration): Promise<{ ready: boolean; n
   const completed = findEvent(iteration.events, "StepCompleted", EVALUATE_STEP_ID);
   if (!completed) return null;
   const reply = await resolveOutput<DraftReply>(iteration.runId, completed);
-  return reply ? briefVerdictIn(reply.reply) : null;
+  // A step that completed without a reply — an agent step that ended in an
+  // error the runtime still records as completion — gave no verdict. The
+  // thread must not fail to load over it.
+  return typeof reply?.reply === "string" ? briefVerdictIn(reply.reply) : null;
 }
 
 /** The latest brief-evaluator verdict for the stage, or null before one has run. */

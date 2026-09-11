@@ -37,6 +37,7 @@ const DELIVERED_BYTES = Buffer.from("the delivered application bytes\n");
 const DELIVERED_SHA = createHash("sha256").update(DELIVERED_BYTES).digest("hex");
 import type { ArtifactKind } from "../apps/hub/src/domain.js";
 import { AUTHORITIES, type Command, type Stage } from "@solutions-builder/app/ledger";
+import { alignmentStep, positionOfSignal, roundSignal, approveSignal, exhaustedSignal } from "@solutions-builder/app/workflows/stage-loop";
 
 const checks: { name: string; ok: boolean; detail: string }[] = [];
 
@@ -947,6 +948,28 @@ let buildRunId = "";
 }
 
 await host.close();
+
+// The run follows the ledger. A run behind it is walked forward with the
+// signals a person would have sent; one ahead of it, or inside the build, is
+// reported rather than driven.
+{
+  const step = (stage: number, at: "round" | "gate", ledgerStage: number, state: "in_progress" | "waiting_approval") =>
+    alignmentStep({ stage: stage as Stage, at }, { stage: ledgerStage as Stage, state });
+  check("a run parked where the ledger stands is aligned", step(4, "round", 4, "in_progress").kind === "aligned");
+  check("a fresh run at stage 1 is sent past its round with a submit", JSON.stringify(step(1, "round", 5, "in_progress")) === JSON.stringify({ kind: "deliver", command: "stage.submit" }));
+  check("a gate below the ledger is left with an approval", JSON.stringify(step(2, "gate", 5, "in_progress")) === JSON.stringify({ kind: "deliver", command: "stage.approve" }));
+  check("stage 7's gate is left with the cost approval", JSON.stringify(step(7, "gate", 8, "in_progress")) === JSON.stringify({ kind: "deliver", command: "cost.approve" }));
+  check("a ledger waiting on approval wants the run at that stage's gate", step(3, "round", 3, "waiting_approval").kind === "deliver" && step(3, "gate", 3, "waiting_approval").kind === "aligned");
+  check("a run ahead of the ledger is not rewound", step(6, "round", 5, "in_progress").kind === "ahead" && step(5, "gate", 5, "in_progress").kind === "ahead");
+  check("a run is never driven through the build stage", step(8, "round", 9, "in_progress").kind === "unsupported");
+  check(
+    "signal names read back as positions",
+    positionOfSignal(2 as Stage, roundSignal(2 as Stage))?.at === "round" &&
+      positionOfSignal(2 as Stage, approveSignal(2 as Stage))?.at === "gate" &&
+      positionOfSignal(2 as Stage, exhaustedSignal(2 as Stage))?.at === "gate" &&
+      positionOfSignal(2 as Stage, "something.else") === null,
+  );
+}
 
 const failed = checks.filter((entry) => !entry.ok);
 
