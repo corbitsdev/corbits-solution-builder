@@ -17,10 +17,13 @@ import type {
   GrantCapability,
   KitSeed,
   PromptRecord,
+  RequiredGrant,
   SkillRecord,
   ToolDeclaration,
 } from "./kit.js";
 import { AGENT_KIT, type AgentRole } from "./kit.js";
+import type { Stage } from "./ledger.js";
+import { baseTemplate } from "./template.js";
 import {
   APPROVAL_WORKFLOW_ID,
   BUILD_SUPERVISION_WORKFLOW_ID,
@@ -165,6 +168,57 @@ function skillsFor(role: AgentRole): string[] {
 function directorFor(role: AgentRole): string {
   const director = DIRECTORS.find((entry) => entry.agents.includes(role.id));
   return director?.key ?? "sb-specialists";
+}
+
+/** Which slot fills which stage, for reading the agent off the template. */
+const STAGE_SLOTS: Partial<Record<Stage, string[]>> = {
+  1: ["discovery-interviewer"],
+  2: ["constraint-mapper"],
+  3: ["proposal-strategy"],
+  4: ["surface-design", "design-feedback"],
+  5: ["audience-package"],
+  6: ["plan-and-review"],
+  7: ["estimate-and-policy"],
+  8: ["build-execution"],
+  9: ["target-verification", "delivery-manifest"],
+};
+
+/**
+ * The grants a stage's agent needs, as Interchange's own requirement manifest.
+ *
+ * §8's read/propose/write split is expressed here rather than in a Builder
+ * table, because this is what the hub resolves at launch into materialized
+ * grants — a grant recorded anywhere else is a description of an authority
+ * rather than the authority itself.
+ *
+ * `source: "invoker"` throughout: an agent acts on the authority of whoever
+ * launched the run, and is satisfied only if that person actually holds the
+ * capability. That is what stops a definition granting itself something its
+ * author could not.
+ */
+export function grantRequirementsFor(stage: Stage): RequiredGrant[] {
+  const seed = kitSeed();
+  const slotAgent = baseTemplate().slots.find((binding) =>
+    STAGE_SLOTS[stage]?.includes(binding.slot),
+  )?.agent;
+  const agent = seed.agents.find((entry) => entry.agent === slotAgent);
+  if (!agent) return [];
+
+  return agent.toolKeys.flatMap((toolKey) => {
+    const tool = seed.tools.find((entry) => entry.key === toolKey);
+    const grant = seed.grants.find((entry) => entry.key === tool?.grantKey);
+    if (!tool || !grant) return [];
+    return [
+      {
+        resource: grant.capability,
+        action: tool.mode,
+        // A capability whose exercise needs a human decision is asked for,
+        // never assumed — §8's "no agent gets human approval authority".
+        effect: grant.requiresApproval ? ("ask" as const) : ("allow" as const),
+        source: "invoker" as const,
+      },
+    ];
+  });
 }
 
 /** The whole kit, derived from the roles that already exist. */

@@ -10,8 +10,9 @@
  * whose breach is invisible at runtime — an agent quietly holding a write
  * grant looks exactly like one that does not.
  */
-import { kitSeed } from "@solutions-builder/app/seed-kit";
+import { kitSeed, grantRequirementsFor } from "@solutions-builder/app/seed-kit";
 import { AGENT_KIT } from "@solutions-builder/app/kit";
+import { STAGES } from "@solutions-builder/app/ledger";
 import { baseTemplate, SLOTS, violationsIn } from "@solutions-builder/app/template";
 import { APP_VERSION, expectedDefinitions } from "@solutions-builder/app/manifest";
 
@@ -113,6 +114,29 @@ check(
   check(
     "and each carries its own model binding",
     new Set(panel.map((agent) => agent.modelKey)).size === 4,
+  );
+}
+
+{
+  // The per-stage grant requirements, moved from the host into the package.
+  const perStage = STAGES.map((stage) => ({ stage, requirements: grantRequirementsFor(stage) }));
+  const empty = perStage.filter((entry) => entry.requirements.length === 0);
+  check(
+    "every stage returns a grant requirement",
+    empty.length === 0,
+    empty.map((entry) => entry.stage).join(", "),
+  );
+  const notInvoker = perStage.flatMap((entry) =>
+    entry.requirements.filter((req) => req.source !== "invoker").map(() => entry.stage),
+  );
+  check("every grant requirement names the invoker as its source", notInvoker.length === 0, notInvoker.join(", "));
+  const writeElsewhere = perStage.filter(
+    (entry) => entry.stage !== 8 && entry.requirements.some((req) => req.action === "write"),
+  );
+  check(
+    "only stage 8 requires a write grant",
+    writeElsewhere.length === 0,
+    writeElsewhere.map((entry) => entry.stage).join(", "),
   );
 }
 

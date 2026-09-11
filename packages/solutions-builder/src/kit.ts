@@ -9,6 +9,7 @@
  * human crosses the gate. No profile here carries approval authority, and none
  * can widen a grant or spend.
  */
+import type { GrantRequirement } from "@intx/types";
 import type { ArtifactKind } from "./artifacts.js";
 import type { Stage } from "./ledger.js";
 
@@ -676,17 +677,16 @@ export type KitSeed = {
 };
 
 /**
- * A grant a workflow definition requires, in Builder's own words.
- *
- * Shaped to what Interchange resolves at launch, but declared here because
- * only the hub's platform files may name the platform's types — the boundary that keeps
- * domain logic free of the runtime it happens to be deployed on.
+ * A grant a workflow definition requires, narrowed from Interchange's own
+ * `GrantRequirement` (`@intx/types`) to what §8's kit ever produces: an
+ * `action` drawn from the read/propose/write split, an `effect` always
+ * stated (never left to the `allow` default), and a `source` that is always
+ * `"invoker"` — an agent acts on the authority of whoever launched the run,
+ * never the definition's author, which is what stops a definition granting
+ * itself something its author could not.
  */
-export type RequiredGrant = {
-  readonly resource: string;
+export type RequiredGrant = GrantRequirement & {
   readonly action: "read" | "propose" | "write";
-  /** `ask` where §8 says exercising it needs a human decision first. */
   readonly effect: "allow" | "ask";
-  /** Resolved against whoever launched the run, never the author. */
   readonly source: "invoker";
 };
