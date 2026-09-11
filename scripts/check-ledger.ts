@@ -150,9 +150,17 @@ for (const terminal of TERMINAL_STATES) {
   const { projectLifecycleDefinition, commandsAtStage, stageStepId } = await import(
     "@solutions-builder/app/workflows/project-lifecycle"
   );
-  const { reviseStepId, exhaustedStepId, roundSignal, approveSignal, exhaustedSignal, loopExits, stageSignal, continuingCommands } = await import(
-    "@solutions-builder/app/workflows/stage-loop"
-  );
+  const {
+    reviseStepId,
+    exhaustedStepId,
+    roundSignal,
+    approveSignal,
+    exhaustedSignal,
+    loopExits,
+    stageSignal,
+    continuingCommands,
+    ROUND_STEP_ID,
+  } = await import("@solutions-builder/app/workflows/stage-loop");
   // stage.draft is the round command that keeps a stage open: it must be a
   // continuing command everywhere, and land on the round signal at every stage.
   if (!continuingCommands().includes("stage.draft")) {
@@ -167,7 +175,14 @@ for (const terminal of TERMINAL_STATES) {
   const definition = projectLifecycleDefinition();
   const steps = definition.steps as Record<
     string,
-    { kind?: string; name?: string; maxIterations?: number; onExhausted?: string; after?: string[]; body?: { steps?: Record<string, { kind?: string; name?: string }> } }
+    {
+      kind?: string;
+      name?: string;
+      maxIterations?: number;
+      onExhausted?: string;
+      after?: string[];
+      body?: { steps?: Record<string, { kind?: string; name?: string }>; stepOrder?: string[] };
+    }
   >;
 
   // Every stage is a bounded revise loop followed by a human gate, both on the
@@ -190,9 +205,22 @@ for (const terminal of TERMINAL_STATES) {
     if (!exhausted || exhausted.kind !== "awaitSignal" || exhausted.name !== exhaustedSignal(stage)) {
       problems.push(`Stage ${stage}'s exhaustion does not end at a human gate`);
     }
-    const round = Object.values(revise.body?.steps ?? {});
-    if (round.length !== 1 || round[0]?.kind !== "awaitSignal" || round[0]?.name !== roundSignal(stage)) {
-      problems.push(`Stage ${stage}'s iteration is not a single round gate`);
+    // The round is the one thing every iteration always has, even once a
+    // drafting round grows a gate and agent steps after it: it must be the
+    // only awaitSignal in the body, and it must run first — nothing else can
+    // be there to receive the signal before it does.
+    const iterationSteps = revise.body?.steps ?? {};
+    const awaitSignals = Object.entries(iterationSteps).filter(([, step]) => step.kind === "awaitSignal");
+    if (
+      awaitSignals.length !== 1 ||
+      awaitSignals[0]?.[0] !== ROUND_STEP_ID ||
+      awaitSignals[0]?.[1].name !== roundSignal(stage)
+    ) {
+      problems.push(`Stage ${stage}'s iteration's round is not its only awaitSignal`);
+    }
+    const iterationOrder = revise.body?.stepOrder;
+    if (iterationOrder && iterationOrder[0] !== ROUND_STEP_ID) {
+      problems.push(`Stage ${stage}'s round does not come first in its iteration`);
     }
     if (!gate || gate.kind !== "awaitSignal" || gate.name !== approveSignal(stage)) {
       problems.push(`The native workflow has no human gate for stage ${stage}`);
@@ -226,9 +254,73 @@ for (const terminal of TERMINAL_STATES) {
     const { mkdtemp, mkdir, symlink, writeFile, rm, realpath } = await import("node:fs/promises");
     const { tmpdir } = await import("node:os");
     const { join } = await import("node:path");
-    const { LIFECYCLE_ENTRY_PATH, lifecycleEntrySource, withoutStateSchemas } = await import(
+    const { LIFECYCLE_ENTRY_PATH, lifecycleEntrySource, withoutStateSchemas, BUILD_STAGE } = await import(
       "@solutions-builder/app/workflows/lifecycle-source"
     );
+    const {
+      BUILD_STEP_ID,
+      DRAFT_STEP_ID,
+      DECIDE_STEP_ID,
+      NO_DRAFT_STEP_ID,
+      EVALUATE_STEP_ID,
+      EVALUATED_STAGE,
+      panelStepId,
+      audienceStepId,
+      reviseStepId: revise,
+    } = await import("@solutions-builder/app/workflows/stage-loop");
+    const { agentFor, agentById, panelPrincipals } = await import("@solutions-builder/app/kit");
+
+    type AgentStepJson = {
+      kind?: string;
+      agent?: {
+        id?: string;
+        toolFactories?: { id?: string }[];
+        inference?: { sources?: { provider?: string; model?: string }[] };
+      };
+      input?: { from?: string };
+      after?: string[];
+    };
+    type IterationJson = {
+      steps?: Record<string, AgentStepJson & { kind?: string; then?: string; else?: string; when?: { from?: string } }>;
+      stepOrder?: string[];
+    };
+    type RenderedDefinition = { steps: Record<string, { body?: IterationJson }> };
+
+    /**
+     * Strips every `step`/`gate`/`escalation` primitive (and its id from
+     * `stepOrder`) out of every iteration body, recursively — the shape a
+     * source-less render never carries, so what remains is exactly what the
+     * in-process, gates-only definition builds. Generalises the old
+     * build-step-only removal to every stage's agent steps at once.
+     */
+    function stripAgentPrimitives(node: unknown): unknown {
+      if (Array.isArray(node)) return node.map(stripAgentPrimitives);
+      if (!node || typeof node !== "object") return node;
+      const obj = node as Record<string, unknown>;
+      if (obj.steps && typeof obj.steps === "object") {
+        const rawSteps = obj.steps as Record<string, { kind?: string }>;
+        const kept: Record<string, unknown> = {};
+        for (const [id, step] of Object.entries(rawSteps)) {
+          if (step && ["step", "gate", "escalation"].includes(step.kind ?? "")) continue;
+          kept[id] = stripAgentPrimitives(step);
+        }
+        const out: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(obj)) {
+          if (key === "steps") {
+            out.steps = kept;
+          } else if (key === "stepOrder" && Array.isArray(value)) {
+            out.stepOrder = (value as string[]).filter((id) => id in kept);
+          } else {
+            out[key] = stripAgentPrimitives(value);
+          }
+        }
+        return out;
+      }
+      const out: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(obj)) out[key] = stripAgentPrimitives(value);
+      return out;
+    }
+
     const dir = await mkdtemp(join(tmpdir(), "sb-lifecycle-source-"));
     try {
       await mkdir(join(dir, "node_modules", "@intx"), { recursive: true });
@@ -242,8 +334,16 @@ for (const terminal of TERMINAL_STATES) {
       await writeFile(join(dir, LIFECYCLE_ENTRY_PATH), lifecycleEntrySource());
       // Written before the first import: Bun caches a directory's listing on
       // first resolution, so a module added afterwards is not found.
-      const withBuild = join(dir, "with-build.js");
-      await writeFile(withBuild, lifecycleEntrySource({ buildSource: { provider: "openai-compatible", model: "probe" } }));
+      const withSourcePath = join(dir, "with-source.js");
+      const source = { provider: "openai-compatible", model: "probe" };
+      await writeFile(withSourcePath, lifecycleEntrySource({ source }));
+      const withAudiencesPath = join(dir, "with-audiences.js");
+      const audiences = [
+        { name: "A", role: "x" },
+        { name: "B", role: "y" },
+      ];
+      await writeFile(withAudiencesPath, lifecycleEntrySource({ source, audiences }));
+
       const evaluated = (await import(join(dir, LIFECYCLE_ENTRY_PATH))) as { default: unknown };
       const rendered = JSON.stringify(evaluated.default);
       const inProcess = JSON.stringify(withoutStateSchemas(definition));
@@ -251,38 +351,116 @@ for (const terminal of TERMINAL_STATES) {
         problems.push("The rendered lifecycle source evaluates to a different definition than the package builds in-process");
       }
 
+      const withSource = (await import(withSourcePath)) as { default: RenderedDefinition };
+      const withSourceSteps = withSource.default.steps;
+
+      // Stripping every step/gate/escalation out of the drafted render must
+      // leave exactly the in-process, gates-only definition: whatever an
+      // offering adds is additive, never a different shape underneath it.
+      if (JSON.stringify(stripAgentPrimitives(withSource.default)) !== inProcess) {
+        problems.push("The lifecycle rendered with a source differs from the package beyond its agent steps");
+      }
+
       // With an offering the build stage's round is followed by the build
       // agent: a real step under the sidecar, with the kit's stage 8 prompt,
-      // the posix tools, and the offering as its declared source. Everything
-      // else must be the same definition.
-      const { BUILD_STAGE } = await import("@solutions-builder/app/workflows/lifecycle-source");
-      const { BUILD_STEP_ID, reviseStepId: revise } = await import("@solutions-builder/app/workflows/stage-loop");
-      const { agentFor } = await import("@solutions-builder/app/kit");
-      const built = (await import(withBuild)) as {
-        default: { steps: Record<string, { body?: { steps?: Record<string, { kind?: string; agent?: { id?: string; toolFactories?: { id?: string }[]; inference?: { sources?: { provider?: string; model?: string }[] } }; after?: string[] }> } }> };
-      };
-      const buildBody = built.default.steps[revise(BUILD_STAGE as never)]?.body?.steps ?? {};
+      // the posix tools, and the offering as its declared source.
+      const buildBody = withSourceSteps[revise(BUILD_STAGE as never)]?.body?.steps ?? {};
       const buildStep = buildBody[BUILD_STEP_ID];
       if (!buildStep || buildStep.kind !== "step" || buildStep.agent?.id !== agentFor(BUILD_STAGE as never).id) {
         problems.push("The build stage's iteration has no agent step for the kit's stage 8 specialist");
       } else {
-        if (!buildStep.after?.includes("round")) problems.push("The build agent does not run after the round gate");
+        if (!buildStep.after?.includes(ROUND_STEP_ID)) problems.push("The build agent does not run after the round gate");
         if (!buildStep.agent?.toolFactories?.some((tool) => tool.id === "@intx/tools-posix/sidecar-bundle")) {
           problems.push("The build agent carries no posix tools");
         }
-        const source = buildStep.agent?.inference?.sources?.[0];
-        if (source?.provider !== "openai-compatible" || source?.model !== "probe") {
+        const declared = buildStep.agent?.inference?.sources?.[0];
+        if (declared?.provider !== source.provider || declared?.model !== source.model) {
           problems.push("The build agent does not declare the offering it was rendered with");
         }
       }
-      const withoutBuild = JSON.parse(JSON.stringify(built.default)) as {
-        steps: Record<string, { body?: { steps?: Record<string, unknown>; stepOrder?: string[] } }>;
-      };
-      const buildIteration = withoutBuild.steps[revise(BUILD_STAGE as never)]?.body;
-      delete buildIteration?.steps?.[BUILD_STEP_ID];
-      if (buildIteration?.stepOrder) buildIteration.stepOrder = buildIteration.stepOrder.filter((id) => id !== BUILD_STEP_ID);
-      if (JSON.stringify(withoutBuild) !== inProcess) {
-        problems.push("The lifecycle with a build agent differs from the package beyond the build step itself");
+
+      // Every drafted stage (everything but 5 and 8) is: round, a decide gate
+      // reading the round's draft flag, and a draft step for the kit's
+      // specialist. Stage 1 also carries the brief evaluator after its draft.
+      for (const stage of STAGES) {
+        if (stage === 5 || (stage as number) === BUILD_STAGE) continue;
+        const iteration = withSourceSteps[revise(stage)]?.body;
+        const decide = iteration?.steps?.[DECIDE_STEP_ID];
+        const draft = iteration?.steps?.[DRAFT_STEP_ID];
+        if (!decide || decide.kind !== "gate" || decide.when?.from !== `steps.${ROUND_STEP_ID}.output.draft`) {
+          problems.push(`Stage ${stage}'s decide gate does not read the round's draft flag`);
+        } else if (decide.then !== DRAFT_STEP_ID || decide.else !== NO_DRAFT_STEP_ID) {
+          problems.push(`Stage ${stage}'s decide gate does not branch to draft/no-draft`);
+        }
+        if (!draft || draft.kind !== "step" || draft.agent?.id !== agentFor(stage).id) {
+          problems.push(`Stage ${stage}'s draft step is not the kit's specialist`);
+        } else if (draft.input?.from !== `steps.${ROUND_STEP_ID}.output.prompt`) {
+          problems.push(`Stage ${stage}'s draft step does not read the round's prompt`);
+        } else if (!draft.after?.includes(DECIDE_STEP_ID)) {
+          problems.push(`Stage ${stage}'s draft step does not follow its decide gate`);
+        }
+        const noDraft = iteration?.steps?.[NO_DRAFT_STEP_ID];
+        if (!noDraft || noDraft.kind !== "escalation" || !noDraft.after?.includes(DECIDE_STEP_ID)) {
+          problems.push(`Stage ${stage} has no no-draft escalation after its decide gate`);
+        }
+        if (stage === EVALUATED_STAGE) {
+          const evaluator = agentById("brief-evaluator");
+          const evaluate = iteration?.steps?.[EVALUATE_STEP_ID];
+          if (!evaluate || evaluate.kind !== "step" || evaluate.agent?.id !== evaluator?.id) {
+            problems.push("Stage 1 has no brief-evaluator step after its draft");
+          } else if (evaluate.input?.from !== `steps.${DRAFT_STEP_ID}.output.reply`) {
+            problems.push("Stage 1's evaluator does not read the draft's reply");
+          } else if (!evaluate.after?.includes(DRAFT_STEP_ID)) {
+            problems.push("Stage 1's evaluator does not follow the draft");
+          }
+        }
+      }
+
+      // Stage 6: the architect drafts, then the four panel principals review
+      // it in order, each after the last, all reading the same draft reply.
+      {
+        const iteration = withSourceSteps[revise(6 as never)]?.body;
+        let previous = DRAFT_STEP_ID;
+        for (const role of panelPrincipals()) {
+          const specialty = role.id.replace(/^senior-engineer-/, "");
+          const stepId = panelStepId(specialty);
+          const review = iteration?.steps?.[stepId];
+          if (!review || review.kind !== "step" || review.agent?.id !== role.id) {
+            problems.push(`Stage 6 has no ${stepId} step for ${role.id}`);
+          } else if (review.input?.from !== `steps.${DRAFT_STEP_ID}.output.reply`) {
+            problems.push(`Stage 6's ${stepId} does not read the draft's reply`);
+          } else if (!review.after?.includes(previous)) {
+            problems.push(`Stage 6's ${stepId} does not follow ${previous}`);
+          }
+          previous = stepId;
+        }
+      }
+
+      // Stage 5: one package step per audience, in order, each reading its
+      // own slot of the round's rendered prompts.
+      {
+        const withAudiences = (await import(withAudiencesPath)) as { default: RenderedDefinition };
+        const iteration = withAudiences.default.steps[revise(5 as never)]?.body;
+        let previous = DECIDE_STEP_ID;
+        audiences.forEach((_audience, index) => {
+          const stepId = audienceStepId(index);
+          const packageStep = iteration?.steps?.[stepId];
+          if (!packageStep || packageStep.kind !== "step" || packageStep.agent?.id !== agentFor(5 as never).id) {
+            problems.push(`Stage 5 has no ${stepId} step for the kit's presentation specialist`);
+          } else if (packageStep.input?.from !== `steps.${ROUND_STEP_ID}.output.prompts[${index}]`) {
+            problems.push(`Stage 5's ${stepId} does not read prompts[${index}]`);
+          } else if (!packageStep.after?.includes(previous)) {
+            problems.push(`Stage 5's ${stepId} does not follow ${previous}`);
+          }
+          previous = stepId;
+        });
+
+        // Zero audiences renders no package step and no gate either — a
+        // stage with no agent step stays gates-only, exactly like today.
+        const noAudiences = withSourceSteps[revise(5 as never)]?.body;
+        if (Object.keys(noAudiences?.steps ?? {}).some((id) => id !== ROUND_STEP_ID)) {
+          problems.push("Stage 5 with no audiences renders more than the round");
+        }
       }
     } finally {
       await rm(dir, { recursive: true, force: true });

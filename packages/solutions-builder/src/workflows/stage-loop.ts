@@ -26,6 +26,7 @@ import {
   type WorkflowDefinition,
 } from "@intx/workflow";
 import { LEDGER, type Command, type Stage } from "../ledger.js";
+import { panelPrincipals } from "../kit.js";
 
 export const STAGE_WORKFLOW_ID = "solutions-builder.stage";
 
@@ -34,6 +35,60 @@ export const MAX_REVISIONS = 24;
 
 /** The one step inside an iteration: the round waits to hear what the person did. */
 export const ROUND_STEP_ID = "round";
+
+/** The step that runs the stage's specialist once a round asks for a draft. */
+export const DRAFT_STEP_ID = "draft";
+/** The gate after the round: does this round's command ask for a draft? */
+export const DECIDE_STEP_ID = "decide";
+/** The gate's empty branch — pure data, taken when there is nothing to draft. */
+export const NO_DRAFT_STEP_ID = "no-draft";
+/** The advisory brief-evaluator step, stage 1 only. */
+export const EVALUATE_STEP_ID = "evaluate";
+/** The one stage whose draft is followed by the brief evaluator. */
+export const EVALUATED_STAGE: Stage = 1;
+/**
+ * How long one drafting agent step may run before the runtime fails it.
+ * Matches `DEFAULT_TIMEOUT_MS` in `apps/hub/src/inference.ts`, the timeout
+ * the host itself uses for an inference call of this shape.
+ */
+export const DRAFT_STEP_TIMEOUT_MS = 15 * 60 * 1000;
+
+/** The step id for one of stage 6's panel principals reviewing the draft. */
+export function panelStepId(specialty: string): string {
+  return `review-${specialty}`;
+}
+
+/** The step id for one of stage 5's per-audience packaging steps. */
+export function audienceStepId(index: number): string {
+  return `package-${index}`;
+}
+
+/** A panel principal's short specialty id, read off its seeded role id. */
+function panelSpecialty(roleId: string): string {
+  const specialty = roleId.replace(/^senior-engineer-/, "");
+  if (specialty === roleId) throw new Error(`Not a panel principal role: ${roleId}`);
+  return specialty;
+}
+
+/**
+ * The agent step ids a stage contributes to its iteration, in run order —
+ * the same order the rendered lifecycle wires them with `after`. Stage 8
+ * keeps its own build step outside this shape (see `BUILD_STEP_ID`), and a
+ * stage 5 with no audiences contributes none: nothing to package, so the
+ * stage stays gates-only.
+ */
+export function agentStepIds(stage: Stage, audienceCount: number): string[] {
+  if (stage === 5) {
+    return Array.from({ length: audienceCount }, (_unused, index) => audienceStepId(index));
+  }
+  if (stage === 6) {
+    return [DRAFT_STEP_ID, ...panelPrincipals().map((role) => panelStepId(panelSpecialty(role.id)))];
+  }
+  if (stage === EVALUATED_STAGE) {
+    return [DRAFT_STEP_ID, EVALUATE_STEP_ID];
+  }
+  return [DRAFT_STEP_ID];
+}
 
 /**
  * Commands that leave `stage.in_progress` at this stage, from the ledger.
@@ -110,12 +165,17 @@ export function exhaustedSignal(stage: Stage): string {
   return `${STAGE_WORKFLOW_ID}.${stage}.approve-after-exhaustion`;
 }
 
-export type StageSignal = { readonly name: string; readonly payload: { readonly command: Command } };
+export type StageSignal = {
+  readonly name: string;
+  readonly payload: { readonly command: Command; readonly draft: boolean };
+};
 
 /**
  * The signal a ledger command lands as. A round command ends the current
  * round; every other stage command resolves the gate. The command rides in the
- * payload so the loop's own functions can read it.
+ * payload so the loop's own functions can read it; `draft` is what the
+ * iteration's `decide` gate reads to tell a drafting round from any other
+ * command that also happens to keep the stage open.
  */
 export function stageSignal(
   stage: Stage,
@@ -127,7 +187,7 @@ export function stageSignal(
     : gate === "gate"
       ? approveSignal(stage)
       : exhaustedSignal(stage);
-  return { name, payload: { command } };
+  return { name, payload: { command, draft: command === "stage.draft" } };
 }
 
 export function reviseStepId(stage: Stage): string {
