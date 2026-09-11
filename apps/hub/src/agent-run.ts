@@ -167,6 +167,22 @@ async function draftWith(
   // outer fence is a kindness to the reviewer, not a licence to reinterpret
   // the draft: nothing else about the text is touched.
   const cleaned = stripOuterFence(result.text);
+  console.log(
+    `${agent.title}: ${cleaned.length} characters, ${result.outputTokens ?? "unknown"} output tokens, ${result.model}`,
+  );
+
+  // A design is one HTML document, and one that stops before its closing tag
+  // was cut short on the way here: a dropped stream, a limit the provider
+  // did not report. The preview would show its background and nothing else,
+  // so it is refused now, with the size, rather than recorded as a version.
+  if (/^\s*<(!doctype html|html)\b/i.test(cleaned) && !/<\/html>\s*$/i.test(cleaned)) {
+    throw new HostError(
+      "provider_unavailable",
+      `${agent.title} returned a design cut short after ${cleaned.length} characters: the document has no closing tag. Nothing was recorded. Try again.`,
+      {},
+      true,
+    );
+  }
 
   // Boundary validation, once, here. Persistence is what makes it an artifact.
   const draft = ArtifactDraft({

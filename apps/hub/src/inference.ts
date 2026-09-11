@@ -285,6 +285,19 @@ async function completeWith(
     }
   }
 
+  // A model that used every token it was allowed stopped mid-sentence, and a
+  // draft cut short is not a draft. Said here, once, rather than stored and
+  // discovered when the document fails to render.
+  const limit = request.maxTokens ?? 4096;
+  if (outputTokens !== null && outputTokens >= limit) {
+    throw new HostError(
+      "provider_unavailable",
+      `${provider.label} stopped at its output limit of ${limit} tokens, so the reply is cut short and nothing was recorded. Try again.`,
+      {},
+      true,
+    );
+  }
+
   return { text, providerId: provider.providerId, model, inputTokens, outputTokens };
   }
 }
