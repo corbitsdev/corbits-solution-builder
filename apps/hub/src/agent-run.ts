@@ -19,6 +19,7 @@ import { type } from "arktype";
 import { ArtifactDraft } from "./domain.js";
 import { HostError, ReplyCutShort } from "./errors.js";
 import {
+  DESIGNER_TOKENS_DEFAULT,
   DESIGNER_TOKENS_MAX,
   designerGuidance,
   designerSettings,
@@ -154,7 +155,7 @@ async function draftWith(
   // happens when a design is cut short is their policy.
   const designer = agent.produces === "design_artifact" ? await designerSettings() : null;
   let system = designer ? `${agent.system}\n\n${designerGuidance(designer)}` : agent.system;
-  let maxTokens = designer?.maxTokens ?? 8000;
+  let maxTokens = designer?.maxTokens ?? DESIGNER_TOKENS_DEFAULT;
   let note: string | undefined;
 
   beginLiveDraft(args.projectId, args.stage);

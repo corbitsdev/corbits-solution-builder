@@ -17,7 +17,11 @@ import { designerSettingsFile } from "./paths.js";
 
 export const DESIGNER_TOKENS_MIN = 1_000;
 export const DESIGNER_TOKENS_MAX = 64_000;
-export const DESIGNER_TOKENS_DEFAULT = 8_000;
+/**
+ * A real design — every state shown, an id on every element, three note
+ * sections — runs 20,000 to 40,000 tokens. 8,000 cut most of them short.
+ */
+export const DESIGNER_TOKENS_DEFAULT = 32_000;
 
 const Settings = type({
   /** What the mockup is drawn on. `brief` leaves it to the document's brief. */
