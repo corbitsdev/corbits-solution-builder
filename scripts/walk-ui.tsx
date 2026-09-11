@@ -210,6 +210,9 @@ function Conversation({ withDocument }: { withDocument?: boolean }) {
       content={brief}
       turns={turns}
       openQuestion={{ remaining: 4, ordinal: 1 }}
+      // Renders the evaluator's ready cue on the approve control, so the
+      // layout gate sees it rather than only the un-evaluated state.
+      evaluation={{ ready: true, notes: [] }}
       canSubmit
       soloApproval
       busy={null}

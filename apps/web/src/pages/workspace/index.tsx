@@ -18,6 +18,7 @@ import {
   ApiFailure,
   type ArtifactNode,
   type DesignFeedback,
+  type Evaluation,
   type ProjectDetail,
   type Quote,
   type StageTurn,
@@ -60,6 +61,7 @@ export function StageWorkspace({
   const [content, setContent] = useState<string>("");
   const [turns, setTurns] = useState<StageTurn[]>([]);
   const [openQuestion, setOpenQuestion] = useState<{ remaining: number; ordinal: number } | null>(null);
+  const [evaluation, setEvaluation] = useState<Evaluation | null>(null);
 
   const current = detail.current;
   const stage = current?.stage ?? 1;
@@ -148,10 +150,12 @@ export function StageWorkspace({
       const result = await api.thread(detail.project.id, stage);
       setTurns(result.turns);
       setOpenQuestion(result.open);
+      setEvaluation(result.evaluation ?? null);
     } catch (cause) {
       // An empty thread and a thread that could not be read look identical on
       // screen — and that screen then asks for what the person already said.
       setTurns([]);
+      setEvaluation(null);
       setError(
         `The conversation for this stage could not be read: ${
           cause instanceof ApiFailure ? cause.detail.message : String(cause)
@@ -214,6 +218,7 @@ export function StageWorkspace({
         <StageGate
           soloApproval={detail.soloApproval}
           busy={busy === "submit"}
+          evaluation={evaluation}
           onApprove={() =>
             run("submit", () =>
               api.decide(detail.project.id, {
@@ -336,6 +341,7 @@ export function StageWorkspace({
           canSubmit={inProgress}
           turns={turns}
           openQuestion={openQuestion}
+          evaluation={evaluation}
           onRevise={(message: string, quotes: Quote[], revise?: boolean) => {
             // Shown before the round trip. A message that leaves the box and
             // appears nowhere reads as lost, and the person writes it again.
