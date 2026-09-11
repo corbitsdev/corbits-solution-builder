@@ -140,7 +140,13 @@ for (const file of files) {
   {
     const platform = external.filter((name) => startsWithAny(name, PLATFORM_PACKAGES));
     const runtimeOnly = platform.every((name) => startsWithAny(name, RUNTIME_PACKAGES));
-    const allowed = PLATFORM_FILE.test(path) || (area === "hub" && runtimeOnly);
+    // `@intx/types` sits in both lists: it is a platform package (its home is
+    // vendor/interchange) and the one the app package rule above already
+    // names as allowed, because they are types, not internals. Without this
+    // clause the two rules contradict each other and no package file could
+    // ever import it.
+    const packageAllowed = area === "package" && platform.every((name) => startsWithAny(name, PACKAGE_ALLOWED));
+    const allowed = PLATFORM_FILE.test(path) || (area === "hub" && runtimeOnly) || packageAllowed;
     if (platform.length > 0 && !allowed) {
       violations.push({
         file: path,

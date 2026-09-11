@@ -137,12 +137,31 @@ for (const stage of [1, 2, 3, 4] as Stage[]) {
   const run = detail.current!;
   const node = await produce(stage, projectId, run.id);
 
+  if (stage === 1) {
+    const drafted = await command("stage.draft", projectId, {
+      runId: run.id,
+      message: "Here's the problem as I see it.",
+      quotes: [],
+    });
+    check(
+      "stage.draft from in_progress is accepted and leaves the run open at the same stage",
+      drafted.stage === 1 && drafted.state === "in_progress",
+      `stage=${drafted.stage} state=${drafted.state}`,
+    );
+  }
+
   await command("stage.submit", projectId, {
     runId: run.id,
     versions: [{ artifactId: node.artifactId, versionId: node.nodeId, contentHash: node.contentHash }],
   });
 
   if (stage === 1) {
+    await refuses(
+      "stage.draft after stage.submit is refused: the stage is waiting_approval, not in_progress",
+      "wrong_state",
+      () => command("stage.draft", projectId, { runId: run.id, message: "One more pass?", quotes: [] }),
+    );
+
     const waiting = await projectDetail(projectId, ACTOR.principalId);
     check(
       "submitting puts a decision in the queue, derived from the parked run",

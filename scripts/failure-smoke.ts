@@ -14,6 +14,7 @@
  */
 import { describeProviderFailure, humanDuration } from "../apps/hub/src/failure.js";
 import { aggregateRefusal } from "../apps/hub/src/inference.js";
+import { cutShortTwice } from "../apps/hub/src/designer-settings.js";
 
 const checks: { name: string; ok: boolean; detail: string }[] = [];
 function check(name: string, ok: boolean, detail = "") {
@@ -128,6 +129,35 @@ check("a short reset reads as words", humanDuration(30) === "in under a minute")
   check(
     "a refusal that only mentions the word in passing still retries rather than failing shut",
     retriesWithoutTemperature(new Error("Unsupported parameter: temperature")),
+  );
+}
+
+// The designer's limit policy retries once. A retry that is cut short too is
+// reported as the second failure it is, naming both attempts, not as a repeat
+// of the first — which read as though the policy had never run.
+{
+  const reduced = cutShortTwice({
+    title: "Experience designer",
+    onLimit: "reduce",
+    firstLimit: 8000,
+    secondLimit: 8000,
+  });
+  check(
+    "a lower-resolution retry that was cut short says both attempts ran",
+    reduced.includes("twice") && reduced.includes("lower resolution") && reduced.includes("8000"),
+    reduced,
+  );
+  check("and still points at the setting", reduced.includes("Settings, Designer"));
+  const raised = cutShortTwice({
+    title: "Experience designer",
+    onLimit: "raise",
+    firstLimit: 8000,
+    secondLimit: 16000,
+  });
+  check(
+    "a raised-limit retry that was cut short names both limits",
+    raised.includes("8000") && raised.includes("16000"),
+    raised,
   );
 }
 

@@ -97,6 +97,13 @@ export type MountedHub = {
     fence(allocationId: string, generation: number): void;
     connected(): string[];
   };
+  /**
+   * The sidecar router's event emitter, re-emitting frames such as
+   * `agent.event` (an agent step's live inference stream) after the wire
+   * layer decodes them. Exposed so the host can feed the live-draft pane
+   * from a run's own signals instead of an in-process callback.
+   */
+  readonly events: ReturnType<typeof createSidecarRouter>["events"];
 };
 
 let mounted: MountedHub | null = null;
@@ -392,6 +399,7 @@ export async function mountHub(): Promise<MountedHub> {
       fence: (allocationId, generation) => socketRouter.fenceAllocation(allocationId, generation),
       connected: () => socketRouter.getConnectedSidecars(),
     },
+    events: sidecarRouter.events,
   };
   return mounted;
 }

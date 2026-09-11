@@ -163,6 +163,10 @@ export const ArtifactDraft = type({
     /** Stated by the agent, lifted from the draft's own headings. */
     "assumptions?": "string[]",
     "questions?": "string[]",
+    /** `<childRunId>/<stepId>` of the agent step that produced this version. */
+    "stepRef?": "string > 0",
+    /** The standing brief this version was drafted against, when compacted. */
+    "brief?": "string",
   },
 });
 export type ArtifactDraft = typeof ArtifactDraft.infer;

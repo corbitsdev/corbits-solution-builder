@@ -113,3 +113,23 @@ entry" and nothing else.
 **What changed.** The workflow-entry import error appends the cause's message.
 
 **Upstream-able.** Yes.
+
+## `packages/hub-sessions/src/workflow-run-reader.ts`, `packages/hub-api/src/routes/workflows.ts` — HTTP route for run blobs
+
+**Why.** Step outputs whose JSON exceeds the 1 MiB inline threshold spill to
+`runs/<runId>/blobs/<sha256>` on the deployment's workflow-run repo
+(`workflow-host/src/adapters/blob-substrate.ts`). The vendored hub has a route
+for the run's event log (`GET /:runId/runs/:eventRunId/events`) but none to
+fetch a spilled blob's bytes, so a hub client cannot read a large step output
+at all.
+
+**What changed.** `WorkflowRunReader` gains `readRunBlob(repoId, ref, runId,
+sha)`, validating `sha` against the same 64-hex shape the workflow-run kind
+handler enforces at push time and returning `null` when the repo, ref, run, or
+blob is absent. `hub-api/src/routes/workflows.ts` adds
+`GET /:runId/runs/:eventRunId/blobs/:sha`, guarded the same way as the events
+route, returning the bytes as `application/octet-stream`, 404 when the reader
+returns null, 400 when `sha` is malformed.
+
+**Upstream-able.** Yes; it is a read-only addition alongside the existing
+events route, following the same shape.

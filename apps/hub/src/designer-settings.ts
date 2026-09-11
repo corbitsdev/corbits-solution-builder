@@ -91,6 +91,26 @@ export function designerGuidance(settings: DesignerSettings): string {
 }
 
 /** Added to a retry after a design was cut short, under the `reduce` policy. */
+/**
+ * What a person is told when the retry the policy asked for was cut short as
+ * well. Said in full: the policy fired, both attempts ran, both failed, and how
+ * the second differed. A second failure worded like a first makes the policy
+ * look as though it never ran.
+ */
+export function cutShortTwice(args: {
+  title: string;
+  onLimit: "raise" | "reduce";
+  firstLimit: number;
+  secondLimit: number;
+}): string {
+  const second =
+    args.onLimit === "raise"
+      ? `a second at the raised limit of ${args.secondLimit} tokens was cut short too`
+      : "a second at lower resolution within the same limit was cut short too";
+  const next = args.onLimit === "raise" ? "raise the limit further" : "raise the limit";
+  return `${args.title} was cut short twice: the first attempt used every one of its ${args.firstLimit} tokens, and ${second}. Nothing was recorded. In Settings, Designer, you can ${next}.`;
+}
+
 export function lowerResolutionGuidance(limit: number): string {
   return [
     `Lower resolution. The previous attempt did not fit in ${limit} tokens and was cut short.`,

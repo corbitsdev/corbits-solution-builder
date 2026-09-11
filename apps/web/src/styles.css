@@ -1972,6 +1972,19 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   max-width: 52ch;
 }
 
+/* How long the wait has been, and how long is normal. */
+.elapsed {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--wb-muted-foreground);
+}
+
+.elapsed-clock {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--wb-foreground);
+}
+
 .preparing-tip {
   margin: 0;
   min-height: 3em;

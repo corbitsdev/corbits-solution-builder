@@ -67,8 +67,12 @@ export function StageWorkspace({
   // The panel's reviews live at stage 6 alongside the plan, but they are not
   // versions of it: mixing them into one version selector reads as five drafts
   // of the same document when it is one document and four opinions of it.
+  // Design feedback is recorded as a stage-4 node too, and is a record of what
+  // was said about a version, not a version: the newest node after feedback is
+  // the feedback, and a gate that named it would approve the wrong thing.
   const stageNodes = detail.nodes.filter(
-    (node) => node.stage === stage && node.kind !== "engineering_review",
+    (node) =>
+      node.stage === stage && node.kind !== "engineering_review" && node.kind !== "design_feedback",
   );
   const panelReviews = detail.nodes.filter(
     (node) => node.stage === stage && node.kind === "engineering_review",
@@ -448,6 +452,21 @@ function DesignPanel({ detail, onChanged }: { detail: ProjectDetail; onChanged: 
         designs={designs}
         feedbackByNode={feedbackByNode}
         contentByNode={contentByNode}
+        approval={{
+          soloApproval: detail.soloApproval,
+          canApprove: detail.current?.state === "in_progress",
+          // One decision when nobody else can take it, as on the written
+          // stages: submitting a thing to yourself and then approving it is
+          // two clicks for one act.
+          onApprove: (design) =>
+            (detail.soloApproval ? api.decide : api.submit)(detail.project.id, {
+              expectedRevision: detail.project.revision,
+              runId: detail.current!.id,
+              versions: [
+                { artifactId: design.artifactId, versionId: design.id, contentHash: design.contentHash },
+              ],
+            }),
+        }}
         onChanged={() => {
           void load();
           onChanged();
@@ -542,6 +561,7 @@ function BuildPanel({ detail, onChanged }: { detail: ProjectDetail; onChanged: (
   const final = events.find((event) => event.type === "bridge.final");
 
   return (
+    <div data-tour="build-panel">
     <Screen
       title="Build supervision"
       status={
@@ -600,6 +620,7 @@ function BuildPanel({ detail, onChanged }: { detail: ProjectDetail; onChanged: (
         <p className="inline-note">No build attempt has reported yet.</p>
       )}
     </Screen>
+    </div>
   );
 }
 

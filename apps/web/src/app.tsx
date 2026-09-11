@@ -643,7 +643,7 @@ export function App() {
                   {/* Imported and never rendered, so the walkthrough simply
                       did not exist. It runs once, on the surface it describes,
                       and remembers that it has. */}
-                  <StageTour enabled={detail.current !== null} />
+                  <StageTour enabled={detail.current !== null} stage={detail.current?.stage ?? 1} />
                   <StageWorkspace
                     detail={detail}
                     draftOpen={draftOpen}

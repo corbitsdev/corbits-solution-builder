@@ -9,7 +9,7 @@ import { agentFor, panelPrincipals, type AgentRole } from "@solutions-builder/ap
 import { assumptionsIn, questionsIn, summaryIn } from "@solutions-builder/app/document";
 import { renderStageContext, stageContext, type StageContext } from "./agent-conversation.js";
 import { appendHumanTurn, appendSpecialistTurn, type Quote } from "./hub-conversation.js";
-import { beginLiveDraft, endLiveDraft, updateLiveDraft } from "./live-drafts.js";
+import { beginLiveDraft, endLiveDraft, stripOuterFence, updateLiveDraft } from "./live-drafts.js";
 import { complete } from "./inference.js";
 import { readArtifactNode, writeArtifact } from "./projects.js";
 import { database } from "./db.js";
@@ -21,6 +21,7 @@ import { HostError, ReplyCutShort } from "./errors.js";
 import {
   DESIGNER_TOKENS_DEFAULT,
   DESIGNER_TOKENS_MAX,
+  cutShortTwice,
   designerGuidance,
   designerSettings,
   lowerResolutionGuidance,
@@ -140,6 +141,9 @@ async function draftWith(
   },
 ): Promise<StageDraftResult> {
   const inputs = await approvedInputs(args.projectId, args.stage);
+  if (!agent.produces) {
+    throw new HostError("validation_failed", `${agent.title} produces no artifact; it cannot draft.`);
+  }
 
   const prompt = buildDraftPrompt({
     projectTitle: args.projectTitle,
@@ -156,6 +160,7 @@ async function draftWith(
   const designer = agent.produces === "design_artifact" ? await designerSettings() : null;
   let system = designer ? `${agent.system}\n\n${designerGuidance(designer)}` : agent.system;
   let maxTokens = designer?.maxTokens ?? DESIGNER_TOKENS_DEFAULT;
+  const firstLimit = maxTokens;
   let note: string | undefined;
 
   beginLiveDraft(args.projectId, args.stage);
@@ -189,7 +194,21 @@ async function draftWith(
       } catch (cause) {
         // One more attempt, and only for a design, and only as the person's
         // settings say. Anything else is the failure it was.
-        if (!(cause instanceof ReplyCutShort) || !designer || attempt > 0) throw cause;
+        if (!(cause instanceof ReplyCutShort) || !designer) throw cause;
+        // The retry was cut short as well. Said as the second failure it is,
+        // not as a repeat of the first: the person needs to know the policy
+        // ran and was not enough.
+        if (attempt > 0) {
+          throw new ReplyCutShort(
+            cutShortTwice({
+              title: agent.title,
+              onLimit: designer.onLimit === "raise" ? "raise" : "reduce",
+              firstLimit,
+              secondLimit: maxTokens,
+            }),
+            cause.limit,
+          );
+        }
         const limit = maxTokens;
         if (designer.onLimit === "raise") {
           const raised = Math.min(limit * 2, DESIGNER_TOKENS_MAX);
@@ -264,12 +283,6 @@ async function draftWith(
     model: result.model,
     content: result.text,
   };
-}
-
-function stripOuterFence(text: string): string {
-  const trimmed = text.trim();
-  const match = /^```[a-zA-Z]*\n([\s\S]*?)\n?```$/.exec(trimmed);
-  return match?.[1] ?? trimmed;
 }
 
 /**

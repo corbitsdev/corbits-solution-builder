@@ -1,3 +1,4 @@
+import { Check } from "lucide-react";
 import {
   Textarea,
   EmptyState,
@@ -29,6 +30,7 @@ import {
   type DesignFeedback,
 } from "../client.js";
 import { Banner, Button, Field, Screen, StateLabel, shortHash } from "../components.jsx";
+import { Elapsed } from "./workspace/elapsed.jsx";
 
 type PendingComment = { anchor: DesignAnchor; body: string };
 
@@ -65,17 +67,30 @@ export function anchorLabel(anchor: DesignAnchor): string {
   return anchor.domPath ?? "(whole design)";
 }
 
+/**
+ * How the design on screen moves on. `canApprove` is false while the stage is
+ * not open for it — waiting on a decision already, or routed back — and the
+ * row is not drawn then.
+ */
+export type DesignApproval = {
+  soloApproval: boolean;
+  canApprove: boolean;
+  onApprove: (design: ArtifactNode) => Promise<unknown>;
+};
+
 export function DesignFeedbackView({
   projectId,
   designs,
   feedbackByNode,
   contentByNode,
+  approval,
   onChanged,
 }: {
   projectId: string;
   designs: ArtifactNode[];
   feedbackByNode: Map<string, { feedback?: DesignFeedback; prompt?: string }>;
   contentByNode: Map<string, string>;
+  approval: DesignApproval;
   onChanged: () => void;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(designs.at(-1)?.id ?? null);
@@ -170,6 +185,30 @@ export function DesignFeedbackView({
 
   return (
     <>
+      {/* The way forward, first and in plain sight. A screen that offers
+          feedback and a next version but no approval reads as a screen you
+          cannot leave — the guide was telling people to approve, and nothing
+          on the page let them. */}
+      {design && approval.canApprove ? (
+        <div className="stage-gate" role="status">
+          <span className="stage-gate-dot" aria-hidden="true" />
+          <p>
+            {approval.soloApproval
+              ? `Happy with version ${design.version}? Approving it starts the next stage. To change it first, switch Mode to Feedback and say what should change.`
+              : `Version ${design.version} goes to the people who decide when you send it. To change it first, switch Mode to Feedback.`}
+          </p>
+          <Button
+            variant="primary"
+            loading={busy === "approve"}
+            disabled={busy !== null && busy !== "approve"}
+            onClick={() => run("approve", () => approval.onApprove(design))}
+          >
+            <Check aria-hidden="true" />
+            {approval.soloApproval ? "Approve and continue" : "Send for approval"}
+          </Button>
+        </div>
+      ) : null}
+      <div data-tour="design-feedback">
       <Screen
         title="Design feedback"
         description="Click an element to anchor a comment."
@@ -236,6 +275,7 @@ export function DesignFeedbackView({
           }}
         />
       </Screen>
+      </div>
 
       {feedbackMode && !submitted ? (
         <Screen title="Anchored comments">
@@ -320,6 +360,7 @@ export function DesignFeedbackView({
 
           <Button
             variant="primary"
+            data-tour="design-submit"
             loading={busy === "submit"}
             disabled={!design}
             onClick={() =>
@@ -377,7 +418,9 @@ export function DesignFeedbackView({
               onClick={() => run("revise", () => api.reviseDesign(projectId, design!.id))}
             >
               Generate the next design version
-            </Button>{stored?.prompt ? (
+            </Button>
+            {busy === "revise" ? <Elapsed stage={4} /> : null}
+            {stored?.prompt ? (
               <div className="artifact">
                 <pre>{stored.prompt}</pre>
               </div>
