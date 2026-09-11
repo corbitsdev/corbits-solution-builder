@@ -1438,7 +1438,8 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
    itself can run edge to edge. */
 /* The design review inside a filling stage: the one region there that
    scrolls, so the frame, the comments and the form are all reachable. */
-.design-review {
+.design-review,
+.stage-scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;

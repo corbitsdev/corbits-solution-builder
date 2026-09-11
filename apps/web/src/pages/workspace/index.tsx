@@ -371,9 +371,23 @@ export function StageWorkspace({
 
       {stage === 4 ? <DesignPanel detail={detail} onChanged={onChanged} /> : null}
 
-      {stage === 5 ? <AudiencePackages detail={detail} onChanged={onChanged} /> : null}
+      {/* The stage fills the window and clips, so a stage that is a stack of
+          screens rather than the document layout needs a region of its own
+          to scroll, as the design review has. Without one, whatever sits
+          below the fold — the decisions table, the rationale — cannot be
+          reached at all. */}
+      {stage === 5 ? (
+        <div className="stage-scroll">
+          <AudiencePackages detail={detail} onChanged={onChanged} />
+        </div>
+      ) : null}
 
-      {stage === 8 ? <BuildPanel detail={detail} onChanged={onChanged} /> : null}
+      {stage === 8 ? (
+        <div className="stage-scroll">
+          <BuildPanel detail={detail} onChanged={onChanged} />
+          {live.length > 0 ? <PacketSummary detail={detail} onChanged={onChanged} /> : null}
+        </div>
+      ) : null}
 
       {panelReviews.length > 0 ? <PanelReviews reviews={panelReviews} /> : null}
 
@@ -438,7 +452,7 @@ export function StageWorkspace({
       ) : null}
 
 
-      {live.length > 0 && stage >= 7 ? <PacketSummary detail={detail} onChanged={onChanged} /> : null}
+      {live.length > 0 && stage >= 7 && stage !== 8 ? <PacketSummary detail={detail} onChanged={onChanged} /> : null}
     </div>
   );
 }
