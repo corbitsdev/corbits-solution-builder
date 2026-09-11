@@ -25,7 +25,7 @@ import {
   type StageSignal,
 } from "@solutions-builder/app/workflows/stage-loop";
 import { deploymentRuns, HubApiError, type HubRunEvent } from "./hub-client.js";
-import { ensureLifecycleDeployment } from "./workflow-deploy.js";
+import { deploymentIsLive, ensureLifecycleDeployment } from "./workflow-deploy.js";
 
 /** What a signal delivery actually did, so a caller can tell nothing from broken. */
 export type DeliveryOutcome = "delivered" | "no_execution" | "failed";
@@ -257,6 +257,9 @@ const ENDED = new Set(["completed", "failed", "cancelled"]);
  */
 const STALLED_AFTER_MS = 60_000;
 
+/** How often the wait for a park re-reads whether the deployment is still live. */
+const LIVENESS_CHECK_MS = 2_000;
+
 /**
  * The deployment has fired its lifecycle run and nothing on it will ever
  * park again: every run under it has ended, or the runs sit with nothing
@@ -280,7 +283,16 @@ function anchorIsDead(_anchor: string, runs: FoldedRun[]): boolean {
  */
 async function parkedPosition(anchor: string, waitMs: number): Promise<Parked | "dead" | null> {
   const deadline = Date.now() + waitMs;
+  let checkLiveAt = 0;
   for (;;) {
+    // The platform gives up on a sidecar that never dials back in and
+    // releases the deployment under the run; nothing sent to it since was
+    // delivered, and nothing will be. Read that as dead as soon as it lands
+    // rather than after the full wait.
+    if (Date.now() >= checkLiveAt) {
+      checkLiveAt = Date.now() + LIVENESS_CHECK_MS;
+      if (!(await deploymentIsLive(anchor))) return "dead";
+    }
     const runs = await foldRuns(anchor);
     if (anchorIsDead(anchor, runs)) return "dead";
     const parked = parkedSteps(runs).find(
@@ -349,7 +361,14 @@ async function alignOnce(projectId: string, ledger: LedgerPosition): Promise<"al
       throw new HubApiError(409, anchor, "the deployment's run has ended");
     }
     if (!parked || parked.signalName === null) {
-      console.error(`[executor] ${projectId}: the run never parked, so it could not be brought to stage ${ledger.stage}.`);
+      // The shape of every run under the deployment goes with the message:
+      // which steps are parked or in flight, and what failed. Without it the
+      // line says only that a wait ran out.
+      const shape = (await debugRuns(projectId)) as Record<string, { kinds?: unknown } | unknown>;
+      for (const value of Object.values(shape)) if (value && typeof value === "object") delete (value as { kinds?: unknown }).kinds;
+      console.error(
+        `[executor] ${projectId}: the run never parked, so it could not be brought to stage ${ledger.stage}. ${JSON.stringify(shape)}`,
+      );
       return "failed";
     }
     const position = positionOfSignal(parked.stage, parked.signalName)!;
