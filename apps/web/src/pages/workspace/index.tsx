@@ -434,7 +434,10 @@ function DesignPanel({ detail, onChanged }: { detail: ProjectDetail; onChanged: 
   }, [load]);
 
   return (
-    <>
+    // The stage fills the window and clips, so this is the region that
+    // scrolls: a mockup, its comments and the feedback form together run
+    // well past one screen.
+    <div className="design-review">
       {loadError ? (
         <Banner tone="error" title="The design history could not be read">
           {loadError}
@@ -450,7 +453,7 @@ function DesignPanel({ detail, onChanged }: { detail: ProjectDetail; onChanged: 
           onChanged();
         }}
       />
-    </>
+    </div>
   );
 }
 

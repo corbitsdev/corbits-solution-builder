@@ -1427,6 +1427,18 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 /* The filling stage view: its chrome is fixed, the conversation takes the
    rest. Padding lives on the chrome rather than the region, so the panel
    itself can run edge to edge. */
+/* The design review inside a filling stage: the one region there that
+   scrolls, so the frame, the comments and the form are all reachable. */
+.design-review {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-4) var(--space-5) var(--space-6);
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+}
+
 .canvas-body.is-fill > .banner {
   flex: none;
   margin: var(--space-3) var(--space-4) 0;
