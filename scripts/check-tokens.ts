@@ -38,6 +38,26 @@ const raw = await readFile(SHEET, "utf8");
  */
 const strip = (text: string) =>
   text.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/^[ \t]*\/\/.*$/gm, "");
+
+/** The sheet with every `@media print { … }` block cut out, braces balanced. */
+function withoutPrintBlocks(text: string): string {
+  let out = "";
+  let at = 0;
+  for (;;) {
+    const start = text.indexOf("@media print", at);
+    if (start < 0) return out + text.slice(at);
+    const open = text.indexOf("{", start);
+    if (open < 0) return out + text.slice(at);
+    let depth = 0;
+    let end = open;
+    for (; end < text.length; end++) {
+      if (text[end] === "{") depth++;
+      else if (text[end] === "}" && --depth === 0) break;
+    }
+    out += text.slice(at, start);
+    at = end + 1;
+  }
+}
 const css = strip(raw);
 
 let passed = 0;
@@ -118,7 +138,13 @@ check(
     .filter((name) => !new RegExp(`var\\(${name}[,)]`).test(css));
   check("every alias is actually used", unused.length === 0, unused.join(", "));
 }
-check("the sheet does not pin a colour scheme", !/color-scheme:\s*light/.test(css));
+{
+  // Paper is the one surface with a scheme of its own: a print block pins
+  // light so a dark theme does not print pale text on white. Everything
+  // outside a print block still may not choose.
+  const onScreen = withoutPrintBlocks(css);
+  check("the sheet does not pin a colour scheme", !/color-scheme:\s*light/.test(onScreen));
+}
 
 // --- The spacing scale ---
 {

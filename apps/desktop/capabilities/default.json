@@ -1,12 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The window loads the host's loopback URL, so that origin is the page: it needs the IPC to ask the shell for dictation and to hear its events.",
+  "description": "The window loads the host's loopback URL, so that origin is the page: it needs the IPC to ask the shell for dictation and to hear its events, and to print: on macOS the webview's window.print is the shell's own print command.",
   "windows": [
     "main"
   ],
   "permissions": [
     "core:default",
+    "core:webview:allow-print",
     "allow-dictation-start",
     "allow-dictation-stop",
     "allow-dictation-open-settings"

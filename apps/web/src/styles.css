@@ -2442,3 +2442,113 @@ button[aria-disabled="true"] {
 [data-slot="sidebar"]:not([data-collapsed="true"]) {
   width: 12.75rem;
 }
+
+/* ------------------------------------------------------------------ print */
+
+/* The document alone, over the app. In print the layer is the page. Above
+   the first-run tour, which draws its beacon at 1000 in a portal of its own. */
+.print-view {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  overflow-y: auto;
+  background: var(--wb-background);
+  color: var(--wb-foreground);
+}
+
+.print-bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  background: var(--wb-background);
+  border-bottom: 1px solid var(--wb-border);
+}
+
+.print-now {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-control);
+  border: 1px solid var(--wb-primary);
+  background: var(--wb-primary);
+  color: var(--primary-foreground);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.print-now:focus-visible {
+  outline: 2px solid var(--wb-ring);
+  outline-offset: 2px;
+}
+
+.print-page {
+  max-width: 72ch;
+  margin: 0 auto;
+  padding: var(--space-8) var(--space-6) var(--space-12);
+}
+
+.print-head {
+  margin-bottom: var(--space-6);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--wb-border);
+}
+
+.print-head h1 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 0 0 var(--space-1);
+}
+
+.print-head p {
+  margin: 0;
+  color: var(--wb-muted-foreground);
+  font-size: 0.875rem;
+}
+
+/* The design page's "Reviewing …" note, with the print action at its end. */
+.design-reviewing {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+@media print {
+  @page {
+    margin: 18mm;
+  }
+
+  .app,
+  .print-bar,
+  #react-joyride-portal {
+    display: none !important;
+  }
+
+  /* Paper is light whatever theme the app wears: the layer takes the light
+     scheme and the system's ink, so a dark theme does not print pale text. */
+  .print-view {
+    position: static;
+    overflow: visible;
+    color-scheme: light;
+    background: Canvas;
+  }
+
+  .print-view,
+  .print-view * {
+    color: CanvasText;
+  }
+
+  .print-page {
+    max-width: none;
+    padding: 0;
+  }
+}
