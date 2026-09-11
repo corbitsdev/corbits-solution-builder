@@ -83,7 +83,7 @@ export function Preparing({
         <p className="preparing-kicker">
           Stage <RollingNumber value={stage} /> of 9
         </p>
-        <h2>Preparing {stageName(stage).toLowerCase()}</h2>
+        <h2>{stageName(stage)}</h2>
         <p className="preparing-goal">{STAGE_GOAL[stage]}</p>
       </header>
 
@@ -93,25 +93,30 @@ export function Preparing({
         </div>
       ) : (
         <div className="preparing-activity">
-          {!busy ? (
-            <span className="thinking">Starting</span>
-          ) : begun ? (
-            <WorkingLabel stage={stage} />
-          ) : (
-            <span className="thinking">
-              {said.length > 0 ? "Reading what you wrote" : "Reading the approved work from earlier stages"}
-            </span>
-          )}
-          {busy ? <Elapsed stage={stage} /> : null}
+          {/* What the running process is doing, boxed and labelled so it reads
+              as status and not as another tip. The tips stay outside it. */}
+          <div className="preparing-status" role="status" aria-label="What is happening now">
+            <p className="preparing-status-label">Working</p>
+            {!busy ? (
+              <span className="thinking">Starting</span>
+            ) : begun ? (
+              <WorkingLabel stage={stage} />
+            ) : (
+              <span className="thinking">
+                {said.length > 0 ? "Reading what you wrote" : "Reading the approved work from earlier stages"}
+              </span>
+            )}
+            {busy ? <Elapsed stage={stage} /> : null}
+            {stalled ? (
+              <p className="preparing-stall">
+                Still waiting on the model: nothing has come back for a while. If this keeps
+                happening, try another provider in Settings.
+              </p>
+            ) : null}
+          </div>
           <p key={tip} className="preparing-tip">
             {tips[tip]}
           </p>
-          {stalled ? (
-            <p className="preparing-stall" role="status">
-              Still waiting on the model: nothing has come back for a while. If this keeps
-              happening, try another provider in Settings.
-            </p>
-          ) : null}
         </div>
       )}
     </section>
