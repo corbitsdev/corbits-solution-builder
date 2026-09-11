@@ -618,7 +618,7 @@
 
     "@better-fetch/fetch": ["@better-fetch/fetch@1.3.1", "", {}, "sha512-ABkD1WhyfPZprKRQI3bhATjeiFuNWC9PXhfGWqL+sg/gKrM977oFrYkdb4msM3hgUGonr7KlOsOFT5TU2rht9g=="],
 
-    "@corbits/artifacts": ["@corbits/artifacts@github:corbitsdev/corbits-artifacts#8d4e156", { "dependencies": { "@hono/standard-validator": "^0.2.3" }, "peerDependencies": { "@intx/hub-api": "^0.3.0", "@intx/types": "^0.3.0", "arktype": "^2.1.29", "drizzle-orm": "^0.45.2", "hono": "^4.12.32", "hono-openapi": "^1.2.0", "postgres": "^3.4.9" } }, "corbitsdev-corbits-artifacts-8d4e156", "sha512-pLN1OD2kl4tKFtbs/Wi/ZzOoY/O0tXClmYGpYtnS8BP15CsNVN/1xGEEueqopYVCinAJT+ItDGSXl8XQDvWQ2w=="],
+    "@corbits/artifacts": ["@corbits/artifacts@github:corbitsdev/corbits-artifacts#78a6648", { "dependencies": { "@hono/standard-validator": "^0.2.3" }, "peerDependencies": { "@intx/hub-api": "^0.3.0", "@intx/types": "^0.3.0", "arktype": "^2.1.29", "drizzle-orm": "^0.45.2", "hono": "^4.12.32", "hono-openapi": "^1.2.0", "postgres": "^3.4.9" } }, "corbitsdev-corbits-artifacts-78a6648", "sha512-xjcVZpsyHXGSv30OyrVYe0IdIH/EUTj1xpNnXFhJB7kWYM4LmsPVbEAVi+rGEBrDU0OEk0VYs0lJZ8gQo2T3Ug=="],
 
     "@corbits/codex-provider": ["@corbits/codex-provider@github:corbitsdev/corbits-codex-provider#bf07850", { "dependencies": { "@corbits/oauth-core": "github:corbitsdev/corbits-oauth-core", "@corbits/openai-responses": "github:corbitsdev/corbits-openai-responses", "arktype": "2.2.3" }, "peerDependencies": { "@intx/inference": ">=0.3.0", "@intx/types": ">=0.3.0" } }, "corbitsdev-corbits-codex-provider-bf07850", "sha512-5dVtVXd/CjWcXp4AitJAhcxky5mjhAq6G77q0t0iWs1bnms54VDLDnjN9oSqPJiD3nEiXmAoRbxiH1CxJkwTrA=="],
 
