@@ -1,0 +1,27 @@
+# The merge gate. `bun run check` is what the repository already calls the
+# gate (AGENTS.md); this only makes it run where nobody can forget to.
+name: check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      # postinstall builds the vendored Interchange packages.
+      - run: bun install --frozen-lockfile
+      # The launch smoke serves the built web bundle.
+      - run: bun run ui:build
+      - run: bun run check
