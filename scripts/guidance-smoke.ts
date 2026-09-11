@@ -75,6 +75,18 @@ check(
     "stage 7's solo wording names the cost, not a generic approval",
     nextStep({ state: "in_progress", stage: 7, hasDraft: true, soloApproval: true }).title === "Approve the cost",
   );
+
+// The design stage is reviewed through feedback on the mockup. Its guidance
+// says so, rather than pointing at a conversation the screen does not have.
+{
+  const design = nextStep({ state: "in_progress", stage: 4, hasDraft: true, soloApproval: true });
+  check(
+    "stage 4 guidance points at feedback, not a conversation",
+    design.detail.includes("feedback") && !design.detail.includes("conversation"),
+    design.detail,
+  );
+  check("and still names the approval", design.title === "Approve and continue");
+}
   check(
     "waiting_approval is worded for the approver",
     nextStep({ state: "waiting_approval", stage: 1, hasDraft: true }).title === "Approve or send back",
