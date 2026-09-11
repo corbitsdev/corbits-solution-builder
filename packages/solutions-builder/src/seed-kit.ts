@@ -52,6 +52,8 @@ const SKILLS: readonly { id: string; instructions: string; tools: readonly strin
       "Name the primitive you are using. A plan that says \"a queue\" where the platform has one is a plan to write a second queue.",
       "Do not model authority twice. Tenant and principal are the platform's; reference them rather than keeping a parallel copy, and let grants resolve against whoever launched the run.",
       "Secrets live in an OS keychain where the machine has one. The hub's credential row holds the sealed key, never plaintext; the sidecar decrypts it to authenticate.",
+      "Beyond the runtime, the corbitsdev catalog is the reuse surface. `@corbits/artifacts` is a versioned artifact store — the one Builder itself uses. `@corbits/react-ui` is the UI kit a generated interface should draw its components from. `@corbits/oauth-core` handles an OAuth flow rather than one being written by hand. The `@corbits/*-provider` packages are the connectors to individual services. The `@intx/tools-*` packages are the tool implementations an agent step calls.",
+      "A generated solution is normally one of three shapes: a workflow deployment with agent steps, a desktop host embedding the hub, or a hosted hub. Pick the shape the requirement actually needs rather than defaulting to one.",
       "Where the platform genuinely lacks something, say so plainly and scope it as work — a substitute that pretends to be the primitive is worse than an admitted gap.",
     ].join(" "),
     tools: ["artifact-read", "plan-validate"],
@@ -151,12 +153,12 @@ function skillsFor(role: AgentRole): string[] {
     brainstormer: ["discovery-interview", "proposal-comparison"],
     "constraints-mapper": ["constraint-framing"],
     proposer: ["proposal-comparison"],
-    "experience-designer": ["interaction-design"],
-    "presentation-creator": ["approval-packaging"],
+    "experience-designer": ["interaction-design", "interchange-platform"],
+    "presentation-creator": ["approval-packaging", "interchange-platform"],
     architect: ["build-planning", "interchange-platform"],
-    estimator: ["cost-estimation"],
+    estimator: ["cost-estimation", "interchange-platform"],
     "build-supervisor": ["worker-supervision", "interchange-platform"],
-    "delivery-verifier": ["delivery-verification"],
+    "delivery-verifier": ["delivery-verification", "interchange-platform"],
   };
   if (role.id.startsWith("senior-engineer-")) {
     const specialty = role.id.replace("senior-engineer-", "");

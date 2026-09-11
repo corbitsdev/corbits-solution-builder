@@ -219,7 +219,15 @@ check(
 // The roles that decide whether something gets built twice carry the guidance
 // for not doing it. This whole build was a demonstration of the failure.
 {
-  const planners = ["architect", "build-supervisor", "senior-engineer-application"];
+  const planners = [
+    "architect",
+    "build-supervisor",
+    "senior-engineer-application",
+    "experience-designer",
+    "presentation-creator",
+    "estimator",
+    "delivery-verifier",
+  ];
   for (const id of planners) {
     const agent = seed.agents.find((entry) => entry.agent === id);
     check(
@@ -231,8 +239,8 @@ check(
   const skill = seed.skills.find((entry) => entry.key === "interchange-platform");
   check(
     "and it names the primitives rather than gesturing at them",
-    ["workflow", "grant", "credential", "mail", "tenant", "principal"].every((word) =>
-      (skill?.instructions ?? "").toLowerCase().includes(word),
+    ["workflow", "grant", "credential", "mail", "tenant", "principal", "artifacts", "react-ui", "oauth"].every(
+      (word) => (skill?.instructions ?? "").toLowerCase().includes(word),
     ),
   );
 }
