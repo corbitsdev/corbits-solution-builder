@@ -18,6 +18,7 @@ import {
   submitFeedback,
 } from "../apps/hub/src/design-feedback.js";
 import { HostError } from "../apps/hub/src/errors.js";
+import { printableDesign } from "../apps/hub/src/print-page.js";
 
 const checks: { name: string; ok: boolean; detail: string }[] = [];
 function check(name: string, ok: boolean, detail = "") {
@@ -175,6 +176,25 @@ const stored = await feedbackFor(design.nodeId);
 check("dispositions persist for the before/after view", stored !== null);
 
 await host.close();
+// A design printed as a page of its own: the bar lands inside the body, the
+// document's own markup is untouched, and the policy admits only the bar's
+// script — a model's design is not trusted to run anything.
+{
+  const html = "<!doctype html><html><head><style>body{margin:0}</style></head><body class=\"x\"><h1>Mock</h1><script>alert(1)</script></body></html>";
+  const page = printableDesign({ html, title: "Design", version: 3 });
+  const barAt = page.body.indexOf("data-print-bar");
+  const bodyAt = page.body.indexOf('<body class="x">');
+  check("the print bar sits just inside the body", barAt > bodyAt && bodyAt >= 0, `${bodyAt} < ${barAt}`);
+  check("the design's own markup is untouched", page.body.includes("<h1>Mock</h1>") && page.body.endsWith("</html>"));
+  check("the bar names the document and version", page.body.includes("Design, version 3"));
+  const nonce = /script-src 'nonce-([a-f0-9]+)'/.exec(page.headers["content-security-policy"] ?? "")?.[1];
+  check("the policy admits only a nonced script", !!nonce && page.body.includes(`<script nonce="${nonce}">`), page.headers["content-security-policy"]);
+  check("the policy allows no fetch, frame or form", /default-src 'none'/.test(page.headers["content-security-policy"] ?? "") && /form-action 'none'/.test(page.headers["content-security-policy"] ?? ""));
+  const headless = printableDesign({ html: "<p>bare</p>", title: "Design", version: 1 });
+  check("a document with no body tag gets the bar at the top", headless.body.startsWith("<div data-print-bar"));
+  check("each response mints its own nonce", nonce !== /nonce-([a-f0-9]+)/.exec(headless.headers["content-security-policy"] ?? "")?.[1]);
+}
+
 const failed = checks.filter((entry) => !entry.ok);
 console.log(`\nDesign feedback smoke: ${checks.length - failed.length}/${checks.length} checks passed`);
 process.exit(failed.length === 0 ? 0 : 1);

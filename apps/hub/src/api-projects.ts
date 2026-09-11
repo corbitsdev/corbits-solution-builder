@@ -26,6 +26,7 @@ import { notFound } from "./errors.js";
 import { type RunState } from "@solutions-builder/app/ledger";
 import { parsed } from "./api.js";
 import { localActor } from "./hub-client.js";
+import { printableDesign } from "./print-page.js";
 
 export function registerProjectRoutes(api: Hono) {
   api.get("/decisions", async (context) =>
@@ -154,6 +155,25 @@ export function registerProjectRoutes(api: Hono) {
   api.get("/artifacts/:nodeId", async (context) =>
     context.json(await readArtifactNode(context.req.param("nodeId"))),
   );
+
+  /**
+   * A design as a page of its own, with a print bar, so it can be printed or
+   * saved as a PDF. Markdown documents print from inside the app, which
+   * renders them; only an HTML artifact needs to be left for.
+   */
+  api.get("/artifacts/:nodeId/print", async (context) => {
+    const { node, content } = await readArtifactNode(context.req.param("nodeId"));
+    if (node.mediaType !== "text/html") {
+      throw new HostError(
+        "validation_failed",
+        "Only a design is served as a page of its own; other documents print from the app.",
+        {},
+        false,
+      );
+    }
+    const page = printableDesign({ html: content, title: node.title, version: node.version });
+    return new Response(page.body, { headers: page.headers });
+  });
 
   /**
    * Orientation from the Product guide — read-only, and never a transition.

@@ -17,6 +17,7 @@ import { Dictated } from "../../dictation.jsx";
 import { approachName, sectionsIn } from "@solutions-builder/app/document";
 import { markChanges } from "../../revisions.js";
 import { Button, documentName, RollingNumber } from "../../components.jsx";
+import { PrintButton } from "../../print.jsx";
 import { SpecialistTurn, WorkingLabel, type TurnNote } from "./thread.jsx";
 
 /**
@@ -430,6 +431,7 @@ export function StageDocument({
                 <span>Changes since v{previous.version}</span>
               </label>
             ) : null}
+            <PrintButton node={node} content={content || null} />
           </div>
         </header>
         <div className="document-body" data-tour="document-body" onMouseUp={attachSelection}>
