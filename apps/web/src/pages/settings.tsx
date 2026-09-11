@@ -122,6 +122,8 @@ type DesignerSettings = {
 };
 const TOKENS_MIN = 1000;
 const TOKENS_MAX = 64000;
+/** What the host uses when nothing is saved; kept in step with the host's own default. */
+const TOKENS_DEFAULT = 32000;
 
 /**
  * What the stage-4 designer draws to and how much it may write. Each control
@@ -143,7 +145,7 @@ function Designer() {
         const loaded: DesignerSettings = {
           surface: (preferences["designer.surface"] as DesignerSurface | undefined) ?? "light",
           language: String(preferences["designer.language"] ?? ""),
-          maxTokens: Number(preferences["designer.maxTokens"] ?? 8000),
+          maxTokens: Number(preferences["designer.maxTokens"] ?? TOKENS_DEFAULT),
           onLimit: (preferences["designer.onLimit"] as DesignerOnLimit | undefined) ?? "tell",
         };
         setSettings(loaded);
@@ -174,7 +176,7 @@ function Designer() {
   const saveTokens = () => {
     const value = Number(tokens);
     if (!Number.isInteger(value) || value < TOKENS_MIN || value > TOKENS_MAX) {
-      setTokens(String(settings?.maxTokens ?? 8000));
+      setTokens(String(settings?.maxTokens ?? TOKENS_DEFAULT));
       setError(`The output limit is a whole number between ${TOKENS_MIN} and ${TOKENS_MAX} tokens.`);
       return;
     }
@@ -220,7 +222,7 @@ function Designer() {
       <div className="setting-row">
         <div>
           <strong>Output limit</strong>
-          <p>How many tokens one design may use, {TOKENS_MIN} to {TOKENS_MAX}. A fuller design needs more; a design that uses them all is cut short.</p>
+          <p>How many tokens one design may use, {TOKENS_MIN} to {TOKENS_MAX}. A full design usually needs 20,000 to 40,000 and takes five to ten minutes; a design that uses them all is cut short.</p>
         </div>
         <Input
           className="setting-number"
