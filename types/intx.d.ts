@@ -229,6 +229,8 @@ declare module "@intx/types/runtime" {
 declare module "@intx/types" {
   export function hexDecode(value: string): Uint8Array;
   export function hexEncode(value: Uint8Array): string;
+  /** Splits a `<runId>@<domain>` agent address, or `null` when malformed. */
+  export function parseRunAddress(address: string): { runId: string; domain: string } | null;
   export type SidecarCapabilityRule = Record<string, unknown>;
   /**
    * A grant the hub resolves at launch into a materialized grant, against the
@@ -315,7 +317,10 @@ declare module "@intx/hub-sessions" {
   };
   export function createSidecarPluginRegistry(opts: Record<string, unknown>): unknown;
   export function createSidecarRouter(opts: Record<string, unknown>): Record<string, unknown> & {
-    events: { on: (name: string, handler: (payload: never) => unknown) => void };
+    // `on` returns the unsubscribe function the real emitter returns
+    // (`sidecar-events.ts`'s `SidecarEventEmitter`); callers that stop
+    // watching (a smoke's diagnostic subscription) rely on it.
+    events: { on: (name: string, handler: (payload: never) => unknown) => () => void };
   };
   export function createSidecarCredentialResolver(opts: Record<string, unknown>): {
     resolve: (token: string) => Promise<unknown>;

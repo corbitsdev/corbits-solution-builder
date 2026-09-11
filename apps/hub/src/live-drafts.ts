@@ -8,7 +8,18 @@
  *
  * In memory only: a partial draft is not an artifact, is never approved, and
  * a host restart should forget it.
+ *
+ * Two feeders write into this module today. `agent-run.ts`'s in-process
+ * `complete()` path calls `beginLiveDraft`/`updateLiveDraft`/`endLiveDraft`
+ * directly around a provider call it makes itself. `attachLiveDrafts` below
+ * is the other: it reads the same signals off a project's own run, the way
+ * they exist once the specialist step actually executes under the sidecar.
+ * Both coexist until the run-based path replaces the in-process one.
  */
+import { parseRunAddress } from "@intx/types";
+import { hub } from "./hub-mount.js";
+import { projectForAnchor } from "./hub-executor.js";
+
 type Listener = (event: LiveEvent) => void;
 
 export type LiveEvent =
@@ -71,4 +82,88 @@ export function subscribeLiveDraft(projectId: string, stage: number, listener: L
   return () => {
     live!.listeners.delete(listener);
   };
+}
+
+/**
+ * Models wrap output in a code fence even when told not to. Stripping one
+ * outer fence is a kindness to the reader, not a licence to reinterpret the
+ * draft: nothing else about the text is touched. Shared by both feeders so a
+ * partial draft and its finished artifact are cleaned the same way.
+ */
+export function stripOuterFence(text: string): string {
+  const trimmed = text.trim();
+  const match = /^```[a-zA-Z]*\n([\s\S]*?)\n?```$/.exec(trimmed);
+  return match?.[1] ?? trimmed;
+}
+
+// --- Feeding live drafts from a run's own inference events ------------------
+
+/**
+ * Which stage a project's next inference cycle belongs to, set by the host
+ * just before it asks the run to draft. The sidecar relays every inference
+ * cycle on the run — the specialist's, and later a reviewer's or evaluator's
+ * — as `agent.event` frames on the same address, and nothing on the wire
+ * says which is which. This is how the caller tells them apart: only the
+ * first cycle after the expectation is set streams as a live draft: it is
+ * cleared as soon as that cycle ends, so a later cycle on the same run (a
+ * reviewer or evaluator step) is not mistaken for a second draft.
+ */
+const expected = new Map<string, { stage: number; active: boolean }>();
+
+export function expectLiveDraft(projectId: string, stage: number): void {
+  expected.set(projectId, { stage, active: false });
+}
+
+/** Accumulated text for the cycle currently streaming, keyed by project. */
+const accumulating = new Map<string, string>();
+
+let attached = false;
+
+/**
+ * Subscribes once to the hub's sidecar events and feeds `live-drafts` from
+ * whichever project's anchor run they name. Idempotent: a caller that mounts
+ * the hub more than once in a process (a smoke, a hot reload) does not stack
+ * a second listener.
+ */
+export function attachLiveDrafts(): void {
+  if (attached) return;
+  attached = true;
+  hub().events.on("agent.event", ({ agentAddress, event }) => {
+    const address = parseRunAddress(agentAddress);
+    if (!address) return;
+    const projectId = projectForAnchor(address.runId);
+    if (!projectId) return;
+    const expectation = expected.get(projectId);
+    if (!expectation) return;
+
+    const inference = event as { type?: unknown; data?: unknown };
+    switch (inference.type) {
+      case "inference.start": {
+        if (expectation.active) return; // a later cycle on the same run; not the draft
+        expectation.active = true;
+        accumulating.set(projectId, "");
+        beginLiveDraft(projectId, expectation.stage);
+        return;
+      }
+      case "inference.text.delta": {
+        if (!expectation.active) return;
+        const data = inference.data as { token?: unknown } | undefined;
+        const token = typeof data?.token === "string" ? data.token : "";
+        const text = (accumulating.get(projectId) ?? "") + token;
+        accumulating.set(projectId, text);
+        updateLiveDraft(projectId, expectation.stage, stripOuterFence(text));
+        return;
+      }
+      case "inference.done":
+      case "connector.reply": {
+        if (!expectation.active) return;
+        endLiveDraft(projectId, expectation.stage);
+        accumulating.delete(projectId);
+        expected.delete(projectId);
+        return;
+      }
+      default:
+        return;
+    }
+  });
 }

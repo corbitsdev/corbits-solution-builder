@@ -184,6 +184,19 @@ export function hasExecution(projectId: string): boolean {
   return anchors.has(projectId);
 }
 
+/**
+ * The project behind an anchor run id, for callers that only have the run's
+ * own address (a sidecar's `agent.event` frame carries `<anchorRunId>@domain`,
+ * never the project id). `null` when the anchor is not one this process has
+ * resolved a deployment for yet.
+ */
+export function projectForAnchor(anchorRunId: string): string | null {
+  for (const [projectId, anchor] of anchors) {
+    if (anchor === anchorRunId) return projectId;
+  }
+  return null;
+}
+
 /** Why a project has no run: no offering connected yet, or a host that cannot place sidecars. */
 export function executionUnavailable(projectId: string): string | null {
   return unavailable.get(projectId) ?? null;

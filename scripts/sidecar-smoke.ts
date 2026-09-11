@@ -74,6 +74,8 @@ setHostPort(port);
 const host = await openDatabase(join(dataDir, "pglite"));
 await prepareDatabase(host);
 await mountHub();
+const { attachLiveDrafts } = await import("../apps/hub/src/live-drafts.js");
+attachLiveDrafts();
 
 const server = Bun.serve({
   hostname: "127.0.0.1",
@@ -258,6 +260,19 @@ try {
 
     if (atStage8?.parked && atStage8.stage === 8) {
       const beforeBuild = completions.length;
+
+      // The stub streams "## In short\n- Build attempt acknowledged." as two
+      // chunks; the live-draft pane should show the round taking shape from
+      // the run's own inference events, not just the finished reply.
+      const { expectLiveDraft, subscribeLiveDraft } = await import("../apps/hub/src/live-drafts.js");
+      const liveEvents: { type: string; text?: string }[] = [];
+      const rawAgentEvents: unknown[] = [];
+      const unsubscribeRaw = hub().events.on("agent.event", (frame) => rawAgentEvents.push(frame));
+      expectLiveDraft(project.projectId, 8);
+      const unsubscribeLive = subscribeLiveDraft(project.projectId, 8, (event) => {
+        liveEvents.push(event.type === "text" ? { type: event.type, text: event.text } : { type: event.type });
+      });
+
       const attempt = await deliverStageSignal(project.projectId, "build.start_attempt", { runId: project.runId }, `smoke-attempt-${project.projectId}`);
       check("build.start_attempt lands on the stage 8 round", attempt === "delivered", attempt);
       const buildStarted = Date.now();
@@ -289,6 +304,30 @@ try {
         console.log("STUB REQUESTS", JSON.stringify(requests.slice(-10)));
         console.log("DIAG", JSON.stringify(await debugRuns(project.projectId), null, 1).slice(0, 12000));
       }
+
+      // The sidecar relays the step's inference cycle asynchronously over its
+      // own websocket; give it room to arrive after the stub has answered.
+      const liveWaitStarted = Date.now();
+      while (Date.now() - liveWaitStarted < 30_000) {
+        if (liveEvents.some((event) => event.type === "done")) break;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      unsubscribeRaw();
+      unsubscribeLive();
+
+      const begun = liveEvents.some((event) => event.type === "begin");
+      const texted = liveEvents.some(
+        (event) => event.type === "text" && (event.text ?? "").includes("Build attempt acknowledged"),
+      );
+      const done = liveEvents.some((event) => event.type === "done");
+      check(
+        "the live draft streams a begin, the acknowledged text and a done from the run's own inference events",
+        begun && texted && done,
+        begun && texted && done
+          ? "begin/text/done all seen"
+          : `begin=${begun} text=${texted} done=${done}; live=${JSON.stringify(liveEvents).slice(0, 500)}; agent.event frames=${JSON.stringify(rawAgentEvents).slice(0, 1500)}`,
+      );
+
       const afterBuild = await settle((s) => s.parked && s.stage === 8 && s.signalName === roundSignal(8));
       check(
         "the attempt's round ends and the build stage waits for the next command",
