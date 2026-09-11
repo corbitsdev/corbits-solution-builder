@@ -2555,6 +2555,17 @@ button[aria-disabled="true"] {
   font-size: 0.875rem;
 }
 
+/* A design in the artifacts tab: the page itself, most of the reading height. */
+.artifact-page {
+  width: 100%;
+  height: clamp(460px, 70vh, 1100px);
+  border: 1px solid var(--wb-border);
+}
+
+.feedback-record ul {
+  padding-left: var(--space-5);
+}
+
 /* Material in the artifacts tab: an image as the image, text as text. */
 .material-figure {
   margin: 0;
