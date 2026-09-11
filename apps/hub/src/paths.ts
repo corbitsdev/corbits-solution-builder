@@ -32,6 +32,16 @@ export function startAtLoginMarker(): string {
   return join(dataDirectory(), "start-at-login");
 }
 
+/**
+ * The loopback port the host served on last time. Sidecars are bound to the
+ * hub's address, port included, so a host that comes back on a new port
+ * strands every sidecar placed by the old one. The port is remembered here
+ * and taken again when it is still free.
+ */
+export function portFile(): string {
+  return join(dataDirectory(), "port");
+}
+
 /** The designer's settings: surface, design language, token limit, policy. */
 export function designerSettingsFile(): string {
   return join(dataDirectory(), "designer.json");

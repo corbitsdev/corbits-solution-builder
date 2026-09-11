@@ -98,6 +98,13 @@ export type MountedHub = {
    * from a run's own signals instead of an in-process callback.
    */
   readonly events: ReturnType<typeof createSidecarRouter>["events"];
+  /**
+   * What the deployment provisioner pins a sidecar allocation to: the sidecar
+   * entry and the hub address it dials. The platform leaves an allocation
+   * bound to any other fingerprint alone forever, so a deployment whose
+   * allocation carries a different one is not reachable from this host.
+   */
+  readonly sidecarBindingFingerprint: string;
 };
 
 let mounted: MountedHub | null = null;
@@ -133,6 +140,63 @@ const SIDECAR_ENTRY = join(
   import.meta.dir, "..", "..", "..", "vendor", "interchange", "apps", "sidecar", "src", "index.ts",
 );
 const SIDECAR_RUNTIME = join(import.meta.dir, "..", "bin", "sidecar-runtime");
+
+/**
+ * An allocated sidecar is a child process of the host that placed it, and
+ * stopping the host stops them all. On the next start the reconciler waits
+ * its full connect timeout for each one to dial back in before it gives the
+ * allocation up, and every command on that deployment waits with it. When
+ * the process is gone the wait is pointless, so its deadline is moved to the
+ * past and the reconciler releases the allocation on its next pass; the
+ * deployment reads as released, and the lifecycle is deployed again on
+ * first use. An allocation bound to another hub address is left alone: the
+ * reconciler will not act on it, and `workflow-deploy.ts` steps around it.
+ */
+type AllocationRow = {
+  readonly id: string;
+  readonly status: string;
+  readonly generation: number;
+  readonly provisionerBindingFingerprint: string;
+  readonly externalRef?: string;
+};
+type AllocationStore = {
+  listActive(): Promise<AllocationRow[]>;
+  markConnectionLost(args: {
+    allocationId: string;
+    generation: number;
+    connectDeadline: Date;
+    now: Date;
+  }): Promise<unknown>;
+};
+
+async function retireDeadSidecars(untyped: unknown, bindingFingerprint: string): Promise<void> {
+  // The typecheck stub of the platform's store package has no method types.
+  const store = untyped as AllocationStore;
+  const now = new Date();
+  for (const allocation of await store.listActive()) {
+    if (allocation.status !== "allocated") continue;
+    if (allocation.provisionerBindingFingerprint !== bindingFingerprint) continue;
+    if (processAlive(allocation.externalRef)) continue;
+    await store.markConnectionLost({
+      allocationId: allocation.id,
+      generation: allocation.generation,
+      connectDeadline: new Date(0),
+      now,
+    });
+  }
+}
+
+/** The process provisioner's external ref is `<allocation>:<generation>:<pid>`. */
+function processAlive(externalRef: string | undefined): boolean {
+  const pid = Number(externalRef?.split(":").at(-1));
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function hub(): MountedHub {
   if (!mounted) throw new Error("The Interchange hub is not mounted.");
@@ -251,7 +315,10 @@ export async function mountHub(): Promise<MountedHub> {
         hubWebSocketUrl,
       }),
     });
-  const sidecarPlugins = createSidecarPluginRegistry({ provisioners: [provisionerFor("deployment")] });
+  const deploymentProvisioner = provisionerFor("deployment");
+  // The typecheck stub of the provisioner package does not type the field.
+  const bindingFingerprint = String((deploymentProvisioner as { bindingFingerprint?: unknown }).bindingFingerprint ?? "");
+  const sidecarPlugins = createSidecarPluginRegistry({ provisioners: [deploymentProvisioner] });
   const probeSidecarPlugins = createSidecarPluginRegistry({ provisioners: [provisionerFor("probe")] });
 
   const workflowAllocationService = createWorkflowAllocationService({
@@ -288,6 +355,7 @@ export async function mountHub(): Promise<MountedHub> {
   });
   await workflowAllocationService.initialize?.();
   await sidecarAllocationReconciler.initialize();
+  await retireDeadSidecars(sidecarAllocationStore, bindingFingerprint);
   type Allocated = Record<string, unknown> | undefined;
   sidecarRouter.events.on("sidecar.disconnect", ({ allocated }: { allocated: Allocated }) => {
     if (allocated === undefined) return;
@@ -393,6 +461,7 @@ export async function mountHub(): Promise<MountedHub> {
       connected: () => socketRouter.getConnectedSidecars(),
     },
     events: sidecarRouter.events,
+    sidecarBindingFingerprint: bindingFingerprint,
   };
   return mounted;
 }

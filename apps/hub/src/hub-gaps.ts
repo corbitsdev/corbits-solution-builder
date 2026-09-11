@@ -43,6 +43,12 @@
  *  10. listChildTenants     `GET /api/tenants` does not exist; `/api/me/principals`
  *                           lists memberships, not the tenants under a parent.
  *                           A project is a child tenant, so the list is read here.
+ *  11. allocationBinding    `GET /workflows/deployments` projects an allocation's
+ *                           status but not the provisioner binding it is pinned
+ *                           to, and a deployment bound to another hub address
+ *                           is unreachable from this one. The binding is read
+ *                           here so such a deployment is not handed back as
+ *                           current.
  *   9. createHubServer      The vendored tree ships `@intx/hub-api`
  *                           (`createApp`, `createAuth`) and
  *                           `@intx/hub-sessions`, not Interchange's
@@ -466,4 +472,18 @@ export async function readWorkflowSourceBlob(assetId: string, path: string): Pro
   } catch {
     return null;
   }
+}
+
+// --- 11. allocationBinding --------------------------------------------------
+
+/** The provisioner binding fingerprint of the deployment's sidecar allocation, or null without one. */
+export async function allocationBinding(anchorRunId: string): Promise<string | null> {
+  const rows = (await handle().execute(sql`
+    SELECT "provisioner_binding_fingerprint"
+    FROM "public"."sidecar_allocation"
+    WHERE "anchor_run_id" = ${anchorRunId}
+    LIMIT 1
+  `)) as unknown as Row[];
+  const row = rows[0];
+  return row ? String(row.provisioner_binding_fingerprint) : null;
 }
