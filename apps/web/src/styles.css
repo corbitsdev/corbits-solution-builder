@@ -2471,8 +2471,9 @@ button[aria-disabled="true"] {
   width: 12.75rem;
 }
 
-/* The start box takes a drop. While something is over it, it says so. */
-.start.is-dragging {
+/* The start box and the stage view take a drop. While something is over one, it says so. */
+.start.is-dragging,
+.stage-view.is-dragging {
   outline: 2px dashed var(--wb-primary);
   outline-offset: var(--space-2);
   border-radius: var(--radius-control);
@@ -2520,6 +2521,13 @@ button[aria-disabled="true"] {
 .material-remove:focus-visible {
   outline: 2px solid var(--wb-ring);
   outline-offset: 2px;
+}
+
+/* Adding material from the artifacts tab, above the list. */
+.library-add {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--wb-border);
+  font-size: 0.875rem;
 }
 
 /* Material in the artifacts tab: an image as the image, text as text. */
