@@ -24,9 +24,44 @@ import { assets, catalog, workflows, type HubDeployment } from "./hub-client.js"
  * runtime still dispatches to (`isSidecarAllocationDispatchable` in
  * `@intx/types`); `releasing`, `released` and `failed` are not.
  */
-const LIVE_DEPLOYMENT_STATUSES = new Set(["pending", "provisioning", "allocated", "replacing"]);
-import { readWorkflowSourceBlob, writeWorkflowSourceTree } from "./hub-gaps.js";
-import { canPlaceSidecars } from "./hub-mount.js";
+import { allocationBinding, readWorkflowSourceBlob, writeWorkflowSourceTree } from "./hub-gaps.js";
+import { canPlaceSidecars, hub } from "./hub-mount.js";
+
+/**
+ * The deployment statuses the hub projects from a sidecar allocation that is
+ * over: none of these can be fired or signalled again. Everything else —
+ * "pending" while the sidecar is placed or reconnecting, "deployed" once it
+ * is connected, "recovering" while it is replaced — is live. Named by
+ * exclusion because the projection's healthy status is "deployed", and a
+ * list of the live ones that left it out read every connected sidecar as
+ * gone.
+ */
+const ENDED_DEPLOYMENT_STATUSES = new Set(["releasing", "released", "failed"]);
+
+function isLive(deployment: HubDeployment | undefined): deployment is HubDeployment {
+  return deployment !== undefined && !ENDED_DEPLOYMENT_STATUSES.has(deployment.status);
+}
+
+/**
+ * Whether the deployment's sidecar is still placed, or on its way: released,
+ * releasing and failed deployments cannot be fired or signalled again.
+ */
+export async function deploymentIsLive(deploymentId: string): Promise<boolean> {
+  return isLive((await workflows.deployments()).find((entry: HubDeployment) => entry.id === deploymentId));
+}
+
+/**
+ * Whether this host can reach the deployment's sidecar. The platform pins an
+ * allocation to the hub address the sidecar dials, and leaves one pinned to
+ * any other address alone forever: a host that came back on a different
+ * port sees such a deployment as live, while nothing sent to it is ever
+ * delivered. (A deployment with no allocation yet is reachable: the
+ * allocation it gets will be this host's.)
+ */
+async function reachable(deploymentId: string): Promise<boolean> {
+  const binding = await allocationBinding(deploymentId);
+  return binding === null || binding === hub().sidecarBindingFingerprint;
+}
 import { readProject } from "./project-tenant.js";
 import { closureFiles, treeDigest, workspaceCatalog } from "./workflow-closure.js";
 
@@ -201,10 +236,13 @@ export async function ensureLifecycleDeployment(
   // current left every project unable to draft after a restart, so the
   // lifecycle is deployed again instead, on the same source when unchanged.
   const latest = (await workflows.deployments()).find(
-    (deployment: HubDeployment) =>
-      deployment.definitionAssetId === assetId && LIVE_DEPLOYMENT_STATUSES.has(deployment.status),
+    (deployment: HubDeployment) => deployment.definitionAssetId === assetId && isLive(deployment),
   );
-  if (head === rendered[DIGEST_PATH] && latest && !options.replace) {
+  if (latest && !(await reachable(latest.id))) {
+    console.error(
+      `[deploy] ${projectId ?? "workspace"}: deployment ${latest.id} is bound to a hub address this host no longer serves; deploying the lifecycle again.`,
+    );
+  } else if (head === rendered[DIGEST_PATH] && latest && !options.replace) {
     return {
       status: "current",
       assetId,
