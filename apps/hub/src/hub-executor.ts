@@ -223,11 +223,36 @@ async function consumed(anchor: string, step: Parked): Promise<void> {
   }
 }
 
-/** The first parked stage step with a position this module knows, waiting for a run that is still starting. */
-async function parkedPosition(anchor: string, waitMs: number): Promise<Parked | null> {
+/**
+ * A pause after every signal the executor sends on a person's behalf. The
+ * runtime commits its own events to the run's log as a step ends and the
+ * next one starts; a signal landing inside that commit has been seen to
+ * collide with it (two events at one sequence number), which fails the
+ * whole run. Waiting for the next park is not enough on its own, since the
+ * park is written before the commit that follows it settles.
+ */
+const SETTLE_MS = 750;
+
+/** The run phases nothing follows (`isTerminalRunPhase` in the runtime's state machine). */
+const ENDED = new Set(["completed", "failed", "cancelled"]);
+
+/** The deployment's own top-level run has ended: nothing on it will ever park again. */
+function anchorIsDead(anchor: string, runs: FoldedRun[]): boolean {
+  const top = runs.find((run) => run.runId === anchor);
+  return top !== undefined && ENDED.has(top.state.phase);
+}
+
+/**
+ * The first parked stage step with a position this module knows, waiting for
+ * a run that is still starting. "dead" when the run has ended instead — a run
+ * that failed leaves nothing parked, and waiting for it would only time out.
+ */
+async function parkedPosition(anchor: string, waitMs: number): Promise<Parked | "dead" | null> {
   const deadline = Date.now() + waitMs;
   for (;;) {
-    const parked = parkedSteps(await foldRuns(anchor)).find(
+    const runs = await foldRuns(anchor);
+    if (anchorIsDead(anchor, runs)) return "dead";
+    const parked = parkedSteps(runs).find(
       (step) => step.signalName !== null && positionOfSignal(step.stage, step.signalName) !== null,
     );
     if (parked) return parked;
@@ -257,13 +282,23 @@ export async function alignRunWithLedger(projectId: string, ledger: LedgerPositi
     return await alignOnce(projectId, ledger);
   } catch (cause) {
     // The anchor this process remembered is dead: its sidecar was released
-    // under it. Forget it and resolve the deployment again, which deploys a
-    // live one, then try once more; anything else is the failure it was.
+    // under it, or its run failed. Forget it and resolve the deployment
+    // again, which deploys a live one, then try once more; anything else is
+    // the failure it was.
     if (!(cause instanceof HubApiError && cause.status === 409)) throw cause;
     console.error(`[executor] ${projectId}: the run's deployment is no longer live; deploying the lifecycle again.`);
-    anchors.delete(projectId);
+    forgetExecution(projectId);
     return await alignOnce(projectId, ledger);
   }
+}
+
+/**
+ * Forgets the deployment this process resolved for a project, so the next
+ * command resolves it again: a fresh deployment when the rendered lifecycle
+ * changed (a stakeholder added), or when the old one is dead.
+ */
+export function forgetExecution(projectId: string): void {
+  anchors.delete(projectId);
 }
 
 async function alignOnce(projectId: string, ledger: LedgerPosition): Promise<"aligned" | "no_execution" | "failed"> {
@@ -273,6 +308,11 @@ async function alignOnce(projectId: string, ledger: LedgerPosition): Promise<"al
   // Two signals per stage below the ledger's, and one more to read the result.
   for (let sent = 0; sent <= 2 * ledger.stage; sent += 1) {
     const parked = await parkedPosition(anchor, FIRST_PARK_WAIT_MS);
+    if (parked === "dead") {
+      // The same path a refused signal takes: the caller forgets this
+      // deployment and deploys again.
+      throw new HubApiError(409, anchor, "the deployment's run has ended");
+    }
     if (!parked || parked.signalName === null) {
       console.error(`[executor] ${projectId}: the run never parked, so it could not be brought to stage ${ledger.stage}.`);
       return "failed";
@@ -311,6 +351,7 @@ async function alignOnce(projectId: string, ledger: LedgerPosition): Promise<"al
     // a second signal to the same step would queue behind the first and be
     // consumed by a round nobody asked to leave.
     await consumed(anchor, parked);
+    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
   }
   console.error(`[executor] ${projectId}: the run did not reach stage ${ledger.stage} within the expected number of signals.`);
   return "failed";

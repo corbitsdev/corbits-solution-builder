@@ -15,7 +15,7 @@ export const STAGE_GOAL: Record<number, string> = {
   2: "Bound the shape: platforms, privacy, integrations, installation, and non-goals.",
   3: "Two approaches, compared on the same criteria. You pick one.",
   4: "Work out surfaces, flows, states, and the criteria a build will be measured against.",
-  5: "Prepare a package for each audience that must answer: is this worth pursuing?",
+  5: "Prepare a package for each stakeholder who must answer: is this worth pursuing?",
   6: "Turn the approved concept into a plan the code builder can execute, then review it four ways.",
   7: "Convert the accepted plan into a firm estimate, then approve the spend.",
   8: "Supervise the build. Humans decide permissions, material changes, and evidence.",

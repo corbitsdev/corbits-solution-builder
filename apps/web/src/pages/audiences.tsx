@@ -19,10 +19,141 @@ import {
   TableHead,
   TableHeader,
   TableRow,
+  Input,
 } from "@corbits/react-ui";
 import { Markdown } from "../markdown.jsx";
 
 type Policy = { audiences?: { name: string; role: string }[]; audienceQuorum?: number };
+
+/** A role's name as a person reads it. */
+function roleLabel(role: string): string {
+  return role.replace(/_/g, " ");
+}
+
+/**
+ * Who the packages are for. Each row is a name and a role; the quorum is how
+ * many proceeds approve the stage. Saved as a whole, since the list and the
+ * quorum only make sense together, and the lifecycle is rendered again from
+ * the new list on the next draft.
+ */
+function Stakeholders({
+  projectId,
+  audiences,
+  quorum,
+  onChanged,
+}: {
+  projectId: string;
+  audiences: { name: string; role: string }[];
+  quorum: number;
+  onChanged: () => void;
+}) {
+  const [rows, setRows] = useState(audiences);
+  const [needed, setNeeded] = useState(quorum);
+  const [roles, setRoles] = useState<string[]>([]);
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    void api.stakeholders(projectId).then((result) => setRoles(result.roles)).catch(() => setRoles([]));
+  }, [projectId]);
+  useEffect(() => {
+    if (!editing) {
+      setRows(audiences);
+      setNeeded(quorum);
+    }
+  }, [audiences, quorum, editing]);
+
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.setStakeholders(projectId, { audiences: rows, audienceQuorum: needed });
+      setEditing(false);
+      onChanged();
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Screen
+      title="Stakeholders"
+      description="Who each package is written for, and who records a decision on it."
+      status={<StateLabel tone="info">{audiences.length} named · {quorum} must proceed</StateLabel>}
+      tight
+    >
+      {error ? <Banner tone="error" title={error} /> : null}
+      {editing ? (
+        <div className="screen-body stakeholder-editor">
+          {rows.map((row, index) => (
+            <div key={index} className="stakeholder-row">
+              <Input
+                aria-label={`Stakeholder ${index + 1} name`}
+                value={row.name}
+                placeholder="Name"
+                onChange={(event) => setRows(rows.map((held, at) => (at === index ? { ...held, name: event.target.value } : held)))}
+              />
+              <select
+                aria-label={`Stakeholder ${index + 1} role`}
+                value={row.role}
+                onChange={(event) => setRows(rows.map((held, at) => (at === index ? { ...held, role: event.target.value } : held)))}
+              >
+                {roles.map((role) => (
+                  <option key={role} value={role}>
+                    {roleLabel(role)}
+                  </option>
+                ))}
+              </select>
+              <Button variant="ghost" disabled={rows.length === 1} onClick={() => setRows(rows.filter((_, at) => at !== index))}>
+                Remove
+              </Button>
+            </div>
+          ))}
+          <div className="button-row">
+            <Button onClick={() => setRows([...rows, { name: "", role: "audience_member" }])}>Add a stakeholder</Button>
+          </div>
+          <Field label="How many must proceed for the stage to be approved">
+            <Input
+              className="setting-number"
+              type="number"
+              inputMode="numeric"
+              min={0}
+              max={rows.length}
+              value={String(needed)}
+              onChange={(event) => setNeeded(Number(event.target.value))}
+            />
+          </Field>
+          <p className="inline-note">
+            The next draft writes one package per stakeholder. Decisions already recorded stay recorded.
+          </p>
+          <div className="button-row">
+            <Button variant="primary" loading={busy} onClick={() => void save()}>
+              Save stakeholders
+            </Button>
+            <Button variant="ghost" disabled={busy} onClick={() => setEditing(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="screen-body">
+          <ul className="stakeholder-list">
+            {audiences.map((audience) => (
+              <li key={audience.name}>
+                <strong>{audience.name}</strong> · {roleLabel(audience.role)}
+              </li>
+            ))}
+          </ul>
+          <div className="button-row">
+            <Button onClick={() => setEditing(true)}>Edit stakeholders…</Button>
+          </div>
+        </div>
+      )}
+    </Screen>
+  );
+}
 
 export function AudiencePackages({
   detail,
@@ -96,9 +227,10 @@ export function AudiencePackages({
 
   return (
     <>
+      <Stakeholders projectId={detail.project.id} audiences={audiences} quorum={quorum} onChanged={onChanged} />
       <div data-tour="audience-packages">
       <Screen
-        title="Audience packages"
+        title="Stakeholder packages"
         description="Rough cost, not the firm estimate."
         status={
           quorumMet ? (
@@ -115,19 +247,19 @@ export function AudiencePackages({
         {error ? <Banner tone="error" title="That decision was refused">{error}</Banner> : null}
 
         {audiences.length === 0 ? (
-          <Banner title="No audiences are named for this project" />
+          <Banner title="No stakeholders are named for this project" />
         ) : null}
 
         {packages.length === 0 ? (
           <EmptyState
             title="No packages drafted"
-            description="Draft this stage to produce one package per named audience."
+            description="Draft this stage to produce one package per stakeholder."
           />
         ) : (
           <>
             {/* One tab per audience package. */}
             <Tabs
-              label="Audience packages"
+              label="Stakeholder packages"
               active={selected?.id ?? ""}
               onChange={setActive}
               tabs={packages.map((node) => ({
@@ -157,13 +289,13 @@ export function AudiencePackages({
       {audiences.length > 0 ? (
         <div data-tour="audience-decisions">
         <Screen
-          title="Per-audience decisions"
+          title="Per-stakeholder decisions"
           tight
         >
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Audience</TableHead>
+                <TableHead>Stakeholder</TableHead>
                 <TableHead>Role</TableHead>
                 <TableHead>Decision</TableHead>
                 <TableHead>Record</TableHead>
