@@ -139,6 +139,9 @@ async function draftWith(
   },
 ): Promise<StageDraftResult> {
   const inputs = await approvedInputs(args.projectId, args.stage);
+  if (!agent.produces) {
+    throw new HostError("validation_failed", `${agent.title} produces no artifact; it cannot draft.`);
+  }
 
   const prompt = buildDraftPrompt({
     projectTitle: args.projectTitle,

@@ -59,6 +59,7 @@ const SKILLS: readonly { id: string; instructions: string; tools: readonly strin
     tools: ["artifact-read", "plan-validate"],
   },
   { id: "delivery-verification", instructions: "Verify accessible bytes against the manifest. An unknown is not a pass.", tools: ["sink-checksum", "artifact-draft"] },
+  { id: "brief-evaluation", instructions: "Judge whether a problem brief is ready for a person to approve. Advisory only: never approves, edits or blocks.", tools: ["artifact-read"] },
 ];
 
 /**
@@ -111,7 +112,7 @@ const DIRECTORS: readonly DirectorRecord[] = [
   {
     key: "sb-facilitator",
     title: "Facilitator",
-    agents: ["product-guide", "constraints-mapper"],
+    agents: ["product-guide", "constraints-mapper", "brief-evaluator"],
     workflows: [PROJECT_LIFECYCLE_ID, STAGE_WORKFLOW_ID, APPROVAL_WORKFLOW_ID],
   },
   {
@@ -159,6 +160,7 @@ function skillsFor(role: AgentRole): string[] {
     estimator: ["cost-estimation", "interchange-platform"],
     "build-supervisor": ["worker-supervision", "interchange-platform"],
     "delivery-verifier": ["delivery-verification", "interchange-platform"],
+    "brief-evaluator": ["brief-evaluation"],
   };
   if (role.id.startsWith("senior-engineer-")) {
     const specialty = role.id.replace("senior-engineer-", "");
@@ -231,7 +233,7 @@ export function kitSeed(): KitSeed {
     role: role.id,
     system: role.system,
     inputs: ["approved artifact versions", "the conversation so far", "policy"],
-    produces: role.produces,
+    produces: role.produces ?? "verdict",
   }));
 
   const models: CuratedModelBinding[] = AGENT_KIT.map((role) => ({

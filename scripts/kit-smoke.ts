@@ -15,6 +15,7 @@ import { AGENT_KIT } from "@solutions-builder/app/kit";
 import { STAGES } from "@solutions-builder/app/ledger";
 import { baseTemplate, SLOTS, violationsIn } from "@solutions-builder/app/template";
 import { APP_VERSION, expectedDefinitions } from "@solutions-builder/app/manifest";
+import { briefVerdictIn } from "@solutions-builder/app/document";
 
 let passed = 0;
 const failures: string[] = [];
@@ -45,7 +46,8 @@ check("every role has an agent seed", seed.agents.length === AGENT_KIT.length);
 }
 {
   // CL-7603: no quota of questions; ask what matters, and none is allowed.
-  const quota = AGENT_KIT.filter((role) => !role.system.includes("none is a fine answer"));
+  // Only roles that interview are held to it; the evaluator asks nothing.
+  const quota = AGENT_KIT.filter((role) => role.system.includes("What I need from you") && !role.system.includes("none is a fine answer"));
   check("no specialist targets a number of questions", quota.length === 0, quota.map((role) => role.id).join(", "));
 }
 check("§8's ten default skills are present", seed.skills.length >= 10, `${seed.skills.length} skills`);
@@ -243,6 +245,36 @@ check(
       (word) => (skill?.instructions ?? "").toLowerCase().includes(word),
     ),
   );
+}
+
+{
+  // The evaluator only reads; it decides nothing and holds nothing to write with.
+  const evaluator = seed.agents.find((agent) => agent.agent === "brief-evaluator");
+  check(
+    "the brief evaluator holds no propose or write tool",
+    evaluator?.toolKeys.every((key) => {
+      const tool = seed.tools.find((entry) => entry.key === key);
+      return tool?.mode === "read";
+    }) === true,
+    evaluator?.toolKeys.join(", ") ?? "no evaluator",
+  );
+}
+
+{
+  const ready = briefVerdictIn("Verdict: ready\n- Nothing outstanding.");
+  check("a ready verdict parses", ready?.ready === true, JSON.stringify(ready));
+
+  const notYet = briefVerdictIn(
+    "Verdict: not yet\n- Success criteria are not checkable\n- Who is affected is vague",
+  );
+  check(
+    "a not-yet verdict parses with its notes",
+    notYet?.ready === false && notYet.notes.length === 2,
+    JSON.stringify(notYet),
+  );
+
+  const malformed = briefVerdictIn("This brief looks fine to me.");
+  check("a malformed verdict returns null", malformed === null, JSON.stringify(malformed));
 }
 
 console.log(`\nKit smoke: ${passed}/${passed + failures.length} checks passed`);
