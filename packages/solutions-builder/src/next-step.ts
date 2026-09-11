@@ -83,18 +83,23 @@ export function nextStep(input: {
       // "Submit for approval" is a lie when the submitter and the approver
       // are the same person — nobody sends anything to anybody. Solo says so
       // plainly; only a real second approver earns the word "send".
+      // Stage 4 is reviewed through anchored feedback on the mockup, not a
+      // conversation; telling someone to say so in a conversation that is not
+      // on the screen sends them looking for it.
+      const change =
+        stage === 4
+          ? "If something is wrong, give feedback on the design and a new version comes back."
+          : "If something is wrong, say so in the conversation and a new version comes back.";
       if (soloApproval) {
         return {
           title: stage === 7 ? "Approve the cost" : "Approve and continue",
-          detail:
-            "If something is wrong, say so in the conversation and a new version comes back. You hold the only approval this stage needs.",
+          detail: `${change} You hold the only approval this stage needs.`,
           where: "stage",
         };
       }
       return {
         title: "Send for approval",
-        detail:
-          "If something is wrong, say so in the conversation and a new version comes back. If it is right, send it on for approval.",
+        detail: `${change} If it is right, send it on for approval.`,
         where: "stage",
       };
     }
