@@ -37,10 +37,10 @@ const anchors = new Map<string, string>();
 /** Why a project has no execution, for the status line. */
 const unavailable = new Map<string, string>();
 
-async function anchorFor(projectId: string): Promise<string | null> {
+async function anchorFor(projectId: string, replace = false): Promise<string | null> {
   const known = anchors.get(projectId);
-  if (known) return known;
-  const deployment = await ensureLifecycleDeployment(projectId);
+  if (known && !replace) return known;
+  const deployment = await ensureLifecycleDeployment(projectId, { replace });
   if (deployment.status === "no_offering" || deployment.status === "no_host") {
     unavailable.set(projectId, deployment.status);
     return null;
@@ -207,8 +207,13 @@ export async function deliverStageSignal(
   return "failed";
 }
 
-/** How long a freshly fired run gets to park for the first time. */
-const FIRST_PARK_WAIT_MS = 30_000;
+/**
+ * How long a freshly fired run gets to park for the first time. A new
+ * deployment materialises the lifecycle's closure and starts a sidecar
+ * before its run can take a step, and on a slow disk that has taken well
+ * over half a minute.
+ */
+const FIRST_PARK_WAIT_MS = 180_000;
 
 /** Waits until `step` is no longer parked on its signal, or the park wait runs out. */
 async function consumed(anchor: string, step: Parked): Promise<void> {
@@ -236,10 +241,15 @@ const SETTLE_MS = 750;
 /** The run phases nothing follows (`isTerminalRunPhase` in the runtime's state machine). */
 const ENDED = new Set(["completed", "failed", "cancelled"]);
 
-/** The deployment's own top-level run has ended: nothing on it will ever park again. */
-function anchorIsDead(anchor: string, runs: FoldedRun[]): boolean {
-  const top = runs.find((run) => run.runId === anchor);
-  return top !== undefined && ENDED.has(top.state.phase);
+/**
+ * The deployment has fired its lifecycle run and every run under it has
+ * ended: nothing on it will ever park again. The deployment itself stays
+ * allocated when its run fails, so its allocation status cannot say this;
+ * only the runs can. (A deployment with no runs yet is not dead — it has
+ * not been fired.)
+ */
+function anchorIsDead(_anchor: string, runs: FoldedRun[]): boolean {
+  return runs.length > 0 && runs.every((run) => ENDED.has(run.state.phase));
 }
 
 /**
@@ -288,6 +298,10 @@ export async function alignRunWithLedger(projectId: string, ledger: LedgerPositi
     if (!(cause instanceof HubApiError && cause.status === 409)) throw cause;
     console.error(`[executor] ${projectId}: the run's deployment is no longer live; deploying the lifecycle again.`);
     forgetExecution(projectId);
+    // A replacement, not a re-resolution: a dead run leaves its deployment
+    // allocated and its digest current, so resolving again would hand the
+    // same dead anchor back.
+    if ((await anchorFor(projectId, true)) === null) return "no_execution";
     return await alignOnce(projectId, ledger);
   }
 }
