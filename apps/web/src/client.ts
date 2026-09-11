@@ -359,6 +359,16 @@ export const api = {
   /** Brings an exported project in as a new project here. */
   importProject: (bundle: unknown) =>
     post<{ projectId: string; nodes: number; commands: number }>("/projects/import", bundle),
+  /** The stakeholders stage 5 writes for, and the roles one may hold. */
+  stakeholders: (projectId: string) =>
+    request<{ audiences: { name: string; role: string }[]; audienceQuorum: number; roles: string[] }>(
+      `/projects/${projectId}/stakeholders`,
+    ),
+  setStakeholders: (projectId: string, payload: { audiences: { name: string; role: string }[]; audienceQuorum: number }) =>
+    request<{ audiences: { name: string; role: string }[]; audienceQuorum: number; roles: string[] }>(
+      `/projects/${projectId}/stakeholders`,
+      { method: "PUT", body: JSON.stringify(payload) },
+    ),
   updateProject: (projectId: string, payload: { title?: string; archived?: boolean }) =>
     request<{ ok: true }>(`/projects/${projectId}`, { method: "PATCH", body: JSON.stringify(payload) }),
   deleteProject: (projectId: string) =>

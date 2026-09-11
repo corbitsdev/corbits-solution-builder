@@ -31,9 +31,9 @@ export const STAGE_TIPS: Record<number, string[]> = {
     "Feedback on a screen can quote it directly. Select text in the draft to attach it to what you say.",
   ],
   5: [
-    "Each audience gets its own package answering one question: is this worth pursuing?",
+    "Each stakeholder gets their own package answering one question: is this worth pursuing?",
     "A package is written for its reader. A founder and an engineer should not be handed the same page.",
-    "Stage 5 needs a quorum. The project moves on when enough audiences have decided.",
+    "Stage 5 needs a quorum. The project moves on when enough stakeholders have decided.",
   ],
   6: [
     "The plan is what the code builder executes, so vagueness here becomes vagueness in the build.",

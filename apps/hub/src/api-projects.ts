@@ -29,6 +29,7 @@ import { localActor } from "./hub-client.js";
 import { printableDesign } from "./print-page.js";
 import { exportDirectory, exportProject, importProject, parseBundle, saveBundle, bundleFileName } from "./project-transfer.js";
 import { attachMaterial, MATERIAL_KIND, type IncomingFile } from "./source-material.js";
+import { setStakeholders, STAKEHOLDER_ROLES } from "./stakeholders.js";
 
 export function registerProjectRoutes(api: Hono) {
   api.get("/decisions", async (context) =>
@@ -285,6 +286,21 @@ export function registerProjectRoutes(api: Hono) {
     }
     if (typeof body.archived === "boolean") await archiveProject(projectId, body.archived);
     return context.json({ ok: true });
+  });
+
+  /** The people stage 5 writes for and who each decide; the roles they may hold ride along for the editor. */
+  api.get("/projects/:projectId/stakeholders", async (context) => {
+    const detail = await projectDetail(context.req.param("projectId"), localActor().principalId);
+    const policy = detail.project.policy as { audiences: { name: string; role: string }[]; audienceQuorum: number };
+    return context.json({ audiences: policy.audiences, audienceQuorum: policy.audienceQuorum, roles: STAKEHOLDER_ROLES });
+  });
+
+  api.put("/projects/:projectId/stakeholders", async (context) => {
+    const projectId = context.req.param("projectId");
+    await projectDetail(projectId, localActor().principalId);
+    const body = (await context.req.json().catch(() => ({}))) as { audiences?: unknown; audienceQuorum?: unknown };
+    const policy = await setStakeholders(projectId, { audiences: body.audiences, audienceQuorum: body.audienceQuorum });
+    return context.json({ audiences: policy.audiences, audienceQuorum: policy.audienceQuorum, roles: STAKEHOLDER_ROLES });
   });
 
   api.delete("/projects/:projectId", async (context) => {
