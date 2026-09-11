@@ -14,7 +14,7 @@
  */
 import { applyEvent, emptyState, loopBodyRunId, type WorkflowEvent } from "@intx/workflow";
 import type { Command, Stage } from "@solutions-builder/app/ledger";
-import { reviseStepId, stageOfStepId, stageSignal } from "@solutions-builder/app/workflows/stage-loop";
+import { reviseStepId, stageOfStepId, stageSignal, type StageSignal } from "@solutions-builder/app/workflows/stage-loop";
 import { deploymentRuns, type HubRunEvent } from "./hub-client.js";
 import { ensureLifecycleDeployment } from "./workflow-deploy.js";
 
@@ -136,6 +136,33 @@ export async function projectExecutionStatus(projectId: string): Promise<StageSt
  * accepted but the run cannot consume is visible rather than swallowed. `signalId` is the command's own idempotency key, so a retried
  * command is a deduplicated signal, never a second one.
  */
+/**
+ * How long a delivery waits for the run to park between steps. A round that
+ * has just finished leaves the loop spawning its next iteration for a moment;
+ * a command that arrives in that gap must not read as "nothing awaits it".
+ */
+const PARK_WAIT_MS = 20_000;
+
+/**
+ * The signal the run currently awaits for this command, waiting out the gap
+ * between one step ending and the next park while a stage step is in flight.
+ * The command lands on whichever stage the run is parked at; the ledger has
+ * already decided it is allowed there.
+ */
+async function awaitingSignalFor(anchor: string, command: Command): Promise<StageSignal | null> {
+  const deadline = Date.now() + PARK_WAIT_MS;
+  for (;;) {
+    const runs = await foldRuns(anchor);
+    const signal = parkedSteps(runs)
+      .flatMap((step) => [stageSignal(step.stage, command, "gate"), stageSignal(step.stage, command, "exhausted")]
+        .map((candidate) => ({ step, signal: candidate })))
+      .find(({ step, signal }) => step.signalName === signal.name)?.signal;
+    if (signal) return signal;
+    if (currentStep(runs) === null || Date.now() >= deadline) return null;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+}
+
 export async function deliverStageSignal(
   projectId: string,
   command: Command,
@@ -144,13 +171,7 @@ export async function deliverStageSignal(
 ): Promise<DeliveryOutcome> {
   const anchor = anchors.get(projectId) ?? (await anchorFor(projectId));
   if (!anchor) return "no_execution";
-  const parked = parkedSteps(await foldRuns(anchor));
-  // The command lands on whichever stage the run is parked at; the ledger has
-  // already decided it is allowed there.
-  const signal = parked
-    .flatMap((step) => [stageSignal(step.stage, command, "gate"), stageSignal(step.stage, command, "exhausted")]
-      .map((candidate) => ({ step, signal: candidate })))
-    .find(({ step, signal }) => step.signalName === signal.name)?.signal;
+  const signal = await awaitingSignalFor(anchor, command);
   if (!signal) return "no_execution";
   // Signals address the deployment's top-level run; a loop relays a named
   // signal into the iteration that awaits it.
