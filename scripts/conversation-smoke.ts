@@ -24,6 +24,8 @@ import {
   type StageTurn,
 } from "../apps/hub/src/hub-conversation.js";
 import { nextQuestion } from "../apps/hub/src/questions.js";
+import { evaluationIn, projectStageThread } from "../apps/hub/src/stage-thread.js";
+import { DRAFT_STEP_ID, EVALUATE_STEP_ID, ROUND_STEP_ID } from "@solutions-builder/app/workflows/stage-loop";
 import { openDatabase } from "../apps/hub/src/db.js";
 import { prepareDatabase } from "../apps/hub/src/migrate.js";
 import { mountHub } from "../apps/hub/src/hub-mount.js";
@@ -125,6 +127,110 @@ const turn = (id: string, role: "human" | "specialist", body: string): StageTurn
   // only instruction there is would be worse than an oversized prompt.
   const huge = splitForCompaction([turn("huge", "human", "z".repeat(9000))]);
   check("one oversized turn is kept rather than dropped", huge.keep.length === 1 && huge.fold.length === 0);
+}
+
+// --- The thread projected straight from run events (no persistence at all) ---
+{
+  const inline = (value: unknown) => `inline:${JSON.stringify(value)}`;
+  const at = (minute: number) => new Date(2024, 0, 1, 0, minute).toISOString();
+  const stepCompleted = (seq: number, stepId: string, output: unknown, minute: number) => ({
+    seq,
+    type: "StepCompleted",
+    body: { stepId, attempt: 1, output: { ref: inline(output) }, at: at(minute) },
+  });
+  const signalReceived = (seq: number, payload: unknown, minute: number) => ({
+    seq,
+    type: "SignalReceived",
+    body: { signalName: "solutions-builder.stage.1.round", signalId: `sig-${seq}`, payload, at: at(minute) },
+  });
+
+  const round1 = at(0);
+  const iteration1 = {
+    runId: "run_anchor__revise-1__0",
+    events: [
+      signalReceived(1, {
+        command: "stage.draft",
+        draft: true,
+        message: "Focus on cold outbound.",
+        quotes: [{ quote: "Reps rebuild the list every Monday." }],
+        mode: "final",
+      }, 0),
+      stepCompleted(2, ROUND_STEP_ID, {
+        command: "stage.draft",
+        draft: true,
+        message: "Focus on cold outbound.",
+        quotes: [{ quote: "Reps rebuild the list every Monday." }],
+        mode: "final",
+      }, 0),
+      stepCompleted(
+        3,
+        DRAFT_STEP_ID,
+        { reply: "# In Short\nThis draft nails the process.\n\n# Open Questions\n- Which channel do we use?\n- How many leads per week?\n" },
+        1,
+      ),
+      stepCompleted(4, EVALUATE_STEP_ID, { reply: "Verdict: ready\n- Scope is clear\n- Audience is named" }, 1),
+    ],
+  };
+
+  const iteration2 = {
+    runId: "run_anchor__revise-1__1",
+    events: [
+      signalReceived(1, { command: "stage.draft", draft: true, message: "Email.", mode: "interview" }, 2),
+      stepCompleted(3, DRAFT_STEP_ID, { reply: "# In Short\nRevised per the channel answer.\n" }, 2),
+    ],
+  };
+
+  const iteration3 = {
+    runId: "run_anchor__revise-1__2",
+    events: [
+      signalReceived(1, { command: "stage.draft", draft: true, message: "", quotes: [], mode: "final" }, 3),
+      stepCompleted(3, DRAFT_STEP_ID, { reply: "# In Short\nNothing more to add.\n" }, 3),
+    ],
+  };
+
+  const nodes = [
+    { id: "nod_1", provenance: { stepRef: `${iteration1.runId}/${DRAFT_STEP_ID}` } },
+    { id: "nod_2", provenance: { stepRef: `${iteration2.runId}/${DRAFT_STEP_ID}` } },
+  ];
+
+  const turns = await projectStageThread({
+    iterations: [iteration1 as never, iteration2 as never, iteration3 as never],
+    nodes,
+    opening: { body: "Reps rebuild the list every Monday.", createdAt: round1 },
+  });
+
+  check("the opening problem statement is the first turn", turns[0]?.body === "Reps rebuild the list every Monday.");
+  check(
+    "a human turn with a quote projects with the quote",
+    turns[1]?.role === "human" && turns[1]?.quotes[0]?.quote === "Reps rebuild the list every Monday.",
+  );
+  check(
+    "a final draft with two questions opens a round with the first question",
+    turns[2]?.role === "specialist" &&
+      turns[2]?.questions?.length === 2 &&
+      turns[2]!.body.includes("Which channel do we use?"),
+    turns[2]?.body,
+  );
+  check("the draft's result node rides on its turn", turns[2]?.resultNodeId === "nod_1");
+
+  check(
+    "an interview-mode iteration projects the next question, not its own draft's questions",
+    turns[4]?.role === "specialist" && turns[4]?.questions === null && turns[4]?.body === "How many leads per week?",
+    turns[4]?.body,
+  );
+  check("its result node still rides on the turn", turns[4]?.resultNodeId === "nod_2");
+
+  check(
+    "an empty message with no quotes projects no human turn",
+    turns.filter((entry) => entry.id === `${iteration3.runId}:round`).length === 0,
+  );
+
+  const evaluation = await evaluationIn([iteration1 as never, iteration2 as never, iteration3 as never]);
+  check(
+    "the evaluation parses the latest verdict",
+    evaluation?.ready === true && evaluation.notes.length === 2,
+    JSON.stringify(evaluation),
+  );
 }
 
 // Everything from here on writes to `agent_session` / `session_mail` /

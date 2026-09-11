@@ -578,6 +578,13 @@ async function apply(
       };
     }
 
+    case "stage.draft": {
+      // Keeps the stage open: no run mutation, no approval, no notify. Its
+      // only durable effect is the round signal `runGateSideEffects` delivers
+      // to the run after this command commits.
+      return { runId: run.id, stage: run.stage, state: run.state };
+    }
+
     case "stage.submit": {
       draft.patch(run.id, { state: "waiting_approval" });
       return { runId: run.id, stage: run.stage, state: "waiting_approval", notifyRunId: run.id };

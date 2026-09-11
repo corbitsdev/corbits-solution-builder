@@ -9,7 +9,7 @@ import { agentFor, panelPrincipals, type AgentRole } from "@solutions-builder/ap
 import { assumptionsIn, questionsIn, summaryIn } from "@solutions-builder/app/document";
 import { renderStageContext, stageContext, type StageContext } from "./agent-conversation.js";
 import { appendHumanTurn, appendSpecialistTurn, type Quote } from "./hub-conversation.js";
-import { beginLiveDraft, endLiveDraft, updateLiveDraft } from "./live-drafts.js";
+import { beginLiveDraft, endLiveDraft, stripOuterFence, updateLiveDraft } from "./live-drafts.js";
 import { complete } from "./inference.js";
 import { readArtifactNode, writeArtifact } from "./projects.js";
 import { database } from "./db.js";
@@ -139,6 +139,9 @@ async function draftWith(
   },
 ): Promise<StageDraftResult> {
   const inputs = await approvedInputs(args.projectId, args.stage);
+  if (!agent.produces) {
+    throw new HostError("validation_failed", `${agent.title} produces no artifact; it cannot draft.`);
+  }
 
   const prompt = buildDraftPrompt({
     projectTitle: args.projectTitle,
@@ -263,12 +266,6 @@ async function draftWith(
     model: result.model,
     content: result.text,
   };
-}
-
-function stripOuterFence(text: string): string {
-  const trimmed = text.trim();
-  const match = /^```[a-zA-Z]*\n([\s\S]*?)\n?```$/.exec(trimmed);
-  return match?.[1] ?? trimmed;
 }
 
 /**

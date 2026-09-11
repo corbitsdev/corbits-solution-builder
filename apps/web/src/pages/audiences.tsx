@@ -96,6 +96,7 @@ export function AudiencePackages({
 
   return (
     <>
+      <div data-tour="audience-packages">
       <Screen
         title="Audience packages"
         description="Rough cost, not the firm estimate."
@@ -151,8 +152,10 @@ export function AudiencePackages({
           </>
         )}
       </Screen>
+      </div>
 
       {audiences.length > 0 ? (
+        <div data-tour="audience-decisions">
         <Screen
           title="Per-audience decisions"
           tight
@@ -225,6 +228,7 @@ export function AudiencePackages({
             ) : null}
           </div>
         </Screen>
+        </div>
       ) : null}
     </>
   );

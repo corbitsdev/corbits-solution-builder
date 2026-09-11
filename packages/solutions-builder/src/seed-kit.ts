@@ -17,10 +17,13 @@ import type {
   GrantCapability,
   KitSeed,
   PromptRecord,
+  RequiredGrant,
   SkillRecord,
   ToolDeclaration,
 } from "./kit.js";
 import { AGENT_KIT, type AgentRole } from "./kit.js";
+import type { Stage } from "./ledger.js";
+import { baseTemplate } from "./template.js";
 import {
   APPROVAL_WORKFLOW_ID,
   BUILD_SUPERVISION_WORKFLOW_ID,
@@ -49,11 +52,14 @@ const SKILLS: readonly { id: string; instructions: string; tools: readonly strin
       "Name the primitive you are using. A plan that says \"a queue\" where the platform has one is a plan to write a second queue.",
       "Do not model authority twice. Tenant and principal are the platform's; reference them rather than keeping a parallel copy, and let grants resolve against whoever launched the run.",
       "Secrets live in an OS keychain where the machine has one. The hub's credential row holds the sealed key, never plaintext; the sidecar decrypts it to authenticate.",
+      "Beyond the runtime, the corbitsdev catalog is the reuse surface. `@corbits/artifacts` is a versioned artifact store — the one Builder itself uses. `@corbits/react-ui` is the UI kit a generated interface should draw its components from. `@corbits/oauth-core` handles an OAuth flow rather than one being written by hand. The `@corbits/*-provider` packages are the connectors to individual services. The `@intx/tools-*` packages are the tool implementations an agent step calls.",
+      "A generated solution is normally one of three shapes: a workflow deployment with agent steps, a desktop host embedding the hub, or a hosted hub. Pick the shape the requirement actually needs rather than defaulting to one.",
       "Where the platform genuinely lacks something, say so plainly and scope it as work — a substitute that pretends to be the primitive is worse than an admitted gap.",
     ].join(" "),
     tools: ["artifact-read", "plan-validate"],
   },
   { id: "delivery-verification", instructions: "Verify accessible bytes against the manifest. An unknown is not a pass.", tools: ["sink-checksum", "artifact-draft"] },
+  { id: "brief-evaluation", instructions: "Judge whether a problem brief is ready for a person to approve. Advisory only: never approves, edits or blocks.", tools: ["artifact-read"] },
 ];
 
 /**
@@ -106,7 +112,7 @@ const DIRECTORS: readonly DirectorRecord[] = [
   {
     key: "sb-facilitator",
     title: "Facilitator",
-    agents: ["product-guide", "constraints-mapper"],
+    agents: ["product-guide", "constraints-mapper", "brief-evaluator"],
     workflows: [PROJECT_LIFECYCLE_ID, STAGE_WORKFLOW_ID, APPROVAL_WORKFLOW_ID],
   },
   {
@@ -148,12 +154,13 @@ function skillsFor(role: AgentRole): string[] {
     brainstormer: ["discovery-interview", "proposal-comparison"],
     "constraints-mapper": ["constraint-framing"],
     proposer: ["proposal-comparison"],
-    "experience-designer": ["interaction-design"],
-    "presentation-creator": ["approval-packaging"],
+    "experience-designer": ["interaction-design", "interchange-platform"],
+    "presentation-creator": ["approval-packaging", "interchange-platform"],
     architect: ["build-planning", "interchange-platform"],
-    estimator: ["cost-estimation"],
+    estimator: ["cost-estimation", "interchange-platform"],
     "build-supervisor": ["worker-supervision", "interchange-platform"],
-    "delivery-verifier": ["delivery-verification"],
+    "delivery-verifier": ["delivery-verification", "interchange-platform"],
+    "brief-evaluator": ["brief-evaluation"],
   };
   if (role.id.startsWith("senior-engineer-")) {
     const specialty = role.id.replace("senior-engineer-", "");
@@ -167,6 +174,57 @@ function directorFor(role: AgentRole): string {
   return director?.key ?? "sb-specialists";
 }
 
+/** Which slot fills which stage, for reading the agent off the template. */
+const STAGE_SLOTS: Partial<Record<Stage, string[]>> = {
+  1: ["discovery-interviewer"],
+  2: ["constraint-mapper"],
+  3: ["proposal-strategy"],
+  4: ["surface-design", "design-feedback"],
+  5: ["audience-package"],
+  6: ["plan-and-review"],
+  7: ["estimate-and-policy"],
+  8: ["build-execution"],
+  9: ["target-verification", "delivery-manifest"],
+};
+
+/**
+ * The grants a stage's agent needs, as Interchange's own requirement manifest.
+ *
+ * §8's read/propose/write split is expressed here rather than in a Builder
+ * table, because this is what the hub resolves at launch into materialized
+ * grants — a grant recorded anywhere else is a description of an authority
+ * rather than the authority itself.
+ *
+ * `source: "invoker"` throughout: an agent acts on the authority of whoever
+ * launched the run, and is satisfied only if that person actually holds the
+ * capability. That is what stops a definition granting itself something its
+ * author could not.
+ */
+export function grantRequirementsFor(stage: Stage): RequiredGrant[] {
+  const seed = kitSeed();
+  const slotAgent = baseTemplate().slots.find((binding) =>
+    STAGE_SLOTS[stage]?.includes(binding.slot),
+  )?.agent;
+  const agent = seed.agents.find((entry) => entry.agent === slotAgent);
+  if (!agent) return [];
+
+  return agent.toolKeys.flatMap((toolKey) => {
+    const tool = seed.tools.find((entry) => entry.key === toolKey);
+    const grant = seed.grants.find((entry) => entry.key === tool?.grantKey);
+    if (!tool || !grant) return [];
+    return [
+      {
+        resource: grant.capability,
+        action: tool.mode,
+        // A capability whose exercise needs a human decision is asked for,
+        // never assumed — §8's "no agent gets human approval authority".
+        effect: grant.requiresApproval ? ("ask" as const) : ("allow" as const),
+        source: "invoker" as const,
+      },
+    ];
+  });
+}
+
 /** The whole kit, derived from the roles that already exist. */
 export function kitSeed(): KitSeed {
   const prompts: PromptRecord[] = AGENT_KIT.map((role) => ({
@@ -175,7 +233,7 @@ export function kitSeed(): KitSeed {
     role: role.id,
     system: role.system,
     inputs: ["approved artifact versions", "the conversation so far", "policy"],
-    produces: role.produces,
+    produces: role.produces ?? "verdict",
   }));
 
   const models: CuratedModelBinding[] = AGENT_KIT.map((role) => ({

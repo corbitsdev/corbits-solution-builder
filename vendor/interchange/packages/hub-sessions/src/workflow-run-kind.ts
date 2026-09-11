@@ -402,7 +402,7 @@ export function requireEventSeq(filename: string, context: string): number {
  * encoding) fails the push at the boundary rather than landing
  * silently.
  */
-const BLOB_FILENAME_RE = /^[0-9a-f]{64}$/;
+export const BLOB_FILENAME_RE = /^[0-9a-f]{64}$/;
 
 /**
  * Per-mail-part filename shape for the

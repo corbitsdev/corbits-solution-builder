@@ -14,12 +14,13 @@ import {
   LIFECYCLE_ENTRY_PATH,
   lifecycleEntrySource,
   WORKFLOW_PACKAGE_DEPENDENCIES,
-  type BuildSource,
+  type InferenceSourcePin,
 } from "@solutions-builder/app/workflows/lifecycle-source";
 import { continuingCommands, ROUND_STEP_ID } from "@solutions-builder/app/workflows/stage-loop";
 import { assets, catalog, workflows, type HubDeployment } from "./hub-client.js";
 import { readWorkflowSourceBlob, writeWorkflowSourceTree } from "./hub-gaps.js";
 import { canPlaceSidecars } from "./hub-mount.js";
+import { readProject } from "./project-tenant.js";
 import { closureFiles, treeDigest, workspaceCatalog } from "./workflow-closure.js";
 
 export const LIFECYCLE_ASSET_NAME = "solutions-builder-project-lifecycle";
@@ -73,7 +74,11 @@ export function lifecycleAssetName(projectId?: string): string {
  * closure resolves to the vendored revision rather than npm. A digest of every
  * file sits at the root so a changed byte anywhere is a new deployment.
  */
-export function renderLifecycleSource(projectId?: string, buildSource?: BuildSource): LifecycleSource {
+export function renderLifecycleSource(
+  projectId?: string,
+  source?: InferenceSourcePin,
+  audiences?: readonly { name: string; role: string }[],
+): LifecycleSource {
   const name = lifecycleAssetName(projectId);
   const root = {
     name: `${name}-workspace`,
@@ -94,7 +99,9 @@ export function renderLifecycleSource(projectId?: string, buildSource?: BuildSou
   const files: Record<string, string> = {
     "package.json": `${JSON.stringify(root, null, 2)}\n`,
     [`${LIFECYCLE_DIR}/package.json`]: `${JSON.stringify(member, null, 2)}\n`,
-    [`${LIFECYCLE_DIR}/${ENTRY_PATH}`]: lifecycleEntrySource(buildSource ? { buildSource } : {}),
+    [`${LIFECYCLE_DIR}/${ENTRY_PATH}`]: lifecycleEntrySource(
+      source ? { source, ...(audiences ? { audiences } : {}) } : {},
+    ),
     [`${LIFECYCLE_DIR}/${LOOPS_PATH}`]: loopsModule(),
     // The build agent's tools ride beside the workflow runtime; the two
     // closures overlap on @intx/agent and @intx/types, which is fine.
@@ -106,12 +113,13 @@ export function renderLifecycleSource(projectId?: string, buildSource?: BuildSou
 }
 
 /**
- * The (provider plugin, canonical model) pair the hub pins a step's source by,
- * for the operator's first offering. The deploy resolves each offering to a
- * harness source keyed exactly this way, so the agent's declared preference
- * matches an approved source rather than falling back to the default.
+ * The (provider plugin, canonical model) pair the hub pins every rendered
+ * agent step's source by, for the operator's first offering. The deploy
+ * resolves each offering to a harness source keyed exactly this way, so the
+ * agent's declared preference matches an approved source rather than falling
+ * back to the default.
  */
-async function buildSourceFor(offering: { providerId: string; modelId: string }): Promise<BuildSource | undefined> {
+async function sourceFor(offering: { providerId: string; modelId: string }): Promise<InferenceSourcePin | undefined> {
   // An offering points at a model provider (the catalog's `mpv_` row, whose
   // plugin names the inference adapter), not at the credential provider.
   const [providers, models] = await Promise.all([catalog.modelProviders(), catalog.models()]);
@@ -161,13 +169,18 @@ export async function ensureLifecycleDeployment(projectId?: string): Promise<Lif
     .sort((a, b) => a.priority - b.priority);
   if (offerings.length === 0) return { status: "no_offering" };
 
-  const source = renderLifecycleSource(projectId, await buildSourceFor(offerings[0]!));
+  // A project's own deployment renders against that project's audiences, so
+  // an audience added or renamed changes the digest and redeploys — the same
+  // upgrade path any other lifecycle change takes.
+  const project = projectId ? await readProject(projectId) : null;
+  const audiences = project?.policy.audiences;
+  const rendered = renderLifecycleSource(projectId, await sourceFor(offerings[0]!), audiences);
   const assetId = await lifecycleAsset(projectId);
   const head = await readWorkflowSourceBlob(assetId, DIGEST_PATH);
   const [latest] = (await workflows.deployments()).filter(
     (deployment: HubDeployment) => deployment.definitionAssetId === assetId,
   );
-  if (head === source[DIGEST_PATH] && latest) {
+  if (head === rendered[DIGEST_PATH] && latest) {
     return {
       status: "current",
       assetId,
@@ -179,7 +192,7 @@ export async function ensureLifecycleDeployment(projectId?: string): Promise<Lif
 
   const { commitSha } = await writeWorkflowSourceTree({
     assetId,
-    files: { ...source },
+    files: { ...rendered },
     message: "Project lifecycle generated from the transition ledger",
   });
   commitsByAsset.set(assetId, commitSha);

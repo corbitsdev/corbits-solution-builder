@@ -21,7 +21,8 @@ import { prepareDatabase } from "./migrate.js";
 import { databaseDirectory, dataDirectory } from "./paths.js";
 import { stopSpawnedSidecars } from "./sidecar-processes.js";
 import { ensureHub, hubFetch, resolveWorkspace } from "./hub-client.js";
-import { hub, hubWebSocket, setHostPort, SIDECAR_WS_PATH } from "./hub-mount.js";
+import { hub, hubIsMounted, hubWebSocket, setHostPort, SIDECAR_WS_PATH } from "./hub-mount.js";
+import { attachLiveDrafts } from "./live-drafts.js";
 import {
   clientConnected,
   markReady,
@@ -74,6 +75,10 @@ if (migrated.builder.length > 0) {
 
 const hubEndpoint = await ensureHub();
 console.log(`Interchange hub: ${hubEndpoint.detail}`);
+
+// The embedded hub is mounted in this process; a hosted one is not, and its
+// events reach a different process entirely. Nothing to attach to there yet.
+if (hubIsMounted()) attachLiveDrafts();
 
 // Not seeding: signing in. If the owner and their workspace already exist, the
 // host knows which tenant it serves; if not, the client installs one.

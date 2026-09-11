@@ -10,10 +10,12 @@
  * whose breach is invisible at runtime — an agent quietly holding a write
  * grant looks exactly like one that does not.
  */
-import { kitSeed } from "@solutions-builder/app/seed-kit";
+import { kitSeed, grantRequirementsFor } from "@solutions-builder/app/seed-kit";
 import { AGENT_KIT } from "@solutions-builder/app/kit";
+import { STAGES } from "@solutions-builder/app/ledger";
 import { baseTemplate, SLOTS, violationsIn } from "@solutions-builder/app/template";
 import { APP_VERSION, expectedDefinitions } from "@solutions-builder/app/manifest";
+import { briefVerdictIn } from "@solutions-builder/app/document";
 
 let passed = 0;
 const failures: string[] = [];
@@ -44,7 +46,8 @@ check("every role has an agent seed", seed.agents.length === AGENT_KIT.length);
 }
 {
   // CL-7603: no quota of questions; ask what matters, and none is allowed.
-  const quota = AGENT_KIT.filter((role) => !role.system.includes("none is a fine answer"));
+  // Only roles that interview are held to it; the evaluator asks nothing.
+  const quota = AGENT_KIT.filter((role) => role.system.includes("What I need from you") && !role.system.includes("none is a fine answer"));
   check("no specialist targets a number of questions", quota.length === 0, quota.map((role) => role.id).join(", "));
 }
 check("§8's ten default skills are present", seed.skills.length >= 10, `${seed.skills.length} skills`);
@@ -113,6 +116,29 @@ check(
   check(
     "and each carries its own model binding",
     new Set(panel.map((agent) => agent.modelKey)).size === 4,
+  );
+}
+
+{
+  // The per-stage grant requirements, moved from the host into the package.
+  const perStage = STAGES.map((stage) => ({ stage, requirements: grantRequirementsFor(stage) }));
+  const empty = perStage.filter((entry) => entry.requirements.length === 0);
+  check(
+    "every stage returns a grant requirement",
+    empty.length === 0,
+    empty.map((entry) => entry.stage).join(", "),
+  );
+  const notInvoker = perStage.flatMap((entry) =>
+    entry.requirements.filter((req) => req.source !== "invoker").map(() => entry.stage),
+  );
+  check("every grant requirement names the invoker as its source", notInvoker.length === 0, notInvoker.join(", "));
+  const writeElsewhere = perStage.filter(
+    (entry) => entry.stage !== 8 && entry.requirements.some((req) => req.action === "write"),
+  );
+  check(
+    "only stage 8 requires a write grant",
+    writeElsewhere.length === 0,
+    writeElsewhere.map((entry) => entry.stage).join(", "),
   );
 }
 
@@ -195,7 +221,15 @@ check(
 // The roles that decide whether something gets built twice carry the guidance
 // for not doing it. This whole build was a demonstration of the failure.
 {
-  const planners = ["architect", "build-supervisor", "senior-engineer-application"];
+  const planners = [
+    "architect",
+    "build-supervisor",
+    "senior-engineer-application",
+    "experience-designer",
+    "presentation-creator",
+    "estimator",
+    "delivery-verifier",
+  ];
   for (const id of planners) {
     const agent = seed.agents.find((entry) => entry.agent === id);
     check(
@@ -207,10 +241,40 @@ check(
   const skill = seed.skills.find((entry) => entry.key === "interchange-platform");
   check(
     "and it names the primitives rather than gesturing at them",
-    ["workflow", "grant", "credential", "mail", "tenant", "principal"].every((word) =>
-      (skill?.instructions ?? "").toLowerCase().includes(word),
+    ["workflow", "grant", "credential", "mail", "tenant", "principal", "artifacts", "react-ui", "oauth"].every(
+      (word) => (skill?.instructions ?? "").toLowerCase().includes(word),
     ),
   );
+}
+
+{
+  // The evaluator only reads; it decides nothing and holds nothing to write with.
+  const evaluator = seed.agents.find((agent) => agent.agent === "brief-evaluator");
+  check(
+    "the brief evaluator holds no propose or write tool",
+    evaluator?.toolKeys.every((key) => {
+      const tool = seed.tools.find((entry) => entry.key === key);
+      return tool?.mode === "read";
+    }) === true,
+    evaluator?.toolKeys.join(", ") ?? "no evaluator",
+  );
+}
+
+{
+  const ready = briefVerdictIn("Verdict: ready\n- Nothing outstanding.");
+  check("a ready verdict parses", ready?.ready === true, JSON.stringify(ready));
+
+  const notYet = briefVerdictIn(
+    "Verdict: not yet\n- Success criteria are not checkable\n- Who is affected is vague",
+  );
+  check(
+    "a not-yet verdict parses with its notes",
+    notYet?.ready === false && notYet.notes.length === 2,
+    JSON.stringify(notYet),
+  );
+
+  const malformed = briefVerdictIn("This brief looks fine to me.");
+  check("a malformed verdict returns null", malformed === null, JSON.stringify(malformed));
 }
 
 console.log(`\nKit smoke: ${passed}/${passed + failures.length} checks passed`);

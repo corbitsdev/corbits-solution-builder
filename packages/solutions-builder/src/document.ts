@@ -133,3 +133,32 @@ export function approachName(heading: string): string | null {
 export function questionIn(document: string): string | null {
   return questionsIn(document)[0] ?? null;
 }
+
+/**
+ * The brief evaluator's fixed-shape verdict, parsed leniently: the verdict
+ * line may sit anywhere in the first three lines, and its bullets use the
+ * `- ` prefix. Anything else — no verdict line at all — is not a verdict.
+ */
+export function briefVerdictIn(text: string): { ready: boolean; notes: string[] } | null {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  let ready: boolean | null = null;
+  let verdictAt = -1;
+  for (let i = 0; i < Math.min(3, lines.length); i++) {
+    const match = /^verdict:\s*(ready|not yet)\s*$/i.exec(lines[i]!.trim());
+    if (match) {
+      ready = match[1]!.toLowerCase() === "ready";
+      verdictAt = i;
+      break;
+    }
+  }
+  if (ready === null) return null;
+
+  const notes = lines
+    .slice(verdictAt + 1)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("- "))
+    .map((line) => line.slice(2).trim())
+    .filter((line) => line.length > 0);
+
+  return { ready, notes };
+}

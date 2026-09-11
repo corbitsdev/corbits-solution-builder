@@ -12,10 +12,10 @@
  * checkpoint, why it ended) is folded from the ledger thread in `runs.ts`;
  * nothing about a run lives in process memory.
  */
-import { applyEvent, emptyState, type WorkflowEvent } from "@intx/workflow";
+import { applyEvent, emptyState, loopBodyRunId, type WorkflowEvent } from "@intx/workflow";
 import type { Command, Stage } from "@solutions-builder/app/ledger";
-import { stageOfStepId, stageSignal } from "@solutions-builder/app/workflows/stage-loop";
-import { deploymentRuns } from "./hub-client.js";
+import { reviseStepId, stageOfStepId, stageSignal } from "@solutions-builder/app/workflows/stage-loop";
+import { deploymentRuns, type HubRunEvent } from "./hub-client.js";
 import { ensureLifecycleDeployment } from "./workflow-deploy.js";
 
 /** What a signal delivery actually did, so a caller can tell nothing from broken. */
@@ -184,6 +184,19 @@ export function hasExecution(projectId: string): boolean {
   return anchors.has(projectId);
 }
 
+/**
+ * The project behind an anchor run id, for callers that only have the run's
+ * own address (a sidecar's `agent.event` frame carries `<anchorRunId>@domain`,
+ * never the project id). `null` when the anchor is not one this process has
+ * resolved a deployment for yet.
+ */
+export function projectForAnchor(anchorRunId: string): string | null {
+  for (const [projectId, anchor] of anchors) {
+    if (anchor === anchorRunId) return projectId;
+  }
+  return null;
+}
+
 /** Why a project has no run: no offering connected yet, or a host that cannot place sidecars. */
 export function executionUnavailable(projectId: string): string | null {
   return unavailable.get(projectId) ?? null;
@@ -224,4 +237,46 @@ export async function debugRuns(projectId: string): Promise<unknown> {
     }
   }
   return out;
+}
+
+export type StageIteration = { readonly runId: string; readonly events: HubRunEvent[] };
+
+/**
+ * Every iteration child run of a stage's revise loop, oldest first.
+ *
+ * A loop iteration's run id is deterministic (`loopBodyRunId`), so rather
+ * than folding every run's `state.children` map (as `parkedSteps` does, to
+ * learn which stage a parked run belongs to) this walks the index straight:
+ * iteration 0, 1, 2, ... until one is not among the deployment's run ids.
+ * That is the one place this stage-thread projection needs to know how a
+ * loop names its children; everything past this function reads iterations as
+ * plain `{runId, events}` pairs.
+ */
+export async function stageIterations(projectId: string, stage: Stage): Promise<StageIteration[]> {
+  const anchor = anchors.get(projectId) ?? (await anchorFor(projectId));
+  if (!anchor) return [];
+  const runIds = new Set(await deploymentRuns.list(anchor));
+  const loopId = reviseStepId(stage);
+  const iterations: StageIteration[] = [];
+  for (let index = 0; ; index += 1) {
+    const runId = loopBodyRunId(anchor, loopId, index);
+    if (!runIds.has(runId)) break;
+    iterations.push({ runId, events: await deploymentRuns.events(anchor, runId) });
+  }
+  return iterations;
+}
+
+/**
+ * Resolves a step output ref to the value it names: `inline:<json>` is
+ * parsed directly (the ref carries the value itself), `blob:<sha>` is
+ * fetched through the deployment's blob route first. One place to change if
+ * the ref format ever grows a third shape.
+ */
+export async function readOutputRef(anchor: string, runId: string, ref: string): Promise<unknown> {
+  if (ref.startsWith("inline:")) return JSON.parse(ref.slice("inline:".length));
+  const match = /^blob:(.+)$/.exec(ref);
+  if (!match) throw new Error(`Unrecognized step output ref: ${ref}`);
+  const bytes = await deploymentRuns.blob(anchor, runId, match[1]!);
+  if (!bytes) throw new Error(`Blob ${match[1]} for run ${runId} was not found.`);
+  return JSON.parse(new TextDecoder().decode(bytes));
 }

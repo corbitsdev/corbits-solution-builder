@@ -170,6 +170,7 @@ export function DesignFeedbackView({
 
   return (
     <>
+      <div data-tour="design-feedback">
       <Screen
         title="Design feedback"
         description="Click an element to anchor a comment."
@@ -236,6 +237,7 @@ export function DesignFeedbackView({
           }}
         />
       </Screen>
+      </div>
 
       {feedbackMode && !submitted ? (
         <Screen title="Anchored comments">
@@ -320,6 +322,7 @@ export function DesignFeedbackView({
 
           <Button
             variant="primary"
+            data-tour="design-submit"
             loading={busy === "submit"}
             disabled={!design}
             onClick={() =>

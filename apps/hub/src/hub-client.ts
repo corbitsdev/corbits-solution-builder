@@ -687,4 +687,11 @@ export const deploymentRuns = {
     ),
   signal: (anchorRunId: string, input: { runId: string; signalName: string; signalId: string; payload?: unknown }) =>
     hubApi(tenantPath(`/workflows/${anchorRunId}/signals`), { method: "POST", body: JSON.stringify(input) }),
+  /** A step output spilled to a blob because its JSON exceeded the inline threshold. */
+  blob: async (anchorRunId: string, runId: string, sha: string): Promise<Uint8Array | null> => {
+    const response = await hubApi(tenantPath(`/workflows/${anchorRunId}/runs/${runId}/blobs/${sha}`));
+    if (response.status === 404) return null;
+    if (!response.ok) throw new HubApiError(response.status, response.url, await response.text());
+    return new Uint8Array(await response.arrayBuffer());
+  },
 };
