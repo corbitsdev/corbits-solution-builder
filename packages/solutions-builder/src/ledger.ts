@@ -72,6 +72,7 @@ export const TERMINAL_STATES = [
 
 export const COMMANDS = [
   "project.create",
+  "stage.draft",
   "stage.submit",
   "stage.approve",
   "stage.reject",
@@ -152,6 +153,21 @@ export const LEDGER: readonly Transition[] = [
     effects: ["project", "root branch", "stage run 1"],
     createsRun: "stage",
     stages: [1],
+  },
+  {
+    id: "stage.draft",
+    command: "stage.draft",
+    from: { kind: "stage", state: "in_progress" },
+    to: { kind: "stage", state: "in_progress" },
+    authority: ["project_owner"],
+    preconditions: [
+      "the run is in progress at this stage",
+      "the message and quoted passages are the person's own words",
+    ],
+    effects: ["round signal on the stage's run"],
+    createsRun: null,
+    stages: null,
+    note: "The one command that keeps a stage open.",
   },
   {
     id: "stage.submit",

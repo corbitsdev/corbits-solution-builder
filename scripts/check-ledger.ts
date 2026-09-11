@@ -150,9 +150,20 @@ for (const terminal of TERMINAL_STATES) {
   const { projectLifecycleDefinition, commandsAtStage, stageStepId } = await import(
     "@solutions-builder/app/workflows/project-lifecycle"
   );
-  const { reviseStepId, exhaustedStepId, roundSignal, approveSignal, exhaustedSignal, loopExits, stageSignal } = await import(
+  const { reviseStepId, exhaustedStepId, roundSignal, approveSignal, exhaustedSignal, loopExits, stageSignal, continuingCommands } = await import(
     "@solutions-builder/app/workflows/stage-loop"
   );
+  // stage.draft is the round command that keeps a stage open: it must be a
+  // continuing command everywhere, and land on the round signal at every stage.
+  if (!continuingCommands().includes("stage.draft")) {
+    problems.push("continuingCommands() does not include stage.draft");
+  }
+  for (const stage of STAGES) {
+    if (stageSignal(stage, "stage.draft").name !== roundSignal(stage)) {
+      problems.push(`stage.draft does not land on the round signal at stage ${stage}`);
+    }
+  }
+
   const definition = projectLifecycleDefinition();
   const steps = definition.steps as Record<
     string,
