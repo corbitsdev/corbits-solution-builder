@@ -133,3 +133,50 @@ returns null, 400 when `sha` is malformed.
 
 **Upstream-able.** Yes; it is a read-only addition alongside the existing
 events route, following the same shape.
+
+## `packages/workflow`, `packages/workflow-host`, `packages/agent`, `packages/inference` — per-call inference options on a step
+
+**Why.** An agent step's model call is made by the runtime inside the run,
+and nothing on that path could carry an output cap: an agent definition
+holds only source preferences, a source resolved from a catalog offering has
+no defaults, and the step invoker passed no per-call options, so every
+specialist ran under the provider adapters' hard-coded 4096 output tokens.
+A stage-4 design is a full HTML document that needs several times that, and
+the person's own limit in Settings could not reach the call. The definition
+is fixed at deploy time, so anything decided per run has to arrive with the
+run, the way a step's `input` does.
+
+**What changed.**
+
+- `@intx/workflow`: `step({ inference: Selector })` — a selector resolved
+  beside `input` against the run's trigger payload and step outputs. The
+  runtime hands the resolved object to the invoker as
+  `StepInvokeRequest.inferenceOptions`; `null`/`undefined` means the agent's
+  defaults, anything but an object fails the step as a selector error. Only
+  `maxTokens`, `temperature` and `thinking` may arrive this way
+  (`StepInferenceOptions`): how much the call may spend and how it samples.
+  A `systemPrompt`, `tools` or `providerOptions` in the resolved object
+  fails the step — a run may not displace the definition that was approved
+  at deploy time, which is the control the frozen definition exists to
+  keep. Not recorded on `StepStarted`: it shapes the call, it is not what
+  the agent was asked. `projectPrimitive` spreads the primitive, so the
+  selector is part of the wire definition and its hash. Tests in
+  `src/runtime/step-inference-options.test.ts`.
+- `@intx/workflow-host`: the step invoker forwards them as
+  `SendOptions.inference` on that send alone — the warm agent outlives the
+  step, so they are never built into it.
+- `@intx/agent`: `SendOptions.inference`, carried on the queued send to
+  `reactor.deliver(message, { inference })`. The agent and reactor accept
+  the full `InferenceOptions`: their callers are code with the agent in
+  hand, not a run; the workflow step is where run-supplied values enter,
+  and that is where the allowlist sits.
+- `@intx/inference`: `Reactor.deliver` takes `DeliveryOptions`; the options
+  are held for the message's run (`message.run.started` to
+  `message.run.ended`) and merged beneath the director's own infer options
+  for every inference in it, so a director that names an option outright
+  still wins. A delivery that correlates to a parked gate opens no run and
+  drops them.
+
+**Upstream-able.** Yes, as-is: additive on every surface, no behaviour
+change for a step that names no selector, and the test file is written to
+land beside the runtime's other tests.

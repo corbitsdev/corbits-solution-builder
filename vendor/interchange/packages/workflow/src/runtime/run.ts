@@ -8,6 +8,8 @@
 // us swap the env implementations underneath without re-validating the
 // body.
 
+import type { Selector } from "../definition/selectors";
+import type { StepInferenceOptions } from "./env";
 import { correlationIdFromSignalName, signalName } from "@intx/types";
 import type { ApprovalSnapshot, ControlParkKind } from "@intx/types/runtime";
 
@@ -33,7 +35,7 @@ import {
   stepTriggerBudget,
   validateRetryTriggerCombination,
 } from "../definition/index";
-import { evaluate, type SelectorContext } from "./selectors";
+import { evaluate, SelectorError, type SelectorContext } from "./selectors";
 import {
   hasFailedStep,
   isCrashedInvocationStep,
@@ -1468,6 +1470,13 @@ async function runStep(
     // same `null` so an audit reader cannot diverge from the agent's
     // actual input.
     const input = rawInput === undefined ? null : rawInput;
+    // Per-call inference options, resolved beside the input and handed to
+    // the invoker with it. Not recorded: they shape the call, they are not
+    // what the agent was asked, and the audit reader has no use for them.
+    const inferenceOptions =
+      step.inference !== undefined
+        ? resolveInferenceOptions(step.inference, selectorCtx)
+        : undefined;
     if (!stepStartedEmitted) {
       const { ref: inputRef } = await env.blobs.recordOutput(
         `${step.id}.input`,
@@ -1570,6 +1579,7 @@ async function runStep(
         const result = await env.invokeStep({
           agent: step.agent,
           input,
+          ...(inferenceOptions !== undefined ? { inferenceOptions } : {}),
           authzContext: {
             stepId: step.id,
             attempt,
@@ -4992,4 +5002,48 @@ async function runEscalation(
   const output = { escalatedTo: primitive.to, payload };
   await emitStepCompletedWithValue(env, runId, primitive.id, output);
   return output;
+}
+
+/**
+ * The inference options a step may take from the run: how much the call may
+ * spend and how it samples, never what the agent is told or what it may
+ * call. A system prompt or a tool list arriving with a run would displace
+ * the definition that was approved at deploy time, which is the control
+ * the frozen definition exists to keep; those stay the definition's alone.
+ */
+const STEP_INFERENCE_KEYS: ReadonlySet<keyof StepInferenceOptions> = new Set([
+  "maxTokens",
+  "temperature",
+  "thinking",
+]);
+
+/**
+ * A step's `inference` selector, resolved: `null` or `undefined` is "the
+ * agent's own defaults"; anything but a plain object, or an object naming a
+ * key outside `STEP_INFERENCE_KEYS`, is a definition error, surfaced as a
+ * selector error so it fails the step the way a bad `input` path does.
+ */
+function resolveInferenceOptions(
+  selector: Selector,
+  ctx: SelectorContext,
+): StepInferenceOptions | undefined {
+  const value = evaluate(selector, ctx);
+  if (value === null || value === undefined) return undefined;
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new SelectorError(
+      "step inference selector must resolve to an object of inference options",
+      selector,
+    );
+  }
+  const refused = Object.keys(value).filter(
+    (key) => !STEP_INFERENCE_KEYS.has(key as keyof StepInferenceOptions),
+  );
+  if (refused.length > 0) {
+    throw new SelectorError(
+      `step inference selector may carry only ${[...STEP_INFERENCE_KEYS].join(", ")}; refused ${refused.join(", ")}`,
+      selector,
+    );
+  }
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- every key is one of STEP_INFERENCE_KEYS; the harness validates the values it reads
+  return value as StepInferenceOptions;
 }

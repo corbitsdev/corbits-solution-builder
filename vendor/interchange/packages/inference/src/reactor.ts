@@ -149,11 +149,22 @@ export type ReactorConfig = {
   doomLoopThreshold?: number | false;
 };
 
+/**
+ * What a caller may attach to one delivered message. `inference` is merged
+ * beneath the director's own infer options for every inference the
+ * message's run performs, and is forgotten when that run closes: a per-call
+ * override (an output cap, a temperature) the sender knows and the agent's
+ * definition cannot, since the definition is fixed before any message exists.
+ */
+export type DeliveryOptions = {
+  inference?: InferenceOptions;
+};
+
 export type Reactor = {
   /** Begin processing. Emits reactor.start. Must be called exactly once. */
   start(): void;
-  /** Inject an inbound message into the reactor. */
-  deliver(message: InboundMessage): void;
+  /** Inject an inbound message into the reactor, with options scoped to its run. */
+  deliver(message: InboundMessage, options?: DeliveryOptions): void;
   /** Initiate graceful shutdown with a reason. */
   abort(reason: AbortReason): void;
 };
@@ -343,6 +354,13 @@ export function createReactor(config: ReactorConfig): Reactor {
   // so a crash-and-replay that re-delivers the same messageId still
   // produces unambiguous start/end pairs downstream.
   let currentMessageRunId: string | null = null;
+  /**
+   * Inference options delivered with a message, keyed by message id until
+   * its run opens, then held as the run's own until it closes. A delivery
+   * that correlates to a parked gate opens no run and drops its entry.
+   */
+  const deliveredInference = new Map<string, InferenceOptions>();
+  let currentMessageInference: InferenceOptions | null = null;
   let currentMessageId: string | null = null;
 
   // Doom-loop detection state, scoped to the current message run. Each executed
@@ -359,6 +377,8 @@ export function createReactor(config: ReactorConfig): Reactor {
   function openMessageRun(messageId: string): void {
     currentMessageRunId = crypto.randomUUID();
     currentMessageId = messageId;
+    currentMessageInference = deliveredInference.get(messageId) ?? null;
+    deliveredInference.delete(messageId);
     lastToolBatchSignature = null;
     toolBatchRepeatCount = 0;
     lastToolBatchNames = [];
@@ -391,6 +411,7 @@ export function createReactor(config: ReactorConfig): Reactor {
     if (error !== undefined) data.error = error;
     emit({ type: "message.run.ended", seq: nextSeq(), data });
     currentMessageRunId = null;
+    currentMessageInference = null;
     currentMessageId = null;
   }
 
@@ -659,6 +680,18 @@ export function createReactor(config: ReactorConfig): Reactor {
     for (const blob of blobs) {
       await contextStore.writeBlob(blob.key, blob.bytes, blob.contentType);
     }
+  }
+
+  /**
+   * The director's infer options over the delivered message's. The director
+   * decides how this cycle infers and may name an option outright; what the
+   * sender attached fills in beneath it.
+   */
+  function withDeliveredInference(
+    options: InferenceOptions | undefined,
+  ): InferenceOptions | undefined {
+    if (currentMessageInference === null) return options;
+    return { ...currentMessageInference, ...(options ?? {}) };
   }
 
   async function executeInfer(
@@ -1495,7 +1528,7 @@ export function createReactor(config: ReactorConfig): Reactor {
       // Handle infer.
       const inferAction = normalized.find((a) => a.type === "infer");
       if (inferAction !== undefined && inferAction.type === "infer") {
-        await executeInfer(inferAction.options);
+        await executeInfer(withDeliveredInference(inferAction.options));
         continue;
       }
 
@@ -1665,6 +1698,7 @@ export function createReactor(config: ReactorConfig): Reactor {
       let correlated: boolean;
       try {
         correlated = await tryCorrelate(message);
+        if (correlated) deliveredInference.delete(message.headers.messageId);
       } catch (cause) {
         // A correlation-path invariant failed (e.g. a malformed approval
         // decision). Surface it as a fatal reactor error rather than a silent
@@ -1694,8 +1728,11 @@ export function createReactor(config: ReactorConfig): Reactor {
     })();
   }
 
-  function deliver(message: InboundMessage): void {
+  function deliver(message: InboundMessage, options?: DeliveryOptions): void {
     if (done) return;
+    if (options?.inference !== undefined) {
+      deliveredInference.set(message.headers.messageId, options.inference);
+    }
     if (startupDeliveries !== null) {
       startupDeliveries.push(message);
       return;

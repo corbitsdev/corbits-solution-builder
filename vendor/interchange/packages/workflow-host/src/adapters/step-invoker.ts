@@ -52,6 +52,7 @@
 //     the warm cache, torn down at eviction.
 // Multi-step steps pass no cache and keep instantiate-send-teardown.
 
+import type { SendOptions } from "@intx/agent";
 import {
   createAgent,
   type Agent,
@@ -580,7 +581,14 @@ async function sendWithAbort(
       };
       abortListener = onAbort;
       req.signal.addEventListener("abort", onAbort, { once: true });
-      const sendOpts = cfg.closeOnAbort ? undefined : { signal: req.signal };
+      // The step's per-call inference options ride with this send alone:
+      // the warm agent outlives the step, so they must not be built into it.
+      const sendOpts: SendOptions = {
+        ...(cfg.closeOnAbort ? {} : { signal: req.signal }),
+        ...(req.inferenceOptions !== undefined
+          ? { inference: req.inferenceOptions }
+          : {}),
+      };
       agent.send(message, sendOpts).then(resolve, (cause: unknown) => {
         reject(cause instanceof Error ? cause : new Error(String(cause)));
       });
