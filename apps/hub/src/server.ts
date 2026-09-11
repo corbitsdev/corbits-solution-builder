@@ -18,7 +18,7 @@ import { Hono } from "hono";
 import { API_VERSION, createApi } from "./api.js";
 import { openDatabase } from "./db.js";
 import { prepareDatabase } from "./migrate.js";
-import { databaseDirectory, dataDirectory } from "./paths.js";
+import { databaseDirectory, dataDirectory, portFile } from "./paths.js";
 import { stopSpawnedSidecars } from "./sidecar-processes.js";
 import { ensureHub, hubFetch, resolveWorkspace } from "./hub-client.js";
 import { hub, hubIsMounted, hubWebSocket, setHostPort, SIDECAR_WS_PATH } from "./hub-mount.js";
@@ -47,9 +47,27 @@ if (requestedPort < 0 || requestedPort > 65_535) {
 }
 // Sidecars dial back into the hub on this port, and the hub has to know the
 // number before it mounts, so a free port is claimed here rather than left to
-// `Bun.serve` to pick later.
-const port = requestedPort || (await freePort());
+// `Bun.serve` to pick later. The platform binds each sidecar allocation to
+// the hub's address, port included, and an allocation bound to another
+// address is one it will never touch again; so the port the host served on
+// last time is taken again whenever it is still free, and a fresh one only
+// when it is not.
+await mkdir(dataDirectory(), { recursive: true });
+const port = requestedPort || (await rememberedPort()) || (await freePort());
 setHostPort(port);
+await Bun.write(portFile(), `${port}\n`);
+
+async function rememberedPort(): Promise<number | null> {
+  const remembered = Number((await Bun.file(portFile()).text().catch(() => "")).trim());
+  if (!Number.isInteger(remembered) || remembered <= 0 || remembered > 65_535) return null;
+  try {
+    const probe = Bun.serve({ hostname: "127.0.0.1", port: remembered, fetch: () => new Response() });
+    await probe.stop(true);
+    return remembered;
+  } catch {
+    return null;
+  }
+}
 
 async function freePort(): Promise<number> {
   const probe = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() });
