@@ -31,6 +31,7 @@ import {
 import { adoptLegacyWorkspace } from "./hub-gaps.js";
 import { expectedWorkflowDefinitions, seedWorkflows } from "./workflow-seed.js";
 import { installProjectAuthority, listProjectRecords } from "./project-tenant.js";
+import { ensureSkillAssets } from "./skill-assets.js";
 import { ensureLifecycleDeployment } from "./workflow-deploy.js";
 
 export type InstallState = {
@@ -162,6 +163,7 @@ export async function install(): Promise<InstallState> {
   for (const project of await listProjectRecords()) {
     await installProjectAuthority(project.id, project.policy);
   }
+  await ensureSkillAssets();
 
   // Model bindings are the catalog rows written when a provider connects, so
   // there is nothing to rebind here; re-running after a credential change is

@@ -10,8 +10,8 @@
  * whose breach is invisible at runtime — an agent quietly holding a write
  * grant looks exactly like one that does not.
  */
-import { kitSeed, grantRequirementsFor } from "@solutions-builder/app/seed-kit";
-import { AGENT_KIT } from "@solutions-builder/app/kit";
+import { kitSeed, grantRequirementsFor, skillTextFor } from "@solutions-builder/app/seed-kit";
+import { AGENT_KIT, agentById } from "@solutions-builder/app/kit";
 import { STAGES } from "@solutions-builder/app/ledger";
 import { baseTemplate, SLOTS, violationsIn } from "@solutions-builder/app/template";
 import { APP_VERSION, expectedDefinitions } from "@solutions-builder/app/manifest";
@@ -248,6 +248,16 @@ check(
     ["workflow", "grant", "credential", "mail", "tenant", "principal", "artifacts", "react-ui", "oauth"].every(
       (word) => (skill?.instructions ?? "").toLowerCase().includes(word),
     ),
+  );
+
+  // The skill's instructions reach the model only through the rendered
+  // system prompt, so the rendered text is what has to name them.
+  const architect = agentById("architect");
+  const architectText = architect ? skillTextFor(architect) : "";
+  check(
+    "the architect's rendered skill text names the interchange-platform skill's instructions",
+    architect !== undefined && skill !== undefined && architectText.includes(skill.instructions),
+    architectText.slice(0, 120),
   );
 }
 

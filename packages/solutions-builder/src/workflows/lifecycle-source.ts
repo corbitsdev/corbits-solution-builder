@@ -30,6 +30,7 @@ import {
 } from "./stage-loop.js";
 import { agentById, agentFor, panelPrincipals, type AgentRole } from "../kit.js";
 import { STAGES, type Stage } from "../ledger.js";
+import { skillTextFor } from "../seed-kit.js";
 
 /**
  * What the deployed package depends on. `@intx/workflow` is a workspace member
@@ -70,6 +71,17 @@ export const LIFECYCLE_ENTRY_PATH = "workflow.js";
 
 /** One agent step the rendered iteration wires: its id, the role that runs it, and its input. */
 type AgentStepSpec = { readonly id: string; readonly roleId: string; readonly input: { readonly from: string } };
+
+/**
+ * A role's kit prompt has no runtime after this point to load a skill from: an
+ * agent step's `systemPrompt` is a static string baked in at render time, so a
+ * skill the role carries reaches the model only if it rides along here. The
+ * skill asset written by `apps/hub/src/skill-assets.ts` is the platform-side
+ * record of the same text, not a second place it is read from.
+ */
+function renderedPrompt(role: AgentRole): string {
+  return `${role.system}\n\n${skillTextFor(role)}`;
+}
 
 /** The role that runs a given agent step id at a given stage. */
 function roleIdForStep(stage: Stage, stepId: string): string {
@@ -146,7 +158,7 @@ import { posix } from ${JSON.stringify("@intx/tools-posix/sidecar-bundle")};
     ? `
 const buildAgent = defineAgent({
   id: ${JSON.stringify(agentFor(BUILD_STAGE).id)},
-  systemPrompt: ${JSON.stringify(agentFor(BUILD_STAGE).system)},
+  systemPrompt: ${JSON.stringify(renderedPrompt(agentFor(BUILD_STAGE)))},
   tools: [posix],
   capabilities: [],
   inference: { sources: [SOURCE] },
@@ -174,7 +186,7 @@ const AGENTS = {
 ${rolesInUse(audienceCount)
   .map(
     (role) =>
-      `  ${JSON.stringify(role.id)}: defineAgent({ id: ${JSON.stringify(role.id)}, systemPrompt: ${JSON.stringify(role.system)}, tools: [], capabilities: [], inference: { sources: [SOURCE] } }),`,
+      `  ${JSON.stringify(role.id)}: defineAgent({ id: ${JSON.stringify(role.id)}, systemPrompt: ${JSON.stringify(renderedPrompt(role))}, tools: [], capabilities: [], inference: { sources: [SOURCE] } }),`,
   )
   .join("\n")}
 };

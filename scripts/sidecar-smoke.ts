@@ -26,6 +26,8 @@ const { connectProvider } = await import("../apps/hub/src/providers.js");
 const { ensureLifecycleDeployment, LIFECYCLE_ASSET_NAME } = await import(
   "../apps/hub/src/workflow-deploy.js"
 );
+const { assets } = await import("../apps/hub/src/hub-client.js");
+const { kitSeed } = await import("@solutions-builder/app/seed-kit");
 
 const checks: { name: string; ok: boolean }[] = [];
 function check(name: string, ok: boolean, detail = "") {
@@ -121,6 +123,22 @@ const rows = async (statement: ReturnType<typeof sql>) => {
 
 try {
   await install();
+  const skillAssets = await assets.list("skill");
+  const skillKeys = kitSeed().skills.map((skill) => skill.key);
+  check(
+    "install writes one skill asset per kit skill",
+    skillKeys.every((key) => skillAssets.some((asset) => asset.name === key)) && skillAssets.length === skillKeys.length,
+    `${skillAssets.length} assets for ${skillKeys.length} skills`,
+  );
+
+  await install();
+  const skillAssetsAgain = await assets.list("skill");
+  check(
+    "a second install creates no new skill assets",
+    skillAssetsAgain.length === skillAssets.length,
+    `${skillAssetsAgain.length} vs ${skillAssets.length}`,
+  );
+
   const before = await ensureLifecycleDeployment();
   check("without an offering the lifecycle is not deployed", before.status === "no_offering", before.status);
 

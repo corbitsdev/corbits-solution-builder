@@ -169,6 +169,21 @@ function skillsFor(role: AgentRole): string[] {
   return byRole[role.id] ?? ["stage-navigation"];
 }
 
+/**
+ * The skills a role carries, rendered into its own system prompt. This is how
+ * a skill's instructions reach the model: a workflow step's agent is defined
+ * once at render time from a static `systemPrompt` string, so there is no
+ * per-turn seam that could load a skill later.
+ */
+export function skillTextFor(role: AgentRole): string {
+  const seed = kitSeed();
+  const lines = skillsFor(role)
+    .map((key) => seed.skills.find((skill) => skill.key === key))
+    .filter((skill): skill is SkillRecord => skill !== undefined)
+    .map((skill) => `- ${skill.key}: ${skill.instructions}`);
+  return ["## Skills you carry", ...lines].join("\n");
+}
+
 function directorFor(role: AgentRole): string {
   const director = DIRECTORS.find((entry) => entry.agents.includes(role.id));
   return director?.key ?? "sb-specialists";
