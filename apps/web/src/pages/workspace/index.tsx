@@ -172,12 +172,19 @@ export function StageWorkspace({
     void loadThread();
   }, [loadThread]);
 
+  // Something a draft wants the person to hear about how it came to be — a
+  // retry the designer's limit policy asked for. Said once, here, since the
+  // thread is projected from the run and a retry is not a turn in it.
+  const [notice, setNotice] = useState<string | null>(null);
   const run = async (label: string, work: () => Promise<unknown>) => {
     setBusy(label);
     setError(null);
     setRemediation(undefined);
     try {
-      await work();
+      const result = await work();
+      if (result && typeof result === "object" && "note" in result && typeof result.note === "string") {
+        setNotice(result.note);
+      }
       await loadThread();
       onChanged();
     } catch (cause) {
@@ -275,6 +282,10 @@ export function StageWorkspace({
             stalled={stalled}
           />
         )
+      ) : null}
+
+      {notice ? (
+        <Banner tone="warning" title={notice} action={{ label: "Dismiss", onClick: () => setNotice(null) }} />
       ) : null}
 
       {error ? (

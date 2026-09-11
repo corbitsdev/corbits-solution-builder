@@ -40,7 +40,21 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { newId } from "./ids.js";
 import { ArtifactDraft } from "./domain.js";
 import { HostError, ReplyCutShort } from "./errors.js";
-import { designerGuidance, designerSettings } from "./designer-settings.js";
+import {
+  cutShortTwice,
+  DESIGNER_TOKENS_MAX,
+  designerGuidance,
+  designerSettings,
+  lowerResolutionGuidance,
+  saveDesignerSettings,
+} from "./designer-settings.js";
+
+/**
+ * The output cap a written document's round runs under. The runtime's own
+ * default is 4096 tokens, which cut a build plan or an audience package
+ * short; a design takes the person's limit from Settings instead.
+ */
+const DOCUMENT_OUTPUT_TOKENS = 16_000;
 
 export type StageDraftResult = {
   nodeId: string;
@@ -249,6 +263,8 @@ export type StageDraftRequest = {
   packages: StageDraftResult[] | null;
   /** Stage 6 only: the four panel reviews of the architect's plan. */
   review: StageDraftResult[] | null;
+  /** Something the person should hear about how this draft came to be: a retry the policy asked for. */
+  note?: string;
 };
 
 /**
@@ -274,6 +290,7 @@ export async function requestDraft(args: {
 }): Promise<StageDraftRequest> {
   const inputs = await approvedInputs(args.projectId, args.stage);
   const context = await stageContext({ projectId: args.projectId, stage: args.stage });
+  const designer = args.stage === 4 ? await designerSettings() : null;
 
   let prompt: string | undefined;
   let prompts: string[] | undefined;
@@ -316,11 +333,59 @@ export async function requestDraft(args: {
     // The designer's system prompt is fixed at deploy time, so the person's
     // surface and design-language settings cannot live there; they ride on
     // the round's own prompt instead, the one thing that does change per draft.
-    if (args.stage === 4) {
-      prompt = `${prompt}\n\n${designerGuidance(await designerSettings())}`;
+    if (designer) {
+      prompt = `${prompt}\n\n${designerGuidance(designer)}`;
     }
   }
 
+  // The output cap rides on the round too, read by the specialist step's
+  // `inference` selector, so a change in Settings applies to the next draft
+  // with nothing redeployed. The designer's policy for a design cut short
+  // is a second round: at a raised cap, or at lower resolution within it.
+  let maxTokens = designer?.maxTokens ?? DOCUMENT_OUTPUT_TOKENS;
+  const firstLimit = maxTokens;
+  let note: string | undefined;
+
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      const result = await round(maxTokens);
+      return note === undefined ? result : { ...result, note };
+    } catch (cause) {
+      // One more round, only for a design, only as the person's settings
+      // say. Anything else is the failure it was.
+      if (!(cause instanceof ReplyCutShort) || !designer) throw cause;
+      if (attempt > 0) {
+        throw new ReplyCutShort(
+          cutShortTwice({
+            title: agentFor(args.stage).title,
+            onLimit: designer.onLimit === "raise" ? "raise" : "reduce",
+            firstLimit,
+            secondLimit: maxTokens,
+          }),
+          maxTokens,
+        );
+      }
+      const limit = maxTokens;
+      if (designer.onLimit === "raise") {
+        const raised = Math.min(limit * 2, DESIGNER_TOKENS_MAX);
+        if (raised <= limit) throw cause;
+        await saveDesignerSettings({ maxTokens: raised });
+        maxTokens = raised;
+        note = `The first attempt was cut short at the ${limit}-token limit. The limit is now ${raised} (Settings, Designer), and this version was produced within it.`;
+      } else if (designer.onLimit === "reduce") {
+        prompt = `${prompt}\n\n${lowerResolutionGuidance(limit)}`;
+        note = `The first attempt was cut short at the ${limit}-token limit. This version is a lower-resolution design produced within it; raise the limit in Settings, Designer, for a fuller one.`;
+      } else {
+        throw new ReplyCutShort(
+          `${cause.message} In Settings, Designer, you can raise the limit, or have the designer retry at lower resolution.`,
+          limit,
+        );
+      }
+    }
+  }
+
+  /** One drafting round: the command, the run's answer, and its versions. */
+  async function round(cap: number): Promise<StageDraftRequest> {
   expectLiveDraft(args.projectId, args.stage);
 
   const before = await stageIterations(args.projectId, args.stage);
@@ -347,6 +412,7 @@ export async function requestDraft(args: {
       ...(prompt !== undefined ? { prompt } : {}),
       ...(prompts !== undefined ? { prompts } : {}),
       ...(context.brief ? { brief: context.brief } : {}),
+      inference: { maxTokens: cap },
     },
   });
 
@@ -411,6 +477,7 @@ export async function requestDraft(args: {
   if (!draft) throw new HostError("internal_error", `Stage ${args.stage} produced no draft output.`);
 
   return { draft, packages, review };
+  }
 }
 
 // --- Waiting for the round's agent steps to answer --------------------------

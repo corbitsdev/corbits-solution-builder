@@ -7,6 +7,7 @@
 // any `isChildProcess`-shaped discriminator -- an explicit
 // source-level test in `run.test.ts` asserts the discipline.
 
+import type { InferenceOptions } from "@intx/types";
 import type { AgentDefinition, BaseEnv, DirectorRegistry } from "@intx/agent";
 import type { ApprovalSnapshot, ControlParkKind } from "@intx/types/runtime";
 
@@ -155,10 +156,27 @@ export type StepInvoker = (
   input: StepInvokeRequest,
 ) => Promise<StepInvokeResult>;
 
+/**
+ * What a step may take from the run per call: how much the call may spend
+ * and how it samples. The agent's system prompt and tools are the
+ * definition's alone, approved at deploy time; a run cannot displace them.
+ */
+export type StepInferenceOptions = Pick<
+  InferenceOptions,
+  "maxTokens" | "temperature" | "thinking"
+>;
+
 export interface StepInvokeRequest {
   agent: AgentDefinition<BaseEnv>;
   /** The materialized input the runtime resolved from the step's `input` selector. */
   input: unknown;
+  /**
+   * Per-call inference options the runtime resolved from the step's
+   * `inference` selector, for this invocation's turn. Absent when the step
+   * names none or the selector resolved to nothing; never anything outside
+   * `StepInferenceOptions`, which the runtime enforces before invoking.
+   */
+  inferenceOptions?: StepInferenceOptions;
   /** Workflow-runtime context for every authz call inside the step. */
   authzContext: AuthorizeContext;
   /** Cancelled when the step is being torn down (timeout, cancellation). */

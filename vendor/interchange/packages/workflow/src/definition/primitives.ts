@@ -72,6 +72,21 @@ export interface StepPrimitive extends PrimitiveBase {
   kind: "step";
   agent: AgentDefinition<BaseEnv>;
   input?: Selector;
+  /**
+   * Per-call inference options for the agent's turn, resolved against the
+   * run exactly as `input` is. The agent definition is fixed at deploy time,
+   * so anything a caller decides per run — an output cap sized to the
+   * document asked for, a temperature — has to arrive with the run, and this
+   * is where a step reads it. Only `maxTokens`, `temperature` and
+   * `thinking` may arrive this way: how much the call may spend and how it
+   * samples. The system prompt and the tools are the definition's alone,
+   * approved at deploy time, and a run naming them fails the step. Resolving
+   * to `null` or `undefined` means the agent's own defaults; anything but an
+   * object, or an object with another key, fails the step as a definition
+   * error. Not recorded on `StepStarted`: it shapes the call, it is not what
+   * the agent was asked.
+   */
+  inference?: Selector;
   reads?: readonly Selector[];
   writes?: readonly Selector[];
   retry?: RetryPolicy;
@@ -310,6 +325,8 @@ export type Primitive =
 export interface StepOpts<EnvReq extends BaseEnv> {
   agent: AgentDefinition<EnvReq>;
   input?: Selector;
+  /** See {@link StepPrimitive.inference}. */
+  inference?: Selector;
   reads?: readonly Selector[];
   writes?: readonly Selector[];
   retry?: RetryPolicy;
@@ -402,6 +419,7 @@ export function step<EnvReq extends BaseEnv>(
     agent,
     drainBehavior,
     ...(opts.input !== undefined ? { input: opts.input } : {}),
+    ...(opts.inference !== undefined ? { inference: opts.inference } : {}),
     ...(opts.reads !== undefined ? { reads: opts.reads } : {}),
     ...(opts.writes !== undefined ? { writes: opts.writes } : {}),
     ...(opts.retry !== undefined ? { retry: opts.retry } : {}),

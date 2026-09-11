@@ -278,6 +278,7 @@ for (const terminal of TERMINAL_STATES) {
         inference?: { sources?: { provider?: string; model?: string }[] };
       };
       input?: { from?: string };
+      inference?: { from?: string };
       after?: string[];
     };
     type IterationJson = {
@@ -394,6 +395,8 @@ for (const terminal of TERMINAL_STATES) {
         }
         if (!draft || draft.kind !== "step" || draft.agent?.id !== agentFor(stage).id) {
           problems.push(`Stage ${stage}'s draft step is not the kit's specialist`);
+        } else if (draft.inference?.from !== `steps.${ROUND_STEP_ID}.output.inference`) {
+          problems.push(`Stage ${stage}'s draft step does not read its inference options off the round`);
         } else if (draft.input?.from !== `steps.${ROUND_STEP_ID}.output.prompt`) {
           problems.push(`Stage ${stage}'s draft step does not read the round's prompt`);
         } else if (!draft.after?.includes(DECIDE_STEP_ID)) {
