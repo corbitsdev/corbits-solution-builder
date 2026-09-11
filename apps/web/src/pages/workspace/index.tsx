@@ -542,6 +542,7 @@ function BuildPanel({ detail, onChanged }: { detail: ProjectDetail; onChanged: (
   const final = events.find((event) => event.type === "bridge.final");
 
   return (
+    <div data-tour="build-panel">
     <Screen
       title="Build supervision"
       status={
@@ -600,6 +601,7 @@ function BuildPanel({ detail, onChanged }: { detail: ProjectDetail; onChanged: (
         <p className="inline-note">No build attempt has reported yet.</p>
       )}
     </Screen>
+    </div>
   );
 }
 

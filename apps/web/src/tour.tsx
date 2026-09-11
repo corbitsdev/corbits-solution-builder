@@ -1,19 +1,26 @@
 /**
- * The first run, walked through once.
+ * The first run, walked through once per stage.
  *
  * Reading a draft and pointing at a passage inside it are not discoverable —
  * nothing on the screen says that selecting text does anything. A person who
  * does not find that feature does not experience the product, so the first
  * time someone opens a drafted stage the tour shows them, anchored to the real
- * screen rather than a mocked one.
+ * screen rather than a mocked one. Every stage looks different enough — some
+ * have no composer at all — that one tour cannot describe all of them, so
+ * each stage remembers its own first run and shows only what is on its own
+ * screen.
  *
  * Seen-ness lives in this browser's localStorage: the host only persists
  * start-at-login, so a window on another machine sees the tour again.
  */
 import { useEffect, useState } from "react";
 import { Joyride, STATUS, type EventData, type Status, type Step } from "react-joyride";
+import { STAGE_GOAL } from "./pages/workspace/gate.jsx";
 
-export const TOUR_PREFERENCE = "tour.stage.completed";
+/** Where a given stage's seen-ness lives. */
+export function tourPreferenceKey(stage: number): string {
+  return `tour.stage.${stage}.completed`;
+}
 
 /**
  * A theme token's current value.
@@ -33,52 +40,131 @@ function token(name: string, fallback: string): string {
 /** The width under which the stylesheet stacks the document over the conversation. */
 const STACKED_BELOW = 1080;
 
-const steps = (): Step[] => [
-  {
-    target: '[data-tour="next-step"]',
-    placement: "left",
-    title: "Stuck? Start here",
-    content:
-      "This names the one thing to do next, at every stage, and it follows you around the app. You should never have to work out what happens now.",
-  },
-  {
-    target: '[data-tour="composer"]',
-    title: "Answer in your own words",
-    content:
-      "The specialist asks one question at a time. Answer it and the draft is rewritten with what you said, then the next question comes.",
-  },
-  {
-    target: '[data-tour="document"]',
-    // The document fills its pane top to bottom, so there is no room above or
-    // below it: left unset, the callout was pushed past the window's top edge
-    // and could not be read. Beside it, over the conversation, it fits; once
-    // the panes stack there is no beside either, and the centre of the
-    // spotlight is the one place that is always on screen.
-    placement: window.innerWidth > STACKED_BELOW ? "left" : "center",
-    title: "The draft, beside the conversation",
-    content:
-      "It is rewritten with every answer you give. Select any passage in it and that passage attaches to your next message, so the specialist has exactly what you meant.",
-  },
-  {
-    target: '[data-tour="submit"]',
-    title: "When it is right, submit it",
-    content:
-      "That records your approval against this exact version and opens the next stage. Only you can do it.",
-  },
-];
+const documentPlacement = () => (window.innerWidth > STACKED_BELOW ? "left" : "center");
 
-export function StageTour({ enabled }: { enabled: boolean }) {
+/** The three steps every stage with a composer, a document and a submit control shares. */
+function draftingSteps(goal: string): Step[] {
+  return [
+    {
+      target: '[data-tour="composer"]',
+      title: "What this stage decides",
+      content: goal,
+    },
+    {
+      target: '[data-tour="document"]',
+      // See the note on STACKED_BELOW above: beside the conversation above
+      // that width, centred once the panes stack and there is no "beside".
+      placement: documentPlacement(),
+      title: "Rewritten from your answers",
+      content:
+        "It is rewritten with every answer you give. Select any passage in it and that passage attaches to your next message, so the specialist has exactly what you meant.",
+    },
+    {
+      target: '[data-tour="submit"]',
+      title: "Where to submit",
+      content:
+        "When it is right, submit it here. That records your approval against this exact version and opens the next stage.",
+    },
+  ];
+}
+
+/** Per-stage step maps. A stage with no entry shows nothing. */
+const STAGE_STEPS: Record<number, () => Step[]> = {
+  1: () => [
+    {
+      target: '[data-tour="next-step"]',
+      placement: "left",
+      title: "Stuck? Start here",
+      content:
+        "This names the one thing to do next, at every stage, and it follows you around the app. You should never have to work out what happens now.",
+    },
+    {
+      target: '[data-tour="composer"]',
+      title: "Answer in your own words",
+      content:
+        "The specialist asks one question at a time. Answer it and the draft is rewritten with what you said, then the next question comes.",
+    },
+    {
+      target: '[data-tour="document"]',
+      placement: documentPlacement(),
+      title: "The draft, beside the conversation",
+      content:
+        "It is rewritten with every answer you give. Select any passage in it and that passage attaches to your next message, so the specialist has exactly what you meant.",
+    },
+    {
+      target: '[data-tour="submit"]',
+      title: "When it is right, submit it",
+      content:
+        "That records your approval against this exact version and opens the next stage. Only you can do it. It turns green when the brief is ready.",
+    },
+  ],
+  2: () => draftingSteps(STAGE_GOAL[2]!),
+  3: () => draftingSteps(STAGE_GOAL[3]!),
+  4: () => [
+    {
+      target: '[data-tour="design-feedback"]',
+      title: "What this stage decides",
+      content: STAGE_GOAL[4]!,
+    },
+    {
+      target: '[data-tour="design-submit"]',
+      title: "Where to submit",
+      content:
+        "Switch to feedback mode, click anything you want changed, then submit your feedback here to open the next design version.",
+    },
+  ],
+  5: () => [
+    {
+      target: '[data-tour="audience-packages"]',
+      title: "What this stage decides",
+      content: STAGE_GOAL[5]!,
+    },
+    {
+      target: '[data-tour="audience-decisions"]',
+      title: "Where to submit",
+      content:
+        "Each audience records its own decision here. The stage moves on once the configured quorum has proceeded.",
+    },
+  ],
+  6: () => draftingSteps(STAGE_GOAL[6]!),
+  7: () => draftingSteps(STAGE_GOAL[7]!),
+  8: () => [
+    {
+      target: '[data-tour="next-step"]',
+      placement: "left",
+      title: "What this stage decides",
+      content: STAGE_GOAL[8]!,
+    },
+    {
+      target: '[data-tour="build-panel"]',
+      title: "Where to submit",
+      content:
+        "Start the build attempt here. Permissions and material changes still wait on you; this is where the evidence lands.",
+    },
+  ],
+  9: () => [
+    {
+      target: '[data-tour="next-step"]',
+      placement: "left",
+      title: "What this stage decides",
+      content: STAGE_GOAL[9]!,
+    },
+  ],
+};
+
+export function StageTour({ enabled, stage }: { enabled: boolean; stage: number }) {
   const [run, setRun] = useState(false);
+  const key = tourPreferenceKey(stage);
 
   useEffect(() => {
     if (!enabled) return;
     try {
-      if (localStorage.getItem(TOUR_PREFERENCE) !== "true") setRun(true);
+      if (localStorage.getItem(key) !== "true") setRun(true);
     } catch {
       // A tour that cannot check whether it already ran should stay quiet
       // rather than risk repeating itself on every open.
     }
-  }, [enabled]);
+  }, [enabled, key]);
 
   const finish = (data: EventData) => {
     const done: Status[] = [STATUS.FINISHED, STATUS.SKIPPED];
@@ -87,13 +173,14 @@ export function StageTour({ enabled }: { enabled: boolean }) {
     // Skipping counts as seen. Being shown it twice after saying no is worse
     // than never showing it.
     try {
-      localStorage.setItem(TOUR_PREFERENCE, "true");
+      localStorage.setItem(key, "true");
     } catch {
       // Best effort; nothing to fall back to.
     }
   };
 
-  if (!enabled) return null;
+  const steps = STAGE_STEPS[stage];
+  if (!enabled || !steps) return null;
 
   return (
     <Joyride
