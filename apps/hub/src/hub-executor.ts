@@ -50,7 +50,12 @@ async function anchorFor(projectId: string, replace = false): Promise<string | n
   return deployment.deploymentId;
 }
 
-type FoldedRun = { readonly runId: string; readonly state: ReturnType<typeof emptyState> };
+type FoldedRun = {
+  readonly runId: string;
+  readonly state: ReturnType<typeof emptyState>;
+  /** When the run's newest event was committed, or null for a run with none. */
+  readonly lastAt: number | null;
+};
 
 /** Every run under the deployment, folded from its committed events. */
 async function foldRuns(anchorRunId: string): Promise<FoldedRun[]> {
@@ -59,12 +64,15 @@ async function foldRuns(anchorRunId: string): Promise<FoldedRun[]> {
   for (const runId of runIds) {
     const events = await deploymentRuns.events(anchorRunId, runId);
     let state = emptyState(runId);
+    let lastAt: number | null = null;
     for (const event of events) {
       // The hub stores the discriminator as `type`; the runtime reads it as
       // `kind`. The stored body already carries `seq` and `type`.
       state = applyEvent(state, { ...event.body, seq: event.seq, kind: event.type } as unknown as WorkflowEvent);
+      const at = typeof event.body.at === "string" ? Date.parse(event.body.at) : Number.NaN;
+      if (!Number.isNaN(at) && (lastAt === null || at > lastAt)) lastAt = at;
     }
-    folded.push({ runId, state });
+    folded.push({ runId, state, lastAt });
   }
   return folded;
 }
@@ -242,14 +250,27 @@ const SETTLE_MS = 750;
 const ENDED = new Set(["completed", "failed", "cancelled"]);
 
 /**
- * The deployment has fired its lifecycle run and every run under it has
- * ended: nothing on it will ever park again. The deployment itself stays
- * allocated when its run fails, so its allocation status cannot say this;
- * only the runs can. (A deployment with no runs yet is not dead — it has
- * not been fired.)
+ * How long a fired run may sit with nothing parked and nothing in flight
+ * before it is taken to have died without a trace. A run that crashes in
+ * the sidecar's own process can leave the hub's log with no terminal event
+ * at all; folded, it reads as running, and it never moves again.
+ */
+const STALLED_AFTER_MS = 60_000;
+
+/**
+ * The deployment has fired its lifecycle run and nothing on it will ever
+ * park again: every run under it has ended, or the runs sit with nothing
+ * parked and nothing in flight and their newest event is old. The
+ * deployment itself stays allocated when its run fails, so its allocation
+ * status cannot say this; only the runs can. (A deployment with no runs yet
+ * is not dead — it has not been fired.)
  */
 function anchorIsDead(_anchor: string, runs: FoldedRun[]): boolean {
-  return runs.length > 0 && runs.every((run) => ENDED.has(run.state.phase));
+  if (runs.length === 0) return false;
+  if (runs.every((run) => ENDED.has(run.state.phase))) return true;
+  if (parkedSteps(runs).length > 0 || currentStep(runs) !== null) return false;
+  const newest = Math.max(...runs.map((run) => run.lastAt ?? 0));
+  return newest > 0 && Date.now() - newest > STALLED_AFTER_MS;
 }
 
 /**
