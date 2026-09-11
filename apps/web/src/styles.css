@@ -2471,6 +2471,12 @@ button[aria-disabled="true"] {
   width: 12.75rem;
 }
 
+/* The import link under the start box: a quieter second way in. */
+.start-import {
+  margin: var(--space-2) 0 0;
+  font-size: 0.875rem;
+}
+
 /* ------------------------------------------------------------------ print */
 
 /* The document alone, over the app. In print the layer is the page. Above

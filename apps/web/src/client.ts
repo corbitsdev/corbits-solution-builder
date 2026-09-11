@@ -321,6 +321,12 @@ export const api = {
   createProject: (payload: unknown) =>
     post<{ projectId: string; runId: string }>("/projects", payload),
   project: (projectId: string) => request<ProjectDetail>(`/projects/${projectId}`),
+  /** Writes the project's export beside the person's downloads and says where. */
+  exportProject: (projectId: string) =>
+    post<{ path: string; bytes: number; nodes: number; commands: number }>(`/projects/${projectId}/export`, {}),
+  /** Brings an exported project in as a new project here. */
+  importProject: (bundle: unknown) =>
+    post<{ projectId: string; nodes: number; commands: number }>("/projects/import", bundle),
   updateProject: (projectId: string, payload: { title?: string; archived?: boolean }) =>
     request<{ ok: true }>(`/projects/${projectId}`, { method: "PATCH", body: JSON.stringify(payload) }),
   deleteProject: (projectId: string) =>
