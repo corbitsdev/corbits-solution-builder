@@ -6,10 +6,10 @@
  * replaced them.
  */
 import { EmptyState } from "@corbits/react-ui";
-import { useEffect, useState } from "react";
-import { api, type ArtifactNode } from "../client.js";
+import { useEffect, useRef, useState } from "react";
+import { api, ApiFailure, type ArtifactNode } from "../client.js";
 import { Markdown } from "../markdown.jsx";
-import { documentName, stageName } from "../components.jsx";
+import { Button, documentName, stageName } from "../components.jsx";
 import { PrintButton } from "../print.jsx";
 
 type ArtifactEdge = { childNodeId: string; sourceNodeId: string };
@@ -113,12 +113,50 @@ export function ArtifactGraph({
   edges,
   contents,
   openedId: openedIdProp,
+  onAddMaterial,
 }: {
   nodes: ArtifactNode[];
   edges: ArtifactEdge[];
   contents?: Record<string, string> | undefined;
   openedId?: string;
+  /** Hands files over as material, mid-project. Absent where nothing can be added. */
+  onAddMaterial?: ((files: File[]) => Promise<void>) | undefined;
 }) {
+  const materialInput = useRef<HTMLInputElement>(null);
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+  const addMaterial = async (files: FileList) => {
+    if (!onAddMaterial || files.length === 0) return;
+    setAdding(true);
+    setAddError(null);
+    try {
+      await onAddMaterial([...files]);
+    } catch (cause) {
+      setAddError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    } finally {
+      setAdding(false);
+      if (materialInput.current) materialInput.current.value = "";
+    }
+  };
+  const addControl = onAddMaterial ? (
+    <div className="library-add">
+      <input
+        ref={materialInput}
+        type="file"
+        multiple
+        hidden
+        accept=".txt,.md,.csv,.json,.html,.xlsx,.xls,.docx,.doc,.pptx,.ppt,.pdf,.png,.jpg,.jpeg,.gif,.webp"
+        aria-label="Choose documents or images to add to the project"
+        onChange={(event) => {
+          if (event.target.files) void addMaterial(event.target.files);
+        }}
+      />
+      <Button variant="link" loading={adding} onClick={() => materialInput.current?.click()}>
+        Add documents or images…
+      </Button>
+      {addError ? <p className="inline-note">{addError}</p> : null}
+    </div>
+  ) : null;
   const [openedId, setOpenedId] = useState<string | null>(
     () => openedIdProp ?? defaultOpenedId(nodes),
   );
@@ -139,6 +177,7 @@ export function ArtifactGraph({
           title="Nothing produced yet"
           description="Draft the current stage and the first document appears."
         />
+        {addControl}
       </div>
     );
   }
@@ -153,6 +192,7 @@ export function ArtifactGraph({
   return (
     <div className="library-layout">
       <aside className="library-list" aria-label="Documents">
+        {addControl}
         {groupedRows(nodes).map((group) => (
           <section key={group.stage}>
             <p className="queue-list-head">{stageName(group.stage)}</p>
@@ -247,7 +287,11 @@ function ArtifactReader({
         {content === null ? (
           <p className="inline-note">Loading…</p>
         ) : content ? (
-          <Markdown source={content} />
+          node.kind === "source_material" ? (
+            <Material node={node} content={content} />
+          ) : (
+            <Markdown source={content} />
+          )
         ) : (
           <p className="inline-note">This version could not be read.</p>
         )}
@@ -292,5 +336,40 @@ function ArtifactReader({
         </footer>
       ) : null}
     </>
+  );
+}
+
+/**
+ * A file the person handed over, shown as what it is: an image as the image,
+ * text as text, anything else by name, type and size. Never rendered as
+ * Markdown — a CSV is not prose, and a data URL is not a document.
+ */
+function Material({ node, content }: { node: ArtifactNode; content: string }) {
+  const mediaType = node.mediaType ?? "";
+  const size = `${Math.max(1, Math.round(node.sizeBytes / 1024))} KB`;
+  if (mediaType.startsWith("image/")) {
+    return (
+      <figure className="material-figure">
+        <img src={content} alt={node.title} />
+        <figcaption>
+          {node.title} · {mediaType} · {size}
+        </figcaption>
+      </figure>
+    );
+  }
+  if (mediaType.startsWith("text/") || mediaType === "application/json") {
+    return (
+      <div className="material-text">
+        <p className="inline-note">
+          {node.title} · {mediaType} · {size}
+        </p>
+        <pre>{content}</pre>
+      </div>
+    );
+  }
+  return (
+    <p className="inline-note">
+      {node.title} · {mediaType} · {size}. Kept with the project; the specialists are told it is here.
+    </p>
   );
 }

@@ -28,6 +28,7 @@ import { parsed } from "./api.js";
 import { localActor } from "./hub-client.js";
 import { printableDesign } from "./print-page.js";
 import { exportDirectory, exportProject, importProject, parseBundle, saveBundle, bundleFileName } from "./project-transfer.js";
+import { attachMaterial, MATERIAL_KIND, type IncomingFile } from "./source-material.js";
 
 export function registerProjectRoutes(api: Hono) {
   api.get("/decisions", async (context) =>
@@ -175,6 +176,26 @@ export function registerProjectRoutes(api: Hono) {
     const bundle = await exportProject(context.req.param("projectId"));
     const saved = await saveBundle(bundle, exportDirectory());
     return context.json({ ...saved, nodes: bundle.artifacts.nodes.length, commands: bundle.ledger.length });
+  });
+
+  /**
+   * Files the person hands over with the problem, as multipart `files`. Each
+   * becomes a `source_material` version the specialists read at every stage.
+   */
+  api.post("/projects/:projectId/material", async (context) => {
+    const projectId = context.req.param("projectId");
+    const detail = await projectDetail(projectId, localActor().principalId);
+    const form = await context.req.formData().catch(() => null);
+    if (!form) throw new HostError("validation_failed", "Send the files as multipart form data under `files`.");
+    const files: IncomingFile[] = [];
+    for (const entry of form.getAll("files")) {
+      if (entry instanceof File) files.push({ name: entry.name, type: entry.type, bytes: new Uint8Array(await entry.arrayBuffer()) });
+    }
+    const held = detail.nodes
+      .filter((node) => node.kind === MATERIAL_KIND && node.supersededByNodeId === null)
+      .reduce((sum, node) => sum + node.sizeBytes, 0);
+    const attached = await attachMaterial({ projectId, actor: localActor(), files, alreadyHeldBytes: held });
+    return context.json({ attached });
   });
 
   /** A project carried in: the bundle as the body, a new project here as the answer. */

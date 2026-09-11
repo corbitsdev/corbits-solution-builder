@@ -32,6 +32,29 @@ export class ApiFailure extends Error {
   }
 }
 
+/** A multipart post: the browser sets the content type, boundary and all. */
+async function requestForm<T>(path: string, form: FormData): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`/api${path}`, { method: "POST", body: form });
+  } catch {
+    throw new ApiFailure({
+      code: "host_unreachable",
+      message: "That request did not reach the host. Try again, or reopen the window.",
+      correlationId: "-",
+      retryable: true,
+    });
+  }
+  const body: unknown = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const detail = (body as { error?: ApiError }).error;
+    throw new ApiFailure(
+      detail ?? { code: "internal_error", message: `The host answered ${response.status}.`, correlationId: "-", retryable: false },
+    );
+  }
+  return body as T;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
@@ -324,6 +347,15 @@ export const api = {
   /** Writes the project's export beside the person's downloads and says where. */
   exportProject: (projectId: string) =>
     post<{ path: string; bytes: number; nodes: number; commands: number }>(`/projects/${projectId}/export`, {}),
+  /** Hands files over with the problem; each becomes a version the specialists read. */
+  attachMaterial: (projectId: string, files: File[]) => {
+    const form = new FormData();
+    for (const file of files) form.append("files", file, file.name);
+    return requestForm<{ attached: { nodeId: string; name: string; mediaType: string; sizeBytes: number }[] }>(
+      `/projects/${projectId}/material`,
+      form,
+    );
+  },
   /** Brings an exported project in as a new project here. */
   importProject: (bundle: unknown) =>
     post<{ projectId: string; nodes: number; commands: number }>("/projects/import", bundle),

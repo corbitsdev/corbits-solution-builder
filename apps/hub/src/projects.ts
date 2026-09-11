@@ -339,7 +339,7 @@ export async function importArtifactNodes(args: {
   const hashes = new Map<string, string>();
   const sizes = new Map<string, number>();
   for (const node of args.nodes) {
-    if (node.mediaType !== "application/json") continue;
+    if (node.kind !== "design_feedback") continue;
     let parsed: unknown;
     try {
       parsed = JSON.parse(node.content);

@@ -658,7 +658,14 @@ export function App() {
                   />
                 </>
               ) : (
-                <ArtifactGraph nodes={graph.nodes} edges={graph.edges} />
+                <ArtifactGraph
+                  nodes={graph.nodes}
+                  edges={graph.edges}
+                  onAddMaterial={async (files) => {
+                    await api.attachMaterial(detail.project.id, files);
+                    await reloadDetail();
+                  }}
+                />
               )}
             </>
           ) : (

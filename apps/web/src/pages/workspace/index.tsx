@@ -74,7 +74,10 @@ export function StageWorkspace({
   // the feedback, and a gate that named it would approve the wrong thing.
   const stageNodes = detail.nodes.filter(
     (node) =>
-      node.stage === stage && node.kind !== "engineering_review" && node.kind !== "design_feedback",
+      node.stage === stage &&
+      node.kind !== "engineering_review" &&
+      node.kind !== "design_feedback" &&
+      node.kind !== "source_material",
   );
   const panelReviews = detail.nodes.filter(
     (node) => node.stage === stage && node.kind === "engineering_review",
@@ -176,6 +179,19 @@ export function StageWorkspace({
   // retry the designer's limit policy asked for. Said once, here, since the
   // thread is projected from the run and a retry is not a turn in it.
   const [notice, setNotice] = useState<string | null>(null);
+  // Material handed over mid-project: dropped anywhere on the stage view. It
+  // is read on the next draft, and the notice says so rather than redrafting
+  // on the person's behalf.
+  const [dragging, setDragging] = useState(false);
+  const attach = (files: FileList) => {
+    const list = [...files];
+    if (list.length === 0) return;
+    void run("material", async () => {
+      const { attached } = await api.attachMaterial(detail.project.id, list);
+      const names = attached.map((entry) => entry.name).join(", ");
+      return { note: `Attached ${names}. The specialists read it with their next draft: say what to do with it, or ask for a redraft.` };
+    });
+  };
   const run = async (label: string, work: () => Promise<unknown>) => {
     setBusy(label);
     setError(null);
@@ -224,7 +240,25 @@ export function StageWorkspace({
   // a glitch. Keyed so React mounts fresh when the stage or its phase changes.
   const phase = stageNodes.length === 0 ? "preparing" : awaitingReview ? "waiting" : "drafting";
   return (
-    <div key={`${stage}:${phase}`} className="stage-view">
+    <div
+      key={`${stage}:${phase}`}
+      className={dragging ? "stage-view is-dragging" : "stage-view"}
+      onDragOver={(event) => {
+        if ([...event.dataTransfer.types].includes("Files")) {
+          event.preventDefault();
+          setDragging(true);
+        }
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false);
+      }}
+      onDrop={(event) => {
+        if (![...event.dataTransfer.types].includes("Files")) return;
+        event.preventDefault();
+        setDragging(false);
+        attach(event.dataTransfer.files);
+      }}
+    >
       {awaitingReview && stage <= 7 && active ? (
         <StageGate
           soloApproval={detail.soloApproval}

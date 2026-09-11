@@ -2471,6 +2471,89 @@ button[aria-disabled="true"] {
   width: 12.75rem;
 }
 
+/* The start box and the stage view take a drop. While something is over one, it says so. */
+.start.is-dragging,
+.stage-view.is-dragging {
+  outline: 2px dashed var(--wb-primary);
+  outline-offset: var(--space-2);
+  border-radius: var(--radius-control);
+}
+
+.start-material {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.material-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.material-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--radius-control);
+  font-size: 0.8125rem;
+}
+
+.material-size {
+  color: var(--wb-muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
+.material-remove {
+  min-width: 28px;
+  min-height: 28px;
+  border: 0;
+  background: none;
+  color: var(--wb-muted-foreground);
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.material-remove:focus-visible {
+  outline: 2px solid var(--wb-ring);
+  outline-offset: 2px;
+}
+
+/* Adding material from the artifacts tab, above the list. */
+.library-add {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--wb-border);
+  font-size: 0.875rem;
+}
+
+/* Material in the artifacts tab: an image as the image, text as text. */
+.material-figure {
+  margin: 0;
+}
+
+.material-figure img {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--wb-border);
+}
+
+.material-figure figcaption,
+.material-text .inline-note {
+  margin-top: var(--space-2);
+  font-size: 0.8125rem;
+  color: var(--wb-muted-foreground);
+}
+
+.material-text pre {
+  overflow-x: auto;
+  white-space: pre;
+  font-size: 0.8125rem;
+}
+
 /* The import link under the start box: a quieter second way in. */
 .start-import {
   margin: var(--space-2) 0 0;
