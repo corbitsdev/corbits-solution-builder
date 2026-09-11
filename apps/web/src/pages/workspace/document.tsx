@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
   type ArtifactNode,
+  type Evaluation,
   type Quote,
   type StageTurn,
 } from "../../client.js";
@@ -40,6 +41,7 @@ export function StageDocument({
   content,
   turns,
   openQuestion,
+  evaluation = null,
   onSelectVersion,
   onRevise,
   onSubmit,
@@ -56,6 +58,8 @@ export function StageDocument({
   turns: StageTurn[];
   /** Set while the specialist is still waiting on an answer. */
   openQuestion: { remaining: number; ordinal: number } | null;
+  /** The stage-1 brief evaluator's verdict, advisory only. Null off stage 1. */
+  evaluation?: Evaluation | null;
   onSelectVersion: (id: string) => void;
   onRevise: (message: string, quotes: Quote[], revise?: boolean) => void;
   onSubmit: () => void;
@@ -354,7 +358,11 @@ export function StageDocument({
           ) : canSubmit ? (
             <div className="composer-approve">
               <span>{soloApproval ? "Happy with it?" : "Nothing more to say?"}</span>
-              <span data-tour="submit">
+              <span
+                data-tour="submit"
+                data-ready={evaluation?.ready ? "true" : undefined}
+                className={evaluation?.ready ? "is-ready" : undefined}
+              >
                 <Button variant="ghost" loading={busy === "submit"} onClick={onSubmit}>
                   <Check aria-hidden="true" />
                   {soloApproval ? "Approve and continue" : "Send for approval"}

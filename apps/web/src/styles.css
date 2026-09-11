@@ -1424,6 +1424,15 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   color: var(--wb-muted-foreground);
 }
 
+/* The evaluator's verdict, advisory only: it colours the control, it never
+   disables or replaces it. */
+.composer-approve .is-ready button {
+  border-color: var(--wb-okay);
+  color: var(--wb-okay);
+  background: color-mix(in srgb, var(--wb-okay) 12%, var(--wb-card));
+}
+
+
 /* The filling stage view: its chrome is fixed, the conversation takes the
    rest. Padding lives on the chrome rather than the region, so the panel
    itself can run edge to edge. */
@@ -2038,6 +2047,12 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   border-radius: 999px;
   background: var(--wb-primary);
   animation: gate-pulse 1.6s ease-in-out infinite;
+}
+
+/* The evaluator's verdict on the brief, advisory only: it colours the dot, it
+   never changes what the gate does. */
+.stage-gate-dot.is-ready {
+  background: var(--wb-okay);
 }
 
 @keyframes gate-pulse {

@@ -272,6 +272,9 @@ export type StageTurn = {
   createdAt: string;
 };
 
+/** The stage-1 brief evaluator's verdict. Advisory only — nothing gates on it. */
+export type Evaluation = { ready: boolean; notes: string[] };
+
 export type InstallState = {
   deployment?: { status: string; detail: string };
   installed: boolean;
@@ -340,9 +343,12 @@ export const api = {
   guidance: (projectId: string) =>
     request<{ guidance: Guidance }>(`/projects/${projectId}/guidance`),
   thread: (projectId: string, stage: number) =>
-    request<{ turns: StageTurn[]; open: { remaining: number; ordinal: number } | null }>(
-      `/projects/${projectId}/stages/${stage}/thread`,
-    ),
+    request<{
+      turns: StageTurn[];
+      open: { remaining: number; ordinal: number } | null;
+      /** Absent on a hub that does not evaluate this stage yet. */
+      evaluation?: Evaluation | null;
+    }>(`/projects/${projectId}/stages/${stage}/thread`),
   reply: (
     projectId: string,
     stage: number,

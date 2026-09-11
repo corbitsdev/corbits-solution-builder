@@ -8,7 +8,7 @@ import {
   TableRow,
 } from "@corbits/react-ui";
 import { Button, StateLabel } from "../../components.jsx";
-import type { ProjectDetail } from "../../client.js";
+import type { Evaluation, ProjectDetail } from "../../client.js";
 
 export const STAGE_GOAL: Record<number, string> = {
   1: "Describe what hurts. The Brainstormer interviews the problem, not a solution.",
@@ -30,17 +30,23 @@ export const STAGE_GOAL: Record<number, string> = {
 export function StageGate({
   soloApproval,
   busy,
+  evaluation = null,
   onApprove,
   onOpenDecisions,
 }: {
   soloApproval: boolean;
   busy: boolean;
+  /** The stage-1 brief evaluator's verdict, advisory only. Null off stage 1. */
+  evaluation?: Evaluation | null;
   onApprove: () => void;
   onOpenDecisions?: (() => void) | undefined;
 }) {
   return (
     <div className="stage-gate" role="status">
-      <span className="stage-gate-dot" aria-hidden="true" />
+      <span
+        className={evaluation?.ready ? "stage-gate-dot is-ready" : "stage-gate-dot"}
+        aria-hidden="true"
+      />
       <p>
         {soloApproval
           ? "This version is ready. Approving it starts the next stage."

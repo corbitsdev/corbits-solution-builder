@@ -95,7 +95,7 @@ const STAGE_STEPS: Record<number, () => Step[]> = {
       target: '[data-tour="submit"]',
       title: "When it is right, submit it",
       content:
-        "That records your approval against this exact version and opens the next stage. Only you can do it. It turns green when the brief is ready.",
+        "That records your approval against this exact version and opens the next stage. It turns green once the evaluator judges the brief complete — but approving it is still your call, whenever you're ready.",
     },
   ],
   2: () => draftingSteps(STAGE_GOAL[2]!),
