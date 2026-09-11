@@ -29,6 +29,7 @@ import {
   type DesignFeedback,
 } from "../client.js";
 import { Banner, Button, Field, Screen, StateLabel, shortHash } from "../components.jsx";
+import { Elapsed } from "./workspace/elapsed.jsx";
 
 type PendingComment = { anchor: DesignAnchor; body: string };
 
@@ -377,7 +378,9 @@ export function DesignFeedbackView({
               onClick={() => run("revise", () => api.reviseDesign(projectId, design!.id))}
             >
               Generate the next design version
-            </Button>{stored?.prompt ? (
+            </Button>
+            {busy === "revise" ? <Elapsed stage={4} /> : null}
+            {stored?.prompt ? (
               <div className="artifact">
                 <pre>{stored.prompt}</pre>
               </div>
