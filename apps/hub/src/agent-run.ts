@@ -20,6 +20,7 @@ import { ArtifactDraft } from "./domain.js";
 import { HostError, ReplyCutShort } from "./errors.js";
 import {
   DESIGNER_TOKENS_MAX,
+  cutShortTwice,
   designerGuidance,
   designerSettings,
   lowerResolutionGuidance,
@@ -158,6 +159,7 @@ async function draftWith(
   const designer = agent.produces === "design_artifact" ? await designerSettings() : null;
   let system = designer ? `${agent.system}\n\n${designerGuidance(designer)}` : agent.system;
   let maxTokens = designer?.maxTokens ?? 8000;
+  const firstLimit = maxTokens;
   let note: string | undefined;
 
   beginLiveDraft(args.projectId, args.stage);
@@ -191,7 +193,21 @@ async function draftWith(
       } catch (cause) {
         // One more attempt, and only for a design, and only as the person's
         // settings say. Anything else is the failure it was.
-        if (!(cause instanceof ReplyCutShort) || !designer || attempt > 0) throw cause;
+        if (!(cause instanceof ReplyCutShort) || !designer) throw cause;
+        // The retry was cut short as well. Said as the second failure it is,
+        // not as a repeat of the first: the person needs to know the policy
+        // ran and was not enough.
+        if (attempt > 0) {
+          throw new ReplyCutShort(
+            cutShortTwice({
+              title: agent.title,
+              onLimit: designer.onLimit === "raise" ? "raise" : "reduce",
+              firstLimit,
+              secondLimit: maxTokens,
+            }),
+            cause.limit,
+          );
+        }
         const limit = maxTokens;
         if (designer.onLimit === "raise") {
           const raised = Math.min(limit * 2, DESIGNER_TOKENS_MAX);
