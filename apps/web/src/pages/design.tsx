@@ -227,7 +227,9 @@ export function DesignFeedbackView({
           sandbox=""
           style={{
             width: "100%",
-            height: "460px",
+            // Most of the window, not a strip of it: the mockup is the thing
+            // being reviewed. It scrolls inside the frame past that.
+            height: "clamp(460px, 72vh, 1100px)",
             border: "1px solid var(--wb-border)",
             background: "#fff", // not-our-surface: a generated mockup is its
             // own page and renders on white whatever theme the app wears.
