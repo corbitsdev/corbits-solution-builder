@@ -18,6 +18,7 @@ import {
 } from "./client.js";
 import { CircleCheck, FolderKanban, PanelRight, PanelRightClose, Settings as SettingsIcon } from "lucide-react";
 import { Banner, Button, Mark, StateLabel } from "./components.jsx";
+import { PrintView, usePrintTarget } from "./print.jsx";
 import { DecisionQueue } from "./pages/decisions.jsx";
 import { Projects } from "./pages/projects.jsx";
 import { Settings } from "./pages/settings.jsx";
@@ -208,6 +209,9 @@ export function AppRail({
 
 export function App() {
   const [view, setView] = useState<View>(initialView);
+  // A document being printed lies over the app rather than replacing it, so
+  // nothing in flight underneath is lost.
+  const printing = usePrintTarget();
   const [projectTab, setProjectTab] = useState<ProjectTab>("stage");
   // The conversation and the artifact library fill the window; every other
   // view scrolls. Computed here rather than inline so a class list stays a
@@ -482,6 +486,7 @@ export function App() {
   }
 
   return (
+    <>
     <div className="app">
       <AppRail
         view={view}
@@ -673,5 +678,7 @@ export function App() {
         </div>
       </main>
     </div>
+    {printing ? <PrintView target={printing} /> : null}
+    </>
   );
 }

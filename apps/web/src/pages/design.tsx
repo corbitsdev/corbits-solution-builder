@@ -30,6 +30,7 @@ import {
   type DesignFeedback,
 } from "../client.js";
 import { Banner, Button, Field, Screen, StateLabel, shortHash } from "../components.jsx";
+import { PrintButton } from "../print.jsx";
 import { Elapsed } from "./workspace/elapsed.jsx";
 
 type PendingComment = { anchor: DesignAnchor; body: string };
@@ -253,8 +254,11 @@ export function DesignFeedbackView({
         </div>
 
         {design ? (
-          <p className="inline-note">
-            Reviewing {design.title}, version {design.version}.
+          <p className="inline-note design-reviewing">
+            <span>
+              Reviewing {design.title}, version {design.version}.
+            </span>
+            <PrintButton node={design} content={null} />
           </p>
         ) : null}
 

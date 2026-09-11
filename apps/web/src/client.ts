@@ -155,6 +155,8 @@ export type ArtifactNode = {
   artifactId: string;
   contentHash: string;
   sizeBytes: number;
+  /** `text/markdown` for a written document, `text/html` for a design. */
+  mediaType?: string;
   createdAt: string;
   supersededByNodeId: string | null;
   provenance: { producer: string; agentRole?: string; providerId?: string; model?: string };
@@ -322,6 +324,8 @@ export const api = {
     request<{ ok: true }>(`/projects/${projectId}`, { method: "DELETE" }),
   artifact: (nodeId: string) =>
     request<{ node: ArtifactNode; content: string }>(`/artifacts/${nodeId}`),
+  /** Where a design is served as a page of its own, for printing. A path, not a request. */
+  printPage: (nodeId: string) => `/api/artifacts/${nodeId}/print`,
   draft: (projectId: string, stage: number, input: string, quotes: Quote[] = []) =>
     post<{ draft: { nodeId: string; contentHash: string; content: string; agent: string; model: string } }>(
       `/projects/${projectId}/stages/${stage}/draft`,

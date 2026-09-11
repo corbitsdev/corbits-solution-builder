@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { api, type ArtifactNode } from "../client.js";
 import { Markdown } from "../markdown.jsx";
 import { documentName, stageName } from "../components.jsx";
+import { PrintButton } from "../print.jsx";
 
 type ArtifactEdge = { childNodeId: string; sourceNodeId: string };
 
@@ -240,6 +241,7 @@ function ArtifactReader({
           <h2>{documentLabel(node)}</h2>
           <p>{kicker}</p>
         </div>
+        <PrintButton node={node} content={content} />
       </header>
       <div className="document-body">
         {content === null ? (
