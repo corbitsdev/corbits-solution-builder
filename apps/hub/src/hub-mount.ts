@@ -73,12 +73,6 @@ export type MountedHub = {
   readonly db: ReturnType<typeof createDB>;
   readonly publicKeyHex: string;
   /**
-   * The hub's git-backed repo store. A definition's body — the system prompt
-   * an agent actually reads — is a commit on its deploy ref here, which is
-   * where the platform expects it to live and where a sidecar pulls it from.
-   */
-  readonly agentRepoStore: ReturnType<typeof createAgentRepoStore>;
-  /**
    * Signs mail on a principal's behalf. Exposed so `hub/conversation.ts` can
    * mint a principal a signing key on first use and sign the mail it composes
    * for a stage thread, the same way the sidecar signs mail for a run.
@@ -391,7 +385,6 @@ export async function mountHub(): Promise<MountedHub> {
     app,
     db,
     publicKeyHex: hexEncode(signingKey.publicKey),
-    agentRepoStore,
     principalKeyStore,
     auth,
     assetService,

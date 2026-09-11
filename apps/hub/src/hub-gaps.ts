@@ -10,12 +10,6 @@
  *                           source on a probe sidecar. There is no route that
  *                           registers a definition row a client generated
  *                           itself, so the row is inserted here.
- *   2. bindAgentRole        `agent_role` (a definition bound to a role) has no
- *                           route; principal roles do, agent roles do not.
- *   3. writeDefinitionBody  A definition's body — the system prompt — is a
- *                           commit in the hub's git registry. Sidecars push it
- *                           over smart HTTP with a git token; a client has no
- *                           route to write it, so the repo store is used.
  *   4. adoptLegacyWorkspace A tenant created before the hub owned identity has
  *                           an owner principal that no user is linked to, and
  *                           none of the owner role and grant `POST /tenants`
@@ -126,50 +120,6 @@ export async function registerDefinition(
       : {}),
   });
   return { id: row.id, created: true };
-}
-
-// --- 2. bindAgentRole ------------------------------------------------------
-
-/** Binds a definition to a role. Idempotent. */
-export async function bindAgentRole(definitionId: string, roleId: string): Promise<void> {
-  const { agentRole } = await import("@intx/db/schema");
-  await handle().insert(agentRole).values({ agentId: definitionId, roleId }).onConflictDoNothing();
-}
-
-// --- 3. writeDefinitionBody ------------------------------------------------
-
-export type DeployedBody = {
-  readonly definitionId: string;
-  readonly commitSha: string;
-};
-
-/**
- * Commits one system prompt per definition to the hub's registry, on the
- * deploy ref a sidecar pulls from. Content-addressed by git, so an unchanged
- * prompt produces the same tree; the sha is what tells two runs apart.
- */
-export async function deployDefinitionBodies(
-  bodies: readonly { definitionId: string; systemPrompt: string }[],
-): Promise<DeployedBody[]> {
-  const store = hub().agentRepoStore;
-  const written: DeployedBody[] = [];
-  for (const body of bodies) {
-    // Serialized deliberately: the store's contract is that the caller does
-    // not write two commits to one agent's repo concurrently.
-    const { commitSha } = await store.writeDeployTree(body.definitionId, {
-      systemPrompt: body.systemPrompt,
-    });
-    written.push({ definitionId: body.definitionId, commitSha });
-  }
-  return written;
-}
-
-/** The packfile a sidecar would pull for this definition, as proof it is there. */
-export async function deployedPack(
-  definitionId: string,
-): Promise<{ bytes: number; commitSha: string; ref: string } | null> {
-  const pack = await hub().agentRepoStore.createDeployPack(definitionId).catch(() => null);
-  return pack ? { bytes: pack.pack.length, commitSha: pack.commitSha, ref: pack.ref } : null;
 }
 
 // --- 4. adoptLegacyWorkspace -----------------------------------------------

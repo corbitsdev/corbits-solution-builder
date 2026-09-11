@@ -274,21 +274,3 @@ export function stageSteps(stage: Stage, after: readonly string[] | null): Recor
   };
 }
 
-/**
- * The stage on its own, as a registered definition the stage thread's agent
- * session points at. The deployed lifecycle inlines the same two steps.
- */
-export function stageDefinition(stage: Stage): WorkflowDefinition {
-  return defineWorkflow({
-    id: `${STAGE_WORKFLOW_ID}.${stage}`,
-    triggers: [{ type: "manual" }],
-    steps: stageSteps(stage, null) as never,
-    state: {
-      schema: {
-        projectId: "string",
-        runId: "string",
-        stage: "number",
-      } as never,
-    },
-  });
-}
