@@ -1,9 +1,10 @@
 /**
  * Preparing a stage thread for the next draft.
  *
- * The persistence layer stores every turn. This decides what the specialist
- * actually sees, which is deliberately not the transcript: a standing brief of
- * the directions that must keep holding, plus the turns recent enough to be
+ * The thread itself is projected straight from the run (`stage-thread.ts`);
+ * nothing here is written. What this decides is what the specialist actually
+ * sees, which is deliberately not the transcript: a standing brief of the
+ * directions that must keep holding, plus the turns recent enough to be
  * worth quoting verbatim.
  *
  * Compaction runs before a draft rather than after one, so the budget is
@@ -11,18 +12,22 @@
  *
  * Compaction itself is a `Compactor` — `ContextStrategy<ConversationTurn[],
  * ConversationTurn[]>` from `@intx/types/runtime`, the type `@intx/agent`
- * registers on `env.compactors` for a director to invoke by name. Solutions
- * Builder's stage specialists are single-shot `complete()` calls rather than
- * an `@intx/agent` reactor session, so there is no director or reactor here to
- * register it with; `stageContext` runs the strategy directly, the same way a
- * reactor would run it on the director's behalf. Adopting the type is what
- * matters for this cutover — it is what replaces the old `compactedAt` column
- * plus a bespoke `stageBrief` table with the platform's own shape for "fold
- * old turns into fewer new ones", persisted through `host/hub/conversation.ts`
- * as an ordinary marked turn rather than a second kind of row.
+ * registers on `env.compactors` for a director to invoke by name. A stage
+ * specialist is a one-shot agent step in the run, not an `@intx/agent`
+ * reactor session, so there is no director or reactor here to register it
+ * with: `stageContext` runs the strategy directly, before the prompt is
+ * rendered, the same way a reactor would run it on the director's behalf.
+ *
+ * The compacted brief has nowhere of its own to live — there is no marker
+ * turn any more — so it travels as `provenance.brief` on the version the
+ * round it prepared for produces, and the next round's brief is read back
+ * off the current live version rather than off a separate row.
  */
 import { complete } from "./inference.js";
-import { pendingContext, recordBrief, type Quote, type StageTurn } from "./hub-conversation.js";
+import { threadTurns, type Quote, type StageTurn } from "./stage-thread.js";
+import { database } from "./db.js";
+import * as table from "./schema.js";
+import { and, eq, isNull } from "drizzle-orm";
 import type { Compactor, ConversationTurn, StrategyContext } from "@intx/types/runtime";
 
 const COMPACTOR_SYSTEM = `You maintain the standing brief for one stage of a product-development thread.
@@ -131,18 +136,55 @@ export const stageBriefCompactor: Compactor = {
 export type StageContext = { brief: string | null; recent: StageTurn[] };
 
 /**
+ * The standing brief and the turns after it — what a revision prompt is built
+ * from. The brief is read off `provenance.brief` of the stage's current live
+ * version (null before there is one); "after it" is every projected turn
+ * whose `resultNodeId` is not that version, i.e. everything the thread has
+ * produced since — a version's own turn is the boundary, not part of what is
+ * still pending.
+ */
+export async function pendingContext(
+  projectId: string,
+  stage: number,
+): Promise<{ brief: string | null; pending: StageTurn[] }> {
+  const all = await threadTurns(projectId, stage);
+
+  const { db } = database();
+  const [node] = await db
+    .select()
+    .from(table.artifactNode)
+    .where(
+      and(
+        eq(table.artifactNode.projectId, projectId),
+        eq(table.artifactNode.stage, stage),
+        isNull(table.artifactNode.supersededByNodeId),
+      ),
+    );
+  if (!node) return { brief: null, pending: all };
+
+  const provenance = node.provenance as { brief?: string };
+  const brief = provenance.brief ?? null;
+  const index = all.findIndex((turn) => turn.resultNodeId === node.id);
+  const pending = index === -1 ? all : all.slice(index + 1);
+  return { brief, pending };
+}
+
+/**
  * The brief and the verbatim tail for the next draft, compacting first if the
  * thread has outgrown its budget.
  *
  * A failed compaction is not fatal. If the model call fails the older turns
  * stay uncompacted and are sent verbatim this time: a larger prompt is a much
  * better outcome than a draft that silently forgets what it was told.
+ *
+ * Nothing is written here: the brief this produces is only durable once the
+ * round it prepares for actually drafts, as that version's own
+ * `provenance.brief` — the caller (`stage-runs.ts`'s `requestDraft`) is what
+ * persists it.
  */
 export async function stageContext(args: {
   projectId: string;
   stage: number;
-  runId: string;
-  actor: { principalId: string };
 }): Promise<StageContext> {
   const { brief, pending } = await pendingContext(args.projectId, args.stage);
   const { fold, keep } = splitForCompaction(pending);
@@ -158,13 +200,6 @@ export async function stageContext(args: {
   const body = result.output.map(textOf).join("\n").trim();
   if (body.length === 0) return { brief, recent: pending };
 
-  await recordBrief({
-    projectId: args.projectId,
-    stage: args.stage,
-    runId: args.runId,
-    body,
-    actor: args.actor,
-  });
   return { brief: body, recent: keep };
 }
 

@@ -8,7 +8,7 @@
  * the old one by construction, so a question about superseded text is never
  * asked. Nothing is stored beside the thread.
  */
-import { threadTurns } from "./hub-conversation.js";
+import { threadTurns } from "./stage-thread.js";
 
 export type OpenQuestion = { id: string; body: string; ordinal: number; remaining: number };
 

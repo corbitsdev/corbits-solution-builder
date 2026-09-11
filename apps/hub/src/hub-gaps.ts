@@ -29,17 +29,23 @@
  *                           patched, not created.
  *   6. ensureAgentSession   `GET /api/me/sessions` is a stub returning [].
  *                           There is no route that creates an `agent_session`
- *                           with a chosen id keyed to a definition.
+ *                           with a chosen id keyed to a definition. The
+ *                           command ledger (`engine-ledger.ts`) is what still
+ *                           needs this: it keys its per-project session to
+ *                           the seeded lifecycle definition so it can work
+ *                           without an offering or a sidecar, which a run's
+ *                           own session cannot promise.
  *   7. writeConversationTurn
  *                           No route writes `session_mail` plus the
- *                           `inference_turn` / `turn_part` pair a stage thread
- *                           reads back, including Builder metadata (quotes,
- *                           resultNodeId, questions, `kind: "brief"`).
- *                           `POST /workflows/:runId/mail` triggers a run; it
- *                           is not a conversation append.
+ *                           `inference_turn` / `turn_part` pair the command
+ *                           ledger reads back as one committed command's
+ *                           metadata (decision, versions, rationale, the
+ *                           run mutations it made). `POST /workflows/:runId/mail`
+ *                           triggers a run; it is not a conversation append.
  *   8. listConversationTurns
  *                           No route lists `turn_part` for a session. The
- *                           me-sessions list is unimplemented.
+ *                           command ledger reads its own session back through
+ *                           this; the me-sessions list is unimplemented.
  *  10. listChildTenants     `GET /api/tenants` does not exist; `/api/me/principals`
  *                           lists memberships, not the tenants under a parent.
  *                           A project is a child tenant, so the list is read here.

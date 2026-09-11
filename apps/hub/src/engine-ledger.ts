@@ -72,6 +72,8 @@ export type LedgerEntry = {
   answer?: BuildAnswer;
   /** What a project.delete removed and what it kept, recorded with the deletion. */
   receipt?: RetentionReceipt;
+  /** The human text this command opened with — `project.create`'s problem statement. */
+  message?: string;
 };
 
 export type RetentionReceipt = {
@@ -160,6 +162,7 @@ export async function recordCommand(entry: LedgerEntry): Promise<void> {
   if (entry.question !== undefined) metadata.question = entry.question;
   if (entry.answer !== undefined) metadata.answer = entry.answer;
   if (entry.receipt !== undefined) metadata.receipt = entry.receipt;
+  if (entry.message !== undefined) metadata.message = entry.message;
 
   await writeConversationTurn({
     sessionId,
@@ -198,6 +201,8 @@ export type LedgerCommand = {
   question: BuildQuestion | null;
   answer: BuildAnswer | null;
   createdAt: string;
+  /** The human text this command opened with, when it carried one. */
+  message: string | null;
 };
 
 /** Every committed command on this project, oldest first, with the run mutations and flag it carried. */
@@ -213,6 +218,7 @@ export async function ledgerCommands(projectId: string): Promise<LedgerCommand[]
     question: (part.metadata?.question as BuildQuestion | undefined) ?? null,
     answer: (part.metadata?.answer as BuildAnswer | undefined) ?? null,
     createdAt: part.startedAt,
+    message: typeof part.metadata?.message === "string" ? part.metadata.message : null,
   }));
 }
 

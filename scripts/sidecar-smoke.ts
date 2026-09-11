@@ -38,6 +38,36 @@ const SECRET = "sk-stub-do-not-store-me-anywhere";
 const completions: { model: string; messages: unknown[] }[] = [];
 /** Every request the stub saw, for diagnosis when the agent never arrives. */
 const requests: string[] = [];
+
+/**
+ * A two-question brief, in the exact shape `questionsIn` parses: each
+ * question a top-level bullet, its likely answers the `- Option:` bullets
+ * that follow it.
+ */
+const BRAINSTORMER_REPLY = `## In short
+Getting started. I will ask a couple of questions, then draft your brief.
+
+## What I need from you
+- Which outbound channel should this brief center on first, meaning the one the process is built around? It decides where the rest of the brief points.
+- Option: Cold email
+- Option: Cold calling
+- How many leads per week should the process handle, meaning the target weekly volume the brief should design around? It sets the scale of what gets built.
+- Option: Dozens
+- Option: Hundreds`;
+
+const EVALUATOR_REPLY = `Verdict: not yet
+- Success criteria are aspirations.`;
+
+const BUILD_REPLY = "## In short\n- Build attempt acknowledged.";
+
+/** Which canned reply a completion gets, told apart by a phrase distinctive to each role's own system prompt. */
+function replyFor(messages: unknown[]): string {
+  const text = JSON.stringify(messages);
+  if (text.includes("You are the Brainstormer at stage 1.")) return BRAINSTORMER_REPLY;
+  if (text.includes("You are the Brief evaluator inside Solutions Builder")) return EVALUATOR_REPLY;
+  return BUILD_REPLY;
+}
+
 const stub = createServer((request, response) => {
   const authorized = (request.headers.authorization ?? "") === `Bearer ${SECRET}`;
   requests.push(`${request.method} ${request.url} ${authorized ? "authorized" : `unauthorized(${(request.headers.authorization ?? "").slice(0, 28)})`}`);
@@ -54,7 +84,7 @@ const stub = createServer((request, response) => {
       const chunk = (delta: Record<string, unknown>, finish: string | null) =>
         `data: ${JSON.stringify({ id: "stub", object: "chat.completion.chunk", model: parsed.model, choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
       response.writeHead(200, { "content-type": "text/event-stream" });
-      response.write(chunk({ role: "assistant", content: "## In short\n- Build attempt acknowledged." }, null));
+      response.write(chunk({ role: "assistant", content: replyFor(parsed.messages) }, null));
       response.write(chunk({}, "stop"));
       response.end("data: [DONE]\n\n");
     });
@@ -159,8 +189,9 @@ try {
   const { createProject } = await import("../apps/hub/src/projects.js");
   const { localActor, deploymentRuns, hubApi, tenantPath } = await import("../apps/hub/src/hub-client.js");
   const { projectExecutionStatus, deliverStageSignal, parkedSignalNames } = await import("../apps/hub/src/hub-executor.js");
+  const projectTitle = "Smoke: runs on the hub";
   const project = await createProject({
-    title: "Smoke: runs on the hub",
+    title: projectTitle,
     owner: { ...localActor(), displayName: "Smoke" },
     policy: {
       costTolerancePercent: 15,
@@ -215,6 +246,74 @@ try {
       }
       return latest;
     };
+
+    // A native drafting round: a `stage.draft` command, delivered as the
+    // round signal, drafted by the run's own agent step (the Brainstormer),
+    // then evaluated by its own agent step (the brief evaluator) — nothing
+    // in-process, and the thread and the evaluation are both projected back
+    // from the run's events afterwards.
+    {
+      const { requestDraft } = await import("../apps/hub/src/stage-runs.js");
+      const { evaluationIn, threadTurns } = await import("../apps/hub/src/stage-thread.js");
+      const { expectLiveDraft, subscribeLiveDraft } = await import("../apps/hub/src/live-drafts.js");
+
+      const liveEvents: { type: string; text?: string }[] = [];
+      expectLiveDraft(project.projectId, 1);
+      const unsubscribeLive = subscribeLiveDraft(project.projectId, 1, (event) => {
+        liveEvents.push(event.type === "text" ? { type: event.type, text: event.text } : { type: event.type });
+      });
+
+      let drafted: Awaited<ReturnType<typeof requestDraft>> | { error: string };
+      try {
+        drafted = await requestDraft({
+          projectId: project.projectId,
+          stage: 1,
+          runId: project.runId,
+          actor: localActor(),
+          message: "Cold outbound is rebuilt by hand every Monday.",
+          mode: "final",
+          projectTitle,
+        });
+      } catch (cause) {
+        drafted = { error: cause instanceof Error ? cause.message : String(cause) };
+      }
+      unsubscribeLive();
+
+      check(
+        "a stage.draft round produces a problem_brief version through the run's own agent step",
+        "draft" in drafted && drafted.draft.content.includes("In short"),
+        "error" in drafted ? drafted.error : drafted.draft.content.slice(0, 200),
+      );
+
+      const thread = "draft" in drafted ? await threadTurns(project.projectId, 1) : [];
+      const opener = thread.find((entry) => entry.role === "specialist" && entry.questions !== null);
+      check(
+        "the projected thread carries a specialist turn with two questions",
+        opener?.questions?.length === 2,
+        JSON.stringify(opener),
+      );
+      check(
+        "nextQuestion reads the first of them off the projected thread",
+        (await (await import("../apps/hub/src/questions.js")).nextQuestion(project.projectId, 1))?.ordinal === 0,
+      );
+
+      const iterationsAfterDraft = await (await import("../apps/hub/src/hub-executor.js")).stageIterations(
+        project.projectId,
+        1,
+      );
+      const evaluation = await evaluationIn(iterationsAfterDraft);
+      check(
+        "the brief evaluator's verdict projects from its own agent step",
+        evaluation?.ready === false && evaluation.notes.length > 0,
+        JSON.stringify(evaluation),
+      );
+
+      check(
+        "the live-draft pane streamed the round from the run's own inference events",
+        liveEvents.some((event) => event.type === "begin") && liveEvents.some((event) => event.type === "done"),
+        JSON.stringify(liveEvents).slice(0, 400),
+      );
+    }
 
     const submitted = await deliverStageSignal(project.projectId, "stage.submit", { runId: project.runId }, `smoke-submit-${project.projectId}`);
     check("stage.submit lands on the parked loop as its round signal", submitted === "delivered", submitted);

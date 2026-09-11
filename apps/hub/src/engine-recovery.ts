@@ -12,6 +12,7 @@ import {
   deliverStageSignal,
   hasExecution,
   launchProjectLifecycle,
+  type DeliveryOutcome,
 } from "./hub-executor.js";
 import type { CommandInput } from "./engine.js";
 
@@ -32,9 +33,14 @@ export const GATE_COMMANDS: readonly Command[] = [
  * transition — the executor is not something the database's single writer
  * connection can be reached from mid-transaction, and this is not part of
  * what made the transition valid.
+ *
+ * Returns the delivery outcome so a caller that needs the round to have
+ * actually reached a waiting run (a drafting request) can tell "delivered"
+ * from "nothing was there to hear it" rather than assuming the best;
+ * `undefined` for a command that is not a gate at all.
  */
-export async function runGateSideEffects(input: CommandInput): Promise<void> {
-  if (!GATE_COMMANDS.includes(input.type)) return;
+export async function runGateSideEffects(input: CommandInput): Promise<DeliveryOutcome | undefined> {
+  if (!GATE_COMMANDS.includes(input.type)) return undefined;
 
   // A restart empties the executor's map, so a project mid-flight has no
   // live run and every later gate would no-op in silence. Relaunching is
@@ -47,7 +53,10 @@ export async function runGateSideEffects(input: CommandInput): Promise<void> {
       console.error(`[executor] ${input.projectId}: could not relaunch after restart:`, cause);
     });
   }
-  await deliverStageSignal(input.projectId, input.type, input.payload, input.idempotencyKey).catch((cause: unknown) => {
-    console.error(`[executor] ${input.projectId}: signal delivery threw:`, cause);
-  });
+  return deliverStageSignal(input.projectId, input.type, input.payload, input.idempotencyKey).catch(
+    (cause: unknown): DeliveryOutcome => {
+      console.error(`[executor] ${input.projectId}: signal delivery threw:`, cause);
+      return "failed";
+    },
+  );
 }
