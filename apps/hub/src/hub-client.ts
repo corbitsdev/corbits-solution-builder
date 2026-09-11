@@ -17,7 +17,7 @@
  * `SOLUTIONS_BUILDER_HUB_URL` selects a hosted hub. Absent, the hub is embedded.
  */
 import { hub, hubIsMounted, mountHub } from "./hub-mount.js";
-import { readSecretResult, storeSecret } from "./provider-credentials.js";
+import { readSecretResult, secretReference, storeSecret } from "./provider-credentials.js";
 import { HostError } from "./errors.js";
 
 export type HubMode = "embedded" | "remote";
@@ -95,7 +95,7 @@ export async function hubFetch(path: string, init?: RequestInit): Promise<Respon
 
   // A hosted hub without its token is a request that will fail on the other
   // side with no explanation here. If the keychain cannot answer, say so now.
-  const read = await readSecretResult(`keychain:${REMOTE_TOKEN_ACCOUNT}`);
+  const read = await readSecretResult(await secretReference(REMOTE_TOKEN_ACCOUNT));
   if (read.status === "unavailable") {
     throw new Error(
       `The keychain could not be read for the hub token: ${read.detail}. ` +
@@ -132,7 +132,7 @@ let sessionCookie: string | null = null;
  * without the desktop app growing a login screen for a one-person workspace.
  */
 async function ownerPassword(mintIfMissing: boolean): Promise<string | null> {
-  const stored = await readSecretResult(`keychain:${OWNER_PASSWORD_ACCOUNT}`);
+  const stored = await readSecretResult(await secretReference(OWNER_PASSWORD_ACCOUNT));
   if (stored.status === "found") return stored.secret;
   if (stored.status === "unavailable") {
     throw new HostError(

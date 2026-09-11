@@ -12,7 +12,7 @@
  * without changing a line here.
  */
 import { derivePublicKeyBytes } from "@intx/crypto";
-import { readSecretResult, storeSecret } from "./provider-credentials.js";
+import { readSecretResult, secretReference, storeSecret } from "./provider-credentials.js";
 
 const ACCOUNTS = {
   credential: "hub:credential-encryption-key",
@@ -31,7 +31,7 @@ async function resolve(account: string, environmentName: string): Promise<string
   const fromEnvironment = process.env[environmentName]?.trim();
   if (fromEnvironment) return fromEnvironment;
 
-  const stored = await readSecretResult(`keychain:${account}`);
+  const stored = await readSecretResult(await secretReference(account));
   if (stored.status === "found" && stored.secret.length === 64) return stored.secret;
 
   // A store that cannot answer is not an empty store. Minting here would write

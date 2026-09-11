@@ -34,6 +34,16 @@ export async function credentialBackend(): Promise<CredentialBackend> {
   return detectBackend();
 }
 
+/**
+ * The reference `storeSecret` would return for this account. Readers build
+ * their reference from this rather than assuming the keychain: on a machine
+ * without one the store is a file, and a hardcoded `keychain:` reference reads
+ * a secret the host itself wrote as "unavailable".
+ */
+export async function secretReference(account: string): Promise<string> {
+  return `${await detectBackend()}:${account}`;
+}
+
 function fallbackPath(account: string) {
   return join(dataDirectory(), "credentials", `${encodeURIComponent(account)}.secret`);
 }

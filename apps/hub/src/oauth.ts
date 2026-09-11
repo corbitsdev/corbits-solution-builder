@@ -43,7 +43,7 @@ import {
   type XaiTokens,
 } from "@corbits/xai-provider";
 import { HostError } from "./errors.js";
-import { deleteSecret, readSecretResult, storeSecret } from "./provider-credentials.js";
+import { deleteSecret, readSecretResult, secretReference, storeSecret } from "./provider-credentials.js";
 
 export const OAUTH_PROVIDERS = ["codex-oauth", "xai-oauth"] as const;
 export type OAuthProviderId = (typeof OAUTH_PROVIDERS)[number];
@@ -167,7 +167,7 @@ padding:24px 32px}h1{font-size:1.1rem;font-weight:500;margin:0 0 6px}p{margin:0;
 const credentialAccount = (id: OAuthProviderId) => `oauth:${id}`;
 
 async function loadTokens(id: OAuthProviderId): Promise<Tokens | undefined> {
-  const read = await readSecretResult(`keychain:${credentialAccount(id)}`);
+  const read = await readSecretResult(await secretReference(credentialAccount(id)));
 
   // A keychain that cannot answer is not a person who never signed in. Treated
   // as absence, a locked keychain silently signs somebody out and offers them
@@ -301,7 +301,7 @@ export async function completeLogin(): Promise<{
 
     return {
       providerId: current.id,
-      credentialRef: `keychain:${credentialAccount(current.id)}`,
+      credentialRef: await secretReference(credentialAccount(current.id)),
       models,
       baseUrl: definition.baseUrl,
       // `expiresAt` is optional on BaseTokens when the issuer omits
@@ -374,7 +374,7 @@ export async function accessTokenFor(id: OAuthProviderId): Promise<Tokens> {
 export async function logout(id: OAuthProviderId): Promise<{ revoked: false; detail: string }> {
   cancelLogin();
   sessions.delete(id);
-  await deleteSecret(`keychain:${credentialAccount(id)}`);
+  await deleteSecret(await secretReference(credentialAccount(id)));
   return {
     revoked: false,
     detail:
