@@ -17,7 +17,11 @@ import { designerSettingsFile } from "./paths.js";
 
 export const DESIGNER_TOKENS_MIN = 1_000;
 export const DESIGNER_TOKENS_MAX = 64_000;
-export const DESIGNER_TOKENS_DEFAULT = 8_000;
+/**
+ * A real design — every state shown, an id on every element, three note
+ * sections — runs 20,000 to 40,000 tokens. 8,000 cut most of them short.
+ */
+export const DESIGNER_TOKENS_DEFAULT = 32_000;
 
 const Settings = type({
   /** What the mockup is drawn on. `brief` leaves it to the document's brief. */
@@ -87,6 +91,26 @@ export function designerGuidance(settings: DesignerSettings): string {
 }
 
 /** Added to a retry after a design was cut short, under the `reduce` policy. */
+/**
+ * What a person is told when the retry the policy asked for was cut short as
+ * well. Said in full: the policy fired, both attempts ran, both failed, and how
+ * the second differed. A second failure worded like a first makes the policy
+ * look as though it never ran.
+ */
+export function cutShortTwice(args: {
+  title: string;
+  onLimit: "raise" | "reduce";
+  firstLimit: number;
+  secondLimit: number;
+}): string {
+  const second =
+    args.onLimit === "raise"
+      ? `a second at the raised limit of ${args.secondLimit} tokens was cut short too`
+      : "a second at lower resolution within the same limit was cut short too";
+  const next = args.onLimit === "raise" ? "raise the limit further" : "raise the limit";
+  return `${args.title} was cut short twice: the first attempt used every one of its ${args.firstLimit} tokens, and ${second}. Nothing was recorded. In Settings, Designer, you can ${next}.`;
+}
+
 export function lowerResolutionGuidance(limit: number): string {
   return [
     `Lower resolution. The previous attempt did not fit in ${limit} tokens and was cut short.`,

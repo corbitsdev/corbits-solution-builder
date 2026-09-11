@@ -3,6 +3,7 @@ import type { StageTurn } from "../../client.js";
 import { Markdown } from "../../markdown.jsx";
 import { RollingNumber, stageName } from "../../components.jsx";
 import { WorkingLabel } from "./thread.jsx";
+import { Elapsed } from "./elapsed.jsx";
 import { STAGE_GOAL } from "./gate.jsx";
 
 /** Nothing back from the model for this long counts as a stall worth naming. */
@@ -101,12 +102,13 @@ export function Preparing({
               {said.length > 0 ? "Reading what you wrote" : "Reading the approved work from earlier stages"}
             </span>
           )}
+          {busy ? <Elapsed stage={stage} /> : null}
           <p key={tip} className="preparing-tip">
             {tips[tip]}
           </p>
           {stalled ? (
             <p className="preparing-stall" role="status">
-              Still waiting on the model. A first draft can take a minute or two; if this keeps
+              Still waiting on the model: nothing has come back for a while. If this keeps
               happening, try another provider in Settings.
             </p>
           ) : null}
