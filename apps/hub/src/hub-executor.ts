@@ -14,8 +14,17 @@
  */
 import { applyEvent, emptyState, loopBodyRunId, type WorkflowEvent } from "@intx/workflow";
 import type { Command, Stage } from "@solutions-builder/app/ledger";
-import { reviseStepId, stageOfStepId, stageSignal, type StageSignal } from "@solutions-builder/app/workflows/stage-loop";
-import { deploymentRuns, type HubRunEvent } from "./hub-client.js";
+import {
+  alignmentStep,
+  exhaustedSignal,
+  positionOfSignal,
+  reviseStepId,
+  stageOfStepId,
+  stageSignal,
+  type LedgerPosition,
+  type StageSignal,
+} from "@solutions-builder/app/workflows/stage-loop";
+import { deploymentRuns, HubApiError, type HubRunEvent } from "./hub-client.js";
 import { ensureLifecycleDeployment } from "./workflow-deploy.js";
 
 /** What a signal delivery actually did, so a caller can tell nothing from broken. */
@@ -149,11 +158,15 @@ const PARK_WAIT_MS = 20_000;
  * The command lands on whichever stage the run is parked at; the ledger has
  * already decided it is allowed there.
  */
-async function awaitingSignalFor(anchor: string, command: Command): Promise<StageSignal | null> {
+async function awaitingSignalFor(anchor: string, command: Command, expectedStage?: Stage): Promise<StageSignal | null> {
   const deadline = Date.now() + PARK_WAIT_MS;
   for (;;) {
     const runs = await foldRuns(anchor);
     const signal = parkedSteps(runs)
+      // A command is for the stage the ledger acted on. Delivered to whatever
+      // stage happens to be parked, a stage-5 draft would run stage 1's
+      // specialist with stage 5's prompt; better nothing than that.
+      .filter((step) => expectedStage === undefined || step.stage === expectedStage)
       .flatMap((step) => [stageSignal(step.stage, command, "gate"), stageSignal(step.stage, command, "exhausted")]
         .map((candidate) => ({ step, signal: candidate })))
       .find(({ step, signal }) => step.signalName === signal.name)?.signal;
@@ -168,10 +181,11 @@ export async function deliverStageSignal(
   command: Command,
   payload: Record<string, unknown> = {},
   signalId: string = crypto.randomUUID(),
+  expectedStage?: Stage,
 ): Promise<DeliveryOutcome> {
   const anchor = anchors.get(projectId) ?? (await anchorFor(projectId));
   if (!anchor) return "no_execution";
-  const signal = await awaitingSignalFor(anchor, command);
+  const signal = await awaitingSignalFor(anchor, command, expectedStage);
   if (!signal) return "no_execution";
   // Signals address the deployment's top-level run; a loop relays a named
   // signal into the iteration that awaits it.
@@ -190,6 +204,115 @@ export async function deliverStageSignal(
       `the ledger has moved and the run has not. ${(await response.text()).slice(0, 300)}`,
   );
   divergent.add(projectId);
+  return "failed";
+}
+
+/** How long a freshly fired run gets to park for the first time. */
+const FIRST_PARK_WAIT_MS = 30_000;
+
+/** Waits until `step` is no longer parked on its signal, or the park wait runs out. */
+async function consumed(anchor: string, step: Parked): Promise<void> {
+  const deadline = Date.now() + PARK_WAIT_MS;
+  while (Date.now() < deadline) {
+    const still = parkedSteps(await foldRuns(anchor)).some(
+      (candidate) =>
+        candidate.runId === step.runId && candidate.stepId === step.stepId && candidate.signalName === step.signalName,
+    );
+    if (!still) return;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+}
+
+/** The first parked stage step with a position this module knows, waiting for a run that is still starting. */
+async function parkedPosition(anchor: string, waitMs: number): Promise<Parked | null> {
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    const parked = parkedSteps(await foldRuns(anchor)).find(
+      (step) => step.signalName !== null && positionOfSignal(step.stage, step.signalName) !== null,
+    );
+    if (parked) return parked;
+    if (Date.now() >= deadline) return null;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+}
+
+/**
+ * Brings the project's run to where the ledger says the project stands.
+ *
+ * A run can fall behind the ledger: a project drafted before the specialists
+ * lived in the run, or whose deployment was re-rendered, gets a fresh run
+ * that starts at stage 1 while the ledger is at stage 5. The ledger is the
+ * state machine, so the run is walked forward to it with the signals a person
+ * would have sent, one stage at a time (`alignmentStep`), and nothing is
+ * delivered to a stage the ledger has already left. Fires the run first when
+ * the deployment has none, which is also what a restart needs.
+ *
+ * "aligned" when the run is parked where the ledger is; "no_execution" when
+ * there is no deployment to align; "failed" when the run could not be brought
+ * there, with the reason logged — the command that follows then reads as
+ * undeliverable rather than landing on the wrong stage.
+ */
+export async function alignRunWithLedger(projectId: string, ledger: LedgerPosition): Promise<"aligned" | "no_execution" | "failed"> {
+  try {
+    return await alignOnce(projectId, ledger);
+  } catch (cause) {
+    // The anchor this process remembered is dead: its sidecar was released
+    // under it. Forget it and resolve the deployment again, which deploys a
+    // live one, then try once more; anything else is the failure it was.
+    if (!(cause instanceof HubApiError && cause.status === 409)) throw cause;
+    console.error(`[executor] ${projectId}: the run's deployment is no longer live; deploying the lifecycle again.`);
+    anchors.delete(projectId);
+    return await alignOnce(projectId, ledger);
+  }
+}
+
+async function alignOnce(projectId: string, ledger: LedgerPosition): Promise<"aligned" | "no_execution" | "failed"> {
+  const anchor = anchors.get(projectId) ?? (await anchorFor(projectId));
+  if (!anchor) return "no_execution";
+  await launchProjectLifecycle({ projectId });
+  // Two signals per stage below the ledger's, and one more to read the result.
+  for (let sent = 0; sent <= 2 * ledger.stage; sent += 1) {
+    const parked = await parkedPosition(anchor, FIRST_PARK_WAIT_MS);
+    if (!parked || parked.signalName === null) {
+      console.error(`[executor] ${projectId}: the run never parked, so it could not be brought to stage ${ledger.stage}.`);
+      return "failed";
+    }
+    const position = positionOfSignal(parked.stage, parked.signalName)!;
+    const step = alignmentStep(position, ledger);
+    if (step.kind === "aligned") {
+      if (sent > 0) console.log(`[executor] ${projectId}: the run now stands with the ledger at stage ${ledger.stage} (${ledger.state}).`);
+      return "aligned";
+    }
+    if (step.kind !== "deliver") {
+      console.error(
+        `[executor] ${projectId}: the run is parked at stage ${position.stage} (${position.at}) and the ledger at ${ledger.stage} (${ledger.state}): ` +
+          (step.kind === "ahead" ? "the run is ahead of the ledger and is not rewound." : step.reason),
+      );
+      return "failed";
+    }
+    const gate = parked.signalName === exhaustedSignal(parked.stage) ? "exhausted" : "gate";
+    const signal = stageSignal(position.stage, step.command, gate);
+    const response = await deploymentRuns.signal(anchor, {
+      runId: anchor,
+      signalName: signal.name,
+      signalId: crypto.randomUUID(),
+      payload: { ...signal.payload },
+    });
+    if (!response.ok) {
+      const text = (await response.text()).slice(0, 300);
+      if (response.status === 409) throw new HubApiError(409, signal.name, text);
+      console.error(
+        `[executor] ${projectId}: the hub did not accept ${signal.name} while bringing the run to stage ${ledger.stage} (${response.status}). ${text}`,
+      );
+      return "failed";
+    }
+    // The signal is accepted before the sidecar consumes it, and the fold
+    // shows the step parked until then. Read again only once it has moved:
+    // a second signal to the same step would queue behind the first and be
+    // consumed by a round nobody asked to leave.
+    await consumed(anchor, parked);
+  }
+  console.error(`[executor] ${projectId}: the run did not reach stage ${ledger.stage} within the expected number of signals.`);
   return "failed";
 }
 

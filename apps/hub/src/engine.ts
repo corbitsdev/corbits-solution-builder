@@ -501,7 +501,7 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
   // Outside the transaction — the executor is not something the database's
   // single writer connection can be reached from mid-transaction, and this is
   // a best-effort shadow of the transition, not part of what made it valid.
-  const delivery = await runGateSideEffects(input);
+  const delivery = await runGateSideEffects(input, outcome.before);
 
   return delivery === undefined ? outcome.result : { ...outcome.result, delivery };
 }

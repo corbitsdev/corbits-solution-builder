@@ -18,6 +18,13 @@ import {
 } from "@solutions-builder/app/workflows/lifecycle-source";
 import { continuingCommands, ROUND_STEP_ID } from "@solutions-builder/app/workflows/stage-loop";
 import { assets, catalog, workflows, type HubDeployment } from "./hub-client.js";
+
+/**
+ * A deployment's status is its sidecar allocation's. These are the ones the
+ * runtime still dispatches to (`isSidecarAllocationDispatchable` in
+ * `@intx/types`); `releasing`, `released` and `failed` are not.
+ */
+const LIVE_DEPLOYMENT_STATUSES = new Set(["pending", "provisioning", "allocated", "replacing"]);
 import { readWorkflowSourceBlob, writeWorkflowSourceTree } from "./hub-gaps.js";
 import { canPlaceSidecars } from "./hub-mount.js";
 import { readProject } from "./project-tenant.js";
@@ -177,8 +184,14 @@ export async function ensureLifecycleDeployment(projectId?: string): Promise<Lif
   const rendered = renderLifecycleSource(projectId, await sourceFor(offerings[0]!), audiences);
   const assetId = await lifecycleAsset(projectId);
   const head = await readWorkflowSourceBlob(assetId, DIGEST_PATH);
-  const [latest] = (await workflows.deployments()).filter(
-    (deployment: HubDeployment) => deployment.definitionAssetId === assetId,
+  // Only a deployment whose sidecar is still placed counts. Stopping the host
+  // releases a project's sidecar, and a released deployment's anchor run is
+  // terminal: it cannot be fired or signalled again. Handing that one back as
+  // current left every project unable to draft after a restart, so the
+  // lifecycle is deployed again instead, on the same source when unchanged.
+  const latest = (await workflows.deployments()).find(
+    (deployment: HubDeployment) =>
+      deployment.definitionAssetId === assetId && LIVE_DEPLOYMENT_STATUSES.has(deployment.status),
   );
   if (head === rendered[DIGEST_PATH] && latest) {
     return {

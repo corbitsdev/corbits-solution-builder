@@ -190,6 +190,57 @@ export function stageSignal(
   return { name, payload: { command, draft: command === "stage.draft" } };
 }
 
+// --- Following the ledger --------------------------------------------------
+
+/** Where a run is parked, in the ledger's terms: a stage's round, or the gate out of it. */
+export type RunPosition = { readonly stage: Stage; readonly at: "round" | "gate" };
+
+/** The position a parked signal name stands for, or null for a name this module never issued. */
+export function positionOfSignal(stage: Stage, signalName: string): RunPosition | null {
+  if (signalName === roundSignal(stage)) return { stage, at: "round" };
+  if (signalName === approveSignal(stage) || signalName === exhaustedSignal(stage)) return { stage, at: "gate" };
+  return null;
+}
+
+/** The ledger states a run can be brought to; anything else is left alone. */
+export type LedgerPosition = { readonly stage: Stage; readonly state: "in_progress" | "waiting_approval" };
+
+export type AlignmentStep =
+  | { readonly kind: "aligned" }
+  | { readonly kind: "deliver"; readonly command: Command }
+  | { readonly kind: "ahead" }
+  | { readonly kind: "unsupported"; readonly reason: string };
+
+/** The stage whose rounds run the builder; a run is never driven through it. */
+const BUILD_STAGE: Stage = 8;
+
+/**
+ * The next signal that brings a run parked at `run` toward where the ledger
+ * says the project stands. The ledger is the only state machine (§7); the run
+ * follows it, never the other way round. A run behind the ledger — fired
+ * fresh after its definition changed, or from before the specialists lived in
+ * it — is walked forward with the signals a person would have sent: a round
+ * is left with `stage.submit`, a gate with the approval that leaves it, which
+ * at stage 7 is the cost approval. A round left this way asks for no draft,
+ * so nothing is drawn and no turn appears in any thread.
+ *
+ * Never through the build stage: a stage-8 round runs the builder whether or
+ * not it asked for a draft, and that is not something to do on a person's
+ * behalf. A run ahead of the ledger is reported, not rewound.
+ */
+export function alignmentStep(run: RunPosition, ledger: LedgerPosition): AlignmentStep {
+  const want: RunPosition = { stage: ledger.stage, at: ledger.state === "in_progress" ? "round" : "gate" };
+  if (run.stage > want.stage || (run.stage === want.stage && run.at === "gate" && want.at === "round")) {
+    return { kind: "ahead" };
+  }
+  if (run.stage === want.stage && run.at === want.at) return { kind: "aligned" };
+  if (run.stage >= BUILD_STAGE) {
+    return { kind: "unsupported", reason: `the run is inside the build stage (${run.stage}), which is never driven on a person's behalf` };
+  }
+  if (run.at === "round") return { kind: "deliver", command: "stage.submit" };
+  return { kind: "deliver", command: run.stage === 7 ? "cost.approve" : "stage.approve" };
+}
+
 export function reviseStepId(stage: Stage): string {
   return `revise-${stage}`;
 }
