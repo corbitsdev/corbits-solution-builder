@@ -27,6 +27,7 @@ import { type RunState } from "@solutions-builder/app/ledger";
 import { parsed } from "./api.js";
 import { localActor } from "./hub-client.js";
 import { printableDesign } from "./print-page.js";
+import { exportDirectory, exportProject, importProject, parseBundle, saveBundle, bundleFileName } from "./project-transfer.js";
 
 export function registerProjectRoutes(api: Hono) {
   api.get("/decisions", async (context) =>
@@ -151,6 +152,36 @@ export function registerProjectRoutes(api: Hono) {
   api.get("/projects/:projectId/graph", async (context) =>
     context.json(await artifactGraph(context.req.param("projectId"))),
   );
+
+  /**
+   * A project carried out of this instance: everything it records, as one
+   * JSON file. The `.json` route hands the bundle back for a browser or a
+   * script; the other writes it beside the person's other downloads and says
+   * where, which is what the desktop shell needs, since its webview saves
+   * nothing on its own.
+   */
+  api.get("/projects/:projectId/export.json", async (context) => {
+    const bundle = await exportProject(context.req.param("projectId"));
+    return new Response(JSON.stringify(bundle, null, 2), {
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "content-disposition": `attachment; filename="${bundleFileName(bundle.project.title)}"`,
+        "cache-control": "no-store",
+      },
+    });
+  });
+
+  api.post("/projects/:projectId/export", async (context) => {
+    const bundle = await exportProject(context.req.param("projectId"));
+    const saved = await saveBundle(bundle, exportDirectory());
+    return context.json({ ...saved, nodes: bundle.artifacts.nodes.length, commands: bundle.ledger.length });
+  });
+
+  /** A project carried in: the bundle as the body, a new project here as the answer. */
+  api.post("/projects/import", async (context) => {
+    const bundle = parseBundle(await context.req.json().catch(() => null));
+    return context.json(await importProject(bundle, localActor()));
+  });
 
   api.get("/artifacts/:nodeId", async (context) =>
     context.json(await readArtifactNode(context.req.param("nodeId"))),

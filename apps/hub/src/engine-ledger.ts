@@ -205,6 +205,32 @@ export type LedgerCommand = {
   message: string | null;
 };
 
+/**
+ * Every committed command on this project as it was recorded, oldest first:
+ * the turn's metadata whole, which is exactly what `recordCommand` wrote.
+ * For carrying a project to another instance, where the ledger is replayed
+ * entry by entry rather than re-decided.
+ */
+export async function ledgerEntries(projectId: string): Promise<{ startedAt: string; metadata: Record<string, unknown> }[]> {
+  const sessionId = await ledgerSessionIdFor(projectId);
+  return commandParts(await listConversationTurns(sessionId)).map((part) => ({
+    startedAt: part.startedAt,
+    metadata: part.metadata as Record<string, unknown>,
+  }));
+}
+
+/** Every worker event recorded on this project, for every run, oldest first. */
+export async function projectBuildEvents(projectId: string): Promise<BuildEvent[]> {
+  const sessionId = await ledgerSessionIdFor(projectId);
+  const parts = await listConversationTurns(sessionId);
+  return parts
+    .filter((part) => part.metadata?.kind === "build_event")
+    .map((part) => {
+      const { kind: _kind, ...event } = part.metadata as Record<string, unknown>;
+      return event as unknown as BuildEvent;
+    });
+}
+
 /** Every committed command on this project, oldest first, with the run mutations and flag it carried. */
 export async function ledgerCommands(projectId: string): Promise<LedgerCommand[]> {
   const sessionId = await ledgerSessionIdFor(projectId);
