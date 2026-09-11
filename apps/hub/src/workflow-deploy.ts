@@ -169,7 +169,18 @@ const commitsByAsset = new Map<string, string>();
  * the project and lives in the workspace tenant, where the catalog offerings
  * are; a project tenant holds none of its own.
  */
-export async function ensureLifecycleDeployment(projectId?: string): Promise<LifecycleDeployment> {
+export async function ensureLifecycleDeployment(
+  projectId?: string,
+  options: {
+    /**
+     * Deploy again even when a live deployment of the current shape exists.
+     * For a deployment whose lifecycle run has ended: the deployment is
+     * alive, its run is not, and a second run on the same anchor would reuse
+     * the first run's iteration ids, so the project needs a new anchor.
+     */
+    replace?: boolean;
+  } = {},
+): Promise<LifecycleDeployment> {
   if (!canPlaceSidecars()) return { status: "no_host" };
   const offerings = (await catalog.offerings())
     .filter((offering) => !offering.disabled)
@@ -193,7 +204,7 @@ export async function ensureLifecycleDeployment(projectId?: string): Promise<Lif
     (deployment: HubDeployment) =>
       deployment.definitionAssetId === assetId && LIVE_DEPLOYMENT_STATUSES.has(deployment.status),
   );
-  if (head === rendered[DIGEST_PATH] && latest) {
+  if (head === rendered[DIGEST_PATH] && latest && !options.replace) {
     return {
       status: "current",
       assetId,
