@@ -11,13 +11,13 @@ runtime, in one process, on an embedded database.
 apps/hub/src/                    the host: loopback API, guard, engine, persistence, the embedded Interchange hub
 apps/web/                    the client
 apps/desktop/                the native shell and tray
-packages/solutions-builder/src/  the app package: the transition ledger, the workflows generated from it,
+packages/solutions-builder/src/  the app package: the transition ledger, the lifecycle workflow generated from it,
                              the specialist kit, the document format
 ```
 
 **The app package** (`packages/solutions-builder`) is the product itself,
 stated once: the ledger with every state, command, authority and transition
-and the three forbidden cases; the Interchange workflow definitions generated
+and the three forbidden cases; the Interchange lifecycle workflow generated
 from it; the specialist kit and its prompts; and the document format the
 client and the hub both parse. It depends on nothing in the apps and on no
 platform internals. It is what will become the package installed into an

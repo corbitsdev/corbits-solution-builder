@@ -149,7 +149,11 @@ check(
   };
   check("APP_VERSION matches the package version", APP_VERSION === declared.version, `${APP_VERSION} vs ${declared.version}`);
   const names = expectedDefinitions();
-  check("the manifest names one definition per stage plus the six concerns", names.length === 15, `${names.length}`);
+  check(
+    "the manifest names only the lifecycle anchor the command ledger's session keys on",
+    names.length === 1,
+    `${names.length}`,
+  );
   check("and no name twice", new Set(names).size === names.length);
 }
 
