@@ -155,7 +155,7 @@ try {
   // A project runs on its own deployment. Creating one fires the run; the
   // first stage parks on the person, and a gate command lands as a signal.
   const { createProject } = await import("../apps/hub/src/projects.js");
-  const { localActor } = await import("../apps/hub/src/hub-client.js");
+  const { localActor, deploymentRuns, hubApi, tenantPath } = await import("../apps/hub/src/hub-client.js");
   const { projectExecutionStatus, deliverStageSignal, parkedSignalNames } = await import("../apps/hub/src/hub-executor.js");
   const project = await createProject({
     title: "Smoke: runs on the hub",
@@ -183,6 +183,19 @@ try {
     status?.parked === true && status.stage === 1,
     status ? `${status.stepId} ${status.signalName ?? ""} in ${((Date.now() - parkedAt) / 1000).toFixed(1)}s` : "no run",
   );
+
+  // The blob route: a well-formed but unknown sha 404s through the hub client
+  // (proving the null-path holds end to end), and a malformed sha 400s at the
+  // boundary. Reading a real blob needs an output over the 1 MiB inline
+  // threshold, which this smoke does not produce.
+  const unknownSha = "0".repeat(64);
+  const missingBlob = await deploymentRuns.blob(project.runId, project.runId, unknownSha);
+  check("a well-formed but unknown blob sha 404s through the hub", missingBlob === null, String(missingBlob));
+
+  const malformedResponse = await hubApi(
+    tenantPath(`/workflows/${project.runId}/runs/${project.runId}/blobs/not-a-sha`),
+  );
+  check("a malformed blob sha 400s", malformedResponse.status === 400, String(malformedResponse.status));
   if (status?.parked) {
     const { roundSignal, approveSignal, gateStepId, reviseStepId } = await import(
       "@solutions-builder/app/workflows/stage-loop"
