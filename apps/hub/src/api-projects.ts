@@ -15,11 +15,11 @@ import {
 import {
   designHistory,
   feedbackFor,
+  recordDisposition,
   submitFeedback,
   type Direction,
 } from "./design-feedback.js";
-import { redesignFromFeedback } from "./agent-run.js";
-import { appendHumanTurn } from "./hub-conversation.js";
+import { requestDraft } from "./stage-runs.js";
 import { nameProject, titleFromProblem } from "./title.js";
 import { runGuidance } from "./guide.js";
 import { notFound } from "./errors.js";
@@ -40,31 +40,18 @@ export function registerProjectRoutes(api: Hono) {
     const problem = payload.problemStatement?.trim() ?? "";
 
     // Opened with the plain first line so a project exists whether or not a
-    // model is reachable; the real name follows below.
+    // model is reachable; the real name follows below. What they typed IS the
+    // first thing they said, recorded on the `project.create` command itself
+    // — not a best-effort side write — so stage 1 opens already knowing the
+    // problem rather than asking for it again.
     const created = await createProject({
       title: payload.title || titleFromProblem(problem),
       policy: payload.policy,
       owner: localActor(),
+      ...(problem.length > 0 ? { problemStatement: problem } : {}),
     });
 
     if (problem.length > 0) {
-      // What they typed IS the first thing they said. It used to be accepted
-      // and dropped — the signature took it, nothing wrote it — so stage 1
-      // opened by asking for the problem they had just described.
-      // Not best effort. What somebody typed is the thing this project is
-      // about, and a `.catch` that logs is precisely how it went missing
-      // before — the write failed, a line went to a console nobody reads, and
-      // stage 1 asked for the problem again as if they had never spoken. If
-      // this cannot be recorded the create fails and says so, because a
-      // project that has forgotten its own problem is worse than no project.
-      await appendHumanTurn({
-        projectId: created.projectId,
-        runId: created.runId,
-        stage: 1,
-        body: problem,
-        actor: localActor(),
-      });
-
       // A name for the thing, not a sentence about the person. Best effort and
       // never blocking: a project that will not open because a model is busy
       // is a far worse failure than a plainly-named one.
@@ -123,14 +110,42 @@ export function registerProjectRoutes(api: Hono) {
     const body = (await context.req.json()) as { designNodeId: string };
     const detail = await projectDetail(projectId, localActor().principalId);
     if (!detail.current) throw notFound("An open run for that project");
-    const result = await redesignFromFeedback({
+
+    const stored = await feedbackFor(body.designNodeId);
+    if (!stored) {
+      throw new HostError(
+        "validation_failed",
+        "No feedback has been submitted against that design version.",
+      );
+    }
+
+    // The designer is handed the deterministic revision prompt rather than a
+    // chat history, which is what makes the resulting version attributable to
+    // exactly the feedback that was submitted.
+    const result = await requestDraft({
       projectId,
-      designNodeId: body.designNodeId,
+      stage: 4,
       runId: detail.current.id,
       actor: localActor(),
+      message: stored.prompt,
+      mode: "final",
       projectTitle: detail.project.title,
     });
-    return context.json(result);
+
+    // Every comment is dispositioned rather than left implicit. `addressed` is
+    // the designer's claim; the human reviewing the next version is what
+    // tests it. Anchors that no longer resolve are reported as stale.
+    const { stale } = await recordDisposition({
+      designNodeId: body.designNodeId,
+      newDesignNodeId: result.draft.nodeId,
+      dispositions: stored.feedback.comments.map((comment) => ({
+        commentId: comment.id,
+        disposition: "addressed" as const,
+      })),
+      actor: localActor(),
+    });
+
+    return context.json({ ...result.draft, stale });
   });
 
   api.get("/projects/:projectId/graph", async (context) =>

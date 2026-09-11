@@ -102,6 +102,7 @@ export async function createProject(args: {
     stage,
     runId: created.runId,
     runs: [{ op: "create", run: opened }],
+    ...(args.problemStatement?.trim() ? { message: args.problemStatement.trim() } : {}),
   });
   await launchProjectRun({ projectId: created.projectId });
 

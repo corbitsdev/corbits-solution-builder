@@ -1,35 +1,26 @@
 /**
- * The stage conversation, on Interchange's native session and mail, and its
- * compactor.
+ * The stage conversation and its compactor.
  *
  * Three claims are load-bearing and none of them are obvious from reading the
  * code, so they are checked here: that a revision carries the document it is
  * revising, that compaction never drops the instruction being acted on, and
- * that a brief and the turns it covers commit together — now expressed as an
- * `agent_session`'s `session_mail` / `turn_part` rows rather than the retired
- * `stage_message` / `stage_brief` tables.
+ * that the thread is projected correctly from a run's own events — including
+ * the standing brief, which now travels as a produced version's own
+ * `provenance.brief` rather than a separate marker turn.
  */
-import { buildDraftPrompt } from "../apps/hub/src/agent-run.js";
+import { buildDraftPrompt } from "../apps/hub/src/stage-runs.js";
 import {
   VERBATIM_BUDGET,
+  pendingContext,
   splitForCompaction,
 } from "../apps/hub/src/agent-conversation.js";
-import {
-  appendHumanTurn,
-  appendSpecialistTurn,
-  pendingContext,
-  recordBrief,
-  threadTurns,
-  sessionIdFor,
-  type StageTurn,
-} from "../apps/hub/src/hub-conversation.js";
-import { nextQuestion } from "../apps/hub/src/questions.js";
-import { evaluationIn, projectStageThread } from "../apps/hub/src/stage-thread.js";
+import { evaluationIn, projectStageThread, threadTurns, type StageTurn } from "../apps/hub/src/stage-thread.js";
 import { DRAFT_STEP_ID, EVALUATE_STEP_ID, ROUND_STEP_ID } from "@solutions-builder/app/workflows/stage-loop";
+import { agentFor } from "@solutions-builder/app/kit";
 import { openDatabase } from "../apps/hub/src/db.js";
 import { prepareDatabase } from "../apps/hub/src/migrate.js";
 import { mountHub } from "../apps/hub/src/hub-mount.js";
-import { createProject } from "../apps/hub/src/projects.js";
+import { createProject, writeArtifact } from "../apps/hub/src/projects.js";
 import { install } from "../apps/hub/src/install.js";
 import { localActor } from "../apps/hub/src/hub-client.js";
 import { mkdtemp } from "node:fs/promises";
@@ -233,9 +224,10 @@ const turn = (id: string, role: "human" | "specialist", body: string): StageTurn
   );
 }
 
-// Everything from here on writes to `agent_session` / `session_mail` /
-// `turn_part`, so the embedded hub has to be mounted and its stage workflow
-// definitions seeded — the definition an `agent_session` is keyed to.
+// From here on the embedded hub has to be mounted and installed: the command
+// ledger a project's opening problem statement rides on, and the artifact
+// store a version's `provenance.brief` is read back from, are both platform
+// writes.
 const dataDir = await mkdtemp(join(tmpdir(), "sb-convo-"));
 await prepareDatabase(await openDatabase(`${dataDir}/pglite`));
 await mountHub();
@@ -243,233 +235,71 @@ await install();
 
 const ACTOR = localActor();
 
-// --- Persistence, on session_mail / turn_part ---
+const POLICY = {
+  costTolerancePercent: 15,
+  costToleranceAbsolute: 500,
+  audiences: [{ name: "Project owner", role: "project_owner" as const }],
+  audienceQuorum: 1,
+  allowExternalProviders: false,
+};
+
+// --- The standing brief rides on the version, not a separate marker turn ---
 {
   const project = await createProject({
     title: "Outreach",
-    policy: {
-      costTolerancePercent: 15,
-      costToleranceAbsolute: 500,
-      audiences: [{ name: "Project owner", role: "project_owner" }],
-      audienceQuorum: 1,
-      allowExternalProviders: false,
-    },
+    policy: POLICY,
     owner: { ...ACTOR, displayName: "Local" },
   });
 
-  const key = {
-    projectId: project.projectId,
-    runId: project.runId,
-    stage: 1,
-  };
-  const one = await appendHumanTurn({
-    ...key,
-    body: "Keep it short.",
-    actor: ACTOR,
-    quotes: [{ quote: "a passage" }],
-  });
-  await appendSpecialistTurn({ ...key, body: "Produced version 1.", actor: ACTOR, resultNodeId: "nod_x" });
-  const two = await appendHumanTurn({ ...key, body: "Cut section two.", actor: ACTOR });
-
-  const all = await threadTurns(key.projectId, 1);
-  check("turns persist in order", all.length === 3 && all[0]!.id === one && all[2]!.id === two);
-  check("an attached passage is retained", all[0]!.quotes[0]?.quote === "a passage");
-
   check(
-    "nothing is compacted until it is",
-    (await pendingContext(key.projectId, 1)).pending.length === 3,
+    "nothing is pending and there is no brief before any version exists",
+    (await pendingContext(project.projectId, 1)).brief === null,
   );
 
-  // Compaction always folds a chronological prefix — `splitForCompaction`
-  // never produces anything else — so a brief written now covers every turn
-  // written before it, and only a turn written after stays pending.
-  await recordBrief({
-    projectId: key.projectId,
-    stage: 1,
-    runId: key.runId,
-    body: "- Keep it short.",
-    actor: ACTOR,
-  });
-  const coveredContext = await pendingContext(key.projectId, 1);
-  check("a covered turn stops being sent", coveredContext.pending.length === 0);
-  check("the brief is readable back", coveredContext.brief === "- Keep it short.");
-
-  const three = await appendHumanTurn({ ...key, body: "One more thing.", actor: ACTOR });
-  const afterMore = await pendingContext(key.projectId, 1);
-  check(
-    "uncovered turns are still sent",
-    afterMore.pending.length === 1 && afterMore.pending[0]!.id === three,
-  );
-  check(
-    "compaction never deletes what the person wrote",
-    (await threadTurns(key.projectId, 1)).length === 4,
-  );
-}
-
-// --- The interview: one question at a time ---
-{
-  const project = await createProject({
-    title: "Outreach",
-    policy: {
-      costTolerancePercent: 15,
-      costToleranceAbsolute: 500,
-      audiences: [{ name: "Project owner", role: "project_owner" }],
-      audienceQuorum: 1,
-      allowExternalProviders: false,
+  const written = await writeArtifact(
+    {
+      projectId: project.projectId,
+      kind: agentFor(1).produces!,
+      title: "Problem brief — stage 1",
+      content: "# Problem brief\n\nSample content.",
+      mediaType: "text/markdown",
+      sourceVersionIds: [],
+      provenance: { producer: "agent", brief: "- Keep it short.\n- Never propose replacing the CRM." },
     },
-    owner: { ...ACTOR, displayName: "Local" },
-  });
-  const key = {
-    projectId: project.projectId,
-    stage: 1,
-    runId: project.runId,
-  };
-
-  const asked = ["Which channel?", "Send or draft?", "How many leads?"];
-  // The round opens on the specialist's own turn: the questions ride on the
-  // mail, and which one is open is read back from the thread.
-  await appendSpecialistTurn({ ...key, body: asked[0]!, actor: ACTOR, questions: asked });
-
-  let open = await nextQuestion(key.projectId, 1);
-  check("the first question is asked first", open?.body === "Which channel?", String(open?.body));
-  check("it knows how many follow", open?.remaining === 2, `${open?.remaining} remaining`);
-
-  const answer = await appendHumanTurn({ ...key, body: "Email.", actor: ACTOR });
-
-  open = await nextQuestion(key.projectId, 1);
-  check("answering asks the next one", open?.body === "Send or draft?", String(open?.body));
-  check("the count comes down", open?.remaining === 1, `${open?.remaining} remaining`);
-  check("the follow-up question is a turn that does not reopen the round", (await (async () => {
-    await appendSpecialistTurn({ ...key, body: open!.body, actor: ACTOR });
-    return (await nextQuestion(key.projectId, 1))?.ordinal;
-  })()) === 1);
-
-  // Choosing to move on redrafts, and the new draft opens a new round: that is
-  // what retires what was left of the old one.
-  await appendSpecialistTurn({ ...key, body: "Here is the revised draft.", actor: ACTOR, questions: [] });
-  check(
-    "moving on retires what is left",
-    (await nextQuestion(key.projectId, 1)) === null,
-  );
-  check(
-    "an answered question is not retired with them",
-    (await threadTurns(key.projectId, 1)).some((t) => t.id === answer),
+    ACTOR,
   );
 
-  // A new draft's questions replace an older draft's unanswered ones: a
-  // question about superseded text is not worth asking.
-  await appendSpecialistTurn({ ...key, body: "Stale?", actor: ACTOR, questions: ["Stale?"] });
-  await appendSpecialistTurn({ ...key, body: "Fresh?", actor: ACTOR, questions: ["Fresh?"] });
+  const context = await pendingContext(project.projectId, 1);
   check(
-    "a new draft supersedes the old draft's questions",
-    (await nextQuestion(key.projectId, 1))?.body === "Fresh?",
+    "the standing brief is read off the latest version's own provenance",
+    context.brief === "- Keep it short.\n- Never propose replacing the CRM.",
   );
+  check(
+    "nothing is pending before any round has run against that version",
+    context.pending.length === 0,
+  );
+  void written;
 }
-
-// Ordering, written fast enough that a clock alone cannot separate the turns.
-// The thread is the product's main surface: an answer rendered above the
-// question it answers is the one fault a reader cannot look past.
-{
-  const ordering = await createProject({
-    title: "Ordering",
-    policy: {
-      costTolerancePercent: 15,
-      costToleranceAbsolute: 100,
-      audiences: [],
-      audienceQuorum: 0,
-      allowExternalProviders: false,
-    },
-    owner: { ...ACTOR, displayName: "You" },
-  });
-  const key = {
-    projectId: ordering.projectId,
-    stage: 3 as const,
-    runId: "run_order",
-  };
-  const bodies = ["first", "second", "third", "fourth", "fifth", "sixth"];
-  for (const [index, body] of bodies.entries()) {
-    if (index % 2 === 0) {
-      await appendHumanTurn({ ...key, body, actor: ACTOR });
-    } else {
-      await appendSpecialistTurn({ ...key, body, actor: ACTOR });
-    }
-  }
-  const ordered = await threadTurns(key.projectId, key.stage);
-
-  // The timestamps alone happen to separate these writes, so asserting the
-  // rendered order proves nothing about the tiebreak. The stored positions are
-  // what the fix actually changed: assert those directly, so forcing them back
-  // to a constant fails this gate.
-  {
-    const { turnPart } = await import("@intx/db/schema");
-    const { hub } = await import("../apps/hub/src/hub-mount.js");
-    const { eq } = await import("drizzle-orm");
-    const rows = (await (hub().db.db as never as {
-      select: () => { from: (t: unknown) => { where: (p: unknown) => Promise<unknown[]> } };
-    })
-      .select()
-      .from(turnPart)
-      .where(
-        eq(
-          (turnPart as never as { sessionId: never }).sessionId,
-          await sessionIdFor(key.projectId, key.stage),
-        ),
-      )) as {
-      ordinal: number | null;
-    }[];
-    const positions = rows.map((row) => row.ordinal ?? 0).sort((a, b) => a - b);
-    check(
-      "every turn on a thread carries a distinct position, not a constant",
-      positions.length === bodies.length &&
-        new Set(positions).size === positions.length,
-      positions.join(","),
-    );
-  }
-  const seen = ordered.map((turn) => turn.body);
-  check(
-    "turns written in the same instant still read back in the order they were written",
-    JSON.stringify(seen) === JSON.stringify(bodies),
-    seen.join(" | "),
-  );
-  check(
-    "and the roles alternate as they were written",
-    ordered.every((turn, index) => turn.role === (index % 2 === 0 ? "human" : "specialist")),
-    ordered.map((turn) => turn.role).join(","),
-  );
-}
-
 
 // What somebody types when they open a project is the first thing they said,
-// and it has to survive. It used to be accepted by `createProject` and written
-// nowhere — so stage 1 opened by asking for the problem they had just
-// described, and the words themselves were gone.
+// and it has to survive. It rides on the `project.create` command itself now
+// — recorded once, read back as stage 1's opening turn — rather than a
+// separate append that used to be accepted and dropped.
 {
   const { titleFromProblem } = await import("../apps/hub/src/title.js");
   const problem = "Cold outbound is rebuilt by hand every Monday and it eats my week.";
   const opened = await createProject({
     title: titleFromProblem(problem),
-    policy: {
-      costTolerancePercent: 15,
-      costToleranceAbsolute: 100,
-      audiences: [],
-      audienceQuorum: 0,
-      allowExternalProviders: false,
-    },
+    policy: { ...POLICY, audiences: [], audienceQuorum: 0 },
     owner: { ...ACTOR, displayName: "You" },
-  });
-  await appendHumanTurn({
-    projectId: opened.projectId,
-    runId: opened.runId,
-    stage: 1,
-    body: problem,
-    actor: ACTOR,
+    problemStatement: problem,
   });
 
   const opening = await threadTurns(opened.projectId, 1);
   check(
     "the problem someone opened with is the first turn on stage 1",
     opening.length === 1 && opening[0]!.body === problem && opening[0]!.role === "human",
-    opening.map((turn) => `${turn.role}:${turn.body.slice(0, 24)}`).join(" | "),
+    opening.map((entry) => `${entry.role}:${entry.body.slice(0, 24)}`).join(" | "),
   );
   check(
     "a long opening line is trimmed to a title rather than used whole",
@@ -481,10 +311,6 @@ const ACTOR = localActor();
     titleFromProblem("Cold outreach agent") === "Cold outreach agent",
   );
 }
-
-
-
-
 
 console.log(`\nConversation smoke: ${passed}/${passed + failures.length} checks passed`);
 if (failures.length > 0) process.exit(1);

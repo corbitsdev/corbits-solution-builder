@@ -15,16 +15,29 @@
  * payload never does: it is small and structured, so it is read straight off
  * `SignalReceived.payload` with no ref indirection, and every other read here
  * is a one-line `readOutputRef` await. `hub-executor.ts` owns every import of
- * the platform itself; this file only calls the plain functions it exports.
+ * the Interchange platform itself; this file only calls the plain functions
+ * it exports.
+ *
+ * `threadTurns` is the assembled read a route or `questions.ts` actually
+ * wants: it gathers the iterations, the project's own artifact nodes (for
+ * `resultNodeId`) and, at stage 1, the opening problem statement recorded on
+ * the `project.create` command, and hands them to `projectStageThread`. That
+ * is the one place in this file that reads the app's own tables rather than
+ * the run's event log; it is still nothing this file writes.
  */
 import {
   DRAFT_STEP_ID,
   EVALUATE_STEP_ID,
   ROUND_STEP_ID,
 } from "@solutions-builder/app/workflows/stage-loop";
+import type { Stage } from "@solutions-builder/app/ledger";
 import { briefVerdictIn, questionsIn, summaryIn } from "@solutions-builder/app/document";
 import type { HubRunEvent } from "./hub-client.js";
-import { readOutputRef, type StageIteration } from "./hub-executor.js";
+import { readOutputRef, stageIterations, type StageIteration } from "./hub-executor.js";
+import { database } from "./db.js";
+import * as table from "./schema.js";
+import { eq } from "drizzle-orm";
+import { ledgerCommands } from "./engine-ledger.js";
 
 export type Quote = { readonly quote: string };
 
@@ -114,8 +127,8 @@ function nextInterviewQuestion(turnsSoFar: StageTurn[]): string {
 
 /**
  * The stage thread, read straight from the run: one human turn and one
- * specialist turn per iteration, at most, in the shape `hub-conversation.ts`
- * exports today so `questions.ts`' `nextQuestion` and the web client keep
+ * specialist turn per iteration, at most, in the shape the stage thread has
+ * always had so `questions.ts`' `nextQuestion` and the web client keep
  * working unchanged.
  */
 export async function projectStageThread(args: {
@@ -195,17 +208,50 @@ export async function projectStageThread(args: {
   return turns;
 }
 
+/** The opening problem statement, projected as stage 1's first human turn — read once, off the `project.create` command. */
+async function openingFor(
+  projectId: string,
+  stage: number,
+): Promise<{ body: string; createdAt: string } | null> {
+  if (stage !== 1) return null;
+  const commands = await ledgerCommands(projectId);
+  const opened = commands.find((command) => command.command === "project.create");
+  if (!opened || !opened.message) return null;
+  return { body: opened.message, createdAt: opened.createdAt };
+}
+
+/**
+ * The stage thread, assembled: every iteration's turns, the project's live
+ * artifact nodes (for `resultNodeId`) and, at stage 1, the opening problem
+ * statement. The shape a route or `questions.ts` reads.
+ */
+export async function threadTurns(projectId: string, stage: number): Promise<StageTurn[]> {
+  const { db } = database();
+  const [iterations, nodes, opening] = await Promise.all([
+    stageIterations(projectId, stage as Stage),
+    db
+      .select({ id: table.artifactNode.id, provenance: table.artifactNode.provenance })
+      .from(table.artifactNode)
+      .where(eq(table.artifactNode.projectId, projectId)),
+    openingFor(projectId, stage),
+  ]);
+  return projectStageThread({ iterations, nodes: nodes as ArtifactNodeRef[], opening });
+}
+
+/** The brief-evaluator verdict one iteration produced, or null when it did not run. */
+async function verdictIn(iteration: StageIteration): Promise<{ ready: boolean; notes: string[] } | null> {
+  const completed = findEvent(iteration.events, "StepCompleted", EVALUATE_STEP_ID);
+  if (!completed) return null;
+  const reply = await resolveOutput<DraftReply>(iteration.runId, completed);
+  return reply ? briefVerdictIn(reply.reply) : null;
+}
+
 /** The latest brief-evaluator verdict for the stage, or null before one has run. */
 export async function evaluationIn(
   iterations: readonly StageIteration[],
 ): Promise<{ ready: boolean; notes: string[] } | null> {
   for (let at = iterations.length - 1; at >= 0; at -= 1) {
-    const iteration = iterations[at]!;
-    const completed = findEvent(iteration.events, "StepCompleted", EVALUATE_STEP_ID);
-    if (!completed) continue;
-    const reply = await resolveOutput<DraftReply>(iteration.runId, completed);
-    if (!reply) return null;
-    return briefVerdictIn(reply.reply);
+    if (findEvent(iterations[at]!.events, "StepCompleted", EVALUATE_STEP_ID)) return verdictIn(iterations[at]!);
   }
   return null;
 }

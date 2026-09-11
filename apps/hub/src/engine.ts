@@ -19,7 +19,7 @@ import { HostError, notFound } from "./errors.js";
 import { newId } from "./ids.js";
 import { database, type Db } from "./db.js";
 import type { Authority } from "@solutions-builder/app/ledger";
-import { launchProjectLifecycle } from "./hub-executor.js";
+import { launchProjectLifecycle, type DeliveryOutcome } from "./hub-executor.js";
 import { loadRun } from "./engine-views.js";
 import { RunDraft, activeRun, readRun, runsForProject } from "./runs.js";
 import {
@@ -101,6 +101,13 @@ export type CommandOutcome = {
   readonly state: string;
   readonly transitionId: string;
   readonly replayed: boolean;
+  /**
+   * What `runGateSideEffects` did with the signal this command produced.
+   * Present only for a gate command; a caller that needs the round to have
+   * actually reached a waiting run (a drafting request) reads this rather
+   * than assuming delivery from a bare commit.
+   */
+  readonly delivery?: DeliveryOutcome;
 };
 
 type VersionRef = { artifactId: string; versionId: string; contentHash: string };
@@ -494,9 +501,9 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
   // Outside the transaction — the executor is not something the database's
   // single writer connection can be reached from mid-transaction, and this is
   // a best-effort shadow of the transition, not part of what made it valid.
-  await runGateSideEffects(input);
+  const delivery = await runGateSideEffects(input);
 
-  return outcome.result;
+  return delivery === undefined ? outcome.result : { ...outcome.result, delivery };
 }
 
 /** A decision recorded on this run, carried through to the post-commit ledger write. */

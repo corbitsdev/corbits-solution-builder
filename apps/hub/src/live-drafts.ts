@@ -9,12 +9,10 @@
  * In memory only: a partial draft is not an artifact, is never approved, and
  * a host restart should forget it.
  *
- * Two feeders write into this module today. `agent-run.ts`'s in-process
- * `complete()` path calls `beginLiveDraft`/`updateLiveDraft`/`endLiveDraft`
- * directly around a provider call it makes itself. `attachLiveDrafts` below
- * is the other: it reads the same signals off a project's own run, the way
- * they exist once the specialist step actually executes under the sidecar.
- * Both coexist until the run-based path replaces the in-process one.
+ * `attachLiveDrafts` below is the one feeder: it reads a project's own run —
+ * the sidecar's inference events for the agent step a round just started —
+ * and calls `beginLiveDraft`/`updateLiveDraft`/`endLiveDraft` from those,
+ * never from a provider call this module or its caller makes itself.
  */
 import { parseRunAddress } from "@intx/types";
 import { hub } from "./hub-mount.js";

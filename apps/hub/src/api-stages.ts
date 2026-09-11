@@ -1,10 +1,12 @@
 import type { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { type Stage } from "@solutions-builder/app/ledger";
+import { EVALUATED_STAGE } from "@solutions-builder/app/workflows/stage-loop";
 import { notFound } from "./errors.js";
 import { projectDetail } from "./projects.js";
-import { draftAudiencePackages, draftStageArtifact, runEngineeringReview } from "./agent-run.js";
-import { appendHumanTurn, appendSpecialistTurn, threadTurns } from "./hub-conversation.js";
+import { requestDraft } from "./stage-runs.js";
+import { evaluationIn, threadTurns } from "./stage-thread.js";
+import { stageIterations } from "./hub-executor.js";
 import { nextQuestion } from "./questions.js";
 import { liveDraft, liveDraftBegun, subscribeLiveDraft } from "./live-drafts.js";
 import { localActor } from "./hub-client.js";
@@ -15,9 +17,12 @@ export function registerStageRoutes(api: Hono) {
     const projectId = context.req.param("projectId");
     const stage = Number(context.req.param("stage"));
     const open = await nextQuestion(projectId, stage);
+    const evaluation =
+      stage === EVALUATED_STAGE ? await evaluationIn(await stageIterations(projectId, stage as Stage)) : null;
     return context.json({
       turns: await threadTurns(projectId, stage),
       open: open ? { remaining: open.remaining, ordinal: open.ordinal } : null,
+      evaluation,
     });
   });
 
@@ -52,10 +57,14 @@ export function registerStageRoutes(api: Hono) {
   /**
    * Replying in the conversation.
    *
-   * Answering an outstanding question asks the next one, which costs nothing:
-   * no model call and no new draft. Only when the questions run out — or the
-   * person says to move on — is the document revised, once, against every
-   * answer given. Six questions become six exchanges rather than six redrafts.
+   * Answering an outstanding question asks the next one: the round revises
+   * the document against the answer just given (`mode: "interview"`), but the
+   * specialist's own turn stays silent — the thread projection speaks the
+   * next queued question, not a fresh one. Only when the questions run out —
+   * or the person says to move on — is the round a `final` one, opening a
+   * new round of questions or none. Which case this is is known before the
+   * round runs: `open.remaining` already says how many questions are left
+   * after the one just answered.
    */
   api.post("/projects/:projectId/stages/:stage/reply", async (context) => {
     const projectId = context.req.param("projectId");
@@ -72,59 +81,24 @@ export function registerStageRoutes(api: Hono) {
     const quotes = body.quotes ?? [];
 
     const open = body.revise ? null : await nextQuestion(projectId, stage);
+    const mode = open !== null && message.length > 0 && open.remaining > 0 ? "interview" : "final";
 
-    if (open && message.length > 0) {
-      const messageId = await appendHumanTurn({
-        projectId,
-        runId: detail.current.id,
-        stage,
-        body: message,
-        actor: localActor(),
-        ...(quotes.length > 0 ? { quotes } : {}),
-      });
-      void messageId;
-
-      const following = await nextQuestion(projectId, stage);
-      if (following) {
-        // The document grows with the answer, before the next question is
-        // asked. It used to sit untouched until the last one, so a person
-        // answered five questions and watched nothing happen — the whole
-        // premise is that this is being written as they talk.
-        const revised = await draftStageArtifact({
-          projectId,
-          stage,
-          runId: detail.current.id,
-          actor: localActor(),
-          userInput: "",
-          projectTitle: detail.project.title,
-          mode: "interview",
-        });
-
-        await appendSpecialistTurn({
-          projectId,
-          runId: detail.current.id,
-          stage,
-          body: following.body,
-          actor: localActor(),
-          resultNodeId: revised.nodeId,
-        });
-        return context.json({ asked: true, remaining: following.remaining, draft: revised });
-      }
-    }
-
-    // Nothing left to ask, or the person chose to move on: fold everything
-    // said into one new version. The new draft opens a new round, which is
-    // what retires whatever was left of the old one.
-    const draft = await draftStageArtifact({
+    const result = await requestDraft({
       projectId,
       stage,
       runId: detail.current.id,
       actor: localActor(),
-      userInput: open ? "" : message,
+      message,
+      ...(quotes.length > 0 ? { quotes } : {}),
+      mode,
       projectTitle: detail.project.title,
-      ...(quotes.length > 0 && !open ? { quotes } : {}),
     });
-    return context.json({ asked: false, remaining: 0, draft });
+
+    if (mode === "interview") {
+      const following = await nextQuestion(projectId, stage);
+      return context.json({ asked: true, remaining: following?.remaining ?? 0, draft: result.draft });
+    }
+    return context.json({ asked: false, remaining: 0, draft: result.draft });
   });
 
   /** Runs the stage specialist and records its draft as a new version. */
@@ -138,45 +112,20 @@ export function registerStageRoutes(api: Hono) {
     const detail = await projectDetail(projectId, localActor().principalId);
     if (!detail.current) throw notFound("An open run for that project");
 
-    // Stage 5 fans out: one package per named audience.
-    if (stage === 5) {
-      const policy = detail.project.policy as {
-        audiences?: { name: string; role: string }[];
-      };
-      const packages = await draftAudiencePackages({
-        projectId,
-        runId: detail.current.id,
-        actor: localActor(),
-        projectTitle: detail.project.title,
-        audiences: policy.audiences ?? [],
-        userInput: body.input ?? "",
-      });
-      return context.json({ draft: packages[0], packages, review: null });
-    }
-
-    const result = await draftStageArtifact({
+    const result = await requestDraft({
       projectId,
       stage,
       runId: detail.current.id,
       actor: localActor(),
-      userInput: body.input ?? "",
-      projectTitle: detail.project.title,
+      message: body.input ?? "",
       ...(body.quotes && body.quotes.length > 0 ? { quotes: body.quotes } : {}),
+      mode: "final",
+      projectTitle: detail.project.title,
     });
 
-    // Stage 6 gets its four independent reviews against the plan just written.
-    // Four principals, four artifacts — never merged into one voice (section 8).
-    let review: Awaited<ReturnType<typeof runEngineeringReview>> | null = null;
-    if (stage === 6) {
-      review = await runEngineeringReview({
-        projectId,
-        runId: detail.current.id,
-        actor: localActor(),
-        projectTitle: detail.project.title,
-        plan: result.content,
-      });
-    }
-
-    return context.json({ draft: result, review });
+    // Stage 5 fans out into one package per named audience; stage 6's four
+    // panel reviews ride the same round as the architect's plan. Every other
+    // stage carries neither.
+    return context.json({ draft: result.draft, packages: result.packages, review: result.review });
   });
 }
