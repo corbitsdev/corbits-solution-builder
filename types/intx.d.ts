@@ -534,6 +534,9 @@ declare module "@intx/workflow" {
   }
   export function emptyState(runId: string): RunState;
   export function applyEvent(state: RunState, event: WorkflowEvent): RunState;
+
+  /** A loop iteration's body-child run id: `<runId>__<loopStepId>__<index>`. */
+  export function loopBodyRunId(runId: string, loopId: string, index: number): string;
 }
 
 declare module "@intx/agent" {
