@@ -64,6 +64,9 @@ const BUILD_REPLY = "## In short\n- Build attempt acknowledged.";
 
 /** The stakeholder whose package the stub answers with nothing, while set. */
 let packageToFail: string | null = null;
+/** Every illustration the stub was asked to draw. */
+const imagePrompts: string[] = [];
+const ONE_PIXEL_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
 /** Which canned reply a completion gets, told apart by a phrase distinctive to each role's own system prompt; null refuses the call. */
 function replyFor(messages: unknown[]): string | null {
@@ -129,8 +132,18 @@ const stub = createServer((request, response) => {
     });
     return;
   }
+  if (request.method === "POST" && /\/images\/generations$/.test(request.url ?? "")) {
+    let body = "";
+    request.on("data", (chunk: Buffer) => (body += chunk.toString()));
+    request.on("end", () => {
+      imagePrompts.push((JSON.parse(body) as { prompt: string }).prompt);
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ data: [{ b64_json: ONE_PIXEL_PNG }] }));
+    });
+    return;
+  }
   response.writeHead(200, { "content-type": "application/json" });
-  response.end(JSON.stringify({ data: [{ id: "stub-large" }] }));
+  response.end(JSON.stringify({ data: [{ id: "stub-large" }, { id: "stub-image" }] }));
 });
 await new Promise<void>((resolve) => stub.listen(0, "127.0.0.1", resolve));
 const stubPort = (stub.address() as { port: number }).port;
@@ -596,6 +609,28 @@ try {
           redesigned.built && redesigned.nodeId !== deckOnce.nodeId && !redesignedAgain.built,
           `${redesigned.built}/${redesignedAgain.built}`,
         );
+        // Images: drawn by the connected provider's image model when the
+        // slides are asked for, one per slide plus the cover, and kept so a
+        // second build asks for nothing.
+        await saveDeckDesign("project_owner", { images: "all" });
+        const drawn = await ensureDeckFor({ packageNodeId: older.nodeId, actor: ACTOR });
+        const asked = imagePrompts.length;
+        const drawnAgain = await ensureDeckFor({ packageNodeId: older.nodeId, actor: ACTOR });
+        const { content: drawnContent } = await readArtifactNode(drawn.nodeId);
+        const drawnBytes = Buffer.from(/base64,(.*)$/s.exec(drawnContent)![1]!, "base64");
+        const { mkdtemp, rm } = await import("node:fs/promises");
+        const { tmpdir } = await import("node:os");
+        const dir = await mkdtemp(join(tmpdir(), "sb-deck-"));
+        await Bun.write(join(dir, "deck.pptx"), drawnBytes);
+        const mediaParts = Bun.spawnSync(["unzip", "-Z1", join(dir, "deck.pptx")]).stdout.toString().split("\n").filter((name) => /^ppt\/media\/image[\w-]*\.png$/.test(name));
+        await rm(dir, { recursive: true, force: true });
+        check(
+          "slides asked for with images are drawn by the provider's image model, the cover and one per slide",
+          drawn.built && asked === 2 && mediaParts.length === 2 && imagePrompts.every((prompt) => /No text, no words/.test(prompt)),
+          `built=${drawn.built} asked=${asked} media=${mediaParts.length}`,
+        );
+        check("and a second build draws nothing again", !drawnAgain.built && imagePrompts.length === asked, `${imagePrompts.length} prompts`);
+        await saveDeckDesign("project_owner", { images: "none", theme: "ember", typeface: "Calibri" });
       }
       await deliverStageSignal(project.projectId, "stage.submit", { runId: project.runId }, `smoke-submit-${stage}-${project.projectId}`);
       const gate = await settle((s) => s.parked && s.stepId === gateStepId(stage));

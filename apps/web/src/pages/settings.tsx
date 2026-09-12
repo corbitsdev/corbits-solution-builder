@@ -392,9 +392,26 @@ type DeckRole = (typeof DECK_ROLES)[number];
 type DeckTheme = "ember" | "slate" | "forest" | "navy" | "plum";
 type DeckTypeface = "Calibri" | "Georgia" | "Arial" | "Helvetica";
 type DeckDensity = "sparse" | "standard" | "full";
-type DeckDesign = { theme: DeckTheme; typeface: DeckTypeface; density: DeckDensity; notes: boolean; guidance: string };
+type DeckImages = "none" | "cover" | "all";
+type DeckDesign = {
+  theme: DeckTheme;
+  typeface: DeckTypeface;
+  density: DeckDensity;
+  notes: boolean;
+  images: DeckImages;
+  template: string | null;
+  guidance: string;
+};
 
-const DEFAULT_DECK: DeckDesign = { theme: "ember", typeface: "Calibri", density: "standard", notes: true, guidance: "" };
+const DEFAULT_DECK: DeckDesign = {
+  theme: "ember",
+  typeface: "Calibri",
+  density: "standard",
+  notes: true,
+  images: "none",
+  template: null,
+  guidance: "",
+};
 
 function roleLabel(role: string): string {
   return role.replace(/_/g, " ");
@@ -427,6 +444,8 @@ function StakeholderDecks() {
               typeface: (preferences[`deck.${role}.typeface`] as DeckTypeface | undefined) ?? DEFAULT_DECK.typeface,
               density: (preferences[`deck.${role}.density`] as DeckDensity | undefined) ?? DEFAULT_DECK.density,
               notes: preferences[`deck.${role}.notes`] !== false,
+              images: (preferences[`deck.${role}.images`] as DeckImages | undefined) ?? "none",
+              template: typeof preferences[`deck.${role}.template`] === "string" ? String(preferences[`deck.${role}.template`]) : null,
               guidance: String(preferences[`deck.${role}.guidance`] ?? ""),
             },
           ]),
@@ -455,10 +474,30 @@ function StakeholderDecks() {
     }
   };
 
+  const [templateBusy, setTemplateBusy] = useState<DeckRole | null>(null);
+  const setTemplate = async (role: DeckRole, file: File | null) => {
+    if (!designs) return;
+    setTemplateBusy(role);
+    setError(null);
+    try {
+      if (file) {
+        await api.uploadDeckTemplate(role, file);
+        setDesigns({ ...designs, [role]: { ...designs[role], template: file.name } });
+      } else {
+        await api.removeDeckTemplate(role);
+        setDesigns({ ...designs, [role]: { ...designs[role], template: null } });
+      }
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    } finally {
+      setTemplateBusy(null);
+    }
+  };
+
   return (
     <Section
       title="Stakeholder decks"
-      lead="How each stakeholder role's slides look, and what their deck outline should emphasise. A changed look rebuilds the slides the next time they are saved; changed guidance shapes the next package written for that role."
+      lead="How each stakeholder role's slides look, and what their deck outline should emphasise. A changed look rebuilds the slides the next time they are saved; changed guidance shapes the next package written for that role. Images are drawn by the first connected provider that lists an image model, when the slides are saved, and each is kept so it is drawn once."
     >
       {error ? <Banner tone="error" title={error} /> : null}
       {DECK_ROLES.map((role) => {
@@ -513,6 +552,51 @@ function StakeholderDecks() {
                 <span>Speaker notes</span>
                 <Switch checked={design.notes} disabled={!designs} onCheckedChange={(checked) => void save(role, "notes", checked)} />
               </label>
+              <label className="deck-role-control">
+                <span>Images</span>
+                <select
+                  className="setting-select"
+                  value={design.images}
+                  disabled={!designs}
+                  onChange={(event) => void save(role, "images", event.target.value as DeckImages)}
+                >
+                  <option value="none">None</option>
+                  <option value="cover">The cover</option>
+                  <option value="all">The cover and every slide</option>
+                </select>
+              </label>
+            </div>
+            <div className="setting-field">
+              <div>
+                <strong>Style guide</strong>
+                <p>
+                  A PowerPoint whose theme these slides follow: its accent and text colours, its title and body typefaces, and its slide
+                  size. It takes precedence over the colour and typeface above. Nothing else is copied from it.
+                </p>
+              </div>
+              <div className="deck-template">
+                {design.template ? (
+                  <>
+                    <span className="deck-template-name">{design.template}</span>
+                    <Button loading={templateBusy === role} onClick={() => void setTemplate(role, null)}>
+                      Remove
+                    </Button>
+                  </>
+                ) : null}
+                <label className="deck-template-pick">
+                  <Input
+                    type="file"
+                    accept=".pptx,.potx,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                    disabled={!designs || templateBusy === role}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0] ?? null;
+                      event.target.value = "";
+                      if (file) void setTemplate(role, file);
+                    }}
+                  />
+                  <span>{design.template ? "Replace…" : "Choose a PowerPoint…"}</span>
+                </label>
+              </div>
             </div>
             <div className="setting-field">
               <div>

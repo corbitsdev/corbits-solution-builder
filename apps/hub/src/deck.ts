@@ -19,6 +19,8 @@ import {
   deckDesignHash,
   type DeckDesign,
 } from "./deck-settings.js";
+import { templateThemeFor, type TemplateTheme } from "./deck-template.js";
+import { illustration, illustrationPrompt, imageSource } from "./deck-images.js";
 
 /** The kind a deck is recorded as: stage 5, one per stakeholder, never a prompt input. */
 export const DECK_KIND: ArtifactKind = "audience_deck";
@@ -41,6 +43,10 @@ export type Deck = {
   readonly decision: readonly string[];
   /** The look the role's settings ask for. */
   readonly design: DeckDesign;
+  /** What the role's style guide, when there is one, changes about the look. */
+  readonly theme?: TemplateTheme;
+  /** Illustrations by slide: "cover", or an item's index as a string. PNG bytes. */
+  readonly images?: ReadonlyMap<string, Uint8Array>;
 };
 
 /** The text under a `### heading`, up to the next heading of the same or a higher level. */
@@ -123,6 +129,8 @@ export function deckFrom(args: {
   role: string;
   markdown: string;
   design?: DeckDesign;
+  theme?: TemplateTheme;
+  images?: ReadonlyMap<string, Uint8Array>;
 }): Deck | null {
   const design = args.design ?? DEFAULT_DECK_DESIGN;
   const slides = outlineSlidesIn(args.markdown, DECK_DENSITY[design.density]);
@@ -134,72 +142,146 @@ export function deckFrom(args: {
     slides,
     decision: decisionLinesIn(args.markdown),
     design,
+    ...(args.theme ? { theme: args.theme } : {}),
+    ...(args.images ? { images: args.images } : {}),
   };
 }
 
-const INK = "1F2933";
-const MUTED = "6B7280";
+/** The look a deck is drawn with: the role's settings, with its style guide's theme over them. */
+export type DeckLook = {
+  readonly accent: string;
+  readonly ink: string;
+  readonly paper: string;
+  readonly muted: string;
+  readonly titleFace: string;
+  readonly bodyFace: string;
+  readonly wide: boolean;
+};
+
+export function lookOf(design: DeckDesign, theme?: TemplateTheme): DeckLook {
+  return {
+    accent: theme?.accent ?? DECK_THEMES[design.theme].accent,
+    ink: theme?.ink ?? "1F2933",
+    paper: theme?.paper ?? "FFFFFF",
+    muted: "6B7280",
+    titleFace: theme?.titleFace ?? theme?.bodyFace ?? design.typeface,
+    bodyFace: theme?.bodyFace ?? design.typeface,
+    wide: theme?.ratio === undefined || theme.ratio > 1.5,
+  };
+}
+
+function pngData(bytes: Uint8Array): string {
+  return `image/png;base64,${Buffer.from(bytes).toString("base64")}`;
+}
 
 /** The deck as PowerPoint bytes: a title slide, one slide per outline item, and the decision request. */
 export async function renderDeck(deck: Deck): Promise<Uint8Array> {
-  // The role's look: a typeface PowerPoint carries and Keynote substitutes
-  // cleanly, and one accent colour on the cover's bar and each rule.
-  const FACE = deck.design.typeface;
-  const ACCENT = DECK_THEMES[deck.design.theme].accent;
+  const look = lookOf(deck.design, deck.theme);
   const pptx = new PptxGenJS();
-  pptx.layout = "LAYOUT_16x9";
+  pptx.layout = look.wide ? "LAYOUT_16x9" : "LAYOUT_4x3";
+  const W = look.wide ? 10 : 10;
+  const H = look.wide ? 5.625 : 7.5;
   pptx.title = `${deck.projectTitle} — for ${deck.audience}`;
   const footer = (slide: PptxGenJS.Slide, page: number) => {
     slide.addText(`${deck.projectTitle} · for ${deck.audience} · ${page}`, {
       x: 0.5,
-      y: 5.1,
-      w: 9,
+      y: H - 0.5,
+      w: W - 1,
       h: 0.3,
       fontSize: 9,
-      fontFace: FACE,
-      color: MUTED,
+      fontFace: look.bodyFace,
+      color: look.muted,
     });
+  };
+  const paint = (slide: PptxGenJS.Slide) => {
+    if (look.paper !== "FFFFFF") slide.background = { color: look.paper };
   };
 
   const cover = pptx.addSlide();
-  cover.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 0.25, h: 5.625, fill: { color: ACCENT } });
-  cover.addText(deck.projectTitle, { x: 0.7, y: 1.4, w: 8.6, h: 1.4, fontSize: 32, fontFace: FACE, bold: true, color: INK, valign: "bottom" });
-  cover.addText(`Prepared for ${deck.audience} · ${deck.role}`, { x: 0.7, y: 2.9, w: 8.6, h: 0.5, fontSize: 16, fontFace: FACE, color: MUTED });
+  paint(cover);
+  const coverImage = deck.images?.get("cover");
+  const coverTextWidth = coverImage ? W * 0.52 : W - 1.4;
+  cover.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 0.25, h: H, fill: { color: look.accent } });
+  cover.addText(deck.projectTitle, { x: 0.7, y: H * 0.25, w: coverTextWidth, h: 1.4, fontSize: 32, fontFace: look.titleFace, bold: true, color: look.ink, valign: "bottom" });
+  cover.addText(`Prepared for ${deck.audience} · ${deck.role}`, { x: 0.7, y: H * 0.25 + 1.5, w: coverTextWidth, h: 0.5, fontSize: 16, fontFace: look.bodyFace, color: look.muted });
   cover.addText("Is this worth pursuing? Rough figures throughout; a firm estimate follows at stage 7.", {
     x: 0.7,
-    y: 3.5,
-    w: 8.6,
+    y: H * 0.25 + 2.1,
+    w: coverTextWidth,
     h: 0.6,
     fontSize: 12,
-    fontFace: FACE,
-    color: MUTED,
+    fontFace: look.bodyFace,
+    color: look.muted,
   });
+  if (coverImage) {
+    cover.addImage({ data: pngData(coverImage), x: W * 0.58, y: 0.6, w: W * 0.38, h: H - 1.2, sizing: { type: "contain", w: W * 0.38, h: H - 1.2 } });
+  }
+
+  const itemSlide = (title: string, lines: readonly string[], notes: string | null, image: Uint8Array | undefined, page: number) => {
+    const slide = pptx.addSlide();
+    paint(slide);
+    const textWidth = image ? W * 0.56 : W - 1;
+    slide.addText(title, { x: 0.5, y: 0.35, w: W - 1, h: 0.9, fontSize: 24, fontFace: look.titleFace, bold: true, color: look.ink, valign: "top" });
+    slide.addShape(pptx.ShapeType.line, { x: 0.5, y: 1.3, w: W - 1, h: 0, line: { color: look.accent, width: 1.5 } });
+    slide.addText(
+      lines.map((text) => ({ text, options: { bullet: true, breakLine: true } })),
+      { x: 0.5, y: 1.5, w: textWidth, h: H - 2.2, fontSize: 15, fontFace: look.bodyFace, color: look.ink, valign: "top", paraSpaceAfter: 6 },
+    );
+    if (image) {
+      slide.addImage({ data: pngData(image), x: W * 0.62, y: 1.5, w: W * 0.34, h: H - 2.2, sizing: { type: "contain", w: W * 0.34, h: H - 2.2 } });
+    }
+    if (notes && deck.design.notes) slide.addNotes(notes);
+    footer(slide, page);
+  };
 
   deck.slides.forEach((entry, index) => {
-    const slide = pptx.addSlide();
-    slide.addText(entry.title, { x: 0.5, y: 0.35, w: 9, h: 0.9, fontSize: 24, fontFace: FACE, bold: true, color: INK, valign: "top" });
-    slide.addShape(pptx.ShapeType.line, { x: 0.5, y: 1.3, w: 9, h: 0, line: { color: ACCENT, width: 1.5 } });
-    slide.addText(
-      entry.bullets.map((text) => ({ text, options: { bullet: true, breakLine: true } })),
-      { x: 0.5, y: 1.5, w: 9, h: 3.5, fontSize: 15, fontFace: FACE, color: INK, valign: "top", paraSpaceAfter: 6 },
-    );
-    if (entry.notes && deck.design.notes) slide.addNotes(entry.notes);
-    footer(slide, index + 2);
+    itemSlide(entry.title, entry.bullets, entry.notes, deck.images?.get(String(index)), index + 2);
   });
-
   if (deck.decision.length > 0) {
-    const slide = pptx.addSlide();
-    slide.addText("Decision request", { x: 0.5, y: 0.35, w: 9, h: 0.9, fontSize: 24, fontFace: FACE, bold: true, color: INK, valign: "top" });
-    slide.addShape(pptx.ShapeType.line, { x: 0.5, y: 1.3, w: 9, h: 0, line: { color: ACCENT, width: 1.5 } });
-    slide.addText(
-      deck.decision.map((text) => ({ text, options: { bullet: true, breakLine: true } })),
-      { x: 0.5, y: 1.5, w: 9, h: 3.5, fontSize: 15, fontFace: FACE, color: INK, valign: "top", paraSpaceAfter: 6 },
-    );
-    footer(slide, deck.slides.length + 2);
+    itemSlide("Decision request", deck.decision, null, undefined, deck.slides.length + 2);
   }
 
   const out = (await pptx.write({ outputType: "nodebuffer" })) as Buffer;
   return new Uint8Array(out);
+}
+
+/**
+ * The illustrations a role's design asks for, drawn by the provider's image
+ * model: the cover's, or one per outline item as well. Null when the design
+ * asks for none. Throws when it asks and no connected provider can draw.
+ */
+export async function illustrationsFor(deck: Deck): Promise<Map<string, Uint8Array> | null> {
+  if (deck.design.images === "none") return null;
+  const source = await imageSource();
+  if (!source) {
+    throw new HostError(
+      "provider_unavailable",
+      "The slides ask for images, but no connected provider lists an image model (gpt-image-1, dall-e-3 or a Grok image model). Connect one, or set Images to none for this role in Settings, Stakeholder decks.",
+      {},
+      false,
+    );
+  }
+  const colour = DECK_THEMES[deck.design.theme].label.toLowerCase();
+  const images = new Map<string, Uint8Array>();
+  const gist = deck.slides[0]?.bullets[0] ?? deck.slides[0]?.title ?? deck.projectTitle;
+  images.set(
+    "cover",
+    await illustration(source, illustrationPrompt({ projectTitle: deck.projectTitle, audience: deck.audience, role: deck.role, title: deck.projectTitle, gist, colour })),
+  );
+  if (deck.design.images === "all") {
+    for (const [index, slide] of deck.slides.entries()) {
+      const prompt = illustrationPrompt({
+        projectTitle: deck.projectTitle,
+        audience: deck.audience,
+        role: deck.role,
+        title: slide.title,
+        gist: slide.bullets[0] ?? slide.notes.slice(0, 200),
+        colour,
+      });
+      images.set(String(index), await illustration(source, prompt));
+    }
+  }
+  return images;
 }
 
 export function deckFileName(projectTitle: string, audience: string): string {
@@ -225,16 +307,26 @@ export async function writeDeckFor(args: {
   markdown: string;
   agentRole: string;
   actor: { principalId: string };
+  /**
+   * Whether to draw the illustrations the role's design asks for. Off when
+   * the deck is built as a package is written — the person is waiting on
+   * the package, not on nine images — and on when they ask for the slides.
+   */
+  illustrate?: boolean;
 }): Promise<{ nodeId: string; version: number } | null> {
   const design = await deckDesignFor(args.audience.role);
-  const deck = deckFrom({
+  const theme = (await templateThemeFor(args.audience.role)) ?? undefined;
+  const plain = deckFrom({
     projectTitle: args.projectTitle,
     audience: args.audience.name,
     role: args.audience.role.replace(/_/g, " "),
     markdown: args.markdown,
     design,
+    ...(theme ? { theme } : {}),
   });
-  if (!deck) return null;
+  if (!plain) return null;
+  const images = args.illustrate ? await illustrationsFor(plain) : null;
+  const deck: Deck = images ? { ...plain, images } : plain;
   const bytes = await renderDeck(deck);
   const written = await writeArtifact(
     {
@@ -246,16 +338,16 @@ export async function writeDeckFor(args: {
       mediaType: DECK_MEDIA_TYPE,
       sourceVersionIds: [args.packageNodeId],
       // The look it was built with rides along, so a changed design is a new version.
-      provenance: { producer: "agent", agentRole: args.agentRole, promptKey: designKey(design) },
+      provenance: { producer: "agent", agentRole: args.agentRole, promptKey: designKey(design, theme, images !== null) },
     },
     args.actor,
   );
   return { nodeId: written.nodeId, version: written.version };
 }
 
-/** How a deck's provenance names the look it was built with. */
-function designKey(design: DeckDesign): string {
-  return `sb-deck-design:${deckDesignHash(design)}`;
+/** How a deck's provenance names the look it was built with: the design, the style guide's theme, and whether it carries the images asked for. */
+function designKey(design: DeckDesign, theme: TemplateTheme | undefined, illustrated: boolean): string {
+  return `sb-deck-design:${deckDesignHash(design, [theme ?? null, design.images !== "none" ? illustrated : true])}`;
 }
 
 /**
@@ -280,7 +372,7 @@ export async function ensureDeckFor(args: {
     role: "stakeholder",
   };
   const { nodes, edges } = await artifactGraph(node.projectId);
-  const current = designKey(await deckDesignFor(audience.role));
+  const current = designKey(await deckDesignFor(audience.role), (await templateThemeFor(audience.role)) ?? undefined, true);
   const existing = nodes.find(
     (candidate) =>
       candidate.kind === DECK_KIND &&
@@ -297,6 +389,7 @@ export async function ensureDeckFor(args: {
     markdown: content,
     agentRole: agentFor(5).id,
     actor: args.actor,
+    illustrate: true,
   });
   if (!written) {
     throw new HostError(

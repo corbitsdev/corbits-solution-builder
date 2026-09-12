@@ -88,7 +88,7 @@ const designed = deckFrom({
   audience: "Barry",
   role: "budget approver",
   markdown: PACKAGE,
-  design: { theme: "navy", typeface: "Georgia", density: "sparse", notes: false, guidance: "Lead with cost." },
+  design: { theme: "navy", typeface: "Georgia", density: "sparse", notes: false, images: "none", template: null, guidance: "Lead with cost." },
 })!;
 check("density caps the points a slide shows", designed.slides.every((slide) => slide.bullets.length <= 3));
 const designedBytes = await renderDeck(designed);
@@ -103,6 +103,46 @@ const notesParts = Bun.spawnSync(["unzip", "-Z1", file2]).stdout.toString().spli
 const notesText = notesParts.map((part) => Bun.spawnSync(["unzip", "-p", file2, part]).stdout.toString()).join("");
 check("speaker notes can be left off", !notesText.includes("cannot afford"), `${notesParts.length} notes parts`);
 await rm(dir2, { recursive: true, force: true });
+
+// A style guide's theme is read from its XML: colours by sRGB or a system
+// colour's last value, typefaces from the major and minor fonts.
+const { themeFromXml, themeFromPptx } = await import("../apps/hub/src/deck-template.js");
+const THEME_XML = `<a:theme xmlns:a="x"><a:themeElements><a:clrScheme name="Office">
+<a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1><a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1>
+<a:dk2><a:srgbClr val="44546A"/></a:dk2><a:lt2><a:srgbClr val="E7E6E6"/></a:lt2><a:accent1><a:srgbClr val="4472C4"/></a:accent1>
+</a:clrScheme><a:fontScheme name="Office"><a:majorFont><a:latin typeface="Playfair Display"/></a:majorFont><a:minorFont><a:latin typeface="Source Sans Pro"/></a:minorFont></a:fontScheme></a:themeElements></a:theme>`;
+const parsedTheme = themeFromXml(THEME_XML);
+check(
+  "a style guide's theme is read: accent, ink, paper, and both typefaces",
+  parsedTheme.accent === "4472C4" && parsedTheme.ink === "000000" && parsedTheme.paper === "FFFFFF" && parsedTheme.titleFace === "Playfair Display" && parsedTheme.bodyFace === "Source Sans Pro",
+  JSON.stringify(parsedTheme),
+);
+// Our own rendered deck is a PowerPoint with a theme part and a slide size, so it reads as one.
+const ownTheme = await themeFromPptx(bytes);
+check("a PowerPoint file's theme and slide size are read", typeof ownTheme.ratio === "number" && ownTheme.ratio > 1.7, JSON.stringify(ownTheme));
+
+// With a theme and images, the deck is drawn with the theme's colours and
+// faces, and carries the pictures as media parts.
+const PNG = new Uint8Array(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64"));
+const pictured = deckFrom({
+  projectTitle: "Triage",
+  audience: "Barry",
+  role: "budget approver",
+  markdown: PACKAGE,
+  design: { ...designed.design, images: "all" },
+  theme: parsedTheme,
+  images: new Map([["cover", PNG], ["0", PNG], ["1", PNG]]),
+})!;
+const picturedBytes = await renderDeck(pictured);
+const dir3 = await mkdtemp(join(tmpdir(), "sb-deck-"));
+const file3 = join(dir3, "deck.pptx");
+await Bun.write(file3, picturedBytes);
+const parts3 = Bun.spawnSync(["unzip", "-Z1", file3]).stdout.toString().split("\n");
+const media = parts3.filter((name) => /^ppt\/media\/image[\w-]*\.png$/.test(name));
+check("the illustrations ride in the deck as media parts", media.length >= 3, `${media.length} media parts`);
+const cover3 = Bun.spawnSync(["unzip", "-p", file3, "ppt/slides/slide1.xml"]).stdout.toString();
+check("the style guide's accent and title face are drawn with", cover3.includes("4472C4") && cover3.includes("Playfair Display"), `${cover3.includes("4472C4")}/${cover3.includes("Playfair Display")}`);
+await rm(dir3, { recursive: true, force: true });
 
 const failed = checks.filter((entry) => !entry.ok);
 console.log(`\nDeck smoke: ${checks.length - failed.length}/${checks.length} checks passed`);
