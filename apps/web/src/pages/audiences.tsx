@@ -181,16 +181,16 @@ export function AudiencePackages({
   const [error, setError] = useState<string | null>(null);
   /** Where the last saved slides went, said once. */
   const [saved, setSaved] = useState<string | null>(null);
-  // The slides built from each package: a file beside it, by stakeholder.
-  const decks = detail.nodes.filter((node) => node.kind === "audience_deck" && node.supersededByNodeId === null);
-  const deckFor = (audienceName: string | null | undefined) =>
-    audienceName ? (decks.find((node) => node.variant === audienceName) ?? null) : null;
-  const saveDeck = async (nodeId: string) => {
-    setBusy(`deck:${nodeId}`);
+  // The slides for a package are built from it the first time they are
+  // asked for — a package written before decks existed has none yet — and
+  // saved; after that, saved again from the deck already recorded.
+  const saveSlides = async (packageNodeId: string) => {
+    setBusy(`slides:${packageNodeId}`);
     setError(null);
     try {
-      const result = await api.saveArtifactFile(nodeId);
+      const result = await api.saveSlidesFor(packageNodeId);
       setSaved(result.path);
+      if (result.built) onChanged();
     } catch (cause) {
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     } finally {
@@ -366,17 +366,9 @@ export function AudiencePackages({
                     while the stage is open, a way to write the package again
                     on its own; the others keep their versions and decisions. */}
                 <div className="button-row">
-                  {deckFor(selected.variant) ? (
-                    <Button
-                      variant="primary"
-                      loading={busy === `deck:${deckFor(selected.variant)!.id}`}
-                      onClick={() => saveDeck(deckFor(selected.variant)!.id)}
-                    >
-                      Save slides (.pptx)
-                    </Button>
-                  ) : (
-                    <span className="inline-note">No slides: this package has no deck outline to build them from.</span>
-                  )}
+                  <Button variant="primary" loading={busy === `slides:${selected.id}`} onClick={() => saveSlides(selected.id)}>
+                    Save slides (.pptx)
+                  </Button>
                   {selected.variant && inProgress && !decisionFor(selected.variant) ? (
                     <Button loading={drafting} onClick={() => onDraftPackages([selected.variant!])}>
                       Write this package again

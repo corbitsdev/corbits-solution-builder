@@ -7,7 +7,10 @@
  */
 import PptxGenJS from "pptxgenjs";
 import type { ArtifactKind } from "@solutions-builder/app/artifacts";
-import { writeArtifact } from "./projects.js";
+import { agentFor } from "@solutions-builder/app/kit";
+import { HostError, notFound } from "./errors.js";
+import { artifactGraph, readArtifactNode, writeArtifact } from "./projects.js";
+import { readProject } from "./project-tenant.js";
 
 /** The kind a deck is recorded as: stage 5, one per stakeholder, never a prompt input. */
 export const DECK_KIND: ArtifactKind = "audience_deck";
@@ -226,4 +229,53 @@ export async function writeDeckFor(args: {
     args.actor,
   );
   return { nodeId: written.nodeId, version: written.version };
+}
+
+/**
+ * The deck built from this package version, building it now when none has
+ * been: a package written before decks existed, or one whose build failed.
+ * The person asks for slides from the package they can see, so the answer
+ * is the slides for that version, never a rewrite of the package.
+ */
+export async function ensureDeckFor(args: {
+  packageNodeId: string;
+  actor: { principalId: string };
+}): Promise<{ nodeId: string; built: boolean }> {
+  const { node, content } = await readArtifactNode(args.packageNodeId);
+  if (node.kind !== "audience_package") {
+    throw new HostError("validation_failed", "Slides are built from a stakeholder's package.", {}, false);
+  }
+  const { nodes, edges } = await artifactGraph(node.projectId);
+  const existing = nodes.find(
+    (candidate) =>
+      candidate.kind === DECK_KIND &&
+      candidate.supersededByNodeId === null &&
+      edges.some((edge) => edge.childNodeId === candidate.id && edge.sourceNodeId === node.id),
+  );
+  if (existing) return { nodeId: existing.id, built: false };
+
+  const project = await readProject(node.projectId);
+  if (!project) throw notFound("That project");
+  const audience = project.policy.audiences?.find((entry) => entry.name === node.variant) ?? {
+    name: node.variant ?? "Stakeholder",
+    role: "stakeholder",
+  };
+  const written = await writeDeckFor({
+    projectId: node.projectId,
+    projectTitle: project.title,
+    audience,
+    packageNodeId: node.id,
+    markdown: content,
+    agentRole: agentFor(5).id,
+    actor: args.actor,
+  });
+  if (!written) {
+    throw new HostError(
+      "validation_failed",
+      "This package has no \"Deck outline\" section with numbered items, so there is nothing to build slides from.",
+      {},
+      false,
+    );
+  }
+  return { nodeId: written.nodeId, built: true };
 }
