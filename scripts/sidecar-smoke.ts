@@ -585,6 +585,17 @@ try {
           deckOnce.built && !deckAgain.built && deckAgain.nodeId === deckOnce.nodeId,
           `${deckOnce.built}/${deckAgain.built}`,
         );
+        // A role's design changed in Settings: the next save builds a new
+        // version with the new look; the package is untouched.
+        const { saveDeckDesign } = await import("../apps/hub/src/deck-settings.js");
+        await saveDeckDesign("project_owner", { theme: "forest", typeface: "Georgia" });
+        const redesigned = await ensureDeckFor({ packageNodeId: older.nodeId, actor: ACTOR });
+        const redesignedAgain = await ensureDeckFor({ packageNodeId: older.nodeId, actor: ACTOR });
+        check(
+          "a changed deck design for the role builds the slides again, once",
+          redesigned.built && redesigned.nodeId !== deckOnce.nodeId && !redesignedAgain.built,
+          `${redesigned.built}/${redesignedAgain.built}`,
+        );
       }
       await deliverStageSignal(project.projectId, "stage.submit", { runId: project.runId }, `smoke-submit-${stage}-${project.projectId}`);
       const gate = await settle((s) => s.parked && s.stepId === gateStepId(stage));

@@ -81,6 +81,29 @@ check("speaker notes ride with the item slides", notes.length >= 3, `${notes.len
 await rm(dir, { recursive: true, force: true });
 check("the file is named for the project and the stakeholder", deckFileName("Triage for open source", "Barry Moneyman") === "triage-for-open-source-barry-moneyman-slides.pptx");
 
+// A role's design decides the look: its colour and typeface in the slide
+// parts, how many points a slide carries, and whether notes ride along.
+const designed = deckFrom({
+  projectTitle: "Triage",
+  audience: "Barry",
+  role: "budget approver",
+  markdown: PACKAGE,
+  design: { theme: "navy", typeface: "Georgia", density: "sparse", notes: false, guidance: "Lead with cost." },
+})!;
+check("density caps the points a slide shows", designed.slides.every((slide) => slide.bullets.length <= 3));
+const designedBytes = await renderDeck(designed);
+const dir2 = await mkdtemp(join(tmpdir(), "sb-deck-"));
+const file2 = join(dir2, "deck.pptx");
+await Bun.write(file2, designedBytes);
+const cover = Bun.spawnSync(["unzip", "-p", file2, "ppt/slides/slide1.xml"]).stdout.toString();
+check("the role's colour and typeface are in the slides", cover.includes("1E3A8A") && cover.includes("Georgia"), `${cover.includes("1E3A8A")}/${cover.includes("Georgia")}`);
+// The library writes a notes part for every slide; with notes off, none of
+// them carries the item's text.
+const notesParts = Bun.spawnSync(["unzip", "-Z1", file2]).stdout.toString().split("\n").filter((name) => /^ppt\/notesSlides\/notesSlide\d+\.xml$/.test(name));
+const notesText = notesParts.map((part) => Bun.spawnSync(["unzip", "-p", file2, part]).stdout.toString()).join("");
+check("speaker notes can be left off", !notesText.includes("cannot afford"), `${notesParts.length} notes parts`);
+await rm(dir2, { recursive: true, force: true });
+
 const failed = checks.filter((entry) => !entry.ok);
 console.log(`\nDeck smoke: ${checks.length - failed.length}/${checks.length} checks passed`);
 process.exit(failed.length === 0 ? 0 : 1);
