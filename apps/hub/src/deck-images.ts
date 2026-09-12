@@ -89,8 +89,9 @@ async function complete(source: ChatSource, system: string, user: string): Promi
         { role: "system", content: system },
         { role: "user", content: user },
       ],
-      temperature: 0.4,
-      max_tokens: 2_000,
+      // No temperature and no output cap: the newest OpenAI models refuse a
+      // temperature other than their own and the old name for the cap, and
+      // a plan is short whichever model writes it.
       stream: false,
     }),
     signal: AbortSignal.timeout(120_000),
