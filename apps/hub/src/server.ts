@@ -23,6 +23,7 @@ import { stopSpawnedSidecars } from "./sidecar-processes.js";
 import { ensureHub, hubFetch, resolveWorkspace } from "./hub-client.js";
 import { hub, hubIsMounted, hubWebSocket, setHostPort, SIDECAR_WS_PATH } from "./hub-mount.js";
 import { attachLiveDrafts } from "./live-drafts.js";
+import { rerankCatalogProviders } from "./catalog.js";
 import {
   clientConnected,
   markReady,
@@ -105,6 +106,18 @@ const known = await resolveWorkspace().catch((cause: unknown) => {
   return null;
 });
 console.log(known ? `Workspace: tenant ${known.tenantId}` : "Workspace: not installed yet");
+
+// What each provider serves is read again for what can answer, every boot:
+// a workspace connected before the listing was read this way would
+// otherwise keep leading with a model that cannot, and the client asks for
+// an install only when something is missing, which here nothing is.
+if (known) {
+  const reordered = await rerankCatalogProviders().catch((cause: unknown) => {
+    console.error("Could not put the providers' models in order:", cause);
+    return 0;
+  });
+  if (reordered > 0) console.log(`Put ${reordered} model offerings in order.`);
+}
 
 // Boot ends here. Everything that makes this tenant Solutions Builder — the
 // owner principal, workflow definitions, roles, specialist prompts — is

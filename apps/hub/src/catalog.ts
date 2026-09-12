@@ -282,8 +282,9 @@ async function retireUnservable(
   models: HubModel[],
   serving: readonly string[],
   basePriority: number,
-): Promise<void> {
+): Promise<number> {
   let behind = 0;
+  let changed = 0;
   for (const offering of offerings) {
     const canonicalName = models.find((row) => row.id === offering.modelId)?.canonicalName ?? "";
     if (serving.includes(canonicalName)) continue;
@@ -291,7 +292,9 @@ async function retireUnservable(
     behind += 1;
     if (offering.disabled && offering.priority === priority) continue;
     await catalog.patchOffering(offering.id, { disabled: true, priority });
+    changed += 1;
   }
+  return changed;
 }
 
 /** Where a provider's retired offerings sit within its thousand: behind any it serves. */
@@ -305,21 +308,27 @@ const UNSERVABLE_OFFSET = 900;
  * cleared instead: every served offering is enabled, and the host picks
  * among them as it does before a choice is made.
  */
-async function ensureOneServes(offerings: HubOffering[], models: HubModel[], serving: readonly string[]): Promise<void> {
+async function ensureOneServes(offerings: HubOffering[], models: HubModel[], serving: readonly string[]): Promise<number> {
   const served = offerings.filter((offering) =>
     serving.includes(models.find((row) => row.id === offering.modelId)?.canonicalName ?? ""),
   );
-  if (served.length === 0 || served.some((offering) => !offering.disabled)) return;
+  if (served.length === 0 || served.some((offering) => !offering.disabled)) return 0;
   for (const offering of served) await catalog.patchOffering(offering.id, { disabled: false });
+  return served.length;
 }
 
 /**
  * Reads every connected provider's models again for what can answer, and
- * reorders its offerings to match. Run on install so a workspace connected
- * before the listing was read this way is put right without a reconnect.
+ * reorders its offerings to match. Run when the host boots, so a workspace
+ * connected before the listing was read this way is put right without a
+ * reconnect. (Not only on install: the client asks for an install only when
+ * the workspace is missing something, which an existing one is not, so a
+ * step that lives there alone never runs for the people it is for.)
+ * Returns how many offerings were changed.
  */
-export async function rerankCatalogProviders(): Promise<void> {
-  if (!workspaceOrNull()) return;
+export async function rerankCatalogProviders(): Promise<number> {
+  if (!workspaceOrNull()) return 0;
+  let changed = 0;
   const [providerRows, modelRows, offeringRows] = await Promise.all([
     catalog.modelProviders(),
     catalog.models(),
@@ -332,15 +341,19 @@ export async function rerankCatalogProviders(): Promise<void> {
     const listed = offerings.map((offering) => modelRows.find((entry) => entry.id === offering.modelId)?.canonicalName ?? "");
     const serving = servableModels(listed, row.plugin as Plugin);
     const basePriority = offerings.length > 0 ? Math.floor(offerings[0]!.priority / 1000) : 0;
-    await retireUnservable(offerings, modelRows, serving, basePriority);
-    await ensureOneServes(offerings, modelRows, serving);
+    changed += await retireUnservable(offerings, modelRows, serving, basePriority);
+    changed += await ensureOneServes(offerings, modelRows, serving);
     for (const [index, canonicalName] of serving.entries()) {
       const offering = offerings.find((entry) => modelRows.find((model) => model.id === entry.modelId)?.canonicalName === canonicalName);
       if (!offering) continue;
       const priority = basePriority * 1000 + index;
-      if (offering.priority !== priority) await catalog.patchOffering(offering.id, { priority });
+      if (offering.priority !== priority) {
+        await catalog.patchOffering(offering.id, { priority });
+        changed += 1;
+      }
     }
   }
+  return changed;
 }
 
 /**
