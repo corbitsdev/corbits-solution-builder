@@ -58,8 +58,17 @@ export async function designerSettings(): Promise<DesignerSettings> {
   }
 }
 
+/** Saves are one after another: two in flight at once would each write the other's change away. */
+let writing: Promise<unknown> = Promise.resolve();
+
 /** Saves a change to one or more settings, refusing a value the type rejects. */
-export async function saveDesignerSettings(patch: Partial<DesignerSettings>): Promise<DesignerSettings> {
+export function saveDesignerSettings(patch: Partial<DesignerSettings>): Promise<DesignerSettings> {
+  const turn = writing.then(() => writeDesignerSettings(patch));
+  writing = turn.catch(() => undefined);
+  return turn;
+}
+
+async function writeDesignerSettings(patch: Partial<DesignerSettings>): Promise<DesignerSettings> {
   const next = Settings({ ...(await designerSettings()), ...patch });
   if (next instanceof type.errors) {
     throw new HostError("validation_failed", `Designer settings: ${next.summary}`);

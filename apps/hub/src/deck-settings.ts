@@ -90,8 +90,22 @@ export async function deckDesignFor(role: string): Promise<DeckDesign> {
   return (all as Record<string, DeckDesign>)[role] ?? DEFAULT_DECK_DESIGN;
 }
 
+/**
+ * Saves are one after another. A save reads the whole file, changes one
+ * role and writes the whole file back; two in flight at once — six selects
+ * changed while the host was busy — each wrote the other's change away,
+ * and every second role came back unchanged.
+ */
+let writing: Promise<unknown> = Promise.resolve();
+
 /** Saves a change to one role's design, refusing a value the type rejects. */
-export async function saveDeckDesign(role: string, patch: Partial<DeckDesign>): Promise<DeckDesign> {
+export function saveDeckDesign(role: string, patch: Partial<DeckDesign>): Promise<DeckDesign> {
+  const turn = writing.then(() => writeDeckDesign(role, patch));
+  writing = turn.catch(() => undefined);
+  return turn;
+}
+
+async function writeDeckDesign(role: string, patch: Partial<DeckDesign>): Promise<DeckDesign> {
   if (!(DECK_ROLES as readonly string[]).includes(role)) {
     throw new HostError("validation_failed", `${role} is not a stakeholder role.`);
   }
