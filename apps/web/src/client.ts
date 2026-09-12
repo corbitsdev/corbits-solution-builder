@@ -375,6 +375,14 @@ export const api = {
     request<{ ok: true }>(`/projects/${projectId}`, { method: "DELETE" }),
   artifact: (nodeId: string) =>
     request<{ node: ArtifactNode; content: string }>(`/artifacts/${nodeId}`),
+  /** Keeps a PowerPoint as a stakeholder role's style guide; its theme is read back. */
+  uploadDeckTemplate: (role: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    return requestForm<{ role: string; theme: Record<string, string | number> }>(`/deck-settings/${role}/template`, form);
+  },
+  removeDeckTemplate: (role: string) =>
+    request<{ role: string }>(`/deck-settings/${role}/template`, { method: "DELETE" }),
   /** Builds a package's slides when none exist for it yet, then saves them into the Downloads folder; says where. */
   saveSlidesFor: (packageNodeId: string) =>
     post<{ path: string; bytes: number; nodeId: string; built: boolean }>(`/artifacts/${packageNodeId}/slides/save`, {}),

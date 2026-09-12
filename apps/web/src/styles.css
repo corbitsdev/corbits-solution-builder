@@ -2575,6 +2575,36 @@ button[aria-disabled="true"] {
   color: var(--wb-muted-foreground);
 }
 
+/* A role's style guide: the file kept, and a way to pick another. */
+.deck-template {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.deck-template-name {
+  font-size: 0.875rem;
+}
+
+.deck-template-pick {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--radius-control);
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.deck-template-pick input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
 /* A stakeholder's slides in the artifacts view: a file, described and saved. */
 .deck-file {
   display: grid;
