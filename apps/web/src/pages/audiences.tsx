@@ -209,14 +209,37 @@ export function AudiencePackages({
   const blocked = decisions.filter((approval) => approval.decision !== "proceed").length;
   const quorumMet = blocked === 0 && proceeded >= quorum;
 
+  // The ledger records a stakeholder's decision only once the packages have
+  // been sent for review (stage 5 in waiting_approval). Nothing on this
+  // screen sends them as a step of its own: the first decision does, with
+  // every current package as what is under review, and then records itself.
+  const inProgress = detail.current?.state === "in_progress";
+  const sent = detail.current?.state === "waiting_approval";
+  const everyoneHasOne = audiences.length > 0 && missing.length === 0;
+
   const decide = async (audienceName: string, decision: "proceed" | "reject" | "revise") => {
     const node = packages.find((entry) => entry.variant === audienceName) ?? selected;
     if (!node || !detail.current) return;
     setBusy(audienceName);
     setError(null);
     try {
+      let revision = detail.project.revision;
+      if (inProgress) {
+        await api.submit(detail.project.id, {
+          expectedRevision: revision,
+          runId: detail.current.id,
+          versions: packages.map((entry) => ({
+            artifactId: entry.artifactId,
+            versionId: entry.id,
+            contentHash: entry.contentHash,
+          })),
+        });
+        // Sending moved the project on; the decision is recorded against
+        // where it stands now, not where the screen last read it.
+        revision = (await api.project(detail.project.id)).project.revision;
+      }
       await api.command(detail.project.id, "audience.decide", {
-        expectedRevision: detail.project.revision,
+        expectedRevision: revision,
         runId: detail.current.id,
         audienceName,
         decision,
@@ -274,13 +297,15 @@ export function AudiencePackages({
                   <span>
                     <strong>{audience.name}</strong> · {roleLabel(audience.role)}
                   </span>
-                  <Button loading={drafting} onClick={() => onDraftPackages([audience.name])}>
-                    Write it
-                  </Button>
+                  {inProgress ? (
+                    <Button loading={drafting} onClick={() => onDraftPackages([audience.name])}>
+                      Write it
+                    </Button>
+                  ) : null}
                 </li>
               ))}
             </ul>
-            {missing.length > 1 ? (
+            {missing.length > 1 && inProgress ? (
               <Button
                 variant="primary"
                 loading={drafting}
@@ -318,7 +343,7 @@ export function AudiencePackages({
                 </div>
                 {/* A package that came back wrong can be written again on
                     its own; the others keep their versions and decisions. */}
-                {selected.variant && !decisionFor(selected.variant) ? (
+                {selected.variant && inProgress && !decisionFor(selected.variant) ? (
                   <div className="button-row">
                     <Button loading={drafting} onClick={() => onDraftPackages([selected.variant!])}>
                       Write this package again
@@ -338,6 +363,13 @@ export function AudiencePackages({
           title="Per-stakeholder decisions"
           tight
         >
+          {inProgress && everyoneHasOne ? (
+            <Banner title="The first decision sends every package for review, then records itself." />
+          ) : inProgress ? (
+            <Banner tone="warning" title="Decisions wait until every stakeholder has a package." />
+          ) : sent ? (
+            <Banner tone="okay" title="The packages are under review. Decisions are recorded against these versions." />
+          ) : null}
           <Table>
             <TableHeader>
               <TableRow>
@@ -375,13 +407,17 @@ export function AudiencePackages({
                         <div className="button-row">
                           <Button
                             loading={busy === audience.name}
+                            disabled={!(sent || everyoneHasOne)}
                             onClick={() => decide(audience.name, "proceed")}
                           >
                             Proceed
                           </Button>
-                          <Button onClick={() => decide(audience.name, "revise")}>Revise</Button>
+                          <Button disabled={!(sent || everyoneHasOne)} onClick={() => decide(audience.name, "revise")}>
+                            Revise
+                          </Button>
                           <Button
                             variant="destructive"
+                            disabled={!(sent || everyoneHasOne)}
                             onClick={() => decide(audience.name, "reject")}
                           >
                             Reject
