@@ -42,6 +42,7 @@ import { ArtifactDraft } from "./domain.js";
 import { HostError, ReplyCutShort } from "./errors.js";
 import { providerServingModel } from "./catalog.js";
 import { MATERIAL_KIND, materialText } from "./source-material.js";
+import { DECK_KIND, writeDeckFor } from "./deck.js";
 import {
   cutShortTwice,
   DESIGNER_TOKENS_MAX,
@@ -88,8 +89,9 @@ async function approvedInputs(projectId: string, stage: Stage) {
     .orderBy(asc(table.artifactNode.stage));
 
   // What the person handed over is read at every stage, the first included;
-  // what earlier stages approved is read at the stages after them.
-  const relevant = nodes.filter((node) => node.kind === MATERIAL_KIND || node.stage < stage);
+  // what earlier stages approved is read at the stages after them. A deck is
+  // bytes built from a package the model already reads, never an input.
+  const relevant = nodes.filter((node) => node.kind !== DECK_KIND && (node.kind === MATERIAL_KIND || node.stage < stage));
   return Promise.all(
     relevant.map(async (node) => {
       const { content } = await readArtifactNode(node.id);
@@ -530,9 +532,7 @@ export async function requestDraft(args: {
           : undefined;
 
     try {
-      persisted.set(
-        stepId,
-        await persistOutput({
+      const result = await persistOutput({
           projectId: args.projectId,
           stage: args.stage,
           role,
@@ -546,8 +546,25 @@ export async function requestDraft(args: {
           // Only the round's own prompt drew on the compacted brief; a panel
           // review or an audience package was never handed it.
           ...(isDraftStep && context.brief ? { brief: context.brief } : {}),
-        }),
-      );
+      });
+      persisted.set(stepId, result);
+      // Each stakeholder's package carries a deck outline; the slides are
+      // built from it and kept beside the package. A deck that cannot be
+      // built is logged, not a failure of the package it came from.
+      if (args.stage === 5 && variant !== undefined) {
+        const audience = audiences.find((entry) => entry.name === variant)!;
+        await writeDeckFor({
+          projectId: args.projectId,
+          projectTitle: args.projectTitle,
+          audience,
+          packageNodeId: result.nodeId,
+          markdown: result.content,
+          agentRole: role.id,
+          actor: args.actor,
+        }).catch((cause: unknown) => {
+          console.error(`[stage 5] ${args.projectId}: the slides for ${variant} could not be built:`, cause);
+        });
+      }
     } catch (cause) {
       // An empty or cut-short package is that package's failure too.
       if (args.stage !== 5 || !(cause instanceof HostError)) throw cause;

@@ -76,7 +76,26 @@ function replyFor(messages: unknown[]): string | null {
     // the agent step waiting for one, while a provider error fails the
     // step at once — the failure a person sees when a call goes wrong.
     if (audience === packageToFail) return null;
-    return `## Audience: ${audience}\n\n## Why now\n- The Monday rebuild costs a day a week.`;
+    return [
+      `## Audience: ${audience}`,
+      "",
+      "### One-pager",
+      "The Monday rebuild costs a day a week.",
+      "",
+      "### Deck outline",
+      "",
+      "1. **Problem: the Monday rebuild**  ",
+      "   Cold outbound is rebuilt by hand every Monday. It costs a day a week [Brainstormer — stage 1].",
+      "",
+      "2. **Proposed solution: one process, kept**  ",
+      "   The process is written once and run each week. Source: stage 3.",
+      "",
+      "### Decision request",
+      "- Fund the next planning step.",
+      "",
+      "### Source versions",
+      "- Brainstormer — stage 1",
+    ].join("\n");
   }
   return BUILD_REPLY;
 }
@@ -522,6 +541,27 @@ try {
           current.length === 2 && ["Project owner", "Finance lead"].every((name) => current.some((node) => node.variant === name)),
           current.map((node) => `${node.variant}:v${node.version}`).join(","),
         );
+        // Each package's deck outline becomes a PowerPoint beside it: a file
+        // artifact the person saves, never an input the model is handed.
+        const { readArtifactNode } = await import("../apps/hub/src/projects.js");
+        const decks = (await projectDetail(project.projectId, localActor().principalId)).nodes.filter(
+          (node) => node.kind === "audience_deck" && node.supersededByNodeId === null,
+        );
+        const deckBytes = await Promise.all(
+          decks.map(async (node) => {
+            const { content } = await readArtifactNode(node.id);
+            const match = /^data:([^;]+);base64,(.*)$/s.exec(content);
+            return { variant: node.variant, mime: match?.[1] ?? "", head: match ? Buffer.from(match[2]!, "base64").subarray(0, 2).toString() : "" };
+          }),
+        );
+        check(
+          "each stakeholder's package has a PowerPoint built beside it",
+          deckBytes.length === 2 &&
+            deckBytes.every((deck) => deck.mime === "application/vnd.openxmlformats-officedocument.presentationml.presentation" && deck.head === "PK"),
+          JSON.stringify(deckBytes),
+        );
+        const { stageInputsForSmoke } = await import("../apps/hub/src/stage-runs.js");
+        check("the slides are never handed to a later stage as an input", !(await stageInputsForSmoke(project.projectId, 6 as never)).includes("base64"));
       }
       await deliverStageSignal(project.projectId, "stage.submit", { runId: project.runId }, `smoke-submit-${stage}-${project.projectId}`);
       const gate = await settle((s) => s.parked && s.stepId === gateStepId(stage));
