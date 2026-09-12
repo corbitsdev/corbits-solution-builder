@@ -7,7 +7,11 @@
  */
 import PptxGenJS from "pptxgenjs";
 import type { ArtifactKind } from "@solutions-builder/app/artifacts";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { agentFor } from "@solutions-builder/app/kit";
+import { dataDirectory } from "./paths.js";
 import { HostError, notFound } from "./errors.js";
 import { artifactGraph, readArtifactNode, writeArtifact } from "./projects.js";
 import { readProject } from "./project-tenant.js";
@@ -291,6 +295,40 @@ export async function illustrationsFor(deck: Deck): Promise<Map<string, Uint8Arr
   return images;
 }
 
+/**
+ * The artifact store takes a version of at most 15 MiB, and a deck is kept
+ * there as base64, a third larger than its bytes. A deck past this many
+ * bytes is kept as a file in the data directory and its version records
+ * where; it is rebuilt from the package if the file is ever gone.
+ */
+const STORE_LIMIT_BYTES = 11 * 1024 * 1024;
+
+function deckFilesDirectory(): string {
+  return join(dataDirectory(), "decks");
+}
+
+/** A deck version's content: the bytes as a data URI when they fit the store, else a pointer to the file. */
+async function deckContent(bytes: Uint8Array): Promise<string> {
+  if (bytes.byteLength <= STORE_LIMIT_BYTES) return `data:${DECK_MEDIA_TYPE};base64,${Buffer.from(bytes).toString("base64")}`;
+  const name = `${createHash("sha256").update(bytes).digest("hex").slice(0, 32)}.pptx`;
+  await mkdir(deckFilesDirectory(), { recursive: true });
+  await writeFile(join(deckFilesDirectory(), name), bytes);
+  return JSON.stringify({ deckFile: name, bytes: bytes.byteLength });
+}
+
+/** A deck version's bytes, from the store or from the file it points at; null when the file is gone. */
+export async function deckBytesOf(content: string): Promise<Uint8Array | null> {
+  const inline = /^data:[^;]+;base64,(.*)$/s.exec(content);
+  if (inline) return new Uint8Array(Buffer.from(inline[1]!, "base64"));
+  try {
+    const pointer = JSON.parse(content) as { deckFile?: unknown };
+    if (typeof pointer.deckFile !== "string" || !/^[a-f0-9]+\.pptx$/.test(pointer.deckFile)) return null;
+    return new Uint8Array(await readFile(join(deckFilesDirectory(), pointer.deckFile)));
+  } catch {
+    return null;
+  }
+}
+
 export function deckFileName(projectTitle: string, audience: string): string {
   const slug = (value: string) =>
     value
@@ -344,7 +382,7 @@ export async function writeDeckFor(args: {
       kind: DECK_KIND,
       variant: args.audience.name,
       title: `Slides for ${args.audience.name}`,
-      content: `data:${DECK_MEDIA_TYPE};base64,${Buffer.from(bytes).toString("base64")}`,
+      content: await deckContent(bytes),
       mediaType: DECK_MEDIA_TYPE,
       sourceVersionIds: [args.packageNodeId],
       // The look it was built with rides along, so a changed design is a new version.
@@ -390,7 +428,8 @@ export async function ensureDeckFor(args: {
       edges.some((edge) => edge.childNodeId === candidate.id && edge.sourceNodeId === node.id) &&
       (candidate.provenance as { promptKey?: unknown } | null)?.promptKey === current,
   );
-  if (existing) return { nodeId: existing.id, built: false };
+  // A version whose bytes live in a file that is gone is no deck at all.
+  if (existing && (await deckBytesOf((await readArtifactNode(existing.id)).content)) !== null) return { nodeId: existing.id, built: false };
   const written = await writeDeckFor({
     projectId: node.projectId,
     projectTitle: project.title,

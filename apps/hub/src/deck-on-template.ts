@@ -145,6 +145,36 @@ function rels(entries: { id: string; type: string; target: string }[]): string {
     .join("")}</Relationships>`;
 }
 
+/** Removes media and embeddings that no remaining relationship reaches. */
+async function pruneUnreachedMedia(zip: JSZip): Promise<void> {
+  const reached = new Set<string>();
+  for (const name of Object.keys(zip.files)) {
+    if (!/\/_rels\/[^/]+\.rels$/.test(name)) continue;
+    const base = name.replace(/_rels\/([^/]+)\.rels$/, "$1");
+    const directory = base.slice(0, base.lastIndexOf("/") + 1);
+    const xml = await zip.file(name)!.async("string");
+    for (const match of xml.matchAll(/Target="([^"]+)"/g)) {
+      const target = match[1]!;
+      if (/^https?:|^mailto:/.test(target)) continue;
+      const resolved = target.startsWith("/") ? target.slice(1) : normalize(`${directory}${target}`);
+      reached.add(resolved);
+    }
+  }
+  for (const name of Object.keys(zip.files)) {
+    if (/^ppt\/(media|embeddings)\/[^/]+$/.test(name) && !reached.has(name)) zip.remove(name);
+  }
+}
+
+/** `a/b/../c` as `a/c`. */
+function normalize(path: string): string {
+  const out: string[] = [];
+  for (const part of path.split("/")) {
+    if (part === "..") out.pop();
+    else if (part !== "." && part !== "") out.push(part);
+  }
+  return out.join("/");
+}
+
 /** Whether a PowerPoint file can carry a deck: it has a presentation part and at least one layout. */
 export async function templateCanCarryADeck(bytes: Uint8Array): Promise<boolean> {
   try {
@@ -177,6 +207,11 @@ export async function renderDeckOnTemplate(template: Uint8Array, deck: Deck): Pr
   // The template's own slides, their notes and comments go; everything else stays.
   const removed = Object.keys(zip.files).filter((name) => /^ppt\/(slides|notesSlides|comments)\//.test(name));
   for (const name of removed) zip.remove(name);
+  // With them goes the media only they reached: a template's photographs
+  // sit on its slides, and a deck that carried them would be tens of
+  // megabytes of pictures nobody sees. What a master, layout, theme or
+  // notes master still points at stays.
+  await pruneUnreachedMedia(zip);
   const presRelsPath = "ppt/_rels/presentation.xml.rels";
   let presRels = (await zip.file(presRelsPath)?.async("string")) ?? rels([]);
   presRels = presRels.replace(/<Relationship\b[^>]*Target="(slides|comments|notesSlides)\/[^"]*"[^>]*\/>/g, "");
