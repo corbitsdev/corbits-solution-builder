@@ -11,7 +11,6 @@ import { api, ApiFailure, type ProjectDetail } from "../client.js";
 import { Banner, Button, Field, Screen, StateLabel } from "../components.jsx";
 import {
   Textarea,
-  EmptyState,
   Tabs,
   Table,
   TableBody,
@@ -158,9 +157,15 @@ function Stakeholders({
 export function AudiencePackages({
   detail,
   onChanged,
+  drafting,
+  onDraftPackages,
 }: {
   detail: ProjectDetail;
   onChanged: () => void;
+  /** A round is under way: the rows say so instead of offering another. */
+  drafting: boolean;
+  /** Writes these stakeholders' packages, by name, leaving the others as they are. */
+  onDraftPackages: (audiences: string[]) => void;
 }) {
   const policy = (detail.project.policy ?? {}) as Policy;
   const audiences = policy.audiences ?? [];
@@ -176,6 +181,10 @@ export function AudiencePackages({
   const [error, setError] = useState<string | null>(null);
 
   const selected = packages.find((node) => node.id === active) ?? packages[0] ?? null;
+  // A stakeholder whose package was never written, or failed to be: the
+  // round writes the ones it can and reports the rest, so these are offered
+  // one by one rather than the whole stage again.
+  const missing = audiences.filter((audience) => !packages.some((node) => node.variant === audience.name));
 
   useEffect(() => {
     if (!selected) {
@@ -250,12 +259,40 @@ export function AudiencePackages({
           <Banner title="No stakeholders are named for this project" />
         ) : null}
 
-        {packages.length === 0 ? (
-          <EmptyState
-            title="No packages drafted"
-            description="Draft this stage to produce one package per stakeholder."
-          />
-        ) : (
+        {missing.length > 0 ? (
+          <div className="packages-missing" role="status">
+            <p className="packages-missing-title">
+              {packages.length === 0
+                ? "No packages yet."
+                : missing.length === 1
+                  ? "One stakeholder has no package yet."
+                  : `${missing.length} stakeholders have no package yet.`}
+            </p>
+            <ul className="packages-missing-list">
+              {missing.map((audience) => (
+                <li key={audience.name}>
+                  <span>
+                    <strong>{audience.name}</strong> · {roleLabel(audience.role)}
+                  </span>
+                  <Button loading={drafting} onClick={() => onDraftPackages([audience.name])}>
+                    Write it
+                  </Button>
+                </li>
+              ))}
+            </ul>
+            {missing.length > 1 ? (
+              <Button
+                variant="primary"
+                loading={drafting}
+                onClick={() => onDraftPackages(missing.map((audience) => audience.name))}
+              >
+                Write all {missing.length}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {packages.length === 0 ? null : (
           <>
             {/* One tab per audience package. */}
             <Tabs
@@ -279,6 +316,15 @@ export function AudiencePackages({
                     <p className="inline-note">Loading…</p>
                   )}
                 </div>
+                {/* A package that came back wrong can be written again on
+                    its own; the others keep their versions and decisions. */}
+                {selected.variant && !decisionFor(selected.variant) ? (
+                  <div className="button-row">
+                    <Button loading={drafting} onClick={() => onDraftPackages([selected.variant!])}>
+                      Write this package again
+                    </Button>
+                  </div>
+                ) : null}
               </>
             ) : null}
           </>

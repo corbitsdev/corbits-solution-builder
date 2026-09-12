@@ -2547,6 +2547,37 @@ button[aria-disabled="true"] {
 }
 
 /* The stakeholder editor: one row per person, name then role then remove. */
+/* Stakeholders without a package: a list, each with its own way to write one. */
+.packages-missing {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--radius-control);
+  background: var(--wb-card);
+}
+
+.packages-missing-title {
+  margin: 0;
+  font-weight: 600;
+}
+
+.packages-missing-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.packages-missing-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
 .stakeholder-editor {
   display: grid;
   gap: var(--space-3);
