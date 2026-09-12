@@ -55,6 +55,41 @@ export function catalogCapabilitiesFor(
   return { capabilities: [], quirks: null };
 }
 
+/**
+ * Model ids that can never answer a chat completion, by family: embeddings,
+ * speech, images, moderation, the completions-only legacy models, and the
+ * models OpenAI serves only through its Responses endpoint. Only a
+ * first-party OpenAI listing is read against this — it mixes every kind of
+ * model into one `/models` reply — and a listing from any other endpoint is
+ * taken as it comes, since its shape is unknown here.
+ */
+const NOT_A_CHAT_MODEL =
+  /embedding|whisper|tts|transcribe|moderation|dall-e|sora|davinci|babbage|-instruct|realtime|audio|-image|search-preview|computer-use|codex|deep-research|-pro\b/;
+
+/** Whether a listed model could serve the lifecycle's chat completions at all. */
+export function isServableModel(canonicalName: string, plugin: Plugin): boolean {
+  return plugin !== "openai" || !NOT_A_CHAT_MODEL.test(canonicalName);
+}
+
+/**
+ * The models a provider is recorded as serving, in the order they are
+ * preferred: the ones the inference catalog knows first, in the catalog's
+ * own order, then the rest as the provider listed them. The lifecycle pins
+ * whichever offering comes first, so the first one has to be a model that
+ * can answer; a raw listing put an embeddings model there.
+ */
+export function servableModels(models: readonly string[], plugin: Plugin): string[] {
+  const rank = (canonicalName: string) => {
+    const index = catalogModels.findIndex((entry) => entry.canonicalName === canonicalName);
+    return index === -1 ? Number.POSITIVE_INFINITY : index;
+  };
+  return models
+    .filter((canonicalName) => isServableModel(canonicalName, plugin))
+    .map((canonicalName, index) => ({ canonicalName, index, rank: rank(canonicalName) }))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .map((entry) => entry.canonicalName);
+}
+
 export function catalogDisplayNameFor(canonicalName: string): string {
   return (
     catalogModels.find((entry) => entry.canonicalName === canonicalName)?.displayName ??
@@ -190,8 +225,11 @@ export async function registerProviderCatalog(input: {
     (row) => row.providerId === providerRow!.id,
   );
 
+  const serving = servableModels(input.models, input.plugin);
+  await retireUnservable(offerings, models, serving, input.priority ?? 0);
+
   let count = 0;
-  for (const [index, canonicalName] of input.models.entries()) {
+  for (const [index, canonicalName] of serving.entries()) {
     const modelRow =
       models.find((row) => row.canonicalName === canonicalName) ??
       (await catalog.createModel({ canonicalName, displayName: catalogDisplayNameFor(canonicalName) }));
@@ -217,6 +255,63 @@ export async function registerProviderCatalog(input: {
   }
 
   return { providerRowId: providerRow.id, offerings: count };
+}
+
+/**
+ * An offering this provider carries for a model it is no longer recorded as
+ * serving — one a raw listing put there before the listing was read for
+ * what can answer — is disabled and moved behind every served one. Not
+ * deleted: a deployment may name it among its sources. Disabled, the
+ * lifecycle never picks it, and `toProviderRow` keeps it out of the rows the
+ * operator sees, so it never reads as a chosen model either.
+ */
+async function retireUnservable(
+  offerings: HubOffering[],
+  models: HubModel[],
+  serving: readonly string[],
+  basePriority: number,
+): Promise<void> {
+  let behind = 0;
+  for (const offering of offerings) {
+    const canonicalName = models.find((row) => row.id === offering.modelId)?.canonicalName ?? "";
+    if (serving.includes(canonicalName)) continue;
+    const priority = basePriority * 1000 + UNSERVABLE_OFFSET + behind;
+    behind += 1;
+    if (offering.disabled && offering.priority === priority) continue;
+    await catalog.patchOffering(offering.id, { disabled: true, priority });
+  }
+}
+
+/** Where a provider's retired offerings sit within its thousand: behind any it serves. */
+const UNSERVABLE_OFFSET = 900;
+
+/**
+ * Reads every connected provider's models again for what can answer, and
+ * reorders its offerings to match. Run on install so a workspace connected
+ * before the listing was read this way is put right without a reconnect.
+ */
+export async function rerankCatalogProviders(): Promise<void> {
+  if (!workspaceOrNull()) return;
+  const [providerRows, modelRows, offeringRows] = await Promise.all([
+    catalog.modelProviders(),
+    catalog.models(),
+    catalog.offerings(),
+  ]);
+  for (const row of providerRows) {
+    const offerings = offeringRows
+      .filter((offering) => offering.providerId === row.id)
+      .sort((a, b) => a.priority - b.priority);
+    const listed = offerings.map((offering) => modelRows.find((entry) => entry.id === offering.modelId)?.canonicalName ?? "");
+    const serving = servableModels(listed, row.plugin as Plugin);
+    const basePriority = offerings.length > 0 ? Math.floor(offerings[0]!.priority / 1000) : 0;
+    await retireUnservable(offerings, modelRows, serving, basePriority);
+    for (const [index, canonicalName] of serving.entries()) {
+      const offering = offerings.find((entry) => modelRows.find((model) => model.id === entry.modelId)?.canonicalName === canonicalName);
+      if (!offering) continue;
+      const priority = basePriority * 1000 + index;
+      if (offering.priority !== priority) await catalog.patchOffering(offering.id, { priority });
+    }
+  }
 }
 
 export type CatalogModelRow = {
@@ -285,6 +380,9 @@ function toProviderRow(
         disabled: offering.disabled,
       };
     })
+    // A retired offering is not one the provider serves: out of the rows, so
+    // it is neither offered as a choice nor read as one already made.
+    .filter((entry) => isServableModel(entry.canonicalName, row.plugin as Plugin))
     .sort((a, b) => a.priority - b.priority);
 
   return {

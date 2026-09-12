@@ -366,6 +366,77 @@ stub.close();
   local.close();
 }
 
+// A first-party OpenAI listing mixes every kind of model into one reply,
+// and the lifecycle pins whichever offering comes first. Recorded, the
+// listing leads with a model that can answer, in the catalog's order; the
+// ones that cannot are disabled behind it and kept out of the operator's
+// rows, so none is offered as a choice or read as one.
+{
+  const { registerProviderCatalog, getCatalogProvider, rerankCatalogProviders } = await import("../apps/hub/src/catalog.js");
+  // The listing is recorded directly, as a connect would record it once the
+  // key had been validated; the stub's credential (connected again, since
+  // the earlier connection was taken down above) stands in for OpenAI's.
+  const relisted = createServer((_request, response) => {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ data: [{ id: "stub-again" }] }));
+  });
+  await new Promise<void>((resolve) => relisted.listen(0, "127.0.0.1", resolve));
+  await connectProvider({
+    providerId: "compatible",
+    label: "Stub provider",
+    kind: "api_key",
+    secret: SECRET,
+    baseUrl: `http://127.0.0.1:${(relisted.address() as { port: number }).port}`,
+  });
+  const stubRow = (await rows("select credential_id from public.model_provider where name = 'compatible'"))[0] as { credential_id: string };
+  const listing = ["text-embedding-ada-002", "whisper-1", "gpt-4o-mini", "tts-1", "gpt-4.1", "o1-pro", "gpt-5.5", "gpt-4o-2024-08-06"];
+  await registerProviderCatalog({
+    providerId: "openai",
+    label: "OpenAI",
+    plugin: "openai",
+    baseUrl: "https://api.openai.com/v1",
+    credentialId: stubRow.credential_id,
+    models: listing,
+    priority: 3,
+  });
+  relisted.close();
+  const openai = await getCatalogProvider("openai");
+  const served = openai?.models.map((entry) => entry.canonicalName) ?? [];
+  check(
+    "a first-party OpenAI listing leads with a chat model the catalog knows, in the catalog's order",
+    served.slice(0, 3).join(",") === "gpt-5.5,gpt-4.1,gpt-4o-mini",
+    served.join(","),
+  );
+  check(
+    "models that cannot answer a chat completion are kept out of the provider's rows",
+    !served.some((name) => /embedding|whisper|tts|o1-pro/.test(name)) && served.includes("gpt-4o-2024-08-06"),
+    served.join(","),
+  );
+  const unservable = "select o.priority, o.disabled, m.canonical_name from public.model_offering o join public.model m on m.id = o.model_id where m.canonical_name in ('text-embedding-ada-002','whisper-1','tts-1','o1-pro','text-embedding-3-small')";
+  check("and they are recorded as no offering at all", (await rows(unservable)).length === 0);
+  check("and no model reads as the operator's chosen one", openai?.models.every((entry) => !entry.disabled) === true);
+
+  // A workspace connected before the listing was read this way holds such
+  // an offering already, and at the front: the very shape that pinned the
+  // lifecycle to an embeddings model. Install reranks it behind and off.
+  const { catalog } = await import("../apps/hub/src/hub-client.js");
+  const planted = await catalog.createModel({ canonicalName: "text-embedding-3-small", displayName: "text-embedding-3-small" });
+  await catalog.createOffering({ modelId: planted.id, providerId: openai!.providerRowId, priority: 3000, capabilities: [] });
+  await rerankCatalogProviders();
+  const retired = (await rows(unservable)) as { priority: number; disabled: boolean }[];
+  const reranked = (await getCatalogProvider("openai"))?.models ?? [];
+  check(
+    "reranking on install disables an offering that cannot answer and moves it behind every served one",
+    retired.length === 1 && retired[0]!.disabled && retired[0]!.priority >= 3900,
+    JSON.stringify(retired),
+  );
+  check(
+    "and the served ones lead again, in the catalog's order",
+    reranked[0]?.canonicalName === "gpt-5.5" && reranked[0].priority === 3000 && !reranked.some((entry) => entry.canonicalName === "text-embedding-3-small"),
+    reranked.map((entry) => `${entry.canonicalName}:${entry.priority}`).join(","),
+  );
+}
+
 const failed = checks.filter((entry) => !entry.ok);
 console.log(`\nCatalog smoke: ${checks.length - failed.length}/${checks.length} checks passed`);
 process.exit(failed.length === 0 ? 0 : 1);

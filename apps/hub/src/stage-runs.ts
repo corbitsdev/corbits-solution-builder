@@ -554,7 +554,7 @@ export async function requestDraft(args: {
     if (failed.length > 0) {
       throw new HostError(
         "provider_unavailable",
-        failed.map((entry) => `${entry.audience}: ${entry.message}`).join(" "),
+        failed.map((entry) => `The package for ${entry.audience} could not be written. ${entry.message}`).join(" "),
         {},
         true,
       );
