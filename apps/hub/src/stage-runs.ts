@@ -186,6 +186,24 @@ function panelPrincipalFor(stepId: string): AgentRole {
 }
 
 /**
+ * How the platform's default director words a reply that stands in for a
+ * failed inference call, one preamble per error category. Mirrors
+ * `@intx/inference`'s `default-director.ts`; a step output that named the
+ * error itself is the upstream ask, and until then the words are the signal.
+ */
+const INFERENCE_ERROR_PREAMBLES = [
+  "This agent could not complete your request",
+  "This agent encountered a temporary error communicating with the inference provider",
+  "This agent's inference request was aborted",
+];
+
+/** Whether a reply is the director's account of a failed call rather than the model's answer. */
+export function isInferenceErrorReply(reply: string): boolean {
+  const text = reply.trimStart();
+  return INFERENCE_ERROR_PREAMBLES.some((preamble) => text.startsWith(preamble));
+}
+
+/**
  * Persists one agent step's reply as an artifact version — the boundary
  * validation and write every drafted stage shares, whatever produced the
  * reply: the stage's own specialist, one of stage 5's audience packages, or
@@ -211,6 +229,13 @@ async function persistOutput(args: {
       {},
       true,
     );
+  }
+  // The platform's director answers a failed call with a sentence about the
+  // failure, as the agent's reply: the step completes, and nothing in its
+  // output says the text is not the model's. Recorded, that sentence would
+  // become a version of the document. It is the failure it describes.
+  if (isInferenceErrorReply(cleaned)) {
+    throw new HostError("provider_unavailable", `${args.role.title} could not get an answer from the model. ${cleaned.trim()}`, {}, true);
   }
   // A design is one HTML document, and one that stops before its closing tag
   // was cut short on the way here: a dropped stream, a limit the run's own
@@ -270,6 +295,12 @@ export type StageDraftRequest = {
   draft: StageDraftResult;
   /** Stage 5 only: one package per named audience, in policy order; `draft` is the first. */
   packages: StageDraftResult[] | null;
+  /**
+   * Stage 5 only: the stakeholders whose package could not be written this
+   * round, with the reason. The packages that were written are recorded
+   * regardless, so a person retries these alone.
+   */
+  failed?: { audience: string; message: string }[];
   /** Stage 6 only: the four panel reviews of the architect's plan. */
   review: StageDraftResult[] | null;
   /** Something the person should hear about how this draft came to be: a retry the policy asked for. */
@@ -296,6 +327,12 @@ export async function requestDraft(args: {
   quotes?: Quote[];
   mode: "interview" | "final";
   projectTitle: string;
+  /**
+   * Stage 5 only: the stakeholders whose package this round writes, by
+   * name. Absent, every stakeholder's. The others' packages are left as
+   * they are, and their steps are skipped by the run.
+   */
+  audiences?: readonly string[];
 }): Promise<StageDraftRequest> {
   const inputs = await approvedInputs(args.projectId, args.stage);
   const context = await stageContext({ projectId: args.projectId, stage: args.stage });
@@ -304,6 +341,8 @@ export async function requestDraft(args: {
   let prompt: string | undefined;
   let prompts: string[] | undefined;
   let audiences: { name: string; role: string }[] = [];
+  /** Stage 5: which of `audiences` this round writes, in the same order. */
+  let wanted: boolean[] = [];
 
   if (args.stage === 5) {
     const project = await readProject(args.projectId);
@@ -314,6 +353,14 @@ export async function requestDraft(args: {
         "No audiences are named for this project. Stage 5 needs at least one, " +
           "and who must decide is the user's call, not the product's.",
       );
+    }
+    const unknown = (args.audiences ?? []).filter((name) => !audiences.some((audience) => audience.name === name));
+    if (unknown.length > 0) {
+      throw new HostError("validation_failed", `No stakeholder is named ${unknown.map((name) => JSON.stringify(name)).join(", ")}.`);
+    }
+    wanted = audiences.map((audience) => args.audiences === undefined || args.audiences.includes(audience.name));
+    if (!wanted.some(Boolean)) {
+      throw new HostError("validation_failed", "No stakeholder was named to write a package for.");
     }
     prompts = audiences.map((audience) =>
       buildDraftPrompt({
@@ -419,7 +466,7 @@ export async function requestDraft(args: {
       ...(args.quotes && args.quotes.length > 0 ? { quotes: args.quotes } : {}),
       mode: args.mode,
       ...(prompt !== undefined ? { prompt } : {}),
-      ...(prompts !== undefined ? { prompts } : {}),
+      ...(prompts !== undefined ? { prompts, wanted } : {}),
       ...(context.brief ? { brief: context.brief } : {}),
       inference: { maxTokens: cap },
     },
@@ -434,14 +481,28 @@ export async function requestDraft(args: {
     );
   }
 
-  const stepIds = agentStepIds(args.stage, audiences.length);
-  const { runId: iterationRunId, outputs } = await awaitIterationOutputs({
+  // At stage 5 only the wanted packages' steps run; the rest are skipped by
+  // their gates and are not waited on.
+  const stepIds = agentStepIds(args.stage, audiences.length).filter(
+    (stepId, index) => args.stage !== 5 || wanted[index],
+  );
+  // A stakeholder's package failing is that package's failure, not the
+  // round's: the others are recorded and the failed ones are reported, so
+  // the person retries those alone. Every other stage's steps depend on
+  // each other, so there the first failure is the round's.
+  const { runId: iterationRunId, outputs, failures } = await awaitIterationOutputs({
     projectId: args.projectId,
     stage: args.stage,
     afterIteration,
     stepIds,
     timeoutMs: DRAFT_STEP_TIMEOUT_MS,
+    settle: args.stage === 5,
   });
+  const audienceOf = (stepId: string) => audiences[Number(stepId.replace(/^package-/, ""))]!.name;
+  const failed: { audience: string; message: string }[] = [...failures].map(([stepId, message]) => ({
+    audience: audienceOf(stepId),
+    message,
+  }));
 
   const persisted = new Map<string, StageDraftResult>();
   for (const stepId of stepIds) {
@@ -461,31 +522,47 @@ export async function requestDraft(args: {
           ? role.title.replace("Senior engineer — ", "")
           : undefined;
 
-    persisted.set(
-      stepId,
-      await persistOutput({
-        projectId: args.projectId,
-        stage: args.stage,
-        role,
-        reply: output.reply,
-        iterationRunId,
+    try {
+      persisted.set(
         stepId,
-        actor: args.actor,
-        inputs,
-        ...(variant !== undefined ? { variant } : {}),
-        // Only the round's own prompt drew on the compacted brief; a panel
-        // review or an audience package was never handed it.
-        ...(isDraftStep && context.brief ? { brief: context.brief } : {}),
-      }),
-    );
+        await persistOutput({
+          projectId: args.projectId,
+          stage: args.stage,
+          role,
+          reply: output.reply,
+          iterationRunId,
+          stepId,
+          actor: args.actor,
+          inputs,
+          ...(variant !== undefined ? { variant } : {}),
+          // Only the round's own prompt drew on the compacted brief; a panel
+          // review or an audience package was never handed it.
+          ...(isDraftStep && context.brief ? { brief: context.brief } : {}),
+        }),
+      );
+    } catch (cause) {
+      // An empty or cut-short package is that package's failure too.
+      if (args.stage !== 5 || !(cause instanceof HostError)) throw cause;
+      failed.push({ audience: audienceOf(stepId), message: cause.message });
+    }
   }
 
-  const packages = args.stage === 5 ? stepIds.map((id) => persisted.get(id)!) : null;
+  const packages = args.stage === 5 ? stepIds.flatMap((id) => persisted.get(id) ?? []) : null;
   const review = args.stage === 6 ? stepIds.filter((id) => id !== DRAFT_STEP_ID).map((id) => persisted.get(id)!) : null;
   const draft = persisted.get(DRAFT_STEP_ID) ?? packages?.[0];
-  if (!draft) throw new HostError("internal_error", `Stage ${args.stage} produced no draft output.`);
+  if (!draft) {
+    if (failed.length > 0) {
+      throw new HostError(
+        "provider_unavailable",
+        failed.map((entry) => `${entry.audience}: ${entry.message}`).join(" "),
+        {},
+        true,
+      );
+    }
+    throw new HostError("internal_error", `Stage ${args.stage} produced no draft output.`);
+  }
 
-  return { draft, packages, review };
+  return { draft, packages, review, ...(failed.length > 0 ? { failed } : {}) };
   }
 }
 
@@ -510,7 +587,9 @@ function sleep(ms: number): Promise<void> {
  * step in `stepIds`, and returns each one's resolved `{reply}` output.
  * Throws `HostError("provider_unavailable", …)` the moment any of them fails,
  * quoting the run's own error message, and again if nothing has answered by
- * `timeoutMs`.
+ * `timeoutMs`. With `settle`, a failed step is not the end: the wait goes
+ * on until every step has completed or failed, and the failures come back
+ * by step id beside the outputs of the ones that completed.
  */
 export async function awaitIterationOutputs(args: {
   readonly projectId: string;
@@ -518,7 +597,8 @@ export async function awaitIterationOutputs(args: {
   readonly afterIteration: number;
   readonly stepIds: readonly string[];
   readonly timeoutMs: number;
-}): Promise<{ runId: string; outputs: Map<string, { reply: string }> }> {
+  readonly settle?: boolean;
+}): Promise<{ runId: string; outputs: Map<string, { reply: string }>; failures: Map<string, string> }> {
   const deadline = Date.now() + args.timeoutMs;
 
   for (;;) {
@@ -529,30 +609,29 @@ export async function awaitIterationOutputs(args: {
       const iteration = iterations[newestIndex]!;
       const anchor = iteration.runId.split("__", 1)[0]!;
 
+      const failures = new Map<string, string>();
       for (const stepId of args.stepIds) {
         const failed = findEvent(iteration.events, "StepFailed", stepId);
-        if (failed) {
-          const error = eventBody(failed).error as { message?: string } | undefined;
-          throw new HostError(
-            "provider_unavailable",
-            `The ${stepId} step failed: ${error?.message ?? "no error message was recorded"}.`,
-            {},
-            true,
-          );
-        }
+        if (!failed) continue;
+        const error = eventBody(failed).error as { message?: string } | undefined;
+        const message = `The ${stepId} step failed: ${error?.message ?? "no error message was recorded"}.`;
+        if (!args.settle) throw new HostError("provider_unavailable", message, {}, true);
+        failures.set(stepId, message);
       }
 
       const completed = args.stepIds.map((stepId) => findEvent(iteration.events, "StepCompleted", stepId));
-      if (completed.every((event) => event !== undefined)) {
+      if (completed.every((event, index) => event !== undefined || failures.has(args.stepIds[index]!))) {
         const outputs = new Map<string, { reply: string }>();
         for (const [index, stepId] of args.stepIds.entries()) {
-          const output = eventBody(completed[index]!).output as { ref?: unknown } | undefined;
+          const event = completed[index];
+          if (!event) continue;
+          const output = eventBody(event).output as { ref?: unknown } | undefined;
           if (typeof output?.ref !== "string") {
             throw new HostError("internal_error", `The ${stepId} step completed with no output ref.`);
           }
           outputs.set(stepId, (await readOutputRef(anchor, iteration.runId, output.ref)) as { reply: string });
         }
-        return { runId: iteration.runId, outputs };
+        return { runId: iteration.runId, outputs, failures };
       }
     }
 

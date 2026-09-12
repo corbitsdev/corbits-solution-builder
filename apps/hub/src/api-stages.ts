@@ -108,6 +108,8 @@ export function registerStageRoutes(api: Hono) {
     const body = (await context.req.json().catch(() => ({}))) as {
       input?: string;
       quotes?: { quote: string }[];
+      /** Stage 5: write these stakeholders' packages only, by name. */
+      audiences?: string[];
     };
     const detail = await projectDetail(projectId, localActor().principalId);
     if (!detail.current) throw notFound("An open run for that project");
@@ -121,11 +123,18 @@ export function registerStageRoutes(api: Hono) {
       ...(body.quotes && body.quotes.length > 0 ? { quotes: body.quotes } : {}),
       mode: "final",
       projectTitle: detail.project.title,
+      ...(Array.isArray(body.audiences) ? { audiences: body.audiences.map(String) } : {}),
     });
 
-    // Stage 5 fans out into one package per named audience; stage 6's four
-    // panel reviews ride the same round as the architect's plan. Every other
-    // stage carries neither.
-    return context.json({ draft: result.draft, ...(result.note !== undefined ? { note: result.note } : {}), packages: result.packages, review: result.review });
+    // Stage 5 fans out into one package per named audience, and says which
+    // could not be written; stage 6's four panel reviews ride the same round
+    // as the architect's plan. Every other stage carries neither.
+    return context.json({
+      draft: result.draft,
+      ...(result.note !== undefined ? { note: result.note } : {}),
+      packages: result.packages,
+      review: result.review,
+      ...(result.failed ? { failed: result.failed } : {}),
+    });
   });
 }
