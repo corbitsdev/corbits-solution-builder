@@ -62,11 +62,22 @@ const EVALUATOR_REPLY = `Verdict: not yet
 
 const BUILD_REPLY = "## In short\n- Build attempt acknowledged.";
 
-/** Which canned reply a completion gets, told apart by a phrase distinctive to each role's own system prompt. */
-function replyFor(messages: unknown[]): string {
+/** The stakeholder whose package the stub answers with nothing, while set. */
+let packageToFail: string | null = null;
+
+/** Which canned reply a completion gets, told apart by a phrase distinctive to each role's own system prompt; null refuses the call. */
+function replyFor(messages: unknown[]): string | null {
   const text = JSON.stringify(messages);
   if (text.includes("You are the Brainstormer at stage 1.")) return BRAINSTORMER_REPLY;
   if (text.includes("You are the Brief evaluator inside Solutions Builder")) return EVALUATOR_REPLY;
+  if (text.includes("You are the Presentation creator at stage 5.")) {
+    const audience = /Prepare the package for one audience only: ([^(]+) \(/.exec(text)?.[1]?.trim() ?? "?";
+    // A refusal, not an empty reply: an assistant turn with no text leaves
+    // the agent step waiting for one, while a provider error fails the
+    // step at once — the failure a person sees when a call goes wrong.
+    if (audience === packageToFail) return null;
+    return `## Audience: ${audience}\n\n## Why now\n- The Monday rebuild costs a day a week.`;
+  }
   return BUILD_REPLY;
 }
 
@@ -83,10 +94,17 @@ const stub = createServer((request, response) => {
     request.on("end", () => {
       const parsed = JSON.parse(body) as { model: string; messages: unknown[]; max_tokens?: number };
       completions.push({ model: parsed.model, messages: parsed.messages, maxTokens: parsed.max_tokens });
+      const reply = replyFor(parsed.messages);
+      if (reply === null) {
+        // A 400 is fatal to the inference harness: no retry, the step fails now.
+        response.writeHead(400, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: { message: "stub: this package is refused", type: "invalid_request_error" } }));
+        return;
+      }
       const chunk = (delta: Record<string, unknown>, finish: string | null) =>
         `data: ${JSON.stringify({ id: "stub", object: "chat.completion.chunk", model: parsed.model, choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
       response.writeHead(200, { "content-type": "text/event-stream" });
-      response.write(chunk({ role: "assistant", content: replyFor(parsed.messages) }, null));
+      response.write(chunk({ role: "assistant", content: reply }, null));
       response.write(chunk({}, "stop"));
       response.end("data: [DONE]\n\n");
     });
@@ -214,7 +232,10 @@ try {
     policy: {
       costTolerancePercent: 15,
       costToleranceAbsolute: 500,
-      audiences: [{ name: "Project owner", role: "project_owner" }],
+      audiences: [
+        { name: "Project owner", role: "project_owner" },
+        { name: "Finance lead", role: "budget_approver" },
+      ],
       audienceQuorum: 1,
       allowExternalProviders: false,
     },
@@ -270,6 +291,8 @@ try {
     // then evaluated by its own agent step (the brief evaluator) — nothing
     // in-process, and the thread and the evaluation are both projected back
     // from the run's events afterwards.
+    /** The stage 1 brief the draft produced, or null when it did not. */
+    let brief: { nodeId: string; artifactId: string; contentHash: string } | null = null;
     {
       const { requestDraft } = await import("../apps/hub/src/stage-runs.js");
       const { evaluationIn, threadTurns } = await import("../apps/hub/src/stage-thread.js");
@@ -296,6 +319,7 @@ try {
         drafted = { error: cause instanceof Error ? cause.message : String(cause) };
       }
       unsubscribeLive();
+      if ("draft" in drafted) brief = drafted.draft;
 
       check(
         "a stage.draft round produces a problem_brief version through the run's own agent step",
@@ -343,7 +367,49 @@ try {
       );
     }
 
-    const submitted = await deliverStageSignal(project.projectId, "stage.submit", { runId: project.runId }, `smoke-submit-${project.projectId}`);
+    // From here the ledger is walked with its own commands, the way the app
+    // does it: the engine commits each transition and delivers the signal
+    // the run waits on. The run and the ledger then agree at every stage,
+    // which stage 5's draft below depends on.
+    const { execute } = await import("../apps/hub/src/engine.js");
+    const { newId } = await import("../apps/hub/src/ids.js");
+    const { writeArtifact, projectDetail } = await import("../apps/hub/src/projects.js");
+    const ACTOR = { ...localActor(), displayName: "Smoke" };
+    const command = (type: string, payload: Record<string, unknown>) =>
+      execute({
+        type: type as never,
+        actor: ACTOR,
+        projectId: project.projectId,
+        idempotencyKey: newId.command(),
+        correlationId: newId.correlation(),
+        payload,
+      });
+    const currentRunId = async () => (await projectDetail(project.projectId, ACTOR.principalId)).current!.id;
+    const versionOf = (node: { nodeId: string; artifactId: string; contentHash: string }) => [
+      { artifactId: node.artifactId, versionId: node.nodeId, contentHash: node.contentHash },
+    ];
+    const STAGE_ARTIFACT: Record<number, string> = {
+      1: "problem_brief",
+      2: "solution_constraints",
+      3: "chosen_approach",
+      4: "design_artifact",
+    };
+    const produce = async (stage: number) =>
+      writeArtifact(
+        {
+          projectId: project.projectId,
+          kind: STAGE_ARTIFACT[stage] as never,
+          title: `Stage ${stage} artifact`,
+          content: `# Stage ${stage}\n\nRecorded by the sidecar smoke at ${new Date().toISOString()}.`,
+          mediaType: "text/markdown",
+          sourceVersionIds: [],
+          provenance: { producer: "human", runId: await currentRunId() },
+        },
+        ACTOR,
+      );
+
+    const briefVersion = versionOf(brief ?? (await produce(1)));
+    const submitted = (await command("stage.submit", { runId: await currentRunId(), versions: briefVersion })).delivery ?? "none";
     check("stage.submit lands on the parked loop as its round signal", submitted === "delivered", submitted);
     const atGate = await settle((s) => s.parked && s.stepId === gateStepId(1));
     if (!atGate) {
@@ -356,7 +422,7 @@ try {
       atGate ? `${atGate.stepId} ${atGate.signalName ?? ""}` : "no status",
     );
 
-    const approved = await deliverStageSignal(project.projectId, "stage.approve", { runId: project.runId }, `smoke-approve-${project.projectId}`);
+    const approved = (await command("stage.approve", { runId: await currentRunId(), versions: briefVersion })).delivery ?? "none";
     check("stage.approve lands on the gate", approved === "delivered", approved);
     const atStage2 = await settle((s) => s.parked && s.stage === 2);
     check(
@@ -371,6 +437,81 @@ try {
     let walked = atStage2?.parked === true && atStage2.stage === 2;
     for (const stage of [2, 3, 4, 5, 6, 7] as const) {
       if (!walked) break;
+      // Stages 2 to 4 through the engine, with a version to submit and
+      // approve; stage 5 and beyond by raw signal, since the ledger's own
+      // stage 5 approval needs stakeholder decisions this smoke does not
+      // record, and the run alone is what the build stage below needs.
+      if (stage <= 4) {
+        const version = versionOf(await produce(stage));
+        await command("stage.submit", { runId: await currentRunId(), versions: version });
+        const gate = await settle((s) => s.parked && s.stepId === gateStepId(stage));
+        await command("stage.approve", { runId: await currentRunId(), versions: version });
+        const next = await settle((s) => s.parked && s.stage === stage + 1);
+        walked = gate?.stepId === gateStepId(stage) && next?.stage === stage + 1;
+        continue;
+      }
+      // Stage 5 writes one package per stakeholder, each behind its own
+      // gate. A package that fails is that package's failure: the others
+      // are recorded and it is reported, and a later round writes it alone,
+      // skipping the packages that already exist.
+      if (stage === 5) {
+        const { requestDraft } = await import("../apps/hub/src/stage-runs.js");
+        const packagerCalls = () =>
+          completions.filter((call) => JSON.stringify(call.messages).includes("You are the Presentation creator at stage 5.")).length;
+        const draftPackages = async (audiences?: string[]) => {
+          try {
+            return await requestDraft({
+              projectId: project.projectId,
+              stage: 5,
+              // Each approval opens a new run at the next stage; the one
+              // the project was created with ended at stage 1.
+              runId: await currentRunId(),
+              actor: localActor(),
+              message: "",
+              mode: "final",
+              projectTitle,
+              ...(audiences ? { audiences } : {}),
+            });
+          } catch (cause) {
+            return { error: cause instanceof Error ? cause.message : String(cause) };
+          }
+        };
+
+        packageToFail = "Finance lead";
+        const first = await draftPackages();
+        check(
+          "a stakeholder's package that fails is reported, and the others are recorded",
+          "packages" in first &&
+            first.packages?.length === 1 &&
+            first.packages[0]?.content.includes("Audience: Project owner") === true &&
+            first.failed?.length === 1 &&
+            first.failed[0]?.audience === "Finance lead",
+          "error" in first ? first.error : JSON.stringify({ packages: first.packages?.length, failed: first.failed }),
+        );
+
+        packageToFail = null;
+        const before = packagerCalls();
+        const again = await draftPackages(["Finance lead"]);
+        check(
+          "the failed package is written again on its own",
+          "packages" in again &&
+            again.packages?.length === 1 &&
+            again.packages[0]?.content.includes("Audience: Finance lead") === true &&
+            again.failed === undefined,
+          "error" in again ? again.error : JSON.stringify({ packages: again.packages?.length, failed: again.failed }),
+        );
+        check("the round that writes one package again runs no other package step", packagerCalls() - before === 1, `${packagerCalls() - before} calls`);
+
+        const { projectDetail } = await import("../apps/hub/src/projects.js");
+        const current = (await projectDetail(project.projectId, localActor().principalId)).nodes.filter(
+          (node) => node.kind === "audience_package" && node.supersededByNodeId === null,
+        );
+        check(
+          "both stakeholders now hold a current package",
+          current.length === 2 && ["Project owner", "Finance lead"].every((name) => current.some((node) => node.variant === name)),
+          current.map((node) => `${node.variant}:v${node.version}`).join(","),
+        );
+      }
       await deliverStageSignal(project.projectId, "stage.submit", { runId: project.runId }, `smoke-submit-${stage}-${project.projectId}`);
       const gate = await settle((s) => s.parked && s.stepId === gateStepId(stage));
       const advance = stage === 7 ? "cost.approve" : "stage.approve";
