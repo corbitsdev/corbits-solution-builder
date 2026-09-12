@@ -392,7 +392,7 @@ type DeckRole = (typeof DECK_ROLES)[number];
 type DeckTheme = "ember" | "slate" | "forest" | "navy" | "plum";
 type DeckTypeface = "Calibri" | "Georgia" | "Arial" | "Helvetica";
 type DeckDensity = "sparse" | "standard" | "full";
-type DeckImages = "none" | "cover" | "all";
+type DeckImages = "none" | "cover" | "some" | "all";
 type DeckDesign = {
   theme: DeckTheme;
   typeface: DeckTypeface;
@@ -497,7 +497,7 @@ function StakeholderDecks() {
   return (
     <Section
       title="Stakeholder decks"
-      lead="How each stakeholder role's slides look, and what their deck outline should emphasise. A changed look rebuilds the slides the next time they are saved; changed guidance shapes the next package written for that role. Images are drawn by the first connected provider that lists an image model, when the slides are saved, and each is kept so it is drawn once."
+      lead="How each stakeholder role's slides look, and what their deck outline should emphasise. A changed look rebuilds the slides the next time they are saved; changed guidance shapes the next package written for that role. For images, a model reads the whole deck, decides which slides a picture would help and what each should show, and the first connected provider that lists an image model draws them when the slides are saved; each is kept so it is drawn once."
     >
       {error ? <Banner tone="error" title={error} /> : null}
       {DECK_ROLES.map((role) => {
@@ -562,6 +562,7 @@ function StakeholderDecks() {
                 >
                   <option value="none">None</option>
                   <option value="cover">The cover</option>
+                  <option value="some">Some slides, chosen for the content</option>
                   <option value="all">The cover and every slide</option>
                 </select>
               </label>
