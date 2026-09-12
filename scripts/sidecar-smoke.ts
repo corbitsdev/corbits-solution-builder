@@ -489,6 +489,17 @@ try {
           "error" in first ? first.error : JSON.stringify({ packages: first.packages?.length, failed: first.failed }),
         );
 
+        check(
+          "the failure names the provider and model that were asked",
+          "failed" in first && first.failed?.[0]?.message.includes("Stub provider · stub-large") === true,
+          "failed" in first ? String(first.failed?.[0]?.message).slice(0, 160) : "",
+        );
+        check(
+          "a recorded package names the model that wrote it",
+          "packages" in first && first.packages?.[0]?.model === "stub-large" && first.packages[0].providerId === "compatible",
+          "packages" in first ? `${first.packages?.[0]?.providerId}/${first.packages?.[0]?.model}` : "",
+        );
+
         packageToFail = null;
         const before = packagerCalls();
         const again = await draftPackages(["Finance lead"]);

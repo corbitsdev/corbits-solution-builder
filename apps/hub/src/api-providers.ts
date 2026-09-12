@@ -67,9 +67,11 @@ export function registerProviderRoutes(api: Hono) {
   );
 
   api.put("/providers/:providerId/model", async (context) => {
-    const body = (await context.req.json()) as { model?: string };
-    if (!body.model) throw new HostError("validation_failed", "Name a model.");
-    const provider = await selectModel(context.req.param("providerId"), body.model);
+    // An empty model is "best available": the choice is cleared and the
+    // host picks among what the provider serves.
+    const body = (await context.req.json().catch(() => ({}))) as { model?: string };
+    const model = typeof body.model === "string" ? body.model.trim() : "";
+    const provider = await selectModel(context.req.param("providerId"), model === "" ? null : model);
     return context.json({ provider });
   });
 

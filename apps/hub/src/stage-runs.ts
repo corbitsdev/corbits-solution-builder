@@ -40,6 +40,7 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { newId } from "./ids.js";
 import { ArtifactDraft } from "./domain.js";
 import { HostError, ReplyCutShort } from "./errors.js";
+import { providerServingModel } from "./catalog.js";
 import { MATERIAL_KIND, materialText } from "./source-material.js";
 import {
   cutShortTwice,
@@ -220,12 +221,18 @@ async function persistOutput(args: {
   inputs: { node: { id: string } }[];
   variant?: string;
   brief?: string;
+  /** The model the step's turn names — the one the deployment is pinned to. */
+  model?: string;
 }): Promise<StageDraftResult> {
   const cleaned = stripOuterFence(args.reply);
+  const served = args.model ? await providerServingModel(args.model) : null;
+  // Who was asked, named in any failure: Settings cannot say which model
+  // the host picked among "best available", and the failure has to.
+  const asked = args.model ? `${served ? `${served.label} · ` : ""}${args.model}` : "the model";
   if (!cleaned.trim()) {
     throw new HostError(
       "provider_unavailable",
-      `${args.role.title} returned an empty draft. The model or provider failed; nothing was recorded.`,
+      `${args.role.title} got an empty draft from ${asked}. The model or provider failed; nothing was recorded.`,
       {},
       true,
     );
@@ -235,7 +242,7 @@ async function persistOutput(args: {
   // output says the text is not the model's. Recorded, that sentence would
   // become a version of the document. It is the failure it describes.
   if (isInferenceErrorReply(cleaned)) {
-    throw new HostError("provider_unavailable", `${args.role.title} could not get an answer from the model. ${cleaned.trim()}`, {}, true);
+    throw new HostError("provider_unavailable", `${args.role.title} could not get an answer from ${asked}. ${cleaned.trim()}`, {}, true);
   }
   // A design is one HTML document, and one that stops before its closing tag
   // was cut short on the way here: a dropped stream, a limit the run's own
@@ -285,8 +292,8 @@ async function persistOutput(args: {
   return {
     ...written,
     agent: args.role.id,
-    providerId: "",
-    model: args.role.modelKey ?? "",
+    providerId: served?.providerId ?? "",
+    model: args.model ?? args.role.modelKey ?? "",
     content: args.reply,
   };
 }
@@ -534,6 +541,7 @@ export async function requestDraft(args: {
           stepId,
           actor: args.actor,
           inputs,
+          ...(typeof output.turn?.model === "string" ? { model: output.turn.model } : {}),
           ...(variant !== undefined ? { variant } : {}),
           // Only the round's own prompt drew on the compacted brief; a panel
           // review or an audience package was never handed it.
@@ -582,6 +590,9 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** An agent step's output: the reply, and the turn that produced it, which names the model. */
+export type StepReply = { reply: string; turn?: { model?: string } };
+
 /**
  * Waits for the newest iteration beyond `afterIteration` to complete every
  * step in `stepIds`, and returns each one's resolved `{reply}` output.
@@ -598,7 +609,7 @@ export async function awaitIterationOutputs(args: {
   readonly stepIds: readonly string[];
   readonly timeoutMs: number;
   readonly settle?: boolean;
-}): Promise<{ runId: string; outputs: Map<string, { reply: string }>; failures: Map<string, string> }> {
+}): Promise<{ runId: string; outputs: Map<string, StepReply>; failures: Map<string, string> }> {
   const deadline = Date.now() + args.timeoutMs;
 
   for (;;) {
@@ -621,7 +632,7 @@ export async function awaitIterationOutputs(args: {
 
       const completed = args.stepIds.map((stepId) => findEvent(iteration.events, "StepCompleted", stepId));
       if (completed.every((event, index) => event !== undefined || failures.has(args.stepIds[index]!))) {
-        const outputs = new Map<string, { reply: string }>();
+        const outputs = new Map<string, StepReply>();
         for (const [index, stepId] of args.stepIds.entries()) {
           const event = completed[index];
           if (!event) continue;
@@ -629,7 +640,7 @@ export async function awaitIterationOutputs(args: {
           if (typeof output?.ref !== "string") {
             throw new HostError("internal_error", `The ${stepId} step completed with no output ref.`);
           }
-          outputs.set(stepId, (await readOutputRef(anchor, iteration.runId, output.ref)) as { reply: string });
+          outputs.set(stepId, (await readOutputRef(anchor, iteration.runId, output.ref)) as StepReply);
         }
         return { runId: iteration.runId, outputs, failures };
       }

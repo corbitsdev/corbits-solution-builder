@@ -343,6 +343,31 @@ export async function rerankCatalogProviders(): Promise<void> {
   }
 }
 
+/**
+ * The provider that serves a model, by the label the operator sees, or null
+ * when no offering carries it. Read when a call fails, so the failure names
+ * who was asked and which model, which Settings alone cannot say once the
+ * host has picked among "best available".
+ */
+export async function providerServingModel(canonicalName: string): Promise<{ label: string; providerId: string } | null> {
+  if (!workspaceOrNull()) return null;
+  const [providerRows, modelRows, offeringRows, vendorRows] = await Promise.all([
+    catalog.modelProviders(),
+    catalog.models(),
+    catalog.offerings(),
+    catalog.providers(),
+  ]);
+  const model = modelRows.find((row) => row.canonicalName === canonicalName);
+  if (!model) return null;
+  const offering = offeringRows
+    .filter((row) => row.modelId === model.id)
+    .sort((a, b) => Number(a.disabled) - Number(b.disabled) || a.priority - b.priority)[0];
+  const provider = offering ? providerRows.find((row) => row.id === offering.providerId) : undefined;
+  if (!provider) return null;
+  const label = vendorRows.find((row) => row.name === provider.name)?.metadata?.label;
+  return { label: typeof label === "string" ? label : provider.name, providerId: provider.name };
+}
+
 export type CatalogModelRow = {
   offeringId: string;
   canonicalName: string;
