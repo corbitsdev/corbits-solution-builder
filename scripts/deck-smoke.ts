@@ -4,7 +4,12 @@
  * notes, the decision request) and the render (a PowerPoint file with one
  * slide per outline item plus a cover and the decision).
  */
-import { deckFrom, deckFileName, decisionLinesIn, outlineSlidesIn, renderDeck } from "../apps/hub/src/deck.js";
+import { mkdtemp as mkdtempTop } from "node:fs/promises";
+import { tmpdir as tmpdirTop } from "node:os";
+import { join as joinTop } from "node:path";
+// The settings the smoke saves go to a data directory of its own.
+process.env["SOLUTIONS_BUILDER_DATA_DIR"] = await mkdtempTop(joinTop(tmpdirTop(), "sb-deck-settings-"));
+const { deckFrom, deckFileName, decisionLinesIn, outlineSlidesIn, renderDeck } = await import("../apps/hub/src/deck.js");
 
 const checks: { name: string; ok: boolean }[] = [];
 function check(name: string, ok: boolean, detail = "") {
@@ -209,6 +214,20 @@ await rm(dir3, { recursive: true, force: true });
   const types4 = Bun.spawnSync(["unzip", "-p", file4, "\\[Content_Types\\].xml"]).stdout.toString();
   check("the package declares every slide part it carries", slides4.every((name) => types4.includes(`PartName="/${name}"`)));
   await rm(dir4, { recursive: true, force: true });
+}
+
+// Six roles' settings changed at once — what six selects on one screen do
+// while the host is busy — must all land; each save rewrites the whole file.
+{
+  const { DECK_ROLES, deckSettings, saveDeckDesign } = await import("../apps/hub/src/deck-settings.js");
+  await Promise.all(DECK_ROLES.map((role) => saveDeckDesign(role, { images: "some" })));
+  const settings = await deckSettings();
+  const landed = DECK_ROLES.filter((role) => settings[role].images === "some");
+  check("settings saved for every role at once all land", landed.length === DECK_ROLES.length, `${landed.length} of ${DECK_ROLES.length}`);
+  const { saveDesignerSettings, designerSettings } = await import("../apps/hub/src/designer-settings.js");
+  await Promise.all([saveDesignerSettings({ surface: "dark" }), saveDesignerSettings({ language: "Inter, one accent." })]);
+  const designer = await designerSettings();
+  check("two designer settings saved at once both land", designer.surface === "dark" && designer.language === "Inter, one accent.");
 }
 
 const failed = checks.filter((entry) => !entry.ok);
