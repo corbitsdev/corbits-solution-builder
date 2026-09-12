@@ -38,7 +38,7 @@ import {
   bundleFileName,
 } from "./project-transfer.js";
 import { bytesOf } from "./source-material.js";
-import { ensureDeckFor } from "./deck.js";
+import { deckBytesOf, ensureDeckFor } from "./deck.js";
 import { attachMaterial, MATERIAL_KIND, type IncomingFile } from "./source-material.js";
 import { setStakeholders, STAKEHOLDER_ROLES } from "./stakeholders.js";
 
@@ -228,10 +228,11 @@ export function registerProjectRoutes(api: Hono) {
   api.post("/artifacts/:nodeId/save", async (context) => {
     const { node, content } = await readArtifactNode(context.req.param("nodeId"));
     const stored = bytesOf(content);
-    if (!stored) {
+    const bytes = stored?.bytes ?? (node.kind === "audience_deck" ? await deckBytesOf(content) : null);
+    if (!bytes) {
       throw new HostError("validation_failed", "Only a file is saved this way; documents print from the app.", {}, false);
     }
-    const saved = await saveFile(fileNameFor(node.title, stored.mime), stored.bytes, exportDirectory());
+    const saved = await saveFile(fileNameFor(node.title, stored?.mime ?? node.mediaType), bytes, exportDirectory());
     return context.json(saved);
   });
 
@@ -243,9 +244,9 @@ export function registerProjectRoutes(api: Hono) {
   api.post("/artifacts/:nodeId/slides/save", async (context) => {
     const deck = await ensureDeckFor({ packageNodeId: context.req.param("nodeId"), actor: localActor() });
     const { node, content } = await readArtifactNode(deck.nodeId);
-    const stored = bytesOf(content);
-    if (!stored) throw new HostError("internal_error", "The slides were recorded without their bytes.");
-    const saved = await saveFile(fileNameFor(node.title, stored.mime), stored.bytes, exportDirectory());
+    const bytes = await deckBytesOf(content);
+    if (!bytes) throw new HostError("internal_error", "The slides were recorded without their bytes.");
+    const saved = await saveFile(fileNameFor(node.title, node.mediaType), bytes, exportDirectory());
     return context.json({ ...saved, nodeId: deck.nodeId, built: deck.built });
   });
 
