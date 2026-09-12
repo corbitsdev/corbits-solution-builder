@@ -66,9 +66,20 @@ export function catalogCapabilitiesFor(
 const NOT_A_CHAT_MODEL =
   /embedding|whisper|tts|transcribe|moderation|dall-e|sora|davinci|babbage|-instruct|realtime|audio|-image|search-preview|computer-use|codex|deep-research|-pro\b/;
 
+/**
+ * Chat models whose context cannot hold this product's documents. A stage's
+ * prompt carries every approved artifact before it — a brief, the
+ * constraints, the approach and a design run to some 25,000 tokens by
+ * stage 5 — and a document is written under a 16,000-token output cap, so
+ * a model needs room for both. The GPT-3.5 family (16k) and the original
+ * GPT-4 (8k, 32k) do not have it: every call from stage 3 on would be
+ * refused for length.
+ */
+const TOO_SMALL_FOR_DOCUMENTS = /^gpt-3\.5|^gpt-4(-\d{4})?$|^gpt-4-32k/;
+
 /** Whether a listed model could serve the lifecycle's chat completions at all. */
 export function isServableModel(canonicalName: string, plugin: Plugin): boolean {
-  return plugin !== "openai" || !NOT_A_CHAT_MODEL.test(canonicalName);
+  return plugin !== "openai" || !(NOT_A_CHAT_MODEL.test(canonicalName) || TOO_SMALL_FOR_DOCUMENTS.test(canonicalName));
 }
 
 /**
@@ -227,6 +238,7 @@ export async function registerProviderCatalog(input: {
 
   const serving = servableModels(input.models, input.plugin);
   await retireUnservable(offerings, models, serving, input.priority ?? 0);
+  await ensureOneServes(offerings, models, serving);
 
   let count = 0;
   for (const [index, canonicalName] of serving.entries()) {
@@ -286,6 +298,22 @@ async function retireUnservable(
 const UNSERVABLE_OFFSET = 900;
 
 /**
+ * An operator's chosen model disables every other offering the provider
+ * carries. When the chosen one is retired — it cannot answer, or the
+ * provider no longer lists it — the provider would be left serving nothing
+ * and the workspace would read as having no provider at all. The choice is
+ * cleared instead: every served offering is enabled, and the host picks
+ * among them as it does before a choice is made.
+ */
+async function ensureOneServes(offerings: HubOffering[], models: HubModel[], serving: readonly string[]): Promise<void> {
+  const served = offerings.filter((offering) =>
+    serving.includes(models.find((row) => row.id === offering.modelId)?.canonicalName ?? ""),
+  );
+  if (served.length === 0 || served.some((offering) => !offering.disabled)) return;
+  for (const offering of served) await catalog.patchOffering(offering.id, { disabled: false });
+}
+
+/**
  * Reads every connected provider's models again for what can answer, and
  * reorders its offerings to match. Run on install so a workspace connected
  * before the listing was read this way is put right without a reconnect.
@@ -305,6 +333,7 @@ export async function rerankCatalogProviders(): Promise<void> {
     const serving = servableModels(listed, row.plugin as Plugin);
     const basePriority = offerings.length > 0 ? Math.floor(offerings[0]!.priority / 1000) : 0;
     await retireUnservable(offerings, modelRows, serving, basePriority);
+    await ensureOneServes(offerings, modelRows, serving);
     for (const [index, canonicalName] of serving.entries()) {
       const offering = offerings.find((entry) => modelRows.find((model) => model.id === entry.modelId)?.canonicalName === canonicalName);
       if (!offering) continue;

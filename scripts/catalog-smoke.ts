@@ -389,7 +389,7 @@ stub.close();
     baseUrl: `http://127.0.0.1:${(relisted.address() as { port: number }).port}`,
   });
   const stubRow = (await rows("select credential_id from public.model_provider where name = 'compatible'"))[0] as { credential_id: string };
-  const listing = ["text-embedding-ada-002", "whisper-1", "gpt-4o-mini", "tts-1", "gpt-4.1", "o1-pro", "gpt-5.5", "gpt-4o-2024-08-06"];
+  const listing = ["text-embedding-ada-002", "whisper-1", "gpt-3.5-turbo-16k", "gpt-4o-mini", "tts-1", "gpt-4-0613", "gpt-4.1", "o1-pro", "gpt-5.5", "gpt-4o-2024-08-06"];
   await registerProviderCatalog({
     providerId: "openai",
     label: "OpenAI",
@@ -408,8 +408,8 @@ stub.close();
     served.join(","),
   );
   check(
-    "models that cannot answer a chat completion are kept out of the provider's rows",
-    !served.some((name) => /embedding|whisper|tts|o1-pro/.test(name)) && served.includes("gpt-4o-2024-08-06"),
+    "models that cannot answer a chat completion, or hold the documents, are kept out of the provider's rows",
+    !served.some((name) => /embedding|whisper|tts|o1-pro|gpt-3\.5|gpt-4-0613/.test(name)) && served.includes("gpt-4o-2024-08-06"),
     served.join(","),
   );
   const unservable = "select o.priority, o.disabled, m.canonical_name from public.model_offering o join public.model m on m.id = o.model_id where m.canonical_name in ('text-embedding-ada-002','whisper-1','tts-1','o1-pro','text-embedding-3-small')";
@@ -422,6 +422,9 @@ stub.close();
   const { catalog } = await import("../apps/hub/src/hub-client.js");
   const planted = await catalog.createModel({ canonicalName: "text-embedding-3-small", displayName: "text-embedding-3-small" });
   await catalog.createOffering({ modelId: planted.id, providerId: openai!.providerRowId, priority: 3000, capabilities: [] });
+  // And the operator had chosen it: every other offering is disabled. The
+  // rerank must not leave the provider serving nothing.
+  for (const entry of openai!.models) await catalog.patchOffering(entry.offeringId, { disabled: true });
   await rerankCatalogProviders();
   const retired = (await rows(unservable)) as { priority: number; disabled: boolean }[];
   const reranked = (await getCatalogProvider("openai"))?.models ?? [];
@@ -434,6 +437,11 @@ stub.close();
     "and the served ones lead again, in the catalog's order",
     reranked[0]?.canonicalName === "gpt-5.5" && reranked[0].priority === 3000 && !reranked.some((entry) => entry.canonicalName === "text-embedding-3-small"),
     reranked.map((entry) => `${entry.canonicalName}:${entry.priority}`).join(","),
+  );
+  check(
+    "a choice of a model that cannot serve is cleared rather than leaving the provider serving nothing",
+    reranked.length > 0 && reranked.every((entry) => !entry.disabled),
+    reranked.map((entry) => `${entry.canonicalName}:${entry.disabled ? "off" : "on"}`).join(","),
   );
 }
 
