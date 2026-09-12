@@ -39,8 +39,13 @@ const Design = type({
   density: "'sparse' | 'standard' | 'full'",
   /** Whether each slide carries the item's full text as speaker notes. */
   notes: "boolean",
-  /** Which slides the provider's image model illustrates: none, the cover, or every one. */
-  images: "'none' | 'cover' | 'all'",
+  /**
+   * Which slides carry an illustration: none; the cover; some, chosen by a
+   * model that has read the deck; or the cover and every slide. In every
+   * case but none, the same model reads the deck and says what each picture
+   * should show.
+   */
+  images: "'none' | 'cover' | 'some' | 'all'",
   /** The file name of the PowerPoint kept as this role's style guide, or null. */
   template: "string | null",
   /** What this role's deck outline should emphasise, in the person's words; given to the presentation creator. */
