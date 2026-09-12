@@ -43,6 +43,7 @@ import { HostError, ReplyCutShort } from "./errors.js";
 import { providerServingModel } from "./catalog.js";
 import { MATERIAL_KIND, materialText } from "./source-material.js";
 import { DECK_KIND, writeDeckFor } from "./deck.js";
+import { DEFAULT_DECK_DESIGN, deckGuidance, deckSettings, type DeckDesign } from "./deck-settings.js";
 import {
   cutShortTwice,
   DESIGNER_TOKENS_MAX,
@@ -371,6 +372,9 @@ export async function requestDraft(args: {
     if (!wanted.some(Boolean)) {
       throw new HostError("validation_failed", "No stakeholder was named to write a package for.");
     }
+    // Each stakeholder's package follows the deck design their role was
+    // given in Settings: what the outline should cover and lead with.
+    const decks = await deckSettings();
     prompts = audiences.map((audience) =>
       buildDraftPrompt({
         projectTitle: args.projectTitle,
@@ -379,6 +383,7 @@ export async function requestDraft(args: {
         userInput: [
           `Prepare the package for one audience only: ${audience.name} (${audience.role.replace(/_/g, " ")}).`,
           `Use the "## Audience: ${audience.name}" heading and its four subsections.`,
+          deckGuidance(audience.role, (decks as Record<string, DeckDesign>)[audience.role] ?? DEFAULT_DECK_DESIGN) ?? "",
           args.message,
         ]
           .filter(Boolean)
