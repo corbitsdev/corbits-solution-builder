@@ -27,7 +27,17 @@ import { type RunState } from "@solutions-builder/app/ledger";
 import { parsed } from "./api.js";
 import { localActor } from "./hub-client.js";
 import { printableDesign } from "./print-page.js";
-import { exportDirectory, exportProject, importProject, parseBundle, saveBundle, bundleFileName } from "./project-transfer.js";
+import {
+  exportDirectory,
+  exportProject,
+  fileNameFor,
+  importProject,
+  parseBundle,
+  saveBundle,
+  saveFile,
+  bundleFileName,
+} from "./project-transfer.js";
+import { bytesOf } from "./source-material.js";
 import { attachMaterial, MATERIAL_KIND, type IncomingFile } from "./source-material.js";
 import { setStakeholders, STAKEHOLDER_ROLES } from "./stakeholders.js";
 
@@ -208,6 +218,21 @@ export function registerProjectRoutes(api: Hono) {
   api.get("/artifacts/:nodeId", async (context) =>
     context.json(await readArtifactNode(context.req.param("nodeId"))),
   );
+
+  /**
+   * An artifact that is a file — a stakeholder's slides, a spreadsheet the
+   * person attached — saved into the same folder exports go to. The window
+   * cannot download, so the host writes the file and says where.
+   */
+  api.post("/artifacts/:nodeId/save", async (context) => {
+    const { node, content } = await readArtifactNode(context.req.param("nodeId"));
+    const stored = bytesOf(content);
+    if (!stored) {
+      throw new HostError("validation_failed", "Only a file is saved this way; documents print from the app.", {}, false);
+    }
+    const saved = await saveFile(fileNameFor(node.title, stored.mime), stored.bytes, exportDirectory());
+    return context.json(saved);
+  });
 
   /**
    * A design as a page of its own, with a print bar, so it can be printed or
