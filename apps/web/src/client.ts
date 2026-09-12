@@ -377,11 +377,14 @@ export const api = {
     request<{ node: ArtifactNode; content: string }>(`/artifacts/${nodeId}`),
   /** Where a design is served as a page of its own, for printing. A path, not a request. */
   printPage: (nodeId: string) => `/api/artifacts/${nodeId}/print`,
-  draft: (projectId: string, stage: number, input: string, quotes: Quote[] = []) =>
-    post<{ draft: { nodeId: string; contentHash: string; content: string; agent: string; model: string }; note?: string }>(
-      `/projects/${projectId}/stages/${stage}/draft`,
-      { input, quotes },
-    ),
+  /** Drafts the stage; at stage 5, `audiences` names the stakeholders whose package to write (all when absent). */
+  draft: (projectId: string, stage: number, input: string, quotes: Quote[] = [], audiences?: string[]) =>
+    post<{
+      draft: { nodeId: string; contentHash: string; content: string; agent: string; model: string };
+      note?: string;
+      /** Stage 5: the stakeholders whose package could not be written, and why. */
+      failed?: { audience: string; message: string }[];
+    }>(`/projects/${projectId}/stages/${stage}/draft`, { input, quotes, ...(audiences ? { audiences } : {}) }),
   preferences: () => request<{ preferences: Record<string, unknown> }>("/preferences"),
   setPreference: (key: string, value: unknown) =>
     request<{ key: string }>(`/preferences/${key}`, {

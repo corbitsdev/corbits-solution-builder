@@ -201,6 +201,17 @@ export function StageWorkspace({
       if (result && typeof result === "object" && "note" in result && typeof result.note === "string") {
         setNotice(result.note);
       }
+      // A stage 5 round that wrote some packages and not others is not a
+      // failure of the round: the written ones are recorded, and the
+      // packages screen offers to write the missing ones again.
+      if (result && typeof result === "object" && "failed" in result && Array.isArray(result.failed) && result.failed.length > 0) {
+        const failed = result.failed as { audience: string; message: string }[];
+        setError(
+          `${failed.length === 1 ? "One package" : `${failed.length} packages`} could not be written. ${failed
+            .map((entry) => `${entry.audience}: ${entry.message}`)
+            .join(" ")}`,
+        );
+      }
       await loadThread();
       onChanged();
     } catch (cause) {
@@ -279,7 +290,9 @@ export function StageWorkspace({
         />
       ) : null}
 
-      {stageNodes.length === 0 && inProgress && stage <= 7 ? (
+      {/* Stage 5 shows its own stakeholder rows, each with a way to write
+          the package, so its preparing view is only for the round under way. */}
+      {stageNodes.length === 0 && inProgress && stage <= 7 && (stage !== 5 || busy === "draft") ? (
         stage === 1 && said.length === 0 ? (
           <Screen title={`Stage 1 of 9 · ${stageName(1)}`} description={STAGE_GOAL[1]} tight>
             <div className="screen-body">
@@ -378,7 +391,14 @@ export function StageWorkspace({
           reached at all. */}
       {stage === 5 ? (
         <div className="stage-scroll">
-          <AudiencePackages detail={detail} onChanged={onChanged} />
+          <AudiencePackages
+            detail={detail}
+            onChanged={onChanged}
+            drafting={busy === "draft"}
+            onDraftPackages={(audiences) =>
+              run("draft", () => api.draft(detail.project.id, stage, "", [], audiences))
+            }
+          />
         </div>
       ) : null}
 
