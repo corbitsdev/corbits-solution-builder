@@ -144,6 +144,61 @@ const cover3 = Bun.spawnSync(["unzip", "-p", file3, "ppt/slides/slide1.xml"]).st
 check("the style guide's accent and title face are drawn with", cover3.includes("4472C4") && cover3.includes("Playfair Display"), `${cover3.includes("4472C4")}/${cover3.includes("Playfair Display")}`);
 await rm(dir3, { recursive: true, force: true });
 
+// A deck built on a person's own PowerPoint: the template keeps its master,
+// layouts and theme; its slides go; ours are written on its layouts. The
+// fixture is a small deck with a master carrying title and body
+// placeholders, made with the same library, so the test needs no file.
+{
+  const { renderDeckOnTemplate, templateCanCarryADeck } = await import("../apps/hub/src/deck-on-template.js");
+  const { default: PptxGenJS } = await import("pptxgenjs");
+  const fixture = new PptxGenJS();
+  fixture.layout = "LAYOUT_16x9";
+  fixture.defineSlideMaster({
+    title: "HOUSE",
+    background: { color: "0B3D91" },
+    objects: [
+      { placeholder: { options: { name: "title", type: "title", x: 0.5, y: 0.4, w: 9, h: 1 } } },
+      { placeholder: { options: { name: "body", type: "body", x: 0.5, y: 1.6, w: 9, h: 3.4 } } },
+    ],
+  });
+  const seed = fixture.addSlide({ masterName: "HOUSE" });
+  seed.addText("Old slide", { placeholder: "title" });
+  const templateBytes = new Uint8Array((await fixture.write({ outputType: "nodebuffer" })) as Buffer);
+  check("a PowerPoint with layouts can carry a deck", await templateCanCarryADeck(templateBytes));
+  check("a file that is not a PowerPoint cannot", !(await templateCanCarryADeck(new Uint8Array([1, 2, 3]))));
+
+  const built = await renderDeckOnTemplate(templateBytes, pictured);
+  const dir4 = await mkdtemp(join(tmpdir(), "sb-deck-"));
+  const file4 = join(dir4, "deck.pptx");
+  await Bun.write(file4, built);
+  const parts4 = Bun.spawnSync(["unzip", "-Z1", file4]).stdout.toString().split("\n");
+  const slides4 = parts4.filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name));
+  check("the template's slides are gone and ours are in their place: a cover, one per item, the decision", slides4.length === 5, `${slides4.length} slides`);
+  check("the template's master and theme survive", parts4.some((name) => /^ppt\/slideMasters\/slideMaster1\.xml$/.test(name)) && parts4.some((name) => /^ppt\/theme\/theme1\.xml$/.test(name)));
+  const rels2 = Bun.spawnSync(["unzip", "-p", file4, "ppt/slides/_rels/slide2.xml.rels"]).stdout.toString();
+  check("each slide is written on one of the template's layouts", /slideLayouts\/slideLayout\d+\.xml/.test(rels2), rels2.slice(0, 160));
+  const slide2xml = Bun.spawnSync(["unzip", "-p", file4, "ppt/slides/slide2.xml"]).stdout.toString();
+  check(
+    "the slide fills the layout's title and body placeholders",
+    slide2xml.includes('<p:ph type="title"') && slide2xml.includes('<p:ph type="body"') && slide2xml.includes("Problem: PRs are closed because filtering costs too much"),
+  );
+  // The library keeps a master's background on its layout; a template from
+  // PowerPoint keeps it on the master. Either way it is still there.
+  const surfaces = parts4
+    .filter((name) => /^ppt\/(slideMasters|slideLayouts)\/[^/]+\.xml$/.test(name))
+    .map((name) => Bun.spawnSync(["unzip", "-p", file4, name]).stdout.toString())
+    .join("");
+  check("the template's own background is what the slides sit on", surfaces.includes("0B3D91"));
+  const media4 = parts4.filter((name) => /^ppt\/media\/deck-image-\d+\.png$/.test(name));
+  check("the illustrations ride along as media parts", media4.length === 3, `${media4.length} media parts`);
+  const presentation4 = Bun.spawnSync(["unzip", "-p", file4, "ppt/presentation.xml"]).stdout.toString();
+  check("the presentation lists exactly our slides", (presentation4.match(/<p:sldId /g) ?? []).length === 5);
+  // unzip reads square brackets as a pattern; the part's name has them.
+  const types4 = Bun.spawnSync(["unzip", "-p", file4, "\\[Content_Types\\].xml"]).stdout.toString();
+  check("the package declares every slide part it carries", slides4.every((name) => types4.includes(`PartName="/${name}"`)));
+  await rm(dir4, { recursive: true, force: true });
+}
+
 const failed = checks.filter((entry) => !entry.ok);
 console.log(`\nDeck smoke: ${checks.length - failed.length}/${checks.length} checks passed`);
 process.exit(failed.length === 0 ? 0 : 1);

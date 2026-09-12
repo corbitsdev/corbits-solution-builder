@@ -631,6 +631,42 @@ try {
         );
         check("and a second build draws nothing again", !drawnAgain.built && imagePrompts.length === asked, `${imagePrompts.length} prompts`);
         await saveDeckDesign("project_owner", { images: "none", theme: "ember", typeface: "Calibri" });
+        // A style guide kept for the role: the next build is on that
+        // PowerPoint — its master survives, our slides sit on its layouts.
+        const { storeTemplate, removeTemplate } = await import("../apps/hub/src/deck-template.js");
+        const { default: PptxGenJS } = await import("pptxgenjs");
+        const fixture = new PptxGenJS();
+        fixture.defineSlideMaster({
+          title: "HOUSE",
+          background: { color: "0B3D91" },
+          objects: [
+            { placeholder: { options: { name: "title", type: "title", x: 0.5, y: 0.4, w: 9, h: 1 } } },
+            { placeholder: { options: { name: "body", type: "body", x: 0.5, y: 1.6, w: 9, h: 3.4 } } },
+          ],
+        });
+        fixture.addSlide({ masterName: "HOUSE" }).addText("Old", { placeholder: "title" });
+        const fixtureBytes = new Uint8Array((await fixture.write({ outputType: "nodebuffer" })) as Buffer);
+        await storeTemplate("project_owner", { name: "house.pptx", type: "application/vnd.openxmlformats-officedocument.presentationml.presentation", bytes: fixtureBytes });
+        const onTemplate = await ensureDeckFor({ packageNodeId: older.nodeId, actor: ACTOR });
+        const { content: templatedContent } = await readArtifactNode(onTemplate.nodeId);
+        const templatedBytes = Buffer.from(/base64,(.*)$/s.exec(templatedContent)![1]!, "base64");
+        const dir2 = await mkdtemp(join(tmpdir(), "sb-deck-"));
+        await Bun.write(join(dir2, "deck.pptx"), templatedBytes);
+        const templatedParts = Bun.spawnSync(["unzip", "-Z1", join(dir2, "deck.pptx")]).stdout.toString().split("\n");
+        // The library keeps a master's background on its layout; either way it is still there.
+        const master = templatedParts
+          .filter((name) => /^ppt\/(slideMasters|slideLayouts)\/[^/]+\.xml$/.test(name))
+          .map((name) => Bun.spawnSync(["unzip", "-p", join(dir2, "deck.pptx"), name]).stdout.toString())
+          .join("");
+        const slideCount = templatedParts.filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name)).length;
+        await rm(dir2, { recursive: true, force: true });
+        check(
+          "a style guide kept for the role makes the next build a deck on that PowerPoint",
+          onTemplate.built && master.includes("0B3D91") && slideCount === 3,
+          `built=${onTemplate.built} master=${master.includes("0B3D91")} slides=${slideCount}`,
+        );
+        await removeTemplate("project_owner");
+        await saveDeckDesign("project_owner", { template: null });
       }
       await deliverStageSignal(project.projectId, "stage.submit", { runId: project.runId }, `smoke-submit-${stage}-${project.projectId}`);
       const gate = await settle((s) => s.parked && s.stepId === gateStepId(stage));
