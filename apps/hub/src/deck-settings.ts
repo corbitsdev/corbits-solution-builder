@@ -39,6 +39,10 @@ const Design = type({
   density: "'sparse' | 'standard' | 'full'",
   /** Whether each slide carries the item's full text as speaker notes. */
   notes: "boolean",
+  /** Which slides the provider's image model illustrates: none, the cover, or every one. */
+  images: "'none' | 'cover' | 'all'",
+  /** The file name of the PowerPoint kept as this role's style guide, or null. */
+  template: "string | null",
   /** What this role's deck outline should emphasise, in the person's words; given to the presentation creator. */
   guidance: "string",
 });
@@ -49,6 +53,8 @@ export const DEFAULT_DECK_DESIGN: DeckDesign = {
   typeface: "Calibri",
   density: "standard",
   notes: true,
+  images: "none",
+  template: null,
   guidance: "",
 };
 
@@ -97,9 +103,9 @@ export async function saveDeckDesign(role: string, patch: Partial<DeckDesign>): 
 }
 
 /** A short fingerprint of the look a deck was built with, so a changed design builds a new version. */
-export function deckDesignHash(design: DeckDesign): string {
+export function deckDesignHash(design: DeckDesign, extra: unknown = null): string {
   const { guidance: _guidance, ...look } = design;
-  return createHash("sha256").update(JSON.stringify(look)).digest("hex").slice(0, 16);
+  return createHash("sha256").update(JSON.stringify([look, extra])).digest("hex").slice(0, 16);
 }
 
 /** What the role's design adds to the presentation creator's instructions for that stakeholder's package. */

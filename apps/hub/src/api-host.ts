@@ -3,6 +3,8 @@ import type { Hono } from "hono";
 import { startAtLoginMarker } from "./paths.js";
 import { designerSettings, saveDesignerSettings, type DesignerSettings } from "./designer-settings.js";
 import { deckSettings, saveDeckDesign, type DeckDesign } from "./deck-settings.js";
+import { removeTemplate, storeTemplate } from "./deck-template.js";
+import { HostError } from "./errors.js";
 import { COMMANDS, LEDGER, STAGE_TITLES } from "@solutions-builder/app/ledger";
 import { AGENT_KIT } from "@solutions-builder/app/kit";
 import { listProviders } from "./providers.js";
@@ -123,6 +125,27 @@ export function registerHostRoutes(api: Hono) {
       ),
     );
     return context.json({ preferences: { "host.startAtLogin": startAtLogin, ...designer, ...decks } });
+  });
+
+  /**
+   * A role's style guide: a PowerPoint whose theme — colours, typefaces,
+   * slide size — the role's decks are drawn with. Sent as multipart `file`.
+   */
+  api.post("/deck-settings/:role/template", async (context) => {
+    const role = context.req.param("role");
+    const form = await context.req.formData().catch(() => null);
+    const file = form?.get("file");
+    if (!(file instanceof File)) throw new HostError("validation_failed", "Send the PowerPoint as multipart form data under `file`.");
+    const theme = await storeTemplate(role, { name: file.name, type: file.type, bytes: new Uint8Array(await file.arrayBuffer()) });
+    const design = await saveDeckDesign(role, { template: file.name });
+    return context.json({ role, design, theme });
+  });
+
+  api.delete("/deck-settings/:role/template", async (context) => {
+    const role = context.req.param("role");
+    await removeTemplate(role);
+    const design = await saveDeckDesign(role, { template: null });
+    return context.json({ role, design });
   });
 
   api.put("/preferences/:key", async (context) => {
