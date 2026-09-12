@@ -163,6 +163,9 @@ await rm(dir3, { recursive: true, force: true });
   });
   const seed = fixture.addSlide({ masterName: "HOUSE" });
   seed.addText("Old slide", { placeholder: "title" });
+  // A photograph on the template's own slide: reached by nothing once that
+  // slide is gone, so it must not ride along in every deck.
+  seed.addImage({ data: `image/png;base64,${Buffer.from(PNG).toString("base64")}`, x: 1, y: 1, w: 1, h: 1 });
   const templateBytes = new Uint8Array((await fixture.write({ outputType: "nodebuffer" })) as Buffer);
   check("a PowerPoint with layouts can carry a deck", await templateCanCarryADeck(templateBytes));
   check("a file that is not a PowerPoint cannot", !(await templateCanCarryADeck(new Uint8Array([1, 2, 3]))));
@@ -191,6 +194,15 @@ await rm(dir3, { recursive: true, force: true });
   check("the template's own background is what the slides sit on", surfaces.includes("0B3D91"));
   const media4 = parts4.filter((name) => /^ppt\/media\/deck-image-\d+\.png$/.test(name));
   check("the illustrations ride along as media parts", media4.length === 3, `${media4.length} media parts`);
+  const leftover = parts4.filter((name) => /^ppt\/media\/[^/]+$/.test(name) && !/deck-image-/.test(name));
+  check("media only the template's own slides reached is left out", leftover.length === 0, leftover.join(","));
+  const { deckBytesOf } = await import("../apps/hub/src/deck.js");
+  check(
+    "a deck version's bytes come from the store, and a pointer to a file that is gone is no deck",
+    (await deckBytesOf(`data:x/y;base64,${Buffer.from("PK").toString("base64")}`))?.byteLength === 2 &&
+      (await deckBytesOf(JSON.stringify({ deckFile: "0123456789abcdef.pptx" }))) === null &&
+      (await deckBytesOf("not a deck")) === null,
+  );
   const presentation4 = Bun.spawnSync(["unzip", "-p", file4, "ppt/presentation.xml"]).stdout.toString();
   check("the presentation lists exactly our slides", (presentation4.match(/<p:sldId /g) ?? []).length === 5);
   // unzip reads square brackets as a pattern; the part's name has them.
