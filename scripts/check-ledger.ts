@@ -440,22 +440,44 @@ for (const terminal of TERMINAL_STATES) {
       }
 
       // Stage 5: one package step per audience, in order, each reading its
-      // own slot of the round's rendered prompts.
+      // own slot of the round's rendered prompts, and each behind a gate of
+      // its own that reads the round's "wanted" flag for that audience: a
+      // round may write one stakeholder's package again and leave the rest.
+      // The gate's empty branch is a skip marker, and the next gate follows
+      // both, so the chain goes on whichever way each gate went.
       {
         const withAudiences = (await import(withAudiencesPath)) as { default: RenderedDefinition };
         const iteration = withAudiences.default.steps[revise(5 as never)]?.body;
-        let previous = DECIDE_STEP_ID;
+        const decide = iteration?.steps?.[DECIDE_STEP_ID];
+        if (decide?.then !== "pick-0") {
+          problems.push(`Stage 5's decide gate does not lead to the first package's gate (leads to ${String(decide?.then)})`);
+        }
+        let previous: string[] = [DECIDE_STEP_ID];
         audiences.forEach((_audience, index) => {
           const stepId = audienceStepId(index);
+          const pickId = `pick-${index}`;
+          const skipId = `skip-${index}`;
+          const pick = iteration?.steps?.[pickId];
+          const skip = iteration?.steps?.[skipId];
           const packageStep = iteration?.steps?.[stepId];
+          if (!pick || pick.kind !== "gate" || pick.then !== stepId || pick.else !== skipId) {
+            problems.push(`Stage 5 has no ${pickId} gate choosing between ${stepId} and ${skipId}`);
+          } else if ((pick.when as { from?: string } | undefined)?.from !== `steps.${ROUND_STEP_ID}.output.wanted[${index}]`) {
+            problems.push(`Stage 5's ${pickId} does not read wanted[${index}]`);
+          } else if (!previous.every((id) => pick.after?.includes(id))) {
+            problems.push(`Stage 5's ${pickId} does not follow ${previous.join(" and ")}`);
+          }
+          if (!skip || skip.kind !== "escalation" || !skip.after?.includes(pickId)) {
+            problems.push(`Stage 5's ${skipId} is not an escalation after ${pickId}`);
+          }
           if (!packageStep || packageStep.kind !== "step" || packageStep.agent?.id !== agentFor(5 as never).id) {
             problems.push(`Stage 5 has no ${stepId} step for the kit's presentation specialist`);
           } else if (packageStep.input?.from !== `steps.${ROUND_STEP_ID}.output.prompts[${index}]`) {
             problems.push(`Stage 5's ${stepId} does not read prompts[${index}]`);
-          } else if (!packageStep.after?.includes(previous)) {
-            problems.push(`Stage 5's ${stepId} does not follow ${previous}`);
+          } else if (!packageStep.after?.includes(pickId)) {
+            problems.push(`Stage 5's ${stepId} does not follow ${pickId}`);
           }
-          previous = stepId;
+          previous = [stepId, skipId];
         });
 
         // Zero audiences renders no package step and no gate either — a

@@ -64,6 +64,9 @@ export type LifecycleSourceOptions = {
 /** The stage whose rounds run the build agent. */
 export const BUILD_STAGE = 8;
 
+/** The stage whose rounds write one package per stakeholder, each behind its own gate. */
+export const PACKAGE_STAGE = 5;
+
 /** Every stage whose round is followed by its kit specialist under the "draft" id. */
 const DRAFTED_STAGES: readonly Stage[] = [1, 2, 3, 4, 6, 7, 9];
 
@@ -207,6 +210,7 @@ const DECIDE = ${JSON.stringify(DECIDE_STEP_ID)};
 const NO_DRAFT = ${JSON.stringify(NO_DRAFT_STEP_ID)};
 const DRAFT_TIMEOUT = ${DRAFT_STEP_TIMEOUT_MS};
 const BUILD_STAGE = ${BUILD_STAGE};
+const PACKAGE_STAGE = ${PACKAGE_STAGE};
 ${source ? `const SOURCE = ${JSON.stringify(source)};` : ""}
 ${buildAgent}${agentsBlock}${agentStepSpecs}
 // One iteration: the workflow waits to hear what the person did. A gate right
@@ -225,19 +229,26 @@ function iteration(stage) {
   } else if (typeof AGENT_STEP_SPECS !== "undefined") {
     const specs = AGENT_STEP_SPECS[stage] || [];
     if (specs.length > 0) {
+      // Stage 5 writes one package per stakeholder, and a round may ask for
+      // only some of them: the ones that failed last time, or one to be
+      // written again. Each package sits behind its own gate, read from the
+      // round's "wanted" flags; a package not wanted is skipped, and the
+      // next gate joins both branches so the chain goes on either way.
+      const picked = stage === PACKAGE_STAGE;
+      const first = picked ? "pick-0" : specs[0].id;
       Object.assign(steps, {
         [DECIDE]: gate({
           when: { from: "steps." + ROUND + ".output.draft" },
-          then: specs[0].id,
+          then: first,
           else: NO_DRAFT,
           after: [ROUND],
         }),
         [NO_DRAFT]: escalation({ to: NO_DRAFT, after: [DECIDE] }),
       });
-      let previous = DECIDE;
-      for (const spec of specs) {
-        Object.assign(steps, {
-          [spec.id]: step({
+      let previous = [DECIDE];
+      specs.forEach((spec, index) => {
+        const agentStep = (after) =>
+          step({
             agent: AGENTS[spec.roleId],
             input: spec.input,
             // The round carries the call's options — the output cap the
@@ -245,11 +256,27 @@ function iteration(stage) {
             inference: { from: "steps." + ROUND + ".output.inference" },
             timeout: DRAFT_TIMEOUT,
             drainBehavior: "wait",
-            after: [previous],
-          }),
-        });
-        previous = spec.id;
-      }
+            after,
+          });
+        if (picked) {
+          const pick = "pick-" + index;
+          const skip = "skip-" + index;
+          Object.assign(steps, {
+            [pick]: gate({
+              when: { from: "steps." + ROUND + ".output.wanted[" + index + "]" },
+              then: spec.id,
+              else: skip,
+              after: previous,
+            }),
+            [skip]: escalation({ to: skip, after: [pick] }),
+            [spec.id]: agentStep([pick]),
+          });
+          previous = [spec.id, skip];
+        } else {
+          Object.assign(steps, { [spec.id]: agentStep(previous) });
+          previous = [spec.id];
+        }
+      });
     }
   }
   return defineWorkflow({
