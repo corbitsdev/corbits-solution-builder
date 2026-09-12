@@ -202,10 +202,11 @@ function catalogToSummary(row: CatalogProviderRow): ProviderSummary {
  * difference between a stage that drafts in a minute and one that appears to
  * hang. The host defaults sensibly and says what it chose.
  */
-export async function selectModel(providerId: string, model: string): Promise<ProviderSummary> {
+/** Records the operator's chosen model for a provider; null clears the choice, and the host picks again. */
+export async function selectModel(providerId: string, model: string | null): Promise<ProviderSummary> {
   const catalogRow = await getCatalogProvider(providerId);
   if (!catalogRow) throw notFound("That provider connection");
-  if (!catalogRow.models.some((entry) => entry.canonicalName === model)) {
+  if (model !== null && !catalogRow.models.some((entry) => entry.canonicalName === model)) {
     throw new HostError(
       "validation_failed",
       `${model} is not in that provider's validated catalogue.`,

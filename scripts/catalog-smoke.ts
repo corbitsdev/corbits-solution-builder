@@ -354,6 +354,8 @@ stub.close();
     selectedLocal.selectedModel === "qwen2.5",
     String(selectedLocal.selectedModel),
   );
+  const cleared = await selectModel("local", null);
+  check("clearing the choice leaves the host to pick again", cleared.selectedModel === null, String(cleared.selectedModel));
 
   await disconnectProvider("local");
   const afterLocalDisconnect = await listProviders();
