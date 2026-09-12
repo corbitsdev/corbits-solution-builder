@@ -19,7 +19,8 @@ import {
   deckDesignHash,
   type DeckDesign,
 } from "./deck-settings.js";
-import { templateThemeFor, type TemplateTheme } from "./deck-template.js";
+import { templateFor, templateThemeFor, type TemplateTheme } from "./deck-template.js";
+import { renderDeckOnTemplate } from "./deck-on-template.js";
 import { illustration, illustrationPrompt, imageSource } from "./deck-images.js";
 
 /** The kind a deck is recorded as: stage 5, one per stakeholder, never a prompt input. */
@@ -315,7 +316,8 @@ export async function writeDeckFor(args: {
   illustrate?: boolean;
 }): Promise<{ nodeId: string; version: number } | null> {
   const design = await deckDesignFor(args.audience.role);
-  const theme = (await templateThemeFor(args.audience.role)) ?? undefined;
+  const template = await templateFor(args.audience.role);
+  const theme = template ? ((await templateThemeFor(args.audience.role)) ?? undefined) : undefined;
   const plain = deckFrom({
     projectTitle: args.projectTitle,
     audience: args.audience.name,
@@ -327,7 +329,9 @@ export async function writeDeckFor(args: {
   if (!plain) return null;
   const images = args.illustrate ? await illustrationsFor(plain) : null;
   const deck: Deck = images ? { ...plain, images } : plain;
-  const bytes = await renderDeck(deck);
+  // On the person's own PowerPoint when the role has one: its masters,
+  // layouts and media, our slides. Otherwise drawn from the design.
+  const bytes = template ? await renderDeckOnTemplate(template.bytes, deck) : await renderDeck(deck);
   const written = await writeArtifact(
     {
       projectId: args.projectId,
@@ -338,16 +342,16 @@ export async function writeDeckFor(args: {
       mediaType: DECK_MEDIA_TYPE,
       sourceVersionIds: [args.packageNodeId],
       // The look it was built with rides along, so a changed design is a new version.
-      provenance: { producer: "agent", agentRole: args.agentRole, promptKey: designKey(design, theme, images !== null) },
+      provenance: { producer: "agent", agentRole: args.agentRole, promptKey: designKey(design, template?.hash, images !== null) },
     },
     args.actor,
   );
   return { nodeId: written.nodeId, version: written.version };
 }
 
-/** How a deck's provenance names the look it was built with: the design, the style guide's theme, and whether it carries the images asked for. */
-function designKey(design: DeckDesign, theme: TemplateTheme | undefined, illustrated: boolean): string {
-  return `sb-deck-design:${deckDesignHash(design, [theme ?? null, design.images !== "none" ? illustrated : true])}`;
+/** How a deck's provenance names the look it was built with: the design, the style guide file, and whether it carries the images asked for. */
+function designKey(design: DeckDesign, templateHash: string | undefined, illustrated: boolean): string {
+  return `sb-deck-design:${deckDesignHash(design, [templateHash ?? null, design.images !== "none" ? illustrated : true])}`;
 }
 
 /**
@@ -372,7 +376,7 @@ export async function ensureDeckFor(args: {
     role: "stakeholder",
   };
   const { nodes, edges } = await artifactGraph(node.projectId);
-  const current = designKey(await deckDesignFor(audience.role), (await templateThemeFor(audience.role)) ?? undefined, true);
+  const current = designKey(await deckDesignFor(audience.role), (await templateFor(audience.role))?.hash, true);
   const existing = nodes.find(
     (candidate) =>
       candidate.kind === DECK_KIND &&

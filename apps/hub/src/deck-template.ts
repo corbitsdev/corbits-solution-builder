@@ -7,7 +7,9 @@
  */
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import JSZip from "jszip";
+import { templateCanCarryADeck } from "./deck-on-template.js";
 import { HostError } from "./errors.js";
 import { dataDirectory } from "./paths.js";
 
@@ -43,10 +45,10 @@ export async function storeTemplate(role: string, file: { name: string; type: st
   if (file.bytes.byteLength > MAX_TEMPLATE_BYTES) {
     throw new HostError("validation_failed", "A style guide is at most 25 MB.");
   }
-  const theme = await themeFromPptx(file.bytes);
-  if (Object.keys(theme).length === 0) {
-    throw new HostError("validation_failed", "That file carries no theme to read: no colours, typefaces or slide size were found in it.");
+  if (!(await templateCanCarryADeck(file.bytes))) {
+    throw new HostError("validation_failed", "That file is not a PowerPoint a deck can be built on: it has no slide layouts.");
   }
+  const theme = await themeFromPptx(file.bytes);
   await mkdir(templateDirectory(), { recursive: true });
   await writeFile(templatePath(role), file.bytes);
   return theme;
@@ -54,6 +56,16 @@ export async function storeTemplate(role: string, file: { name: string; type: st
 
 export async function removeTemplate(role: string): Promise<void> {
   await rm(templatePath(role), { force: true });
+}
+
+/** The role's style guide as a file, with a fingerprint of it, or null when none is kept. */
+export async function templateFor(role: string): Promise<{ bytes: Uint8Array; hash: string } | null> {
+  try {
+    const bytes = new Uint8Array(await readFile(templatePath(role)));
+    return { bytes, hash: createHash("sha256").update(bytes).digest("hex").slice(0, 16) };
+  } catch {
+    return null;
+  }
 }
 
 /** The role's style guide theme, or null when none is kept or it cannot be read. */
