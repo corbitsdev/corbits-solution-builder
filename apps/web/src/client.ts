@@ -375,6 +375,8 @@ export const api = {
     request<{ ok: true }>(`/projects/${projectId}`, { method: "DELETE" }),
   artifact: (nodeId: string) =>
     request<{ node: ArtifactNode; content: string }>(`/artifacts/${nodeId}`),
+  /** Saves an artifact that is a file (a stakeholder's slides) into the Downloads folder; says where. */
+  saveArtifactFile: (nodeId: string) => post<{ path: string; bytes: number }>(`/artifacts/${nodeId}/save`, {}),
   /** Where a design is served as a page of its own, for printing. A path, not a request. */
   printPage: (nodeId: string) => `/api/artifacts/${nodeId}/print`,
   /** Drafts the stage; at stage 5, `audiences` names the stakeholders whose package to write (all when absent). */

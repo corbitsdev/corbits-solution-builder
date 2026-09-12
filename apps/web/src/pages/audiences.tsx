@@ -179,6 +179,24 @@ export function AudiencePackages({
   const [rationale, setRationale] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Where the last saved slides went, said once. */
+  const [saved, setSaved] = useState<string | null>(null);
+  // The slides built from each package: a file beside it, by stakeholder.
+  const decks = detail.nodes.filter((node) => node.kind === "audience_deck" && node.supersededByNodeId === null);
+  const deckFor = (audienceName: string | null | undefined) =>
+    audienceName ? (decks.find((node) => node.variant === audienceName) ?? null) : null;
+  const saveDeck = async (nodeId: string) => {
+    setBusy(`deck:${nodeId}`);
+    setError(null);
+    try {
+      const result = await api.saveArtifactFile(nodeId);
+      setSaved(result.path);
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const selected = packages.find((node) => node.id === active) ?? packages[0] ?? null;
   // A stakeholder whose package was never written, or failed to be: the
@@ -341,15 +359,30 @@ export function AudiencePackages({
                     <p className="inline-note">Loading…</p>
                   )}
                 </div>
-                {/* A package that came back wrong can be written again on
-                    its own; the others keep their versions and decisions. */}
-                {selected.variant && inProgress && !decisionFor(selected.variant) ? (
-                  <div className="button-row">
+                {saved ? (
+                  <Banner tone="okay" title={`Saved to ${saved}`} action={{ label: "Dismiss", onClick: () => setSaved(null) }} />
+                ) : null}
+                {/* The slides built from this package's deck outline, and,
+                    while the stage is open, a way to write the package again
+                    on its own; the others keep their versions and decisions. */}
+                <div className="button-row">
+                  {deckFor(selected.variant) ? (
+                    <Button
+                      variant="primary"
+                      loading={busy === `deck:${deckFor(selected.variant)!.id}`}
+                      onClick={() => saveDeck(deckFor(selected.variant)!.id)}
+                    >
+                      Save slides (.pptx)
+                    </Button>
+                  ) : (
+                    <span className="inline-note">No slides: this package has no deck outline to build them from.</span>
+                  )}
+                  {selected.variant && inProgress && !decisionFor(selected.variant) ? (
                     <Button loading={drafting} onClick={() => onDraftPackages([selected.variant!])}>
                       Write this package again
                     </Button>
-                  </div>
-                ) : null}
+                  ) : null}
+                </div>
               </>
             ) : null}
           </>

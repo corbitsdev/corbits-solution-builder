@@ -2547,6 +2547,12 @@ button[aria-disabled="true"] {
 }
 
 /* The stakeholder editor: one row per person, name then role then remove. */
+/* A stakeholder's slides in the artifacts view: a file, described and saved. */
+.deck-file {
+  display: grid;
+  gap: var(--space-3);
+}
+
 /* Stakeholders without a package: a list, each with its own way to write one. */
 .packages-missing {
   display: grid;

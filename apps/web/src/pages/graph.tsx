@@ -9,7 +9,7 @@ import { EmptyState } from "@corbits/react-ui";
 import { useEffect, useRef, useState } from "react";
 import { api, ApiFailure, type ArtifactNode } from "../client.js";
 import { Markdown } from "../markdown.jsx";
-import { Button, documentName, stageName } from "../components.jsx";
+import { Banner, Button, documentName, stageName } from "../components.jsx";
 import { PrintButton } from "../print.jsx";
 
 type ArtifactEdge = { childNodeId: string; sourceNodeId: string };
@@ -290,7 +290,7 @@ function ArtifactReader({
           <h2>{documentLabel(node, nodes)}</h2>
           <p>{kicker}</p>
         </div>
-        <PrintButton node={node} content={content} />
+        {node.kind === "audience_deck" ? null : <PrintButton node={node} content={content} />}
       </header>
       <div className="document-body">
         {content === null ? (
@@ -298,6 +298,8 @@ function ArtifactReader({
         ) : content ? (
           node.kind === "source_material" ? (
             <Material node={node} content={content} />
+          ) : node.kind === "audience_deck" ? (
+            <DeckFile node={node} />
           ) : node.kind === "design_feedback" ? (
             <FeedbackRecord content={content} />
           ) : node.mediaType === "text/html" || node.kind === "design_artifact" ? (
@@ -365,6 +367,43 @@ function ArtifactReader({
  * text as text, anything else by name, type and size. Never rendered as
  * Markdown — a CSV is not prose, and a data URL is not a document.
  */
+/** A stakeholder's slides: bytes, not a page, so what is offered is a save. */
+function DeckFile({ node }: { node: ArtifactNode }) {
+  const [state, setState] = useState<{ busy: boolean; saved: string | null; error: string | null }>({
+    busy: false,
+    saved: null,
+    error: null,
+  });
+  const size = `${Math.max(1, Math.round(node.sizeBytes / 1024))} KB`;
+  return (
+    <div className="deck-file">
+      <p className="inline-note">
+        {node.title} · PowerPoint · {size}. Built from the package's deck outline: a title slide, one slide per
+        outline item with the item's text as speaker notes, and the decision request.
+      </p>
+      <div className="button-row">
+        <Button
+          variant="primary"
+          loading={state.busy}
+          onClick={() => {
+            setState({ busy: true, saved: null, error: null });
+            api
+              .saveArtifactFile(node.id)
+              .then((result) => setState({ busy: false, saved: result.path, error: null }))
+              .catch((cause) =>
+                setState({ busy: false, saved: null, error: cause instanceof ApiFailure ? cause.detail.message : String(cause) }),
+              );
+          }}
+        >
+          Save slides (.pptx)
+        </Button>
+      </div>
+      {state.saved ? <Banner tone="okay" title={`Saved to ${state.saved}`} /> : null}
+      {state.error ? <Banner tone="error" title={state.error} /> : null}
+    </div>
+  );
+}
+
 function Material({ node, content }: { node: ArtifactNode; content: string }) {
   const mediaType = node.mediaType ?? "";
   const size = `${Math.max(1, Math.round(node.sizeBytes / 1024))} KB`;

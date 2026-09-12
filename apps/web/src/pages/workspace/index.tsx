@@ -77,7 +77,10 @@ export function StageWorkspace({
       node.stage === stage &&
       node.kind !== "engineering_review" &&
       node.kind !== "design_feedback" &&
-      node.kind !== "source_material",
+      node.kind !== "source_material" &&
+      // The slides built from a stage 5 package are a file beside it, not a
+      // version of the stage's document, and never what a gate approves.
+      node.kind !== "audience_deck",
   );
   const panelReviews = detail.nodes.filter(
     (node) => node.stage === stage && node.kind === "engineering_review",
