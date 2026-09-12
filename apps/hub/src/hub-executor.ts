@@ -348,6 +348,20 @@ export function forgetExecution(projectId: string): void {
   anchors.delete(projectId);
 }
 
+/**
+ * Forgets every project's deployment. The lifecycle is rendered with the
+ * model it will draft with, pinned at deploy time, so a change to what the
+ * catalog serves — a model chosen, providers reordered, one connected or
+ * disconnected — is a different lifecycle. The next command on any project
+ * resolves its deployment again, which deploys the new shape and walks its
+ * run to the ledger; until then the old one would keep drafting with the
+ * old model, whatever Settings says.
+ */
+export function forgetAllExecutions(): void {
+  anchors.clear();
+  unavailable.clear();
+}
+
 async function alignOnce(projectId: string, ledger: LedgerPosition): Promise<"aligned" | "no_execution" | "failed"> {
   const anchor = anchors.get(projectId) ?? (await anchorFor(projectId));
   if (!anchor) return "no_execution";

@@ -20,6 +20,7 @@
  * row's mere existence.
  */
 import { HostError, notFound } from "./errors.js";
+import { forgetAllExecutions } from "./hub-executor.js";
 import { storeSecret, deleteSecret, readSecret } from "./provider-credentials.js";
 import {
   registerProviderCatalog,
@@ -211,7 +212,18 @@ export async function selectModel(providerId: string, model: string): Promise<Pr
     );
   }
   await setCatalogSelectedModel(providerId, model);
+  catalogChanged();
   return catalogToSummary((await getCatalogProvider(providerId))!);
+}
+
+/**
+ * What the catalog serves decides the model every lifecycle is pinned to,
+ * so after any change to it each project's deployment is resolved again on
+ * its next command. Without this a model chosen in Settings took effect
+ * only after the host restarted.
+ */
+function catalogChanged(): void {
+  forgetAllExecutions();
 }
 
 export async function listProviders(): Promise<ProviderSummary[]> {
@@ -237,6 +249,7 @@ export async function setProviderOrder(providerIds: string[]): Promise<ProviderS
   for (const [index, providerId] of providerIds.entries()) {
     await setCatalogProviderPriority(providerId, index);
   }
+  catalogChanged();
   return listProviders();
 }
 
@@ -358,7 +371,8 @@ export async function connectProvider(
       credentialRef: null,
       baseUrl: request.baseUrl,
     });
-    await registerProviderCatalog({
+    catalogChanged();
+  await registerProviderCatalog({
       providerId: LOCAL_PROVIDER_ID,
       label: request.label,
       plugin: PLUGINS[LOCAL_PROVIDER_ID] ?? "openai-compatible",
@@ -409,7 +423,8 @@ export async function connectProvider(
       baseUrl,
     });
     if (!link) throw new Error("the hub did not return a credential reference");
-    await registerProviderCatalog({
+    catalogChanged();
+  await registerProviderCatalog({
       providerId: request.providerId,
       label: request.label,
       plugin: PLUGINS[request.providerId] ?? "openai-compatible",
@@ -474,7 +489,8 @@ export async function finishOAuthConnect(): Promise<ProviderSummary> {
       baseUrl: completed.baseUrl,
     });
     if (!link) throw new Error("the hub did not return a credential reference");
-    await registerProviderCatalog({
+    catalogChanged();
+  await registerProviderCatalog({
       providerId: completed.providerId,
       label: definition.label,
       plugin: PLUGINS[completed.providerId] ?? "openai-compatible",
@@ -520,6 +536,7 @@ export async function refreshProviderModels(providerId: string): Promise<Provide
   // cleared rather than left pointing at nothing.
   const priorSelected = selectedModelOf(catalogRow.models);
 
+  catalogChanged();
   await registerProviderCatalog({
     providerId,
     label: catalogRow.label,
@@ -547,6 +564,7 @@ export async function disconnectProvider(providerId: string): Promise<void> {
     if (ref) await deleteSecret(ref);
   }
   await disconnectCatalogProvider(providerId);
+  catalogChanged();
 }
 
 /**
