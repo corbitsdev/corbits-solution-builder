@@ -38,6 +38,7 @@ import {
   bundleFileName,
 } from "./project-transfer.js";
 import { bytesOf } from "./source-material.js";
+import { ensureDeckFor } from "./deck.js";
 import { attachMaterial, MATERIAL_KIND, type IncomingFile } from "./source-material.js";
 import { setStakeholders, STAKEHOLDER_ROLES } from "./stakeholders.js";
 
@@ -232,6 +233,20 @@ export function registerProjectRoutes(api: Hono) {
     }
     const saved = await saveFile(fileNameFor(node.title, stored.mime), stored.bytes, exportDirectory());
     return context.json(saved);
+  });
+
+  /**
+   * A stakeholder's slides, saved into the Downloads folder: built from the
+   * package now when none exists for this version, and then saved. One
+   * request, because that is one act for the person.
+   */
+  api.post("/artifacts/:nodeId/slides/save", async (context) => {
+    const deck = await ensureDeckFor({ packageNodeId: context.req.param("nodeId"), actor: localActor() });
+    const { node, content } = await readArtifactNode(deck.nodeId);
+    const stored = bytesOf(content);
+    if (!stored) throw new HostError("internal_error", "The slides were recorded without their bytes.");
+    const saved = await saveFile(fileNameFor(node.title, stored.mime), stored.bytes, exportDirectory());
+    return context.json({ ...saved, nodeId: deck.nodeId, built: deck.built });
   });
 
   /**

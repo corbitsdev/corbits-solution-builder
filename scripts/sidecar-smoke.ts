@@ -562,6 +562,29 @@ try {
         );
         const { stageInputsForSmoke } = await import("../apps/hub/src/stage-runs.js");
         check("the slides are never handed to a later stage as an input", !(await stageInputsForSmoke(project.projectId, 6 as never)).includes("base64"));
+        // A package written before decks existed has none; asking for its
+        // slides builds them from the package as it is, once.
+        const { ensureDeckFor } = await import("../apps/hub/src/deck.js");
+        const older = await writeArtifact(
+          {
+            projectId: project.projectId,
+            kind: "audience_package" as never,
+            variant: "Project owner",
+            title: "Audience package — Project owner",
+            content: "## Audience: Project owner\n\n### Deck outline\n\n1. **Only slide**  \n   One line of body.\n\n### Decision request\n- Decide.",
+            mediaType: "text/markdown",
+            sourceVersionIds: [],
+            provenance: { producer: "human", runId: await currentRunId() },
+          },
+          ACTOR,
+        );
+        const deckOnce = await ensureDeckFor({ packageNodeId: older.nodeId, actor: ACTOR });
+        const deckAgain = await ensureDeckFor({ packageNodeId: older.nodeId, actor: ACTOR });
+        check(
+          "slides asked for from a package without any are built from it, once",
+          deckOnce.built && !deckAgain.built && deckAgain.nodeId === deckOnce.nodeId,
+          `${deckOnce.built}/${deckAgain.built}`,
+        );
       }
       await deliverStageSignal(project.projectId, "stage.submit", { runId: project.runId }, `smoke-submit-${stage}-${project.projectId}`);
       const gate = await settle((s) => s.parked && s.stepId === gateStepId(stage));
