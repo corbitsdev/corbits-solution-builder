@@ -2547,6 +2547,34 @@ button[aria-disabled="true"] {
 }
 
 /* The stakeholder editor: one row per person, name then role then remove. */
+/* One stakeholder role's deck design in Settings: a titled block of controls. */
+.deck-role {
+  display: grid;
+  gap: var(--space-3);
+  padding-block: var(--space-4);
+  border-top: 1px solid var(--wb-border);
+}
+
+.deck-role-title {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.deck-role-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.deck-role-control {
+  display: grid;
+  gap: var(--space-1);
+  font-size: 0.8125rem;
+  color: var(--wb-muted-foreground);
+}
+
 /* A stakeholder's slides in the artifacts view: a file, described and saved. */
 .deck-file {
   display: grid;
