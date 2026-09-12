@@ -21,7 +21,7 @@ import {
 } from "./deck-settings.js";
 import { templateFor, templateThemeFor, type TemplateTheme } from "./deck-template.js";
 import { renderDeckOnTemplate } from "./deck-on-template.js";
-import { illustration, illustrationPrompt, imageSource } from "./deck-images.js";
+import { artDirection, chatSource, illustration, illustrationPrompt, imageSource } from "./deck-images.js";
 
 /** The kind a deck is recorded as: stage 5, one per stakeholder, never a prompt input. */
 export const DECK_KIND: ArtifactKind = "audience_deck";
@@ -247,9 +247,11 @@ export async function renderDeck(deck: Deck): Promise<Uint8Array> {
 }
 
 /**
- * The illustrations a role's design asks for, drawn by the provider's image
- * model: the cover's, or one per outline item as well. Null when the design
- * asks for none. Throws when it asks and no connected provider can draw.
+ * The illustrations a role's design asks for. A chat model that has read the
+ * whole deck says which slides deserve a picture and what each should show;
+ * the provider's image model then draws those, in the house manner. Null
+ * when the design asks for none. Throws when it asks and no connected
+ * provider can read or draw.
  */
 export async function illustrationsFor(deck: Deck): Promise<Map<string, Uint8Array> | null> {
   if (deck.design.images === "none") return null;
@@ -262,25 +264,29 @@ export async function illustrationsFor(deck: Deck): Promise<Map<string, Uint8Arr
       false,
     );
   }
+  const reader = await chatSource();
+  if (!reader) {
+    throw new HostError(
+      "provider_unavailable",
+      "The slides ask for images, but no connected provider has a chat model to read the deck with. Connect one, or set Images to none for this role in Settings, Stakeholder decks.",
+      {},
+      false,
+    );
+  }
+  const direction = await artDirection({
+    source: reader,
+    mode: deck.design.images,
+    projectTitle: deck.projectTitle,
+    audience: deck.audience,
+    role: deck.role,
+    guidance: deck.design.guidance,
+    slides: deck.slides,
+    decision: deck.decision,
+  });
   const colour = DECK_THEMES[deck.design.theme].label.toLowerCase();
   const images = new Map<string, Uint8Array>();
-  const gist = deck.slides[0]?.bullets[0] ?? deck.slides[0]?.title ?? deck.projectTitle;
-  images.set(
-    "cover",
-    await illustration(source, illustrationPrompt({ projectTitle: deck.projectTitle, audience: deck.audience, role: deck.role, title: deck.projectTitle, gist, colour })),
-  );
-  if (deck.design.images === "all") {
-    for (const [index, slide] of deck.slides.entries()) {
-      const prompt = illustrationPrompt({
-        projectTitle: deck.projectTitle,
-        audience: deck.audience,
-        role: deck.role,
-        title: slide.title,
-        gist: slide.bullets[0] ?? slide.notes.slice(0, 200),
-        colour,
-      });
-      images.set(String(index), await illustration(source, prompt));
-    }
+  for (const [key, subject] of direction) {
+    images.set(key, await illustration(source, illustrationPrompt({ subject, colour })));
   }
   return images;
 }
