@@ -11,6 +11,14 @@ import { agentFor } from "@solutions-builder/app/kit";
 import { HostError, notFound } from "./errors.js";
 import { artifactGraph, readArtifactNode, writeArtifact } from "./projects.js";
 import { readProject } from "./project-tenant.js";
+import {
+  DECK_DENSITY,
+  DECK_THEMES,
+  DEFAULT_DECK_DESIGN,
+  deckDesignFor,
+  deckDesignHash,
+  type DeckDesign,
+} from "./deck-settings.js";
 
 /** The kind a deck is recorded as: stage 5, one per stakeholder, never a prompt input. */
 export const DECK_KIND: ArtifactKind = "audience_deck";
@@ -31,6 +39,8 @@ export type Deck = {
   readonly slides: readonly DeckSlide[];
   /** The package's decision request, as the closing slide's lines. */
   readonly decision: readonly string[];
+  /** The look the role's settings ask for. */
+  readonly design: DeckDesign;
 };
 
 /** The text under a `### heading`, up to the next heading of the same or a higher level. */
@@ -54,21 +64,21 @@ function plain(text: string): string {
     .trim();
 }
 
-/** A body split into the sentences a slide shows; a "Source:" sentence stays in the notes. */
-function bulletsOf(body: string): string[] {
+/** A body split into the sentences a slide shows, up to `most`; a "Source:" sentence stays in the notes. */
+function bulletsOf(body: string, most: number): string[] {
   const text = plain(body).replace(/\s*Source:.*$/i, "");
   const sentences = text
     .split(/(?<=[.!?])\s+(?=[A-Z`"'(])/)
     .map((sentence) => sentence.trim())
     .filter((sentence) => sentence.length > 0);
-  return sentences.slice(0, 5);
+  return sentences.slice(0, most);
 }
 
 /**
  * The deck outline's numbered items: each a title in bold and a body under
  * it. An item without bold text takes its whole first line as the title.
  */
-export function outlineSlidesIn(markdown: string): DeckSlide[] {
+export function outlineSlidesIn(markdown: string, most = DECK_DENSITY[DEFAULT_DECK_DESIGN.density]): DeckSlide[] {
   const section = sectionIn(markdown, "deck outline");
   if (section === null) return [];
   const items: { title: string; body: string[] }[] = [];
@@ -92,7 +102,7 @@ export function outlineSlidesIn(markdown: string): DeckSlide[] {
     .filter((item) => item.title.length > 0)
     .map((item) => {
       const body = item.body.join(" ");
-      return { title: item.title, bullets: bulletsOf(body), notes: plain(body) };
+      return { title: item.title, bullets: bulletsOf(body, most), notes: plain(body) };
     });
 }
 
@@ -107,8 +117,15 @@ export function decisionLinesIn(markdown: string): string[] {
     .slice(0, 8);
 }
 
-export function deckFrom(args: { projectTitle: string; audience: string; role: string; markdown: string }): Deck | null {
-  const slides = outlineSlidesIn(args.markdown);
+export function deckFrom(args: {
+  projectTitle: string;
+  audience: string;
+  role: string;
+  markdown: string;
+  design?: DeckDesign;
+}): Deck | null {
+  const design = args.design ?? DEFAULT_DECK_DESIGN;
+  const slides = outlineSlidesIn(args.markdown, DECK_DENSITY[design.density]);
   if (slides.length === 0) return null;
   return {
     projectTitle: args.projectTitle,
@@ -116,17 +133,19 @@ export function deckFrom(args: { projectTitle: string; audience: string; role: s
     role: args.role,
     slides,
     decision: decisionLinesIn(args.markdown),
+    design,
   };
 }
 
-/** A face PowerPoint carries everywhere and Keynote substitutes cleanly; a viewer's fallback serif reads as unfinished. */
-const FACE = "Calibri";
 const INK = "1F2933";
 const MUTED = "6B7280";
-const ACCENT = "B45309";
 
 /** The deck as PowerPoint bytes: a title slide, one slide per outline item, and the decision request. */
 export async function renderDeck(deck: Deck): Promise<Uint8Array> {
+  // The role's look: a typeface PowerPoint carries and Keynote substitutes
+  // cleanly, and one accent colour on the cover's bar and each rule.
+  const FACE = deck.design.typeface;
+  const ACCENT = DECK_THEMES[deck.design.theme].accent;
   const pptx = new PptxGenJS();
   pptx.layout = "LAYOUT_16x9";
   pptx.title = `${deck.projectTitle} — for ${deck.audience}`;
@@ -164,7 +183,7 @@ export async function renderDeck(deck: Deck): Promise<Uint8Array> {
       entry.bullets.map((text) => ({ text, options: { bullet: true, breakLine: true } })),
       { x: 0.5, y: 1.5, w: 9, h: 3.5, fontSize: 15, fontFace: FACE, color: INK, valign: "top", paraSpaceAfter: 6 },
     );
-    if (entry.notes) slide.addNotes(entry.notes);
+    if (entry.notes && deck.design.notes) slide.addNotes(entry.notes);
     footer(slide, index + 2);
   });
 
@@ -207,11 +226,13 @@ export async function writeDeckFor(args: {
   agentRole: string;
   actor: { principalId: string };
 }): Promise<{ nodeId: string; version: number } | null> {
+  const design = await deckDesignFor(args.audience.role);
   const deck = deckFrom({
     projectTitle: args.projectTitle,
     audience: args.audience.name,
     role: args.audience.role.replace(/_/g, " "),
     markdown: args.markdown,
+    design,
   });
   if (!deck) return null;
   const bytes = await renderDeck(deck);
@@ -224,18 +245,25 @@ export async function writeDeckFor(args: {
       content: `data:${DECK_MEDIA_TYPE};base64,${Buffer.from(bytes).toString("base64")}`,
       mediaType: DECK_MEDIA_TYPE,
       sourceVersionIds: [args.packageNodeId],
-      provenance: { producer: "agent", agentRole: args.agentRole },
+      // The look it was built with rides along, so a changed design is a new version.
+      provenance: { producer: "agent", agentRole: args.agentRole, promptKey: designKey(design) },
     },
     args.actor,
   );
   return { nodeId: written.nodeId, version: written.version };
 }
 
+/** How a deck's provenance names the look it was built with. */
+function designKey(design: DeckDesign): string {
+  return `sb-deck-design:${deckDesignHash(design)}`;
+}
+
 /**
- * The deck built from this package version, building it now when none has
- * been: a package written before decks existed, or one whose build failed.
- * The person asks for slides from the package they can see, so the answer
- * is the slides for that version, never a rewrite of the package.
+ * The deck built from this package version with the role's current design,
+ * building it now when none has been: a package written before decks
+ * existed, one whose build failed, or one whose role's design has changed
+ * since. The person asks for slides from the package they can see, so the
+ * answer is the slides for that version, never a rewrite of the package.
  */
 export async function ensureDeckFor(args: {
   packageNodeId: string;
@@ -245,21 +273,22 @@ export async function ensureDeckFor(args: {
   if (node.kind !== "audience_package") {
     throw new HostError("validation_failed", "Slides are built from a stakeholder's package.", {}, false);
   }
-  const { nodes, edges } = await artifactGraph(node.projectId);
-  const existing = nodes.find(
-    (candidate) =>
-      candidate.kind === DECK_KIND &&
-      candidate.supersededByNodeId === null &&
-      edges.some((edge) => edge.childNodeId === candidate.id && edge.sourceNodeId === node.id),
-  );
-  if (existing) return { nodeId: existing.id, built: false };
-
   const project = await readProject(node.projectId);
   if (!project) throw notFound("That project");
   const audience = project.policy.audiences?.find((entry) => entry.name === node.variant) ?? {
     name: node.variant ?? "Stakeholder",
     role: "stakeholder",
   };
+  const { nodes, edges } = await artifactGraph(node.projectId);
+  const current = designKey(await deckDesignFor(audience.role));
+  const existing = nodes.find(
+    (candidate) =>
+      candidate.kind === DECK_KIND &&
+      candidate.supersededByNodeId === null &&
+      edges.some((edge) => edge.childNodeId === candidate.id && edge.sourceNodeId === node.id) &&
+      (candidate.provenance as { promptKey?: unknown } | null)?.promptKey === current,
+  );
+  if (existing) return { nodeId: existing.id, built: false };
   const written = await writeDeckFor({
     projectId: node.projectId,
     projectTitle: project.title,

@@ -2,6 +2,7 @@ import { access, rm, writeFile } from "node:fs/promises";
 import type { Hono } from "hono";
 import { startAtLoginMarker } from "./paths.js";
 import { designerSettings, saveDesignerSettings, type DesignerSettings } from "./designer-settings.js";
+import { deckSettings, saveDeckDesign, type DeckDesign } from "./deck-settings.js";
 import { COMMANDS, LEDGER, STAGE_TITLES } from "@solutions-builder/app/ledger";
 import { AGENT_KIT } from "@solutions-builder/app/kit";
 import { listProviders } from "./providers.js";
@@ -116,7 +117,12 @@ export function registerHostRoutes(api: Hono) {
     const designer = Object.fromEntries(
       Object.entries(await designerSettings()).map(([key, value]) => [`designer.${key}`, value]),
     );
-    return context.json({ preferences: { "host.startAtLogin": startAtLogin, ...designer } });
+    const decks = Object.fromEntries(
+      Object.entries(await deckSettings()).flatMap(([role, design]) =>
+        Object.entries(design).map(([key, value]) => [`deck.${role}.${key}`, value]),
+      ),
+    );
+    return context.json({ preferences: { "host.startAtLogin": startAtLogin, ...designer, ...decks } });
   });
 
   api.put("/preferences/:key", async (context) => {
@@ -130,6 +136,11 @@ export function registerHostRoutes(api: Hono) {
     } else if (key.startsWith("designer.")) {
       const field = key.slice("designer.".length) as keyof DesignerSettings;
       const saved = await saveDesignerSettings({ [field]: value } as Partial<DesignerSettings>);
+      return context.json({ key, value: saved[field] });
+    } else if (key.startsWith("deck.")) {
+      // `deck.<role>.<field>`: one role's design, one field at a time.
+      const [role, field] = key.slice("deck.".length).split(".") as [string, keyof DeckDesign];
+      const saved = await saveDeckDesign(role, { [field]: value } as Partial<DeckDesign>);
       return context.json({ key, value: saved[field] });
     }
     return context.json({ key, value });

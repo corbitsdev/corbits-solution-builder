@@ -40,6 +40,7 @@ export function Settings({
         onChanged={onChanged}
       />
       <Designer />
+      <StakeholderDecks />
       <ThisComputer status={status} />
       <Diagnostics status={status} />
     </div>
@@ -374,5 +375,164 @@ function Diagnostics({ status }: { status: HostStatus | null }) {
         </div>
       </dl>
     </details>
+  );
+}
+
+/* ------------------------------------------------------------ stakeholder decks */
+
+const DECK_ROLES = [
+  "project_owner",
+  "budget_approver",
+  "technical_approver",
+  "audience_member",
+  "builder_operator",
+  "delivery_recipient",
+] as const;
+type DeckRole = (typeof DECK_ROLES)[number];
+type DeckTheme = "ember" | "slate" | "forest" | "navy" | "plum";
+type DeckTypeface = "Calibri" | "Georgia" | "Arial" | "Helvetica";
+type DeckDensity = "sparse" | "standard" | "full";
+type DeckDesign = { theme: DeckTheme; typeface: DeckTypeface; density: DeckDensity; notes: boolean; guidance: string };
+
+const DEFAULT_DECK: DeckDesign = { theme: "ember", typeface: "Calibri", density: "standard", notes: true, guidance: "" };
+
+function roleLabel(role: string): string {
+  return role.replace(/_/g, " ");
+}
+
+/**
+ * How each stakeholder role's deck is designed: its look, and what its
+ * outline should emphasise. A budget approver and a technical approver do
+ * not want the same slides. Selects save as they change; the guidance
+ * saves when the field is left, since it is typed.
+ */
+function StakeholderDecks() {
+  const [designs, setDesigns] = useState<Record<DeckRole, DeckDesign> | null>(null);
+  const [guidance, setGuidance] = useState<Record<DeckRole, string>>(
+    Object.fromEntries(DECK_ROLES.map((role) => [role, ""])) as Record<DeckRole, string>,
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .preferences()
+      .then(({ preferences }) => {
+        if (cancelled) return;
+        const loaded = Object.fromEntries(
+          DECK_ROLES.map((role) => [
+            role,
+            {
+              theme: (preferences[`deck.${role}.theme`] as DeckTheme | undefined) ?? DEFAULT_DECK.theme,
+              typeface: (preferences[`deck.${role}.typeface`] as DeckTypeface | undefined) ?? DEFAULT_DECK.typeface,
+              density: (preferences[`deck.${role}.density`] as DeckDensity | undefined) ?? DEFAULT_DECK.density,
+              notes: preferences[`deck.${role}.notes`] !== false,
+              guidance: String(preferences[`deck.${role}.guidance`] ?? ""),
+            },
+          ]),
+        ) as Record<DeckRole, DeckDesign>;
+        setDesigns(loaded);
+        setGuidance(Object.fromEntries(DECK_ROLES.map((role) => [role, loaded[role].guidance])) as Record<DeckRole, string>);
+      })
+      .catch((cause) => {
+        if (!cancelled) setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const save = async <K extends keyof DeckDesign>(role: DeckRole, key: K, value: DeckDesign[K]) => {
+    if (!designs) return;
+    setError(null);
+    const before = designs;
+    setDesigns({ ...designs, [role]: { ...designs[role], [key]: value } });
+    try {
+      await api.setPreference(`deck.${role}.${key}`, value);
+    } catch (cause) {
+      setDesigns(before);
+      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    }
+  };
+
+  return (
+    <Section
+      title="Stakeholder decks"
+      lead="How each stakeholder role's slides look, and what their deck outline should emphasise. A changed look rebuilds the slides the next time they are saved; changed guidance shapes the next package written for that role."
+    >
+      {error ? <Banner tone="error" title={error} /> : null}
+      {DECK_ROLES.map((role) => {
+        const design = designs?.[role] ?? DEFAULT_DECK;
+        return (
+          <div key={role} className="deck-role">
+            <h3 className="deck-role-title">{roleLabel(role)}</h3>
+            <div className="deck-role-controls">
+              <label className="deck-role-control">
+                <span>Colour</span>
+                <select
+                  className="setting-select"
+                  value={design.theme}
+                  disabled={!designs}
+                  onChange={(event) => void save(role, "theme", event.target.value as DeckTheme)}
+                >
+                  <option value="ember">Ember</option>
+                  <option value="slate">Slate</option>
+                  <option value="forest">Forest</option>
+                  <option value="navy">Navy</option>
+                  <option value="plum">Plum</option>
+                </select>
+              </label>
+              <label className="deck-role-control">
+                <span>Typeface</span>
+                <select
+                  className="setting-select"
+                  value={design.typeface}
+                  disabled={!designs}
+                  onChange={(event) => void save(role, "typeface", event.target.value as DeckTypeface)}
+                >
+                  <option value="Calibri">Calibri</option>
+                  <option value="Georgia">Georgia</option>
+                  <option value="Arial">Arial</option>
+                  <option value="Helvetica">Helvetica</option>
+                </select>
+              </label>
+              <label className="deck-role-control">
+                <span>Density</span>
+                <select
+                  className="setting-select"
+                  value={design.density}
+                  disabled={!designs}
+                  onChange={(event) => void save(role, "density", event.target.value as DeckDensity)}
+                >
+                  <option value="sparse">Sparse · up to 3 points a slide</option>
+                  <option value="standard">Standard · up to 5</option>
+                  <option value="full">Full · up to 7</option>
+                </select>
+              </label>
+              <label className="deck-role-control">
+                <span>Speaker notes</span>
+                <Switch checked={design.notes} disabled={!designs} onCheckedChange={(checked) => void save(role, "notes", checked)} />
+              </label>
+            </div>
+            <div className="setting-field">
+              <div>
+                <strong>What the outline should emphasise</strong>
+                <p>In your words, for this role: what to lead with, what to leave out, the tone. Given to the presentation creator with the next package.</p>
+              </div>
+              <Textarea
+                aria-label={`Deck guidance for ${roleLabel(role)}`}
+                value={guidance[role]}
+                disabled={!designs}
+                placeholder="e.g. Lead with cost and timeline; one risk slide at most; no implementation detail."
+                onChange={(event) => setGuidance({ ...guidance, [role]: event.target.value })}
+                onBlur={() => {
+                  if (designs && guidance[role] !== designs[role].guidance) void save(role, "guidance", guidance[role]);
+                }}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </Section>
   );
 }

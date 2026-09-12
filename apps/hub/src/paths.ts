@@ -42,6 +42,11 @@ export function portFile(): string {
   return join(dataDirectory(), "port");
 }
 
+/** How each stakeholder role's deck is designed, and what its outline emphasises. */
+export function deckSettingsFile(): string {
+  return join(dataDirectory(), "decks.json");
+}
+
 /** The designer's settings: surface, design language, token limit, policy. */
 export function designerSettingsFile(): string {
   return join(dataDirectory(), "designer.json");
