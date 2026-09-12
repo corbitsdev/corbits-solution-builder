@@ -73,6 +73,17 @@ function replyFor(messages: unknown[]): string | null {
   const text = JSON.stringify(messages);
   if (text.includes("You are the Brainstormer at stage 1.")) return BRAINSTORMER_REPLY;
   if (text.includes("You are the Brief evaluator inside Solutions Builder")) return EVALUATOR_REPLY;
+  if (text.includes("You are the art director for a short business presentation.")) {
+    // The deck as the host sent it: the cover and the first slide get a
+    // picture, the second is left alone.
+    return JSON.stringify({
+      cover: { illustrate: true, subject: "A maintainer at a desk with a tall stack of paper, one sheet lifted to the light." },
+      slides: [
+        { index: 0, illustrate: true, subject: "A Monday calendar page with a heavy toolbox on it." },
+        { index: 1, illustrate: false },
+      ],
+    });
+  }
   if (text.includes("You are the Presentation creator at stage 5.")) {
     const audience = /Prepare the package for one audience only: ([^(]+) \(/.exec(text)?.[1]?.trim() ?? "?";
     // A refusal, not an empty reply: an assistant turn with no text leaves
@@ -612,7 +623,7 @@ try {
         // Images: drawn by the connected provider's image model when the
         // slides are asked for, one per slide plus the cover, and kept so a
         // second build asks for nothing.
-        await saveDeckDesign("project_owner", { images: "all" });
+        await saveDeckDesign("project_owner", { images: "some" });
         const drawn = await ensureDeckFor({ packageNodeId: older.nodeId, actor: ACTOR });
         const asked = imagePrompts.length;
         const drawnAgain = await ensureDeckFor({ packageNodeId: older.nodeId, actor: ACTOR });
@@ -625,9 +636,14 @@ try {
         const mediaParts = Bun.spawnSync(["unzip", "-Z1", join(dir, "deck.pptx")]).stdout.toString().split("\n").filter((name) => /^ppt\/media\/image[\w-]*\.png$/.test(name));
         await rm(dir, { recursive: true, force: true });
         check(
-          "slides asked for with images are drawn by the provider's image model, the cover and one per slide",
+          "a model reads the deck and chooses the slides to illustrate; the image model draws those, and only those",
           drawn.built && asked === 2 && mediaParts.length === 2 && imagePrompts.every((prompt) => /No text, no words/.test(prompt)),
           `built=${drawn.built} asked=${asked} media=${mediaParts.length}`,
+        );
+        check(
+          "each picture is asked for as the art director's subject, drawn from the deck's content",
+          imagePrompts.some((prompt) => prompt.startsWith("A maintainer at a desk")) && imagePrompts.some((prompt) => prompt.startsWith("A Monday calendar page")),
+          imagePrompts.map((prompt) => prompt.slice(0, 40)).join(" | "),
         );
         check("and a second build draws nothing again", !drawnAgain.built && imagePrompts.length === asked, `${imagePrompts.length} prompts`);
         await saveDeckDesign("project_owner", { images: "none", theme: "ember", typeface: "Calibri" });
