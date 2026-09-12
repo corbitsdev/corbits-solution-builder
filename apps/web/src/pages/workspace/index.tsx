@@ -206,11 +206,7 @@ export function StageWorkspace({
       // packages screen offers to write the missing ones again.
       if (result && typeof result === "object" && "failed" in result && Array.isArray(result.failed) && result.failed.length > 0) {
         const failed = result.failed as { audience: string; message: string }[];
-        setError(
-          `${failed.length === 1 ? "One package" : `${failed.length} packages`} could not be written. ${failed
-            .map((entry) => `${entry.audience}: ${entry.message}`)
-            .join(" ")}`,
-        );
+        setError(failed.map((entry) => `The package for ${entry.audience} could not be written. ${entry.message}`).join(" "));
       }
       await loadThread();
       onChanged();
