@@ -278,6 +278,8 @@ export async function audienceDecisions(
 export async function projectApprovals(projectId: string): Promise<
   {
     id: string;
+    /** The run the decision was recorded on: a stage reviewed again after a route back is a new run, and its review starts clean. */
+    runId: string;
     stage: number;
     command: string;
     decision: string;
@@ -293,6 +295,7 @@ export async function projectApprovals(projectId: string): Promise<
     .filter((part) => typeof part.metadata?.decision === "string")
     .map((part) => ({
       id: part.id,
+      runId: String(part.metadata?.runId ?? ""),
       stage: Number(part.metadata?.stage ?? 0),
       command: String(part.metadata?.command ?? ""),
       decision: String(part.metadata?.decision ?? ""),

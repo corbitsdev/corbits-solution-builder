@@ -218,11 +218,18 @@ export function AudiencePackages({
     };
   }, [selected?.id]);
 
+  // A decision belongs to the review it was recorded on. Reopening the stage
+  // starts a new run and a clean review; what was decided before is history,
+  // shown as such beside the stakeholder.
   const decisions = detail.approvals.filter(
-    (approval) => approval.command === "audience.decide",
+    (approval) => approval.command === "audience.decide" && approval.runId === detail.current?.id,
   );
   const decisionFor = (name: string) =>
     decisions.find((approval) => approval.audienceName === name);
+  const earlierDecisionFor = (name: string) =>
+    [...detail.approvals]
+      .reverse()
+      .find((approval) => approval.command === "audience.decide" && approval.runId !== detail.current?.id && approval.audienceName === name);
   const proceeded = decisions.filter((approval) => approval.decision === "proceed").length;
   const blocked = decisions.filter((approval) => approval.decision !== "proceed").length;
   const quorumMet = blocked === 0 && proceeded >= quorum;
@@ -234,6 +241,42 @@ export function AudiencePackages({
   const inProgress = detail.current?.state === "in_progress";
   const sent = detail.current?.state === "waiting_approval";
   const everyoneHasOne = audiences.length > 0 && missing.length === 0;
+
+  /**
+   * Reopens the review: routes the stage back to itself and resumes it, which
+   * starts a new run at stage 5 with the packages open for drafting again.
+   * The decisions recorded on this review stay recorded, as history; the new
+   * review starts clean, so a stakeholder who asked for a revision decides
+   * again on the revised package.
+   */
+  const reopen = async () => {
+    if (!detail.current) return;
+    setBusy("reopen");
+    setError(null);
+    try {
+      const versions = packages.map((entry) => ({ artifactId: entry.artifactId, versionId: entry.id, contentHash: entry.contentHash }));
+      await api.command(detail.project.id, "stage.revise", {
+        expectedRevision: detail.project.revision,
+        runId: detail.current.id,
+        versions,
+        rationale: "Reopened to revise the packages.",
+        reason: "Reopened to revise the packages.",
+        targetStage: 5,
+      });
+      const routed = await api.project(detail.project.id);
+      if (routed.current) {
+        await api.command(detail.project.id, "stage.select_route", {
+          expectedRevision: routed.project.revision,
+          runId: routed.current.id,
+        });
+      }
+      onChanged();
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const decide = async (audienceName: string, decision: "proceed" | "reject" | "revise") => {
     const node = packages.find((entry) => entry.variant === audienceName) ?? selected;
@@ -392,8 +435,18 @@ export function AudiencePackages({
             <Banner title="The first decision sends every package for review, then records itself." />
           ) : inProgress ? (
             <Banner tone="warning" title="Decisions wait until every stakeholder has a package." />
+          ) : sent && blocked > 0 ? (
+            <Banner
+              tone="warning"
+              title="A revise or reject blocks approval. Reopen the review to revise the packages; everyone then decides again on the new versions."
+              action={{ label: busy === "reopen" ? "Reopening…" : "Reopen for revision", onClick: () => void reopen() }}
+            />
           ) : sent ? (
-            <Banner tone="okay" title="The packages are under review. Decisions are recorded against these versions." />
+            <Banner
+              tone="okay"
+              title="The packages are under review. Decisions are recorded against these versions; reopen the review to change a package."
+              action={{ label: busy === "reopen" ? "Reopening…" : "Reopen for revision", onClick: () => void reopen() }}
+            />
           ) : null}
           <Table>
             <TableHeader>
@@ -427,6 +480,10 @@ export function AudiencePackages({
                         <span className="inline-note">
                           Recorded {new Date(recorded.createdAt).toLocaleString()}. Decisions are
                           immutable.
+                        </span>
+                      ) : earlierDecisionFor(audience.name) ? (
+                        <span className="inline-note">
+                          Asked for {earlierDecisionFor(audience.name)!.decision === "proceed" ? "proceed" : `a ${earlierDecisionFor(audience.name)!.decision}`} on an earlier review; decides again on this one.
                         </span>
                       ) : (
                         <div className="button-row">

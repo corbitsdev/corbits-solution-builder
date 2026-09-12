@@ -222,6 +222,7 @@ export type ProjectDetail = {
   nodes: ArtifactNode[];
   approvals: {
     id: string;
+    runId: string;
     stage: number;
     command: string;
     decision: string;
