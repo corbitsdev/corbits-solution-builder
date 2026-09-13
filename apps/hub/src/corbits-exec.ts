@@ -153,6 +153,9 @@ export async function runBuildAttempt(args: {
   });
 
   const timeout = setTimeout(() => child.kill(), args.timeoutMs ?? 30 * 60_000);
+  // A cancel can land before the process is up; an already-aborted signal
+  // never fires its listener, so it is checked as well as listened for.
+  if (args.signal?.aborted) child.kill();
   args.signal?.addEventListener("abort", () => child.kill(), { once: true });
 
   const [stdout, stderr] = await Promise.all([
