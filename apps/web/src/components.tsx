@@ -489,3 +489,57 @@ export function RollingNumber({ value }: { value: number }) {
 export function documentName(kind: string): string {
   return DOCUMENT_NAMES[kind] ?? kind.replace(/_/g, " ");
 }
+
+/** What the specialists can read: the same list the Projects page and the Artifacts tab accept. */
+export const MATERIAL_ACCEPT = ".txt,.md,.csv,.json,.html,.xlsx,.xls,.docx,.doc,.pptx,.ppt,.pdf,.png,.jpg,.jpeg,.gif,.webp";
+
+/**
+ * The one way to hand documents or images over mid-project, wherever it
+ * appears: a link that opens the file picker, and the reason if the files
+ * were refused. The caller attaches them; this only asks for them.
+ */
+export function AddMaterial({
+  onAdd,
+  label = "Add documents or images…",
+  className,
+}: {
+  onAdd: (files: File[]) => Promise<void>;
+  label?: string;
+  className?: string;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  const [adding, setAdding] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const add = async (files: FileList) => {
+    if (files.length === 0) return;
+    setAdding(true);
+    setError(null);
+    try {
+      await onAdd([...files]);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setAdding(false);
+      if (input.current) input.current.value = "";
+    }
+  };
+  return (
+    <div className={className ?? "material-add"}>
+      <input
+        ref={input}
+        type="file"
+        multiple
+        hidden
+        accept={MATERIAL_ACCEPT}
+        aria-label="Choose documents or images to add to the project"
+        onChange={(event) => {
+          if (event.target.files) void add(event.target.files);
+        }}
+      />
+      <Button variant="link" loading={adding} onClick={() => input.current?.click()}>
+        {label}
+      </Button>
+      {error ? <p className="inline-note">{error}</p> : null}
+    </div>
+  );
+}
