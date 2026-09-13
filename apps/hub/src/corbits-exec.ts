@@ -13,7 +13,9 @@
  *   interface      one CLI's non-interactive form — `corbits exec <prompt>`
  *                  by default; the worker is chosen in Settings (build-worker.ts)
  *   inputs         one prompt string, a working directory, a model/provider
- *   outputs        final text on stdout, and an exit status. That is all.
+ *   outputs        final text on stdout, and an exit status; while it runs,
+ *                  its stdout and stderr as written, and — where the worker
+ *                  has a lifecycle hook — its own report of each turn
  *   failure        non-zero exit, timeout, or the binary being absent
  *   permissions    inherits the operator's own CLI configuration; the bridge
  *                  never passes --dangerously-skip-permissions
@@ -26,10 +28,11 @@
  * are absent here rather than synthesised from stdout — a fake control is worse
  * than a missing one, because a human would act on it.
  */
-import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { dataDirectory } from "./paths.js";
 import { buildWorker, type BuildWorker } from "./build-worker.js";
+import { followTurnLog } from "./turn-reports.js";
 
 export const BRIDGE_ID = "bounded-local-corbits-exec";
 
@@ -41,6 +44,8 @@ export const BRIDGE_CAPABILITIES = {
   liveEvents: false,
   /** The process's own stdout and stderr, as written, in arrival order. Not events. */
   liveOutput: true,
+  /** The worker's own report of each turn through its lifecycle hook, where it has one. */
+  turnReports: true,
   sessionInspection: false,
   questionsAndApprovals: false,
   steering: false,
@@ -58,6 +63,11 @@ export type BridgeOutcome = {
   readonly finalText: string;
   readonly stderrTail: string;
   readonly workspace: string;
+  /** Where the worker's turn reports were appended, or null when the worker has no hook. */
+  readonly turnLog: string | null;
+  /** How many turns and tool calls the worker reported; null when it could not report. */
+  readonly turns: number | null;
+  readonly toolCalls: number | null;
   readonly startedAt: string;
   readonly endedAt: string;
   /**
@@ -124,6 +134,11 @@ export async function workspaceFor(runId: string): Promise<string> {
   return path;
 }
 
+/** Beside the workspace, not in it: the worker builds in one and reports into the other. */
+export function turnLogFor(runId: string): string {
+  return join(dataDirectory(), "builds", `${runId}.turns.jsonl`);
+}
+
 /**
  * Runs one build attempt. Resolves with the outcome whether the attempt
  * succeeded or failed — a failed build is evidence, not an exception.
@@ -131,14 +146,14 @@ export async function workspaceFor(runId: string): Promise<string> {
 export async function runBuildAttempt(args: {
   runId: string;
   prompt: string;
-  timeoutMs?: number;
   signal?: AbortSignal;
   /**
-   * Each chunk the process writes, on either pipe, as it arrives. The bridge
-   * passes bytes through as text and nothing more: no lines are parsed, no
-   * progress is inferred.
+   * Each chunk the process writes, on either pipe, as it arrives, and each
+   * turn the worker reports through its hook, said in a line or two. The
+   * pipes pass through as text and nothing more: no lines are parsed, no
+   * progress is inferred. A turn report is the worker's own.
    */
-  onOutput?: (chunk: string, channel: "stdout" | "stderr") => void;
+  onOutput?: (chunk: string, channel: "stdout" | "stderr" | "turn") => void;
 }): Promise<BridgeOutcome> {
   const startedAt = new Date().toISOString();
   const workspace = await workspaceFor(args.runId);
@@ -153,6 +168,9 @@ export async function runBuildAttempt(args: {
       finalText: "",
       stderrTail: availability.detail,
       workspace,
+      turnLog: null,
+      turns: null,
+      toolCalls: null,
       startedAt,
       endedAt: new Date().toISOString(),
       checkpointRef: null,
@@ -160,6 +178,20 @@ export async function runBuildAttempt(args: {
   }
 
   const worker = availability.worker;
+
+  // A worker with a lifecycle hook is given one for this attempt, in its
+  // working directory, and the log it appends to is followed while it runs.
+  const turnLog = worker.turnReports ? turnLogFor(args.runId) : null;
+  if (turnLog && worker.turnReports) {
+    await writeFile(turnLog, "");
+    for (const file of worker.turnReports.install(turnLog)) {
+      const path = join(workspace, file.path);
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, file.content);
+    }
+  }
+  const following = turnLog ? followTurnLog(turnLog, (text) => args.onOutput?.(text, "turn")) : null;
+
   const child = Bun.spawn([worker.command, ...worker.run(args.prompt)], {
     cwd: workspace,
     stdout: "pipe",
@@ -168,7 +200,7 @@ export async function runBuildAttempt(args: {
     env: { ...process.env },
   });
 
-  const timeout = setTimeout(() => child.kill(), args.timeoutMs ?? 30 * 60_000);
+  const timeout = setTimeout(() => child.kill(), 30 * 60_000);
   // A cancel can land before the process is up; an already-aborted signal
   // never fires its listener, so it is checked as well as listened for.
   if (args.signal?.aborted) child.kill();
@@ -180,6 +212,7 @@ export async function runBuildAttempt(args: {
   ]);
   const exitStatus = await child.exited;
   clearTimeout(timeout);
+  const tally = following ? await following.stop() : null;
 
   return {
     bridgeId: BRIDGE_ID,
@@ -190,6 +223,9 @@ export async function runBuildAttempt(args: {
     finalText: stdout,
     stderrTail: stderr.split("\n").slice(-40).join("\n"),
     workspace,
+    turnLog,
+    turns: tally?.turns ?? null,
+    toolCalls: tally?.toolCalls ?? null,
     startedAt,
     endedAt: new Date().toISOString(),
     checkpointRef: null,
