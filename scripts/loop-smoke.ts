@@ -511,7 +511,17 @@ let buildRunId = "";
   const slow = join(bin, "slow-worker");
   await writeFile(
     slow,
-    ['#!/bin/sh', 'case "$1" in', '  --help) echo "usage: worker exec <prompt>"; exit 0 ;;', '  exec) echo "working on it"; exec sleep 60 ;;', 'esac', ''].join("\n"),
+    [
+      "#!/bin/sh",
+      'case "$1" in',
+      '  --help) echo "usage: worker exec <prompt>"; exit 0 ;;',
+      // What Corbits Code does after a turn: the placed hook, the turn on stdin.
+      "  exec) echo \"working on it\"; printf '%s' '"
+        + JSON.stringify({ turnIndex: 0, durationMs: 1500, toolCalls: [{ id: "c1", name: "read_file", arguments: { path: "plan.md" } }], toolResults: [{ callId: "c1", content: "ok" }] })
+        + "' | sh .corbits/hooks/solutions-builder-turns.sh postTurn; exec sleep 60 ;;",
+      "esac",
+      "",
+    ].join("\n"),
   );
   await chmod(slow, 0o755);
   process.env.SOLUTIONS_BUILDER_WORKER_BIN = slow;
@@ -540,11 +550,25 @@ let buildRunId = "";
     live ? `startedAt=${live.startedAt} transcript=${JSON.stringify(live.transcript)}` : "no live attempt",
   );
   check("and reaches a watcher as it lands", watched.join("").includes("working on it"));
+  for (let waited = 0; waited < 50 && !liveBuild(requeued.runId)?.transcript.includes("read_file"); waited += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  const reported = liveBuild(requeued.runId)?.transcript ?? "";
+  check(
+    "a turn the worker reports through the placed hook is said in the transcript, with its tool call",
+    reported.includes("── turn 1 · 1 tool call · 1.5s") && reported.includes('read_file {"path":"plan.md"}'),
+    JSON.stringify(reported),
+  );
   const cancelled = await command("build.cancel", projectId, { runId: requeued.runId, reason: "smoke" });
   check("build.cancel terminalises the running attempt", cancelled.state === "cancelled");
   check("the cancel reaches the worker process", abortBuildAttempt(requeued.runId));
   const outcomeOfSecond = await second.attempt;
   check("the worker ends once cancelled", outcomeOfSecond !== null && outcomeOfSecond.exitStatus !== 0);
+  check(
+    "the outcome counts what the worker reported",
+    outcomeOfSecond?.turns === 1 && outcomeOfSecond.toolCalls === 1 && typeof outcomeOfSecond.turnLog === "string",
+    `turns=${outcomeOfSecond?.turns} toolCalls=${outcomeOfSecond?.toolCalls}`,
+  );
   check("a watcher is told the attempt ended, and nothing is live for it", ended && liveBuild(requeued.runId) === null);
   stopWatching();
   const afterCancel = await projectDetail(projectId, ACTOR.principalId);

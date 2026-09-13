@@ -916,6 +916,20 @@ function BuildPanel({
               <dt>Workspace</dt>
               <dd className="hash">{String(final.payload.workspace ?? "")}</dd>
             </div>
+            {typeof final.payload.turns === "number" ? (
+              <div>
+                <dt>Reported</dt>
+                <dd>
+                  {final.payload.turns} turn{final.payload.turns === 1 ? "" : "s"} and {String(final.payload.toolCalls ?? 0)} tool
+                  call{final.payload.toolCalls === 1 ? "" : "s"}, through the worker's own hook
+                  {typeof final.payload.turnLog === "string" ? (
+                    <>
+                      : <span className="hash">{final.payload.turnLog}</span>
+                    </>
+                  ) : null}
+                </dd>
+              </div>
+            ) : null}
           </dl>
           <div className="artifact">
             <pre>{String(final.payload.finalText ?? "") || "(no output)"}</pre>
@@ -972,7 +986,9 @@ function LiveOutput({ startedAt, text }: { startedAt: string | null; text: strin
         <span className="elapsed-clock" role="timer" aria-live="off">
           {clock(seconds)}
         </span>{" "}
-        {startedAt ? "elapsed. The worker's output appears below as it is written." : "Waiting for the host to say when the worker started."}
+        {startedAt
+          ? "elapsed. Below: the worker's output as it is written, and each turn it reports, with the tools it called."
+          : "Waiting for the host to say when the worker started."}
       </p>
       <div
         className="artifact live-output"

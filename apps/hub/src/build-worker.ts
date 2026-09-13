@@ -31,7 +31,38 @@ export type BuildWorkerKind = {
   readonly probeExpects: string | null;
   /** Arguments that run one attempt on a prompt and end. */
   readonly run: (prompt: string) => readonly string[];
+  /**
+   * How the worker reports each turn while it runs, where it can: the files
+   * to place in its working directory so its own lifecycle hook appends every
+   * turn to the log at `log`. Null for a worker with no such interface, whose
+   * live output is its stdout alone.
+   */
+  readonly turnReports: null | { install: (log: string) => readonly { path: string; content: string }[] };
 };
+
+/**
+ * Corbits Code discovers shell hooks in `.corbits/hooks/` under its working
+ * directory and hands `postTurn` the turn as JSON on stdin. The hook appends
+ * it, one record a line, to the log named when it was written. Ignored by
+ * git inside that directory so the built software never ships it.
+ */
+function corbitsTurnHook(log: string): readonly { path: string; content: string }[] {
+  const quoted = `'${log.replace(/'/g, `'\\''`)}'`;
+  return [
+    {
+      path: ".corbits/hooks/solutions-builder-turns.sh",
+      content: [
+        "#!/bin/sh",
+        "# Placed by Solutions Builder for one build attempt: each turn's report, appended as a line.",
+        'case "$1" in',
+        `  postTurn) cat >> ${quoted}; printf '\\n' >> ${quoted} ;;`,
+        "esac",
+        "",
+      ].join("\n"),
+    },
+    { path: ".corbits/hooks/.gitignore", content: "solutions-builder-turns.sh\n" },
+  ];
+}
 
 /** In the order Settings offers them; the first is the default. */
 export const BUILD_WORKERS: readonly BuildWorkerKind[] = [
@@ -42,6 +73,7 @@ export const BUILD_WORKERS: readonly BuildWorkerKind[] = [
     probe: ["--help"],
     probeExpects: "exec",
     run: (prompt) => ["exec", prompt],
+    turnReports: { install: corbitsTurnHook },
   },
   {
     id: "claude-code",
@@ -50,6 +82,7 @@ export const BUILD_WORKERS: readonly BuildWorkerKind[] = [
     probe: ["--version"],
     probeExpects: null,
     run: (prompt) => ["-p", prompt],
+    turnReports: null,
   },
   {
     id: "codex",
@@ -58,6 +91,7 @@ export const BUILD_WORKERS: readonly BuildWorkerKind[] = [
     probe: ["--version"],
     probeExpects: null,
     run: (prompt) => ["exec", prompt],
+    turnReports: null,
   },
 ];
 
