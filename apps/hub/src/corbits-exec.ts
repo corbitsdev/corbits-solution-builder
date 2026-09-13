@@ -29,7 +29,7 @@
  * are absent here rather than synthesised from stdout — a fake control is worse
  * than a missing one, because a human would act on it.
  */
-import { mkdir, writeFile } from "node:fs/promises";
+import { cp, mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { dataDirectory } from "./paths.js";
 import { buildWorker, type BuildWorker } from "./build-worker.js";
@@ -69,6 +69,8 @@ export type BridgeOutcome = {
   /** How many turns and tool calls the worker reported; null when it could not report. */
   readonly turns: number | null;
   readonly toolCalls: number | null;
+  /** The earlier attempt whose workspace this one started from, or null for a clean start. */
+  readonly continuedFrom: string | null;
   readonly startedAt: string;
   readonly endedAt: string;
   /**
@@ -149,6 +151,12 @@ export async function runBuildAttempt(args: {
   prompt: string;
   signal?: AbortSignal;
   /**
+   * An earlier attempt whose workspace is copied into this one before the
+   * worker starts, so it continues from that work rather than from nothing.
+   * Each attempt keeps its own directory: evidence is per attempt.
+   */
+  continueFrom?: { runId: string; workspace: string };
+  /**
    * Each chunk the process writes, on either pipe, as it arrives, and each
    * turn the worker reports through its hook, said in a line or two. The
    * pipes pass through as text and nothing more: no lines are parsed, no
@@ -158,6 +166,12 @@ export async function runBuildAttempt(args: {
 }): Promise<BridgeOutcome> {
   const startedAt = new Date().toISOString();
   const workspace = await workspaceFor(args.runId);
+  if (args.continueFrom) {
+    // Everything but the hook the bridge places, which is written afresh
+    // for this attempt with this attempt's log.
+    const from = args.continueFrom.workspace;
+    await cp(from, workspace, { recursive: true, filter: (source) => source !== join(from, ".corbits") });
+  }
   const availability = await bridgeAvailable();
 
   if (!availability.available) {
@@ -172,6 +186,7 @@ export async function runBuildAttempt(args: {
       turnLog: null,
       turns: null,
       toolCalls: null,
+      continuedFrom: args.continueFrom?.runId ?? null,
       startedAt,
       endedAt: new Date().toISOString(),
       checkpointRef: null,
@@ -225,6 +240,7 @@ export async function runBuildAttempt(args: {
     turnLog,
     turns: tally?.turns ?? null,
     toolCalls: tally?.toolCalls ?? null,
+    continuedFrom: args.continueFrom?.runId ?? null,
     startedAt,
     endedAt: new Date().toISOString(),
     checkpointRef: null,
