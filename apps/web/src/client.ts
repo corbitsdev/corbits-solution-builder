@@ -206,6 +206,16 @@ export type Run = {
   activity: RunActivity | null;
 };
 
+/** One worker event on a build run, as the host recorded it. */
+export type BuildEvent = {
+  id: string;
+  runId: string;
+  type: string;
+  severity: string;
+  payload: Record<string, unknown>;
+  occurredAt: string;
+};
+
 export type ProjectDetail = {
   project: {
     id: string;
@@ -449,15 +459,14 @@ export const api = {
     post<CommandOutcome>(`/projects/${projectId}/decide`, payload),
   command: (projectId: string, command: string, payload: unknown) =>
     post<CommandOutcome>(`/projects/${projectId}/commands/${command}`, payload),
-  startBuild: (projectId: string, runId: string) =>
-    post<{ run: CommandOutcome; bridge: { available: boolean; exitStatus: number | null; finalText: string; stderrTail: string; workspace: string } }>(
-      `/projects/${projectId}/build/start`,
-      { runId },
-    ),
+  /**
+   * Answers once the run is running. The worker's outcome arrives later, as a
+   * `bridge.final` event and the run's state.
+   */
+  startBuild: (projectId: string, runId: string, expectedRevision?: number) =>
+    post<{ run: CommandOutcome }>(`/projects/${projectId}/build/start`, { runId, expectedRevision }),
   buildEvents: (projectId: string) =>
-    request<{ events: { id: string; type: string; severity: string; payload: Record<string, unknown>; occurredAt: string }[] }>(
-      `/projects/${projectId}/build/events`,
-    ),
+    request<{ events: BuildEvent[] }>(`/projects/${projectId}/build/events`),
   design: (projectId: string) =>
     request<{
       designs: ArtifactNode[];
