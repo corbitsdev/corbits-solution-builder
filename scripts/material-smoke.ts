@@ -16,7 +16,7 @@ import { prepareDatabase } from "../apps/hub/src/migrate.js";
 import { ensureHub, localActor } from "../apps/hub/src/hub-client.js";
 import { install } from "../apps/hub/src/install.js";
 import { createProject, projectDetail, readArtifactNode } from "../apps/hub/src/projects.js";
-import { attachMaterial, materialText, spreadsheetText, bytesOf } from "../apps/hub/src/source-material.js";
+import { attachMaterial, materialText, pdfText, spreadsheetText, bytesOf } from "../apps/hub/src/source-material.js";
 import { stageInputsForSmoke } from "../apps/hub/src/stage-runs.js";
 import { HostError } from "../apps/hub/src/errors.js";
 
@@ -80,6 +80,32 @@ check("the CSV goes as its own text", rendered.includes("Email clients,Sam,45"))
 check("the spreadsheet goes as one CSV block per sheet", rendered.includes('Sheet "Invoices" (3 rows)') && rendered.includes('"Globex, Inc",850.5,2026-10-05') && rendered.includes('Sheet "Notes"'));
 check("the image goes by name, with a plain note that it was not read", rendered.includes("board.png") && rendered.includes("nothing here reads images"));
 check("nothing claims to have read the image", !/read the image|the image shows/i.test(rendered));
+
+// A PDF written by hand, with no cross-reference table — the shape a tolerant
+// reader has to cope with anyway — and one with no text at all.
+const pdfOf = (content: string) =>
+  new TextEncoder().encode(
+    [
+      "%PDF-1.4",
+      "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
+      "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+      "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj",
+      `4 0 obj << /Length ${content.length} >> stream`,
+      content,
+      "endstream endobj",
+      "5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj",
+      "trailer << /Root 1 0 R >>",
+      "%%EOF",
+    ].join("\n"),
+  );
+const brief = await pdfText(pdfOf("BT /F1 24 Tf 72 700 Td (The executive brief: prove the invoice flow first) Tj ET"));
+check("a PDF's text is read, page by page", brief.includes("Page 1 of 1") && brief.includes("prove the invoice flow first"), brief.slice(0, 120));
+const scan = await pdfText(pdfOf(""));
+check("a PDF with no text says so rather than reading blank pages", scan.includes("none carrying text") && scan.includes("ask the person"), scan.slice(0, 120));
+const asMaterial = await materialText({ title: "brief.pdf", mediaType: "application/pdf" }, `data:application/pdf;base64,${Buffer.from(pdfOf("BT /F1 12 Tf 72 700 Td (From the material path) Tj ET")).toString("base64")}`);
+check("a PDF attached as material reaches the specialist as its text", asMaterial.includes("From the material path"), asMaterial.slice(0, 120));
+const broken = await materialText({ title: "broken.pdf", mediaType: "application/pdf" }, "data:application/pdf;base64,AAAA");
+check("a PDF that cannot be read says so instead of failing the draft", broken.includes("could not be read"), broken.slice(0, 100));
 
 const parsed = await spreadsheetText(xlsx);
 check("a workbook's cells read as text, numbers included", parsed.includes("Acme,1200,2026-09-30"));

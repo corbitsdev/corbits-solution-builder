@@ -6,11 +6,12 @@
  * content — and every stage's specialist is handed what can be read of it.
  *
  * What can be read: text of any kind as it is; a spreadsheet as one CSV block
- * per sheet; an image or a PDF or a Word file by name and size only, since
- * nothing here reads those yet, and a prompt that pretends to have read them
- * is worse than one that says it has not.
+ * per sheet; a PDF as its text, page by page; an image or a Word file by name
+ * and size only, since nothing here reads those yet, and a prompt that
+ * pretends to have read them is worse than one that says it has not.
  */
 import ExcelJS from "exceljs";
+import { extractText, getDocumentProxy } from "unpdf";
 import { HostError } from "./errors.js";
 import { writeArtifact } from "./projects.js";
 import { activeRun } from "./runs.js";
@@ -61,6 +62,7 @@ const MAX_FILE_CHARS = 40_000;
 const MAX_SHEET_ROWS = 2_000;
 
 const XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const PDF = "application/pdf";
 
 export type IncomingFile = { name: string; type: string; bytes: Uint8Array };
 
@@ -152,6 +154,24 @@ export async function spreadsheetText(bytes: Uint8Array): Promise<string> {
   return blocks.join("\n\n");
 }
 
+/**
+ * A PDF's text, page by page. Only what the file carries as text: a scan has
+ * none, and is said to have none rather than read as blank pages.
+ */
+export async function pdfText(bytes: Uint8Array): Promise<string> {
+  // Quiet: a PDF with a broken cross-reference table makes the reader say so
+  // on the console, which is the host log, and it copes with it anyway.
+  const document = await getDocumentProxy(new Uint8Array(bytes), { verbosity: 0 });
+  const { totalPages, text } = await extractText(document, { mergePages: false });
+  const pages = text.map((page, index) => ({ number: index + 1, text: page.trim() })).filter((page) => page.text.length > 0);
+  if (pages.length === 0) {
+    return `(${totalPages} page${totalPages === 1 ? "" : "s"}, none carrying text: a scanned or image-only PDF. Nothing here reads images, so ask the person what it says if that matters.)`;
+  }
+  const blocks = pages.map((page) => `Page ${page.number} of ${totalPages}:\n${page.text}`);
+  const silent = totalPages - pages.length;
+  return `${blocks.join("\n\n")}${silent > 0 ? `\n\n(${silent} page${silent === 1 ? "" : "s"} with no text, not shown)` : ""}`;
+}
+
 function describe(name: string, mime: string, size: number, what: string): string {
   return `(${what} the person attached: ${name}, ${mime}, ${Math.ceil(size / 1024)} KB.)`;
 }
@@ -172,6 +192,13 @@ export async function materialText(node: { title: string; mediaType: string }, c
       return cap(await spreadsheetText(stored.bytes));
     } catch (cause) {
       return `${describe(node.title, node.mediaType, stored.bytes.byteLength, "A spreadsheet")} It could not be read: ${cause instanceof Error ? cause.message : String(cause)}`;
+    }
+  }
+  if (node.mediaType === PDF) {
+    try {
+      return cap(await pdfText(stored.bytes));
+    } catch (cause) {
+      return `${describe(node.title, node.mediaType, stored.bytes.byteLength, "A PDF")} It could not be read: ${cause instanceof Error ? cause.message : String(cause)}`;
     }
   }
   if (node.mediaType.startsWith("image/")) {

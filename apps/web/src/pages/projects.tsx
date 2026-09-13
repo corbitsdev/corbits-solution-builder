@@ -194,7 +194,7 @@ export function Projects({
             <Button variant="link" disabled={busy} onClick={() => materialInput.current?.click()}>
               Add documents or images…
             </Button>
-            {" "}Spreadsheets, text, CSV, JSON, Markdown and HTML are read by the specialists. PDFs,
+            {" "}Spreadsheets, PDFs, text, CSV, JSON, Markdown and HTML are read by the specialists.
             Word files and images are kept with the project and named to them.
           </p>
         </div>
