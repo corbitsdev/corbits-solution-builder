@@ -443,6 +443,7 @@ const DOCUMENT_NAMES: Record<string, string> = {
   design_feedback: "Design feedback",
   audience_package: "Audience package",
   audience_deck: "Slides",
+  product_requirements: "Product requirements",
   build_plan: "Build plan",
   engineering_review: "Engineering review",
   cost_approval: "Cost",

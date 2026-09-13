@@ -391,14 +391,33 @@ export const api = {
   saveArtifactFile: (nodeId: string) => post<{ path: string; bytes: number }>(`/artifacts/${nodeId}/save`, {}),
   /** Where a design is served as a page of its own, for printing. A path, not a request. */
   printPage: (nodeId: string) => `/api/artifacts/${nodeId}/print`,
-  /** Drafts the stage; at stage 5, `audiences` names the stakeholders whose package to write (all when absent). */
-  draft: (projectId: string, stage: number, input: string, quotes: Quote[] = [], audiences?: string[]) =>
+  /**
+   * Drafts the stage. At stage 5, `audiences` names the stakeholders whose
+   * package to write (all when absent). At stage 6, `documents` names which
+   * of the requirements and the plan to write (whatever the stage lacks when
+   * absent, and always the plan once the requirements exist).
+   */
+  draft: (
+    projectId: string,
+    stage: number,
+    input: string,
+    quotes: Quote[] = [],
+    audiences?: string[],
+    documents?: ("requirements" | "plan")[],
+  ) =>
     post<{
       draft: { nodeId: string; contentHash: string; content: string; agent: string; model: string };
       note?: string;
       /** Stage 5: the stakeholders whose package could not be written, and why. */
       failed?: { audience: string; message: string }[];
-    }>(`/projects/${projectId}/stages/${stage}/draft`, { input, quotes, ...(audiences ? { audiences } : {}) }),
+      /** Stage 6: the requirements document, when this request wrote it. */
+      requirements?: { nodeId: string; contentHash: string; content: string } | null;
+    }>(`/projects/${projectId}/stages/${stage}/draft`, {
+      input,
+      quotes,
+      ...(audiences ? { audiences } : {}),
+      ...(documents ? { documents } : {}),
+    }),
   preferences: () => request<{ preferences: Record<string, unknown> }>("/preferences"),
   setPreference: (key: string, value: unknown) =>
     request<{ key: string }>(`/preferences/${key}`, {

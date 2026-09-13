@@ -373,18 +373,30 @@ for (const stage of [1, 2, 3, 4] as Stage[]) {
   );
 }
 
-// --- Stage 6 ---
+// --- Stage 6: the requirements and the plan, approved together ---
 {
   const detail = await projectDetail(projectId, ACTOR.principalId);
   const run = detail.current!;
+  const requirements = await writeArtifact(
+    {
+      projectId,
+      kind: "product_requirements",
+      title: "Stage 6 requirements",
+      content: `# Requirements\n\nRecorded by the loop smoke at ${new Date().toISOString()}.`,
+      mediaType: "text/markdown",
+      sourceVersionIds: [],
+      provenance: { producer: "human", runId: run.id },
+    },
+    ACTOR,
+  );
   const node = await produce(6, projectId, run.id);
-  const version = {
-    artifactId: node.artifactId,
-    versionId: node.nodeId,
-    contentHash: node.contentHash,
-  };
-  await command("stage.submit", projectId, { runId: run.id, versions: [version] });
-  const advanced = await command("stage.approve", projectId, { runId: run.id, versions: [version] });
+  const versions = [node, requirements].map((entry) => ({
+    artifactId: entry.artifactId,
+    versionId: entry.nodeId,
+    contentHash: entry.contentHash,
+  }));
+  await command("stage.submit", projectId, { runId: run.id, versions });
+  const advanced = await command("stage.approve", projectId, { runId: run.id, versions });
   check("stage 6 advances to cost approval", advanced.stage === 7);
 }
 

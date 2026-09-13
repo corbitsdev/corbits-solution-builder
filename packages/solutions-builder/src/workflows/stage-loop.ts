@@ -38,6 +38,13 @@ export const ROUND_STEP_ID = "round";
 
 /** The step that runs the stage's specialist once a round asks for a draft. */
 export const DRAFT_STEP_ID = "draft";
+/**
+ * Stage 6's first step: the requirements document the plan is written
+ * against. It runs in a round of its own, ahead of the plan, because the
+ * architect's prompt has to carry the requirements as an input and the host
+ * only has them once this step has answered.
+ */
+export const REQUIREMENTS_STEP_ID = "requirements";
 /** The gate after the round: does this round's command ask for a draft? */
 export const DECIDE_STEP_ID = "decide";
 /** The gate's empty branch — pure data, taken when there is nothing to draft. */
@@ -82,12 +89,26 @@ export function agentStepIds(stage: Stage, audienceCount: number): string[] {
     return Array.from({ length: audienceCount }, (_unused, index) => audienceStepId(index));
   }
   if (stage === 6) {
-    return [DRAFT_STEP_ID, ...panelPrincipals().map((role) => panelStepId(panelSpecialty(role.id)))];
+    return [REQUIREMENTS_STEP_ID, DRAFT_STEP_ID, ...panelPrincipals().map((role) => panelStepId(panelSpecialty(role.id)))];
   }
   if (stage === EVALUATED_STAGE) {
     return [DRAFT_STEP_ID, EVALUATE_STEP_ID];
   }
   return [DRAFT_STEP_ID];
+}
+
+/**
+ * How many of a stage's agent steps, from the first, sit behind a gate of
+ * their own that reads the round's "wanted" flag for that step. Stage 5's
+ * packages all do, since a round may write one stakeholder's again and leave
+ * the rest. Stage 6's requirements and plan do, since the requirements are
+ * written in a round of their own and the plan in the next; the panel's
+ * reviews follow the plan and are skipped with it.
+ */
+export function gatedStepCount(stage: Stage, audienceCount: number): number {
+  if (stage === 5) return audienceCount;
+  if (stage === 6) return 2;
+  return 0;
 }
 
 /**

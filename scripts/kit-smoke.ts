@@ -226,6 +226,7 @@ check(
 // for not doing it. This whole build was a demonstration of the failure.
 {
   const planners = [
+    "requirements-author",
     "architect",
     "build-supervisor",
     "senior-engineer-application",

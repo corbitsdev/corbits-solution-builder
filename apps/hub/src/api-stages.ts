@@ -2,14 +2,23 @@ import type { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { type Stage } from "@solutions-builder/app/ledger";
 import { EVALUATED_STAGE } from "@solutions-builder/app/workflows/stage-loop";
-import { notFound } from "./errors.js";
+import { notFound, HostError } from "./errors.js";
 import { projectDetail } from "./projects.js";
-import { requestDraft } from "./stage-runs.js";
+import { requestDraft, type PlanDocument } from "./stage-runs.js";
 import { evaluationIn, threadTurns } from "./stage-thread.js";
 import { stageIterations } from "./hub-executor.js";
 import { nextQuestion } from "./questions.js";
 import { liveDraft, liveDraftBegun, subscribeLiveDraft } from "./live-drafts.js";
 import { localActor } from "./hub-client.js";
+
+/** The stage 6 documents a request names, refused rather than guessed when one is not a document. */
+function planDocumentsIn(names: unknown[]): PlanDocument[] {
+  return names.map((name) => {
+    if (name === "requirements" || name === "plan") return name;
+    throw new HostError("validation_failed", `Stage 6 has no document called ${JSON.stringify(String(name))}.`);
+  });
+}
+
 
 export function registerStageRoutes(api: Hono) {
   /** The conversation with a stage specialist, oldest turn first. */
@@ -110,6 +119,8 @@ export function registerStageRoutes(api: Hono) {
       quotes?: { quote: string }[];
       /** Stage 5: write these stakeholders' packages only, by name. */
       audiences?: string[];
+      /** Stage 6: write the requirements, the plan, or both; absent, whatever the stage lacks. */
+      documents?: string[];
     };
     const detail = await projectDetail(projectId, localActor().principalId);
     if (!detail.current) throw notFound("An open run for that project");
@@ -124,16 +135,19 @@ export function registerStageRoutes(api: Hono) {
       mode: "final",
       projectTitle: detail.project.title,
       ...(Array.isArray(body.audiences) ? { audiences: body.audiences.map(String) } : {}),
+      ...(Array.isArray(body.documents) ? { documents: planDocumentsIn(body.documents) } : {}),
     });
 
     // Stage 5 fans out into one package per named audience, and says which
-    // could not be written; stage 6's four panel reviews ride the same round
-    // as the architect's plan. Every other stage carries neither.
+    // could not be written; stage 6 writes its requirements and then the
+    // architect's plan with the four panel reviews. Every other stage
+    // carries none of these.
     return context.json({
       draft: result.draft,
       ...(result.note !== undefined ? { note: result.note } : {}),
       packages: result.packages,
       review: result.review,
+      requirements: result.requirements,
       ...(result.failed ? { failed: result.failed } : {}),
     });
   });
