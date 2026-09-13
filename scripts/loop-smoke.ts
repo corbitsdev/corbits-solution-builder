@@ -584,7 +584,7 @@ let buildRunId = "";
   const crashing = join(bin, "crashing-worker");
   await writeFile(
     crashing,
-    ["#!/bin/sh", 'case "$1" in', '  --help) echo "usage: worker exec <prompt>"; exit 0 ;;', '  exec) echo "built everything"; echo "teardown failed" >&2; exit 1 ;;', "esac", ""].join("\n"),
+    ["#!/bin/sh", 'case "$1" in', '  --help) echo "usage: worker exec <prompt>"; exit 0 ;;', '  exec) echo "built everything"; echo "half the work" > built.txt; echo "teardown failed" >&2; exit 1 ;;', "esac", ""].join("\n"),
   );
   await chmod(crashing, 0o755);
   process.env.SOLUTIONS_BUILDER_WORKER_BIN = crashing;
@@ -608,11 +608,44 @@ let buildRunId = "";
   const judged = await command("build.fail", projectId, { runId: third.runId, reason: "the person read the output and said so" });
   check("the person can then fail it through the ledger", judged.state === "failed");
 
-  delete process.env.SOLUTIONS_BUILDER_WORKER_BIN;
-  // The attempt the rest of the smoke drives by hand, through the ledger alone.
+  // Trying again can continue from that attempt's work: its workspace is
+  // copied into the new attempt's, and the worker is told it is there.
+  const continuing = join(bin, "continuing-worker");
+  await writeFile(
+    continuing,
+    ["#!/bin/sh", 'case "$1" in', '  --help) echo "usage: worker exec <prompt>"; exit 0 ;;', '  exec) if [ -f built.txt ]; then echo "found previous work: $(cat built.txt)"; else echo "nothing here"; fi; case "$2" in *"Continue from it"*) echo "told to continue" ;; esac; exit 0 ;;', "esac", ""].join("\n"),
+  );
+  await chmod(continuing, 0o755);
+  process.env.SOLUTIONS_BUILDER_WORKER_BIN = continuing;
   const fourth = await command("build.start_attempt", projectId, { runId: third.runId });
   check("starting from a failed run queues a new attempt", fourth.state === "queued");
-  buildRunId = fourth.runId;
+  const continued = await startBuildAttempt({ actor: ACTOR, projectId, runId: fourth.runId, continueFromRunId: third.runId });
+  const continuedOutcome = await continued.attempt;
+  check(
+    "a continued attempt starts from the earlier attempt's work, and is told so",
+    continuedOutcome?.finalText.includes("found previous work: half the work") === true &&
+      continuedOutcome.finalText.includes("told to continue") &&
+      continuedOutcome.continuedFrom === third.runId,
+    JSON.stringify(continuedOutcome?.finalText),
+  );
+  check(
+    "in a workspace of its own, not the earlier attempt's",
+    (await workspaceFor(fourth.runId)) !== (await workspaceFor(third.runId)) &&
+      (await Bun.file(join(await workspaceFor(fourth.runId), "built.txt")).exists()),
+  );
+  await refuses(
+    "continuing from a run that is not a build attempt of this project is refused",
+    "validation_failed",
+    () => startBuildAttempt({ actor: ACTOR, projectId, runId: fourth.runId, continueFromRunId: "run_not_here" }),
+  );
+  delete process.env.SOLUTIONS_BUILDER_WORKER_BIN;
+  // The continued attempt ended with exit 0 and is the person's to judge;
+  // judged failed here so the rest of the smoke has a queued attempt to
+  // drive by hand, through the ledger alone.
+  await command("build.fail", projectId, { runId: fourth.runId, reason: "the smoke moves on" });
+  const fifth = await command("build.start_attempt", projectId, { runId: fourth.runId });
+  check("starting from the judged run queues the attempt the smoke drives by hand", fifth.state === "queued");
+  buildRunId = fifth.runId;
 }
 
 // --- Stage 8: attempt, a human question, and evidence ---
@@ -706,12 +739,12 @@ let buildRunId = "";
     "the delivery manifest is recorded and accepted",
     final.manifests.length === 1 && final.manifests[0]!.acceptedAt !== null,
   );
-  // Seven stage runs (1-7), four build runs (one failed for want of a worker,
-  // one cancelled, one failed by the person, one accepted), one delivery run.
-  // Nothing is deleted or reused along the way.
+  // Seven stage runs (1-7), five build runs (one failed for want of a worker,
+  // one canceled, one failed by the person, one continued from it and judged,
+  // one accepted), one delivery run. Nothing is deleted or reused along the way.
   check(
     "every run is retained in history",
-    final.runs.length === 12,
+    final.runs.length === 13,
     `${final.runs.length} runs`,
   );
 

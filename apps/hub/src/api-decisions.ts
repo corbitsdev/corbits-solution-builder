@@ -116,12 +116,13 @@ export function registerDecisionRoutes(api: Hono) {
    */
   api.post("/projects/:projectId/build/start", async (context) => {
     const projectId = context.req.param("projectId");
-    const body = (await context.req.json()) as { runId: string; expectedRevision?: number };
+    const body = (await context.req.json()) as { runId: string; expectedRevision?: number; continueFromRunId?: string };
     const started = await startBuildAttempt({
       actor: localActor(),
       projectId,
       runId: body.runId,
       ...(typeof body.expectedRevision === "number" ? { expectedRevision: body.expectedRevision } : {}),
+      ...(typeof body.continueFromRunId === "string" && body.continueFromRunId ? { continueFromRunId: body.continueFromRunId } : {}),
     });
     started.attempt.catch((cause) => {
       console.error(`[build] ${started.run.runId}: the attempt could not be settled on the ledger`, cause);

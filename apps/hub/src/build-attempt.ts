@@ -21,7 +21,7 @@ import { projectDetail, readArtifactNode } from "./projects.js";
 import { recordBuildEvent } from "./engine-ledger.js";
 import { readRun } from "./runs.js";
 import { localActor } from "./hub-client.js";
-import { BRIDGE_CAPABILITIES, runBuildAttempt, type BridgeOutcome } from "./corbits-exec.js";
+import { BRIDGE_CAPABILITIES, runBuildAttempt, workspaceFor, type BridgeOutcome } from "./corbits-exec.js";
 
 /** The host relays what the worker did; no person appears to have done it. */
 const HOST_ACTOR: Actor = { principalId: HOST_PRINCIPAL, displayName: "Solutions Builder host" };
@@ -98,7 +98,15 @@ export async function startBuildAttempt(args: {
   runId: string;
   expectedRevision?: number;
   idempotencyKey?: string;
+  /** An earlier build attempt of this project whose workspace the new one continues from. */
+  continueFromRunId?: string;
 }): Promise<StartedAttempt> {
+  const continueFrom = args.continueFromRunId
+    ? await readRun(args.continueFromRunId, args.projectId)
+    : null;
+  if (args.continueFromRunId && (continueFrom === null || continueFrom.kind !== "build")) {
+    throw new HostError("validation_failed", "A build can only continue from an earlier build attempt of the same project.");
+  }
   const run = await execute({
     type: "build.start_attempt",
     actor: args.actor,
@@ -109,10 +117,10 @@ export async function startBuildAttempt(args: {
     payload: { runId: args.runId },
   });
   if (run.state !== "running") return { run, attempt: Promise.resolve(null) };
-  return { run, attempt: driveAttempt(args.projectId, run.runId) };
+  return { run, attempt: driveAttempt(args.projectId, run.runId, continueFrom?.id ?? null) };
 }
 
-async function driveAttempt(projectId: string, runId: string): Promise<BridgeOutcome> {
+async function driveAttempt(projectId: string, runId: string, continueFromRunId: string | null): Promise<BridgeOutcome> {
   // Registered before the first await: the run is `running` on the ledger
   // from the moment the caller has its outcome, so a cancel can arrive before
   // the prompt is even assembled and must still reach the worker.
@@ -124,11 +132,14 @@ async function driveAttempt(projectId: string, runId: string): Promise<BridgeOut
   };
   inFlight.set(runId, attempt);
   try {
-    const prompt = await buildPrompt(projectId, runId);
+    const prompt = await buildPrompt(projectId, runId, continueFromRunId !== null);
     const outcome = await runBuildAttempt({
       runId,
       prompt,
       signal: attempt.controller.signal,
+      ...(continueFromRunId !== null
+        ? { continueFrom: { runId: continueFromRunId, workspace: await workspaceFor(continueFromRunId) } }
+        : {}),
       onOutput: (chunk) => {
         attempt.transcript = (attempt.transcript + chunk).slice(-TRANSCRIPT_KEEP);
         for (const listener of attempt.listeners) listener({ type: "text", text: chunk });
@@ -154,6 +165,7 @@ async function driveAttempt(projectId: string, runId: string): Promise<BridgeOut
         turnLog: outcome.turnLog,
         turns: outcome.turns,
         toolCalls: outcome.toolCalls,
+        continuedFrom: outcome.continuedFrom,
         finalText: outcome.finalText.slice(0, 20_000),
         stderrTail: outcome.stderrTail,
         capabilities: BRIDGE_CAPABILITIES,
@@ -173,7 +185,7 @@ async function driveAttempt(projectId: string, runId: string): Promise<BridgeOut
  * The prompt the worker is handed: the plan says what to do, the requirements
  * it cites say when it is done.
  */
-async function buildPrompt(projectId: string, runId: string): Promise<string> {
+async function buildPrompt(projectId: string, runId: string, continuing: boolean): Promise<string> {
   const detail = await projectDetail(projectId, localActor().principalId);
   const packetRun = detail.runs.find((run) => run.id === runId);
   // The frozen packet is an artifact version; its hash is the version's.
@@ -188,6 +200,12 @@ async function buildPrompt(projectId: string, runId: string): Promise<string> {
 
   return [
     `Build the software described by this approved plan, against the requirements it cites. Work in the current directory.`,
+    ...(continuing
+      ? [
+          ``,
+          `An earlier attempt's work is already in the current directory, including any commits it made. Continue from it: keep what is right, finish what is not, and do not start over.`,
+        ]
+      : []),
     ``,
     ...(requirementsText ? [`--- REQUIREMENTS ---`, requirementsText, ``] : []),
     `--- PLAN ---`,

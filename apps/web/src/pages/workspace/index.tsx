@@ -705,7 +705,7 @@ function BuildPanel({
   onChanged: () => void;
   onOpenSettings: () => void;
 }) {
-  const [busy, setBusy] = useState<"start" | "cancel" | "fail" | "retry" | null>(null);
+  const [busy, setBusy] = useState<"start" | "cancel" | "fail" | "retry" | "continue" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [events, setEvents] = useState<BuildEvent[]>([]);
   const current = detail.current;
@@ -800,7 +800,7 @@ function BuildPanel({
   // attempt is not over until the person says what its result was.
   const ended = running && final !== undefined && !unavailable;
 
-  const act = async (name: "start" | "cancel" | "fail" | "retry", work: () => Promise<void>) => {
+  const act = async (name: "start" | "cancel" | "fail" | "retry" | "continue", work: () => Promise<void>) => {
     setBusy(name);
     setError(null);
     try {
@@ -812,7 +812,48 @@ function BuildPanel({
       setBusy(null);
     }
   };
-  const start = (runId: string) => api.startBuild(detail.project.id, runId, detail.project.revision);
+  const start = (runId: string) =>
+    api.startBuild(detail.project.id, runId, { expectedRevision: detail.project.revision });
+  // A worker ran here, so there is work to continue from; a worker that could
+  // not run left nothing.
+  const hasWork = final !== undefined && !unavailable;
+  /**
+   * The ledger's way to another attempt: an ended attempt is failed first,
+   * then a new one is queued from the terminal run and started — in the
+   * previous attempt's workspace when the person chooses to continue.
+   */
+  const tryAgain = (continuing: boolean) =>
+    act(continuing ? "continue" : "retry", async () => {
+      if (!current) return;
+      let from = current.id;
+      if (ended) {
+        const failed = await api.command(detail.project.id, "build.fail", {
+          expectedRevision: detail.project.revision,
+          runId: current.id,
+          reason: "Failed to try the build again from the build supervision screen.",
+        });
+        from = failed.runId;
+      }
+      const queued = await api.command(detail.project.id, "build.start_attempt", {
+        ...(ended ? {} : { expectedRevision: detail.project.revision }),
+        runId: from,
+      });
+      await api.startBuild(detail.project.id, queued.runId, continuing ? { continueFromRunId: current.id } : {});
+    });
+  const tryAgainButtons = hasWork ? (
+    <>
+      <Button variant="primary" loading={busy === "continue"} onClick={() => void tryAgain(true)}>
+        Try again, continuing from this attempt's work
+      </Button>
+      <Button variant="outline" loading={busy === "retry"} onClick={() => void tryAgain(false)}>
+        Try again from scratch
+      </Button>
+    </>
+  ) : (
+    <Button variant="primary" loading={busy === "retry"} onClick={() => void tryAgain(false)}>
+      Try the build again
+    </Button>
+  );
 
   return (
     <div data-tour="build-panel">
@@ -906,46 +947,10 @@ function BuildPanel({
               >
                 Mark this attempt failed
               </Button>
-              <Button
-                variant="primary"
-                loading={busy === "retry"}
-                onClick={() =>
-                  act("retry", async () => {
-                    // The ledger's way from an ended attempt to a new one: this
-                    // one is failed, then a new attempt is queued and started.
-                    const failed = await api.command(detail.project.id, "build.fail", {
-                      expectedRevision: detail.project.revision,
-                      runId: current.id,
-                      reason: "Failed to try the build again from the build supervision screen.",
-                    });
-                    const queued = await api.command(detail.project.id, "build.start_attempt", { runId: failed.runId });
-                    await api.startBuild(detail.project.id, queued.runId);
-                  })
-                }
-              >
-                Try the build again
-              </Button>
+              {tryAgainButtons}
             </>
           ) : null}
-          {terminal ? (
-            <Button
-              variant="primary"
-              loading={busy === "retry"}
-              onClick={() =>
-                act("retry", async () => {
-                  // The ledger queues a new attempt from a terminal run; it is
-                  // then started, which is the same decision as the first time.
-                  const queued = await api.command(detail.project.id, "build.start_attempt", {
-                    expectedRevision: detail.project.revision,
-                    runId: current.id,
-                  });
-                  await api.startBuild(detail.project.id, queued.runId);
-                })
-              }
-            >
-              Try the build again
-            </Button>
-          ) : null}
+          {terminal ? tryAgainButtons : null}
         </div>
       ) : null}
 
@@ -968,6 +973,14 @@ function BuildPanel({
               <dt>Workspace</dt>
               <dd className="hash">{String(final.payload.workspace ?? "")}</dd>
             </div>
+            {typeof final.payload.continuedFrom === "string" ? (
+              <div>
+                <dt>Continued from</dt>
+                <dd>
+                  an earlier attempt's work, <span className="hash">{final.payload.continuedFrom}</span>
+                </dd>
+              </div>
+            ) : null}
             {typeof final.payload.turns === "number" ? (
               <div>
                 <dt>Reported</dt>
