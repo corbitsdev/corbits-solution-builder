@@ -2,9 +2,11 @@
 
 ## Branching
 
-Branch off `main` with a short, descriptive name in the `<type>/<short-description>`
-form used throughout this repo's history (e.g. `fix/settings-write-race`,
-`feat/build-worker-setting`).
+Branch off `main`. For work tracked as a Linear issue — most of it — use the
+branch name Linear generates: `cl-<issue-number>-<slug>`. Otherwise, use
+`<type>/<short-description>` (e.g. `fix/settings-write-race`,
+`feat/build-worker-setting`), the form this repo's merged history otherwise
+uses.
 
 ## Opening a pull request
 
