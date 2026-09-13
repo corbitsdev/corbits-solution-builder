@@ -26,19 +26,51 @@ import { BRIDGE_CAPABILITIES, runBuildAttempt, type BridgeOutcome } from "./corb
 /** The host relays what the worker did; no person appears to have done it. */
 const HOST_ACTOR: Actor = { principalId: HOST_PRINCIPAL, displayName: "Solutions Builder host" };
 
+/** What a watcher of a running attempt is told: text as written, then that it ended. */
+export type BuildOutputEvent = { type: "text"; text: string } | { type: "done" };
+
+type InFlight = {
+  readonly controller: AbortController;
+  readonly startedAt: string;
+  /** Everything the worker has written so far, both pipes, in arrival order; the tail once it is long. */
+  transcript: string;
+  readonly listeners: Set<(event: BuildOutputEvent) => void>;
+};
+
+/** Enough to read the last stretch of a long build; a full log is not what this is. */
+const TRANSCRIPT_KEEP = 200_000;
+
 /**
  * The attempts whose worker process is running right now, by run id, so a
- * cancel or interrupt decided through the ledger can reach the process. The
- * ledger row is applied first; this only carries the decision to the worker.
+ * cancel or interrupt decided through the ledger can reach the process, and
+ * a window can watch what the process writes. The ledger row is applied
+ * first; this only carries the decision to the worker. It is memory: a host
+ * that restarts knows nothing of an attempt it was running, and says so.
  */
-const inFlight = new Map<string, AbortController>();
+const inFlight = new Map<string, InFlight>();
 
 /** Stops the worker for a run, if one is running. True when there was one. */
 export function abortBuildAttempt(runId: string): boolean {
-  const controller = inFlight.get(runId);
-  if (!controller) return false;
-  controller.abort();
+  const attempt = inFlight.get(runId);
+  if (!attempt) return false;
+  attempt.controller.abort();
   return true;
+}
+
+/** The running attempt for a run on this host, or null when this host is not running one. */
+export function liveBuild(runId: string): { startedAt: string; transcript: string } | null {
+  const attempt = inFlight.get(runId);
+  return attempt ? { startedAt: attempt.startedAt, transcript: attempt.transcript } : null;
+}
+
+/** Watches a running attempt's output. Returns how to stop watching; a no-op when nothing is running. */
+export function subscribeBuildOutput(runId: string, listener: (event: BuildOutputEvent) => void): () => void {
+  const attempt = inFlight.get(runId);
+  if (!attempt) return () => undefined;
+  attempt.listeners.add(listener);
+  return () => {
+    attempt.listeners.delete(listener);
+  };
 }
 
 export type StartedAttempt = {
@@ -84,40 +116,54 @@ async function driveAttempt(projectId: string, runId: string): Promise<BridgeOut
   // Registered before the first await: the run is `running` on the ledger
   // from the moment the caller has its outcome, so a cancel can arrive before
   // the prompt is even assembled and must still reach the worker.
-  const controller = new AbortController();
-  inFlight.set(runId, controller);
-  let outcome: BridgeOutcome;
+  const attempt: InFlight = {
+    controller: new AbortController(),
+    startedAt: new Date().toISOString(),
+    transcript: "",
+    listeners: new Set(),
+  };
+  inFlight.set(runId, attempt);
   try {
     const prompt = await buildPrompt(projectId, runId);
-    outcome = await runBuildAttempt({ runId, prompt, signal: controller.signal });
+    const outcome = await runBuildAttempt({
+      runId,
+      prompt,
+      signal: attempt.controller.signal,
+      onOutput: (chunk) => {
+        attempt.transcript = (attempt.transcript + chunk).slice(-TRANSCRIPT_KEEP);
+        for (const listener of attempt.listeners) listener({ type: "text", text: chunk });
+      },
+    });
+
+    // The bridge's result is recorded as a run event on the ledger thread,
+    // not as approval or evidence. Recorded, and the run settled, before a
+    // watcher is told the attempt ended: "done" means the ledger has it.
+    await recordBuildEvent(projectId, {
+      id: newId.event(),
+      runId,
+      idempotencyKey: `${runId}:bridge-final`,
+      cursor: 1,
+      type: "bridge.final",
+      severity: outcome.exitStatus === 0 ? "info" : "error",
+      payload: {
+        bridgeId: outcome.bridgeId,
+        worker: outcome.worker,
+        available: outcome.available,
+        exitStatus: outcome.exitStatus,
+        workspace: outcome.workspace,
+        finalText: outcome.finalText.slice(0, 20_000),
+        stderrTail: outcome.stderrTail,
+        capabilities: BRIDGE_CAPABILITIES,
+      },
+      occurredAt: new Date(outcome.endedAt).toISOString(),
+    });
+    await settle(projectId, runId, outcome);
+    return outcome;
   } finally {
     inFlight.delete(runId);
+    for (const listener of attempt.listeners) listener({ type: "done" });
+    attempt.listeners.clear();
   }
-
-  // The bridge's result is recorded as a run event on the ledger thread,
-  // not as approval or evidence.
-  await recordBuildEvent(projectId, {
-    id: newId.event(),
-    runId,
-    idempotencyKey: `${runId}:bridge-final`,
-    cursor: 1,
-    type: "bridge.final",
-    severity: outcome.exitStatus === 0 ? "info" : "error",
-    payload: {
-      bridgeId: outcome.bridgeId,
-      worker: outcome.worker,
-      available: outcome.available,
-      exitStatus: outcome.exitStatus,
-      workspace: outcome.workspace,
-      finalText: outcome.finalText.slice(0, 20_000),
-      stderrTail: outcome.stderrTail,
-      capabilities: BRIDGE_CAPABILITIES,
-    },
-    occurredAt: new Date(outcome.endedAt).toISOString(),
-  });
-
-  await settle(projectId, runId, outcome);
-  return outcome;
 }
 
 /**

@@ -39,6 +39,8 @@ export const BRIDGE_CAPABILITIES = {
   finalText: true,
   exitStatus: true,
   liveEvents: false,
+  /** The process's own stdout and stderr, as written, in arrival order. Not events. */
+  liveOutput: true,
   sessionInspection: false,
   questionsAndApprovals: false,
   steering: false,
@@ -131,6 +133,12 @@ export async function runBuildAttempt(args: {
   prompt: string;
   timeoutMs?: number;
   signal?: AbortSignal;
+  /**
+   * Each chunk the process writes, on either pipe, as it arrives. The bridge
+   * passes bytes through as text and nothing more: no lines are parsed, no
+   * progress is inferred.
+   */
+  onOutput?: (chunk: string, channel: "stdout" | "stderr") => void;
 }): Promise<BridgeOutcome> {
   const startedAt = new Date().toISOString();
   const workspace = await workspaceFor(args.runId);
@@ -167,8 +175,8 @@ export async function runBuildAttempt(args: {
   args.signal?.addEventListener("abort", () => child.kill(), { once: true });
 
   const [stdout, stderr] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
+    drain(child.stdout, (chunk) => args.onOutput?.(chunk, "stdout")),
+    drain(child.stderr, (chunk) => args.onOutput?.(chunk, "stderr")),
   ]);
   const exitStatus = await child.exited;
   clearTimeout(timeout);
@@ -186,4 +194,25 @@ export async function runBuildAttempt(args: {
     endedAt: new Date().toISOString(),
     checkpointRef: null,
   };
+}
+
+/** Reads a pipe to its end, handing each chunk on as it lands, and returns the whole. */
+async function drain(pipe: ReadableStream<Uint8Array>, onChunk: (text: string) => void): Promise<string> {
+  const decoder = new TextDecoder();
+  const parts: string[] = [];
+  const reader = pipe.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const text = decoder.decode(value, { stream: true });
+    if (text.length === 0) continue;
+    parts.push(text);
+    onChunk(text);
+  }
+  const rest = decoder.decode();
+  if (rest.length > 0) {
+    parts.push(rest);
+    onChunk(rest);
+  }
+  return parts.join("");
 }
