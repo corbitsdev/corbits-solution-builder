@@ -28,6 +28,7 @@
     "smoke:oauth": "bun --conditions intx-src scripts/oauth-smoke.ts",
     "smoke:agent": "bun --conditions intx-src scripts/agent-smoke.ts",
     "seed:demo": "bun --conditions intx-src scripts/seed-demo.ts",
+    "seed:workspace": "bun --conditions intx-src scripts/seed-workspace.ts",
     "smoke:hub": "bun --conditions intx-src scripts/hub-topology-smoke.ts",
     "check:slop": "bun scripts/check-slop.ts",
     "smoke:upgrade": "bun --conditions intx-src scripts/upgrade-smoke.ts",
