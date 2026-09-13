@@ -31,6 +31,7 @@ import { DesignFeedbackView } from "../design.jsx";
 import { Banner, Button, Screen, StateLabel, stageName, versionDigest } from "../../components.jsx";
 import { StageGate, STAGE_GOAL } from "./gate.jsx";
 import { Preparing, STALL_AFTER_MS } from "./preparing.jsx";
+import { clock } from "./elapsed.jsx";
 import { StageDocument } from "./document.jsx";
 
 export { StageDocument, DocumentBody } from "./document.jsx";
@@ -744,7 +745,54 @@ function BuildPanel({
     return () => clearInterval(timer);
   }, [running, loadEvents, onChanged, current?.id]);
 
+  // What the worker has written so far, from the host's stream: begun when
+  // the host says when it started, `idle` when this host is not running the
+  // attempt at all. Closed when the run is no longer running.
+  const [live, setLive] = useState<{ startedAt: string; text: string } | "idle" | null>(null);
+  useEffect(() => {
+    if (!running || !current) {
+      setLive(null);
+      return;
+    }
+    const source = new EventSource(`/api/projects/${detail.project.id}/build/live?runId=${encodeURIComponent(current.id)}`);
+    source.addEventListener("idle", () => {
+      setLive("idle");
+      source.close();
+    });
+    source.addEventListener("begin", (event) => {
+      const { startedAt } = JSON.parse((event as MessageEvent<string>).data) as { startedAt: string };
+      setLive({ startedAt, text: "" });
+    });
+    source.addEventListener("text", (event) => {
+      const text = JSON.parse((event as MessageEvent<string>).data) as string;
+      setLive((before) => (before && before !== "idle" ? { ...before, text: (before.text + text).slice(-200_000) } : before));
+    });
+    source.addEventListener("done", () => {
+      source.close();
+      void loadEvents().then(setEvents);
+      onChanged();
+    });
+    return () => source.close();
+  }, [running, current?.id, detail.project.id, onChanged, loadEvents]);
+
   const final = events.find((event) => event.runId === current?.id && event.type === "bridge.final");
+
+  // A run cancelled from here turns terminal before its worker has ended, so
+  // the stream above is closed before "done" and the final event is not yet
+  // on the ledger. It is fetched again, briefly, until it is.
+  useEffect(() => {
+    if (!terminal || final) return;
+    let tries = 0;
+    const timer = setInterval(() => {
+      tries += 1;
+      if (tries > 60) {
+        clearInterval(timer);
+        return;
+      }
+      void loadEvents().then(setEvents);
+    }, 1_000);
+    return () => clearInterval(timer);
+  }, [terminal, final, loadEvents]);
   const unavailable = final?.payload.available === false;
   const exitStatus = final ? (final.payload.exitStatus as number | null) : null;
   const stderrTail = final ? String(final.payload.stderrTail ?? "").trim() : "";
@@ -879,12 +927,64 @@ function BuildPanel({
           ) : null}
         </>
       ) : running && !final ? (
-        <p className="inline-note">The worker is running. Its final output and exit status appear here when it ends.</p>
+        live === "idle" ? (
+          <p className="inline-note">
+            No worker is running for this attempt on this host. If the host was restarted while the worker was up, its
+            work is not being watched: cancel this attempt and try the build again.
+          </p>
+        ) : (
+          <LiveOutput startedAt={live?.startedAt ?? null} text={live?.text ?? ""} />
+        )
       ) : !final ? (
         <p className="inline-note">No build attempt has reported yet.</p>
       ) : null}
     </Screen>
     </div>
+  );
+}
+
+/**
+ * A running worker, watched: how long it has been at it, and what it has
+ * written so far, as it wrote it. The clock counts from when the host started
+ * the worker, not from when this window opened, so a reload does not reset
+ * it. The text is the process's own output, both pipes in arrival order,
+ * following its own end unless the reader has scrolled up to read.
+ */
+function LiveOutput({ startedAt, text }: { startedAt: string | null; text: string }) {
+  const [seconds, setSeconds] = useState(0);
+  const pane = useRef<HTMLDivElement>(null);
+  const following = useRef(true);
+  useEffect(() => {
+    if (!startedAt) return;
+    const started = Date.parse(startedAt);
+    const tick = () => setSeconds(Math.max(0, Math.floor((Date.now() - started) / 1000)));
+    tick();
+    const timer = setInterval(tick, 1_000);
+    return () => clearInterval(timer);
+  }, [startedAt]);
+  useEffect(() => {
+    const element = pane.current;
+    if (element && following.current) element.scrollTop = element.scrollHeight;
+  }, [text]);
+  return (
+    <>
+      <p className="elapsed">
+        <span className="elapsed-clock" role="timer" aria-live="off">
+          {clock(seconds)}
+        </span>{" "}
+        {startedAt ? "elapsed. The worker's output appears below as it is written." : "Waiting for the host to say when the worker started."}
+      </p>
+      <div
+        className="artifact live-output"
+        ref={pane}
+        onScroll={(event) => {
+          const element = event.currentTarget;
+          following.current = element.scrollHeight - element.scrollTop - element.clientHeight < 24;
+        }}
+      >
+        <pre>{text || "(nothing written yet)"}</pre>
+      </div>
+    </>
   );
 }
 

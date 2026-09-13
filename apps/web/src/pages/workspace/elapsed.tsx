@@ -11,7 +11,7 @@ export function draftEstimate(stage: number): string {
     : "A draft usually takes a minute or two.";
 }
 
-function clock(seconds: number): string {
+export function clock(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
   const rest = seconds % 60;
   return `${minutes}:${String(rest).padStart(2, "0")}`;
