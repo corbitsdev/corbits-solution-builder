@@ -16,6 +16,7 @@ import { prepareDatabase } from "../apps/hub/src/migrate.js";
 import { ensureHub, localActor } from "../apps/hub/src/hub-client.js";
 import { install } from "../apps/hub/src/install.js";
 import { createProject, projectDetail, readArtifactNode } from "../apps/hub/src/projects.js";
+import * as XLSX from "xlsx";
 import { attachMaterial, materialText, pdfText, spreadsheetText, bytesOf } from "../apps/hub/src/source-material.js";
 import { stageInputsForSmoke } from "../apps/hub/src/stage-runs.js";
 import { HostError } from "../apps/hub/src/errors.js";
@@ -116,6 +117,26 @@ const asMaterial = await materialText({ title: "brief.pdf", mediaType: "applicat
 check("a PDF attached as material reaches the specialist as its text", asMaterial.includes("From the material path"), asMaterial.slice(0, 120));
 const broken = await materialText({ title: "broken.pdf", mediaType: "application/pdf" }, "data:application/pdf;base64,AAAA");
 check("a PDF that cannot be read says so instead of failing the draft", broken.includes("could not be read"), broken.slice(0, 100));
+
+// The older binary workbook, written by the converter's own writer: values,
+// a number format, a merge and widths. (That writer drops formulas; the
+// reader keeps them from a real .xls, as checked against one by hand.)
+const legacy = XLSX.utils.book_new();
+const legacySheet = XLSX.utils.aoa_to_sheet([["Client", "Amount"], ["Acme", 1200], ["Globex, Inc", 850.5]]);
+legacySheet["B2"]!.z = "#,##0.00";
+legacySheet["!merges"] = [{ s: { r: 4, c: 0 }, e: { r: 4, c: 1 } }];
+legacySheet["A5"] = { t: "s", v: "Signed off" };
+legacySheet["!ref"] = "A1:B5";
+legacySheet["!cols"] = [{ wch: 18 }];
+XLSX.utils.book_append_sheet(legacy, legacySheet, "Old");
+const xls = new Uint8Array(XLSX.write(legacy, { bookType: "xls", type: "buffer" }) as ArrayBuffer);
+const oldRendered = await materialText({ title: "budget.xls", mediaType: "application/vnd.ms-excel" }, `data:application/vnd.ms-excel;base64,${Buffer.from(xls).toString("base64")}`);
+check(
+  "an older binary workbook is read like a modern one: values, format, merge and width",
+  oldRendered.includes('Sheet "Old"') && oldRendered.includes('"Globex, Inc",850.5') && oldRendered.includes("Merged: A5:B5") && oldRendered.includes("#,##0.00 at B2") && oldRendered.includes("Column widths: A "),
+  oldRendered.slice(0, 200),
+);
+check("a merged range's value is written once, at its top left", oldRendered.includes("Signed off,\n") || oldRendered.endsWith("Signed off,") || /Signed off,(\n|$)/.test(oldRendered), oldRendered.match(/Signed off[^\n]*/)?.[0] ?? "no merged row");
 
 const parsed = await spreadsheetText(xlsx);
 check("a workbook's cells read as text, numbers included", parsed.includes("Acme,1200,2026-09-30"));
