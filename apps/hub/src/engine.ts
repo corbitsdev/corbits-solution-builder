@@ -208,15 +208,21 @@ export async function submitAndApprove(input: {
   const before = await readRun(input.runId, input.projectId);
   if (!before) throw notFound("That run");
 
-  const submitted = await execute({
-    type: "stage.submit",
-    actor: input.actor,
-    projectId: input.projectId,
-    idempotencyKey: `${input.idempotencyKey}#submit`,
-    correlationId: input.correlationId,
-    ...(input.expectedRevision !== undefined ? { expectedRevision: input.expectedRevision } : {}),
-    payload: { runId: input.runId, versions: input.versions },
-  });
+  // A stage already sent for review — stage 5's packages go when the first
+  // stakeholder decides — has nothing left to submit; only the approval
+  // remains, checked against the revision the caller saw.
+  const alreadySubmitted = before.state === "waiting_approval";
+  const submitted = alreadySubmitted
+    ? { runId: input.runId }
+    : await execute({
+        type: "stage.submit",
+        actor: input.actor,
+        projectId: input.projectId,
+        idempotencyKey: `${input.idempotencyKey}#submit`,
+        correlationId: input.correlationId,
+        ...(input.expectedRevision !== undefined ? { expectedRevision: input.expectedRevision } : {}),
+        payload: { runId: input.runId, versions: input.versions },
+      });
 
   const approveType: Command = before.stage === 7 ? "cost.approve" : "stage.approve";
   return execute({
@@ -229,6 +235,7 @@ export async function submitAndApprove(input: {
     // re-asserting a revision that has deliberately moved.
     idempotencyKey: `${input.idempotencyKey}#approve`,
     correlationId: input.correlationId,
+    ...(alreadySubmitted && input.expectedRevision !== undefined ? { expectedRevision: input.expectedRevision } : {}),
     payload: {
       runId: submitted.runId,
       versions: input.versions,
