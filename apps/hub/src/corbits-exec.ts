@@ -16,7 +16,8 @@
  *   outputs        final text on stdout, and an exit status; while it runs,
  *                  its stdout and stderr as written, and — where the worker
  *                  has a lifecycle hook — its own report of each turn
- *   failure        non-zero exit, timeout, or the binary being absent
+ *   failure        non-zero exit, or the binary being absent. No timeout: a
+ *                  build takes as long as it takes, and cancel is the control
  *   permissions    inherits the operator's own CLI configuration; the bridge
  *                  never passes --dangerously-skip-permissions
  *   linkage        every attempt is linked to an immutable packet and run
@@ -200,7 +201,6 @@ export async function runBuildAttempt(args: {
     env: { ...process.env },
   });
 
-  const timeout = setTimeout(() => child.kill(), 30 * 60_000);
   // A cancel can land before the process is up; an already-aborted signal
   // never fires its listener, so it is checked as well as listened for.
   if (args.signal?.aborted) child.kill();
@@ -211,7 +211,6 @@ export async function runBuildAttempt(args: {
     drain(child.stderr, (chunk) => args.onOutput?.(chunk, "stderr")),
   ]);
   const exitStatus = await child.exited;
-  clearTimeout(timeout);
   const tally = following ? await following.stop() : null;
 
   return {
