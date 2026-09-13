@@ -13,7 +13,7 @@
     "dev": "bun run vendor:build && bun scripts/dev.ts",
     "dev:desktop": "bun scripts/dev.ts --desktop",
     "dev:fresh": "bun scripts/dev.ts --desktop --fresh",
-    "host": "bun --conditions intx-src apps/hub/server.ts",
+    "host": "bun --conditions intx-src apps/hub/src/server.ts",
     "ui:build": "vite build -c apps/web/vite.config.ts",
     "ui:watch": "vite build -c apps/web/vite.config.ts --watch",
     "desktop:build": "bun scripts/desktop-release.ts",
