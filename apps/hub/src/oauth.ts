@@ -43,6 +43,11 @@ import {
   type XaiTokens,
 } from "@corbits/xai-provider";
 import { HostError } from "./errors.js";
+import {
+  authorizationDoneHtml,
+  callbackPageHtml,
+  type CallbackPageCopy,
+} from "./oauth-page.js";
 import { deleteSecret, readSecretResult, secretReference, storeSecret } from "./provider-credentials.js";
 
 export const OAUTH_PROVIDERS = ["codex-oauth", "xai-oauth"] as const;
@@ -152,17 +157,13 @@ function callbackFor(definition: Definition): { port: number; host: string; path
   };
 }
 
-const DONE_HTML = `<!doctype html><meta charset="utf-8"><title>Signed in</title>
-<style>body{font:16px -apple-system,system-ui,sans-serif;margin:0;display:grid;place-items:center;
-height:100vh;background:#fff;color:#2b2627}div{border:1px solid #dfe3e6;border-left:2px solid #37904a;
-padding:24px 32px}h1{font-size:1.1rem;font-weight:500;margin:0 0 6px}p{margin:0;color:#5c5555}</style>
-<div><h1>Signed in</h1><p>Return to Solutions Builder. You can close this tab.</p></div>`;
-
-const failedHtml = (reason: string) => `<!doctype html><meta charset="utf-8"><title>Sign-in failed</title>
-<style>body{font:16px -apple-system,system-ui,sans-serif;margin:0;display:grid;place-items:center;
-height:100vh;background:#fff;color:#2b2627}div{border:1px solid #dfe3e6;border-left:2px solid #9e2b25;
-padding:24px 32px}h1{font-size:1.1rem;font-weight:500;margin:0 0 6px}p{margin:0;color:#5c5555}</style>
-<div><h1>Sign-in failed</h1><p>${reason.replace(/[<&]/g, "")}</p></div>`;
+export const PAGE_COPY: CallbackPageCopy = {
+  productName: "Solutions Builder",
+  siteUrl: "https://corbits.dev",
+  siteLabel: "corbits.dev",
+  githubUrl: "https://github.com/corbitsdev/solutions-builder-alpha",
+  githubLabel: "github.com/corbitsdev/solutions-builder-alpha",
+};
 
 const credentialAccount = (id: OAuthProviderId) => `oauth:${id}`;
 
@@ -233,8 +234,12 @@ export async function beginLogin(id: OAuthProviderId): Promise<LoginStarted> {
           port: callback.port,
           host: callback.host,
           path: callback.path,
-          doneHtml: DONE_HTML,
-          failedHtml,
+          // The callback page lands before the exchange and model discovery
+          // finish, so it reports the authorization received, not a completed
+          // connection — the app closes out the setup.
+          doneHtml: authorizationDoneHtml(definition.label, PAGE_COPY),
+          failedHtml: (reason) =>
+            callbackPageHtml({ subject: definition.label, error: reason }, PAGE_COPY),
         }),
       buildAuthorizeUrl: (pkce, state) =>
         buildAuthorizeUrl(definition.config, pkce, state),
