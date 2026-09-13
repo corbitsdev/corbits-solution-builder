@@ -1,12 +1,12 @@
 /**
- * SQL files imported as text.
+ * The vendored Interchange migrations, imported as text.
  *
- * The bundler resolves `import sql from "./x.sql" with { type: "text" }` and
- * embeds the contents, which is how the compiled single-file host carries the
- * vendored migrations. TypeScript has no such resolution, so the module shape
- * is declared here.
+ * Scoped to the migrations directory rather than declaring every `.sql` in the
+ * repository: a mistyped or unintended SQL import elsewhere should still fail
+ * to resolve rather than silently typecheck as a string. The pattern carries
+ * the one wildcard TypeScript permits in an ambient module name.
  */
-declare module "*.sql" {
+declare module "../../../vendor/interchange/packages/db/migrations/*.sql" {
   const contents: string;
   export default contents;
 }
