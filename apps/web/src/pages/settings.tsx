@@ -611,7 +611,6 @@ function StakeholderDecks() {
                 </label>
               </div>
             </div>
-            </div>
             <div className="setting-field">
               <div>
                 <strong>What the outline should emphasise</strong>
