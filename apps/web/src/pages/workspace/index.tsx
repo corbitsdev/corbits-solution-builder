@@ -395,7 +395,18 @@ export function StageWorkspace({
             onChanged={onChanged}
             drafting={busy === "draft"}
             onDraftPackages={(audiences) =>
-              run("draft", () => api.draft(detail.project.id, stage, "", [], audiences))
+              run("draft", async () => {
+                const result = await api.draft(detail.project.id, stage, "", [], audiences);
+                // Said once it lands: a rewrite that succeeds otherwise
+                // shows nothing but the new text under the same tab.
+                const written = audiences.filter((name) => !result.failed?.some((entry) => entry.audience === name));
+                return {
+                  ...result,
+                  ...(written.length > 0 && result.note === undefined
+                    ? { note: `Wrote the package for ${written.join(", ")} again. Save slides to rebuild the deck from it.` }
+                    : {}),
+                };
+              })
             }
           />
         </div>
