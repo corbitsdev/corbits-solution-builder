@@ -51,6 +51,30 @@ reviews the plan, and approving the stage names both documents.
 
 Rejecting a stage routes back to a named earlier stage. The history is kept.
 
+The person can hand a specialist more than a description: a document, a
+spreadsheet or an image can be attached to the problem as it is written up.
+Text and spreadsheets are read in full and given to the specialist that reads
+the record; an image, PDF or Word file is kept with the project but not read —
+the specialist says so, rather than pretending it saw what it did not.
+
+## Stage 5: a package and a deck per stakeholder
+
+Stage 5 drafts one package per audience — a decision request in that
+stakeholder's own terms. A package can be redrafted alone: asking for one
+stakeholder's package again rewrites only that one, leaving the others as they
+stood.
+
+Each package's deck outline becomes a PowerPoint deck for that stakeholder,
+kept as its own version beside the package. A deck's design — theme, typeface,
+how much a slide carries, whether it carries speaker notes, and what its
+outline should emphasise — is set once per role in Settings, where a role can
+also supply its own PowerPoint file as a style guide; where one is on file,
+the deck is built onto that file's own colours, fonts and slide proportions
+instead of the built-in look. When a role's design asks for illustrations, a
+model that has read the whole deck chooses which slides get one and what each
+should show, and the image generated from that description is placed on the
+slide.
+
 ## How a stage feels
 
 A specialist asks one question at a time. The document is written while the
@@ -73,10 +97,25 @@ an API key, a sign-in with ChatGPT or xAI, or a local endpoint that speaks the
 OpenAI protocol. The key is checked against the provider before it is kept.
 Everything that does not need a model works without one.
 
+Each connected provider lists the models it actually serves, checked live; the
+person can pick one or leave the choice to the host, and the choice can change
+without reconnecting.
+
 If a provider refuses, the next one in the person's preferred order is tried,
 and the message names every provider that was asked. There is no silent
 fallback from a local endpoint to a cloud one. Unavailable is a state the
 product shows.
+
+## Taking work out of the app
+
+A project can be exported as one file and imported into another instance of
+the app. Every approval, artifact version and build event travels with it and
+is replayed exactly as it happened rather than re-decided on the way in.
+Providers and credentials never travel with it — the instance receiving the
+project connects its own.
+
+Any document, or a design, can also be printed or saved as a PDF from inside
+the app.
 
 ## Promises
 
@@ -95,24 +134,28 @@ These are product requirements, not style.
 - **Closing the window does not stop the work.** Already-authorised work runs
   to its next human gate, the wait is recorded, and a desktop notification
   fires when it gets there.
+- **Deleting a project hides it, never erases it.** It leaves every listing,
+  but its record and artifacts are kept. Irreversibly dropping someone's work
+  is not a thing a button does.
 
 ## What is not finished
 
-- **Stage 8 is a bounded build.** It runs one supervised command and shows its
-  final output and exit status. Which coding agent runs it is chosen in
-  Settings — Corbits Code by default, Claude Code or Codex otherwise — and
-  the choice changes the tool, not what the interface can see. While it
-  runs, the interface shows the worker's output as it is written and, for a
-  worker with a lifecycle hook (Corbits Code), the worker's own report of
-  each turn and the tools it called. There is no timeout: a build takes as
-  long as it takes, and cancelling it is the control. There is no agent
-  roster, no steering and no checkpoint resume. The interface reports each
-  of those as unavailable rather than faking them.
+- **Stage 8 is a bounded build.** It runs one supervised command, chosen in
+  Settings — Corbits Code by default, Claude Code or Codex otherwise — and the
+  choice changes the tool, not what the interface can see. While it runs, its
+  stdout and stderr stream onto the screen chunk by chunk as the worker writes
+  them, beside an elapsed-time clock — the text is the process's own, passed
+  through as it arrives and not parsed into events, sessions or steps — and,
+  for a worker with a lifecycle hook (Corbits Code), its own report of each
+  turn and the tools it called. There is no timeout: a build takes as long as
+  it takes, and cancelling it is the control. There is still no per-agent
+  roster, no steering and no checkpoint resume. The interface reports each of
+  those as unavailable rather than faking them.
 - **Delivery evidence is not verified byte for byte.** The manifest exists; the
   hash checks against an install target do not.
 - **Branches are in the record but not the interface.** Only the main branch
   is used today.
-- **Cost drift, materiality routing, retention receipts and project deletion**
-  have no surface yet.
+- **Cost drift, materiality routing and retention receipts** have no surface
+  yet.
 - **Signing, notarisation and Windows** are not done.
 - **A test suite** beyond the smoke checks does not exist.
