@@ -472,6 +472,12 @@ export const api = {
     runId: string,
     options: { expectedRevision?: number; continueFromRunId?: string } = {},
   ) => post<{ run: CommandOutcome }>(`/projects/${projectId}/build/start`, { runId, ...options }),
+  /** Accepts an ended attempt's work as evidence: packaged, recorded, and on to delivery review. */
+  acceptBuild: (projectId: string, runId: string, expectedRevision?: number) =>
+    post<{ run: CommandOutcome; artifact: { nodeId: string; title: string; name: string; sizeBytes: number } }>(
+      `/projects/${projectId}/build/accept`,
+      { runId, expectedRevision },
+    ),
   buildEvents: (projectId: string) =>
     request<{ events: BuildEvent[] }>(`/projects/${projectId}/build/events`),
   design: (projectId: string) =>

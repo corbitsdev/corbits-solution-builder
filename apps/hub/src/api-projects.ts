@@ -39,6 +39,7 @@ import {
 } from "./project-transfer.js";
 import { bytesOf } from "./source-material.js";
 import { deckBytesOf, ensureDeckFor } from "./deck.js";
+import { buildBytesOf } from "./build-output.js";
 import { attachMaterial, MATERIAL_KIND, type IncomingFile } from "./source-material.js";
 import { setStakeholders, STAKEHOLDER_ROLES } from "./stakeholders.js";
 
@@ -228,7 +229,9 @@ export function registerProjectRoutes(api: Hono) {
   api.post("/artifacts/:nodeId/save", async (context) => {
     const { node, content } = await readArtifactNode(context.req.param("nodeId"));
     const stored = bytesOf(content);
-    const bytes = stored?.bytes ?? (node.kind === "audience_deck" ? await deckBytesOf(content) : null);
+    const bytes =
+      stored?.bytes ??
+      (node.kind === "audience_deck" ? await deckBytesOf(content) : node.kind === "build_evidence" ? await buildBytesOf(content) : null);
     if (!bytes) {
       throw new HostError("validation_failed", "Only a file is saved this way; documents print from the app.", {}, false);
     }

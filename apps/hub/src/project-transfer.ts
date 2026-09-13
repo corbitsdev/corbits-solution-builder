@@ -111,7 +111,9 @@ export function fileNameFor(title: string, mime: string): string {
         ? "xlsx"
         : mime === "application/pdf"
           ? "pdf"
-          : (mime.split("/")[1] ?? "bin").replace(/[^a-z0-9]+/g, "").slice(0, 8) || "bin";
+          : mime === "application/gzip"
+            ? "tar.gz"
+            : (mime.split("/")[1] ?? "bin").replace(/[^a-z0-9]+/g, "").slice(0, 8) || "bin";
   const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 80) || "file";
   return `${slug}.${extension}`;
 }

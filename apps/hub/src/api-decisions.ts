@@ -16,6 +16,7 @@ import { newId } from "./ids.js";
 import { projectDetail } from "./projects.js";
 import { buildEvents } from "./engine-ledger.js";
 import { abortBuildAttempt, liveBuild, startBuildAttempt, subscribeBuildOutput } from "./build-attempt.js";
+import { acceptBuildEvidence } from "./build-output.js";
 import { streamSSE } from "hono/streaming";
 import { commandFrom, parsed } from "./api.js";
 import { localActor } from "./hub-client.js";
@@ -165,6 +166,24 @@ export function registerDecisionRoutes(api: Hono) {
       });
       while (!closed) await stream.sleep(15_000).then(() => (closed ? undefined : send("ping", "")));
     });
+  });
+
+  /**
+   * Accepts an ended attempt's work as the build's evidence: the workspace
+   * is packaged into an archive named after the project, recorded as a
+   * version, and the ledger moves to delivery review with that archive as
+   * what stage 9 verifies.
+   */
+  api.post("/projects/:projectId/build/accept", async (context) => {
+    const projectId = context.req.param("projectId");
+    const body = (await context.req.json()) as { runId: string; expectedRevision?: number };
+    const accepted = await acceptBuildEvidence({
+      actor: localActor(),
+      projectId,
+      runId: body.runId,
+      ...(typeof body.expectedRevision === "number" ? { expectedRevision: body.expectedRevision } : {}),
+    });
+    return context.json(accepted);
   });
 
   api.get("/projects/:projectId/build/events", async (context) => {

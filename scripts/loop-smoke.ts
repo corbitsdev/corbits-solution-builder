@@ -31,6 +31,8 @@ import { openDecisionFor } from "../apps/hub/src/decisions.js";
 import { workspaceFor } from "../apps/hub/src/corbits-exec.js";
 import { abortBuildAttempt, liveBuild, startBuildAttempt, subscribeBuildOutput } from "../apps/hub/src/build-attempt.js";
 import { buildEvents } from "../apps/hub/src/engine-ledger.js";
+import { buildArchiveName, packageBuild } from "../apps/hub/src/build-output.js";
+import { verifyManifest } from "../apps/hub/src/delivery.js";
 import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -638,6 +640,33 @@ let buildRunId = "";
     "validation_failed",
     () => startBuildAttempt({ actor: ACTOR, projectId, runId: fourth.runId, continueFromRunId: "run_not_here" }),
   );
+  // Accepting an attempt's work packages its workspace into one archive
+  // named after the project, which is what stage 9 then verifies.
+  const archive = await packageBuild(fourth.runId, "Smoke: a chess game I can actually play");
+  const listed = await new Response(Bun.spawn(["tar", "-tzf", archive.absolutePath], { stdout: "pipe" }).stdout).text();
+  check(
+    "the build is packaged as an archive named after the project, holding the work and not the bridge's hook",
+    archive.name === buildArchiveName("Smoke: a chess game I can actually play") &&
+      archive.name === "smoke-a-chess-game-i-can-actually-play-build.tar.gz" &&
+      listed.includes("built.txt") &&
+      !listed.includes(".corbits") &&
+      !listed.includes(archive.name),
+    `${archive.name}: ${listed.split("\n").filter(Boolean).join(", ")}`,
+  );
+  const verified = await verifyManifest(
+    "n_smoke",
+    {
+      descriptors: [{ category: "source", path: archive.path, sha256: archive.sha256, sizeBytes: archive.sizeBytes, mediaType: "application/gzip", access: "local", required: true }],
+      costForecast: null,
+      costActual: null,
+      costActualReason: null,
+      verification: {},
+      exceptions: null,
+    },
+    await workspaceFor(fourth.runId),
+  );
+  check("and the descriptor it yields verifies byte for byte against the workspace", verified.complete, JSON.stringify(verified.items));
+
   delete process.env.SOLUTIONS_BUILDER_WORKER_BIN;
   // The continued attempt ended with exit 0 and is the person's to judge;
   // judged failed here so the rest of the smoke has a queued attempt to
