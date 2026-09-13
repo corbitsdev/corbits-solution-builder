@@ -23,9 +23,4 @@ Follow Conventional Commits 1.0.0 (https://www.conventionalcommits.org/en/v1.0.0
 - Types: `feat`, `fix`, `perf`, `refactor`, `test`, `docs`, `build`, `ci`,
   `chore`, `style`. Breaking changes: append `!` after the type/scope or add a
   `BREAKING CHANGE:` footer.
-- Historically this repo used a bare `component: description` prefix
-  (`executor:`, `nameref:`); new commits keep the component as the scope and
-  lead with the type.
-- Releases: `chore(release): perfi X.Y.Z`; release notes: `docs(release): add
-  perfi X.Y.Z release notes`.
 - Never add a `Co-Authored-By` trailer to any commit, PR, gh issue, or any other artifact
