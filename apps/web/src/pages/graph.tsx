@@ -25,6 +25,8 @@ function documentIdentity(node: ArtifactNode): string {
  * design it was given on, not by the node id its variant happens to hold.
  */
 function documentLabel(node: ArtifactNode, nodes: ArtifactNode[] = []): string {
+  // The build is named after the project, as its file is.
+  if (node.kind === "build_evidence") return node.title;
   if (node.kind === "design_feedback") {
     const design = nodes.find((candidate) => candidate.id === node.variant);
     return design ? `Feedback on Design v${design.version}` : "Design feedback";
@@ -295,7 +297,7 @@ function ArtifactReader({
           <h2>{documentLabel(node, nodes)}</h2>
           <p>{kicker}</p>
         </div>
-        {node.kind === "audience_deck" ? null : <PrintButton node={node} content={content} />}
+        {node.kind === "audience_deck" || node.kind === "build_evidence" ? null : <PrintButton node={node} content={content} />}
       </header>
       <div className="document-body">
         {content === null ? (
@@ -305,6 +307,8 @@ function ArtifactReader({
             <Material node={node} content={content} />
           ) : node.kind === "audience_deck" ? (
             <DeckFile node={node} />
+          ) : node.kind === "build_evidence" ? (
+            <BuildFile node={node} />
           ) : node.kind === "design_feedback" ? (
             <FeedbackRecord content={content} />
           ) : node.mediaType === "text/html" || node.kind === "design_artifact" ? (
@@ -401,6 +405,47 @@ function DeckFile({ node }: { node: ArtifactNode }) {
           }}
         >
           Save slides (.pptx)
+        </Button>
+      </div>
+      {state.saved ? <Banner tone="okay" title={`Saved to ${state.saved}`} /> : null}
+      {state.error ? <Banner tone="error" title={state.error} /> : null}
+    </div>
+  );
+}
+
+/**
+ * The completed build, as the person accepted it: one archive of the
+ * attempt's workspace, named after the project. Saved, not shown — a
+ * source tree is not a document.
+ */
+function BuildFile({ node }: { node: ArtifactNode }) {
+  const [state, setState] = useState<{ busy: boolean; saved: string | null; error: string | null }>({
+    busy: false,
+    saved: null,
+    error: null,
+  });
+  const size = node.sizeBytes >= 1024 * 1024 ? `${(node.sizeBytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(node.sizeBytes / 1024))} KB`;
+  return (
+    <div className="deck-file">
+      <p className="inline-note">
+        {node.title} · tar.gz archive · about {size} stored. The build attempt's workspace as accepted at stage 8, without
+        installed dependencies. Its bytes are what delivery review verifies.
+      </p>
+      <div className="button-row">
+        <Button
+          variant="primary"
+          loading={state.busy}
+          onClick={() => {
+            setState({ busy: true, saved: null, error: null });
+            api
+              .saveArtifactFile(node.id)
+              .then((result) => setState({ busy: false, saved: result.path, error: null }))
+              .catch((cause) =>
+                setState({ busy: false, saved: null, error: cause instanceof ApiFailure ? cause.detail.message : String(cause) }),
+              );
+          }}
+        >
+          Save the build (.tar.gz)
         </Button>
       </div>
       {state.saved ? <Banner tone="okay" title={`Saved to ${state.saved}`} /> : null}

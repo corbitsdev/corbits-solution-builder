@@ -705,7 +705,7 @@ function BuildPanel({
   onChanged: () => void;
   onOpenSettings: () => void;
 }) {
-  const [busy, setBusy] = useState<"start" | "cancel" | "fail" | "retry" | "continue" | null>(null);
+  const [busy, setBusy] = useState<"start" | "cancel" | "fail" | "retry" | "continue" | "accept" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [events, setEvents] = useState<BuildEvent[]>([]);
   const current = detail.current;
@@ -800,7 +800,7 @@ function BuildPanel({
   // attempt is not over until the person says what its result was.
   const ended = running && final !== undefined && !unavailable;
 
-  const act = async (name: "start" | "cancel" | "fail" | "retry" | "continue", work: () => Promise<void>) => {
+  const act = async (name: "start" | "cancel" | "fail" | "retry" | "continue" | "accept", work: () => Promise<void>) => {
     setBusy(name);
     setError(null);
     try {
@@ -817,6 +817,13 @@ function BuildPanel({
   // A worker ran here, so there is work to continue from; a worker that could
   // not run left nothing.
   const hasWork = final !== undefined && !unavailable;
+  const archiveName = `${
+    detail.project.title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 60) || "project"
+  }-build.tar.gz`;
   /**
    * The ledger's way to another attempt: an ended attempt is failed first,
    * then a new one is queued from the terminal run and started — in the
@@ -842,7 +849,7 @@ function BuildPanel({
     });
   const tryAgainButtons = hasWork ? (
     <>
-      <Button variant="primary" loading={busy === "continue"} onClick={() => void tryAgain(true)}>
+      <Button variant={ended ? "outline" : "primary"} loading={busy === "continue"} onClick={() => void tryAgain(true)}>
         Try again, continuing from this attempt's work
       </Button>
       <Button variant="outline" loading={busy === "retry"} onClick={() => void tryAgain(false)}>
@@ -891,8 +898,9 @@ function BuildPanel({
         <p className="inline-note">
           The worker has ended
           {exitStatus === 0 ? " with exit status 0" : exitStatus === null ? " without an exit status" : ` with exit status ${exitStatus}`}.
-          An exit status is not a verdict on the work: read what it left below, then say whether this attempt failed or
-          should be tried again.
+          An exit status is not a verdict on the work: read what it left below, then say what it was. Accepting it
+          packages the workspace as <code>{archiveName}</code>, records that as this project's build, and opens delivery
+          review, where its bytes are verified.
         </p>
       ) : null}
 
@@ -930,6 +938,17 @@ function BuildPanel({
           ) : null}
           {ended ? (
             <>
+              <Button
+                variant="primary"
+                loading={busy === "accept"}
+                onClick={() =>
+                  act("accept", async () => {
+                    await api.acceptBuild(detail.project.id, current.id, detail.project.revision);
+                  })
+                }
+              >
+                Accept as evidence
+              </Button>
               <Button
                 variant="destructive"
                 loading={busy === "fail"}
