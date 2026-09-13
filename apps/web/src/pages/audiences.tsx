@@ -174,7 +174,10 @@ export function AudiencePackages({
   const packages = detail.nodes.filter(
     (node) => node.kind === "audience_package" && node.supersededByNodeId === null,
   );
-  const [active, setActive] = useState<string | null>(packages[0]?.id ?? null);
+  // The open tab is a stakeholder, not a version: writing a package again
+  // gives it a new version id, and a tab keyed on the id fell back to the
+  // first stakeholder the moment the rewrite landed.
+  const [active, setActive] = useState<string | null>(packages[0]?.variant ?? null);
   const [content, setContent] = useState("");
   const [rationale, setRationale] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -198,7 +201,7 @@ export function AudiencePackages({
     }
   };
 
-  const selected = packages.find((node) => node.id === active) ?? packages[0] ?? null;
+  const selected = packages.find((node) => node.variant === active) ?? packages[0] ?? null;
   // A stakeholder whose package was never written, or failed to be: the
   // round writes the ones it can and reports the rest, so these are offered
   // one by one rather than the whole stage again.
@@ -383,10 +386,10 @@ export function AudiencePackages({
             {/* One tab per audience package. */}
             <Tabs
               label="Stakeholder packages"
-              active={selected?.id ?? ""}
+              active={selected?.variant ?? ""}
               onChange={setActive}
               tabs={packages.map((node) => ({
-                id: node.id,
+                id: node.variant ?? node.id,
                 label: node.variant ?? node.title,
               }))}
             >
