@@ -434,30 +434,65 @@ function BuildFile({ node }: { node: ArtifactNode }) {
 function Material({ node, content }: { node: ArtifactNode; content: string }) {
   const mediaType = node.mediaType ?? "";
   const size = `${Math.max(1, Math.round(node.sizeBytes / 1024))} KB`;
-  if (mediaType.startsWith("image/")) {
-    return (
-      <figure className="material-figure">
-        <img src={content} alt={node.title} />
-        <figcaption>
-          {node.title} · {mediaType} · {size}
-        </figcaption>
-      </figure>
-    );
-  }
-  if (mediaType.startsWith("text/") || mediaType === "application/json") {
-    return (
-      <div className="material-text">
-        <p className="inline-note">
-          {node.title} · {mediaType} · {size}
-        </p>
-        <pre>{content}</pre>
-      </div>
-    );
-  }
-  return (
+  const shown = mediaType.startsWith("image/") ? (
+    <figure className="material-figure">
+      <img src={content} alt={node.title} />
+      <figcaption>
+        {node.title} · {mediaType} · {size}
+      </figcaption>
+    </figure>
+  ) : mediaType.startsWith("text/") || mediaType === "application/json" ? (
+    <div className="material-text">
+      <p className="inline-note">
+        {node.title} · {mediaType} · {size}
+      </p>
+      <pre>{content}</pre>
+    </div>
+  ) : (
     <p className="inline-note">
-      {node.title} · {mediaType} · {size}. Kept with the project; the specialists are told it is here.
+      {node.title} · {mediaType} · {size}. Kept with the project.
     </p>
+  );
+  return (
+    <>
+      {shown}
+      <Reading nodeId={node.id} />
+    </>
+  );
+}
+
+/**
+ * What the specialists are handed for this file, word for word: a
+ * spreadsheet's values and structure, a PDF's text, or the note that nothing
+ * here reads it. Folded, and fetched when opened, because the file itself is
+ * what the person came to see; this is for checking that the part that
+ * matters made it through before a draft leans on it.
+ */
+function Reading({ nodeId }: { nodeId: string }) {
+  const [text, setText] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = () => {
+    if (text !== null || error !== null) return;
+    api
+      .materialReading(nodeId)
+      .then((result) => setText(result.text))
+      .catch((cause) => setError(cause instanceof ApiFailure ? cause.detail.message : String(cause)));
+  };
+  return (
+    <details className="document-fold material-reading" onToggle={(event) => event.currentTarget.open && load()}>
+      <summary className="document-fold-summary">
+        <span className="document-fold-title">What the specialists can read of this</span>
+      </summary>
+      {error ? (
+        <p className="inline-note">{error}</p>
+      ) : text === null ? (
+        <p className="inline-note">Loading…</p>
+      ) : (
+        <div className="artifact">
+          <pre>{text}</pre>
+        </div>
+      )}
+    </details>
   );
 }
 
