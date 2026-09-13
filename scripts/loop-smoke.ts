@@ -560,7 +560,7 @@ let buildRunId = "";
     JSON.stringify(reported),
   );
   const cancelled = await command("build.cancel", projectId, { runId: requeued.runId, reason: "smoke" });
-  check("build.cancel terminalises the running attempt", cancelled.state === "cancelled");
+  check("build.cancel terminalizes the running attempt", cancelled.state === "cancelled");
   check("the cancel reaches the worker process", abortBuildAttempt(requeued.runId));
   const outcomeOfSecond = await second.attempt;
   check("the worker ends once cancelled", outcomeOfSecond !== null && outcomeOfSecond.exitStatus !== 0);
@@ -577,11 +577,42 @@ let buildRunId = "";
     afterCancel.runs.find((entry) => entry.id === requeued.runId)?.state === "cancelled",
   );
 
-  delete process.env.SOLUTIONS_BUILDER_WORKER_BIN;
-  // The attempt the rest of the smoke drives by hand, through the ledger alone.
+  // A worker that ran and exited non-zero — a build that finished and then
+  // crashed on the way out looks exactly like this — is not a failed build.
+  // The run stays running with the worker's result beside it, and the person
+  // decides what it was.
+  const crashing = join(bin, "crashing-worker");
+  await writeFile(
+    crashing,
+    ["#!/bin/sh", 'case "$1" in', '  --help) echo "usage: worker exec <prompt>"; exit 0 ;;', '  exec) echo "built everything"; echo "teardown failed" >&2; exit 1 ;;', "esac", ""].join("\n"),
+  );
+  await chmod(crashing, 0o755);
+  process.env.SOLUTIONS_BUILDER_WORKER_BIN = crashing;
   const third = await command("build.start_attempt", projectId, { runId: requeued.runId });
   check("starting from a cancelled run queues a new attempt", third.state === "queued");
-  buildRunId = third.runId;
+  const crashed = await startBuildAttempt({ actor: ACTOR, projectId, runId: third.runId });
+  const crashedOutcome = await crashed.attempt;
+  const afterCrash = await projectDetail(projectId, ACTOR.principalId);
+  check(
+    "a worker that ran and exited non-zero leaves the run running, for the person to judge",
+    crashedOutcome?.exitStatus === 1 && afterCrash.runs.find((entry) => entry.id === third.runId)?.state === "running",
+    `exit=${crashedOutcome?.exitStatus} state=${afterCrash.runs.find((entry) => entry.id === third.runId)?.state}`,
+  );
+  check(
+    "with the worker's final output and error tail recorded",
+    (await buildEvents(projectId, third.runId)).some((event) => {
+      const payload = event.payload as { finalText?: string; stderrTail?: string };
+      return event.type === "bridge.final" && payload.finalText?.includes("built everything") === true && payload.stderrTail?.includes("teardown failed") === true;
+    }),
+  );
+  const judged = await command("build.fail", projectId, { runId: third.runId, reason: "the person read the output and said so" });
+  check("the person can then fail it through the ledger", judged.state === "failed");
+
+  delete process.env.SOLUTIONS_BUILDER_WORKER_BIN;
+  // The attempt the rest of the smoke drives by hand, through the ledger alone.
+  const fourth = await command("build.start_attempt", projectId, { runId: third.runId });
+  check("starting from a failed run queues a new attempt", fourth.state === "queued");
+  buildRunId = fourth.runId;
 }
 
 // --- Stage 8: attempt, a human question, and evidence ---
@@ -675,11 +706,12 @@ let buildRunId = "";
     "the delivery manifest is recorded and accepted",
     final.manifests.length === 1 && final.manifests[0]!.acceptedAt !== null,
   );
-  // Seven stage runs (1-7), three build runs (one failed, one cancelled, one
-  // accepted), one delivery run. Nothing is deleted or reused along the way.
+  // Seven stage runs (1-7), four build runs (one failed for want of a worker,
+  // one cancelled, one failed by the person, one accepted), one delivery run.
+  // Nothing is deleted or reused along the way.
   check(
     "every run is retained in history",
-    final.runs.length === 11,
+    final.runs.length === 12,
     `${final.runs.length} runs`,
   );
 
