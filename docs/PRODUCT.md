@@ -150,8 +150,11 @@ These are product requirements, not style.
   turn and the tools it called. There is no timeout: a build takes as long as
   it takes, and cancelling it is the control. When the worker ends, its exit
   status is shown but is not a verdict: the person reads what it left and
-  accepts it, marks the attempt failed, or tries again. Only a worker that
-  could not run at all fails an attempt by itself. There is still no per-agent
+  accepts it, marks the attempt failed, or tries again — from scratch or
+  continuing from that attempt's work. Accepting packages the workspace into
+  an archive named after the project, records it as the project's build
+  artifact, and opens delivery review with that archive as what is verified.
+  Only a worker that could not run at all fails an attempt by itself. There is still no per-agent
   roster, no steering and no checkpoint resume. The interface reports each of
   those as unavailable rather than faking them.
 - **Delivery evidence is not verified byte for byte.** The manifest exists; the
