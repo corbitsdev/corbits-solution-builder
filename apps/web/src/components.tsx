@@ -452,6 +452,12 @@ const DOCUMENT_NAMES: Record<string, string> = {
   delivery_verification: "Delivery verification",
 };
 
+/** What a folded document says for itself: its version, when it was written, and how long it is. */
+export function versionDigest(node: { version: number; createdAt: string; sizeBytes: number }): string {
+  const length = node.sizeBytes < 1024 ? `${node.sizeBytes} B` : `${(node.sizeBytes / 1024).toFixed(1)} kB`;
+  return `Version ${node.version} · written ${new Date(node.createdAt).toLocaleString()} · ${length}`;
+}
+
 /**
  * A number that rolls to its next value like an odometer wheel: the old digit
  * slides up and out as the new one rises in. A count that changes by simply

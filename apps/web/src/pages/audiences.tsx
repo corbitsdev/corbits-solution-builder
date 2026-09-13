@@ -8,7 +8,7 @@
  */
 import { useEffect, useState } from "react";
 import { api, ApiFailure, type ProjectDetail } from "../client.js";
-import { Banner, Button, Field, Screen, StateLabel } from "../components.jsx";
+import { Banner, Button, Field, Screen, StateLabel, versionDigest } from "../components.jsx";
 import {
   Textarea,
   Tabs,
@@ -410,13 +410,23 @@ export function AudiencePackages({
 
             {selected ? (
               <>
-                <div className="document-body">
-                  {content ? (
-                    <Markdown source={content} />
-                  ) : (
-                    <p className="inline-note">Loading…</p>
-                  )}
-                </div>
+                {/* The package itself stays folded: one line says which
+                    version this is and when it was written, and opening it
+                    shows the report. The fold is one element across the
+                    tabs, so it stays open while reading several in turn. */}
+                <details className="document-fold">
+                  <summary className="document-fold-summary">
+                    <span className="document-fold-title">{selected.title}</span>
+                    <span className="document-fold-digest">{versionDigest(selected)}</span>
+                  </summary>
+                  <div className="document-body document-fold-body">
+                    {content ? (
+                      <Markdown source={content} />
+                    ) : (
+                      <p className="inline-note">Loading…</p>
+                    )}
+                  </div>
+                </details>
                 {saved ? (
                   <Banner tone="okay" title={`Saved to ${saved}`} action={{ label: "Dismiss", onClick: () => setSaved(null) }} />
                 ) : null}
