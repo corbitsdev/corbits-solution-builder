@@ -282,6 +282,108 @@ declare module "@intx/hub-api" {
   export function createMailTriggeredRunGrantsMaterializer(opts: Record<string, unknown>): unknown;
 }
 
+declare module "@intx/hub-client" {
+  export interface Transport {
+    fetch<T>(method: string, path: string, body?: unknown): Promise<T>;
+    subscribe(path: string, onEvent: (event: unknown) => void, opts?: { eventName?: string }): () => void;
+  }
+  export class ApiError extends Error {
+    constructor(status: number, code: string, message: string);
+    status: number;
+    code: string;
+  }
+  export function createBrowserTransport(): Transport;
+
+  export interface WorkflowDeployment {
+    id: string;
+    tenantId: string;
+    definitionAssetId: string;
+    status: string;
+    createdAt: string;
+  }
+  export interface WorkflowRunTrigger {
+    runId: string;
+    address: string;
+    messageId: string;
+  }
+  export interface WorkflowRunEvent {
+    seq: number;
+    type: string;
+    body: Record<string, unknown>;
+  }
+  export interface WorkflowRunEvents {
+    runId: string;
+    events: WorkflowRunEvent[];
+  }
+
+  /** Where a workflow definition's bytes come from at apply time (`@intx/types/workflow-sources`). */
+  export type WorkflowDefinitionSource =
+    | { kind: "registry"; registry: string }
+    | {
+        kind: "asset";
+        assetId: string;
+        package: { format: "tarball" } | { format: "source"; commitSha: string; packageName?: string };
+      };
+
+  export type TriggerRunAttachment = { mimeType: string; data: string; name?: string };
+  export type TriggerWorkflowRunInput = { content: string; attachments?: TriggerRunAttachment[] };
+  export type DeployWorkflowInput = {
+    source: WorkflowDefinitionSource;
+    entry: string;
+    sourceOfferingIds: string[];
+    defaultSourceOfferingId: string;
+    pin?: string;
+  };
+  export type DeliverSignalInput = { runId: string; signalName: string; signalId: string; payload?: unknown };
+
+  export function listWorkflowDeployments(transport: Transport, tenantId: string): Promise<WorkflowDeployment[]>;
+  export function deployWorkflow(
+    transport: Transport,
+    tenantId: string,
+    input: DeployWorkflowInput,
+  ): Promise<WorkflowDeployment>;
+  export function deliverWorkflowSignal(
+    transport: Transport,
+    tenantId: string,
+    runId: string,
+    input: DeliverSignalInput,
+  ): Promise<void>;
+  export function triggerWorkflowRun(
+    transport: Transport,
+    tenantId: string,
+    runId: string,
+    input: TriggerWorkflowRunInput,
+  ): Promise<WorkflowRunTrigger>;
+  export function listWorkflowRuns(transport: Transport, tenantId: string, runId: string): Promise<string[]>;
+  export function readWorkflowRunEvents(
+    transport: Transport,
+    tenantId: string,
+    runId: string,
+    eventRunId: string,
+  ): Promise<WorkflowRunEvents>;
+
+  export const TERMINAL_RUN_EVENT_TYPES: readonly string[];
+  export function isTerminalRunEvents(events: WorkflowRunEvent[]): boolean;
+  export type AwaitingSignal = { seq: number; signalName: string };
+  export function findAwaitingSignal(events: WorkflowRunEvent[]): AwaitingSignal | null;
+
+  export interface RunSession {
+    readonly events: WorkflowRunEvent[];
+    readonly hydrated: boolean;
+    readonly terminal: boolean;
+    start(): () => void;
+    destroy(): void;
+  }
+  export function createRunSession(opts: {
+    tenantId: string;
+    runId: string;
+    transport: Transport;
+    onChange: () => void;
+    onError?: (error: Error) => void;
+    pollIntervalMs?: number;
+  }): RunSession;
+}
+
 declare module "@intx/hub-sessions" {
   export function createAgentRepoStore(opts: Record<string, unknown>): {
     repoStore: unknown;

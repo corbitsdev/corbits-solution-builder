@@ -16,6 +16,20 @@
  *
  * `SOLUTIONS_BUILDER_HUB_URL` selects a hosted hub. Absent, the hub is embedded.
  */
+import {
+  ApiError,
+  deliverWorkflowSignal,
+  deployWorkflow,
+  listWorkflowDeployments,
+  listWorkflowRuns,
+  readWorkflowRunEvents,
+  triggerWorkflowRun,
+  type DeliverSignalInput,
+  type DeployWorkflowInput,
+  type Transport,
+  type WorkflowDeployment,
+  type WorkflowRunEvent,
+} from "@intx/hub-client";
 import { hub, hubIsMounted, mountHub } from "./hub-mount.js";
 import { readSecretResult, secretReference, storeSecret } from "./provider-credentials.js";
 import { HostError } from "./errors.js";
@@ -228,6 +242,81 @@ export async function hubApi(path: string, init: RequestInit = {}): Promise<Resp
     }
   }
   return response;
+}
+
+// --- The workflow client's transport --------------------------------------
+
+/** Re-exported so callers of `workflows`/`deploymentRuns` can catch it. */
+export { ApiError };
+
+async function asTyped<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    const text = await response.text();
+    let parsed: unknown = null;
+    try {
+      parsed = text ? JSON.parse(text) : null;
+    } catch {
+      // Left as null; the error below falls back to the raw status.
+    }
+    const err = parsed as { error?: { code?: string; message?: string } } | null;
+    throw new ApiError(
+      response.status,
+      err?.error?.code ?? "unknown",
+      err?.error?.message ?? (text.slice(0, 300) || `HTTP ${response.status}`),
+    );
+  }
+  if (response.status === 204) return undefined as T;
+  const text = await response.text();
+  return text.length === 0 ? (undefined as T) : (JSON.parse(text) as T);
+}
+
+function jsonInit(method: string, requestBody?: unknown): RequestInit {
+  const init: RequestInit = { method };
+  if (requestBody !== undefined) {
+    init.headers = { "content-type": "application/json" };
+    init.body = JSON.stringify(requestBody);
+  }
+  return init;
+}
+
+/**
+ * The in-process half of the upstream `Transport` interface: dispatch into
+ * the mounted Hono app, cookie-authenticated. `hubApi` already is this
+ * dispatch when `hubMode()` is `"embedded"` — see `hubFetch` above — so this
+ * is a shape adapter onto it, not a second implementation of the switch.
+ */
+function createEmbeddedTransport(): Transport {
+  return {
+    async fetch<T>(method: string, path: string, requestBody?: unknown): Promise<T> {
+      return asTyped<T>(await hubApi(path, jsonInit(method, requestBody)));
+    },
+    subscribe(): () => void {
+      throw new Error("The embedded hub has no socket to subscribe on.");
+    },
+  };
+}
+
+/**
+ * The remote half of the upstream `Transport` interface: HTTPS to a hosted
+ * hub, bearer-token authenticated. `hubApi` is this dispatch too when
+ * `hubMode()` is `"remote"` — the token attach and the one-shot 401 retry
+ * both live in `hubFetch`/`hubApi` already, and duplicating that logic here
+ * would only risk it drifting from the embedded case.
+ */
+function createRemoteTransport(): Transport {
+  return {
+    async fetch<T>(method: string, path: string, requestBody?: unknown): Promise<T> {
+      return asTyped<T>(await hubApi(path, jsonInit(method, requestBody)));
+    },
+    subscribe(): () => void {
+      throw new Error("The remote hub transport has no live subscription support.");
+    },
+  };
+}
+
+/** The same embedded/remote switch `hubMode()` has always driven, now selecting a `Transport`. */
+function hubTransport(): Transport {
+  return hubMode() === "embedded" ? createEmbeddedTransport() : createRemoteTransport();
 }
 
 async function body<T>(response: Response, path: string): Promise<T> {
@@ -633,13 +722,10 @@ export const catalog = {
 // --- Assets and workflow deployments ---------------------------------------
 
 export type HubAsset = { id: string; tenantId: string; kind: string; name: string };
-export type HubDeployment = {
-  id: string;
-  tenantId: string;
-  definitionAssetId: string;
-  status: string;
-  createdAt: string;
-};
+/** The upstream client's own deployment shape; kept under the host's name. */
+export type HubDeployment = WorkflowDeployment;
+/** The upstream client's own run-event shape; kept under the host's name. */
+export type HubRunEvent = WorkflowRunEvent;
 
 export const assets = {
   // Bare arrays, not pages: these two routes do not paginate.
@@ -649,45 +735,33 @@ export const assets = {
 };
 
 export const workflows = {
-  deployments: () => hubGet<HubDeployment[]>(tenantPath("/workflows/deployments")),
+  deployments: () => listWorkflowDeployments(hubTransport(), tenantId()),
   /**
    * Installs, probes, freezes and places a code-sourced workflow. The hub
    * answers only once the probe sidecar has evaluated the source, so this
    * call takes as long as spawning that process does.
    */
-  deploy: (input: {
-    source: {
-      kind: "asset";
-      assetId: string;
-      package: { format: "source"; commitSha: string; packageName?: string };
-    };
-    entry: string;
-    sourceOfferingIds: string[];
-    defaultSourceOfferingId: string;
-  }) => hubPost<HubDeployment>(tenantPath("/workflows/deployments"), input),
+  deploy: (input: DeployWorkflowInput) => deployWorkflow(hubTransport(), tenantId(), input),
 };
 
 // --- Runs on a deployment ------------------------------------------------------
 
-export type HubRunEvent = { seq: number; type: string; body: Record<string, unknown> };
-
 export const deploymentRuns = {
   /** Every run under the deployment: the stable top-level run and its children. */
-  list: (anchorRunId: string) =>
-    hubGet<{ runIds: string[] }>(tenantPath(`/workflows/${anchorRunId}/runs`)).then((r) => r.runIds),
+  list: (anchorRunId: string) => listWorkflowRuns(hubTransport(), tenantId(), anchorRunId),
   events: (anchorRunId: string, runId: string) =>
-    hubGet<{ runId: string; events: HubRunEvent[] }>(
-      tenantPath(`/workflows/${anchorRunId}/runs/${runId}/events`),
-    ).then((r) => r.events),
+    readWorkflowRunEvents(hubTransport(), tenantId(), anchorRunId, runId).then((r) => r.events),
   /** The first message fires the deployment's top-level run. */
   trigger: (anchorRunId: string, content: string) =>
-    hubPost<{ runId: string; address: string; messageId: string }>(
-      tenantPath(`/workflows/${anchorRunId}/mail`),
-      { content },
-    ),
-  signal: (anchorRunId: string, input: { runId: string; signalName: string; signalId: string; payload?: unknown }) =>
-    hubApi(tenantPath(`/workflows/${anchorRunId}/signals`), { method: "POST", body: JSON.stringify(input) }),
-  /** A step output spilled to a blob because its JSON exceeded the inline threshold. */
+    triggerWorkflowRun(hubTransport(), tenantId(), anchorRunId, { content }),
+  /** Throws `ApiError` (from `@intx/hub-client`) on a non-2xx response. */
+  signal: (anchorRunId: string, input: DeliverSignalInput) =>
+    deliverWorkflowSignal(hubTransport(), tenantId(), anchorRunId, input),
+  /**
+   * A step output spilled to a blob because its JSON exceeded the inline
+   * threshold. This route (`vendor/interchange/PATCHES.md`) is a local
+   * addition to the hub with no upstream client op, so it stays hand-rolled.
+   */
   blob: async (anchorRunId: string, runId: string, sha: string): Promise<Uint8Array | null> => {
     const response = await hubApi(tenantPath(`/workflows/${anchorRunId}/runs/${runId}/blobs/${sha}`));
     if (response.status === 404) return null;
