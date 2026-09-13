@@ -94,16 +94,72 @@ async function readStateWithPending(
 }
 
 /**
+ * How many times a flush is re-folded onto the durable tip after another
+ * writer overtook it before the conflict is the failure it was.
+ */
+const OVERTAKEN_FLUSH_RETRIES = 3;
+
+/** The store's refusal of a batch whose seqs no longer continue from its tip. */
+function isSeqConflict(cause: unknown): boolean {
+  return (
+    typeof cause === "object" &&
+    cause !== null &&
+    "seqConflict" in cause &&
+    typeof (cause as { seqConflict?: unknown }).seqConflict === "object"
+  );
+}
+
+/**
+ * The pending events renumbered to continue from the log as it now
+ * stands, each transition validated against that log in turn. A batch
+ * whose transition no longer applies after what landed ahead of it
+ * throws from the state machine rather than being written.
+ */
+function refoldedOntoTip(
+  runId: string,
+  durable: readonly WorkflowEvent[],
+  events: readonly WorkflowEvent[],
+): WorkflowEvent[] {
+  let state = resumeFromLog(runId, durable);
+  const out: WorkflowEvent[] = [];
+  for (const event of events) {
+    const next: WorkflowEvent = { ...event, seq: state.lastSeq + 1 };
+    state = applyEvent(state, next);
+    out.push(next);
+  }
+  return out;
+}
+
+/**
  * Flush the pending buffer in ONE durable `appendBatch`. Called under
  * the per-runId chain lock so the flushed seqs are contiguous on the
  * durable tip. No-op when the buffer is empty.
+ *
+ * The chain serialises every writer in this process, but a container
+ * run's log has been seen to gain an event between the read that
+ * assigned a batch's seqs and the append: a delivered signal's own
+ * `SignalReceived`, recorded once by the awaiter and once by the relay
+ * that carried it into the body, from a write this chain did not
+ * serialise. The store refuses the overtaken batch. Rather than fail
+ * the run on it, the batch is re-folded onto the tip -- read again,
+ * each transition validated against the log as it now stands,
+ * renumbered -- and appended once more; a duplicate `SignalReceived`
+ * is a no-op to the reducer, so what lands is what would have landed.
  */
 async function flushBuffer(env: CommitEnv, runId: string): Promise<void> {
   const buf = pendingBuffers.get(runId);
   if (buf === undefined || buf.length === 0) return;
-  const events = buf.slice();
+  let events: WorkflowEvent[] = buf.slice();
   buf.length = 0;
-  await env.repoStore.appendBatch(runId, events);
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await env.repoStore.appendBatch(runId, events);
+      return;
+    } catch (cause) {
+      if (attempt >= OVERTAKEN_FLUSH_RETRIES || !isSeqConflict(cause)) throw cause;
+      events = refoldedOntoTip(runId, await env.repoStore.read(runId), events);
+    }
+  }
 }
 
 /**

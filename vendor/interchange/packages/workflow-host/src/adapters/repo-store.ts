@@ -420,8 +420,14 @@ async function appendBatchEvents(
   }
   if (seqConflict !== null) {
     const conflict: { expected: number; supplied: number } = seqConflict;
-    throw new Error(
-      `workflow-runtime: seq conflict on append to ${runId}; single-writer invariant violated (expected seq ${String(conflict.expected)} from prior tree, caller supplied ${String(conflict.supplied)})`,
+    // Carried on the error so the commit chain can tell an overtaken batch
+    // from any other failure and re-fold it onto the tip (see
+    // `flushBuffer` in `@intx/workflow`'s commit-chain).
+    throw Object.assign(
+      new Error(
+        `workflow-runtime: seq conflict on append to ${runId}; single-writer invariant violated (expected seq ${String(conflict.expected)} from prior tree, caller supplied ${String(conflict.supplied)})`,
+      ),
+      { seqConflict: conflict },
     );
   }
 }
