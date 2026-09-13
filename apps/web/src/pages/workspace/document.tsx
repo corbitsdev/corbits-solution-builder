@@ -16,6 +16,8 @@ import { ArrowDown, ArrowUp, Check } from "lucide-react";
 import { Markdown } from "../../markdown.jsx";
 import { Dictated } from "../../dictation.jsx";
 import { approachName, sectionsIn } from "@solutions-builder/app/document";
+import { agentFor } from "@solutions-builder/app/kit";
+import type { Stage } from "@solutions-builder/app/ledger";
 import { markChanges } from "../../revisions.js";
 import { Button, documentName, RollingNumber } from "../../components.jsx";
 import { PrintButton } from "../../print.jsx";
@@ -297,8 +299,14 @@ export function StageDocument({
           }
           empty={
             <div className="thread-empty">
-              <p>The specialist has not spoken yet.</p>
-              <p>Draft this stage and it opens with what it found.</p>
+              {/* The document is beside this, so what is missing is the
+                  conversation, not the specialist: say which document, and
+                  who wrote it. */}
+              <p>No conversation about this {noun} is recorded yet.</p>
+              <p>
+                The {agentFor(node.stage as Stage).title.toLowerCase()} wrote it. Say what should change, or approve it as
+                it is.
+              </p>
             </div>
           }
         />
