@@ -482,7 +482,7 @@ let buildRunId = "";
   // A worker that is not there — the same, to the bridge, as one the OS kills
   // on launch. The bridge's probe fails, and the run has to say so on the
   // ledger rather than sit under "running" beside a terminal result.
-  process.env.SOLUTIONS_BUILDER_CORBITS_BIN = join(bin, "no-such-worker");
+  process.env.SOLUTIONS_BUILDER_WORKER_BIN = join(bin, "no-such-worker");
   const first = await startBuildAttempt({ actor: ACTOR, projectId, runId: buildRunId });
   check("starting an attempt moves the queued run to running", first.run.state === "running");
   const outcome = await first.attempt;
@@ -514,7 +514,7 @@ let buildRunId = "";
     ['#!/bin/sh', 'case "$1" in', '  --help) echo "usage: worker exec <prompt>"; exit 0 ;;', '  exec) exec sleep 60 ;;', 'esac', ''].join("\n"),
   );
   await chmod(slow, 0o755);
-  process.env.SOLUTIONS_BUILDER_CORBITS_BIN = slow;
+  process.env.SOLUTIONS_BUILDER_WORKER_BIN = slow;
   const requeued = await command("build.start_attempt", projectId, { runId: buildRunId });
   check(
     "starting from a failed run queues a new attempt rather than running one",
@@ -533,7 +533,7 @@ let buildRunId = "";
     afterCancel.runs.find((entry) => entry.id === requeued.runId)?.state === "cancelled",
   );
 
-  delete process.env.SOLUTIONS_BUILDER_CORBITS_BIN;
+  delete process.env.SOLUTIONS_BUILDER_WORKER_BIN;
   // The attempt the rest of the smoke drives by hand, through the ledger alone.
   const third = await command("build.start_attempt", projectId, { runId: requeued.runId });
   check("starting from a cancelled run queues a new attempt", third.state === "queued");
