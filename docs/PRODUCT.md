@@ -101,9 +101,13 @@ These are product requirements, not style.
 - **Stage 8 is a bounded build.** It runs one supervised command and shows its
   final output and exit status. Which coding agent runs it is chosen in
   Settings — Corbits Code by default, Claude Code or Codex otherwise — and
-  the choice changes the tool, not what the interface can see. There is no
-  live event stream, no agent roster, no steering and no checkpoint resume.
-  The interface reports each of those as unavailable rather than faking them.
+  the choice changes the tool, not what the interface can see. While it
+  runs, the interface shows the worker's output as it is written and, for a
+  worker with a lifecycle hook (Corbits Code), the worker's own report of
+  each turn and the tools it called. There is no timeout: a build takes as
+  long as it takes, and cancelling it is the control. There is no agent
+  roster, no steering and no checkpoint resume. The interface reports each
+  of those as unavailable rather than faking them.
 - **Delivery evidence is not verified byte for byte.** The manifest exists; the
   hash checks against an install target do not.
 - **Branches are in the record but not the interface.** Only the main branch
