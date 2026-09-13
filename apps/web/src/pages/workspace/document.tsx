@@ -19,7 +19,7 @@ import { approachName, sectionsIn } from "@solutions-builder/app/document";
 import { agentFor } from "@solutions-builder/app/kit";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { markChanges } from "../../revisions.js";
-import { Button, documentName, RollingNumber } from "../../components.jsx";
+import { AddMaterial, Button, documentName, RollingNumber } from "../../components.jsx";
 import { PrintButton } from "../../print.jsx";
 import { SpecialistTurn, WorkingLabel, type TurnNote } from "./thread.jsx";
 
@@ -46,6 +46,7 @@ export function StageDocument({
   evaluation = null,
   onSelectVersion,
   onRevise,
+  onAddMaterial,
   onSubmit,
   soloApproval,
   canSubmit,
@@ -64,6 +65,8 @@ export function StageDocument({
   evaluation?: Evaluation | null;
   onSelectVersion: (id: string) => void;
   onRevise: (message: string, quotes: Quote[], revise?: boolean) => void;
+  /** Hands files over as material, mid-project. Absent where nothing can be added. */
+  onAddMaterial?: ((files: File[]) => Promise<void>) | undefined;
   onSubmit: () => void;
   soloApproval: boolean;
   canSubmit: boolean;
@@ -408,6 +411,12 @@ export function StageDocument({
           {queued && busy !== null ? (
             <p className="composer-cue" aria-live="polite">
               Held until the specialist finishes, then sent.
+            </p>
+          ) : null}
+          {onAddMaterial ? (
+            <p className="composer-cue composer-material">
+              <AddMaterial className="material-add-inline" onAdd={onAddMaterial} />{" "}
+              or drop files anywhere here. The specialists read them with their next draft.
             </p>
           ) : null}
         </div>

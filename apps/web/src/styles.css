@@ -2816,6 +2816,28 @@ button[aria-disabled="true"] {
   font-size: 0.875rem;
 }
 
+/* The same picker inside a sentence: beside the composer and on the opening
+   screen, it reads as one of the ways in, not a control of its own. */
+.material-add-inline {
+  display: inline;
+}
+
+.material-add-inline button {
+  padding: 0;
+  height: auto;
+  min-height: 0;
+  font-size: inherit;
+  vertical-align: baseline;
+}
+
+.material-add-inline .inline-note {
+  display: block;
+}
+
+.material-cue {
+  margin-top: var(--space-2);
+}
+
 /* A design in the artifacts tab: the page itself, most of the reading height. */
 .artifact-page {
   width: 100%;

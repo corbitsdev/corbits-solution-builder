@@ -28,7 +28,7 @@ import { Textarea, Tabs } from "@corbits/react-ui";
 import { Markdown } from "../../markdown.jsx";
 import { AudiencePackages } from "../audiences.jsx";
 import { DesignFeedbackView } from "../design.jsx";
-import { Banner, Button, Screen, StateLabel, stageName, versionDigest } from "../../components.jsx";
+import { AddMaterial, Banner, Button, Screen, StateLabel, stageName, versionDigest } from "../../components.jsx";
 import { StageGate, STAGE_GOAL } from "./gate.jsx";
 import { Preparing, STALL_AFTER_MS } from "./preparing.jsx";
 import { clock } from "./elapsed.jsx";
@@ -202,10 +202,12 @@ export function StageWorkspace({
   // is read on the next draft, and the notice says so rather than redrafting
   // on the person's behalf.
   const [dragging, setDragging] = useState(false);
-  const attach = (files: FileList) => {
+  // Dropped anywhere on the stage, or chosen through the picker beside the
+  // composer and on the opening screen: one path either way.
+  const attach = (files: FileList | File[]) => {
     const list = [...files];
-    if (list.length === 0) return;
-    void run("material", async () => {
+    if (list.length === 0) return Promise.resolve();
+    return run("material", async () => {
       const { attached } = await api.attachMaterial(detail.project.id, list);
       const names = attached.map((entry) => entry.name).join(", ");
       return { note: `Attached ${names}. The specialists read it with their next draft: say what to do with it, or ask for a redraft.` };
@@ -282,7 +284,7 @@ export function StageWorkspace({
         if (![...event.dataTransfer.types].includes("Files")) return;
         event.preventDefault();
         setDragging(false);
-        attach(event.dataTransfer.files);
+        void attach(event.dataTransfer.files);
       }}
     >
       {awaitingReview && stage <= 7 && active ? (
@@ -334,6 +336,10 @@ export function StageWorkspace({
                   placeholder="Describe it in your own words. Rough is fine."
                 />
               </div>
+              <p className="inline-note material-cue">
+                Have documents or images? Drop them anywhere here, or <AddMaterial className="material-add-inline" onAdd={attach} />{" "}
+                They are read with every draft.
+              </p>
               <Button
                 variant="primary"
                 loading={busy === "draft"}
@@ -349,14 +355,21 @@ export function StageWorkspace({
             </div>
           </Screen>
         ) : (
-          <Preparing
-            stage={stage}
-            said={said}
-            writing={writing}
-            busy={busy === "draft"}
-            begun={begun}
-            stalled={stalled}
-          />
+          <>
+            <Preparing
+              stage={stage}
+              said={said}
+              writing={writing}
+              busy={busy === "draft"}
+              begun={begun}
+              stalled={stalled}
+            />
+            <p className="inline-note material-cue">
+              Documents or images to hand over meanwhile? Drop them anywhere here, or{" "}
+              <AddMaterial className="material-add-inline" onAdd={attach} />{" "}
+              They are read with the next draft.
+            </p>
+          </>
         )
       ) : null}
 
@@ -485,6 +498,7 @@ export function StageWorkspace({
           versions={stageNodes}
           content={content}
           onSelectVersion={setSelectedNode}
+          onAddMaterial={inProgress ? attach : undefined}
           busy={busy}
           canSubmit={inProgress}
           turns={turns}

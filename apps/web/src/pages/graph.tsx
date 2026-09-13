@@ -6,10 +6,10 @@
  * replaced them.
  */
 import { EmptyState } from "@corbits/react-ui";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { api, ApiFailure, type ArtifactNode } from "../client.js";
 import { Markdown } from "../markdown.jsx";
-import { Banner, Button, documentName, stageName } from "../components.jsx";
+import { AddMaterial, Banner, Button, documentName, stageName } from "../components.jsx";
 import { PrintButton } from "../print.jsx";
 
 type ArtifactEdge = { childNodeId: string; sourceNodeId: string };
@@ -138,40 +138,17 @@ export function ArtifactGraph({
   /** Hands files over as material, mid-project. Absent where nothing can be added. */
   onAddMaterial?: ((files: File[]) => Promise<void>) | undefined;
 }) {
-  const materialInput = useRef<HTMLInputElement>(null);
-  const [adding, setAdding] = useState(false);
-  const [addError, setAddError] = useState<string | null>(null);
-  const addMaterial = async (files: FileList) => {
-    if (!onAddMaterial || files.length === 0) return;
-    setAdding(true);
-    setAddError(null);
-    try {
-      await onAddMaterial([...files]);
-    } catch (cause) {
-      setAddError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-    } finally {
-      setAdding(false);
-      if (materialInput.current) materialInput.current.value = "";
-    }
-  };
   const addControl = onAddMaterial ? (
-    <div className="library-add">
-      <input
-        ref={materialInput}
-        type="file"
-        multiple
-        hidden
-        accept=".txt,.md,.csv,.json,.html,.xlsx,.xls,.docx,.doc,.pptx,.ppt,.pdf,.png,.jpg,.jpeg,.gif,.webp"
-        aria-label="Choose documents or images to add to the project"
-        onChange={(event) => {
-          if (event.target.files) void addMaterial(event.target.files);
-        }}
-      />
-      <Button variant="link" loading={adding} onClick={() => materialInput.current?.click()}>
-        Add documents or images…
-      </Button>
-      {addError ? <p className="inline-note">{addError}</p> : null}
-    </div>
+    <AddMaterial
+      className="library-add"
+      onAdd={async (files) => {
+        try {
+          await onAddMaterial(files);
+        } catch (cause) {
+          throw new Error(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+        }
+      }}
+    />
   ) : null;
   const [openedId, setOpenedId] = useState<string | null>(
     () => openedIdProp ?? defaultOpenedId(nodes),
