@@ -404,6 +404,7 @@ declare module "@intx/hub-sessions" {
       tree: { files: Record<string, string | Uint8Array>; message: string; clearPrefix?: string };
     }): Promise<{ commitSha: string }>;
     readAssetBlob(params: { assetId: string; path: string; ref?: string }): Promise<Uint8Array>;
+    listAssetBlobs(params: { assetId: string; dir: string; ref?: string }): Promise<string[]>;
   };
   export function createAssetService(opts: Record<string, unknown>): AssetService;
   export function createEventCollectorRegistry(opts: Record<string, unknown>): unknown;
@@ -722,6 +723,47 @@ declare module "@intx/inference" {
   export const BEARER_CREDENTIAL_SENTINEL: string;
 
   export function parseSSE(stream: ReadableStream<Uint8Array>): AsyncIterable<string>;
+}
+
+declare module "@intx/tool-packaging" {
+  export type ToolPackagePin = { name: string; version: string };
+  export type ToolPackageManifestEntry = {
+    name: string;
+    version: string;
+    source: { kind: "registry"; registry: string; integrity: string } | {
+      kind: "asset";
+      assetId: string;
+      package: { format: "tarball"; path: string; integrity: string } | { format: "source"; treeOid: string };
+    };
+  };
+  export type ToolPackageManifest = { entries: ToolPackageManifestEntry[] };
+  export interface RegistrySource {
+    readonly name: string;
+    fetchPackument(name: string): Promise<unknown>;
+    materializeRefForEntry(name: string, version: string, picked: unknown, integrity: string): unknown;
+  }
+  export class AssetRegistrySource implements RegistrySource {
+    readonly name: string;
+    constructor(args: {
+      name: string;
+      assetId: string;
+      readBlob: (path: string) => Promise<Uint8Array>;
+      listBlobs: (dir: string) => Promise<string[]>;
+    });
+    fetchPackument(name: string): Promise<unknown>;
+    materializeRefForEntry(name: string, version: string, picked: unknown, integrity: string): unknown;
+  }
+  export function createClosureResolver(config: {
+    registries: ReadonlyMap<string, RegistrySource>;
+    defaultRegistry: string;
+    scopeRouting?: readonly { scope: string; registry: string }[];
+  }): { resolveClosure(pins: readonly ToolPackagePin[]): Promise<ToolPackageManifest> };
+  export function parsePin(spec: string): ToolPackagePin;
+}
+
+declare module "@intx/types/tool-packages" {
+  import type { ToolPackageManifestEntry } from "@intx/tool-packaging";
+  export function getToolPackageSourceContentIdentity(source: ToolPackageManifestEntry["source"]): string;
 }
 
 declare module "@intx/inference/providers" {
