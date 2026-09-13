@@ -28,7 +28,7 @@ export const STAGE_GOAL: Record<number, string> = {
  * says who the wait is on and where to go.
  */
 /** Stage 5's quorum as it stands: how many must proceed, how many have, how many block. */
-export type Quorum = { needed: number; proceeded: number; blocked: number };
+export type Quorum = { needed: number; proceeded: number; blocked: number; named: number };
 
 export function StageGate({
   soloApproval,
@@ -57,7 +57,7 @@ export function StageGate({
       : quorum.blocked > 0
         ? "A stakeholder asked for a revise or reject, which blocks approval. Reopen the review below to revise the packages."
         : quorum.proceeded < quorum.needed
-          ? `${quorum.proceeded} of ${quorum.needed} stakeholders have said proceed. Approval needs ${quorum.needed}; record the decisions below.`
+          ? `${quorum.proceeded} of ${quorum.named} stakeholders ${quorum.proceeded === 1 ? "has" : "have"} said proceed. Approval needs ${quorum.needed}; record the decisions below.`
           : null;
   return (
     <div className="stage-gate" role="status">

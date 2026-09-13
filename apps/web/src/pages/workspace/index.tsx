@@ -277,11 +277,12 @@ export function StageWorkspace({
           quorum={
             stage === 5
               ? (() => {
-                  const policy = (detail.project.policy ?? {}) as { audienceQuorum?: number };
+                  const policy = (detail.project.policy ?? {}) as { audienceQuorum?: number; audiences?: unknown[] };
                   const decisions = detail.approvals.filter(
                     (approval) => approval.command === "audience.decide" && approval.runId === current?.id,
                   );
                   return {
+                    named: policy.audiences?.length ?? 0,
                     needed: policy.audienceQuorum ?? 0,
                     proceeded: decisions.filter((approval) => approval.decision === "proceed").length,
                     blocked: decisions.filter((approval) => approval.decision !== "proceed").length,
