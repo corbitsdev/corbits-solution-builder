@@ -4,11 +4,11 @@
  *
  * The bounded bridge (`corbits-exec.ts`) reports an outcome and nothing else.
  * What the outcome *means* for the run is decided here, through the same
- * guard every other command goes through: a worker that is unavailable or
- * exits non-zero fails the run, with the reason, as the host's own `system`
- * principal. A worker that exits zero leaves the run running, because whether
- * its output is evidence is a person's call (`build.accept_evidence`), never
- * the exit status's.
+ * guard every other command goes through: a worker that could not run at all
+ * fails the run, with the reason, as the host's own `system` principal. A
+ * worker that ran leaves the run running whatever its exit status, because
+ * whether what it left behind is evidence is a person's call
+ * (`build.accept_evidence`, `build.fail`), never the exit code's.
  *
  * Until this existed the route recorded the bridge's final event and returned,
  * so a run whose worker could not even start sat under a "running" label with
@@ -198,21 +198,24 @@ async function buildPrompt(projectId: string, runId: string): Promise<string> {
   ].join("\n");
 }
 
-/** What a worker's outcome means for its run, said in the ledger's terms. */
-export function failureReason(outcome: Pick<BridgeOutcome, "available" | "exitStatus" | "stderrTail">): string | null {
+/**
+ * What a worker's outcome means for its run, said in the ledger's terms —
+ * which is only that a worker that could not run at all has failed the
+ * attempt. An exit status is not a verdict on the work: a worker that built
+ * everything and then crashed on the way out exits non-zero, and one that
+ * did nothing can exit zero. Whether what it left behind is evidence is a
+ * person's call, so a worker that ran leaves the run running for them.
+ */
+export function failureReason(outcome: Pick<BridgeOutcome, "available" | "stderrTail">): string | null {
   if (!outcome.available) return `The build worker is unavailable. ${outcome.stderrTail}`.trim();
-  if (outcome.exitStatus === 0) return null;
-  return outcome.exitStatus === null
-    ? "The build worker ended without an exit status."
-    : `The build worker exited ${outcome.exitStatus}.`;
+  return null;
 }
 
 /**
- * Fails a run whose worker did not succeed. A run that is no longer running
- * — cancelled or interrupted while the worker was up, which is the one way a
- * worker ends without succeeding on purpose — already has its terminal row,
- * and the guard would refuse a second one; that refusal is the expected end
- * of the race, not an error.
+ * Fails a run whose worker could not run. A run that is no longer running
+ * — canceled or interrupted while the worker was up — already has its
+ * terminal row, and the guard would refuse a second one; that refusal is
+ * the expected end of the race, not an error.
  */
 async function settle(projectId: string, runId: string, outcome: BridgeOutcome): Promise<void> {
   const reason = failureReason(outcome);

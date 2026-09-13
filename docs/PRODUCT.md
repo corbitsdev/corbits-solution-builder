@@ -148,7 +148,10 @@ These are product requirements, not style.
   through as it arrives and not parsed into events, sessions or steps — and,
   for a worker with a lifecycle hook (Corbits Code), its own report of each
   turn and the tools it called. There is no timeout: a build takes as long as
-  it takes, and cancelling it is the control. There is still no per-agent
+  it takes, and cancelling it is the control. When the worker ends, its exit
+  status is shown but is not a verdict: the person reads what it left and
+  accepts it, marks the attempt failed, or tries again. Only a worker that
+  could not run at all fails an attempt by itself. There is still no per-agent
   roster, no steering and no checkpoint resume. The interface reports each of
   those as unavailable rather than faking them.
 - **Delivery evidence is not verified byte for byte.** The manifest exists; the
