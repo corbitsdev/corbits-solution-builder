@@ -5,14 +5,15 @@
  * one `source_material` node per file, the file's own type, the bytes as the
  * content — and every stage's specialist is handed what can be read of it.
  *
- * What can be read: text of any kind as it is; a spreadsheet as one block per
- * sheet — its values as CSV, then its merges, widths, formulas and number
- * formats; a PDF as its text, page by page; an image or a Word file by name
+ * What can be read: text of any kind as it is; a spreadsheet, modern or the
+ * older binary kind, as one block per sheet — its values as CSV, then its
+ * merges, widths, formulas and number formats; a PDF as its text, page by page; an image or a Word file by name
  * and size only, since nothing here reads those yet, and a prompt that
  * pretends to have read them is worse than one that says it has not.
  */
 import ExcelJS from "exceljs";
 import { extractText, getDocumentProxy } from "unpdf";
+import * as XLSX from "xlsx";
 import { HostError } from "./errors.js";
 import { writeArtifact } from "./projects.js";
 import { activeRun } from "./runs.js";
@@ -62,7 +63,8 @@ const MAX_FILE_CHARS = 40_000;
 /** Rows of one sheet a prompt carries. */
 const MAX_SHEET_ROWS = 2_000;
 
-const XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const XLS_MIME = "application/vnd.ms-excel";
 const PDF = "application/pdf";
 
 export type IncomingFile = { name: string; type: string; bytes: Uint8Array };
@@ -134,8 +136,9 @@ function csvCell(text: string): string {
   return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
-/** A cell's text as a person would read it: a date as a date, not as the runtime prints one. */
+/** A cell's text as a person would read it: a date as a date, not as the runtime prints one; a merged range's value once, at its top left. */
 function cellText(cell: ExcelJS.Cell): string {
+  if (cell.isMerged && cell.master !== cell) return "";
   const value = cell.value;
   if (value instanceof Date) {
     const iso = value.toISOString();
@@ -215,6 +218,16 @@ export async function spreadsheetText(bytes: Uint8Array): Promise<string> {
   return blocks.join("\n\n");
 }
 
+/**
+ * The older binary workbook, converted to the modern format so one renderer
+ * serves both. The converter reads values, formulas, number formats, merges
+ * and column widths from the binary form.
+ */
+export function legacyWorkbookToXlsx(bytes: Uint8Array): Uint8Array {
+  const workbook = XLSX.read(bytes, { type: "buffer", cellFormula: true, cellNF: true, cellStyles: true });
+  return new Uint8Array(XLSX.write(workbook, { bookType: "xlsx", type: "buffer", cellStyles: true }) as ArrayBuffer);
+}
+
 /** 1 → A, 27 → AA: how a sheet names its columns. */
 function columnLetter(index: number): string {
   let name = "";
@@ -255,9 +268,9 @@ export async function materialText(node: { title: string; mediaType: string }, c
   if (isText(node.mediaType)) return cap(content);
   const stored = bytesOf(content);
   if (!stored) return describe(node.title, node.mediaType, content.length, "A file");
-  if (node.mediaType === XLSX) {
+  if (node.mediaType === XLSX_MIME || node.mediaType === XLS_MIME) {
     try {
-      return cap(await spreadsheetText(stored.bytes));
+      return cap(await spreadsheetText(node.mediaType === XLS_MIME ? legacyWorkbookToXlsx(stored.bytes) : stored.bytes));
     } catch (cause) {
       return `${describe(node.title, node.mediaType, stored.bytes.byteLength, "A spreadsheet")} It could not be read: ${cause instanceof Error ? cause.message : String(cause)}`;
     }
