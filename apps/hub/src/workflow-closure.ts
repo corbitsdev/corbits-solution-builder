@@ -35,7 +35,11 @@ type PackageManifest = {
   [key: string]: unknown;
 };
 
-function readManifest(shortName: string): PackageManifest {
+/** A vendored package's own `package.json`, parsed. Exported so callers that
+ *  need more than the trimmed shape `memberFiles` produces — the registry-asset
+ *  packer reads real `dependencies`/`peerDependencies` off it — read the same
+ *  file through the same path rather than a second copy of this join. */
+export function readManifest(shortName: string): PackageManifest {
   return JSON.parse(readFileSync(join(VENDORED_PACKAGES, shortName, "package.json"), "utf8")) as PackageManifest;
 }
 
@@ -66,7 +70,10 @@ export function workspaceCatalog(): Record<string, string> {
   return root.catalog ?? {};
 }
 
-function walk(dir: string, out: string[]): void {
+/** Recursively lists every file under `dir`, depth-first. Exported so any
+ *  caller collecting a directory's files (a workspace member, a repacked
+ *  tarball) walks it the same way rather than each writing its own. */
+export function walk(dir: string, out: string[]): void {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) walk(full, out);
@@ -75,10 +82,32 @@ function walk(dir: string, out: string[]): void {
 }
 
 /**
+ * A vendored package's runtime `dist/` files, keyed by their path relative to
+ * `dist/` (POSIX separators). Declarations, source maps and tests are left
+ * out; the sidecar evaluates, it does not type-check.
+ */
+export function distFiles(shortName: string): Record<string, string> {
+  const distDir = join(VENDORED_PACKAGES, shortName, "dist");
+  if (!statSync(distDir, { throwIfNoEntry: false })?.isDirectory()) {
+    throw new Error(
+      `@intx/${shortName} has no dist/; run \`bun run vendor:build\` before deploying a code-sourced workflow`,
+    );
+  }
+  const paths: string[] = [];
+  walk(distDir, paths);
+  const files: Record<string, string> = {};
+  for (const full of paths) {
+    const rel = relative(distDir, full);
+    if (/\.d\.ts$/.test(rel) || /\.map$/.test(rel) || /\.test\.js$/.test(rel) || rel === ".emitted") continue;
+    files[rel.split("\\").join("/")] = readFileSync(full, "utf8");
+  }
+  return files;
+}
+
+/**
  * The member's files: a trimmed manifest (no scripts, dev dependencies or
  * publish metadata; the `intx-src` condition stays and is simply never
- * selected) and every runtime file under `dist/`. Declarations and source maps
- * are left out; the sidecar evaluates, it does not type-check.
+ * selected) and every runtime file under `dist/`.
  */
 export function memberFiles(shortName: string): Record<string, string> {
   const manifest = readManifest(shortName);
@@ -97,18 +126,8 @@ export function memberFiles(shortName: string): Record<string, string> {
   const files: Record<string, string> = {
     [`${dir}/package.json`]: `${JSON.stringify(trimmed, null, 2)}\n`,
   };
-  const distDir = join(VENDORED_PACKAGES, shortName, "dist");
-  if (!statSync(distDir, { throwIfNoEntry: false })?.isDirectory()) {
-    throw new Error(
-      `@intx/${shortName} has no dist/; run \`bun run vendor:build\` before deploying a code-sourced workflow`,
-    );
-  }
-  const paths: string[] = [];
-  walk(distDir, paths);
-  for (const full of paths) {
-    const rel = relative(distDir, full);
-    if (/\.d\.ts$/.test(rel) || /\.map$/.test(rel) || /\.test\.js$/.test(rel) || rel === ".emitted") continue;
-    files[`${dir}/dist/${rel.split("\\").join("/")}`] = readFileSync(full, "utf8");
+  for (const [rel, content] of Object.entries(distFiles(shortName))) {
+    files[`${dir}/dist/${rel}`] = content;
   }
   return files;
 }

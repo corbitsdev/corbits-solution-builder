@@ -29,6 +29,7 @@
         "@intx/mime": "workspace:*",
         "@intx/sidecar-app": "workspace:*",
         "@intx/storage-isogit": "workspace:*",
+        "@intx/tool-packaging": "workspace:*",
         "@intx/tools-posix": "workspace:*",
         "@intx/types": "workspace:*",
         "@intx/workflow": "workspace:*",

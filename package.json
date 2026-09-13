@@ -52,6 +52,7 @@
     "smoke:stakeholders": "bun --conditions intx-src scripts/stakeholders-smoke.ts",
     "smoke:deck": "bun --conditions intx-src scripts/deck-smoke.ts",
     "vendor:build": "bun scripts/vendor-build.ts",
+    "assets:pack-registry": "bun --conditions intx-src scripts/pack-registry-asset.ts",
     "postinstall": "bun run vendor:build",
     "check:vendored-migrations": "bun --conditions intx-src scripts/check-vendored-migrations.ts"
   },
@@ -80,6 +81,7 @@
     "@intx/mime": "workspace:*",
     "@intx/sidecar-app": "workspace:*",
     "@intx/storage-isogit": "workspace:*",
+    "@intx/tool-packaging": "workspace:*",
     "@intx/tools-posix": "workspace:*",
     "@intx/types": "workspace:*",
     "@intx/workflow": "workspace:*",
