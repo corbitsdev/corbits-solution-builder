@@ -390,6 +390,8 @@ export const api = {
     request<{ ok: true }>(`/projects/${projectId}`, { method: "DELETE" }),
   artifact: (nodeId: string) =>
     request<{ node: ArtifactNode; content: string }>(`/artifacts/${nodeId}`),
+  /** Exactly what the specialists are handed for an attached file. */
+  materialReading: (nodeId: string) => request<{ text: string }>(`/artifacts/${nodeId}/reading`),
   /** Keeps a PowerPoint as a stakeholder role's style guide; its theme is read back. */
   uploadDeckTemplate: (role: string, file: File) => {
     const form = new FormData();
