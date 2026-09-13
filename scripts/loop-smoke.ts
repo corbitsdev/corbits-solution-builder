@@ -226,11 +226,20 @@ for (const stage of [1, 2, 3, 4] as Stage[]) {
     stillFive.current!.stage === 5 && stillFive.current!.state === "waiting_approval",
   );
 
-  const advanced = await command("stage.approve", projectId, {
+  // The collapsed "Approve and continue" submits and approves in one; a
+  // stage already under review — stage 5's packages go with the first
+  // decision — has nothing left to submit, and the approval alone must run.
+  const { submitAndApprove } = await import("../apps/hub/src/engine.js");
+  const advanced = await submitAndApprove({
+    actor: ACTOR,
+    projectId,
     runId: run.id,
     versions: [version],
+    idempotencyKey: newId.command(),
+    correlationId: newId.correlation(),
+    expectedRevision: (await projectDetail(projectId, ACTOR.principalId)).project.revision,
   });
-  check("stage 5 advances once the quorum is met", advanced.stage === 6);
+  check("stage 5 advances once the quorum is met, through the one-step approval of a stage already under review", advanced.stage === 6, `stage ${advanced.stage}`);
 }
 
 // --- Stage 5, separately: parallel audience packages and a blocking reject ---

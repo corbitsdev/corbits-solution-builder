@@ -274,6 +274,21 @@ export function StageWorkspace({
           soloApproval={detail.soloApproval}
           busy={busy === "submit"}
           evaluation={evaluation}
+          quorum={
+            stage === 5
+              ? (() => {
+                  const policy = (detail.project.policy ?? {}) as { audienceQuorum?: number };
+                  const decisions = detail.approvals.filter(
+                    (approval) => approval.command === "audience.decide" && approval.runId === current?.id,
+                  );
+                  return {
+                    needed: policy.audienceQuorum ?? 0,
+                    proceeded: decisions.filter((approval) => approval.decision === "proceed").length,
+                    blocked: decisions.filter((approval) => approval.decision !== "proceed").length,
+                  };
+                })()
+              : null
+          }
           onApprove={() =>
             run("submit", () =>
               api.decide(detail.project.id, {
