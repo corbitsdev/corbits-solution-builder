@@ -12,6 +12,7 @@
  * checkpoint, why it ended) is folded from the ledger thread in `runs.ts`;
  * nothing about a run lives in process memory.
  */
+import { ApiError } from "@intx/hub-client";
 import { applyEvent, emptyState, loopBodyRunId, type WorkflowEvent } from "@intx/workflow";
 import type { Command, Stage } from "@solutions-builder/app/ledger";
 import {
@@ -239,22 +240,23 @@ export async function deliverStageSignal(
   if (!signal) return "no_execution";
   // Signals address the deployment's top-level run; a loop relays a named
   // signal into the iteration that awaits it.
-  const response = await deploymentRuns.signal(anchor, {
-    runId: anchor,
-    signalName: signal.name,
-    signalId,
-    payload: { ...payload, ...signal.payload },
-  });
-  if (response.ok) {
+  try {
+    await deploymentRuns.signal(anchor, {
+      runId: anchor,
+      signalName: signal.name,
+      signalId,
+      payload: { ...payload, ...signal.payload },
+    });
     divergent.delete(projectId);
     return "delivered";
+  } catch (cause) {
+    const detail = cause instanceof ApiError ? `(${cause.status}) ${cause.message}` : String(cause);
+    console.error(
+      `[executor] ${projectId}: the hub did not accept ${signal.name} ${detail}; the ledger has moved and the run has not.`,
+    );
+    divergent.add(projectId);
+    return "failed";
   }
-  console.error(
-    `[executor] ${projectId}: the hub did not accept ${signal.name} (${response.status}); ` +
-      `the ledger has moved and the run has not. ${(await response.text()).slice(0, 300)}`,
-  );
-  divergent.add(projectId);
-  return "failed";
 }
 
 /**
@@ -387,7 +389,8 @@ export async function alignRunWithLedger(projectId: string, ledger: LedgerPositi
       // the failure it was. The replacement's own run can die the same way
       // while it is walked to the ledger, so this is a bounded loop rather
       // than one more try.
-      if (!(cause instanceof HubApiError && cause.status === 409) || replaced >= REPLACEMENTS) throw cause;
+      const conflict = (cause instanceof HubApiError || cause instanceof ApiError) && cause.status === 409;
+      if (!conflict || replaced >= REPLACEMENTS) throw cause;
       console.error(`[executor] ${projectId}: the run's deployment is no longer live; deploying the lifecycle again.`);
       forgetExecution(projectId);
       // A replacement, not a re-resolution: a dead run leaves its deployment
@@ -459,17 +462,18 @@ async function alignOnce(projectId: string, ledger: LedgerPosition): Promise<"al
     }
     const gate = parked.signalName === exhaustedSignal(parked.stage) ? "exhausted" : "gate";
     const signal = stageSignal(position.stage, step.command, gate);
-    const response = await deploymentRuns.signal(anchor, {
-      runId: anchor,
-      signalName: signal.name,
-      signalId: crypto.randomUUID(),
-      payload: { ...signal.payload },
-    });
-    if (!response.ok) {
-      const text = (await response.text()).slice(0, 300);
-      if (response.status === 409) throw new HubApiError(409, signal.name, text);
+    try {
+      await deploymentRuns.signal(anchor, {
+        runId: anchor,
+        signalName: signal.name,
+        signalId: crypto.randomUUID(),
+        payload: { ...signal.payload },
+      });
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 409) throw new HubApiError(409, signal.name, cause.message);
+      const detail = cause instanceof ApiError ? `(${cause.status}) ${cause.message}` : String(cause);
       console.error(
-        `[executor] ${projectId}: the hub did not accept ${signal.name} while bringing the run to stage ${ledger.stage} (${response.status}). ${text}`,
+        `[executor] ${projectId}: the hub did not accept ${signal.name} while bringing the run to stage ${ledger.stage} ${detail}.`,
       );
       return "failed";
     }
