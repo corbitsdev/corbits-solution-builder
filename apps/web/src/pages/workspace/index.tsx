@@ -705,7 +705,7 @@ function BuildPanel({
   onChanged: () => void;
   onOpenSettings: () => void;
 }) {
-  const [busy, setBusy] = useState<"start" | "cancel" | "retry" | null>(null);
+  const [busy, setBusy] = useState<"start" | "cancel" | "fail" | "retry" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [events, setEvents] = useState<BuildEvent[]>([]);
   const current = detail.current;
@@ -777,7 +777,7 @@ function BuildPanel({
 
   const final = events.find((event) => event.runId === current?.id && event.type === "bridge.final");
 
-  // A run cancelled from here turns terminal before its worker has ended, so
+  // A run canceled from here turns terminal before its worker has ended, so
   // the stream above is closed before "done" and the final event is not yet
   // on the ledger. It is fetched again, briefly, until it is.
   useEffect(() => {
@@ -796,8 +796,11 @@ function BuildPanel({
   const unavailable = final?.payload.available === false;
   const exitStatus = final ? (final.payload.exitStatus as number | null) : null;
   const stderrTail = final ? String(final.payload.stderrTail ?? "").trim() : "";
+  // The worker ran and has ended, and the ledger still says running: the
+  // attempt is not over until the person says what its result was.
+  const ended = running && final !== undefined && !unavailable;
 
-  const act = async (name: "start" | "cancel" | "retry", work: () => Promise<void>) => {
+  const act = async (name: "start" | "cancel" | "fail" | "retry", work: () => Promise<void>) => {
     setBusy(name);
     setError(null);
     try {
@@ -817,8 +820,8 @@ function BuildPanel({
       title="Build supervision"
       status={
         current ? (
-          <StateLabel tone={running ? "loading" : terminal ? "error" : "selected"}>
-            {current.state.replace(/_/g, " ")}
+          <StateLabel tone={ended ? "warning" : running ? "loading" : terminal ? "error" : "selected"}>
+            {ended ? "worker ended · your decision" : current.state.replace(/_/g, " ")}
           </StateLabel>
         ) : null
       }
@@ -843,6 +846,15 @@ function BuildPanel({
         </p>
       ) : null}
 
+      {ended ? (
+        <p className="inline-note">
+          The worker has ended
+          {exitStatus === 0 ? " with exit status 0" : exitStatus === null ? " without an exit status" : ` with exit status ${exitStatus}`}.
+          An exit status is not a verdict on the work: read what it left below, then say whether this attempt failed or
+          should be tried again.
+        </p>
+      ) : null}
+
       {current && (state === "queued" || running || terminal) ? (
         <div className="button-row">
           {state === "queued" ? (
@@ -858,7 +870,7 @@ function BuildPanel({
               Start the build attempt
             </Button>
           ) : null}
-          {running ? (
+          {running && !ended ? (
             <Button
               variant="destructive"
               loading={busy === "cancel"}
@@ -874,6 +886,46 @@ function BuildPanel({
             >
               Cancel the build attempt
             </Button>
+          ) : null}
+          {ended ? (
+            <>
+              <Button
+                variant="destructive"
+                loading={busy === "fail"}
+                onClick={() =>
+                  act("fail", async () => {
+                    await api.command(detail.project.id, "build.fail", {
+                      expectedRevision: detail.project.revision,
+                      runId: current.id,
+                      reason: `Marked failed from the build supervision screen after the worker ended${
+                        exitStatus === null ? "" : ` with exit status ${exitStatus}`
+                      }.`,
+                    });
+                  })
+                }
+              >
+                Mark this attempt failed
+              </Button>
+              <Button
+                variant="primary"
+                loading={busy === "retry"}
+                onClick={() =>
+                  act("retry", async () => {
+                    // The ledger's way from an ended attempt to a new one: this
+                    // one is failed, then a new attempt is queued and started.
+                    const failed = await api.command(detail.project.id, "build.fail", {
+                      expectedRevision: detail.project.revision,
+                      runId: current.id,
+                      reason: "Failed to try the build again from the build supervision screen.",
+                    });
+                    const queued = await api.command(detail.project.id, "build.start_attempt", { runId: failed.runId });
+                    await api.startBuild(detail.project.id, queued.runId);
+                  })
+                }
+              >
+                Try the build again
+              </Button>
+            </>
           ) : null}
           {terminal ? (
             <Button
