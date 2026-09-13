@@ -250,11 +250,14 @@ export async function deliverStageSignal(
     divergent.delete(projectId);
     return "delivered";
   } catch (cause) {
-    // Any throw here — a refused ApiError, or anything else the transport
-    // raises — is treated as a refused signal, never rethrown.
-    const detail = cause instanceof ApiError ? `(${cause.status}) ${cause.message}` : String(cause);
+    // Only a refusal the transport actually reported — an `ApiError` off a
+    // non-2xx response — reads as a refused signal. Anything else (a
+    // programming error, a failure the transport did not translate) is not
+    // this function's to swallow, and propagates.
+    if (!(cause instanceof ApiError)) throw cause;
     console.error(
-      `[executor] ${projectId}: the hub did not accept ${signal.name} ${detail}; the ledger has moved and the run has not.`,
+      `[executor] ${projectId}: the hub did not accept ${signal.name} (${cause.status}) ${cause.message}; ` +
+        `the ledger has moved and the run has not.`,
     );
     divergent.add(projectId);
     return "failed";
@@ -473,9 +476,12 @@ async function alignOnce(projectId: string, ledger: LedgerPosition): Promise<"al
       });
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) throw new HubApiError(409, signal.name, cause.message);
-      const detail = cause instanceof ApiError ? `(${cause.status}) ${cause.message}` : String(cause);
+      // As in `deliverStageSignal`: only a reported `ApiError` reads as a
+      // refused signal. Anything else propagates rather than being read as
+      // "the run rejected this stage".
+      if (!(cause instanceof ApiError)) throw cause;
       console.error(
-        `[executor] ${projectId}: the hub did not accept ${signal.name} while bringing the run to stage ${ledger.stage} ${detail}.`,
+        `[executor] ${projectId}: the hub did not accept ${signal.name} while bringing the run to stage ${ledger.stage} (${cause.status}) ${cause.message}.`,
       );
       return "failed";
     }
