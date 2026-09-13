@@ -467,8 +467,11 @@ export const api = {
    * Answers once the run is running. The worker's outcome arrives later, as a
    * `bridge.final` event and the run's state.
    */
-  startBuild: (projectId: string, runId: string, expectedRevision?: number) =>
-    post<{ run: CommandOutcome }>(`/projects/${projectId}/build/start`, { runId, expectedRevision }),
+  startBuild: (
+    projectId: string,
+    runId: string,
+    options: { expectedRevision?: number; continueFromRunId?: string } = {},
+  ) => post<{ run: CommandOutcome }>(`/projects/${projectId}/build/start`, { runId, ...options }),
   buildEvents: (projectId: string) =>
     request<{ events: BuildEvent[] }>(`/projects/${projectId}/build/events`),
   design: (projectId: string) =>
