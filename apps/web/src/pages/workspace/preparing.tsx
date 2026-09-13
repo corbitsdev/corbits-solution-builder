@@ -60,6 +60,7 @@ export function Preparing({
   busy,
   begun,
   stalled,
+  since = null,
 }: {
   stage: number;
   said: StageTurn[];
@@ -69,6 +70,8 @@ export function Preparing({
   begun: boolean;
   /** Nothing has come back for a while. */
   stalled: boolean;
+  /** When the host says the draft step began, where it says so. */
+  since?: string | null;
 }) {
   const tips = STAGE_TIPS[stage] ?? STAGE_TIPS[1]!;
   const [tip, setTip] = useState(0);
@@ -103,10 +106,14 @@ export function Preparing({
               <WorkingLabel stage={stage} />
             ) : (
               <span className="thinking">
-                {said.length > 0 ? "Reading what you wrote" : "Reading the approved work from earlier stages"}
+                {stage === 4
+                  ? "The designer is drawing the first mockup"
+                  : said.length > 0
+                    ? "Reading what you wrote"
+                    : "Reading the approved work from earlier stages"}
               </span>
             )}
-            {busy ? <Elapsed stage={stage} /> : null}
+            {busy ? <Elapsed stage={stage} since={since} /> : null}
             {stalled ? (
               <p className="preparing-stall">
                 Still waiting on the model: nothing has come back for a while. If this keeps

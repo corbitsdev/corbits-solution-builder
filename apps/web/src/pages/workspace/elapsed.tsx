@@ -24,13 +24,19 @@ export function clock(seconds: number): string {
  * know. The clock is kept out of any live region so a screen reader is not
  * told the time every second.
  */
-export function Elapsed({ stage }: { stage: number }) {
+export function Elapsed({ stage, since }: { stage: number; since?: string | null }) {
   const [seconds, setSeconds] = useState(0);
   useEffect(() => {
-    const started = Date.now();
-    const timer = setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 1_000);
+    // From when the host says the step began where it says so, so a draft
+    // the host started on its own is not clocked from when this window
+    // happened to notice it.
+    const parsed = since ? Date.parse(since) : Number.NaN;
+    const started = Number.isNaN(parsed) ? Date.now() : parsed;
+    const tick = () => setSeconds(Math.max(0, Math.floor((Date.now() - started) / 1000)));
+    tick();
+    const timer = setInterval(tick, 1_000);
     return () => clearInterval(timer);
-  }, []);
+  }, [since]);
   return (
     <p className="elapsed">
       <span className="elapsed-clock" role="timer" aria-live="off">
