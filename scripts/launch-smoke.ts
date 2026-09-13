@@ -27,6 +27,24 @@ function check(name: string, ok: boolean, detail = "") {
 /** The prefix the Rust host waits for. If this changes, both sides must. */
 const HANDSHAKE = "Solutions Builder launch URL: ";
 
+// Races a promise against a timeout, clearing the timer either way so a
+// resolution that beats the clock does not leave a dangling timer behind.
+function raceTimeout<T>(promise: Promise<T>, timeoutMs: number, onTimeout: T): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => resolve(onTimeout), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 // `child.kill()` only sends the signal; it does not wait for the process to
 // actually be gone. A caller that chains `bun run smoke:launch && pgrep ...`
 // must not see a live host, so cleanup here waits for the exit, escalating to
@@ -35,13 +53,14 @@ const HANDSHAKE = "Solutions Builder launch URL: ";
 async function killAndWait(child: Bun.Subprocess, timeoutMs = 5_000): Promise<void> {
   if (child.killed) return;
   child.kill();
-  const exited = await Promise.race([
+  const exited = await raceTimeout(
     child.exited.then(() => true),
-    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), timeoutMs)),
-  ]);
+    timeoutMs,
+    false,
+  );
   if (exited) return;
   child.kill("SIGKILL");
-  await Promise.race([child.exited, new Promise<void>((resolve) => setTimeout(resolve, timeoutMs))]);
+  await raceTimeout(child.exited, timeoutMs, undefined);
 }
 
 async function reachesHandshake(
