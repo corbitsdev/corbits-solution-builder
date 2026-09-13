@@ -27,7 +27,7 @@ import { Textarea, Tabs } from "@corbits/react-ui";
 import { Markdown } from "../../markdown.jsx";
 import { AudiencePackages } from "../audiences.jsx";
 import { DesignFeedbackView } from "../design.jsx";
-import { Banner, Button, Screen, StateLabel, stageName } from "../../components.jsx";
+import { Banner, Button, Screen, StateLabel, stageName, versionDigest } from "../../components.jsx";
 import { StageGate, STAGE_GOAL } from "./gate.jsx";
 import { Preparing, STALL_AFTER_MS } from "./preparing.jsx";
 import { StageDocument } from "./document.jsx";
@@ -69,13 +69,16 @@ export function StageWorkspace({
   // The panel's reviews live at stage 6 alongside the plan, but they are not
   // versions of it: mixing them into one version selector reads as five drafts
   // of the same document when it is one document and four opinions of it.
-  // Design feedback is recorded as a stage-4 node too, and is a record of what
-  // was said about a version, not a version: the newest node after feedback is
-  // the feedback, and a gate that named it would approve the wrong thing.
+  // The requirements are the document the plan is written against, kept
+  // beside it for the same reason. Design feedback is recorded as a stage-4
+  // node too, and is a record of what was said about a version, not a
+  // version: the newest node after feedback is the feedback, and a gate that
+  // named it would approve the wrong thing.
   const stageNodes = detail.nodes.filter(
     (node) =>
       node.stage === stage &&
       node.kind !== "engineering_review" &&
+      node.kind !== "product_requirements" &&
       node.kind !== "design_feedback" &&
       node.kind !== "source_material" &&
       // The slides built from a stage 5 package are a file beside it, not a
@@ -85,6 +88,17 @@ export function StageWorkspace({
   const panelReviews = detail.nodes.filter(
     (node) => node.stage === stage && node.kind === "engineering_review",
   );
+  const requirements =
+    detail.nodes.find((node) => node.stage === stage && node.kind === "product_requirements" && node.supersededByNodeId === null) ??
+    null;
+  // What the gate names at this stage: the document, and at stage 6 the
+  // requirements it was written against, so the approval covers both.
+  const approvedVersions = (node: ArtifactNode) =>
+    [node, ...(stage === 6 && requirements ? [requirements] : [])].map((entry) => ({
+      artifactId: entry.artifactId,
+      versionId: entry.id,
+      contentHash: entry.contentHash,
+    }));
   // The draft as the model writes it. Open while a draft is in flight, so the
   // document forms on screen instead of arriving whole a minute later.
   const [writing, setWriting] = useState<string | null>(null);
@@ -295,9 +309,7 @@ export function StageWorkspace({
               api.decide(detail.project.id, {
                 expectedRevision: detail.project.revision,
                 runId: current!.id,
-                versions: [
-                  { artifactId: active.artifactId, versionId: active.id, contentHash: active.contentHash },
-                ],
+                versions: approvedVersions(active),
               }),
             )
           }
@@ -435,7 +447,32 @@ export function StageWorkspace({
         </div>
       ) : null}
 
+      {/* The documents that sit beside the plan at stage 6. The stage fills
+          the window and clips, and the plan below keeps its own scrolling
+          panes, so these live in a bounded region that scrolls on its own:
+          folded, they are two lines; opened, they never push the plan out
+          of reach. */}
+      {requirements || panelReviews.length > 0 ? (
+        <div className="stage-companions">
+      {requirements ? (
+        <ProductRequirements
+          node={requirements}
+          canRewrite={inProgress}
+          busy={busy === "draft"}
+          onRewrite={() =>
+            run("draft", async () => {
+              // The plan is written against the requirements, so a rewrite
+              // of the requirements writes the plan again too.
+              const result = await api.draft(detail.project.id, stage, "", [], undefined, ["requirements", "plan"]);
+              return { ...result, note: "Wrote the requirements again, and the plan against them." };
+            })
+          }
+        />
+      ) : null}
+
       {panelReviews.length > 0 ? <PanelReviews reviews={panelReviews} /> : null}
+        </div>
+      ) : null}
 
       {active && stage <= 7 && stage !== 4 && stage !== 5 ? (
         <StageDocument
@@ -484,13 +521,7 @@ export function StageWorkspace({
               (detail.soloApproval ? api.decide : api.submit)(detail.project.id, {
                 expectedRevision: detail.project.revision,
                 runId: current!.id,
-                versions: [
-                  {
-                    artifactId: active.artifactId,
-                    versionId: active.id,
-                    contentHash: active.contentHash,
-                  },
-                ],
+                versions: approvedVersions(active),
               }),
             )
           }
@@ -743,6 +774,65 @@ function BuildPanel({ detail, onChanged }: { detail: ProjectDetail; onChanged: (
  * undoes that at the last step — the reader has to be able to see that
  * security and platform reached their verdicts separately.
  */
+/**
+ * Stage 6's requirements, beside the plan: what stages 1 to 4 agreed,
+ * gathered into the document the plan is written against. Folded to one line
+ * by default, since the plan is what the person is here to read.
+ */
+function ProductRequirements({
+  node,
+  canRewrite,
+  busy,
+  onRewrite,
+}: {
+  node: ArtifactNode;
+  canRewrite: boolean;
+  busy: boolean;
+  onRewrite: () => void;
+}) {
+  const [content, setContent] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setContent(null);
+    void api
+      .artifact(node.id)
+      .then((result) => {
+        if (!cancelled) setContent(result.content);
+      })
+      .catch(() => {
+        if (!cancelled) setContent(UNREADABLE);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [node.id]);
+  return (
+    <Screen
+      title="Product requirements"
+      description="What stages 1 to 4 agreed, gathered into the one document the plan is written against. The plan cites its ids."
+      status={<StateLabel tone="info">Version {node.version}</StateLabel>}
+      tight
+    >
+      <details className="document-fold">
+        <summary className="document-fold-summary">
+          <span className="document-fold-title">Requirements</span>
+          <span className="document-fold-digest">{versionDigest(node)}</span>
+        </summary>
+        <div className="document-body document-fold-body">
+          {content === null ? <p className="inline-note">Loading…</p> : <Markdown source={content} />}
+        </div>
+      </details>
+      {canRewrite ? (
+        <div className="button-row">
+          <Button loading={busy} onClick={onRewrite}>
+            Write the requirements again
+          </Button>
+        </div>
+      ) : null}
+    </Screen>
+  );
+}
+
 function PanelReviews({ reviews }: { reviews: ArtifactNode[] }) {
   const live = reviews.filter((node) => node.supersededByNodeId === null);
   const [openId, setOpenId] = useState<string | null>(live[0]?.id ?? null);
@@ -769,36 +859,48 @@ function PanelReviews({ reviews }: { reviews: ArtifactNode[] }) {
     const match = /##\s*Verdict\s*\n+([^\n#]+)/i.exec(text);
     return match?.[1]?.trim() ?? null;
   };
+  // Folded, the line carries every principal's verdict, so the four can be
+  // compared without opening any of them.
+  const verdicts = live
+    .map((node) => `${node.variant ?? node.title}: ${verdictOf(contents.get(node.id) ?? "") ?? "…"}`)
+    .join(" · ");
 
   return (
     <Screen
       title="Independent engineering review"
       description="Four principals reviewed this plan separately. Their findings are not merged."
+      tight
     >
-      {/* The verdict rides in the tab's own count slot, so the four can be
-          compared without opening each one. */}
-      <Tabs
-        label="Panel principals"
-        active={open?.id ?? ""}
-        onChange={setOpenId}
-        tabs={live.map((node) => ({
-          id: node.id,
-          label: node.variant ?? node.title,
-        }))}
-      >
-        {/* The review reads inside the panel the tab controls, so switching
-            principals announces the finding rather than an empty region. */}
-        {() => (
-          <>
-            <p className="inline-note">
-              {open ? (verdictOf(contents.get(open.id) ?? "") ?? "No verdict stated.") : null}
-            </p>
-            <div className="document-body">
-              {body ? <Markdown source={body} /> : <p className="inline-note">Loading…</p>}
-            </div>
-          </>
-        )}
-      </Tabs>
+      <details className="document-fold">
+        <summary className="document-fold-summary">
+          <span className="document-fold-title">Reviews</span>
+          <span className="document-fold-digest">{verdicts}</span>
+        </summary>
+        <div className="document-fold-body">
+          <Tabs
+            label="Panel principals"
+            active={open?.id ?? ""}
+            onChange={setOpenId}
+            tabs={live.map((node) => ({
+              id: node.id,
+              label: node.variant ?? node.title,
+            }))}
+          >
+            {/* The review reads inside the panel the tab controls, so switching
+                principals announces the finding rather than an empty region. */}
+            {() => (
+              <>
+                <p className="inline-note">
+                  {open ? (verdictOf(contents.get(open.id) ?? "") ?? "No verdict stated.") : null}
+                </p>
+                <div className="document-body">
+                  {body ? <Markdown source={body} /> : <p className="inline-note">Loading…</p>}
+                </div>
+              </>
+            )}
+          </Tabs>
+        </div>
+      </details>
     </Screen>
   );
 }

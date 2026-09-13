@@ -24,8 +24,8 @@ import {
   type LedgerPosition,
   type StageSignal,
 } from "@solutions-builder/app/workflows/stage-loop";
-import { deploymentRuns, HubApiError, type HubRunEvent } from "./hub-client.js";
-import { deploymentIsLive, ensureLifecycleDeployment } from "./workflow-deploy.js";
+import { assets, deploymentRuns, HubApiError, workflows, type HubRunEvent } from "./hub-client.js";
+import { deploymentIsLive, ensureLifecycleDeployment, lifecycleAssetName } from "./workflow-deploy.js";
 
 /** What a signal delivery actually did, so a caller can tell nothing from broken. */
 export type DeliveryOutcome = "delivered" | "no_execution" | "failed";
@@ -48,6 +48,48 @@ async function anchorFor(projectId: string, replace = false): Promise<string | n
   unavailable.delete(projectId);
   anchors.set(projectId, deployment.deploymentId);
   return deployment.deploymentId;
+}
+
+/**
+ * Every anchor the project's lifecycle has run under, oldest first: one per
+ * deployment of its asset. Stopping the host releases the sidecar, so each
+ * start deploys the lifecycle again under a new anchor and aligns it to
+ * where the ledger stands; the rounds a stage recorded before that are
+ * under the earlier anchors, and they are still the stage's conversation.
+ * Read once per process, then extended as the current anchor changes: a
+ * deployment that is not the current one gains no runs after this host
+ * started.
+ */
+const anchorHistory = new Map<string, string[]>();
+
+async function anchorsFor(projectId: string): Promise<string[]> {
+  const current = anchors.get(projectId) ?? (await anchorFor(projectId));
+  let history = anchorHistory.get(projectId);
+  if (!history) {
+    const name = lifecycleAssetName(projectId);
+    const asset = (await assets.list("workflow")).find((entry) => entry.name === name);
+    history = asset
+      ? (await workflows.deployments())
+          .filter((deployment) => deployment.definitionAssetId === asset.id)
+          .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+          .map((deployment) => deployment.id)
+      : [];
+    anchorHistory.set(projectId, history);
+  }
+  if (current && !history.includes(current)) history.push(current);
+  return history;
+}
+
+/** The run ids under an anchor that is no longer current. Those never change, so they are read once. */
+const settledRunIds = new Map<string, string[]>();
+
+async function runIdsUnder(anchor: string, current: boolean): Promise<string[]> {
+  if (current) return deploymentRuns.list(anchor);
+  const known = settledRunIds.get(anchor);
+  if (known) return known;
+  const listed = await deploymentRuns.list(anchor);
+  settledRunIds.set(anchor, listed);
+  return listed;
 }
 
 type FoldedRun = {
@@ -263,14 +305,25 @@ const LIVENESS_CHECK_MS = 2_000;
 /**
  * The deployment has fired its lifecycle run and nothing on it will ever
  * park again: every run under it has ended, or the runs sit with nothing
- * parked and nothing in flight and their newest event is old. The
- * deployment itself stays allocated when its run fails, so its allocation
- * status cannot say this; only the runs can. (A deployment with no runs yet
- * is not dead — it has not been fired.)
+ * parked and nothing in flight and their newest event is old, or a stage
+ * step on the lifecycle run itself has failed. The deployment itself stays
+ * allocated when its run fails, so its allocation status cannot say this;
+ * only the runs can. (A deployment with no runs yet is not dead — it has
+ * not been fired.)
+ *
+ * The failed stage step is the case a restart used to be the only way out
+ * of: a signal landing inside the runtime's own commit fails the stage's
+ * loop, the runtime routes on to the stage's gates, and those park but
+ * never complete. Folded, the run reads as parked, so the executor kept
+ * signalling a run that could not move.
  */
-function anchorIsDead(_anchor: string, runs: FoldedRun[]): boolean {
+function anchorIsDead(anchor: string, runs: FoldedRun[]): boolean {
   if (runs.length === 0) return false;
   if (runs.every((run) => ENDED.has(run.state.phase))) return true;
+  const lifecycle = runs.find((run) => run.runId === anchor);
+  if (lifecycle && [...lifecycle.state.steps.values()].some((step) => step.phase === "failed" && stageOfStepId(step.stepId) !== null)) {
+    return true;
+  }
   if (parkedSteps(runs).length > 0 || currentStep(runs) !== null) return false;
   const newest = Math.max(...runs.map((run) => run.lastAt ?? 0));
   return newest > 0 && Date.now() - newest > STALLED_AFTER_MS;
@@ -320,22 +373,28 @@ async function parkedPosition(anchor: string, waitMs: number): Promise<Parked | 
  * there, with the reason logged — the command that follows then reads as
  * undeliverable rather than landing on the wrong stage.
  */
+/** How many fresh deployments the alignment will try when each one's run dies under it. */
+const REPLACEMENTS = 3;
+
 export async function alignRunWithLedger(projectId: string, ledger: LedgerPosition): Promise<"aligned" | "no_execution" | "failed"> {
-  try {
-    return await alignOnce(projectId, ledger);
-  } catch (cause) {
-    // The anchor this process remembered is dead: its sidecar was released
-    // under it, or its run failed. Forget it and resolve the deployment
-    // again, which deploys a live one, then try once more; anything else is
-    // the failure it was.
-    if (!(cause instanceof HubApiError && cause.status === 409)) throw cause;
-    console.error(`[executor] ${projectId}: the run's deployment is no longer live; deploying the lifecycle again.`);
-    forgetExecution(projectId);
-    // A replacement, not a re-resolution: a dead run leaves its deployment
-    // allocated and its digest current, so resolving again would hand the
-    // same dead anchor back.
-    if ((await anchorFor(projectId, true)) === null) return "no_execution";
-    return await alignOnce(projectId, ledger);
+  for (let replaced = 0; ; replaced += 1) {
+    try {
+      return await alignOnce(projectId, ledger);
+    } catch (cause) {
+      // The anchor this process remembered is dead: its sidecar was released
+      // under it, or its run failed. Forget it and resolve the deployment
+      // again, which deploys a live one, then try again; anything else is
+      // the failure it was. The replacement's own run can die the same way
+      // while it is walked to the ledger, so this is a bounded loop rather
+      // than one more try.
+      if (!(cause instanceof HubApiError && cause.status === 409) || replaced >= REPLACEMENTS) throw cause;
+      console.error(`[executor] ${projectId}: the run's deployment is no longer live; deploying the lifecycle again.`);
+      forgetExecution(projectId);
+      // A replacement, not a re-resolution: a dead run leaves its deployment
+      // allocated and its digest current, so resolving again would hand the
+      // same dead anchor back.
+      if ((await anchorFor(projectId, true)) === null) return "no_execution";
+    }
   }
 }
 
@@ -505,16 +564,32 @@ export type StageIteration = { readonly runId: string; readonly events: HubRunEv
  * loop names its children; everything past this function reads iterations as
  * plain `{runId, events}` pairs.
  */
-export async function stageIterations(projectId: string, stage: Stage): Promise<StageIteration[]> {
-  const anchor = anchors.get(projectId) ?? (await anchorFor(projectId));
-  if (!anchor) return [];
-  const runIds = new Set(await deploymentRuns.list(anchor));
+export async function stageIterations(
+  projectId: string,
+  stage: Stage,
+  options: {
+    /**
+     * Only the anchor the project runs under now. A round can only run
+     * there, so a caller waiting on one must not read an earlier anchor's
+     * parked iteration as the newest; the thread, which reads history,
+     * wants every anchor.
+     */
+    readonly currentOnly?: boolean;
+  } = {},
+): Promise<StageIteration[]> {
+  const current = anchors.get(projectId) ?? (await anchorFor(projectId));
+  const history = options.currentOnly ? (current ? [current] : []) : await anchorsFor(projectId);
   const loopId = reviseStepId(stage);
   const iterations: StageIteration[] = [];
-  for (let index = 0; ; index += 1) {
-    const runId = loopBodyRunId(anchor, loopId, index);
-    if (!runIds.has(runId)) break;
-    iterations.push({ runId, events: await deploymentRuns.events(anchor, runId) });
+  // Oldest anchor first, so the newest iteration is last whichever anchor
+  // it ran under.
+  for (const anchor of history) {
+    const runIds = new Set(await runIdsUnder(anchor, anchor === current));
+    for (let index = 0; ; index += 1) {
+      const runId = loopBodyRunId(anchor, loopId, index);
+      if (!runIds.has(runId)) break;
+      iterations.push({ runId, events: await deploymentRuns.events(anchor, runId) });
+    }
   }
   return iterations;
 }

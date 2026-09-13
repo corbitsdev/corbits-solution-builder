@@ -24,9 +24,11 @@ import {
   EVALUATED_STAGE,
   MAX_REVISIONS,
   NO_DRAFT_STEP_ID,
+  REQUIREMENTS_STEP_ID,
   ROUND_STEP_ID,
   STAGE_WORKFLOW_ID,
   agentStepIds,
+  gatedStepCount,
 } from "./stage-loop.js";
 import { agentById, agentFor, panelPrincipals, type AgentRole } from "../kit.js";
 import { STAGES, type Stage } from "../ledger.js";
@@ -67,13 +69,29 @@ export const BUILD_STAGE = 8;
 /** The stage whose rounds write one package per stakeholder, each behind its own gate. */
 export const PACKAGE_STAGE = 5;
 
+/**
+ * The stage whose rounds write the requirements and then the plan, each
+ * behind its own gate: the requirements in one round, the plan and its
+ * reviews in the next, once the host can hand the plan the requirements.
+ */
+export const PLAN_STAGE = 6;
+
 /** Every stage whose round is followed by its kit specialist under the "draft" id. */
 const DRAFTED_STAGES: readonly Stage[] = [1, 2, 3, 4, 6, 7, 9];
 
 export const LIFECYCLE_ENTRY_PATH = "workflow.js";
 
-/** One agent step the rendered iteration wires: its id, the role that runs it, and its input. */
-type AgentStepSpec = { readonly id: string; readonly roleId: string; readonly input: { readonly from: string } };
+/**
+ * One agent step the rendered iteration wires: its id, the role that runs it,
+ * its input, and whether it sits behind a gate reading the round's "wanted"
+ * flag at its own index.
+ */
+type AgentStepSpec = {
+  readonly id: string;
+  readonly roleId: string;
+  readonly input: { readonly from: string };
+  readonly gated: boolean;
+};
 
 /**
  * A role's kit prompt has no runtime after this point to load a skill from: an
@@ -94,7 +112,12 @@ function roleIdForStep(stage: Stage, stepId: string): string {
     if (!evaluator) throw new Error("brief-evaluator role missing from the kit");
     return evaluator.id;
   }
-  if (stage === 6 && stepId !== DRAFT_STEP_ID) {
+  if (stage === PLAN_STAGE && stepId === REQUIREMENTS_STEP_ID) {
+    const author = agentById("requirements-author");
+    if (!author) throw new Error("requirements-author role missing from the kit");
+    return author.id;
+  }
+  if (stage === PLAN_STAGE && stepId !== DRAFT_STEP_ID) {
     const specialty = stepId.replace(/^review-/, "");
     const role = panelPrincipals().find((entry) => entry.id === `senior-engineer-${specialty}`);
     if (!role) throw new Error(`No panel principal for step ${stepId}`);
@@ -103,9 +126,13 @@ function roleIdForStep(stage: Stage, stepId: string): string {
   return agentFor(stage).id;
 }
 
-/** What a given agent step reads: the round's prompt, or the draft it revises. */
-function inputForStep(stage: Stage, stepId: string, audienceIndex: number): { from: string } {
-  if (stage === 5) return { from: `steps.${ROUND_STEP_ID}.output.prompts[${audienceIndex}]` };
+/**
+ * What a given agent step reads: the round's prompt, or the draft it revises.
+ * A gated step reads its own slot of the round's prompts, at the same index
+ * as its "wanted" flag.
+ */
+function inputForStep(stage: Stage, stepId: string, index: number, audienceCount: number): { from: string } {
+  if (index < gatedStepCount(stage, audienceCount)) return { from: `steps.${ROUND_STEP_ID}.output.prompts[${index}]` };
   if (stepId === DRAFT_STEP_ID) return { from: `steps.${ROUND_STEP_ID}.output.prompt` };
   return { from: `steps.${DRAFT_STEP_ID}.output.reply` };
 }
@@ -113,18 +140,14 @@ function inputForStep(stage: Stage, stepId: string, audienceIndex: number): { fr
 /** Every agent step spec for every stage that carries one, keyed by stage number. */
 function agentStepSpecsByStage(audienceCount: number): Readonly<Record<number, readonly AgentStepSpec[]>> {
   const out: Record<number, AgentStepSpec[]> = {};
-  for (const stage of DRAFTED_STAGES) {
-    out[stage] = agentStepIds(stage, 0).map((id) => ({
+  for (const stage of [...DRAFTED_STAGES, 5 as Stage]) {
+    out[stage] = agentStepIds(stage, audienceCount).map((id, index) => ({
       id,
       roleId: roleIdForStep(stage, id),
-      input: inputForStep(stage, id, 0),
+      input: inputForStep(stage, id, index, audienceCount),
+      gated: index < gatedStepCount(stage, audienceCount),
     }));
   }
-  out[5] = agentStepIds(5, audienceCount).map((id, index) => ({
-    id,
-    roleId: roleIdForStep(5, id),
-    input: inputForStep(5, id, index),
-  }));
   return out;
 }
 
@@ -210,7 +233,6 @@ const DECIDE = ${JSON.stringify(DECIDE_STEP_ID)};
 const NO_DRAFT = ${JSON.stringify(NO_DRAFT_STEP_ID)};
 const DRAFT_TIMEOUT = ${DRAFT_STEP_TIMEOUT_MS};
 const BUILD_STAGE = ${BUILD_STAGE};
-const PACKAGE_STAGE = ${PACKAGE_STAGE};
 ${source ? `const SOURCE = ${JSON.stringify(source)};` : ""}
 ${buildAgent}${agentsBlock}${agentStepSpecs}
 // One iteration: the workflow waits to hear what the person did. A gate right
@@ -229,13 +251,16 @@ function iteration(stage) {
   } else if (typeof AGENT_STEP_SPECS !== "undefined") {
     const specs = AGENT_STEP_SPECS[stage] || [];
     if (specs.length > 0) {
-      // Stage 5 writes one package per stakeholder, and a round may ask for
-      // only some of them: the ones that failed last time, or one to be
-      // written again. Each package sits behind its own gate, read from the
-      // round's "wanted" flags; a package not wanted is skipped, and the
-      // next gate joins both branches so the chain goes on either way.
-      const picked = stage === PACKAGE_STAGE;
-      const first = picked ? "pick-0" : specs[0].id;
+      // A round may ask for only some of a stage's steps: at stage 5 the
+      // packages that failed last time, or one to be written again; at
+      // stage 6 the requirements in one round and the plan in the next.
+      // Such a step sits behind its own gate, read from the round's
+      // "wanted" flags; one not wanted is skipped, and the next gate joins
+      // both branches so the chain goes on either way. A step with no gate
+      // of its own follows the step before it, never that step's skip
+      // marker: a review of a plan not written this round is skipped with
+      // the plan.
+      const first = specs[0].gated ? "pick-0" : specs[0].id;
       Object.assign(steps, {
         [DECIDE]: gate({
           when: { from: "steps." + ROUND + ".output.draft" },
@@ -258,7 +283,7 @@ function iteration(stage) {
             drainBehavior: "wait",
             after,
           });
-        if (picked) {
+        if (spec.gated) {
           const pick = "pick-" + index;
           const skip = "skip-" + index;
           Object.assign(steps, {
@@ -273,7 +298,8 @@ function iteration(stage) {
           });
           previous = [spec.id, skip];
         } else {
-          Object.assign(steps, { [spec.id]: agentStep(previous) });
+          const after = index > 0 && specs[index - 1].gated ? [specs[index - 1].id] : previous;
+          Object.assign(steps, { [spec.id]: agentStep(after) });
           previous = [spec.id];
         }
       });

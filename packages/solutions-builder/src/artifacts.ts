@@ -8,6 +8,7 @@ export const ARTIFACT_KINDS = [
   "design_feedback",
   "audience_package",
   "audience_deck",
+  "product_requirements",
   "build_plan",
   "engineering_review",
   "cost_approval",
@@ -30,6 +31,8 @@ export const ARTIFACT_STAGE: Readonly<Record<ArtifactKind, number>> = {
   audience_package: 5,
   /** The slides built from a package's deck outline: one per stakeholder, beside the package. */
   audience_deck: 5,
+  /** What stages 1 to 4 agreed, gathered into the one document the plan is written against. */
+  product_requirements: 6,
   build_plan: 6,
   engineering_review: 6,
   cost_approval: 7,

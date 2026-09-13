@@ -34,7 +34,7 @@ and waits for a human. Approving names the exact version that was read.
 | 3 | Solution proposal | One chosen approach, rejected alternatives kept | One version is selected |
 | 4 | GUI design | Mockups, interaction notes, acceptance criteria | Design accepted, after anchored feedback rounds |
 | 5 | Concept approval | One package per audience | Each audience proceeds; then the owner approves |
-| 6 | Build plan | Plan with independent reviews | Plan accepted |
+| 6 | Build plan | Product requirements, then a plan with independent reviews | Plan accepted |
 | 7 | Cost approval | Firm cost | Cost approved, then the plan is frozen |
 | 8 | Build and test | Working software and evidence | Evidence accepted |
 | 9 | Deliver | Delivery manifest | Delivery accepted |
@@ -43,6 +43,11 @@ Stage 7 cannot be approved the way the others are. Spend needs its own decision,
 so it routes through a cost approval and a freeze. Stage 5 cannot be approved
 until the configured quorum of audiences has recorded a proceed with no reject
 or revise outstanding.
+
+Stage 6 opens by gathering what stages 1 to 4 agreed into one product
+requirements document, with an id on every requirement and acceptance
+criterion. The plan is written against it and cites those ids, the panel
+reviews the plan, and approving the stage names both documents.
 
 Rejecting a stage routes back to a named earlier stage. The history is kept.
 

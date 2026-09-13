@@ -28,6 +28,7 @@
 import {
   DRAFT_STEP_ID,
   EVALUATE_STEP_ID,
+  REQUIREMENTS_STEP_ID,
   ROUND_STEP_ID,
 } from "@solutions-builder/app/workflows/stage-loop";
 import type { Stage } from "@solutions-builder/app/ledger";
@@ -167,11 +168,32 @@ export async function projectStageThread(args: {
     // A round that asked for nothing (a non-drafting command reached this
     // iteration) or that failed to draft leaves no specialist turn.
     if (!round || !round.payload.draft) continue;
+
+    // Stage 6 writes its requirements in a round of their own, ahead of the
+    // plan. That round has no draft to speak for, so the requirements say
+    // once that they are there; the questions, if any, come with the plan.
+    const requirementsCompleted = findEvent(iteration.events, "StepCompleted", REQUIREMENTS_STEP_ID);
+    const requirements = await resolveOutput<DraftReply>(iteration.runId, requirementsCompleted);
+    if (requirementsCompleted && typeof requirements?.reply === "string") {
+      turns.push({
+        id: `${iteration.runId}:requirements`,
+        role: "specialist",
+        body: "The product requirements are beside this: what stages 1 to 4 agreed, gathered into the one document the plan is written against.",
+        quotes: [],
+        resultNodeId:
+          args.nodes.find((node) => node.provenance.stepRef === `${iteration.runId}/${REQUIREMENTS_STEP_ID}`)?.id ?? null,
+        questions: null,
+        createdAt: String(eventBody(requirementsCompleted).at),
+      });
+    }
+
     if (findEvent(iteration.events, "StepFailed", DRAFT_STEP_ID)) continue;
 
+    // A step the round's gate skipped completes with a sentinel and no reply;
+    // it is not a draft.
     const draftCompleted = findEvent(iteration.events, "StepCompleted", DRAFT_STEP_ID);
     const reply = await resolveOutput<DraftReply>(iteration.runId, draftCompleted);
-    if (!draftCompleted || !reply) continue;
+    if (!draftCompleted || typeof reply?.reply !== "string") continue;
 
     const resultNodeId =
       args.nodes.find((node) => node.provenance.stepRef === `${iteration.runId}/${DRAFT_STEP_ID}`)?.id ?? null;

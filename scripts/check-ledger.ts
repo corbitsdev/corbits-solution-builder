@@ -264,6 +264,7 @@ for (const terminal of TERMINAL_STATES) {
       NO_DRAFT_STEP_ID,
       EVALUATE_STEP_ID,
       EVALUATED_STAGE,
+      REQUIREMENTS_STEP_ID,
       panelStepId,
       audienceStepId,
       reviseStepId: revise,
@@ -383,23 +384,26 @@ for (const terminal of TERMINAL_STATES) {
       // Every drafted stage (everything but 5 and 8) is: round, a decide gate
       // reading the round's draft flag, and a draft step for the kit's
       // specialist. Stage 1 also carries the brief evaluator after its draft.
+      // Stage 6's draft sits behind a gate of its own, after the
+      // requirements' gate, and is checked in full below.
       for (const stage of STAGES) {
         if (stage === 5 || (stage as number) === BUILD_STAGE) continue;
         const iteration = withSourceSteps[revise(stage)]?.body;
         const decide = iteration?.steps?.[DECIDE_STEP_ID];
         const draft = iteration?.steps?.[DRAFT_STEP_ID];
+        const gated = (stage as number) === 6;
         if (!decide || decide.kind !== "gate" || decide.when?.from !== `steps.${ROUND_STEP_ID}.output.draft`) {
           problems.push(`Stage ${stage}'s decide gate does not read the round's draft flag`);
-        } else if (decide.then !== DRAFT_STEP_ID || decide.else !== NO_DRAFT_STEP_ID) {
+        } else if (decide.then !== (gated ? "pick-0" : DRAFT_STEP_ID) || decide.else !== NO_DRAFT_STEP_ID) {
           problems.push(`Stage ${stage}'s decide gate does not branch to draft/no-draft`);
         }
         if (!draft || draft.kind !== "step" || draft.agent?.id !== agentFor(stage).id) {
           problems.push(`Stage ${stage}'s draft step is not the kit's specialist`);
         } else if (draft.inference?.from !== `steps.${ROUND_STEP_ID}.output.inference`) {
           problems.push(`Stage ${stage}'s draft step does not read its inference options off the round`);
-        } else if (draft.input?.from !== `steps.${ROUND_STEP_ID}.output.prompt`) {
+        } else if (!gated && draft.input?.from !== `steps.${ROUND_STEP_ID}.output.prompt`) {
           problems.push(`Stage ${stage}'s draft step does not read the round's prompt`);
-        } else if (!draft.after?.includes(DECIDE_STEP_ID)) {
+        } else if (!gated && !draft.after?.includes(DECIDE_STEP_ID)) {
           problems.push(`Stage ${stage}'s draft step does not follow its decide gate`);
         }
         const noDraft = iteration?.steps?.[NO_DRAFT_STEP_ID];
@@ -419,10 +423,57 @@ for (const terminal of TERMINAL_STATES) {
         }
       }
 
-      // Stage 6: the architect drafts, then the four panel principals review
-      // it in order, each after the last, all reading the same draft reply.
+      // Stage 6: the requirements author writes, behind a gate reading
+      // wanted[0]; the architect drafts behind a gate reading wanted[1] that
+      // follows the requirements either way; then the four panel principals
+      // review the plan in order, each after the last, all reading the same
+      // draft reply. The first review follows the draft alone, so a round
+      // that skips the plan skips its reviews with it.
       {
         const iteration = withSourceSteps[revise(6 as never)]?.body;
+        const author = agentById("requirements-author");
+        const pick0 = iteration?.steps?.["pick-0"];
+        const skip0 = iteration?.steps?.["skip-0"];
+        const requirements = iteration?.steps?.[REQUIREMENTS_STEP_ID];
+        if (!pick0 || pick0.kind !== "gate" || pick0.then !== REQUIREMENTS_STEP_ID || pick0.else !== "skip-0") {
+          problems.push("Stage 6 has no pick-0 gate choosing between requirements and skip-0");
+        } else if ((pick0.when as { from?: string } | undefined)?.from !== `steps.${ROUND_STEP_ID}.output.wanted[0]`) {
+          problems.push("Stage 6's pick-0 does not read wanted[0]");
+        } else if (!pick0.after?.includes(DECIDE_STEP_ID)) {
+          problems.push("Stage 6's pick-0 does not follow the decide gate");
+        }
+        if (!skip0 || skip0.kind !== "escalation" || !skip0.after?.includes("pick-0")) {
+          problems.push("Stage 6's skip-0 is not an escalation after pick-0");
+        }
+        if (!requirements || requirements.kind !== "step" || requirements.agent?.id !== author?.id) {
+          problems.push("Stage 6 has no requirements step for the kit's requirements author");
+        } else if (requirements.input?.from !== `steps.${ROUND_STEP_ID}.output.prompts[0]`) {
+          problems.push("Stage 6's requirements step does not read prompts[0]");
+        } else if (!requirements.after?.includes("pick-0")) {
+          problems.push("Stage 6's requirements step does not follow pick-0");
+        }
+        const pick1 = iteration?.steps?.["pick-1"];
+        const skip1 = iteration?.steps?.["skip-1"];
+        const draft = iteration?.steps?.[DRAFT_STEP_ID];
+        if (!pick1 || pick1.kind !== "gate" || pick1.then !== DRAFT_STEP_ID || pick1.else !== "skip-1") {
+          problems.push("Stage 6 has no pick-1 gate choosing between draft and skip-1");
+        } else if ((pick1.when as { from?: string } | undefined)?.from !== `steps.${ROUND_STEP_ID}.output.wanted[1]`) {
+          problems.push("Stage 6's pick-1 does not read wanted[1]");
+        } else if (![REQUIREMENTS_STEP_ID, "skip-0"].every((id) => pick1.after?.includes(id))) {
+          problems.push("Stage 6's pick-1 does not follow requirements and skip-0");
+        }
+        if (!skip1 || skip1.kind !== "escalation" || !skip1.after?.includes("pick-1")) {
+          problems.push("Stage 6's skip-1 is not an escalation after pick-1");
+        }
+        if (draft?.input?.from !== `steps.${ROUND_STEP_ID}.output.prompts[1]`) {
+          problems.push("Stage 6's draft step does not read prompts[1]");
+        } else if (!draft.after?.includes("pick-1")) {
+          problems.push("Stage 6's draft step does not follow pick-1");
+        }
+        const firstReview = iteration?.steps?.[panelStepId(panelPrincipals()[0]!.id.replace(/^senior-engineer-/, ""))];
+        if (firstReview?.after?.includes("skip-1")) {
+          problems.push("Stage 6's first review follows the plan's skip marker, so it would review a plan not written this round");
+        }
         let previous = DRAFT_STEP_ID;
         for (const role of panelPrincipals()) {
           const specialty = role.id.replace(/^senior-engineer-/, "");

@@ -57,17 +57,22 @@ function currentRows(nodes: ArtifactNode[]): ArtifactNode[] {
   return rows;
 }
 
+/**
+ * Newest first: the stage under way at the top, and within a stage the
+ * document written most recently first. What the person is working on is
+ * what they came to read; the problem brief from week one is at the bottom.
+ */
 function groupedRows(nodes: ArtifactNode[]): { stage: number; documents: ArtifactNode[] }[] {
   const byStage = new Map<number, ArtifactNode[]>();
   for (const row of currentRows(nodes)) {
     byStage.set(row.stage, [...(byStage.get(row.stage) ?? []), row]);
   }
   return [...byStage.keys()]
-    .sort((left, right) => left - right)
+    .sort((left, right) => right - left)
     .map((stage) => ({
       stage,
-      documents: (byStage.get(stage) ?? []).sort((left, right) =>
-        documentLabel(left, nodes).localeCompare(documentLabel(right, nodes)),
+      documents: (byStage.get(stage) ?? []).sort(
+        (left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt),
       ),
     }));
 }

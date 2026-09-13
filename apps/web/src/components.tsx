@@ -443,6 +443,7 @@ const DOCUMENT_NAMES: Record<string, string> = {
   design_feedback: "Design feedback",
   audience_package: "Audience package",
   audience_deck: "Slides",
+  product_requirements: "Product requirements",
   build_plan: "Build plan",
   engineering_review: "Engineering review",
   cost_approval: "Cost",
@@ -451,6 +452,12 @@ const DOCUMENT_NAMES: Record<string, string> = {
   delivery_manifest: "Delivery manifest",
   delivery_verification: "Delivery verification",
 };
+
+/** What a folded document says for itself: its version, when it was written, and how long it is. */
+export function versionDigest(node: { version: number; createdAt: string; sizeBytes: number }): string {
+  const length = node.sizeBytes < 1024 ? `${node.sizeBytes} B` : `${(node.sizeBytes / 1024).toFixed(1)} kB`;
+  return `Version ${node.version} · written ${new Date(node.createdAt).toLocaleString()} · ${length}`;
+}
 
 /**
  * A number that rolls to its next value like an odometer wheel: the old digit

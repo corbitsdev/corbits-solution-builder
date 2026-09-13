@@ -115,14 +115,21 @@ export function registerDecisionRoutes(api: Hono) {
     const packet = packetRun?.packetId ? await readArtifactNode(packetRun.packetId) : null;
     const targets = packet ? ((JSON.parse(packet.content) as { targets?: unknown }).targets ?? []) : [];
 
-    const plan = detail.nodes.find((node) => node.kind === "build_plan");
+    const live = detail.nodes.filter((node) => node.supersededByNodeId === null);
+    const plan = live.find((node) => node.kind === "build_plan") ?? detail.nodes.find((node) => node.kind === "build_plan");
     const planText = plan ? (await readArtifactNode(plan.id)).content : "";
+    // The plan cites the requirements by id, so the builder is handed both:
+    // the plan says what to do, the requirements say when it is done.
+    const requirements = live.find((node) => node.kind === "product_requirements");
+    const requirementsText = requirements ? (await readArtifactNode(requirements.id)).content : "";
 
     const outcome = await runBuildAttempt({
       runId: started.runId,
       prompt: [
-        `Build the software described by this approved plan. Work in the current directory.`,
+        `Build the software described by this approved plan, against the requirements it cites. Work in the current directory.`,
         ``,
+        ...(requirementsText ? [`--- REQUIREMENTS ---`, requirementsText, ``] : []),
+        `--- PLAN ---`,
         planText,
         ``,
         `Frozen packet: ${packet?.node.contentHash ?? "unknown"}.`,

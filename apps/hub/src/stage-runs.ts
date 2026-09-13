@@ -18,14 +18,16 @@
  * made in-process instead.
  */
 import { type } from "arktype";
-import { agentFor, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
+import { agentById, agentFor, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
 import { assumptionsIn, questionsIn } from "@solutions-builder/app/document";
 import {
   DRAFT_STEP_ID,
   DRAFT_STEP_TIMEOUT_MS,
   EVALUATE_STEP_ID,
+  REQUIREMENTS_STEP_ID,
   agentStepIds,
 } from "@solutions-builder/app/workflows/stage-loop";
+import type { ArtifactKind } from "@solutions-builder/app/artifacts";
 import type { Stage } from "@solutions-builder/app/ledger";
 import type { HubRunEvent } from "./hub-client.js";
 import { readOutputRef, stageIterations } from "./hub-executor.js";
@@ -74,9 +76,11 @@ export type StageDraftResult = {
 /**
  * Approved source material for a stage: every artifact node on this branch from
  * an earlier stage that has not been superseded. Superseded versions are
- * retained for history but are not what a later stage builds on.
+ * retained for history but are not what a later stage builds on. `sameStage`
+ * names the kinds written this stage that a later step of it reads too: the
+ * plan is written against the requirements the stage itself produced.
  */
-async function approvedInputs(projectId: string, stage: Stage) {
+async function approvedInputs(projectId: string, stage: Stage, sameStage: readonly ArtifactKind[] = []) {
   const { db } = database();
   const nodes = await db
     .select()
@@ -92,7 +96,11 @@ async function approvedInputs(projectId: string, stage: Stage) {
   // What the person handed over is read at every stage, the first included;
   // what earlier stages approved is read at the stages after them. A deck is
   // bytes built from a package the model already reads, never an input.
-  const relevant = nodes.filter((node) => node.kind !== DECK_KIND && (node.kind === MATERIAL_KIND || node.stage < stage));
+  const relevant = nodes.filter(
+    (node) =>
+      node.kind !== DECK_KIND &&
+      (node.kind === MATERIAL_KIND || node.stage < stage || (node.stage === stage && sameStage.includes(node.kind as ArtifactKind))),
+  );
   return Promise.all(
     relevant.map(async (node) => {
       const { content } = await readArtifactNode(node.id);
@@ -103,18 +111,21 @@ async function approvedInputs(projectId: string, stage: Stage) {
 
 /** The rendered inputs a stage's specialist would be handed, for a smoke to read. */
 export async function stageInputsForSmoke(projectId: string, stage: Stage): Promise<string> {
-  return renderInputs(await approvedInputs(projectId, stage));
+  return renderInputs(await approvedInputs(projectId, stage), stage);
 }
 
-function renderInputs(
-  inputs: { node: { title: string; kind: string; stage: number }; content: string }[],
-): string {
+type Inputs = { node: { id: string; title: string; kind: string; stage: number }; content: string }[];
+
+/** The inputs as the specialist reads them. A document written this stage is not yet approved, and is labelled as such. */
+function renderInputs(inputs: Inputs, stage: number): string {
   if (inputs.length === 0) return "(No earlier approved artifacts. This is the first stage.)";
   return inputs
     .map((input) =>
       input.node.kind === MATERIAL_KIND
         ? `--- MATERIAL THE PERSON PROVIDED: ${input.node.title} ---\n${input.content}`
-        : `--- APPROVED INPUT: ${input.node.title} (stage ${input.node.stage}, ${input.node.kind}) ---\n${input.content}`,
+        : input.node.stage === stage
+          ? `--- WRITTEN THIS STAGE, NOT YET APPROVED: ${input.node.title} (stage ${input.node.stage}, ${input.node.kind}) ---\n${input.content}`
+          : `--- APPROVED INPUT: ${input.node.title} (stage ${input.node.stage}, ${input.node.kind}) ---\n${input.content}`,
     )
     .join("\n\n");
 }
@@ -162,8 +173,13 @@ export function buildDraftPrompt(args: {
   ].join("\n");
 }
 
-/** The live version of this stage's document, or null before there is one. */
-async function currentStageDocument(projectId: string, stage: Stage): Promise<string | null> {
+/**
+ * The live version of one of this stage's documents, or null before there is
+ * one. By kind, since a stage may hold more than one: stage 6 keeps the
+ * requirements, the plan and four reviews, and a revision of the plan must
+ * carry the plan and not whichever was written first.
+ */
+async function currentStageDocument(projectId: string, stage: Stage, kind: ArtifactKind): Promise<string | null> {
   const { db } = database();
   const [node] = await db
     .select()
@@ -172,6 +188,7 @@ async function currentStageDocument(projectId: string, stage: Stage): Promise<st
       and(
         eq(table.artifactNode.projectId, projectId),
         eq(table.artifactNode.stage, stage),
+        eq(table.artifactNode.kind, kind),
         isNull(table.artifactNode.supersededByNodeId),
       ),
     )
@@ -187,6 +204,29 @@ function panelPrincipalFor(stepId: string): AgentRole {
   const found = panelPrincipals().find((entry) => entry.id === `senior-engineer-${specialty}`);
   if (!found) throw new Error(`No panel principal for step ${stepId}`);
   return found;
+}
+
+/**
+ * The role whose reply an agent step's output is, and the variant the version
+ * is recorded under where one kind has several: a stakeholder's package, a
+ * principal's review.
+ */
+function roleForStep(
+  stage: Stage,
+  stepId: string,
+  audiences: readonly { name: string }[],
+): { role: AgentRole; variant?: string } {
+  if (stage === 5) return { role: agentFor(5), variant: audiences[Number(stepId.replace(/^package-/, ""))]!.name };
+  if (stage === 6 && stepId === REQUIREMENTS_STEP_ID) {
+    const author = agentById("requirements-author");
+    if (!author) throw new Error("requirements-author role missing from the kit");
+    return { role: author };
+  }
+  if (stage === 6 && stepId !== DRAFT_STEP_ID) {
+    const role = panelPrincipalFor(stepId);
+    return { role, variant: role.title.replace("Senior engineer — ", "") };
+  }
+  return { role: agentFor(stage) };
 }
 
 /**
@@ -313,14 +353,38 @@ export type StageDraftRequest = {
   failed?: { audience: string; message: string }[];
   /** Stage 6 only: the four panel reviews of the architect's plan. */
   review: StageDraftResult[] | null;
+  /** Stage 6 only: the requirements document, when this request wrote it. */
+  requirements: StageDraftResult | null;
   /** Something the person should hear about how this draft came to be: a retry the policy asked for. */
   note?: string;
 };
 
+/** Which of stage 6's two documents a request writes. */
+export type PlanDocument = "requirements" | "plan";
+
+/** One round's worth of a `stage.draft` command: what it carries, and which agent steps it waits on. */
+type Round = {
+  /** What the person said, as the thread shows it. Empty on a round that follows one that already carried it. */
+  readonly message: string;
+  readonly prompt?: string;
+  readonly prompts?: string[];
+  readonly wanted?: boolean[];
+  /** The agent steps this round runs, in run order; a gated step not wanted is not among them. */
+  readonly stepIds: readonly string[];
+  /** What the round's prompts were rendered from, recorded as each version's sources. */
+  readonly inputs: Inputs;
+};
+
+type RoundOutcome = {
+  persisted: Map<string, StageDraftResult>;
+  failed: { audience: string; message: string }[];
+};
+
 /**
  * Asks the stage's specialist to draft — or, at stage 5, every audience's
- * package, or at stage 6, the architect's plan and then the panel's four
- * reviews of it — and waits for the run's agent steps to answer.
+ * package; at stage 6, the requirements in one round and then the architect's
+ * plan and the panel's four reviews of it in the next — and waits for the
+ * run's agent steps to answer.
  *
  * `mode: "interview"` revises the document mid-conversation: the answer just
  * given is folded into a new version, but the questions already queued are
@@ -343,6 +407,13 @@ export async function requestDraft(args: {
    * they are, and their steps are skipped by the run.
    */
   audiences?: readonly string[];
+  /**
+   * Stage 6 only: which of its documents to write. Absent, the requirements
+   * when the stage has none yet and then the plan; once the requirements
+   * exist, the plan alone, so answering the architect's question revises the
+   * plan and not the document it is written against.
+   */
+  documents?: readonly PlanDocument[];
 }): Promise<StageDraftRequest> {
   const inputs = await approvedInputs(args.projectId, args.stage);
   const context = await stageContext({ projectId: args.projectId, stage: args.stage });
@@ -379,7 +450,7 @@ export async function requestDraft(args: {
       buildDraftPrompt({
         projectTitle: args.projectTitle,
         stage: args.stage,
-        inputs: renderInputs(inputs),
+        inputs: renderInputs(inputs, args.stage),
         userInput: [
           `Prepare the package for one audience only: ${audience.name} (${audience.role.replace(/_/g, " ")}).`,
           `Use the "## Audience: ${audience.name}" heading and its four subsections.`,
@@ -390,12 +461,18 @@ export async function requestDraft(args: {
           .join("\n\n"),
       }),
     );
+  } else if (args.stage === 6) {
+    // Stage 6's prompts are built per round, below: the plan's carries the
+    // requirements, which the first round may only just have written.
+    if (args.documents !== undefined && args.documents.length === 0) {
+      throw new HostError("validation_failed", "No document was named to write at stage 6.");
+    }
   } else {
-    const current = await currentStageDocument(args.projectId, args.stage);
+    const current = await currentStageDocument(args.projectId, args.stage, agentFor(args.stage).produces ?? "problem_brief");
     prompt = buildDraftPrompt({
       projectTitle: args.projectTitle,
       stage: args.stage,
-      inputs: renderInputs(inputs),
+      inputs: renderInputs(inputs, args.stage),
       userInput: args.message,
       ...(current === null ? {} : { currentDocument: current }),
       context,
@@ -418,7 +495,7 @@ export async function requestDraft(args: {
 
   for (let attempt = 0; ; attempt += 1) {
     try {
-      const result = await round(maxTokens);
+      const result = await draftAt(maxTokens);
       return note === undefined ? result : { ...result, note };
     } catch (cause) {
       // One more round, only for a design, only as the person's settings
@@ -454,90 +531,170 @@ export async function requestDraft(args: {
     }
   }
 
-  /** One drafting round: the command, the run's answer, and its versions. */
-  async function round(cap: number): Promise<StageDraftRequest> {
-  expectLiveDraft(args.projectId, args.stage);
+  /** The stage's rounds at one output cap, and the versions they recorded. */
+  async function draftAt(cap: number): Promise<StageDraftRequest> {
+    if (args.stage === 5) {
+      const stepIds = agentStepIds(5, audiences.length).filter((_stepId, index) => wanted[index]);
+      const { persisted, failed } = await round(cap, { message: args.message, prompts: prompts ?? [], wanted, stepIds, inputs });
+      const packages = stepIds.flatMap((id) => persisted.get(id) ?? []);
+      const draft = packages[0];
+      if (!draft) {
+        if (failed.length > 0) {
+          throw new HostError(
+            "provider_unavailable",
+            failed.map((entry) => `The package for ${entry.audience} could not be written. ${entry.message}`).join(" "),
+            {},
+            true,
+          );
+        }
+        throw new HostError("internal_error", "Stage 5 produced no draft output.");
+      }
+      return { draft, packages, review: null, requirements: null, ...(failed.length > 0 ? { failed } : {}) };
+    }
 
-  const before = await stageIterations(args.projectId, args.stage);
-  // The iteration this round will run in is either already visible (parked,
-  // awaiting the very signal about to be delivered) or not yet spawned; either
-  // way it is not a *new* entry in the list once the round is under way — the
-  // loop only advances to a fresh iteration once this one's whole body has
-  // finished. One less than the newest index we can already see is what makes
-  // `awaitIterationOutputs`' "the newest iteration is beyond where I started"
-  // check pass as soon as this round's own iteration exists.
-  const afterIteration = before.length - 2;
+    if (args.stage === 6) return await planRounds(cap);
 
-  const outcome = await execute({
-    type: "stage.draft",
-    actor: args.actor,
-    projectId: args.projectId,
-    idempotencyKey: newId.command(),
-    correlationId: newId.correlation(),
-    payload: {
-      runId: args.runId,
-      message: args.message,
-      ...(args.quotes && args.quotes.length > 0 ? { quotes: args.quotes } : {}),
-      mode: args.mode,
-      ...(prompt !== undefined ? { prompt } : {}),
-      ...(prompts !== undefined ? { prompts, wanted } : {}),
-      ...(context.brief ? { brief: context.brief } : {}),
-      inference: { maxTokens: cap },
-    },
-  });
-
-  if (outcome.delivery !== "delivered") {
-    throw new HostError(
-      "provider_unavailable",
-      `Stage ${args.stage} has no run waiting for this stage; nothing was drafted.`,
-      {},
-      true,
-    );
+    const stepIds = agentStepIds(args.stage, 0);
+    const { persisted } = await round(cap, { message: args.message, prompt: prompt ?? "", stepIds, inputs });
+    const draft = persisted.get(DRAFT_STEP_ID);
+    if (!draft) throw new HostError("internal_error", `Stage ${args.stage} produced no draft output.`);
+    return { draft, packages: null, review: null, requirements: null };
   }
 
-  // At stage 5 only the wanted packages' steps run; the rest are skipped by
-  // their gates and are not waited on.
-  const stepIds = agentStepIds(args.stage, audiences.length).filter(
-    (stepId, index) => args.stage !== 5 || wanted[index],
-  );
-  // A stakeholder's package failing is that package's failure, not the
-  // round's: the others are recorded and the failed ones are reported, so
-  // the person retries those alone. Every other stage's steps depend on
-  // each other, so there the first failure is the round's.
-  const { runId: iterationRunId, outputs, failures } = await awaitIterationOutputs({
-    projectId: args.projectId,
-    stage: args.stage,
-    afterIteration,
-    stepIds,
-    timeoutMs: DRAFT_STEP_TIMEOUT_MS,
-    settle: args.stage === 5,
-  });
-  const audienceOf = (stepId: string) => audiences[Number(stepId.replace(/^package-/, ""))]!.name;
-  const failed: { audience: string; message: string }[] = [...failures].map(([stepId, message]) => ({
-    audience: audienceOf(stepId),
-    message,
-  }));
+  /**
+   * Stage 6: the requirements in a round of their own, then the plan and its
+   * reviews in the next. Two rounds rather than one chain of steps because
+   * the architect's prompt is built by the host, with the requirements as an
+   * input beside the approved ones, and the host only has them once the
+   * first round has answered. The person's message rides the first round
+   * that runs; the thread shows it once.
+   */
+  async function planRounds(cap: number): Promise<StageDraftRequest> {
+    const existing = await currentStageDocument(args.projectId, 6, "product_requirements");
+    const documents: readonly PlanDocument[] = args.documents ?? (existing === null ? ["requirements", "plan"] : ["plan"]);
 
-  const persisted = new Map<string, StageDraftResult>();
-  for (const stepId of stepIds) {
-    // The evaluator is advisory and produces nothing an approver reviews;
-    // its verdict is read back through `evaluationIn`, never written here.
-    if (stepId === EVALUATE_STEP_ID) continue;
-    const output = outputs.get(stepId);
-    if (!output) continue;
+    let requirements: StageDraftResult | null = null;
+    if (documents.includes("requirements")) {
+      const requirementsPrompt = buildDraftPrompt({
+        projectTitle: args.projectTitle,
+        stage: 6,
+        inputs: renderInputs(inputs, 6),
+        userInput: args.message,
+        ...(existing === null ? {} : { currentDocument: existing }),
+        context,
+      });
+      const { persisted } = await round(cap, {
+        message: args.message,
+        prompts: [requirementsPrompt, ""],
+        wanted: [true, false],
+        stepIds: [REQUIREMENTS_STEP_ID],
+        inputs,
+      });
+      requirements = persisted.get(REQUIREMENTS_STEP_ID) ?? null;
+      if (!requirements) throw new HostError("internal_error", "Stage 6 produced no requirements document.");
+    }
+    if (!documents.includes("plan")) {
+      return { draft: requirements!, packages: null, review: null, requirements };
+    }
 
-    const isDraftStep = stepId === DRAFT_STEP_ID;
-    const role =
-      args.stage === 5 ? agentFor(5) : args.stage === 6 && !isDraftStep ? panelPrincipalFor(stepId) : agentFor(args.stage);
-    const variant =
-      args.stage === 5
-        ? audiences[Number(stepId.replace(/^package-/, ""))]!.name
-        : args.stage === 6 && !isDraftStep
-          ? role.title.replace("Senior engineer — ", "")
-          : undefined;
+    const planInputs = await approvedInputs(args.projectId, 6, ["product_requirements"]);
+    const currentPlan = await currentStageDocument(args.projectId, 6, "build_plan");
+    const planPrompt = buildDraftPrompt({
+      projectTitle: args.projectTitle,
+      stage: 6,
+      inputs: renderInputs(planInputs, 6),
+      userInput: args.message,
+      ...(currentPlan === null ? {} : { currentDocument: currentPlan }),
+      context,
+    });
+    const stepIds = agentStepIds(6, 0).filter((id) => id !== REQUIREMENTS_STEP_ID);
+    const { persisted } = await round(cap, {
+      message: requirements === null ? args.message : "",
+      prompts: ["", planPrompt],
+      wanted: [false, true],
+      stepIds,
+      inputs: planInputs,
+    });
+    const draft = persisted.get(DRAFT_STEP_ID);
+    if (!draft) throw new HostError("internal_error", "Stage 6 produced no plan.");
+    const review = stepIds.filter((id) => id !== DRAFT_STEP_ID).map((id) => persisted.get(id)!);
+    return { draft, packages: null, review, requirements };
+  }
 
-    try {
-      const result = await persistOutput({
+  /** One drafting round: the command, the run's answer, and its versions. */
+  async function round(cap: number, plan: Round): Promise<RoundOutcome> {
+    expectLiveDraft(args.projectId, args.stage);
+
+    const before = await stageIterations(args.projectId, args.stage, { currentOnly: true });
+    // The iteration this round will run in is either already visible (parked,
+    // awaiting the very signal about to be delivered) or not yet spawned; either
+    // way it is not a *new* entry in the list once the round is under way — the
+    // loop only advances to a fresh iteration once this one's whole body has
+    // finished. One less than the newest index we can already see is what makes
+    // `awaitIterationOutputs`' "the newest iteration is beyond where I started"
+    // check pass as soon as this round's own iteration exists.
+    const afterIteration = before.length - 2;
+
+    const outcome = await execute({
+      type: "stage.draft",
+      actor: args.actor,
+      projectId: args.projectId,
+      idempotencyKey: newId.command(),
+      correlationId: newId.correlation(),
+      payload: {
+        runId: args.runId,
+        message: plan.message,
+        ...(args.quotes && args.quotes.length > 0 ? { quotes: args.quotes } : {}),
+        mode: args.mode,
+        ...(plan.prompt !== undefined ? { prompt: plan.prompt } : {}),
+        ...(plan.prompts !== undefined ? { prompts: plan.prompts, wanted: plan.wanted } : {}),
+        ...(context.brief ? { brief: context.brief } : {}),
+        inference: { maxTokens: cap },
+      },
+    });
+
+    if (outcome.delivery !== "delivered") {
+      throw new HostError(
+        "provider_unavailable",
+        `Stage ${args.stage} has no run waiting for this stage; nothing was drafted.`,
+        {},
+        true,
+      );
+    }
+
+    // A stakeholder's package failing is that package's failure, not the
+    // round's: the others are recorded and the failed ones are reported, so
+    // the person retries those alone. Every other stage's steps depend on
+    // each other, so there the first failure is the round's.
+    const { runId: iterationRunId, outputs, failures } = await awaitIterationOutputs({
+      projectId: args.projectId,
+      stage: args.stage,
+      afterIteration,
+      stepIds: plan.stepIds,
+      timeoutMs: DRAFT_STEP_TIMEOUT_MS,
+      settle: args.stage === 5,
+    });
+    const audienceOf = (stepId: string) => audiences[Number(stepId.replace(/^package-/, ""))]!.name;
+    const failed: { audience: string; message: string }[] = [...failures].map(([stepId, message]) => ({
+      audience: audienceOf(stepId),
+      message,
+    }));
+
+    const persisted = new Map<string, StageDraftResult>();
+    for (const stepId of plan.stepIds) {
+      // The evaluator is advisory and produces nothing an approver reviews;
+      // its verdict is read back through `evaluationIn`, never written here.
+      if (stepId === EVALUATE_STEP_ID) continue;
+      const output = outputs.get(stepId);
+      if (!output) continue;
+
+      const { role, variant } = roleForStep(args.stage, stepId, audiences);
+      // Only a document's own prompt drew on the compacted brief; a panel
+      // review or an audience package was never handed it.
+      const drewOnBrief = stepId === DRAFT_STEP_ID || stepId === REQUIREMENTS_STEP_ID;
+
+      try {
+        const result = await persistOutput({
           projectId: args.projectId,
           stage: args.stage,
           role,
@@ -545,54 +702,37 @@ export async function requestDraft(args: {
           iterationRunId,
           stepId,
           actor: args.actor,
-          inputs,
+          inputs: plan.inputs,
           ...(typeof output.turn?.model === "string" ? { model: output.turn.model } : {}),
           ...(variant !== undefined ? { variant } : {}),
-          // Only the round's own prompt drew on the compacted brief; a panel
-          // review or an audience package was never handed it.
-          ...(isDraftStep && context.brief ? { brief: context.brief } : {}),
-      });
-      persisted.set(stepId, result);
-      // Each stakeholder's package carries a deck outline; the slides are
-      // built from it and kept beside the package. A deck that cannot be
-      // built is logged, not a failure of the package it came from.
-      if (args.stage === 5 && variant !== undefined) {
-        const audience = audiences.find((entry) => entry.name === variant)!;
-        await writeDeckFor({
-          projectId: args.projectId,
-          projectTitle: args.projectTitle,
-          audience,
-          packageNodeId: result.nodeId,
-          markdown: result.content,
-          agentRole: role.id,
-          actor: args.actor,
-        }).catch((cause: unknown) => {
-          console.error(`[stage 5] ${args.projectId}: the slides for ${variant} could not be built:`, cause);
+          ...(drewOnBrief && context.brief ? { brief: context.brief } : {}),
         });
+        persisted.set(stepId, result);
+        // Each stakeholder's package carries a deck outline; the slides are
+        // built from it and kept beside the package. A deck that cannot be
+        // built is logged, not a failure of the package it came from.
+        if (args.stage === 5 && variant !== undefined) {
+          const audience = audiences.find((entry) => entry.name === variant)!;
+          await writeDeckFor({
+            projectId: args.projectId,
+            projectTitle: args.projectTitle,
+            audience,
+            packageNodeId: result.nodeId,
+            markdown: result.content,
+            agentRole: role.id,
+            actor: args.actor,
+          }).catch((cause: unknown) => {
+            console.error(`[stage 5] ${args.projectId}: the slides for ${variant} could not be built:`, cause);
+          });
+        }
+      } catch (cause) {
+        // An empty or cut-short package is that package's failure too.
+        if (args.stage !== 5 || !(cause instanceof HostError)) throw cause;
+        failed.push({ audience: audienceOf(stepId), message: cause.message });
       }
-    } catch (cause) {
-      // An empty or cut-short package is that package's failure too.
-      if (args.stage !== 5 || !(cause instanceof HostError)) throw cause;
-      failed.push({ audience: audienceOf(stepId), message: cause.message });
     }
-  }
 
-  const packages = args.stage === 5 ? stepIds.flatMap((id) => persisted.get(id) ?? []) : null;
-  const review = args.stage === 6 ? stepIds.filter((id) => id !== DRAFT_STEP_ID).map((id) => persisted.get(id)!) : null;
-  const draft = persisted.get(DRAFT_STEP_ID) ?? packages?.[0];
-  if (!draft) {
-    if (failed.length > 0) {
-      throw new HostError(
-        "provider_unavailable",
-        failed.map((entry) => `The package for ${entry.audience} could not be written. ${entry.message}`).join(" "),
-        {},
-        true,
-      );
-    }
-    throw new HostError("internal_error", `Stage ${args.stage} produced no draft output.`);
-  }
-
-  return { draft, packages, review, ...(failed.length > 0 ? { failed } : {}) };
+    return { persisted, failed };
   }
 }
 
@@ -635,7 +775,7 @@ export async function awaitIterationOutputs(args: {
   const deadline = Date.now() + args.timeoutMs;
 
   for (;;) {
-    const iterations = await stageIterations(args.projectId, args.stage);
+    const iterations = await stageIterations(args.projectId, args.stage, { currentOnly: true });
     const newestIndex = iterations.length - 1;
 
     if (newestIndex > args.afterIteration) {

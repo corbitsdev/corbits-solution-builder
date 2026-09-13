@@ -180,3 +180,26 @@ run, the way a step's `input` does.
 **Upstream-able.** Yes, as-is: additive on every surface, no behaviour
 change for a step that names no selector, and the test file is written to
 land beside the runtime's other tests.
+
+## `packages/workflow/src/runtime/commit-chain.ts` and `packages/workflow-host/src/adapters/repo-store.ts` — a flush another writer overtook is re-folded, not failed
+
+**Why.** A container run's log gains a `SignalReceived` twice for one delivered
+signal: once from the awaiter and once from the relay that carries it into the
+loop body. When the body's round finishes within a second (a round that asks
+for no draft, such as a stage's submit or an alignment step), the batch that
+carries the iteration's `ChildCompleted` has had its seqs assigned before the
+second record lands, and the store refuses it: `seq conflict on append …
+single-writer invariant violated`. The loop step fails, the runtime routes on
+to the stage's gates, and the lifecycle run is wedged until it is deployed
+again. Seen on every fast round in a session, at stages 5, 6 and 7.
+
+**What changed.** `repo-store.ts` carries the conflict on the error it throws
+(`seqConflict: { expected, supplied }`). `commit-chain.ts`'s `flushBuffer`
+catches that one failure, reads the durable log again, validates each pending
+transition against it, renumbers the batch to continue from the tip, and
+appends once more, up to three times. A duplicate `SignalReceived` is a no-op
+to the reducer, so what lands is what would have landed.
+
+**Upstream-able.** The retry is defensive and local; the two writers are the
+real question for upstream — which of the awaiter and the relay should own the
+record when both see the same delivery.
