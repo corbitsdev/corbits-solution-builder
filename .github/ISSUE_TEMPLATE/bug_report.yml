@@ -1,5 +1,6 @@
 name: Bug report
 description: Something isn't working as expected
+title: "[Bug]: "
 labels:
   - bug
 body:
@@ -25,14 +26,17 @@ body:
     id: version
     attributes:
       label: App version
-      description: Settings shows the version. If you're running from source, the commit hash.
+      description: >-
+        Right-click Solutions Builder.app, "Get Info", and copy the version
+        number. If you're running from source, the commit hash instead.
       placeholder: "0.1.0"
     validations:
       required: true
   - type: input
     id: os
     attributes:
-      label: Operating system
-      placeholder: e.g. macOS 14.5
+      label: macOS version
+      description: The app only ships for macOS right now.
+      placeholder: e.g. 14.5
     validations:
       required: true
