@@ -53,9 +53,9 @@ Rejecting a stage routes back to a named earlier stage. The history is kept.
 
 The person can hand a specialist more than a description: a document, a
 spreadsheet or an image can be attached to the problem as it is written up.
-Text and spreadsheets are read in full and given to the specialist that reads
-the record; an image, PDF or Word file is kept with the project but not read —
-the specialist says so, rather than pretending it saw what it did not.
+Text, spreadsheets and the text of PDFs are read and given to the specialist
+that reads the record; an image or Word file is kept with the project but not
+read — the specialist says so, rather than pretending it saw what it did not.
 
 ## Stage 5: a package and a deck per stakeholder
 
