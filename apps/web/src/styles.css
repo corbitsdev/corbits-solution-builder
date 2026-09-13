@@ -1884,6 +1884,22 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   text-align: right;
 }
 
+/* A path is long and read left to right: wider than a number, monospaced. */
+.setting-path {
+  flex: none;
+  width: 20rem;
+  max-width: 100%;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.8125rem;
+}
+
+/* The host's own word on the section, under the controls it describes. */
+.setting-note {
+  margin: var(--space-2) 0 0;
+  font-size: 0.8125rem;
+  color: var(--wb-muted-foreground);
+}
+
 .setting-row + .setting-row {
   border-top: 1px solid var(--wb-border);
 }

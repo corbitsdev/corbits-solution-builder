@@ -244,6 +244,42 @@ if (await Bun.file(sidecar).exists()) {
       off.status === 200 && !(await Bun.file(marker).exists()),
       `${off.status}`,
     );
+
+    // The build worker: Corbits Code until somebody chooses otherwise, the
+    // choice reported by the host's status at once, and a tool the bridge
+    // cannot drive refused rather than saved.
+    const status = async () =>
+      (await (await fetch(`${origin}/api/status`, { headers: { cookie } })).json()) as {
+        build: { worker: { id: string }; workers: { id: string }[] };
+      };
+    const before = await status();
+    check(
+      "the build worker is Corbits Code by default, among the workers on offer",
+      before.build.worker.id === "corbits-code" && before.build.workers.length >= 3,
+      `${before.build.worker.id}; ${before.build.workers.length} on offer`,
+    );
+    const chosen = await fetch(`${origin}/api/preferences/build.worker`, {
+      method: "PUT",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify("claude-code"),
+    });
+    const preferences = (await (await fetch(`${origin}/api/preferences`, { headers: { cookie } })).json()) as {
+      preferences: Record<string, unknown>;
+    };
+    const after = await status();
+    check(
+      "choosing another worker is saved and reported by the host's status",
+      chosen.status === 200 &&
+        preferences.preferences["build.worker"] === "claude-code" &&
+        after.build.worker.id === "claude-code",
+      `${chosen.status}; preference ${String(preferences.preferences["build.worker"])}; status ${after.build.worker.id}`,
+    );
+    const refused = await fetch(`${origin}/api/preferences/build.worker`, {
+      method: "PUT",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify("some-other-tool"),
+    });
+    check("a worker the bridge cannot drive is refused", refused.status === 400, `${refused.status}`);
   }
   child.kill();
 }

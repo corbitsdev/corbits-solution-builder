@@ -51,3 +51,8 @@ export function deckSettingsFile(): string {
 export function designerSettingsFile(): string {
   return join(dataDirectory(), "designer.json");
 }
+
+/** Which coding agent stage 8 runs, and where its executable is. */
+export function buildWorkerSettingsFile(): string {
+  return join(dataDirectory(), "build-worker.json");
+}

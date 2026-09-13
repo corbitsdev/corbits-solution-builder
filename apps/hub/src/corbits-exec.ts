@@ -10,7 +10,8 @@
  *
  *   owner          Solutions Builder host (this file)
  *   purpose        stabilise freeze -> running -> evidence for the local loop
- *   interface      `corbits exec <prompt>`, verified against the installed CLI
+ *   interface      one CLI's non-interactive form — `corbits exec <prompt>`
+ *                  by default; the worker is chosen in Settings (build-worker.ts)
  *   inputs         one prompt string, a working directory, a model/provider
  *   outputs        final text on stdout, and an exit status. That is all.
  *   failure        non-zero exit, timeout, or the binary being absent
@@ -28,6 +29,7 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { dataDirectory } from "./paths.js";
+import { buildWorker, type BuildWorker } from "./build-worker.js";
 
 export const BRIDGE_ID = "bounded-local-corbits-exec";
 
@@ -47,6 +49,8 @@ export const BRIDGE_CAPABILITIES = {
 
 export type BridgeOutcome = {
   readonly bridgeId: string;
+  /** Which worker ran, or would have. */
+  readonly worker: string;
   readonly available: boolean;
   readonly exitStatus: number | null;
   readonly finalText: string;
@@ -61,15 +65,13 @@ export type BridgeOutcome = {
   readonly checkpointRef: null;
 };
 
-export function bridgeBinary(): string {
-  return process.env.SOLUTIONS_BUILDER_CORBITS_BIN?.trim() || "corbits";
-}
-
-/** Whether the CLI this bridge wraps is actually present. */
-export async function bridgeAvailable(): Promise<{ available: boolean; detail: string }> {
+/** Whether the chosen worker's CLI is actually present. */
+export async function bridgeAvailable(): Promise<{ available: boolean; detail: string; worker: BuildWorker }> {
+  const worker = await buildWorker();
+  const probeCommand = [worker.command, ...worker.probe].join(" ");
   let probe: ReturnType<typeof Bun.spawnSync>;
   try {
-    probe = Bun.spawnSync([bridgeBinary(), "--help"], {
+    probe = Bun.spawnSync([worker.command, ...worker.probe], {
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -79,10 +81,11 @@ export async function bridgeAvailable(): Promise<{ available: boolean; detail: s
     const code = (cause as { code?: string }).code;
     return {
       available: false,
+      worker,
       detail:
         code === "ENOENT"
-          ? `\`${bridgeBinary()}\` is not installed, or not on this host's PATH. The build lane is unavailable.`
-          : `\`${bridgeBinary()}\` could not be started (${code ?? String(cause)}). The build lane is unavailable.`,
+          ? `${worker.label} (\`${worker.command}\`) is not installed, or not on this host's PATH. The build lane is unavailable.`
+          : `${worker.label} (\`${worker.command}\`) could not be started (${code ?? String(cause)}). The build lane is unavailable.`,
     };
   }
   if (probe.signalCode) {
@@ -91,23 +94,26 @@ export async function bridgeAvailable(): Promise<{ available: boolean; detail: s
     // worker's own doing.
     return {
       available: false,
-      detail: `\`${bridgeBinary()} --help\` was killed on launch (${probe.signalCode}), which is what an invalid code signature looks like on macOS. The build lane is unavailable.`,
+      worker,
+      detail: `\`${probeCommand}\` was killed on launch (${probe.signalCode}), which is what an invalid code signature looks like on macOS. The build lane is unavailable.`,
     };
   }
   if (probe.exitCode !== 0) {
     return {
       available: false,
-      detail: `\`${bridgeBinary()} --help\` exited ${probe.exitCode}. The build lane is unavailable.`,
+      worker,
+      detail: `\`${probeCommand}\` exited ${probe.exitCode}. The build lane is unavailable.`,
     };
   }
-  const help = probe.stdout?.toString() ?? "";
-  if (!help.includes("exec")) {
+  const answer = probe.stdout?.toString() ?? "";
+  if (worker.probeExpects !== null && !answer.includes(worker.probeExpects)) {
     return {
       available: false,
-      detail: "The installed CLI does not advertise an `exec` verb; this bridge cannot drive it.",
+      worker,
+      detail: `The installed ${worker.label} does not advertise an \`${worker.probeExpects}\` verb; this bridge cannot drive it.`,
     };
   }
-  return { available: true, detail: "corbits exec is available." };
+  return { available: true, worker, detail: `${worker.label} (\`${worker.command}\`) is available.` };
 }
 
 export async function workspaceFor(runId: string): Promise<string> {
@@ -133,6 +139,7 @@ export async function runBuildAttempt(args: {
   if (!availability.available) {
     return {
       bridgeId: BRIDGE_ID,
+      worker: availability.worker.id,
       available: false,
       exitStatus: null,
       finalText: "",
@@ -144,7 +151,8 @@ export async function runBuildAttempt(args: {
     };
   }
 
-  const child = Bun.spawn([bridgeBinary(), "exec", args.prompt], {
+  const worker = availability.worker;
+  const child = Bun.spawn([worker.command, ...worker.run(args.prompt)], {
     cwd: workspace,
     stdout: "pipe",
     stderr: "pipe",
@@ -167,6 +175,7 @@ export async function runBuildAttempt(args: {
 
   return {
     bridgeId: BRIDGE_ID,
+    worker: worker.id,
     available: true,
     exitStatus,
     // Final text as the process emitted it. No parsing into synthetic events.

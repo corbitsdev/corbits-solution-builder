@@ -99,9 +99,11 @@ These are product requirements, not style.
 ## What is not finished
 
 - **Stage 8 is a bounded build.** It runs one supervised command and shows its
-  final output and exit status. There is no live event stream, no agent roster,
-  no steering and no checkpoint resume. The interface reports each of those as
-  unavailable rather than faking them.
+  final output and exit status. Which coding agent runs it is chosen in
+  Settings — Corbits Code by default, Claude Code or Codex otherwise — and
+  the choice changes the tool, not what the interface can see. There is no
+  live event stream, no agent roster, no steering and no checkpoint resume.
+  The interface reports each of those as unavailable rather than faking them.
 - **Delivery evidence is not verified byte for byte.** The manifest exists; the
   hash checks against an install target do not.
 - **Branches are in the record but not the interface.** Only the main branch

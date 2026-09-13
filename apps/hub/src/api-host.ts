@@ -2,6 +2,7 @@ import { access, rm, writeFile } from "node:fs/promises";
 import type { Hono } from "hono";
 import { startAtLoginMarker } from "./paths.js";
 import { designerSettings, saveDesignerSettings, type DesignerSettings } from "./designer-settings.js";
+import { buildWorkerSettings, saveBuildWorkerSettings, BUILD_WORKERS, type BuildWorkerSettings } from "./build-worker.js";
 import { deckSettings, saveDeckDesign, type DeckDesign } from "./deck-settings.js";
 import { removeTemplate, storeTemplate } from "./deck-template.js";
 import { HostError } from "./errors.js";
@@ -59,6 +60,8 @@ export function registerHostRoutes(api: Hono) {
       build: {
         // Named honestly: this is the bounded bridge, not shared-hub supervision.
         integration: BRIDGE_ID,
+        worker: { id: bridge.worker.id, label: bridge.worker.label, command: bridge.worker.command },
+        workers: BUILD_WORKERS.map((worker) => ({ id: worker.id, label: worker.label, executable: worker.executable })),
         available: bridge.available,
         detail: bridge.detail,
         capabilities: BRIDGE_CAPABILITIES,
@@ -110,7 +113,8 @@ export function registerHostRoutes(api: Hono) {
    * Two kinds of preference, neither in the database. Start-at-login lives
    * in a marker file the desktop host reads before the database is open;
    * its presence is the opt-in. The designer's settings live in a file of
-   * their own and are read once per design, as `designer.*` keys here.
+   * their own and are read once per design, as `designer.*` keys here; the
+   * build worker's likewise, as `build.*`, read at every probe and attempt.
    */
   api.get("/preferences", async (context) => {
     const startAtLogin = await access(startAtLoginMarker())
@@ -124,7 +128,10 @@ export function registerHostRoutes(api: Hono) {
         Object.entries(design).map(([key, value]) => [`deck.${role}.${key}`, value]),
       ),
     );
-    return context.json({ preferences: { "host.startAtLogin": startAtLogin, ...designer, ...decks } });
+    const build = Object.fromEntries(
+      Object.entries(await buildWorkerSettings()).map(([key, value]) => [`build.${key}`, value]),
+    );
+    return context.json({ preferences: { "host.startAtLogin": startAtLogin, ...designer, ...decks, ...build } });
   });
 
   /**
@@ -159,6 +166,10 @@ export function registerHostRoutes(api: Hono) {
     } else if (key.startsWith("designer.")) {
       const field = key.slice("designer.".length) as keyof DesignerSettings;
       const saved = await saveDesignerSettings({ [field]: value } as Partial<DesignerSettings>);
+      return context.json({ key, value: saved[field] });
+    } else if (key.startsWith("build.")) {
+      const field = key.slice("build.".length) as keyof BuildWorkerSettings;
+      const saved = await saveBuildWorkerSettings({ [field]: value } as Partial<BuildWorkerSettings>);
       return context.json({ key, value: saved[field] });
     } else if (key.startsWith("deck.")) {
       // `deck.<role>.<field>`: one role's design, one field at a time.

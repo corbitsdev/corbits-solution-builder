@@ -105,6 +105,7 @@ async function driveAttempt(projectId: string, runId: string): Promise<BridgeOut
     severity: outcome.exitStatus === 0 ? "info" : "error",
     payload: {
       bridgeId: outcome.bridgeId,
+      worker: outcome.worker,
       available: outcome.available,
       exitStatus: outcome.exitStatus,
       workspace: outcome.workspace,
