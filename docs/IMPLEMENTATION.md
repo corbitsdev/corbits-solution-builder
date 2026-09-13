@@ -30,8 +30,8 @@ ship no `dist`. Every command that runs the host passes
 `--conditions intx-src`. Without it the hub cannot be resolved and the host
 exits before the handshake.
 
-The hub's migrations are copied into `apps/hub/src/hub-migrations.generated.ts` so
-the compiled single-file host carries them. `bun run check:hub-migrations`
+The hub's migrations are text-imported by `apps/hub/src/hub-migrations.ts` so the
+compiled single-file host carries them. `bun run check:vendored-migrations`
 fails when that file is behind the vendor.
 
 ## Host process
@@ -115,7 +115,7 @@ OAuth sign-in uses PKCE over a loopback redirect. Tokens live in the keychain.
 | `dev:fresh` | `dev:desktop` on a new empty data directory |
 | `desktop:build` | `.app` and `.dmg`, unsigned |
 | `sidecar:build` | Compile the host to one self-contained binary |
-| `generate:hub-migrations`, `check:hub-migrations` | Copy the vendor's migrations into the host; fail when stale |
+| `check:vendored-migrations` | Fail when the host's migration list drifts from the vendored SQL |
 | `typecheck` | `tsc --noEmit`, strict |
 | `check` | Everything below, in order |
 | `check:ledger` | The ledger is consistent and the generated workflows match it |

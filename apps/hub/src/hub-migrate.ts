@@ -1,17 +1,17 @@
 /**
  * Applies Interchange's own migrations to the host database.
  *
- * The SQL is embedded by `scripts/generate-hub-migrations.ts` rather than read
- * from disk, because the packaged host is a single file with no vendor
- * directory beside it. It is the vendored SQL, unmodified — Solutions Builder does not own the
- * hub's schema and must not drift from it. `exec` runs each file as a script,
- * the way the upstream migrator does, because several files hold more than one
- * statement.
+ * The SQL comes from `hub-migrations.ts`, which text-imports the vendored `.sql`
+ * files so the bundler embeds them — the packaged host is a single file with no
+ * vendor directory beside it. It is the vendored SQL, unmodified — Solutions
+ * Builder does not own the hub's schema and must not drift from it.
+ * `exec` runs each file as a script, the way the upstream migrator does, because
+ * several files hold more than one statement.
  */
 import { sql } from "drizzle-orm";
 import type { HostDatabase } from "./db.js";
 import { dataDirectory } from "./paths.js";
-import { HUB_MIGRATIONS } from "./hub-migrations.generated.js";
+import { HUB_MIGRATIONS } from "./hub-migrations.js";
 
 /**
  * Raised when the workspace predates the hub. Its own class so the host can

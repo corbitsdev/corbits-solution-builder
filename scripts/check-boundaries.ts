@@ -11,7 +11,7 @@
  *      because the definitions it generates are Interchange workflows.
  *   2. Only the hub talks to a provider or an agent runtime, and only the
  *      hub's embedding files (`hub-mount`, `hub-keys`, `hub-migrate`,
- *      `hub-migrations.generated`, `db`, `schema`, `migrate`) plus
+ *      `db`, `schema`, `migrate`) plus
  *      `hub-executor` and `hub-gaps` import Interchange internals. A second
  *      module reaching into the hub is how a parallel control plane starts.
  *   3. The client cannot write persistence: `apps/web` never imports the hub,
@@ -101,7 +101,7 @@ const RUNTIME_PACKAGES = ["@intx/inference", "@intx/inference-catalog", "@intx/a
 /** What the app package may take from the platform: authoring, not internals. */
 const PACKAGE_ALLOWED = ["@intx/workflow", "@intx/types", "arktype"];
 
-const PLATFORM_FILE = /^apps\/hub\/src\/(hub-mount|hub-keys|hub-migrate|hub-migrations\.generated|hub-executor|hub-gaps|db|schema|migrate)\.ts$/;
+const PLATFORM_FILE = /^apps\/hub\/src\/(hub-mount|hub-keys|hub-migrate|hub-executor|hub-gaps|db|schema|migrate)\.ts$/;
 
 const files = (await Promise.all([PACKAGE, HUB, WEB].map((area) => walk(join(root, area))))).flat();
 
