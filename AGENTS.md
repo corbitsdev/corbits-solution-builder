@@ -7,6 +7,34 @@ typecheck, and the nine-stage loop smoke. Run it before claiming anything works.
 Green does not mean the product is right - drive the app for anything a person
 would see.
 
+## How this sits on Interchange
+
+Read this before proposing any change to how the platform is used. Most wrong
+turns here start with one of these being assumed rather than checked.
+
+- **`vendor/interchange` is upstream, unmodified, at the revision in
+  `VENDORED_REVISION`.** Its packages are bun workspace members, so `apps/hub`
+  imports `@intx/db` and gets the vendored copy. There is no separate install
+  step and no npm dependency on the platform.
+- **Refreshing the pin is routine. Editing a vendored file is not.** Every local
+  edit is listed in `vendor/interchange/PATCHES.md` with its reason and whether
+  it can go upstream. Adding another is a cost to argue for, not a default. If
+  upstream already fixed it, refresh the pin instead.
+- **We author `apps/*` and `packages/*`.** Upstream's own apps are reference
+  examples, not something to vendor and adapt.
+- **The hub deploys code, and the platform decides where the bytes come from.**
+  A deploy names a source: an external npm registry, or a hub asset - a
+  checked-out git repo - holding the definition either as packed tarballs or as
+  a source tree at a pinned commit. Dependency-closure resolution, version
+  pinning and integrity are the platform's, identical across those sources.
+- **Search the vendored tree before proposing to build a mechanism.** Registry
+  and asset-backed package resolution, offline closure resolution, capability
+  approval and workflow provisioning are already there. Reinventing one is the
+  most expensive mistake available in this repository.
+- **Read a handler through, and follow the types down, before concluding a
+  capability is missing.** A guard in one route is not an absent subsystem; the
+  layer beneath it may already do the work.
+
 ## The rules the code keeps
 
 These are enforced by `scripts/check-ledger.ts` and `scripts/check-boundaries.ts`.
