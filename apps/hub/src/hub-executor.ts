@@ -24,8 +24,8 @@ import {
   type LedgerPosition,
   type StageSignal,
 } from "@solutions-builder/app/workflows/stage-loop";
-import { deploymentRuns, HubApiError, type HubRunEvent } from "./hub-client.js";
-import { deploymentIsLive, ensureLifecycleDeployment } from "./workflow-deploy.js";
+import { assets, deploymentRuns, HubApiError, workflows, type HubRunEvent } from "./hub-client.js";
+import { deploymentIsLive, ensureLifecycleDeployment, lifecycleAssetName } from "./workflow-deploy.js";
 
 /** What a signal delivery actually did, so a caller can tell nothing from broken. */
 export type DeliveryOutcome = "delivered" | "no_execution" | "failed";
@@ -48,6 +48,48 @@ async function anchorFor(projectId: string, replace = false): Promise<string | n
   unavailable.delete(projectId);
   anchors.set(projectId, deployment.deploymentId);
   return deployment.deploymentId;
+}
+
+/**
+ * Every anchor the project's lifecycle has run under, oldest first: one per
+ * deployment of its asset. Stopping the host releases the sidecar, so each
+ * start deploys the lifecycle again under a new anchor and aligns it to
+ * where the ledger stands; the rounds a stage recorded before that are
+ * under the earlier anchors, and they are still the stage's conversation.
+ * Read once per process, then extended as the current anchor changes: a
+ * deployment that is not the current one gains no runs after this host
+ * started.
+ */
+const anchorHistory = new Map<string, string[]>();
+
+async function anchorsFor(projectId: string): Promise<string[]> {
+  const current = anchors.get(projectId) ?? (await anchorFor(projectId));
+  let history = anchorHistory.get(projectId);
+  if (!history) {
+    const name = lifecycleAssetName(projectId);
+    const asset = (await assets.list("workflow")).find((entry) => entry.name === name);
+    history = asset
+      ? (await workflows.deployments())
+          .filter((deployment) => deployment.definitionAssetId === asset.id)
+          .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+          .map((deployment) => deployment.id)
+      : [];
+    anchorHistory.set(projectId, history);
+  }
+  if (current && !history.includes(current)) history.push(current);
+  return history;
+}
+
+/** The run ids under an anchor that is no longer current. Those never change, so they are read once. */
+const settledRunIds = new Map<string, string[]>();
+
+async function runIdsUnder(anchor: string, current: boolean): Promise<string[]> {
+  if (current) return deploymentRuns.list(anchor);
+  const known = settledRunIds.get(anchor);
+  if (known) return known;
+  const listed = await deploymentRuns.list(anchor);
+  settledRunIds.set(anchor, listed);
+  return listed;
 }
 
 type FoldedRun = {
@@ -506,15 +548,19 @@ export type StageIteration = { readonly runId: string; readonly events: HubRunEv
  * plain `{runId, events}` pairs.
  */
 export async function stageIterations(projectId: string, stage: Stage): Promise<StageIteration[]> {
-  const anchor = anchors.get(projectId) ?? (await anchorFor(projectId));
-  if (!anchor) return [];
-  const runIds = new Set(await deploymentRuns.list(anchor));
+  const history = await anchorsFor(projectId);
+  const current = anchors.get(projectId) ?? null;
   const loopId = reviseStepId(stage);
   const iterations: StageIteration[] = [];
-  for (let index = 0; ; index += 1) {
-    const runId = loopBodyRunId(anchor, loopId, index);
-    if (!runIds.has(runId)) break;
-    iterations.push({ runId, events: await deploymentRuns.events(anchor, runId) });
+  // Oldest anchor first, so the newest iteration is last whichever anchor
+  // it ran under; a caller waiting on a round reads the end of the list.
+  for (const anchor of history) {
+    const runIds = new Set(await runIdsUnder(anchor, anchor === current));
+    for (let index = 0; ; index += 1) {
+      const runId = loopBodyRunId(anchor, loopId, index);
+      if (!runIds.has(runId)) break;
+      iterations.push({ runId, events: await deploymentRuns.events(anchor, runId) });
+    }
   }
   return iterations;
 }

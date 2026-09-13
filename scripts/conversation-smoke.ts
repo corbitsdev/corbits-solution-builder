@@ -15,7 +15,7 @@ import {
   splitForCompaction,
 } from "../apps/hub/src/agent-conversation.js";
 import { evaluationIn, projectStageThread, threadTurns, type StageTurn } from "../apps/hub/src/stage-thread.js";
-import { DRAFT_STEP_ID, EVALUATE_STEP_ID, ROUND_STEP_ID } from "@solutions-builder/app/workflows/stage-loop";
+import { DRAFT_STEP_ID, EVALUATE_STEP_ID, REQUIREMENTS_STEP_ID, ROUND_STEP_ID } from "@solutions-builder/app/workflows/stage-loop";
 import { agentFor } from "@solutions-builder/app/kit";
 import { openDatabase } from "../apps/hub/src/db.js";
 import { prepareDatabase } from "../apps/hub/src/migrate.js";
@@ -221,6 +221,50 @@ const turn = (id: string, role: "human" | "specialist", body: string): StageTurn
     "the evaluation parses the latest verdict",
     evaluation?.ready === true && evaluation.notes.length === 2,
     JSON.stringify(evaluation),
+  );
+
+  // Stage 6 is two rounds: the requirements, with the plan's step skipped by
+  // its gate, then the plan with the requirements' step skipped. The event
+  // shapes are the runtime's own, read off a real run: a skipped step
+  // completes with a sentinel and no reply.
+  const skipped = (seq: number, stepId: string, minute: number) =>
+    stepCompleted(seq, stepId, { skipped: true, gateId: "pick-1", branch: stepId }, minute);
+  const requirementsRound = {
+    runId: "run_anchor__revise-6__0",
+    events: [
+      signalReceived(1, { command: "stage.draft", draft: true, message: "Keep it to one binary.", mode: "final", wanted: [true, false] }, 10),
+      stepCompleted(2, ROUND_STEP_ID, { command: "stage.draft", draft: true, message: "Keep it to one binary.", mode: "final", wanted: [true, false] }, 10),
+      stepCompleted(3, REQUIREMENTS_STEP_ID, { reply: "## In short\n- **One binary.**\n\n## Purpose\nTriage.\n" }, 11),
+      skipped(4, DRAFT_STEP_ID, 11),
+      skipped(5, "review-application", 11),
+    ],
+  };
+  const planRound = {
+    runId: "run_anchor__revise-6__1",
+    events: [
+      signalReceived(1, { command: "stage.draft", draft: true, message: "", mode: "final", wanted: [false, true] }, 12),
+      stepCompleted(2, ROUND_STEP_ID, { command: "stage.draft", draft: true, message: "", mode: "final", wanted: [false, true] }, 12),
+      stepCompleted(3, REQUIREMENTS_STEP_ID, { skipped: true, gateId: "pick-0", branch: REQUIREMENTS_STEP_ID }, 12),
+      stepCompleted(4, DRAFT_STEP_ID, { reply: "## In short\n- **Two services.**\n\n## What I need from you\nWhich licence?\n- Option: MIT\n" }, 13),
+      stepCompleted(5, "review-application", { reply: "## Verdict\nacceptable\n" }, 13),
+    ],
+  };
+  const planTurns = await projectStageThread({
+    iterations: [requirementsRound as never, planRound as never],
+    nodes: [
+      { id: "nod_req", provenance: { stepRef: `${requirementsRound.runId}/${REQUIREMENTS_STEP_ID}` } },
+      { id: "nod_plan", provenance: { stepRef: `${planRound.runId}/${DRAFT_STEP_ID}` } },
+    ],
+  });
+  check(
+    "the requirements round projects the person's message and one requirements turn, no plan turn",
+    planTurns.length === 3 && planTurns[0]?.role === "human" && planTurns[1]?.resultNodeId === "nod_req" && planTurns[1]?.questions === null,
+    planTurns.map((entry) => `${entry.role}:${entry.resultNodeId}`).join(" "),
+  );
+  check(
+    "the plan round projects the architect's turn with its question, and no turn for the skipped requirements",
+    planTurns[2]?.resultNodeId === "nod_plan" && planTurns[2]?.questions?.[0]?.startsWith("Which licence?") === true,
+    planTurns[2]?.body,
   );
 }
 
