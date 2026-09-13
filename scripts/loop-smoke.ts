@@ -29,7 +29,7 @@ import { newId } from "../apps/hub/src/ids.js";
 import { HostError } from "../apps/hub/src/errors.js";
 import { openDecisionFor } from "../apps/hub/src/decisions.js";
 import { workspaceFor } from "../apps/hub/src/corbits-exec.js";
-import { abortBuildAttempt, startBuildAttempt } from "../apps/hub/src/build-attempt.js";
+import { abortBuildAttempt, liveBuild, startBuildAttempt, subscribeBuildOutput } from "../apps/hub/src/build-attempt.js";
 import { buildEvents } from "../apps/hub/src/engine-ledger.js";
 import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -511,7 +511,7 @@ let buildRunId = "";
   const slow = join(bin, "slow-worker");
   await writeFile(
     slow,
-    ['#!/bin/sh', 'case "$1" in', '  --help) echo "usage: worker exec <prompt>"; exit 0 ;;', '  exec) exec sleep 60 ;;', 'esac', ''].join("\n"),
+    ['#!/bin/sh', 'case "$1" in', '  --help) echo "usage: worker exec <prompt>"; exit 0 ;;', '  exec) echo "working on it"; exec sleep 60 ;;', 'esac', ''].join("\n"),
   );
   await chmod(slow, 0o755);
   process.env.SOLUTIONS_BUILDER_WORKER_BIN = slow;
@@ -522,11 +522,31 @@ let buildRunId = "";
   );
   const second = await startBuildAttempt({ actor: ACTOR, projectId, runId: requeued.runId });
   check("the new attempt runs", second.run.state === "running");
+  // The worker's output reaches a watcher as it is written, and the host
+  // says when the worker started, so a window can count up from it.
+  const watched: string[] = [];
+  let ended = false;
+  const stopWatching = subscribeBuildOutput(requeued.runId, (event) => {
+    if (event.type === "text") watched.push(event.text);
+    else ended = true;
+  });
+  for (let waited = 0; waited < 50 && !liveBuild(requeued.runId)?.transcript.includes("working on it"); waited += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  const live = liveBuild(requeued.runId);
+  check(
+    "a running attempt's output is kept as the worker writes it",
+    live !== null && live.transcript.includes("working on it") && Number.isFinite(Date.parse(live.startedAt)),
+    live ? `startedAt=${live.startedAt} transcript=${JSON.stringify(live.transcript)}` : "no live attempt",
+  );
+  check("and reaches a watcher as it lands", watched.join("").includes("working on it"));
   const cancelled = await command("build.cancel", projectId, { runId: requeued.runId, reason: "smoke" });
   check("build.cancel terminalises the running attempt", cancelled.state === "cancelled");
   check("the cancel reaches the worker process", abortBuildAttempt(requeued.runId));
-  const ended = await second.attempt;
-  check("the worker ends once cancelled", ended !== null && ended.exitStatus !== 0);
+  const outcomeOfSecond = await second.attempt;
+  check("the worker ends once cancelled", outcomeOfSecond !== null && outcomeOfSecond.exitStatus !== 0);
+  check("a watcher is told the attempt ended, and nothing is live for it", ended && liveBuild(requeued.runId) === null);
+  stopWatching();
   const afterCancel = await projectDetail(projectId, ACTOR.principalId);
   check(
     "a cancelled run stays cancelled after its worker ends",
