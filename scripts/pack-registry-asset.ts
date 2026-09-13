@@ -14,20 +14,34 @@
  *     a hand-maintained list. `vendoredClosure` (`apps/hub/src/workflow-closure.ts`,
  *     already used by that deploy path) walks each root's `workspace:*`
  *     dependency graph to the full vendored set.
+ *   - Every *real* npm package that closure (plus `WORKFLOW_PACKAGE_DEPENDENCIES`
+ *     itself) actually imports at runtime — `arktype` and its own dependency
+ *     graph, `semver`, `@logtape/logtape`, `@logtape/hono`, `hono` — walked the
+ *     same way, from each package's own real `package.json` `dependencies`.
+ *     This is not optional: our vendored `dist/` is a plain `tsc` emit, not a
+ *     bundle, so e.g. `vendor/interchange/packages/agent/dist/default-director.js`
+ *     still has a bare `import { type } from "arktype"` in it. Packing only the
+ *     `@intx/*` half and dropping this half would resolve cleanly (the
+ *     dropped names never reach the walker) while leaving an import a sidecar
+ *     would fail on at evaluation time — a resolvable-but-wrong closure is
+ *     worse than an unresolvable one. Each real npm package is packed
+ *     unmodified, straight from its installed directory (found the same way
+ *     `bun install` itself would resolve it — Bun's own module resolution
+ *     from the dependent's real location, not a guess at a store path), so
+ *     its own `dependencies`/`peerDependencies` stay exactly what npm
+ *     published.
  *
  * Each package becomes one npm-style tarball under `tarballs/<name>-<version>.tgz`
  * in the asset — the exact shape `AssetRegistrySource`
  * (`vendor/interchange/packages/tool-packaging/src/resolver.ts`) scans for.
- * A packed tarball's `dependencies` field keeps only its `@intx/*`
- * `workspace:*` entries (rewritten to `"*"`, since the asset carries exactly
- * one version of each); every other field — arktype, hono, isomorphic-git,
- * anything not vendored here — is dropped. Those are real npm packages, not
- * ours to vendor, and this issue's asset is single-source (no HTTP fallback,
- * matching `resolveWorkflowClosure`'s asset+tarball arm exactly): a
- * `dependencies` entry the asset cannot serve would fail the closure walk
- * outright rather than silently degrade. Resolving those external
- * dependencies is the mixed-registry map the real deploy wires up (CL-7887);
- * it does not belong to this asset.
+ * A packed *vendored* tarball's `dependencies` field rewrites `workspace:*`
+ * and `catalog:` specs to `"*"` (real npm ranges the vendored manifest never
+ * uses) since the asset carries exactly one version of each name; everything
+ * else in that field is kept verbatim. Real npm packages are packed with
+ * their manifests untouched. Since every name any packed manifest declares as
+ * a real dependency is itself packed alongside it, the asset is genuinely
+ * single-source: a `dependencies` entry the asset cannot serve would fail the
+ * closure walk outright rather than silently degrade.
  *
  * Idempotent: the packed set's digest is compared against
  * `package-registry.json` already on the asset, and an unchanged digest is a
@@ -38,10 +52,13 @@
  * Proof: after pushing, the script drives `AssetRegistrySource` +
  * `createClosureResolver` directly against the asset — the same two calls
  * `resolveWorkflowClosure`'s asset+tarball arm makes
- * (`vendor/interchange/packages/hub-sessions/src/workflow-closure-resolution.ts`)
- * — and resolves `@solutions-builder/app`'s closure, printing the pinned
- * manifest with integrity for every entry. No route, no HTTP, no sidecar: the
- * resolver reads tarballs out of the asset in-process.
+ * (`vendor/interchange/packages/hub-sessions/src/workflow-closure-resolution.ts`),
+ * with the resolver's internal registry name set to the asset id itself
+ * (`args.source.assetId` there), matching that arm exactly rather than a name
+ * of this script's own choosing — and resolves `@solutions-builder/app`'s
+ * closure, printing the pinned manifest with integrity for every entry. No
+ * route, no HTTP, no sidecar: the resolver reads tarballs out of the asset
+ * in-process.
  *
  * This script only builds and proves the asset. It does not touch the
  * deploy path (CL-7887) and does not install anything into the running app.
@@ -52,9 +69,9 @@ import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { gzipSync } from "node:zlib";
 import { mkdtemp, mkdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 
 import {
   AssetRegistrySource,
@@ -69,22 +86,28 @@ import { install } from "../apps/hub/src/install.js";
 import { assets as hubAssets } from "../apps/hub/src/hub-client.js";
 import { hub } from "../apps/hub/src/hub-mount.js";
 import { databaseDirectory } from "../apps/hub/src/paths.js";
-import { vendoredClosure } from "../apps/hub/src/workflow-closure.js";
+import { distFiles, readManifest, vendoredClosure, walk } from "../apps/hub/src/workflow-closure.js";
 import { WORKFLOW_PACKAGE_DEPENDENCIES } from "@solutions-builder/app/workflows/lifecycle-source";
 
+/** The asset's human-readable name — how it's found and created. Distinct
+ *  from the resolver's internal registry name (see `resolveAndPrintClosure`),
+ *  which production keys to the asset id, not this. */
 const REGISTRY_ASSET_NAME = "solutions-builder-packages";
-const VENDOR_PACKAGES_DIR = join(import.meta.dir, "..", "vendor", "interchange", "packages");
-const APP_PACKAGE_DIR = join(import.meta.dir, "..", "packages", "solutions-builder");
+const ROOT_DIR = join(import.meta.dir, "..");
+const VENDOR_PACKAGES_DIR = join(ROOT_DIR, "vendor", "interchange", "packages");
+const APP_PACKAGE_DIR = join(ROOT_DIR, "packages", "solutions-builder");
 const INDEX_PATH = "package-registry.json";
 
 type PackedFiles = Record<string, Uint8Array>;
 
-type VendoredManifest = {
+type PackageManifest = {
   name: string;
   version: string;
   type?: string;
   exports?: unknown;
   dependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+  peerDependenciesMeta?: Record<string, unknown>;
 };
 
 type PackedEntry = {
@@ -93,6 +116,10 @@ type PackedEntry = {
   readonly filename: string;
   readonly bytes: Uint8Array;
 };
+
+function encode(text: string): Uint8Array {
+  return new TextEncoder().encode(text);
+}
 
 // --- derive what to pack: WORKFLOW_PACKAGE_DEPENDENCIES is the honest
 // source for what the deployed workflow needs, not a list maintained here. ---
@@ -116,87 +143,145 @@ function vendoredShortNames(): string[] {
   return [...seen].sort();
 }
 
-/** Only the entries the asset can actually serve: `@intx/*` at `workspace:*`,
- *  rewritten to `"*"` since the asset carries exactly one version of each.
- *  Everything else (arktype, hono, isomorphic-git, ...) is a real npm
- *  package this asset does not vendor — see the file header. */
-function intxDependenciesOnly(dependencies: Record<string, string> | undefined): Record<string, string> {
+/** A `workspace:*`/`catalog:` spec is not a real npm range; rewrite it to
+ *  `"*"` since the asset carries exactly one version of the name either way.
+ *  Anything else (a real npm range on a real npm dependency) is kept as
+ *  declared. */
+function rewriteDependencies(dependencies: Record<string, string> | undefined): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [name, spec] of Object.entries(dependencies ?? {})) {
-    if (spec === "workspace:*" && name.startsWith("@intx/")) out[name] = "*";
+    out[name] = spec === "workspace:*" || spec === "catalog:" ? "*" : spec;
   }
   return out;
 }
 
-function readVendoredManifest(shortName: string): VendoredManifest {
-  return JSON.parse(readFileSync(join(VENDOR_PACKAGES_DIR, shortName, "package.json"), "utf8")) as VendoredManifest;
-}
-
-function walkFiles(dir: string, out: string[]): void {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) walkFiles(full, out);
-    else if (entry.isFile()) out.push(full);
-  }
-}
-
 /** The tarball's file tree, rooted at `package/` (the npm-tarball convention
  *  `extractTarballPackageJSON` and the sidecar's `tar.extract({strip:1})`
- *  both expect): a trimmed `package.json` plus every runtime `dist/` file.
- *  Declarations, source maps and tests are left out — nothing here type-checks
- *  or tests the packed bytes; it only evaluates them. */
-function vendoredTarballFiles(shortName: string): { manifest: VendoredManifest; files: PackedFiles } {
-  const manifest = readVendoredManifest(shortName);
-  const trimmed = {
+ *  both expect): a trimmed `package.json` plus every runtime `dist/` file
+ *  (shared with the source-tree path via `distFiles`, not a second walk).
+ *  `peerDependencies`/`peerDependenciesMeta` ride through unmodified — the
+ *  resolver validates peers by name+range against the closure, not against
+ *  this asset specifically. */
+function vendoredTarballFiles(shortName: string): { manifest: PackageManifest; files: PackedFiles } {
+  const manifest = readManifest(shortName) as PackageManifest;
+  const trimmed: PackageManifest = {
     name: manifest.name,
     version: manifest.version,
     type: manifest.type ?? "module",
     ...(manifest.exports !== undefined ? { exports: manifest.exports } : {}),
-    dependencies: intxDependenciesOnly(manifest.dependencies),
+    dependencies: rewriteDependencies(manifest.dependencies),
+    ...(manifest.peerDependencies !== undefined ? { peerDependencies: manifest.peerDependencies } : {}),
+    ...(manifest.peerDependenciesMeta !== undefined ? { peerDependenciesMeta: manifest.peerDependenciesMeta } : {}),
   };
-  const files: PackedFiles = {
-    "package.json": new TextEncoder().encode(`${JSON.stringify(trimmed, null, 2)}\n`),
-  };
-  const distDir = join(VENDOR_PACKAGES_DIR, shortName, "dist");
-  if (!statSync(distDir, { throwIfNoEntry: false })?.isDirectory()) {
-    throw new Error(`@intx/${shortName} has no dist/; run \`bun run vendor:build\` before packing the registry asset`);
-  }
-  const paths: string[] = [];
-  walkFiles(distDir, paths);
-  for (const full of paths) {
-    const rel = relative(distDir, full).split("\\").join("/");
-    if (/\.d\.ts$/.test(rel) || /\.map$/.test(rel) || /\.test\.js$/.test(rel) || rel === ".emitted") continue;
-    files[`dist/${rel}`] = new Uint8Array(readFileSync(full));
+  const files: PackedFiles = { "package.json": encode(`${JSON.stringify(trimmed, null, 2)}\n`) };
+  for (const [rel, content] of Object.entries(distFiles(shortName))) {
+    files[`dist/${rel}`] = encode(content);
   }
   return { manifest, files };
 }
 
 /** `@solutions-builder/app`'s own files, packed as-is: its `src/` tree
  *  (there is no build step — the package is consumed as source), with a
- *  `dependencies` field derived the same way (see `intxDependenciesOnly`)
- *  rather than the empty one the checked-in `package.json` carries today
- *  (everything is hoisted to the workspace root, which a standalone tarball
- *  cannot rely on). */
-function appTarballFiles(): { manifest: VendoredManifest; files: PackedFiles } {
-  const manifest = JSON.parse(readFileSync(join(APP_PACKAGE_DIR, "package.json"), "utf8")) as VendoredManifest;
-  const trimmed = {
+ *  `dependencies` field derived from `WORKFLOW_PACKAGE_DEPENDENCIES` rather
+ *  than the empty one the checked-in `package.json` carries today (everything
+ *  is hoisted to the workspace root, which a standalone tarball cannot rely
+ *  on) — `hono` included, not dropped: it is what satisfies `@logtape/hono`'s
+ *  non-optional peer requirement once `@intx/log`'s real dependency on
+ *  `@logtape/hono` pulls that package into the closure. */
+function appTarballFiles(): { manifest: PackageManifest; files: PackedFiles } {
+  const manifest = JSON.parse(readFileSync(join(APP_PACKAGE_DIR, "package.json"), "utf8")) as PackageManifest;
+  const trimmed: PackageManifest = {
     name: manifest.name,
     version: manifest.version,
     type: manifest.type ?? "module",
     ...(manifest.exports !== undefined ? { exports: manifest.exports } : {}),
-    dependencies: intxDependenciesOnly(WORKFLOW_PACKAGE_DEPENDENCIES),
+    dependencies: rewriteDependencies(WORKFLOW_PACKAGE_DEPENDENCIES),
   };
-  const files: PackedFiles = {
-    "package.json": new TextEncoder().encode(`${JSON.stringify(trimmed, null, 2)}\n`),
-  };
+  const files: PackedFiles = { "package.json": encode(`${JSON.stringify(trimmed, null, 2)}\n`) };
   const srcDir = join(APP_PACKAGE_DIR, "src");
   const paths: string[] = [];
-  walkFiles(srcDir, paths);
+  walk(srcDir, paths);
   for (const full of paths) {
     const rel = relative(APP_PACKAGE_DIR, full).split("\\").join("/"); // "src/..."
     files[rel] = new Uint8Array(readFileSync(full));
   }
   return { manifest, files };
+}
+
+// --- external (real npm) packages: found by real module resolution, not a
+// guess at where a package manager happens to store them, then packed
+// byte-for-byte from their installed directory. ---
+
+type ExternalPackage = { readonly name: string; readonly version: string; readonly dir: string };
+
+/** Resolves `name`'s real installed directory the way `bun install` itself
+ *  would: real module resolution rooted at a real dependent (falling back to
+ *  the workspace root), not a hand-parsed lockfile or a guessed store path.
+ *  Each vendored package keeps its own resolved `node_modules` (bun's
+ *  workspace linking), so resolving from the actual declaring package's
+ *  directory gets the exact version that package imports at runtime. */
+function resolveExternalPackageDir(name: string, fromDirs: readonly string[]): string {
+  for (const dir of fromDirs) {
+    try {
+      return dirname(Bun.resolveSync(`${name}/package.json`, dir));
+    } catch {
+      // Not resolvable from this root; try the next.
+    }
+  }
+  throw new Error(`could not resolve installed package "${name}" from: ${fromDirs.join(", ")}`);
+}
+
+/** BFS over real `dependencies` edges only — `peerDependencies` are not
+ *  walked, matching the platform's own resolver: a peer is validated against
+ *  whatever the closure already contains by a real dependency edge, never
+ *  fetched on its own. Seeded from every non-`@intx` entry any vendored
+ *  package's *real* manifest declares, plus `WORKFLOW_PACKAGE_DEPENDENCIES`'s
+ *  own non-`@intx` entry (`hono`) — nothing hand-listed beyond those two
+ *  already-derived sources. */
+function discoverExternalClosure(): ExternalPackage[] {
+  const found = new Map<string, ExternalPackage>();
+  const queue: { name: string; fromDirs: string[] }[] = [];
+
+  for (const shortName of vendoredShortNames()) {
+    const manifest = readManifest(shortName) as PackageManifest;
+    for (const name of Object.keys(manifest.dependencies ?? {})) {
+      if (name.startsWith("@intx/")) continue;
+      queue.push({ name, fromDirs: [join(VENDOR_PACKAGES_DIR, shortName), ROOT_DIR] });
+    }
+  }
+  for (const name of Object.keys(WORKFLOW_PACKAGE_DEPENDENCIES)) {
+    if (name.startsWith("@intx/")) continue;
+    queue.push({ name, fromDirs: [ROOT_DIR] });
+  }
+
+  while (queue.length > 0) {
+    const { name, fromDirs } = queue.shift()!;
+    if (found.has(name)) continue;
+    const dir = resolveExternalPackageDir(name, fromDirs);
+    const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as PackageManifest;
+    found.set(name, { name: manifest.name, version: manifest.version, dir });
+    for (const depName of Object.keys(manifest.dependencies ?? {})) {
+      if (found.has(depName)) continue;
+      queue.push({ name: depName, fromDirs: [dir, ROOT_DIR] });
+    }
+  }
+  return [...found.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** A real npm package's installed directory, packed unmodified — its own
+ *  `package.json`, `dependencies` and `peerDependencies` exactly as npm
+ *  published them. Only its own `node_modules` (its *own* dependencies'
+ *  bytes, packed as their own separate tarballs) is excluded. */
+function externalTarballFiles(pkg: ExternalPackage): PackedFiles {
+  const paths: string[] = [];
+  walk(pkg.dir, paths);
+  const files: PackedFiles = {};
+  for (const full of paths) {
+    const rel = relative(pkg.dir, full).split("\\").join("/");
+    if (rel === "node_modules" || rel.startsWith("node_modules/")) continue;
+    files[rel] = new Uint8Array(readFileSync(full));
+  }
+  return files;
 }
 
 /** Scoped names flatten to `@scope-tail`, per
@@ -252,16 +337,22 @@ async function packTarball(files: PackedFiles): Promise<Uint8Array> {
   }
 }
 
+async function pack(name: string, version: string, files: PackedFiles): Promise<PackedEntry> {
+  const bytes = await packTarball(files);
+  return { name, version, filename: tarballFilename(name, version), bytes };
+}
+
 async function buildPackedEntries(): Promise<PackedEntry[]> {
   const entries: PackedEntry[] = [];
   for (const shortName of vendoredShortNames()) {
     const { manifest, files } = vendoredTarballFiles(shortName);
-    const bytes = await packTarball(files);
-    entries.push({ name: manifest.name, version: manifest.version, filename: tarballFilename(manifest.name, manifest.version), bytes });
+    entries.push(await pack(manifest.name, manifest.version, files));
   }
-  const { manifest, files } = appTarballFiles();
-  const bytes = await packTarball(files);
-  entries.push({ name: manifest.name, version: manifest.version, filename: tarballFilename(manifest.name, manifest.version), bytes });
+  const app = appTarballFiles();
+  entries.push(await pack(app.manifest.name, app.manifest.version, app.files));
+  for (const external of discoverExternalClosure()) {
+    entries.push(await pack(external.name, external.version, externalTarballFiles(external)));
+  }
   entries.sort((a, b) => a.filename.localeCompare(b.filename));
   return entries;
 }
@@ -344,18 +435,24 @@ async function pushRegistryAsset(
 
 /** The proof: drive `AssetRegistrySource` + `createClosureResolver` directly
  *  against the pushed asset, the same two calls
- *  `resolveWorkflowClosure`'s asset+tarball arm makes. No route, no HTTP. */
+ *  `resolveWorkflowClosure`'s asset+tarball arm makes. The registry name
+ *  handed to both is the asset id itself, matching that arm's own
+ *  `const name = args.source.assetId` exactly — production names the
+ *  registry after the asset so a resolution error is traceable to it, and a
+ *  different name here would print a different diagnostic than production
+ *  ever would. No route, no HTTP. */
 async function resolveAndPrintClosure(assetId: string, pin: string): Promise<void> {
   const assetService = hub().assetService;
+  const registryName = assetId;
   const source = new AssetRegistrySource({
-    name: REGISTRY_ASSET_NAME,
+    name: registryName,
     assetId,
     readBlob: (path) => assetService.readAssetBlob({ assetId, path }),
     listBlobs: (dir) => assetService.listAssetBlobs({ assetId, dir }),
   });
   const resolver = createClosureResolver({
-    registries: new Map([[REGISTRY_ASSET_NAME, source]]),
-    defaultRegistry: REGISTRY_ASSET_NAME,
+    registries: new Map([[registryName, source]]),
+    defaultRegistry: registryName,
   });
 
   const manifest = await resolver.resolveClosure([parsePin(pin)]);
@@ -369,7 +466,11 @@ async function resolveAndPrintClosure(assetId: string, pin: string): Promise<voi
 }
 
 async function main(): Promise<void> {
-  console.log("Packing @solutions-builder/app and the vendored @intx/* closure...");
+  if (!existsSync(join(VENDOR_PACKAGES_DIR, "workflow", "dist"))) {
+    throw new Error("vendored packages have no dist/; run `bun run vendor:build` first");
+  }
+
+  console.log("Packing @solutions-builder/app, the vendored @intx/* closure, and the real npm packages it imports...");
   const entries = await buildPackedEntries();
   for (const entry of entries) console.log(`  packed ${entry.filename} (${String(entry.bytes.byteLength)} bytes)`);
 
