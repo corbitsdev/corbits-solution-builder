@@ -3,7 +3,9 @@
 ## Verify before asserting
 
 `bun run check` is the gate: ledger consistency, dependency boundaries,
-typecheck, and the nine-stage loop smoke. Run it before claiming anything works.
+typecheck, the nine-stage loop smoke, and the sidecar smoke that deploys the
+lifecycle as a real workflow through the process provisioner. Run it before
+claiming anything works.
 Green does not mean the product is right - drive the app for anything a person
 would see.
 
