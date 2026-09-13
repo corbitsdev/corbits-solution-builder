@@ -37,6 +37,7 @@ and say why, not to route around it.
 
 ## Conventions
 
-- Plain-English commit messages, no conventional-commit prefixes.
+- Commit messages and how to open a PR: see CONTRIBUTING.md. These rules bind
+  humans and agents alike; a pull request that does not follow them is declined.
 - One issue per defect, one PR per issue.
 - Comments explain why, not what. The code says what.
