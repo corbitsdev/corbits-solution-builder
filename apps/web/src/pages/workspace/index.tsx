@@ -447,6 +447,13 @@ export function StageWorkspace({
         </div>
       ) : null}
 
+      {/* The documents that sit beside the plan at stage 6. The stage fills
+          the window and clips, and the plan below keeps its own scrolling
+          panes, so these live in a bounded region that scrolls on its own:
+          folded, they are two lines; opened, they never push the plan out
+          of reach. */}
+      {requirements || panelReviews.length > 0 ? (
+        <div className="stage-companions">
       {requirements ? (
         <ProductRequirements
           node={requirements}
@@ -464,6 +471,8 @@ export function StageWorkspace({
       ) : null}
 
       {panelReviews.length > 0 ? <PanelReviews reviews={panelReviews} /> : null}
+        </div>
+      ) : null}
 
       {active && stage <= 7 && stage !== 4 && stage !== 5 ? (
         <StageDocument
@@ -850,36 +859,48 @@ function PanelReviews({ reviews }: { reviews: ArtifactNode[] }) {
     const match = /##\s*Verdict\s*\n+([^\n#]+)/i.exec(text);
     return match?.[1]?.trim() ?? null;
   };
+  // Folded, the line carries every principal's verdict, so the four can be
+  // compared without opening any of them.
+  const verdicts = live
+    .map((node) => `${node.variant ?? node.title}: ${verdictOf(contents.get(node.id) ?? "") ?? "…"}`)
+    .join(" · ");
 
   return (
     <Screen
       title="Independent engineering review"
       description="Four principals reviewed this plan separately. Their findings are not merged."
+      tight
     >
-      {/* The verdict rides in the tab's own count slot, so the four can be
-          compared without opening each one. */}
-      <Tabs
-        label="Panel principals"
-        active={open?.id ?? ""}
-        onChange={setOpenId}
-        tabs={live.map((node) => ({
-          id: node.id,
-          label: node.variant ?? node.title,
-        }))}
-      >
-        {/* The review reads inside the panel the tab controls, so switching
-            principals announces the finding rather than an empty region. */}
-        {() => (
-          <>
-            <p className="inline-note">
-              {open ? (verdictOf(contents.get(open.id) ?? "") ?? "No verdict stated.") : null}
-            </p>
-            <div className="document-body">
-              {body ? <Markdown source={body} /> : <p className="inline-note">Loading…</p>}
-            </div>
-          </>
-        )}
-      </Tabs>
+      <details className="document-fold">
+        <summary className="document-fold-summary">
+          <span className="document-fold-title">Reviews</span>
+          <span className="document-fold-digest">{verdicts}</span>
+        </summary>
+        <div className="document-fold-body">
+          <Tabs
+            label="Panel principals"
+            active={open?.id ?? ""}
+            onChange={setOpenId}
+            tabs={live.map((node) => ({
+              id: node.id,
+              label: node.variant ?? node.title,
+            }))}
+          >
+            {/* The review reads inside the panel the tab controls, so switching
+                principals announces the finding rather than an empty region. */}
+            {() => (
+              <>
+                <p className="inline-note">
+                  {open ? (verdictOf(contents.get(open.id) ?? "") ?? "No verdict stated.") : null}
+                </p>
+                <div className="document-body">
+                  {body ? <Markdown source={body} /> : <p className="inline-note">Loading…</p>}
+                </div>
+              </>
+            )}
+          </Tabs>
+        </div>
+      </details>
     </Screen>
   );
 }

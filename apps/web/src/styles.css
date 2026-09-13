@@ -2734,6 +2734,27 @@ button[aria-disabled="true"] {
   padding: var(--space-4) var(--space-5) var(--space-5);
 }
 
+/* The documents beside the plan at stage 6, the requirements and the
+   reviews: a region of their own above the plan that scrolls on its own
+   and never takes more than half the window, so the plan stays reachable
+   whatever is opened above it. */
+.stage-companions {
+  flex: none;
+  max-height: 50vh;
+  overflow-y: auto;
+  display: grid;
+  gap: var(--space-2);
+  align-content: start;
+}
+
+/* A folded document's body is read within the fold; the pane's own
+   scrolling belongs to the region around it. */
+.document-fold-body.document-body,
+.document-fold .document-body {
+  flex: none;
+  overflow: visible;
+}
+
 .document-fold[open] > .document-fold-body {
   border-top: 1px solid var(--wb-border);
 }
