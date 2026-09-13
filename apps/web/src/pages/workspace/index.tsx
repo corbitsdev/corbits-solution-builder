@@ -108,8 +108,13 @@ export function StageWorkspace({
   // is still on its way. "stalled" is nothing back for a while after that.
   const [begun, setBegun] = useState(false);
   const [stalled, setStalled] = useState(false);
+  // A draft is running when this window asked for one, or when the host's
+  // workflow started one on its own — every stage 4 design begins the moment
+  // stage 3 is approved. The host's activity names the step in flight.
+  const hostDrafting = current?.activity?.stepId === "draft" && current.activity.parked === false;
+  const drafting = busy === "draft" || hostDrafting;
   useEffect(() => {
-    if (busy !== "draft") {
+    if (!drafting) {
       setWriting(null);
       setBegun(false);
       setStalled(false);
@@ -128,7 +133,7 @@ export function StageWorkspace({
       source.close();
       clearTimeout(stall);
     };
-  }, [busy, detail.project.id, stage]);
+  }, [drafting, detail.project.id, stage]);
   const latest = stageNodes.find((node) => node.supersededByNodeId === null) ?? stageNodes.at(-1) ?? null;
   const active = stageNodes.find((node) => node.id === selectedNode) ?? latest;
 
@@ -360,9 +365,10 @@ export function StageWorkspace({
               stage={stage}
               said={said}
               writing={writing}
-              busy={busy === "draft"}
+              busy={drafting}
               begun={begun}
               stalled={stalled}
+              since={hostDrafting ? (current?.activity?.since ?? null) : null}
             />
             <p className="inline-note material-cue">
               Documents or images to hand over meanwhile? Drop them anywhere here, or{" "}

@@ -98,6 +98,8 @@ type FoldedRun = {
   readonly state: ReturnType<typeof emptyState>;
   /** When the run's newest event was committed, or null for a run with none. */
   readonly lastAt: number | null;
+  /** When each step's latest attempt started, by step id: how long a step has been at it. */
+  readonly stepStartedAt: ReadonlyMap<string, number>;
 };
 
 /** Every run under the deployment, folded from its committed events. */
@@ -108,19 +110,29 @@ async function foldRuns(anchorRunId: string): Promise<FoldedRun[]> {
     const events = await deploymentRuns.events(anchorRunId, runId);
     let state = emptyState(runId);
     let lastAt: number | null = null;
+    const stepStartedAt = new Map<string, number>();
     for (const event of events) {
       // The hub stores the discriminator as `type`; the runtime reads it as
       // `kind`. The stored body already carries `seq` and `type`.
       state = applyEvent(state, { ...event.body, seq: event.seq, kind: event.type } as unknown as WorkflowEvent);
       const at = typeof event.body.at === "string" ? Date.parse(event.body.at) : Number.NaN;
       if (!Number.isNaN(at) && (lastAt === null || at > lastAt)) lastAt = at;
+      if (event.type === "StepStarted" && !Number.isNaN(at) && typeof event.body.stepId === "string") {
+        stepStartedAt.set(event.body.stepId, at);
+      }
     }
-    folded.push({ runId, state, lastAt });
+    folded.push({ runId, state, lastAt, stepStartedAt });
   }
   return folded;
 }
 
-type Parked = { readonly runId: string; readonly stepId: string; readonly stage: Stage; readonly signalName: string | null };
+type Parked = {
+  readonly runId: string;
+  readonly stepId: string;
+  readonly stage: Stage;
+  readonly signalName: string | null;
+  readonly since: string | null;
+};
 
 /**
  * The steps waiting on a person. Every gate lives on the top-level run: a
@@ -141,18 +153,30 @@ function parkedSteps(runs: FoldedRun[]): Parked[] {
       const stepId = spawnedBy.get(run.runId) ?? step.stepId;
       const stage = stageOfStepId(stepId);
       if (stage === null) continue;
-      parked.push({ runId: run.runId, stepId, stage, signalName: step.awaitingSignal?.name ?? null });
+      parked.push({
+        runId: run.runId,
+        stepId,
+        stage,
+        signalName: step.awaitingSignal?.name ?? null,
+        since: sinceOf(run, step.stepId),
+      });
     }
   }
   return parked;
 }
 
+/** When a step's latest attempt started, as the hub recorded it, or null when it never started. */
+function sinceOf(run: FoldedRun, stepId: string): string | null {
+  const at = run.stepStartedAt.get(stepId);
+  return at === undefined ? null : new Date(at).toISOString();
+}
+
 /** The top-level stage step currently running, when nothing is parked. */
-function currentStep(runs: FoldedRun[]): { stepId: string; stage: Stage } | null {
+function currentStep(runs: FoldedRun[]): { stepId: string; stage: Stage; since: string | null } | null {
   for (const run of runs) {
     for (const step of run.state.steps.values()) {
       const stage = stageOfStepId(step.stepId);
-      if (step.phase === "in-flight" && stage !== null) return { stepId: step.stepId, stage };
+      if (step.phase === "in-flight" && stage !== null) return { stepId: step.stepId, stage, since: sinceOf(run, step.stepId) };
     }
   }
   return null;
@@ -176,6 +200,8 @@ export type StageStatus = {
   readonly stepId: string;
   readonly parked: boolean;
   readonly signalName: string | null;
+  /** When the step began — running, or waiting — so a window can count from it. */
+  readonly since: string | null;
 };
 
 /** Where the project's run stands, read from the hub's own event log. */
@@ -184,7 +210,7 @@ export async function projectExecutionStatus(projectId: string): Promise<StageSt
   if (!anchor) return null;
   const runs = await foldRuns(anchor);
   const [parked] = parkedSteps(runs);
-  if (parked) return { stage: parked.stage, stepId: parked.stepId, parked: true, signalName: parked.signalName };
+  if (parked) return { stage: parked.stage, stepId: parked.stepId, parked: true, signalName: parked.signalName, since: parked.since };
   const running = currentStep(runs);
   if (running) return { ...running, parked: false, signalName: null };
   return null;
