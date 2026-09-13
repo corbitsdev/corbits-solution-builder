@@ -27,12 +27,29 @@ function check(name: string, ok: boolean, detail = "") {
 /** The prefix the Rust host waits for. If this changes, both sides must. */
 const HANDSHAKE = "Solutions Builder launch URL: ";
 
+// `child.kill()` only sends the signal; it does not wait for the process to
+// actually be gone. A caller that chains `bun run smoke:launch && pgrep ...`
+// must not see a live host, so cleanup here waits for the exit, escalating to
+// SIGKILL if the child is still around after a few seconds rather than
+// hanging the smoke on a wedged process.
+async function killAndWait(child: Bun.Subprocess, timeoutMs = 5_000): Promise<void> {
+  if (child.killed) return;
+  child.kill();
+  const exited = await Promise.race([
+    child.exited.then(() => true),
+    new Promise<boolean>((resolve) => setTimeout(() => resolve(false), timeoutMs)),
+  ]);
+  if (exited) return;
+  child.kill("SIGKILL");
+  await Promise.race([child.exited, new Promise<void>((resolve) => setTimeout(resolve, timeoutMs))]);
+}
+
 async function reachesHandshake(
   command: string[],
   // Tauri passes the interface directory from its resource bundle, so a check
   // that wants to fetch a page has to pass it the same way.
   options: { serveInterface?: boolean } = {},
-): Promise<{ ok: boolean; detail: string; origin: string | null; stop: () => void }> {
+): Promise<{ ok: boolean; detail: string; origin: string | null; stop: () => Promise<void> }> {
   const dataDir = await mkdtemp(join(tmpdir(), "sb-launch-"));
   // Port 0 asks the host to bind whatever's free and report back what it
   // picked, so this never depends on - or fights over - a fixed port.
@@ -46,9 +63,9 @@ async function reachesHandshake(
     stdout: "pipe",
     stderr: "pipe",
   });
-  const stop = () => {
-    child.kill();
-    void rm(dataDir, { recursive: true, force: true });
+  const stop = async () => {
+    await killAndWait(child);
+    await rm(dataDir, { recursive: true, force: true });
   };
 
   try {
@@ -73,7 +90,7 @@ async function reachesHandshake(
     const stderr = found ? "" : (await new Response(child.stderr).text()).slice(-400);
     const spawnFailed = /EADDRINUSE|address already in use/i.test(stderr);
 
-    if (!options.serveInterface) stop();
+    if (!options.serveInterface) await stop();
 
     return {
       ok: found,
@@ -86,7 +103,7 @@ async function reachesHandshake(
       stop,
     };
   } catch (error) {
-    stop();
+    await stop();
     throw error;
   }
 }
@@ -128,7 +145,7 @@ if (await Bun.file(sidecar).exists()) {
       check("and the bundle it links", script?.status === 200, asset ?? "no bundle linked");
     }
   } finally {
-    result.stop();
+    await result.stop();
   }
 } else {
   console.log("SKIP  compiled sidecar - none built (run `bun run sidecar:build`)");
@@ -206,8 +223,8 @@ if (await Bun.file(sidecar).exists()) {
       }
     }
   } finally {
-    child.kill();
-    void rm(dataDir, { recursive: true, force: true });
+    await killAndWait(child);
+    await rm(dataDir, { recursive: true, force: true });
   }
 }
 
@@ -318,8 +335,8 @@ if (await Bun.file(sidecar).exists()) {
       check("a worker the bridge cannot drive is refused", refused.status === 400, `${refused.status}`);
     }
   } finally {
-    child.kill();
-    void rm(dataDir, { recursive: true, force: true });
+    await killAndWait(child);
+    await rm(dataDir, { recursive: true, force: true });
   }
 }
 
