@@ -502,9 +502,21 @@ function StakeholderDecks() {
       {error ? <Banner tone="error" title={error} /> : null}
       {DECK_ROLES.map((role) => {
         const design = designs?.[role] ?? DEFAULT_DECK;
+        const digest = [
+          design.template ? `style guide: ${design.template}` : `${design.theme}, ${design.typeface}`,
+          design.density,
+          design.images === "none" ? "no images" : design.images === "cover" ? "cover image" : design.images === "some" ? "some images" : "images on every slide",
+          design.notes ? "notes" : "no notes",
+        ].join(" · ");
         return (
-          <div key={role} className="deck-role">
-            <h3 className="deck-role-title">{roleLabel(role)}</h3>
+          // One line per role until it is opened: the role and a digest of
+          // its design; the controls only when disclosed.
+          <details key={role} className="deck-role">
+            <summary className="deck-role-summary">
+              <span className="deck-role-title">{roleLabel(role)}</span>
+              <span className="deck-role-digest">{digest}</span>
+            </summary>
+            <div className="deck-role-body">
             <div className="deck-role-controls">
               <label className="deck-role-control">
                 <span>Colour</span>
@@ -599,6 +611,7 @@ function StakeholderDecks() {
                 </label>
               </div>
             </div>
+            </div>
             <div className="setting-field">
               <div>
                 <strong>What the outline should emphasise</strong>
@@ -615,7 +628,8 @@ function StakeholderDecks() {
                 }}
               />
             </div>
-          </div>
+            </div>
+          </details>
         );
       })}
     </Section>
