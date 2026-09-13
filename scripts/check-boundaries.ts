@@ -96,7 +96,14 @@ const PLATFORM_PACKAGES = [
 ];
 
 /** The runtime surface the hub's product code may use without being a platform file. */
-const RUNTIME_PACKAGES = ["@intx/inference", "@intx/inference-catalog", "@intx/agent", "@intx/types", "@intx/workflow"];
+const RUNTIME_PACKAGES = [
+  "@intx/inference",
+  "@intx/inference-catalog",
+  "@intx/agent",
+  "@intx/types",
+  "@intx/workflow",
+  "@intx/hub-client",
+];
 
 /** What the app package may take from the platform: authoring, not internals. */
 const PACKAGE_ALLOWED = ["@intx/workflow", "@intx/types", "arktype"];
