@@ -44,9 +44,17 @@ const created = await createProject({
 // A workbook with two sheets, as a person would hand over.
 const workbook = new ExcelJS.Workbook();
 const invoices = workbook.addWorksheet("Invoices");
+invoices.columns = [{ width: 18 }, { width: 10 }, {}];
 invoices.addRow(["Client", "Amount", "Due"]);
 invoices.addRow(["Acme", 1200, "2026-09-30"]);
 invoices.addRow(["Globex, Inc", 850.5, "2026-10-05"]);
+invoices.addRow(["Total", { formula: "SUM(B2:B3)", result: 2050.5 }, new Date("2026-10-31T00:00:00Z")]);
+invoices.getCell("B2").numFmt = "#,##0.00";
+invoices.getCell("B3").numFmt = "#,##0.00";
+invoices.getCell("B4").numFmt = "#,##0.00";
+invoices.getCell("C4").numFmt = "yyyy-mm-dd";
+invoices.mergeCells("A6:C6");
+invoices.getCell("A6").value = "Signed off by finance";
 const notes = workbook.addWorksheet("Notes");
 notes.addRow(["Every Friday, copy last week's rows and bump the dates."]);
 const xlsx = new Uint8Array(await workbook.xlsx.writeBuffer());
@@ -77,7 +85,9 @@ check("an image's bytes are kept whole", stored !== null && stored.bytes.byteLen
 const rendered = await stageInputsForSmoke(created.projectId, 1);
 check("stage 1 is handed the material although nothing is approved yet", rendered.includes("MATERIAL THE PERSON PROVIDED: process.csv"));
 check("the CSV goes as its own text", rendered.includes("Email clients,Sam,45"));
-check("the spreadsheet goes as one CSV block per sheet", rendered.includes('Sheet "Invoices" (3 rows)') && rendered.includes('"Globex, Inc",850.5,2026-10-05') && rendered.includes('Sheet "Notes"'));
+check("the spreadsheet goes as one block per sheet, its values as CSV", rendered.includes('Sheet "Invoices" (A1:C6, 5 rows × 3 columns)') && rendered.includes('"Globex, Inc",850.5,2026-10-05') && rendered.includes('Sheet "Notes"'), rendered.match(/Sheet "Invoices"[^\n]*/)?.[0] ?? "no Invoices block");
+check("with what CSV cannot carry: the formula, the merge, the widths and the number formats", rendered.includes("Formulas:\nB4 =SUM(B2:B3) → 2050.5") && rendered.includes("Merged: A6:C6") && rendered.includes("Column widths: A 18, B 10") && rendered.includes("#,##0.00 at B2, B3, B4") && rendered.includes("yyyy-mm-dd at C4"), rendered.slice(rendered.indexOf("Merged"), rendered.indexOf("Merged") + 200));
+check("a date cell reads as a date, not as the runtime prints one", rendered.includes("Total,2050.5,2026-10-31") && !rendered.includes("GMT"));
 check("the image goes by name, with a plain note that it was not read", rendered.includes("board.png") && rendered.includes("nothing here reads images"));
 check("nothing claims to have read the image", !/read the image|the image shows/i.test(rendered));
 
