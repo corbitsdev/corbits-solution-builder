@@ -31,7 +31,7 @@ enforces the ledger, the engine that applies commands, the providers and the
 agent runs. The Interchange hub is Interchange's own hub app, mounted in this
 process (`hub-mount.ts`). Platform writes go through that hub's HTTP API
 (`hub-client.ts`) — the same calls a hosted hub would serve. Only embedding
-files (`hub-mount`, `hub-keys`, `hub-migrate`, `hub-migrations.generated`,
+files (`hub-mount`, `hub-keys`, `hub-migrate`, `hub-migrations`,
 `db`, `schema`, `migrate`) plus `hub-executor` and `hub-gaps` import
 Interchange internals. It is the only place a run's state is written and the
 only area allowed to reach a provider.
