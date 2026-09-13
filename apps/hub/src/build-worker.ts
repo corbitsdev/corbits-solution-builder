@@ -42,8 +42,12 @@ export type BuildWorkerKind = {
 
 /**
  * Corbits Code discovers shell hooks in `.corbits/hooks/` under its working
- * directory and hands `postTurn` the turn as JSON on stdin. The hook appends
- * it, one record a line, to the log named when it was written. Ignored by
+ * directory and hands each lifecycle kind its payload as JSON on stdin:
+ * `postTurn` the turn, `postRun` the whole run. The hook appends turns, one
+ * record a line, to the log named when it was written, and reads every
+ * other payload to its end and discards it — a hook that exits without
+ * reading closes the pipe under a run summary too large to buffer, and
+ * Corbits 0.3.24 dies on the broken pipe after a finished build. Ignored by
  * git inside that directory so the built software never ships it.
  */
 function corbitsTurnHook(log: string): readonly { path: string; content: string }[] {
@@ -54,8 +58,10 @@ function corbitsTurnHook(log: string): readonly { path: string; content: string 
       content: [
         "#!/bin/sh",
         "# Placed by Solutions Builder for one build attempt: each turn's report, appended as a line.",
+        "# Every other payload is read to its end so the writer never meets a closed pipe.",
         'case "$1" in',
         `  postTurn) cat >> ${quoted}; printf '\\n' >> ${quoted} ;;`,
+        "  *) cat > /dev/null ;;",
         "esac",
         "",
       ].join("\n"),

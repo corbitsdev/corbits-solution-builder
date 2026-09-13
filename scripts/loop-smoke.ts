@@ -644,6 +644,21 @@ let buildRunId = "";
   // named after the project, which is what stage 9 then verifies.
   const archive = await packageBuild(fourth.runId, "Smoke: a chess game I can actually play");
   const listed = await new Response(Bun.spawn(["tar", "-tzf", archive.absolutePath], { stdout: "pipe" }).stdout).text();
+  // The placed hook reads a run-end payload to its end rather than exiting
+  // on it: a payload larger than the pipe buffers must not be left unread.
+  const hook = Bun.spawn(["sh", join(await workspaceFor(fourth.runId), ".corbits", "hooks", "solutions-builder-turns.sh"), "postRun"], {
+    stdin: "pipe",
+    stdout: "ignore",
+    stderr: "pipe",
+  });
+  let swallowed = true;
+  try {
+    await hook.stdin.write("x".repeat(2_000_000));
+    await hook.stdin.end();
+  } catch {
+    swallowed = false;
+  }
+  check("the placed hook reads a run-end payload to its end", swallowed && (await hook.exited) === 0);
   check(
     "the build is packaged as an archive named after the project, holding the work and not the bridge's hook",
     archive.name === buildArchiveName("Smoke: a chess game I can actually play") &&
