@@ -25,6 +25,12 @@ import { Markdown } from "../markdown.jsx";
 type Policy = { audiences?: { name: string; role: string }[]; audienceQuorum?: number };
 
 /** A role's name as a person reads it. */
+/** The person's own entry — the stakeholder named "You" — ahead of everyone else, the rest as listed. */
+function youFirst<T extends { name: string }>(list: readonly T[]): T[] {
+  const isYou = (entry: T) => entry.name.trim().toLowerCase() === "you";
+  return [...list.filter(isYou), ...list.filter((entry) => !isYou(entry))];
+}
+
 function roleLabel(role: string): string {
   return role.replace(/_/g, " ");
 }
@@ -168,12 +174,18 @@ export function AudiencePackages({
   onDraftPackages: (audiences: string[]) => void;
 }) {
   const policy = (detail.project.policy ?? {}) as Policy;
-  const audiences = policy.audiences ?? [];
+  const audiences = youFirst(policy.audiences ?? []);
   const quorum = policy.audienceQuorum ?? 0;
 
-  const packages = detail.nodes.filter(
-    (node) => node.kind === "audience_package" && node.supersededByNodeId === null,
-  );
+  // Packages in the stakeholders' order, so the tabs and the decisions
+  // table read the same way, with the person's own first.
+  const rank = (name: string | null) => {
+    const index = audiences.findIndex((audience) => audience.name === name);
+    return index === -1 ? audiences.length : index;
+  };
+  const packages = detail.nodes
+    .filter((node) => node.kind === "audience_package" && node.supersededByNodeId === null)
+    .sort((a, b) => rank(a.variant) - rank(b.variant));
   // The open tab is a stakeholder, not a version: writing a package again
   // gives it a new version id, and a tab keyed on the id fell back to the
   // first stakeholder the moment the rewrite landed.
