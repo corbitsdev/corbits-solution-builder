@@ -144,12 +144,13 @@ These are product requirements, not style.
   Settings — Corbits Code by default, Claude Code or Codex otherwise — and the
   choice changes the tool, not what the interface can see. While it runs, its
   stdout and stderr stream onto the screen chunk by chunk as the worker writes
-  them, beside an elapsed-time clock, and — for a worker with a lifecycle hook
-  (Corbits Code) — its own report of each turn and the tools it called. There
-  is no timeout: a build takes as long as it takes, and cancelling it is the
-  control. There is still no per-agent roster, no steering and no checkpoint
-  resume. The interface reports each of those as unavailable rather than
-  faking them.
+  them, beside an elapsed-time clock — the text is the process's own, passed
+  through as it arrives and not parsed into events, sessions or steps — and,
+  for a worker with a lifecycle hook (Corbits Code), its own report of each
+  turn and the tools it called. There is no timeout: a build takes as long as
+  it takes, and cancelling it is the control. There is still no per-agent
+  roster, no steering and no checkpoint resume. The interface reports each of
+  those as unavailable rather than faking them.
 - **Delivery evidence is not verified byte for byte.** The manifest exists; the
   hash checks against an install target do not.
 - **Branches are in the record but not the interface.** Only the main branch
