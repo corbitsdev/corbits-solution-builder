@@ -29,7 +29,10 @@ import { newId } from "../apps/hub/src/ids.js";
 import { HostError } from "../apps/hub/src/errors.js";
 import { openDecisionFor } from "../apps/hub/src/decisions.js";
 import { workspaceFor } from "../apps/hub/src/corbits-exec.js";
-import { mkdir, writeFile } from "node:fs/promises";
+import { abortBuildAttempt, startBuildAttempt } from "../apps/hub/src/build-attempt.js";
+import { buildEvents } from "../apps/hub/src/engine-ledger.js";
+import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 
@@ -472,6 +475,71 @@ let buildRunId = "";
   );
 }
 
+// --- Stage 8: what the worker's outcome means for the run ---
+{
+  const bin = await mkdtemp(join(tmpdir(), "solutions-builder-worker-"));
+
+  // A worker that is not there — the same, to the bridge, as one the OS kills
+  // on launch. The bridge's probe fails, and the run has to say so on the
+  // ledger rather than sit under "running" beside a terminal result.
+  process.env.SOLUTIONS_BUILDER_CORBITS_BIN = join(bin, "no-such-worker");
+  const first = await startBuildAttempt({ actor: ACTOR, projectId, runId: buildRunId });
+  check("starting an attempt moves the queued run to running", first.run.state === "running");
+  const outcome = await first.attempt;
+  check(
+    "an unavailable worker reports itself so, with no exit status",
+    outcome?.available === false && outcome.exitStatus === null,
+  );
+  const afterFirst = await projectDetail(projectId, ACTOR.principalId);
+  const failedRun = afterFirst.runs.find((entry) => entry.id === buildRunId);
+  check(
+    "an unavailable worker fails the run on the ledger, with the reason",
+    failedRun?.state === "failed" && (failedRun.terminalReason ?? "").includes("unavailable"),
+    `state=${failedRun?.state} reason=${failedRun?.terminalReason ?? "none"}`,
+  );
+  check("the failed attempt is the project's current run", afterFirst.current?.id === buildRunId);
+  const recorded = await buildEvents(projectId, buildRunId);
+  check(
+    "the bridge's final event records that the worker was unavailable",
+    recorded.some(
+      (event) => event.type === "bridge.final" && (event.payload as { available?: boolean }).available === false,
+    ),
+  );
+
+  // A worker that stays up can be cancelled: the ledger decides, then the
+  // process is stopped, and the run stays cancelled once the worker ends.
+  const slow = join(bin, "slow-worker");
+  await writeFile(
+    slow,
+    ['#!/bin/sh', 'case "$1" in', '  --help) echo "usage: worker exec <prompt>"; exit 0 ;;', '  exec) exec sleep 60 ;;', 'esac', ''].join("\n"),
+  );
+  await chmod(slow, 0o755);
+  process.env.SOLUTIONS_BUILDER_CORBITS_BIN = slow;
+  const requeued = await command("build.start_attempt", projectId, { runId: buildRunId });
+  check(
+    "starting from a failed run queues a new attempt rather than running one",
+    requeued.state === "queued" && requeued.runId !== buildRunId,
+  );
+  const second = await startBuildAttempt({ actor: ACTOR, projectId, runId: requeued.runId });
+  check("the new attempt runs", second.run.state === "running");
+  const cancelled = await command("build.cancel", projectId, { runId: requeued.runId, reason: "smoke" });
+  check("build.cancel terminalises the running attempt", cancelled.state === "cancelled");
+  check("the cancel reaches the worker process", abortBuildAttempt(requeued.runId));
+  const ended = await second.attempt;
+  check("the worker ends once cancelled", ended !== null && ended.exitStatus !== 0);
+  const afterCancel = await projectDetail(projectId, ACTOR.principalId);
+  check(
+    "a cancelled run stays cancelled after its worker ends",
+    afterCancel.runs.find((entry) => entry.id === requeued.runId)?.state === "cancelled",
+  );
+
+  delete process.env.SOLUTIONS_BUILDER_CORBITS_BIN;
+  // The attempt the rest of the smoke drives by hand, through the ledger alone.
+  const third = await command("build.start_attempt", projectId, { runId: requeued.runId });
+  check("starting from a cancelled run queues a new attempt", third.state === "queued");
+  buildRunId = third.runId;
+}
+
 // --- Stage 8: attempt, a human question, and evidence ---
 {
   const running = await command("build.start_attempt", projectId, { runId: buildRunId });
@@ -563,11 +631,11 @@ let buildRunId = "";
     "the delivery manifest is recorded and accepted",
     final.manifests.length === 1 && final.manifests[0]!.acceptedAt !== null,
   );
-  // Seven stage runs (1-7), one build run, one delivery run. Nothing is
-  // deleted or reused along the way.
+  // Seven stage runs (1-7), three build runs (one failed, one cancelled, one
+  // accepted), one delivery run. Nothing is deleted or reused along the way.
   check(
     "every run is retained in history",
-    final.runs.length === 9,
+    final.runs.length === 11,
     `${final.runs.length} runs`,
   );
 

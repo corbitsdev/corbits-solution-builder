@@ -67,17 +67,40 @@ export function bridgeBinary(): string {
 
 /** Whether the CLI this bridge wraps is actually present. */
 export async function bridgeAvailable(): Promise<{ available: boolean; detail: string }> {
-  const probe = Bun.spawnSync([bridgeBinary(), "--help"], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
+  let probe: ReturnType<typeof Bun.spawnSync>;
+  try {
+    probe = Bun.spawnSync([bridgeBinary(), "--help"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+  } catch (cause) {
+    // Absent is the commonest way to be unavailable, and it surfaces as a
+    // spawn failure rather than an exit status.
+    const code = (cause as { code?: string }).code;
+    return {
+      available: false,
+      detail:
+        code === "ENOENT"
+          ? `\`${bridgeBinary()}\` is not installed, or not on this host's PATH. The build lane is unavailable.`
+          : `\`${bridgeBinary()}\` could not be started (${code ?? String(cause)}). The build lane is unavailable.`,
+    };
+  }
+  if (probe.signalCode) {
+    // Killed before it could answer. On macOS that is what an invalid code
+    // signature looks like; said plainly, since "exited null" reads as the
+    // worker's own doing.
+    return {
+      available: false,
+      detail: `\`${bridgeBinary()} --help\` was killed on launch (${probe.signalCode}), which is what an invalid code signature looks like on macOS. The build lane is unavailable.`,
+    };
+  }
   if (probe.exitCode !== 0) {
     return {
       available: false,
       detail: `\`${bridgeBinary()} --help\` exited ${probe.exitCode}. The build lane is unavailable.`,
     };
   }
-  const help = probe.stdout.toString();
+  const help = probe.stdout?.toString() ?? "";
   if (!help.includes("exec")) {
     return {
       available: false,
@@ -130,6 +153,9 @@ export async function runBuildAttempt(args: {
   });
 
   const timeout = setTimeout(() => child.kill(), args.timeoutMs ?? 30 * 60_000);
+  // A cancel can land before the process is up; an already-aborted signal
+  // never fires its listener, so it is checked as well as listened for.
+  if (args.signal?.aborted) child.kill();
   args.signal?.addEventListener("abort", () => child.kill(), { once: true });
 
   const [stdout, stderr] = await Promise.all([

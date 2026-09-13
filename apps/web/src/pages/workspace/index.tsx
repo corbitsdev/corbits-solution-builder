@@ -17,6 +17,7 @@ import {
   api,
   ApiFailure,
   type ArtifactNode,
+  type BuildEvent,
   type DesignFeedback,
   type Evaluation,
   type ProjectDetail,
@@ -442,7 +443,7 @@ export function StageWorkspace({
 
       {stage === 8 ? (
         <div className="stage-scroll">
-          <BuildPanel detail={detail} onChanged={onChanged} />
+          <BuildPanel detail={detail} onChanged={onChanged} onOpenSettings={onOpenSettings} />
           {live.length > 0 ? <PacketSummary detail={detail} onChanged={onChanged} /> : null}
         </div>
       ) : null}
@@ -684,23 +685,83 @@ function PacketSummary({
   );
 }
 
-/** Stage 8: build supervision, capability-honest about the bounded bridge. */
-function BuildPanel({ detail, onChanged }: { detail: ProjectDetail; onChanged: () => void }) {
-  const [busy, setBusy] = useState(false);
+/**
+ * Stage 8: build supervision, capability-honest about the bounded bridge.
+ *
+ * The bridge reports final text and an exit status, and whether it could run
+ * at all. Each of those is shown as what it is: a worker that is unavailable
+ * is a state with a reason and a way to the screen that explains it, never an
+ * exit status of "null". The controls are the ledger's — start, cancel while
+ * the worker is up, try again once the run is terminal — and nothing that the
+ * bridge cannot actually do.
+ */
+function BuildPanel({
+  detail,
+  onChanged,
+  onOpenSettings,
+}: {
+  detail: ProjectDetail;
+  onChanged: () => void;
+  onOpenSettings: () => void;
+}) {
+  const [busy, setBusy] = useState<"start" | "cancel" | "retry" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [events, setEvents] = useState<
-    { id: string; type: string; severity: string; payload: Record<string, unknown>; occurredAt: string }[]
-  >([]);
+  const [events, setEvents] = useState<BuildEvent[]>([]);
   const current = detail.current;
+  const state = current?.state ?? null;
+  const running = state === "running";
+  const terminal = state === "failed" || state === "cancelled" || state === "interrupted";
+
+  const loadEvents = useCallback(
+    () =>
+      api
+        .buildEvents(detail.project.id)
+        .then((result) => result.events)
+        .catch(() => [] as BuildEvent[]),
+    [detail.project.id],
+  );
 
   useEffect(() => {
-    void api
-      .buildEvents(detail.project.id)
-      .then((result) => setEvents(result.events))
-      .catch(() => setEvents([]));
-  }, [detail.project.id, detail.runs.length]);
+    let cancelled = false;
+    void loadEvents().then((next) => {
+      if (!cancelled) setEvents(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadEvents, detail.runs.length, current?.id, state]);
 
-  const final = events.find((event) => event.type === "bridge.final");
+  // The worker ends on its own time. While the run is up, its final event and
+  // the state the host settled it to are fetched until one of them lands.
+  useEffect(() => {
+    if (!running) return;
+    const timer = setInterval(() => {
+      void loadEvents().then((next) => {
+        setEvents(next);
+        if (next.some((event) => event.runId === current?.id && event.type === "bridge.final")) onChanged();
+      });
+    }, 5_000);
+    return () => clearInterval(timer);
+  }, [running, loadEvents, onChanged, current?.id]);
+
+  const final = events.find((event) => event.runId === current?.id && event.type === "bridge.final");
+  const unavailable = final?.payload.available === false;
+  const exitStatus = final ? (final.payload.exitStatus as number | null) : null;
+  const stderrTail = final ? String(final.payload.stderrTail ?? "").trim() : "";
+
+  const act = async (name: "start" | "cancel" | "retry", work: () => Promise<void>) => {
+    setBusy(name);
+    setError(null);
+    try {
+      await work();
+      onChanged();
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  };
+  const start = (runId: string) => api.startBuild(detail.project.id, runId, detail.project.revision);
 
   return (
     <div data-tour="build-panel">
@@ -708,47 +769,100 @@ function BuildPanel({ detail, onChanged }: { detail: ProjectDetail; onChanged: (
       title="Build supervision"
       status={
         current ? (
-          <StateLabel tone={current.state === "running" ? "loading" : "selected"}>
+          <StateLabel tone={running ? "loading" : terminal ? "error" : "selected"}>
             {current.state.replace(/_/g, " ")}
           </StateLabel>
         ) : null
       }
     >
-      {error ? <Banner tone="error" title="The build attempt failed to start">{error}</Banner> : null}
+      {error ? <Banner tone="error" title="The build attempt could not be changed">{error}</Banner> : null}
 
-      {current?.state === "queued" ? (
-        <Button
-          variant="primary"
-          loading={busy}
-          onClick={async () => {
-            setBusy(true);
-            setError(null);
-            try {
-              await api.startBuild(detail.project.id, current.id);
-              onChanged();
-            } catch (cause) {
-              setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-            } finally {
-              setBusy(false);
-            }
-          }}
+      {unavailable ? (
+        <Banner
+          tone="error"
+          title="The build worker is unavailable"
+          action={{ label: "Open Settings", onClick: onOpenSettings }}
         >
-          Start the build attempt
-        </Button>
+          {stderrTail || "The worker this host looks for could not be run."} Settings › Diagnostics names the worker
+          and what it reported.
+        </Banner>
       ) : null}
 
-      {final ? (
+      {terminal && !unavailable && current?.terminalReason ? (
+        <p className="inline-note">
+          {current.state === "failed" ? "Failed" : current.state === "cancelled" ? "Cancelled" : "Interrupted"}:{" "}
+          {current.terminalReason}
+        </p>
+      ) : null}
+
+      {current && (state === "queued" || running || terminal) ? (
+        <div className="button-row">
+          {state === "queued" ? (
+            <Button
+              variant="primary"
+              loading={busy === "start"}
+              onClick={() =>
+                act("start", async () => {
+                  await start(current.id);
+                })
+              }
+            >
+              Start the build attempt
+            </Button>
+          ) : null}
+          {running ? (
+            <Button
+              variant="destructive"
+              loading={busy === "cancel"}
+              onClick={() =>
+                act("cancel", async () => {
+                  await api.command(detail.project.id, "build.cancel", {
+                    expectedRevision: detail.project.revision,
+                    runId: current.id,
+                    reason: "Stopped from the build supervision screen.",
+                  });
+                })
+              }
+            >
+              Cancel the build attempt
+            </Button>
+          ) : null}
+          {terminal ? (
+            <Button
+              variant="primary"
+              loading={busy === "retry"}
+              onClick={() =>
+                act("retry", async () => {
+                  // The ledger queues a new attempt from a terminal run; it is
+                  // then started, which is the same decision as the first time.
+                  const queued = await api.command(detail.project.id, "build.start_attempt", {
+                    expectedRevision: detail.project.revision,
+                    runId: current.id,
+                  });
+                  await api.startBuild(detail.project.id, queued.runId);
+                })
+              }
+            >
+              Try the build again
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {final && !unavailable ? (
         <>
           <dl className="version-list">
             <div>
               <dt>Exit status</dt>
               <dd>
-              {final.payload.exitStatus === 0 ? (
-                <StateLabel tone="success">Exited 0</StateLabel>
-              ) : (
-                <StateLabel tone="error">Exited {String(final.payload.exitStatus)}</StateLabel>
-              )}
-            </dd>
+                {exitStatus === 0 ? (
+                  <StateLabel tone="success">Exited 0</StateLabel>
+                ) : exitStatus === null ? (
+                  <StateLabel tone="error">Ended without an exit status</StateLabel>
+                ) : (
+                  <StateLabel tone="error">Exited {exitStatus}</StateLabel>
+                )}
+              </dd>
             </div>
             <div>
               <dt>Workspace</dt>
@@ -757,10 +871,18 @@ function BuildPanel({ detail, onChanged }: { detail: ProjectDetail; onChanged: (
           </dl>
           <div className="artifact">
             <pre>{String(final.payload.finalText ?? "") || "(no output)"}</pre>
-          </div></>
-      ) : (
+          </div>
+          {exitStatus !== 0 && stderrTail ? (
+            <div className="artifact">
+              <pre>{stderrTail}</pre>
+            </div>
+          ) : null}
+        </>
+      ) : running && !final ? (
+        <p className="inline-note">The worker is running. Its final output and exit status appear here when it ends.</p>
+      ) : !final ? (
         <p className="inline-note">No build attempt has reported yet.</p>
-      )}
+      ) : null}
     </Screen>
     </div>
   );

@@ -13,9 +13,9 @@ import { COMMANDS, type Command } from "@solutions-builder/app/ledger";
 import { submitAndApprove } from "./engine.js";
 import { HostError } from "./errors.js";
 import { newId } from "./ids.js";
-import { projectDetail, readArtifactNode } from "./projects.js";
-import { buildEvents, recordBuildEvent } from "./engine-ledger.js";
-import { BRIDGE_CAPABILITIES, runBuildAttempt } from "./corbits-exec.js";
+import { projectDetail } from "./projects.js";
+import { buildEvents } from "./engine-ledger.js";
+import { abortBuildAttempt, startBuildAttempt } from "./build-attempt.js";
 import { commandFrom, parsed } from "./api.js";
 import { localActor } from "./hub-client.js";
 
@@ -62,6 +62,9 @@ export function registerDecisionRoutes(api: Hono) {
     }
 
     const outcome = await commandFrom(command, projectId, body);
+    // The ledger has decided; a worker still running for that run is stopped
+    // now, and the attempt records that ending rather than a failure.
+    if (command === "build.cancel" || command === "build.interrupt") abortBuildAttempt(outcome.runId);
     return context.json(outcome);
   });
 
@@ -103,62 +106,26 @@ export function registerDecisionRoutes(api: Hono) {
     return context.json(outcome);
   });
 
-  /** Starts a build attempt through the bounded bridge. */
+  /**
+   * Starts a build attempt through the bounded bridge. Answers as soon as the
+   * ledger says the run is running; the worker keeps going and its outcome
+   * reaches the ledger on its own, where the events route and the run's state
+   * report it. Holding the response for the whole attempt meant a person
+   * watched a spinner for up to thirty minutes with nothing they could do.
+   */
   api.post("/projects/:projectId/build/start", async (context) => {
     const projectId = context.req.param("projectId");
-    const body = (await context.req.json()) as { runId: string };
-    const started = await commandFrom("build.start_attempt", projectId, body as never);
-
-    const detail = await projectDetail(projectId, localActor().principalId);
-    const packetRun = detail.runs.find((run) => run.id === started.runId);
-    // The frozen packet is an artifact version; its hash is the version's.
-    const packet = packetRun?.packetId ? await readArtifactNode(packetRun.packetId) : null;
-    const targets = packet ? ((JSON.parse(packet.content) as { targets?: unknown }).targets ?? []) : [];
-
-    const live = detail.nodes.filter((node) => node.supersededByNodeId === null);
-    const plan = live.find((node) => node.kind === "build_plan") ?? detail.nodes.find((node) => node.kind === "build_plan");
-    const planText = plan ? (await readArtifactNode(plan.id)).content : "";
-    // The plan cites the requirements by id, so the builder is handed both:
-    // the plan says what to do, the requirements say when it is done.
-    const requirements = live.find((node) => node.kind === "product_requirements");
-    const requirementsText = requirements ? (await readArtifactNode(requirements.id)).content : "";
-
-    const outcome = await runBuildAttempt({
-      runId: started.runId,
-      prompt: [
-        `Build the software described by this approved plan, against the requirements it cites. Work in the current directory.`,
-        ``,
-        ...(requirementsText ? [`--- REQUIREMENTS ---`, requirementsText, ``] : []),
-        `--- PLAN ---`,
-        planText,
-        ``,
-        `Frozen packet: ${packet?.node.contentHash ?? "unknown"}.`,
-        `Targets: ${JSON.stringify(targets)}.`,
-      ].join("\n"),
+    const body = (await context.req.json()) as { runId: string; expectedRevision?: number };
+    const started = await startBuildAttempt({
+      actor: localActor(),
+      projectId,
+      runId: body.runId,
+      ...(typeof body.expectedRevision === "number" ? { expectedRevision: body.expectedRevision } : {}),
     });
-
-    // The bridge's result is recorded as a run event on the ledger thread,
-    // not as approval or evidence.
-    await recordBuildEvent(projectId, {
-      id: newId.event(),
-      runId: started.runId,
-      idempotencyKey: `${started.runId}:bridge-final`,
-      cursor: 1,
-      type: "bridge.final",
-      severity: outcome.exitStatus === 0 ? "info" : "error",
-      payload: {
-        bridgeId: outcome.bridgeId,
-        available: outcome.available,
-        exitStatus: outcome.exitStatus,
-        workspace: outcome.workspace,
-        finalText: outcome.finalText.slice(0, 20_000),
-        stderrTail: outcome.stderrTail,
-        capabilities: BRIDGE_CAPABILITIES,
-      },
-      occurredAt: new Date(outcome.endedAt).toISOString(),
+    started.attempt.catch((cause) => {
+      console.error(`[build] ${started.run.runId}: the attempt could not be settled on the ledger`, cause);
     });
-
-    return context.json({ run: started, bridge: outcome });
+    return context.json({ run: started.run });
   });
 
   api.get("/projects/:projectId/build/events", async (context) => {
