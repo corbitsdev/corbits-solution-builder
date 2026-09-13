@@ -44,21 +44,25 @@ calls go over HTTPS. Platform writes go through the hub API, not drizzle on
 public tables.
 
 The client installs the app. On launch it reads `GET /api/install`, which
-compares the tenant with the package manifest (version and the workflow
-definitions it must hold), and calls `POST /api/install` when anything is
-missing or stale. Install is idempotent and does, in order:
+recomputes "installed" every time by comparing the tenant's workflow
+definitions against the hash the package would generate right now — there is
+no stored version flag — and calls `POST /api/install` when anything is
+missing or stale. The same `POST /api/install` runs on first launch, on
+upgrade, and after every credential change, and is idempotent, doing, in
+order:
 
 - the owner principal and the local tenant
 - the one workflow definition generated from the ledger, `project-lifecycle`
   — the row the command ledger's own session keys on
 - the roles the ledger names, held by the owner
 - project authority for every project tenant
+- the curated kit's skills, installed as hub assets
+- the provider catalog reranked, so a model that can no longer answer drops
+  behind the ones that can
 - the per-project lifecycle deployment, once a provider is connected
-- the installed version, recorded as a host preference until Interchange has
-  an installed-app record to hold it
 
 The provider list calls install again after any credential change so bindings
-follow credentials. First run and upgrade are the same call.
+follow credentials.
 
 It prints a launch URL carrying a session token. Every API request must present
 that token. The hub proxy is guarded the same way.
@@ -81,7 +85,7 @@ The database is in `pglite/` under it. Build workspaces are in `builds/<run>`.
 |---|---|
 | `SOLUTIONS_BUILDER_DATA_DIR` | Override the data directory |
 | `SOLUTIONS_BUILDER_DIST_DIR` | Where the host serves the interface from; otherwise a `dist/` beside the executable, then the repo's |
-| `SOLUTIONS_BUILDER_HOST_COMMAND` | Debug builds of the shell only: run the host with this command instead of the bundled sidecar |
+| `SOLUTIONS_BUILDER_HOST_COMMAND` | Debug builds of the shell only: run the host with this command instead of the bundled sidecar (the host compiled to one binary by `sidecar:build`) |
 | `SOLUTIONS_BUILDER_DEV_RELOAD` | Mount `/api/dev/reload`, a change stream the development bundle subscribes to |
 | `CREDENTIAL_ENCRYPTION_KEY`, `PRINCIPAL_KEY_ENCRYPTION_KEY` | Interchange's at-rest keys; minted into the keychain when unset |
 
@@ -113,28 +117,38 @@ OAuth sign-in uses PKCE over a loopback redirect. Tokens live in the keychain.
 | `ui:build`, `ui:watch` | Build the interface |
 | `dev:desktop` | Tauri window with the host running from source |
 | `dev:fresh` | `dev:desktop` on a new empty data directory |
-| `desktop:build` | `.app` and `.dmg`, unsigned |
+| `desktop:build` | `.app` and `.dmg`; signed and notarised when the Apple env vars are set, unsigned otherwise (see "Releasing the desktop app") |
 | `sidecar:build` | Compile the host to one self-contained binary |
 | `generate:hub-migrations`, `check:hub-migrations` | Copy the vendor's migrations into the host; fail when stale |
 | `typecheck` | `tsc --noEmit`, strict |
-| `check` | Everything below, in order |
+| `check` | The load-bearing gate: hub migrations, the ledger, boundaries, typecheck, and the specific smokes `package.json`'s `check` script names — in order, not every smoke below |
 | `check:ledger` | The ledger is consistent and the generated workflows match it |
 | `check:boundaries` | The one-direction rule |
 | `check:slop`, `check:tokens`, `check:layout`, `check:markdown` | Interface audits |
+| `check:ui` | `check:slop`, `check:tokens`, `check:layout`, `check:markdown` and `smoke:responsive` together |
+| `check:full` | `check`, `check:ui`, and every smoke `check` leaves out — the full gate |
 | `smoke` | The nine-stage loop and every refusal path |
 | `smoke:upgrade` | Migrations on an existing database |
-| `smoke:launch` | Desktop launch paths |
-| `smoke:design` | Stage-4 anchored feedback |
-| `smoke:oauth` | OAuth lifecycle against the real issuers |
-| `smoke:failure` | Provider failure classification and remediation |
+| `smoke:db-lock` | Recovering from a crashed pglite lock, and refusing a second live writer |
+| `smoke:launch` | Desktop launch paths (binds a fixed port; a run left over from a failed check must be killed before a retry) |
 | `smoke:hub` | Embedded and hosted hub topologies |
-| `smoke:kit` | Specialist definitions |
+| `smoke:sidecar` | The embedded hub's own sidecar, deploying the lifecycle as a real workflow |
 | `smoke:conversation`, `smoke:guidance` | Stage conversation and the product guide |
-| `smoke:responsive` | Layout at narrow widths |
+| `smoke:material` | Source material attached to a project reaches the specialists |
+| `smoke:stakeholders` | Stakeholders changed while a project is under way |
+| `smoke:choices` | What counts as a specialist's offered choice, in prose |
+| `smoke:deck` | The stakeholder deck: an outline parsed and rendered to slides |
+| `smoke:design` | Stage-4 anchored feedback |
+| `smoke:kit` | Specialist definitions |
 | `smoke:catalog` | Provider catalog rows |
 | `smoke:agent` | Drafts through a real provider; skips cleanly without one |
+| `smoke:failure` | Provider failure classification and remediation |
+| `smoke:oauth` | OAuth lifecycle against the real issuers |
+| `smoke:transfer` | A project exported and re-imported round-trips exactly |
+| `smoke:responsive` | Layout at narrow widths |
 | `seed:demo` | A project with a decision waiting |
 | `walk` | Render every screen with fixtures for review |
+| `vendor:build` | Emit `dist/` for the vendored packages, which the sidecar needs since it runs without `intx-src`; runs on `bun install` |
 
 ## Build
 
