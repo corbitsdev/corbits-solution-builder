@@ -149,6 +149,7 @@ OAuth sign-in uses PKCE over a loopback redirect. Tokens live in the keychain.
 | `seed:demo` | A project with a decision waiting |
 | `walk` | Render every screen with fixtures for review |
 | `vendor:build` | Emit `dist/` for the vendored packages, which the sidecar needs since it runs without `intx-src`; runs on `bun install` |
+| `postinstall` | `vendor:build`, so a fresh `bun install` leaves `dist/` in place without a separate step |
 
 ## Build
 
