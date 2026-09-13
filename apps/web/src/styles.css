@@ -2838,6 +2838,11 @@ button[aria-disabled="true"] {
   margin-top: var(--space-2);
 }
 
+/* The reading sits under the file, in the file's own column. */
+.material-reading {
+  margin-top: var(--space-4);
+}
+
 /* A design in the artifacts tab: the page itself, most of the reading height. */
 .artifact-page {
   width: 100%;
