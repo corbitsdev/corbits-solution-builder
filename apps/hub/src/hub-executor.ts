@@ -373,22 +373,28 @@ async function parkedPosition(anchor: string, waitMs: number): Promise<Parked | 
  * there, with the reason logged — the command that follows then reads as
  * undeliverable rather than landing on the wrong stage.
  */
+/** How many fresh deployments the alignment will try when each one's run dies under it. */
+const REPLACEMENTS = 3;
+
 export async function alignRunWithLedger(projectId: string, ledger: LedgerPosition): Promise<"aligned" | "no_execution" | "failed"> {
-  try {
-    return await alignOnce(projectId, ledger);
-  } catch (cause) {
-    // The anchor this process remembered is dead: its sidecar was released
-    // under it, or its run failed. Forget it and resolve the deployment
-    // again, which deploys a live one, then try once more; anything else is
-    // the failure it was.
-    if (!(cause instanceof HubApiError && cause.status === 409)) throw cause;
-    console.error(`[executor] ${projectId}: the run's deployment is no longer live; deploying the lifecycle again.`);
-    forgetExecution(projectId);
-    // A replacement, not a re-resolution: a dead run leaves its deployment
-    // allocated and its digest current, so resolving again would hand the
-    // same dead anchor back.
-    if ((await anchorFor(projectId, true)) === null) return "no_execution";
-    return await alignOnce(projectId, ledger);
+  for (let replaced = 0; ; replaced += 1) {
+    try {
+      return await alignOnce(projectId, ledger);
+    } catch (cause) {
+      // The anchor this process remembered is dead: its sidecar was released
+      // under it, or its run failed. Forget it and resolve the deployment
+      // again, which deploys a live one, then try again; anything else is
+      // the failure it was. The replacement's own run can die the same way
+      // while it is walked to the ledger, so this is a bounded loop rather
+      // than one more try.
+      if (!(cause instanceof HubApiError && cause.status === 409) || replaced >= REPLACEMENTS) throw cause;
+      console.error(`[executor] ${projectId}: the run's deployment is no longer live; deploying the lifecycle again.`);
+      forgetExecution(projectId);
+      // A replacement, not a re-resolution: a dead run leaves its deployment
+      // allocated and its digest current, so resolving again would hand the
+      // same dead anchor back.
+      if ((await anchorFor(projectId, true)) === null) return "no_execution";
+    }
   }
 }
 
