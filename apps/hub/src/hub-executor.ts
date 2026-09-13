@@ -250,6 +250,8 @@ export async function deliverStageSignal(
     divergent.delete(projectId);
     return "delivered";
   } catch (cause) {
+    // Any throw here — a refused ApiError, or anything else the transport
+    // raises — is treated as a refused signal, never rethrown.
     const detail = cause instanceof ApiError ? `(${cause.status}) ${cause.message}` : String(cause);
     console.error(
       `[executor] ${projectId}: the hub did not accept ${signal.name} ${detail}; the ledger has moved and the run has not.`,
