@@ -117,6 +117,10 @@ export type HostStatus = {
   };
   build: {
     integration: string;
+    /** The worker stage 8 runs now, and the executable it resolves to. */
+    worker: { id: string; label: string; command: string };
+    /** Every worker the bridge knows how to run, in the order Settings offers them. */
+    workers: { id: string; label: string; executable: string }[];
     available: boolean;
     detail: string;
     capabilities: Record<string, boolean>;
