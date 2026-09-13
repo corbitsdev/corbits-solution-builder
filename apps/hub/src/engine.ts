@@ -13,7 +13,7 @@
  * true if there is a single place that writes.
  */
 import type { Command, Stage } from "@solutions-builder/app/ledger";
-import { PROJECT_DELETE } from "@solutions-builder/app/ledger";
+import { LEDGER, PROJECT_DELETE } from "@solutions-builder/app/ledger";
 import { evaluate, evaluateAudienceDecision, type GuardContext, type RunView } from "./guard.js";
 import { HostError, notFound } from "./errors.js";
 import { newId } from "./ids.js";
@@ -816,7 +816,11 @@ async function apply(
     case "build.fail":
     case "build.cancel":
     case "build.interrupt": {
-      const state = input.type.split(".")[1] === "interrupt" ? "interrupted" : `${input.type.split(".")[1]}ed`;
+      // The ledger row names the terminal state. Spelling it from the command
+      // wrote "canceled", a state the ledger does not have, so a cancelled run
+      // could neither be shown nor started again.
+      const state = LEDGER.find((row) => row.id === args.transitionId)?.to?.state;
+      if (!state) throw new HostError("internal_error", `No ledger row named ${args.transitionId}.`);
       terminalize(state, String(input.payload.reason ?? input.type));
       return { runId: run.id, stage: run.stage, state };
     }
