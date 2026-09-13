@@ -484,12 +484,15 @@ export function AudiencePackages({
                           Recorded {new Date(recorded.createdAt).toLocaleString()}. Decisions are
                           immutable.
                         </span>
-                      ) : earlierDecisionFor(audience.name) ? (
-                        <span className="inline-note">
-                          Asked for {earlierDecisionFor(audience.name)!.decision === "proceed" ? "proceed" : `a ${earlierDecisionFor(audience.name)!.decision}`} on an earlier review; decides again on this one.
-                        </span>
                       ) : (
                         <div className="button-row">
+                          {/* What they said on an earlier review is history beside
+                              the buttons, never in place of them. */}
+                          {earlierDecisionFor(audience.name) ? (
+                            <span className="inline-note">
+                              Said {earlierDecisionFor(audience.name)!.decision} on an earlier review; decides again here.
+                            </span>
+                          ) : null}
                           <Button
                             loading={busy === audience.name}
                             disabled={!(sent || everyoneHasOne)}
