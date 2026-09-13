@@ -15,7 +15,8 @@ import { HostError } from "./errors.js";
 import { newId } from "./ids.js";
 import { projectDetail } from "./projects.js";
 import { buildEvents } from "./engine-ledger.js";
-import { abortBuildAttempt, startBuildAttempt } from "./build-attempt.js";
+import { abortBuildAttempt, liveBuild, startBuildAttempt, subscribeBuildOutput } from "./build-attempt.js";
+import { streamSSE } from "hono/streaming";
 import { commandFrom, parsed } from "./api.js";
 import { localActor } from "./hub-client.js";
 
@@ -126,6 +127,43 @@ export function registerDecisionRoutes(api: Hono) {
       console.error(`[build] ${started.run.runId}: the attempt could not be settled on the ledger`, cause);
     });
     return context.json({ run: started.run });
+  });
+
+  /**
+   * A running attempt's output, streamed: when it started, what the worker
+   * has written so far, then each chunk as it lands, then `done`. The text is
+   * the process's own, in arrival order — the bridge holds the pipes and
+   * nothing more, so this is what it can honestly show. `idle` when this host
+   * is not running an attempt for the run, which after a host restart is the
+   * truth about a run the ledger still calls running.
+   */
+  api.get("/projects/:projectId/build/live", (context) => {
+    const runId = context.req.query("runId") ?? "";
+    return streamSSE(context, async (stream) => {
+      let id = 0;
+      const send = (event: string, data: string) => stream.writeSSE({ event, data, id: String(id++) });
+      const live = liveBuild(runId);
+      if (!live) {
+        await send("idle", "1");
+        return;
+      }
+      await send("begin", JSON.stringify({ startedAt: live.startedAt }));
+      if (live.transcript.length > 0) await send("text", JSON.stringify(live.transcript));
+      let closed = false;
+      const unsubscribe = subscribeBuildOutput(runId, (event) => {
+        if (closed) return;
+        if (event.type === "text") void send("text", JSON.stringify(event.text));
+        else {
+          closed = true;
+          void send("done", "1");
+        }
+      });
+      stream.onAbort(() => {
+        closed = true;
+        unsubscribe();
+      });
+      while (!closed) await stream.sleep(15_000).then(() => (closed ? undefined : send("ping", "")));
+    });
   });
 
   api.get("/projects/:projectId/build/events", async (context) => {
