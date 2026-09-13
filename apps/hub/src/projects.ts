@@ -529,8 +529,13 @@ export async function projectDetail(projectId: string, actorPrincipalId: string)
   // — plus whether a draft already exists — is what turns "in_progress" into
   // "Drafting" or "Revising the draft" instead of leaving the machine's own
   // vocabulary on the screen.
-  let activity: { headline: string; stepId: string | null; parked: boolean; signalName: string | null } | null =
-    null;
+  let activity: {
+    headline: string;
+    stepId: string | null;
+    parked: boolean;
+    signalName: string | null;
+    since: string | null;
+  } | null = null;
   let soloApproval = false;
   if (current) {
     const status = await projectExecutionStatus(projectId);
@@ -556,6 +561,7 @@ export async function projectDetail(projectId: string, actorPrincipalId: string)
       stepId: status?.stepId ?? null,
       parked: status?.parked ?? false,
       signalName: status?.signalName ?? null,
+      since: status?.since ?? null,
     };
     soloApproval = await soloApprovalFor(projectId, current.stage, actorPrincipalId);
   }

@@ -195,6 +195,8 @@ export type RunActivity = {
   stepId: string | null;
   parked: boolean;
   signalName: string | null;
+  /** When the step in flight, or the wait, began. */
+  since: string | null;
 };
 
 export type Run = {
