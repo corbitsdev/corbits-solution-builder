@@ -305,14 +305,25 @@ const LIVENESS_CHECK_MS = 2_000;
 /**
  * The deployment has fired its lifecycle run and nothing on it will ever
  * park again: every run under it has ended, or the runs sit with nothing
- * parked and nothing in flight and their newest event is old. The
- * deployment itself stays allocated when its run fails, so its allocation
- * status cannot say this; only the runs can. (A deployment with no runs yet
- * is not dead — it has not been fired.)
+ * parked and nothing in flight and their newest event is old, or a stage
+ * step on the lifecycle run itself has failed. The deployment itself stays
+ * allocated when its run fails, so its allocation status cannot say this;
+ * only the runs can. (A deployment with no runs yet is not dead — it has
+ * not been fired.)
+ *
+ * The failed stage step is the case a restart used to be the only way out
+ * of: a signal landing inside the runtime's own commit fails the stage's
+ * loop, the runtime routes on to the stage's gates, and those park but
+ * never complete. Folded, the run reads as parked, so the executor kept
+ * signalling a run that could not move.
  */
-function anchorIsDead(_anchor: string, runs: FoldedRun[]): boolean {
+function anchorIsDead(anchor: string, runs: FoldedRun[]): boolean {
   if (runs.length === 0) return false;
   if (runs.every((run) => ENDED.has(run.state.phase))) return true;
+  const lifecycle = runs.find((run) => run.runId === anchor);
+  if (lifecycle && [...lifecycle.state.steps.values()].some((step) => step.phase === "failed" && stageOfStepId(step.stepId) !== null)) {
+    return true;
+  }
   if (parkedSteps(runs).length > 0 || currentStep(runs) !== null) return false;
   const newest = Math.max(...runs.map((run) => run.lastAt ?? 0));
   return newest > 0 && Date.now() - newest > STALLED_AFTER_MS;
@@ -547,13 +558,25 @@ export type StageIteration = { readonly runId: string; readonly events: HubRunEv
  * loop names its children; everything past this function reads iterations as
  * plain `{runId, events}` pairs.
  */
-export async function stageIterations(projectId: string, stage: Stage): Promise<StageIteration[]> {
-  const history = await anchorsFor(projectId);
-  const current = anchors.get(projectId) ?? null;
+export async function stageIterations(
+  projectId: string,
+  stage: Stage,
+  options: {
+    /**
+     * Only the anchor the project runs under now. A round can only run
+     * there, so a caller waiting on one must not read an earlier anchor's
+     * parked iteration as the newest; the thread, which reads history,
+     * wants every anchor.
+     */
+    readonly currentOnly?: boolean;
+  } = {},
+): Promise<StageIteration[]> {
+  const current = anchors.get(projectId) ?? (await anchorFor(projectId));
+  const history = options.currentOnly ? (current ? [current] : []) : await anchorsFor(projectId);
   const loopId = reviseStepId(stage);
   const iterations: StageIteration[] = [];
   // Oldest anchor first, so the newest iteration is last whichever anchor
-  // it ran under; a caller waiting on a round reads the end of the list.
+  // it ran under.
   for (const anchor of history) {
     const runIds = new Set(await runIdsUnder(anchor, anchor === current));
     for (let index = 0; ; index += 1) {

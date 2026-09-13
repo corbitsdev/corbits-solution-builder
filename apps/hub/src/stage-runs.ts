@@ -625,7 +625,7 @@ export async function requestDraft(args: {
   async function round(cap: number, plan: Round): Promise<RoundOutcome> {
     expectLiveDraft(args.projectId, args.stage);
 
-    const before = await stageIterations(args.projectId, args.stage);
+    const before = await stageIterations(args.projectId, args.stage, { currentOnly: true });
     // The iteration this round will run in is either already visible (parked,
     // awaiting the very signal about to be delivered) or not yet spawned; either
     // way it is not a *new* entry in the list once the round is under way — the
@@ -775,7 +775,7 @@ export async function awaitIterationOutputs(args: {
   const deadline = Date.now() + args.timeoutMs;
 
   for (;;) {
-    const iterations = await stageIterations(args.projectId, args.stage);
+    const iterations = await stageIterations(args.projectId, args.stage, { currentOnly: true });
     const newestIndex = iterations.length - 1;
 
     if (newestIndex > args.afterIteration) {
