@@ -9,62 +9,53 @@ host. **The host is the product.** Closing the window does not stop it.
 Already-authorised work continues to its next human gate, the wait is recorded,
 and a desktop notification fires when it gets there.
 
-## Run it
+## Getting started
 
-Requires [Bun](https://bun.sh) 1.4 or newer. The desktop window also needs the
-[Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) (Rust and
-Xcode command line tools on macOS).
+Requires [Bun](https://bun.sh) 1.4 or newer (`engines.bun` in
+[package.json](package.json)). Check with `bun --version`.
 
 ```bash
 bun install
-bun run dev            # host from source, opens in your browser, rebuilds on edit
+bun run dev
 ```
 
-Then connect a provider in Settings: an API key, a sign-in with ChatGPT or xAI,
-or a local endpoint that speaks the OpenAI protocol. Everything else works
-without one, and `bun run seed:demo` gives you a project with a decision
-waiting.
+This builds the interface, starts the host, and opens it in your browser. When
+it works you'll see the host print its launch URL, then a browser tab open on
+it:
 
-Other ways to run it:
+```
+Solutions Builder host: http://127.0.0.1:PORT (api v1)
+Solutions Builder launch URL: http://127.0.0.1:PORT/?token=...
+```
+
+The window opens on an empty workspace. Connect a provider in Settings — an
+API key, a sign-in with ChatGPT or xAI, or a local endpoint that speaks the
+OpenAI protocol — to draft with real agents, or in another terminal run:
 
 ```bash
-bun run dev:desktop    # the same, inside the native window
-bun run dev:fresh      # the native window on a brand-new, empty workspace
-bun run desktop:build  # .app and .dmg (unsigned)
-bun run check          # every invariant checker and smoke, the gate before a commit
+bun run seed:demo
 ```
+
+for a project already through stages 1 and 2, with a decision waiting at
+stage 3.
+
+To run the desktop shell instead of the browser (`bun run dev:desktop`) or
+build it (`bun run desktop:build`), you also need the
+[Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) (Rust and
+Xcode command line tools on macOS). `bun run check` is the full gate — every
+invariant checker and smoke test — before a commit; every script, including
+these, is listed in [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md#scripts).
 
 ## Read next
 
 - [docs/PRODUCT.md](docs/PRODUCT.md): what it is, who it is for, the nine
   stages, the promises, and what is not finished.
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): the components, the three
-  enforced rules, how a stage runs, and how this sits on Interchange.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): the components, the layout of
+  the repository, and how this sits on Interchange.
 - [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md): the stack, paths and
   environment variables, credentials, every script.
-- [AGENTS.md](AGENTS.md): conventions for working in this repository.
-
-## How it is put together
-
-```
-apps/hub/src/                    the host: loopback API, guard, engine, persistence, the embedded Interchange hub
-apps/web/                    the client
-apps/desktop/                the native shell and tray
-packages/solutions-builder/src/  the app package: the transition ledger, the workflows generated from it,
-                             the specialist kit, the document format
-vendor/interchange/          the Interchange control plane, vendored (LGPL-2.1)
-```
-
-Three rules are enforced by `bun run check` rather than documented:
-
-- **One state machine.** The ledger is the single machine-readable contract,
-  the guard is its only enforcement point, and the engine is the only writer of
-  a run's state. The Interchange workflow definitions are generated from it.
-- **One direction.** The app package depends on nothing in the apps. Only the
-  hub may reach a provider. The client never imports the hub or touches
-  persistence.
-- **Exact versions.** An approval names a version and the hash the approver
-  saw. If the bytes moved, the approval is refused.
+- [AGENTS.md](AGENTS.md): conventions for working in this repository,
+  including the rules the code enforces.
 
 ## Licensing
 
