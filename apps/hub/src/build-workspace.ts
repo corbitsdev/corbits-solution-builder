@@ -35,7 +35,7 @@ This workspace was seeded by Solutions Builder. The approved plan is
 
 ## The platform
 
-Five skills under \`.agents/skills/\` carry the platform vocabulary — what
+Skills under \`.agents/skills/\` carry the platform vocabulary — what
 Interchange and CorbitsCore are, how to install their packages, how a
 deliverable is shaped on them. They are agent tooling, not project files;
 your skill tools can search and load them.
