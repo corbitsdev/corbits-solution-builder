@@ -7,30 +7,41 @@
  * condition pointing at source they do not ship. With `dist/` present the
  * sidecar resolves vendored and published packages the same way.
  *
- * Idempotent: a package is rebuilt only when a source file is newer than its
- * last emit. Emit only, no type check; the workspace typecheck owns that.
+ * Idempotent: a package is rebuilt only when its sources or the emit settings
+ * differ from what the last emit recorded. The record is a digest rather than a
+ * timestamp so an emitted `dist/` stays valid across a fresh checkout, a branch
+ * switch, or a CI cache restore — none of which preserve modification times.
+ * Emit only, no type check; the workspace typecheck owns that.
  */
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { rewriteDistTree } from "../vendor/interchange/bin/dist-rewrite";
 
 const ROOT = join(import.meta.dirname, "..");
 const PACKAGES = join(ROOT, "vendor", "interchange", "packages");
 const STAMP = ".emitted";
+const REWRITE = join(ROOT, "vendor", "interchange", "bin", "dist-rewrite.ts");
 const CONCURRENCY = 4;
 
 type Target = { name: string; dir: string };
 
-function newestMtime(dir: string): number {
-  let newest = 0;
+/** Everything under `src` that is not a test; the emit resolves JSON too. */
+function sourceFiles(dir: string, prefix = ""): string[] {
+  const out: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const path = join(dir, entry.name);
-    if (entry.isDirectory()) newest = Math.max(newest, newestMtime(path));
-    else if (entry.name.endsWith(".ts") && !entry.name.endsWith(".test.ts")) {
-      newest = Math.max(newest, statSync(path).mtimeMs);
-    }
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) out.push(...sourceFiles(join(dir, entry.name), rel));
+    else if (!entry.name.endsWith(".test.ts")) out.push(rel);
   }
-  return newest;
+  return out;
 }
 
 async function targets(): Promise<Target[]> {
@@ -51,10 +62,25 @@ async function targets(): Promise<Target[]> {
   return out;
 }
 
+function sourceDigest(target: Target): string {
+  const src = join(target.dir, "src");
+  // `emit` post-processes tsc's output with `rewriteDistTree`, so the rewriter
+  // is as much an input to what lands in `dist/` as the sources and the
+  // compiler settings are.
+  const hash = createHash("sha256").update(config).update(readFileSync(REWRITE));
+  for (const rel of sourceFiles(src).sort()) {
+    // NUL cannot occur in a path, so the name and the bytes cannot be read as
+    // each other: without it `a.ts` holding `bc` digests as `a.tsbc` holding
+    // nothing, and a rename that shifts a byte into a file goes unnoticed.
+    hash.update(rel).update("\0").update(readFileSync(join(src, rel)));
+  }
+  return hash.digest("hex");
+}
+
 function stale(target: Target): boolean {
   const stamp = join(target.dir, "dist", STAMP);
   if (!existsSync(stamp)) return true;
-  return newestMtime(join(target.dir, "src")) > statSync(stamp).mtimeMs;
+  return readFileSync(stamp, "utf8").trim() !== sourceDigest(target);
 }
 
 const config = JSON.stringify({
@@ -81,6 +107,7 @@ const config = JSON.stringify({
 });
 
 async function emit(target: Target): Promise<void> {
+  const digest = sourceDigest(target);
   const configPath = join(target.dir, "tsconfig.dist.generated.json");
   const dist = join(target.dir, "dist");
   rmSync(dist, { recursive: true, force: true });
@@ -106,7 +133,7 @@ async function emit(target: Target): Promise<void> {
       );
     }
     mkdirSync(dist, { recursive: true });
-    writeFileSync(join(dist, STAMP), "");
+    writeFileSync(join(dist, STAMP), digest);
   } finally {
     rmSync(configPath, { force: true });
   }

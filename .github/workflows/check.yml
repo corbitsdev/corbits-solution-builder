@@ -1,5 +1,11 @@
-# The merge gate. `bun run check` is what the repository already calls the
-# gate (AGENTS.md); this only makes it run where nobody can forget to.
+# The merge gate. `bun run check` is what the repository already calls the gate
+# (AGENTS.md); this only makes it run where nobody can forget to.
+#
+# The gate is split across parallel jobs because it was one sequential run in
+# which the deploying smoke — the slowest step by a wide margin — held every
+# other step behind it. The steps are independent processes sharing no state,
+# and on separate runners even the launch smoke's fixed port stops being a
+# hazard. `check:shards` asserts this matrix and `bun run check` stay in step.
 name: check
 
 on:
@@ -12,16 +18,49 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
+  shard:
+    name: check (${{ matrix.shard }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      # One shard's failure should not hide the others' results.
+      fail-fast: false
+      matrix:
+        shard: [static, core, launch, product, deploy]
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+      # An optimisation, not a correctness boundary: `vendor-build` rebuilds a
+      # restored tree its digest disagrees with. Every shard shares the key, so
+      # a miss has each rebuild only what moved and offer a save the cache keeps
+      # once — cheaper than a serial build job in front of every run.
+      - uses: actions/cache@v4
+        with:
+          path: vendor/interchange/packages/*/dist
+          key: >-
+            vendor-dist-${{ runner.os }}-${{ hashFiles('vendor/interchange/VENDORED_REVISION',
+            'scripts/vendor-build.ts', 'vendor/interchange/bin/dist-rewrite.ts',
+            'vendor/interchange/packages/*/src/**') }}
+          restore-keys: vendor-dist-${{ runner.os }}-
       # postinstall builds the vendored Interchange packages.
       - run: bun install --frozen-lockfile
-      # The launch smoke serves the built web bundle.
-      - run: bun run ui:build
-      - run: bun run check
+      - run: bun run check:${{ matrix.shard }}
+
+  # The single required status check: green only when every shard is.
+  check:
+    name: check
+    needs: shard
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every shard passed
+        if: needs.shard.result != 'success'
+        run: |
+          echo "::error::the check matrix did not pass (${{ needs.shard.result }})"
+          exit 1
