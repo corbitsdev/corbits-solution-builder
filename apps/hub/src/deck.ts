@@ -409,6 +409,23 @@ export async function ensureDeckFor(args: {
   packageNodeId: string;
   actor: { principalId: string };
 }): Promise<{ nodeId: string; built: boolean }> {
+  // A second request for slides still being built joins the build rather
+  // than starting another: a build draws images and records a version, and
+  // two of each for one press-twice is a mess the person did not ask for.
+  const inFlight = building.get(args.packageNodeId);
+  if (inFlight) return inFlight;
+  const build = findOrBuildDeck(args).finally(() => building.delete(args.packageNodeId));
+  building.set(args.packageNodeId, build);
+  return build;
+}
+
+/** The builds under way, by package version, for the request that arrives mid-build. */
+const building = new Map<string, Promise<{ nodeId: string; built: boolean }>>();
+
+async function findOrBuildDeck(args: {
+  packageNodeId: string;
+  actor: { principalId: string };
+}): Promise<{ nodeId: string; built: boolean }> {
   const { node, content } = await readArtifactNode(args.packageNodeId);
   if (node.kind !== "audience_package") {
     throw new HostError("validation_failed", "Slides are built from a stakeholder's package.", {}, false);
