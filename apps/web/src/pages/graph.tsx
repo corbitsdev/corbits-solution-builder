@@ -405,8 +405,9 @@ function BuildFile({ node }: { node: ArtifactNode }) {
   return (
     <div className="deck-file">
       <p className="inline-note">
-        {node.title} · tar.gz archive · about {size} stored. The build attempt's workspace as accepted at stage 8, without
-        installed dependencies. Its bytes are what delivery review verifies.
+        {node.title} · tar.gz archive · about {size} stored. The build attempt's workspace as the worker left it,
+        without installed dependencies; it unpacks into a directory named for the project. Its bytes are what delivery
+        review verifies once accepted.
       </p>
       <div className="button-row">
         <Button
