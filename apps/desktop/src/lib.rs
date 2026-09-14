@@ -36,6 +36,8 @@ use tauri::{
 };
 
 const HANDSHAKE_PREFIX: &str = "Solutions Builder launch URL: ";
+/** The window's name when the page has none of its own to give it. */
+const APP_TITLE: &str = "Solutions Builder";
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
@@ -363,10 +365,18 @@ fn open_window(app: &AppHandle) -> AppResult<()> {
         .launch_url
         .clone();
     WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
-        .title("Solutions Builder")
+        .title(APP_TITLE)
         .inner_size(1280.0, 880.0)
         .min_inner_size(960.0, 640.0)
         .center()
+        // The window's title is what a print job is named after on macOS, and
+        // so what "Save as PDF" offers. The page sets its title to the
+        // project's and the document's while it is printing; the window
+        // follows it, and returns to the app's own name when the page does.
+        .on_document_title_changed(|window, title| {
+            let title = title.trim();
+            let _ = window.set_title(if title.is_empty() { APP_TITLE } else { title });
+        })
         .build()?;
     Ok(())
 }
