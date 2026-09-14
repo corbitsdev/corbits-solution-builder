@@ -195,16 +195,47 @@ async function lifecycleAsset(projectId?: string): Promise<string> {
 const commitsByAsset = new Map<string, string>();
 
 /**
+ * At most one lifecycle deploy per project at a time. Every caller queues
+ * behind the project's previous one, so concurrent callers can never write
+ * two commits and pin two shas — the stampede that 409s on `lifecycleAsset`
+ * and leaves the sidecar's pack, indexed once at checkout, unable to read a
+ * sibling attempt's sha. `replace: true` needs no special case: nothing is
+ * ever deduped away, so it always runs a real redeploy.
+ */
+const tail = new Map<string, Promise<void>>();
+
+export async function ensureLifecycleDeployment(
+  projectId?: string,
+  options: { replace?: boolean } = {},
+): Promise<LifecycleDeployment> {
+  const key = projectId ?? "";
+  const ahead = tail.get(key);
+  let done: () => void;
+  tail.set(key, new Promise<void>((resolve) => (done = resolve)));
+  if (ahead) await ahead;
+  try {
+    return await ensureLifecycleDeploymentUncached(projectId, options);
+  } finally {
+    // Resolved, never rejected: the gate only orders the queue. This run's
+    // own failure propagates to its own caller and is not inherited by the
+    // next one.
+    done!();
+  }
+}
+
+/**
  * Makes sure the tenant holds a deployment of the lifecycle at the package's
  * current shape. Safe to call on every install: an unchanged tree with a
- * deployment behind it is a read, not a write.
+ * deployment behind it is a read, not a write. Callers go through
+ * `ensureLifecycleDeployment` above, which serializes concurrent callers per
+ * project; this is the racy sequence itself and must not be called directly.
  *
  * A project gets its own deployment: a deployment has one stable top-level
  * run, and that run is the project's lifecycle. The asset is named after
  * the project and lives in the workspace tenant, where the catalog offerings
  * are; a project tenant holds none of its own.
  */
-export async function ensureLifecycleDeployment(
+async function ensureLifecycleDeploymentUncached(
   projectId?: string,
   options: {
     /**
