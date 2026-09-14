@@ -4,6 +4,24 @@
  * `delivery_verification` whose source is the manifest version it checked, so
  * "what was verified, against what, when" is a version like every other
  * record here.
+ *
+ * Existence checks (below) only prove a descriptor's bytes are present; they
+ * cannot tell working software from a scaffold of stubs. `runExecutionChecks`
+ * closes that gap by actually running the deliverable's entry point, and its
+ * declared tests and typecheck, inside the workspace. This is deliberately
+ * narrow, not a sandbox (that is CL-7956's job):
+ *   - one bounded child process per check, cwd pinned to the workspace,
+ *     stdin closed so nothing can block waiting for input;
+ *   - a hard wall-clock timeout per check, escalating from SIGTERM to
+ *     SIGKILL, so a hang cannot stall verification forever;
+ *   - stdout/stderr are drained to a bounded tail as they arrive, never
+ *     buffered in full, so a runaway writer cannot exhaust memory;
+ *   - the environment is trimmed to PATH/HOME, not the host process's full
+ *     env, so ambient credentials are not handed to generated code.
+ * What it does NOT do: no filesystem, network, or process-namespace
+ * isolation. A deliverable can still read/write outside the workspace, reach
+ * the network, or leave grandchild processes running after its own process
+ * is killed — none of that is contained here.
  */
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
@@ -23,6 +41,36 @@ import { database } from "./db.js";
 import * as table from "./schema.js";
 import { readArtifactNode, writeArtifact } from "./projects.js";
 import { workspaceFor } from "./corbits-exec.js";
+
+const ENTRY_POINT_TIMEOUT_MS = 15_000;
+const SCRIPT_TIMEOUT_MS = 60_000;
+const KILL_GRACE_MS = 2_000;
+const OUTPUT_TAIL_BYTES = 4_000;
+
+/** Conventional CLI entry points tried when `package.json` names none. */
+const ENTRY_POINT_CANDIDATES = ["src/cli.ts", "src/index.ts", "src/main.ts", "index.ts", "main.ts", "bin/cli.ts"];
+
+type PackageManifest = { scripts?: Record<string, string>; main?: string };
+
+export type ExecutionKind = "entry_point" | "test" | "typecheck";
+
+/** What ran, how it was bounded, and what it produced — never just an exit code. */
+export type ExecutionCheck = {
+  readonly kind: ExecutionKind;
+  readonly command: string;
+  readonly exitCode: number | null;
+  readonly timedOut: boolean;
+  /** Whether this check counts as passing. False blocks delivery like a required descriptor would. */
+  readonly ok: boolean;
+  readonly detail: string;
+  readonly stdoutTail: string;
+  readonly stderrTail: string;
+};
+
+/** A `VerificationReport` plus what actually ran, so "present" and "works" are distinct. */
+export type DeliveryVerificationReport = VerificationReport & {
+  readonly execution: ExecutionCheck[];
+};
 
 async function hashFile(path: string): Promise<{ sha256: string; sizeBytes: number }> {
   const info = await stat(path);
@@ -66,15 +114,134 @@ async function checkDescriptor(descriptor: DeliveryDescriptor, workspaceRoot: st
   }
 }
 
-/** Checks every descriptor against the bytes under `workspaceRoot`. */
+/** Reads a pipe to a bounded tail: the last `maxBytes`, never the whole stream. */
+async function drainTail(pipe: ReadableStream<Uint8Array> | null, maxBytes: number): Promise<string> {
+  if (!pipe) return "";
+  const decoder = new TextDecoder();
+  const reader = pipe.getReader();
+  let tail = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    tail = (tail + decoder.decode(value, { stream: true })).slice(-maxBytes);
+  }
+  return tail;
+}
+
+/** Runs one command to completion or to its timeout, whichever comes first. */
+async function execBounded(
+  command: string[],
+  cwd: string,
+  timeoutMs: number,
+): Promise<{ exitCode: number | null; timedOut: boolean; stdoutTail: string; stderrTail: string }> {
+  const child = Bun.spawn(command, {
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+    stdin: "ignore",
+    // Not the host's own env: generated code gets PATH/HOME to run, nothing
+    // ambient it could exfiltrate or turn into a credential.
+    env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "" },
+  });
+  let timedOut = false;
+  let killTimer: ReturnType<typeof setTimeout> | null = null;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    child.kill();
+    killTimer = setTimeout(() => child.kill("SIGKILL"), KILL_GRACE_MS);
+  }, timeoutMs);
+  const [stdoutTail, stderrTail] = await Promise.all([
+    drainTail(child.stdout, OUTPUT_TAIL_BYTES),
+    drainTail(child.stderr, OUTPUT_TAIL_BYTES),
+  ]);
+  const exitCode = await child.exited;
+  clearTimeout(timer);
+  if (killTimer) clearTimeout(killTimer);
+  return { exitCode: timedOut ? null : exitCode, timedOut, stdoutTail, stderrTail };
+}
+
+/** The command to run the deliverable itself, or null when none is discoverable. */
+async function discoverEntryPoint(workspaceRoot: string, pkg: PackageManifest | null): Promise<string[] | null> {
+  // `--silent` matters here: without it `bun run <script>` echoes "$ <command>"
+  // to stdout, which would read as output the deliverable itself never wrote.
+  if (pkg?.scripts?.start) return ["bun", "run", "--silent", "start"];
+  if (typeof pkg?.main === "string" && containedPath(workspaceRoot, pkg.main)) return ["bun", "run", pkg.main];
+  for (const candidate of ENTRY_POINT_CANDIDATES) {
+    const resolved = containedPath(workspaceRoot, candidate);
+    if (resolved && (await Bun.file(resolved).exists())) return ["bun", "run", candidate];
+  }
+  return null;
+}
+
+async function runEntryPoint(command: string[], workspaceRoot: string): Promise<ExecutionCheck> {
+  const raw = await execBounded(command, workspaceRoot, ENTRY_POINT_TIMEOUT_MS);
+  const producedOutput = raw.stdoutTail.trim().length > 0 || raw.stderrTail.trim().length > 0;
+  const ok = !raw.timedOut && raw.exitCode === 0 && producedOutput;
+  const detail = raw.timedOut
+    ? `entry point exceeded ${ENTRY_POINT_TIMEOUT_MS}ms and was killed`
+    : raw.exitCode !== 0
+      ? `entry point exited ${raw.exitCode}`
+      : !producedOutput
+        ? "entry point exited 0 but produced no output on stdout or stderr"
+        : "entry point ran and produced output";
+  return { kind: "entry_point", command: command.join(" "), exitCode: raw.exitCode, timedOut: raw.timedOut, ok, detail, stdoutTail: raw.stdoutTail, stderrTail: raw.stderrTail };
+}
+
+async function runDeclaredScript(kind: "test" | "typecheck", workspaceRoot: string): Promise<ExecutionCheck> {
+  const command = ["bun", "run", "--silent", kind];
+  const raw = await execBounded(command, workspaceRoot, SCRIPT_TIMEOUT_MS);
+  const ok = !raw.timedOut && raw.exitCode === 0;
+  const detail = raw.timedOut
+    ? `${kind} exceeded ${SCRIPT_TIMEOUT_MS}ms and was killed`
+    : ok
+      ? `${kind} passed`
+      : `${kind} exited ${raw.exitCode}`;
+  return { kind, command: command.join(" "), exitCode: raw.exitCode, timedOut: raw.timedOut, ok, detail, stdoutTail: raw.stdoutTail, stderrTail: raw.stderrTail };
+}
+
+/**
+ * Runs the deliverable's own entry point, and its declared tests and
+ * typecheck, inside `workspaceRoot`. Nothing here is presence checking —
+ * every item is a process that actually ran, or an explicit record that it
+ * did not.
+ */
+async function runExecutionChecks(workspaceRoot: string): Promise<ExecutionCheck[]> {
+  const pkgPath = join(workspaceRoot, "package.json");
+  const pkg: PackageManifest | null = (await Bun.file(pkgPath).exists())
+    ? (JSON.parse(await Bun.file(pkgPath).text()) as PackageManifest)
+    : null;
+
+  const checks: ExecutionCheck[] = [];
+  const entry = await discoverEntryPoint(workspaceRoot, pkg);
+  if (entry) checks.push(await runEntryPoint(entry, workspaceRoot));
+  for (const kind of ["test", "typecheck"] as const) {
+    if (pkg?.scripts?.[kind]) checks.push(await runDeclaredScript(kind, workspaceRoot));
+  }
+  return checks;
+}
+
+/**
+ * Checks every descriptor against the bytes under `workspaceRoot`, then runs
+ * the deliverable to see whether it does anything. A required descriptor
+ * that is merely present no longer reads as "verified" on its own — an
+ * execution check that fails is exactly as blocking.
+ */
 export async function verifyManifest(
   manifestNodeId: string,
   manifest: DeliveryManifest,
   workspaceRoot: string,
-): Promise<VerificationReport> {
+): Promise<DeliveryVerificationReport> {
   const items: VerificationItem[] = [];
   for (const descriptor of manifest.descriptors) items.push(await checkDescriptor(descriptor, workspaceRoot));
-  return summarizeVerification(manifestNodeId, items, new Date());
+  const base = summarizeVerification(manifestNodeId, items, new Date());
+  const execution = await runExecutionChecks(workspaceRoot);
+  const executionFailures = execution.filter((check) => !check.ok).map((check) => `execution:${check.kind}`);
+  return {
+    ...base,
+    complete: base.complete && executionFailures.length === 0,
+    failed: [...base.failed, ...executionFailures],
+    execution,
+  };
 }
 
 export type ManifestVersion = {
@@ -101,18 +268,18 @@ export async function latestManifest(projectId: string): Promise<ManifestVersion
 }
 
 /** The newest verification recorded for a manifest version, or null. */
-export async function latestVerification(manifestNodeId: string): Promise<VerificationReport | null> {
+export async function latestVerification(manifestNodeId: string): Promise<DeliveryVerificationReport | null> {
   const { db } = database();
   const rows = await db
     .select({ childNodeId: table.artifactEdge.childNodeId })
     .from(table.artifactEdge)
     .where(eq(table.artifactEdge.sourceNodeId, manifestNodeId));
-  let newest: { report: VerificationReport; createdAt: Date } | null = null;
+  let newest: { report: DeliveryVerificationReport; createdAt: Date } | null = null;
   for (const row of rows) {
     const { node, content } = await readArtifactNode(row.childNodeId);
     if (node.kind !== "delivery_verification") continue;
     if (newest && newest.createdAt > node.createdAt) continue;
-    newest = { report: JSON.parse(content) as VerificationReport, createdAt: node.createdAt };
+    newest = { report: JSON.parse(content) as DeliveryVerificationReport, createdAt: node.createdAt };
   }
   return newest?.report ?? null;
 }
@@ -125,7 +292,7 @@ export async function verifyAndRecord(
   projectId: string,
   version: ManifestVersion,
   actor: { principalId: string },
-): Promise<VerificationReport> {
+): Promise<DeliveryVerificationReport> {
   // The manifest's producer run is the build run whose workspace holds the bytes.
   const buildRunId = version.node.producerRunId ?? "";
   const workspaceRoot = await workspaceFor(buildRunId);
@@ -145,11 +312,22 @@ export async function verifyAndRecord(
   return report;
 }
 
+/** One sentence naming what execution checks failed, or null when all passed. */
+function describeExecutionFailures(execution: ExecutionCheck[]): string | null {
+  const failed = execution.filter((check) => !check.ok);
+  if (failed.length === 0) return null;
+  return `execution failed: ${failed.map((check) => `${check.kind} (${check.detail})`).join("; ")}`;
+}
+
 /** What blocks acceptance of the project's latest manifest, or null when nothing does. */
 export async function deliveryBlockers(projectId: string): Promise<string | null> {
   const version = await latestManifest(projectId);
   if (!version) return null;
   const report = await latestVerification(version.node.id);
   if (!report) return "Delivery cannot be accepted yet. The manifest has not been verified.";
-  return describeBlockers(report);
+  const existence = describeBlockers(report);
+  const execution = describeExecutionFailures(report.execution);
+  if (!existence && !execution) return null;
+  if (existence && execution) return `${existence} ${execution}.`;
+  return existence ?? `Delivery cannot be accepted yet. ${execution}.`;
 }
