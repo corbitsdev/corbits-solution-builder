@@ -169,6 +169,8 @@ await prepareDatabase(host);
 await mountHub();
 const { attachLiveDrafts } = await import("../apps/hub/src/live-drafts.js");
 attachLiveDrafts();
+const { attachRoundSpend } = await import("../apps/hub/src/round-spend.js");
+attachRoundSpend();
 
 const server = Bun.serve({
   hostname: "127.0.0.1",
@@ -797,6 +799,22 @@ try {
         begun && texted && done
           ? "begin/text/done all seen"
           : `begin=${begun} text=${texted} done=${done}; live=${JSON.stringify(liveEvents).slice(0, 500)}; agent.event frames=${JSON.stringify(rawAgentEvents).slice(0, 1500)}`,
+      );
+
+      // Each round call the stub answered is the project's spend, from the
+      // same events: one record per inference.done, in the stub's own name.
+      const { usageRecords } = await import("../apps/hub/src/engine-ledger.js");
+      const { projectSpend } = await import("../apps/hub/src/spend.js");
+      const rounds = (await usageRecords(project.projectId)).filter((record) => record.source === "round");
+      const spend = await projectSpend(project.projectId);
+      const stubRow = spend.rows.find((row) => row.provider === "compatible" && row.model === "stub-large");
+      check(
+        "every round's call is recorded as the project's spend, under the connected provider that answered",
+        rounds.length >= 1 &&
+          rounds.every((record) => record.provider === "compatible" && record.model === "stub-large" && record.calls === 1 && record.runId?.startsWith("run_") === true) &&
+          stubRow !== undefined &&
+          stubRow.calls >= rounds.length,
+        `${rounds.length} round records ${JSON.stringify(rounds.slice(0, 2))}; rows=${JSON.stringify(spend.rows)}`,
       );
 
       const afterBuild = await settle((s) => s.parked && s.stage === 8 && s.signalName === roundSignal(8));
