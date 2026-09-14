@@ -17,8 +17,12 @@
  *   outputs        final text on stdout, and an exit status; while it runs,
  *                  its stdout and stderr as written, and — where the worker
  *                  has a lifecycle hook — its own report of each turn
- *   failure        non-zero exit, or the binary being absent. No timeout: a
- *                  build takes as long as it takes, and cancel is the control
+ *   failure        non-zero exit, or the binary being absent. No timeout on a
+ *                  single invocation: a turn takes as long as it takes, and
+ *                  cancel is the control. The continuation loop below does
+ *                  carry a turn and wall-clock budget across invocations,
+ *                  because unlike a single turn, "no bound on how many turns
+ *                  a stalled worker gets" is not a control worth having
  *   permissions    inherits the operator's own CLI configuration; the bridge
  *                  never passes --dangerously-skip-permissions
  *   linkage        every attempt is linked to an immutable packet and run
@@ -29,8 +33,23 @@
  * accounting, approval channels, checkpoint resume, steering, or pause. Those
  * are absent here rather than synthesised from stdout — a fake control is worse
  * than a missing one, because a human would act on it.
+ *
+ * A coding agent finishes a turn, reports, and waits for its next
+ * instruction; `corbits exec` is one-shot, so the first return would end the
+ * attempt wherever the model paused — typically well short of the plan. This
+ * bridge re-invokes the worker instead of treating that return as final,
+ * asking it to continue in the same workspace. `corbits resume`/`continue`
+ * exists but is an interactive session picker with no non-interactive form
+ * (verified against `corbits --help`), so a clean resume is not reachable
+ * through this interface; re-invoking `exec` with a continuation prompt in
+ * the same working directory is the reachable alternative. The loop stops on
+ * the workspace going stale across consecutive continuations, the abort
+ * signal, or a turn/wall-clock budget — never on "this output looks like a
+ * question" or "this output looks done": the interface gives no event for
+ * either, and guessing at one from stdout is exactly the synthesis this
+ * bridge refuses elsewhere.
  */
-import { cp, mkdir, writeFile } from "node:fs/promises";
+import { cp, mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { dataDirectory } from "./paths.js";
 import { seedBuildWorkspace, type WorkspaceSeed } from "./build-workspace.js";
@@ -57,13 +76,33 @@ export const BRIDGE_CAPABILITIES = {
   perAgentRoster: false,
 } as const;
 
+/** Why the continuation loop ended. Null when the worker never ran (unavailable). */
+export type ContinuationStopReason = "stalled" | "aborted" | "turn_budget" | "wall_clock_budget";
+
+/** Tunes the continuation loop; every field has a default. */
+export type ContinuationConfig = {
+  /** Consecutive continuations with no workspace change before giving up on progress. */
+  readonly maxStaleContinuations?: number;
+  /** Total continuations, regardless of progress, before the turn budget stops the loop. */
+  readonly maxContinuations?: number;
+  /** Wall-clock budget for the whole attempt, continuations included. */
+  readonly maxWallClockMs?: number;
+};
+
+const DEFAULT_MAX_STALE_CONTINUATIONS = 2;
+const DEFAULT_MAX_CONTINUATIONS = 8;
+const DEFAULT_MAX_WALL_CLOCK_MS = 30 * 60 * 1000;
+
 export type BridgeOutcome = {
   readonly bridgeId: string;
   /** Which worker ran, or would have. */
   readonly worker: string;
   readonly available: boolean;
+  /** The last invocation's exit status: what ended the attempt, not what every continuation returned. */
   readonly exitStatus: number | null;
+  /** Every invocation's stdout, in order, joined by a blank line — one attempt can be several invocations. */
   readonly finalText: string;
+  /** The tail of every invocation's stderr, in order. */
   readonly stderrTail: string;
   readonly workspace: string;
   /** Where the worker's turn reports were appended, or null when the worker has no hook. */
@@ -73,6 +112,16 @@ export type BridgeOutcome = {
   readonly toolCalls: number | null;
   /** The earlier attempt whose workspace this one started from, or null for a clean start. */
   readonly continuedFrom: string | null;
+  /** How many times the worker was re-invoked after its first return. 0 means it ran once. */
+  readonly continuations: number;
+  /**
+   * Why the loop stopped. Null when the worker never ran. There is no
+   * "completed" value: this interface has no event for it, and reading one
+   * out of stdout is the synthesis this bridge refuses elsewhere — so a
+   * finished plan and a budget stop look the same here except for which
+   * `ContinuationStopReason` is recorded.
+   */
+  readonly stopReason: ContinuationStopReason | null;
   readonly startedAt: string;
   readonly endedAt: string;
   /**
@@ -171,6 +220,8 @@ export async function runBuildAttempt(args: {
    * progress is inferred. A turn report is the worker's own.
    */
   onOutput?: (chunk: string, channel: "stdout" | "stderr" | "turn") => void;
+  /** Tunes when the continuation loop below gives up. Defaults apply for anything omitted. */
+  continuation?: ContinuationConfig;
 }): Promise<BridgeOutcome> {
   const startedAt = new Date().toISOString();
   const workspace = await workspaceFor(args.runId);
@@ -196,6 +247,8 @@ export async function runBuildAttempt(args: {
       turns: null,
       toolCalls: null,
       continuedFrom: args.continueFrom?.runId ?? null,
+      continuations: 0,
+      stopReason: null,
       startedAt,
       endedAt: new Date().toISOString(),
       checkpointRef: null,
@@ -217,7 +270,83 @@ export async function runBuildAttempt(args: {
   }
   const following = turnLog ? followTurnLog(turnLog, (text) => args.onOutput?.(text, "turn")) : null;
 
-  const child = Bun.spawn([worker.command, ...worker.run(args.prompt)], {
+  const config = {
+    maxStaleContinuations: args.continuation?.maxStaleContinuations ?? DEFAULT_MAX_STALE_CONTINUATIONS,
+    maxContinuations: args.continuation?.maxContinuations ?? DEFAULT_MAX_CONTINUATIONS,
+    maxWallClockMs: args.continuation?.maxWallClockMs ?? DEFAULT_MAX_WALL_CLOCK_MS,
+  };
+  const loopStartedAt = Date.now();
+
+  let invocation = await spawnWorker(worker, workspace, args.prompt, args.signal, args.onOutput);
+  const finalTextByInvocation = [invocation.finalText];
+  const stderrByInvocation = [invocation.stderr];
+  // Baseline is the workspace after the first run; staleness is measured
+  // between continuations, never against the pre-run state.
+  let previousFingerprint = await snapshotWorkspace(workspace);
+  let continuations = 0;
+  let staleStreak = 0;
+  let stopReason: ContinuationStopReason | null = null;
+
+  for (;;) {
+    if (args.signal?.aborted) {
+      stopReason = "aborted";
+      break;
+    }
+    if (continuations >= config.maxContinuations) {
+      stopReason = "turn_budget";
+      break;
+    }
+    if (Date.now() - loopStartedAt >= config.maxWallClockMs) {
+      stopReason = "wall_clock_budget";
+      break;
+    }
+    continuations += 1;
+    invocation = await spawnWorker(worker, workspace, continuationPrompt(invocation.finalText), args.signal, args.onOutput);
+    finalTextByInvocation.push(invocation.finalText);
+    stderrByInvocation.push(invocation.stderr);
+    const fingerprint = await snapshotWorkspace(workspace);
+    staleStreak = fingerprint === previousFingerprint ? staleStreak + 1 : 0;
+    previousFingerprint = fingerprint;
+    if (staleStreak >= config.maxStaleContinuations) {
+      stopReason = "stalled";
+      break;
+    }
+  }
+
+  const tally = following ? await following.stop() : null;
+
+  return {
+    bridgeId: BRIDGE_ID,
+    worker: worker.id,
+    available: true,
+    exitStatus: invocation.exitStatus,
+    // No parsing into synthetic events: each invocation's stdout, joined.
+    finalText: finalTextByInvocation.join("\n"),
+    stderrTail: stderrByInvocation.join("\n").split("\n").slice(-40).join("\n"),
+    workspace,
+    turnLog,
+    turns: tally?.turns ?? null,
+    toolCalls: tally?.toolCalls ?? null,
+    continuedFrom: args.continueFrom?.runId ?? null,
+    continuations,
+    stopReason,
+    startedAt,
+    endedAt: new Date().toISOString(),
+    checkpointRef: null,
+  };
+}
+
+type WorkerInvocation = { exitStatus: number | null; finalText: string; stderr: string };
+
+/** Runs the worker once and waits for it to exit, killing it promptly on an abort. */
+async function spawnWorker(
+  worker: BuildWorker,
+  workspace: string,
+  prompt: string,
+  signal: AbortSignal | undefined,
+  onOutput: ((chunk: string, channel: "stdout" | "stderr" | "turn") => void) | undefined,
+): Promise<WorkerInvocation> {
+  const child = Bun.spawn([worker.command, ...worker.run(prompt)], {
     cwd: workspace,
     stdout: "pipe",
     stderr: "pipe",
@@ -227,33 +356,81 @@ export async function runBuildAttempt(args: {
 
   // A cancel can land before the process is up; an already-aborted signal
   // never fires its listener, so it is checked as well as listened for.
-  if (args.signal?.aborted) child.kill();
-  args.signal?.addEventListener("abort", () => child.kill(), { once: true });
+  if (signal?.aborted) child.kill();
+  const onAbort = () => child.kill();
+  signal?.addEventListener("abort", onAbort, { once: true });
 
   const [stdout, stderr] = await Promise.all([
-    drain(child.stdout, (chunk) => args.onOutput?.(chunk, "stdout")),
-    drain(child.stderr, (chunk) => args.onOutput?.(chunk, "stderr")),
+    drain(child.stdout, (chunk) => onOutput?.(chunk, "stdout")),
+    drain(child.stderr, (chunk) => onOutput?.(chunk, "stderr")),
   ]);
   const exitStatus = await child.exited;
-  const tally = following ? await following.stop() : null;
+  signal?.removeEventListener("abort", onAbort);
 
-  return {
-    bridgeId: BRIDGE_ID,
-    worker: worker.id,
-    available: true,
-    exitStatus,
-    // Final text as the process emitted it. No parsing into synthetic events.
-    finalText: stdout,
-    stderrTail: stderr.split("\n").slice(-40).join("\n"),
-    workspace,
-    turnLog,
-    turns: tally?.turns ?? null,
-    toolCalls: tally?.toolCalls ?? null,
-    continuedFrom: args.continueFrom?.runId ?? null,
-    startedAt,
-    endedAt: new Date().toISOString(),
-    checkpointRef: null,
-  };
+  return { exitStatus, finalText: stdout, stderr };
+}
+
+/** What the worker is told on a continuation: it is still the same task, and there is no one to ask. */
+function continuationPrompt(previousFinalText: string): string {
+  const tail = previousFinalText.trim().slice(-2000);
+  return [
+    "Continue the build in this same working directory. This is not a new task: the previous turn ended before the plan was finished, and there is nobody to answer a question or approve a next step — decide and keep working rather than pausing to ask.",
+    tail.length > 0 ? `\nThe previous turn ended with:\n${tail}` : "",
+  ].join("\n");
+}
+
+/**
+ * A fingerprint of the workspace's contents, cheap enough to take after every
+ * invocation and compare to the last: unchanged across `maxStaleContinuations`
+ * continuations is this bridge's only usable signal that the worker has
+ * stopped making progress, since the interface gives no other one. Prefers
+ * `git status`/`HEAD` when the workspace is a repo — precise for both
+ * uncommitted edits and new commits — and falls back to a file list of
+ * path, size and mtime otherwise.
+ */
+async function snapshotWorkspace(workspace: string): Promise<string> {
+  if (await pathExists(join(workspace, ".git"))) {
+    const status = Bun.spawnSync(["git", "-C", workspace, "status", "--porcelain=v1", "-uall"], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const head = Bun.spawnSync(["git", "-C", workspace, "rev-parse", "HEAD"], { stdout: "pipe", stderr: "pipe" });
+    if (status.exitCode !== 0 || head.exitCode !== 0) {
+      throw new Error(`git could not report the state of ${workspace}`);
+    }
+    return `${head.stdout.toString()}\n${status.stdout.toString()}`;
+  }
+  return fileTreeFingerprint(workspace);
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch (cause) {
+    if ((cause as { code?: string }).code === "ENOENT") return false;
+    throw cause;
+  }
+}
+
+/** Every file under `root`, excluding VCS and dependency noise, as `path:size:mtime` lines. */
+async function fileTreeFingerprint(root: string): Promise<string> {
+  const entries: string[] = [];
+  async function walk(dir: string): Promise<void> {
+    for (const item of await readdir(dir, { withFileTypes: true })) {
+      if (item.name === ".git" || item.name === "node_modules") continue;
+      const full = join(dir, item.name);
+      if (item.isDirectory()) {
+        await walk(full);
+      } else if (item.isFile()) {
+        const info = await stat(full);
+        entries.push(`${full.slice(root.length)}:${info.size}:${info.mtimeMs}`);
+      }
+    }
+  }
+  await walk(root);
+  entries.sort();
+  return entries.join("\n");
 }
 
 /** Reads a pipe to its end, handing each chunk on as it lands, and returns the whole. */

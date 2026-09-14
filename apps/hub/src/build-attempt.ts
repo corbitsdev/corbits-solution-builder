@@ -190,6 +190,8 @@ async function driveAttempt(projectId: string, runId: string, continueFromRunId:
         turns: outcome.turns,
         toolCalls: outcome.toolCalls,
         continuedFrom: outcome.continuedFrom,
+        continuations: outcome.continuations,
+        stopReason: outcome.stopReason,
         archive,
         archiveError,
         finalText: outcome.finalText.slice(0, 20_000),
