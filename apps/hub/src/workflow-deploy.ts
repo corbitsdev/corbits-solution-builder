@@ -195,32 +195,26 @@ async function lifecycleAsset(projectId?: string): Promise<string> {
 const commitsByAsset = new Map<string, string>();
 
 /**
- * At most one lifecycle deploy per project at a time. Every caller queues
- * behind the project's previous one, so concurrent callers can never write
- * two commits and pin two shas — the stampede that 409s on `lifecycleAsset`
- * and leaves the sidecar's pack, indexed once at checkout, unable to read a
- * sibling attempt's sha. `replace: true` needs no special case: nothing is
- * ever deduped away, so it always runs a real redeploy.
+ * At most one lifecycle deploy per project at a time. Concurrent callers
+ * would each write a commit and pin its sha, and the sidecar's pack --
+ * indexed once at checkout -- cannot read back a sibling attempt's sha.
+ * `replace: true` needs no special case: nothing is deduped away, so it
+ * always runs a real redeploy.
  */
-const tail = new Map<string, Promise<void>>();
+const queued = new Map<string | undefined, Promise<unknown>>();
 
-export async function ensureLifecycleDeployment(
+export function ensureLifecycleDeployment(
   projectId?: string,
   options: { replace?: boolean } = {},
 ): Promise<LifecycleDeployment> {
-  const key = projectId ?? "";
-  const ahead = tail.get(key);
-  let done: () => void;
-  tail.set(key, new Promise<void>((resolve) => (done = resolve)));
-  if (ahead) await ahead;
-  try {
-    return await ensureLifecycleDeploymentUncached(projectId, options);
-  } finally {
-    // Resolved, never rejected: the gate only orders the queue. This run's
-    // own failure propagates to its own caller and is not inherited by the
-    // next one.
-    done!();
-  }
+  const deploy = () => ensureLifecycleDeploymentUncached(projectId, options);
+  // Both arms are `deploy`, so this call starts once the one ahead has
+  // settled, whether it succeeded or failed. The queue only orders; the
+  // promise handed back is the real one, so a failure reaches its own caller
+  // rather than the next caller in line.
+  const mine = (queued.get(projectId) ?? Promise.resolve()).then(deploy, deploy);
+  queued.set(projectId, mine);
+  return mine;
 }
 
 /**
