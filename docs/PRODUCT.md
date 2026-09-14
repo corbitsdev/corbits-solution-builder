@@ -109,8 +109,10 @@ product shows.
 ## Taking work out of the app
 
 A project can be exported as one file and imported into another instance of
-the app. Every approval, artifact version and build event travels with it and
-is replayed exactly as it happened rather than re-decided on the way in.
+the app. Every approval, artifact version, build event and conversation with a
+stage's specialist travels with it — a question left open at home is still
+open here — and is replayed exactly as it happened rather than re-decided on
+the way in.
 Providers and credentials never travel with it — the instance receiving the
 project connects its own.
 
