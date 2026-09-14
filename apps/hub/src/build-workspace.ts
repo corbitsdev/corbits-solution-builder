@@ -130,8 +130,16 @@ export async function seedBuildWorkspace(
   // have set. Best effort: a host without git still gets a working
   // workspace.
   try {
-    Bun.spawnSync(["git", "init", "-q"], { cwd: dir });
-    Bun.spawnSync(["git", "add", "-A"], { cwd: dir });
+    const init = Bun.spawnSync(["git", "init", "-q"], { cwd: dir, stdout: "pipe", stderr: "pipe" });
+    if (!init.success) {
+      console.error(`build-workspace: git init failed for ${dir}: ${init.stderr.toString().trim()}`);
+      return;
+    }
+    const add = Bun.spawnSync(["git", "add", "-A"], { cwd: dir, stdout: "pipe", stderr: "pipe" });
+    if (!add.success) {
+      console.error(`build-workspace: git add failed for ${dir}: ${add.stderr.toString().trim()}`);
+      return;
+    }
     // This is the app writing a baseline into a scratch workspace, not the
     // operator authoring a commit, so the operator's hooks (an author
     // allowlist, say) and signing requirement must not apply.
@@ -151,7 +159,7 @@ export async function seedBuildWorkspace(
         "-m",
         "chore: seed the workspace",
       ],
-      { cwd: dir },
+      { cwd: dir, stdout: "pipe", stderr: "pipe" },
     );
     if (!commit.success) {
       console.error(

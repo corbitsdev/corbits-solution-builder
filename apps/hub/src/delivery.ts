@@ -16,8 +16,10 @@
  *     SIGKILL, so a hang cannot stall verification forever;
  *   - stdout/stderr are drained to a bounded tail as they arrive, never
  *     buffered in full, so a runaway writer cannot exhaust memory;
- *   - the environment is trimmed to PATH/HOME, not the host process's full
- *     env, so ambient credentials are not handed to generated code.
+ *   - the environment is trimmed to PATH plus a scratch HOME made fresh for
+ *     the run and discarded after it, not the host process's full env or its
+ *     real home directory — so generated code cannot reach the operator's
+ *     `~/.ssh`, `~/.aws`, `~/.npmrc`, or git credential helpers.
  * What it does NOT do: no filesystem, network, or process-namespace
  * isolation. A deliverable can still read/write outside the workspace, reach
  * the network, or leave grandchild processes running after its own process
@@ -25,7 +27,8 @@
  */
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { isAbsolute, join, normalize } from "node:path";
 import { and, desc, eq } from "drizzle-orm";
 import {
@@ -133,15 +136,19 @@ async function execBounded(
   command: string[],
   cwd: string,
   timeoutMs: number,
+  home: string,
 ): Promise<{ exitCode: number | null; timedOut: boolean; stdoutTail: string; stderrTail: string }> {
   const child = Bun.spawn(command, {
     cwd,
     stdout: "pipe",
     stderr: "pipe",
     stdin: "ignore",
-    // Not the host's own env: generated code gets PATH/HOME to run, nothing
-    // ambient it could exfiltrate or turn into a credential.
-    env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "" },
+    // Not the host's own env, and not the host's own home directory either:
+    // `HOME` is where credentials live (`~/.ssh`, `~/.aws`, `~/.npmrc`, git
+    // credential helpers), so generated code gets PATH to find tools plus a
+    // scratch HOME made fresh for this run, nothing it could read as a
+    // credential or exfiltrate.
+    env: { PATH: process.env.PATH ?? "", HOME: home },
   });
   let timedOut = false;
   let killTimer: ReturnType<typeof setTimeout> | null = null;
@@ -173,8 +180,8 @@ async function discoverEntryPoint(workspaceRoot: string, pkg: PackageManifest | 
   return null;
 }
 
-async function runEntryPoint(command: string[], workspaceRoot: string): Promise<ExecutionCheck> {
-  const raw = await execBounded(command, workspaceRoot, ENTRY_POINT_TIMEOUT_MS);
+async function runEntryPoint(command: string[], workspaceRoot: string, home: string): Promise<ExecutionCheck> {
+  const raw = await execBounded(command, workspaceRoot, ENTRY_POINT_TIMEOUT_MS, home);
   const producedOutput = raw.stdoutTail.trim().length > 0 || raw.stderrTail.trim().length > 0;
   const ok = !raw.timedOut && raw.exitCode === 0 && producedOutput;
   const detail = raw.timedOut
@@ -187,15 +194,28 @@ async function runEntryPoint(command: string[], workspaceRoot: string): Promise<
   return { kind: "entry_point", command: command.join(" "), exitCode: raw.exitCode, timedOut: raw.timedOut, ok, detail, stdoutTail: raw.stdoutTail, stderrTail: raw.stderrTail };
 }
 
-async function runDeclaredScript(kind: "test" | "typecheck", workspaceRoot: string): Promise<ExecutionCheck> {
+async function runDeclaredScript(kind: "test" | "typecheck", workspaceRoot: string, home: string): Promise<ExecutionCheck> {
   const command = ["bun", "run", "--silent", kind];
-  const raw = await execBounded(command, workspaceRoot, SCRIPT_TIMEOUT_MS);
-  const ok = !raw.timedOut && raw.exitCode === 0;
+  const raw = await execBounded(command, workspaceRoot, SCRIPT_TIMEOUT_MS, home);
+  // `bun test` exits 1 when it finds zero test files under the deliverable —
+  // the same exit code a genuinely failing suite produces. Seeding always
+  // declares a `test` script, so a deliverable nobody wrote tests for would
+  // otherwise be blocked from delivery by accident, indistinguishable from
+  // one whose tests actually fail. This is a deliberate call: "no tests
+  // exist yet" is read from bun's own message and treated as passing, not
+  // as a failure this check is in a position to force — whether a
+  // deliverable needs tests is a decision for delivery review, not this
+  // process's exit code.
+  const noTestFiles =
+    kind === "test" && !raw.timedOut && /No tests found!|0 test files matching/.test(raw.stderrTail);
+  const ok = !raw.timedOut && (raw.exitCode === 0 || noTestFiles);
   const detail = raw.timedOut
     ? `${kind} exceeded ${SCRIPT_TIMEOUT_MS}ms and was killed`
-    : ok
-      ? `${kind} passed`
-      : `${kind} exited ${raw.exitCode}`;
+    : noTestFiles
+      ? "no test files were found; not treated as a failure"
+      : ok
+        ? `${kind} passed`
+        : `${kind} exited ${raw.exitCode}`;
   return { kind, command: command.join(" "), exitCode: raw.exitCode, timedOut: raw.timedOut, ok, detail, stdoutTail: raw.stdoutTail, stderrTail: raw.stderrTail };
 }
 
@@ -211,13 +231,20 @@ async function runExecutionChecks(workspaceRoot: string): Promise<ExecutionCheck
     ? (JSON.parse(await Bun.file(pkgPath).text()) as PackageManifest)
     : null;
 
-  const checks: ExecutionCheck[] = [];
-  const entry = await discoverEntryPoint(workspaceRoot, pkg);
-  if (entry) checks.push(await runEntryPoint(entry, workspaceRoot));
-  for (const kind of ["test", "typecheck"] as const) {
-    if (pkg?.scripts?.[kind]) checks.push(await runDeclaredScript(kind, workspaceRoot));
+  // One scratch HOME for every check in this run, made fresh and discarded
+  // after — never the host's real home directory (see the file header).
+  const home = await mkdtemp(join(tmpdir(), "solutions-builder-deliverable-home-"));
+  try {
+    const checks: ExecutionCheck[] = [];
+    const entry = await discoverEntryPoint(workspaceRoot, pkg);
+    if (entry) checks.push(await runEntryPoint(entry, workspaceRoot, home));
+    for (const kind of ["test", "typecheck"] as const) {
+      if (pkg?.scripts?.[kind]) checks.push(await runDeclaredScript(kind, workspaceRoot, home));
+    }
+    return checks;
+  } finally {
+    await rm(home, { recursive: true, force: true });
   }
-  return checks;
 }
 
 /**

@@ -17,12 +17,17 @@
  *   outputs        final text on stdout, and an exit status; while it runs,
  *                  its stdout and stderr as written, and — where the worker
  *                  has a lifecycle hook — its own report of each turn
- *   failure        non-zero exit, or the binary being absent. No timeout on a
- *                  single invocation: a turn takes as long as it takes, and
- *                  cancel is the control. The continuation loop below does
- *                  carry a turn and wall-clock budget across invocations,
- *                  because unlike a single turn, "no bound on how many turns
- *                  a stalled worker gets" is not a control worth having
+ *   failure        non-zero exit, or the binary being absent. A turn is not
+ *                  killed the moment it is slow — a worker mid-build should
+ *                  not be cut off capriciously — but the attempt's
+ *                  wall-clock budget is a deadline on the whole attempt, not
+ *                  just the gaps between invocations: it bounds whichever
+ *                  invocation is running when it expires, single turn or
+ *                  not, because an unbounded invocation makes the budget a
+ *                  fiction. The continuation loop below also carries a turn
+ *                  budget across invocations, because unlike a single turn,
+ *                  "no bound on how many turns a stalled worker gets" is not
+ *                  a control worth having
  *   permissions    inherits the operator's own CLI configuration; the bridge
  *                  never passes --dangerously-skip-permissions
  *   linkage        every attempt is linked to an immutable packet and run
@@ -276,8 +281,22 @@ export async function runBuildAttempt(args: {
     maxWallClockMs: args.continuation?.maxWallClockMs ?? DEFAULT_MAX_WALL_CLOCK_MS,
   };
   const loopStartedAt = Date.now();
+  const deadlineAt = loopStartedAt + config.maxWallClockMs;
 
-  let invocation = await spawnWorker(worker, workspace, args.prompt, args.signal, args.onOutput);
+  // Bounds one invocation to whatever is left of the attempt's wall-clock
+  // budget: a deadline signal merged with the caller's own abort, so the
+  // budget reaches inside a hung invocation rather than only being checked
+  // between them. `timedOut` distinguishes "the deadline is why this
+  // invocation ended" from an ordinary cancel, so the loop can report
+  // `wall_clock_budget` rather than `aborted`.
+  async function invokeBounded(prompt: string): Promise<{ invocation: WorkerInvocation; timedOut: boolean }> {
+    const deadlineSignal = AbortSignal.timeout(Math.max(0, deadlineAt - Date.now()));
+    const bounded = args.signal ? AbortSignal.any([args.signal, deadlineSignal]) : deadlineSignal;
+    const invocation = await spawnWorker(worker, workspace, prompt, bounded, args.onOutput);
+    return { invocation, timedOut: deadlineSignal.aborted };
+  }
+
+  let { invocation, timedOut } = await invokeBounded(args.prompt);
   const finalTextByInvocation = [invocation.finalText];
   const stderrByInvocation = [invocation.stderr];
   // Baseline is the workspace after the first run; staleness is measured
@@ -285,9 +304,9 @@ export async function runBuildAttempt(args: {
   let previousFingerprint = await snapshotWorkspace(workspace);
   let continuations = 0;
   let staleStreak = 0;
-  let stopReason: ContinuationStopReason | null = null;
+  let stopReason: ContinuationStopReason | null = timedOut ? "wall_clock_budget" : null;
 
-  for (;;) {
+  while (stopReason === null) {
     if (args.signal?.aborted) {
       stopReason = "aborted";
       break;
@@ -301,9 +320,14 @@ export async function runBuildAttempt(args: {
       break;
     }
     continuations += 1;
-    invocation = await spawnWorker(worker, workspace, continuationPrompt(invocation.finalText), args.signal, args.onOutput);
+    const next = await invokeBounded(continuationPrompt(invocation.finalText));
+    invocation = next.invocation;
     finalTextByInvocation.push(invocation.finalText);
     stderrByInvocation.push(invocation.stderr);
+    if (next.timedOut) {
+      stopReason = "wall_clock_budget";
+      break;
+    }
     const fingerprint = await snapshotWorkspace(workspace);
     staleStreak = fingerprint === previousFingerprint ? staleStreak + 1 : 0;
     previousFingerprint = fingerprint;
@@ -338,7 +362,19 @@ export async function runBuildAttempt(args: {
 
 type WorkerInvocation = { exitStatus: number | null; finalText: string; stderr: string };
 
-/** Runs the worker once and waits for it to exit, killing it promptly on an abort. */
+/** How long a SIGTERM'd worker gets before SIGKILL. */
+const KILL_GRACE_MS = 5_000;
+/** How much longer the drains get, after SIGKILL, before they are force-stopped. */
+const DRAIN_GRACE_MS = 2_000;
+
+/**
+ * Runs the worker once and waits for it to exit. On abort, `child.kill()` is
+ * a request the worker can ignore (or a grandchild can survive holding the
+ * stdout/stderr pipe open) — so an unresponsive worker is escalated to
+ * SIGKILL after a grace period, and the drains themselves are force-stopped
+ * shortly after that, so this function always resolves in bounded time once
+ * aborted rather than hanging on a pipe nothing will ever close.
+ */
 async function spawnWorker(
   worker: BuildWorker,
   workspace: string,
@@ -354,18 +390,36 @@ async function spawnWorker(
     env: { ...process.env },
   });
 
+  const drainAbort = new AbortController();
+  let terminating = false;
+  let cancelDrainTimer = () => {};
+  const terminate = () => {
+    if (terminating) return;
+    terminating = true;
+    child.kill();
+    const killTimer = setTimeout(() => child.kill("SIGKILL"), KILL_GRACE_MS);
+    // Deliberately NOT cancelled when `child.exited` resolves: a grandchild
+    // that inherited the pipe (this shell worker's `sleep`, say) can keep
+    // its write end open long after the direct child has died, which is
+    // exactly the case this timer exists to bound. Only clearing it once
+    // the drains themselves finish (below) avoids that trap.
+    const drainTimer = setTimeout(() => drainAbort.abort(), KILL_GRACE_MS + DRAIN_GRACE_MS);
+    cancelDrainTimer = () => clearTimeout(drainTimer);
+    child.exited.finally(() => clearTimeout(killTimer));
+  };
+
   // A cancel can land before the process is up; an already-aborted signal
   // never fires its listener, so it is checked as well as listened for.
-  if (signal?.aborted) child.kill();
-  const onAbort = () => child.kill();
-  signal?.addEventListener("abort", onAbort, { once: true });
+  if (signal?.aborted) terminate();
+  signal?.addEventListener("abort", terminate, { once: true });
 
   const [stdout, stderr] = await Promise.all([
-    drain(child.stdout, (chunk) => onOutput?.(chunk, "stdout")),
-    drain(child.stderr, (chunk) => onOutput?.(chunk, "stderr")),
+    drain(child.stdout, (chunk) => onOutput?.(chunk, "stdout"), drainAbort.signal),
+    drain(child.stderr, (chunk) => onOutput?.(chunk, "stderr"), drainAbort.signal),
   ]);
+  cancelDrainTimer();
   const exitStatus = await child.exited;
-  signal?.removeEventListener("abort", onAbort);
+  signal?.removeEventListener("abort", terminate);
 
   return { exitStatus, finalText: stdout, stderr };
 }
@@ -387,18 +441,26 @@ function continuationPrompt(previousFinalText: string): string {
  * `git status`/`HEAD` when the workspace is a repo — precise for both
  * uncommitted edits and new commits — and falls back to a file list of
  * path, size and mtime otherwise.
+ *
+ * A repo with an unborn HEAD (`.git` exists, but nothing has been committed
+ * yet — the seed's baseline commit can fail and still leave `.git/` behind)
+ * is a legitimate state, not a git failure: `git status` still succeeds
+ * there, and only `rev-parse HEAD` does not, so that specific failure is
+ * read as "no commits yet" rather than thrown. `git status` failing is a
+ * genuinely broken invocation and still throws.
  */
-async function snapshotWorkspace(workspace: string): Promise<string> {
+export async function snapshotWorkspace(workspace: string): Promise<string> {
   if (await pathExists(join(workspace, ".git"))) {
     const status = Bun.spawnSync(["git", "-C", workspace, "status", "--porcelain=v1", "-uall"], {
       stdout: "pipe",
       stderr: "pipe",
     });
-    const head = Bun.spawnSync(["git", "-C", workspace, "rev-parse", "HEAD"], { stdout: "pipe", stderr: "pipe" });
-    if (status.exitCode !== 0 || head.exitCode !== 0) {
-      throw new Error(`git could not report the state of ${workspace}`);
+    if (status.exitCode !== 0) {
+      throw new Error(`git could not report the state of ${workspace}: ${status.stderr.toString().trim()}`);
     }
-    return `${head.stdout.toString()}\n${status.stdout.toString()}`;
+    const head = Bun.spawnSync(["git", "-C", workspace, "rev-parse", "HEAD"], { stdout: "pipe", stderr: "pipe" });
+    const headValue = head.exitCode === 0 ? head.stdout.toString().trim() : "unborn";
+    return `${headValue}\n${status.stdout.toString()}`;
   }
   return fileTreeFingerprint(workspace);
 }
@@ -433,18 +495,37 @@ async function fileTreeFingerprint(root: string): Promise<string> {
   return entries.join("\n");
 }
 
-/** Reads a pipe to its end, handing each chunk on as it lands, and returns the whole. */
-async function drain(pipe: ReadableStream<Uint8Array>, onChunk: (text: string) => void): Promise<string> {
+/**
+ * Reads a pipe to its end, handing each chunk on as it lands, and returns the
+ * whole. `signal` lets a caller force the read to stop even if the pipe
+ * itself never reports done — a grandchild of a killed worker can hold the
+ * write end open indefinitely, and this is what keeps that from hanging the
+ * attempt forever.
+ */
+async function drain(
+  pipe: ReadableStream<Uint8Array>,
+  onChunk: (text: string) => void,
+  signal?: AbortSignal,
+): Promise<string> {
   const decoder = new TextDecoder();
   const parts: string[] = [];
   const reader = pipe.getReader();
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    const text = decoder.decode(value, { stream: true });
-    if (text.length === 0) continue;
-    parts.push(text);
-    onChunk(text);
+  const onAbort = () => {
+    reader.cancel().catch(() => undefined);
+  };
+  signal?.addEventListener("abort", onAbort, { once: true });
+  try {
+    for (;;) {
+      if (signal?.aborted) break;
+      const { done, value } = await reader.read();
+      if (done) break;
+      const text = decoder.decode(value, { stream: true });
+      if (text.length === 0) continue;
+      parts.push(text);
+      onChunk(text);
+    }
+  } finally {
+    signal?.removeEventListener("abort", onAbort);
   }
   const rest = decoder.decode();
   if (rest.length > 0) {

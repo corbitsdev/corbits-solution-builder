@@ -95,6 +95,23 @@ describe("verifyManifest execution checks", () => {
     expect(testCheck?.exitCode).toBe(1);
   });
 
+  test("a deliverable with no test files is not blocked by the seeded test script", async () => {
+    const workspace = await workspaceWith({
+      "package.json": JSON.stringify({ name: "untested", scripts: { start: "bun run src/cli.ts", test: "bun test" } }),
+      "src/cli.ts": `console.log("ran");\n`,
+    });
+    const manifest = manifestOf([await descriptorFor(workspace, "src/cli.ts")]);
+
+    const report = await verifyManifest("n_manifest", manifest, workspace);
+
+    expect(report.complete).toBe(true);
+    expect(report.failed).not.toContain("execution:test");
+    const testCheck = report.execution.find((check) => check.kind === "test");
+    expect(testCheck?.ok).toBe(true);
+    expect(testCheck?.exitCode).toBe(1);
+    expect(testCheck?.detail).toContain("no test files");
+  });
+
   test("no discoverable entry point or declared scripts leaves execution empty, not failing", async () => {
     const workspace = await workspaceWith({
       "dist/chess.app": "not-a-real-binary",
