@@ -473,15 +473,26 @@ function SpendBox() {
       cancelled = true;
     };
   }, []);
-  if (!spend || spend.totals.calls === 0) return null;
+  if (!spend) return null;
   const { totals } = spend;
   const priced = spend.byProvider.some((entry) => entry.cost !== null);
+  const nothing = totals.calls === 0;
   return (
     <section className="spend-box" aria-label="Inference spend across projects">
       <div className="spend-headline">
-        <span className="spend-figure">{priced ? formatMoney(totals.cost, totals.currency) : `${formatTokens(totalTokens(totals.tokens))} tokens`}</span>
+        <span className="spend-figure">
+          {nothing
+            ? formatMoney(0, totals.currency)
+            : priced
+              ? formatMoney(totals.cost, totals.currency)
+              : `${formatTokens(totalTokens(totals.tokens))} tokens`}
+        </span>
         <span className="spend-caption">
-          {priced ? "spent on inference across every project" : "of inference across every project, unpriced"}
+          {nothing
+            ? "spent on inference across every project. Nothing is recorded yet; every round, host call, illustration and build from now on is counted."
+            : priced
+              ? "spent on inference across every project"
+              : "of inference across every project, unpriced: no connected provider has a price on file yet"}
           {spend.unpriced > 0 && priced ? ` · ${spend.unpriced} model${spend.unpriced === 1 ? "" : "s"} without a price, not in the total` : ""}
           {totals.uncounted > 0 ? ` · ${totals.uncounted} call${totals.uncounted === 1 ? "" : "s"} reported no token counts` : ""}
         </span>
