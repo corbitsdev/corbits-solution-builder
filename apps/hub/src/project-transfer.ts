@@ -25,10 +25,14 @@ import {
   ledgerEntries,
   projectBuildEvents,
   recordBuildEvent,
+  recordCarriedTurns,
   recordCommand,
   type BuildEvent,
+  type CarriedTurn,
   type LedgerEntry,
 } from "./engine-ledger.js";
+import { portableThread } from "./stage-thread.js";
+import { STAGES } from "@solutions-builder/app/ledger";
 import { launchProjectRun } from "./engine.js";
 import {
   exportArtifactNodes,
@@ -56,6 +60,12 @@ export type ProjectBundle = {
   ledger: { startedAt: string; metadata: Record<string, unknown> }[];
   /** Every worker event, every run, oldest first. */
   buildEvents: BuildEvent[];
+  /**
+   * The conversation with each stage's specialist, oldest turn first —
+   * questions included, so one left open at home is still open here. Absent
+   * from bundles written before it was carried.
+   */
+  conversations?: { stage: number; turns: CarriedTurn[] }[];
   artifacts: {
     nodes: PortableArtifactNode[];
     edges: { childNodeId: string; sourceNodeId: string }[];
@@ -70,6 +80,11 @@ export async function exportProject(projectId: string): Promise<ProjectBundle> {
     projectBuildEvents(projectId),
     exportArtifactNodes(projectId),
   ]);
+  const conversations: { stage: number; turns: CarriedTurn[] }[] = [];
+  for (const stage of STAGES) {
+    const turns = await portableThread(projectId, stage);
+    if (turns.length > 0) conversations.push({ stage, turns: turns.map((turn) => ({ ...turn, quotes: [...turn.quotes] })) });
+  }
   return {
     format: BUNDLE_FORMAT,
     version: BUNDLE_VERSION,
@@ -83,6 +98,7 @@ export async function exportProject(projectId: string): Promise<ProjectBundle> {
     },
     ledger,
     buildEvents,
+    conversations,
     artifacts,
   };
 }
@@ -222,6 +238,9 @@ export async function importProject(
   }
   for (const event of bundle.buildEvents) {
     await recordBuildEvent(record.id, rewriteIds(event, ids) as BuildEvent);
+  }
+  for (const conversation of bundle.conversations ?? []) {
+    await recordCarriedTurns(record.id, conversation.stage, rewriteIds(conversation.turns, ids) as CarriedTurn[]);
   }
   if (bundle.project.archivedAt) {
     await updateProject(record.id, { archivedAt: new Date(bundle.project.archivedAt) });
