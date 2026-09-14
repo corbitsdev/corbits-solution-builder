@@ -430,6 +430,55 @@ export async function allCarriedTurns(projectId: string): Promise<{ stage: numbe
     .sort((a, b) => a.turn.createdAt.localeCompare(b.turn.createdAt));
 }
 
+/**
+ * One use of a model on the project's behalf: who ran it, on what, and what
+ * the source reported. `tokens` is null where the source reported none.
+ */
+export type UsageRecord = {
+  id: string;
+  at: string;
+  source: "round" | "host" | "illustration" | "worker";
+  purpose: string;
+  provider: string;
+  model: string;
+  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number; thinking: number } | null;
+  images: number;
+  calls: number;
+  runId: string | null;
+};
+
+const USAGE_KIND = "inference_usage";
+
+/** Records one use of a model as a turn of the project's ledger session. */
+export async function recordUsage(projectId: string, record: UsageRecord): Promise<void> {
+  const sessionId = await ensureLedgerSession(projectId);
+  await ensureUserPrincipal(tenantId(), HOST_PRINCIPAL);
+  await writeConversationTurn({
+    sessionId,
+    tenantId: tenantId(),
+    runId: record.runId ?? "",
+    role: "specialist",
+    body: `${USAGE_KIND}: ${record.provider} ${record.model}`,
+    fromPrincipalId: HOST_PRINCIPAL,
+    toPrincipalId: SPECIALIST_PRINCIPAL_ID,
+    metadata: { kind: USAGE_KIND, ...record },
+    model: "usage",
+  });
+}
+
+/** Every use of a model recorded on the project, oldest first. */
+export async function usageRecords(projectId: string): Promise<UsageRecord[]> {
+  const sessionId = await ledgerSessionIdFor(projectId);
+  const parts = await listConversationTurns(sessionId);
+  return parts
+    .filter((part) => part.metadata?.kind === USAGE_KIND)
+    .map((part) => {
+      const { kind: _kind, ...record } = part.metadata as Record<string, unknown>;
+      return record as unknown as UsageRecord;
+    })
+    .sort((a, b) => a.at.localeCompare(b.at));
+}
+
 /** The worker events recorded for a run, newest cursor first. */
 export async function buildEvents(projectId: string, runId: string): Promise<BuildEvent[]> {
   const sessionId = await ledgerSessionIdFor(projectId);
