@@ -14,11 +14,13 @@ import { createServer } from "node:http";
 import {
   DEFINITIONS,
   OAUTH_PROVIDERS,
+  PAGE_COPY,
   beginLogin,
   cancelLogin,
   hasSession,
   loginInFlight,
 } from "../apps/hub/src/oauth.js";
+import { authorizationDoneHtml, callbackPageHtml } from "../apps/hub/src/oauth-page.js";
 import { HostError } from "../apps/hub/src/errors.js";
 
 const checks: { name: string; ok: boolean; detail: string }[] = [];
@@ -66,13 +68,22 @@ for (const id of OAUTH_PROVIDERS) {
   check(`${id}: a login is recorded as in flight`, loginInFlight() === id);
 
   // The callback server must actually be listening on the registered port.
-  const bound = await fetch(`http://127.0.0.1:${redirect.port}${redirect.pathname}?error=probe`)
-    .then((response) => response.status)
-    .catch(() => 0);
+  const probe = await fetch(`http://127.0.0.1:${redirect.port}${redirect.pathname}?error=probe`)
+    .then(async (response) => ({ status: response.status, body: await response.text() }))
+    .catch(() => ({ status: 0, body: "" }));
   check(
     `${id}: the callback server is listening on port ${redirect.port}`,
-    bound > 0,
-    bound === 0 ? "nothing answered" : `HTTP ${bound}`,
+    probe.status > 0,
+    probe.status === 0 ? "nothing answered" : `HTTP ${probe.status}`,
+  );
+
+  // A bad state is a failed callback; the served page is the branded one, not
+  // a bare error string.
+  check(
+    `${id}: a failed callback serves the branded page`,
+    probe.body.includes("data-path=") &&
+      probe.body.includes(`${definition.label} failed to connect`) &&
+      probe.body.includes("not connected"),
   );
 
   cancelLogin();
@@ -207,6 +218,34 @@ for (const id of OAUTH_PROVIDERS) {
   check(
     "an exit with nothing on stderr still explains itself",
     (classifySecurityExit(1, "") as { detail: string }).detail.includes("exit code 1"),
+  );
+}
+
+// The success page cannot be driven without a real account; what can be
+// checked is the markup the callback server is wired to serve.
+{
+  const done = authorizationDoneHtml(DEFINITIONS["codex-oauth"].label, PAGE_COPY);
+  check(
+    "the done page carries the dithered mark",
+    done.includes("<canvas") && done.includes("data-path=") && done.includes("BAYER"),
+  );
+  check(
+    "the done page reports the authorization, not a finished setup",
+    done.includes("authorization received") &&
+      done.includes("ChatGPT (Codex)") &&
+      done.includes("Return to Solutions Builder"),
+  );
+  const failedPage = callbackPageHtml(
+    { subject: "<script>x</script>", error: "access_denied" },
+    PAGE_COPY,
+  );
+  check(
+    "the failure page humanizes the error code",
+    failedPage.includes("Access denied") && failedPage.includes("not connected"),
+  );
+  check(
+    "the failure page escapes what it quotes",
+    !failedPage.includes("<script>x</script>"),
   );
 }
 
