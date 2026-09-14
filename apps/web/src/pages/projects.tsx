@@ -411,21 +411,23 @@ function ProjectCard({
       </div>
 
       {renaming ? (
-        <Input
-          ref={field}
-          className="project-card-rename"
-          value={title}
-          onChange={(event) => setTitle(event.target.value)}
-          onBlur={rename}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") rename();
-            if (event.key === "Escape") {
-              setTitle(project.title);
-              setRenaming(false);
-            }
-          }}
-          aria-label="Project name"
-        />
+        <Dictated value={title} onValueChange={setTitle} align="center">
+          <Input
+            ref={field}
+            className="project-card-rename"
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            onBlur={rename}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") rename();
+              if (event.key === "Escape") {
+                setTitle(project.title);
+                setRenaming(false);
+              }
+            }}
+            aria-label="Project name"
+          />
+        </Dictated>
       ) : (
         <button type="button" className="project-card-open-area" onClick={onOpen}>
           <h4>{project.title}</h4>

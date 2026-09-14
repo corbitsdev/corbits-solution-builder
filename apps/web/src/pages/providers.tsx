@@ -12,6 +12,7 @@ import { ArrowDown, ArrowUp, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { api, ApiFailure, OLLAMA_BASE_URL, type Provider } from "../client.js";
 import { Banner, Button, StateLabel } from "../components.jsx";
+import { Dictated } from "../dictation.jsx";
 
 export type ApiKeyProvider = { providerId: string; label: string; needsBaseUrl: boolean };
 export type OAuthCandidate = { providerId: string; label: string; redirectUri: string };
@@ -181,26 +182,38 @@ export function ProviderList({
                     if (canSave(row)) void connect(row);
                   }}
                 >
-                  <Input
-                    autoFocus
-                    type={row.kind === "api_key" ? "password" : "text"}
-                    value={row.kind === "api_key" ? secret : baseUrl}
-                    onChange={(event) =>
-                      row.kind === "api_key"
-                        ? setSecret(event.target.value)
-                        : setBaseUrl(event.target.value)
-                    }
-                    placeholder={row.kind === "api_key" ? `${row.name} API key` : "Endpoint"}
-                    aria-label={row.kind === "api_key" ? `${row.name} API key` : "Endpoint"}
-                    autoComplete="off"
-                    spellCheck={false}
-                    onKeyDown={(event) => {
-                      if (event.key === "Escape") {
-                        event.stopPropagation();
-                        closeAsk();
-                      }
-                    }}
-                  />
+                  {(() => {
+                    const field = (
+                      <Input
+                        autoFocus
+                        type={row.kind === "api_key" ? "password" : "text"}
+                        value={row.kind === "api_key" ? secret : baseUrl}
+                        onChange={(event) =>
+                          row.kind === "api_key"
+                            ? setSecret(event.target.value)
+                            : setBaseUrl(event.target.value)
+                        }
+                        placeholder={row.kind === "api_key" ? `${row.name} API key` : "Endpoint"}
+                        aria-label={row.kind === "api_key" ? `${row.name} API key` : "Endpoint"}
+                        autoComplete="off"
+                        spellCheck={false}
+                        onKeyDown={(event) => {
+                          if (event.key === "Escape") {
+                            event.stopPropagation();
+                            closeAsk();
+                          }
+                        }}
+                      />
+                    );
+                    // A key is a secret that is pasted, not said; an endpoint is an address.
+                    return row.kind === "api_key" ? (
+                      field
+                    ) : (
+                      <Dictated value={baseUrl} onValueChange={setBaseUrl} align="center">
+                        {field}
+                      </Dictated>
+                    );
+                  })()}
                   <Button type="submit" variant="primary" loading={busy === row.id} disabled={!canSave(row)}>
                     Save
                   </Button>
