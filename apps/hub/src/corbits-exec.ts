@@ -12,7 +12,8 @@
  *   purpose        stabilise freeze -> running -> evidence for the local loop
  *   interface      one CLI's non-interactive form — `corbits exec <prompt>`
  *                  by default; the worker is chosen in Settings (build-worker.ts)
- *   inputs         one prompt string, a working directory, a model/provider
+ *   inputs         one prompt string, a working directory seeded with the
+ *                  packet, a model/provider
  *   outputs        final text on stdout, and an exit status; while it runs,
  *                  its stdout and stderr as written, and — where the worker
  *                  has a lifecycle hook — its own report of each turn
@@ -32,6 +33,7 @@
 import { cp, mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { dataDirectory } from "./paths.js";
+import { seedBuildWorkspace, type WorkspaceSeed } from "./build-workspace.js";
 import { buildWorker, type BuildWorker } from "./build-worker.js";
 import { followTurnLog } from "./turn-reports.js";
 
@@ -149,6 +151,12 @@ export function turnLogFor(runId: string): string {
 export async function runBuildAttempt(args: {
   runId: string;
   prompt: string;
+  /**
+   * What the workspace starts with. On a clean start the whole seed is
+   * written; on a continued one only the `.corbits` packet files, over the
+   * copied workspace, so a retry builds against this attempt's plan.
+   */
+  seed: WorkspaceSeed;
   signal?: AbortSignal;
   /**
    * An earlier attempt whose workspace is copied into this one before the
@@ -167,11 +175,12 @@ export async function runBuildAttempt(args: {
   const startedAt = new Date().toISOString();
   const workspace = await workspaceFor(args.runId);
   if (args.continueFrom) {
-    // Everything but the hook the bridge places, which is written afresh
-    // for this attempt with this attempt's log.
+    // Everything but the bridge's own `.corbits`: the hook and the packet
+    // are this attempt's and are written afresh below.
     const from = args.continueFrom.workspace;
     await cp(from, workspace, { recursive: true, filter: (source) => source !== join(from, ".corbits") });
   }
+  await seedBuildWorkspace(workspace, args.seed, { fresh: args.continueFrom === undefined });
   const availability = await bridgeAvailable();
 
   if (!availability.available) {
