@@ -32,8 +32,8 @@ export const BUILD_ARCHIVE_MEDIA_TYPE = "application/gzip";
 /** Inside the workspace, out of the worker's way, and out of the archive. */
 const ARCHIVE_DIRECTORY = ".solutions-builder";
 
-/** What the archive leaves out: the bridge's hook and packet files, version control, installed dependencies, and itself. */
-const ARCHIVE_EXCLUDES = new Set([".corbits", ".git", "node_modules", ARCHIVE_DIRECTORY]);
+/** What the archive leaves out: the bridge's hook, packet and seeded skills, version control, installed dependencies, and itself. */
+const ARCHIVE_EXCLUDES = new Set([".corbits", ".agents", ".git", "node_modules", ARCHIVE_DIRECTORY]);
 
 /** The archive's store limit, as for decks: past this it is a file the version points at. */
 const STORE_LIMIT_BYTES = 11 * 1024 * 1024;

@@ -26,10 +26,13 @@ const DIGEST_PATH = "digest.sha256";
 
 function skillMarkdown(skill: SkillRecord): string {
   // The frontmatter's `description` is a short line the hub's schema caps at
-  // 1024 characters; the skill's own instructions can run longer than that
-  // (`interchange-platform` does), so the full text is the document body and
-  // the description is a bounded summary of it.
-  const description = skill.instructions.length <= 1024 ? skill.instructions : `${skill.instructions.slice(0, 1000)}…`;
+  // 1024 characters and forbids `<…>` placeholders in; a skill that carries
+  // one sets it, and otherwise the instructions serve — truncated, since they
+  // can run longer than that (`interchange-platform` does), so the full text
+  // is the document body and the description is a bounded summary of it.
+  const description =
+    skill.description ??
+    (skill.instructions.length <= 1024 ? skill.instructions : `${skill.instructions.slice(0, 1000)}…`);
   const frontmatter = [
     "---",
     `name: ${skill.key}`,

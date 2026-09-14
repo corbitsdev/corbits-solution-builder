@@ -232,7 +232,7 @@ async function buildPrompt(
 
   return {
     prompt: [
-      `Build the software described by the approved plan. The current directory is a seeded Bun workspace: \`.corbits/BUILD_PLAN.md\` is the plan, \`.corbits/REQUIREMENTS.md\` the requirements it must satisfy, and \`AGENTS.md\` says how the workspace is put together and where the platform's packages come from. Work in the current directory.`,
+      `Build the software described by the approved plan. The current directory is a seeded Bun workspace: \`.corbits/BUILD_PLAN.md\` is the plan, \`.corbits/REQUIREMENTS.md\` the requirements it must satisfy, and \`AGENTS.md\` says how the workspace is put together. The platform's skills — what Interchange and CorbitsCore are and how to install and use their packages — are searchable through your skill tools. Work in the current directory.`,
       ...(continuing
         ? [
             ``,

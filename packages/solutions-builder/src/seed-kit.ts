@@ -23,6 +23,7 @@ import type {
 } from "./kit.js";
 import { AGENT_KIT, type AgentRole } from "./kit.js";
 import type { Stage } from "./ledger.js";
+import { PLATFORM_SKILLS } from "./platform-skills.js";
 import { baseTemplate } from "./template.js";
 import {
   APPROVAL_WORKFLOW_ID,
@@ -151,6 +152,9 @@ const DIRECTORS: readonly DirectorRecord[] = [
 
 /** Which skills a role carries. Read off the stages it serves. */
 function skillsFor(role: AgentRole): string[] {
+  // The platform skills' five keys, spread where a role needs the reference
+  // rather than the one-line summary `interchange-platform` gives.
+  const platform = PLATFORM_SKILLS.map((skill) => skill.key);
   const byRole: Record<string, string[]> = {
     "product-guide": ["stage-navigation"],
     brainstormer: ["discovery-interview", "proposal-comparison"],
@@ -159,9 +163,9 @@ function skillsFor(role: AgentRole): string[] {
     "experience-designer": ["interaction-design", "interchange-platform"],
     "presentation-creator": ["approval-packaging", "interchange-platform"],
     "requirements-author": ["requirements-authoring", "interchange-platform"],
-    architect: ["build-planning", "interchange-platform"],
+    architect: ["build-planning", "interchange-platform", ...platform],
     estimator: ["cost-estimation", "interchange-platform"],
-    "build-supervisor": ["worker-supervision", "interchange-platform"],
+    "build-supervisor": ["worker-supervision", "interchange-platform", ...platform],
     "delivery-verifier": ["delivery-verification", "interchange-platform"],
     "brief-evaluator": ["brief-evaluation"],
   };
@@ -268,6 +272,16 @@ export function kitSeed(): KitSeed {
       key: skill.id,
       version: 1,
       instructions: skill.instructions,
+      tools: skill.tools,
+    })),
+    // The platform skills are Markdown documents, one file each; their
+    // bodies are the instructions here and the SKILL.md content a build
+    // workspace's `.agents/skills/` gets.
+    ...PLATFORM_SKILLS.map((skill) => ({
+      key: skill.key,
+      version: 1,
+      instructions: skill.body,
+      description: skill.description,
       tools: skill.tools,
     })),
     // The panel's four review skills, one per principal.
