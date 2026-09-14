@@ -66,7 +66,6 @@ import { database } from "./db.js";
 import { dataDirectory } from "./paths.js";
 import { hubEncryptionKeys, hubSigningKey } from "./hub-keys.js";
 import { withPostgresJsResultShape } from "./pg-compat.js";
-import { recordRoundUsage, type PlatformTurnUsage } from "./spend.js";
 
 export type MountedHub = {
   readonly app: Hono;
@@ -275,18 +274,12 @@ export async function mountHub(): Promise<MountedHub> {
     lookups,
   });
 
-  // Every inference turn the platform runs is reported here with its run,
-  // provider, model and token counts; without a sink it is dropped. The
-  // record goes on the project's ledger, and a failure to record is logged
-  // rather than allowed to disturb the session it came from.
-  const eventCollectors = createEventCollectorRegistry({
-    db: db.db,
-    onUsage: (_agentAddress: string, usage: PlatformTurnUsage) => {
-      void recordRoundUsage(usage).catch((cause: unknown) => {
-        console.error("[spend] a round's usage could not be recorded", cause);
-      });
-    },
-  });
+  // The registry's `onUsage` sink is not wired: in this Interchange revision
+  // nothing creates a collector, so `dispatch` drops every frame and the sink
+  // never fires. A round's spend is read from the `agent.event` stream itself,
+  // in `round-spend.ts`; a sink here as well would count a call twice once a
+  // revision does create collectors.
+  const eventCollectors = createEventCollectorRegistry({ db: db.db });
 
   createHubSessionOrchestrator({
     events: sidecarRouter.events,
