@@ -51,7 +51,26 @@ export type StageTurn = {
   /** The questions a specialist turn opened a round with; null on every other turn. */
   readonly questions: string[] | null;
   readonly createdAt: string;
+  /** Set on a specialist turn that reports a round the platform could not complete. */
+  readonly failed?: true;
 };
+
+/**
+ * How the platform's director words a call it could not complete: it replies
+ * with the error in the model's place, and that reply is the step's output.
+ * A draft that reads this way is the failure, not a digest.
+ */
+const PLATFORM_ERROR_OPENINGS = ["This agent could not complete your request", "This agent encountered a temporary error", "This agent's inference request was aborted"];
+
+function isPlatformError(reply: string): boolean {
+  return PLATFORM_ERROR_OPENINGS.some((opening) => reply.trimStart().startsWith(opening));
+}
+
+/** What a person is told when a round did not complete, with what the platform reported. */
+export function failedRoundBody(reported: string | null): string {
+  const said = reported?.trim() ? `The platform reported: ${reported.trim().replace(/\.?$/, ".")}` : "The platform did not say why.";
+  return `This round did not complete, so nothing was drafted. ${said} Send your message again to run another round. If it keeps happening, check the provider under Settings.`;
+}
 
 /** The graph node lookup `resultNodeId` is read from — just enough of the row to match `provenance.stepRef`. */
 export type ArtifactNodeRef = { readonly id: string; readonly provenance: { readonly stepRef?: string } };
@@ -187,13 +206,43 @@ export async function projectStageThread(args: {
       });
     }
 
-    if (findEvent(iteration.events, "StepFailed", DRAFT_STEP_ID)) continue;
+    // A round whose draft step failed is still a turn: the person waited on
+    // it, and the thread is the one place they would learn what happened.
+    const draftFailed = findEvent(iteration.events, "StepFailed", DRAFT_STEP_ID);
+    if (draftFailed) {
+      const error = eventBody(draftFailed).error as { message?: string } | undefined;
+      turns.push({
+        id: `${iteration.runId}:failed`,
+        role: "specialist",
+        body: failedRoundBody(typeof error?.message === "string" ? error.message : null),
+        quotes: [],
+        resultNodeId: null,
+        questions: null,
+        createdAt: String(eventBody(draftFailed).at),
+        failed: true,
+      });
+      continue;
+    }
 
     // A step the round's gate skipped completes with a sentinel and no reply;
     // it is not a draft.
     const draftCompleted = findEvent(iteration.events, "StepCompleted", DRAFT_STEP_ID);
     const reply = await resolveOutput<DraftReply>(iteration.runId, draftCompleted);
     if (!draftCompleted || typeof reply?.reply !== "string") continue;
+
+    if (isPlatformError(reply.reply)) {
+      turns.push({
+        id: `${iteration.runId}:failed`,
+        role: "specialist",
+        body: failedRoundBody(reply.reply),
+        quotes: [],
+        resultNodeId: null,
+        questions: null,
+        createdAt: String(eventBody(draftCompleted).at),
+        failed: true,
+      });
+      continue;
+    }
 
     const resultNodeId =
       args.nodes.find((node) => node.provenance.stepRef === `${iteration.runId}/${DRAFT_STEP_ID}`)?.id ?? null;

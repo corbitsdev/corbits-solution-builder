@@ -345,6 +345,8 @@ export type StageTurn = {
   quotes: Quote[];
   resultNodeId: string | null;
   createdAt: string;
+  /** Set on a specialist turn that reports a round the platform could not complete. */
+  failed?: true;
 };
 
 /** The stage-1 brief evaluator's verdict. Advisory only — nothing gates on it. */
