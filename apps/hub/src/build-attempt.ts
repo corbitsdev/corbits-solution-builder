@@ -22,6 +22,7 @@ import { recordBuildEvent } from "./engine-ledger.js";
 import { readRun } from "./runs.js";
 import { localActor } from "./hub-client.js";
 import { recordBuildArchive, type BuildArchive } from "./build-output.js";
+import { recordWorkerUsage } from "./spend.js";
 import { BRIDGE_CAPABILITIES, runBuildAttempt, workspaceFor, type BridgeOutcome } from "./corbits-exec.js";
 
 /** The host relays what the worker did; no person appears to have done it. */
@@ -151,6 +152,12 @@ async function driveAttempt(projectId: string, runId: string, continueFromRunId:
     // into an archive named after the project and recorded as the project's
     // build, before anyone has said what the work was. A packaging failure
     // is noted on the event, not made the attempt's.
+    if (outcome.available && outcome.turnLog) {
+      await recordWorkerUsage({ projectId, runId, turnLog: outcome.turnLog }).catch((cause: unknown) => {
+        console.error(`[spend] ${runId}: the worker's usage could not be recorded`, cause);
+      });
+    }
+
     let archive: BuildArchive | null = null;
     let archiveError: string | null = null;
     if (outcome.available) {
