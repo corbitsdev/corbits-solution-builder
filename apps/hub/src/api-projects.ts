@@ -39,9 +39,15 @@ import {
 } from "./project-transfer.js";
 import { bytesOf } from "./source-material.js";
 import { deckBytesOf, ensureDeckFor } from "./deck.js";
-import { buildBytesOf } from "./build-output.js";
+import { buildBytesOf, slugOf } from "./build-output.js";
+import { readProject } from "./project-tenant.js";
 import { attachMaterial, MATERIAL_KIND, materialText, type IncomingFile } from "./source-material.js";
 import { setStakeholders, STAKEHOLDER_ROLES } from "./stakeholders.js";
+
+/** `<project>-<document>`: what a printed PDF is saved as, before the dialog adds its extension. */
+function printFileName(projectTitle: string, documentTitle: string): string {
+  return `${slugOf(projectTitle)}-${slugOf(documentTitle)}`;
+}
 
 export function registerProjectRoutes(api: Hono) {
   api.get("/decisions", async (context) =>
@@ -281,7 +287,13 @@ export function registerProjectRoutes(api: Hono) {
         false,
       );
     }
-    const page = printableDesign({ html: content, title: node.title, version: node.version });
+    const project = await readProject(node.projectId);
+    const page = printableDesign({
+      html: content,
+      title: node.title,
+      version: node.version,
+      fileName: printFileName(project?.title ?? "project", node.title),
+    });
     return new Response(page.body, { headers: page.headers });
   });
 

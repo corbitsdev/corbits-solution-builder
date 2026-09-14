@@ -16,6 +16,8 @@
 
 /** Where the bar goes: just inside the body, or at the very top if there is none. */
 const BODY_OPEN = /<body\b[^>]*>/i;
+const HEAD_OPEN = /<head\b[^>]*>/i;
+const TITLE = /<title\b[^>]*>[\s\S]*?<\/title>/i;
 
 function escapeHtml(text: string): string {
   return text
@@ -30,10 +32,16 @@ export type PrintablePage = {
   headers: Record<string, string>;
 };
 
-/** The design with the print bar in it, and the headers it must be served with. */
-export function printableDesign(args: { html: string; title: string; version: number }): PrintablePage {
+/**
+ * The design with the print bar in it, and the headers it must be served
+ * with. The page's title becomes the PDF's default file name in every print
+ * dialog, so it is the file name the person should get — the project's and
+ * the document's — whatever the design's own markup called itself.
+ */
+export function printableDesign(args: { html: string; title: string; version: number; fileName: string }): PrintablePage {
   const nonce = crypto.randomUUID().replace(/-/g, "");
   const label = escapeHtml(`${args.title}, version ${args.version}`);
+  const titleTag = `<title>${escapeHtml(args.fileName)}</title>`;
   const button =
     "font:inherit;padding:8px 14px;border-radius:6px;border:1px solid #cfc7bf;background:#fff;color:inherit;cursor:pointer";
   const bar = [
@@ -49,10 +57,15 @@ export function printableDesign(args: { html: string; title: string; version: nu
       `</script>`,
   ].join("");
 
-  const match = BODY_OPEN.exec(args.html);
+  const titled = TITLE.test(args.html)
+    ? args.html.replace(TITLE, titleTag)
+    : HEAD_OPEN.test(args.html)
+      ? args.html.replace(HEAD_OPEN, (head) => `${head}${titleTag}`)
+      : `${titleTag}${args.html}`;
+  const match = BODY_OPEN.exec(titled);
   const body = match
-    ? `${args.html.slice(0, match.index + match[0].length)}${bar}${args.html.slice(match.index + match[0].length)}`
-    : `${bar}${args.html}`;
+    ? `${titled.slice(0, match.index + match[0].length)}${bar}${titled.slice(match.index + match[0].length)}`
+    : `${bar}${titled}`;
 
   const csp = [
     "default-src 'none'",
