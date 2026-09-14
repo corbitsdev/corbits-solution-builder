@@ -132,13 +132,20 @@ export async function seedBuildWorkspace(
   try {
     Bun.spawnSync(["git", "init", "-q"], { cwd: dir });
     Bun.spawnSync(["git", "add", "-A"], { cwd: dir });
-    Bun.spawnSync(
+    // This is the app writing a baseline into a scratch workspace, not the
+    // operator authoring a commit, so the operator's hooks (an author
+    // allowlist, say) and signing requirement must not apply.
+    const commit = Bun.spawnSync(
       [
         "git",
         "-c",
         "user.name=Solutions Builder",
         "-c",
         "user.email=solutions-builder@localhost",
+        "-c",
+        "core.hooksPath=",
+        "-c",
+        "commit.gpgsign=false",
         "commit",
         "-q",
         "-m",
@@ -146,7 +153,12 @@ export async function seedBuildWorkspace(
       ],
       { cwd: dir },
     );
-  } catch {
-    // The files are the seed; version control is a convenience on top.
+    if (!commit.success) {
+      console.error(
+        `build-workspace: baseline commit failed for ${dir}: ${commit.stderr.toString().trim()}`,
+      );
+    }
+  } catch (err) {
+    console.error(`build-workspace: failed to seed version control for ${dir}:`, err);
   }
 }
