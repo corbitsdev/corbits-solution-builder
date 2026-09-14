@@ -112,6 +112,26 @@ describe("verifyManifest execution checks", () => {
     expect(testCheck?.detail).toContain("no test files");
   });
 
+  test("test files bun's own glob never collects are a failure, not indistinguishable from no tests", async () => {
+    const workspace = await workspaceWith({
+      "package.json": JSON.stringify({ name: "misnamed", scripts: { start: "bun run src/cli.ts", test: "bun test" } }),
+      "src/cli.ts": `console.log("ran");\n`,
+      // Bun's test runner collects `*.test.ts`, not `test_*.ts`: this file
+      // is never run, so `bun test` reports "0 test files matching" exactly
+      // as it would if no tests existed at all.
+      "tests/test_icp.ts": `import { test, expect } from "bun:test";\ntest("stub", () => expect(1).toBe(1));\n`,
+    });
+    const manifest = manifestOf([await descriptorFor(workspace, "src/cli.ts")]);
+
+    const report = await verifyManifest("n_manifest", manifest, workspace);
+
+    expect(report.complete).toBe(false);
+    expect(report.failed).toContain("execution:test");
+    const testCheck = report.execution.find((check) => check.kind === "test");
+    expect(testCheck?.ok).toBe(false);
+    expect(testCheck?.detail).toContain("tests/test_icp.ts");
+  });
+
   test("no discoverable entry point or declared scripts leaves execution empty, not failing", async () => {
     const workspace = await workspaceWith({
       "dist/chess.app": "not-a-real-binary",

@@ -47,12 +47,29 @@
  * exists but is an interactive session picker with no non-interactive form
  * (verified against `corbits --help`), so a clean resume is not reachable
  * through this interface; re-invoking `exec` with a continuation prompt in
- * the same working directory is the reachable alternative. The loop stops on
- * the workspace going stale across consecutive continuations, the abort
- * signal, or a turn/wall-clock budget — never on "this output looks like a
- * question" or "this output looks done": the interface gives no event for
- * either, and guessing at one from stdout is exactly the synthesis this
- * bridge refuses elsewhere.
+ * the same working directory is the reachable alternative.
+ *
+ * The loop's stop condition is never "this output looks done" guessed from
+ * stdout — the interface gives no event for that, and guessing would be
+ * exactly the synthesis this bridge refuses elsewhere. Instead, after each
+ * invocation that changed the workspace, the deliverable's own checks are
+ * run (`execution-checks.ts`: its declared `test`/`typecheck` scripts and its
+ * entry point — the same checks `delivery.ts` runs at delivery time, reused
+ * rather than reimplemented). All of them passing is `"complete"`: a
+ * definition of done, not silence. A failing check's command, exit status
+ * and output tail are folded into the next continuation's prompt, so the
+ * worker is told what broke rather than only "continue". Checks are skipped
+ * when a continuation changed nothing — an unchanged workspace cannot have
+ * produced a new result — which is also why `"stalled"` now means something
+ * narrow: no change AND no failing check to act on. The abort signal and the
+ * turn/wall-clock budgets still apply on top of all of this, because a build
+ * that never reaches passing checks must still terminate.
+ *
+ * This interface also gives no event for "the worker has a question" —
+ * `BRIDGE_CAPABILITIES.questionsAndApprovals` is false, and nothing here
+ * synthesises a question out of stdout. A human checkpoint belongs at the
+ * call site that owns a real question/approval channel (the workflow-native
+ * build), not invented here from a guess.
  */
 import { cp, mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -60,6 +77,7 @@ import { dataDirectory } from "./paths.js";
 import { seedBuildWorkspace, type WorkspaceSeed } from "./build-workspace.js";
 import { buildWorker, type BuildWorker } from "./build-worker.js";
 import { followTurnLog } from "./turn-reports.js";
+import { runExecutionChecks, type ExecutionCheck } from "./execution-checks.js";
 
 export const BRIDGE_ID = "bounded-local-corbits-exec";
 
@@ -81,12 +99,30 @@ export const BRIDGE_CAPABILITIES = {
   perAgentRoster: false,
 } as const;
 
-/** Why the continuation loop ended. Null when the worker never ran (unavailable). */
-export type ContinuationStopReason = "stalled" | "aborted" | "turn_budget" | "wall_clock_budget";
+/**
+ * Why the continuation loop ended. Null when the worker never ran
+ * (unavailable).
+ *
+ *   complete    the deliverable's own checks all passed. The definition of
+ *               done — see the file header.
+ *   stalled     the workspace did not change across `maxStaleContinuations`
+ *               continuations AND there was no failing check to hand back —
+ *               either no checks were discoverable at all, or (impossible to
+ *               reach without also being "complete") every discovered check
+ *               passed. Narrow, and expected to be rare: a failing check
+ *               keeps the loop going even when the workspace is unchanged,
+ *               because the worker has something concrete to act on.
+ *   aborted     the caller's own signal fired.
+ *   turn_budget `maxContinuations` was reached with checks still failing or
+ *               undiscoverable.
+ *   wall_clock_budget the attempt's wall-clock budget expired, mid-invocation
+ *               or between them.
+ */
+export type ContinuationStopReason = "complete" | "stalled" | "aborted" | "turn_budget" | "wall_clock_budget";
 
 /** Tunes the continuation loop; every field has a default. */
 export type ContinuationConfig = {
-  /** Consecutive continuations with no workspace change before giving up on progress. */
+  /** Consecutive continuations with no workspace change AND no failing check before giving up on progress. */
   readonly maxStaleContinuations?: number;
   /** Total continuations, regardless of progress, before the turn budget stops the loop. */
   readonly maxContinuations?: number;
@@ -95,7 +131,13 @@ export type ContinuationConfig = {
 };
 
 const DEFAULT_MAX_STALE_CONTINUATIONS = 2;
-const DEFAULT_MAX_CONTINUATIONS = 8;
+// Checks now feed the worker concrete failures instead of silence, so a
+// continuation is more likely to be productive than before — but the budget
+// still has to be a number, not "keep going": 16 gives roughly double the
+// previous headroom (8) for a worker that is actually making progress
+// against failing checks, while the wall-clock budget below remains the
+// backstop for a worker that just burns turns.
+const DEFAULT_MAX_CONTINUATIONS = 16;
 const DEFAULT_MAX_WALL_CLOCK_MS = 30 * 60 * 1000;
 
 export type BridgeOutcome = {
@@ -119,14 +161,15 @@ export type BridgeOutcome = {
   readonly continuedFrom: string | null;
   /** How many times the worker was re-invoked after its first return. 0 means it ran once. */
   readonly continuations: number;
-  /**
-   * Why the loop stopped. Null when the worker never ran. There is no
-   * "completed" value: this interface has no event for it, and reading one
-   * out of stdout is the synthesis this bridge refuses elsewhere — so a
-   * finished plan and a budget stop look the same here except for which
-   * `ContinuationStopReason` is recorded.
-   */
+  /** Why the loop stopped. Null when the worker never ran. See `ContinuationStopReason`. */
   readonly stopReason: ContinuationStopReason | null;
+  /**
+   * The last execution checks run against the workspace — null when the
+   * worker never ran, empty when no check was discoverable (no entry point,
+   * no declared `test`/`typecheck` script). Not re-run after a continuation
+   * that changed nothing, so this can be older than the final invocation.
+   */
+  readonly execution: ExecutionCheck[] | null;
   readonly startedAt: string;
   readonly endedAt: string;
   /**
@@ -254,6 +297,7 @@ export async function runBuildAttempt(args: {
       continuedFrom: args.continueFrom?.runId ?? null,
       continuations: 0,
       stopReason: null,
+      execution: null,
       startedAt,
       endedAt: new Date().toISOString(),
       checkpointRef: null,
@@ -306,6 +350,17 @@ export async function runBuildAttempt(args: {
   let staleStreak = 0;
   let stopReason: ContinuationStopReason | null = timedOut ? "wall_clock_budget" : null;
 
+  // Checked after the first invocation, and after every continuation that
+  // changed the workspace — never after one that didn't, since an unchanged
+  // workspace cannot have produced a different result and the checks cost
+  // real time (a worker's own test/typecheck scripts, run for real). A
+  // killed (timed-out) invocation's checks would run against a workspace
+  // whose stop reason is already decided, so they're skipped too.
+  let lastExecution: ExecutionCheck[] | null = timedOut ? null : await runExecutionChecks(workspace);
+  if (stopReason === null && allChecksPass(lastExecution)) {
+    stopReason = "complete";
+  }
+
   while (stopReason === null) {
     if (args.signal?.aborted) {
       stopReason = "aborted";
@@ -320,7 +375,7 @@ export async function runBuildAttempt(args: {
       break;
     }
     continuations += 1;
-    const next = await invokeBounded(continuationPrompt(invocation.finalText));
+    const next = await invokeBounded(continuationPrompt(invocation.finalText, lastExecution));
     invocation = next.invocation;
     finalTextByInvocation.push(invocation.finalText);
     stderrByInvocation.push(invocation.stderr);
@@ -329,9 +384,22 @@ export async function runBuildAttempt(args: {
       break;
     }
     const fingerprint = await snapshotWorkspace(workspace);
-    staleStreak = fingerprint === previousFingerprint ? staleStreak + 1 : 0;
+    const changed = fingerprint !== previousFingerprint;
     previousFingerprint = fingerprint;
-    if (staleStreak >= config.maxStaleContinuations) {
+    staleStreak = changed ? 0 : staleStreak + 1;
+    if (changed) {
+      lastExecution = await runExecutionChecks(workspace);
+      if (allChecksPass(lastExecution)) {
+        stopReason = "complete";
+        break;
+      }
+    }
+    // Stalled means no change AND nothing to act on: a failing check is
+    // still something the worker can fix on its next turn, so it is not
+    // "stalled" merely because this particular continuation left the
+    // workspace untouched.
+    const hasFailingCheck = lastExecution !== null && lastExecution.some((check) => !check.ok);
+    if (staleStreak >= config.maxStaleContinuations && !hasFailingCheck) {
       stopReason = "stalled";
       break;
     }
@@ -354,6 +422,7 @@ export async function runBuildAttempt(args: {
     continuedFrom: args.continueFrom?.runId ?? null,
     continuations,
     stopReason,
+    execution: lastExecution,
     startedAt,
     endedAt: new Date().toISOString(),
     checkpointRef: null,
@@ -424,12 +493,41 @@ async function spawnWorker(
   return { exitStatus, finalText: stdout, stderr };
 }
 
+/**
+ * "Complete" means every discovered check passed. A deliverable with no
+ * discoverable check (no entry point, no declared `test`/`typecheck`
+ * script) can never be proven complete this way — an empty array is not
+ * treated as vacuously passing, on purpose (see the file header).
+ */
+function allChecksPass(execution: ExecutionCheck[] | null): boolean {
+  return execution !== null && execution.length > 0 && execution.every((check) => check.ok);
+}
+
+/** Bounds one check's output in a continuation prompt: enough to act on, not the whole tail. */
+const FAILURE_DETAIL_CHARS = 1500;
+
 /** What the worker is told on a continuation: it is still the same task, and there is no one to ask. */
-function continuationPrompt(previousFinalText: string): string {
+function continuationPrompt(previousFinalText: string, execution: ExecutionCheck[] | null): string {
   const tail = previousFinalText.trim().slice(-2000);
+  const failures = (execution ?? []).filter((check) => !check.ok);
+  const failureSection =
+    failures.length > 0
+      ? [
+          "\nThe workspace's own checks ran and some failed. Fix these before anything else:",
+          ...failures.map((check) => {
+            const output = [check.stdoutTail, check.stderrTail]
+              .filter((text) => text.trim().length > 0)
+              .join("\n")
+              .trim()
+              .slice(-FAILURE_DETAIL_CHARS);
+            return `\n- ${check.kind} (\`${check.command}\`): exit ${check.exitCode ?? "timeout"} — ${check.detail}${output.length > 0 ? `\n${output}` : ""}`;
+          }),
+        ].join("\n")
+      : "";
   return [
     "Continue the build in this same working directory. This is not a new task: the previous turn ended before the plan was finished, and there is nobody to answer a question or approve a next step — decide and keep working rather than pausing to ask.",
     tail.length > 0 ? `\nThe previous turn ended with:\n${tail}` : "",
+    failureSection,
   ].join("\n");
 }
 
@@ -438,9 +536,17 @@ function continuationPrompt(previousFinalText: string): string {
  * invocation and compare to the last: unchanged across `maxStaleContinuations`
  * continuations is this bridge's only usable signal that the worker has
  * stopped making progress, since the interface gives no other one. Prefers
- * `git status`/`HEAD` when the workspace is a repo — precise for both
- * uncommitted edits and new commits — and falls back to a file list of
- * path, size and mtime otherwise.
+ * `git status`/`HEAD` when the workspace is a repo — respects `.gitignore`,
+ * so build output and `node_modules` don't count as "progress" — and falls
+ * back to a file list of path, size and mtime otherwise.
+ *
+ * `git status --porcelain` names *what* changed (`M path`, `?? path`), not
+ * the content: editing the same untracked or modified file twice in a row
+ * produces the identical line both times, which would read as "no change"
+ * even though the file's bytes did change — exactly the gap a worker fixing
+ * a failing check on an uncommitted file would fall into. Each flagged
+ * path's size and mtime are folded in beside the status line to close it,
+ * the same signal the non-git fallback below uses.
  *
  * A repo with an unborn HEAD (`.git` exists, but nothing has been committed
  * yet — the seed's baseline commit can fail and still leave `.git/` behind)
@@ -460,7 +566,17 @@ export async function snapshotWorkspace(workspace: string): Promise<string> {
     }
     const head = Bun.spawnSync(["git", "-C", workspace, "rev-parse", "HEAD"], { stdout: "pipe", stderr: "pipe" });
     const headValue = head.exitCode === 0 ? head.stdout.toString().trim() : "unborn";
-    return `${headValue}\n${status.stdout.toString()}`;
+    const lines = status.stdout.toString().split("\n").filter((line) => line.length > 0);
+    const entries = await Promise.all(
+      lines.map(async (line) => {
+        // Porcelain v1: two status chars, a space, then the path — a rename
+        // reads "R  old -> new"; the destination is what's on disk now.
+        const path = line.slice(3).split(" -> ").pop()!.trim();
+        const info = await stat(join(workspace, path)).catch(() => null);
+        return `${line}:${info ? `${info.size}:${info.mtimeMs}` : "gone"}`;
+      }),
+    );
+    return `${headValue}\n${entries.sort().join("\n")}`;
   }
   return fileTreeFingerprint(workspace);
 }
