@@ -347,6 +347,9 @@ try {
         liveEvents.push(event.type === "text" ? { type: event.type, text: event.text } : { type: event.type });
       });
 
+      const { stageIterations } = await import("../apps/hub/src/hub-executor.js");
+      const beforeRound = await stageIterations(project.projectId, 1, { currentOnly: true });
+
       let drafted: Awaited<ReturnType<typeof requestDraft>> | { error: string };
       try {
         drafted = await requestDraft({
@@ -379,6 +382,34 @@ try {
         brainstormerCall?.maxTokens === 16_000,
         `max_tokens ${String(brainstormerCall?.maxTokens)}`,
       );
+
+      // By now the loop has spawned the next iteration, parked on its own
+      // round signal. A wait that starts this late — a poll that missed the
+      // window between this round's last step and that spawn — must still
+      // find this round's iteration, not sit on the parked one until it
+      // times out.
+      {
+        const { awaitIterationOutputs } = await import("../apps/hub/src/stage-runs.js");
+        const { DRAFT_STEP_ID, EVALUATE_STEP_ID } = await import("@solutions-builder/app/workflows/stage-loop");
+        let after = await stageIterations(project.projectId, 1, { currentOnly: true });
+        const spawnWaitStarted = Date.now();
+        while (after.length <= beforeRound.length && Date.now() - spawnWaitStarted < 30_000) {
+          await new Promise((resolve) => setTimeout(resolve, 250));
+          after = await stageIterations(project.projectId, 1, { currentOnly: true });
+        }
+        const late = await awaitIterationOutputs({
+          projectId: project.projectId,
+          stage: 1,
+          before: beforeRound,
+          stepIds: [DRAFT_STEP_ID, EVALUATE_STEP_ID],
+          timeoutMs: 5_000,
+        }).catch((cause: unknown) => ({ error: cause instanceof Error ? cause.message : String(cause) }));
+        check(
+          "a wait that starts after the next iteration is parked still finds the round's own outputs",
+          after.length > beforeRound.length && "outputs" in late && late.runId === beforeRound.at(-1)?.runId && late.outputs.has(DRAFT_STEP_ID),
+          "error" in late ? late.error : `${late.runId} with ${[...late.outputs.keys()].join(",")}; ${beforeRound.length} iterations before, ${after.length} after`,
+        );
+      }
 
       const thread = "draft" in drafted ? await threadTurns(project.projectId, 1) : [];
       const opener = thread.find((entry) => entry.role === "specialist" && entry.questions !== null);
