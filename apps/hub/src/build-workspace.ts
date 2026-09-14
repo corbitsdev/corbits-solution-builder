@@ -89,8 +89,8 @@ same way when the plan needs them; its glob is in \`workspaces\` too.
   published to npm, or a git repository a hub asset can check out at a
   pinned commit.
 
-This directory is a git repository. Commit as you go — each attempt's work
-is reviewed against the last.
+Commit as you go if this directory is a git repository — each attempt's
+work is reviewed against the last.
 `;
 
 /** A filesystem-safe name for the seeded package. */
@@ -144,12 +144,27 @@ export async function seedBuildWorkspace(
   }
 
   // A repository from the start, so the worker's commits — and the diff a
-  // continued attempt begins from — have a baseline. Best effort: a host
-  // without git still gets a working workspace.
+  // continued attempt begins from — have a baseline. The identity is given
+  // per command rather than read from host config, which a machine may not
+  // have set. Best effort: a host without git still gets a working
+  // workspace.
   try {
     Bun.spawnSync(["git", "init", "-q"], { cwd: dir });
     Bun.spawnSync(["git", "add", "-A"], { cwd: dir });
-    Bun.spawnSync(["git", "commit", "-q", "-m", "chore: seed the workspace"], { cwd: dir });
+    Bun.spawnSync(
+      [
+        "git",
+        "-c",
+        "user.name=Solutions Builder",
+        "-c",
+        "user.email=solutions-builder@localhost",
+        "commit",
+        "-q",
+        "-m",
+        "chore: seed the workspace",
+      ],
+      { cwd: dir },
+    );
   } catch {
     // The files are the seed; version control is a convenience on top.
   }

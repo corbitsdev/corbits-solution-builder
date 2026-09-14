@@ -12,10 +12,10 @@ the tree lands. The revision file is the pin.
 
 The surfaces a deliverable builds against:
 
-- `@intx/workflow` — `defineWorkflow`, the step vocabulary (agent,
-  action, loop, map, awaitSignal, childWorkflow, sleep, onTrigger) and
-  the run state machine. `@intx/workflow/runlocal` drives tests in
-  memory.
+- `@intx/workflow` — `defineWorkflow` and the step vocabulary:
+  `step({ agent })`, `action`, `loop`, `map`, `gate`, `awaitSignal`,
+  `childWorkflow`, `sleep`, `onTrigger`, `escalation`, plus the run
+  state machine. `@intx/workflow/runlocal` drives tests in memory.
 - `@intx/workflow-host` — the production runtime env: persistence,
   scheduling, the signal channel.
 - `@intx/workflow-deploy` — deploy-time validation, the capability walk
