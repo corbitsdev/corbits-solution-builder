@@ -64,6 +64,8 @@ const BUILD_REPLY = "## In short\n- Build attempt acknowledged.";
 
 /** The stakeholder whose package the stub answers with nothing, while set. */
 let packageToFail: string | null = null;
+/** When set, every stage round's call is refused: the failure a person sees when a provider goes wrong mid-project. */
+let refuseRounds = false;
 /** Every illustration the stub was asked to draw. */
 const imagePrompts: string[] = [];
 const ONE_PIXEL_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
@@ -71,6 +73,7 @@ const ONE_PIXEL_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42
 /** Which canned reply a completion gets, told apart by a phrase distinctive to each role's own system prompt; null refuses the call. */
 function replyFor(messages: unknown[]): string | null {
   const text = JSON.stringify(messages);
+  if (refuseRounds) return null;
   if (text.includes("You are the Brainstormer at stage 1.")) return BRAINSTORMER_REPLY;
   if (text.includes("You are the Brief evaluator inside Solutions Builder")) return EVALUATOR_REPLY;
   if (text.includes("You are the art director for a short business presentation.")) {
@@ -484,6 +487,43 @@ try {
         ACTOR,
       );
 
+    // A round whose call the provider refuses does not draft. The person who
+    // waited on it learns so from the thread: a turn that says the round did
+    // not complete and what the platform reported.
+    if (brief) {
+      const { requestDraft } = await import("../apps/hub/src/stage-runs.js");
+      const { threadTurns } = await import("../apps/hub/src/stage-thread.js");
+      refuseRounds = true;
+      let refusedError = "";
+      try {
+        await requestDraft({
+          projectId: project.projectId,
+          stage: 1,
+          runId: project.runId,
+          actor: localActor(),
+          message: "Also, the handoff to sales is by spreadsheet.",
+          mode: "final",
+          projectTitle,
+        });
+      } catch (cause) {
+        refusedError = cause instanceof Error ? cause.message : String(cause);
+      } finally {
+        refuseRounds = false;
+      }
+      const failedTurn = (await threadTurns(project.projectId, 1)).find((turn) => turn.failed === true);
+      check(
+        "a round the provider refuses is a turn in the thread that says so, with what the platform reported",
+        failedTurn?.role === "specialist" && failedTurn.body.includes("did not complete") && failedTurn.body.includes("stub: this package is refused"),
+        failedTurn ? failedTurn.body.slice(0, 300) : `no failed turn; request said ${JSON.stringify(refusedError).slice(0, 300)}`,
+      );
+      if (!failedTurn) {
+        const { debugRuns } = await import("../apps/hub/src/hub-executor.js");
+        console.log("DIAG", JSON.stringify(await debugRuns(project.projectId), null, 1).slice(0, 6000));
+        console.log("THREAD", JSON.stringify(await threadTurns(project.projectId, 1)).slice(0, 3000));
+      }
+      await settle((s) => s.parked && s.stage === 1);
+    }
+
     const briefVersion = versionOf(brief ?? (await produce(1)));
     const submitted = (await command("stage.submit", { runId: await currentRunId(), versions: briefVersion })).delivery ?? "none";
     check("stage.submit lands on the parked loop as its round signal", submitted === "delivered", submitted);
@@ -827,6 +867,7 @@ try {
         const { debugRuns } = await import("../apps/hub/src/hub-executor.js");
         console.log("DIAG", JSON.stringify(await debugRuns(project.projectId), null, 1).slice(0, 8000));
       }
+
     }
   }
 } finally {

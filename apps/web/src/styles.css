@@ -1407,6 +1407,14 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   color: var(--wb-foreground);
 }
 
+/* A round that did not complete: what the platform reported, set apart from a draft's digest. */
+.turn-failed {
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--wb-destructive);
+  background: var(--wb-muted);
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+}
+
 .thread-progress {
   font-size: 0.8125rem;
   color: var(--wb-muted-foreground);

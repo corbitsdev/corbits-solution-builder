@@ -132,6 +132,9 @@ export function StageDocument({
   // becoming a second kind of thing.
   // Memoised: the thread re-pins its scroll whenever this array is new, and a
   // fresh one on every keystroke in the composer made the transcript twitch.
+  // The turns that report a round the platform could not complete, set apart in the transcript.
+  const failedTurns = useMemo(() => new Set(turns.filter((turn) => turn.failed).map((turn) => turn.id)), [turns]);
+
   const messages: ChatMessage[] = useMemo(() => {
     const list: ChatMessage[] = turns.map((turn) => ({
       id: turn.id,
@@ -283,6 +286,10 @@ export function StageDocument({
           renderBody={(message) =>
             message.id === "pending" ? (
               <WorkingLabel stage={node.stage} />
+            ) : message.role === "agent" && failedTurns.has(message.id) ? (
+              <div className="turn-failed" role="alert">
+                <Markdown source={(message.parts[0] as { text: string }).text} />
+              </div>
             ) : message.role === "agent" ? (
               <SpecialistTurn
                 text={(message.parts[0] as { text: string }).text}
