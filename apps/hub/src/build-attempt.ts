@@ -179,7 +179,12 @@ async function driveAttempt(projectId: string, runId: string, continueFromRunId:
       idempotencyKey: `${runId}:bridge-final`,
       cursor: 1,
       type: "bridge.final",
-      severity: outcome.exitStatus === 0 ? "info" : "error",
+      // An exit status of 0 is not a verdict on the work — a worker that
+      // delegated to an async sub-agent, or read an empty packet and stopped,
+      // exits 0 having produced nothing. `produced` is what the workspace
+      // actually shows for it; only a worker that both ran and left a change
+      // behind reads as `info`.
+      severity: outcome.available && outcome.exitStatus === 0 && outcome.produced?.changed === true ? "info" : "error",
       payload: {
         bridgeId: outcome.bridgeId,
         worker: outcome.worker,
@@ -192,6 +197,7 @@ async function driveAttempt(projectId: string, runId: string, continueFromRunId:
         continuedFrom: outcome.continuedFrom,
         continuations: outcome.continuations,
         stopReason: outcome.stopReason,
+        produced: outcome.produced,
         archive,
         archiveError,
         finalText: outcome.finalText.slice(0, 20_000),

@@ -170,6 +170,14 @@ export type BridgeOutcome = {
    * that changed nothing, so this can be older than the final invocation.
    */
   readonly execution: ExecutionCheck[] | null;
+  /**
+   * What this attempt itself left behind, measured against the workspace as
+   * it stood right before the worker's first invocation — the copied-forward
+   * work of a continued attempt included, so a legitimate no-op continuation
+   * is judged on what it added, not on the size of the workspace it resumed.
+   * Null when the worker never ran, since there is nothing to measure.
+   */
+  readonly produced: { readonly changed: boolean; readonly summary: string } | null;
   readonly startedAt: string;
   readonly endedAt: string;
   /**
@@ -298,6 +306,7 @@ export async function runBuildAttempt(args: {
       continuations: 0,
       stopReason: null,
       execution: null,
+      produced: null,
       startedAt,
       endedAt: new Date().toISOString(),
       checkpointRef: null,
@@ -339,6 +348,11 @@ export async function runBuildAttempt(args: {
     const invocation = await spawnWorker(worker, workspace, prompt, bounded, args.onOutput);
     return { invocation, timedOut: deadlineSignal.aborted };
   }
+
+  // Captured before the worker's first invocation, so a continued attempt is
+  // judged against the workspace it was actually handed — the copied-forward
+  // work of the earlier attempt included — never against an empty directory.
+  const baseline = await captureWorkspaceState(workspace);
 
   let { invocation, timedOut } = await invokeBounded(args.prompt);
   const finalTextByInvocation = [invocation.finalText];
@@ -406,6 +420,7 @@ export async function runBuildAttempt(args: {
   }
 
   const tally = following ? await following.stop() : null;
+  const produced = await describeWorkspaceChange(workspace, baseline);
 
   return {
     bridgeId: BRIDGE_ID,
@@ -423,6 +438,7 @@ export async function runBuildAttempt(args: {
     continuations,
     stopReason,
     execution: lastExecution,
+    produced,
     startedAt,
     endedAt: new Date().toISOString(),
     checkpointRef: null,
@@ -579,6 +595,59 @@ export async function snapshotWorkspace(workspace: string): Promise<string> {
     return `${headValue}\n${entries.sort().join("\n")}`;
   }
   return fileTreeFingerprint(workspace);
+}
+
+/** The workspace's fingerprint, plus its git HEAD when it has one — the reference point a later diff is taken against. */
+type WorkspaceState = { readonly fingerprint: string; readonly head: string | null };
+
+async function captureWorkspaceState(workspace: string): Promise<WorkspaceState> {
+  if (await pathExists(join(workspace, ".git"))) {
+    const head = Bun.spawnSync(["git", "-C", workspace, "rev-parse", "HEAD"], { stdout: "pipe", stderr: "pipe" });
+    if (head.exitCode !== 0) throw new Error(`git could not read HEAD in ${workspace}`);
+    return { fingerprint: await snapshotWorkspace(workspace), head: head.stdout.toString().trim() };
+  }
+  return { fingerprint: await snapshotWorkspace(workspace), head: null };
+}
+
+/**
+ * What this attempt actually left behind, against the workspace it was
+ * handed. `.corbits/` and `.agents/` are the bridge's own — the packet and
+ * the platform skills, reseeded on every attempt including a continued one
+ * — so they are never counted as the worker's work; excluding them is what
+ * keeps a continued attempt's legitimate no-op from reading as a change.
+ *
+ * A worker that only committed is caught here too: `git diff --stat` against
+ * the pre-run HEAD sees the working tree regardless of how many commits the
+ * worker made in between, so a build that committed and left a clean tree is
+ * not mistaken for one that did nothing.
+ */
+async function describeWorkspaceChange(workspace: string, baseline: WorkspaceState): Promise<{ changed: boolean; summary: string }> {
+  const final = await snapshotWorkspace(workspace);
+  if (final === baseline.fingerprint) {
+    return { changed: false, summary: "the worker exited cleanly but wrote nothing: the workspace is unchanged since the attempt began" };
+  }
+  if (baseline.head === null) {
+    return { changed: true, summary: "the workspace's files changed since the attempt began" };
+  }
+  const pathspec = ["--", ".", ":!.corbits", ":!.agents"];
+  const diff = Bun.spawnSync(["git", "-C", workspace, "diff", "--stat", baseline.head, ...pathspec], { stdout: "pipe", stderr: "pipe" });
+  const untracked = Bun.spawnSync(["git", "-C", workspace, "ls-files", "--others", "--exclude-standard", ...pathspec], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (diff.exitCode !== 0 || untracked.exitCode !== 0) throw new Error(`git could not describe the change in ${workspace}`);
+  const stat = diff.stdout.toString().trim();
+  const untrackedFiles = untracked.stdout.toString().split("\n").filter(Boolean);
+  const parts = [stat, untrackedFiles.length > 0 ? `${untrackedFiles.length} new untracked file(s): ${untrackedFiles.join(", ")}` : ""].filter(
+    (part) => part.length > 0,
+  );
+  return {
+    changed: parts.length > 0,
+    summary:
+      parts.length > 0
+        ? parts.join("\n")
+        : "the worker exited cleanly but wrote nothing of its own: only the bridge's own .corbits/.agents files changed",
+  };
 }
 
 async function pathExists(path: string): Promise<boolean> {

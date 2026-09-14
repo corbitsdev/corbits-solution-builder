@@ -763,6 +763,99 @@ let buildRunId = "";
   buildRunId = fifth.runId;
 }
 
+// --- Stage 8: an attempt that writes nothing does not read as a success ---
+{
+  const bin = await mkdtemp(join(tmpdir(), "solutions-builder-worker-nothing-"));
+
+  // Exit 0 having done nothing: both CL-7960 cases — delegating to an async
+  // sub-agent and returning, and finding an empty packet and stopping — look
+  // exactly like this to the bridge.
+  const doesNothing = join(bin, "does-nothing-worker");
+  await writeFile(
+    doesNothing,
+    [
+      "#!/bin/sh",
+      'case "$1" in',
+      '  --help) echo "usage: worker exec <prompt>"; exit 0 ;;',
+      '  exec) echo "The builder is running asynchronously; I will remain idle while it works."; exit 0 ;;',
+      "esac",
+      "",
+    ].join("\n"),
+  );
+  await chmod(doesNothing, 0o755);
+  process.env.SOLUTIONS_BUILDER_WORKER_BIN = doesNothing;
+
+  const started = await startBuildAttempt({ actor: ACTOR, projectId, runId: buildRunId });
+  check("starting the nothing-attempt moves the queued run to running", started.run.state === "running");
+  const outcome = await started.attempt;
+  check(
+    "a worker that exits 0 having changed nothing is reported as having produced nothing",
+    outcome?.available === true && outcome.exitStatus === 0 && outcome.produced?.changed === false,
+    JSON.stringify({ available: outcome?.available, exitStatus: outcome?.exitStatus, produced: outcome?.produced }),
+  );
+  const recordedNothing = (await buildEvents(projectId, buildRunId)).find((event) => event.type === "bridge.final");
+  check(
+    "the bridge's final event does not read as a success when nothing changed, even though the worker exited 0",
+    recordedNothing?.severity === "error",
+    `severity=${recordedNothing?.severity}`,
+  );
+  check(
+    "the run stays running: whether an attempt is evidence is still a person's call, never the exit code's",
+    (await projectDetail(projectId, ACTOR.principalId)).runs.find((entry) => entry.id === buildRunId)?.state === "running",
+  );
+
+  // A worker that actually writes something is reported as having produced
+  // it — the positive case, so the negative one above is not a tautology.
+  const writesOnce = join(bin, "writes-once-worker");
+  await writeFile(
+    writesOnce,
+    ["#!/bin/sh", 'case "$1" in', '  --help) echo "usage: worker exec <prompt>"; exit 0 ;;', '  exec) echo "built" > deliverable.txt; exit 0 ;;', "esac", ""].join(
+      "\n",
+    ),
+  );
+  await chmod(writesOnce, 0o755);
+  await command("build.fail", projectId, { runId: buildRunId, reason: "moving to a worker that writes something" });
+  const requeuedForWrite = await command("build.start_attempt", projectId, { runId: buildRunId });
+  process.env.SOLUTIONS_BUILDER_WORKER_BIN = writesOnce;
+  const wrote = await startBuildAttempt({ actor: ACTOR, projectId, runId: requeuedForWrite.runId });
+  const wroteOutcome = await wrote.attempt;
+  check(
+    "a worker that writes a file is reported as having produced something",
+    wroteOutcome?.produced?.changed === true,
+    JSON.stringify(wroteOutcome?.produced),
+  );
+
+  // A continuation that legitimately adds nothing new to a workspace that
+  // already holds real work is judged against what it started with — not
+  // conflated with an empty build, which is the continuation case CL-7960
+  // asks to be handled carefully.
+  await command("build.fail", projectId, { runId: requeuedForWrite.runId, reason: "moving to the no-op continuation check" });
+  const requeuedForContinuation = await command("build.start_attempt", projectId, { runId: requeuedForWrite.runId });
+  process.env.SOLUTIONS_BUILDER_WORKER_BIN = doesNothing;
+  const continued = await startBuildAttempt({
+    actor: ACTOR,
+    projectId,
+    runId: requeuedForContinuation.runId,
+    continueFromRunId: requeuedForWrite.runId,
+  });
+  const continuedOutcome = await continued.attempt;
+  check(
+    "a no-op continuation of a workspace that already has real work is reported as having produced nothing this attempt, not as an empty build",
+    continuedOutcome?.continuedFrom === requeuedForWrite.runId && continuedOutcome.produced?.changed === false,
+    JSON.stringify(continuedOutcome?.produced),
+  );
+  check(
+    "the copied-forward work from the earlier attempt is still there, untouched by the no-op continuation",
+    await Bun.file(join(await workspaceFor(requeuedForContinuation.runId), "deliverable.txt")).exists(),
+  );
+
+  delete process.env.SOLUTIONS_BUILDER_WORKER_BIN;
+  await command("build.fail", projectId, { runId: requeuedForContinuation.runId, reason: "the smoke moves on" });
+  const nextQueued = await command("build.start_attempt", projectId, { runId: requeuedForContinuation.runId });
+  check("starting from the judged run queues the attempt the rest of the smoke drives by hand", nextQueued.state === "queued");
+  buildRunId = nextQueued.runId;
+}
+
 // --- Stage 8: attempt, a human question, and evidence ---
 {
   const running = await command("build.start_attempt", projectId, { runId: buildRunId });
@@ -854,12 +947,14 @@ let buildRunId = "";
     "the delivery manifest is recorded and accepted",
     final.manifests.length === 1 && final.manifests[0]!.acceptedAt !== null,
   );
-  // Seven stage runs (1-7), five build runs (one failed for want of a worker,
-  // one canceled, one failed by the person, one continued from it and judged,
-  // one accepted), one delivery run. Nothing is deleted or reused along the way.
+  // Seven stage runs (1-7), eight build runs (one failed for want of a
+  // worker, one canceled, one failed by the person, one continued from it and
+  // judged, one that wrote nothing and was judged, one that wrote something
+  // and was judged, one no-op continuation of it and was judged, one
+  // accepted), one delivery run. Nothing is deleted or reused along the way.
   check(
     "every run is retained in history",
-    final.runs.length === 13,
+    final.runs.length === 16,
     `${final.runs.length} runs`,
   );
 
