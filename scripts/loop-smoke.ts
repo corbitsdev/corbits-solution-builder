@@ -29,6 +29,7 @@ import { newId } from "../apps/hub/src/ids.js";
 import { HostError } from "../apps/hub/src/errors.js";
 import { openDecisionFor } from "../apps/hub/src/decisions.js";
 import { workspaceFor } from "../apps/hub/src/corbits-exec.js";
+import { ensureDeckFor } from "../apps/hub/src/deck.js";
 import { abortBuildAttempt, liveBuild, startBuildAttempt, subscribeBuildOutput } from "../apps/hub/src/build-attempt.js";
 import { buildEvents } from "../apps/hub/src/engine-ledger.js";
 import { buildArchiveName, packageBuild } from "../apps/hub/src/build-output.js";
@@ -98,6 +99,12 @@ const STAGE_ARTIFACT: Record<number, ArtifactKind> = {
 
 const dataDir = process.env.SOLUTIONS_BUILDER_DATA_DIR;
 const host = await openDatabase(dataDir ? `${dataDir}/pglite-smoke` : undefined);
+// Settings files — the deck designs, the designer's, the build worker's — are
+// read from the data directory at each use. Left unset, that is the developer's
+// own workspace, and a role whose slides ask for images there fails a deck
+// build here for want of an image provider. The database above stays where it
+// was chosen; only the settings move to a directory of this run's own.
+process.env.SOLUTIONS_BUILDER_DATA_DIR ??= await mkdtemp(join(tmpdir(), "solutions-builder-loop-"));
 await prepareDatabase(host);
 await ensureHub();
 // The actor's ledger authorities come from the platform's roles, which the
@@ -284,7 +291,7 @@ for (const stage of [1, 2, 3, 4] as Stage[]) {
       kind: "audience_package",
       variant: "Security",
       title: "Package for security",
-      content: "# For security",
+      content: "# For security\n\n## Audience: Security\n\n### Deck outline\n\n1. **The risk**  \n   What could go wrong.\n2. **The control**  \n   What stops it.\n\n### Decision request\n- Proceed.\n",
       mediaType: "text/markdown",
       sourceVersionIds: [],
       provenance: { producer: "human" },
@@ -294,6 +301,19 @@ for (const stage of [1, 2, 3, 4] as Stage[]) {
   check(
     "two audience packages coexist rather than superseding each other",
     first.artifactId !== second.artifactId && first.version === 1 && second.version === 1,
+  );
+
+  // Slides asked for twice while they are still being built are built once:
+  // the second request joins the first.
+  const [deckA, deckB] = await Promise.all([
+    ensureDeckFor({ packageNodeId: second.nodeId, actor: ACTOR }),
+    ensureDeckFor({ packageNodeId: second.nodeId, actor: ACTOR }),
+  ]);
+  const decks = (await projectDetail(many.projectId, ACTOR.principalId)).nodes.filter((node) => node.kind === "audience_deck");
+  check(
+    "slides asked for twice mid-build are built once, and both requests get the same deck",
+    deckA.nodeId === deckB.nodeId && deckA.built && deckB.built && decks.length === 1,
+    `${deckA.nodeId} ${deckB.nodeId} decks=${decks.length}`,
   );
 
   // Walk to stage 5.
