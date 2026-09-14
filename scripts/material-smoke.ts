@@ -10,6 +10,7 @@
  *
  * Usage: bun --conditions intx-src scripts/material-smoke.ts
  */
+import { givenDataDir } from "./smoke-env.js";
 import ExcelJS from "exceljs";
 import { openDatabase } from "../apps/hub/src/db.js";
 import { prepareDatabase } from "../apps/hub/src/migrate.js";
@@ -28,7 +29,7 @@ function check(name: string, ok: boolean, detail = "") {
 }
 
 const host = await openDatabase(
-  process.env.SOLUTIONS_BUILDER_DATA_DIR ? `${process.env.SOLUTIONS_BUILDER_DATA_DIR}/pglite-material` : undefined,
+  givenDataDir ? `${givenDataDir}/pglite-material` : undefined,
 );
 await prepareDatabase(host);
 await ensureHub();

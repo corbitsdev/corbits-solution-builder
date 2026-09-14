@@ -6,6 +6,7 @@
  * ledger's own state list rather than a copy of it, so adding a state to the
  * ledger and forgetting to guide it fails here.
  */
+import "./smoke-env.js";
 import { BUILD_STATES, STAGE_STATES, type RunState } from "@solutions-builder/app/ledger";
 import { activityHeadline, nextStep } from "@solutions-builder/app/next-step";
 import { deterministicGuidance } from "../apps/hub/src/guide.js";

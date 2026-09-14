@@ -10,6 +10,7 @@
  * It deliberately does not fake a completed login. Signing in needs a real
  * account; this checks everything up to that point.
  */
+import "./smoke-env.js";
 import { createServer } from "node:http";
 import {
   DEFINITIONS,

@@ -8,6 +8,7 @@
  * the standing brief, which now travels as a produced version's own
  * `provenance.brief` rather than a separate marker turn.
  */
+import "./smoke-env.js";
 import { buildDraftPrompt } from "../apps/hub/src/stage-runs.js";
 import {
   VERBATIM_BUDGET,

@@ -11,6 +11,7 @@
  *
  * Usage: bun --conditions intx-src scripts/transfer-smoke.ts
  */
+import { givenDataDir } from "./smoke-env.js";
 import { openDatabase } from "../apps/hub/src/db.js";
 import { prepareDatabase } from "../apps/hub/src/migrate.js";
 import { ensureHub, localActor } from "../apps/hub/src/hub-client.js";
@@ -31,7 +32,7 @@ function check(name: string, ok: boolean, detail = "") {
 }
 
 const host = await openDatabase(
-  process.env.SOLUTIONS_BUILDER_DATA_DIR ? `${process.env.SOLUTIONS_BUILDER_DATA_DIR}/pglite-transfer` : undefined,
+  givenDataDir ? `${givenDataDir}/pglite-transfer` : undefined,
 );
 await prepareDatabase(host);
 await ensureHub();

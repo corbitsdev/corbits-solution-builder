@@ -11,6 +11,7 @@
  * A stub provider stands in for a vendor: this proves the wiring, not that
  * anyone's API key is valid.
  */
+import "./smoke-env.js";
 import { createServer } from "node:http";
 import { openDatabase } from "../apps/hub/src/db.js";
 import { prepareDatabase } from "../apps/hub/src/migrate.js";
