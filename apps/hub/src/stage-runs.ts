@@ -30,7 +30,7 @@ import {
 import type { ArtifactKind } from "@solutions-builder/app/artifacts";
 import type { Stage } from "@solutions-builder/app/ledger";
 import type { HubRunEvent } from "./hub-client.js";
-import { readOutputRef, stageIterations } from "./hub-executor.js";
+import { readOutputRef, stageIterations, type StageIteration } from "./hub-executor.js";
 import { expectLiveDraft, stripOuterFence } from "./live-drafts.js";
 import { execute, type Actor } from "./engine.js";
 import { readArtifactNode, writeArtifact } from "./projects.js";
@@ -625,15 +625,10 @@ export async function requestDraft(args: {
   async function round(cap: number, plan: Round): Promise<RoundOutcome> {
     expectLiveDraft(args.projectId, args.stage);
 
-    const before = await stageIterations(args.projectId, args.stage, { currentOnly: true });
     // The iteration this round will run in is either already visible (parked,
-    // awaiting the very signal about to be delivered) or not yet spawned; either
-    // way it is not a *new* entry in the list once the round is under way — the
-    // loop only advances to a fresh iteration once this one's whole body has
-    // finished. One less than the newest index we can already see is what makes
-    // `awaitIterationOutputs`' "the newest iteration is beyond where I started"
-    // check pass as soon as this round's own iteration exists.
-    const afterIteration = before.length - 2;
+    // awaiting the very signal about to be delivered) or not yet spawned.
+    // `awaitIterationOutputs` tells the two apart from this snapshot.
+    const before = await stageIterations(args.projectId, args.stage, { currentOnly: true });
 
     const outcome = await execute({
       type: "stage.draft",
@@ -669,7 +664,7 @@ export async function requestDraft(args: {
     const { runId: iterationRunId, outputs, failures } = await awaitIterationOutputs({
       projectId: args.projectId,
       stage: args.stage,
-      afterIteration,
+      before,
       stepIds: plan.stepIds,
       timeoutMs: DRAFT_STEP_TIMEOUT_MS,
       settle: args.stage === 5,
@@ -767,19 +762,37 @@ export type StepReply = { reply: string; turn?: { model?: string } };
 export async function awaitIterationOutputs(args: {
   readonly projectId: string;
   readonly stage: Stage;
-  readonly afterIteration: number;
+  /**
+   * The stage's iterations as they were when the round was requested. The
+   * round runs in the last of them when that one is parked awaiting the
+   * signal, or in the next one spawned; an iteration that had already
+   * settled by then is an earlier round's, whatever its position.
+   */
+  readonly before: readonly StageIteration[];
   readonly stepIds: readonly string[];
   readonly timeoutMs: number;
   readonly settle?: boolean;
 }): Promise<{ runId: string; outputs: Map<string, StepReply>; failures: Map<string, string> }> {
   const deadline = Date.now() + args.timeoutMs;
 
+  // Every step the round is waiting on has completed or failed.
+  const settled = (iteration: StageIteration): boolean =>
+    args.stepIds.every(
+      (stepId) => findEvent(iteration.events, "StepCompleted", stepId) !== undefined || findEvent(iteration.events, "StepFailed", stepId) !== undefined,
+    );
+  const earlier = new Set(args.before.filter(settled).map((iteration) => iteration.runId));
+  const first = Math.max(0, args.before.length - 1);
+
   for (;;) {
     const iterations = await stageIterations(args.projectId, args.stage, { currentOnly: true });
-    const newestIndex = iterations.length - 1;
 
-    if (newestIndex > args.afterIteration) {
-      const iteration = iterations[newestIndex]!;
+    // The round's own iteration is the first from the snapshot's last one on
+    // that was not already settled then and is settled now. Not the newest:
+    // the loop spawns the next iteration, parked on its own round signal,
+    // as soon as this one's body ends, and a poll that lands after that
+    // spawn would otherwise wait on an iteration nothing will ever draft in.
+    for (const iteration of iterations.slice(first)) {
+      if (earlier.has(iteration.runId)) continue;
       const anchor = iteration.runId.split("__", 1)[0]!;
 
       const failures = new Map<string, string>();
@@ -792,20 +805,18 @@ export async function awaitIterationOutputs(args: {
         failures.set(stepId, message);
       }
 
-      const completed = args.stepIds.map((stepId) => findEvent(iteration.events, "StepCompleted", stepId));
-      if (completed.every((event, index) => event !== undefined || failures.has(args.stepIds[index]!))) {
-        const outputs = new Map<string, StepReply>();
-        for (const [index, stepId] of args.stepIds.entries()) {
-          const event = completed[index];
-          if (!event) continue;
-          const output = eventBody(event).output as { ref?: unknown } | undefined;
-          if (typeof output?.ref !== "string") {
-            throw new HostError("internal_error", `The ${stepId} step completed with no output ref.`);
-          }
-          outputs.set(stepId, (await readOutputRef(anchor, iteration.runId, output.ref)) as StepReply);
+      if (!settled(iteration)) continue;
+      const outputs = new Map<string, StepReply>();
+      for (const stepId of args.stepIds) {
+        const event = findEvent(iteration.events, "StepCompleted", stepId);
+        if (!event) continue;
+        const output = eventBody(event).output as { ref?: unknown } | undefined;
+        if (typeof output?.ref !== "string") {
+          throw new HostError("internal_error", `The ${stepId} step completed with no output ref.`);
         }
-        return { runId: iteration.runId, outputs, failures };
+        outputs.set(stepId, (await readOutputRef(anchor, iteration.runId, output.ref)) as StepReply);
       }
+      return { runId: iteration.runId, outputs, failures };
     }
 
     if (Date.now() >= deadline) {
