@@ -99,9 +99,10 @@ export const BUILD_WORKERS: readonly BuildWorkerKind[] = [
     probe: ["--version"],
     probeExpects: null,
     // workspace-write scopes writes to the workspace (plus /tmp), short of a
-    // full bypass; --skip-git-repo-check is needed because a build workspace
-    // is a plain directory, not a git repo, which codex otherwise refuses to run in.
-    run: (prompt) => ["exec", "-s", "workspace-write", "--skip-git-repo-check", prompt],
+    // full bypass. No --skip-git-repo-check: build-workspace.ts git-inits
+    // every fresh workspace, so codex's own git-repo check already passes
+    // (it accepts an unborn repo too, before the baseline commit lands).
+    run: (prompt) => ["exec", "-s", "workspace-write", prompt],
     turnReports: null,
   },
 ];
