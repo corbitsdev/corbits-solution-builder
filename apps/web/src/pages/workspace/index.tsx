@@ -843,7 +843,7 @@ function BuildPanel({
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "")
       .slice(0, 60) || "project"
-  }-build.tar.gz`;
+  }.tar.gz`;
   /**
    * The ledger's way to another attempt: an ended attempt is failed first,
    * then a new one is queued from the terminal run and started — in the
@@ -918,9 +918,9 @@ function BuildPanel({
         <p className="inline-note">
           The worker has ended
           {exitStatus === 0 ? " with exit status 0" : exitStatus === null ? " without an exit status" : ` with exit status ${exitStatus}`}.
-          An exit status is not a verdict on the work: read what it left below, then say what it was. Accepting it
-          packages the workspace as <code>{archiveName}</code>, records that as this project's build, and opens delivery
-          review, where its bytes are verified.
+          An exit status is not a verdict on the work: read what it left below, then say what it was. Its work is
+          packaged as <code>{archiveName}</code> and recorded as this project's build; accepting it opens delivery
+          review, where that archive's bytes are verified.
         </p>
       ) : null}
 
@@ -1012,6 +1012,19 @@ function BuildPanel({
               <dt>Workspace</dt>
               <dd className="hash">{String(final.payload.workspace ?? "")}</dd>
             </div>
+            {final.payload.archive && typeof final.payload.archive === "object" ? (
+              <div>
+                <dt>Packaged</dt>
+                <dd>
+                  <BuildArchiveRow archive={final.payload.archive as { nodeId: string; name: string; root: string; sizeBytes: number }} />
+                </dd>
+              </div>
+            ) : typeof final.payload.archiveError === "string" ? (
+              <div>
+                <dt>Packaged</dt>
+                <dd>The work could not be packaged: {final.payload.archiveError}</dd>
+              </div>
+            ) : null}
             {typeof final.payload.continuedFrom === "string" ? (
               <div>
                 <dt>Continued from</dt>
@@ -1058,6 +1071,33 @@ function BuildPanel({
       ) : null}
     </Screen>
     </div>
+  );
+}
+
+/** The build as packaged when the worker ended: its name, its size, where it unpacks, and a way to save it. */
+function BuildArchiveRow({ archive }: { archive: { nodeId: string; name: string; root: string; sizeBytes: number } }) {
+  const [state, setState] = useState<{ busy: boolean; saved: string | null; error: string | null }>({ busy: false, saved: null, error: null });
+  const size = archive.sizeBytes >= 1024 * 1024 ? `${(archive.sizeBytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(archive.sizeBytes / 1024))} KB`;
+  return (
+    <>
+      <span className="hash">{archive.name}</span> · {size} · unpacks into <span className="hash">{archive.root}/</span> · in Artifacts as this
+      project's build{" "}
+      <Button
+        variant="link"
+        loading={state.busy}
+        onClick={() => {
+          setState({ busy: true, saved: null, error: null });
+          api
+            .saveArtifactFile(archive.nodeId)
+            .then((result) => setState({ busy: false, saved: result.path, error: null }))
+            .catch((cause) => setState({ busy: false, saved: null, error: cause instanceof ApiFailure ? cause.detail.message : String(cause) }));
+        }}
+      >
+        Save it
+      </Button>
+      {state.saved ? <span className="inline-note"> Saved to {state.saved}</span> : null}
+      {state.error ? <span className="inline-note"> {state.error}</span> : null}
+    </>
   );
 }
 

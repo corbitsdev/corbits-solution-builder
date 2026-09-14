@@ -1,13 +1,14 @@
 /**
  * The completed build as an artifact, and its acceptance as evidence.
  *
- * A worker leaves its work as a directory under `builds/<runId>`. Accepting
- * that as evidence means three things, done here in order: the directory is
- * packaged into one archive named after the project; the archive is recorded
- * as a `build_evidence` version so it stands beside the plan, the packet and
- * the decks and can be saved from the app; and `build.accept_evidence` is
- * issued through the guard with one descriptor — that archive, hashed and
- * sized — which is what stage 9 verifies byte for byte.
+ * A worker leaves its work as a directory under `builds/<runId>`. When the
+ * worker ends, that directory is packaged into one archive named after the
+ * project — `<project>.tar.gz`, unpacking into a directory of the project's
+ * name — and recorded as a `build_evidence` version, so the build stands
+ * beside the plan, the packet and the decks and can be saved from the app
+ * before anyone decides what it was. Accepting the evidence then issues
+ * `build.accept_evidence` through the guard with that archive as the one
+ * descriptor, hashed and sized, which is what stage 9 verifies byte for byte.
  *
  * The archive is written inside the workspace, under `.solutions-builder/`,
  * because a descriptor's path must stay inside the workspace it describes.
@@ -15,13 +16,14 @@
  * itself.
  */
 import { createHash } from "node:crypto";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execute, type Actor, type CommandOutcome } from "./engine.js";
 import { HostError } from "./errors.js";
 import { newId } from "./ids.js";
 import { dataDirectory } from "./paths.js";
-import { projectDetail, writeArtifact } from "./projects.js";
+import { projectDetail, readArtifactNode, writeArtifact } from "./projects.js";
 import { buildEvents } from "./engine-ledger.js";
 import { workspaceFor } from "./corbits-exec.js";
 
@@ -31,11 +33,12 @@ export const BUILD_ARCHIVE_MEDIA_TYPE = "application/gzip";
 const ARCHIVE_DIRECTORY = ".solutions-builder";
 
 /** What the archive leaves out: the bridge's hook, installed dependencies, and itself. */
-const ARCHIVE_EXCLUDES = [".corbits", "node_modules", ARCHIVE_DIRECTORY];
+const ARCHIVE_EXCLUDES = new Set([".corbits", "node_modules", ARCHIVE_DIRECTORY]);
 
 /** The archive's store limit, as for decks: past this it is a file the version points at. */
 const STORE_LIMIT_BYTES = 11 * 1024 * 1024;
 
+/** The project's name as a file and directory name: lower case, hyphens, nothing a shell minds. */
 export function slugOf(title: string): string {
   return (
     title
@@ -46,9 +49,9 @@ export function slugOf(title: string): string {
   );
 }
 
-/** `<project>-build.tar.gz`: the project's name is the file's. */
+/** `<project>.tar.gz`, unpacking into `<project>/`. */
 export function buildArchiveName(projectTitle: string): string {
-  return `${slugOf(projectTitle)}-build.tar.gz`;
+  return `${slugOf(projectTitle)}.tar.gz`;
 }
 
 export type PackagedBuild = {
@@ -56,30 +59,47 @@ export type PackagedBuild = {
   readonly path: string;
   readonly absolutePath: string;
   readonly name: string;
+  /** The directory the archive unpacks into. */
+  readonly root: string;
   readonly sha256: string;
   readonly sizeBytes: number;
 };
 
-/** Packages a build attempt's workspace into one archive named after the project. */
+/**
+ * Packages a build attempt's workspace into one archive named after the
+ * project, with everything under a top-level directory of the project's
+ * name. The workspace is staged under that name first, because that is the
+ * one way both tar implementations in use write the same paths.
+ */
 export async function packageBuild(runId: string, projectTitle: string): Promise<PackagedBuild> {
   const workspace = await workspaceFor(runId);
-  const name = buildArchiveName(projectTitle);
+  const root = slugOf(projectTitle);
+  const name = `${root}.tar.gz`;
   const directory = join(workspace, ARCHIVE_DIRECTORY);
   await mkdir(directory, { recursive: true });
   const absolutePath = join(directory, name);
-  const tar = Bun.spawn(
-    ["tar", "-czf", absolutePath, "-C", workspace, ...ARCHIVE_EXCLUDES.flatMap((entry) => ["--exclude", `./${entry}`]), "."],
-    { stdout: "ignore", stderr: "pipe" },
-  );
-  const [exit, stderr] = await Promise.all([tar.exited, new Response(tar.stderr).text()]);
-  if (exit !== 0) {
-    throw new HostError("internal_error", `The build could not be packaged: tar exited ${exit}. ${stderr.trim()}`.trim());
+
+  const staging = await mkdtemp(join(tmpdir(), "solutions-builder-archive-"));
+  try {
+    await cp(workspace, join(staging, root), {
+      recursive: true,
+      filter: (source) => !ARCHIVE_EXCLUDES.has(source.slice(workspace.length + 1).split("/")[0] ?? ""),
+    });
+    const tar = Bun.spawn(["tar", "-czf", absolutePath, "-C", staging, root], { stdout: "ignore", stderr: "pipe" });
+    const [exit, stderr] = await Promise.all([tar.exited, new Response(tar.stderr).text()]);
+    if (exit !== 0) {
+      throw new HostError("internal_error", `The build could not be packaged: tar exited ${exit}. ${stderr.trim()}`.trim());
+    }
+  } finally {
+    await rm(staging, { recursive: true, force: true });
   }
+
   const bytes = await readFile(absolutePath);
   return {
     path: `${ARCHIVE_DIRECTORY}/${name}`,
     absolutePath,
     name,
+    root,
     sha256: createHash("sha256").update(bytes).digest("hex"),
     sizeBytes: (await stat(absolutePath)).size,
   };
@@ -95,7 +115,7 @@ async function buildContent(archive: PackagedBuild): Promise<string> {
   if (bytes.byteLength <= STORE_LIMIT_BYTES) return `data:${BUILD_ARCHIVE_MEDIA_TYPE};base64,${bytes.toString("base64")}`;
   const name = `${archive.sha256.slice(0, 32)}.tar.gz`;
   await mkdir(buildFilesDirectory(), { recursive: true });
-  await writeFile(join(buildFilesDirectory(), name), bytes);
+  await cp(archive.absolutePath, join(buildFilesDirectory(), name));
   return JSON.stringify({ buildFile: name, bytes: bytes.byteLength });
 }
 
@@ -112,17 +132,57 @@ export async function buildBytesOf(content: string): Promise<Uint8Array | null> 
   }
 }
 
-export type AcceptedBuild = {
-  readonly run: CommandOutcome;
-  readonly artifact: { nodeId: string; artifactId: string; version: number; title: string; name: string; sizeBytes: number };
+/** What a build's final event carries about its archive, once it is packaged. */
+export type BuildArchive = {
+  readonly nodeId: string;
+  readonly name: string;
+  readonly root: string;
+  readonly path: string;
+  readonly sha256: string;
+  readonly sizeBytes: number;
 };
 
 /**
- * Accepts an ended attempt's work as the build's evidence: packages it,
- * records the archive as a version of the project, and moves the ledger to
- * delivery review with the archive as the one thing stage 9 must verify.
- * Refused while the worker is still running — there is nothing to accept
- * until it has ended — and for a run that is not a build attempt.
+ * Packages an ended attempt's workspace and records it as the project's
+ * build, a `build_evidence` version titled with the project's name and
+ * produced by the attempt. Done when the worker ends, before anyone has
+ * judged the work: the archive is the work as left, whatever the verdict.
+ */
+export async function recordBuildArchive(args: {
+  actor: Actor;
+  projectId: string;
+  runId: string;
+}): Promise<BuildArchive> {
+  const detail = await projectDetail(args.projectId, args.actor.principalId);
+  const run = detail.runs.find((entry) => entry.id === args.runId);
+  const archive = await packageBuild(args.runId, detail.project.title);
+  const version = await writeArtifact(
+    {
+      projectId: args.projectId,
+      kind: "build_evidence",
+      title: detail.project.title,
+      content: await buildContent(archive),
+      mediaType: BUILD_ARCHIVE_MEDIA_TYPE,
+      // The packet the build was run against is the version this came from.
+      sourceVersionIds: run?.packetId ? [run.packetId] : [],
+      provenance: { producer: "human", runId: args.runId },
+    },
+    args.actor,
+  );
+  return { nodeId: version.nodeId, name: archive.name, root: archive.root, path: archive.path, sha256: archive.sha256, sizeBytes: archive.sizeBytes };
+}
+
+export type AcceptedBuild = {
+  readonly run: CommandOutcome;
+  readonly artifact: { nodeId: string; title: string; name: string; sizeBytes: number };
+};
+
+/**
+ * Accepts an ended attempt's work as the build's evidence: the archive
+ * recorded when the worker ended — packaged now if that attempt predates
+ * the packaging, or the file is gone — is what the ledger moves to delivery
+ * review with, as the one thing stage 9 must verify. Refused while the
+ * worker is still running, and for a run that is not a build attempt.
  */
 export async function acceptBuildEvidence(args: {
   actor: Actor;
@@ -143,23 +203,11 @@ export async function acceptBuildEvidence(args: {
     turns?: number | null;
     toolCalls?: number | null;
     continuedFrom?: string | null;
+    archive?: BuildArchive | null;
   };
 
-  const archive = await packageBuild(args.runId, detail.project.title);
-  const title = `${detail.project.title} build`;
-  const version = await writeArtifact(
-    {
-      projectId: args.projectId,
-      kind: "build_evidence",
-      title,
-      content: await buildContent(archive),
-      mediaType: BUILD_ARCHIVE_MEDIA_TYPE,
-      // The packet the build was run against is the version this came from.
-      sourceVersionIds: run.packetId ? [run.packetId] : [],
-      provenance: { producer: "human", runId: args.runId },
-    },
-    args.actor,
-  );
+  const archive = (await stillThere(args.runId, reported.archive)) ?? (await recordBuildArchive({ actor: args.actor, projectId: args.projectId, runId: args.runId }));
+  const { node: version } = await readArtifactNode(archive.nodeId);
 
   const outcome = await execute({
     type: "build.accept_evidence",
@@ -170,7 +218,7 @@ export async function acceptBuildEvidence(args: {
     ...(args.expectedRevision !== undefined ? { expectedRevision: args.expectedRevision } : {}),
     payload: {
       runId: args.runId,
-      versions: [{ artifactId: version.artifactId, versionId: version.nodeId, contentHash: version.contentHash }],
+      versions: [{ artifactId: version.artifactId, versionId: version.id, contentHash: version.contentHash }],
       descriptors: [
         {
           category: "source",
@@ -192,20 +240,24 @@ export async function acceptBuildEvidence(args: {
         toolCalls: reported.toolCalls ?? null,
         continuedFrom: reported.continuedFrom ?? null,
         archive: { name: archive.name, sha256: archive.sha256, sizeBytes: archive.sizeBytes },
-        evidenceVersionId: version.nodeId,
+        evidenceVersionId: archive.nodeId,
       },
     },
   });
 
   return {
     run: outcome,
-    artifact: {
-      nodeId: version.nodeId,
-      artifactId: version.artifactId,
-      version: version.version,
-      title,
-      name: archive.name,
-      sizeBytes: archive.sizeBytes,
-    },
+    artifact: { nodeId: archive.nodeId, title: version.title, name: archive.name, sizeBytes: archive.sizeBytes },
   };
+}
+
+/** The archive the final event named, when its file is still in the workspace with the same bytes. */
+async function stillThere(runId: string, archive: BuildArchive | null | undefined): Promise<BuildArchive | null> {
+  if (!archive) return null;
+  try {
+    const bytes = await readFile(join(await workspaceFor(runId), archive.path));
+    return createHash("sha256").update(bytes).digest("hex") === archive.sha256 ? archive : null;
+  } catch {
+    return null;
+  }
 }

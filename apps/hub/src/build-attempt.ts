@@ -21,6 +21,7 @@ import { projectDetail, readArtifactNode } from "./projects.js";
 import { recordBuildEvent } from "./engine-ledger.js";
 import { readRun } from "./runs.js";
 import { localActor } from "./hub-client.js";
+import { recordBuildArchive, type BuildArchive } from "./build-output.js";
 import { BRIDGE_CAPABILITIES, runBuildAttempt, workspaceFor, type BridgeOutcome } from "./corbits-exec.js";
 
 /** The host relays what the worker did; no person appears to have done it. */
@@ -146,6 +147,20 @@ async function driveAttempt(projectId: string, runId: string, continueFromRunId:
       },
     });
 
+    // A worker that ran leaves its work behind; packaged now, as it was left,
+    // into an archive named after the project and recorded as the project's
+    // build, before anyone has said what the work was. A packaging failure
+    // is noted on the event, not made the attempt's.
+    let archive: BuildArchive | null = null;
+    let archiveError: string | null = null;
+    if (outcome.available) {
+      try {
+        archive = await recordBuildArchive({ actor: localActor(), projectId, runId });
+      } catch (cause) {
+        archiveError = cause instanceof Error ? cause.message : String(cause);
+      }
+    }
+
     // The bridge's result is recorded as a run event on the ledger thread,
     // not as approval or evidence. Recorded, and the run settled, before a
     // watcher is told the attempt ended: "done" means the ledger has it.
@@ -166,6 +181,8 @@ async function driveAttempt(projectId: string, runId: string, continueFromRunId:
         turns: outcome.turns,
         toolCalls: outcome.toolCalls,
         continuedFrom: outcome.continuedFrom,
+        archive,
+        archiveError,
         finalText: outcome.finalText.slice(0, 20_000),
         stderrTail: outcome.stderrTail,
         capabilities: BRIDGE_CAPABILITIES,
