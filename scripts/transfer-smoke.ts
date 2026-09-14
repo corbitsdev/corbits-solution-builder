@@ -19,7 +19,9 @@ import { install } from "../apps/hub/src/install.js";
 import { createProject, projectDetail, writeArtifact } from "../apps/hub/src/projects.js";
 import { execute } from "../apps/hub/src/engine.js";
 import { newId } from "../apps/hub/src/ids.js";
-import { ledgerCommands } from "../apps/hub/src/engine-ledger.js";
+import { ledgerCommands, recordCarriedTurns } from "../apps/hub/src/engine-ledger.js";
+import { threadTurns } from "../apps/hub/src/stage-thread.js";
+import { nextQuestion } from "../apps/hub/src/questions.js";
 import { submitFeedback, feedbackFor } from "../apps/hub/src/design-feedback.js";
 import { exportProject, importProject, parseBundle, bundleFileName } from "../apps/hub/src/project-transfer.js";
 import { HostError } from "../apps/hub/src/errors.js";
@@ -99,10 +101,24 @@ await submitFeedback({
 await submitAndApprove(source, design, false);
 
 // --- Out, and back in.
+// The conversation with the stage's specialist does not live on the ledger
+// at home; carried in, it is kept there. Two questions asked, one answered:
+// the second must still be open once the project has travelled.
+await recordCarriedTurns(source, 3, [
+  { id: "turn-q", role: "specialist", body: "Two things before I choose.", quotes: [], resultNodeId: null, questions: ["Which platform first?", "Who signs off?"], createdAt: "2026-09-14T10:00:00.000Z" },
+  { id: "turn-a", role: "human", body: "Desktop first.", quotes: [], resultNodeId: null, questions: null, createdAt: "2026-09-14T10:01:00.000Z" },
+]);
+check("at home, the second question is the open one", (await nextQuestion(source, 3))?.body === "Who signs off?", JSON.stringify(await nextQuestion(source, 3)));
+
 const bundle = await exportProject(source);
 check("the bundle names its format and version", bundle.format === "solutions-builder.project" && bundle.version === 1);
 check("the bundle carries every version with its bytes", bundle.artifacts.nodes.length === 6 && bundle.artifacts.nodes.every((node) => node.content.length > 0), `${bundle.artifacts.nodes.length} nodes`);
 check("the bundle carries the whole ledger", bundle.ledger.length === (await ledgerCommands(source)).length, `${bundle.ledger.length} entries`);
+check(
+  "the bundle carries the conversation, questions included",
+  bundle.conversations?.some((entry) => entry.stage === 3 && entry.turns.length === 2 && entry.turns[0]?.questions?.length === 2) === true,
+  JSON.stringify(bundle.conversations?.map((entry) => [entry.stage, entry.turns.length])),
+);
 check("the bundle carries no provider or credential", !JSON.stringify(bundle).includes("credential") && !/sk-|enc:aead/.test(JSON.stringify(bundle)));
 check("the file name is the title made safe", bundleFileName(bundle.project.title) === "transfer-smoke.solutions-builder.json", bundleFileName(bundle.project.title));
 
@@ -130,6 +146,14 @@ check("supersession is carried and points at nodes that exist here", JSON.string
 check("the node ids are this workspace's own, so a bundle can come back where it left", after.nodes.every((node) => !before.nodes.some((original) => original.id === node.id)));
 check("the artifact ids are the store's own here", after.nodes.every((node) => !before.nodes.some((original) => original.artifactId === node.artifactId)));
 check("every approval is there and names a version that exists here", after.approvals.length === before.approvals.length && after.approvals.every((approval) => approval.versions.every((version) => after.nodes.some((node) => node.id === version.versionId && node.contentHash === version.contentHash))), `${after.approvals.length} approvals`);
+const carriedThread = await threadTurns(imported.projectId, 3);
+check(
+  "the copy's conversation reads as it did at home, and the same question is still open",
+  carriedThread.some((turn) => turn.id === "turn-q" && turn.questions?.length === 2) &&
+    carriedThread.some((turn) => turn.id === "turn-a") &&
+    (await nextQuestion(imported.projectId, 3))?.body === "Who signs off?",
+  JSON.stringify(await nextQuestion(imported.projectId, 3)),
+);
 check("the copy is waiting on the same decision", after.waits.length === before.waits.length && after.waits[0]?.title === before.waits[0]?.title, after.waits[0]?.title ?? "none");
 const designHere = after.nodes.find((node) => node.kind === "design_artifact" && node.contentHash === design.contentHash);
 const carriedFeedback = designHere ? await feedbackFor(designHere.id) : null;
