@@ -41,6 +41,7 @@ import { bytesOf } from "./source-material.js";
 import { deckBytesOf, ensureDeckFor } from "./deck.js";
 import { buildBytesOf, slugOf } from "./build-output.js";
 import { readProject } from "./project-tenant.js";
+import { projectSpend, workspaceSpend } from "./spend.js";
 import { attachMaterial, MATERIAL_KIND, materialText, type IncomingFile } from "./source-material.js";
 import { setStakeholders, STAKEHOLDER_ROLES } from "./stakeholders.js";
 
@@ -223,6 +224,47 @@ export function registerProjectRoutes(api: Hono) {
     return context.json(await importProject(bundle, localActor()));
   });
 
+  /** What the workspace has spent on inference, by project and by provider. */
+  api.get("/spend", async (context) => context.json(await workspaceSpend()));
+
+  /**
+   * One project, described: when it began, where it stands, what it holds,
+   * and what it has spent on inference with each provider.
+   */
+  api.get("/projects/:projectId/info", async (context) => {
+    const projectId = context.req.param("projectId");
+    const project = await readProject(projectId);
+    if (!project) throw notFound("That project");
+    const detail = await projectDetail(projectId, localActor().principalId);
+    const live = detail.nodes.filter((node) => node.supersededByNodeId === null);
+    const byKind = new Map<string, { count: number; bytes: number }>();
+    for (const node of detail.nodes) {
+      const entry = byKind.get(node.kind) ?? { count: 0, bytes: 0 };
+      entry.count += 1;
+      entry.bytes += node.sizeBytes;
+      byKind.set(node.kind, entry);
+    }
+    const stamps = [
+      ...detail.nodes.map((node) => node.createdAt),
+      ...detail.approvals.map((approval) => approval.createdAt),
+      ...detail.runs.map((run) => run.createdAt),
+    ].filter((value): value is string => typeof value === "string");
+    return context.json({
+      project: { id: project.id, title: project.title, createdAt: project.createdAt.toISOString(), archivedAt: project.archivedAt?.toISOString() ?? null },
+      stage: detail.current ? { stage: detail.current.stage, state: detail.current.state } : null,
+      artifacts: {
+        versions: detail.nodes.length,
+        live: live.length,
+        bytes: detail.nodes.reduce((sum, node) => sum + node.sizeBytes, 0),
+        byKind: [...byKind.entries()].map(([kind, entry]) => ({ kind, ...entry })).sort((a, b) => b.bytes - a.bytes),
+      },
+      runs: { total: detail.runs.length, builds: detail.runs.filter((run) => run.kind === "build").length },
+      approvals: detail.approvals.length,
+      lastActivityAt: stamps.sort().at(-1) ?? project.createdAt.toISOString(),
+      spend: await projectSpend(projectId),
+    });
+  });
+
   api.get("/artifacts/:nodeId", async (context) =>
     context.json(await readArtifactNode(context.req.param("nodeId"))),
   );
@@ -321,6 +363,7 @@ export function registerProjectRoutes(api: Hono) {
     );
     return context.json({
       guidance: await runGuidance({
+        projectId,
         projectTitle: detail.project.title,
         stage: detail.current?.stage ?? 1,
         state: (detail.current?.state ?? null) as RunState | null,

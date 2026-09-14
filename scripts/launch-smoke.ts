@@ -352,6 +352,20 @@ if (await Bun.file(sidecar).exists()) {
         body: JSON.stringify("some-other-tool"),
       });
       check("a worker the bridge cannot drive is refused", refused.status === 400, `${refused.status}`);
+
+    // The workspace's inference spend is served like the projects list: empty
+    // once installed, and before the install the same refusal every other
+    // workspace route gives, which the window already treats as empty.
+    const spend = (await (await fetch(`${origin}/api/spend`, { headers: { cookie } })).json()) as {
+      totals?: { calls: number; cost: number };
+      projects?: unknown[];
+      error?: { code: string };
+    };
+    check(
+      "the workspace's spend is served, or refused as uninstalled like the projects list",
+      (spend.totals?.calls === 0 && spend.totals.cost === 0 && Array.isArray(spend.projects)) || spend.error?.code === "conflict",
+      JSON.stringify(spend).slice(0, 120),
+    );
     }
   } finally {
     await killAndWait(child);

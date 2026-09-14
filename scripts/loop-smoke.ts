@@ -34,6 +34,7 @@ import { ensureDeckFor } from "../apps/hub/src/deck.js";
 import { abortBuildAttempt, liveBuild, startBuildAttempt, subscribeBuildOutput } from "../apps/hub/src/build-attempt.js";
 import { buildEvents } from "../apps/hub/src/engine-ledger.js";
 import { buildArchiveName, packageBuild } from "../apps/hub/src/build-output.js";
+import { projectSpend, recordHostUsage } from "../apps/hub/src/spend.js";
 import { verifyManifest } from "../apps/hub/src/delivery.js";
 import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -533,7 +534,7 @@ let buildRunId = "";
       '  --help) echo "usage: worker exec <prompt>"; exit 0 ;;',
       // What Corbits Code does after a turn: the placed hook, the turn on stdin.
       "  exec) echo \"working on it\"; printf '%s' '"
-        + JSON.stringify({ turnIndex: 0, durationMs: 1500, toolCalls: [{ id: "c1", name: "read_file", arguments: { path: "plan.md" } }], toolResults: [{ callId: "c1", content: "ok" }] })
+        + JSON.stringify({ turnIndex: 0, durationMs: 1500, toolCalls: [{ id: "c1", name: "read_file", arguments: { path: "plan.md" } }], toolResults: [{ callId: "c1", content: "ok" }], usage: { input: 1200, output: 340, cacheRead: 50, cacheWrite: 0, thinking: 0 }, source: { provider: "anthropic", model: "claude-fable-5" } })
         + "' | sh .corbits/hooks/solutions-builder-turns.sh postTurn; exec sleep 60 ;;",
       "esac",
       "",
@@ -586,6 +587,20 @@ let buildRunId = "";
     `turns=${outcomeOfSecond?.turns} toolCalls=${outcomeOfSecond?.toolCalls}`,
   );
   check("a watcher is told the attempt ended, and nothing is live for it", ended && liveBuild(requeued.runId) === null);
+  // The worker's own usage report is the project's spend, by provider and
+  // model, once the attempt ends; a call that reported no counts is counted
+  // as uncounted rather than as free.
+  await recordHostUsage({ projectId, purpose: "guidance", provider: "anthropic", model: "claude-fable-5", tokens: { input: 300, output: 60, cacheRead: 0, cacheWrite: 0, thinking: 0 } });
+  await recordHostUsage({ projectId, purpose: "deck art direction", provider: "openai", model: "gpt-5", tokens: null });
+  const spend = await projectSpend(projectId);
+  const anthropic = spend.rows.find((row) => row.provider === "anthropic" && row.model === "claude-fable-5");
+  const openai = spend.rows.find((row) => row.provider === "openai");
+  check(
+    "the project's spend sums the worker's turns and the host's calls by provider and model",
+    anthropic?.tokens.input === 1500 && anthropic.tokens.output === 400 && anthropic.calls === 2 && spend.totals.calls === 3,
+    JSON.stringify(spend.rows),
+  );
+  check("a call that reported no token counts is shown as uncounted, and no model here is priced", openai?.uncounted === 1 && spend.unpriced === 2 && spend.totals.cost === 0, JSON.stringify(spend.totals));
   stopWatching();
   const afterCancel = await projectDetail(projectId, ACTOR.principalId);
   check(

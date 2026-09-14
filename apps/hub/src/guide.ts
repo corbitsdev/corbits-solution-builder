@@ -21,6 +21,8 @@ import { nextStep } from "@solutions-builder/app/next-step";
 import type { RunState } from "@solutions-builder/app/ledger";
 
 export type GuidanceInput = {
+  /** Whose spend the call is; guidance for a project names it. */
+  projectId?: string;
   projectTitle: string;
   stage: number;
   state: RunState | null;
@@ -123,6 +125,7 @@ export async function runGuidance(input: GuidanceInput): Promise<GuidanceRecord>
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const result = await complete({
+        ...(input.projectId ? { usage: { projectId: input.projectId, purpose: "guidance" } } : {}),
         system: guide.system,
         prompt,
         temperature: guide.temperature,

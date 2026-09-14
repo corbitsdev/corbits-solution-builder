@@ -52,6 +52,22 @@ async function anchorFor(projectId: string, replace = false): Promise<string | n
 }
 
 /**
+ * The project whose lifecycle a run belongs to, by the run's id: a loop
+ * iteration's id is its anchor's followed by `__`, and an anchor is a
+ * deployment of one project's lifecycle asset. Null for a run that is not a
+ * project's.
+ */
+export async function projectForRun(runId: string): Promise<string | null> {
+  const anchor = runId.split("__")[0] ?? runId;
+  for (const [projectId, known] of anchors) if (known === anchor) return projectId;
+  const deployment = (await workflows.deployments()).find((entry) => entry.id === anchor);
+  if (!deployment) return null;
+  const asset = (await assets.list("workflow")).find((entry) => entry.id === deployment.definitionAssetId);
+  const match = asset ? /^solutions-builder-project-lifecycle-tnt-([a-z0-9]+)$/.exec(asset.name) : null;
+  return match ? `tnt_${match[1]}` : null;
+}
+
+/**
  * Every anchor the project's lifecycle has run under, oldest first: one per
  * deployment of its asset. Stopping the host releases the sidecar, so each
  * start deploys the lifecycle again under a new anchor and aligns it to

@@ -26,6 +26,7 @@ import {
 import { templateFor, templateThemeFor, type TemplateTheme } from "./deck-template.js";
 import { renderDeckOnTemplate } from "./deck-on-template.js";
 import { artDirection, chatSource, illustration, illustrationPrompt, imageSource } from "./deck-images.js";
+import { recordHostUsage, recordIllustrations } from "./spend.js";
 
 /** The kind a deck is recorded as: stage 5, one per stakeholder, never a prompt input. */
 export const DECK_KIND: ArtifactKind = "audience_deck";
@@ -257,7 +258,7 @@ export async function renderDeck(deck: Deck): Promise<Uint8Array> {
  * when the design asks for none. Throws when it asks and no connected
  * provider can read or draw.
  */
-export async function illustrationsFor(deck: Deck): Promise<Map<string, Uint8Array> | null> {
+export async function illustrationsFor(deck: Deck, projectId?: string): Promise<Map<string, Uint8Array> | null> {
   if (deck.design.images === "none") return null;
   const source = await imageSource();
   if (!source) {
@@ -291,6 +292,12 @@ export async function illustrationsFor(deck: Deck): Promise<Map<string, Uint8Arr
   const images = new Map<string, Uint8Array>();
   for (const [key, subject] of direction) {
     images.set(key, await illustration(source, illustrationPrompt({ subject, colour })));
+  }
+  if (projectId) {
+    // The reader's call streams and reports no counts; the pictures are
+    // counted, since image models price per picture.
+    await recordHostUsage({ projectId, purpose: "deck art direction", provider: reader.providerId, model: reader.model, tokens: null }).catch(() => undefined);
+    await recordIllustrations({ projectId, provider: source.providerId, model: source.model, images: images.size }).catch(() => undefined);
   }
   return images;
 }
@@ -371,7 +378,7 @@ export async function writeDeckFor(args: {
     ...(theme ? { theme } : {}),
   });
   if (!plain) return null;
-  const images = args.illustrate ? await illustrationsFor(plain) : null;
+  const images = args.illustrate ? await illustrationsFor(plain, args.projectId) : null;
   const deck: Deck = images ? { ...plain, images } : plain;
   // On the person's own PowerPoint when the role has one: its masters,
   // layouts and media, our slides. Otherwise drawn from the design.

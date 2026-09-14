@@ -66,6 +66,7 @@ import { database } from "./db.js";
 import { dataDirectory } from "./paths.js";
 import { hubEncryptionKeys, hubSigningKey } from "./hub-keys.js";
 import { withPostgresJsResultShape } from "./pg-compat.js";
+import { recordRoundUsage, type PlatformTurnUsage } from "./spend.js";
 
 export type MountedHub = {
   readonly app: Hono;
@@ -274,7 +275,18 @@ export async function mountHub(): Promise<MountedHub> {
     lookups,
   });
 
-  const eventCollectors = createEventCollectorRegistry({ db: db.db });
+  // Every inference turn the platform runs is reported here with its run,
+  // provider, model and token counts; without a sink it is dropped. The
+  // record goes on the project's ledger, and a failure to record is logged
+  // rather than allowed to disturb the session it came from.
+  const eventCollectors = createEventCollectorRegistry({
+    db: db.db,
+    onUsage: (_agentAddress: string, usage: PlatformTurnUsage) => {
+      void recordRoundUsage(usage).catch((cause: unknown) => {
+        console.error("[spend] a round's usage could not be recorded", cause);
+      });
+    },
+  });
 
   createHubSessionOrchestrator({
     events: sidecarRouter.events,
