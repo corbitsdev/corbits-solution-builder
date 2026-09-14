@@ -9,6 +9,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiFailure, type ProjectDetail } from "../client.js";
 import { Banner, Button, Field, Screen, StateLabel, versionDigest } from "../components.jsx";
+import { Dictated } from "../dictation.jsx";
 import {
   Textarea,
   Tabs,
@@ -94,12 +95,18 @@ function Stakeholders({
         <div className="screen-body stakeholder-editor">
           {rows.map((row, index) => (
             <div key={index} className="stakeholder-row">
-              <Input
-                aria-label={`Stakeholder ${index + 1} name`}
+              <Dictated
                 value={row.name}
-                placeholder="Name"
-                onChange={(event) => setRows(rows.map((held, at) => (at === index ? { ...held, name: event.target.value } : held)))}
-              />
+                onValueChange={(name) => setRows(rows.map((held, at) => (at === index ? { ...held, name } : held)))}
+                align="center"
+              >
+                <Input
+                  aria-label={`Stakeholder ${index + 1} name`}
+                  value={row.name}
+                  placeholder="Name"
+                  onChange={(event) => setRows(rows.map((held, at) => (at === index ? { ...held, name: event.target.value } : held)))}
+                />
+              </Dictated>
               <select
                 aria-label={`Stakeholder ${index + 1} role`}
                 value={row.role}
@@ -576,7 +583,9 @@ export function AudiencePackages({
 
           <div className="screen-body">
             <Field label="Rationale">
-              <Textarea value={rationale} onChange={(event) => setRationale(event.target.value)} />
+              <Dictated value={rationale} onValueChange={setRationale} align="start">
+                <Textarea value={rationale} onChange={(event) => setRationale(event.target.value)} />
+              </Dictated>
             </Field>
             {blocked > 0 ? (
               <Banner tone="error" title="A reject or revise blocks approval" />

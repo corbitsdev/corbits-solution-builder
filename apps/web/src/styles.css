@@ -1553,6 +1553,28 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   min-width: 0;
 }
 
+/* Beside a plain text area the microphone sits at the top; beside a one-line
+   field, on its center line. Neither has a send button to be level with. */
+.dictated-row-start {
+  align-items: flex-start;
+}
+
+.dictated-row-center {
+  align-items: center;
+}
+
+.dictated-row-start > .dictate,
+.dictated-row-center > .dictate {
+  margin-bottom: 0;
+}
+
+/* In a row that lays its field out beside a button, the wrapper takes the field's place. */
+.provider-ask > .dictated,
+.stakeholder-row > .dictated {
+  flex: 1;
+  min-width: 0;
+}
+
 /* The input's send button is 36px inside 8px of padding; the same size and
    the same inset puts the two on one line. */
 .dictate {

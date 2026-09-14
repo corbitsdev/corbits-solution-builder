@@ -16,6 +16,7 @@ import { Input, Switch, Textarea } from "@corbits/react-ui";
 import { useEffect, useState } from "react";
 import { api, ApiFailure, type HostStatus, type Provider } from "../client.js";
 import { Banner, Button, StateLabel } from "../components.jsx";
+import { Dictated } from "../dictation.jsx";
 import { ProviderList, type ApiKeyProvider, type OAuthCandidate } from "./providers.jsx";
 
 export function Settings({
@@ -211,16 +212,18 @@ function Designer() {
           <strong>Design language</strong>
           <p>Palette, type, spacing, tone, what to avoid: anything the designer should follow, in your words. It takes precedence over the defaults. Saved when you leave the field.</p>
         </div>
-        <Textarea
-          aria-label="Design language"
-          value={language}
-          disabled={!settings}
-          placeholder="e.g. Inter for text, one accent colour, generous whitespace, no gradients, buttons with 6px corners."
-          onChange={(event) => setLanguage(event.target.value)}
-          onBlur={() => {
-            if (settings && language !== settings.language) void save("language", language);
-          }}
-        />
+        <Dictated value={language} onValueChange={setLanguage} disabled={!settings} align="start">
+          <Textarea
+            aria-label="Design language"
+            value={language}
+            disabled={!settings}
+            placeholder="e.g. Inter for text, one accent colour, generous whitespace, no gradients, buttons with 6px corners."
+            onChange={(event) => setLanguage(event.target.value)}
+            onBlur={() => {
+              if (settings && language !== settings.language) void save("language", language);
+            }}
+          />
+        </Dictated>
       </div>
       <div className="setting-row">
         <div>
@@ -354,6 +357,7 @@ function BuildWorker({ status, onChanged }: { status: HostStatus | null; onChang
           <strong>Executable</strong>
           <p>Leave empty to use <code>{chosen?.executable ?? "the tool's own name"}</code> from this computer's PATH. Give a full path for an install that is somewhere else. Saved when you leave the field.</p>
         </div>
+        <Dictated value={executable} onValueChange={setExecutable} disabled={worker === null} align="center">
         <Input
           className="setting-path"
           aria-label="Build worker executable"
@@ -370,6 +374,7 @@ function BuildWorker({ status, onChanged }: { status: HostStatus | null; onChang
             if (event.key === "Enter") (event.target as HTMLInputElement).blur();
           }}
         />
+        </Dictated>
       </div>
       {status ? <p className="setting-note">{status.build.detail}</p> : null}
     </Section>
@@ -729,16 +734,18 @@ function StakeholderDecks() {
                 <strong>What the outline should emphasise</strong>
                 <p>In your words, for this role: what to lead with, what to leave out, the tone. Given to the presentation creator with the next package.</p>
               </div>
-              <Textarea
-                aria-label={`Deck guidance for ${roleLabel(role)}`}
-                value={guidance[role]}
-                disabled={!designs}
-                placeholder="e.g. Lead with cost and timeline; one risk slide at most; no implementation detail."
-                onChange={(event) => setGuidance({ ...guidance, [role]: event.target.value })}
-                onBlur={() => {
-                  if (designs && guidance[role] !== designs[role].guidance) void save(role, "guidance", guidance[role]);
-                }}
-              />
+              <Dictated value={guidance[role]} onValueChange={(next) => setGuidance({ ...guidance, [role]: next })} disabled={!designs} align="start">
+                <Textarea
+                  aria-label={`Deck guidance for ${roleLabel(role)}`}
+                  value={guidance[role]}
+                  disabled={!designs}
+                  placeholder="e.g. Lead with cost and timeline; one risk slide at most; no implementation detail."
+                  onChange={(event) => setGuidance({ ...guidance, [role]: event.target.value })}
+                  onBlur={() => {
+                    if (designs && guidance[role] !== designs[role].guidance) void save(role, "guidance", guidance[role]);
+                  }}
+                />
+              </Dictated>
             </div>
             </div>
           </details>

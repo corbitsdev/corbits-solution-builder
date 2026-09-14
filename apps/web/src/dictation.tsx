@@ -55,6 +55,13 @@ const REFUSALS: Record<string, string> = {
 const QUIET_ENDS = new Set(["stopped", "silence", "final"]);
 
 const inShell = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+/**
+ * The one session open anywhere on the page. A page has a microphone beside
+ * every text box, and a person who taps a second one means to speak into
+ * that box; the first is ended rather than left listening beside it.
+ */
+let openSession: { abort: () => void } | null = null;
 /** After the shell says it has started, sound has this long to reach the page. */
 const FIRST_SOUND_WAIT_MS = 20_000;
 
@@ -107,6 +114,7 @@ export function useDictation(value: string, onValueChange: (value: string) => vo
   }, []);
 
   const finish = useCallback((reason: string, help: Help | null = null) => {
+    if (openSession !== null && openSession === session.current) openSession = null;
     session.current = null;
     setListening(false);
     setLive(false);
@@ -117,6 +125,10 @@ export function useDictation(value: string, onValueChange: (value: string) => vo
 
   const start = useCallback(async () => {
     if (session.current) return;
+    if (openSession) {
+      openSession.abort();
+      openSession = null;
+    }
     const typed = current.current.trimEnd();
     const base = typed.length > 0 ? `${typed} ` : "";
     setRefusal(null);
@@ -152,6 +164,7 @@ export function useDictation(value: string, onValueChange: (value: string) => vo
           void invoke("dictation_stop").catch(() => undefined);
         },
       };
+      openSession = session.current;
       try {
         await invoke("dictation_start");
       } catch (cause) {
@@ -249,6 +262,7 @@ export function useDictation(value: string, onValueChange: (value: string) => vo
         recognition.abort();
       },
     };
+    openSession = session.current;
     try {
       recognition.start();
     } catch (cause) {
@@ -305,11 +319,13 @@ function SettingsHelp({ help, onClose }: { help: Help; onClose: () => void }) {
 }
 
 /**
- * A composer with a microphone beside it, on the left, level with the send
- * button. Where there is no way to dictate the composer is rendered alone: a
- * control that does not exist is absent.
+ * A text box with a microphone beside it, on the left. Where there is no
+ * way to dictate the box is rendered alone: a control that does not exist
+ * is absent.
  *
- * While listening the microphone is green and a line under the composer says
+ * The microphone sits level with a composer's send button (`end`), at the
+ * top of a plain text area (`start`), or centered on a one-line field
+ * (`center`). While listening it is green and a line under the box says
  * "Listening:" with a waveform of the input beside it. A refusal takes the
  * same line. Otherwise the line is absent, so the row never changes shape.
  */
@@ -317,12 +333,15 @@ export function Dictated({
   value,
   onValueChange,
   disabled = false,
+  align = "end",
   children,
 }: {
   value: string;
   onValueChange: (value: string) => void;
-  /** The composer is busy; dictation into it would be lost. */
+  /** The box is busy; dictation into it would be lost. */
   disabled?: boolean;
+  /** Where the microphone sits against the box. */
+  align?: "end" | "start" | "center";
   children: ReactNode;
 }) {
   const { supported, listening, live, levels, refusal, dismiss, start, stop } = useDictation(value, onValueChange);
@@ -332,7 +351,7 @@ export function Dictated({
   if (!supported) return <>{children}</>;
   return (
     <div className="dictated">
-      <div className="dictated-row">
+      <div className={`dictated-row dictated-row-${align}`}>
         <button
           type="button"
           className="dictate"
@@ -340,6 +359,9 @@ export function Dictated({
           aria-label={listening ? "Stop dictating" : "Dictate"}
           title={listening ? "Stop dictating" : "Dictate instead of typing"}
           disabled={disabled}
+          // The box keeps focus: a field that commits on blur (a name being
+          // renamed) must not close because its microphone was tapped.
+          onMouseDown={(event) => event.preventDefault()}
           onClick={listening ? stop : () => void start()}
         >
           <Mic aria-hidden="true" />

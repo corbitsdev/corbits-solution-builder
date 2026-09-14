@@ -15,6 +15,7 @@ import { EmptyState, Textarea } from "@corbits/react-ui";
 import { useState } from "react";
 import type { ProjectDetail, Wait } from "../client.js";
 import { Button, Screen, StateLabel, shortHash, stageName } from "../components.jsx";
+import { Dictated } from "../dictation.jsx";
 import { ApprovalsRecord } from "./workspace.jsx";
 
 /** What each stage's gate is called, in the approver's language. */
@@ -168,12 +169,14 @@ export function DecisionQueue({
             <label htmlFor="decision-reason">
               Rationale, or the reason to route back
             </label>
-            <Textarea
-              id="decision-reason"
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
-              placeholder="Recorded with the decision, against these exact versions."
-            />
+            <Dictated value={reason} onValueChange={setReason} align="start">
+              <Textarea
+                id="decision-reason"
+                value={reason}
+                onChange={(event) => setReason(event.target.value)}
+                placeholder="Recorded with the decision, against these exact versions."
+              />
+            </Dictated>
           </div>
 
           <div className="action-row">

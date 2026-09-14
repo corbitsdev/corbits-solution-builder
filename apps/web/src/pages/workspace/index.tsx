@@ -29,6 +29,7 @@ import { Markdown } from "../../markdown.jsx";
 import { AudiencePackages } from "../audiences.jsx";
 import { DesignFeedbackView } from "../design.jsx";
 import { AddMaterial, Banner, Button, Screen, StateLabel, stageName, versionDigest } from "../../components.jsx";
+import { Dictated } from "../../dictation.jsx";
 import { StageGate, STAGE_GOAL } from "./gate.jsx";
 import { Preparing, STALL_AFTER_MS } from "./preparing.jsx";
 import { clock } from "./elapsed.jsx";
@@ -334,12 +335,14 @@ export function StageWorkspace({
             <div className="screen-body">
               <div className="field">
                 <label htmlFor="stage-input">What is the problem?</label>
-                <Textarea
-                  id="stage-input"
-                  value={input}
-                  onChange={(event) => setInput(event.target.value)}
-                  placeholder="Describe it in your own words. Rough is fine."
-                />
+                <Dictated value={input} onValueChange={setInput} disabled={busy === "draft"} align="start">
+                  <Textarea
+                    id="stage-input"
+                    value={input}
+                    onChange={(event) => setInput(event.target.value)}
+                    placeholder="Describe it in your own words. Rough is fine."
+                  />
+                </Dictated>
               </div>
               <p className="inline-note material-cue">
                 Have documents or images? Drop them anywhere here, or <AddMaterial className="material-add-inline" onAdd={attach} />{" "}

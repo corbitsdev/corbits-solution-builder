@@ -30,6 +30,7 @@ import {
   type DesignFeedback,
 } from "../client.js";
 import { Banner, Button, Field, Screen, StateLabel, shortHash } from "../components.jsx";
+import { Dictated } from "../dictation.jsx";
 import { PrintButton } from "../print.jsx";
 import { Elapsed } from "./workspace/elapsed.jsx";
 
@@ -297,7 +298,9 @@ export function DesignFeedbackView({
                 </div>
               </dl>
               <Field label="Comment">
-                <Textarea value={draftBody} onChange={(event) => setDraftBody(event.target.value)} />
+                <Dictated value={draftBody} onValueChange={setDraftBody} align="start">
+                  <Textarea value={draftBody} onChange={(event) => setDraftBody(event.target.value)} />
+                </Dictated>
               </Field>
               <div className="button-row">
                 <Button
@@ -359,7 +362,9 @@ export function DesignFeedbackView({
           </Field>
 
           <Field label="Note to the designer">
-            <Textarea value={overallNote} onChange={(event) => setOverallNote(event.target.value)} />
+            <Dictated value={overallNote} onValueChange={setOverallNote} align="start">
+              <Textarea value={overallNote} onChange={(event) => setOverallNote(event.target.value)} />
+            </Dictated>
           </Field>
 
           <Button

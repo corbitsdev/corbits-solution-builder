@@ -14,6 +14,7 @@ import { Textarea } from "@corbits/react-ui";
 import { useState } from "react";
 import { api, ApiFailure, type Provider } from "../client.js";
 import { Banner, Button, Mark } from "../components.jsx";
+import { Dictated } from "../dictation.jsx";
 import { ProviderList, type ApiKeyProvider, type OAuthCandidate } from "./providers.jsx";
 
 type Step = "provider" | "project";
@@ -134,13 +135,15 @@ function ProjectStep({ onCreated }: { onCreated: (projectId: string) => void }) 
       {error ? <Banner tone="error" title={error} /> : null}
 
       <div className="ask">
-        <Textarea
-          id="first-problem"
-          value={problem}
-          onChange={(event) => setProblem(event.target.value)}
-          placeholder="Something that keeps costing me time, and I have never sat down to fix it properly…"
-          autoFocus
-        />
+        <Dictated value={problem} onValueChange={setProblem} disabled={busy} align="start">
+          <Textarea
+            id="first-problem"
+            value={problem}
+            onChange={(event) => setProblem(event.target.value)}
+            placeholder="Something that keeps costing me time, and I have never sat down to fix it properly…"
+            autoFocus
+          />
+        </Dictated>
         <Button
           variant="primary"
           block
