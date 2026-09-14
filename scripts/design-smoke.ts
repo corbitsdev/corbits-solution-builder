@@ -182,7 +182,12 @@ await host.close();
 // script — a model's design is not trusted to run anything.
 {
   const html = "<!doctype html><html><head><style>body{margin:0}</style></head><body class=\"x\"><h1>Mock</h1><script>alert(1)</script></body></html>";
-  const page = printableDesign({ html, title: "Design", version: 3 });
+  const page = printableDesign({ html, title: "Design", version: 3, fileName: "inteva-apqp-design" });
+  check(
+    "the printable page's title is the PDF's file name, the project's and the document's, whatever the design called itself",
+    (page.body.match(/<title>/g) ?? []).length === 1 && page.body.includes("<title>inteva-apqp-design</title>"),
+    page.body.match(/<title>[^<]*<\/title>/)?.[0] ?? "no title",
+  );
   const barAt = page.body.indexOf("data-print-bar");
   const bodyAt = page.body.indexOf('<body class="x">');
   check("the print bar sits just inside the body", barAt > bodyAt && bodyAt >= 0, `${bodyAt} < ${barAt}`);
@@ -191,7 +196,8 @@ await host.close();
   const nonce = /script-src 'nonce-([a-f0-9]+)'/.exec(page.headers["content-security-policy"] ?? "")?.[1];
   check("the policy admits only a nonced script", !!nonce && page.body.includes(`<script nonce="${nonce}">`), page.headers["content-security-policy"]);
   check("the policy allows no fetch, frame or form", /default-src 'none'/.test(page.headers["content-security-policy"] ?? "") && /form-action 'none'/.test(page.headers["content-security-policy"] ?? ""));
-  const headless = printableDesign({ html: "<p>bare</p>", title: "Design", version: 1 });
+  const headless = printableDesign({ html: "<p>bare</p>", title: "Design", version: 1, fileName: "p-design" });
+  check("a design with no head still gets the file name as its title", headless.body.includes("<title>p-design</title>"), headless.body.slice(-60));
   check("a document with no body tag gets the bar at the top", headless.body.startsWith("<div data-print-bar"));
   check("each response mints its own nonce", nonce !== /nonce-([a-f0-9]+)/.exec(headless.headers["content-security-policy"] ?? "")?.[1]);
 }

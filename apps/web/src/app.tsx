@@ -18,7 +18,7 @@ import {
 } from "./client.js";
 import { CircleCheck, FolderKanban, PanelRight, PanelRightClose, Settings as SettingsIcon } from "lucide-react";
 import { Banner, Button, Mark, StateLabel } from "./components.jsx";
-import { PrintView, usePrintTarget } from "./print.jsx";
+import { PrintView, setPrintProject, usePrintTarget } from "./print.jsx";
 import { DecisionQueue } from "./pages/decisions.jsx";
 import { Projects } from "./pages/projects.jsx";
 import { Settings } from "./pages/settings.jsx";
@@ -335,6 +335,10 @@ export function App() {
     const next = decisions[0]?.projectId ?? projects[0]?.id;
     if (next) setSelected(next);
   }, [decisions, projects, selected]);
+
+  useEffect(() => {
+    setPrintProject(detail?.project.title ?? null);
+  }, [detail?.project.title]);
 
   useEffect(() => {
     if (!selected) {

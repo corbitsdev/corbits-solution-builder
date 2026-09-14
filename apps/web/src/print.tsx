@@ -26,6 +26,31 @@ export type PrintTarget = { node: ArtifactNode; content: string | null };
 let target: PrintTarget | null = null;
 const listeners = new Set<() => void>();
 
+/**
+ * The open project's name, told by the app as it changes: a printed PDF is
+ * saved under the page's title, and the title should name the project and
+ * the document rather than the app.
+ */
+let projectTitle: string | null = null;
+export function setPrintProject(title: string | null): void {
+  projectTitle = title;
+}
+
+function slug(value: string): string {
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 60) || "document"
+  );
+}
+
+/** `<project>-<document>`: the PDF's default file name, before the dialog adds its extension. */
+export function printFileName(node: ArtifactNode): string {
+  return `${slug(projectTitle ?? "project")}-${slug(documentLabel(node))}`;
+}
+
 function set(next: PrintTarget | null) {
   target = next;
   for (const listener of listeners) listener();
@@ -76,6 +101,16 @@ function documentLabel(node: ArtifactNode): string {
 export function PrintView({ target: shown }: { target: PrintTarget }) {
   const printButton = useRef<HTMLButtonElement>(null);
   const content = useFetched(shown);
+
+  // The page's title is what the print dialog names the PDF. It is the
+  // document's for as long as the layer is open, and the app's again after.
+  useEffect(() => {
+    const before = document.title;
+    document.title = printFileName(shown.node);
+    return () => {
+      document.title = before;
+    };
+  }, [shown.node]);
 
   useEffect(() => {
     printButton.current?.focus();
