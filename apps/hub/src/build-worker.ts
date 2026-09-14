@@ -87,7 +87,9 @@ export const BUILD_WORKERS: readonly BuildWorkerKind[] = [
     executable: "claude",
     probe: ["--version"],
     probeExpects: null,
-    run: (prompt) => ["-p", prompt],
+    // acceptEdits lets the worker write within the session without the
+    // blanket --dangerously-skip-permissions bypass the bridge refuses to pass.
+    run: (prompt) => ["-p", prompt, "--permission-mode", "acceptEdits"],
     turnReports: null,
   },
   {
@@ -96,7 +98,10 @@ export const BUILD_WORKERS: readonly BuildWorkerKind[] = [
     executable: "codex",
     probe: ["--version"],
     probeExpects: null,
-    run: (prompt) => ["exec", prompt],
+    // workspace-write scopes writes to the workspace (plus /tmp), short of a
+    // full bypass; --skip-git-repo-check is needed because a build workspace
+    // is a plain directory, not a git repo, which codex otherwise refuses to run in.
+    run: (prompt) => ["exec", "-s", "workspace-write", "--skip-git-repo-check", prompt],
     turnReports: null,
   },
 ];

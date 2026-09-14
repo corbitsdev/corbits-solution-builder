@@ -18,8 +18,9 @@
  *                  has a lifecycle hook — its own report of each turn
  *   failure        non-zero exit, or the binary being absent. No timeout: a
  *                  build takes as long as it takes, and cancel is the control
- *   permissions    inherits the operator's own CLI configuration; the bridge
- *                  never passes --dangerously-skip-permissions
+ *   permissions    each worker is given the narrowest flag that lets it write
+ *                  within its workspace (build-worker.ts); the bridge never
+ *                  passes a blanket bypass such as --dangerously-skip-permissions
  *   linkage        every attempt is linked to an immutable packet and run
  *   exit criterion replaced by verified shared-hub integration before launch
  *
