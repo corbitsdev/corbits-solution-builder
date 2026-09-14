@@ -674,13 +674,23 @@ let buildRunId = "";
   }
   check("the placed hook reads a run-end payload to its end", swallowed && (await hook.exited) === 0);
   check(
-    "the build is packaged as an archive named after the project, holding the work and not the bridge's hook",
+    "the build is packaged as <project>.tar.gz, unpacking into <project>/, holding the work and not the bridge's hook",
     archive.name === buildArchiveName("Smoke: a chess game I can actually play") &&
-      archive.name === "smoke-a-chess-game-i-can-actually-play-build.tar.gz" &&
-      listed.includes("built.txt") &&
+      archive.name === "smoke-a-chess-game-i-can-actually-play.tar.gz" &&
+      listed.includes("smoke-a-chess-game-i-can-actually-play/built.txt") &&
+      listed.split("\n").filter(Boolean).every((entry) => entry.startsWith("smoke-a-chess-game-i-can-actually-play/")) &&
       !listed.includes(".corbits") &&
       !listed.includes(archive.name),
     `${archive.name}: ${listed.split("\n").filter(Boolean).join(", ")}`,
+  );
+  const packagedOnEnd = (await buildEvents(projectId, fourth.runId)).find((event) => event.type === "bridge.final")?.payload as
+    | { archive?: { nodeId: string; name: string; root: string } | null }
+    | undefined;
+  const buildNode = (await projectDetail(projectId, ACTOR.principalId)).nodes.find((node) => node.kind === "build_evidence" && node.id === packagedOnEnd?.archive?.nodeId);
+  check(
+    "the work is packaged and recorded as the project's build when the worker ends, before anyone judges it",
+    packagedOnEnd?.archive?.name === archive.name && packagedOnEnd.archive.root === "smoke-a-chess-game-i-can-actually-play" && buildNode?.title === "Smoke: a chess game I can actually play",
+    JSON.stringify(packagedOnEnd?.archive ?? null),
   );
   const verified = await verifyManifest(
     "n_smoke",
