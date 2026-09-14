@@ -12,6 +12,7 @@
  *
  * Usage: bun scripts/loop-smoke.ts [--port 7788]
  */
+import { givenDataDir } from "./smoke-env.js";
 import { openDatabase } from "../apps/hub/src/db.js";
 import { prepareDatabase } from "../apps/hub/src/migrate.js";
 import { ensureHub, evaluate, listRoles, assignRole, localActor, tenantId } from "../apps/hub/src/hub-client.js";
@@ -97,14 +98,7 @@ const STAGE_ARTIFACT: Record<number, ArtifactKind> = {
   7: "cost_approval",
 };
 
-const dataDir = process.env.SOLUTIONS_BUILDER_DATA_DIR;
-const host = await openDatabase(dataDir ? `${dataDir}/pglite-smoke` : undefined);
-// Settings files — the deck designs, the designer's, the build worker's — are
-// read from the data directory at each use. Left unset, that is the developer's
-// own workspace, and a role whose slides ask for images there fails a deck
-// build here for want of an image provider. The database above stays where it
-// was chosen; only the settings move to a directory of this run's own.
-process.env.SOLUTIONS_BUILDER_DATA_DIR ??= await mkdtemp(join(tmpdir(), "solutions-builder-loop-"));
+const host = await openDatabase(givenDataDir ? `${givenDataDir}/pglite-smoke` : undefined);
 await prepareDatabase(host);
 await ensureHub();
 // The actor's ledger authorities come from the platform's roles, which the

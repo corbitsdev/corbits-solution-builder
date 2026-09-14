@@ -12,6 +12,7 @@
  *
  * Usage: bun --conditions intx-src scripts/failure-smoke.ts
  */
+import "./smoke-env.js";
 import { describeProviderFailure, humanDuration } from "../apps/hub/src/failure.js";
 import { aggregateRefusal } from "../apps/hub/src/inference.js";
 import { cutShortTwice } from "../apps/hub/src/designer-settings.js";

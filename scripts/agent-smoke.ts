@@ -14,6 +14,7 @@
  *
  * Usage: bun scripts/agent-smoke.ts [--base-url http://127.0.0.1:11434]
  */
+import "./smoke-env.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

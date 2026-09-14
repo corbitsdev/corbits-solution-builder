@@ -3,6 +3,7 @@
  * `postmaster.pid` behind. The host must recover from that crash and refuse a
  * live second writer, rather than dying with `RuntimeError: Aborted()`.
  */
+import "./smoke-env.js";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

@@ -6,6 +6,7 @@
  * carry-forward and stale-anchor reporting. No provider is needed — the design
  * versions are written directly, so the flow is testable on its own.
  */
+import { givenDataDir } from "./smoke-env.js";
 import { openDatabase } from "../apps/hub/src/db.js";
 import { prepareDatabase } from "../apps/hub/src/migrate.js";
 import { ensureHub, localActor } from "../apps/hub/src/hub-client.js";
@@ -27,8 +28,8 @@ function check(name: string, ok: boolean, detail = "") {
 }
 
 const host = await openDatabase(
-  process.env.SOLUTIONS_BUILDER_DATA_DIR
-    ? `${process.env.SOLUTIONS_BUILDER_DATA_DIR}/pglite-design`
+  givenDataDir
+    ? `${givenDataDir}/pglite-design`
     : undefined,
 );
 await prepareDatabase(host);

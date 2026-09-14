@@ -8,6 +8,7 @@
  *
  * Usage: bun --conditions intx-src scripts/stakeholders-smoke.ts
  */
+import { givenDataDir } from "./smoke-env.js";
 import { openDatabase } from "../apps/hub/src/db.js";
 import { prepareDatabase } from "../apps/hub/src/migrate.js";
 import { ensureHub, localActor, listRoles } from "../apps/hub/src/hub-client.js";
@@ -24,7 +25,7 @@ function check(name: string, ok: boolean, detail = "") {
 }
 
 const host = await openDatabase(
-  process.env.SOLUTIONS_BUILDER_DATA_DIR ? `${process.env.SOLUTIONS_BUILDER_DATA_DIR}/pglite-stakeholders` : undefined,
+  givenDataDir ? `${givenDataDir}/pglite-stakeholders` : undefined,
 );
 await prepareDatabase(host);
 await ensureHub();
