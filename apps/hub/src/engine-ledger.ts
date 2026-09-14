@@ -375,6 +375,61 @@ export async function recordBuildEvent(projectId: string, event: BuildEvent): Pr
   });
 }
 
+/**
+ * A turn of a stage's conversation, carried in from another instance. The
+ * conversation at home is projected from the platform's workflow runs, which
+ * do not travel; here it is kept as turns of the ledger's own session, so
+ * the thread reads as it did and its open questions are still open.
+ */
+export type CarriedTurn = {
+  id: string;
+  role: "human" | "specialist";
+  body: string;
+  quotes: unknown[];
+  resultNodeId: string | null;
+  questions: string[] | null;
+  createdAt: string;
+};
+
+const CARRIED_KIND = "carried_turn";
+
+/** Records a stage's carried turns, once each: a turn already here by id is left as it is. */
+export async function recordCarriedTurns(projectId: string, stage: number, turns: CarriedTurn[]): Promise<void> {
+  if (turns.length === 0) return;
+  const sessionId = await ensureLedgerSession(projectId);
+  const already = new Set((await carriedTurns(projectId, stage)).map((turn) => turn.id));
+  await ensureUserPrincipal(tenantId(), HOST_PRINCIPAL);
+  for (const turn of turns) {
+    if (already.has(turn.id)) continue;
+    await writeConversationTurn({
+      sessionId,
+      tenantId: tenantId(),
+      runId: "",
+      role: turn.role,
+      body: turn.body,
+      fromPrincipalId: HOST_PRINCIPAL,
+      toPrincipalId: SPECIALIST_PRINCIPAL_ID,
+      metadata: { kind: CARRIED_KIND, stage, turn },
+      model: "carried",
+    });
+  }
+}
+
+/** The turns carried in for one stage, oldest first. */
+export async function carriedTurns(projectId: string, stage: number): Promise<CarriedTurn[]> {
+  return (await allCarriedTurns(projectId)).filter((entry) => entry.stage === stage).map((entry) => entry.turn);
+}
+
+/** Every carried turn on the project, with its stage, oldest first. */
+export async function allCarriedTurns(projectId: string): Promise<{ stage: number; turn: CarriedTurn }[]> {
+  const sessionId = await ledgerSessionIdFor(projectId);
+  const parts = await listConversationTurns(sessionId);
+  return parts
+    .filter((part) => part.metadata?.kind === CARRIED_KIND)
+    .map((part) => ({ stage: Number(part.metadata!.stage), turn: part.metadata!.turn as CarriedTurn }))
+    .sort((a, b) => a.turn.createdAt.localeCompare(b.turn.createdAt));
+}
+
 /** The worker events recorded for a run, newest cursor first. */
 export async function buildEvents(projectId: string, runId: string): Promise<BuildEvent[]> {
   const sessionId = await ledgerSessionIdFor(projectId);

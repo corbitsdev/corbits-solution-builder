@@ -38,7 +38,7 @@ import { readOutputRef, stageIterations, type StageIteration } from "./hub-execu
 import { database } from "./db.js";
 import * as table from "./schema.js";
 import { eq } from "drizzle-orm";
-import { ledgerCommands } from "./engine-ledger.js";
+import { carriedTurns, ledgerCommands } from "./engine-ledger.js";
 
 export type Quote = { readonly quote: string };
 
@@ -249,15 +249,28 @@ async function openingFor(
  */
 export async function threadTurns(projectId: string, stage: number): Promise<StageTurn[]> {
   const { db } = database();
-  const [iterations, nodes, opening] = await Promise.all([
+  const [iterations, nodes, opening, carried] = await Promise.all([
     stageIterations(projectId, stage as Stage),
     db
       .select({ id: table.artifactNode.id, provenance: table.artifactNode.provenance })
       .from(table.artifactNode)
       .where(eq(table.artifactNode.projectId, projectId)),
     openingFor(projectId, stage),
+    carriedTurns(projectId, stage),
   ]);
-  return projectStageThread({ iterations, nodes: nodes as ArtifactNodeRef[], opening });
+  const here = await projectStageThread({ iterations, nodes: nodes as ArtifactNodeRef[], opening });
+  if (carried.length === 0) return here;
+  // What was carried in happened before anything that ran here; the opening
+  // statement, when there is one, came before all of it.
+  const [first, ...rest] = here;
+  const before = first?.id === "opening" ? [first] : [];
+  const after = first?.id === "opening" ? rest : here;
+  return [...before, ...(carried as StageTurn[]), ...after];
+}
+
+/** The stage's conversation as it can travel: every turn that ran here or was carried here, the opening statement aside since it rides on the ledger. */
+export async function portableThread(projectId: string, stage: number): Promise<StageTurn[]> {
+  return (await threadTurns(projectId, stage)).filter((turn) => turn.id !== "opening");
 }
 
 /** The brief-evaluator verdict one iteration produced, or null when it did not run. */
