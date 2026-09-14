@@ -33,6 +33,13 @@ This workspace was seeded by Solutions Builder. The approved plan is
 \`.corbits/BUILD_PLAN.md\`; the requirements it must satisfy are
 \`.corbits/REQUIREMENTS.md\`. They are the contract — build against them.
 
+## Verifying your work
+
+\`bun test\` runs the test suite — Bun's test runner is built in, so this
+works with nothing installed. \`bun run typecheck\` runs the TypeScript
+compiler against the seeded \`tsconfig.json\`. Use these; do not reach for
+\`npm\`, \`yarn\` or \`npx\`.
+
 ## The platform
 
 Skills under \`.agents/skills/\` carry the platform vocabulary — what
@@ -61,6 +68,33 @@ function slug(title: string): string {
   const s = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   return s || "build";
 }
+
+/**
+ * A tsconfig for a Bun TypeScript project. No `types` entry: that would need
+ * `bun-types` installed before it resolves, and the point of this file is to
+ * work the moment it lands. `types/` carries one ambient stub so `include`
+ * always matches at least one file — an empty match is `tsc`'s own hard
+ * error (TS18003), which would fail typecheck before any code exists.
+ */
+const TSCONFIG = {
+  compilerOptions: {
+    target: "ESNext",
+    module: "ESNext",
+    moduleResolution: "bundler",
+    moduleDetection: "force",
+    strict: true,
+    skipLibCheck: true,
+    noEmit: true,
+    esModuleInterop: true,
+    resolveJsonModule: true,
+    allowImportingTsExtensions: true,
+  },
+  include: ["apps", "packages", "types"],
+  exclude: ["node_modules", "vendor"],
+};
+
+/** The lone file under `types/`, so `tsconfig.json`'s `include` never matches zero files. */
+const TYPES_STUB = "export {};\n";
 
 export async function seedBuildWorkspace(
   dir: string,
@@ -103,11 +137,22 @@ export async function seedBuildWorkspace(
           "vendor/interchange/apps/*",
           "vendor/workbench/packages/*",
         ],
+        // Both need nothing beyond this file: `test` needs no install at
+        // all (Bun's test runner is built in), and `typecheck` needs only
+        // the `typescript` devDependency below plus the seeded tsconfig.
+        scripts: {
+          test: "bun test",
+          typecheck: "tsc --noEmit",
+        },
+        devDependencies: {
+          typescript: "^5.9.3",
+        },
       },
       null,
       2,
     )}\n`,
   );
+  await writeFile(join(dir, "tsconfig.json"), `${JSON.stringify(TSCONFIG, null, 2)}\n`);
   await writeFile(
     join(dir, "README.md"),
     `# ${seed.title}\n\nBuilt by Solutions Builder. The approved plan is \`.corbits/BUILD_PLAN.md\`, the requirements are \`.corbits/REQUIREMENTS.md\`, and how this repository is put together is \`AGENTS.md\`.\n`,
@@ -122,6 +167,22 @@ export async function seedBuildWorkspace(
   for (const member of ["apps", "packages", "docs"]) {
     await mkdir(join(dir, member), { recursive: true });
     await writeFile(join(dir, member, ".gitkeep"), "");
+  }
+  await mkdir(join(dir, "types"), { recursive: true });
+  await writeFile(join(dir, "types", "global.d.ts"), TYPES_STUB);
+
+  // Installed now, so `typecheck` works on the worker's first turn rather
+  // than after a failed one. `test` needs none of this — it is proven
+  // working either way. An install that cannot run (no network, no
+  // registry) is reported, not swallowed, and leaves everything seeded
+  // above untouched and usable.
+  try {
+    const install = Bun.spawnSync(["bun", "install"], { cwd: dir, stdout: "ignore", stderr: "pipe" });
+    if (!install.success) {
+      console.error(`build-workspace: toolchain install failed for ${dir}: ${install.stderr.toString().trim()}`);
+    }
+  } catch (err) {
+    console.error(`build-workspace: failed to run the toolchain install for ${dir}:`, err);
   }
 
   // A repository from the start, so the worker's commits — and the diff a
