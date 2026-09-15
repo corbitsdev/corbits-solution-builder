@@ -23,9 +23,30 @@ move is what progress looks like when the code has somewhere else to live.
 Goal: that ratio inverts. Hub vanilla, meat in workflows/agents/tools/skills.
 
 ## In flight
-- **CL-8009 tenant inheritance** — one lifecycle asset for all projects
-  instead of one each. Investigation first: per-project rendering may be
-  load-bearing. Worktree `build/pr-8009`.
+- qwen end-to-end under the judge, re-run after the manifest-crash fix.
+
+## The judge works end to end
+A Sonnet build was driven through the `cli` target: the interview ran, an ICP
+was proposed, leads came back with reasons. The judge read that transcript
+against the requirements and returned **medium, not high** — because a
+correction was never exercised, which is a real requirement the run never
+tested. `stopReason: stalled`, not complete. Verified by running the
+deliverable myself.
+
+A qwen build the same night died on an unguarded `JSON.parse` of a
+package.json the worker had broken with a stray comma. That is fixed: a
+malformed manifest is now a failing check carrying the parse error, which
+blocks completion and reaches the next turn. Five defects tonight were found
+by running the product; none by the gate.
+
+## Closed without merging
+- #210 (CL-8009) keyed the lifecycle asset on audience count. It dedupes and
+  is worse: unrelated projects share an asset by an incidental property, it
+  added 74 lines to the hub, and it makes the deploy serialization more
+  necessary. Its investigation was the valuable part and CL-8009 is rewritten
+  around it: **project tenants are created with `parentId` and never used** —
+  every call routes through the workspace tenant, so the hierarchy is built
+  and never walked.
 
 ## Landed: completion is judged, not computed (CL-8005)
 `completion-judge.ts`. The rule that produced five false "complete" verdicts
