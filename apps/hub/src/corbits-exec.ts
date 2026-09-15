@@ -55,8 +55,10 @@
  * invocation that changed the workspace, the deliverable's own checks are
  * run (`execution-checks.ts`: its declared `test`/`typecheck` scripts and its
  * entry point — the same checks `delivery.ts` runs at delivery time, reused
- * rather than reimplemented). All of them passing is `"complete"`: a
- * definition of done, not silence. A failing check's command, exit status
+ * rather than reimplemented). All of them passing, AND at least one of them
+ * being non-vacuous evidence something was actually built rather than a
+ * check that trivially passed on nothing (`hasWorkingDeliverable`), is
+ * `"complete"`: a definition of done, not silence. A failing check's command, exit status
  * and output tail are folded into the next continuation's prompt, so the
  * worker is told what broke rather than only "continue". Checks are skipped
  * when a continuation changed nothing — an unchanged workspace cannot have
@@ -77,7 +79,7 @@ import { dataDirectory } from "./paths.js";
 import { seedBuildWorkspace, type WorkspaceSeed } from "./build-workspace.js";
 import { buildWorker, type BuildWorker } from "./build-worker.js";
 import { followTurnLog } from "./turn-reports.js";
-import { runExecutionChecks, type ExecutionCheck } from "./execution-checks.js";
+import { runExecutionChecks, hasWorkingDeliverable, type ExecutionCheck } from "./execution-checks.js";
 
 export const BRIDGE_ID = "bounded-local-corbits-exec";
 
@@ -103,8 +105,13 @@ export const BRIDGE_CAPABILITIES = {
  * Why the continuation loop ended. Null when the worker never ran
  * (unavailable).
  *
- *   complete    the deliverable's own checks all passed. The definition of
- *               done — see the file header.
+ *   complete    the deliverable's own checks all passed AND at least one of
+ *               them is non-vacuous evidence something was actually built
+ *               (`hasWorkingDeliverable` in execution-checks.ts) — every
+ *               check passing is not enough on its own, since a workspace
+ *               with no source at all still passes a seeded `test`/
+ *               `typecheck` script for free. The definition of done — see
+ *               the file header.
  *   stalled     the workspace did not change across `maxStaleContinuations`
  *               continuations AND there was no failing check to hand back —
  *               either no checks were discoverable at all, or (impossible to
@@ -357,7 +364,7 @@ export async function runBuildAttempt(args: {
   // killed (timed-out) invocation's checks would run against a workspace
   // whose stop reason is already decided, so they're skipped too.
   let lastExecution: ExecutionCheck[] | null = timedOut ? null : await runExecutionChecks(workspace);
-  if (stopReason === null && allChecksPass(lastExecution)) {
+  if (stopReason === null && hasWorkingDeliverable(lastExecution)) {
     stopReason = "complete";
   }
 
@@ -389,7 +396,7 @@ export async function runBuildAttempt(args: {
     staleStreak = changed ? 0 : staleStreak + 1;
     if (changed) {
       lastExecution = await runExecutionChecks(workspace);
-      if (allChecksPass(lastExecution)) {
+      if (hasWorkingDeliverable(lastExecution)) {
         stopReason = "complete";
         break;
       }
@@ -493,16 +500,6 @@ async function spawnWorker(
   return { exitStatus, finalText: stdout, stderr };
 }
 
-/**
- * "Complete" means every discovered check passed. A deliverable with no
- * discoverable check (no entry point, no declared `test`/`typecheck`
- * script) can never be proven complete this way — an empty array is not
- * treated as vacuously passing, on purpose (see the file header).
- */
-function allChecksPass(execution: ExecutionCheck[] | null): boolean {
-  return execution !== null && execution.length > 0 && execution.every((check) => check.ok);
-}
-
 /** Bounds one check's output in a continuation prompt: enough to act on, not the whole tail. */
 const FAILURE_DETAIL_CHARS = 1500;
 
@@ -524,10 +521,23 @@ function continuationPrompt(previousFinalText: string, execution: ExecutionCheck
           }),
         ].join("\n")
       : "";
+  // Every check passed, but none of them prove anything was built (see
+  // `hasWorkingDeliverable`) — a worker that has only made checks pass
+  // vacuously (no tests, no source to typecheck, no entry point) needs to
+  // hear that explicitly, or it has no signal that "nothing failed" is not
+  // the same as "done".
+  const noEvidenceSection =
+    failures.length === 0 && execution !== null && !hasWorkingDeliverable(execution)
+      ? "\nThe workspace's own checks all passed, but none of them prove a deliverable exists yet: " +
+        (execution.length === 0
+          ? "there is no entry point and no declared `test`/`typecheck` script to run at all."
+          : "they passed on an empty or trivial workspace (no test files, no source to typecheck, no runnable entry point). Write the actual deliverable — an entry point that runs and produces output is the strongest evidence of progress.")
+      : "";
   return [
     "Continue the build in this same working directory. This is not a new task: the previous turn ended before the plan was finished, and there is nobody to answer a question or approve a next step — decide and keep working rather than pausing to ask.",
     tail.length > 0 ? `\nThe previous turn ended with:\n${tail}` : "",
     failureSection,
+    noEvidenceSection,
   ].join("\n");
 }
 

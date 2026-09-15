@@ -34,7 +34,25 @@ const ENTRY_POINT_CANDIDATES = ["src/cli.ts", "src/index.ts", "src/main.ts", "in
 
 /** File name patterns a human would recognise as a test, whether or not the runner also does. */
 const TEST_LIKE_PATTERN = /(^|[._-])(test|spec)s?([._-]|$)/i;
-const SKIPPED_DIRECTORIES = new Set(["node_modules", ".git", "dist", "build"]);
+/**
+ * Files a `typecheck` script could plausibly be typechecking. Ambient
+ * declaration files (`*.d.ts`, `*.d.mts`, `*.d.cts`) are excluded on
+ * purpose: a `.d.ts` declares types, it contains no logic of its own, and
+ * it is exactly what the workspace seed writes (`types/global.d.ts`, so
+ * `tsc --noEmit` doesn't hard-error on an otherwise-empty project) — a
+ * declaration file existing proves the seed ran, never that a deliverable
+ * was written.
+ */
+const SOURCE_FILE_PATTERN = /(?<!\.d)\.(ts|tsx|mts|cts)$/i;
+/**
+ * Directories excluded from source/test discovery: VCS and build noise, and
+ * — same principle as `.d.ts` above — the bridge's own reserved directories.
+ * `.corbits/` and `.agents/` are tooling the seed writes for the worker to
+ * read (the packet, the platform skills, the turn-report hook), never part
+ * of the deliverable; a file the seed drops there must not be able to stand
+ * in for one the worker wrote.
+ */
+const SKIPPED_DIRECTORIES = new Set(["node_modules", ".git", "dist", "build", ".corbits", ".agents"]);
 
 export type PackageManifest = { scripts?: Record<string, string>; main?: string };
 
@@ -48,6 +66,17 @@ export type ExecutionCheck = {
   readonly timedOut: boolean;
   /** Whether this check counts as passing. False blocks delivery like a required descriptor would. */
   readonly ok: boolean;
+  /**
+   * True when the check passed without exercising anything: `test` with no
+   * test files to collect, `typecheck` with no source files to typecheck.
+   * Both are legitimate on a real deliverable that simply has no tests, or
+   * is untyped — but on an otherwise-empty workspace they pass for free,
+   * proving nothing about whether a deliverable exists. An entry point is
+   * never vacuous: it either actually ran and produced output, or it
+   * didn't. Only meaningful when `ok` is true; a failing check is never
+   * vacuous, it is evidence of its own.
+   */
+  readonly vacuous: boolean;
   readonly detail: string;
   readonly stdoutTail: string;
   readonly stderrTail: string;
@@ -140,6 +169,8 @@ async function runEntryPoint(command: string[], workspaceRoot: string, home: str
     exitCode: raw.exitCode,
     timedOut: raw.timedOut,
     ok,
+    // Never vacuous: it either actually ran and produced output, or `ok` is false.
+    vacuous: false,
     detail,
     stdoutTail: raw.stdoutTail,
     stderrTail: raw.stderrTail,
@@ -147,14 +178,11 @@ async function runEntryPoint(command: string[], workspaceRoot: string, home: str
 }
 
 /**
- * Every file under `root` whose name looks like a test to a human — `test`
- * or `spec` set off by a separator, e.g. `test_icp.ts`, `icp.test.ts`,
- * `__tests__/icp.ts` — regardless of whether the declared test runner's own
- * glob would collect it. Bounded to a handful of hits: this exists to tell
- * "no tests exist" from "tests exist but are misnamed", not to enumerate a
- * whole tree.
+ * Every file under `root` whose name matches `pattern`, skipping VCS and
+ * build noise. Bounded to a handful of hits — this exists to tell "none
+ * exist" from "some exist", not to enumerate a whole tree.
  */
-async function findTestLikeFiles(root: string, limit = 5): Promise<string[]> {
+async function findFiles(root: string, pattern: RegExp, limit: number): Promise<string[]> {
   const hits: string[] = [];
   async function walk(dir: string): Promise<void> {
     if (hits.length >= limit) return;
@@ -163,13 +191,33 @@ async function findTestLikeFiles(root: string, limit = 5): Promise<string[]> {
       if (item.isDirectory()) {
         if (SKIPPED_DIRECTORIES.has(item.name)) continue;
         await walk(join(dir, item.name));
-      } else if (item.isFile() && TEST_LIKE_PATTERN.test(item.name)) {
+      } else if (item.isFile() && pattern.test(item.name)) {
         hits.push(join(dir, item.name).slice(root.length + 1));
       }
     }
   }
   await walk(root);
   return hits;
+}
+
+/**
+ * Every file under `root` whose name looks like a test to a human — `test`
+ * or `spec` set off by a separator, e.g. `test_icp.ts`, `icp.test.ts`,
+ * `__tests__/icp.ts` — regardless of whether the declared test runner's own
+ * glob would collect it.
+ */
+function findTestLikeFiles(root: string, limit = 5): Promise<string[]> {
+  return findFiles(root, TEST_LIKE_PATTERN, limit);
+}
+
+/**
+ * Whether `root` holds anything a `typecheck` script could plausibly be
+ * typechecking. `tsc --noEmit` exits 0 on a project with zero matching
+ * files, exactly like a real pass — this is what tells the two apart.
+ */
+async function hasTypecheckableSource(root: string): Promise<boolean> {
+  const hits = await findFiles(root, SOURCE_FILE_PATTERN, 1);
+  return hits.length > 0;
 }
 
 async function runDeclaredScript(kind: "test" | "typecheck", workspaceRoot: string, home: string): Promise<ExecutionCheck> {
@@ -189,21 +237,30 @@ async function runDeclaredScript(kind: "test" | "typecheck", workspaceRoot: stri
   const misnamedTests = bunFoundNothing ? await findTestLikeFiles(workspaceRoot) : [];
   const noTestFiles = bunFoundNothing && misnamedTests.length === 0;
   const ok = !raw.timedOut && (raw.exitCode === 0 || noTestFiles);
+  // `tsc --noEmit` exits 0 with nothing to say when it typechecks zero
+  // files — passing for the same reason `bun test` passes on zero tests:
+  // there was nothing to fail. Only checked when the run otherwise passed;
+  // a real failure is never vacuous.
+  const noSourceFiles = kind === "typecheck" && ok && !(await hasTypecheckableSource(workspaceRoot));
+  const vacuous = noTestFiles || noSourceFiles;
   const detail = raw.timedOut
     ? `${kind} exceeded ${SCRIPT_TIMEOUT_MS}ms and was killed`
     : noTestFiles
       ? "no test files were found; not treated as a failure"
       : misnamedTests.length > 0
         ? `bun collected no test files, but found what look like tests it will never run: ${misnamedTests.join(", ")} — rename them to match bun's test glob (*.test.ts, *_test.ts, etc.)`
-        : ok
-          ? `${kind} passed`
-          : `${kind} exited ${raw.exitCode}`;
+        : noSourceFiles
+          ? "typecheck passed, but no .ts/.tsx source files exist to typecheck"
+          : ok
+            ? `${kind} passed`
+            : `${kind} exited ${raw.exitCode}`;
   return {
     kind,
     command: command.join(" "),
     exitCode: raw.exitCode,
     timedOut: raw.timedOut,
     ok,
+    vacuous,
     detail,
     stdoutTail: raw.stdoutTail,
     stderrTail: raw.stderrTail,
@@ -238,4 +295,27 @@ export async function runExecutionChecks(workspaceRoot: string): Promise<Executi
   } finally {
     await rm(home, { recursive: true, force: true });
   }
+}
+
+/**
+ * Whether `checks` prove a working deliverable exists — not merely that
+ * nothing failed. Every check must pass, exactly as before, but passing is
+ * not sufficient on its own: on a workspace with no source and no entry
+ * point, a seeded `test` script passes because there are no tests to run and
+ * a seeded `typecheck` script passes because there is nothing to typecheck —
+ * both checks green, nothing built. So at least one check must also be
+ * non-vacuous, i.e. must have actually exercised something: an entry point
+ * that ran and produced output, a test suite that ran real tests, a
+ * typecheck over real source. `null` or `[]` (no check was even
+ * discoverable) is never enough either.
+ *
+ * Deliberately not `produced.changed`/a workspace-diff check: a continued
+ * attempt legitimately resumes a workspace that already holds finished work,
+ * and an invocation that changes nothing there is not evidence the
+ * deliverable is missing. This rule asks "does the workspace hold a working
+ * deliverable", not "did this invocation add to it".
+ */
+export function hasWorkingDeliverable(checks: ExecutionCheck[] | null): boolean {
+  if (checks === null || checks.length === 0) return false;
+  return checks.every((check) => check.ok) && checks.some((check) => !check.vacuous);
 }

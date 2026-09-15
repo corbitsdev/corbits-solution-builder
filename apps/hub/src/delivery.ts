@@ -28,7 +28,7 @@ import { database } from "./db.js";
 import * as table from "./schema.js";
 import { readArtifactNode, writeArtifact } from "./projects.js";
 import { workspaceFor } from "./corbits-exec.js";
-import { containedPath, runExecutionChecks, type ExecutionCheck } from "./execution-checks.js";
+import { containedPath, runExecutionChecks, hasWorkingDeliverable, type ExecutionCheck } from "./execution-checks.js";
 
 export type { ExecutionCheck, ExecutionKind } from "./execution-checks.js";
 
@@ -89,6 +89,14 @@ export async function verifyManifest(
   const base = summarizeVerification(manifestNodeId, items, new Date());
   const execution = await runExecutionChecks(workspaceRoot);
   const executionFailures = execution.filter((check) => !check.ok).map((check) => `execution:${check.kind}`);
+  // Every check can pass while none of them prove anything was built — the
+  // same blind spot the build loop closes with `hasWorkingDeliverable`.
+  // Only asserted when there is at least one check to have proven anything
+  // with: an empty `execution` (nothing runnable was discoverable) is left
+  // to the existence checks above, as it always has been.
+  if (execution.length > 0 && executionFailures.length === 0 && !hasWorkingDeliverable(execution)) {
+    executionFailures.push("execution:no_evidence");
+  }
   return {
     ...base,
     complete: base.complete && executionFailures.length === 0,
@@ -168,8 +176,13 @@ export async function verifyAndRecord(
 /** One sentence naming what execution checks failed, or null when all passed. */
 function describeExecutionFailures(execution: ExecutionCheck[]): string | null {
   const failed = execution.filter((check) => !check.ok);
-  if (failed.length === 0) return null;
-  return `execution failed: ${failed.map((check) => `${check.kind} (${check.detail})`).join("; ")}`;
+  if (failed.length > 0) {
+    return `execution failed: ${failed.map((check) => `${check.kind} (${check.detail})`).join("; ")}`;
+  }
+  if (execution.length > 0 && !hasWorkingDeliverable(execution)) {
+    return "execution checks all passed, but none of them are evidence a deliverable exists (no entry point, no real tests, no real typecheck)";
+  }
+  return null;
 }
 
 /** What blocks acceptance of the project's latest manifest, or null when nothing does. */

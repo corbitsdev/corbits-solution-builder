@@ -132,6 +132,21 @@ describe("verifyManifest execution checks", () => {
     expect(testCheck?.detail).toContain("tests/test_icp.ts");
   });
 
+  test("checks that all pass vacuously on an empty workspace do not verify", async () => {
+    const workspace = await workspaceWith({
+      "package.json": JSON.stringify({ name: "empty", scripts: { test: "bun test", typecheck: "exit 0" } }),
+      "README.md": "nothing built yet\n",
+    });
+    const manifest = manifestOf([await descriptorFor(workspace, "README.md")]);
+
+    const report = await verifyManifest("n_manifest", manifest, workspace);
+
+    expect(report.items.every((item) => item.status === "verified")).toBe(true);
+    expect(report.execution.every((check) => check.ok)).toBe(true);
+    expect(report.complete).toBe(false);
+    expect(report.failed).toContain("execution:no_evidence");
+  });
+
   test("no discoverable entry point or declared scripts leaves execution empty, not failing", async () => {
     const workspace = await workspaceWith({
       "dist/chess.app": "not-a-real-binary",
