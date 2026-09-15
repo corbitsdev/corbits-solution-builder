@@ -39,6 +39,12 @@ and waits for a human. Approving names the exact version that was read.
 | 8 | Build and test | Working software and evidence | Evidence accepted |
 | 9 | Deliver | Delivery manifest | Delivery accepted |
 
+Every figure about building — stage 3's effort, stage 5's rough cost and
+timeline, stage 7's firm estimate — assumes a coding agent writes the code
+(Corbits Code by default). Cost is inference spend plus what the software costs
+to run; time is the agent's wall-clock plus the gates. Nothing is priced in
+engineer-days.
+
 Stage 7 cannot be approved the way the others are. Spend needs its own decision,
 so it routes through a cost approval and a freeze. Stage 5 cannot be approved
 until the configured quorum of audiences has recorded a proceed with no reject
