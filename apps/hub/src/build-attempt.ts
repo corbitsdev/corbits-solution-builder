@@ -14,6 +14,7 @@
  * so a run whose worker could not even start sat under a "running" label with
  * a terminal result beside it, and nothing a person could do about either.
  */
+import { targetGuidance } from "@solutions-builder/app/targets";
 import { execute, HOST_PRINCIPAL, type Actor, type CommandOutcome } from "./engine.js";
 import { HostError } from "./errors.js";
 import { newId } from "./ids.js";
@@ -257,6 +258,7 @@ async function buildPrompt(
       ``,
       `Frozen packet: ${packet?.node.contentHash ?? "unknown"}.`,
       `Targets: ${JSON.stringify(targets)}.`,
+      ...(targets.length > 0 ? [``, `What each target means:`, targetGuidance(targets)] : []),
     ].join("\n"),
     seed: { title: detail.project.title, plan: planText, requirements: requirementsText },
     targets,

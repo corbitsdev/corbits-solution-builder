@@ -1,0 +1,41 @@
+/**
+ * What a declared `targets` string means — the one place that knows both
+ * axes of it. The frozen packet (BUILD_PLAN_V3 §6/§13) declares `targets:
+ * string[]`, the modalities the deliverable must be usable through; that
+ * declaration is read twice downstream — once to tell the worker what to
+ * build, once to tell the completion judge what to verify — and both reads
+ * must agree on what each string means, so the classification lives here
+ * rather than being reimplemented at either call site.
+ */
+
+/** A declared target's modality. Only `"cli"` is actually exercised today; everything else is honestly reported as not exercised. */
+export type TargetModality = "cli" | "web" | "api" | "desktop" | "other";
+
+export function classifyTarget(target: string): TargetModality {
+  const t = target.toLowerCase();
+  if (/\bcli\b|terminal|command[- ]?line|console app|\bshell\b/.test(t)) return "cli";
+  if (/\bweb\b|browser|website|webapp|\bspa\b|frontend/.test(t)) return "web";
+  if (/\bapi\b|\bservice\b|\bserver\b|backend|\bhttp\b|\brest\b|grpc/.test(t)) return "api";
+  if (/desktop|electron|installable|installer|native app|macos app|windows app/.test(t)) return "desktop";
+  return "other";
+}
+
+/** What a target's modality asks the worker to expose, and how the completion judge will exercise it — true to `verifyTarget` in `apps/hub/src/completion-judge.ts`, so this never promises checking that does not exist. */
+const GUIDANCE: Record<TargetModality, string> = {
+  cli: "The deliverable must be runnable as a command. It will be exercised by running it and feeding it real input drawn from the requirements on stdin, then checking that it runs successfully and produces output.",
+  web: "The deliverable must be usable as a browser-run web app. No web verification is implemented yet — this target will be reported as not exercised, so it contributes no confidence toward completion on its own.",
+  api: "The deliverable must expose a network service (HTTP/REST/gRPC). No API verification is implemented yet — this target will be reported as not exercised, so it contributes no confidence toward completion on its own.",
+  desktop: "The deliverable must be an installable desktop app. No desktop verification is implemented yet — this target will be reported as not exercised, so it contributes no confidence toward completion on its own.",
+  other: "This target's modality is not recognized, so no verification is implemented for it — it will be reported as not exercised and contributes no confidence toward completion on its own.",
+};
+
+/**
+ * Per-declared-target guidance for the worker prompt: what each target asks
+ * the deliverable to expose, and how it will actually be exercised. A
+ * target nobody can exercise contributes nothing toward completion, so this
+ * says so plainly rather than letting a bare target name imply a check that
+ * does not exist.
+ */
+export function targetGuidance(targets: readonly string[]): string {
+  return targets.map((target) => `- "${target}" (${classifyTarget(target)}): ${GUIDANCE[classifyTarget(target)]}`).join("\n");
+}

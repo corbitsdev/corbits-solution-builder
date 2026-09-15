@@ -57,6 +57,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentById } from "@solutions-builder/app/kit";
+import { classifyTarget, type TargetModality } from "@solutions-builder/app/targets";
 import { complete, type CompletionResult } from "./inference.js";
 import { runExecutionChecks, discoverEntryPoint, type ExecutionCheck, type PackageManifest } from "./execution-checks.js";
 
@@ -67,9 +68,6 @@ const LEVELS: readonly ConfidenceLevel[] = ["none", "low", "medium", "high"];
 export const CONFIDENCE_LEVELS = LEVELS;
 const levelIndex = (level: ConfidenceLevel): number => LEVELS.indexOf(level);
 const minLevel = (a: ConfidenceLevel, b: ConfidenceLevel): ConfidenceLevel => (levelIndex(a) <= levelIndex(b) ? a : b);
-
-/** A declared target's modality. Only `"cli"` is actually exercised today; everything else is honestly reported as not exercised. */
-export type TargetModality = "cli" | "web" | "api" | "desktop" | "other";
 
 export type TargetVerification = {
   readonly target: string;
@@ -130,16 +128,10 @@ export function readVerifierReport(value: unknown): VerifierReport | null {
 }
 
 // ---------------------------------------------------------------------------
-// Target modality: dispatch and the one modality actually implemented (CLI).
-
-function classifyTarget(target: string): TargetModality {
-  const t = target.toLowerCase();
-  if (/\bcli\b|terminal|command[- ]?line|console app|\bshell\b/.test(t)) return "cli";
-  if (/\bweb\b|browser|website|webapp|\bspa\b|frontend/.test(t)) return "web";
-  if (/\bapi\b|\bservice\b|\bserver\b|backend|\bhttp\b|\brest\b|grpc/.test(t)) return "api";
-  if (/desktop|electron|installable|installer|native app|macos app|windows app/.test(t)) return "desktop";
-  return "other";
-}
+// Target modality: dispatch to the one modality actually implemented (CLI).
+// Classification itself (`classifyTarget`) lives in the packages module
+// (`@solutions-builder/app/targets`) so the worker prompt and this judge
+// agree on what each declared target means.
 
 /**
  * Candidate example input, drawn from the requirements themselves rather
