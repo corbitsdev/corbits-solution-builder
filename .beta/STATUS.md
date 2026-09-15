@@ -5,12 +5,23 @@
 | --- | --- | --- |
 | start of night | 21,132 | 3,570 |
 | after stage-8 judge + panel | 21,841 | 3,578 |
-| deck merged out (#208) | 21,166 | 4,207 |
-| accept_evidence gate (#211) | **21,365** | **4,093** |
+| deck authoring out (#208) | 21,166 | 4,207 |
+| accept_evidence gate (#211) | 21,365 | 4,093 |
+| prompt text out (#212, #213) | 20,038 | 4,257 |
+| design prompt + rubric out (#214, #215) | 19,848 | 4,513 |
+| deck tool in the closure (#216) | 19,912 | 4,747 |
+| art direction out + bench in (#232, #234) | **19,874** | **4,887** |
+
+Two honesty notes on this table. From the `#212` row down the hub count
+excludes `*.test.ts`, which the rows above it did not separate — the trend is
+real either way, but the rows are not all measured the same. And I rebuilt
+this table once: several edits to it silently no-op'd when their anchor text
+had moved, leaving rows missing and stale bolding. The numbers above are the
+ones actually measured at each merge.
 
 Correction: an earlier row here claimed the deck move was -1,881. That
 compared two branches with different bases and was wrong. Measured across the
-merge itself it is **-675**. Still the largest single reduction so far.
+merge itself it is **-675**.
 
 The middle row is the lesson: stage-8 work has nowhere to go but the hub while
 the build runs beside the workflow instead of inside it (CL-7991). The deck
