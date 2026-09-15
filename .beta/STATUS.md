@@ -23,13 +23,31 @@ move is what progress looks like when the code has somewhere else to live.
 Goal: that ratio inverts. Hub vanilla, meat in workflows/agents/tools/skills.
 
 ## In flight
-- **CL-8005 delivery-verifier** — judges by USING the deliverable. Confidence
-  derived from what was exercised, `targets` picks the modality, reports
-  honestly rather than refusing. Agent working in `internal-beta` directly.
-- **Panel at stage 8** (plan §8) — four independent principals reviewing
-  evidence, not just stage 6. Agent working in `internal-beta` directly.
-- **CL-8006 deck behind the Documents seam** — 807 lines of PptxGenJS
-  authoring out of the hub. Worktree `build/pr-8006`, PR into `internal-beta`.
+- **CL-8009 tenant inheritance** — one lifecycle asset for all projects
+  instead of one each. Investigation first: per-project rendering may be
+  load-bearing. Worktree `build/pr-8009`.
+
+## Landed: completion is judged, not computed (CL-8005)
+`completion-judge.ts`. The rule that produced five false "complete" verdicts
+is gone. What replaced it:
+
+- **A mechanical ceiling the model cannot raise.** `minLevel(parsed.level,
+  ceiling)` — the model's answer is clamped by what was actually exercised.
+  `"high"` is unreachable without evidence the thing ran with real input and
+  produced output, whatever the model says.
+- **`targets` selects the modality.** Only `cli` is implemented: it starts the
+  entry point and feeds it real input drawn from the requirements' own example
+  section, never fabricated. Other targets report "not exercised" — no false
+  pass, no dead end.
+- **Confidence, not a boolean** — none/low/medium/high, with reasoning.
+- **The judge is only asked when there is something to interpret** (ceiling at
+  medium or above); below that the facts decide alone.
+- **An unreachable judge holds at the ceiling, never raises**, and a `high`
+  ceiling is downgraded to medium when the verdict cannot be read.
+- The worker's own tests survive only as labelled self-reported corroboration.
+
+18 regression tests cover all five false-complete routes plus a trivial
+"prints done" entry point. Verified the clamp myself at `completion-judge.ts:493`.
 
 ## Landed on internal-beta
 - baseline commit lands (seeded workspace is diffable)
