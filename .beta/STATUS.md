@@ -260,6 +260,33 @@ The lesson is narrow and worth keeping: **after resolving a merge, `git add -A`
 or check `git status` before committing, and run the gate on the committed
 tree, not the working tree.**
 
+## The first real stage-8 build, and what it showed
+
+1032s, four continuations, `stopReason: stalled`, **`confidence: none`** — and
+the deliverable *works*: the hub's own checks ran its suite in that workspace,
+**26 pass, 0 fail**, typecheck clean. A real ICP CLI with template parsing,
+weighted matching, a reason per criterion and a review gate.
+
+It scored zero for two reasons, neither the model's fault:
+
+- **CL-8015 — the worker can write but cannot run.** `--permission-mode
+  acceptEdits` permits edits, not Bash. It wrote a working deliverable and
+  spent four continuations hand-tracing code it was never allowed to execute,
+  saying so honestly every turn. `--allowedTools` permits named tools without
+  the blanket bypass the bridge rightly refuses.
+- **The verifier could not find how to run it.** `discoverEntryPoint` checks
+  `start`, `main` and six root filenames; the deliverable declared
+  `"icp": "bun run apps/icp-cli/src/main.ts"`. So the one implemented modality
+  was never exercised, the ceiling was mechanical, and the judge was never
+  consulted. In flight: state the contract in `targetGuidance`, and recognise
+  `bin` — without guessing at arbitrary script names, which is how a verifier
+  starts lying.
+
+Both share a root worth naming: **the deliverable was never actually run, by
+anyone, at any point in the pipeline.** The worker couldn't, and the verifier
+couldn't find it. The one thing that did run it was the mechanical `bun test`
+check, which is why we know it works at all.
+
 ## In flight
 - CL-7981 `targets` stops being inert: `classifyTarget` moves out of the hub
   into `packages/solutions-builder/src/targets.ts`, and the worker prompt
