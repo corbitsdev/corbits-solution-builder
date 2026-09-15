@@ -135,11 +135,13 @@ async function driveAttempt(projectId: string, runId: string, continueFromRunId:
   };
   inFlight.set(runId, attempt);
   try {
-    const { prompt, seed } = await buildPrompt(projectId, runId, continueFromRunId !== null);
+    const { prompt, seed, targets } = await buildPrompt(projectId, runId, continueFromRunId !== null);
     const outcome = await runBuildAttempt({
       runId,
       prompt,
       seed,
+      projectId,
+      ...(targets.length > 0 ? { targets } : {}),
       signal: attempt.controller.signal,
       ...(continueFromRunId !== null
         ? { continueFrom: { runId: continueFromRunId, workspace: await workspaceFor(continueFromRunId) } }
@@ -197,6 +199,7 @@ async function driveAttempt(projectId: string, runId: string, continueFromRunId:
         continuedFrom: outcome.continuedFrom,
         continuations: outcome.continuations,
         stopReason: outcome.stopReason,
+        completion: outcome.completion,
         produced: outcome.produced,
         archive,
         archiveError,
@@ -225,12 +228,16 @@ async function buildPrompt(
   projectId: string,
   runId: string,
   continuing: boolean,
-): Promise<{ prompt: string; seed: WorkspaceSeed }> {
+): Promise<{ prompt: string; seed: WorkspaceSeed; targets: string[] }> {
   const detail = await projectDetail(projectId, localActor().principalId);
   const packetRun = detail.runs.find((run) => run.id === runId);
   // The frozen packet is an artifact version; its hash is the version's.
   const packet = packetRun?.packetId ? await readArtifactNode(packetRun.packetId) : null;
-  const targets = packet ? ((JSON.parse(packet.content) as { targets?: unknown }).targets ?? []) : [];
+  const rawTargets = packet ? ((JSON.parse(packet.content) as { targets?: unknown }).targets ?? []) : [];
+  // The same array also selects the completion judge's modality
+  // (`completion-judge.ts`) — filtered defensively to strings, since the
+  // packet's own content is untyped JSON by the time it is read back here.
+  const targets = Array.isArray(rawTargets) ? rawTargets.filter((target): target is string => typeof target === "string") : [];
 
   const live = detail.nodes.filter((node) => node.supersededByNodeId === null);
   const plan = live.find((node) => node.kind === "build_plan") ?? detail.nodes.find((node) => node.kind === "build_plan");
@@ -252,6 +259,7 @@ async function buildPrompt(
       `Targets: ${JSON.stringify(targets)}.`,
     ].join("\n"),
     seed: { title: detail.project.title, plan: planText, requirements: requirementsText },
+    targets,
   };
 }
 

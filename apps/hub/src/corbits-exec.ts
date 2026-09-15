@@ -53,20 +53,35 @@
  * The loop's stop condition is never "this output looks done" guessed from
  * stdout — the interface gives no event for that, and guessing would be
  * exactly the synthesis this bridge refuses elsewhere. Instead, after each
- * invocation that changed the workspace, the deliverable's own checks are
- * run (`execution-checks.ts`: its declared `test`/`typecheck` scripts and its
- * entry point — the same checks `delivery.ts` runs at delivery time, reused
- * rather than reimplemented). All of them passing, AND at least one of them
- * being non-vacuous evidence something was actually built rather than a
- * check that trivially passed on nothing (`hasWorkingDeliverable`), is
- * `"complete"`: a definition of done, not silence. A failing check's command, exit status
- * and output tail are folded into the next continuation's prompt, so the
- * worker is told what broke rather than only "continue". Checks are skipped
- * when a continuation changed nothing — an unchanged workspace cannot have
- * produced a new result — which is also why `"stalled"` now means something
- * narrow: no change AND no failing check to act on. The abort signal and the
- * turn/wall-clock budgets still apply on top of all of this, because a build
- * that never reaches passing checks must still terminate.
+ * invocation that changed the workspace, a completion judge is asked
+ * (`completion-judge.ts`). It does not trust the worker's own `test`/
+ * `typecheck` scripts (self-reported, kept only as weak corroboration); it
+ * runs the deliverable itself, in the modality the frozen packet declares
+ * (`targets` — a CLI is actually started with real input drawn from the
+ * requirements; a modality not yet implemented is honestly reported as not
+ * exercised, never faked and never a dead end), diffs the workspace against
+ * the seed's own baseline commit, and reports a confidence level — `"none"`,
+ * `"low"`, `"medium"` or `"high"` — computed mechanically as a ceiling from
+ * what was actually exercised and then, once there is real behaviour to
+ * read, handed to an agent (the kit's own `delivery-verifier` role) to judge
+ * whether that behaviour matches the plan and the requirements. The agent's
+ * answer is clamped to the mechanical ceiling — it can only lower the level,
+ * never raise it, so `"high"` is structurally unreachable without evidence
+ * the deliverable actually ran with real input and produced output. CL-8005:
+ * a fixed rule (`hasWorkingDeliverable`) produced five false "complete"
+ * verdicts, each by a different route a worker's own edits could always
+ * find (including a passing test suite that had run nothing); a confidence
+ * level derived from actually-exercised behaviour is what replaced it.
+ * `"complete"` is the judge reaching `"high"`, never a check passing on its
+ * own. The judge's own reasoning — which always names what was and was not
+ * exercised — is folded into the next continuation's prompt when the level
+ * is not yet `"high"`, so the worker is told what is missing rather than
+ * only "continue". The judge is skipped when a continuation changed
+ * nothing — an unchanged workspace cannot have produced a new result —
+ * which is also why `"stalled"` now means something narrow: no change AND
+ * no failing check to act on. The abort signal and the turn/wall-clock
+ * budgets still apply on top of all of this, because a build that never
+ * reaches `"high"` must still terminate.
  *
  * This interface also gives no event for "the worker has a question" —
  * `BRIDGE_CAPABILITIES.questionsAndApprovals` is false, and nothing here
@@ -80,7 +95,8 @@ import { dataDirectory } from "./paths.js";
 import { seedBuildWorkspace, type WorkspaceSeed } from "./build-workspace.js";
 import { buildWorker, type BuildWorker } from "./build-worker.js";
 import { followTurnLog } from "./turn-reports.js";
-import { runExecutionChecks, hasWorkingDeliverable, type ExecutionCheck } from "./execution-checks.js";
+import type { ExecutionCheck } from "./execution-checks.js";
+import { judgeCompletion, type CompletionVerdict } from "./completion-judge.js";
 
 export const BRIDGE_ID = "bounded-local-corbits-exec";
 
@@ -106,13 +122,14 @@ export const BRIDGE_CAPABILITIES = {
  * Why the continuation loop ended. Null when the worker never ran
  * (unavailable).
  *
- *   complete    the deliverable's own checks all passed AND at least one of
- *               them is non-vacuous evidence something was actually built
- *               (`hasWorkingDeliverable` in execution-checks.ts) — every
- *               check passing is not enough on its own, since a workspace
- *               with no source at all still passes a seeded `test`/
- *               `typecheck` script for free. The definition of done — see
- *               the file header.
+ *   complete    the completion judge (`completion-judge.ts`) reached
+ *               confidence level `"high"` — reached only from evidence
+ *               gathered outside the worker's control (the deliverable
+ *               actually run, in its declared modality, with real input;
+ *               the worker's own tests as weak corroboration only; the
+ *               workspace diff against the seeded baseline commit), never a
+ *               check passing on its own. The definition of done — see the
+ *               file header.
  *   stalled     the workspace did not change across `maxStaleContinuations`
  *               continuations AND there was no failing check to hand back —
  *               either no checks were discoverable at all, or (impossible to
@@ -178,6 +195,17 @@ export type BridgeOutcome = {
    * that changed nothing, so this can be older than the final invocation.
    */
   readonly execution: ExecutionCheck[] | null;
+  /**
+   * The completion judge's own verdict on the last checked state — null
+   * when the worker never ran or a continuation left the workspace
+   * unchanged (mirrors `execution` above). `stopReason === "complete"` iff
+   * `completion?.level === "high"`; every other stop reason leaves this
+   * naming the confidence level actually reached and why, including
+   * `source: "unavailable"` when the judge itself could not be reached (the
+   * level then holds at the mechanical ceiling rather than being guessed
+   * at).
+   */
+  readonly completion: CompletionVerdict | null;
   /**
    * What this attempt itself left behind, measured against the workspace as
    * it stood right before the worker's first invocation — the copied-forward
@@ -268,8 +296,20 @@ export async function runBuildAttempt(args: {
    * What the workspace starts with. On a clean start the whole seed is
    * written; on a continued one only the `.corbits` packet files, over the
    * copied workspace, so a retry builds against this attempt's plan.
+   * `seed.plan`/`seed.requirements` are also what the completion judge is
+   * given — the same contract the workspace itself was seeded with.
    */
   seed: WorkspaceSeed;
+  /** Whose spend the judge's inference calls are, for the usage ledger. Omitted, they run unattributed rather than blocked. */
+  projectId?: string;
+  /**
+   * The frozen packet's declared targets — what modality the completion
+   * judge exercises the deliverable in (`completion-judge.ts`). Omitted or
+   * empty defaults to a single implicit `"cli"` target: every workspace
+   * this bridge seeds is a local Bun CLI-shaped project until a target says
+   * otherwise.
+   */
+  targets?: readonly string[];
   signal?: AbortSignal;
   /**
    * An earlier attempt whose workspace is copied into this one before the
@@ -286,6 +326,15 @@ export async function runBuildAttempt(args: {
   onOutput?: (chunk: string, channel: "stdout" | "stderr" | "turn") => void;
   /** Tunes when the continuation loop below gives up. Defaults apply for anything omitted. */
   continuation?: ContinuationConfig;
+  /**
+   * Overrides the completion judge. Defaults to the real `judgeCompletion`
+   * (an inference call to the operator's connected provider); production
+   * callers never pass this. Exists so a test can substitute a deterministic
+   * stand-in rather than depending on a live provider to prove the loop's
+   * own control flow (stop at confidence level `"high"`, keep going and
+   * feed back `reasoning` otherwise).
+   */
+  judge?: typeof judgeCompletion;
 }): Promise<BridgeOutcome> {
   const startedAt = new Date().toISOString();
   const workspace = await workspaceFor(args.runId);
@@ -314,6 +363,7 @@ export async function runBuildAttempt(args: {
       continuations: 0,
       stopReason: null,
       execution: null,
+      completion: null,
       produced: null,
       startedAt,
       endedAt: new Date().toISOString(),
@@ -372,14 +422,29 @@ export async function runBuildAttempt(args: {
   let staleStreak = 0;
   let stopReason: ContinuationStopReason | null = timedOut ? "wall_clock_budget" : null;
 
+  const judgeFn = args.judge ?? judgeCompletion;
+  const judgeUsage = args.projectId ? { projectId: args.projectId, purpose: "build.completion_judge" } : undefined;
+  const askJudge = () =>
+    judgeFn({
+      workspaceRoot: workspace,
+      plan: args.seed.plan,
+      requirements: args.seed.requirements,
+      ...(args.targets ? { targets: args.targets } : {}),
+      ...(judgeUsage ? { usage: judgeUsage } : {}),
+    });
+
   // Checked after the first invocation, and after every continuation that
   // changed the workspace — never after one that didn't, since an unchanged
-  // workspace cannot have produced a different result and the checks cost
-  // real time (a worker's own test/typecheck scripts, run for real). A
-  // killed (timed-out) invocation's checks would run against a workspace
-  // whose stop reason is already decided, so they're skipped too.
-  let lastExecution: ExecutionCheck[] | null = timedOut ? null : await runExecutionChecks(workspace);
-  if (stopReason === null && hasWorkingDeliverable(lastExecution)) {
+  // workspace cannot have produced a different result. The judge's own
+  // mechanical work (running the deliverable in its declared modality,
+  // diffing the workspace) costs real time regardless of level; only once
+  // that work shows real behaviour worth reading (ceiling "medium" or
+  // above) does it also cost an inference call. A killed (timed-out)
+  // invocation's evidence would be gathered against a workspace whose stop
+  // reason is already decided, so it's skipped too.
+  let lastVerdict: CompletionVerdict | null = timedOut ? null : await askJudge();
+  let lastExecution: ExecutionCheck[] | null = lastVerdict?.checks ?? null;
+  if (stopReason === null && lastVerdict?.level === "high") {
     stopReason = "complete";
   }
 
@@ -397,7 +462,7 @@ export async function runBuildAttempt(args: {
       break;
     }
     continuations += 1;
-    const next = await invokeBounded(continuationPrompt(invocation.finalText, lastExecution));
+    const next = await invokeBounded(continuationPrompt(invocation.finalText, lastVerdict));
     invocation = next.invocation;
     finalTextByInvocation.push(invocation.finalText);
     stderrByInvocation.push(invocation.stderr);
@@ -410,8 +475,9 @@ export async function runBuildAttempt(args: {
     previousFingerprint = fingerprint;
     staleStreak = changed ? 0 : staleStreak + 1;
     if (changed) {
-      lastExecution = await runExecutionChecks(workspace);
-      if (hasWorkingDeliverable(lastExecution)) {
+      lastVerdict = await askJudge();
+      lastExecution = lastVerdict.checks;
+      if (lastVerdict.level === "high") {
         stopReason = "complete";
         break;
       }
@@ -446,6 +512,7 @@ export async function runBuildAttempt(args: {
     continuations,
     stopReason,
     execution: lastExecution,
+    completion: lastVerdict,
     produced,
     startedAt,
     endedAt: new Date().toISOString(),
@@ -521,9 +588,10 @@ async function spawnWorker(
 const FAILURE_DETAIL_CHARS = 1500;
 
 /** What the worker is told on a continuation: it is still the same task, and there is no one to ask. */
-function continuationPrompt(previousFinalText: string, execution: ExecutionCheck[] | null): string {
+function continuationPrompt(previousFinalText: string, verdict: CompletionVerdict | null): string {
   const tail = previousFinalText.trim().slice(-2000);
-  const failures = (execution ?? []).filter((check) => !check.ok);
+  const checks = verdict?.checks ?? [];
+  const failures = checks.filter((check) => !check.ok);
   const failureSection =
     failures.length > 0
       ? [
@@ -538,23 +606,20 @@ function continuationPrompt(previousFinalText: string, execution: ExecutionCheck
           }),
         ].join("\n")
       : "";
-  // Every check passed, but none of them prove anything was built (see
-  // `hasWorkingDeliverable`) — a worker that has only made checks pass
-  // vacuously (no tests, no source to typecheck, no entry point) needs to
-  // hear that explicitly, or it has no signal that "nothing failed" is not
-  // the same as "done".
-  const noEvidenceSection =
-    failures.length === 0 && execution !== null && !hasWorkingDeliverable(execution)
-      ? "\nThe workspace's own checks all passed, but none of them prove a deliverable exists yet: " +
-        (execution.length === 0
-          ? "there is no entry point and no declared `test`/`typecheck` script to run at all."
-          : "they passed on an empty or trivial workspace (no test files, no source to typecheck, no runnable entry point). Write the actual deliverable — an entry point that runs and produces output is the strongest evidence of progress.")
+  // Every discovered check passed, but the completion judge's confidence
+  // level is not yet "high" — including `source: "unavailable"`, which
+  // holds at the mechanical ceiling rather than being silently treated as
+  // "high". Its reasoning names what was and was not exercised and what is
+  // missing, so it goes back verbatim rather than a canned "not done yet".
+  const judgeSection =
+    failures.length === 0 && verdict !== null && verdict.level !== "high"
+      ? `\nThis is not judged complete yet (confidence: ${verdict.level}): ${verdict.reasoning}`
       : "";
   return [
     "Continue the build in this same working directory. This is not a new task: the previous turn ended before the plan was finished, and there is nobody to answer a question or approve a next step — decide and keep working rather than pausing to ask.",
     tail.length > 0 ? `\nThe previous turn ended with:\n${tail}` : "",
     failureSection,
-    noEvidenceSection,
+    judgeSection,
   ].join("\n");
 }
 

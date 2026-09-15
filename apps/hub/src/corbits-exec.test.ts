@@ -10,6 +10,31 @@ const dataDir = await mkdtemp(join(tmpdir(), "corbits-exec-test-data-"));
 process.env.SOLUTIONS_BUILDER_DATA_DIR = dataDir;
 
 const { runBuildAttempt, snapshotWorkspace } = await import("./corbits-exec.js");
+const { runExecutionChecks } = await import("./execution-checks.js");
+const { judgeCompletion } = await import("./completion-judge.js");
+
+/**
+ * A deterministic stand-in for the real completion judge: it runs the same
+ * mechanical checks a real judge is handed, but decides with the pre-CL-8005
+ * rule (every check passing, and at least one of them non-vacuous means
+ * "high") instead of an inference call — these tests exist to prove the
+ * loop's own control flow (stop at level "high", otherwise keep going and
+ * feed `reasoning` back), not to depend on a live provider or a real CLI
+ * verification pass being connected in CI. `completion-judge.test.ts` covers
+ * the real judge's own mechanics (target verification, the confidence
+ * ceiling, the JSON parsing) in isolation.
+ */
+const stubJudge: typeof judgeCompletion = async (args) => {
+  const checks = await runExecutionChecks(args.workspaceRoot);
+  const done = checks.length > 0 && checks.every((check) => check.ok) && checks.some((check) => !check.vacuous);
+  return {
+    level: done ? "high" : "none",
+    reasoning: done ? "stub judge: a non-vacuous check passed" : "stub judge: nothing non-vacuous has passed yet",
+    source: "judge",
+    checks,
+    targets: [],
+  };
+};
 
 const cleanupDirs: string[] = [];
 afterEach(async () => {
@@ -167,6 +192,7 @@ describe("runBuildAttempt stops on the deliverable's own checks, not on silence"
         runId: `run-${Date.now()}`,
         prompt: "build it",
         seed: { title: "complete test", plan: "plan", requirements: "reqs" },
+        judge: stubJudge,
       });
 
       expect(outcome.available).toBe(true);
@@ -212,6 +238,7 @@ describe("runBuildAttempt stops on the deliverable's own checks, not on silence"
         runId: `run-${Date.now()}`,
         prompt: "build it",
         seed: { title: "fed-back failure test", plan: "plan", requirements: "reqs" },
+        judge: stubJudge,
       });
 
       expect(outcome.available).toBe(true);
