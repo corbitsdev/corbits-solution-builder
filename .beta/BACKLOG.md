@@ -83,6 +83,21 @@ the deliverable actually runs, and what the worker did when it got stuck.
    Overturns plan §7's "ledger is the only state machine"; needs an explicit
    ruling before anyone starts.
 
+## Observed, not yet worth fixing
+
+- **A worked example's halves can be bold labels rather than subheadings.**
+  #244 separates input from output when the document names them as headings
+  (`### Input`), and takes a flat example whole otherwise. A real run wrote
+  `**Input**:` as a bold label inside a flat section, so both halves are fed.
+  That is the honest fallback and it still supplies real input — but it means
+  a deliverable can be handed its own expected output.
+
+  Left alone deliberately: matching bold labels is heuristic creep on a parser
+  whose strictness is the point, and the fix belongs upstream anyway — the
+  requirements prompt could ask for the halves as subheadings, which is one
+  instruction rather than one more pattern. Worth doing if a build is ever
+  seen to echo its expected output and look correct.
+
 ## Ours, urgent, from running the product
 
 - **CL-8014 — every build from the UI was unverifiable.** The client froze
