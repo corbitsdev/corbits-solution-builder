@@ -35,10 +35,19 @@ Rules for every iteration:
    prompt side and the shared classifier. The verification side was already
    live from CL-8005. Both now read the same `classifyTarget`.
 
-5. **Move the stage machinery into packages** (plan §7/§9).
-   `engine.ts` + `engine-ledger.ts` = 1,343 lines. §7: one contract generated
-   from the ledger, consumed by workflow definitions, guards and tests. The
-   hub should enforce, not define.
+5. ~~**Move the stage machinery into packages**~~ (plan §7/§9) — **withdrawn,
+   the premise was wrong.** §7 asks that the hub "enforce, not define", and it
+   already does. The definition — `LEDGER`'s transition table, `COMMANDS`,
+   `STAGES`, every state and authority — is 607 lines that already live in
+   `packages/solutions-builder/src/ledger.ts`, and `engine.ts:16` and
+   `guard.ts:24` import it. `engine.ts` declares no transition of its own
+   (two mentions, both the imported symbol).
+
+   What is left in `engine.ts` (874) is transaction handling, in-flight
+   deduplication and command application; `engine-ledger.ts` (493) writes each
+   committed command onto Interchange's conversation primitives through
+   `hub-gaps`. Both are host mechanics. Moving them into packages would be
+   moving mechanism out of the host, which is the opposite of the goal.
 
 6. **Retire the bridge** (CL-7991) — blocked on corbits-code as a package.
    `corbits-exec.ts` is 770 lines of subprocess supervisor reimplementing
@@ -74,6 +83,22 @@ Rules for every iteration:
 
 - design revision prompt (§10) into packages.
 - the verifier rubric into packages.
+
+## Where the floor is
+
+Worth being straight about: after the prompt text is out, `apps/hub` is close
+to its floor under the current constraints. The bulk of what remains is
+plumbing that only shrinks if something outside this repo changes —
+`corbits-exec.ts` (797) goes when the bridge is retired and needs corbits-code
+as a package; `hub-gaps.ts` (489) shrinks one function at a time as upstream
+routes land; `migrate.ts` (671), `hub-client.ts` (771) and `hub-mount.ts` (490)
+are the seam to Interchange itself.
+
+So the honest reading of the scoreboard: the ratio improves a lot more from
+here by **packages growing** — workflows, tools and skills that run in the
+sidecar — than by the hub shrinking further. The deck tool is the model for
+that: it left the hub, and its destination is the workflow closure, not
+another host module.
 
 ## The pattern that is working
 
