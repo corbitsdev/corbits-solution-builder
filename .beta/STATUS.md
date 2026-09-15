@@ -10,7 +10,8 @@
 | prompt text out (#212, #213) | 20,038 | 4,257 |
 | design prompt + rubric out (#214, #215) | 19,848 | 4,513 |
 | deck tool in the closure (#216) | 19,912 | 4,747 |
-| art direction out + bench in (#232, #234) | **19,874** | **4,887** |
+| art direction out + bench in (#232, #234) | 19,874 | 4,887 |
+| main merged + outline deduped (#235) | **19,907** | **4,949** |
 
 Two honesty notes on this table. From the `#212` row down the hub count
 excludes `*.test.ts`, which the rows above it did not separate — the trend is
@@ -184,7 +185,33 @@ Worth naming because it is the failure mode this whole branch is about. His
 the hub matches the section via `OUTLINE_HEADING.toLowerCase()`, the package
 via the literal `"deck outline"`. Identical today. Change the constant and the
 check that refuses a package and the renderer that draws its slides would
-disagree about what a slide outline is. In flight.
+disagree about what a slide outline is.
+
+Resolved in #235: one definition, in `packages/solutions-builder/src/deck.ts`,
+with `outlineSlidesIn` now matching the section via `OUTLINE_HEADING` so the
+constant is load-bearing for both readers rather than decorative for one.
+`apps/hub/src/package-outline.ts` deleted outright rather than left as a
+re-export shim — a file that only forwards is a hop, not a home. Deck smoke
+stayed 36/36, which is the check that proves it: it covers the renderer and
+the refusal both.
+
+## A mistake, and what it cost
+
+I pushed a merge commit whose message described two fixes its tree did not
+contain. During a conflicted merge `git commit` writes the index: I had
+resolved the two conflicted files with `git add`, but the other two I only
+edited in the working tree. **The gate I ran was green against the working
+tree, so it proved nothing about what I committed** — and I reported it as
+green.
+
+`origin/internal-beta` did not typecheck for about half an hour. It was found
+by a subagent reporting an "unrelated, pre-existing" typecheck error and being
+exactly right; it reported it rather than quietly fixing it, which is the only
+reason I looked. Repaired in `a7d6905`.
+
+The lesson is narrow and worth keeping: **after resolving a merge, `git add -A`
+or check `git status` before committing, and run the gate on the committed
+tree, not the working tree.**
 
 ## In flight
 - CL-7981 `targets` stops being inert: `classifyTarget` moves out of the hub
