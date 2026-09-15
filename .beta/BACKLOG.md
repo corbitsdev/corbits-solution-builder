@@ -52,3 +52,29 @@ Rules for every iteration:
    `divergent`, `alignRunWithLedger`, `forgetExecution`, `awaitingSignalFor`.
    Overturns plan §7's "ledger is the only state machine"; needs an explicit
    ruling before anyone starts.
+
+## Flagged upstream (we may not fix these)
+
+- **CL-8011 — credential `use` grants don't survive the ancestor walk.**
+  Resolution walks the tenant chain; authorization does not. The auto-grant
+  `credentials.ts:265` writes is stamped with the tenant the credential was
+  created in, and every production lookup is the single-tenant
+  `collectGrants`. `collectGrantsInChain` exists, is implemented in both
+  stores, is described in its own docstring as the credential-use path, and
+  has **zero call sites** — grep of the whole vendored tree returns only the
+  declaration, the two implementations and two test stubs.
+
+  Not a live failure: nothing in `apps/hub` acts inside a project subtenant
+  yet — every call goes through `tenantPath()`, the root workspace tenant. It
+  becomes a hard blocker the moment a run launches in a project subtenant,
+  which is exactly the tenancy model we want. Fix it upstream before moving
+  runs into subtenants, not after.
+
+## In flight
+
+- CL-7981 `targets` stops being inert — `classifyTarget` out of the hub into
+  `packages/solutions-builder/src/targets.ts`, and the worker prompt stops
+  pasting `Targets: ["cli"]` as raw JSON.
+- stage prompt rendering into packages — `buildDraftPrompt`, `renderInputs`,
+  `renderStageContext` are pure text, and what an agent is told is domain
+  content, not host mechanics.
