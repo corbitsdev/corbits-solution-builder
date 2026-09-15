@@ -290,6 +290,37 @@ anyone, at any point in the pipeline.** The worker couldn't, and the verifier
 couldn't find it. The one thing that did run it was the mechanical `bun test`
 check, which is why we know it works at all.
 
+## The chain works, end to end
+
+The closing build, with every fix from tonight in:
+
+    seconds: 362 | stopReason: complete | continuations: 0
+    confidence: high | source: judge
+    target cli: exercised=True ranOK=True realInput=True
+
+`stopReason: complete`, not stalled. Zero continuations — first try. Compare
+the first real build: 1032s, four continuations, stalled, `confidence: none`.
+
+**Verified by running it myself**, with my own input rather than the example,
+because a `high` deserves more suspicion than a `medium`: it read the criteria,
+proposed profiles, refined them, and produced leads each with a written reason.
+The reasons are honest — "49 employees is near, but outside, the target band
+50-200" — it does not dress a near-miss as a match. The judge said high and
+the judge was right.
+
+### The caveat the verdict cannot see
+
+**The leads are invented.** Beacon Ridge Labs, Cascade Data Systems — plausible,
+well-formed, fabricated. The deliverable satisfies its specification exactly,
+and the specification never named a data source.
+
+That is not a defect in the build, the judge, or the verifier: all three did
+their job. It is a gap one stage earlier — a lead-generation tool whose
+requirements do not say where leads come from will invent them, and everything
+downstream will correctly certify that it works. Worth a stage-2/3 question
+about data sources, and worth remembering that "high confidence the deliverable
+meets the specification" is exactly what it says and nothing more.
+
 ## Stale PRs, left alone on purpose
 
 Eight PRs are still open — #168, #172, #177, #192, #202, #203, #204, #207.
