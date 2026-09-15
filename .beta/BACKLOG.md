@@ -31,9 +31,9 @@ Rules for every iteration:
    build runs beside the workflow rather than inside it. See CL-7991: that
    constraint is why 2,830 lines of stage-8 support live in the hub.
 
-4. **`targets` stops being inert** (CL-7981).
-   `domain.ts:112` types it; `build-attempt.ts:227` pastes it into a prompt and
-   nothing branches on it. It should select seeding and verification modality.
+4. ~~**`targets` stops being inert**~~ (CL-7981) — DONE, PR #212 for the
+   prompt side and the shared classifier. The verification side was already
+   live from CL-8005. Both now read the same `classifyTarget`.
 
 5. **Move the stage machinery into packages** (plan §7/§9).
    `engine.ts` + `engine-ledger.ts` = 1,343 lines. §7: one contract generated
@@ -72,9 +72,21 @@ Rules for every iteration:
 
 ## In flight
 
-- CL-7981 `targets` stops being inert — `classifyTarget` out of the hub into
-  `packages/solutions-builder/src/targets.ts`, and the worker prompt stops
-  pasting `Targets: ["cli"]` as raw JSON.
-- stage prompt rendering into packages — `buildDraftPrompt`, `renderInputs`,
-  `renderStageContext` are pure text, and what an agent is told is domain
-  content, not host mechanics.
+- design revision prompt (§10) into packages.
+- the verifier rubric into packages.
+
+## The pattern that is working
+
+Four moves now, same shape each time: **the hub keeps the mechanism, the
+package takes the words.** Prompt text, rubrics and the data types they render
+are domain content; process spawning, database writes, clamps and gates are
+host mechanics. Every move so far has been byte-identical on the strings, so
+none of them can regress a run's behaviour — which is why they can go fast.
+
+Survey of what is left (long string literals per hub file, `*.test.ts`
+excluded): `hub-migrations.ts` 56 (SQL, stays), `stage-runs.ts` 10,
+`deck-images.ts` 10, `completion-judge.ts` 10 (in flight), `source-material.ts`
+9, `print-page.ts` 8, `corbits-exec.ts` 8. After the rubric lands, the
+remaining prompt text in the hub is thin — the next reductions have to come
+from item 5 (stage machinery) and item 6 (retiring the bridge), which are
+structural rather than textual.
