@@ -9,7 +9,7 @@ import { tmpdir as tmpdirTop } from "node:os";
 import { join as joinTop } from "node:path";
 // The settings the smoke saves go to a data directory of its own.
 process.env["SOLUTIONS_BUILDER_DATA_DIR"] = await mkdtempTop(joinTop(tmpdirTop(), "sb-deck-settings-"));
-const { deckFrom, deckFileName, decisionLinesIn, outlineSlidesIn, renderDeck } = await import("../apps/hub/src/deck.js");
+const { deckFrom, deckFileName, decisionLinesIn, outlineSlidesIn, renderDeck } = await import("../packages/solutions-builder/src/deck.js");
 
 const checks: { name: string; ok: boolean }[] = [];
 function check(name: string, ok: boolean, detail = "") {
@@ -154,7 +154,7 @@ await rm(dir3, { recursive: true, force: true });
 // fixture is a small deck with a master carrying title and body
 // placeholders, made with the same library, so the test needs no file.
 {
-  const { renderDeckOnTemplate, templateCanCarryADeck } = await import("../apps/hub/src/deck-on-template.js");
+  const { renderDeckOnTemplate, templateCanCarryADeck } = await import("../packages/solutions-builder/src/deck-on-template.js");
   const { default: PptxGenJS } = await import("pptxgenjs");
   const fixture = new PptxGenJS();
   fixture.layout = "LAYOUT_16x9";

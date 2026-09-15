@@ -9,7 +9,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import JSZip from "jszip";
-import { templateCanCarryADeck } from "./deck-on-template.js";
+import { templateCanCarryADeck } from "@solutions-builder/app/deck-on-template";
 import { HostError } from "./errors.js";
 import { dataDirectory } from "./paths.js";
 

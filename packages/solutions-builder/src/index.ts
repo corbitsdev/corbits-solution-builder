@@ -16,3 +16,5 @@ export * from "./workflows/stage-loop.js";
 export * from "./manifest.js";
 export * from "./delivery.js";
 export * from "./decision-copy.js";
+export * from "./deck.js";
+export * from "./deck-on-template.js";

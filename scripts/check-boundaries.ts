@@ -105,8 +105,18 @@ const RUNTIME_PACKAGES = [
   "@intx/hub-client",
 ];
 
-/** What the app package may take from the platform: authoring, not internals. */
-const PACKAGE_ALLOWED = ["@intx/workflow", "@intx/types", "arktype"];
+/**
+ * What the app package may take from the platform: authoring, not internals.
+ *
+ * `pptxgenjs` and `jszip` are deck authoring's own libraries — deterministic,
+ * offline document generation, not a provider SDK or an agent runtime — so
+ * they belong beside the tool that uses them (`deck.ts`, `deck-on-template.ts`)
+ * rather than in the hub. They are still hub-invoked today (CL-8006's
+ * intermediate step); once that tool ships as a workflow-closure member
+ * (`workflow-closure.ts`) resolved via its own npm entries instead of the
+ * hub's local `node_modules`, this allowance moves with it.
+ */
+const PACKAGE_ALLOWED = ["@intx/workflow", "@intx/types", "arktype", "pptxgenjs", "jszip"];
 
 const PLATFORM_FILE = /^apps\/hub\/src\/(hub-mount|hub-keys|hub-migrate|hub-executor|hub-gaps|db|schema|migrate)\.ts$/;
 
