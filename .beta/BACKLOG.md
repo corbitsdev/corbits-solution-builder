@@ -84,6 +84,39 @@ Rules for every iteration:
 - design revision prompt (§10) into packages.
 - the verifier rubric into packages.
 
+## BLOCKER — tools in a workflow do not work yet (CL-8012)
+
+The most important thing found tonight, and it was found by trying to prove
+#216 rather than trusting a passing probe.
+
+A tool call from a step nested inside a `loop` body is **always refused**:
+
+```
+workflow-child authorize: credentialsSnapshot has no entry for stepId package-0
+```
+
+`capability-walk.ts` keys `perStep` by top-level `stepOrder` only and folds
+loop-body steps into the loop's own entry, so a leaf step in a body never gets
+a credentials-snapshot entry. Upstream, in `vendor/interchange/`.
+
+This is not about the deck. It blocks **any** tool from **any** loop-nested
+step, stage 8's `posix` tools included — which sit in exactly that shape. As
+far as we can tell, an agent step inside our stage loop has never been able to
+call a tool in a deployed workflow at all. That may be part of why the build
+runs through the host-side bridge instead of inside the workflow (CL-7991);
+if so, fixing this makes retiring the bridge much cheaper.
+
+**Read this before writing another workflow tool.** More tools written against
+this seam will all be blocked the same way. The live proof is on branch
+`cl-8012-live-proof`, deliberately not merged: its two assertions fail today
+and they are the acceptance criteria for the upstream fix, not a regression.
+
+Separately real and ours: `grantRequirementsFor` (`seed-kit.ts:225`) has no
+production caller — only `kit-smoke.ts` asserting its shape — and
+`workflow-seed.ts:60` registers definitions without `grantRequirements`, a
+field `hub-gaps.ts:95` already accepts. Not the cause of the above, but it
+will matter the moment the upstream defect is fixed.
+
 ## Deck, step 2 — and why it is not a deletion
 
 #216 was additive on purpose: the hub path still works. Removing it is **not**
@@ -116,6 +149,17 @@ here by **packages growing** — workflows, tools and skills that run in the
 sidecar — than by the hub shrinking further. The deck tool is the model for
 that: it left the hub, and its destination is the workflow closure, not
 another host module.
+
+## The shape to watch for
+
+Three instances tonight of one failure mode: `collectGrantsInChain` (CL-8011),
+the loop-body grants (CL-8012), and `grantRequirementsFor`. Each is a contract
+written, an implementation written, a test asserting the implementation — and
+the one line connecting it to anything missing. All three were invisible
+because the tests check the piece rather than the path.
+
+**An exported function whose only callers are its own tests is the signature.**
+Worth a deliberate sweep.
 
 ## The pattern that is working
 
