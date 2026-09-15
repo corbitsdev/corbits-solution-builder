@@ -64,7 +64,37 @@ move is what progress looks like when the code has somewhere else to live.
   written, not where the workflow entry is. One line of `package.json` fixed
   it; nothing else would have found it.
 
+- #217 `check:ledger` asserts stage 5 carries the `render_deck` factory,
+  reading the name from the package so a rename cannot silently pass.
+- #218 the product says **why** a project cannot run. The reason was computed
+  and stored in a map whose docstring read "for the status line", and never
+  reached the status line. Now: "Can't run yet — no model provider is
+  connected" / "…no host is free for this project's sidecar", with the words
+  in `packages/next-step.ts` and the hub supplying only the fact.
+- #219 **the gate runs the behaviour smokes it was skipping.** Six suites
+  existed, passed, and ran in `check:full` only — which nothing runs. 200
+  checks, 66 seconds, previously optional.
+
 Goal: that ratio inverts. Hub vanilla, meat in workflows/agents/tools/skills.
+
+## Two gate lessons, one night
+
+Both found by accident, both the same shape — a check that cannot fail:
+
+1. Landing #218 I noticed `bun run check` never called `smoke:guidance`. The
+   proof I had asked for could not have failed the gate. Fixed in #219.
+2. #216's deck tool passed `check:ledger` and a hand-built closure and was
+   still broken; only the real probe sidecar caught it.
+
+Neither was a missing test. In both cases the test existed and passed — it
+just was not on the path that decides whether something merges. That is the
+same shape as the three unwired contracts (CL-8011, CL-8012,
+`grantRequirementsFor`): the piece is checked, the path is not.
+
+`check-shards.ts` deserves credit: it rejected the first attempt at #219 and
+was right both times — two smokes I thought were outside the gate were already
+in `check:core`, and the CI matrix needed the new shard or it would have run
+locally and never in CI.
 
 ## In flight
 - CL-7981 `targets` stops being inert: `classifyTarget` moves out of the hub
