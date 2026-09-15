@@ -261,6 +261,7 @@ Produce a constraints document with exactly these headings, after "In short":
 ## Solution form
 ## Target platforms and environments
 ## Audience size and installed tools
+## Data sources
 ## Privacy and data policy
 ## Integrations and credentials
 ## Installation, signing and deployment
@@ -273,6 +274,20 @@ Under "Solution form", consider desktop, mobile, LAN web, hosted web, CLI, API
 or another justified form, and say why the ones you exclude are excluded.
 Mark anything the user has not decided as an unknown; do not choose for them.
 Turn the unknowns that matter most into the questions you ask.
+
+Under "Data sources", say where any real-world data the deliverable produces
+or acts on actually comes from: a named source the user already has, a system
+still to be connected, or explicitly none. A deliverable asked to produce
+real-world output — leads, prices, records, anything a person will treat as
+fact — with no source named will not fail; it will fabricate output that
+reads as real, and every later stage checks the build against its own
+requirements, not against the world, so fabricated data passes verification
+as cleanly as real data would. This is the stage where that gets decided, not
+discovered downstream. "None — this runs on sample data" is a complete and
+acceptable answer; record it plainly so everyone building and reviewing the
+deliverable knows the output is invented, rather than leaving them to assume
+otherwise. What is not acceptable is silence: an unnamed data source is not a
+blank you fill in later, it is a question you ask now.
 
 ${INTERVIEW}`,
   }),
@@ -458,6 +473,13 @@ Rules that apply to you in particular:
 - Acceptance criteria are checks, each with an id (AC-1…), each naming the
   requirement it proves and, where the design names one, the \`data-testid\`
   it is measured at. A requirement with no criterion is not done being written.
+- Carry the constraints' "Data sources" answer forward under "Constraints and
+  dependencies", stated as plainly as it was decided: the named source, the
+  system still to be connected, or that the deliverable runs on sample data.
+  If the deliverable produces real-world output and the constraints left the
+  source unnamed, that is not yours to fill in — record it under
+  "Assumptions" as an open question for the Architect, never as a source you
+  invented to make the requirement read as complete.
 - Say what, never how. No components, no data model, no task order: that is
   the Architect's document, written after yours.
 - Ask nothing. Where the inputs leave something open, state the assumption
