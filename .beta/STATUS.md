@@ -5,11 +5,20 @@
 | --- | --- | --- |
 | start of night | 21,132 | 3,570 |
 | after stage-8 judge + panel | 21,841 | 3,578 |
-| deck moved out (pr-8006, in review) | **19,960** | **4,199** |
+| deck merged out (#208) | **21,166** | **4,207** |
+
+Correction: an earlier row here claimed the deck move was -1,881. That
+compared two branches with different bases and was wrong. Measured across the
+merge itself it is **-675**. Still the largest single reduction so far.
 
 The middle row is the lesson: stage-8 work has nowhere to go but the hub while
 the build runs beside the workflow instead of inside it (CL-7991). The deck
 move is what progress looks like when the code has somewhere else to live.
+
+## Merged into internal-beta
+- #208 deck authoring out of the hub (CL-8006) — intermediate; destination is
+  a tool in the workflow closure running in the sidecar
+- #209 stage consequence copy into packages (CL-8007) — pending CI
 
 Goal: that ratio inverts. Hub vanilla, meat in workflows/agents/tools/skills.
 
