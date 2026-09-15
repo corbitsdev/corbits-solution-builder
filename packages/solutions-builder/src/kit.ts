@@ -750,6 +750,13 @@ export type SkillRecord = {
   readonly key: string;
   readonly version: number;
   readonly instructions: string;
+  /**
+   * The one line a SKILL.md's frontmatter carries and `skill_search` matches
+   * against. Absent, the frontmatter falls back to a truncated instructions
+   * body — which is why a skill whose body runs long or names `<placeholders>`
+   * must set it: the platform's schema forbids angle brackets there.
+   */
+  readonly description?: string;
   /** Tool declarations this skill may call, by key. */
   readonly tools: readonly string[];
 };

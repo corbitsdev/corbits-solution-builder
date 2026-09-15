@@ -36,7 +36,7 @@ import { buildEvents } from "../apps/hub/src/engine-ledger.js";
 import { buildArchiveName, packageBuild } from "../apps/hub/src/build-output.js";
 import { projectSpend, recordHostUsage } from "../apps/hub/src/spend.js";
 import { verifyManifest } from "../apps/hub/src/delivery.js";
-import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -639,6 +639,31 @@ let buildRunId = "";
   const judged = await command("build.fail", projectId, { runId: third.runId, reason: "the person read the output and said so" });
   check("the person can then fail it through the ledger", judged.state === "failed");
 
+  // The workspace the worker landed in is a seeded Bun workspace: the
+  // packet as files it can reread, the platform skills where its skill
+  // tools find them — `.agents/skills/`, ignored so they are never the
+  // project's — and the skeleton a deliverable keeps.
+  const thirdWorkspace = await workspaceFor(third.runId);
+  const seededSkills = (await readdir(join(thirdWorkspace, ".agents", "skills"))).sort();
+  const seededSkillDocs = await Promise.all(
+    seededSkills.map((name) => Bun.file(join(thirdWorkspace, ".agents", "skills", name, "SKILL.md")).text()),
+  );
+  const seededManifest = JSON.parse(await Bun.file(join(thirdWorkspace, "package.json")).text()) as {
+    workspaces?: string[];
+  };
+  const seededGitignore = await Bun.file(join(thirdWorkspace, ".gitignore")).text();
+  check(
+    "a fresh attempt's workspace is seeded: the packet as files, five platform skills, the deliverable's skeleton",
+    (await Bun.file(join(thirdWorkspace, ".corbits", "BUILD_PLAN.md")).text()).includes("# Stage 6") &&
+      (await Bun.file(join(thirdWorkspace, ".corbits", "REQUIREMENTS.md")).text()).includes("# Requirements") &&
+      seededSkills.length === 5 &&
+      seededSkillDocs.every((doc, i) => doc.includes(`name: ${seededSkills[i]}`)) &&
+      seededManifest.workspaces?.includes("apps/*") === true &&
+      seededGitignore.includes(".agents/") &&
+      (await Bun.file(join(thirdWorkspace, "AGENTS.md")).exists()),
+    `skills=${seededSkills.join(",")}`,
+  );
+
   // Trying again can continue from that attempt's work: its workspace is
   // copied into the new attempt's, and the worker is told it is there.
   const continuing = join(bin, "continuing-worker");
@@ -663,6 +688,11 @@ let buildRunId = "";
     "in a workspace of its own, not the earlier attempt's",
     (await workspaceFor(fourth.runId)) !== (await workspaceFor(third.runId)) &&
       (await Bun.file(join(await workspaceFor(fourth.runId), "built.txt")).exists()),
+  );
+  check(
+    "with the packet files reseeded rather than copied, so a retry builds against this attempt's plan",
+    (await Bun.file(join(await workspaceFor(fourth.runId), ".corbits", "BUILD_PLAN.md")).text()).includes("# Stage 6") &&
+      (await Bun.file(join(await workspaceFor(fourth.runId), "package.json")).exists()),
   );
   await refuses(
     "continuing from a run that is not a build attempt of this project is refused",
@@ -695,6 +725,8 @@ let buildRunId = "";
       listed.includes("smoke-a-chess-game-i-can-actually-play/built.txt") &&
       listed.split("\n").filter(Boolean).every((entry) => entry.startsWith("smoke-a-chess-game-i-can-actually-play/")) &&
       !listed.includes(".corbits") &&
+      !listed.includes(".agents") &&
+      !listed.includes("/.git/") &&
       !listed.includes(archive.name),
     `${archive.name}: ${listed.split("\n").filter(Boolean).join(", ")}`,
   );

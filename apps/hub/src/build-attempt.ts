@@ -24,6 +24,7 @@ import { localActor } from "./hub-client.js";
 import { recordBuildArchive, type BuildArchive } from "./build-output.js";
 import { recordWorkerUsage } from "./spend.js";
 import { BRIDGE_CAPABILITIES, runBuildAttempt, workspaceFor, type BridgeOutcome } from "./corbits-exec.js";
+import type { WorkspaceSeed } from "./build-workspace.js";
 
 /** The host relays what the worker did; no person appears to have done it. */
 const HOST_ACTOR: Actor = { principalId: HOST_PRINCIPAL, displayName: "Solutions Builder host" };
@@ -134,10 +135,11 @@ async function driveAttempt(projectId: string, runId: string, continueFromRunId:
   };
   inFlight.set(runId, attempt);
   try {
-    const prompt = await buildPrompt(projectId, runId, continueFromRunId !== null);
+    const { prompt, seed } = await buildPrompt(projectId, runId, continueFromRunId !== null);
     const outcome = await runBuildAttempt({
       runId,
       prompt,
+      seed,
       signal: attempt.controller.signal,
       ...(continueFromRunId !== null
         ? { continueFrom: { runId: continueFromRunId, workspace: await workspaceFor(continueFromRunId) } }
@@ -188,6 +190,8 @@ async function driveAttempt(projectId: string, runId: string, continueFromRunId:
         turns: outcome.turns,
         toolCalls: outcome.toolCalls,
         continuedFrom: outcome.continuedFrom,
+        continuations: outcome.continuations,
+        stopReason: outcome.stopReason,
         archive,
         archiveError,
         finalText: outcome.finalText.slice(0, 20_000),
@@ -206,10 +210,16 @@ async function driveAttempt(projectId: string, runId: string, continueFromRunId:
 }
 
 /**
- * The prompt the worker is handed: the plan says what to do, the requirements
- * it cites say when it is done.
+ * The prompt the worker is handed, and the packet its workspace is seeded
+ * with. The plan and requirements live in the workspace's `.corbits/` files
+ * rather than in the prompt itself: they are what the build is driven by,
+ * and a file the worker can reread outlives a prompt it saw once.
  */
-async function buildPrompt(projectId: string, runId: string, continuing: boolean): Promise<string> {
+async function buildPrompt(
+  projectId: string,
+  runId: string,
+  continuing: boolean,
+): Promise<{ prompt: string; seed: WorkspaceSeed }> {
   const detail = await projectDetail(projectId, localActor().principalId);
   const packetRun = detail.runs.find((run) => run.id === runId);
   // The frozen packet is an artifact version; its hash is the version's.
@@ -222,22 +232,21 @@ async function buildPrompt(projectId: string, runId: string, continuing: boolean
   const requirements = live.find((node) => node.kind === "product_requirements");
   const requirementsText = requirements ? (await readArtifactNode(requirements.id)).content : "";
 
-  return [
-    `Build the software described by this approved plan, against the requirements it cites. Work in the current directory.`,
-    ...(continuing
-      ? [
-          ``,
-          `An earlier attempt's work is already in the current directory, including any commits it made. Continue from it: keep what is right, finish what is not, and do not start over.`,
-        ]
-      : []),
-    ``,
-    ...(requirementsText ? [`--- REQUIREMENTS ---`, requirementsText, ``] : []),
-    `--- PLAN ---`,
-    planText,
-    ``,
-    `Frozen packet: ${packet?.node.contentHash ?? "unknown"}.`,
-    `Targets: ${JSON.stringify(targets)}.`,
-  ].join("\n");
+  return {
+    prompt: [
+      `Build the software described by the approved plan. The current directory is a seeded Bun workspace: \`.corbits/BUILD_PLAN.md\` is the plan, \`.corbits/REQUIREMENTS.md\` the requirements it must satisfy, and \`AGENTS.md\` says how the workspace is put together. The platform's skills — what Interchange and CorbitsCore are and how to install and use their packages — are searchable through your skill tools. Work in the current directory.`,
+      ...(continuing
+        ? [
+            ``,
+            `An earlier attempt's work is already in the current directory, including any commits it made. Continue from it: keep what is right, finish what is not, and do not start over. The files under \`.corbits\` are this attempt's — where they differ from what the earlier attempt saw, the files are right.`,
+          ]
+        : []),
+      ``,
+      `Frozen packet: ${packet?.node.contentHash ?? "unknown"}.`,
+      `Targets: ${JSON.stringify(targets)}.`,
+    ].join("\n"),
+    seed: { title: detail.project.title, plan: planText, requirements: requirementsText },
+  };
 }
 
 /**

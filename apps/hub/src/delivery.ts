@@ -4,11 +4,16 @@
  * `delivery_verification` whose source is the manifest version it checked, so
  * "what was verified, against what, when" is a version like every other
  * record here.
+ *
+ * Existence checks (below) only prove a descriptor's bytes are present; they
+ * cannot tell working software from a scaffold of stubs. `runExecutionChecks`
+ * (in `execution-checks.ts`, shared with the build loop in `corbits-exec.ts`)
+ * closes that gap by actually running the deliverable's entry point, and its
+ * declared tests and typecheck, inside the workspace.
  */
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
-import { isAbsolute, join, normalize } from "node:path";
 import { and, desc, eq } from "drizzle-orm";
 import {
   DeliveryManifest,
@@ -23,6 +28,14 @@ import { database } from "./db.js";
 import * as table from "./schema.js";
 import { readArtifactNode, writeArtifact } from "./projects.js";
 import { workspaceFor } from "./corbits-exec.js";
+import { containedPath, runExecutionChecks, type ExecutionCheck } from "./execution-checks.js";
+
+export type { ExecutionCheck, ExecutionKind } from "./execution-checks.js";
+
+/** A `VerificationReport` plus what actually ran, so "present" and "works" are distinct. */
+export type DeliveryVerificationReport = VerificationReport & {
+  readonly execution: ExecutionCheck[];
+};
 
 async function hashFile(path: string): Promise<{ sha256: string; sizeBytes: number }> {
   const info = await stat(path);
@@ -34,12 +47,6 @@ async function hashFile(path: string): Promise<{ sha256: string; sizeBytes: numb
 }
 
 /** Keeps a descriptor's path inside the workspace it claims to describe. */
-function containedPath(root: string, relative: string): string | null {
-  if (isAbsolute(relative)) return null;
-  const resolved = normalize(join(root, relative));
-  return resolved.startsWith(normalize(root) + "/") ? resolved : null;
-}
-
 async function checkDescriptor(descriptor: DeliveryDescriptor, workspaceRoot: string): Promise<VerificationItem> {
   const base = { category: descriptor.category, path: descriptor.path, required: descriptor.required };
   // No remote fetcher exists in this host. A remote descriptor is unverified
@@ -66,15 +73,28 @@ async function checkDescriptor(descriptor: DeliveryDescriptor, workspaceRoot: st
   }
 }
 
-/** Checks every descriptor against the bytes under `workspaceRoot`. */
+/**
+ * Checks every descriptor against the bytes under `workspaceRoot`, then runs
+ * the deliverable to see whether it does anything. A required descriptor
+ * that is merely present no longer reads as "verified" on its own — an
+ * execution check that fails is exactly as blocking.
+ */
 export async function verifyManifest(
   manifestNodeId: string,
   manifest: DeliveryManifest,
   workspaceRoot: string,
-): Promise<VerificationReport> {
+): Promise<DeliveryVerificationReport> {
   const items: VerificationItem[] = [];
   for (const descriptor of manifest.descriptors) items.push(await checkDescriptor(descriptor, workspaceRoot));
-  return summarizeVerification(manifestNodeId, items, new Date());
+  const base = summarizeVerification(manifestNodeId, items, new Date());
+  const execution = await runExecutionChecks(workspaceRoot);
+  const executionFailures = execution.filter((check) => !check.ok).map((check) => `execution:${check.kind}`);
+  return {
+    ...base,
+    complete: base.complete && executionFailures.length === 0,
+    failed: [...base.failed, ...executionFailures],
+    execution,
+  };
 }
 
 export type ManifestVersion = {
@@ -101,18 +121,18 @@ export async function latestManifest(projectId: string): Promise<ManifestVersion
 }
 
 /** The newest verification recorded for a manifest version, or null. */
-export async function latestVerification(manifestNodeId: string): Promise<VerificationReport | null> {
+export async function latestVerification(manifestNodeId: string): Promise<DeliveryVerificationReport | null> {
   const { db } = database();
   const rows = await db
     .select({ childNodeId: table.artifactEdge.childNodeId })
     .from(table.artifactEdge)
     .where(eq(table.artifactEdge.sourceNodeId, manifestNodeId));
-  let newest: { report: VerificationReport; createdAt: Date } | null = null;
+  let newest: { report: DeliveryVerificationReport; createdAt: Date } | null = null;
   for (const row of rows) {
     const { node, content } = await readArtifactNode(row.childNodeId);
     if (node.kind !== "delivery_verification") continue;
     if (newest && newest.createdAt > node.createdAt) continue;
-    newest = { report: JSON.parse(content) as VerificationReport, createdAt: node.createdAt };
+    newest = { report: JSON.parse(content) as DeliveryVerificationReport, createdAt: node.createdAt };
   }
   return newest?.report ?? null;
 }
@@ -125,7 +145,7 @@ export async function verifyAndRecord(
   projectId: string,
   version: ManifestVersion,
   actor: { principalId: string },
-): Promise<VerificationReport> {
+): Promise<DeliveryVerificationReport> {
   // The manifest's producer run is the build run whose workspace holds the bytes.
   const buildRunId = version.node.producerRunId ?? "";
   const workspaceRoot = await workspaceFor(buildRunId);
@@ -145,11 +165,22 @@ export async function verifyAndRecord(
   return report;
 }
 
+/** One sentence naming what execution checks failed, or null when all passed. */
+function describeExecutionFailures(execution: ExecutionCheck[]): string | null {
+  const failed = execution.filter((check) => !check.ok);
+  if (failed.length === 0) return null;
+  return `execution failed: ${failed.map((check) => `${check.kind} (${check.detail})`).join("; ")}`;
+}
+
 /** What blocks acceptance of the project's latest manifest, or null when nothing does. */
 export async function deliveryBlockers(projectId: string): Promise<string | null> {
   const version = await latestManifest(projectId);
   if (!version) return null;
   const report = await latestVerification(version.node.id);
   if (!report) return "Delivery cannot be accepted yet. The manifest has not been verified.";
-  return describeBlockers(report);
+  const existence = describeBlockers(report);
+  const execution = describeExecutionFailures(report.execution);
+  if (!existence && !execution) return null;
+  if (existence && execution) return `${existence} ${execution}.`;
+  return existence ?? `Delivery cannot be accepted yet. ${execution}.`;
 }
