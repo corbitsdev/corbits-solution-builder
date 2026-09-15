@@ -83,6 +83,18 @@ the deliverable actually runs, and what the worker did when it got stuck.
    Overturns plan §7's "ledger is the only state machine"; needs an explicit
    ruling before anyone starts.
 
+## Ours, urgent, from running the product
+
+- **CL-8014 — every build from the UI was unverifiable.** The client froze
+  `targets: ["local"]`; `"local"` is a placement, not a modality, so
+  `classifyTarget` placed it as `other`, nothing was exercised, and the
+  completion judge could never be consulted. Fixed in #239: the client asks
+  "How will this be used?" in plain language, marking which choices are
+  verified today, and `build.freeze` refuses an unclassifiable target at the
+  boundary. That refusal immediately caught two more call sites with the same
+  bug.
+- **CL-8015 — the worker can write but cannot run.** In flight.
+
 ## Flagged upstream (we may not fix these)
 
 - **CL-8013 — every stage iteration leaves a run marked "running" with an
