@@ -149,6 +149,43 @@ was right both times — two smokes I thought were outside the gate were already
 in `check:core`, and the CI matrix needed the new shard or it would have run
 locally and never in CI.
 
+## Caught up with main
+
+Ten of Brian's commits merged in. Three needed *refactoring* in rather than
+merging, because main still keeps the deck authoring in `apps/hub` and this
+branch moved it to `packages` in #208:
+
+- `apps/hub/src/deck.ts` — taken as deleted, but verified rather than assumed:
+  all 98 lines main contributes to the conflicted block are already present
+  verbatim in `packages/solutions-builder/src/deck.ts`, including the
+  `Deck | null` refusal from "a package without a slide outline is refused".
+  Nothing of his is lost.
+- `scripts/deck-smoke.ts` — main imports `packageOutlineProblem` from
+  `deck.ts`, which used to re-export it. Each symbol now comes from where it
+  is actually defined.
+- `apps/hub/src/package-outline.ts` — his new module imported `DECK_DENSITY`
+  from `./deck-settings.js`, where it no longer is.
+- `apps/web/src/app.tsx` — auto-merge took main's `KIND_WORDS`, which predates
+  the `build_review` kind this branch added with the stage-8 panel. It would
+  have failed typecheck, not silently: the record is exhaustive over
+  `ArtifactKind`.
+
+`rerere` recorded both conflict resolutions, so the next time main touches
+`deck.ts` the same resolution replays instead of being re-derived.
+
+Gate green after the merge, and **Deck smoke went 32 → 36** — his new outline
+checks now run here.
+
+## The merge left a duplicate
+
+Worth naming because it is the failure mode this whole branch is about. His
+`package-outline.ts` and our `packages/deck.ts` now both define `DeckSlide`,
+`outlineSlidesIn` and `decisionLinesIn`, and they have **already drifted**:
+the hub matches the section via `OUTLINE_HEADING.toLowerCase()`, the package
+via the literal `"deck outline"`. Identical today. Change the constant and the
+check that refuses a package and the renderer that draws its slides would
+disagree about what a slide outline is. In flight.
+
 ## In flight
 - CL-7981 `targets` stops being inert: `classifyTarget` moves out of the hub
   into `packages/solutions-builder/src/targets.ts`, and the worker prompt
