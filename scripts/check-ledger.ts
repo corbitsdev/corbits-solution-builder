@@ -326,12 +326,28 @@ for (const terminal of TERMINAL_STATES) {
     const dir = await mkdtemp(join(tmpdir(), "sb-lifecycle-source-"));
     try {
       await mkdir(join(dir, "node_modules", "@intx"), { recursive: true });
+      await mkdir(join(dir, "node_modules", "@solutions-builder"), { recursive: true });
       // The workspace's own copies, by path: a bare-specifier resolve from this
       // script can land on a published tarball in Bun's cache instead.
       for (const name of ["workflow", "agent", "tools-posix"]) {
         const pkg = await realpath(join(import.meta.dir, "..", "node_modules", "@intx", name));
         await symlink(pkg, join(dir, "node_modules", "@intx", name), "dir");
       }
+      // Same reasoning for the deck tool and the app package it depends on:
+      // the tools-deck package itself is not a workspace root dependency
+      // (only the rendered lifecycle source names it), so it never lands in
+      // the workspace's own node_modules; symlink it and its dependency by
+      // repo path instead.
+      await symlink(
+        join(import.meta.dir, "..", "packages", "tools-deck"),
+        join(dir, "node_modules", "@solutions-builder", "tools-deck"),
+        "dir",
+      );
+      await symlink(
+        await realpath(join(import.meta.dir, "..", "node_modules", "@solutions-builder", "app")),
+        join(dir, "node_modules", "@solutions-builder", "app"),
+        "dir",
+      );
       await writeFile(join(dir, "package.json"), JSON.stringify({ name: "check", type: "module" }));
       await writeFile(join(dir, LIFECYCLE_ENTRY_PATH), lifecycleEntrySource());
       // Written before the first import: Bun caches a directory's listing on

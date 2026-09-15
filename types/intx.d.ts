@@ -128,6 +128,19 @@ declare module "@intx/mime" {
 }
 
 declare module "@intx/types/runtime" {
+  /** A model-issued tool invocation, as the harness hands it to a `ToolBundle.run`. */
+  export type ToolCall = { id: string; name: string; arguments: Record<string, unknown> };
+  /** What a tool call resolves to; `content` rides back to the model as the tool turn. */
+  export type ToolResult = {
+    callId: string;
+    content: string | Record<string, unknown>;
+    detail?: unknown;
+    isError?: boolean;
+    pendingMarker?: { status: "pending"; correlationId: string; expectedFrom?: string };
+  };
+  /** The tool metadata surfaced to the model: name, description, and a JSON-Schema input shape. */
+  export type ToolDefinition = { name: string; description: string; inputSchema: Record<string, unknown> };
+
   export type ContentBlock = { type: "text"; text: string; signature?: string } & Record<
     string,
     unknown
@@ -643,9 +656,44 @@ declare module "@intx/workflow" {
 }
 
 declare module "@intx/agent" {
+  import type { ToolCall, ToolDefinition, ToolResult } from "@intx/types/runtime";
+
   export type AgentHandle = Record<string, unknown>;
   /** Director registry used to wire a `WorkflowRuntimeEnv.directors` in the in-process executor. */
   export function createDefaultDirectorRegistry(): Record<string, unknown>;
+
+  /**
+   * The env-DI contract `defineTool`'s factories are constructed against.
+   * Real `BaseEnv` (`packages/agent/src/env.ts`) requires `sources`,
+   * `defaultSource`, `storage`, `workdir`, `audit`, `authorize` and
+   * `directors`; loosened to a catch-all here since nothing this repo's own
+   * tool packages construct at typecheck time needs those fields checked —
+   * only that a caller's richer env structurally satisfies this one.
+   */
+  export interface BaseEnv {
+    [key: string]: unknown;
+  }
+  export interface ToolDeclaration {
+    readonly name: string;
+    readonly approval?: "ask";
+  }
+  export interface ToolBundle {
+    readonly definitions: readonly ToolDefinition[];
+    run(call: ToolCall, signal: AbortSignal): Promise<ToolResult>;
+    dispose?(): Promise<void>;
+  }
+  export type ToolFactory<EnvReq extends BaseEnv = BaseEnv> = (env: EnvReq) => ToolBundle;
+  export type AnnotatedToolFactory<EnvReq extends BaseEnv = BaseEnv> = ToolFactory<EnvReq> & {
+    readonly id: string;
+    readonly requires: readonly string[];
+    readonly definitions: readonly ToolDeclaration[];
+  };
+  export function defineTool<EnvReq extends BaseEnv = BaseEnv>(opts: {
+    id: string;
+    requires?: readonly string[];
+    definitions: readonly ToolDeclaration[];
+    factory: ToolFactory<EnvReq>;
+  }): AnnotatedToolFactory<EnvReq>;
 }
 
 declare module "@intx/inference" {

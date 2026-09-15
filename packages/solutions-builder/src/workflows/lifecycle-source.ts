@@ -40,11 +40,18 @@ import { skillTextFor } from "../seed-kit.js";
  * `apps/hub/src/workflow-closure.ts`); everything else comes from npm. `hono` is imported by
  * nothing here: it satisfies the peer dependency `@logtape/hono` declares
  * inside `@intx/log`, which the closure resolver refuses to leave unmet.
+ * `@solutions-builder/tools-deck` is the deck-rendering tool stage 5's
+ * specialist carries: it ships beside the workflow the same way
+ * `@intx/tools-posix` does, so a running workflow renders a stakeholder's
+ * slides itself instead of asking the hub to do it (`apps/hub/src/workflow-closure.ts`
+ * ships its files, and `@solutions-builder/app`'s deck authoring it depends
+ * on, into the same asset).
  */
 export const WORKFLOW_PACKAGE_DEPENDENCIES: Readonly<Record<string, string>> = {
   "@intx/workflow": "workspace:*",
   "@intx/agent": "workspace:*",
   "@intx/tools-posix": "workspace:*",
+  "@solutions-builder/tools-deck": "workspace:*",
   hono: "^4.0.0",
 };
 
@@ -175,6 +182,7 @@ export function lifecycleEntrySource(options: LifecycleSourceOptions = {}): stri
   const sourceImports = source
     ? `import { defineAgent } from ${JSON.stringify("@intx/agent")};
 import { posix } from ${JSON.stringify("@intx/tools-posix/sidecar-bundle")};
+import { deck } from ${JSON.stringify("@solutions-builder/tools-deck/sidecar-bundle")};
 `
     : "";
   // The build agent is the kit's stage 8 specialist, given a workspace. Every
@@ -202,17 +210,19 @@ const buildAgent = defineAgent({
         after: [ROUND],
       }),`
     : "";
-  // Every other stage's specialist: tools-free, capabilities-free, pinned to
-  // the same offering as the build agent. Rendered as pure data (ids, prompts,
+  // Every other stage's specialist: capabilities-free, pinned to the same
+  // offering as the build agent. Rendered as pure data (ids, prompts,
   // selectors) and reassembled into `defineAgent` calls here, in the sidecar,
-  // never carried across as functions.
+  // never carried across as functions. Stage 5's specialist alone carries a
+  // tool — the deck renderer — since it is the one that turns a stakeholder's
+  // package into slides; every other rendered stage stays tools-free.
   const agentsBlock = source
     ? `
 const AGENTS = {
 ${rolesInUse(audienceCount)
   .map(
     (role) =>
-      `  ${JSON.stringify(role.id)}: defineAgent({ id: ${JSON.stringify(role.id)}, systemPrompt: ${JSON.stringify(renderedPrompt(role))}, tools: [], capabilities: [], inference: { sources: [SOURCE] } }),`,
+      `  ${JSON.stringify(role.id)}: defineAgent({ id: ${JSON.stringify(role.id)}, systemPrompt: ${JSON.stringify(renderedPrompt(role))}, tools: [${role.id === agentFor(PACKAGE_STAGE).id ? "deck" : ""}], capabilities: [], inference: { sources: [SOURCE] } }),`,
   )
   .join("\n")}
 };

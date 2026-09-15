@@ -1,0 +1,18 @@
+{
+  "name": "@solutions-builder/tools-deck",
+  "description": "Deck rendering as a workflow tool: the sidecar renders a stakeholder's slides from the deck authoring in @solutions-builder/app/deck, so a running workflow never phones the hub to do it.",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./sidecar-bundle": {
+      "intx-src": "./src/sidecar-bundle.ts",
+      "default": "./src/sidecar-bundle.ts"
+    }
+  },
+  "dependencies": {
+    "@intx/agent": "workspace:*",
+    "@solutions-builder/app": "workspace:*",
+    "pptxgenjs": "4"
+  }
+}

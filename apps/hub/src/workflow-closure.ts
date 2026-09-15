@@ -17,6 +17,8 @@ import { join, relative } from "node:path";
 
 const VENDORED_PACKAGES = join(import.meta.dir, "..", "..", "..", "vendor", "interchange", "packages");
 const ROOT_PACKAGE_JSON = join(import.meta.dir, "..", "..", "..", "package.json");
+const SOLUTIONS_BUILDER_APP_DIR = join(import.meta.dir, "..", "..", "..", "packages", "solutions-builder");
+const TOOLS_DECK_DIR = join(import.meta.dir, "..", "..", "..", "packages", "tools-deck");
 
 /** Where a vendored package lands inside the asset: `packages/intx-<name>`. */
 export function memberDir(shortName: string): string {
@@ -136,6 +138,63 @@ export function memberFiles(shortName: string): Record<string, string> {
 export function closureFiles(root: string): Record<string, string> {
   const files: Record<string, string> = {};
   for (const shortName of vendoredClosure(root)) Object.assign(files, memberFiles(shortName));
+  return files;
+}
+
+/**
+ * `@solutions-builder/app`'s deck authoring, shipped as its own member so
+ * `@solutions-builder/tools-deck` — carried by the deployed workflow's stage
+ * 5 specialist — resolves `@solutions-builder/app/deck` in the sidecar the
+ * same way it resolves it in this repo. Only `deck.ts` rides along: it is
+ * the one module the tool imports, and it has no relative imports of its
+ * own (only the npm package `pptxgenjs`), so shipping it alone avoids
+ * dragging the rest of the app package — its host-only modules and their
+ * host-only dependencies — into an asset that never runs them. Unlike the
+ * vendored `@intx/*` members, this ships as TypeScript source: the package
+ * is consumed as source everywhere in this repo (see `scripts/pack-registry-asset.ts`'s
+ * `appTarballFiles`), so there is no `dist/` to copy.
+ */
+export function deckAppMemberFiles(): Record<string, string> {
+  const dir = "packages/solutions-builder-app";
+  const manifest = {
+    name: "@solutions-builder/app",
+    version: "0.1.0",
+    type: "module",
+    exports: { "./*": "./src/*.ts" },
+    dependencies: { pptxgenjs: "4" },
+  };
+  return {
+    [`${dir}/package.json`]: `${JSON.stringify(manifest, null, 2)}\n`,
+    [`${dir}/src/deck.ts`]: readFileSync(join(SOLUTIONS_BUILDER_APP_DIR, "src", "deck.ts"), "utf8"),
+  };
+}
+
+/**
+ * `@solutions-builder/tools-deck`'s own files: the package stage 5's
+ * specialist imports for `render_deck`. Shipped as source for the same
+ * reason `deckAppMemberFiles` is: this family of packages has no build
+ * step. Its own `package.json` rides along unmodified — its
+ * `@solutions-builder/app: workspace:*` dependency resolves against the
+ * member `deckAppMemberFiles` ships beside it, and `pptxgenjs` resolves
+ * from npm like `hono` already does for the lifecycle package itself.
+ */
+export function toolsDeckMemberFiles(): Record<string, string> {
+  const dir = "packages/tools-deck";
+  const manifest = JSON.parse(readFileSync(join(TOOLS_DECK_DIR, "package.json"), "utf8")) as PackageManifest;
+  const trimmed: PackageManifest = {
+    name: manifest.name,
+    version: manifest.version,
+    type: manifest.type ?? "module",
+    ...(manifest.exports !== undefined ? { exports: manifest.exports } : {}),
+    ...(manifest.dependencies !== undefined ? { dependencies: manifest.dependencies } : {}),
+  };
+  const files: Record<string, string> = { [`${dir}/package.json`]: `${JSON.stringify(trimmed, null, 2)}\n` };
+  const paths: string[] = [];
+  walk(join(TOOLS_DECK_DIR, "src"), paths);
+  for (const full of paths) {
+    const rel = relative(TOOLS_DECK_DIR, full).split("\\").join("/");
+    files[`${dir}/${rel}`] = readFileSync(full, "utf8");
+  }
   return files;
 }
 
