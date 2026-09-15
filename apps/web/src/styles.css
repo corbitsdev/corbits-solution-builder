@@ -390,6 +390,11 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 /* A label stacked above the control it names. */
 .field { display: grid; gap: var(--space-2); }
 
+/* The stage a decision is sent back to: its labels say what returning
+   there is for, so the picker takes the field's width rather than the
+   Settings cap that clips them. */
+.field .decision-target { max-width: none; width: 100%; }
+
 /* ---- Artifact rendering ---- */
 
 /* Not a card: the artifact body *is* the panel's content. A bordered, filled
@@ -473,6 +478,51 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   display: grid;
   gap: var(--space-1);
   border-radius: var(--radius-panel);
+}
+
+/* What the open stage creates, under the rows: each word is the artifact's
+   way into the Artifacts panel, on the rows' 16px inset. */
+.rail-stage {
+  margin: 0 var(--space-2);
+  padding: var(--space-2);
+  display: grid;
+  gap: var(--space-1);
+}
+
+.rail-stage-head {
+  margin: 0;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--wb-muted-foreground);
+}
+
+.rail-stage-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+  font-size: 0.875rem;
+}
+
+.rail-stage-list a {
+  color: var(--wb-primary);
+  text-decoration: none;
+}
+
+.rail-stage-list a:hover {
+  text-decoration: underline;
+}
+
+.rail-stage-list .is-pending {
+  color: var(--wb-muted-foreground);
+}
+
+.head-panel {
+  font-weight: 400;
+  color: var(--wb-muted-foreground);
 }
 
 .rail-decision-title {
@@ -1337,7 +1387,8 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 
   .rail-section::-webkit-scrollbar { display: none; }
 
-  .rail-decision {
+  .rail-decision,
+  .rail-stage {
     display: none;
   }
 }

@@ -10,6 +10,9 @@ import { join as joinTop } from "node:path";
 // The settings the smoke saves go to a data directory of its own.
 process.env["SOLUTIONS_BUILDER_DATA_DIR"] = await mkdtempTop(joinTop(tmpdirTop(), "sb-deck-settings-"));
 const { deckFrom, deckFileName, decisionLinesIn, outlineSlidesIn, renderDeck } = await import("../packages/solutions-builder/src/deck.js");
+// `packageOutlineProblem` is the hub's own, from the module that defines it --
+// the deck authoring it used to be re-exported beside now lives in packages.
+const { packageOutlineProblem } = await import("../apps/hub/src/package-outline.js");
 
 const checks: { name: string; ok: boolean }[] = [];
 function check(name: string, ok: boolean, detail = "") {
@@ -64,6 +67,24 @@ check(
 const decision = decisionLinesIn(PACKAGE);
 check("the decision request's lines close the deck", decision.length === 2 && decision[1] === "Fund the next planning step only.", JSON.stringify(decision));
 check("a package with no deck outline builds no deck", deckFrom({ projectTitle: "P", audience: "A", role: "r", markdown: "## Audience: A\n\n### One-pager\nText." }) === null);
+
+// Every package must carry a slide outline: the writer refuses one without,
+// and the reason it gives names what is missing.
+check("a package with the outline is a package", packageOutlineProblem(PACKAGE) === null);
+check(
+  "a package with no deck outline section is refused for that reason",
+  /no "### Deck outline" section/.test(packageOutlineProblem("## Audience: A\n\n### One-pager\nText.") ?? ""),
+  String(packageOutlineProblem("## Audience: A\n\n### One-pager\nText.")),
+);
+check(
+  "an outline written as bullets or sub-headings, not numbered slides, is refused for that reason",
+  /no numbered slides/.test(packageOutlineProblem("## Audience: A\n\n### Deck outline\n- Problem\n- Solution\n\n#### Slide 1\nText.") ?? ""),
+  String(packageOutlineProblem("## Audience: A\n\n### Deck outline\n- Problem\n- Solution")),
+);
+check(
+  "a level-two outline heading is not the section the slides are read from",
+  packageOutlineProblem("## Audience: A\n\n## Deck outline\n1. **One**\n   Text.") !== null,
+);
 
 const deck = deckFrom({ projectTitle: "Triage for open source", audience: "You", role: "project owner", markdown: PACKAGE })!;
 const bytes = await renderDeck(deck);

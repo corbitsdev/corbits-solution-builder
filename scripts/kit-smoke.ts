@@ -11,7 +11,7 @@
  * grant looks exactly like one that does not.
  */
 import { kitSeed, grantRequirementsFor, skillTextFor } from "@solutions-builder/app/seed-kit";
-import { AGENT_KIT, agentById } from "@solutions-builder/app/kit";
+import { AGENT_ECONOMICS, AGENT_KIT, agentById } from "@solutions-builder/app/kit";
 import { STAGES } from "@solutions-builder/app/ledger";
 import { baseTemplate, SLOTS, violationsIn } from "@solutions-builder/app/template";
 import { APP_VERSION, expectedDefinitions } from "@solutions-builder/app/manifest";
@@ -49,6 +49,26 @@ check("every role has an agent seed", seed.agents.length === AGENT_KIT.length);
   // Only roles that interview are held to it; the evaluator asks nothing.
   const quota = AGENT_KIT.filter((role) => role.system.includes("What I need from you") && !role.system.includes("none is a fine answer"));
   check("no specialist targets a number of questions", quota.length === 0, quota.map((role) => role.id).join(", "));
+}
+{
+  // Every role that puts a number or a duration on the work says who builds
+  // it: a coding agent, priced as inference and timed as its wall-clock, never
+  // as engineer-days. The roles that estimate are the ones whose task names
+  // cost, effort or a timeline.
+  const named = ["proposer", "presentation-creator", "architect", "estimator"];
+  const estimating = AGENT_KIT.filter(
+    (role) => named.includes(role.id) || /\b(effort|timeline|estimate|expected cost)\b/i.test(role.system.replace(AGENT_ECONOMICS, "")),
+  );
+  const human = estimating.filter((role) => !role.system.includes(AGENT_ECONOMICS));
+  check(
+    "every estimating specialist prices a coding agent, not engineer time",
+    estimating.length >= named.length && human.length === 0,
+    `estimating: ${estimating.map((role) => role.id).join(", ")}; without: ${human.map((role) => role.id).join(", ") || "none"}`,
+  );
+  check(
+    "no specialist is told to price engineer time",
+    AGENT_KIT.every((role) => !/\b(engineer-days|person-days|day rate|sprints?)\b/i.test(role.system.replace(AGENT_ECONOMICS, ""))),
+  );
 }
 check("§8's ten default skills are present", seed.skills.length >= 10, `${seed.skills.length} skills`);
 check("the three stable directors exist", seed.directors.length === 3, seed.directors.map((d) => d.key).join(", "));

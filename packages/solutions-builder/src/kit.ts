@@ -97,6 +97,29 @@ export type AgentRole = {
 };
 
 /**
+ * Who builds, and so what building costs. Every role that puts a number or a
+ * duration on the work carries this: without it a model prices the work the
+ * way its training does, in engineer-days and day rates, and that is not
+ * how anything here gets built.
+ */
+export const AGENT_ECONOMICS = `
+The code is written by a coding agent, not by people: Corbits Code by default,
+or another coding agent the operator has connected. Every figure you give
+about building rests on that.
+- Cost to build is inference spend — the tokens the coding agent and the
+  specialists consume, and any subscription or quota that covers them — plus
+  whatever the software costs to run and any artifact provider it needs. Never
+  price engineer time, day rates, headcount, contractors or salaries.
+- Time to build is how long the coding agent takes to write and check the
+  code, plus the time people spend at the gates deciding. Give it in minutes
+  and hours, or days at most; never in engineer-days, sprints, weeks of
+  effort or quarters.
+- Effort means the agent's effort: how much of the work the platform's
+  primitives already do, how many rounds the agent needs, and how much a
+  person has to check by hand.
+`.trim();
+
+/**
  * The four panel principals — BUILD_PLAN_V3 section 8.
  *
  * Each keeps its own required review, prompt key and model binding, and none
@@ -283,9 +306,12 @@ clearly right, and say why under "Recommendation")
 ## What I need from you
 
 Under "Side by side", one Markdown table: the same criteria as rows (fit
-against the success criteria, effort, risk, cost to run, what it rules out),
-Approach A and Approach B as the two columns, one short phrase per cell. That
-table is how the reader decides, so it carries the trade-offs, not prose.
+against the success criteria, effort to build, risk, cost to run, what it
+rules out), Approach A and Approach B as the two columns, one short phrase per
+cell. That table is how the reader decides, so it carries the trade-offs, not
+prose.
+
+${AGENT_ECONOMICS}
 Under "Recommendation", say which you would pick and the one reason, in two
 sentences. You do not select: the reader does, at the gate.
 
@@ -380,10 +406,20 @@ Produce, for each audience, exactly these headings:
 ### Decision request
 ### Source versions
 
-The deck outline is 6 to 8 slides covering problem, proposed solution, value,
-risks, timeline and order-of-magnitude expected cost. Say plainly that the cost
-figure is rough and that a firm estimate follows at stage 7 — a rough number
-presented as firm is how a project loses its budget approver's trust.
+Every package has a deck outline; a package without one is refused and
+nothing is recorded. The deck outline is a numbered list of 6 to 8 slides,
+one item per slide, the slide's title in bold and what it says under it:
+
+1. **Problem: <the slide's title>**
+   Two or three sentences the slide shows.
+
+The slides cover problem, proposed solution, value, risks, timeline and
+order-of-magnitude expected cost. Do not write the outline as bullets or
+sub-headings: the slides are built from the numbered items. Say plainly that
+the cost figure is rough and that a firm estimate follows at stage 7 — a rough
+number presented as firm is how a project loses its budget approver's trust.
+
+${AGENT_ECONOMICS}
 
 Write for the audience you are addressing. A security reviewer and a department
 head do not need the same one-pager.`,
@@ -483,12 +519,15 @@ Produce a build plan with exactly these headings, after "In short":
 ## What I need from you
 
 Every interface gets an owner and an acceptance condition. Every task is small
-enough that its completion is observable. Under "Frozen source references",
+enough that its completion is observable, and is sized for the coding agent
+that will do it, never for a person. Under "Frozen source references",
 the requirements document comes first; under "Acceptance criteria", carry the
 requirements' criteria by id and add only what the plan itself introduces.
 The build you are planning is built
 on Interchange and CorbitsCore; name the primitives it uses rather
 than inventing ones the platform already provides.
+
+${AGENT_ECONOMICS}
 
 ${INTERVIEW}`,
   }),
@@ -554,12 +593,14 @@ Distinguish a blocking finding from a suggestion. ${specialty.authority}`,
     system: `${SHARED_RULES}
 
 You are the Estimator at stage 7. Convert the accepted plan into a firm
-estimate from actual scope, dependencies, effort, inference and artifact
-providers, worker placement and target-platform validation.
+estimate from actual scope, dependencies, the coding agent's effort, inference
+and artifact providers, worker placement and target-platform validation.
 
 The plan you are pricing is built on Interchange and CorbitsCore;
 price against what that reuse actually saves rather than the cost of building
 each primitive from scratch.
+
+${AGENT_ECONOMICS}
 
 Produce a cost approval with exactly these headings, after "In short":
 
@@ -573,7 +614,9 @@ Produce a cost approval with exactly these headings, after "In short":
 ## What I need from you
 
 Under "Forecast", break the figure down by line so a budget approver can argue
-with a line rather than with a total. State the currency.
+with a line rather than with a total: inference by stage and by the build's
+rounds, providers, running cost. State the currency. Give the time the same
+way, as the coding agent's wall-clock plus the gates, never as human effort.
 
 An unknown quota or an unknown subscription allowance is an unknown. It is not
 zero cost, and it is not unlimited use. Say so in "Unknowns" rather than

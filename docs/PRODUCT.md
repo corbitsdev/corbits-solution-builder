@@ -39,6 +39,12 @@ and waits for a human. Approving names the exact version that was read.
 | 8 | Build and test | Working software and evidence | Evidence accepted |
 | 9 | Deliver | Delivery manifest | Delivery accepted |
 
+Every figure about building — stage 3's effort, stage 5's rough cost and
+timeline, stage 7's firm estimate — assumes a coding agent writes the code
+(Corbits Code by default). Cost is inference spend plus what the software costs
+to run; time is the agent's wall-clock plus the gates. Nothing is priced in
+engineer-days.
+
 Stage 7 cannot be approved the way the others are. Spend needs its own decision,
 so it routes through a cost approval and a freeze. Stage 5 cannot be approved
 until the configured quorum of audiences has recorded a proceed with no reject
@@ -49,7 +55,10 @@ requirements document, with an id on every requirement and acceptance
 criterion. The plan is written against it and cites those ids, the panel
 reviews the plan, and approving the stage names both documents.
 
-Rejecting a stage routes back to a named earlier stage. The history is kept.
+Sending a stage back routes to the stage the person names, any from the first
+up to the current one: someone at Concept approval who missed part of the
+problem returns to the brief, and the stages between are walked again with
+each specialist revising its current document. The history is kept.
 
 The person can hand a specialist more than a description: a document, a
 spreadsheet or an image can be attached to the problem as it is written up.
@@ -64,7 +73,9 @@ stakeholder's own terms. A package can be redrafted alone: asking for one
 stakeholder's package again rewrites only that one, leaving the others as they
 stood.
 
-Each package's deck outline becomes a PowerPoint deck for that stakeholder,
+Every package carries a deck outline — a numbered list of slides under a
+"Deck outline" heading — and one without is refused rather than recorded,
+whoever wrote it. That outline becomes a PowerPoint deck for that stakeholder,
 kept as its own version beside the package. A deck's design — theme, typeface,
 how much a slide carries, whether it carries speaker notes, and what its
 outline should emphasise — is set once per role in Settings, where a role can

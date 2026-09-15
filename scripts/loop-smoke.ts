@@ -144,7 +144,10 @@ async function produce(stage: Stage, projectId: string, runId: string) {
       projectId,
       kind,
       title: `Stage ${stage} artifact`,
-      content: `# Stage ${stage}\n\nRecorded by the loop smoke at ${new Date().toISOString()}.`,
+      content:
+        stage === 5
+          ? `# Stage 5\n\n## Audience: Owner\n\n### Deck outline\n\n1. **The ask**  \n   Recorded by the loop smoke at ${new Date().toISOString()}.\n\n### Decision request\n- Proceed.\n`
+          : `# Stage ${stage}\n\nRecorded by the loop smoke at ${new Date().toISOString()}.`,
       mediaType: "text/markdown",
       sourceVersionIds: [],
       provenance: { producer: "human", runId },
@@ -289,7 +292,7 @@ for (const stage of [1, 2, 3, 4] as Stage[]) {
       kind: "audience_package",
       variant: "Project owner",
       title: "Package for the project owner",
-      content: "# For the owner",
+      content: "# For the owner\n\n## Audience: Project owner\n\n### Deck outline\n\n1. **The ask**  \n   What the owner decides.\n\n### Decision request\n- Proceed.\n",
       mediaType: "text/markdown",
       sourceVersionIds: [],
       provenance: { producer: "human" },
