@@ -26,7 +26,7 @@ jobs:
       # One shard's failure should not hide the others' results.
       fail-fast: false
       matrix:
-        shard: [static, core, launch, product, deploy]
+        shard: [static, core, launch, product, behaviour, deploy]
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
