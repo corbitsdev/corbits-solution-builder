@@ -75,7 +75,34 @@ move is what progress looks like when the code has somewhere else to live.
   existed, passed, and ran in `check:full` only — which nothing runs. 200
   checks, 66 seconds, previously optional.
 
+- #226 the three orphans behind `check:ui`'s failure, and the gate now runs
+  the interface audits. `check:ui` was outside the gate *because it was red*.
+  Three distinct causes, not one: `.dictated-row-start`/`-center` were live
+  and the checker could not see through `` `dictated-row-${align}` `` (fixed
+  by teaching it that an interpolation is a prefix wildcard — a prefix
+  matching no rule still fails); `material-add` was an unreachable `??`
+  fallback with no rule, since all four call sites pass a className;
+  `composer-material` was a class with no rule.
+
+  `smoke:responsive` deliberately stays out of the default gate. It drives
+  headless Chrome and gets OOM-killed under load — one of two isolated runs
+  died with SIGKILL at 70-90 load average, and it killed a full `check` run
+  too. A gate that fails for reasons unrelated to the change teaches people
+  to ignore red. It stays reachable from `check:full`, so `check-shards`
+  counts it as gated rather than abandoned.
+
 Goal: that ratio inverts. Hub vanilla, meat in workflows/agents/tools/skills.
+
+## Process note, from a mistake
+
+I edited a worktree while its agent was still running in it. The agent saw an
+unexplained commit appear, correctly treated it as foreign, and reset the
+branch — discarding my work and reporting that "something else in this shared
+environment is auto-committing to worktrees". It was right to do that, and the
+diagnosis was only wrong because the intruder was me.
+
+**A worktree belongs to its agent until the agent reports.** Verify after, not
+during. Nothing was lost, but it cost a full gate cycle.
 
 ## Two gate lessons, one night
 

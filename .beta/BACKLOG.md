@@ -5,6 +5,8 @@ lives in `packages/*`. Today: hub 21,132 lines / packages 3,570. Six to one the
 wrong way round.
 
 Rules for every iteration:
+- never edit a worktree while its agent is still running in it — the agent
+  will rightly treat your commit as foreign and may reset it away
 - never touch `vendor/interchange/`
 - commit to `internal-beta`, never push, never merge to main
 - `bun run check` exits 0 before the commit, run alone
