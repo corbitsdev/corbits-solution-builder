@@ -105,7 +105,6 @@ move is what progress looks like when the code has somewhere else to live.
   walk and then died demanding `--out`, which only stage 8 needs; and the host
   cleanup swallowed its own failure with `.catch(() => undefined)`.
 
-| deck art direction + bench (#232, #234) | **19,874** | **4,887** |
 
 Goal: that ratio inverts. Hub vanilla, meat in workflows/agents/tools/skills.
 
