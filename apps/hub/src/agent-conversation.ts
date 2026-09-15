@@ -29,6 +29,7 @@ import { database } from "./db.js";
 import * as table from "./schema.js";
 import { and, eq, isNull } from "drizzle-orm";
 import type { Compactor, ConversationTurn, StrategyContext } from "@intx/types/runtime";
+import type { StageContext } from "@solutions-builder/app/stage-prompt";
 
 const COMPACTOR_SYSTEM = `You maintain the standing brief for one stage of a product-development thread.
 
@@ -50,19 +51,6 @@ Rules:
  * something a reader of this file can verify.
  */
 export const VERBATIM_BUDGET = 4000;
-
-/** Renders one turn for the compactor's prompt, and for the draft prompt. */
-function renderTurns(turns: StageTurn[]): string {
-  return turns
-    .map((turn) => {
-      if (turn.role === "specialist") return `SPECIALIST: ${turn.body}`;
-      const quoted = turn.quotes
-        .map((entry) => `  (about this passage: "${entry.quote}")`)
-        .join("\n");
-      return `PERSON: ${turn.body}${quoted ? `\n${quoted}` : ""}`;
-    })
-    .join("\n\n");
-}
 
 /** A `StageTurn`, folded into `ConversationTurn`'s shape for the compactor. */
 function toConversationTurns(turns: StageTurn[]): ConversationTurn[] {
@@ -133,8 +121,6 @@ export const stageBriefCompactor: Compactor = {
   },
 };
 
-export type StageContext = { brief: string | null; recent: StageTurn[] };
-
 /**
  * The standing brief and the turns after it — what a revision prompt is built
  * from. The brief is read off `provenance.brief` of the stage's current live
@@ -201,21 +187,6 @@ export async function stageContext(args: {
   if (body.length === 0) return { brief, recent: pending };
 
   return { brief: body, recent: keep };
-}
-
-/** The conversation section of a draft prompt. Empty when there is none. */
-export function renderStageContext(context: StageContext): string {
-  const sections: string[] = [];
-  if (context.brief) {
-    sections.push(
-      "--- STANDING DIRECTIONS FROM THE PERSON (these still apply) ---",
-      context.brief,
-    );
-  }
-  if (context.recent.length > 0) {
-    sections.push("--- THE CONVERSATION SO FAR ---", renderTurns(context.recent));
-  }
-  return sections.join("\n\n");
 }
 
 /**

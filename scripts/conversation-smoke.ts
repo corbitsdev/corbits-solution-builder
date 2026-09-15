@@ -9,7 +9,7 @@
  * `provenance.brief` rather than a separate marker turn.
  */
 import "./smoke-env.js";
-import { buildDraftPrompt } from "../apps/hub/src/stage-runs.js";
+import { buildDraftPrompt } from "@solutions-builder/app/stage-prompt";
 import {
   VERBATIM_BUDGET,
   pendingContext,

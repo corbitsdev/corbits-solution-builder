@@ -1,3 +1,11 @@
+/**
+ * The kind a person's own uploaded file is recorded under. Named because two
+ * places key off it — the hub writes it, `stage-prompt.ts` labels it
+ * differently from an artifact the product wrote — and a second spelling of
+ * the string is a silent mislabel rather than a type error.
+ */
+export const MATERIAL_KIND = "source_material";
+
 /** The documents the nine stages produce, and which stage owns which. */
 export const ARTIFACT_KINDS = [
   "source_material",

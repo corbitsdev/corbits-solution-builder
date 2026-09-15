@@ -17,8 +17,10 @@ import * as XLSX from "xlsx";
 import { HostError } from "./errors.js";
 import { writeArtifact } from "./projects.js";
 import { activeRun } from "./runs.js";
+import { MATERIAL_KIND } from "@solutions-builder/app/artifacts";
 
-export const MATERIAL_KIND = "source_material";
+export { MATERIAL_KIND };
+
 /** Bytes one file may be, the artifact store's own upload ceiling. */
 export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 

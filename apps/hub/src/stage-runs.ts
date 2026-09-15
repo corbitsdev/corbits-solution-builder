@@ -35,7 +35,8 @@ import { expectLiveDraft, stripOuterFence } from "./live-drafts.js";
 import { execute, type Actor } from "./engine.js";
 import { readArtifactNode, writeArtifact } from "./projects.js";
 import { readProject } from "./project-tenant.js";
-import { stageContext, renderStageContext, type StageContext, type Quote } from "./agent-conversation.js";
+import { stageContext } from "./agent-conversation.js";
+import { renderInputs, buildDraftPrompt, type Inputs, type Quote } from "@solutions-builder/app/stage-prompt";
 import { database } from "./db.js";
 import * as table from "./schema.js";
 import { and, asc, eq, isNull } from "drizzle-orm";
@@ -112,65 +113,6 @@ async function approvedInputs(projectId: string, stage: Stage, sameStage: readon
 /** The rendered inputs a stage's specialist would be handed, for a smoke to read. */
 export async function stageInputsForSmoke(projectId: string, stage: Stage): Promise<string> {
   return renderInputs(await approvedInputs(projectId, stage), stage);
-}
-
-type Inputs = { node: { id: string; title: string; kind: string; stage: number }; content: string }[];
-
-/** The inputs as the specialist reads them. A document written this stage is not yet approved, and is labelled as such. */
-function renderInputs(inputs: Inputs, stage: number): string {
-  if (inputs.length === 0) return "(No earlier approved artifacts. This is the first stage.)";
-  return inputs
-    .map((input) =>
-      input.node.kind === MATERIAL_KIND
-        ? `--- MATERIAL THE PERSON PROVIDED: ${input.node.title} ---\n${input.content}`
-        : input.node.stage === stage
-          ? `--- WRITTEN THIS STAGE, NOT YET APPROVED: ${input.node.title} (stage ${input.node.stage}, ${input.node.kind}) ---\n${input.content}`
-          : `--- APPROVED INPUT: ${input.node.title} (stage ${input.node.stage}, ${input.node.kind}) ---\n${input.content}`,
-    )
-    .join("\n\n");
-}
-
-/**
- * The draft prompt.
- *
- * Pure, and exported, so the two properties that matter can be checked without
- * a provider: that a revision carries the document it is revising, and that
- * the standing directions travel with it.
- *
- * Without the current version in the prompt the model re-rolls the stage from
- * scratch and version two is a different draft rather than a better one, which
- * is not what "revise" means to anyone.
- */
-export function buildDraftPrompt(args: {
-  projectTitle: string;
-  stage: number;
-  inputs: string;
-  userInput: string;
-  currentDocument?: string;
-  context?: StageContext;
-}): string {
-  const revising = (args.currentDocument ?? "").trim().length > 0;
-  const conversation = args.context ? renderStageContext(args.context) : "";
-
-  return [
-    `Project: ${args.projectTitle}`,
-    "",
-    args.inputs,
-    ...(revising
-      ? ["", "--- THE CURRENT VERSION OF THIS DOCUMENT ---", args.currentDocument!.trim()]
-      : []),
-    ...(conversation ? ["", conversation] : []),
-    "",
-    "--- WHAT THE PERSON IS ASKING FOR NOW ---",
-    args.userInput.trim() ||
-      (revising
-        ? "(No further instruction. Improve the current version without changing what was agreed.)"
-        : "(The user gave no further input; work from the approved inputs above.)"),
-    "",
-    revising
-      ? `Produce the next version of the stage ${args.stage} artifact. Revise the current version above rather than starting over: keep every part that was not objected to, apply what is asked for, and honour the standing directions. Use exactly the headings your instructions specify.`
-      : `Produce the stage ${args.stage} artifact now, using exactly the headings your instructions specify.`,
-  ].join("\n");
 }
 
 /**

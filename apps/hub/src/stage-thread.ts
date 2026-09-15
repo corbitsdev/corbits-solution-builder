@@ -39,21 +39,9 @@ import { database } from "./db.js";
 import * as table from "./schema.js";
 import { eq } from "drizzle-orm";
 import { carriedTurns, ledgerCommands } from "./engine-ledger.js";
+import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
 
-export type Quote = { readonly quote: string };
-
-export type StageTurn = {
-  readonly id: string;
-  readonly role: "human" | "specialist";
-  readonly body: string;
-  readonly quotes: Quote[];
-  readonly resultNodeId: string | null;
-  /** The questions a specialist turn opened a round with; null on every other turn. */
-  readonly questions: string[] | null;
-  readonly createdAt: string;
-  /** Set on a specialist turn that reports a round the platform could not complete. */
-  readonly failed?: true;
-};
+export type { Quote, StageTurn };
 
 /**
  * How the platform's director words a call it could not complete: it replies
