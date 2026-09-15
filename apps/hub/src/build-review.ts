@@ -5,11 +5,13 @@
  * four independent principals — application, quality, platform, security —
  * each with its own prompt, model, run and findings, "not a single synthetic
  * reviewer". Stage 6 already runs them, as agent steps inside the stage's own
- * revise loop, reviewing the architect's plan. Stage 8 has none: the build
- * loop (`build-attempt.ts`, `corbits-exec.ts`) drives its own state machine
- * directly and never signals the deployed workflow, so the stage-6 shape —
- * agent steps parked on a round signal — has nothing to run against at stage
- * 8. This module is the same four-principal review, reached the way stage
+ * revise loop, reviewing the architect's plan. Stage 8 has none. Its round
+ * does reach the deployed workflow — `build.start_attempt` is delivered into
+ * `revise-8` and the run parks there again when the attempt ends — but the
+ * build itself runs host-side, as a subprocess `build-attempt.ts` and
+ * `corbits-exec.ts` supervise. The workflow tracks the round; it does not run
+ * the build, so there are no agent steps inside it for a reviewer to be one
+ * of. This module is the same four-principal review, reached the way stage
  * 8's other host-side work already is: one inference call per principal
  * (`inference.ts`'s `complete()`, the same port `completion-judge.ts` uses),
  * each under its own kit system prompt, each persisted as its own version —
