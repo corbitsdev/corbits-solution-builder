@@ -11,6 +11,10 @@ sees or does next is in the wrong place.
 - `vendor/interchange` is untouchable. Interchange bugs get flagged for the
   operator, not patched here.
 - Lean on the Ollama models at the Tailscale endpoint for agent work.
+- **A running workflow does not phone home.** Anything a workflow or agent
+  needs to do, it should carry — as a tool in its deployed closure, running
+  in the sidecar. A hub endpoint that exists only so a workflow can ask the
+  host to do something is the shape to remove, not to tidy.
 - Prefer small changes with large effect. A change that grows `apps/hub`
   needs a reason.
 - Never `git stash`. Worktrees share one stash stack, so a stash in one
