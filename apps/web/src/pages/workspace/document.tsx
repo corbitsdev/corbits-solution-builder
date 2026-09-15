@@ -421,7 +421,7 @@ export function StageDocument({
             </p>
           ) : null}
           {onAddMaterial ? (
-            <p className="composer-cue composer-material">
+            <p className="composer-cue">
               <AddMaterial className="material-add-inline" onAdd={onAddMaterial} />{" "}
               or drop files anywhere here. The specialists read them with their next draft.
             </p>

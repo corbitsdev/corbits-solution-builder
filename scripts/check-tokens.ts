@@ -222,8 +222,23 @@ check(
   // template ends a lazy `\{...\}` match in the wrong place, and a class the
   // gate cannot see is a class it silently exempts.
   const used = new Set<string>();
+  // A class ending in `${...}` names a whole family of rules, not one: the
+  // fixed text before the interpolation is a prefix, and any declared rule
+  // starting with it is a match. The placeholder is a control character, so
+  // it never collides with a real class name and still binds to its prefix
+  // when the surrounding literal is split on whitespace.
+  const PLACEHOLDER = " ";
+  const usedPrefixes = new Set<string>();
   const add = (text: string) => {
-    for (const name of text.split(/\s+/)) if (name) used.add(name);
+    for (const name of text.split(/\s+/)) {
+      if (!name) continue;
+      if (name.includes(PLACEHOLDER)) {
+        const prefix = name.split(PLACEHOLDER)[0]!;
+        if (prefix) usedPrefixes.add(prefix);
+        continue;
+      }
+      used.add(name);
+    }
   };
   for (let at = markup.indexOf("className="); at !== -1; at = markup.indexOf("className=", at + 1)) {
     const start = at + "className=".length;
@@ -242,9 +257,7 @@ check(
         if (depth === 0) break;
       }
     }
-    // `${...}` is an expression, and leaving it in truncates the literal
-    // around it — `canvas-body${x}` would be read as the class "canvas-body${x".
-    const expression = markup.slice(start + 1, end).replace(/\$\{[^}]*\}/g, " ");
+    const expression = markup.slice(start + 1, end).replace(/\$\{[^}]*\}/g, PLACEHOLDER);
     for (const quoted of expression.matchAll(/["'`]([^"'`]*)["'`]/g)) add(quoted[1] ?? "");
   }
 
@@ -256,13 +269,25 @@ check(
   // beginning `p-`, `w-` or `text-` from orphan detection in both directions.
   const HOOKED = new Set(["items-end"]);
   const orphans = [...declared].filter(
-    (name) => !external.test(name) && !HOOKED.has(name) && !used.has(name),
+    (name) =>
+      !external.test(name) &&
+      !HOOKED.has(name) &&
+      !used.has(name) &&
+      ![...usedPrefixes].some((prefix) => name.startsWith(prefix)),
   );
   check("no rule outlives the markup it styled", orphans.length === 0, orphans.slice(0, 6).join(", "));
 
-  const unstyled = [...used].filter(
-    (name) => /^[a-z][a-z0-9-]*$/.test(name) && !TAILWIND.test(name) && !declared.has(name),
+  // A prefix that matches no declared rule at all is exactly as dead as any
+  // other unstyled class — it just names a whole family instead of one name.
+  const unmatchedPrefixes = [...usedPrefixes].filter(
+    (prefix) => ![...declared].some((name) => name.startsWith(prefix)),
   );
+  const unstyled = [
+    ...[...used].filter(
+      (name) => /^[a-z][a-z0-9-]*$/.test(name) && !TAILWIND.test(name) && !declared.has(name),
+    ),
+    ...unmatchedPrefixes,
+  ];
   check("no markup outlives the rule that styled it", unstyled.length === 0, unstyled.slice(0, 8).join(", "));
 }
 

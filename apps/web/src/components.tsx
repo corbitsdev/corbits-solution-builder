@@ -505,7 +505,7 @@ export function AddMaterial({
 }: {
   onAdd: (files: File[]) => Promise<void>;
   label?: string;
-  className?: string;
+  className: string;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [adding, setAdding] = useState(false);
@@ -524,7 +524,7 @@ export function AddMaterial({
     }
   };
   return (
-    <div className={className ?? "material-add"}>
+    <div className={className}>
       <input
         ref={input}
         type="file"

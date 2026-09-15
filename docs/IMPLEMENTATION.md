@@ -125,8 +125,8 @@ OAuth sign-in uses PKCE over a loopback redirect. Tokens live in the keychain.
 | `check:ledger` | The ledger is consistent and the generated workflows match it |
 | `check:boundaries` | The one-direction rule |
 | `check:slop`, `check:tokens`, `check:layout`, `check:markdown` | Interface audits |
-| `check:ui` | `check:slop`, `check:tokens`, `check:layout`, `check:markdown` and `smoke:responsive` together |
-| `check:full` | `check`, `check:ui`, and every smoke `check` leaves out — the full gate |
+| `check:ui` | `check:slop`, `check:tokens`, `check:layout` and `check:markdown` together — the static interface audits, all in the gate |
+| `check:full` | `check` plus `smoke:responsive`. The only thing outside the default gate is the responsive smoke: it drives headless Chrome and is killed by the OOM reaper under load (observed: one of two isolated runs, at 70-90 load average on 8 cores). A gate that fails for reasons unrelated to the change teaches people to ignore it, so it is run deliberately rather than on every merge. |
 | `smoke` | The nine-stage loop and every refusal path |
 | `smoke:upgrade` | Migrations on an existing database |
 | `smoke:db-lock` | Recovering from a crashed pglite lock, and refusing a second live writer |
