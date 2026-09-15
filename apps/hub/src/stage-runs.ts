@@ -43,7 +43,7 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { newId } from "./ids.js";
 import { ArtifactDraft } from "./domain.js";
 import { HostError, ReplyCutShort } from "./errors.js";
-import { packageOutlineProblem } from "./package-outline.js";
+import { packageOutlineProblem } from "@solutions-builder/app/deck";
 import { providerServingModel } from "./catalog.js";
 import { MATERIAL_KIND, materialText } from "./source-material.js";
 import { DECK_KIND, writeDeckFor } from "./deck.js";

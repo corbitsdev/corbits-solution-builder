@@ -15,7 +15,7 @@ import { newId, sha256 } from "./ids.js";
 import { HostError, notFound } from "./errors.js";
 import { origin } from "./guard.js";
 import { ARTIFACT_STAGE, type ArtifactDraft } from "./domain.js";
-import { packageOutlineProblem } from "./package-outline.js";
+import { packageOutlineProblem } from "@solutions-builder/app/deck";
 import type { ProjectPolicy } from "./engine.js";
 import { launchProjectRun, soloApprovalFor } from "./engine.js";
 import { ledgerCommands, recordCommand, projectApprovals, projectFlags, projectQuestions } from "./engine-ledger.js";

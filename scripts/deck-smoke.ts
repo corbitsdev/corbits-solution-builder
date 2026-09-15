@@ -9,10 +9,9 @@ import { tmpdir as tmpdirTop } from "node:os";
 import { join as joinTop } from "node:path";
 // The settings the smoke saves go to a data directory of its own.
 process.env["SOLUTIONS_BUILDER_DATA_DIR"] = await mkdtempTop(joinTop(tmpdirTop(), "sb-deck-settings-"));
-const { deckFrom, deckFileName, decisionLinesIn, outlineSlidesIn, renderDeck } = await import("../packages/solutions-builder/src/deck.js");
-// `packageOutlineProblem` is the hub's own, from the module that defines it --
-// the deck authoring it used to be re-exported beside now lives in packages.
-const { packageOutlineProblem } = await import("../apps/hub/src/package-outline.js");
+const { deckFrom, deckFileName, decisionLinesIn, outlineSlidesIn, renderDeck, packageOutlineProblem } = await import(
+  "../packages/solutions-builder/src/deck.js"
+);
 
 const checks: { name: string; ok: boolean }[] = [];
 function check(name: string, ok: boolean, detail = "") {

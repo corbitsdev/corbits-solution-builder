@@ -13,6 +13,9 @@ import PptxGenJS from "pptxgenjs";
 /** The media type a deck is stored and served as. */
 export const DECK_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
+/** The heading a package's slides are read from. */
+export const OUTLINE_HEADING = "Deck outline";
+
 export type DeckSlide = {
   readonly title: string;
   /** What is shown on the slide: the item's body, sentence by sentence. */
@@ -124,7 +127,7 @@ function bulletsOf(body: string, most: number): string[] {
  * it. An item without bold text takes its whole first line as the title.
  */
 export function outlineSlidesIn(markdown: string, most = DECK_DENSITY[DEFAULT_DECK_DESIGN.density]): DeckSlide[] {
-  const section = sectionIn(markdown, "deck outline");
+  const section = sectionIn(markdown, OUTLINE_HEADING.toLowerCase());
   if (section === null) return [];
   const items: { title: string; body: string[] }[] = [];
   for (const raw of section.split("\n")) {
@@ -160,6 +163,22 @@ export function decisionLinesIn(markdown: string): string[] {
     .map((line) => plain(line.replace(/^\s*(?:[-*]|\d+[.)])\s+/, "")))
     .filter((line) => line.length > 0)
     .slice(0, 8);
+}
+
+/**
+ * Why a package cannot be one, or null when it can: every package carries a
+ * "### Deck outline" section with at least one numbered slide, because that
+ * is what its stakeholder's slides are built from. The sentence is written
+ * for the person reading the refusal.
+ */
+export function packageOutlineProblem(markdown: string): string | null {
+  if (sectionIn(markdown, OUTLINE_HEADING.toLowerCase()) === null) {
+    return `it has no "### ${OUTLINE_HEADING}" section, and a package's slides are built from that outline`;
+  }
+  if (outlineSlidesIn(markdown).length === 0) {
+    return `its "### ${OUTLINE_HEADING}" section has no numbered slides (one per line, "1. **Title** — what the slide says"), and a package's slides are built from those`;
+  }
+  return null;
 }
 
 export function deckFrom(args: {
