@@ -26,17 +26,25 @@ import {
   type StageSignal,
 } from "@solutions-builder/app/workflows/stage-loop";
 import { assets, deploymentRuns, HubApiError, workflows, type HubRunEvent } from "./hub-client.js";
-import { deploymentIsLive, ensureLifecycleDeployment, lifecycleAssetName } from "./workflow-deploy.js";
+import {
+  deploymentIsLive,
+  ensureLifecycleDeployment,
+  lifecycleAssetName,
+  type LifecycleDeployment,
+} from "./workflow-deploy.js";
 
 /** What a signal delivery actually did, so a caller can tell nothing from broken. */
 export type DeliveryOutcome = "delivered" | "no_execution" | "failed";
+
+/** Why a project has no execution: no model provider connected, or no host to place a sidecar on. */
+export type ExecutionUnavailableReason = Extract<LifecycleDeployment["status"], "no_offering" | "no_host">;
 
 // --- The deployment behind a project -------------------------------------------
 
 /** Anchor run id (= deployment id) per project, remembered once resolved. */
 const anchors = new Map<string, string>();
 /** Why a project has no execution, for the status line. */
-const unavailable = new Map<string, string>();
+const unavailable = new Map<string, ExecutionUnavailableReason>();
 
 async function anchorFor(projectId: string, replace = false): Promise<string | null> {
   const known = anchors.get(projectId);
@@ -564,7 +572,7 @@ export function projectForAnchor(anchorRunId: string): string | null {
 }
 
 /** Why a project has no run: no offering connected yet, or a host that cannot place sidecars. */
-export function executionUnavailable(projectId: string): string | null {
+export function executionUnavailable(projectId: string): ExecutionUnavailableReason | null {
   return unavailable.get(projectId) ?? null;
 }
 

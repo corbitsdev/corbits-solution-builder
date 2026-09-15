@@ -23,7 +23,7 @@ import { nextQuestion } from "./questions.js";
 import { openDecisionFor } from "./decisions.js";
 import { liveDraft } from "./live-drafts.js";
 import { activityHeadline } from "@solutions-builder/app/next-step";
-import { projectExecutionStatus } from "./hub-executor.js";
+import { executionUnavailable, projectExecutionStatus } from "./hub-executor.js";
 import { activeRun, runsForProject, type RunRecord } from "./runs.js";
 import { tenantId } from "./hub-client.js";
 import {
@@ -539,6 +539,7 @@ export async function projectDetail(projectId: string, actorPrincipalId: string)
   let soloApproval = false;
   if (current) {
     const status = await projectExecutionStatus(projectId);
+    const unavailable = executionUnavailable(projectId);
     const hasDraft = nodes.some((node) => node.stage === current.stage);
     const quorum =
       current.stage === 5
@@ -557,6 +558,7 @@ export async function projectDetail(projectId: string, actorPrincipalId: string)
         parked: status?.parked ?? false,
         hasDraft,
         ...(quorum ? { quorum } : {}),
+        ...(unavailable ? { executionUnavailable: unavailable } : {}),
       }),
       stepId: status?.stepId ?? null,
       parked: status?.parked ?? false,

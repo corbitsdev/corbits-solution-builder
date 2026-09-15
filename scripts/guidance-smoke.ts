@@ -181,6 +181,50 @@ check(
       (headline) => /awaitSignal|stepId|signalName|in_progress|waiting_approval/i.test(headline),
     ),
   );
+
+  // A project that cannot run at all must say why, not just "Drafting".
+  const noOffering = activityHeadline({
+    state: "in_progress",
+    stage: 1,
+    parked: false,
+    hasDraft: false,
+    executionUnavailable: "no_offering",
+  });
+  check(
+    "no offering connected is named plainly, not as a machine status",
+    noOffering.toLowerCase().includes("model provider") && !/no_offering/i.test(noOffering),
+    noOffering,
+  );
+
+  const noHost = activityHeadline({
+    state: "in_progress",
+    stage: 1,
+    parked: false,
+    hasDraft: false,
+    executionUnavailable: "no_host",
+  });
+  check(
+    "no host available is named plainly, not as a machine status",
+    noHost.toLowerCase().includes("host") && !/no_host/i.test(noHost),
+    noHost,
+  );
+
+  check(
+    "the two unavailable reasons read differently from each other",
+    noOffering !== noHost,
+  );
+
+  const unavailableStep = nextStep({
+    state: "in_progress",
+    stage: 1,
+    hasDraft: false,
+    executionUnavailable: "no_offering",
+  });
+  check(
+    "the next step for a missing offering points at connecting one",
+    unavailableStep.title.toLowerCase().includes("model provider"),
+    unavailableStep.title,
+  );
 }
 
 // --- The Product guide's deterministic floor (BUILD_PLAN_V3 section 8) ---
