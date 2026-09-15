@@ -15,3 +15,4 @@ export * from "./workflows/project-lifecycle.js";
 export * from "./workflows/stage-loop.js";
 export * from "./manifest.js";
 export * from "./delivery.js";
+export * from "./decision-copy.js";

@@ -10,6 +10,7 @@
 import { and, desc, eq, isNull } from "drizzle-orm";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { STAGE_TITLES } from "@solutions-builder/app/ledger";
+import { CONSEQUENCE, STATE_CONSEQUENCE } from "@solutions-builder/app/decision-copy";
 import { database } from "./db.js";
 import * as table from "./schema.js";
 import { requiredAuthorityFor } from "./engine-approvals.js";
@@ -38,24 +39,6 @@ export type Decision = {
 
 /** Run states in which the next move is a person's. */
 const DECIDING_STATES = new Set(["waiting_approval", "cost_approved", "waiting_human", "delivery_review"]);
-
-/** What a gate freezes, in the approver's language. Section 10's copy rule. */
-const CONSEQUENCE: Record<number, string> = {
-  1: "Approving accepts the problem brief and opens solution shape. Revisions stay possible.",
-  2: "Approving fixes the solution bounds every later stage is held to.",
-  3: "Approving selects this exact proposal and its branch as the execution path.",
-  4: "Approving fixes the design every build check is measured against.",
-  5: "Approving records that the named audiences agree this is worth pursuing.",
-  6: "Approving accepts the plan as complete and buildable, and sends it to costing.",
-  7: "Approving the cost authorizes spend against this exact plan, then freezes the build packet.",
-  8: "Accepting this evidence ends the build and opens delivery review.",
-  9: "Accepting this manifest completes delivery of the exact versions listed.",
-};
-
-const STATE_CONSEQUENCE: Record<string, string> = {
-  cost_approved: "Freezing locks this exact plan and cost and queues the build. Nothing is spent until then.",
-  waiting_human: "Answering resumes the same build attempt with exactly what you grant, and nothing more.",
-};
 
 /**
  * Whether a decision has been announced, per process. Notifying is a ping, not
