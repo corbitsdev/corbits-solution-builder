@@ -43,15 +43,26 @@ function arg(name: string): string | undefined {
   const index = process.argv.indexOf(`--${name}`);
   return index === -1 ? undefined : process.argv[index + 1];
 }
+function flag(name: string): boolean {
+  return process.argv.includes(`--${name}`);
+}
 
 const stage = Number(arg("stage") ?? "3");
 if (!Number.isInteger(stage) || stage < 1 || stage > 8) {
   console.error(
-    `Usage: bun run seed --stage <1-8> (default 3) [--problem <path>]\nGot: ${arg("stage") ?? "(none)"}`,
+    `Usage: bun run seed --stage <1-8> (default 3) [--problem <path>] [--seed-artifacts]\nGot: ${arg("stage") ?? "(none)"}`,
   );
   process.exit(1);
 }
 const targetStage = stage as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+
+// Default: every stage 1-7 artifact is drafted by a real specialist round
+// through `requestDraft` — this is what an end-to-end walk means. `--seed-artifacts`
+// opts into the canned-text shortcut instead, for jumping straight to a stage
+// to experiment there without sitting through every earlier stage's real
+// round; its artifacts are legitimately `provenance.producer: "human"`.
+const walkMode = flag("seed-artifacts") ? "seeded" : "real";
+console.log(`Walk mode: ${walkMode}${walkMode === "seeded" ? " (canned artifacts, not drafted by a model)" : " (every stage drafted by its real specialist)"}`);
 
 const problemPath = arg("problem");
 let problemStatement = "";
@@ -196,11 +207,10 @@ try {
   }
 
   const actor = { ...localActor(), displayName: "Seed" };
+  const projectTitle =
+    problemStatement.length > 0 ? titleFromProblem(problemStatement) : `Seed: stage ${targetStage}`;
   const project = await createProject({
-    title:
-      problemStatement.length > 0
-        ? titleFromProblem(problemStatement)
-        : `Seed: stage ${targetStage}`,
+    title: projectTitle,
     owner: actor,
     policy: {
       costTolerancePercent: 15,
@@ -216,9 +226,10 @@ try {
   });
 
   const parked = await walkToStage(
-    { projectId: project.projectId, runId: project.runId, actor },
+    { projectId: project.projectId, runId: project.runId, actor, projectTitle },
     targetStage,
     "Project owner",
+    walkMode,
   );
   if (!parked?.parked || parked.stage !== targetStage) {
     throw new Error(

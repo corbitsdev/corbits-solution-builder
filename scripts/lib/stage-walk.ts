@@ -1,19 +1,35 @@
 /**
- * The lifecycle stage walk: shared by `sidecar-smoke.ts` and `seed.ts` so the
- * two cannot drift.
+ * The lifecycle stage walk: shared by `sidecar-smoke.ts`, `seed.ts` and
+ * `bench-run.ts` so none of them can drift.
  *
  * Advancing past a parked stage is `produce(stage)` writing the stage
  * artifact, then `stage.submit` → settle on `gateStepId(stage)` →
  * `stage.approve` → settle on `stage + 1`. Stages 1-4 go through the engine
  * with a version to submit and approve; stage 5 and beyond advances by raw
  * signal instead (`cost.approve` rather than `stage.approve` at stage 7).
+ *
+ * `walkToStage` writes the stage artifact one of two ways:
+ *
+ * - `mode: "real"` (the default): `requestDraft` runs the stage's real
+ *   specialist through the deployed workflow, waits for its agent step(s) to
+ *   answer, and persists each answer as a version through the same path the
+ *   product's own "Draft" button takes. `provenance.producer` is asserted to
+ *   be `"agent"` on every version this writes.
+ * - `mode: "seeded"`: the canned-text shortcut (`produceStageArtifact` /
+ *   `produceStageArtifacts`), for jumping straight to a stage to experiment
+ *   there without sitting through every earlier one's real round. Its
+ *   artifacts are legitimately `provenance.producer: "human"` — nobody's
+ *   model wrote them.
  */
 import { execute, type Actor } from "../../apps/hub/src/engine.js";
 import { newId } from "../../apps/hub/src/ids.js";
-import { writeArtifact, projectDetail } from "../../apps/hub/src/projects.js";
+import { writeArtifact, readArtifactNode, projectDetail } from "../../apps/hub/src/projects.js";
+import { requestDraft, type StageDraftResult } from "../../apps/hub/src/stage-runs.js";
 import { deliverStageSignal, projectExecutionStatus, type StageStatus } from "../../apps/hub/src/hub-executor.js";
 import { gateStepId } from "@solutions-builder/app/workflows/stage-loop";
 import type { Stage } from "@solutions-builder/app/ledger";
+
+export type WalkMode = "real" | "seeded";
 
 export const STAGE_ARTIFACT: Record<1 | 2 | 3 | 4, string> = {
   1: "problem_brief",
@@ -28,9 +44,26 @@ export interface WalkContext {
   readonly projectId: string;
   readonly runId: string;
   readonly actor: Actor;
+  /** Required only in `mode: "real"` — `requestDraft` renders it into every prompt. */
+  readonly projectTitle?: string;
 }
 
 const currentRunId = async (ctx: WalkContext) => (await projectDetail(ctx.projectId, ctx.actor.principalId)).current!.id;
+
+const versionOf = (result: StageDraftResult): ArtifactVersion => ({
+  artifactId: result.artifactId,
+  versionId: result.nodeId,
+  contentHash: result.contentHash,
+});
+
+/** The whole point of `mode: "real"`: a future change that silently reverts to canned text must fail loudly. */
+async function assertAgentProvenance(nodeId: string, label: string): Promise<void> {
+  const { node } = await readArtifactNode(nodeId);
+  const producer = (node.provenance as { producer?: string } | null)?.producer;
+  if (producer !== "agent") {
+    throw new Error(`walkToStage: ${label}'s artifact ${nodeId} has provenance.producer=${JSON.stringify(producer)}, expected "agent"`);
+  }
+}
 
 /** Waits for the project's run to reach a status `until` accepts, or times out at `null`. */
 export async function settleStatus(
@@ -67,6 +100,22 @@ export async function produceStageArtifact(
     ctx.actor,
   );
   return [{ artifactId: node.artifactId, versionId: node.nodeId, contentHash: node.contentHash }];
+}
+
+/** Drives stage N's (1-4) real specialist through `requestDraft` and returns its draft as a version to submit. */
+export async function draftStageArtifact(ctx: WalkContext, stage: 1 | 2 | 3 | 4): Promise<ArtifactVersion[]> {
+  if (!ctx.projectTitle) throw new Error(`draftStageArtifact(${stage}): ctx.projectTitle is required for a real round`);
+  const result = await requestDraft({
+    projectId: ctx.projectId,
+    stage,
+    runId: await currentRunId(ctx),
+    actor: ctx.actor,
+    message: "",
+    mode: "final",
+    projectTitle: ctx.projectTitle,
+  });
+  await assertAgentProvenance(result.draft.nodeId, `stage ${stage}`);
+  return [versionOf(result.draft)];
 }
 
 /**
@@ -145,6 +194,51 @@ export async function produceStageArtifacts(ctx: WalkContext, stage: 5 | 6 | 7):
   return versions;
 }
 
+/**
+ * Drives stage N's (5-7) real specialist(s) through `requestDraft` and
+ * returns the resulting versions to submit — the whole set for stage 5 (one
+ * package per audience) and stage 6 (its requirements and its plan; the
+ * panel's four reviews are advisory and are never among the versions a
+ * `stage.submit` names, matching what the canned `STAGE_5_TO_7_ARTIFACT`
+ * shape submits).
+ */
+export async function draftStageArtifacts(ctx: WalkContext, stage: 5 | 6 | 7): Promise<ArtifactVersion[]> {
+  if (!ctx.projectTitle) throw new Error(`draftStageArtifacts(${stage}): ctx.projectTitle is required for a real round`);
+  const result = await requestDraft({
+    projectId: ctx.projectId,
+    stage,
+    runId: await currentRunId(ctx),
+    actor: ctx.actor,
+    message: "",
+    mode: "final",
+    projectTitle: ctx.projectTitle,
+  });
+
+  if (stage === 5) {
+    if (result.failed && result.failed.length > 0) {
+      throw new Error(
+        `walkToStage: stage 5 failed to draft a package for ${result.failed.map((entry) => `${entry.audience} (${entry.message})`).join(", ")}`,
+      );
+    }
+    const packages = result.packages ?? [result.draft];
+    await Promise.all(packages.map((pkg) => assertAgentProvenance(pkg.nodeId, "stage 5's audience package")));
+    return packages.map(versionOf);
+  }
+
+  if (stage === 6) {
+    if (!result.requirements) throw new Error("walkToStage: stage 6 produced no requirements document");
+    await assertAgentProvenance(result.requirements.nodeId, "stage 6's requirements");
+    await assertAgentProvenance(result.draft.nodeId, "stage 6's plan");
+    for (const review of result.review ?? []) {
+      await assertAgentProvenance(review.nodeId, "stage 6's panel review");
+    }
+    return [versionOf(result.requirements), versionOf(result.draft)];
+  }
+
+  await assertAgentProvenance(result.draft.nodeId, "stage 7's cost approval");
+  return [versionOf(result.draft)];
+}
+
 /** Runs one ledger command as this actor, the same shape `advanceStage` uses inline for stages 1-4. */
 export function runCommand(ctx: WalkContext, type: string, payload: Record<string, unknown>) {
   return execute({
@@ -173,16 +267,31 @@ export function runCommand(ctx: WalkContext, type: string, payload: Record<strin
  * is what actually opens the stage 8 build run. `audienceName` must name one
  * of the project's configured audiences whenever the walk passes stage 5.
  *
+ * `mode` (default `"real"`) is what writes each stage's artifact: `"real"`
+ * drives the stage's actual specialist through `requestDraft`, the same path
+ * the product's own "Draft" button takes, and asserts `provenance.producer
+ * === "agent"` on every version it writes; `"seeded"` is the canned-text
+ * shortcut, for jumping to a stage without sitting through every earlier
+ * one's real round, and its versions are legitimately `"human"`.
+ *
  * Throws, naming the stage and the last observed step/signal, the moment a
  * stage fails to settle — nothing here retries or falls back silently.
  */
-export async function walkToStage(ctx: WalkContext, targetStage: Stage, audienceName?: string): Promise<StageStatus> {
+export async function walkToStage(
+  ctx: WalkContext,
+  targetStage: Stage,
+  audienceName?: string,
+  mode: WalkMode = "real",
+): Promise<StageStatus> {
   const parkedAt1 = await settleStatus(ctx.projectId, (s) => s.parked && s.stage === 1);
   if (!parkedAt1) throw new Error(`walkToStage: project ${ctx.projectId} never parked at stage 1`);
   let latest = parkedAt1;
   for (let stage = 1; stage < targetStage; stage++) {
     if (stage <= 4) {
-      const versions = await produceStageArtifact(ctx, stage as 1 | 2 | 3 | 4);
+      const versions =
+        mode === "seeded"
+          ? await produceStageArtifact(ctx, stage as 1 | 2 | 3 | 4)
+          : await draftStageArtifact(ctx, stage as 1 | 2 | 3 | 4);
       const result = await advanceStage(ctx, stage as Stage, versions);
       if (!result.gate || result.gate.stepId !== gateStepId(stage as Stage)) {
         throw new Error(
@@ -202,7 +311,8 @@ export async function walkToStage(ctx: WalkContext, targetStage: Stage, audience
       throw new Error("walkToStage: an audienceName is required to clear stage 5's quorum");
     }
 
-    const versions = await produceStageArtifacts(ctx, stage as 5 | 6 | 7);
+    const versions =
+      mode === "seeded" ? await produceStageArtifacts(ctx, stage as 5 | 6 | 7) : await draftStageArtifacts(ctx, stage as 5 | 6 | 7);
     await runCommand(ctx, "stage.submit", { runId: await currentRunId(ctx), versions });
     const gate = await settleStatus(ctx.projectId, (s) => s.parked && s.stepId === gateStepId(stage as Stage));
     if (!gate) {
