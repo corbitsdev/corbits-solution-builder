@@ -11,28 +11,19 @@ import { dirname } from "node:path";
 import { createHash } from "node:crypto";
 import { type } from "arktype";
 import { AUTHORITIES, type Authority } from "@solutions-builder/app/ledger";
+import { DEFAULT_DECK_DESIGN, type DeckDesign } from "@solutions-builder/app/deck";
 import { HostError } from "./errors.js";
 import { deckSettingsFile } from "./paths.js";
+
+export { DEFAULT_DECK_DESIGN, type DeckDesign };
 
 /** The roles a stakeholder can hold; each has a deck design of its own. */
 export const DECK_ROLES: readonly Authority[] = AUTHORITIES.filter((role) => role !== "system");
 
-export const DECK_THEMES = {
-  ember: { label: "Ember", accent: "B45309" },
-  slate: { label: "Slate", accent: "334155" },
-  forest: { label: "Forest", accent: "166534" },
-  navy: { label: "Navy", accent: "1E3A8A" },
-  plum: { label: "Plum", accent: "6B21A8" },
-} as const;
-export type DeckTheme = keyof typeof DECK_THEMES;
-
-export const DECK_TYPEFACES = ["Calibri", "Georgia", "Arial", "Helvetica"] as const;
-export type DeckTypeface = (typeof DECK_TYPEFACES)[number];
-
-/** How much a slide carries: the most bullets an outline item is shown as. */
-export const DECK_DENSITY = { sparse: 3, standard: 5, full: 7 } as const;
-export type DeckDensity = keyof typeof DECK_DENSITY;
-
+// The look and content shape a design can take (theme, typeface, density,
+// what illustrations to draw) is the authoring provider's — the deck
+// package's — typed input; this file only validates and persists it per
+// role.
 const Design = type({
   theme: "'ember' | 'slate' | 'forest' | 'navy' | 'plum'",
   typeface: "'Calibri' | 'Georgia' | 'Arial' | 'Helvetica'",
@@ -51,17 +42,6 @@ const Design = type({
   /** What this role's deck outline should emphasise, in the person's words; given to the presentation creator. */
   guidance: "string",
 });
-export type DeckDesign = typeof Design.infer;
-
-export const DEFAULT_DECK_DESIGN: DeckDesign = {
-  theme: "ember",
-  typeface: "Calibri",
-  density: "standard",
-  notes: true,
-  images: "none",
-  template: null,
-  guidance: "",
-};
 
 export type DeckSettings = Record<Authority, DeckDesign>;
 
