@@ -390,6 +390,11 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 /* A label stacked above the control it names. */
 .field { display: grid; gap: var(--space-2); }
 
+/* The stage a decision is sent back to: its labels say what returning
+   there is for, so the picker takes the field's width rather than the
+   Settings cap that clips them. */
+.field .decision-target { max-width: none; width: 100%; }
+
 /* ---- Artifact rendering ---- */
 
 /* Not a card: the artifact body *is* the panel's content. A bordered, filled

@@ -201,7 +201,7 @@ export function DecisionQueue({
             <label htmlFor="decision-target">Send back to</label>
             <select
               id="decision-target"
-              className="setting-select"
+              className="setting-select decision-target"
               value={target}
               onChange={(event) => setTarget(Number(event.target.value))}
             >
