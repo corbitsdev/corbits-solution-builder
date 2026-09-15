@@ -11,6 +11,19 @@
 /** A declared target's modality. Only `"cli"` is actually exercised today; everything else is honestly reported as not exercised. */
 export type TargetModality = "cli" | "web" | "api" | "desktop" | "other";
 
+export type TargetVerification = {
+  readonly target: string;
+  readonly modality: TargetModality;
+  /** Whether this target was actually run, to any degree, rather than left unexercised. */
+  readonly exercised: boolean;
+  /** For an exercised target: whether real input drawn from the requirements was fed to it, rather than an immediate EOF. */
+  readonly realInputFed: boolean;
+  readonly ranSuccessfully: boolean;
+  readonly producedOutput: boolean;
+  /** What happened, in enough detail for a human — or the judge — to read the actual behaviour, or to see why nothing could be established. */
+  readonly transcript: string;
+};
+
 export function classifyTarget(target: string): TargetModality {
   const t = target.toLowerCase();
   if (/\bcli\b|terminal|command[- ]?line|console app|\bshell\b/.test(t)) return "cli";
