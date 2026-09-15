@@ -29,6 +29,24 @@ move is what progress looks like when the code has somewhere else to live.
   accepting with nothing to accept against is not. +65 hub lines, the only
   growth tonight, and it buys the gate §4 says the bridge can never be.
 
+- #214 design revision prompt (§10) into packages. All 20 prompt strings
+  byte-identical — checked, not assumed: §10 documents the revision prompt as
+  deterministic ("the same feedback produces byte-identical bytes, so a
+  regenerated design is attributable"), so a whitespace change would have been
+  a real regression.
+- #215 the verifier rubric into packages. `judgeSystemPrompt` and
+  `coverageSummary` diffed **identical** against the hub original; the only
+  changes in the moved code are a type name (`ExecutionCheck` →
+  a structural `JudgeExecutionCheck`, so the hub-only type need not move) and
+  a constant alias (`LEVELS` → `CONFIDENCE_LEVELS`, the same array). The clamp
+  — `minLevel(parsed.level, ceiling)`, the model may lower confidence and never
+  raise it — stays in the hub, where enforcement belongs.
+
+  A note on my own method: my first check compared whole string literals with
+  a regex and reported "0 of 23 verbatim", which was wrong — the regex was the
+  wrong tool, not evidence of rewording. Diffing the moved function bodies is
+  what actually answered it.
+
 Goal: that ratio inverts. Hub vanilla, meat in workflows/agents/tools/skills.
 
 ## In flight
