@@ -91,6 +91,22 @@ move is what progress looks like when the code has somewhere else to live.
   to ignore red. It stays reachable from `check:full`, so `check-shards`
   counts it as gated rather than abandoned.
 
+- #232 deck art direction into packages. The art director's system prompt, its
+  content builders, plan parsing and `illustrationPrompt` are text; the
+  provider calls, credential resolution, model ranking and disk cache stay.
+  `parsePlan` returns `null` in the package instead of throwing a hub error
+  type, and the hub re-throws the identical `HostError` at the boundary —
+  checked, because a move that quietly turns a throw into a null is how an
+  error gets swallowed.
+- #234 **the bench harness enters the repo.** The script that drives a fresh
+  workspace through the lifecycle against a real provider was untracked, so
+  "the end-to-end bench still works" — a rule in this very backlog — lived on
+  one machine. Two real bugs found by running it: `--stage 7` did the whole
+  walk and then died demanding `--out`, which only stage 8 needs; and the host
+  cleanup swallowed its own failure with `.catch(() => undefined)`.
+
+| deck art direction + bench (#232, #234) | **19,874** | **4,887** |
+
 Goal: that ratio inverts. Hub vanilla, meat in workflows/agents/tools/skills.
 
 ## Process note, from a mistake
