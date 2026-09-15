@@ -819,6 +819,11 @@ function BuildPanel({
   const unavailable = final?.payload.available === false;
   const exitStatus = final ? (final.payload.exitStatus as number | null) : null;
   const stderrTail = final ? String(final.payload.stderrTail ?? "").trim() : "";
+  const produced = final?.payload.produced as { changed: boolean; summary: string } | null | undefined;
+  // A worker that ran and left nothing behind is not a success, whatever its
+  // exit status: an exit of 0 here is "the process returned cleanly", not
+  // "the build did something".
+  const wroteNothing = !unavailable && produced !== null && produced !== undefined && produced.changed === false;
   // The worker ran and has ended, and the ledger still says running: the
   // attempt is not over until the person says what its result was.
   const ended = running && final !== undefined && !unavailable;
@@ -907,6 +912,13 @@ function BuildPanel({
         >
           {stderrTail || "The worker this host looks for could not be run."} Settings › Diagnostics names the worker
           and what it reported.
+        </Banner>
+      ) : null}
+
+      {wroteNothing ? (
+        <Banner tone="error" title="The worker exited cleanly but wrote nothing">
+          {produced?.summary || "The workspace is unchanged since the attempt began."} An exit status of 0 is not a
+          verdict on the work.
         </Banner>
       ) : null}
 
@@ -1002,8 +1014,10 @@ function BuildPanel({
             <div>
               <dt>Exit status</dt>
               <dd>
-                {exitStatus === 0 ? (
+                {exitStatus === 0 && !wroteNothing ? (
                   <StateLabel tone="success">Exited 0</StateLabel>
+                ) : exitStatus === 0 ? (
+                  <StateLabel tone="error">Exited 0, wrote nothing</StateLabel>
                 ) : exitStatus === null ? (
                   <StateLabel tone="error">Ended without an exit status</StateLabel>
                 ) : (
@@ -1015,6 +1029,12 @@ function BuildPanel({
               <dt>Workspace</dt>
               <dd className="hash">{String(final.payload.workspace ?? "")}</dd>
             </div>
+            {produced ? (
+              <div>
+                <dt>Produced</dt>
+                <dd>{produced.changed ? produced.summary : "nothing — the workspace is unchanged since the attempt began"}</dd>
+              </div>
+            ) : null}
             {final.payload.archive && typeof final.payload.archive === "object" ? (
               <div>
                 <dt>Packaged</dt>
