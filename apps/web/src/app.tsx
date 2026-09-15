@@ -465,6 +465,8 @@ export function App() {
     wait: Wait,
     decision: "approve" | "reject" | "revise",
     reason: string,
+    /** The stage a send-back returns to: any up to this one, as the ledger allows. */
+    target: number = wait.stage - 1,
   ) => {
     setBusy(decision);
     setError(null);
@@ -502,7 +504,7 @@ export function App() {
       };
       if (decision !== "approve") {
         payload.reason = reason || "Routed back without a stated reason.";
-        payload.targetStage = Math.max(1, wait.stage - 1);
+        payload.targetStage = Math.min(wait.stage, Math.max(1, Math.round(target)));
       }
       if (command === "cost.approve") {
         payload.forecastUsd = 0;

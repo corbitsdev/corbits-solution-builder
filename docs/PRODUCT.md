@@ -55,7 +55,10 @@ requirements document, with an id on every requirement and acceptance
 criterion. The plan is written against it and cites those ids, the panel
 reviews the plan, and approving the stage names both documents.
 
-Rejecting a stage routes back to a named earlier stage. The history is kept.
+Sending a stage back routes to the stage the person names, any from the first
+up to the current one: someone at Concept approval who missed part of the
+problem returns to the brief, and the stages between are walked again with
+each specialist revising its current document. The history is kept.
 
 The person can hand a specialist more than a description: a document, a
 spreadsheet or an image can be attached to the problem as it is written up.

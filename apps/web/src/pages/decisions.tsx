@@ -12,7 +12,7 @@
  */
 import type React from "react";
 import { EmptyState, Textarea } from "@corbits/react-ui";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ProjectDetail, Wait } from "../client.js";
 import { Button, Screen, StateLabel, shortHash, stageName } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
@@ -31,17 +31,26 @@ const ACTION: Record<number, string> = {
   9: "Accept the delivery",
 };
 
-const SECONDARY: Record<number, string> = {
-  1: "Send back for more discovery",
-  2: "Narrow the bounds",
-  3: "Ask for another approach",
-  4: "Request a design revision",
-  5: "Send back to the audiences",
-  6: "Ask for a plan correction",
-  7: "Request a cheaper plan",
-  8: "Request remediation",
-  9: "Reject the manifest",
+/**
+ * What going back to each stage is for, in the person's terms: the reason
+ * they would name it as the target rather than the stage before this one.
+ */
+const RETURN_TO: Record<number, string> = {
+  1: "revise the problem brief",
+  2: "change the solution bounds",
+  3: "choose or rework the approach",
+  4: "revise the design",
+  5: "redo the packages",
+  6: "correct the plan",
+  7: "re-estimate the cost",
+  8: "build again",
+  9: "redo the delivery",
 };
+
+/** The stage a send-back returns to unless the person names another: the one before this. */
+function defaultTarget(stage: number): number {
+  return Math.max(1, stage - 1);
+}
 
 export function DecisionQueue({
   decisions,
@@ -61,12 +70,21 @@ export function DecisionQueue({
   onInspect: (wait: Wait) => void;
   /** Starting something is the other thing this page is for. */
   onStart: () => void;
-  onDecide: (wait: Wait, decision: "approve" | "reject" | "revise", reason: string) => void;
+  /** `target` is the stage a send-back returns to; ignored for an approve. */
+  onDecide: (wait: Wait, decision: "approve" | "reject" | "revise", reason: string, target: number) => void;
 }) {
   const [reason, setReason] = useState("");
   const current =
     decisions.find((wait) => wait.projectId === selectedProjectId) ?? decisions[0];
   const rest = decisions.filter((wait) => wait.id !== current?.id);
+  // Where a send-back goes. The ledger allows any stage up to this one — a
+  // person at Concept approval who missed part of the problem can return to
+  // the brief — and the previous stage is the default because it usually is.
+  const [target, setTarget] = useState(() => defaultTarget(current?.stage ?? 1));
+  useEffect(() => {
+    setTarget(defaultTarget(current?.stage ?? 1));
+  }, [current?.id, current?.stage]);
+  const stagesBack = current ? Array.from({ length: current.stage }, (_, index) => index + 1) : [];
 
   // An empty queue is not an empty screen. Nothing waiting means the next
   // thing a person does is start something, so that is what it offers.
@@ -179,20 +197,42 @@ export function DecisionQueue({
             </Dictated>
           </div>
 
+          <div className="field">
+            <label htmlFor="decision-target">Send back to</label>
+            <select
+              id="decision-target"
+              className="setting-select"
+              value={target}
+              onChange={(event) => setTarget(Number(event.target.value))}
+            >
+              {stagesBack.map((stage) => (
+                <option key={stage} value={stage}>
+                  Stage {stage} — {stageName(stage)}
+                  {stage === current?.stage ? " (this stage again)" : RETURN_TO[stage] ? `, to ${RETURN_TO[stage]}` : ""}
+                </option>
+              ))}
+            </select>
+            <p className="inline-note">
+              {target === current?.stage
+                ? "The work is redone at this stage. What was decided is kept as history."
+                : `Stages ${target} to ${current?.stage} are walked again from there. Each specialist revises its current document against the change rather than starting over.`}
+            </p>
+          </div>
+
           <div className="action-row">
             <Button
               variant="primary"
               loading={busy === "approve"}
               disabled={!canApprove}
-              onClick={() => current && onDecide(current, "approve", reason)}
+              onClick={() => current && onDecide(current, "approve", reason, target)}
             >
               {ACTION[current?.stage ?? 1] ?? "Approve"}
             </Button>
             <Button
               loading={busy === "revise"}
-              onClick={() => current && onDecide(current, "revise", reason)}
+              onClick={() => current && onDecide(current, "revise", reason, target)}
             >
-              {SECONDARY[current?.stage ?? 1] ?? "Send back"}
+              Send back to {stageName(target)}
             </Button>
             <Button onClick={() => current && onInspect(current)}>Inspect evidence</Button>
           </div>
