@@ -27,6 +27,7 @@ import { projectDetail, readArtifactNode, writeArtifact } from "./projects.js";
 import { buildEvents } from "./engine-ledger.js";
 import { workspaceFor } from "./corbits-exec.js";
 import { recordStage8PanelReview } from "./build-review.js";
+import { verifierReportOf, type CompletionVerdict } from "./completion-judge.js";
 
 export const BUILD_ARCHIVE_MEDIA_TYPE = "application/gzip";
 
@@ -205,10 +206,19 @@ export async function acceptBuildEvidence(args: {
     toolCalls?: number | null;
     continuedFrom?: string | null;
     archive?: BuildArchive | null;
+    completion?: CompletionVerdict | null;
   };
 
   const archive = (await stillThere(args.runId, reported.archive)) ?? (await recordBuildArchive({ actor: args.actor, projectId: args.projectId, runId: args.runId }));
   const { node: version, content: archiveContent } = await readArtifactNode(archive.nodeId);
+
+  // The completion judge's own verdict on the attempt just ended
+  // (`completion-judge.ts`, recorded onto this same `bridge.final` event by
+  // `build-attempt.ts`) is the verifier report `build.accept_evidence`
+  // requires. A worker that never ran the judge (unavailable, or timed out
+  // before its first check) reports none, and the engine refuses this
+  // acceptance rather than accepting unverified evidence.
+  const verifierReport = reported.completion ? verifierReportOf(reported.completion) : null;
 
   const outcome = await execute({
     type: "build.accept_evidence",
@@ -220,6 +230,7 @@ export async function acceptBuildEvidence(args: {
     payload: {
       runId: args.runId,
       versions: [{ artifactId: version.artifactId, versionId: version.id, contentHash: version.contentHash }],
+      verifierReport,
       descriptors: [
         {
           category: "source",

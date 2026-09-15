@@ -39,6 +39,7 @@ import { execute, HOST_PRINCIPAL, type Actor, type CommandOutcome } from "../app
 import { newId } from "../apps/hub/src/ids.js";
 import { databaseDirectory } from "../apps/hub/src/paths.js";
 import { workspaceFor } from "../apps/hub/src/corbits-exec.js";
+import { judgeCompletion, verifierReportOf, type VerifierReport } from "../apps/hub/src/completion-judge.js";
 import { HostError } from "../apps/hub/src/errors.js";
 import type { ArtifactKind } from "../apps/hub/src/domain.js";
 import type { Command, Stage } from "@solutions-builder/app/ledger";
@@ -472,6 +473,21 @@ async function writeDeliveredBytes(buildRunId: string): Promise<void> {
   await writeFile(join(workspace, "dist", "chess.app"), DELIVERED_BYTES);
 }
 
+/**
+ * `build.accept_evidence` requires a genuine verifier report (BUILD_PLAN_V3
+ * §7), so seeding a run past it runs the same completion judge a real
+ * attempt would have, against the workspace as this script left it, rather
+ * than fabricating a confidence level. No plan or requirements text is
+ * seeded here, so the mechanical ceiling — never an inference call — decides
+ * the level, exactly as `judgeCompletion` does for any workspace with
+ * nothing to interpret semantics into.
+ */
+async function verifierReportFor(buildRunId: string): Promise<VerifierReport> {
+  const workspace = await workspaceFor(buildRunId);
+  const verdict = await judgeCompletion({ workspaceRoot: workspace, plan: "", requirements: "" });
+  return verifierReportOf(verdict);
+}
+
 async function report(projectId: string): Promise<void> {
   const detail = await projectDetail(projectId, ACTOR.principalId);
   console.log(`\nSeeded "${detail.project.title}" (${projectId})`);
@@ -606,6 +622,7 @@ if (targetStage <= 6) {
       await command("build.accept_evidence", projectId, {
         runId: runningRunId,
         versions: [],
+        verifierReport: await verifierReportFor(runningRunId),
         descriptors: [
           {
             category: "source",
@@ -634,6 +651,7 @@ if (targetStage <= 6) {
   const accepted = await command("build.accept_evidence", projectId, {
     runId: runningRunId,
     versions: [],
+    verifierReport: await verifierReportFor(runningRunId),
     descriptors: [
       {
         category: "source",

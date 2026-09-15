@@ -63,6 +63,8 @@ import { runExecutionChecks, discoverEntryPoint, type ExecutionCheck, type Packa
 export type ConfidenceLevel = "none" | "low" | "medium" | "high";
 
 const LEVELS: readonly ConfidenceLevel[] = ["none", "low", "medium", "high"];
+/** Exported so a caller validating an untrusted payload (`engine.ts`, the smoke scripts) can check a level without duplicating this list. */
+export const CONFIDENCE_LEVELS = LEVELS;
 const levelIndex = (level: ConfidenceLevel): number => LEVELS.indexOf(level);
 const minLevel = (a: ConfidenceLevel, b: ConfidenceLevel): ConfidenceLevel => (levelIndex(a) <= levelIndex(b) ? a : b);
 
@@ -100,6 +102,32 @@ export type CompletionVerdict = {
   /** What was, and was not, actually exercised — the coverage a level rests on. */
   readonly targets: TargetVerification[];
 };
+
+/**
+ * What `build.accept_evidence` (BUILD_PLAN_V3 §7) requires to exist before a
+ * human can accept: the judge's verdict, stripped to the fields a decision
+ * needs — never the full transcripts, which stay on the run's own event.
+ */
+export type VerifierReport = Pick<CompletionVerdict, "level" | "reasoning" | "source">;
+
+export function verifierReportOf(verdict: CompletionVerdict): VerifierReport {
+  return { level: verdict.level, reasoning: verdict.reasoning, source: verdict.source };
+}
+
+/**
+ * Reads a `VerifierReport` back off an untrusted command payload. Returns
+ * null for anything that is not a genuine verdict — absent, malformed, or a
+ * shape someone hand-typed to look like one — so the caller can refuse
+ * rather than accept a fabricated confidence level.
+ */
+export function readVerifierReport(value: unknown): VerifierReport | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { level, reasoning, source } = value as Record<string, unknown>;
+  if (typeof level !== "string" || !CONFIDENCE_LEVELS.includes(level as ConfidenceLevel)) return null;
+  if (typeof reasoning !== "string" || reasoning.trim().length === 0) return null;
+  if (source !== "mechanical" && source !== "judge" && source !== "unavailable") return null;
+  return { level: level as ConfidenceLevel, reasoning, source };
+}
 
 // ---------------------------------------------------------------------------
 // Target modality: dispatch and the one modality actually implemented (CLI).

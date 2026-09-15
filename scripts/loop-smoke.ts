@@ -22,6 +22,7 @@ import {
   createProject,
   listProjects,
   projectDetail,
+  readArtifactNode,
   writeArtifact,
 } from "../apps/hub/src/projects.js";
 import { execute, HOST_PRINCIPAL, submitAndApprove } from "../apps/hub/src/engine.js";
@@ -34,6 +35,7 @@ import { ensureDeckFor } from "../apps/hub/src/deck.js";
 import { abortBuildAttempt, liveBuild, startBuildAttempt, subscribeBuildOutput } from "../apps/hub/src/build-attempt.js";
 import { buildEvents } from "../apps/hub/src/engine-ledger.js";
 import { buildArchiveName, packageBuild } from "../apps/hub/src/build-output.js";
+import { judgeCompletion, verifierReportOf } from "../apps/hub/src/completion-judge.js";
 import { projectSpend, recordHostUsage } from "../apps/hub/src/spend.js";
 import { verifyManifest } from "../apps/hub/src/delivery.js";
 import { chmod, mkdir, mkdtemp, readdir, writeFile } from "node:fs/promises";
@@ -72,6 +74,20 @@ async function command(
     payload,
   });
   return outcome;
+}
+
+/**
+ * `build.accept_evidence` requires a genuine verifier report (BUILD_PLAN_V3
+ * §7). The runs this smoke accepts never went through a real worker attempt
+ * (they are moved by the raw ledger commands above, to exercise the guard
+ * rather than a live build), so this runs the same completion judge a real
+ * attempt would have against the run's own workspace, rather than
+ * fabricating a confidence level.
+ */
+async function verifierReportFor(buildRunId: string) {
+  const workspace = await workspaceFor(buildRunId);
+  const verdict = await judgeCompletion({ workspaceRoot: workspace, plan: "", requirements: "" });
+  return verifierReportOf(verdict);
 }
 
 async function refuses(
@@ -927,11 +943,47 @@ let buildRunId = "";
     () => command("build.resume", projectId, { runId: buildRunId }),
   );
 
+  // BUILD_PLAN_V3 §7's first precondition: no verifier report, no
+  // acceptance — a low or absent report is a human's to weigh, but nothing
+  // to weigh is refused outright.
+  await refuses(
+    "build.accept_evidence is refused with no verifier report at all",
+    "validation_failed",
+    () =>
+      command("build.accept_evidence", projectId, {
+        runId: buildRunId,
+        versions: [],
+        descriptors: [
+          { category: "source", path: "dist/chess.app", sha256: DELIVERED_SHA, sizeBytes: DELIVERED_BYTES.byteLength, mediaType: "application/octet-stream", access: "local", required: true },
+        ],
+        verification: { requiredChecks: "recorded by the loop smoke" },
+        actualCost: 12.5,
+      }),
+  );
+
+  await refuses(
+    "build.accept_evidence is refused with a fabricated confidence level rather than a real verdict",
+    "validation_failed",
+    () =>
+      command("build.accept_evidence", projectId, {
+        runId: buildRunId,
+        versions: [],
+        verifierReport: { level: "high", reasoning: "trust me" },
+        descriptors: [
+          { category: "source", path: "dist/chess.app", sha256: DELIVERED_SHA, sizeBytes: DELIVERED_BYTES.byteLength, mediaType: "application/octet-stream", access: "local", required: true },
+        ],
+        verification: { requiredChecks: "recorded by the loop smoke" },
+        actualCost: 12.5,
+      }),
+  );
+
   // The manifest names bytes that are not in the workspace yet, so the
   // verification recorded with it is incomplete and stage 9 must refuse.
+  const verifierReport = await verifierReportFor(buildRunId);
   const accepted = await command("build.accept_evidence", projectId, {
     runId: buildRunId,
     versions: [],
+    verifierReport,
     descriptors: [
       { category: "source", path: "dist/chess.app", sha256: DELIVERED_SHA, sizeBytes: DELIVERED_BYTES.byteLength, mediaType: "application/octet-stream", access: "local", required: true },
       { category: "docs", path: "https://example.invalid/README", sha256: "b".repeat(64), sizeBytes: 12, mediaType: "text/markdown", access: "remote", required: false },
@@ -940,6 +992,20 @@ let buildRunId = "";
     actualCost: 12.5,
   });
   check("accepting evidence opens delivery review at stage 9", accepted.stage === 9);
+  {
+    const afterAccept = await projectDetail(projectId, ACTOR.principalId);
+    const manifestNode = afterAccept.nodes.filter((node) => node.kind === "delivery_manifest").pop();
+    const manifestContent = manifestNode ? (await readArtifactNode(manifestNode.id)).content : "";
+    const manifest = manifestContent
+      ? (JSON.parse(manifestContent) as { verification?: { verifierReport?: { level?: string; reasoning?: string; source?: string } } })
+      : {};
+    check(
+      "the accepted manifest carries the verifier's level and reasoning, not a bare acceptance",
+      manifest.verification?.verifierReport?.level === verifierReport.level &&
+        manifest.verification?.verifierReport?.reasoning === verifierReport.reasoning,
+      JSON.stringify(manifest.verification?.verifierReport),
+    );
+  }
   const opened = await openDecisionFor(projectId);
   check(
     "the stage 9 decision names the missing byte",

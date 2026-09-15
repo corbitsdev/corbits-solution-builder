@@ -44,6 +44,7 @@ import { writeArtifact } from "./projects.js";
 import type { ArtifactDraft } from "./domain.js";
 import { describeBlockers, normalizeDescriptor, type DeliveryManifest } from "@solutions-builder/app/delivery";
 import { latestManifest, verifyAndRecord } from "./delivery.js";
+import { readVerifierReport } from "./completion-judge.js";
 import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -708,7 +709,23 @@ async function apply(
     }
 
     case "build.accept_evidence": {
-      terminalize("evidence_accepted", "evidence accepted");
+      // §7's first precondition: a complete verifier report. The report
+      // itself renders no verdict on whether the evidence is good enough —
+      // that is the second precondition, the human decision this command's
+      // own authority check already is (guard.ts: only project_owner or
+      // technical_approver may issue it) — it only has to exist. A run whose
+      // attempt never produced one (the worker was unavailable, or timed out
+      // before the judge could run even mechanically) has nothing here for a
+      // human to accept against, so acceptance is refused outright rather
+      // than silently treated as "no evidence problem".
+      const verifierReport = readVerifierReport(input.payload.verifierReport);
+      if (!verifierReport) {
+        throw new HostError(
+          "validation_failed",
+          "build.accept_evidence requires a completed verifier report. No verification was performed for this build attempt, so there is nothing for a human to accept against.",
+        );
+      }
+      terminalize("evidence_accepted", `evidence accepted — verifier report: ${verifierReport.level} confidence (${verifierReport.source})`);
       // The manifest is an artifact version produced by the build run.
       const rawDescriptors = Array.isArray(input.payload.descriptors) ? input.payload.descriptors : [];
       const descriptors = rawDescriptors.map(normalizeDescriptor);
@@ -716,6 +733,10 @@ async function apply(
         throw new HostError("validation_failed", "Every delivery descriptor needs a path, a 64-hex SHA-256 and a size.");
       }
       const actualCost = typeof input.payload.actualCost === "number" ? input.payload.actualCost : null;
+      const suppliedVerification =
+        typeof input.payload.verification === "object" && input.payload.verification !== null
+          ? (input.payload.verification as Record<string, unknown>)
+          : {};
       const manifest: DeliveryManifest = {
         descriptors: descriptors as NonNullable<(typeof descriptors)[number]>[],
         costForecast: typeof input.payload.costForecast === "number" ? input.payload.costForecast : null,
@@ -723,7 +744,10 @@ async function apply(
         // The bounded bridge meters nothing, so an absent actual is recorded as
         // absent with the reason, never as zero.
         costActualReason: actualCost === null ? "the build worker reported no metered cost" : null,
-        verification: (input.payload.verification as unknown) ?? {},
+        // The verifier's own verdict travels with the manifest, honest and
+        // unfiltered — a low confidence level and its reasoning are carried
+        // forward exactly as reported, never hidden behind a bare "accepted".
+        verification: { ...suppliedVerification, verifierReport },
         exceptions: (input.payload.exceptions as unknown) ?? null,
       };
       const draftManifest: ArtifactDraft = {
