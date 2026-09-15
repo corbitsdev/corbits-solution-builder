@@ -5,7 +5,8 @@
 | --- | --- | --- |
 | start of night | 21,132 | 3,570 |
 | after stage-8 judge + panel | 21,841 | 3,578 |
-| deck merged out (#208) | **21,166** | **4,207** |
+| deck merged out (#208) | 21,166 | 4,207 |
+| accept_evidence gate (#211) | **21,365** | **4,093** |
 
 Correction: an earlier row here claimed the deck move was -1,881. That
 compared two branches with different bases and was wrong. Measured across the
@@ -18,11 +19,23 @@ move is what progress looks like when the code has somewhere else to live.
 ## Merged into internal-beta
 - #208 deck authoring out of the hub (CL-8006) — intermediate; destination is
   a tool in the workflow closure running in the sidecar
-- #209 stage consequence copy into packages (CL-8007) — pending CI
+- #209 stage consequence copy into packages (CL-8007)
+- #211 `build.accept_evidence` requires a verifier report (plan §7) — the
+  command validated descriptor shape and terminalized, so a build nobody
+  verified could be accepted. It now refuses without a real report. No
+  confidence threshold: §7's second precondition is the human decision, and
+  `guard.ts` already restricts the command to `project_owner`/
+  `technical_approver`. A low-confidence report a human accepts is their call;
+  accepting with nothing to accept against is not. +65 hub lines, the only
+  growth tonight, and it buys the gate §4 says the bridge can never be.
 
 Goal: that ratio inverts. Hub vanilla, meat in workflows/agents/tools/skills.
 
 ## In flight
+- CL-7981 `targets` stops being inert: `classifyTarget` moves out of the hub
+  into `packages/solutions-builder/src/targets.ts`, and the worker prompt
+  stops pasting `Targets: ["cli"]` as raw JSON and starts saying what each
+  declared target will actually be exercised with.
 - qwen end-to-end under the judge, re-run after the manifest-crash fix.
 
 ## The judge works end to end

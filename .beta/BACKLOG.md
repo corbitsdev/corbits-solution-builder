@@ -20,10 +20,12 @@ Rules for every iteration:
    was driven through the `cli` target and rated `medium`, withholding `high`
    because a correction was never exercised.
 
-2. **`build.accept_evidence` requires a verifier report** (plan §7) — in
-   flight. `engine.ts:710` checks descriptors only; §7 wants "complete
-   verifier report and human stage-8 approval". The report now exists, so this
-   is finally fixable.
+2. ~~**`build.accept_evidence` requires a verifier report**~~ (plan §7) — DONE,
+   PR #211. `engine.ts` now refuses to terminalize without a real verifier
+   report. No confidence threshold: §7's second precondition is the human
+   decision, which `guard.ts` already enforces by restricting the command to
+   `project_owner`/`technical_approver`. A low-confidence report a human
+   accepts is legitimate; accepting with nothing to accept against is not.
 
 3. ~~**Panel reviews at stage 8**~~ (plan §8) — DONE, host-side, because the
    build runs beside the workflow rather than inside it. See CL-7991: that
