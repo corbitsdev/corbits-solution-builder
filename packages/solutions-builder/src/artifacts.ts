@@ -14,6 +14,7 @@ export const ARTIFACT_KINDS = [
   "cost_approval",
   "build_packet",
   "build_evidence",
+  "build_review",
   "delivery_manifest",
   "delivery_verification",
 ] as const;
@@ -38,6 +39,8 @@ export const ARTIFACT_STAGE: Readonly<Record<ArtifactKind, number>> = {
   cost_approval: 7,
   build_packet: 7,
   build_evidence: 8,
+  /** Stage 8's panel review — of the evidence, not the plan. `engineering_review` is stage 6's, fixed there; a kind maps to one stage only, so the panel's second review gets its own. */
+  build_review: 8,
   delivery_manifest: 9,
   delivery_verification: 9,
 };

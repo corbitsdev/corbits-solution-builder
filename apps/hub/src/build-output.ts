@@ -26,6 +26,7 @@ import { dataDirectory } from "./paths.js";
 import { projectDetail, readArtifactNode, writeArtifact } from "./projects.js";
 import { buildEvents } from "./engine-ledger.js";
 import { workspaceFor } from "./corbits-exec.js";
+import { recordStage8PanelReview } from "./build-review.js";
 
 export const BUILD_ARCHIVE_MEDIA_TYPE = "application/gzip";
 
@@ -207,7 +208,7 @@ export async function acceptBuildEvidence(args: {
   };
 
   const archive = (await stillThere(args.runId, reported.archive)) ?? (await recordBuildArchive({ actor: args.actor, projectId: args.projectId, runId: args.runId }));
-  const { node: version } = await readArtifactNode(archive.nodeId);
+  const { node: version, content: archiveContent } = await readArtifactNode(archive.nodeId);
 
   const outcome = await execute({
     type: "build.accept_evidence",
@@ -242,6 +243,23 @@ export async function acceptBuildEvidence(args: {
         archive: { name: archive.name, sha256: archive.sha256, sizeBytes: archive.sizeBytes },
         evidenceVersionId: archive.nodeId,
       },
+    },
+  });
+
+  // The panel reviews the accepted evidence now, not the person's approval:
+  // it may require revision, evidence or remediation, but decides nothing,
+  // so its four findings are recorded and never held against acceptance.
+  await recordStage8PanelReview({
+    projectId: args.projectId,
+    actor: args.actor,
+    archive,
+    content: archiveContent,
+    report: {
+      worker: reported.worker ?? null,
+      exitStatus: reported.exitStatus ?? null,
+      turns: reported.turns ?? null,
+      toolCalls: reported.toolCalls ?? null,
+      continuedFrom: reported.continuedFrom ?? null,
     },
   });
 
