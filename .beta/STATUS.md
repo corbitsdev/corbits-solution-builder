@@ -195,6 +195,38 @@ re-export shim — a file that only forwards is a hop, not a home. Deck smoke
 stayed 36/36, which is the check that proves it: it covers the renderer and
 the refusal both.
 
+## Merging on top of Brian: the rule, and how I broke it
+
+We merge **on top of** main. His logic comes in; our direction — the client
+drives the experience, the hub is thin — does not get reverted to take it.
+Those are not in tension: his change is usually *behaviour*, ours is *where
+the code lives*, and the merge keeps both.
+
+I broke that once. Resolving the main merge I ran:
+
+    git checkout --ours apps/hub/src/deck.ts
+
+which takes **our whole file**, not just the conflicted hunk. Brian had also
+changed that file outside the conflict, and it went with it.
+
+What was lost: his slide-build refusal asks the parser *which* problem the
+package has — no `### Deck outline` section at all, versus a section whose
+items are not numbered slides. Mine flattened both into one static sentence,
+so a person whose outline used bullets was told the section was missing when
+it was not. Restored in `026ebf0`, against the packages copy of the parser,
+architecture intact.
+
+**How I checked, rather than guessing:** for each of his ten commits, every
+added line of real length, tested for presence anywhere in our HEAD. Of ~330
+added lines, 9 came back missing — 8 were import paths made moot by moving
+that parser into packages, 1 was superseded by his own later commit, and the
+one above was a real loss. That sweep is cheap and worth repeating after any
+merge where `--ours` or `--theirs` was used on a file both sides touched.
+
+**The rule:** never `checkout --ours/--theirs` a whole file when both sides
+changed it. Resolve the hunk. If the file must be taken wholesale because it
+moved, diff the other side's commits against the new home afterward.
+
 ## A mistake, and what it cost
 
 I pushed a merge commit whose message described two fixes its tree did not
