@@ -133,7 +133,7 @@ export async function produceStageArtifacts(ctx: WalkContext, stage: 5 | 6 | 7):
         projectId: ctx.projectId,
         kind: entry.kind as never,
         title: entry.title,
-        content: `# ${entry.title}\n\nRecorded at ${new Date().toISOString()}.`,
+        content: await benchArtifactContent(entry.kind, entry.title),
         mediaType: "text/markdown",
         sourceVersionIds: [],
         provenance: { producer: "human", runId },
@@ -229,7 +229,10 @@ export async function walkToStage(ctx: WalkContext, targetStage: Stage, audience
         runId: await currentRunId(ctx),
         versions,
         placement: "local",
-        targets: ["local"],
+        // `placement` is where the build runs; `targets` is what is being
+        // built. They are not the same axis, and conflating them left the
+        // verifier with nothing it knew how to exercise.
+        targets: ["cli"],
       });
     } else {
       await runCommand(ctx, "stage.approve", { runId: await currentRunId(ctx), versions });
@@ -244,4 +247,14 @@ export async function walkToStage(ctx: WalkContext, targetStage: Stage, audience
     latest = next;
   }
   return latest;
+}
+
+async function benchArtifactContent(kind: string, title: string): Promise<string> {
+  const dir = process.env["BENCH_PACKET_DIR"];
+  if (dir === undefined) return `# ${title}\n\nRecorded at ${new Date().toISOString()}.`;
+  const file = kind === "product_requirements" ? "PACKET_REQUIREMENTS.md" : kind === "build_plan" ? "PACKET_BUILD_PLAN.md" : null;
+  if (file === null) return `# ${title}\n\nRecorded at ${new Date().toISOString()}.`;
+  const handle = Bun.file(`${dir}/${file}`);
+  if (!(await handle.exists())) throw new Error(`BENCH_PACKET_DIR: ${dir}/${file} missing`);
+  return await handle.text();
 }
