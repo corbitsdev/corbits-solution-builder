@@ -301,7 +301,11 @@ describe("runBuildAttempt stops on the deliverable's own checks, not on silence"
 
       expect(outcome.available).toBe(true);
       expect(outcome.stopReason).toBe("stalled");
-      expect(outcome.execution).toEqual([]);
+      // Seeding always declares `test` and `typecheck`, so checks are always
+      // discovered — they just prove nothing on a workspace nobody built in.
+      // What matters is that proving nothing never reads as done.
+      expect(outcome.execution?.every((check) => check.vacuous)).toBe(true);
+      expect(outcome.stopReason).not.toBe("complete");
     },
     30_000,
   );
