@@ -227,6 +227,54 @@ describe("runBuildAttempt stops on the deliverable's own checks, not on silence"
   );
 
   test(
+    "a seeded-but-empty workspace never reports complete: passing test/typecheck scripts on nothing built is not evidence of a deliverable",
+    async () => {
+      const worker = join(bin, "seeded-but-empty-worker");
+      await writeFile(
+        worker,
+        [
+          "#!/bin/sh",
+          'case "$1" in',
+          '  --help) echo "usage: worker exec <prompt>"; exit 0 ;;',
+          "  exec)",
+          "    if [ ! -f package.json ]; then",
+          // Exactly the reported bug's shape: scripts that pass trivially,
+          // plus the seeded toolchain (tsconfig.json and a types/global.d.ts
+          // stub, written so `tsc --noEmit` doesn't hard-error on an empty
+          // project) — no src/, no entry point, no real deliverable.
+          '      printf \'{"name":"w","scripts":{"test":"bun test","typecheck":"exit 0"}}\' > package.json',
+          '      printf \'{"compilerOptions":{"strict":true,"noEmit":true},"include":["apps","packages","types"]}\' > tsconfig.json',
+          "      mkdir -p types",
+          "      printf 'export {};' > types/global.d.ts",
+          "      echo 'wrote package.json but nothing else'",
+          "    else",
+          "      echo 'nothing left to do'",
+          "    fi",
+          "    ;;",
+          "esac",
+          "",
+        ].join("\n"),
+      );
+      await chmod(worker, 0o755);
+      process.env.SOLUTIONS_BUILDER_WORKER_BIN = worker;
+
+      const outcome = await runBuildAttempt({
+        runId: `run-${Date.now()}`,
+        prompt: "build it",
+        seed: { title: "seeded but empty test", plan: "plan", requirements: "reqs" },
+        continuation: { maxStaleContinuations: 1 },
+      });
+
+      expect(outcome.available).toBe(true);
+      expect(outcome.stopReason).not.toBe("complete");
+      expect(outcome.stopReason).toBe("stalled");
+      expect(outcome.execution?.every((check) => check.ok)).toBe(true);
+      expect(outcome.execution?.every((check) => check.vacuous)).toBe(true);
+    },
+    30_000,
+  );
+
+  test(
     "no discoverable check never reports complete; the loop stalls instead once the workspace stops changing",
     async () => {
       const worker = join(bin, "no-checks-worker");
