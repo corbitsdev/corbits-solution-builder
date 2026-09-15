@@ -1,10 +1,15 @@
 # Status — updated as work lands
 
 ## Scoreboard
-| | lines |
-| --- | --- |
-| `apps/hub/src` | 21,132 |
-| `packages/*/src` | 3,570 |
+| when | apps/hub/src | packages/* |
+| --- | --- | --- |
+| start of night | 21,132 | 3,570 |
+| after stage-8 judge + panel | 21,841 | 3,578 |
+| deck moved out (pr-8006, in review) | **19,960** | **4,199** |
+
+The middle row is the lesson: stage-8 work has nowhere to go but the hub while
+the build runs beside the workflow instead of inside it (CL-7991). The deck
+move is what progress looks like when the code has somewhere else to live.
 
 Goal: that ratio inverts. Hub vanilla, meat in workflows/agents/tools/skills.
 
