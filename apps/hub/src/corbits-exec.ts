@@ -29,8 +29,11 @@
  *                  "no bound on how many turns a stalled worker gets" is not
  *                  a control worth having
  *   permissions    each worker is given the narrowest flag that lets it write
- *                  within its workspace (build-worker.ts); the bridge never
- *                  passes a blanket bypass such as --dangerously-skip-permissions
+ *                  within its workspace *and run the toolchain it was seeded
+ *                  with* (build-worker.ts) — a worker that can edit but not
+ *                  execute can never verify its own work; the bridge still
+ *                  never passes a blanket bypass such as
+ *                  --dangerously-skip-permissions
  *   linkage        every attempt is linked to an immutable packet and run
  *   exit criterion replaced by verified shared-hub integration before launch
  *

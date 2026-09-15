@@ -78,6 +78,11 @@ export const BUILD_WORKERS: readonly BuildWorkerKind[] = [
     executable: "corbits",
     probe: ["--help"],
     probeExpects: "exec",
+    // No permission flag at all: `corbits exec` has none besides the
+    // bypass this bridge refuses to pass. Checked live — execution then
+    // follows the operator's own saved default in ~/.corbits/settings.json
+    // (corbits's own /yolo toggle), outside this bridge's control either
+    // way. Nothing to add here without reaching for the bypass.
     run: (prompt) => ["exec", prompt],
     turnReports: { install: corbitsTurnHook },
   },
@@ -88,8 +93,22 @@ export const BUILD_WORKERS: readonly BuildWorkerKind[] = [
     probe: ["--version"],
     probeExpects: null,
     // acceptEdits lets the worker write within the session without the
-    // blanket --dangerously-skip-permissions bypass the bridge refuses to pass.
-    run: (prompt) => ["-p", prompt, "--permission-mode", "acceptEdits"],
+    // blanket --dangerously-skip-permissions bypass the bridge refuses to
+    // pass. Edits alone can't run the toolchain the workspace was seeded
+    // with (build-workspace.ts: bun test, bun run typecheck -> tsc), so
+    // --allowedTools names exactly those binaries plus git, which the
+    // worker needs to commit its own progress for the bridge to see it.
+    // Verified against `claude --help` on the installed CLI (2.1.271):
+    // --allowedTools takes Bash(<binary>:*) patterns and everything else
+    // still requires approval, which a non-interactive session can't give.
+    run: (prompt) => [
+      "-p",
+      prompt,
+      "--permission-mode",
+      "acceptEdits",
+      "--allowedTools",
+      "Bash(bun:*) Bash(node:*) Bash(tsc:*) Bash(git:*)",
+    ],
     turnReports: null,
   },
   {
@@ -102,6 +121,11 @@ export const BUILD_WORKERS: readonly BuildWorkerKind[] = [
     // full bypass. No --skip-git-repo-check: build-workspace.ts git-inits
     // every fresh workspace, so codex's own git-repo check already passes
     // (it accepts an unborn repo too, before the baseline commit lands).
+    // Checked, not assumed: `codex exec -s workspace-write` runs with
+    // `approval: never` by default (confirmed in a live run's banner), and
+    // the sandbox governs filesystem/network scope, not whether commands
+    // execute at all — a real `bun --version` ran inside it with no
+    // approval prompt. Nothing to widen here.
     run: (prompt) => ["exec", "-s", "workspace-write", prompt],
     turnReports: null,
   },
