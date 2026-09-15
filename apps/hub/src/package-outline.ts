@@ -4,7 +4,7 @@
  * can refuse a package that has none — whoever wrote it, the presentation
  * creator or a person — before it becomes a version.
  */
-import { DECK_DENSITY, DEFAULT_DECK_DESIGN } from "./deck-settings.js";
+import { DECK_DENSITY, DEFAULT_DECK_DESIGN } from "@solutions-builder/app/deck";
 
 export type DeckSlide = {
   readonly title: string;

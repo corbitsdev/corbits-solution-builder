@@ -69,6 +69,7 @@ const KIND_WORDS: Readonly<Record<ArtifactKind, string | null>> = {
   cost_approval: "Approval",
   build_packet: "Packet",
   build_evidence: "Build",
+  build_review: "Panel",
   delivery_manifest: "Manifest",
   delivery_verification: "Verification",
 };
