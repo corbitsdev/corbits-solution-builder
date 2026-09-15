@@ -13,16 +13,21 @@ Rules for every iteration:
 
 ## Ordered work
 
-1. **Verifier judges the deliverable by using it** (CL-8005) — in flight.
-   Confidence derived from what was exercised, `targets` selects the modality,
-   reports honestly rather than refusing. Uses the kit's `delivery-verifier`.
+1. ~~**Verifier judges the deliverable by using it** (CL-8005)~~ — DONE.
+   `completion-judge.ts`. Exercises the deliverable through its declared
+   `targets`, returns a confidence level clamped by mechanical evidence so the
+   model can lower it but never raise it. Verified end to end: a Sonnet build
+   was driven through the `cli` target and rated `medium`, withholding `high`
+   because a correction was never exercised.
 
-2. **`build.accept_evidence` requires a verifier report** (plan §7).
-   Today `engine.ts:710` checks descriptors only. The plan's precondition is
-   "complete verifier report and human stage-8 approval". Wire the gate.
+2. **`build.accept_evidence` requires a verifier report** (plan §7) — in
+   flight. `engine.ts:710` checks descriptors only; §7 wants "complete
+   verifier report and human stage-8 approval". The report now exists, so this
+   is finally fixable.
 
-3. **Panel reviews at stage 8, not only stage 6** (plan §8).
-   `panelPrincipalFor` is stage-6 only. The panel takes evidence as input at 8.
+3. ~~**Panel reviews at stage 8**~~ (plan §8) — DONE, host-side, because the
+   build runs beside the workflow rather than inside it. See CL-7991: that
+   constraint is why 2,830 lines of stage-8 support live in the hub.
 
 4. **`targets` stops being inert** (CL-7981).
    `domain.ts:112` types it; `build-attempt.ts:227` pastes it into a prompt and
