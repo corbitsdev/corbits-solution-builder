@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { hasWorkingDeliverable, runExecutionChecks } from "./execution-checks.js";
+import { discoverEntryPoint, hasWorkingDeliverable, runExecutionChecks } from "./execution-checks.js";
 
 const workspaces: string[] = [];
 afterEach(async () => {
@@ -238,6 +238,41 @@ describe("the positive case: a real deliverable is complete", () => {
     const entry = execution.find((check) => check.kind === "entry_point");
     expect(entry?.ok).toBe(true);
     expect(hasWorkingDeliverable(execution)).toBe(true);
+  });
+});
+
+describe("discoverEntryPoint", () => {
+  test("bin as a bare string", async () => {
+    const dir = await workspaceWith({ "bin/cli.js": "" });
+    const command = await discoverEntryPoint(dir, { bin: "bin/cli.js" });
+    expect(command).toEqual(["bun", "run", "bin/cli.js"]);
+  });
+
+  test("bin as an object, keyed by package name", async () => {
+    const dir = await workspaceWith({ "bin/cli.js": "", "bin/other.js": "" });
+    const command = await discoverEntryPoint(dir, {
+      name: "icp-cli",
+      bin: { other: "bin/other.js", "icp-cli": "bin/cli.js" },
+    });
+    expect(command).toEqual(["bun", "run", "bin/cli.js"]);
+  });
+
+  test("start script takes precedence over bin", async () => {
+    const dir = await workspaceWith({ "bin/cli.js": "" });
+    const command = await discoverEntryPoint(dir, { scripts: { start: "bun run bin/cli.js" }, bin: "bin/cli.js" });
+    expect(command).toEqual(["bun", "run", "--silent", "start"]);
+  });
+
+  test("a bin path escaping the workspace is refused", async () => {
+    const dir = await workspaceWith({});
+    const command = await discoverEntryPoint(dir, { bin: "../../etc/passwd" });
+    expect(command).toBeNull();
+  });
+
+  test("a manifest declaring none of start, main, bin, or a conventional file returns null", async () => {
+    const dir = await workspaceWith({ "package.json": JSON.stringify({ scripts: { test: "bun test" } }) });
+    const command = await discoverEntryPoint(dir, { scripts: { test: "bun test" } });
+    expect(command).toBeNull();
   });
 });
 

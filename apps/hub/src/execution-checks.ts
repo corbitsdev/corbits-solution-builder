@@ -64,7 +64,7 @@ const SKIPPED_DIRECTORIES = new Set(["node_modules", ".git", "dist", "build", ".
  */
 const MANIFEST_SKIPPED_DIRECTORIES = new Set([...SKIPPED_DIRECTORIES, "vendor"]);
 
-export type PackageManifest = { scripts?: Record<string, string>; main?: string };
+export type PackageManifest = { scripts?: Record<string, string>; main?: string; bin?: string | Record<string, string>; name?: string };
 
 export type ExecutionKind = "entry_point" | "test" | "typecheck" | "manifest";
 
@@ -231,12 +231,36 @@ async function execBounded(
   return { exitCode: timedOut ? null : exitCode, timedOut, stdoutTail, stderrTail };
 }
 
+/**
+ * Resolves `package.json`'s `bin` field to a single workspace-relative path.
+ * `bin` is either a bare string (the package has one binary) or an object
+ * mapping command name to path (it may declare several). For the object
+ * form, prefer the entry whose key matches the package's own `name` — that
+ * is unambiguous even with several binaries declared — and otherwise fall
+ * back to the first entry in declaration order, since a manifest with
+ * multiple binaries and none matching the package name is genuinely
+ * ambiguous and there is no better tiebreak than the order it was written in.
+ */
+function resolveBinPath(pkg: PackageManifest): string | null {
+  if (typeof pkg.bin === "string") return pkg.bin;
+  if (pkg.bin && typeof pkg.bin === "object") {
+    const entries = Object.entries(pkg.bin);
+    const first = entries[0];
+    if (!first) return null;
+    const byName = pkg.name ? entries.find(([key]) => key === pkg.name) : undefined;
+    return (byName ?? first)[1];
+  }
+  return null;
+}
+
 /** The command to run the deliverable itself, or null when none is discoverable. */
 export async function discoverEntryPoint(workspaceRoot: string, pkg: PackageManifest | null): Promise<string[] | null> {
   // `--silent` matters here: without it `bun run <script>` echoes "$ <command>"
   // to stdout, which would read as output the deliverable itself never wrote.
   if (pkg?.scripts?.start) return ["bun", "run", "--silent", "start"];
   if (typeof pkg?.main === "string" && containedPath(workspaceRoot, pkg.main)) return ["bun", "run", pkg.main];
+  const binPath = pkg ? resolveBinPath(pkg) : null;
+  if (binPath && containedPath(workspaceRoot, binPath)) return ["bun", "run", binPath];
   for (const candidate of ENTRY_POINT_CANDIDATES) {
     const resolved = containedPath(workspaceRoot, candidate);
     if (resolved && (await Bun.file(resolved).exists())) return ["bun", "run", candidate];
