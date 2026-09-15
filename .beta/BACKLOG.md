@@ -13,6 +13,25 @@ Rules for every iteration:
 - the end-to-end bench still works: seed to stage 8, build, inspect the artifact
 - prefer deleting host code over adding it; a change that grows `apps/hub` needs a reason
 
+## How this loop runs
+
+**The end-to-end build is the test.** Run a real stage-8 build against a real
+provider, read what came out, fix what it exposed, run it again. The refactor
+items below are worth doing, but they are not the driver — a passing gate has
+never once found a defect that running the product did not find first, and
+tonight's tally is the same shape: every real bug came from running something.
+
+Each turn: run the build, read the artifact and the transcript, fix the worst
+thing it showed, repeat.
+
+    bun --conditions intx-src scripts/bench-run.ts --stage 8 \
+      --out <dir> --problem <file>
+    # SOLUTIONS_BUILDER_SEED_BASE_URL -> the Ollama endpoint
+    # BENCH_WORKER_ID / BENCH_WORKER   -> the coding agent that writes the code
+
+What counts as a result: the verifier's confidence and its reasoning, whether
+the deliverable actually runs, and what the worker did when it got stuck.
+
 ## Ordered work
 
 1. ~~**Verifier judges the deliverable by using it** (CL-8005)~~ — DONE.
