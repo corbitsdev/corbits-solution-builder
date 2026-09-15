@@ -188,7 +188,21 @@ plain-English explanation after a loss, offline on one Mac.
 ## Open questions for reviewers
 - Does the review screen read as an explanation or as a scorecard?
 - Is drag-only interaction enough, or does the click-click path matter for
-  accessibility?`,
+  accessibility?
+
+## Audience: Project owner
+
+### Deck outline
+
+1. **Problem: chess practice without an explanation**
+   A player loses and learns nothing from it.
+2. **Proposed solution: a close game that explains the loss**
+   One Mac, offline, a plain-English review after each game.
+3. **Decision: build the design as shown**
+   Approve the GUI design against the brief's success criteria.
+
+### Decision request
+- Approve the design, or send it back with what to change.`,
     },
   ],
   6: [

@@ -64,7 +64,9 @@ stakeholder's own terms. A package can be redrafted alone: asking for one
 stakeholder's package again rewrites only that one, leaving the others as they
 stood.
 
-Each package's deck outline becomes a PowerPoint deck for that stakeholder,
+Every package carries a deck outline — a numbered list of slides under a
+"Deck outline" heading — and one without is refused rather than recorded,
+whoever wrote it. That outline becomes a PowerPoint deck for that stakeholder,
 kept as its own version beside the package. A deck's design — theme, typeface,
 how much a slide carries, whether it carries speaker notes, and what its
 outline should emphasise — is set once per role in Settings, where a role can

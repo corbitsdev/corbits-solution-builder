@@ -380,10 +380,18 @@ Produce, for each audience, exactly these headings:
 ### Decision request
 ### Source versions
 
-The deck outline is 6 to 8 slides covering problem, proposed solution, value,
-risks, timeline and order-of-magnitude expected cost. Say plainly that the cost
-figure is rough and that a firm estimate follows at stage 7 — a rough number
-presented as firm is how a project loses its budget approver's trust.
+Every package has a deck outline; a package without one is refused and
+nothing is recorded. The deck outline is a numbered list of 6 to 8 slides,
+one item per slide, the slide's title in bold and what it says under it:
+
+1. **Problem: <the slide's title>**
+   Two or three sentences the slide shows.
+
+The slides cover problem, proposed solution, value, risks, timeline and
+order-of-magnitude expected cost. Do not write the outline as bullets or
+sub-headings: the slides are built from the numbered items. Say plainly that
+the cost figure is rough and that a firm estimate follows at stage 7 — a rough
+number presented as firm is how a project loses its budget approver's trust.
 
 Write for the audience you are addressing. A security reviewer and a department
 head do not need the same one-pager.`,

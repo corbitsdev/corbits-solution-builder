@@ -15,6 +15,7 @@ import { newId, sha256 } from "./ids.js";
 import { HostError, notFound } from "./errors.js";
 import { origin } from "./guard.js";
 import { ARTIFACT_STAGE, type ArtifactDraft } from "./domain.js";
+import { packageOutlineProblem } from "./package-outline.js";
 import type { ProjectPolicy } from "./engine.js";
 import { launchProjectRun, soloApprovalFor } from "./engine.js";
 import { ledgerCommands, recordCommand, projectApprovals, projectFlags, projectQuestions } from "./engine-ledger.js";
@@ -123,6 +124,20 @@ export async function writeArtifact(
 ): Promise<{ nodeId: string; artifactId: string; version: number; contentHash: string }> {
   const { db, artifactDb } = database();
   const stage = ARTIFACT_STAGE[draft.kind] as Stage;
+  // A stakeholder's package is where their slides come from, so a package
+  // without a deck outline is not a package, whoever wrote it: the
+  // presentation creator, a person, an import. Refused before it is a version.
+  if (draft.kind === "audience_package") {
+    const problem = packageOutlineProblem(draft.content);
+    if (problem) {
+      throw new HostError(
+        "validation_failed",
+        `The package${draft.variant ? ` for ${draft.variant}` : ""} was not recorded: ${problem}.`,
+        { kind: draft.kind, ...(draft.variant ? { variant: draft.variant } : {}) },
+        false,
+      );
+    }
+  }
   const contentHash = await sha256(draft.content);
 
   const scope = {
