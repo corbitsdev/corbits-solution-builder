@@ -450,42 +450,14 @@ try {
     // does it: the engine commits each transition and delivers the signal
     // the run waits on. The run and the ledger then agree at every stage,
     // which stage 5's draft below depends on.
-    const { execute } = await import("../apps/hub/src/engine.js");
-    const { newId } = await import("../apps/hub/src/ids.js");
     const { writeArtifact, projectDetail } = await import("../apps/hub/src/projects.js");
+    const { produceStageArtifact, advanceStage } = await import("./lib/stage-walk.js");
     const ACTOR = { ...localActor(), displayName: "Smoke" };
-    const command = (type: string, payload: Record<string, unknown>) =>
-      execute({
-        type: type as never,
-        actor: ACTOR,
-        projectId: project.projectId,
-        idempotencyKey: newId.command(),
-        correlationId: newId.correlation(),
-        payload,
-      });
+    const walkCtx = { projectId: project.projectId, runId: project.runId, actor: ACTOR };
     const currentRunId = async () => (await projectDetail(project.projectId, ACTOR.principalId)).current!.id;
     const versionOf = (node: { nodeId: string; artifactId: string; contentHash: string }) => [
       { artifactId: node.artifactId, versionId: node.nodeId, contentHash: node.contentHash },
     ];
-    const STAGE_ARTIFACT: Record<number, string> = {
-      1: "problem_brief",
-      2: "solution_constraints",
-      3: "chosen_approach",
-      4: "design_artifact",
-    };
-    const produce = async (stage: number) =>
-      writeArtifact(
-        {
-          projectId: project.projectId,
-          kind: STAGE_ARTIFACT[stage] as never,
-          title: `Stage ${stage} artifact`,
-          content: `# Stage ${stage}\n\nRecorded by the sidecar smoke at ${new Date().toISOString()}.`,
-          mediaType: "text/markdown",
-          sourceVersionIds: [],
-          provenance: { producer: "human", runId: await currentRunId() },
-        },
-        ACTOR,
-      );
 
     // A round whose call the provider refuses does not draft. The person who
     // waited on it learns so from the thread: a turn that says the round did
@@ -524,23 +496,21 @@ try {
       await settle((s) => s.parked && s.stage === 1);
     }
 
-    const briefVersion = versionOf(brief ?? (await produce(1)));
-    const submitted = (await command("stage.submit", { runId: await currentRunId(), versions: briefVersion })).delivery ?? "none";
-    check("stage.submit lands on the parked loop as its round signal", submitted === "delivered", submitted);
-    const atGate = await settle((s) => s.parked && s.stepId === gateStepId(1));
-    if (!atGate) {
+    const briefVersion = brief ? versionOf(brief) : await produceStageArtifact(walkCtx, 1);
+    const stage1 = await advanceStage(walkCtx, 1, briefVersion);
+    check("stage.submit lands on the parked loop as its round signal", stage1.submitDelivery === "delivered", stage1.submitDelivery);
+    if (!stage1.gate) {
       const { debugRuns } = await import("../apps/hub/src/hub-executor.js");
       console.log("DIAG", JSON.stringify(await debugRuns(project.projectId), null, 1).slice(0, 6000));
     }
     check(
       "the submit ends the round and the run parks at the stage 1 gate",
-      atGate?.parked === true && atGate.stepId === gateStepId(1) && atGate.signalName === approveSignal(1),
-      atGate ? `${atGate.stepId} ${atGate.signalName ?? ""}` : "no status",
+      stage1.gate?.parked === true && stage1.gate.stepId === gateStepId(1) && stage1.gate.signalName === approveSignal(1),
+      stage1.gate ? `${stage1.gate.stepId} ${stage1.gate.signalName ?? ""}` : "no status",
     );
 
-    const approved = (await command("stage.approve", { runId: await currentRunId(), versions: briefVersion })).delivery ?? "none";
-    check("stage.approve lands on the gate", approved === "delivered", approved);
-    const atStage2 = await settle((s) => s.parked && s.stage === 2);
+    check("stage.approve lands on the gate", stage1.approveDelivery === "delivered", stage1.approveDelivery);
+    const atStage2 = stage1.next;
     check(
       "the approval opens stage 2, parked on its first round",
       atStage2?.parked === true && atStage2.stepId.startsWith(reviseStepId(2)) && atStage2.signalName === roundSignal(2),
@@ -558,11 +528,8 @@ try {
       // stage 5 approval needs stakeholder decisions this smoke does not
       // record, and the run alone is what the build stage below needs.
       if (stage <= 4) {
-        const version = versionOf(await produce(stage));
-        await command("stage.submit", { runId: await currentRunId(), versions: version });
-        const gate = await settle((s) => s.parked && s.stepId === gateStepId(stage));
-        await command("stage.approve", { runId: await currentRunId(), versions: version });
-        const next = await settle((s) => s.parked && s.stage === stage + 1);
+        const version = await produceStageArtifact(walkCtx, stage as 1 | 2 | 3 | 4);
+        const { gate, next } = await advanceStage(walkCtx, stage, version);
         walked = gate?.stepId === gateStepId(stage) && next?.stage === stage + 1;
         continue;
       }
@@ -757,11 +724,7 @@ try {
         await removeTemplate("project_owner");
         await saveDeckDesign("project_owner", { template: null });
       }
-      await deliverStageSignal(project.projectId, "stage.submit", { runId: project.runId }, `smoke-submit-${stage}-${project.projectId}`);
-      const gate = await settle((s) => s.parked && s.stepId === gateStepId(stage));
-      const advance = stage === 7 ? "cost.approve" : "stage.approve";
-      await deliverStageSignal(project.projectId, advance, { runId: project.runId }, `smoke-approve-${stage}-${project.projectId}`);
-      const next = await settle((s) => s.parked && s.stage === stage + 1);
+      const { gate, next } = await advanceStage(walkCtx, stage);
       walked = gate?.stepId === gateStepId(stage) && next?.stage === stage + 1;
     }
     const atStage8 = await settle((s) => s.parked && s.stage === 8);
@@ -872,6 +835,7 @@ try {
   }
 } finally {
   stub.close();
+  hub().stopReconcile();
   const { stopSpawnedSidecars } = await import("../apps/hub/src/sidecar-processes.js");
   await stopSpawnedSidecars(join(dataDir, "hub"));
   await server.stop(true);

@@ -105,6 +105,14 @@ export type MountedHub = {
    * allocation carries a different one is not reachable from this host.
    */
   readonly sidecarBindingFingerprint: string;
+  /**
+   * Stops the reconcile loop from rescheduling itself. Idempotent, and safe
+   * to call mid-cycle: the loop only checks the flag in its own `finally`, so
+   * an in-flight tick still finishes. A caller tearing down this mount's
+   * database before the process exits needs this — otherwise the loop keeps
+   * ticking against a closed handle for as long as the process stays up.
+   */
+  readonly stopReconcile: () => void;
 };
 
 let mounted: MountedHub | null = null;
@@ -390,6 +398,11 @@ export async function mountHub(): Promise<MountedHub> {
   const REPAIR_MS = 30_000;
   let nextRepairAt = Date.now() + REPAIR_MS;
   let nextProbeCleanupAt = Date.now() + REPAIR_MS;
+  // Set by `stopReconcile()`. A tick already in flight when it is set still
+  // runs to completion against whatever the caller is tearing down — if that
+  // is the database, the tick fails, but a stopping mount asked for exactly
+  // that, so it is not logged as a failure. It just does not reschedule.
+  let reconcileStopped = false;
   const reconcile = async () => {
     try {
       if (Date.now() >= nextProbeCleanupAt) {
@@ -403,9 +416,11 @@ export async function mountHub(): Promise<MountedHub> {
         await sidecarAllocationReconciler.repairUnscheduledConnections();
       }
     } catch (cause) {
-      console.error(`Sidecar reconciliation failed: ${cause instanceof Error ? cause.message : String(cause)}`);
+      if (!reconcileStopped) {
+        console.error(`Sidecar reconciliation failed: ${cause instanceof Error ? cause.message : String(cause)}`);
+      }
     } finally {
-      setTimeout(() => void reconcile(), RECONCILE_MS).unref();
+      if (!reconcileStopped) setTimeout(() => void reconcile(), RECONCILE_MS).unref();
     }
   };
   setTimeout(() => void reconcile(), 0).unref();
@@ -467,6 +482,9 @@ export async function mountHub(): Promise<MountedHub> {
     },
     events: sidecarRouter.events,
     sidecarBindingFingerprint: bindingFingerprint,
+    stopReconcile: () => {
+      reconcileStopped = true;
+    },
   };
   return mounted;
 }
