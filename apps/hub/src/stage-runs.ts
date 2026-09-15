@@ -42,6 +42,7 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import { newId } from "./ids.js";
 import { ArtifactDraft } from "./domain.js";
 import { HostError, ReplyCutShort } from "./errors.js";
+import { packageOutlineProblem } from "./package-outline.js";
 import { providerServingModel } from "./catalog.js";
 import { MATERIAL_KIND, materialText } from "./source-material.js";
 import { DECK_KIND, writeDeckFor } from "./deck.js";
@@ -302,6 +303,21 @@ async function persistOutput(args: {
       `${args.role.title} returned a design cut short after ${cleaned.length} characters: the document has no closing tag. Nothing was recorded.`,
       null,
     );
+  }
+
+  // A stakeholder's package is the source of their slides, so one with no
+  // deck outline is refused rather than recorded: the person redrafts, and
+  // the thread says what the model left out and who was asked.
+  if (args.role.produces === "audience_package") {
+    const problem = packageOutlineProblem(cleaned);
+    if (problem) {
+      throw new HostError(
+        "validation_failed",
+        `${args.role.title} returned a package${args.variant ? ` for ${args.variant}` : ""} from ${asked} that cannot be recorded: ${problem}. Nothing was recorded; draft it again.`,
+        {},
+        true,
+      );
+    }
   }
 
   const draft = ArtifactDraft({
@@ -703,9 +719,11 @@ export async function requestDraft(args: {
           ...(drewOnBrief && context.brief ? { brief: context.brief } : {}),
         });
         persisted.set(stepId, result);
-        // Each stakeholder's package carries a deck outline; the slides are
-        // built from it and kept beside the package. A deck that cannot be
-        // built is logged, not a failure of the package it came from.
+        // Every stakeholder's package carries a deck outline (persistOutput
+        // refused it otherwise); the slides are built from it and kept beside
+        // the package. A deck the renderer cannot produce is logged, not a
+        // failure of the package it came from: the outline is still there,
+        // and "Save slides" builds from it again.
         if (args.stage === 5 && variant !== undefined) {
           const audience = audiences.find((entry) => entry.name === variant)!;
           await writeDeckFor({
@@ -721,7 +739,7 @@ export async function requestDraft(args: {
           });
         }
       } catch (cause) {
-        // An empty or cut-short package is that package's failure too.
+        // An empty, cut-short or outline-less package is that package's failure too.
         if (args.stage !== 5 || !(cause instanceof HostError)) throw cause;
         failed.push({ audience: audienceOf(stepId), message: cause.message });
       }
