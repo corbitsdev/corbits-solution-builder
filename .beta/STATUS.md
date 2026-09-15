@@ -321,6 +321,34 @@ downstream will correctly certify that it works. Worth a stage-2/3 question
 about data sources, and worth remembering that "high confidence the deliverable
 meets the specification" is exactly what it says and nothing more.
 
+## Acting on the fabrication gap
+
+#245: the stage-2 constraints mapper now asks where real-world data comes
+from, and stage 6 carries the answer into the requirements the build is
+written against. The prompt names the mechanism rather than just demanding a
+field:
+
+> A deliverable asked to produce real-world output — leads, prices, records,
+> anything a person will treat as fact — with no source named will not fail;
+> it will fabricate output that reads as real, and **every later stage checks
+> the build against its own requirements, not against the world**, so
+> fabricated data passes verification as cleanly as real data would.
+
+Two deliberate shapes:
+
+- **"None — this runs on sample data" is a complete answer**, and the prompt
+  says so. The point is that the choice is made and recorded, not that every
+  project wires up a real source. A prototype on invented leads is fine; a
+  prototype nobody realised was on invented leads is not. What is refused is
+  silence.
+- **No hub validation.** A legitimate "sample data" answer is indistinguishable
+  from an omission, and a check that cannot tell them apart would be a gate
+  that lies — the exact failure this branch spent the night removing.
+
+Stage 6 is also forbidden from papering over: if the constraints left it
+unnamed, that goes under Assumptions as an open question for the Architect,
+"never as a source you invented to make the requirement read as complete".
+
 ## Stale PRs, left alone on purpose
 
 Eight PRs are still open — #168, #172, #177, #192, #202, #203, #204, #207.
