@@ -650,6 +650,8 @@ let buildRunId = "";
   );
   const seededManifest = JSON.parse(await Bun.file(join(thirdWorkspace, "package.json")).text()) as {
     workspaces?: string[];
+    scripts?: Record<string, string>;
+    devDependencies?: Record<string, string>;
   };
   const seededGitignore = await Bun.file(join(thirdWorkspace, ".gitignore")).text();
   check(
@@ -663,13 +665,34 @@ let buildRunId = "";
       (await Bun.file(join(thirdWorkspace, "AGENTS.md")).exists()),
     `skills=${seededSkills.join(",")}`,
   );
+  // The worker can verify its own work from the first turn: `test` needs no
+  // install at all (Bun's runner is built in), and `typecheck` needs only the
+  // seeded `typescript` devDependency and tsconfig, installed at seed time.
+  check(
+    "the seeded workspace declares scripts the worker can actually run, and can typecheck itself unmodified",
+    seededManifest.scripts?.test === "bun test" &&
+      seededManifest.scripts?.typecheck === "tsc --noEmit" &&
+      typeof seededManifest.devDependencies?.typescript === "string" &&
+      (await Bun.file(join(thirdWorkspace, "tsconfig.json")).exists()) &&
+      Bun.spawnSync(["bun", "run", "typecheck"], { cwd: thirdWorkspace, stdout: "ignore", stderr: "ignore" }).success,
+  );
 
   // Trying again can continue from that attempt's work: its workspace is
-  // copied into the new attempt's, and the worker is told it is there.
+  // copied into the new attempt's, and the worker is told it is there. It
+  // also writes a passing test, so delivery verification's own `bun test`
+  // run — which now actually executes the seeded `test` script — has
+  // something real to find, the way a worker that finished would leave one.
   const continuing = join(bin, "continuing-worker");
   await writeFile(
     continuing,
-    ["#!/bin/sh", 'case "$1" in', '  --help) echo "usage: worker exec <prompt>"; exit 0 ;;', '  exec) if [ -f built.txt ]; then echo "found previous work: $(cat built.txt)"; else echo "nothing here"; fi; case "$2" in *"Continue from it"*) echo "told to continue" ;; esac; exit 0 ;;', "esac", ""].join("\n"),
+    [
+      "#!/bin/sh",
+      'case "$1" in',
+      '  --help) echo "usage: worker exec <prompt>"; exit 0 ;;',
+      '  exec) if [ -f built.txt ]; then echo "found previous work: $(cat built.txt)"; else echo "nothing here"; fi; case "$2" in *"Continue from it"*) echo "told to continue" ;; esac; echo \'import { test, expect } from "bun:test"; test("smoke", () => expect(true).toBe(true));\' > smoke.test.ts; exit 0 ;;',
+      "esac",
+      "",
+    ].join("\n"),
   );
   await chmod(continuing, 0o755);
   process.env.SOLUTIONS_BUILDER_WORKER_BIN = continuing;
