@@ -20,9 +20,9 @@
  * What it does NOT do: no filesystem, network, or process-namespace
  * isolation.
  */
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, normalize } from "node:path";
+import { dirname, isAbsolute, join, normalize } from "node:path";
 
 const ENTRY_POINT_TIMEOUT_MS = 15_000;
 const SCRIPT_TIMEOUT_MS = 60_000;
@@ -53,6 +53,16 @@ const SOURCE_FILE_PATTERN = /(?<!\.d)\.(ts|tsx|mts|cts)$/i;
  * in for one the worker wrote.
  */
 const SKIPPED_DIRECTORIES = new Set(["node_modules", ".git", "dist", "build", ".corbits", ".agents"]);
+
+/**
+ * Same exclusions as source/test discovery, plus `vendor`: used only when
+ * hunting for a workspace member's `package.json` (see
+ * `findWorkspaceManifests`), where a vendored package declaring the same
+ * script name must never be mistaken for the deliverable following the seed
+ * there. `vendor/interchange` is also large enough that walking into it here
+ * would be pure cost for no signal.
+ */
+const MANIFEST_SKIPPED_DIRECTORIES = new Set([...SKIPPED_DIRECTORIES, "vendor"]);
 
 export type PackageManifest = { scripts?: Record<string, string>; main?: string };
 
@@ -87,6 +97,88 @@ export function containedPath(root: string, relative: string): string | null {
   if (isAbsolute(relative)) return null;
   const resolved = normalize(join(root, relative));
   return resolved.startsWith(normalize(root) + "/") ? resolved : null;
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The seeded `package.json`, read from the workspace's baseline commit
+ * (`chore: seed the workspace`, written by `build-workspace.ts` before the
+ * worker ever runs) — the root commit of the workspace's own history, not a
+ * guess from the message. `null` when there is no baseline to compare
+ * against: no `.git` at all (a host without git), or an unborn/absent root
+ * commit. Either way, nothing is asserted about scripts that were never
+ * recorded seeded in the first place.
+ */
+async function readBaselineManifest(workspaceRoot: string): Promise<PackageManifest | null> {
+  if (!(await pathExists(join(workspaceRoot, ".git")))) return null;
+  const root = Bun.spawnSync(["git", "-C", workspaceRoot, "rev-list", "--max-parents=0", "HEAD"], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (root.exitCode !== 0) return null;
+  const sha = root.stdout.toString().trim().split("\n")[0];
+  if (!sha) return null;
+  const show = Bun.spawnSync(["git", "-C", workspaceRoot, "show", `${sha}:package.json`], {
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (show.exitCode !== 0) return null;
+  try {
+    return JSON.parse(show.stdout.toString()) as PackageManifest;
+  } catch {
+    return null;
+  }
+}
+
+/** Every `package.json` under `root`, as paths relative to it — the root's own included. */
+async function findWorkspaceManifests(root: string, limit = 200): Promise<string[]> {
+  const hits: string[] = [];
+  async function walk(dir: string): Promise<void> {
+    if (hits.length >= limit) return;
+    for (const item of await readdir(dir, { withFileTypes: true })) {
+      if (hits.length >= limit) return;
+      if (item.isDirectory()) {
+        if (MANIFEST_SKIPPED_DIRECTORIES.has(item.name)) continue;
+        await walk(join(dir, item.name));
+      } else if (item.isFile() && item.name === "package.json") {
+        hits.push(join(dir, item.name).slice(root.length + 1));
+      }
+    }
+  }
+  await walk(root);
+  return hits;
+}
+
+/**
+ * Looks for a workspace member (any `package.json` other than the root's
+ * own) that now declares the script the root lost. This is what tells a
+ * legitimate restructure — the deliverable moved into `apps/icp-cli/` with
+ * its own manifest — from an actually-lost check: in the former case the
+ * script still exists, just not at the root, and the check should run from
+ * wherever it now lives.
+ */
+async function findWorkspaceMemberWithScript(
+  root: string,
+  kind: "test" | "typecheck",
+): Promise<{ dir: string } | null> {
+  for (const relative of await findWorkspaceManifests(root)) {
+    if (relative === "package.json") continue;
+    try {
+      const pkg = JSON.parse(await Bun.file(join(root, relative)).text()) as PackageManifest;
+      if (pkg.scripts?.[kind]) return { dir: dirname(relative) };
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }
 
 /** Reads a pipe to a bounded tail: the last `maxBytes`, never the whole stream. */
@@ -220,40 +312,61 @@ async function hasTypecheckableSource(root: string): Promise<boolean> {
   return hits.length > 0;
 }
 
-async function runDeclaredScript(kind: "test" | "typecheck", workspaceRoot: string, home: string): Promise<ExecutionCheck> {
+async function runDeclaredScript(kind: "test" | "typecheck", cwd: string, home: string): Promise<ExecutionCheck> {
   const command = ["bun", "run", "--silent", kind];
-  const raw = await execBounded(command, workspaceRoot, SCRIPT_TIMEOUT_MS, home);
-  // `bun test` exits 1 when it finds zero test files under the deliverable —
-  // the same exit code a genuinely failing suite produces. Seeding always
-  // declares a `test` script, so a deliverable nobody wrote tests for would
-  // otherwise be blocked from delivery by accident, indistinguishable from
-  // one whose tests actually fail. Read from bun's own message, "no tests
-  // exist" is treated as passing — UNLESS the workspace holds files that look
-  // like tests to a human (e.g. `tests/test_icp.ts`, which bun's `*.test.ts`
-  // glob never collects): a worker that wrote tests bun could not find has
-  // not passed, it has produced dead weight indistinguishable from nothing at
-  // all, and that is a failure worth reporting, not a pass.
-  const bunFoundNothing = kind === "test" && !raw.timedOut && /No tests found!|0 test files matching/.test(raw.stderrTail);
-  const misnamedTests = bunFoundNothing ? await findTestLikeFiles(workspaceRoot) : [];
-  const noTestFiles = bunFoundNothing && misnamedTests.length === 0;
+  const raw = await execBounded(command, cwd, SCRIPT_TIMEOUT_MS, home);
+  // Bun's own summary line — "Ran N test(s) across M files." — is read for
+  // its count, not matched as a string: this is what tells a real pass from
+  // one that exercised nothing, regardless of how bun happens to word it.
+  // `null` here means the line never printed at all, which happens on the
+  // *other* zero-test case below (the glob matched no files, so bun never
+  // gets as far as running anything to summarize).
+  const ranMatch = kind === "test" ? raw.stderrTail.match(/Ran (\d+) tests? across \d+ files?\./) : null;
+  const testsRan = ranMatch ? Number(ranMatch[1]) : null;
+  // `bun test` exits 1 when its glob matches zero files under the
+  // deliverable — the same exit code a genuinely failing suite produces.
+  // Seeding always declares a `test` script, so a deliverable nobody wrote
+  // tests for would otherwise be blocked from delivery by accident,
+  // indistinguishable from one whose tests actually fail. Read from bun's
+  // own message, "no tests exist" is treated as passing — UNLESS the
+  // workspace holds files that look like tests to a human (e.g.
+  // `tests/test_icp.ts`, which bun's `*.test.ts` glob never collects): a
+  // worker that wrote tests bun could not find has not passed, it has
+  // produced dead weight indistinguishable from nothing at all, and that is
+  // a failure worth reporting, not a pass. `testsRan === null` gates this:
+  // once the count above proves bun genuinely ran something, this branch is
+  // moot regardless of what stderr also happens to contain.
+  const globMatchedNothing =
+    kind === "test" && !raw.timedOut && testsRan === null && /No tests found!|0 test files matching/.test(raw.stderrTail);
+  const misnamedTests = globMatchedNothing ? await findTestLikeFiles(cwd) : [];
+  const noTestFiles = globMatchedNothing && misnamedTests.length === 0;
   const ok = !raw.timedOut && (raw.exitCode === 0 || noTestFiles);
+  // Vacuous covers two shapes of "passed while proving nothing": no test
+  // files at all (above), and test files that exist, that bun collected and
+  // ran, and in which it executed exactly zero tests — empty files, or files
+  // with no `test()`/`it()` calls in them. Bun exits 0 for that and never
+  // says "No tests found!" (that string is reserved for the glob-matched-
+  // nothing case above), so only the parsed count catches it.
+  const zeroTestsExecuted = kind === "test" && ok && (noTestFiles || testsRan === 0);
   // `tsc --noEmit` exits 0 with nothing to say when it typechecks zero
   // files — passing for the same reason `bun test` passes on zero tests:
   // there was nothing to fail. Only checked when the run otherwise passed;
   // a real failure is never vacuous.
-  const noSourceFiles = kind === "typecheck" && ok && !(await hasTypecheckableSource(workspaceRoot));
-  const vacuous = noTestFiles || noSourceFiles;
+  const noSourceFiles = kind === "typecheck" && ok && !(await hasTypecheckableSource(cwd));
+  const vacuous = zeroTestsExecuted || noSourceFiles;
   const detail = raw.timedOut
     ? `${kind} exceeded ${SCRIPT_TIMEOUT_MS}ms and was killed`
     : noTestFiles
       ? "no test files were found; not treated as a failure"
       : misnamedTests.length > 0
         ? `bun collected no test files, but found what look like tests it will never run: ${misnamedTests.join(", ")} — rename them to match bun's test glob (*.test.ts, *_test.ts, etc.)`
-        : noSourceFiles
-          ? "typecheck passed, but no .ts/.tsx source files exist to typecheck"
-          : ok
-            ? `${kind} passed`
-            : `${kind} exited ${raw.exitCode}`;
+        : testsRan === 0
+          ? "bun collected test files but ran 0 tests in them — empty or assertion-less test files are not evidence anything works"
+          : noSourceFiles
+            ? "typecheck passed, but no .ts/.tsx source files exist to typecheck"
+            : ok
+              ? `${kind} passed`
+              : `${kind} exited ${raw.exitCode}`;
   return {
     kind,
     command: command.join(" "),
@@ -268,12 +381,53 @@ async function runDeclaredScript(kind: "test" | "typecheck", workspaceRoot: stri
 }
 
 /**
+ * When the root `package.json` no longer declares a script the workspace was
+ * seeded with, decides whether that is a lost check or a legitimate
+ * restructure. The baseline commit is the exact record of what was seeded
+ * (`readBaselineManifest`) — never a guess. Three outcomes:
+ *
+ *   - the baseline never declared this script either -> nothing to report
+ *     (`null`), including every host without git to compare against;
+ *   - a workspace member now declares it -> the deliverable moved, so the
+ *     check follows it there and actually runs, from that directory;
+ *   - it is gone everywhere -> a failing check is reported for it, exactly
+ *     as if it had run and failed, because a check a worker can delete
+ *     instead of pass is not a check at all.
+ */
+async function checkSeededScriptSurvival(
+  workspaceRoot: string,
+  kind: "test" | "typecheck",
+  home: string,
+): Promise<ExecutionCheck | null> {
+  const baseline = await readBaselineManifest(workspaceRoot);
+  if (!baseline?.scripts?.[kind]) return null;
+  const member = await findWorkspaceMemberWithScript(workspaceRoot, kind);
+  if (member) return runDeclaredScript(kind, join(workspaceRoot, member.dir), home);
+  return {
+    kind,
+    command: `bun run --silent ${kind}`,
+    exitCode: null,
+    timedOut: false,
+    ok: false,
+    vacuous: false,
+    detail: `the seeded \`${kind}\` script was removed from package.json, and no workspace member declares it either — the check the seed relied on no longer exists`,
+    stdoutTail: "",
+    stderrTail: "",
+  };
+}
+
+/**
  * Runs the deliverable's own entry point, and its declared tests and
  * typecheck, inside `workspaceRoot`. Nothing here is presence checking —
  * every item is a process that actually ran, or an explicit record that it
  * did not. An empty array means no runnable check was discoverable at all
  * (no entry point, no `test` or `typecheck` script) — that is not the same
  * as passing, and callers must not treat it as proof of completion.
+ *
+ * A `test`/`typecheck` script the workspace was *seeded* with (see
+ * `build-workspace.ts`) but which no longer exists anywhere is not silently
+ * absent either: `checkSeededScriptSurvival` reports it as a failing check,
+ * so deleting the check that would fail is no easier than passing it.
  */
 export async function runExecutionChecks(workspaceRoot: string): Promise<ExecutionCheck[]> {
   const pkgPath = join(workspaceRoot, "package.json");
@@ -289,7 +443,12 @@ export async function runExecutionChecks(workspaceRoot: string): Promise<Executi
     const entry = await discoverEntryPoint(workspaceRoot, pkg);
     if (entry) checks.push(await runEntryPoint(entry, workspaceRoot, home));
     for (const kind of ["test", "typecheck"] as const) {
-      if (pkg?.scripts?.[kind]) checks.push(await runDeclaredScript(kind, workspaceRoot, home));
+      if (pkg?.scripts?.[kind]) {
+        checks.push(await runDeclaredScript(kind, workspaceRoot, home));
+      } else {
+        const lost = await checkSeededScriptSurvival(workspaceRoot, kind, home);
+        if (lost) checks.push(lost);
+      }
     }
     return checks;
   } finally {
