@@ -136,16 +136,48 @@ export function readVerifierReport(value: unknown): VerifierReport | null {
  * turn into an unbounded transcript. Returns `[]`, honestly, when the
  * requirements describe no such section — nothing is fabricated to fill it.
  */
-function extractExampleInput(requirements: string, limit = 20): string[] {
+export function extractExampleInput(requirements: string, limit = 20): string[] {
   const collected: string[] = [];
-  let inExample = false;
+  // The depth of the example's own heading while inside one, so a *deeper*
+  // heading stays within it. A real requirements document writes the example
+  // as `## Worked example` with `### Input` and `### Output` under it, and
+  // treating those subheadings as the end of the section threw away the very
+  // lines the example exists to provide -- observed on a real build, whose
+  // example was present, well-formed, and invisible.
+  let exampleDepth: number | null = null;
+  let inFence = false;
+  let inInput = false;
+  let sawInputHeading = false;
   for (const raw of requirements.split("\n")) {
-    const heading = /^#{1,6}\s+(.*)$/.exec(raw);
-    if (heading) {
-      inExample = EXAMPLE_HEADING_PATTERN.test(heading[1] ?? "");
+    // A fenced block inside the example is the example: keep what it holds
+    // and drop the ``` markers, which are markup and not input anyone types.
+    if (/^\s*(```|~~~)/.test(raw)) {
+      if (exampleDepth !== null) inFence = !inFence;
       continue;
     }
-    if (!inExample) continue;
+    const heading = inFence ? null : /^(#{1,6})\s+(.*)$/.exec(raw);
+    if (heading) {
+      const depth = heading[1]!.length;
+      const title = heading[2] ?? "";
+      if (EXAMPLE_HEADING_PATTERN.test(title)) {
+        exampleDepth = depth;
+        inInput = false;
+      } else if (exampleDepth !== null && depth <= exampleDepth) {
+        exampleDepth = null;
+        inInput = false;
+      } else if (exampleDepth !== null) {
+        // Inside the example, a subheading says which half this is. Feeding a
+        // deliverable its own expected output would be evidence of nothing --
+        // it could echo what it was handed and look correct.
+        inInput = /\binput\b|\bgiven\b|\bwhen\b/i.test(title);
+        sawInputHeading = sawInputHeading || inInput;
+      }
+      continue;
+    }
+    if (exampleDepth === null) continue;
+    // Only skip non-input halves once the document has actually named one;
+    // an example written as a flat block has no halves and is taken whole.
+    if (sawInputHeading && !inInput) continue;
     const stripped = raw.replace(/^\s*[-*+]\s+/, "").trim();
     if (stripped.length === 0) continue;
     const withoutLabel = stripped
