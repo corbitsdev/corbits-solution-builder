@@ -85,6 +85,19 @@ the deliverable actually runs, and what the worker did when it got stuck.
 
 ## Flagged upstream (we may not fix these)
 
+- **CL-8013 — every stage iteration leaves a run marked "running" with an
+  active principal.** A *successful* nine-stage walk logs 13 ERROR lines from
+  `hub-session-lookups.ts:435`, one per iteration. Upstream's own comment says
+  what that branch costs: the run stays "running" with its principal active,
+  there is no automatic re-fire, and the ERROR is "the only record that the
+  row needs a manual flip".
+
+  Two possibilities I could not distinguish without querying the workspace DB:
+  the iteration runs have no row at all (leak is imaginary, the message is
+  misleading), or they have one under a different anchor (leak is real). Either
+  needs fixing. Only visible since #238 — the canned walk never created an
+  iteration run, so no terminal event ever fired.
+
 - **CL-8011 — credential `use` grants don't survive the ancestor walk.**
   Resolution walks the tenant chain; authorization does not. The auto-grant
   `credentials.ts:265` writes is stamped with the tenant the credential was

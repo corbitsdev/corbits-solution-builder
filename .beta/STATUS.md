@@ -118,6 +118,21 @@ move is what progress looks like when the code has somewhere else to live.
   cleanup swallowed its own failure with `.catch(() => undefined)`.
 
 
+- #236 Brian's slide-build refusal reason, restored after my `--ours` merge
+  dropped it.
+- #237 **the local endpoint stores the URL that actually answered.** Connect
+  Ollama by its plain URL and it validated, reported ready, listed its models,
+  then 404'd every inference call — a provider that is connected and cannot
+  answer a single request. `validateLocalEndpoint` normalised `/v1` for its own
+  probe and threw it away. Three runs, same model: bare → 404; `/v1` by hand →
+  parked at stage 2; bare with the fix → parked at stage 2.
+- #238 **the bench runs the real specialist rounds.** Stages 1-7 used to write
+  canned text with `producer: "human"` — no specialist, no prompt, no model. It
+  proved the ledger advances and nothing else, which is how #237 survived a
+  whole night of green checks. Real is now the default, with
+  `--seed-artifacts` kept for jumping to a stage with dummy data, and every
+  artifact asserted `producer === "agent"`.
+
 Goal: that ratio inverts. Hub vanilla, meat in workflows/agents/tools/skills.
 
 ## Process note, from a mistake
