@@ -18,6 +18,13 @@ import {
   isTerminal,
 } from "@solutions-builder/app/ledger";
 
+// Not a workspace root dependency (only the rendered lifecycle source names
+// it — see the sandbox symlink below), so its id is read by relative path
+// rather than a bare specifier that would not resolve here.
+const { deck: renderDeckTool } = (await import("../packages/tools-deck/src/sidecar-bundle.ts")) as {
+  deck: { id: string };
+};
+
 const problems: string[] = [];
 const seen = new Set<string>();
 
@@ -543,6 +550,8 @@ for (const terminal of TERMINAL_STATES) {
             problems.push(`Stage 5's ${stepId} does not read prompts[${index}]`);
           } else if (!packageStep.after?.includes(pickId)) {
             problems.push(`Stage 5's ${stepId} does not follow ${pickId}`);
+          } else if (!packageStep.agent?.toolFactories?.some((tool) => tool.id === renderDeckTool.id)) {
+            problems.push(`Stage 5's ${stepId} does not carry the render_deck tool`);
           }
           previous = [stepId, skipId];
         });
