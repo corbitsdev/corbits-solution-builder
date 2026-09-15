@@ -150,6 +150,32 @@ sidecar — than by the hub shrinking further. The deck tool is the model for
 that: it left the hub, and its destination is the workflow closure, not
 another host module.
 
+## The sweep result
+
+I named the shape, so I swept for it rather than leaving it as an observation.
+556 exported symbols across 105 files, every reference traced repo-wide
+excluding `vendor/` and `node_modules/`, plus 30+ policy-shaped optional
+fields. The method re-derived `grantRequirementsFor` independently, which is
+the check that it works.
+
+**Exactly one further instance**, and it is milder than the three known ones:
+`executionUnavailable()` (`hub-executor.ts:567`) has zero callers anywhere, so
+the reason a project cannot run — `no_offering` or `no_host`, already computed
+and stored in a map whose docstring says "for the status line" — never reaches
+the status line. The user sees a generic state instead of what is missing.
+That is a dead end, which is the one thing this product is not allowed to be.
+In flight.
+
+A correction to the sweep's own wording: it said divergence has "no code path,
+log, or API surface". There is a `console.error` at `hub-executor.ts:300`, so
+divergence is not silently lost — `divergentProjects()` being uncalled is a
+loose end, not a hole. Left alone deliberately.
+
+Everything else cleared, and the cleared list is worth as much as the finding:
+ledger-consistency helpers with live production twins, formatting duplicates,
+and optional-parameter defaults are all legitimate. `buildDraftPrompt` remains
+the model of a fine one — exported for testability, and the real path calls it.
+
 ## The shape to watch for
 
 Three instances tonight of one failure mode: `collectGrantsInChain` (CL-8011),
