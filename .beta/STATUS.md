@@ -47,6 +47,23 @@ move is what progress looks like when the code has somewhere else to live.
   wrong tool, not evidence of rewording. Diffing the moved function bodies is
   what actually answered it.
 
+- #216 **the deck renders inside the workflow closure.** New
+  `packages/tools-deck` exposing `render_deck` via a `sidecar-bundle` entry
+  (the convention `@intx/tools-posix` uses), declared in
+  `WORKFLOW_PACKAGE_DEPENDENCIES`, shipped as a closure member, and given to
+  stage 5's specialist. It calls the deck authoring already in
+  `@solutions-builder/app/deck` — nothing re-parses markdown or redraws a
+  slide.
+
+  **The gate earned its keep here.** `check:ledger` passed, and the agent had
+  even hand-built a closure tree and watched `render_deck` produce a real 82KB
+  PowerPoint — and it was still broken. The package imported `defineTool` from
+  `@intx/agent` without declaring it, so the specifier could not resolve from
+  inside the package's own directory once materialized. Only the probe sidecar
+  in `smoke:sidecar` caught it. Resolution happens where the import is
+  written, not where the workflow entry is. One line of `package.json` fixed
+  it; nothing else would have found it.
+
 Goal: that ratio inverts. Hub vanilla, meat in workflows/agents/tools/skills.
 
 ## In flight

@@ -84,6 +84,23 @@ Rules for every iteration:
 - design revision prompt (§10) into packages.
 - the verifier rubric into packages.
 
+## Deck, step 2 — and why it is not a deletion
+
+#216 was additive on purpose: the hub path still works. Removing it is **not**
+a straight deletion, and pretending otherwise would lose behaviour.
+`render_deck` renders text-only slides. The hub's `deck.ts` also draws
+illustrations and applies an uploaded template, and both need things the
+sidecar tool does not have: a connected image provider, and a reader model to
+choose subjects. So step 2 is two questions, not one task:
+
+1. Can an image provider be reached from inside the closure? If yes, the
+   illustration path can move and the hub path can go.
+2. If not, the honest split is what #216 already drew — text slides in the
+   workflow, illustrated decks host-side — and that should be written down as
+   a decision rather than left looking unfinished.
+
+Nobody should delete `apps/hub/src/deck.ts` until one of those is answered.
+
 ## Where the floor is
 
 Worth being straight about: after the prompt text is out, `apps/hub` is close
