@@ -368,7 +368,7 @@ const MIGRATIONS: readonly Migration[] = [
       sql`CREATE INDEX IF NOT EXISTS "change_notice_run_idx"
         ON "builder"."change_notice" ("run_id", "decided_at")`,
 
-      // A local endpoint (Ollama) is the one connection kind the platform's
+      // A local endpoint is the one connection kind the platform's
       // catalog cannot hold: `model_provider` requires exactly one of a
       // credential or a wallet, and a local endpoint has neither. Minting a
       // fake credential to satisfy that constraint would be a lie of

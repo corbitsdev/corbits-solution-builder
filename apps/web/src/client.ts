@@ -320,8 +320,20 @@ export type CommandOutcome = {
   waitId?: string;
 };
 
-/** Ollama's default, matching how corbits-code stores the local provider. */
-export const OLLAMA_BASE_URL = "http://localhost:11434/v1";
+/**
+ * Addresses worth offering when someone connects a local endpoint. Any server
+ * speaking the OpenAI-compatible surface belongs here; these are starting
+ * points, not a supported list, and the field takes anything.
+ */
+export const LOCAL_ENDPOINT_SUGGESTIONS: ReadonlyArray<{ label: string; baseUrl: string }> = [
+  { label: "Ollama", baseUrl: "http://localhost:11434/v1" },
+  { label: "LM Studio", baseUrl: "http://localhost:1234/v1" },
+  { label: "vLLM", baseUrl: "http://localhost:8000/v1" },
+  { label: "llama.cpp", baseUrl: "http://localhost:8080/v1" },
+];
+
+/** What the field opens on: the most common address, not a product assumption. */
+export const DEFAULT_LOCAL_BASE_URL = LOCAL_ENDPOINT_SUGGESTIONS[0]!.baseUrl;
 
 /** Orientation from the Product guide, or the deterministic checklist. */
 export type Guidance = {

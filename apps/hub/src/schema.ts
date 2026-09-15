@@ -82,7 +82,7 @@ export const artifactEdge = builder.table(
  * A durable human wait. Committed *before* the notification is sent, so a
  * failed notification loses a ping and never a decision request.
  */
-// `local_provider` is gone: a local endpoint (Ollama and compatible) is now
+// `local_provider` is gone: a local endpoint (any OpenAI-compatible server) is now
 // registered through Interchange's own catalog rows — `provider`,
 // `model_provider`, `model`, `model_offering` — via `hub-catalog.ts`'s
 // `registerProviderCatalog`, using a placeholder `credential` row tagged

@@ -181,7 +181,7 @@ export const ProviderConnectRequest = type({
    * it; no route ever reads it back, and it never reaches a response body.
    */
   "secret?": "string > 0",
-  /** Present only for `local_endpoint`, e.g. an Ollama base URL. */
+  /** Present only for `local_endpoint`: the base URL of whatever server is running. */
   "baseUrl?": "string.url",
 });
 export type ProviderConnectRequest = typeof ProviderConnectRequest.infer;

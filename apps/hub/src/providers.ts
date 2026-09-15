@@ -1,7 +1,7 @@
 /**
  * Inference connections — BUILD_PLAN_V3 section 5, PRD section 6.
  *
- * Three connection methods: API key, local endpoint (Ollama and compatible),
+ * Three connection methods: API key, local endpoint (any OpenAI-compatible server),
  * and OAuth. The host owns credentials; nothing here returns a secret, and no
  * response body carries one.
  *
@@ -157,7 +157,7 @@ const PLUGINS: Record<string, Plugin> = {
   local: "openai-compatible",
 };
 
-/** The Ollama-style local endpoint's own single connection slot. */
+/** The local endpoint's own single connection slot, whatever is serving it. */
 const LOCAL_PROVIDER_ID = "local";
 
 function summarizeCapabilities(models: CatalogModelRow[]): ProviderCapabilities {
@@ -255,12 +255,24 @@ export async function setProviderOrder(providerIds: string[]): Promise<ProviderS
 }
 
 /**
- * The Ollama default, matching how corbits-code stores it: base URL carries
- * `/v1`, no key, models discovered from the OpenAI-compatible `/models`.
+ * Addresses worth offering when someone connects a local endpoint. Any server
+ * speaking the OpenAI-compatible surface belongs here; these are starting
+ * points, not a supported list, and the field takes anything.
+ *
+ * The first is the default the form opens on only because it is the most
+ * common, not because the product is built around it.
  */
-export const OLLAMA_BASE_URL = "http://localhost:11434/v1";
+export const LOCAL_ENDPOINT_SUGGESTIONS: ReadonlyArray<{ label: string; baseUrl: string }> = [
+  { label: "Ollama", baseUrl: "http://localhost:11434/v1" },
+  { label: "LM Studio", baseUrl: "http://localhost:1234/v1" },
+  { label: "vLLM", baseUrl: "http://localhost:8000/v1" },
+  { label: "llama.cpp", baseUrl: "http://localhost:8080/v1" },
+];
 
-/** Probes a local OpenAI-compatible endpoint (Ollama and friends). */
+/** What the connect form opens on. One of the suggestions, not a hardcoded product assumption. */
+export const DEFAULT_LOCAL_BASE_URL = LOCAL_ENDPOINT_SUGGESTIONS[0]!.baseUrl;
+
+/** Probes a local OpenAI-compatible endpoint, whichever server is behind it. */
 /**
  * Probes a local endpoint and returns the models it serves **and the base URL
  * that actually answered**.
@@ -278,14 +290,32 @@ export function localEndpointBase(baseUrl: string): string {
   return root.endsWith("/v1") ? root : new URL("/v1", root).toString().replace(/\/+$/, "");
 }
 
+/**
+ * How long the probe waits. Generous enough for an endpoint that is reachable
+ * but not local -- a Tailscale host, a LAN box, a server still loading a model -- and
+ * short enough that a genuinely absent service is reported promptly.
+ */
+const PROBE_TIMEOUT_MS = 10_000;
+
 async function validateLocalEndpoint(baseUrl: string): Promise<{ models: string[]; baseUrl: string }> {
   const base = localEndpointBase(baseUrl);
   const target = `${base}/models`;
-  const response = await fetch(target, { signal: AbortSignal.timeout(4_000) }).catch(() => null);
-  if (!response) {
+  // The reason the probe failed is the only useful thing here, and discarding
+  // it left one sentence for every cause: a service that is not running, a
+  // name that does not resolve, a TLS refusal, a reachable-but-slow endpoint
+  // that exceeded the timeout. The old text also named one vendor's binary,
+  // which is wrong advice for most causes and for every other server that
+  // speaks this API -- so it says what failed, not what to run.
+  let response: Response;
+  try {
+    response = await fetch(target, { signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
+  } catch (cause) {
+    const timedOut = cause instanceof Error && cause.name === "TimeoutError";
     throw new HostError(
       "provider_unavailable",
-      `Nothing answered at ${base}. If this is Ollama, start it with \`ollama serve\`.`,
+      timedOut
+        ? `${base} did not answer within ${PROBE_TIMEOUT_MS / 1000} seconds. It may be starting up, or too far away to answer that quickly.`
+        : `Nothing answered at ${base}: ${cause instanceof Error ? cause.message : String(cause)}. Check the endpoint is serving and the address is reachable from here.`,
       {},
       true,
     );
@@ -303,8 +333,7 @@ async function validateLocalEndpoint(baseUrl: string): Promise<{ models: string[
   if (models.length === 0) {
     throw new HostError(
       "provider_unavailable",
-      "That endpoint is running but serves no models. Pull one first, for example " +
-        "`ollama pull llama3.2`.",
+      "That endpoint is running but serves no models. Load or download one in whatever is serving it, then connect again.",
       {},
       true,
     );

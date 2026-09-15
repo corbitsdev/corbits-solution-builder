@@ -10,7 +10,7 @@
 import { Input } from "@corbits/react-ui";
 import { ArrowDown, ArrowUp, RefreshCw } from "lucide-react";
 import { useState } from "react";
-import { api, ApiFailure, OLLAMA_BASE_URL, type Provider } from "../client.js";
+import { api, ApiFailure, DEFAULT_LOCAL_BASE_URL, LOCAL_ENDPOINT_SUGGESTIONS, type Provider } from "../client.js";
 import { Banner, Button, StateLabel } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
 
@@ -44,7 +44,7 @@ export function ProviderList({
 }) {
   const [chosen, setChosen] = useState<string | null>(null);
   const [secret, setSecret] = useState("");
-  const [baseUrl, setBaseUrl] = useState(OLLAMA_BASE_URL);
+  const [baseUrl, setBaseUrl] = useState(DEFAULT_LOCAL_BASE_URL);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -70,8 +70,8 @@ export function ProviderList({
     // Last: the option that needs no account and no key.
     {
       id: LOCAL_ID,
-      name: "Ollama",
-      how: "Runs on this machine. No account, no key.",
+      name: "Local endpoint",
+      how: "A server you run yourself. No account, no key.",
       kind: "local_endpoint",
       action: "Connect locally",
     },
@@ -306,8 +306,16 @@ export function ProviderList({
 
       {rows.find((row) => row.id === chosen)?.kind === "local_endpoint" ? (
         <p className="inline-note">
-          Ollama's default. Change it on the row for LM Studio, vLLM or another
-          OpenAI-compatible server.
+          Any OpenAI-compatible server. Common addresses:{" "}
+          {LOCAL_ENDPOINT_SUGGESTIONS.map((suggestion, index) => (
+            <span key={suggestion.baseUrl}>
+              {index > 0 ? ", " : ""}
+              <button type="button" className="link-button" onClick={() => setBaseUrl(suggestion.baseUrl)}>
+                {suggestion.label}
+              </button>
+            </span>
+          ))}
+          . Or type your own.
         </p>
       ) : null}
     </>

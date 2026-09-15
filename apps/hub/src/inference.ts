@@ -2,7 +2,7 @@
  * The inference port.
  *
  * Every provider attempt — Anthropic Messages, the OpenAI-style chat
- * completions that OpenAI, OpenRouter and local Ollama endpoints all speak —
+ * completions that OpenAI, OpenRouter and locally-run endpoints all speak —
  * runs through Interchange's `runInference` harness: request building,
  * response parsing, retries and timeouts are the platform's, not this file's.
  * Domain code never reaches past this file, and this file contains no gate
