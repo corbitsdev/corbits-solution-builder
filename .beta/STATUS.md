@@ -12,7 +12,9 @@
 | deck tool in the closure (#216) | 19,912 | 4,747 |
 | art direction out + bench in (#232, #234) | 19,874 | 4,887 |
 | main merged + outline deduped (#235) | 19,907 | 4,949 |
-| the build-run findings (#236-#240) | **19,962** | **4,970** |
+| the build-run findings (#236-#240) | 19,962 | 4,970 |
+| worker execution + worked example (#241, #243) | **19,990** | **4,999** |
+| (superseded row) | **19,962** | **4,970** |
 
 Two honesty notes on this table. From the `#212` row down the hub count
 excludes `*.test.ts`, which the rows above it did not separate — the trend is
