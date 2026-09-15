@@ -56,6 +56,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { EXAMPLE_HEADING_PATTERN } from "@solutions-builder/app/requirements-example";
 import { classifyTarget, type TargetVerification } from "@solutions-builder/app/targets";
 import {
   coverageSummary,
@@ -141,7 +142,7 @@ function extractExampleInput(requirements: string, limit = 20): string[] {
   for (const raw of requirements.split("\n")) {
     const heading = /^#{1,6}\s+(.*)$/.exec(raw);
     if (heading) {
-      inExample = /example|sample|walkthrough|scenario/i.test(heading[1] ?? "");
+      inExample = EXAMPLE_HEADING_PATTERN.test(heading[1] ?? "");
       continue;
     }
     if (!inExample) continue;

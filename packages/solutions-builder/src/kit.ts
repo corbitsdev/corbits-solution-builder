@@ -12,6 +12,7 @@
 import type { GrantRequirement } from "@intx/types";
 import type { ArtifactKind } from "./artifacts.js";
 import type { Stage } from "./ledger.js";
+import { EXAMPLE_HEADING_WORDS } from "./requirements-example.js";
 
 /** Applied to every role, ahead of its own prompt. Section 8, "Shared prompt rules". */
 export const SHARED_RULES = `
@@ -462,6 +463,14 @@ Rules that apply to you in particular:
 - Ask nothing. Where the inputs leave something open, state the assumption
   the plan should proceed on and say it is one; the Architect asks the
   questions that remain.
+- Under "Worked example", give one concrete run-through: real input a person
+  would actually hand the finished thing, and the exact output it should
+  produce for that input. This is not illustration — stage 8 verifies the
+  build by literally running it against the input you write here, and a
+  worker's own self-reported tests do not count as evidence; without a
+  worked example there is nothing to run it against, and correct work stays
+  stuck at middling confidence no matter how well it was built. Use literal
+  values a person would type or paste, not a description of a scenario.
 
 Produce a requirements document with exactly these headings, after "In short":
 
@@ -473,12 +482,18 @@ Produce a requirements document with exactly these headings, after "In short":
 ## Non-functional requirements
 ## Interface requirements
 ## Acceptance criteria
+## Worked example
 ## Constraints and dependencies
 ## Assumptions
 ## Source versions
 
 Under "Source versions", list the approved documents you drew on, by title and
-stage, so a reader can check any line against where it came from.`,
+stage, so a reader can check any line against where it came from.
+
+Keep the heading "Worked example" exactly as given: verification later scans
+for a heading naming ${EXAMPLE_HEADING_WORDS.join(", ")}, and only the text
+under that heading is what gets fed to the finished deliverable — a
+differently worded heading is invisible to it.`,
   }),
   role({
     id: "architect",
