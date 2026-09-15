@@ -261,16 +261,31 @@ export async function setProviderOrder(providerIds: string[]): Promise<ProviderS
 export const OLLAMA_BASE_URL = "http://localhost:11434/v1";
 
 /** Probes a local OpenAI-compatible endpoint (Ollama and friends). */
-async function validateLocalEndpoint(baseUrl: string) {
-  // Tolerates a base URL given with or without `/v1`, because both are things
-  // a person reasonably types.
+/**
+ * Probes a local endpoint and returns the models it serves **and the base URL
+ * that actually answered**.
+ *
+ * Returning the base is the point. A person reasonably types either
+ * `http://localhost:11434` or `.../v1`, and this tolerates both — but it used
+ * to normalize only for its own probe and throw that away, so the bare form
+ * was stored and every later inference call asked for `/chat/completions`
+ * against a root that only serves `/v1/chat/completions`. The endpoint
+ * connected, reported ready, listed its models, and then refused every
+ * request with a 404. What is stored is now the base that was proven to work.
+ */
+export function localEndpointBase(baseUrl: string): string {
   const root = baseUrl.replace(/\/+$/, "");
-  const target = root.endsWith("/v1") ? `${root}/models` : new URL("/v1/models", root).toString();
+  return root.endsWith("/v1") ? root : new URL("/v1", root).toString().replace(/\/+$/, "");
+}
+
+async function validateLocalEndpoint(baseUrl: string): Promise<{ models: string[]; baseUrl: string }> {
+  const base = localEndpointBase(baseUrl);
+  const target = `${base}/models`;
   const response = await fetch(target, { signal: AbortSignal.timeout(4_000) }).catch(() => null);
   if (!response) {
     throw new HostError(
       "provider_unavailable",
-      `Nothing answered at ${root}. If this is Ollama, start it with \`ollama serve\`.`,
+      `Nothing answered at ${base}. If this is Ollama, start it with \`ollama serve\`.`,
       {},
       true,
     );
@@ -294,7 +309,7 @@ async function validateLocalEndpoint(baseUrl: string) {
       true,
     );
   }
-  return models;
+  return { models, baseUrl: base };
 }
 
 async function validateApiKey(
@@ -360,7 +375,9 @@ export async function connectProvider(
     if (!request.baseUrl) {
       throw new HostError("validation_failed", "A local endpoint needs a base URL.");
     }
-    const models = await validateLocalEndpoint(request.baseUrl);
+    // The base that answered, not the one that was typed: what is stored has
+    // to be what later inference calls are built against.
+    const { models, baseUrl: validatedBaseUrl } = await validateLocalEndpoint(request.baseUrl);
     const existing = await getCatalogProvider(LOCAL_PROVIDER_ID);
     const priorSelected = existing ? selectedModelOf(existing.models) : null;
     const priority = existing ? existing.basePriority : (await listProviders()).length;
@@ -370,14 +387,14 @@ export async function connectProvider(
       label: request.label,
       kind: "local_endpoint",
       credentialRef: null,
-      baseUrl: request.baseUrl,
+      baseUrl: validatedBaseUrl,
     });
     catalogChanged();
   await registerProviderCatalog({
       providerId: LOCAL_PROVIDER_ID,
       label: request.label,
       plugin: PLUGINS[LOCAL_PROVIDER_ID] ?? "openai-compatible",
-      baseUrl: request.baseUrl,
+      baseUrl: validatedBaseUrl,
       credentialId: link.id,
       models,
       priority,
@@ -524,7 +541,7 @@ export async function refreshProviderModels(providerId: string): Promise<Provide
 
   const isLocal = providerId === LOCAL_PROVIDER_ID;
   const models = isLocal
-    ? await validateLocalEndpoint(catalogRow.baseUrl)
+    ? (await validateLocalEndpoint(catalogRow.baseUrl)).models
     : (OAUTH_PROVIDERS as readonly string[]).includes(providerId)
       ? await refreshModels(providerId as OAuthProviderId)
       : await validateApiKey(
