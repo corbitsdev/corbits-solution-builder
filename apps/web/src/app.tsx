@@ -15,9 +15,11 @@ import {
   type Provider,
   type Wait,
   type Guidance,
+  type ArtifactNode,
 } from "./client.js";
 import { CircleCheck, FolderKanban, PanelRight, PanelRightClose, Settings as SettingsIcon } from "lucide-react";
-import { Banner, Button, Mark, StateLabel } from "./components.jsx";
+import { Banner, Button, Mark, StateLabel, stageName } from "./components.jsx";
+import { ARTIFACT_STAGE, type ArtifactKind } from "@solutions-builder/app/artifacts";
 import { PrintView, setPrintProject, usePrintTarget } from "./print.jsx";
 import { DecisionQueue } from "./pages/decisions.jsx";
 import { Projects } from "./pages/projects.jsx";
@@ -47,6 +49,46 @@ import { StageWorkspace } from "./pages/workspace.jsx";
  * one open project, which is why neither name explained itself.
  */
 type View = "decisions" | "projects" | "project" | "settings";
+
+/**
+ * What a stage's panel creates, one word each, in the order the panel makes
+ * them. Material is handed over, not created, so it is not here.
+ */
+const KIND_WORDS: Readonly<Record<ArtifactKind, string | null>> = {
+  source_material: null,
+  problem_brief: "Brief",
+  solution_constraints: "Constraints",
+  chosen_approach: "Approach",
+  design_artifact: "Design",
+  design_feedback: "Feedback",
+  audience_package: "Package",
+  audience_deck: "Deck",
+  product_requirements: "Requirements",
+  build_plan: "Plan",
+  engineering_review: "Review",
+  cost_approval: "Approval",
+  build_packet: "Packet",
+  build_evidence: "Build",
+  delivery_manifest: "Manifest",
+  delivery_verification: "Verification",
+};
+
+/** One kind the current panel creates: its word, and the newest live artifact of that kind, if any. */
+type StageArtifact = { kind: ArtifactKind; word: string; nodeId: string | null };
+
+/** The kinds the stage's panel creates, each with its newest live artifact on the project. */
+function stageArtifacts(stage: number, nodes: readonly ArtifactNode[]): StageArtifact[] {
+  const out: StageArtifact[] = [];
+  for (const [kind, owner] of Object.entries(ARTIFACT_STAGE) as [ArtifactKind, number][]) {
+    const word = KIND_WORDS[kind];
+    if (owner !== stage || !word) continue;
+    const newest = nodes
+      .filter((node) => node.kind === kind && node.supersededByNodeId === null)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+    out.push({ kind, word, nodeId: newest?.id ?? null });
+  }
+  return out;
+}
 
 /** Sections within an open project. */
 type ProjectTab = "stage" | "artifacts";
@@ -115,6 +157,8 @@ export function AppRail({
   connected,
   onNavigate,
   onInspect,
+  stage = null,
+  onOpenArtifact,
 }: {
   view: View;
   decisions: Wait[];
@@ -124,6 +168,9 @@ export function AppRail({
   connected: boolean;
   onNavigate: (view: View) => void;
   onInspect: (projectId: string) => void;
+  /** The open project's current panel and what it creates; null off a project. */
+  stage?: { number: number; artifacts: StageArtifact[] } | null;
+  onOpenArtifact?: ((nodeId: string) => void) | undefined;
 }) {
   return (
       <Sidebar collapsed={collapsed}>
@@ -159,6 +206,36 @@ export function AppRail({
                 Decision queue
               </SidebarItem>
           </SidebarSection>
+
+          {/* What the open panel creates, each word a way to the artifact in
+              the Artifacts panel. A kind not produced yet is named but not
+              linked: the panel is still where it is made. */}
+          {stage ? (
+            <div className="rail-stage" aria-label="What this stage creates">
+              <p className="rail-stage-head">{stageName(stage.number)} creates</p>
+              <ul className="rail-stage-list">
+                {stage.artifacts.map((artifact) =>
+                  artifact.nodeId ? (
+                    <li key={artifact.kind}>
+                      <a
+                        href={`#artifact:${artifact.nodeId}`}
+                        onClick={(event) => {
+                          event.preventDefault();
+                          onOpenArtifact?.(artifact.nodeId!);
+                        }}
+                      >
+                        {artifact.word}
+                      </a>
+                    </li>
+                  ) : (
+                    <li key={artifact.kind} className="is-pending" title="Not produced yet">
+                      {artifact.word}
+                    </li>
+                  ),
+                )}
+              </ul>
+            </div>
+          ) : null}
 
           {/* One pending decision, pinned. More than one is a queue, and the
               queue has a screen of its own. */}
@@ -246,6 +323,8 @@ export function App() {
   >([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<ProjectDetail | null>(null);
+  // The artifact the Artifacts panel opens on, when the rail sent us there.
+  const [openedArtifact, setOpenedArtifact] = useState<string | null>(null);
   // Guidance describes one project at one moment. Showing yesterday's
   // orientation against today's state is worse than showing none.
   useEffect(() => {
@@ -377,6 +456,7 @@ export function App() {
 
   const openProject = (projectId: string) => {
     setSelected(projectId);
+    setOpenedArtifact(null);
     setProjectTab("stage");
     setView("project");
   };
@@ -504,6 +584,15 @@ export function App() {
           setSelected(projectId);
           setView("decisions");
         }}
+        stage={
+          view === "project" && detail
+            ? { number: detail.current?.stage ?? 1, artifacts: stageArtifacts(detail.current?.stage ?? 1, graph.nodes) }
+            : null
+        }
+        onOpenArtifact={(nodeId) => {
+          setOpenedArtifact(nodeId);
+          setProjectTab("artifacts");
+        }}
       />
 
       <main className="canvas">
@@ -516,7 +605,15 @@ export function App() {
               <span className="crumb-sep" aria-hidden="true">
                 /
               </span>
-              <h1>{detail.project.title}</h1>
+              <h1>
+                {detail.project.title}
+                {/* The panel, named: which stage this is, and Artifacts when that is the panel open. */}
+                <span className="head-panel">
+                  {" "}
+                  ({stageName(detail.current?.stage ?? 1)}
+                  {projectTab === "artifacts" ? " / Artifacts" : ""})
+                </span>
+              </h1>
             </>
           ) : (
             <h1>
@@ -665,6 +762,7 @@ export function App() {
                 <ArtifactGraph
                   nodes={graph.nodes}
                   edges={graph.edges}
+                  {...(openedArtifact ? { openedId: openedArtifact } : {})}
                   onAddMaterial={async (files) => {
                     await api.attachMaterial(detail.project.id, files);
                     await reloadDetail();
