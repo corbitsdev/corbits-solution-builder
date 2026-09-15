@@ -87,7 +87,9 @@ export const BUILD_WORKERS: readonly BuildWorkerKind[] = [
     executable: "claude",
     probe: ["--version"],
     probeExpects: null,
-    run: (prompt) => ["-p", prompt],
+    // acceptEdits lets the worker write within the session without the
+    // blanket --dangerously-skip-permissions bypass the bridge refuses to pass.
+    run: (prompt) => ["-p", prompt, "--permission-mode", "acceptEdits"],
     turnReports: null,
   },
   {
@@ -96,7 +98,11 @@ export const BUILD_WORKERS: readonly BuildWorkerKind[] = [
     executable: "codex",
     probe: ["--version"],
     probeExpects: null,
-    run: (prompt) => ["exec", prompt],
+    // workspace-write scopes writes to the workspace (plus /tmp), short of a
+    // full bypass. No --skip-git-repo-check: build-workspace.ts git-inits
+    // every fresh workspace, so codex's own git-repo check already passes
+    // (it accepts an unborn repo too, before the baseline commit lands).
+    run: (prompt) => ["exec", "-s", "workspace-write", prompt],
     turnReports: null,
   },
 ];

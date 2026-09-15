@@ -28,8 +28,9 @@
  *                  budget across invocations, because unlike a single turn,
  *                  "no bound on how many turns a stalled worker gets" is not
  *                  a control worth having
- *   permissions    inherits the operator's own CLI configuration; the bridge
- *                  never passes --dangerously-skip-permissions
+ *   permissions    each worker is given the narrowest flag that lets it write
+ *                  within its workspace (build-worker.ts); the bridge never
+ *                  passes a blanket bypass such as --dangerously-skip-permissions
  *   linkage        every attempt is linked to an immutable packet and run
  *   exit criterion replaced by verified shared-hub integration before launch
  *
