@@ -34,6 +34,7 @@ import { StageGate, STAGE_GOAL } from "./gate.jsx";
 import { Preparing, STALL_AFTER_MS } from "./preparing.jsx";
 import { clock } from "./elapsed.jsx";
 import { StageDocument } from "./document.jsx";
+import { SELECTABLE_TARGETS } from "@solutions-builder/app/targets";
 
 export { StageDocument, DocumentBody } from "./document.jsx";
 export { ApprovalsRecord, STAGE_GOAL } from "./gate.jsx";
@@ -653,6 +654,7 @@ function PacketSummary({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [chosen, setChosen] = useState<ReadonlySet<string>>(new Set());
   const current = detail.current;
   const costNode = detail.nodes.find(
     (node) => node.kind === "cost_approval" && node.supersededByNodeId === null,
@@ -673,9 +675,41 @@ function PacketSummary({
         )
       }
     >
-      {error ? <Banner tone="error" title="Freeze refused">{error}</Banner> : null}<Button
+      {error ? <Banner tone="error" title="Freeze refused">{error}</Banner> : null}
+      <div className="grid gap-2">
+        <p className="text-sm font-medium">How will this be used?</p>
+        <p className="text-xs text-muted-foreground">
+          Choose every way someone will need to use the finished build. Only a command-line
+          check is actually run today — the others are honest about not being verified yet.
+        </p>
+        <div className="grid gap-2">
+          {SELECTABLE_TARGETS.map((option) => (
+            <label key={option.target} className="flex items-start gap-2">
+              <input
+                type="checkbox"
+                checked={chosen.has(option.target)}
+                onChange={(event) => {
+                  const next = new Set(chosen);
+                  if (event.target.checked) next.add(option.target);
+                  else next.delete(option.target);
+                  setChosen(next);
+                }}
+              />
+              <span>
+                <span className="text-sm">{option.label}</span>{" "}
+                {option.verified ? (
+                  <StateLabel tone="okay">verified today</StateLabel>
+                ) : (
+                  <StateLabel tone="disabled">not verified yet</StateLabel>
+                )}
+              </span>
+            </label>
+          ))}
+        </div>
+      </div>
+      <Button
         variant="primary"
-        disabled={!readyToFreeze || !costNode}
+        disabled={!readyToFreeze || !costNode || chosen.size === 0}
         loading={busy}
         onClick={async () => {
           if (!costNode) return;
@@ -693,7 +727,7 @@ function PacketSummary({
                   contentHash: node.contentHash,
                 })),
               placement: "local",
-              targets: ["local"],
+              targets: [...chosen],
             });
             onChanged();
           } catch (cause) {

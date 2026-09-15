@@ -466,7 +466,7 @@ let buildRunId = "";
         runId: run.id,
         versions: [version],
         placement: "local",
-        targets: ["local"],
+        targets: ["cli"],
       }),
   );
 
@@ -485,7 +485,7 @@ let buildRunId = "";
     runId: run.id,
     versions: [version],
     placement: "local",
-    targets: ["local"],
+    targets: ["cli"],
   });
   check("build.freeze queues a build run at stage 8", frozen.stage === 8 && frozen.state === "queued");
   buildRunId = frozen.runId;
@@ -506,7 +506,7 @@ let buildRunId = "";
         runId: run.id,
         versions: [version],
         placement: "local",
-        targets: ["local"],
+        targets: ["cli"],
       }),
   );
 }

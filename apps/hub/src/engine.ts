@@ -13,6 +13,7 @@
  * true if there is a single place that writes.
  */
 import type { Command, Stage } from "@solutions-builder/app/ledger";
+import { classifyTarget, SELECTABLE_TARGETS } from "@solutions-builder/app/targets";
 import { LEDGER, PROJECT_DELETE } from "@solutions-builder/app/ledger";
 import { evaluate, evaluateAudienceDecision, type GuardContext, type RunView } from "./guard.js";
 import { HostError, notFound } from "./errors.js";
@@ -632,10 +633,21 @@ async function apply(
       // versions it freezes are its sources, the freezing person its producer,
       // and the stage 7 run its producer run, which is what a second freeze
       // for the same source is refused against.
+      const targets = Array.isArray(input.payload.targets) ? input.payload.targets.map(String) : [];
+      // A target `classifyTarget` cannot place is a build nobody can verify:
+      // refused here, at the freeze, rather than discovered later at the
+      // verdict when it is too late to ask the person again.
+      const unclassifiable = targets.filter((target) => classifyTarget(target) === "other");
+      if (unclassifiable.length > 0) {
+        throw new HostError(
+          "validation_failed",
+          `The build packet cannot be frozen: ${unclassifiable.map((target) => `"${target}"`).join(", ")} ${unclassifiable.length === 1 ? "is not a recognized target modality" : "are not recognized target modalities"}. Choose from: ${SELECTABLE_TARGETS.map((entry) => entry.target).join(", ")}.`,
+        );
+      }
       const packet = {
         versions: args.versions,
         placement: String(input.payload.placement ?? "local"),
-        targets: (input.payload.targets as unknown) ?? [],
+        targets,
         costApproval: { versionId: run.costApprovalVersionId },
       };
       const draftPacket: ArtifactDraft = {

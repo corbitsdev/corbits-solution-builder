@@ -52,3 +52,24 @@ const GUIDANCE: Record<TargetModality, string> = {
 export function targetGuidance(targets: readonly string[]): string {
   return targets.map((target) => `- "${target}" (${classifyTarget(target)}): ${GUIDANCE[classifyTarget(target)]}`).join("\n");
 }
+
+/**
+ * What a person picks at freeze time, in their own words rather than the
+ * modality's machine name — the client reads this to build the picker
+ * instead of retyping the vocabulary, and the canonical `target` string it
+ * sends back is exactly what `classifyTarget` places into that same
+ * modality. `"other"` has no entry here: it is not something a person
+ * chooses, only what an unclassifiable value collapses to.
+ */
+export const SELECTABLE_TARGETS: ReadonlyArray<{
+  readonly target: string;
+  readonly modality: Exclude<TargetModality, "other">;
+  readonly label: string;
+  /** Whether choosing this target actually gets exercised at verification time, today. */
+  readonly verified: boolean;
+}> = [
+  { target: "cli", modality: "cli", label: "A command you run in a terminal", verified: true },
+  { target: "web", modality: "web", label: "A website", verified: false },
+  { target: "api", modality: "api", label: "A service other software calls", verified: false },
+  { target: "desktop", modality: "desktop", label: "An app you install", verified: false },
+];

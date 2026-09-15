@@ -475,7 +475,7 @@ async function driveThroughStage7(projectId: string): Promise<{ runId: string }>
     runId: run.id,
     versions,
     placement: "local",
-    targets: ["local"],
+    targets: ["cli"],
   });
   return { runId: frozen.runId };
 }
