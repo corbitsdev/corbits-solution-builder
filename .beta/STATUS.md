@@ -290,6 +290,18 @@ anyone, at any point in the pipeline.** The worker couldn't, and the verifier
 couldn't find it. The one thing that did run it was the mechanical `bun test`
 check, which is why we know it works at all.
 
+## Stale PRs, left alone on purpose
+
+Eight PRs are still open — #168, #172, #177, #192, #202, #203, #204, #207.
+Checked rather than assumed: the four I sampled (#202, #203, #204, #207) are
+**already in `internal-beta`**, merged here earlier; they target `main` or the
+old `cl-7941` feature branch.
+
+Not touched, because main is off-limits and closing someone else's PR is not
+mine to do. Flagging them so they are not mistaken for outstanding work: if
+`internal-beta` eventually merges to main, they land with it and can be closed
+as superseded rather than merged separately.
+
 ## In flight
 - CL-7981 `targets` stops being inert: `classifyTarget` moves out of the hub
   into `packages/solutions-builder/src/targets.ts`, and the worker prompt
