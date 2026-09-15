@@ -66,7 +66,7 @@ const MANIFEST_SKIPPED_DIRECTORIES = new Set([...SKIPPED_DIRECTORIES, "vendor"])
 
 export type PackageManifest = { scripts?: Record<string, string>; main?: string };
 
-export type ExecutionKind = "entry_point" | "test" | "typecheck";
+export type ExecutionKind = "entry_point" | "test" | "typecheck" | "manifest";
 
 /** What ran, how it was bounded, and what it produced — never just an exit code. */
 export type ExecutionCheck = {
@@ -431,9 +431,30 @@ async function checkSeededScriptSurvival(
  */
 export async function runExecutionChecks(workspaceRoot: string): Promise<ExecutionCheck[]> {
   const pkgPath = join(workspaceRoot, "package.json");
-  const pkg: PackageManifest | null = (await Bun.file(pkgPath).exists())
-    ? (JSON.parse(await Bun.file(pkgPath).text()) as PackageManifest)
-    : null;
+  // A manifest the worker wrote is a manifest the worker can break, and a
+  // real one did: a stray comma inside `scripts` threw out of here and took
+  // the whole attempt down. That is not an exceptional condition, it is the
+  // ordinary output of a weak model, and it is worth reporting rather than
+  // crashing on -- an unreadable manifest is exactly the concrete failure a
+  // continuation can act on. Anything other than a parse failure still
+  // throws; this does not hide a broken host.
+  const manifest = await readManifest(pkgPath);
+  if (manifest.kind === "unreadable") {
+    return [
+      {
+        kind: "manifest",
+        command: `read ${pkgPath}`,
+        exitCode: null,
+        timedOut: false,
+        ok: false,
+        vacuous: false,
+        detail: `package.json is not valid JSON, so nothing about this deliverable can be checked: ${manifest.detail}`,
+        stdoutTail: "",
+        stderrTail: manifest.detail,
+      },
+    ];
+  }
+  const pkg: PackageManifest | null = manifest.pkg;
 
   // One scratch HOME for every check in this run, made fresh and discarded
   // after — never the host's real home directory (see the file header).
@@ -477,4 +498,22 @@ export async function runExecutionChecks(workspaceRoot: string): Promise<Executi
 export function hasWorkingDeliverable(checks: ExecutionCheck[] | null): boolean {
   if (checks === null || checks.length === 0) return false;
   return checks.every((check) => check.ok) && checks.some((check) => !check.vacuous);
+}
+
+/**
+ * The workspace manifest, or a readable account of why it could not be read.
+ * `JSON.parse` failing here means the worker wrote something malformed, which
+ * is a finding about the deliverable rather than a fault in this host.
+ */
+async function readManifest(
+  pkgPath: string,
+): Promise<{ kind: "ok"; pkg: PackageManifest | null } | { kind: "unreadable"; detail: string }> {
+  const file = Bun.file(pkgPath);
+  if (!(await file.exists())) return { kind: "ok", pkg: null };
+  const text = await file.text();
+  try {
+    return { kind: "ok", pkg: JSON.parse(text) as PackageManifest };
+  } catch (cause) {
+    return { kind: "unreadable", detail: cause instanceof Error ? cause.message : String(cause) };
+  }
 }

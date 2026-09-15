@@ -240,3 +240,17 @@ describe("the positive case: a real deliverable is complete", () => {
     expect(hasWorkingDeliverable(execution)).toBe(true);
   });
 });
+
+test("a package.json the worker broke is a finding, not a crash", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "sb-badmanifest-"));
+  // The exact shape a real worker produced: a stray comma inside `scripts`.
+  await Bun.write(join(dir, "package.json"), '{\n "scripts": {\n "test": "bun test",\n,\n "type-check": "tsc"\n }\n}');
+  const checks = await runExecutionChecks(dir);
+  expect(checks).toHaveLength(1);
+  expect(checks[0]?.kind).toBe("manifest");
+  expect(checks[0]?.ok).toBe(false);
+  expect(checks[0]?.vacuous).toBe(false);
+  expect(checks[0]?.detail).toContain("not valid JSON");
+  expect(hasWorkingDeliverable?.(checks) ?? false).toBe(false);
+  await rm(dir, { recursive: true, force: true });
+});
