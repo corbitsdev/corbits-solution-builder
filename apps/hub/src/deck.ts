@@ -17,7 +17,7 @@
  * resulting bytes as an artifact version with its lineage.
  */
 import type { ArtifactKind } from "@solutions-builder/app/artifacts";
-import { deckFrom, renderDeck, deckFileName, DECK_MEDIA_TYPE, DECK_THEMES, type Deck } from "@solutions-builder/app/deck";
+import { deckFrom, renderDeck, deckFileName, packageOutlineProblem, DECK_MEDIA_TYPE, DECK_THEMES, type Deck } from "@solutions-builder/app/deck";
 import { renderDeckOnTemplate } from "@solutions-builder/app/deck-on-template";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -241,9 +241,11 @@ async function findOrBuildDeck(args: {
     illustrate: true,
   });
   if (!written) {
+    // Every package is written with an outline; one without is a version
+    // from before that rule, and the person is told what to add.
     throw new HostError(
       "validation_failed",
-      "This package has no \"Deck outline\" section with numbered items, so there is nothing to build slides from.",
+      `There is nothing to build slides from: ${packageOutlineProblem(content) ?? "the package's deck outline is empty"}.`,
       {},
       false,
     );
