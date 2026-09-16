@@ -440,6 +440,14 @@ export function createHubSessionLookups(
               // a missing row is the expected case, not a foreign run. Mint
               // it now so the terminal flip below has somewhere to land --
               // the same idempotent row the register path would have written.
+              // Only ids of this deployment are claimable: the anchor itself
+              // or its `<anchor>__*` children. Anything else keeps the loud
+              // ignore below, so a garbage, typo, or cross-deployment id can
+              // never mint a phantom terminal row here.
+              if (runId !== anchor.id && !runId.startsWith(`${anchor.id}__`)) {
+                logger.error`Ignoring terminal event for run ${runId}: it does not belong to source deployment ${anchor.id}`;
+                return;
+              }
               await workflowRunStore.createIfAbsent(
                 {
                   id: runId,
