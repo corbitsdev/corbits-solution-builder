@@ -24,6 +24,17 @@ export function requiredAuthorityFor(stage: number): Authority {
 /**
  * What this actor may do *on this project*.
  *
+ * Single-tenant authorization invariant: a grant issued in tenant T
+ * authorizes actions in T only. An ancestor tenant's grants — including the
+ * workspace's — never authorize actions in a descendant project tenant, and
+ * no general authorization path here walks the ancestor chain: evaluation is
+ * scoped to the project tenant, and a workspace principal with no principal
+ * in the project holds nothing. A compromised workbench must not inherit
+ * authority over the projects under it. The one exception is the narrow
+ * credential-use delegation (`credential:{id}` / `use`, resource-scoped),
+ * resolved down the chain at credential source-resolution time; everything
+ * else stays single-tenant.
+ *
  * A project is a tenant, so the question is the hub's to answer: the actor's
  * principal in that tenant, and the `authority:<name>/hold` grants its roles
  * carry, evaluated by the hub's own grant evaluator. A workspace principal
