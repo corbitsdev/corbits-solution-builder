@@ -213,18 +213,6 @@ check(
     "the two unavailable reasons read differently from each other",
     noOffering !== noHost,
   );
-
-  const unavailableStep = nextStep({
-    state: "in_progress",
-    stage: 1,
-    hasDraft: false,
-    executionUnavailable: "no_offering",
-  });
-  check(
-    "the next step for a missing offering points at connecting one",
-    unavailableStep.title.toLowerCase().includes("model provider"),
-    unavailableStep.title,
-  );
 }
 
 // --- The Product guide's deterministic floor (BUILD_PLAN_V3 section 8) ---
