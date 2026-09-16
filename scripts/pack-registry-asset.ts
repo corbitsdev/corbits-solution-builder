@@ -66,11 +66,7 @@
  * Usage: `bun run assets:pack-registry`
  */
 import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
-import { gzipSync } from "node:zlib";
-import { mkdtemp, mkdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 
 import {
@@ -86,6 +82,7 @@ import { install } from "../apps/hub/src/install.js";
 import { assets as hubAssets } from "../apps/hub/src/hub-client.js";
 import { hub } from "../apps/hub/src/hub-mount.js";
 import { databaseDirectory } from "../apps/hub/src/paths.js";
+import { packTarballFiles, tarballFilename, tarballIntegrity, type TarballFiles } from "../apps/hub/src/tarball.js";
 import { distFiles, readManifest, vendoredClosure, walk } from "../apps/hub/src/workflow-closure.js";
 import { WORKFLOW_PACKAGE_DEPENDENCIES } from "@solutions-builder/app/workflows/lifecycle-source";
 
@@ -97,8 +94,6 @@ const ROOT_DIR = join(import.meta.dir, "..");
 const VENDOR_PACKAGES_DIR = join(ROOT_DIR, "vendor", "interchange", "packages");
 const APP_PACKAGE_DIR = join(ROOT_DIR, "packages", "solutions-builder");
 const INDEX_PATH = "package-registry.json";
-
-type PackedFiles = Record<string, Uint8Array>;
 
 type PackageManifest = {
   name: string;
@@ -162,7 +157,7 @@ function rewriteDependencies(dependencies: Record<string, string> | undefined): 
  *  `peerDependencies`/`peerDependenciesMeta` ride through unmodified — the
  *  resolver validates peers by name+range against the closure, not against
  *  this asset specifically. */
-function vendoredTarballFiles(shortName: string): { manifest: PackageManifest; files: PackedFiles } {
+function vendoredTarballFiles(shortName: string): { manifest: PackageManifest; files: TarballFiles } {
   const manifest = readManifest(shortName) as PackageManifest;
   const trimmed: PackageManifest = {
     name: manifest.name,
@@ -173,7 +168,7 @@ function vendoredTarballFiles(shortName: string): { manifest: PackageManifest; f
     ...(manifest.peerDependencies !== undefined ? { peerDependencies: manifest.peerDependencies } : {}),
     ...(manifest.peerDependenciesMeta !== undefined ? { peerDependenciesMeta: manifest.peerDependenciesMeta } : {}),
   };
-  const files: PackedFiles = { "package.json": encode(`${JSON.stringify(trimmed, null, 2)}\n`) };
+  const files: TarballFiles = { "package.json": encode(`${JSON.stringify(trimmed, null, 2)}\n`) };
   for (const [rel, content] of Object.entries(distFiles(shortName))) {
     files[`dist/${rel}`] = encode(content);
   }
@@ -188,7 +183,7 @@ function vendoredTarballFiles(shortName: string): { manifest: PackageManifest; f
  *  on) — `hono` included, not dropped: it is what satisfies `@logtape/hono`'s
  *  non-optional peer requirement once `@intx/log`'s real dependency on
  *  `@logtape/hono` pulls that package into the closure. */
-function appTarballFiles(): { manifest: PackageManifest; files: PackedFiles } {
+function appTarballFiles(): { manifest: PackageManifest; files: TarballFiles } {
   const manifest = JSON.parse(readFileSync(join(APP_PACKAGE_DIR, "package.json"), "utf8")) as PackageManifest;
   const trimmed: PackageManifest = {
     name: manifest.name,
@@ -197,7 +192,7 @@ function appTarballFiles(): { manifest: PackageManifest; files: PackedFiles } {
     ...(manifest.exports !== undefined ? { exports: manifest.exports } : {}),
     dependencies: rewriteDependencies(WORKFLOW_PACKAGE_DEPENDENCIES),
   };
-  const files: PackedFiles = { "package.json": encode(`${JSON.stringify(trimmed, null, 2)}\n`) };
+  const files: TarballFiles = { "package.json": encode(`${JSON.stringify(trimmed, null, 2)}\n`) };
   const srcDir = join(APP_PACKAGE_DIR, "src");
   const paths: string[] = [];
   walk(srcDir, paths);
@@ -272,10 +267,10 @@ function discoverExternalClosure(): ExternalPackage[] {
  *  `package.json`, `dependencies` and `peerDependencies` exactly as npm
  *  published them. Only its own `node_modules` (its *own* dependencies'
  *  bytes, packed as their own separate tarballs) is excluded. */
-function externalTarballFiles(pkg: ExternalPackage): PackedFiles {
+function externalTarballFiles(pkg: ExternalPackage): TarballFiles {
   const paths: string[] = [];
   walk(pkg.dir, paths);
-  const files: PackedFiles = {};
+  const files: TarballFiles = {};
   for (const full of paths) {
     const rel = relative(pkg.dir, full).split("\\").join("/");
     if (rel === "node_modules" || rel.startsWith("node_modules/")) continue;
@@ -284,61 +279,8 @@ function externalTarballFiles(pkg: ExternalPackage): PackedFiles {
   return files;
 }
 
-/** Scoped names flatten to `@scope-tail`, per
- *  `vendor/interchange/packages/tool-packaging/ASSET-LAYOUT.md`. */
-function tarballFilename(name: string, version: string): string {
-  return `${name.replace("/", "-")}-${version}.tgz`;
-}
-
-/** A fixed mtime for every packed file, so the archive depends only on file
- *  contents and names — never on the wall clock a temp directory happened to
- *  be built at. Without this, re-running with nothing changed still rewrites
- *  the asset, and two people packing the same tree get different bytes. */
-const DETERMINISTIC_MTIME = new Date(0);
-
-/** Real npm-tarball bytes: `package/` at the tar root, byte-for-byte the same
- *  across runs given the same file contents. Shells out to the system `tar`
- *  for the archive layout rather than inventing one — but pins every entry's
- *  mtime, writes entries in a fixed sorted order (not filesystem readdir
- *  order, which is not guaranteed stable), and gzips the tar bytes with
- *  Node's `zlib` (deterministic; the system `gzip` embeds a source-file
- *  timestamp `tar czf` cannot suppress). The format is the only thing built
- *  here; the resolver, pinning and integrity are the platform's, untouched. */
-async function packTarball(files: PackedFiles): Promise<Uint8Array> {
-  const tmp = await mkdtemp(join(tmpdir(), "sb-pack-"));
-  try {
-    const root = join(tmp, "package");
-    const relPaths = Object.keys(files).sort();
-    for (const rel of relPaths) {
-      const dest = join(root, rel);
-      await mkdir(join(dest, ".."), { recursive: true });
-      await writeFile(dest, files[rel]!);
-      await utimes(dest, DETERMINISTIC_MTIME, DETERMINISTIC_MTIME);
-    }
-    const outTar = join(tmp, "out.tar");
-    const result = spawnSync("tar", [
-      "--format=ustar",
-      "--numeric-owner",
-      "--owner=0",
-      "--group=0",
-      "-cf",
-      outTar,
-      "-C",
-      tmp,
-      ...relPaths.map((rel) => `package/${rel}`),
-    ]);
-    if (result.status !== 0) {
-      throw new Error(`tar failed (${String(result.status)}): ${result.stderr?.toString() ?? ""}`);
-    }
-    const tarBytes = await readFile(outTar);
-    return new Uint8Array(gzipSync(tarBytes, { level: 9 }));
-  } finally {
-    await rm(tmp, { recursive: true, force: true });
-  }
-}
-
-async function pack(name: string, version: string, files: PackedFiles): Promise<PackedEntry> {
-  const bytes = await packTarball(files);
+async function pack(name: string, version: string, files: TarballFiles): Promise<PackedEntry> {
+  const bytes = await packTarballFiles(files);
   return { name, version, filename: tarballFilename(name, version), bytes };
 }
 
@@ -357,21 +299,12 @@ async function buildPackedEntries(): Promise<PackedEntry[]> {
   return entries;
 }
 
-/** Our own bookkeeping digest, for the idempotency check only — not the
- *  resolver's integrity, which `@intx/tool-packaging` computes itself (with
- *  `ssri`, a dependency of that package, not this script) when it reads the
- *  tarball back out of the asset. Same SRI shape (`sha512-<base64>`) so the
- *  index reads like the manifest it stands beside. */
-function sha512Sri(bytes: Uint8Array): string {
-  return `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
-}
-
 function digestEntries(entries: readonly PackedEntry[]): string {
   const hash = createHash("sha256");
   for (const entry of entries) {
     hash.update(entry.filename);
     hash.update("\0");
-    hash.update(sha512Sri(entry.bytes));
+    hash.update(tarballIntegrity(entry.bytes));
     hash.update("\0");
   }
   return hash.digest("hex");

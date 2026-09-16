@@ -75,6 +75,10 @@
       "dependencies": {
         "@solutions-builder/app": "workspace:*",
       },
+      "devDependencies": {
+        "@types/ssri": "catalog:",
+        "ssri": "catalog:",
+      },
     },
     "apps/web": {
       "name": "@solutions-builder/web",
