@@ -114,23 +114,53 @@ async function roundPayload(iteration: StageIteration): Promise<{ payload: Round
 }
 
 /**
- * The next open question of the interview round already under way — the
- * same count `questions.ts`' `nextQuestion` runs over a persisted thread,
- * run here over the turns projected so far.
+ * The next open question over already-projected turns: the last specialist
+ * turn that carried a list of questions starts a round, and every human turn
+ * after it answers the next one. A question the specialist already asked in
+ * an earlier round was answered there — a later round only opens once the
+ * earlier list is exhausted — so repeats are skipped, and when nothing fresh
+ * remains there is no open question. `questions.ts`' `nextQuestion` runs this
+ * over the persisted thread; the interview projection below runs it over the
+ * turns projected so far.
  */
-function nextInterviewQuestion(turnsSoFar: StageTurn[]): string {
-  let openerAt = -1;
-  for (let at = turnsSoFar.length - 1; at >= 0; at -= 1) {
-    if (turnsSoFar[at]!.role === "specialist" && turnsSoFar[at]!.questions !== null) {
-      openerAt = at;
+export function nextOpenQuestion(turns: readonly StageTurn[]): {
+  readonly body: string;
+  readonly ordinal: number;
+  readonly remaining: number;
+  readonly openerId: string;
+} | null {
+  let round = -1;
+  for (let at = turns.length - 1; at >= 0; at -= 1) {
+    if (turns[at]!.role === "specialist" && turns[at]!.questions !== null) {
+      round = at;
       break;
     }
   }
-  if (openerAt === -1) return "Anything to change before you approve it?";
-  const opener = turnsSoFar[openerAt]!;
-  const questions = opener.questions ?? [];
-  const answered = turnsSoFar.slice(openerAt + 1).filter((entry) => entry.role === "human").length;
-  return questions[answered] ?? questions.at(-1) ?? "Anything to change before you approve it?";
+  if (round === -1) return null;
+  const opener = turns[round]!;
+  const askedBefore = new Set<string>();
+  for (const turn of turns.slice(0, round)) {
+    if (turn.role === "specialist" && turn.questions !== null) {
+      for (const asked of turn.questions) askedBefore.add(asked.toLowerCase().replace(/\s+/g, " ").trim());
+    }
+  }
+  const fresh = (opener.questions ?? []).filter(
+    (asked) => !askedBefore.has(asked.toLowerCase().replace(/\s+/g, " ").trim()),
+  );
+  const answered = turns.slice(round + 1).filter((turn) => turn.role === "human").length;
+  const body = fresh[answered];
+  if (body === undefined) return null;
+  return { body, ordinal: answered, remaining: fresh.length - answered - 1, openerId: opener.id };
+}
+
+/**
+ * The next open question of the interview round already under way — the
+ * shared count above, so a repeat the model re-emitted is not spoken again
+ * while its answer stands two rounds back. Nothing fresh left means nothing
+ * to ask, and the turn says so.
+ */
+function nextInterviewQuestion(turnsSoFar: StageTurn[]): string {
+  return nextOpenQuestion(turnsSoFar)?.body ?? "Anything to change before you approve it?";
 }
 
 /**

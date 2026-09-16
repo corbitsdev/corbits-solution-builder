@@ -113,3 +113,17 @@ export function buildDraftPrompt(args: {
       : `Produce the stage ${args.stage} artifact now, using exactly the headings your instructions specify.`,
   ].join("\n");
 }
+
+/**
+ * A stage-3 choice the revised document must record, not relitigate. The
+ * workspace only offers approval once a `## Chosen approach` section exists,
+ * so a draft that absorbs the choice anywhere else leaves the person
+ * choosing again. Anything that is not a stage-3 choice passes through
+ * untouched.
+ */
+export function withChoiceReminder(stage: number, userInput: string): string {
+  if (stage !== 3 || !/^chosen:/i.test(userInput.trim())) return userInput;
+  const match = /^chosen:\s*approach\s+([ab])\s*\(([^)]+)\)/i.exec(userInput.trim());
+  const heading = match ? `## Chosen approach: ${match[2]!.trim()}` : "## Chosen approach";
+  return `${userInput.trim()}\n\nThe choice is made: open the revised document with a "${heading}" section naming the chosen approach and why it won, keep the other approach under its own heading as the rejected alternative, and keep Side by side. Do not ask the choice question again.`;
+}

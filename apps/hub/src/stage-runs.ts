@@ -36,7 +36,7 @@ import { execute, type Actor } from "./engine.js";
 import { readArtifactNode, writeArtifact } from "./projects.js";
 import { readProject } from "./project-tenant.js";
 import { stageContext } from "./agent-conversation.js";
-import { renderInputs, buildDraftPrompt, type Inputs, type Quote } from "@solutions-builder/app/stage-prompt";
+import { renderInputs, buildDraftPrompt, withChoiceReminder, type Inputs, type Quote } from "@solutions-builder/app/stage-prompt";
 import { database } from "./db.js";
 import * as table from "./schema.js";
 import { and, asc, eq, isNull } from "drizzle-orm";
@@ -431,7 +431,7 @@ export async function requestDraft(args: {
       projectTitle: args.projectTitle,
       stage: args.stage,
       inputs: renderInputs(inputs, args.stage),
-      userInput: args.message,
+      userInput: withChoiceReminder(args.stage, args.message),
       ...(current === null ? {} : { currentDocument: current }),
       context,
     });

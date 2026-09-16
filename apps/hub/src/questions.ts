@@ -6,9 +6,12 @@
  * specialist turn that carried a list of questions starts a round, and every
  * human turn after it answers the next one. A new round (a fresh draft) ends
  * the old one by construction, so a question about superseded text is never
- * asked. Nothing is stored beside the thread.
+ * asked. A question the new draft repeats from an earlier round was answered
+ * there, so it is skipped: without that, a model that re-emits answered
+ * questions restarts the count every round and the interview never ends.
+ * Nothing is stored beside the thread.
  */
-import { threadTurns } from "./stage-thread.js";
+import { nextOpenQuestion, threadTurns } from "./stage-thread.js";
 
 export type OpenQuestion = { id: string; body: string; ordinal: number; remaining: number };
 
@@ -18,24 +21,7 @@ export async function nextQuestion(
   stage: number,
 ): Promise<OpenQuestion | null> {
   const turns = await threadTurns(projectId, stage);
-  let round = -1;
-  for (let at = turns.length - 1; at >= 0; at -= 1) {
-    const turn = turns[at]!;
-    if (turn.role === "specialist" && turn.questions !== null) {
-      round = at;
-      break;
-    }
-  }
-  if (round === -1) return null;
-  const opener = turns[round]!;
-  const questions = opener.questions ?? [];
-  const answered = turns.slice(round + 1).filter((turn) => turn.role === "human").length;
-  const body = questions[answered];
-  if (body === undefined) return null;
-  return {
-    id: `${opener.id}:${answered}`,
-    body,
-    ordinal: answered,
-    remaining: questions.length - answered - 1,
-  };
+  const open = nextOpenQuestion(turns);
+  if (open === null) return null;
+  return { id: `${open.openerId}:${open.ordinal}`, body: open.body, ordinal: open.ordinal, remaining: open.remaining };
 }
