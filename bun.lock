@@ -74,10 +74,10 @@
       "version": "0.1.0",
       "dependencies": {
         "@solutions-builder/app": "workspace:*",
-        "ssri": "catalog:",
       },
       "devDependencies": {
         "@types/ssri": "catalog:",
+        "ssri": "catalog:",
       },
     },
     "apps/web": {

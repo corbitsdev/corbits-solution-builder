@@ -8,7 +8,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, mkdir, readFile, readdir, rm, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, readdir, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
@@ -33,9 +33,13 @@ export function tarballIntegrity(bytes: Uint8Array): string {
 }
 
 /** A fixed mtime for every packed file, so the archive depends only on file
- *  contents and names — never on the wall clock a temp directory happened to
- *  be built at. Without this, re-running with nothing changed still rewrites
- *  the asset, and two people packing the same tree get different bytes. */
+ *  contents, names and pinned modes — never on the wall clock a temp
+ *  directory happened to be built at, and never on the packer's umask.
+ *  Without this, re-running with nothing changed still rewrites
+ *  the asset, and two people packing the same tree get different bytes.
+ *  Determinism holds per platform: GNU tar stores leading directory entries
+ *  and bsdtar does not, so macOS-packed vs Linux-packed bytes differ for
+ *  identical inputs. */
 const DETERMINISTIC_MTIME = new Date(0);
 
 /** Real npm-tarball bytes: `package/` at the tar root, byte-for-byte the same
@@ -60,6 +64,7 @@ export async function packTarballFiles(files: TarballFiles): Promise<Uint8Array>
       const dest = join(root, rel);
       await mkdir(join(dest, ".."), { recursive: true });
       await writeFile(dest, files[rel]!);
+      await chmod(dest, 0o644);
       await utimes(dest, DETERMINISTIC_MTIME, DETERMINISTIC_MTIME);
     }
     // Pin the ancestor directories too: GNU tar stores leading directory
@@ -74,6 +79,7 @@ export async function packTarballFiles(files: TarballFiles): Promise<Uint8Array>
       }
     }
     for (const dir of ancestors) {
+      await chmod(dir, 0o755);
       await utimes(dir, DETERMINISTIC_MTIME, DETERMINISTIC_MTIME);
     }
     const outTar = join(tmp, "out.tar");
