@@ -8,6 +8,7 @@ export * from "./artifacts.js";
 export * from "./document.js";
 export * from "./kit.js";
 export * from "./seed-kit.js";
+export * from "./grant-namespaces.js";
 export * from "./next-step.js";
 export * from "./template.js";
 export * from "./workflows/concerns.js";
