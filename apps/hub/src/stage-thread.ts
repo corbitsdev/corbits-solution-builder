@@ -116,13 +116,20 @@ async function roundPayload(iteration: StageIteration): Promise<{ payload: Round
 /**
  * The next open question over already-projected turns: the last specialist
  * turn that carried a list of questions starts a round, and every human turn
- * after it answers the next one. A question the specialist already asked in
- * an earlier round was answered there — a later round only opens once the
- * earlier list is exhausted — so repeats are skipped, and when nothing fresh
- * remains there is no open question. `questions.ts`' `nextQuestion` runs this
- * over the persisted thread; the interview projection below runs it over the
- * turns projected so far.
+ * after it answers the next one. A question an earlier round asked counts as
+ * asked only when it was answered there — the human turns before the next
+ * round started — so a question a `revise:true` round abandoned (api-stages
+ * forces those to `final`, dropping the rest of the queue) is asked again
+ * when the next draft re-emits it. When nothing fresh remains there is no
+ * open question. `questions.ts`' `nextQuestion` runs this over the persisted
+ * thread; the interview projection below runs it over the turns projected so
+ * far.
  */
+/** One question with case and spacing flattened, so a re-emitted repeat matches the round that asked it. */
+function normalizeQuestion(question: string): string {
+  return question.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
 export function nextOpenQuestion(turns: readonly StageTurn[]): {
   readonly body: string;
   readonly ordinal: number;
@@ -139,14 +146,17 @@ export function nextOpenQuestion(turns: readonly StageTurn[]): {
   if (round === -1) return null;
   const opener = turns[round]!;
   const askedBefore = new Set<string>();
-  for (const turn of turns.slice(0, round)) {
-    if (turn.role === "specialist" && turn.questions !== null) {
-      for (const asked of turn.questions) askedBefore.add(asked.toLowerCase().replace(/\s+/g, " ").trim());
-    }
+  const openers: number[] = [];
+  for (let at = 0; at <= round; at += 1) {
+    if (turns[at]!.role === "specialist" && turns[at]!.questions !== null) openers.push(at);
   }
-  const fresh = (opener.questions ?? []).filter(
-    (asked) => !askedBefore.has(asked.toLowerCase().replace(/\s+/g, " ").trim()),
-  );
+  for (let roundIndex = 0; roundIndex + 1 < openers.length; roundIndex += 1) {
+    const start = openers[roundIndex]!;
+    const end = openers[roundIndex + 1]!;
+    const answered = turns.slice(start + 1, end).filter((turn) => turn.role === "human").length;
+    for (const asked of (turns[start]!.questions ?? []).slice(0, answered)) askedBefore.add(normalizeQuestion(asked));
+  }
+  const fresh = (opener.questions ?? []).filter((asked) => !askedBefore.has(normalizeQuestion(asked)));
   const answered = turns.slice(round + 1).filter((turn) => turn.role === "human").length;
   const body = fresh[answered];
   if (body === undefined) return null;

@@ -116,14 +116,62 @@ export function buildDraftPrompt(args: {
 
 /**
  * A stage-3 choice the revised document must record, not relitigate. The
- * workspace only offers approval once a `## Chosen approach` section exists,
- * so a draft that absorbs the choice anywhere else leaves the person
- * choosing again. Anything that is not a stage-3 choice passes through
+ * workspace shows the choice buttons instead of approval until a
+ * `## Chosen approach` section exists, so a draft that absorbs the choice
+ * anywhere else leaves the person choosing again. Anything that is not a
+ * stage-3 choice passes through untouched.
+ *
+ * The reminder below is only a prompt: when the model ignores it,
+ * `ensureChoiceSection` writes the section deterministically after the
+ * draft lands, so approval is never stuck behind a missed instruction.
+ */
+/** A stage-3 choice the person's message made, taken apart for the prompt and the repair alike. */
+function choiceIn(stage: number, userInput: string): { heading: string; letter: string; name: string | null } | null {
+  if (stage !== 3 || !/^chosen:/i.test(userInput.trim())) return null;
+  const match = /^chosen:\s*approach\s+([ab])\s*\(([^)]+)\)/i.exec(userInput.trim());
+  if (!match) return { heading: "Chosen approach", letter: "", name: null };
+  return { heading: `Chosen approach: ${match[2]!.trim()}`, letter: match[1]!.toUpperCase(), name: match[2]!.trim() };
+}
+
+export function withChoiceReminder(stage: number, userInput: string): string {
+  const choice = choiceIn(stage, userInput);
+  if (!choice) return userInput;
+  const heading = `## ${choice.heading}`;
+  return `${userInput.trim()}\n\nThe choice is made: open the revised document with a "${heading}" section naming the chosen approach and why it won, keep the other approach under its own heading as the rejected alternative, and keep Side by side. Do not ask the choice question again.`;
+}
+
+/**
+ * The deterministic fallback for a model that ignored the reminder above: a
+ * stage-3 draft written after the person chose, but with no
+ * `## Chosen approach` section, gains one naming the choice. The section
+ * records the decision — the comparison under Side by side still carries the
+ * trade-offs — so the workspace offers approval instead of asking again. A
+ * compliant draft, and anything that is not a stage-3 choice, passes through
  * untouched.
  */
-export function withChoiceReminder(stage: number, userInput: string): string {
-  if (stage !== 3 || !/^chosen:/i.test(userInput.trim())) return userInput;
-  const match = /^chosen:\s*approach\s+([ab])\s*\(([^)]+)\)/i.exec(userInput.trim());
-  const heading = match ? `## Chosen approach: ${match[2]!.trim()}` : "## Chosen approach";
-  return `${userInput.trim()}\n\nThe choice is made: open the revised document with a "${heading}" section naming the chosen approach and why it won, keep the other approach under its own heading as the rejected alternative, and keep Side by side. Do not ask the choice question again.`;
+export function ensureChoiceSection(stage: number, userInput: string, draft: string): string {
+  const choice = choiceIn(stage, userInput);
+  if (!choice) return draft;
+  if (/^##\s+chosen approach\b/im.test(draft)) return draft;
+  const named = choice.name !== null ? `Approach ${choice.letter} (${choice.name})` : "the chosen approach";
+  const section = [
+    `## ${choice.heading}`,
+    "",
+    `The person chose ${named}. Why it won, and the rejected alternative, are read from the approaches below — this section records the choice so the document opens with what was decided.`,
+  ].join("\n");
+  const lines = draft.replace(/\r\n/g, "\n").split("\n");
+  const inShort = lines.findIndex((line) => /^##\s+in short\b/i.test(line.trim()));
+  if (inShort !== -1) {
+    let end = lines.length;
+    for (let at = inShort + 1; at < lines.length; at += 1) {
+      if (/^##\s+/.test(lines[at]!)) {
+        end = at;
+        break;
+      }
+    }
+    return [...lines.slice(0, end), "", section, "", ...lines.slice(end)].join("\n").trim().concat("\n");
+  }
+  const firstSection = lines.findIndex((line) => /^##\s+/.test(line));
+  if (firstSection !== -1) return [...lines.slice(0, firstSection), section, "", ...lines.slice(firstSection)].join("\n").trim().concat("\n");
+  return `${section}\n\n${draft}`;
 }
