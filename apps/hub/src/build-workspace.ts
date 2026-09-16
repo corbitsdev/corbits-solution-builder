@@ -56,8 +56,13 @@ before writing a new one.
 \`apps/\` holds runnable entry points, \`packages/\` the libraries they
 compose, \`docs/\` the written record. The root is a Bun workspace: a new
 member joins by giving it a package.json under one of those directories.
-The \`vendor/interchange\` and \`vendor/workbench\` globs are already in
-\`workspaces\`, so a vendored platform tree resolves the moment it lands.
+The \`@intx/workflow\`, \`@intx/agent\` and \`@intx/tools-posix\`
+dependencies are already in the root \`package.json\`. Where the registry
+is reachable the seed installs them, and then
+\`import { defineAgent } from "@intx/agent"\`
+typechecks on arrival. The \`vendor/interchange\` and \`vendor/workbench\`
+globs are already in \`workspaces\` too, so a vendored platform tree
+resolves the moment it lands (the offline fallback).
 
 Commit as you go if this directory is a git repository — each attempt's
 work is reviewed against the last.
@@ -124,6 +129,26 @@ export async function seedBuildWorkspace(
     return;
   }
 
+  /**
+   * The platform packages a worker builds on, resolved from the npm
+   * registry — the preferred path (a): the seeded manifest names them, so
+   * `bun install` in a fresh workspace fetches them without further steps.
+   * Verified with `bun add @intx/workflow@0.3.0 @intx/agent
+   * @intx/tools-posix` from a fresh seed (`@intx/workflow` 0.3.0 on the
+   * `latest` tag per `platform-skills/using-interchange.md`; `@intx/agent`
+   * and `@intx/tools-posix` 0.3.0 verified against the live registry),
+   * then `bun install` exiting 0.
+   * The `vendor/*` globs below stay: they are the fallback path (b) — only if
+   * the registry is blocked, plant the host's `vendor/interchange` and
+   * `vendor/workbench` trees plus their VENDORED_REVISION pins, and the same
+   * `@intx/*` names resolve as workspace members instead.
+   */
+  const PLATFORM_DEPENDENCIES: Readonly<Record<string, string>> = {
+    "@intx/workflow": "0.3.0",
+    "@intx/agent": "0.3.0",
+    "@intx/tools-posix": "0.3.0",
+  };
+
   await writeFile(
     join(dir, "package.json"),
     `${JSON.stringify(
@@ -137,6 +162,7 @@ export async function seedBuildWorkspace(
           "vendor/interchange/apps/*",
           "vendor/workbench/packages/*",
         ],
+        dependencies: { ...PLATFORM_DEPENDENCIES },
         // Both need nothing beyond this file: `test` needs no install at
         // all (Bun's test runner is built in), and `typecheck` needs only
         // the `typescript` devDependency below plus the seeded tsconfig.
