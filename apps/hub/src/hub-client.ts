@@ -33,6 +33,7 @@ import {
 import { hub, hubIsMounted, mountHub } from "./hub-mount.js";
 import { readSecretResult, secretReference, storeSecret } from "./provider-credentials.js";
 import { HostError } from "./errors.js";
+import { SOLUTIONS_BUILDER_APP, assertMayMintGrant } from "@solutions-builder/app/grant-namespaces";
 
 export type HubMode = "embedded" | "remote";
 
@@ -569,8 +570,12 @@ export async function ensureRoleGrant(input: {
   action: string;
   effect: HubGrant["effect"];
   origin: "system" | "role";
-}, scope: string = tenantId()): Promise<HubGrant> {
-  const grants = await listGrants(scope);
+}, scope?: string): Promise<HubGrant> {
+  // Refused before the scope is even resolved: an out-of-namespace mint never
+  // reaches the hub, installed or not.
+  assertMayMintGrant(SOLUTIONS_BUILDER_APP, input.resource);
+  const target = scope ?? tenantId();
+  const grants = await listGrants(target);
   const existing = grants.find(
     (grant) =>
       grant.roleId === input.roleId &&
@@ -579,7 +584,7 @@ export async function ensureRoleGrant(input: {
       grant.effect === input.effect,
   );
   if (existing) return existing;
-  return hubPost<HubGrant>(tenantPathFor(scope, "/grants"), input);
+  return hubPost<HubGrant>(tenantPathFor(target, "/grants"), input);
 }
 
 /** What the hub would decide for this principal on this resource and action. */

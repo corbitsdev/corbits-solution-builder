@@ -24,6 +24,7 @@ import type {
 import { AGENT_KIT, type AgentRole } from "./kit.js";
 import type { Stage } from "./ledger.js";
 import { PLATFORM_SKILLS } from "./platform-skills.js";
+import { SOLUTIONS_BUILDER_APP, assertMayRequireGrant } from "./grant-namespaces.js";
 import { baseTemplate } from "./template.js";
 import {
   APPROVAL_WORKFLOW_ID,
@@ -234,6 +235,7 @@ export function grantRequirementsFor(stage: Stage): RequiredGrant[] {
     const tool = seed.tools.find((entry) => entry.key === toolKey);
     const grant = seed.grants.find((entry) => entry.key === tool?.grantKey);
     if (!tool || !grant) return [];
+    assertMayRequireGrant(SOLUTIONS_BUILDER_APP, grant.capability);
     return [
       {
         resource: grant.capability,
