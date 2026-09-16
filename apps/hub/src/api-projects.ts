@@ -1,5 +1,5 @@
 import type { Hono } from "hono";
-import { ProjectCreatePayload } from "./domain.js";
+import { DelegationUpdatePayload, ProjectCreatePayload } from "./domain.js";
 import { HostError } from "./errors.js";
 import { openDecisions } from "./decisions.js";
 import {
@@ -44,6 +44,12 @@ import { readProject } from "./project-tenant.js";
 import { projectSpend, workspaceSpend } from "./spend.js";
 import { attachMaterial, MATERIAL_KIND, materialText, type IncomingFile } from "./source-material.js";
 import { setStakeholders, STAKEHOLDER_ROLES } from "./stakeholders.js";
+import {
+  delegateMore,
+  delegationAudit,
+  liveDelegationStore,
+  revokeAllDelegations,
+} from "./workbench-delegation.js";
 
 /** `<project>-<document>`: what a printed PDF is saved as, before the dialog adds its extension. */
 function printFileName(projectTitle: string, documentTitle: string): string {
@@ -71,6 +77,9 @@ export function registerProjectRoutes(api: Hono) {
       policy: payload.policy,
       owner: localActor(),
       ...(problem.length > 0 ? { problemStatement: problem } : {}),
+      ...(payload.delegatedCredentialIds !== undefined
+        ? { delegatedCredentialIds: payload.delegatedCredentialIds }
+        : {}),
     });
 
     if (problem.length > 0) {
@@ -420,5 +429,32 @@ export function registerProjectRoutes(api: Hono) {
     await projectDetail(projectId, localActor().principalId);
     await deleteProject(projectId);
     return context.json({ ok: true });
+  });
+
+  /**
+   * The delegation audit: what the owner consented to at creation, and the
+   * live `use` grants in this tenant that carry it. Consent after creation
+   * and revocation per workbench live here too.
+   */
+  api.get("/projects/:projectId/delegations", async (context) => {
+    const projectId = context.req.param("projectId");
+    await projectDetail(projectId, localActor().principalId);
+    return context.json(await delegationAudit(liveDelegationStore(), projectId));
+  });
+
+  api.post("/projects/:projectId/delegations", async (context) => {
+    const projectId = context.req.param("projectId");
+    await projectDetail(projectId, localActor().principalId);
+    const payload = parsed(DelegationUpdatePayload(await context.req.json()));
+    return context.json(
+      await delegateMore(liveDelegationStore(), { projectId, delegatedCredentialIds: payload.credentialIds }),
+      201,
+    );
+  });
+
+  api.delete("/projects/:projectId/delegations", async (context) => {
+    const projectId = context.req.param("projectId");
+    await projectDetail(projectId, localActor().principalId);
+    return context.json({ revoked: await revokeAllDelegations(liveDelegationStore(), projectId) });
   });
 }

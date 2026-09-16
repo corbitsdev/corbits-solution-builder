@@ -32,14 +32,22 @@ import {
   listProjectRecords,
   requireProject,
   updateProject,
+  type DelegationRecord,
 } from "./project-tenant.js";
+import {
+  delegateAtCreation,
+  liveDelegationStore,
+  resolveDelegationConsent,
+  revokeAllDelegations,
+} from "./workbench-delegation.js";
 
 export async function createProject(args: {
   title: string;
   policy: ProjectPolicy;
   owner: { principalId: string; displayName: string };
   problemStatement?: string;
-}): Promise<{ projectId: string; runId: string }> {
+  delegatedCredentialIds?: string[];
+}): Promise<{ projectId: string; runId: string; delegations: DelegationRecord }> {
   // `project.create` is the one command with no state to leave, so `evaluate`
   // cannot judge it — but its ledger row still says what opening a project
   // means, and this reads that rather than restating it.
@@ -57,12 +65,23 @@ export async function createProject(args: {
     throw new HostError("validation_failed", "An audience quorum cannot be negative.");
   }
 
+  // Refused consent fails before any tenant exists: no half-created project.
+  const store = liveDelegationStore();
+  resolveDelegationConsent(
+    args.delegatedCredentialIds,
+    await store.listDelegatableCredentials(),
+  );
+
   // The project is a tenant under the workspace; the hub makes the owner its
   // first principal and `createProjectRecord` gives that principal every
   // human authority as a role there.
   const project = await createProjectRecord({ title: args.title, policy: args.policy });
   const runId = newId.run();
   const created = { projectId: project.id, runId };
+  const delegations = await delegateAtCreation(store, {
+    projectId: project.id,
+    delegatedCredentialIds: args.delegatedCredentialIds,
+  });
   // The one run-opening write outside `engine.ts` — `project.create` has no
   // source run to guard, so it never reaches `execute()`. The run is recorded
   // on the project's first ledger turn, below.
@@ -107,7 +126,7 @@ export async function createProject(args: {
   });
   await launchProjectRun({ projectId: created.projectId });
 
-  return created;
+  return { ...created, delegations };
 }
 
 /**
@@ -255,6 +274,9 @@ export async function archiveProject(projectId: string, archived: boolean): Prom
  * should be able to do irreversibly.
  */
 export async function deleteProject(projectId: string): Promise<void> {
+  await revokeAllDelegations(liveDelegationStore(), projectId).catch((cause: unknown) => {
+    console.error("[projects] the deleted project kept its delegation grants:", cause);
+  });
   await updateProject(projectId, { deletedAt: new Date() });
 }
 
