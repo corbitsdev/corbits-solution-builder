@@ -18,9 +18,10 @@
  *                           once. (Interchange INTR-522, first-operator
  *                           bootstrap, is the native answer.)
  *   5. ensureSpecialistPrincipal
- *                           No `POST /api/tenants/:id/principals` for
- *                           `kind: "workflow"`. Principals are listed and
- *                           patched, not created.
+ *                           Closed: the row goes through the principal
+ *                           store's `createIfAbsent`, which mints the
+ *                           per-principal wrap a raw insert cannot. Only an
+ *                           exists-by-id pre-check stays a direct read.
  *   6. ensureAgentSession   `GET /api/me/sessions` is a stub returning [].
  *                           There is no route that creates an `agent_session`
  *                           with a chosen id keyed to a definition. The
@@ -60,6 +61,7 @@
  * Everything else the host asks of the platform goes through `hub-client.ts`.
  */
 import { and, eq, sql, type Column } from "drizzle-orm";
+import { createPrincipalStore } from "@intx/db";
 import { createDetachedSignatureWithSigner } from "@intx/crypto";
 import { assembleMessage, assembleSignedContent, generateMessageId } from "@intx/mime";
 import { hub } from "./hub-mount.js";
@@ -182,6 +184,39 @@ export async function adoptLegacyWorkspace(userId: string): Promise<boolean> {
 
 export const SPECIALIST_PRINCIPAL_ID = "p_specialist";
 
+export type PrincipalSeed = {
+  id: string;
+  tenantId: string;
+  kind: "user" | "workflow";
+  refId: string;
+  status: "active";
+};
+
+export type PrincipalIo = {
+  exists(id: string): Promise<boolean>;
+  create(seed: PrincipalSeed): Promise<unknown>;
+};
+
+export function livePrincipalIo(): PrincipalIo {
+  return {
+    exists: async (id: string) =>
+      (
+        (await handle().execute(sql`
+        SELECT "id" FROM "public"."principal" WHERE "id" = ${id} LIMIT 1
+      `)) as unknown as Row[]
+      ).length > 0,
+    create: async (seed: PrincipalSeed) =>
+      createPrincipalStore(hub().db.db, hub().principalKeyStore).createIfAbsent(seed),
+  };
+}
+
+export async function ensurePrincipal(seed: PrincipalSeed, io: PrincipalIo): Promise<void> {
+  if (await io.exists(seed.id)) return;
+  // A null return is the store's lost-the-race signal: another writer claimed
+  // the natural key first, which still leaves a row for the identity.
+  await io.create(seed);
+}
+
 const MAIL_DOMAIN = "local.solutions-builder.invalid";
 
 function addressOf(principalId: string): string {
@@ -191,14 +226,27 @@ function addressOf(principalId: string): string {
 /**
  * Registers the specialist's platform identity, once. A `principal` row is
  * what a signing key and a session both attach to; `kind: "workflow"` is the
- * enum's own name for "a workflow speaks as this".
+ * enum's own name for "a workflow speaks as this". The row goes through the
+ * principal store, which derives the per-principal wrap from the sealed KEK;
+ * a raw insert cannot mint that wrap. The exists-by-id pre-check stays a
+ * direct read: only the id is known (a real user row's refId is its auth
+ * user, not its id), so the store's natural-key upsert cannot express "this
+ * exact row exists".
  */
-export async function ensureSpecialistPrincipal(tenantId: string): Promise<void> {
-  await handle().execute(sql`
-    INSERT INTO "public"."principal" ("id","tenant_id","kind","ref_id","status")
-    VALUES (${SPECIALIST_PRINCIPAL_ID}, ${tenantId}, 'workflow', 'solutions-builder.specialist', 'active')
-    ON CONFLICT ("id") DO NOTHING
-  `);
+export async function ensureSpecialistPrincipal(
+  tenantId: string,
+  io: PrincipalIo = livePrincipalIo(),
+): Promise<void> {
+  await ensurePrincipal(
+    {
+      id: SPECIALIST_PRINCIPAL_ID,
+      tenantId,
+      kind: "workflow",
+      refId: "solutions-builder.specialist",
+      status: "active",
+    },
+    io,
+  );
 }
 
 // --- 10. listChildTenants ----------------------------------------------------
@@ -227,12 +275,15 @@ export async function listChildTenants(parentId: string): Promise<ChildTenant[]>
 }
 
 /** A user principal by id. Same gap: nothing creates a principal except signup or invite. */
-export async function ensureUserPrincipal(tenantId: string, principalId: string): Promise<void> {
-  await handle().execute(sql`
-    INSERT INTO "public"."principal" ("id","tenant_id","kind","ref_id","status")
-    VALUES (${principalId}, ${tenantId}, 'user', ${principalId}, 'active')
-    ON CONFLICT ("id") DO NOTHING
-  `);
+export async function ensureUserPrincipal(
+  tenantId: string,
+  principalId: string,
+  io: PrincipalIo = livePrincipalIo(),
+): Promise<void> {
+  await ensurePrincipal(
+    { id: principalId, tenantId, kind: "user", refId: principalId, status: "active" },
+    io,
+  );
 }
 
 async function ensureSigningKey(principalId: string): Promise<void> {

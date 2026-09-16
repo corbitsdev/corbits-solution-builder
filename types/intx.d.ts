@@ -37,6 +37,12 @@ declare module "@intx/db" {
   };
   export function createSidecarAllocationStore(db: unknown): unknown;
   export function createWorkflowRunDispatchStore(db: unknown): unknown;
+  export function createPrincipalStore(
+    db: unknown,
+    keyStore: unknown,
+  ): {
+    createIfAbsent(row: unknown): Promise<unknown>;
+  };
 }
 
 declare module "@intx/db/schema" {
