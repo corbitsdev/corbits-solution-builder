@@ -203,3 +203,29 @@ to the reducer, so what lands is what would have landed.
 **Upstream-able.** The retry is defensive and local; the two writers are the
 real question for upstream — which of the awaiter and the relay should own the
 record when both see the same delivery.
+
+## `packages/workflow-deploy/src/capability-walk.ts` — per-step grants for leaf steps inside loop bodies
+
+**Why.** Upstream INTR-545: a tool call from a step nested in a loop body is
+refused before the implementation runs. The capability walk builds its
+per-step grant map keyed only by top-level step order; a loop body's nested
+steps fold into the loop node's single entry, so there is no entry for a leaf
+step id inside the body. At run time the child's authorize looks the invoking
+step id up in the frozen snapshot built from this map and throws
+(`credentialsSnapshot has no entry for stepId`). The unmerged proof branch
+`cl-8012-live-proof` carries the acceptance criteria: its stub answers the
+stage-5 specialist with a genuine tool-call delta and inspects the sidecar's
+own tool result, and those assertions fail until this walk emits the leaf
+entries.
+
+**What changed.** After the top-level walk records a loop node's folded union
+(unchanged, still what the approval gate sees), it emits one entry per leaf
+step id inside the loop body through the same single dispatch, frozen with the
+same deployment-wide trigger grants — recursing into loops nested in the
+body, whose leaves likewise authorize under their own ids. Tests in
+`src/capability-walk.test.ts`: a loop-body agent leaf and its action sibling
+each resolve under their bare body ids carrying exactly their own grants, and
+the leaves of a loop nested in a loop body resolve at every level.
+
+**Upstream-able.** Yes — this should BE the upstream PR for INTR-545. Drop
+this patch when the vendored revision refreshes past the upstream fix.

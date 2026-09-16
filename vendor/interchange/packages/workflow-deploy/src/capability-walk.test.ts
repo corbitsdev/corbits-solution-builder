@@ -664,6 +664,124 @@ describe("walkCapabilities", () => {
     expect(grants.has("effect:git:commit")).toBe(true);
   });
 
+  test("emits per-step entries for leaf steps inside a loop body", () => {
+    // INTR-545: a tool call from a step nested in a loop body was refused
+    // before the implementation ran, because the walk emitted no per-step
+    // grants for loop-body steps while the child's authorize looks each
+    // invoking step id up in the snapshot built from this map.
+    const registry = createDefaultDirectorRegistry();
+    const agent = defineAgent({
+      id: "ag_loop_leaf",
+      systemPrompt: "loop body specialist",
+      tools: [makeFactory("@vendor/deck/main", [{ name: "render_deck" }])],
+      capabilities: [],
+      inference: { sources: [{ provider: "anthropic", model: "mock-model" }] },
+    });
+    const body = defineWorkflow({
+      id: "loop-body",
+      trigger: { type: "manual" },
+      steps: {
+        specialist: step({ agent }),
+        commit: action({
+          handler: "c",
+          effect: { requires: ["git:commit"] },
+          after: ["specialist"],
+        }),
+      },
+    });
+    const workflow = defineWorkflow({
+      id: "wf_loop_leaves",
+      trigger: { type: "manual" },
+      steps: {
+        rework: loop({
+          body,
+          while: "w",
+          carry: "c",
+          maxIterations: 3,
+          onExhausted: "esc",
+        }),
+        esc: step({ agent: makeTrivialAgent(), after: ["rework"] }),
+      },
+    });
+
+    const walk = walkCapabilities(workflow, registry);
+
+    // The loop node still carries the folded union for the approval gate.
+    const loopDeclarations = walk.perStep.get("rework");
+    if (loopDeclarations === undefined) throw new Error("missing declarations");
+    expect(new Set(loopDeclarations.grants).has("tool:render_deck")).toBe(true);
+
+    // The runtime lookup resolves each invoking step id against the frozen
+    // snapshot built from this map, so the leaves must be present under
+    // their bare body ids carrying their own grants.
+    const snapshotSteps = [...walk.perStep].map(([stepId, declarations]) => ({
+      stepId,
+      grants: [...declarations.grants],
+    }));
+    const specialist = snapshotSteps.find((s) => s.stepId === "specialist");
+    if (specialist === undefined) {
+      throw new Error("no snapshot entry for loop-body step specialist");
+    }
+    expect(specialist.grants).toContain("tool:render_deck");
+    const commit = snapshotSteps.find((s) => s.stepId === "commit");
+    if (commit === undefined) {
+      throw new Error("no snapshot entry for loop-body step commit");
+    }
+    expect(commit.grants).toContain("effect:git:commit");
+    expect(commit.grants.some((g) => g.startsWith("tool:"))).toBe(false);
+  });
+
+  test("emits per-step entries for leaves of a loop nested in a loop body", () => {
+    const registry = createDefaultDirectorRegistry();
+    const innerBody = defineWorkflow({
+      id: "inner-body",
+      trigger: { type: "manual" },
+      steps: {
+        deep: step({ agent: makeTrivialAgent() }),
+      },
+    });
+    const outerBody = defineWorkflow({
+      id: "outer-body",
+      trigger: { type: "manual" },
+      steps: {
+        inner: loop({
+          body: innerBody,
+          while: "w",
+          carry: "c",
+          maxIterations: 2,
+          onExhausted: "done",
+        }),
+        done: step({ agent: makeTrivialAgent(), after: ["inner"] }),
+      },
+    });
+    const workflow = defineWorkflow({
+      id: "wf_nested_loop_leaves",
+      trigger: { type: "manual" },
+      steps: {
+        rework: loop({
+          body: outerBody,
+          while: "w",
+          carry: "c",
+          maxIterations: 3,
+          onExhausted: "esc",
+        }),
+        esc: step({ agent: makeTrivialAgent(), after: ["rework"] }),
+      },
+    });
+
+    const walk = walkCapabilities(workflow, registry);
+
+    // Every nesting level authorizes under its own id: the nested loop
+    // node, its leaf, and the outer body's neighbor step each resolve.
+    for (const stepId of ["inner", "deep", "done"]) {
+      const declarations = walk.perStep.get(stepId);
+      if (declarations === undefined) {
+        throw new Error(`no entry for loop-nested step ${stepId}`);
+      }
+      expect(declarations.grants).toContain("tool:mail_send");
+    }
+  });
+
   test("actions and agent steps each carry their own grants", () => {
     const registry = createDefaultDirectorRegistry();
     const agent = makeTrivialAgent();
