@@ -587,6 +587,27 @@ export async function ensureRoleGrant(input: {
   return hubPost<HubGrant>(tenantPathFor(target, "/grants"), input);
 }
 
+export type PrincipalGrantInput = {
+  principalId: string;
+  resource: string;
+  action: string;
+  effect: HubGrant["effect"];
+  origin: "system" | "role" | "creator" | "invoker";
+};
+
+/** A grant on a principal: delegation carries a chosen credential into a project tenant on this. */
+export async function createPrincipalGrant(
+  input: PrincipalGrantInput,
+  scope: string = tenantId(),
+): Promise<HubGrant> {
+  return hubPost<HubGrant>(tenantPathFor(scope, "/grants"), input);
+}
+
+/** Removes one grant by id; revocation deletes only what the delegation minted. */
+export async function deleteGrant(grantId: string, scope: string = tenantId()): Promise<void> {
+  await hubDelete(tenantPathFor(scope, `/grants/${grantId}`));
+}
+
 /** What the hub would decide for this principal on this resource and action. */
 export async function evaluate(
   principalId: string,
@@ -636,6 +657,8 @@ export type HubCredential = {
   name: string;
   type: string;
   status: string;
+  /** Null when tenant-owned; set when a personal credential that never crosses tenants. */
+  principalId: string | null;
   metadata: Record<string, unknown> | null;
   updatedAt: string;
 };

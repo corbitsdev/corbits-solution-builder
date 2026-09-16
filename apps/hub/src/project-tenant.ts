@@ -50,6 +50,17 @@ type StoredProject = {
   revision: number;
   archivedAt: string | null;
   deletedAt: string | null;
+  /** What the owner consented to delegate into this tenant, for audit and revocation. */
+  delegation?: DelegationRecord;
+};
+
+/** What the owner consented to, stored on the project tenant for audit. */
+export type DelegationRecord = {
+  mode: "chosen" | "default";
+  credentialIds: string[];
+  principalId: string;
+  grantedAt: string;
+  grantIds: string[];
 };
 
 function fromTenant(row: {
@@ -73,12 +84,14 @@ function fromTenant(row: {
 }
 
 function toConfig(record: ProjectRecord, existing: Record<string, unknown> | undefined) {
+  const prior = existing?.[CONFIG_KEY] as StoredProject | undefined;
   const stored: StoredProject = {
     policy: record.policy,
     policyVersion: record.policyVersion,
     revision: record.revision,
     archivedAt: record.archivedAt?.toISOString() ?? null,
     deletedAt: record.deletedAt?.toISOString() ?? null,
+    ...(prior?.delegation !== undefined ? { delegation: prior.delegation } : {}),
   };
   return { ...(existing ?? {}), [CONFIG_KEY]: stored };
 }
@@ -115,6 +128,24 @@ export async function requireProject(projectId: string): Promise<ProjectRecord> 
   const record = await readProject(projectId);
   if (!record) throw notFound("That project");
   return record;
+}
+
+/** The recorded consent on a project, or null when nothing was ever consented. */
+export async function readDelegationRecord(projectId: string): Promise<DelegationRecord | null> {
+  const tenant = await getTenant(projectId);
+  if (!tenant) throw notFound("That project");
+  return (tenant.config?.[CONFIG_KEY] as StoredProject | undefined)?.delegation ?? null;
+}
+
+/** Records consent on the project tenant; read-modify-write like every config change. */
+export async function writeDelegationRecord(projectId: string, record: DelegationRecord): Promise<void> {
+  const tenant = await getTenant(projectId);
+  if (!tenant) throw notFound("That project");
+  const stored = (tenant.config?.[CONFIG_KEY] as StoredProject | undefined) ?? null;
+  if (!stored) throw notFound("That project");
+  await patchTenant(projectId, {
+    config: { ...(tenant.config ?? {}), [CONFIG_KEY]: { ...stored, delegation: record } },
+  });
 }
 
 /** Every live project, newest first. */

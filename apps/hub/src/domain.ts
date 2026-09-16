@@ -54,6 +54,13 @@ export const ProjectCreatePayload = type({
    */
   "title?": type("string <= 200"),
   "problemStatement?": "string <= 4000",
+  /**
+   * The parent credentials delegated into the new project tenant. Chosen ids
+   * mint `credential:<id>/use` on the owner inside the child tenant; absent
+   * is the explicit default of none. Personal credentials never cross and
+   * fail the creation before any tenant exists.
+   */
+  "delegatedCredentialIds?": type("string > 0").array(),
   policy: {
     /** Cost tolerance as a percentage and an absolute figure; both apply. */
     costTolerancePercent: "number >= 0",
@@ -66,6 +73,12 @@ export const ProjectCreatePayload = type({
   },
 });
 export type ProjectCreatePayload = typeof ProjectCreatePayload.infer;
+
+/** Adds credentials to a workbench's consented set after creation. */
+export const DelegationUpdatePayload = type({
+  credentialIds: type("string > 0").array(),
+});
+export type DelegationUpdatePayload = typeof DelegationUpdatePayload.infer;
 
 export const StageApprovePayload = type({
   runId: id,
