@@ -76,9 +76,9 @@ export const GRANT_NAMESPACES: readonly GrantNamespaceEntry[] = [
     prefix: "authority:",
     owner: BUILDER,
     mintedBy: [BUILDER],
-    requiredBy: [],
+    requiredBy: [BUILDER],
     meaning:
-      "Authority roles: `authority:<ledger-authority>` with action `hold` means the role holds that human authority. Minted only by the hub installer; never declared as a requirement.",
+      "Authority roles: `authority:<ledger-authority>` with action `hold` means the role holds that human authority. Minted only by the hub installer; nothing declares it in practice, but mint-implies-require keeps the table honest about the enforced rule.",
   },
   {
     prefix: "artifact.",
