@@ -35,7 +35,11 @@
  *                  never passes a blanket bypass such as
  *                  --dangerously-skip-permissions
  *   linkage        every attempt is linked to an immutable packet and run
- *   exit criterion replaced by verified shared-hub integration before launch
+ *   exit criterion retire on a packaged worker runtime replacing the
+ *                  local-CLI probe, plus the upstream loop-nested tool
+ *                  fix this seam waits on — until both land, the seam
+ *                  stays frozen as documented here: hygiene only, no new
+ *                  flags, capabilities, or synthesised sessions
  *
  * What this bridge therefore does NOT report, because the interface does not
  * provide it: session identity, normalised live events, per-agent roster
@@ -263,7 +267,7 @@ export async function bridgeAvailable(): Promise<{ available: boolean; detail: s
     return {
       available: false,
       worker,
-      detail: `\`${probeCommand}\` exited ${probe.exitCode}. The build lane is unavailable.`,
+      detail: `The installed ${worker.label} failed its availability probe (\`${probeCommand}\` exited ${probe.exitCode}). The build lane is unavailable.`,
     };
   }
   const answer = probe.stdout?.toString() ?? "";
@@ -284,7 +288,7 @@ export async function workspaceFor(runId: string): Promise<string> {
 }
 
 /** Beside the workspace, not in it: the worker builds in one and reports into the other. */
-export function turnLogFor(runId: string): string {
+function turnLogFor(runId: string): string {
   return join(dataDirectory(), "builds", `${runId}.turns.jsonl`);
 }
 

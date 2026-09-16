@@ -34,10 +34,8 @@ export function nextStep(input: {
    * self-approving wording by accident.
    */
   soloApproval?: boolean;
-  /** Set when the stage cannot run at all — no model provider, or no host to place a sidecar on. */
-  executionUnavailable?: "no_offering" | "no_host";
 }): NextStep {
-  const { state, stage, hasDraft, soloApproval, executionUnavailable } = input;
+  const { state, stage, hasDraft, soloApproval } = input;
 
   if (state === null) {
     return {
@@ -45,20 +43,6 @@ export function nextStep(input: {
       detail: "Describe a problem worth solving and the first specialist takes it from there.",
       where: "decisions",
     };
-  }
-
-  if (state === "in_progress" && executionUnavailable) {
-    return executionUnavailable === "no_offering"
-      ? {
-          title: "Connect a model provider",
-          detail: "This project can't run until a model provider is connected in settings.",
-          where: "settings",
-        }
-      : {
-          title: "Wait for a host to become available",
-          detail: "There is no host free to place this project's sidecar on right now. It will start as soon as one is.",
-          where: "stage",
-        };
   }
 
   switch (state) {
