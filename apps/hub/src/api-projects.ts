@@ -11,6 +11,7 @@ import {
   renameProject,
   archiveProject,
   deleteProject,
+  revokeProjectDelegations,
 } from "./projects.js";
 import {
   designHistory,
@@ -48,7 +49,6 @@ import {
   delegateMore,
   delegationAudit,
   liveDelegationStore,
-  revokeAllDelegations,
 } from "./workbench-delegation.js";
 
 /** `<project>-<document>`: what a printed PDF is saved as, before the dialog adds its extension. */
@@ -454,7 +454,14 @@ export function registerProjectRoutes(api: Hono) {
 
   api.delete("/projects/:projectId/delegations", async (context) => {
     const projectId = context.req.param("projectId");
-    await projectDetail(projectId, localActor().principalId);
-    return context.json({ revoked: await revokeAllDelegations(liveDelegationStore(), projectId) });
+    try {
+      await projectDetail(projectId, localActor().principalId);
+    } catch (cause) {
+      // A deleted project 404s its detail, but its tenant — and any surviving
+      // delegation grants — are still there. Revocation stays reachable so a
+      // stranded delete can be cleaned up; anything but not-found still throws.
+      if (!(cause instanceof HostError) || cause.code !== "not_found") throw cause;
+    }
+    return context.json({ revoked: await revokeProjectDelegations(projectId) });
   });
 }

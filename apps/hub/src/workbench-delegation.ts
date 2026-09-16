@@ -58,6 +58,9 @@ export function liveDelegationStore(): DelegationStore {
   };
 }
 
+/** What the creation payload consents to: the chosen set, or the explicit default of none. */
+export type DelegationConsent = { mode: "chosen" | "default"; credentialIds: string[] };
+
 /**
  * Settles what the creation payload consents to. Absent is the explicit
  * default of none — recorded, never silent. Unknown ids and personal
@@ -66,7 +69,7 @@ export function liveDelegationStore(): DelegationStore {
 export function resolveDelegationConsent(
   raw: string[] | undefined,
   available: DelegatableCredential[],
-): { mode: "chosen" | "default"; credentialIds: string[] } {
+): DelegationConsent {
   if (raw === undefined) return { mode: "default", credentialIds: [] };
   const credentialIds = [...new Set(raw)];
   const byId = new Map(available.map((credential) => [credential.id, credential]));
@@ -159,20 +162,35 @@ export async function revokeDelegationGrants(
 }
 
 /**
- * The full creation step: settle consent, mint into the child tenant, record
- * it on the project tenant. Validation runs before the caller opens the
- * tenant, so a refused set never leaves a half-created project behind.
+ * The full creation step: settle consent, record it on the project tenant,
+ * mint into the child tenant, record the grant ids. Validation runs before
+ * the caller opens the tenant (or arrives already settled through `consent`),
+ * so a refused set never leaves a half-created project behind. The consent
+ * is recorded before any grant exists, so a mint that dies midway still
+ * leaves a record revocation and audit can see — the grant ids follow once
+ * the mints land.
  */
 export async function delegateAtCreation(
   store: DelegationStore,
-  args: { projectId: string; delegatedCredentialIds?: string[] | undefined },
+  args: {
+    projectId: string;
+    delegatedCredentialIds?: string[] | undefined;
+    consent?: DelegationConsent | undefined;
+  },
 ): Promise<DelegationRecord> {
-  const available = await store.listDelegatableCredentials();
-  const consent = resolveDelegationConsent(args.delegatedCredentialIds, available);
+  const consent =
+    args.consent ??
+    resolveDelegationConsent(args.delegatedCredentialIds, await store.listDelegatableCredentials());
   const principalId = await store.ownerInChild(args.projectId);
   if (!principalId) {
     throw new HostError("internal_error", "The hub opened the project but the owner is not in it.");
   }
+  await store.writeRecord(args.projectId, {
+    ...consent,
+    principalId,
+    grantedAt: new Date().toISOString(),
+    grantIds: [],
+  });
   const grants = await ensureDelegationGrants(store, {
     projectId: args.projectId,
     principalId,
@@ -239,17 +257,19 @@ export async function delegationAudit(
   return { consent, grants };
 }
 
-/** Revokes every recorded delegation on a workbench and clears its record. */
+/** Revokes every delegation grant on a workbench and clears its record. */
 export async function revokeAllDelegations(
   store: DelegationStore,
   projectId: string,
 ): Promise<string[]> {
   const prior = await store.readRecord(projectId);
   if (!prior) return [];
+  // Reconciled from the live grants, not the recorded credential set: a
+  // creation that died between minting and recording still leaves grants
+  // this must remove.
   const revoked = await revokeDelegationGrants(store, {
     projectId,
     principalId: prior.principalId,
-    credentialIds: prior.credentialIds,
   });
   await store.writeRecord(projectId, {
     mode: "default",

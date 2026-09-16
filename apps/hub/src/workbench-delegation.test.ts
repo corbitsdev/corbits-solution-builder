@@ -231,4 +231,47 @@ describe("creation, audit and revocation", () => {
     expect(store.records.get("project-a")).toMatchObject({ mode: "default", credentialIds: [] });
     expect(await revokeAllDelegations(store, "project-never")).toEqual([]);
   });
+
+  test("a mint that dies midway still leaves a revocable record", async () => {
+    const store = fakeStore();
+    let mints = 0;
+    const mint = store.mintChildGrant;
+    store.mintChildGrant = async (projectId, input) => {
+      mints += 1;
+      if (mints > 1) throw new Error("the hub dropped the second mint");
+      return mint(projectId, input);
+    };
+    await expect(
+      delegateAtCreation(store, {
+        projectId: "project-a",
+        delegatedCredentialIds: ["cred-shared", "cred-other"],
+      }),
+    ).rejects.toThrow("the hub dropped the second mint");
+    expect(store.grants).toHaveLength(1);
+    expect(store.records.get("project-a")?.credentialIds).toEqual(["cred-shared", "cred-other"]);
+    const revoked = await revokeAllDelegations(store, "project-a");
+    expect(revoked).toEqual(["cred-shared"]);
+    expect(store.grants).toHaveLength(0);
+  });
+
+  test("a record write that fails after minting still leaves revocable grants", async () => {
+    const store = fakeStore();
+    let writes = 0;
+    const write = store.writeRecord;
+    store.writeRecord = async (projectId, record) => {
+      writes += 1;
+      if (writes === 2) throw new Error("the tenant config would not stick");
+      return write(projectId, record);
+    };
+    await expect(
+      delegateAtCreation(store, {
+        projectId: "project-a",
+        delegatedCredentialIds: ["cred-shared"],
+      }),
+    ).rejects.toThrow("the tenant config would not stick");
+    expect(store.grants).toHaveLength(1);
+    const revoked = await revokeAllDelegations(store, "project-a");
+    expect(revoked).toEqual(["cred-shared"]);
+    expect(store.grants).toHaveLength(0);
+  });
 });

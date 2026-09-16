@@ -39,15 +39,23 @@ import {
   liveDelegationStore,
   resolveDelegationConsent,
   revokeAllDelegations,
+  type DelegationStore,
 } from "./workbench-delegation.js";
 
-export async function createProject(args: {
-  title: string;
-  policy: ProjectPolicy;
-  owner: { principalId: string; displayName: string };
-  problemStatement?: string;
-  delegatedCredentialIds?: string[];
-}): Promise<{ projectId: string; runId: string; delegations: DelegationRecord }> {
+export async function createProject(
+  args: {
+    title: string;
+    policy: ProjectPolicy;
+    owner: { principalId: string; displayName: string };
+    problemStatement?: string;
+    delegatedCredentialIds?: string[];
+  },
+  deps: {
+    store?: DelegationStore;
+    createRecord?: (input: { title: string; policy: ProjectPolicy }) => Promise<{ id: string }>;
+    concealRecord?: (projectId: string) => Promise<void>;
+  } = {},
+): Promise<{ projectId: string; runId: string; delegations: DelegationRecord }> {
   // `project.create` is the one command with no state to leave, so `evaluate`
   // cannot judge it — but its ledger row still says what opening a project
   // means, and this reads that rather than restating it.
@@ -66,8 +74,10 @@ export async function createProject(args: {
   }
 
   // Refused consent fails before any tenant exists: no half-created project.
-  const store = liveDelegationStore();
-  resolveDelegationConsent(
+  // The settled consent travels into the delegation step, so the catalog is
+  // fetched and validated once — never re-read mid-creation.
+  const store = deps.store ?? liveDelegationStore();
+  const consent = resolveDelegationConsent(
     args.delegatedCredentialIds,
     await store.listDelegatableCredentials(),
   );
@@ -75,13 +85,30 @@ export async function createProject(args: {
   // The project is a tenant under the workspace; the hub makes the owner its
   // first principal and `createProjectRecord` gives that principal every
   // human authority as a role there.
-  const project = await createProjectRecord({ title: args.title, policy: args.policy });
+  const createRecord = deps.createRecord ?? createProjectRecord;
+  const project = await createRecord({ title: args.title, policy: args.policy });
   const runId = newId.run();
   const created = { projectId: project.id, runId };
-  const delegations = await delegateAtCreation(store, {
-    projectId: project.id,
-    delegatedCredentialIds: args.delegatedCredentialIds,
-  });
+  let delegations: DelegationRecord;
+  try {
+    delegations = await delegateAtCreation(store, { projectId: project.id, consent });
+  } catch (cause) {
+    // The tenant exists but the project never opened: pull it back off the
+    // listing (and drop whatever the delegation minted) so a failed creation
+    // leaves no orphan behind, then report the failure that caused it.
+    const concealRecord = deps.concealRecord ?? (async (projectId: string) => {
+      await updateProject(projectId, { deletedAt: new Date() });
+    });
+    await revokeAllDelegations(store, project.id).catch((revokeCause: unknown) => {
+      console.error("[projects] a failed creation kept its delegation grants:", revokeCause);
+    });
+    try {
+      await concealRecord(project.id);
+    } catch (concealCause) {
+      console.error("[projects] a failed creation left its project behind:", concealCause);
+    }
+    throw cause;
+  }
   // The one run-opening write outside `engine.ts` — `project.create` has no
   // source run to guard, so it never reaches `execute()`. The run is recorded
   // on the project's first ledger turn, below.
@@ -273,11 +300,38 @@ export async function archiveProject(projectId: string, archived: boolean): Prom
  * approvals stay on disk. Dropping someone's work is not a thing a UI button
  * should be able to do irreversibly.
  */
-export async function deleteProject(projectId: string): Promise<void> {
-  await revokeAllDelegations(liveDelegationStore(), projectId).catch((cause: unknown) => {
-    console.error("[projects] the deleted project kept its delegation grants:", cause);
-  });
-  await updateProject(projectId, { deletedAt: new Date() });
+export async function deleteProject(
+  projectId: string,
+  deps: {
+    store?: DelegationStore;
+    markDeleted?: (projectId: string) => Promise<void>;
+  } = {},
+): Promise<void> {
+  // Revocation runs before the delete mark, and its failure stops the delete:
+  // a marked project 404s every route, so swallowing this would strand the
+  // surviving grants where no retry could reach them. The project stays live
+  // and the delete (or the revocation route) can be retried.
+  await revokeAllDelegations(deps.store ?? liveDelegationStore(), projectId);
+  const markDeleted =
+    deps.markDeleted ??
+    (async (id: string) => {
+      await updateProject(id, { deletedAt: new Date() });
+    });
+  await markDeleted(projectId);
+}
+
+/**
+ * Revokes a deleted project's surviving delegation grants. The delete mark
+ * hides the project from every listing, but the tenant — its consent record
+ * and its grants — is still there, so revocation never needed the project
+ * to be live. This is the way out for a delete that predates the
+ * revoke-before-delete ordering above.
+ */
+export async function revokeProjectDelegations(
+  projectId: string,
+  store: DelegationStore = liveDelegationStore(),
+): Promise<string[]> {
+  return revokeAllDelegations(store, projectId);
 }
 
 /** One artifact node as carried between instances: the row, and the bytes the store holds for it. */
