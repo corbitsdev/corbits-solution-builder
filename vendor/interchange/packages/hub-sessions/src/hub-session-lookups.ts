@@ -340,6 +340,8 @@ export function createHubSessionLookups(
           id: workflowRun.id,
           address: workflowRun.address,
           anchorRunId: workflowRun.anchorRunId,
+          tenantId: workflowRun.tenantId,
+          definitionId: workflowRun.definitionId,
         })
         .from(workflowRun)
         .where(
@@ -431,7 +433,33 @@ export function createHubSessionLookups(
               .from(workflowRun)
               .where(eq(workflowRun.id, runId))
               .limit(1);
-            if (ownedRun?.anchorRunId !== anchor.id) {
+            if (ownedRun === undefined) {
+              // An internal run (e.g. a loop-iteration child whose plain
+              // author-named awaitSignal gate parks silently by design) never
+              // crossed the correlation-register path that mints run rows, so
+              // a missing row is the expected case, not a foreign run. Mint
+              // it now so the terminal flip below has somewhere to land --
+              // the same idempotent row the register path would have written.
+              // Only ids of this deployment are claimable: the anchor itself
+              // or its `<anchor>__*` children. Anything else keeps the loud
+              // ignore below, so a garbage, typo, or cross-deployment id can
+              // never mint a phantom terminal row here.
+              if (runId !== anchor.id && !runId.startsWith(`${anchor.id}__`)) {
+                logger.error`Ignoring terminal event for run ${runId}: it does not belong to source deployment ${anchor.id}`;
+                return;
+              }
+              await workflowRunStore.createIfAbsent(
+                {
+                  id: runId,
+                  anchorRunId: anchor.id,
+                  definitionId: anchor.definitionId,
+                  tenantId: anchor.tenantId,
+                  principalId: null,
+                  status: "running",
+                },
+                tx,
+              );
+            } else if (ownedRun.anchorRunId !== anchor.id) {
               logger.error`Ignoring terminal event for run ${runId}: it does not belong to source deployment ${anchor.id}`;
               return;
             }

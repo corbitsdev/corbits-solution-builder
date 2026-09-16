@@ -203,3 +203,31 @@ to the reducer, so what lands is what would have landed.
 **Upstream-able.** The retry is defensive and local; the two writers are the
 real question for upstream — which of the awaiter and the relay should own the
 record when both see the same delivery.
+
+## `packages/hub-sessions/src/hub-session-lookups.ts` — missing terminal-event run rows are minted, not misread as foreign
+
+**Why.** Upstream INTR-548: loop-iteration terminal events
+(`<anchor>__revise-N__M`) were ERROR-ignored as "does not belong to source
+deployment". The creation side is correct — the composite id is stamped at
+`step-scope.ts` `loopBodyRunId` — but no `workflow_run` row ever exists for
+these children: `onPark` fires only for reserved-channel suspends, never a
+plain author-named `awaitSignal` gate (pinned by `park-notify.test.ts`), so
+the correlation-register path that lazily mints internal rows never runs.
+The lookup guard (`ownedRun?.anchorRunId !== anchor.id`) then conflated a
+missing row (`undefined`) with a row anchored to another deployment, and
+returned before the graceful missing-row handling ten lines below.
+
+**What changed.** The guard is split: a missing row is `createIfAbsent`-minted
+as an internal run (`anchorRunId` of the deployment, the deployment's
+`definitionId`/`tenantId`, `principalId: null`, `running` — the same row the
+register path would have written) so the terminal flip below has somewhere to
+land; only a row that exists with a genuinely different `anchorRunId` keeps
+the loud ERROR ignore. The anchor lookup now also selects `tenantId` and
+`definitionId` to populate the minted row. Regression tests in
+`hub-session-lookups.terminal-guard.test.ts` drive the real
+`receiveWorkflowRunPack` with a scripted executor: missing → one mint insert
+plus the terminal flip; foreign → no insert, no flip.
+
+**Upstream-able.** Yes, as-is: the missing case keeps the register path's row
+shape, the foreign case is byte-for-byte the old behaviour, and the test file
+is written to land beside the guard.
