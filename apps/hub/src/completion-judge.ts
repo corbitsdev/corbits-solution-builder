@@ -175,10 +175,29 @@ export function extractExampleInput(requirements: string, limit = 20): string[] 
       continue;
     }
     if (exampleDepth === null) continue;
+    const bulletStripped = raw.replace(/^\s*[-*+]\s+/, "").trim();
+    // A bare `Input:`/`Output:` line marks which half follows, exactly like an
+    // `### Input` subheading does — the requirements author is told to write
+    // "real input ... and the exact output", and a real build wrote the halves
+    // as labels, feeding the expected output to the deliverable as input.
+    // Only outside fences, so fenced content can never flip the half.
+    if (!inFence) {
+      const halfMatch = /^(input|given|when|output|expected|then|results?)\s*:(.*)$/i.exec(bulletStripped);
+      if (halfMatch) {
+        inInput = /^(input|given|when)$/i.test(halfMatch[1]!);
+        sawInputHeading = true;
+        const rest = halfMatch[2]!.trim();
+        if (inInput && rest.length > 0) {
+          collected.push(rest);
+          if (collected.length >= limit) break;
+        }
+        continue;
+      }
+    }
     // Only skip non-input halves once the document has actually named one;
     // an example written as a flat block has no halves and is taken whole.
     if (sawInputHeading && !inInput) continue;
-    const stripped = raw.replace(/^\s*[-*+]\s+/, "").trim();
+    const stripped = bulletStripped;
     if (stripped.length === 0) continue;
     const withoutLabel = stripped
       .replace(/^(you|user|input|answer|reply|response|prompt)\s*:\s*/i, "")

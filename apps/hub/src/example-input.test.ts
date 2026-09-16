@@ -24,6 +24,29 @@ Lead 1: Company A
 - None.
 `;
 
+// Observed on a real bench run: the requirements author wrote the halves as
+// bare `Input:`/`Output:` labels instead of `### Input`/`### Output`
+// subheadings, so the whole block — expected output included — was fed to
+// the deliverable's stdin. Only the invocation line is real input.
+const BARE_LABELS = `## Worked example
+Input:
+\`\`\`
+agent_start.py --endpoint https://example.com/status --deadline 30000 --interval 5000
+\`\`\`
+Output:
+- Logs in \`transcript.log\`:
+\`\`\`json
+{"timestamp": "2023-10-10T14:23:34.123456Z", "poll_result": {"endpoint": "https://example.com/status", "response": "in_progress", "status_code": 200}, "poll_number": 1}
+\`\`\`
+- Final verdict emitted to stdout:
+\`\`\`plaintext
+Final verdict: completed
+\`\`\`
+
+## Constraints and dependencies
+- None.
+`;
+
 describe("extractExampleInput", () => {
   test("a deeper heading stays inside the example", () => {
     expect(extractExampleInput(REAL)).toContain("Business size: medium; Industry: tech");
@@ -52,5 +75,15 @@ describe("extractExampleInput", () => {
 
   test("no example section yields nothing, rather than something invented", () => {
     expect(extractExampleInput("## Scope\n- A thing.\n")).toEqual([]);
+  });
+
+  test("bare Input:/Output: labels split the halves like subheadings do", () => {
+    expect(extractExampleInput(BARE_LABELS)).toEqual([
+      "agent_start.py --endpoint https://example.com/status --deadline 30000 --interval 5000",
+    ]);
+  });
+
+  test("a bare label with inline content contributes the content, not the label", () => {
+    expect(extractExampleInput("## Example\nInput: hello\n\n## Next\n- other\n")).toEqual(["hello"]);
   });
 });
