@@ -949,4 +949,142 @@ describe("walkCapabilities", () => {
       DuplicateWalkToolError,
     );
   });
+
+  test("throws when a loop-body leaf id collides with a top-level step id", () => {
+    // Leaf ids are not namespaced: the body below reuses the top-level
+    // `specialist` id with a different agent, so a silent overwrite would
+    // corrupt the top-level entry the gate already approved.
+    const registry = createDefaultDirectorRegistry();
+    const leafAgent = defineAgent({
+      id: "ag_collision_leaf",
+      systemPrompt: "loop body leaf with its own tool",
+      tools: [makeFactory("@vendor/deck/main", [{ name: "render_deck" }])],
+      capabilities: [],
+      inference: { sources: [{ provider: "anthropic", model: "mock-model" }] },
+    });
+    const body = defineWorkflow({
+      id: "collision-body",
+      trigger: { type: "manual" },
+      steps: {
+        specialist: step({ agent: leafAgent }),
+      },
+    });
+    const workflow = defineWorkflow({
+      id: "wf_leaf_top_collision",
+      trigger: { type: "manual" },
+      steps: {
+        specialist: step({ agent: makeTrivialAgent() }),
+        rework: loop({
+          body,
+          while: "w",
+          carry: "c",
+          maxIterations: 3,
+          onExhausted: "esc",
+          after: ["specialist"],
+        }),
+        esc: step({ agent: makeTrivialAgent(), after: ["rework"] }),
+      },
+    });
+
+    expect(() => walkCapabilities(workflow, registry)).toThrow(/collides/);
+  });
+
+  test("throws when the same leaf id appears in two sibling loops with different grants", () => {
+    // The loser's grants would never reach the gate (fail-open at
+    // approval) or the loser would authorize against the winner's grants
+    // at runtime; either way the silent overwrite must not stand.
+    const registry = createDefaultDirectorRegistry();
+    const deckAgent = defineAgent({
+      id: "ag_sibling_deck",
+      systemPrompt: "first loop's worker",
+      tools: [makeFactory("@vendor/deck/main", [{ name: "render_deck" }])],
+      capabilities: [],
+      inference: { sources: [{ provider: "anthropic", model: "mock-model" }] },
+    });
+    const bodyA = defineWorkflow({
+      id: "sibling-body-a",
+      trigger: { type: "manual" },
+      steps: {
+        worker: step({ agent: deckAgent }),
+      },
+    });
+    const bodyB = defineWorkflow({
+      id: "sibling-body-b",
+      trigger: { type: "manual" },
+      steps: {
+        worker: step({ agent: makeTrivialAgent() }),
+      },
+    });
+    const workflow = defineWorkflow({
+      id: "wf_sibling_leaf_collision",
+      trigger: { type: "manual" },
+      steps: {
+        first: loop({
+          body: bodyA,
+          while: "w",
+          carry: "c",
+          maxIterations: 2,
+          onExhausted: "esc",
+        }),
+        second: loop({
+          body: bodyB,
+          while: "w",
+          carry: "c",
+          maxIterations: 2,
+          onExhausted: "esc",
+          after: ["first"],
+        }),
+        esc: step({ agent: makeTrivialAgent(), after: ["first", "second"] }),
+      },
+    });
+
+    expect(() => walkCapabilities(workflow, registry)).toThrow(/collides/);
+  });
+
+  test("merges a repeated leaf id across sibling loops when the grants are identical", () => {
+    // Identical grant sets are indistinguishable to both the approval gate
+    // and the runtime lookup, so the repeat entry merges silently.
+    const registry = createDefaultDirectorRegistry();
+    const bodyA = defineWorkflow({
+      id: "merge-body-a",
+      trigger: { type: "manual" },
+      steps: {
+        worker: step({ agent: makeTrivialAgent() }),
+      },
+    });
+    const bodyB = defineWorkflow({
+      id: "merge-body-b",
+      trigger: { type: "manual" },
+      steps: {
+        worker: step({ agent: makeTrivialAgent() }),
+      },
+    });
+    const workflow = defineWorkflow({
+      id: "wf_sibling_leaf_merge",
+      trigger: { type: "manual" },
+      steps: {
+        first: loop({
+          body: bodyA,
+          while: "w",
+          carry: "c",
+          maxIterations: 2,
+          onExhausted: "esc",
+        }),
+        second: loop({
+          body: bodyB,
+          while: "w",
+          carry: "c",
+          maxIterations: 2,
+          onExhausted: "esc",
+          after: ["first"],
+        }),
+        esc: step({ agent: makeTrivialAgent(), after: ["first", "second"] }),
+      },
+    });
+
+    const walk = walkCapabilities(workflow, registry);
+    const declarations = walk.perStep.get("worker");
+    if (declarations === undefined) throw new Error("missing declarations");
+    expect(declarations.grants).toContain("tool:mail_send");
+  });
 });

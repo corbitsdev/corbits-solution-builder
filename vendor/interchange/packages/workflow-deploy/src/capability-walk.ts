@@ -187,7 +187,7 @@ export function walkCapabilities(
       unresolved,
       collected,
     );
-    perStep.set(stepId, freezeDeclarations(collected, triggerGrants));
+    emitPerStepEntry(perStep, stepId, freezeDeclarations(collected, triggerGrants));
     // A loop body runs its steps under their own ids, so each leaf step
     // inside the body needs its own entry for the runtime lookup to find.
     if (primitive.kind === "loop") {
@@ -378,6 +378,21 @@ function collectBodyGrants(
  * under their own ids. Other body-bearing primitives need no recursion: a
  * loop body cannot contain an onTrigger section, and a childWorkflow body
  * runs as its own child run under a separate credential scope.
+ *
+ * Step-id collisions fail closed. Leaf ids are not namespaced (duplicate
+ * checks are per definition), so a body leaf can share a bare id with a
+ * top-level step or with another loop's leaf; a silent overwrite would
+ * corrupt the top-level entry, drop the loser's grants from the approval
+ * gate (fail-open), or authorize the loser against the winner's grants at
+ * runtime. Mirroring `pinInertStepSources` in orchestrator.ts, a repeated
+ * id with different grants throws; an identical grant set merges silently
+ * -- the gate and the runtime lookup cannot distinguish the two entries,
+ * so there is nothing to fail closed on.
+ *
+ * The recursion dispatch is exhaustive over primitive kinds (the `never`
+ * assignment below), matching the coverage `collectPrimitiveGrants` owns
+ * for grant folding: a future body-bearing kind fails the build here
+ * rather than silently skipping its leaves' entries.
  */
 function emitLoopBodyStepEntries(
   body: WorkflowDefinition,
@@ -405,18 +420,91 @@ function emitLoopBodyStepEntries(
       unresolved,
       collected,
     );
-    perStep.set(bodyStepId, freezeDeclarations(collected, triggerGrants));
-    if (bodyPrimitive.kind === "loop") {
-      emitLoopBodyStepEntries(
-        bodyPrimitive.body,
-        registry,
-        pluginDefs,
-        unresolved,
-        perStep,
-        triggerGrants,
-      );
+    emitPerStepEntry(
+      perStep,
+      bodyStepId,
+      freezeDeclarations(collected, triggerGrants),
+    );
+    switch (bodyPrimitive.kind) {
+      case "loop":
+        emitLoopBodyStepEntries(
+          bodyPrimitive.body,
+          registry,
+          pluginDefs,
+          unresolved,
+          perStep,
+          triggerGrants,
+        );
+        break;
+      case "onTrigger":
+      case "childWorkflow":
+        // The nested body's grants are already folded into this leaf's own
+        // entry above; its steps authorize under a separate credential
+        // scope (or, for onTrigger, cannot appear in a loop body), so no
+        // per-step entries are emitted for them.
+        break;
+      case "step":
+      case "map":
+      case "action":
+      case "gate":
+      case "escalation":
+      case "awaitSignal":
+      case "sleep":
+        // Leaf primitives: no nested body to emit entries for.
+        break;
+      default: {
+        const exhaustive: never = bodyPrimitive;
+        throw new Error(
+          `capability walk: unhandled primitive kind ${JSON.stringify(
+            (exhaustive as { kind: string }).kind,
+          )}`,
+        );
+      }
     }
   }
+}
+
+/**
+ * Record one `perStep` entry, failing closed on conflicting collisions.
+ * Both the top-level walk and the loop-body emit route through this one
+ * function so the constraint lives in exactly one place.
+ */
+function emitPerStepEntry(
+  perStep: Map<string, GrantDeclarations>,
+  stepId: string,
+  declarations: GrantDeclarations,
+): void {
+  const existing = perStep.get(stepId);
+  if (existing === undefined) {
+    perStep.set(stepId, declarations);
+    return;
+  }
+  if (!sameDeclarations(existing, declarations)) {
+    throw new Error(
+      `capability walk: step id ${JSON.stringify(stepId)} collides across the workflow and its loop bodies with different grants; leaf ids are not namespaced, so a colliding id must carry identical grants`,
+    );
+  }
+}
+
+/**
+ * Compare two frozen grant declarations by value: the grant strings as a
+ * set (freeze order is an artifact of collection, not meaning) and every
+ * tool effect entry.
+ */
+function sameDeclarations(
+  a: GrantDeclarations,
+  b: GrantDeclarations,
+): boolean {
+  if (a.grants.length !== b.grants.length) return false;
+  const grants = new Set(a.grants);
+  for (const grant of b.grants) {
+    if (!grants.has(grant)) return false;
+  }
+  if (a.grantEffects.size !== b.grantEffects.size) return false;
+  for (const [grant, effect] of b.grantEffects) {
+    if (a.grantEffects.get(grant) !== effect) return false;
+  }
+  return true;
 }
 
 function collectAgentGrants(
