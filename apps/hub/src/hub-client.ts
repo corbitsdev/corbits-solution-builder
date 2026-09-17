@@ -32,7 +32,7 @@ import {
 } from "@intx/hub-client";
 import { hub, hubIsMounted, mountHub } from "./hub-mount.js";
 import { pushTarball } from "./tarball.js";
-import { readSecretResult, secretReference, storeSecret } from "./provider-credentials.js";
+import { readSecretResult, secretReference, storeSecret } from "./host-secrets.js";
 import { HostError } from "./errors.js";
 import { SOLUTIONS_BUILDER_APP, assertMayMintGrant } from "@solutions-builder/app/grant-namespaces";
 

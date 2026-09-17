@@ -1,13 +1,24 @@
 /**
- * Secure credential storage.
+ * Secure storage for the hub's own bootstrap secrets.
  *
  * Secrets go to the OS keychain through `security(1)` on macOS. Where no
  * OS-backed store is available the host falls back to a file with 0600
  * permissions inside the application data directory and *says so* — a fallback
  * that pretends to be a keychain is worse than one that admits what it is.
  *
- * Nothing in this module returns a secret to a route. `readSecret` has exactly
- * one caller, in the provider registry, on the path to an outbound request.
+ * This is not where a *provider* credential lives (CL-8076 moved those into
+ * Interchange's own `credential` table, sealed with its own credential cipher,
+ * so delegation and the hub's own resolution govern them the same way a
+ * deployed workflow's do). What stays here is genuinely circular otherwise:
+ * the hub's own at-rest encryption keys (`hub-keys.ts`), and the owner's
+ * mint-once password and a hosted hub's bearer token (`hub-client.ts`) —
+ * secrets that cannot themselves live in a row this store's own key would
+ * have to decrypt.
+ *
+ * `credential-migration.ts` is the one other caller, and only once: reading
+ * whatever a pre-CL-8076 install left behind in the old `provider:<id>` /
+ * `oauth:<id>` accounts so it can be carried into the hub's own credential
+ * store and deleted from here.
  */
 import { chmod, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -21,6 +32,17 @@ let backend: CredentialBackend | null = null;
 
 async function detectBackend(): Promise<CredentialBackend> {
   if (backend) return backend;
+  // A test run forces `file`: the account names this module and
+  // `credential-migration.ts` use are real production names
+  // (`provider:anthropic`, `oauth:codex-oauth`, ...), and the real macOS
+  // keychain is one per machine, not per test run — a smoke that hit it for
+  // real could read, or worse overwrite and delete, a developer's own signed-in
+  // credentials. `scripts/smoke-env.ts` sets this for every in-process smoke.
+  const forced = process.env.SOLUTIONS_BUILDER_CREDENTIAL_BACKEND;
+  if (forced === "file" || forced === "keychain") {
+    backend = forced;
+    return backend;
+  }
   if (process.platform === "darwin") {
     const probe = Bun.spawnSync(["security", "-h"], { stdout: "ignore", stderr: "ignore" });
     backend = probe.exitCode === 0 ? "keychain" : "file";
@@ -112,12 +134,6 @@ export async function readSecretResult(reference: string): Promise<SecretRead> {
   return code === "ENOENT"
     ? { status: "missing" }
     : { status: "unavailable", detail: String((contents as Error).message ?? contents) };
-}
-
-/** Absence and failure both as `null`, for callers where the difference cannot matter. */
-export async function readSecret(reference: string): Promise<string | null> {
-  const read = await readSecretResult(reference);
-  return read.status === "found" ? read.secret : null;
 }
 
 export async function deleteSecret(reference: string): Promise<void> {

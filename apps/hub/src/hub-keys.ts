@@ -12,7 +12,7 @@
  * without changing a line here.
  */
 import { derivePublicKeyBytes } from "@intx/crypto";
-import { readSecretResult, secretReference, storeSecret } from "./provider-credentials.js";
+import { readSecretResult, secretReference, storeSecret } from "./host-secrets.js";
 
 const ACCOUNTS = {
   credential: "hub:credential-encryption-key",

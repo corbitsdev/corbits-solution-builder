@@ -197,7 +197,7 @@ for (const id of OAUTH_PROVIDERS) {
 // sealed under it — every provider credential, every signed commit — is gone.
 {
   const { classifySecurityExit } = await import(
-    "../apps/hub/src/provider-credentials.js"
+    "../apps/hub/src/host-secrets.js"
   );
   check(
     "a successful read is not a problem",

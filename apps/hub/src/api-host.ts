@@ -9,7 +9,7 @@ import { HostError } from "./errors.js";
 import { COMMANDS, LEDGER, STAGE_TITLES } from "@solutions-builder/app/ledger";
 import { AGENT_KIT } from "@solutions-builder/app/kit";
 import { listProviders } from "./providers.js";
-import { credentialBackend } from "./provider-credentials.js";
+import { credentialBackend } from "./host-secrets.js";
 import { BRIDGE_CAPABILITIES, BRIDGE_ID, bridgeAvailable } from "./corbits-exec.js";
 import { hostStatus, requestHostStop } from "./lifecycle.js";
 import { ensureHub, hubFetch } from "./hub-client.js";
