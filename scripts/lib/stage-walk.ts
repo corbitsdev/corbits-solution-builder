@@ -25,9 +25,10 @@ import { execute, type Actor } from "../../apps/hub/src/command-dispatch.js";
 import { newId } from "../../apps/hub/src/ids.js";
 import { writeArtifact, readArtifactNode, projectDetail } from "../../apps/hub/src/projects.js";
 import { requestDraft, type StageDraftResult } from "../../apps/hub/src/stage-runs.js";
-import { deliverStageSignal, projectExecutionStatus, type StageStatus } from "../../apps/hub/src/lifecycle-run.js";
+import { projectExecutionStatus, type StageStatus } from "../../apps/hub/src/lifecycle-run.js";
+import { runGateSideEffects } from "../../apps/hub/src/gate-delivery.js";
 import { gateStepId } from "@solutions-builder/app/workflows/stage-loop";
-import type { Stage } from "@solutions-builder/app/ledger";
+import type { Command, Stage } from "@solutions-builder/app/ledger";
 
 export type WalkMode = "real" | "seeded";
 
@@ -120,8 +121,9 @@ export async function draftStageArtifact(ctx: WalkContext, stage: 1 | 2 | 3 | 4)
 
 /**
  * Advances a run parked at `stage` to `stage + 1`. Stages 1-4 submit and
- * approve `versions` through the engine; stage 5 and beyond submits and
- * approves by raw signal (`cost.approve` at stage 7).
+ * approve `versions` through dispatch; stage 5 and beyond submits and
+ * approves by gate signal (`cost.approve` at stage 7). Both paths record
+ * the command when `runGateSideEffects` delivers — not only `commandFrom`.
  */
 export interface AdvanceResult {
   readonly submitDelivery: string;
@@ -148,12 +150,32 @@ export async function advanceStage(ctx: WalkContext, stage: Stage, versions?: Ar
     const next = await settleStatus(ctx.projectId, (s) => s.parked && s.stage === stage + 1);
     return { submitDelivery: submitted.delivery ?? "none", gate, approveDelivery: approved.delivery ?? "none", next };
   }
-  const submitDelivery = await deliverStageSignal(ctx.projectId, "stage.submit", { runId: ctx.runId }, `walk-submit-${stage}-${ctx.projectId}`);
+  const submitDelivery = await runGateSideEffects(
+    {
+      type: "stage.submit",
+      actor: ctx.actor,
+      projectId: ctx.projectId,
+      idempotencyKey: `walk-submit-${stage}-${ctx.projectId}`,
+      correlationId: newId.correlation(),
+      payload: { runId: ctx.runId },
+    },
+    { stage, state: "in_progress" },
+  );
   const gate = await settleStatus(ctx.projectId, (s) => s.parked && s.stepId === gateStepId(stage));
-  const advance = stage === 7 ? "cost.approve" : "stage.approve";
-  const approveDelivery = await deliverStageSignal(ctx.projectId, advance, { runId: ctx.runId }, `walk-approve-${stage}-${ctx.projectId}`);
+  const advance: Command = stage === 7 ? "cost.approve" : "stage.approve";
+  const approveDelivery = await runGateSideEffects(
+    {
+      type: advance,
+      actor: ctx.actor,
+      projectId: ctx.projectId,
+      idempotencyKey: `walk-approve-${stage}-${ctx.projectId}`,
+      correlationId: newId.correlation(),
+      payload: { runId: ctx.runId },
+    },
+    { stage, state: "waiting_approval" },
+  );
   const next = await settleStatus(ctx.projectId, (s) => s.parked && s.stage === stage + 1);
-  return { submitDelivery, gate, approveDelivery, next };
+  return { submitDelivery: submitDelivery ?? "none", gate, approveDelivery: approveDelivery ?? "none", next };
 }
 
 /**

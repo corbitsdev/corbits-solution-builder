@@ -216,6 +216,19 @@ export async function deliverStageSignal(
       payload: { ...payload, ...signal.payload },
     });
     divergent.delete(projectId);
+    // Dynamic import: command-ledger reads HOST_PRINCIPAL from dispatch, which
+    // imports this module. A delivered gate is ledger mail even when the
+    // caller never went through `commandFrom`.
+    const { recordGateFromSignal } = await import("./command-ledger.js");
+    await recordGateFromSignal({
+      projectId,
+      command,
+      payload,
+      signalId,
+      ...(expectedStage !== undefined ? { expectedStage } : {}),
+    }).catch((cause: unknown) => {
+      console.error(`[executor] ${projectId}: could not record the delivered gate:`, cause);
+    });
     return "delivered";
   } catch (cause) {
     // Only a refusal the transport actually reported — an `ApiError` off a

@@ -2,10 +2,11 @@
  * Host command dispatch — artifacts, approvals, flags, and gate delivery.
  *
  * Gate commands go to the project's lifecycle run first: `admitGate` in the
- * app package is the admit authority. This module records the command as a
- * ledger mail turn and writes host-side effects (artifact versions, decision
- * flags, worker questions). It does not move run state: that lives in the
- * workflow definition, not in a `RunDraft`.
+ * app package is the admit authority. A delivered gate is recorded as a ledger
+ * mail turn from `runGateSideEffects`, not from the HTTP `commandFrom` envelope.
+ * This module still records non-gate commands and host-side effects (artifact
+ * versions, decision flags, worker questions). It does not move run state: that
+ * lives in the workflow definition, not in a `RunDraft`.
  */
 import type { Command, Stage } from "@solutions-builder/app/ledger";
 import { classifyTarget, SELECTABLE_TARGETS } from "@solutions-builder/app/targets";
@@ -500,24 +501,26 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
     }
   }
 
-  await recordCommand({
-    projectId: input.projectId,
-    actorPrincipalId: input.actor.principalId,
-    authority: authorities[0] ?? null,
-    command: input.type,
-    transitionId: outcome.result.transitionId,
-    correlationId: input.correlationId,
-    before: outcome.before,
-    after: { runId: outcome.applied.runId, state: outcome.applied.state, stage: outcome.applied.stage },
-    idempotencyKey: input.idempotencyKey,
-    result: outcome.result,
-    stage: run.stage,
-    runId: outcome.applied.runId,
-    ...(outcome.applied.flag ? { flag: outcome.applied.flag } : {}),
-    ...(outcome.applied.question ? { question: outcome.applied.question } : {}),
-    ...(outcome.applied.answer ? { answer: outcome.applied.answer } : {}),
-    ...(outcome.applied.approval ?? {}),
-  });
+  if (delivery !== "delivered") {
+    await recordCommand({
+      projectId: input.projectId,
+      actorPrincipalId: input.actor.principalId,
+      authority: authorities[0] ?? null,
+      command: input.type,
+      transitionId: outcome.result.transitionId,
+      correlationId: input.correlationId,
+      before: outcome.before,
+      after: { runId: outcome.applied.runId, state: outcome.applied.state, stage: outcome.applied.stage },
+      idempotencyKey: input.idempotencyKey,
+      result: outcome.result,
+      stage: run.stage,
+      runId: outcome.applied.runId,
+      ...(outcome.applied.flag ? { flag: outcome.applied.flag } : {}),
+      ...(outcome.applied.question ? { question: outcome.applied.question } : {}),
+      ...(outcome.applied.answer ? { answer: outcome.applied.answer } : {}),
+      ...(outcome.applied.approval ?? {}),
+    });
+  }
 
   if (outcome.applied.notifyRunId) {
     await notifyDecision(input.projectId, outcome.applied.notifyRunId).catch(() => undefined);

@@ -10,7 +10,9 @@
  * admit authority; this module does not evaluate the ledger. A fresh UUID
  * is the signal id every time, so a refused wait can hear the next
  * delivery instead of treating it as a duplicate of the command's
- * idempotency key.
+ * idempotency key. A delivered human gate is recorded on the ledger here,
+ * whether the caller went through `commandFrom` or signalled the run
+ * directly — the HTTP envelope is not the only writer.
  *
  * Nothing here writes run state; `hasExecution`/`launchProjectLifecycle`/
  * `deliverStageSignal` all live in the executor itself.
@@ -90,10 +92,32 @@ export async function runGateSideEffects(input: CommandInput, before?: RunBefore
   // A fresh signal id every delivery: the gate loop may refuse and wait
   // again, and reusing the command's idempotency key would make the second
   // delivery look like a duplicate of the first.
-  return deliverStageSignal(input.projectId, input.type, input.payload, crypto.randomUUID(), position?.stage).catch(
+  const payload = {
+    ...input.payload,
+    idempotencyKey: input.idempotencyKey,
+    actorPrincipalId: input.actor.principalId,
+    correlationId: input.correlationId,
+  };
+  const signalId = crypto.randomUUID();
+  const delivery = await deliverStageSignal(input.projectId, input.type, payload, signalId, position?.stage).catch(
     (cause: unknown): DeliveryOutcome => {
       console.error(`[executor] ${input.projectId}: signal delivery threw:`, cause);
       return "failed";
     },
   );
+  if (delivery === "delivered") {
+    // Dynamic import: this module is in command-dispatch's graph, and the
+    // ledger module reads HOST_PRINCIPAL from there.
+    const { recordGateFromSignal } = await import("./command-ledger.js");
+    await recordGateFromSignal({
+      projectId: input.projectId,
+      command: input.type,
+      payload,
+      signalId,
+      ...(position ? { expectedStage: position.stage } : {}),
+    }).catch((cause: unknown) => {
+      console.error(`[executor] ${input.projectId}: could not record the delivered gate:`, cause);
+    });
+  }
+  return delivery;
 }
