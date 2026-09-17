@@ -1,3 +1,7 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, test } from "bun:test";
 import { renderLifecycleSource } from "./workflow-deploy.js";
 
@@ -21,16 +25,25 @@ describe("renderLifecycleSource admit gate", () => {
   test("stillOpen reads the evidence command, not the round start_attempt", async () => {
     const files = renderLifecycleSource();
     const loops = files["packages/lifecycle/loops.js"]!;
-    const mod = (await import(`data:text/javascript,${encodeURIComponent(loops)}`)) as {
-      stillOpen: (output: Record<string, unknown>) => boolean;
-      carryRound: (output: Record<string, unknown>, carry: unknown) => unknown;
-    };
-    const start = { round: { command: "build.start_attempt" } };
-    expect(mod.stillOpen(start)).toBe(true);
-    expect(mod.stillOpen({ ...start, evidence: { command: "build.fail" } })).toBe(true);
-    expect(mod.stillOpen({ ...start, evidence: { command: "build.accept_evidence" } })).toBe(false);
-    const carried = { command: "build.accept_evidence" };
-    expect(mod.carryRound({ ...start, evidence: carried }, start.round)).toEqual(carried);
+    // Bun does not evaluate `data:text/javascript` as ESM (named exports vanish),
+    // so the generated loops module is loaded from a file the way the sidecar would.
+    const dir = await mkdtemp(join(tmpdir(), "lifecycle-loops-"));
+    const path = join(dir, "loops.js");
+    await writeFile(path, loops);
+    try {
+      const mod = (await import(pathToFileURL(path).href)) as {
+        stillOpen: (output: Record<string, unknown>) => boolean;
+        carryRound: (output: Record<string, unknown>, carry: unknown) => unknown;
+      };
+      const start = { round: { command: "build.start_attempt" } };
+      expect(mod.stillOpen(start)).toBe(true);
+      expect(mod.stillOpen({ ...start, evidence: { command: "build.fail" } })).toBe(true);
+      expect(mod.stillOpen({ ...start, evidence: { command: "build.accept_evidence" } })).toBe(false);
+      const carried = { command: "build.accept_evidence" };
+      expect(mod.carryRound({ ...start, evidence: carried }, start.round)).toEqual(carried);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   test("closes the app member for admit, guard, and project-state", () => {

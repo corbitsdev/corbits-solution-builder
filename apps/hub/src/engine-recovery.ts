@@ -38,7 +38,7 @@ export type RunBefore = { readonly stage: Stage; readonly state: string };
  * runtime executor.
  */
 export const GATE_COMMANDS: readonly Command[] = [
-  ...new Set([
+  ...new Set<Command>([
     ...LEDGER.filter((row) => row.from?.kind === "stage").map((row) => row.command),
     "build.accept_evidence",
     "build.fail",
