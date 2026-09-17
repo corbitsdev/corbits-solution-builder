@@ -233,6 +233,82 @@ export function createTenantRoutes({
   );
 
   app.get(
+    "/",
+    describeRoute({
+      tags: ["Tenants"],
+      summary: "List child tenants",
+      description:
+        "Lists every tenant whose parentId is the given tenant, oldest first. Requires membership in the parent.",
+      parameters: [
+        {
+          name: "parentId",
+          in: "query" as const,
+          required: true,
+          schema: { type: "string" as const },
+        },
+      ],
+      responses: {
+        200: {
+          description: "Child tenants",
+          content: {
+            "application/json": { schema: resolver(TenantResponse.array()) },
+          },
+        },
+        403: {
+          description: "Not a member of the parent tenant",
+          content: {
+            "application/json": { schema: resolver(ErrorResponse) },
+          },
+        },
+      },
+    }),
+    async (c) => {
+      const user = c.get("user");
+      if (!user) {
+        return c.json(
+          {
+            error: { code: "unauthorized", message: "Authentication required" },
+          },
+          401,
+        );
+      }
+
+      const parentId = c.req.query("parentId");
+      if (!parentId) {
+        return c.json(
+          { error: { code: "bad_request", message: "parentId is required" } },
+          400,
+        );
+      }
+
+      const membership = await db.query.principal.findFirst({
+        where: and(
+          eq(principal.tenantId, parentId),
+          eq(principal.kind, "user"),
+          eq(principal.refId, user.id),
+        ),
+      });
+      if (!membership) {
+        return c.json(
+          {
+            error: {
+              code: "forbidden",
+              message: "Not a member of this tenant",
+            },
+          },
+          403,
+        );
+      }
+
+      const rows = await db.query.tenant.findMany({
+        where: eq(tenant.parentId, parentId),
+        orderBy: (t, { asc }) => [asc(t.createdAt)],
+      });
+      return c.json(rows.map((row) => formatTenant(row)));
+    },
+  );
+
+  app.get(
     "/:tenantId",
     describeRoute({
       tags: ["Tenants"],
