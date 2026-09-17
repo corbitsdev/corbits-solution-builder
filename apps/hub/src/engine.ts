@@ -4,8 +4,10 @@
  * One entry point for every state change. It:
  *   1. dedupes on the envelope's idempotency key (at-least-once is assumed);
  *   2. resolves the actor's real authorities from the platform (`hub/authority.ts`);
- *   3. asks the guard whether the ledger permits the command;
- *   4. commits the state change;
+ *   3. for a gate command, delivers the signal first — the workflow's
+ *      `admitGate` is the admit authority; `evaluate` is not;
+ *   4. commits the host run mutation only after a command is admitted
+ *      (no `RunDraft` on a refusal);
  *   5. records the command as a ledger mail turn and fires any decision
  *      notification, both after the transaction has committed.
  *
@@ -50,7 +52,7 @@ import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { dataDirectory } from "./paths.js";
-import { runGateSideEffects } from "./engine-recovery.js";
+import { GATE_COMMANDS, runGateSideEffects } from "./engine-recovery.js";
 import { notifyDecision } from "./notify.js";
 import { readProject, updateProject } from "./installer-bridge.js";
 import type { ProjectPolicy } from "@solutions-builder/installer";
@@ -345,11 +347,6 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
   const runId = String(input.payload.runId ?? "");
   if (!runId) throw new HostError("validation_failed", "The command must name a run.");
   const run = await loadRun(runId, input.projectId);
-  // The run mutations this command makes are collected here and written to
-  // the ledger after the transaction returns, since the ledger mail lives on
-  // the same single-writer connection as `tx`.
-  const draft = new RunDraft(await runsForProject(input.projectId));
-
   const versions = Array.isArray(input.payload.versions) ? (input.payload.versions as VersionRef[]) : [];
   const needsExactVersions = (
     ["stage.approve", "cost.approve", "build.freeze", "audience.decide"] as string[]
@@ -405,39 +402,42 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
     }
   }
 
+  const context: GuardContext = {
+    actorAuthorities: authorities,
+    ...(typeof input.payload.targetStage === "number" ? { targetStage: input.payload.targetStage as Stage } : {}),
+    ...(needsExactVersions ? { versionHashesMatch: await versionHashesMatch(db, versions) } : {}),
+    ...(input.type === "build.freeze" ? { frozenPacketExists: await packetExists(db, run.id) } : {}),
+    ...(audienceGuard ? { audience: audienceGuard } : {}),
+    ...(input.type === "build.answer" ? { waitingRequestOriginId: waiting?.originId ?? "" } : {}),
+    // Checkpoint resume is verified only when a worker actually returned a
+    // checkpoint it advertises as resumable. The bounded bridge returns none,
+    // so resume is refused there rather than faked.
+    ...(input.type === "build.resume" ? { checkpointResumeVerified: run.checkpointRef !== null } : {}),
+  };
+
+  // Gate commands go to the run first: `admitGate` is the admit authority.
+  // `evaluate` below only decides whether this host writes a RunDraft.
+  const delivery = GATE_COMMANDS.includes(input.type)
+    ? await runGateSideEffects(
+        { ...input, payload: { ...input.payload, command: input.type, run, context } },
+        { stage: run.stage, state: run.state },
+      )
+    : undefined;
+
+  const verdict =
+    input.type === "audience.decide" ? evaluateAudienceDecision(run, context) : evaluate(input.type, run, context);
+
+  if (!verdict.ok) {
+    throw new HostError("transition_refused", verdict.message, { refusal: verdict.code });
+  }
+
+  // The run mutations this command makes are collected here and written to
+  // the ledger after the transaction returns, since the ledger mail lives on
+  // the same single-writer connection as `tx`. A refused command never
+  // reaches this: no RunDraft on refuse.
+  const draft = new RunDraft(await runsForProject(input.projectId));
+
   const outcome = await db.transaction(async (tx) => {
-    const context: GuardContext = {
-      actorAuthorities: authorities,
-      ...(typeof input.payload.targetStage === "number"
-        ? { targetStage: input.payload.targetStage as Stage }
-        : {}),
-      ...(needsExactVersions
-        ? { versionHashesMatch: await versionHashesMatch(tx, versions) }
-        : {}),
-      ...(input.type === "build.freeze"
-        ? {
-            frozenPacketExists: await packetExists(tx, run.id),
-          }
-        : {}),
-      ...(audienceGuard ? { audience: audienceGuard } : {}),
-      ...(input.type === "build.answer" ? { waitingRequestOriginId: waiting?.originId ?? "" } : {}),
-      // Checkpoint resume is verified only when a worker actually returned a
-      // checkpoint it advertises as resumable. The bounded bridge returns none,
-      // so resume is refused there rather than faked.
-      ...(input.type === "build.resume"
-        ? { checkpointResumeVerified: run.checkpointRef !== null }
-        : {}),
-    };
-
-    const verdict =
-      input.type === "audience.decide"
-        ? evaluateAudienceDecision(run, context)
-        : evaluate(input.type, run, context);
-
-    if (!verdict.ok) {
-      throw new HostError("transition_refused", verdict.message, { refusal: verdict.code });
-    }
-
     const applied = await apply(tx, draft, {
       input,
       run,
@@ -507,11 +507,6 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
   if (outcome.applied.notifyRunId) {
     await notifyDecision(input.projectId, outcome.applied.notifyRunId).catch(() => undefined);
   }
-
-  // Outside the transaction — the executor is not something the database's
-  // single writer connection can be reached from mid-transaction, and this is
-  // a best-effort shadow of the transition, not part of what made it valid.
-  const delivery = await runGateSideEffects(input, outcome.before);
 
   return delivery === undefined ? outcome.result : { ...outcome.result, delivery };
 }

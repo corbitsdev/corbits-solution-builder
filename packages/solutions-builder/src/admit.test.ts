@@ -36,7 +36,8 @@ describe("admit", () => {
     expect(verdict.refused).toBe(true);
     if (verdict.refused) {
       expect(verdict.code).toBe("forbidden");
-      expect(verdict.message).toBe(rule?.reason);
+      expect(rule).toBeDefined();
+      expect(verdict.message).toBe(rule!.reason);
     }
   });
 
@@ -65,7 +66,8 @@ describe("admit", () => {
     expect(verdict.refused).toBe(true);
     if (verdict.refused) {
       expect(verdict.code).toBe("origin_mismatch");
-      expect(verdict.message).toBe(rule?.reason);
+      expect(rule).toBeDefined();
+      expect(verdict.message).toBe(rule!.reason);
     }
   });
 

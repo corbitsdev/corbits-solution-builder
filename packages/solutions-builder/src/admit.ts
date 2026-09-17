@@ -37,19 +37,24 @@ function asContext(value: unknown): GuardContext {
   if (!value || typeof value !== "object") return { actorAuthorities: [] };
   const rec = value as Record<string, unknown>;
   const authorities = rec.actorAuthorities;
-  return {
+  let context: GuardContext = {
     actorAuthorities: Array.isArray(authorities)
       ? authorities.filter((entry): entry is GuardContext["actorAuthorities"][number] => typeof entry === "string")
       : [],
-    ...(typeof rec.targetStage === "number" ? { targetStage: rec.targetStage as Stage } : {}),
-    ...(typeof rec.frozenPacketExists === "boolean" ? { frozenPacketExists: rec.frozenPacketExists } : {}),
-    ...(typeof rec.waitingRequestOriginId === "string" ? { waitingRequestOriginId: rec.waitingRequestOriginId } : {}),
-    ...(typeof rec.checkpointResumeVerified === "boolean"
-      ? { checkpointResumeVerified: rec.checkpointResumeVerified }
-      : {}),
-    ...(typeof rec.versionHashesMatch === "boolean" ? { versionHashesMatch: rec.versionHashesMatch } : {}),
-    ...(rec.audience && typeof rec.audience === "object" ? { audience: rec.audience as GuardContext["audience"] } : {}),
   };
+  if (typeof rec.targetStage === "number") context = { ...context, targetStage: rec.targetStage as Stage };
+  if (typeof rec.frozenPacketExists === "boolean") context = { ...context, frozenPacketExists: rec.frozenPacketExists };
+  if (typeof rec.waitingRequestOriginId === "string") {
+    context = { ...context, waitingRequestOriginId: rec.waitingRequestOriginId };
+  }
+  if (typeof rec.checkpointResumeVerified === "boolean") {
+    context = { ...context, checkpointResumeVerified: rec.checkpointResumeVerified };
+  }
+  if (typeof rec.versionHashesMatch === "boolean") context = { ...context, versionHashesMatch: rec.versionHashesMatch };
+  if (rec.audience && typeof rec.audience === "object") {
+    context = { ...context, audience: rec.audience as NonNullable<GuardContext["audience"]> };
+  }
+  return context;
 }
 
 function asEvents(value: unknown): RunEvent[] {

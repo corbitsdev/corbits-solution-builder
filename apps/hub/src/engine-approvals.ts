@@ -102,10 +102,10 @@ type VersionRef = { artifactId: string; versionId: string; contentHash: string }
  * approver saw; if the stored node's hash differs, the draft moved and the
  * approval is refused rather than silently applied to newer bytes.
  */
-export async function versionHashesMatch(tx: Tx, versions: VersionRef[]): Promise<boolean> {
+export async function versionHashesMatch(db: { select: Tx["select"] }, versions: VersionRef[]): Promise<boolean> {
   if (versions.length === 0) return false;
   for (const reference of versions) {
-    const [node] = await tx
+    const [node] = await db
       .select({ hash: table.artifactNode.contentHash })
       .from(table.artifactNode)
       .where(eq(table.artifactNode.id, reference.versionId));
@@ -131,8 +131,8 @@ export async function audienceTally(
  * Whether a build packet was already frozen from this source run. The packet
  * is an artifact version of kind build_packet whose producer is the source run.
  */
-export async function packetExists(tx: Tx, sourceRunId: string): Promise<boolean> {
-  const [row] = await tx
+export async function packetExists(db: { select: Tx["select"] }, sourceRunId: string): Promise<boolean> {
+  const [row] = await db
     .select({ id: table.artifactNode.id })
     .from(table.artifactNode)
     .where(
