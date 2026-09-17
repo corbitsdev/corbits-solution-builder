@@ -176,7 +176,9 @@ const PARK_WAIT_MS = 20_000;
  * The signal the run currently awaits for this command, waiting out the gap
  * between one step ending and the next park while a stage step is in flight.
  * The command lands on whichever stage the run is parked at; the ledger has
- * already decided it is allowed there.
+ * already decided it is allowed there. Accept and fail match the evidence
+ * park after the build agent (`stageSignal`), not gate-8, while the
+ * iteration is live.
  */
 async function awaitingSignalFor(anchor: string, command: Command, expectedStage?: Stage): Promise<StageSignal | null> {
   const deadline = Date.now() + PARK_WAIT_MS;

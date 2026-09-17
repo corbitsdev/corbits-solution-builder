@@ -3,6 +3,7 @@ import type { Transport } from "@intx/hub-client";
 import { AUTHORITIES, type Authority } from "@solutions-builder/app/ledger";
 import {
   approveSignal,
+  evidenceSignal,
   exhaustedSignal,
   roundSignal,
 } from "@solutions-builder/app/workflows/stage-loop";
@@ -65,6 +66,12 @@ describe("signalGrantsFor", () => {
     expect(authorityHoldsCommand("audience_member", "audience.decide")).toBe(true);
     expect(builder.has(signalGrantAction(approveSignal(5)))).toBe(false);
     expect(audience.has(signalGrantAction(approveSignal(5)))).toBe(true);
+
+    expect(authorityHoldsCommand("project_owner", "build.accept_evidence")).toBe(true);
+    expect(authorityHoldsCommand("builder_operator", "build.fail")).toBe(true);
+    expect(owner.has(signalGrantAction(evidenceSignal(8)))).toBe(true);
+    expect(builder.has(signalGrantAction(evidenceSignal(8)))).toBe(true);
+    expect(budget.has(signalGrantAction(evidenceSignal(8)))).toBe(false);
   });
 
   test("a gate command mints both the live gate and the exhaustion gate", () => {

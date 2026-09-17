@@ -43,6 +43,11 @@ describe("runGateSideEffects", () => {
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     );
   });
+
+  test("accept and fail are delivered as gate commands, not left on gate-8's mapping", () => {
+    expect(GATE_COMMANDS).toContain("build.accept_evidence");
+    expect(GATE_COMMANDS).toContain("build.fail");
+  });
 });
 
 describe("engine admit order", () => {
