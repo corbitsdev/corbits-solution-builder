@@ -26,7 +26,6 @@ import { registerProviderRoutes } from "./api-providers.js";
 import { registerProjectRoutes } from "./api-projects.js";
 import { registerStageRoutes } from "./api-stages.js";
 import { registerDecisionRoutes } from "./api-decisions.js";
-import { registerInstallerGapRoutes } from "./api-installer-gaps.js";
 
 export const API_VERSION = HOST_API_VERSION;
 
@@ -66,7 +65,6 @@ export function createApi() {
   registerProjectRoutes(api);
   registerStageRoutes(api);
   registerDecisionRoutes(api);
-  registerInstallerGapRoutes(api);
 
   api.onError((cause, context) => {
     const correlationId = newId.correlation();

@@ -275,7 +275,7 @@ try {
     `);
     // `POST /api/tenants` bootstraps the creator as the tenant's owner (a
     // role plus an allow-everything grant); a tenant assembled by hand, the
-    // same way `adoptLegacyWorkspace` (`hub-gaps.ts`) repairs one, needs the
+    // same way `adoptLegacyWorkspace` (`hub-migrate.ts`) repairs one, needs the
     // same two rows or every write below is refused as unauthorised.
     await host.db.execute(sql`
       INSERT INTO "public"."role" ("id","tenant_id","name","description","is_system")

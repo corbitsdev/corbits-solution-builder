@@ -5,17 +5,19 @@
  * internal; everything it needs from those crosses here as a `Transport`
  * (`hub-client.ts`'s `hubTransport()`, already authenticated as the owner —
  * minting that identity is `ensureOwner()`'s keychain-and-cookie affair, and
- * stays the host's) plus an `InstallerGaps` bridge for the platform writes
- * `hub-gaps.ts` still makes directly (`api-installer-gaps.ts` names the same
- * gaps as real routes; this bridge calls the functions behind them directly,
- * since the installer runs in this same process rather than over the wire).
+ * stays the host's) plus the two facts about sidecar placement only this
+ * process knows (`SidecarCapability`). Every platform write the package
+ * makes now goes through a real hub route (CL-8075); the one thing that
+ * still cannot — `adoptLegacyWorkspace`, a one-time repair of pre-identity
+ * rows, not a hub route — runs here, once, before the package's own
+ * `install()` looks for a workspace.
  *
  * Everything that used to live in `install.ts`, `project-tenant.ts` and
  * `workbench-delegation.ts` now lives in the package; this file is what is
- * left of them in the hub — the transport, the gap bridge, `tenantId()` (the
- * workspace `hub-client.ts` already caches for every other per-request call)
- * as the scope the package's tenant-shaped functions need, and the handful
- * of call sites elsewhere in the hub that want "the current project" or "the
+ * left of them in the hub — the transport, `tenantId()` (the workspace
+ * `hub-client.ts` already caches for every other per-request call) as the
+ * scope the package's tenant-shaped functions need, and the handful of call
+ * sites elsewhere in the hub that want "the current project" or "the
  * delegation store" without building those themselves.
  */
 import {
@@ -41,24 +43,21 @@ import {
   type LifecycleDeployment,
   type ProjectPolicy,
   type ProjectRecord,
+  type SidecarCapability,
 } from "@solutions-builder/installer";
 import {
   ensureOwner,
   forgetWorkspace as hubClientForgetWorkspace,
+  hubGet,
   hubMode,
   hubTransport,
+  LEGACY_TENANT_ID,
   resolveWorkspace,
   tenantId,
 } from "./hub-client.js";
 import { APP_VERSION } from "@solutions-builder/app/manifest";
-import {
-  adoptLegacyWorkspace,
-  allocationBinding,
-  listChildTenants,
-  readWorkflowSourceBlob,
-  registerDefinition,
-  writeWorkflowSourceTree,
-} from "./hub-gaps.js";
+import { database } from "./db.js";
+import { adoptLegacyWorkspace } from "./hub-migrate.js";
 import { canPlaceSidecars, hub } from "./hub-mount.js";
 import { rerankCatalogProviders } from "./catalog.js";
 import { HostError } from "./errors.js";
@@ -68,17 +67,20 @@ import { migrateLegacyProviderCredentials } from "./credential-migration.js";
 export type { ProjectPolicy, ProjectRecord, LifecycleDeployment };
 export { lifecycleAssetName, LIFECYCLE_ASSET_NAME };
 
-function gaps() {
-  return {
-    registerDefinition,
-    adoptLegacyWorkspace,
-    listChildTenants,
-    writeWorkflowSourceTree,
-    readWorkflowSourceBlob,
-    allocationBinding,
-    canPlaceSidecars,
-    sidecarFingerprint: () => hub().sidecarBindingFingerprint,
-  };
+function sidecarCapability(): SidecarCapability {
+  return { canPlaceSidecars: canPlaceSidecars(), sidecarFingerprint: hub().sidecarBindingFingerprint };
+}
+
+/**
+ * The one-time repair for a tenant created before the hub owned identity:
+ * adopts it as the owner's, once, so its projects keep their tenant. A
+ * no-op once the legacy tenant is gone or already adopted (or there never
+ * was one), so it is safe to call on every install.
+ */
+async function adoptLegacyWorkspaceOnce(): Promise<void> {
+  if (await resolveWorkspace()) return;
+  const me = await hubGet<{ id: string }>("/api/me");
+  await adoptLegacyWorkspace(database(), me.id, LEGACY_TENANT_ID);
 }
 
 /** Rethrows the package's own error shape as the host's, same code and message. */
@@ -141,9 +143,10 @@ async function migrateCredentialsOnce(): Promise<void> {
 export async function install(): Promise<InstallState> {
   if (hubMode() !== "embedded") return HOSTED;
   await ensureOwner();
+  await adoptLegacyWorkspaceOnce();
   const transport = hubTransport();
   const result = await bridged(() =>
-    installerInstall(transport, gaps(), {
+    installerInstall(transport, sidecarCapability(), {
       afterEnsureWorkspace: async () => {
         await migrateCredentialsOnce();
       },
@@ -166,7 +169,7 @@ export async function install(): Promise<InstallState> {
 }
 
 export async function deployLifecycle(): Promise<void> {
-  await installerDeployLifecycle(hubTransport(), gaps(), tenantId());
+  await installerDeployLifecycle(hubTransport(), sidecarCapability(), tenantId());
 }
 
 /** The per-project (or workspace) lifecycle deployment, made current if it is not. */
@@ -174,7 +177,7 @@ export async function ensureLifecycleDeployment(
   projectId?: string,
   options: { replace?: boolean } = {},
 ): Promise<LifecycleDeployment> {
-  return installerEnsureLifecycleDeployment(hubTransport(), gaps(), tenantId(), projectId, options);
+  return installerEnsureLifecycleDeployment(hubTransport(), sidecarCapability(), tenantId(), projectId, options);
 }
 
 /** Whether a deployment's sidecar is still placed, or on its way. */
@@ -200,7 +203,7 @@ export async function updateProject(
 
 /** Every live project under the workspace, newest first. */
 export async function listProjectRecords(): Promise<ProjectRecord[]> {
-  return bridged(() => installerListProjectRecords(hubTransport(), gaps(), tenantId()));
+  return bridged(() => installerListProjectRecords(hubTransport(), tenantId()));
 }
 
 /** The ledger's authorities as roles in the project tenant, plus one per audience. Idempotent. */
@@ -223,7 +226,7 @@ export async function createProject(args: {
 }) {
   const transport = hubTransport();
   return bridged(() =>
-    installerCreateProject(transport, gaps(), tenantId(), {
+    installerCreateProject(transport, tenantId(), {
       title: args.title,
       slug: newId.projectSlug(),
       policy: args.policy,

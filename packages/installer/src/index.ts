@@ -2,13 +2,11 @@
  * The public surface of `@solutions-builder/installer`.
  *
  * Everything here is driven by a `Transport` (`@intx/hub-client`) already
- * authenticated as the workspace owner, and an `InstallerGaps` bridge for the
- * handful of platform writes no hub route does yet (`./gaps.ts`). Both are
- * the host's to build; this package never reaches a database or an
- * Interchange internal itself.
+ * authenticated as the workspace owner. This package never reaches a
+ * database or an Interchange internal itself; every platform write goes
+ * through a real hub route.
  */
 export * from "./errors.js";
-export * from "./gaps.js";
 export * from "./hub.js";
 export * from "./install.js";
 export * from "./project-tenant.js";
@@ -19,7 +17,6 @@ export * from "./workflow-seed.js";
 export * from "./skill-assets.js";
 
 import type { Transport } from "@intx/hub-client";
-import type { InstallerGaps } from "./gaps.js";
 import {
   createProjectRecord,
   type DelegationRecord,
@@ -43,7 +40,6 @@ import {
  */
 export async function createProject(
   transport: Transport,
-  gaps: InstallerGaps,
   workspaceTenantId: string,
   args: { title: string; slug: string; policy: ProjectPolicy; delegatedCredentialIds?: string[] },
 ): Promise<{ project: ProjectRecord; delegations: DelegationRecord }> {

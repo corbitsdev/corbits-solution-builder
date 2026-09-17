@@ -34,8 +34,8 @@ the owner's workspace tenant, its roles and grants, the seeded workflow
 definition, the curated kit's skill assets, and the per-project lifecycle
 deployment; opening a project — its own tenant, authority and credential
 delegation — is its `createProject`. It takes a hub `Transport`
-(`@intx/hub-client`) already authenticated as the owner, plus a small
-`InstallerGaps` bridge for the platform writes no hub route does yet; it
+(`@intx/hub-client`) already authenticated as the owner, plus the two
+facts about sidecar placement only the host process knows; it
 never reaches a database, a keychain or an Interchange internal itself, and
 depends on nothing in `apps/`. The hub boots vanilla (migrate, mount, serve)
 and calls this package to install on first launch and after every credential

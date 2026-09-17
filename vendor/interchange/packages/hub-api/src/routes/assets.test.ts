@@ -829,7 +829,8 @@ describe("POST /:assetId/tree and GET /:assetId/blob", () => {
       `${createURL}/${h.assetId}/blob?path=${encodeURIComponent("package.json")}`,
     );
     expect(blobRes.status).toBe(200);
-    const bytes = new Uint8Array(await blobRes.arrayBuffer());
+    const blobBody = (await blobRes.json()) as { content: string };
+    const bytes = Uint8Array.from(atob(blobBody.content), (ch) => ch.charCodeAt(0));
     expect(new TextDecoder().decode(bytes)).toBe(
       workflowCodebaseFiles()["package.json"],
     );

@@ -350,8 +350,13 @@ route is the precedent: the `hubPrincipal` constant is reused for the write
 so the kind handler's `validatePush` still runs). `POST /:assetId/tree`
 commits the given repo-relative files onto the asset's ref (default
 `refs/heads/main`) in one commit and returns the commit sha; a rejection from
-the kind handler surfaces as 400. `GET /:assetId/blob?path=&ref=` returns the
-raw bytes at that path, 404 when the asset, ref or path is absent.
+the kind handler surfaces as 400. `GET /:assetId/blob?path=&ref=` returns
+`{ content }` -- the bytes at that path, base64-encoded inside a JSON
+envelope rather than as a raw octet-stream body, so a caller with only the
+`Transport` interface (JSON-only `fetch`, no raw body access -- this is what
+`@solutions-builder/installer` gets, since it may not import the host's own
+`hubApi`) can read it too, not only the host's direct-fetch clients. 404 when
+the asset, ref or path is absent.
 
 **Upstream-able.** Yes; additive, and it gives every asset kind a JSON write
 path the tarball routes only gave `package-registry`.
