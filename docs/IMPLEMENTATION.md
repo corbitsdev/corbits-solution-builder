@@ -7,7 +7,7 @@
 | Runtime | Bun 1.4 or newer |
 | Host API | Hono on a random loopback port, session token in the launch URL |
 | Database | pglite (embedded Postgres), drizzle-orm |
-| Control plane | Interchange's hub app, vendored and mounted in process; the host calls its HTTP API |
+| Control plane | Interchange's hub app, vendored; mounted in process when embedded, HTTPS when `SOLUTIONS_BUILDER_HUB_URL` is set |
 | Interface | React 19, Vite, bundled fonts, no remote assets |
 | Desktop shell | Tauri 2, macOS 13 or newer, tray presence |
 | Types at the boundary | ArkType |
@@ -37,34 +37,33 @@ fails when that file is behind the vendor.
 ## Host process
 
 `apps/hub/src/server.ts` opens the database, applies Interchange's migrations then
-the builder schema, mounts Interchange's hub app, and listens. Boot seeds
-nothing. The host is a client of that hub: embedded, `hub-client.ts` dispatches
-into the mounted Hono app; hosted (`SOLUTIONS_BUILDER_HUB_URL`), the same
-calls go over HTTPS. The desktop shell treats that same variable as a
-stronger switch: it loads the named origin in the webview and does not spawn
-the host sidecar at all. Local mode still starts the embed/host as here.
-Platform writes go through the hub API, not drizzle on
-public tables.
+the builder schema, mounts Interchange's hub app when the hub is embedded, and
+listens. Boot seeds nothing: no tenant, no principal, no workflow definition.
+The host is a client of that hub. Embedded, `hub-client.ts` dispatches into the
+mounted Hono app; hosted (`SOLUTIONS_BUILDER_HUB_URL`), the same calls go over
+HTTPS. Platform writes go through the hub API, not drizzle on public tables.
 
-Identity is the hub's. First launch signs up or in against `/hub/api/auth`.
-That signup creates the user principal; the host does not mint an owner or a
-password. The signed-in principal creates the workspace tenant
-(`POST /api/tenants`) through `@solutions-builder/installer`. On launch the
-client asks `installState()` (same-origin credentials; the mount forwards
-the browser's own cookies), which recomputes "installed" every time by
-comparing the tenant's workflow definitions against the hash the package
-would generate right now — there is no stored version flag — and calls
-`install()` when anything is missing or stale. The same `install()` runs on
-first launch, on upgrade, and after every credential change, and is
+Identity is the hub's. A person signs up (or is invited) through the hub's auth
+routes. A user principal is minted then; nothing else creates one. The signed-in
+principal creates the workspace tenant (`POST /api/tenants`). The client
+installs the app over the host's `/hub` mount as that principal. On launch it
+asks `installState()` through `@solutions-builder/installer` (same-origin
+credentials; the mount forwards the browser's own cookies), which recomputes
+"installed" every time by comparing the tenant's workflow definitions against
+the hash the package would generate right now — there is no stored version flag
+— and calls `install()` when anything is missing or stale. The same `install()`
+runs on first launch, on upgrade, and after every credential change, and is
 idempotent, doing, in order:
 
-- the workspace tenant, created by the signed-in principal (the installer or
-  first-run client, not at host listen) if it does not already resolve by slug
+- the workspace tenant, created by the signed-in principal if it does not
+  already resolve by slug
 - the one workflow definition generated from the ledger, `project-lifecycle`
   — the row the command ledger's own session keys on
 - the roles the ledger names, held by that principal
 - project authority for every project tenant
 - the curated kit's skills, installed as hub assets
+- the tool packages the lifecycle imports, shipped as workspace members of
+  the workflow asset (or named from a registry asset when the hub is remote)
 - the provider catalog reranked at boot, so a model that can no longer
   answer drops behind the ones that can
 - the per-project lifecycle deployment, once a provider is connected
@@ -72,28 +71,44 @@ idempotent, doing, in order:
 Opening a project is two steps: the installer's `createProject` (child
 tenant, authority, credential delegation) over `/hub`, then
 `POST /api/projects/:projectId/open` for the ledger's `project.create`.
-Rename, archive, delete, and stakeholder writes go the same way: the
-installer's `updateProject` over `/hub`. The host no longer serves
-`PATCH`/`DELETE /api/projects/:projectId` or `PUT /api/projects/:projectId/stakeholders`.
 
-The `/hub` mount is a same-origin prefix strip onto the hub app. The
-desktop handshake is the process door. After that, Interchange authz is
-policy: auth, root tenant create, git-tokens, and catalog are not
-host-refused. Hub `Set-Cookie` is forwarded so the browser can hold a
-hub session.
+The `/hub` mount is a same-origin prefix strip onto the hub app
+(`hub-proxy.ts`). The desktop handshake is the process door. After that,
+Interchange authz is policy: auth, root tenant create, git-tokens, and
+catalog are not host-refused. Hub `Set-Cookie` is forwarded so the browser
+holds a hub session. The mount does not attach a host session, strip
+cookies, or impersonate a principal.
 
 The provider list calls install again after any credential change so bindings
 follow credentials.
 
 It prints a launch URL carrying a session token. Every API request must present
 that token. The hub mount is guarded the same way; after that outer door it
-forwards the browser's own cookies, so Interchange authz — not an owner-session
-swap — is policy.
+forwards the browser's own cookies.
 
-`GET /api/status` includes `canPlaceSidecars` and `sidecarFingerprint` from
-the embedded mount, so a client can tell whether this host can place a sidecar.
+`GET /api/status` includes `hub.mode` (`embedded` or `remote`),
+`canPlaceSidecars` and `sidecarFingerprint` from the embedded mount, so a
+client can tell whether this host can place a sidecar and whether the
+lifecycle's packages will be embedded locally or resolved from a source the
+remote hub names.
 
 Closing the window does not stop the process. Only an explicit stop does.
+
+## Embedded packages versus remote
+
+A desktop embed cannot assume npm. `scripts/embed-workflow-closure.ts`
+snapshots the vendored `@intx/*` `dist/` trees, `@solutions-builder/app`,
+`@solutions-builder/tools-deck` and `@solutions-builder/tools-delivery` into
+`packages/installer/src/workflow-closure-embed.ts`. `install()` reads that
+snapshot and writes the files into the workflow asset as workspace members.
+The sidecar resolves `workspace:*` from the same git pack. The web bundle
+has no `node:fs`; the snapshot is what makes client-driven install possible
+on the embedded hub.
+
+A remote hub names a source instead: an npm registry, or a hub asset of
+packed tarballs (`scripts/pack-registry-asset.ts`) or a source tree at a
+pinned commit. Closure, pinning and integrity stay the platform's. Hosted
+`install()` does not embed those trees in the browser bundle.
 
 ## Paths and environment
 
@@ -112,8 +127,9 @@ The database is in `pglite/` under it. Build workspaces are in `builds/<run>`.
 | `SOLUTIONS_BUILDER_DATA_DIR` | Override the data directory |
 | `SOLUTIONS_BUILDER_DIST_DIR` | Where the host serves the interface from; otherwise a `dist/` beside the executable, then the repo's |
 | `SOLUTIONS_BUILDER_HOST_COMMAND` | Debug builds of the shell only: run the host with this command instead of the bundled sidecar (the host compiled to one binary by `sidecar:build`) |
+| `SOLUTIONS_BUILDER_HUB_URL` | Hosted Interchange hub. Absent, the hub is embedded in this process |
 | `SOLUTIONS_BUILDER_DEV_RELOAD` | Mount `/api/dev/reload`, a change stream the development bundle subscribes to |
-| `CREDENTIAL_ENCRYPTION_KEY`, `PRINCIPAL_KEY_ENCRYPTION_KEY` | Interchange's at-rest keys; `@solutions-builder/keychain` mints them into the keychain when unset |
+| `CREDENTIAL_ENCRYPTION_KEY`, `PRINCIPAL_KEY_ENCRYPTION_KEY` | Interchange's at-rest keys; minted into the keychain when unset |
 
 ## Credentials
 
@@ -138,10 +154,10 @@ OAuth sign-in uses PKCE over a loopback redirect. Tokens live in the keychain.
 
 | Script | What it does |
 |---|---|
-| `dev` | The host from source, hot-reloading, opens a browser. `SOLUTIONS_BUILDER_HUB_URL` skips the host and opens that origin |
+| `dev` | The host from source, hot-reloading, opens a browser |
 | `host` | The host alone; prints the launch URL |
 | `ui:build`, `ui:watch` | Build the interface |
-| `dev:desktop` | Tauri window with the host running from source; with `SOLUTIONS_BUILDER_HUB_URL`, the window loads that origin and no sidecar starts |
+| `dev:desktop` | Tauri window with the host running from source |
 | `dev:fresh` | `dev:desktop` on a new empty data directory |
 | `desktop:build` | `.app` and `.dmg`; signed and notarised when the Apple env vars are set, unsigned otherwise (see "Releasing the desktop app") |
 | `sidecar:build` | Compile the host to one self-contained binary |
