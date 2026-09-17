@@ -15,6 +15,7 @@
  *
  * Usage: bun --conditions intx-src scripts/upgrade-smoke.ts
  */
+import "./smoke-env.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -26,9 +27,11 @@ import { HUB_MIGRATIONS } from "../apps/hub/src/hub-migrations.js";
 import { migrateHub, PreHubDatabaseError } from "../apps/hub/src/hub-migrate.js";
 import { openDatabase, type HostDatabase } from "../apps/hub/src/db.js";
 import { prepareDatabase } from "../apps/hub/src/migrate.js";
-import { ensureHub } from "../apps/hub/src/hub-client.js";
+import { catalog, ensureHub, getTenant, tenantId } from "../apps/hub/src/hub-client.js";
 import { hub } from "../apps/hub/src/hub-mount.js";
+import { resolveCredentialSecret } from "../apps/hub/src/hub-gaps.js";
 import { install, installState } from "../apps/hub/src/install.js";
+import { readSecretResult, secretReference, storeSecret } from "../apps/hub/src/host-secrets.js";
 import { expectedDefinitions } from "@solutions-builder/app/manifest";
 
 const checks: { name: string; ok: boolean; detail: string }[] = [];
@@ -238,6 +241,83 @@ try {
 
   const again = await install();
   check("a second install is a no-op", again.installed && (await count()) === definitions);
+
+  // --- CL-8076: a pre-upgrade OAuth secret in the old keychain/file store is
+  // carried into the hub's own credential row, once, on boot. ---
+  //
+  // The OAuth case is the one this migration exists to fix: pre-CL-8076 code
+  // sealed a useless keychain-reference *string* into the credential row's
+  // `secret` column (the real tokens lived only in the keychain), so the row
+  // existed but could not have authenticated anything. Seeded here exactly
+  // that way, then `install()` — which runs the migration once the workspace
+  // is resolvable — must overwrite the row with the real tokens and delete
+  // the old keychain entry.
+  {
+    const legacyProviderId = "codex-oauth";
+    const legacyAccount = `oauth:${legacyProviderId}`;
+    const realTokens = JSON.stringify({ access: "at-legacy", refresh: "rt-legacy", expiresAt: 0 });
+    await storeSecret(legacyAccount, realTokens);
+
+    const legacyProvider = await catalog.createProvider({
+      name: legacyProviderId,
+      plugin: legacyProviderId,
+      apiBaseUrl: "https://chatgpt.com/backend-api/codex",
+      metadata: { label: "ChatGPT (Codex)" },
+    });
+    await catalog.createCredential({
+      providerId: legacyProvider.id,
+      name: `provider:${legacyProviderId}`,
+      type: "oauth_token",
+      // The useless pointer pre-CL-8076 code sealed here instead of real
+      // material — `upsertCredential` had no `secret` to fall back to.
+      secret: `keychain:${legacyAccount}`,
+      description: "pre-migration placeholder",
+    });
+
+    const beforeMigration = await readSecretResult(await secretReference(legacyAccount));
+    check("the legacy keychain entry exists before migration", beforeMigration.status === "found");
+
+    await install();
+
+    const credentialRows = await (
+      hub().db.db as unknown as { execute: (q: unknown) => Promise<{ rows: { id: string }[] }> }
+    ).execute(sql`SELECT "id" FROM "public"."credential" WHERE "name" = ${`provider:${legacyProviderId}`}`);
+    const credentialId = credentialRows.rows[0]?.id;
+    check("the credential row still exists after migration", typeof credentialId === "string");
+
+    const decrypted = credentialId ? await resolveCredentialSecret(credentialId) : null;
+    check(
+      "the credential row now carries the real tokens, not the old pointer",
+      decrypted === realTokens,
+      String(decrypted),
+    );
+
+    const afterMigration = await readSecretResult(await secretReference(legacyAccount));
+    check(
+      "the old keychain entry is gone after migration",
+      afterMigration.status === "missing",
+    );
+
+    const tenantConfig = (await getTenant(tenantId()))?.config as
+      | { credentialMigration?: { mappings: { account: string; credentialId: string }[] } }
+      | undefined;
+    const mappings = tenantConfig?.credentialMigration?.mappings ?? [];
+    check(
+      "the migration is recorded on the workspace tenant's config",
+      mappings.some((entry) => entry.account === legacyAccount && entry.credentialId === credentialId),
+      JSON.stringify(mappings),
+    );
+
+    await install();
+    const tenantConfigAgain = (await getTenant(tenantId()))?.config as
+      | { credentialMigration?: { mappings: { account: string; credentialId: string }[] } }
+      | undefined;
+    check(
+      "running the migration again is a no-op, not a duplicate mapping",
+      (tenantConfigAgain?.credentialMigration?.mappings ?? []).length === mappings.length,
+    );
+  }
+
   await host.close();
 }
 
