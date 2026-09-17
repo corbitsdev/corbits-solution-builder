@@ -14,6 +14,8 @@ export type WorkflowDefinitionVersionStatus =
 
 import { type } from "arktype";
 
+import { GrantRequirement } from "./grants";
+
 const WorkflowDefinitionStatusType = type.enumerated(
   ...workflowDefinitionStatuses,
 );
@@ -45,4 +47,21 @@ export const WorkflowDefinitionResponse = type({
 // Rollback a definition to a prior version.
 export const WorkflowRollbackRequest = type({
   version: "string",
+});
+
+// Registers a definition row directly, for a caller that generated the row
+// itself rather than deploying through the probe sidecar (`POST
+// /workflows/deployments`). Identity is keyed on (name, wireHash): an
+// unchanged wireHash under the same name is a no-op.
+export const CreateWorkflowDefinition = type({
+  "id?": "string",
+  name: "string",
+  "description?": "string",
+  wireHash: "string",
+  "grantRequirements?": GrantRequirement.array(),
+});
+
+export const CreateWorkflowDefinitionResponse = type({
+  id: "string",
+  created: "boolean",
 });
