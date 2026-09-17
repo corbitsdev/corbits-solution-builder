@@ -10,16 +10,13 @@
  * that needs no registry plumbing: the resolver already walks members, and the
  * sidecar lays a member out from the same git pack the workflow itself arrives
  * in. The cost is a copy of about a megabyte per lifecycle asset.
+ *
+ * The bytes come from `workflow-closure-embed.ts`, generated at build time
+ * from vendor/ and the tools packages. `install()` must not read the live
+ * trees: apps/web imports this package, and the web bundle has no node:fs.
  */
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
-
-const VENDORED_PACKAGES = join(import.meta.dir, "..", "..", "..", "vendor", "interchange", "packages");
-const ROOT_PACKAGE_JSON = join(import.meta.dir, "..", "..", "..", "package.json");
-const SOLUTIONS_BUILDER_APP_DIR = join(import.meta.dir, "..", "..", "..", "packages", "solutions-builder");
-const TOOLS_DECK_DIR = join(import.meta.dir, "..", "..", "..", "packages", "tools-deck");
-const TOOLS_DELIVERY_DIR = join(import.meta.dir, "..", "..", "..", "packages", "tools-delivery");
+import { WORKFLOW_CLOSURE_EMBED } from "./workflow-closure-embed.js";
 
 /** Where a vendored package lands inside the asset: `packages/intx-<name>`. */
 export function memberDir(shortName: string): string {
@@ -38,12 +35,28 @@ type PackageManifest = {
   [key: string]: unknown;
 };
 
+function embedFile(path: string): string {
+  const content = WORKFLOW_CLOSURE_EMBED[path];
+  if (content === undefined) {
+    throw new Error(`workflow-closure embed is missing ${path}; run \`bun scripts/embed-workflow-closure.ts\``);
+  }
+  return content;
+}
+
+function embedUnder(prefix: string): Record<string, string> {
+  const files: Record<string, string> = {};
+  for (const [path, content] of Object.entries(WORKFLOW_CLOSURE_EMBED)) {
+    if (path.startsWith(prefix)) files[path.slice(prefix.length)] = content;
+  }
+  return files;
+}
+
 /** A vendored package's own `package.json`, parsed. Exported so callers that
  *  need more than the trimmed shape `memberFiles` produces — the registry-asset
  *  packer reads real `dependencies`/`peerDependencies` off it — read the same
  *  file through the same path rather than a second copy of this join. */
 export function readManifest(shortName: string): PackageManifest {
-  return JSON.parse(readFileSync(join(VENDORED_PACKAGES, shortName, "package.json"), "utf8")) as PackageManifest;
+  return JSON.parse(embedFile(`vendor/interchange/packages/${shortName}/package.json`)) as PackageManifest;
 }
 
 /** The transitive `workspace:*` closure of `@intx/<root>`, root first. */
@@ -69,19 +82,8 @@ export function vendoredClosure(root: string): string[] {
  * from this repository's own catalog, which mirrors the vendored revision's.
  */
 export function workspaceCatalog(): Record<string, string> {
-  const root = JSON.parse(readFileSync(ROOT_PACKAGE_JSON, "utf8")) as { catalog?: Record<string, string> };
+  const root = JSON.parse(embedFile("package.json")) as { catalog?: Record<string, string> };
   return root.catalog ?? {};
-}
-
-/** Recursively lists every file under `dir`, depth-first. Exported so any
- *  caller collecting a directory's files (a workspace member, a repacked
- *  tarball) walks it the same way rather than each writing its own. */
-export function walk(dir: string, out: string[]): void {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) walk(full, out);
-    else if (entry.isFile()) out.push(full);
-  }
 }
 
 /**
@@ -90,19 +92,11 @@ export function walk(dir: string, out: string[]): void {
  * out; the sidecar evaluates, it does not type-check.
  */
 export function distFiles(shortName: string): Record<string, string> {
-  const distDir = join(VENDORED_PACKAGES, shortName, "dist");
-  if (!statSync(distDir, { throwIfNoEntry: false })?.isDirectory()) {
+  const files = embedUnder(`vendor/interchange/packages/${shortName}/dist/`);
+  if (Object.keys(files).length === 0) {
     throw new Error(
-      `@intx/${shortName} has no dist/; run \`bun run vendor:build\` before deploying a code-sourced workflow`,
+      `@intx/${shortName} has no dist/; run \`bun run vendor:build\` then \`bun scripts/embed-workflow-closure.ts\` before deploying a code-sourced workflow`,
     );
-  }
-  const paths: string[] = [];
-  walk(distDir, paths);
-  const files: Record<string, string> = {};
-  for (const full of paths) {
-    const rel = relative(distDir, full);
-    if (/\.d\.ts$/.test(rel) || /\.map$/.test(rel) || /\.test\.js$/.test(rel) || rel === ".emitted") continue;
-    files[rel.split("\\").join("/")] = readFileSync(full, "utf8");
   }
   return files;
 }
@@ -168,8 +162,8 @@ export function deckAppMemberFiles(): Record<string, string> {
   };
   return {
     [`${dir}/package.json`]: `${JSON.stringify(manifest, null, 2)}\n`,
-    [`${dir}/src/deck.ts`]: readFileSync(join(SOLUTIONS_BUILDER_APP_DIR, "src", "deck.ts"), "utf8"),
-    [`${dir}/src/delivery.ts`]: readFileSync(join(SOLUTIONS_BUILDER_APP_DIR, "src", "delivery.ts"), "utf8"),
+    [`${dir}/src/deck.ts`]: embedFile("packages/solutions-builder/src/deck.ts"),
+    [`${dir}/src/delivery.ts`]: embedFile("packages/solutions-builder/src/delivery.ts"),
   };
 }
 
@@ -182,9 +176,9 @@ export function deckAppMemberFiles(): Record<string, string> {
  * member `deckAppMemberFiles` ships beside it, and `pptxgenjs` resolves
  * from npm like `hono` already does for the lifecycle package itself.
  */
-function toolsMemberFiles(name: string, packageDir: string): Record<string, string> {
+function toolsMemberFiles(name: string): Record<string, string> {
   const dir = `packages/${name}`;
-  const manifest = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8")) as PackageManifest;
+  const manifest = JSON.parse(embedFile(`packages/${name}/package.json`)) as PackageManifest;
   const trimmed: PackageManifest = {
     name: manifest.name,
     version: manifest.version,
@@ -193,19 +187,16 @@ function toolsMemberFiles(name: string, packageDir: string): Record<string, stri
     ...(manifest.dependencies !== undefined ? { dependencies: manifest.dependencies } : {}),
   };
   const files: Record<string, string> = { [`${dir}/package.json`]: `${JSON.stringify(trimmed, null, 2)}\n` };
-  const paths: string[] = [];
-  walk(join(packageDir, "src"), paths);
-  for (const full of paths) {
-    // Tests exercise the tool in this workspace; the sidecar only ever runs it.
-    if (/\.test\.tsx?$/.test(full)) continue;
-    const rel = relative(packageDir, full).split("\\").join("/");
-    files[`${dir}/${rel}`] = readFileSync(full, "utf8");
+  const src = embedUnder(`packages/${name}/`);
+  for (const [rel, content] of Object.entries(src)) {
+    if (rel === "package.json" || /\.test\.tsx?$/.test(rel)) continue;
+    files[`${dir}/${rel}`] = content;
   }
   return files;
 }
 
 export function toolsDeckMemberFiles(): Record<string, string> {
-  return toolsMemberFiles("tools-deck", TOOLS_DECK_DIR);
+  return toolsMemberFiles("tools-deck");
 }
 
 /**
@@ -216,7 +207,7 @@ export function toolsDeckMemberFiles(): Record<string, string> {
  * member `deckAppMemberFiles`-style copy shipped beside it.
  */
 export function toolsDeliveryMemberFiles(): Record<string, string> {
-  return toolsMemberFiles("tools-delivery", TOOLS_DELIVERY_DIR);
+  return toolsMemberFiles("tools-delivery");
 }
 
 /** One hash over every file, so a changed byte anywhere re-deploys. */

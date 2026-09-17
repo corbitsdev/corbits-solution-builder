@@ -66,7 +66,7 @@
  * Usage: `bun run assets:pack-registry`
  */
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 
 import {
@@ -83,7 +83,7 @@ import { assets as hubAssets } from "../apps/hub/src/hub-client.js";
 import { hub } from "../apps/hub/src/hub-mount.js";
 import { databaseDirectory } from "../apps/hub/src/paths.js";
 import { packTarballFiles, tarballFilename, tarballIntegrity, type TarballFiles } from "../apps/hub/src/tarball.js";
-import { distFiles, readManifest, vendoredClosure, walk } from "../packages/installer/src/workflow-closure.js";
+import { distFiles, readManifest, vendoredClosure } from "../packages/installer/src/workflow-closure.js";
 import { WORKFLOW_PACKAGE_DEPENDENCIES } from "@solutions-builder/app/workflows/lifecycle-source";
 
 /** The asset's human-readable name — how it's found and created. Distinct
@@ -94,6 +94,17 @@ const ROOT_DIR = join(import.meta.dir, "..");
 const VENDOR_PACKAGES_DIR = join(ROOT_DIR, "vendor", "interchange", "packages");
 const APP_PACKAGE_DIR = join(ROOT_DIR, "packages", "solutions-builder");
 const INDEX_PATH = "package-registry.json";
+
+/** Recursively lists every file under `dir`, depth-first. Lives here rather
+ *  than on the installer closure: that module is imported by the web bundle
+ *  and cannot walk the live filesystem. */
+function walk(dir: string, out: string[]): void {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) walk(full, out);
+    else if (entry.isFile()) out.push(full);
+  }
+}
 
 type PackageManifest = {
   name: string;
