@@ -164,6 +164,21 @@ export function canPlaceSidecars(): boolean {
 }
 
 /**
+ * What GET /status reports about this process's ability to place a sidecar.
+ * `sidecarFingerprint` is null until the hub is mounted — there is no binding
+ * to name before then.
+ */
+export function sidecarFacts(): {
+  readonly canPlaceSidecars: boolean;
+  readonly sidecarFingerprint: string | null;
+} {
+  return {
+    canPlaceSidecars: canPlaceSidecars(),
+    sidecarFingerprint: mounted?.sidecarBindingFingerprint ?? null,
+  };
+}
+
+/**
  * The path sidecars connect to, served at the hub's own route rather than
  * under the `/hub` proxy: Bun upgrades only the request it handed to `fetch`,
  * so the socket cannot be rewritten on the way in. The host lets this one

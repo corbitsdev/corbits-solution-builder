@@ -13,6 +13,7 @@ import { credentialBackend } from "./host-secrets.js";
 import { BRIDGE_CAPABILITIES, BRIDGE_ID, bridgeAvailable } from "./corbits-exec.js";
 import { hostStatus, requestHostStop } from "./lifecycle.js";
 import { ensureHub, hubFetch } from "./hub-client.js";
+import { sidecarFacts } from "./hub-mount.js";
 import { install, installState } from "./installer-bridge.js";
 
 export const API_VERSION = "1";
@@ -56,6 +57,7 @@ export function registerHostRoutes(api: Hono) {
         connected: providers.some((provider) => provider.status === "ready"),
         active: providers.find((provider) => provider.active)?.providerId ?? null,
       },
+      ...sidecarFacts(),
       hub: await hubSummary(),
       build: {
         // Named honestly: this is the bounded bridge, not shared-hub supervision.

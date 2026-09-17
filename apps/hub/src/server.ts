@@ -20,8 +20,9 @@ import { openDatabase } from "./db.js";
 import { prepareDatabase } from "./migrate.js";
 import { databaseDirectory, dataDirectory, portFile } from "./paths.js";
 import { stopSpawnedSidecars } from "./sidecar-processes.js";
-import { ensureHub, hubFetch, resolveWorkspace } from "./hub-client.js";
+import { ensureHub, ensureOwner, hubFetch, ownerSession, resolveWorkspace } from "./hub-client.js";
 import { hub, hubIsMounted, hubWebSocket, setHostPort, SIDECAR_WS_PATH } from "./hub-mount.js";
+import { hubProxyHeaders } from "./hub-proxy.js";
 import { attachLiveDrafts } from "./live-drafts.js";
 import { attachRoundSpend } from "./round-spend.js";
 import { rerankCatalogProviders } from "./catalog.js";
@@ -235,8 +236,10 @@ app.use("/api/*", async (context, next) => {
 
 // The hub proxy is guarded too. Without this the host would be an open proxy
 // into the hub for anything on the machine, which is the loopback assumption
-// the rest of the host explicitly rejects. The hub's own auth still applies
-// underneath; this is the outer door, not a replacement for it.
+// the rest of the host explicitly rejects. This is the outer door. The inner
+// identity is the workspace owner: the handler below calls ensureOwner() and
+// forwards that session, because the browser only holds this host's handshake
+// cookie, which the hub would not accept.
 app.use("/hub/*", async (context, next) => {
   if (!authorised(context)) return context.json(unauthorised, 401);
   await next();
@@ -251,9 +254,10 @@ app.route("/api", createApi());
 app.all("/hub/*", async (context) => {
   const url = new URL(context.req.url);
   const path = url.pathname.replace(/^\/hub/, "") + url.search;
+  await ensureOwner();
   return hubFetch(path, {
     method: context.req.method,
-    headers: context.req.raw.headers,
+    headers: hubProxyHeaders(context.req.raw.headers, await ownerSession()),
     ...(context.req.method === "GET" || context.req.method === "HEAD"
       ? {}
       : { body: await context.req.raw.arrayBuffer() }),
