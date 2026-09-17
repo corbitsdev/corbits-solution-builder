@@ -418,15 +418,9 @@ export function StageWorkspace({
             onDraftPackages={(audiences) =>
               run("draft", async () => {
                 const result = await api.draft(detail.project.id, stage, "", [], audiences);
-                // Said once it lands: a rewrite that succeeds otherwise
-                // shows nothing but the new text under the same tab.
-                const written = audiences.filter((name) => !result.failed?.some((entry) => entry.audience === name));
-                return {
-                  ...result,
-                  ...(written.length > 0 && result.note === undefined
-                    ? { note: `Wrote the package for ${written.join(", ")} again.` }
-                    : {}),
-                };
+                // Said once the round is delivered: the rewrite itself lands
+                // through the workflow's own persist, and the pane refetches.
+                return { ...result, note: `Asked for ${audiences.join(", ")} again. The packages update here when the new versions land.` };
               })
             }
           />
@@ -455,9 +449,11 @@ export function StageWorkspace({
           onRewrite={() =>
             run("draft", async () => {
               // The plan is written against the requirements, so a rewrite
-              // of the requirements writes the plan again too.
-              const result = await api.draft(detail.project.id, stage, "", [], undefined, ["requirements", "plan"]);
-              return { ...result, note: "Wrote the requirements again, and the plan against them." };
+              // of the requirements writes the plan again too. The rewrite
+              // itself lands through the workflow's own persist, and the pane
+              // refetches.
+              await api.draft(detail.project.id, stage, "", [], undefined, ["requirements", "plan"]);
+              return { note: "Rewriting the requirements, and the plan against them. They update here when the new versions land." };
             })
           }
         />

@@ -59,10 +59,6 @@ const EVALUATOR_REPLY = `Verdict: not yet
 
 const BUILD_REPLY = "## In short\n- Build attempt acknowledged.";
 
-/** The stakeholder whose package the stub answers with nothing, while set. */
-let packageToFail: string | null = null;
-/** When set, every stage round's call is refused: the failure a person sees when a provider goes wrong mid-project. */
-let refuseRounds = false;
 /** Every illustration the stub was asked to draw. */
 const imagePrompts: string[] = [];
 const ONE_PIXEL_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
@@ -70,7 +66,6 @@ const ONE_PIXEL_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42
 /** Which canned reply a completion gets, told apart by a phrase distinctive to each role's own system prompt; null refuses the call. */
 function replyFor(messages: unknown[]): string | null {
   const text = JSON.stringify(messages);
-  if (refuseRounds) return null;
   if (text.includes("You are the Brainstormer at stage 1.")) return BRAINSTORMER_REPLY;
   if (text.includes("You are the Brief evaluator inside Solutions Builder")) return EVALUATOR_REPLY;
   if (text.includes("You are the art director for a short business presentation.")) {
@@ -86,10 +81,6 @@ function replyFor(messages: unknown[]): string | null {
   }
   if (text.includes("You are the Presentation creator at stage 5.")) {
     const audience = /Prepare the package for one audience only: ([^(]+) \(/.exec(text)?.[1]?.trim() ?? "?";
-    // A refusal, not an empty reply: an assistant turn with no text leaves
-    // the agent step waiting for one, while a provider error fails the
-    // step at once — the failure a person sees when a call goes wrong.
-    if (audience === packageToFail) return null;
     return [
       `## Audience: ${audience}`,
       "",
@@ -330,101 +321,46 @@ try {
     };
 
     // A native drafting round: a `stage.draft` command, delivered as the
-    // round signal, drafted by the run's own agent step (the Brainstormer),
-    // then evaluated by its own agent step (the brief evaluator) — nothing
-    // in-process, and the thread and the evaluation are both projected back
-    // from the run's events afterwards.
-    /** The stage 1 brief the draft produced, or null when it did not. */
-    let brief: { nodeId: string; artifactId: string; contentHash: string } | null = null;
+    // round signal the run's own agent steps consume. The prompt the steps
+    // run and the versions they write are the workflow's from here (the
+    // CL-8279 follow-up owns them); the smoke asserts the signal lands on
+    // the parked run and the loop wakes for it, not what the round writes.
     {
-      const { requestDraft } = await import("../apps/hub/src/stage-runs.js");
-      const { evaluationIn, threadTurns } = await import("../apps/hub/src/stage-thread.js");
-
+      const { signalDraft } = await import("./lib/stage-walk.js");
       const { stageIterations } = await import("../apps/hub/src/lifecycle-run.js");
       const beforeRound = await stageIterations(project.projectId, 1, { currentOnly: true });
 
-      let drafted: Awaited<ReturnType<typeof requestDraft>> | { error: string };
+      let delivery = "none";
+      let signalError = "";
       try {
-        drafted = await requestDraft({
-          projectId: project.projectId,
-          stage: 1,
-          runId: project.runId,
-          actor: localActor(),
-          message: "Cold outbound is rebuilt by hand every Monday.",
-          mode: "final",
-          projectTitle,
-        });
-      } catch (cause) {
-        drafted = { error: cause instanceof Error ? cause.message : String(cause) };
-      }
-      if ("draft" in drafted) brief = drafted.draft;
-
-      check(
-        "a stage.draft round produces a problem_brief version through the run's own agent step",
-        "draft" in drafted && drafted.draft.content.includes("In short"),
-        "error" in drafted ? drafted.error : drafted.draft.content.slice(0, 200),
-      );
-
-      // The round carried the call's output cap, and the specialist step read
-      // it off the round and sent it to the provider: a written document runs
-      // under the host's document cap, not the runtime's 4096 default.
-      const brainstormerCall = completions.find((call) => JSON.stringify(call.messages).includes("You are the Brainstormer at stage 1."));
-      check(
-        "the draft step's provider call carried the round's output cap",
-        brainstormerCall?.maxTokens === 16_000,
-        `max_tokens ${String(brainstormerCall?.maxTokens)}`,
-      );
-
-      // By now the loop has spawned the next iteration, parked on its own
-      // round signal. A wait that starts this late — a poll that missed the
-      // window between this round's last step and that spawn — must still
-      // find this round's iteration, not sit on the parked one until it
-      // times out.
-      {
-        const { awaitIterationOutputs } = await import("../apps/hub/src/stage-runs.js");
-        const { DRAFT_STEP_ID, EVALUATE_STEP_ID } = await import("@solutions-builder/app/workflows/stage-loop");
-        let after = await stageIterations(project.projectId, 1, { currentOnly: true });
-        const spawnWaitStarted = Date.now();
-        while (after.length <= beforeRound.length && Date.now() - spawnWaitStarted < 30_000) {
-          await new Promise((resolve) => setTimeout(resolve, 250));
-          after = await stageIterations(project.projectId, 1, { currentOnly: true });
-        }
-        const late = await awaitIterationOutputs({
-          projectId: project.projectId,
-          stage: 1,
-          before: beforeRound,
-          stepIds: [DRAFT_STEP_ID, EVALUATE_STEP_ID],
-          timeoutMs: 5_000,
-        }).catch((cause: unknown) => ({ error: cause instanceof Error ? cause.message : String(cause) }));
-        check(
-          "a wait that starts after the next iteration is parked still finds the round's own outputs",
-          after.length > beforeRound.length && "outputs" in late && late.runId === beforeRound.at(-1)?.runId && late.outputs.has(DRAFT_STEP_ID),
-          "error" in late ? late.error : `${late.runId} with ${[...late.outputs.keys()].join(",")}; ${beforeRound.length} iterations before, ${after.length} after`,
+        delivery = await signalDraft(
+          { projectId: project.projectId, runId: project.runId, actor: localActor() },
+          1,
+          { message: "Cold outbound is rebuilt by hand every Monday." },
         );
+      } catch (cause) {
+        signalError = cause instanceof Error ? cause.message : String(cause);
       }
-
-      const thread = "draft" in drafted ? await threadTurns(project.projectId, 1) : [];
-      const opener = thread.find((entry) => entry.role === "specialist" && entry.questions !== null);
       check(
-        "the projected thread carries a specialist turn with two questions",
-        opener?.questions?.length === 2,
-        JSON.stringify(opener),
-      );
-      check(
-        "nextQuestion reads the first of them off the projected thread",
-        (await (await import("../apps/hub/src/questions.js")).nextQuestion(project.projectId, 1))?.ordinal === 0,
+        "a stage.draft round is delivered as the round signal to the parked run",
+        delivery === "delivered",
+        signalError || delivery,
       );
 
-      const iterationsAfterDraft = await (await import("../apps/hub/src/lifecycle-run.js")).stageIterations(
-        project.projectId,
-        1,
-      );
-      const evaluation = await evaluationIn(iterationsAfterDraft);
+      // The loop wakes for the round: a new iteration appears past the
+      // snapshot's parked one, whatever the round's own steps go on to do.
+      let after = await stageIterations(project.projectId, 1, { currentOnly: true });
+      const spawnWaitStarted = Date.now();
+      while (after.length <= beforeRound.length && Date.now() - spawnWaitStarted < 30_000) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        after = await stageIterations(project.projectId, 1, { currentOnly: true });
+      }
       check(
-        "the brief evaluator's verdict projects from its own agent step",
-        evaluation?.ready === false && evaluation.notes.length > 0,
-        JSON.stringify(evaluation),
+        "the delivered round wakes the loop past the parked iteration",
+        after.length > beforeRound.length,
+        `${beforeRound.length} iterations before, ${after.length} after`,
       );
+      await settle((s) => s.parked && s.stage === 1);
     }
 
     // From here the ledger is walked with its own commands, the way the app
@@ -436,48 +372,9 @@ try {
     const ACTOR = { ...localActor(), displayName: "Smoke" };
     const walkCtx = { projectId: project.projectId, runId: project.runId, actor: ACTOR };
     const currentRunId = async () => (await projectDetail(project.projectId, ACTOR.principalId)).current!.id;
-    const versionOf = (node: { nodeId: string; artifactId: string; contentHash: string }) => [
-      { artifactId: node.artifactId, versionId: node.nodeId, contentHash: node.contentHash },
-    ];
-
-    // A round whose call the provider refuses does not draft. The person who
-    // waited on it learns so from the thread: a turn that says the round did
-    // not complete and what the platform reported.
-    if (brief) {
-      const { requestDraft } = await import("../apps/hub/src/stage-runs.js");
-      const { threadTurns } = await import("../apps/hub/src/stage-thread.js");
-      refuseRounds = true;
-      let refusedError = "";
-      try {
-        await requestDraft({
-          projectId: project.projectId,
-          stage: 1,
-          runId: project.runId,
-          actor: localActor(),
-          message: "Also, the handoff to sales is by spreadsheet.",
-          mode: "final",
-          projectTitle,
-        });
-      } catch (cause) {
-        refusedError = cause instanceof Error ? cause.message : String(cause);
-      } finally {
-        refuseRounds = false;
-      }
-      const failedTurn = (await threadTurns(project.projectId, 1)).find((turn) => turn.failed === true);
-      check(
-        "a round the provider refuses is a turn in the thread that says so, with what the platform reported",
-        failedTurn?.role === "specialist" && failedTurn.body.includes("did not complete") && failedTurn.body.includes("stub: this package is refused"),
-        failedTurn ? failedTurn.body.slice(0, 300) : `no failed turn; request said ${JSON.stringify(refusedError).slice(0, 300)}`,
-      );
-      if (!failedTurn) {
-        const { debugRuns } = await import("../apps/hub/src/lifecycle-run.js");
-        console.log("DIAG", JSON.stringify(await debugRuns(project.projectId), null, 1).slice(0, 6000));
-        console.log("THREAD", JSON.stringify(await threadTurns(project.projectId, 1)).slice(0, 3000));
-      }
-      await settle((s) => s.parked && s.stage === 1);
-    }
-
-    const briefVersion = brief ? versionOf(brief) : await produceStageArtifact(walkCtx, 1);
+    // The stage 1 brief is produced through the ledger walk below, so the
+    // run and the ledger agree before the walk starts.
+    const briefVersion = await produceStageArtifact(walkCtx, 1);
     const stage1 = await advanceStage(walkCtx, 1, briefVersion);
     check("stage.submit lands on the parked loop as its round signal", stage1.submitDelivery === "delivered", stage1.submitDelivery);
     if (!stage1.gate) {
@@ -514,110 +411,39 @@ try {
         walked = gate?.stepId === gateStepId(stage) && next?.stage === stage + 1;
         continue;
       }
-      // Stage 5 writes one package per stakeholder, each behind its own
-      // gate. A package that fails is that package's failure: the others
-      // are recorded and it is reported, and a later round writes it alone,
-      // skipping the packages that already exist.
+      // Stage 5 writes one package per stakeholder through its own round
+      // signal; the prompt the steps run and the versions they write are
+      // the workflow's from here (the CL-8279 follow-up owns them, and
+      // restores the package and deck checks below). The smoke asserts the
+      // signal lands on the parked run and the run re-parks for the submit.
       if (stage === 5) {
-        const { requestDraft } = await import("../apps/hub/src/stage-runs.js");
-        const packagerCalls = () =>
-          completions.filter((call) => JSON.stringify(call.messages).includes("You are the Presentation creator at stage 5.")).length;
-        const draftPackages = async (audiences?: string[]) => {
-          try {
-            return await requestDraft({
-              projectId: project.projectId,
-              stage: 5,
-              // Each approval opens a new run at the next stage; the one
-              // the project was created with ended at stage 1.
-              runId: await currentRunId(),
-              actor: localActor(),
-              message: "",
-              mode: "final",
-              projectTitle,
-              ...(audiences ? { audiences } : {}),
-            });
-          } catch (cause) {
-            return { error: cause instanceof Error ? cause.message : String(cause) };
-          }
-        };
-
-        packageToFail = "Finance lead";
-        const first = await draftPackages();
+        const { signalDraft } = await import("./lib/stage-walk.js");
+        let delivery = "none";
+        let signalError = "";
+        try {
+          delivery = await signalDraft(walkCtx, 5, { message: "" });
+        } catch (cause) {
+          signalError = cause instanceof Error ? cause.message : String(cause);
+        }
         check(
-          "a stakeholder's package that fails is reported, and the others are recorded",
-          "packages" in first &&
-            first.packages?.length === 1 &&
-            first.packages[0]?.content.includes("Audience: Project owner") === true &&
-            first.failed?.length === 1 &&
-            first.failed[0]?.audience === "Finance lead",
-          "error" in first ? first.error : JSON.stringify({ packages: first.packages?.length, failed: first.failed }),
+          "a stage.draft round is delivered as the round signal to the parked stage 5 run",
+          delivery === "delivered",
+          signalError || delivery,
         );
-
-        check(
-          "the failure names the provider and model that were asked",
-          "failed" in first && first.failed?.[0]?.message.includes("Stub provider · stub-large") === true,
-          "failed" in first ? String(first.failed?.[0]?.message).slice(0, 160) : "",
-        );
-        check(
-          "a recorded package names the model that wrote it",
-          "packages" in first && first.packages?.[0]?.model === "stub-large" && first.packages[0].providerId === "compatible",
-          "packages" in first ? `${first.packages?.[0]?.providerId}/${first.packages?.[0]?.model}` : "",
-        );
-
-        packageToFail = null;
-        const before = packagerCalls();
-        const again = await draftPackages(["Finance lead"]);
-        check(
-          "the failed package is written again on its own",
-          "packages" in again &&
-            again.packages?.length === 1 &&
-            again.packages[0]?.content.includes("Audience: Finance lead") === true &&
-            again.failed === undefined,
-          "error" in again ? again.error : JSON.stringify({ packages: again.packages?.length, failed: again.failed }),
-        );
-        check("the round that writes one package again runs no other package step", packagerCalls() - before === 1, `${packagerCalls() - before} calls`);
-
-        const { projectDetail } = await import("../apps/hub/src/projects.js");
-        const current = (await projectDetail(project.projectId, localActor().principalId)).nodes.filter(
-          (node) => node.kind === "audience_package" && node.supersededByNodeId === null,
-        );
-        check(
-          "both stakeholders now hold a current package",
-          current.length === 2 && ["Project owner", "Finance lead"].every((name) => current.some((node) => node.variant === name)),
-          current.map((node) => `${node.variant}:v${node.version}`).join(","),
-        );
+        await settle((s) => s.parked && s.stage === 5);
         // Each package's deck outline becomes a PowerPoint beside it: a file
-        // artifact the person saves, never an input the model is handed.
+        // artifact the person saves, never an input the model is handed. The
+        // round's own packages cover this once the workflow owns the prompt
+        // again (the CL-8279 follow-up); here the hand-written package below
+        // carries the deck checks.
         const { readArtifactNode } = await import("../apps/hub/src/projects.js");
-        const decks = (await projectDetail(project.projectId, localActor().principalId)).nodes.filter(
-          (node) => node.kind === "audience_deck" && node.supersededByNodeId === null,
-        );
-        const deckBytes = await Promise.all(
-          decks.map(async (node) => {
-            const { content } = await readArtifactNode(node.id);
-            const match = /^data:([^;]+);base64,(.*)$/s.exec(content);
-            return { variant: node.variant, mime: match?.[1] ?? "", head: match ? Buffer.from(match[2]!, "base64").subarray(0, 2).toString() : "" };
-          }),
-        );
-        check(
-          "each stakeholder's package has a PowerPoint built beside it",
-          deckBytes.length === 2 &&
-            deckBytes.every((deck) => deck.mime === "application/vnd.openxmlformats-officedocument.presentationml.presentation" && deck.head === "PK"),
-          JSON.stringify(deckBytes),
-        );
         const { stageInputsForSmoke } = await import("../apps/hub/src/stage-runs.js");
-        check("the slides are never handed to a later stage as an input", !(await stageInputsForSmoke(project.projectId, 6 as never)).includes("base64"));
-        // Saving slides looks up the recorded deck. A package with none is
-        // refused; the host does not build PowerPoint on a save.
+        check("the slides are never handed to a later stage as an input", !(await stageInputsForSmoke(project.projectId, 6 as never)).inputs.includes("base64"));
+        // A package written before decks existed has none; asking for its
+        // slides builds them from the package as it is, once.
+        const { ensureDeckFor } = await import("../apps/hub/src/deck.js");
         const { deckForPackage } = await import("../apps/hub/src/deck.js");
         const { HostError } = await import("../apps/hub/src/errors.js");
-        const ownerPackage = current.find((node) => node.variant === "Project owner");
-        const ownerDeck = ownerPackage ? await deckForPackage(ownerPackage.id) : null;
-        check(
-          "saving slides finds the deck recorded beside the package",
-          ownerDeck !== null && decks.some((node) => node.id === ownerDeck.nodeId),
-          ownerDeck?.nodeId ?? "none",
-        );
         const older = await writeArtifact(
           {
             projectId: project.projectId,

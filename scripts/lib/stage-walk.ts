@@ -10,11 +10,12 @@
  *
  * `walkToStage` writes the stage artifact one of two ways:
  *
- * - `mode: "real"` (the default): `requestDraft` runs the stage's real
- *   specialist through the deployed workflow, waits for its agent step(s) to
- *   answer, and persists each answer as a version through the same path the
- *   product's own "Draft" button takes. `provenance.producer` is asserted to
- *   be `"agent"` on every version this writes.
+ * - `mode: "real"` (the default): it delivers a `stage.draft` round signal
+ *   the way the product's own "Draft" button does, waits for the workflow's
+ *   own persist to write the resulting versions, and returns them to submit.
+ *   `provenance.producer` is asserted to be `"agent"` on every version this
+ *   writes — a future change that silently reverts to canned text fails
+ *   loudly here.
  * - `mode: "seeded"`: the canned-text shortcut (`produceStageArtifact` /
  *   `produceStageArtifacts`), for jumping straight to a stage to experiment
  *   there without sitting through every earlier one's real round. Its
@@ -23,11 +24,15 @@
  */
 import { execute, type Actor } from "../../apps/hub/src/command-dispatch.js";
 import { newId } from "../../apps/hub/src/ids.js";
-import { writeArtifact, readArtifactNode, projectDetail } from "../../apps/hub/src/projects.js";
-import { requestDraft, type StageDraftResult } from "../../apps/hub/src/stage-runs.js";
-import { projectExecutionStatus, type StageStatus } from "../../apps/hub/src/lifecycle-run.js";
+import { writeArtifact, readArtifactNode, projectDetail, exportArtifactNodes, type PortableArtifactNode } from "../../apps/hub/src/projects.js";
+import { roundInference } from "../../apps/hub/src/stage-runs.js";
+import {
+  projectExecutionStatus,
+  type DeliveryOutcome,
+  type StageStatus,
+} from "../../apps/hub/src/lifecycle-run.js";
 import { runGateSideEffects } from "../../apps/hub/src/gate-delivery.js";
-import { gateStepId } from "@solutions-builder/app/workflows/stage-loop";
+import { DRAFT_STEP_TIMEOUT_MS, gateStepId } from "@solutions-builder/app/workflows/stage-loop";
 import type { Command, Stage } from "@solutions-builder/app/ledger";
 
 export type WalkMode = "real" | "seeded";
@@ -45,17 +50,20 @@ export interface WalkContext {
   readonly projectId: string;
   readonly runId: string;
   readonly actor: Actor;
-  /** Required only in `mode: "real"` — `requestDraft` renders it into every prompt. */
+  /** Kept for callers; nothing renders it into a prompt anymore — the workflow owns the prompt. */
   readonly projectTitle?: string;
 }
 
 const currentRunId = async (ctx: WalkContext) => (await projectDetail(ctx.projectId, ctx.actor.principalId)).current!.id;
 
-const versionOf = (result: StageDraftResult): ArtifactVersion => ({
-  artifactId: result.artifactId,
-  versionId: result.nodeId,
-  contentHash: result.contentHash,
-});
+/** A version the workflow's own persist wrote for one of the round's steps, with the step that wrote it. */
+export type RoundVersion = ArtifactVersion & {
+  kind: string;
+  stepId: string;
+  content: string;
+  model?: string;
+  providerId?: string;
+};
 
 /** The whole point of `mode: "real"`: a future change that silently reverts to canned text must fail loudly. */
 async function assertAgentProvenance(nodeId: string, label: string): Promise<void> {
@@ -63,6 +71,97 @@ async function assertAgentProvenance(nodeId: string, label: string): Promise<voi
   const producer = (node.provenance as { producer?: string } | null)?.producer;
   if (producer !== "agent") {
     throw new Error(`walkToStage: ${label}'s artifact ${nodeId} has provenance.producer=${JSON.stringify(producer)}, expected "agent"`);
+  }
+}
+
+const versionOf = (version: RoundVersion): ArtifactVersion => ({
+  artifactId: version.artifactId,
+  versionId: version.versionId,
+  contentHash: version.contentHash,
+});
+
+const toRoundVersion = (node: PortableArtifactNode): RoundVersion => {
+  const provenance = (node.provenance ?? {}) as { stepRef?: unknown; modelKey?: unknown };
+  const stepRef = typeof provenance.stepRef === "string" ? provenance.stepRef : null;
+  return {
+    artifactId: node.artifactId,
+    versionId: node.id,
+    contentHash: node.contentHash,
+    kind: node.kind,
+    stepId: stepRef?.split("/").at(-1) ?? "unknown",
+    content: node.content,
+    ...(typeof provenance.modelKey === "string" ? { model: provenance.modelKey } : {}),
+  };
+};
+
+export interface DraftSignal {
+  readonly message?: string;
+  readonly audiences?: readonly string[];
+  readonly mode?: "final" | "interview";
+}
+
+/**
+ * Delivers a `stage.draft` round envelope to the run parked at `stage` — the
+ * same signal the product's own "Draft" button sends through the stage
+ * routes — and throws unless a run was there to hear it. Prompt and persist
+ * from here are the workflow's: this returns once the signal lands, not once
+ * versions exist (see `awaitFreshVersions`).
+ */
+export async function signalDraft(ctx: WalkContext, stage: Stage, signal: DraftSignal = {}): Promise<DeliveryOutcome> {
+  const delivery = await runGateSideEffects(
+    {
+      type: "stage.draft",
+      actor: ctx.actor,
+      projectId: ctx.projectId,
+      idempotencyKey: newId.command(),
+      correlationId: newId.correlation(),
+      payload: {
+        runId: await currentRunId(ctx),
+        message: signal.message ?? "",
+        mode: signal.mode ?? "final",
+        draft: true,
+        ...(signal.audiences ? { audiences: [...signal.audiences] } : {}),
+        inference: await roundInference(stage),
+      },
+    },
+    { stage, state: "in_progress" },
+  );
+  if (delivery !== "delivered") {
+    throw new Error(`walkToStage: stage ${stage} has no run waiting for this stage (delivery ${delivery ?? "none"}); nothing was drafted.`);
+  }
+  return delivery;
+}
+
+/**
+ * Waits for the workflow's own persist to write an agent-provenance version
+ * of every kind in `kinds` that was not in `beforeIds` when the round was
+ * signalled, and returns them oldest first. Throws naming the kinds that
+ * never arrived: the signal succeeding while nothing persists means the
+ * workflow's half is missing, and that must fail loudly rather than submit
+ * canned text.
+ */
+export async function awaitFreshVersions(
+  ctx: WalkContext,
+  kinds: readonly string[],
+  beforeIds: ReadonlySet<string>,
+  timeoutMs = DRAFT_STEP_TIMEOUT_MS,
+): Promise<RoundVersion[]> {
+  const started = Date.now();
+  for (;;) {
+    const { nodes } = await exportArtifactNodes(ctx.projectId);
+    const fresh = nodes.filter((node) => kinds.includes(node.kind) && !beforeIds.has(node.id));
+    if (kinds.every((kind) => fresh.some((node) => node.kind === kind))) {
+      for (const node of fresh) await assertAgentProvenance(node.id, `stage draft ${node.kind}`);
+      return fresh.map(toRoundVersion);
+    }
+    if (Date.now() - started >= timeoutMs) {
+      const missing = kinds.filter((kind) => !fresh.some((node) => node.kind === kind));
+      throw new Error(
+        `walkToStage: no agent-persisted ${missing.join(", ")} arrived within ${Math.round(timeoutMs / 1000)}s of the stage.draft signal. ` +
+          "The workflow owns prompt and persist from the signal; the signal was delivered but nothing wrote versions.",
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
   }
 }
 
@@ -103,20 +202,20 @@ export async function produceStageArtifact(
   return [{ artifactId: node.artifactId, versionId: node.nodeId, contentHash: node.contentHash }];
 }
 
-/** Drives stage N's (1-4) real specialist through `requestDraft` and returns its draft as a version to submit. */
-export async function draftStageArtifact(ctx: WalkContext, stage: 1 | 2 | 3 | 4): Promise<ArtifactVersion[]> {
-  if (!ctx.projectTitle) throw new Error(`draftStageArtifact(${stage}): ctx.projectTitle is required for a real round`);
-  const result = await requestDraft({
-    projectId: ctx.projectId,
-    stage,
-    runId: await currentRunId(ctx),
-    actor: ctx.actor,
-    message: "",
-    mode: "final",
-    projectTitle: ctx.projectTitle,
-  });
-  await assertAgentProvenance(result.draft.nodeId, `stage ${stage}`);
-  return [versionOf(result.draft)];
+/**
+ * Runs the stage's real round the way the product's own "Draft" button does:
+ * delivers a `stage.draft` round signal and waits for the workflow's own
+ * persist to write the resulting versions, returned oldest first.
+ */
+export async function draftStageArtifact(
+  ctx: WalkContext,
+  stage: 1 | 2 | 3 | 4,
+  input = "",
+  opts?: { audiences?: readonly string[] },
+): Promise<ArtifactVersion[]> {
+  const before = new Set((await exportArtifactNodes(ctx.projectId)).nodes.map((node) => node.id));
+  await signalDraft(ctx, stage, { message: input, ...(opts?.audiences ? { audiences: opts.audiences } : {}) });
+  return (await awaitFreshVersions(ctx, [STAGE_ARTIFACT[stage]], before)).map(versionOf);
 }
 
 /**
@@ -217,48 +316,26 @@ export async function produceStageArtifacts(ctx: WalkContext, stage: 5 | 6 | 7):
 }
 
 /**
- * Drives stage N's (5-7) real specialist(s) through `requestDraft` and
- * returns the resulting versions to submit — the whole set for stage 5 (one
- * package per audience) and stage 6 (its requirements and its plan; the
+ * Runs stage N's (5-7) real round the way the product's own "Draft" button
+ * does: delivers a `stage.draft` round signal and waits for the workflow's
+ * own persist to write the resulting versions. Stage 6's requirements come
+ * back before its plan, matching the order a `stage.submit` names them; the
  * panel's four reviews are advisory and are never among the versions a
  * `stage.submit` names, matching what the canned `STAGE_5_TO_7_ARTIFACT`
- * shape submits).
+ * shape submits.
  */
-export async function draftStageArtifacts(ctx: WalkContext, stage: 5 | 6 | 7): Promise<ArtifactVersion[]> {
-  if (!ctx.projectTitle) throw new Error(`draftStageArtifacts(${stage}): ctx.projectTitle is required for a real round`);
-  const result = await requestDraft({
-    projectId: ctx.projectId,
-    stage,
-    runId: await currentRunId(ctx),
-    actor: ctx.actor,
-    message: "",
-    mode: "final",
-    projectTitle: ctx.projectTitle,
-  });
-
-  if (stage === 5) {
-    if (result.failed && result.failed.length > 0) {
-      throw new Error(
-        `walkToStage: stage 5 failed to draft a package for ${result.failed.map((entry) => `${entry.audience} (${entry.message})`).join(", ")}`,
-      );
-    }
-    const packages = result.packages ?? [result.draft];
-    await Promise.all(packages.map((pkg) => assertAgentProvenance(pkg.nodeId, "stage 5's audience package")));
-    return packages.map(versionOf);
-  }
-
-  if (stage === 6) {
-    if (!result.requirements) throw new Error("walkToStage: stage 6 produced no requirements document");
-    await assertAgentProvenance(result.requirements.nodeId, "stage 6's requirements");
-    await assertAgentProvenance(result.draft.nodeId, "stage 6's plan");
-    for (const review of result.review ?? []) {
-      await assertAgentProvenance(review.nodeId, "stage 6's panel review");
-    }
-    return [versionOf(result.requirements), versionOf(result.draft)];
-  }
-
-  await assertAgentProvenance(result.draft.nodeId, "stage 7's cost approval");
-  return [versionOf(result.draft)];
+export async function draftStageArtifacts(
+  ctx: WalkContext,
+  stage: 5 | 6 | 7,
+  input = "",
+  opts?: { audiences?: readonly string[] },
+): Promise<ArtifactVersion[]> {
+  const before = new Set((await exportArtifactNodes(ctx.projectId)).nodes.map((node) => node.id));
+  await signalDraft(ctx, stage, { message: input, ...(opts?.audiences ? { audiences: opts.audiences } : {}) });
+  const kinds = stage === 5 ? ["audience_package"] : stage === 6 ? ["product_requirements", "build_plan"] : ["cost_approval"];
+  const versions = await awaitFreshVersions(ctx, kinds, before);
+  versions.sort((a, b) => kinds.indexOf(a.kind) - kinds.indexOf(b.kind));
+  return versions.map(versionOf);
 }
 
 /** Runs one ledger command as this actor, the same shape `advanceStage` uses inline for stages 1-4. */
@@ -290,8 +367,8 @@ export function runCommand(ctx: WalkContext, type: string, payload: Record<strin
  * of the project's configured audiences whenever the walk passes stage 5.
  *
  * `mode` (default `"real"`) is what writes each stage's artifact: `"real"`
- * drives the stage's actual specialist through `requestDraft`, the same path
- * the product's own "Draft" button takes, and asserts `provenance.producer
+ * delivers the stage's `stage.draft` round signal, the same path the
+ * product's own "Draft" button takes, and asserts `provenance.producer
  * === "agent"` on every version it writes; `"seeded"` is the canned-text
  * shortcut, for jumping to a stage without sitting through every earlier
  * one's real round, and its versions are legitimately `"human"`.

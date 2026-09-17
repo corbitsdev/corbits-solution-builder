@@ -165,8 +165,7 @@ export async function pendingContext(
  *
  * Nothing is written here: the brief this produces is only durable once the
  * round it prepares for actually drafts, as that version's own
- * `provenance.brief` — the caller (`stage-runs.ts`'s `requestDraft`) is what
- * persists it.
+ * `provenance.brief` — the workflow's own persist is what writes it.
  */
 export async function stageContext(args: {
   projectId: string;

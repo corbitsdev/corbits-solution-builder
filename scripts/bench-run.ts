@@ -57,7 +57,7 @@ if (!Number.isInteger(stage) || stage < 1 || stage > 8) {
 const targetStage = stage as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 
 // Default: every stage 1-7 artifact is drafted by a real specialist round
-// through `requestDraft` — this is what an end-to-end walk means. `--seed-artifacts`
+// through a `stage.draft` round signal — this is what an end-to-end walk means. `--seed-artifacts`
 // opts into the canned-text shortcut instead, for jumping straight to a stage
 // to experiment there without sitting through every earlier stage's real
 // round; its artifacts are legitimately `provenance.producer: "human"`.

@@ -14,11 +14,11 @@ import {
 import {
   designHistory,
   feedbackFor,
-  recordDisposition,
   submitFeedback,
   type Direction,
 } from "./design-feedback.js";
-import { requestDraft } from "./stage-runs.js";
+import { roundInference } from "./stage-runs.js";
+import { commandFrom } from "./api.js";
 import { nameProject } from "./title.js";
 import { runGuidance } from "./guide.js";
 import { notFound } from "./errors.js";
@@ -122,7 +122,17 @@ export function registerProjectRoutes(api: Hono) {
     return context.json(result);
   });
 
-  /** Regenerates the design from recorded feedback, and carries dispositions forward. */
+  /**
+   * Revising the design from recorded feedback.
+   *
+   * A thin relay: it hands the deterministic revision prompt to the
+   * workflow as a `stage.draft` round envelope and returns the delivery
+   * outcome. The revision prompt (rather than a chat history) is what will
+   * make the resulting version attributable to exactly the feedback that
+   * was submitted, once the workflow persists it. Dispositions resume when
+   * the workflow's own persist writes the new version — there is no new
+   * node to disposition against yet.
+   */
   api.post("/projects/:projectId/design/revise", async (context) => {
     const projectId = context.req.param("projectId");
     const body = (await context.req.json()) as { designNodeId: string };
@@ -137,33 +147,14 @@ export function registerProjectRoutes(api: Hono) {
       );
     }
 
-    // The designer is handed the deterministic revision prompt rather than a
-    // chat history, which is what makes the resulting version attributable to
-    // exactly the feedback that was submitted.
-    const result = await requestDraft({
-      projectId,
-      stage: 4,
+    const outcome = await commandFrom("stage.draft", projectId, {
       runId: detail.current.id,
-      actor: localActor(),
       message: stored.prompt,
       mode: "final",
-      projectTitle: detail.project.title,
+      draft: true,
+      inference: await roundInference(4),
     });
-
-    // Every comment is dispositioned rather than left implicit. `addressed` is
-    // the designer's claim; the human reviewing the next version is what
-    // tests it. Anchors that no longer resolve are reported as stale.
-    const { stale } = await recordDisposition({
-      designNodeId: body.designNodeId,
-      newDesignNodeId: result.draft.nodeId,
-      dispositions: stored.feedback.comments.map((comment) => ({
-        commentId: comment.id,
-        disposition: "addressed" as const,
-      })),
-      actor: localActor(),
-    });
-
-    return context.json({ ...result.draft, stale });
+    return context.json(outcome);
   });
 
   api.get("/projects/:projectId/graph", async (context) =>

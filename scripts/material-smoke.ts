@@ -84,7 +84,7 @@ const image = material.find((node) => node.title === "board.png")!;
 const stored = bytesOf((await readArtifactNode(image.id)).content);
 check("an image's bytes are kept whole", stored !== null && stored.bytes.byteLength === png.byteLength && stored.mime === "image/png");
 
-const rendered = await stageInputsForSmoke(created.projectId, 1);
+const rendered = (await stageInputsForSmoke(created.projectId, 1)).inputs;
 check("stage 1 is handed the material although nothing is approved yet", rendered.includes("MATERIAL THE PERSON PROVIDED: process.csv"));
 check("the CSV goes as its own text", rendered.includes("Email clients,Sam,45"));
 check("the spreadsheet goes as one block per sheet, its values as CSV", rendered.includes('Sheet "Invoices" (A1:C6, 5 rows × 3 columns)') && rendered.includes('"Globex, Inc",850.5,2026-10-05') && rendered.includes('Sheet "Notes"'), rendered.match(/Sheet "Invoices"[^\n]*/)?.[0] ?? "no Invoices block");
@@ -156,7 +156,7 @@ await attachMaterial({ projectId: created.projectId, actor: ACTOR, alreadyHeldBy
 const after = await projectDetail(created.projectId, ACTOR.principalId);
 const versions = after.nodes.filter((node) => node.kind === "source_material" && node.variant === "process.csv");
 check("the same file name again is a new version that replaces the old", versions.length === 2 && versions.filter((node) => node.supersededByNodeId === null).length === 1 && versions.some((node) => node.version === 2));
-check("the replaced version is what the specialists are handed now", (await stageInputsForSmoke(created.projectId, 1)).includes("Only one,Sam") && !(await stageInputsForSmoke(created.projectId, 1)).includes("Email clients"));
+check("the replaced version is what the specialists are handed now", (await stageInputsForSmoke(created.projectId, 1)).inputs.includes("Only one,Sam") && !(await stageInputsForSmoke(created.projectId, 1)).inputs.includes("Email clients"));
 
 const failed = checks.filter((entry) => !entry.ok);
 console.log(`\nMaterial smoke: ${checks.length - failed.length}/${checks.length} checks passed`);

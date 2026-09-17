@@ -3,9 +3,11 @@ import { type Stage } from "@solutions-builder/app/ledger";
 import { EVALUATED_STAGE } from "@solutions-builder/app/workflows/stage-loop";
 import { notFound, HostError } from "./errors.js";
 import { projectDetail } from "./projects.js";
-import { requestDraft, type PlanDocument } from "./stage-runs.js";
+import { roundInference, type PlanDocument } from "./stage-runs.js";
 import { evaluationIn, threadTurns } from "./stage-thread.js";
 import { stageIterations } from "./lifecycle-run.js";
+import { commandFrom } from "./api.js";
+import { readProject } from "./project-records.js";
 import { nextQuestion } from "./questions.js";
 import { localActor } from "./hub-client.js";
 
@@ -44,6 +46,11 @@ export function registerStageRoutes(api: Hono) {
    * new round of questions or none. Which case this is is known before the
    * round runs: `open.remaining` already says how many questions are left
    * after the one just answered.
+   *
+   * The route only signals: it delivers the round envelope as a `stage.draft`
+   * command and returns the delivery outcome. The workflow owns the prompt
+   * and the persisted versions from there; the pane learns of them through
+   * its own refetch.
    */
   api.post("/projects/:projectId/stages/:stage/reply", async (context) => {
     const projectId = context.req.param("projectId");
@@ -62,25 +69,31 @@ export function registerStageRoutes(api: Hono) {
     const open = body.revise ? null : await nextQuestion(projectId, stage);
     const mode = open !== null && message.length > 0 && open.remaining > 0 ? "interview" : "final";
 
-    const result = await requestDraft({
-      projectId,
-      stage,
+    const outcome = await commandFrom("stage.draft", projectId, {
       runId: detail.current.id,
-      actor: localActor(),
       message,
       ...(quotes.length > 0 ? { quotes } : {}),
       mode,
-      projectTitle: detail.project.title,
+      draft: true,
+      inference: await roundInference(stage),
     });
 
     if (mode === "interview") {
       const following = await nextQuestion(projectId, stage);
-      return context.json({ asked: true, remaining: following?.remaining ?? 0, draft: result.draft, ...(result.note !== undefined ? { note: result.note } : {}) });
+      return context.json({ ...outcome, asked: true, remaining: following?.remaining ?? 0 });
     }
-    return context.json({ asked: false, remaining: 0, draft: result.draft, ...(result.note !== undefined ? { note: result.note } : {}) });
+    return context.json({ ...outcome, asked: false, remaining: 0 });
   });
 
-  /** Runs the stage specialist and records its draft as a new version. */
+  /**
+   * Asking the stage specialist for a draft.
+   *
+   * A thin relay: it validates the request, then delivers the round envelope
+   * as a `stage.draft` command and returns the delivery outcome. The prompt
+   * is rendered workflow-side from the envelope's message and selectors, and
+   * the versions land through the workflow's own persist — the pane learns of
+   * them through its own refetch, not through this response.
+   */
   api.post("/projects/:projectId/stages/:stage/draft", async (context) => {
     const projectId = context.req.param("projectId");
     const stage = Number(context.req.param("stage")) as Stage;
@@ -95,30 +108,39 @@ export function registerStageRoutes(api: Hono) {
     const detail = await projectDetail(projectId, localActor().principalId);
     if (!detail.current) throw notFound("An open run for that project");
 
-    const result = await requestDraft({
-      projectId,
-      stage,
-      runId: detail.current.id,
-      actor: localActor(),
-      message: body.input ?? "",
-      ...(body.quotes && body.quotes.length > 0 ? { quotes: body.quotes } : {}),
-      mode: "final",
-      projectTitle: detail.project.title,
-      ...(Array.isArray(body.audiences) ? { audiences: body.audiences.map(String) } : {}),
-      ...(Array.isArray(body.documents) ? { documents: planDocumentsIn(body.documents) } : {}),
-    });
+    const audiences = Array.isArray(body.audiences) ? body.audiences.map(String) : undefined;
+    if (stage === 5 && audiences) {
+      const policy = (await readProject(projectId))?.policy;
+      const configured = policy?.audiences.map((entry) => entry.name) ?? [];
+      const unknown = audiences.filter((name) => !configured.includes(name));
+      if (unknown.length > 0) {
+        throw new HostError("validation_failed", `Stage 5 has no audience called ${unknown.map((name) => JSON.stringify(name)).join(", ")}.`);
+      }
+      if (configured.length === 0) {
+        throw new HostError(
+          "validation_failed",
+          "No audiences named yet at stage 5: the run is still gathering them.",
+        );
+      }
+    }
+    const documents = Array.isArray(body.documents) ? planDocumentsIn(body.documents) : undefined;
+    if (stage === 6 && documents?.length === 0) {
+      throw new HostError(
+        "validation_failed",
+        "Either name one of the stage 6 documents, or let the draft decide.",
+      );
+    }
 
-    // Stage 5 fans out into one package per named audience, and says which
-    // could not be written; stage 6 writes its requirements and then the
-    // architect's plan with the four panel reviews. Every other stage
-    // carries none of these.
-    return context.json({
-      draft: result.draft,
-      ...(result.note !== undefined ? { note: result.note } : {}),
-      packages: result.packages,
-      review: result.review,
-      requirements: result.requirements,
-      ...(result.failed ? { failed: result.failed } : {}),
+    const outcome = await commandFrom("stage.draft", projectId, {
+      runId: detail.current.id,
+      message: body.input ?? "",
+      ...((body.quotes?.length ?? 0) > 0 ? { quotes: body.quotes } : {}),
+      mode: "final",
+      draft: true,
+      ...(audiences ? { audiences } : {}),
+      ...(documents ? { documents } : {}),
+      inference: await roundInference(stage),
     });
+    return context.json(outcome);
   });
 }

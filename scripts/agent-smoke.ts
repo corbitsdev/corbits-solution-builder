@@ -42,7 +42,8 @@ const { install } = await import("./host-install.js");
 const { localActor } = await import("../apps/hub/src/hub-client.js");
 const { connectProvider, selectModel } = await import("../apps/hub/src/providers.js");
 const { createProject, projectDetail, writeArtifact } = await import("../apps/hub/src/projects.js");
-const { requestDraft } = await import("../apps/hub/src/stage-runs.js");
+const { signalDraft, awaitFreshVersions } = await import("./lib/stage-walk.js");
+const { exportArtifactNodes } = await import("../apps/hub/src/projects.js");
 const { projectExecutionStatus } = await import("../apps/hub/src/lifecycle-run.js");
 const { execute } = await import("../apps/hub/src/command-dispatch.js");
 const { newId } = await import("../apps/hub/src/ids.js");
@@ -110,17 +111,23 @@ try {
   console.log("PASS  the lifecycle deployed and stage 1 is parked, waiting on a person");
 
   const detail = await projectDetail(created.projectId, ACTOR.principalId);
-  const { draft } = await requestDraft({
-    projectId: created.projectId,
-    stage: 1,
-    runId: detail.current!.id,
-    actor: ACTOR,
+  // The client signals; the workflow owns prompt and persist. The smoke
+  // delivers the round signal and waits for the workflow's own persist to
+  // write the brief, the way the product's "Draft" button does.
+  const walkCtx = { projectId: created.projectId, runId: detail.current!.id, actor: ACTOR };
+  const beforeBrief = new Set((await exportArtifactNodes(created.projectId)).nodes.map((node) => node.id));
+  await signalDraft(walkCtx, 1, {
     message:
       "I want to play chess against something that is actually fun to play against, " +
       "not a stockfish that crushes me instantly. I have no idea what is involved.",
-    mode: "final",
-    projectTitle: "A chess game I can actually play",
   });
+  const [briefVersion] = await awaitFreshVersions(walkCtx, ["problem_brief"], beforeBrief);
+  const draft = {
+    artifactId: briefVersion!.artifactId,
+    nodeId: briefVersion!.versionId,
+    contentHash: briefVersion!.contentHash,
+    content: briefVersion!.content,
+  };
 
   console.log(`PASS  the Brainstormer drafted through the run's own agent step`);
   console.log(`      ${draft.content.length} characters, sha256 ${draft.contentHash.slice(0, 16)}...`);
@@ -196,15 +203,16 @@ try {
     }
 
     const atFour = await projectDetail(created.projectId, ACTOR.principalId);
-    const { draft: design } = await requestDraft({
-      projectId: created.projectId,
-      stage: 4,
-      runId: atFour.current!.id,
-      actor: ACTOR,
-      message: "Keep it to one board screen and a new-game screen.",
-      mode: "final",
-      projectTitle: "A chess game I can actually play",
-    });
+    const walkCtxFour = { projectId: created.projectId, runId: atFour.current!.id, actor: ACTOR };
+    const beforeDesign = new Set((await exportArtifactNodes(created.projectId)).nodes.map((node) => node.id));
+    await signalDraft(walkCtxFour, 4, { message: "Keep it to one board screen and a new-game screen." });
+    const [designVersion] = await awaitFreshVersions(walkCtxFour, ["design_artifact"], beforeDesign);
+    const design = {
+      artifactId: designVersion!.artifactId,
+      nodeId: designVersion!.versionId,
+      contentHash: designVersion!.contentHash,
+      content: designVersion!.content,
+    };
 
     const html = design.content;
     const testIds = Array.from(html.matchAll(/data-testid="([^"]+)"/g), (match) => match[1]!);

@@ -193,14 +193,14 @@ export async function recordStage8PanelReview(args: {
   readonly report: BuildAttemptReport;
 }): Promise<PanelReviewOutcome[]> {
   try {
-    const [planAndApprovedInputs, evidence] = await Promise.all([
+    const [stageInputs, evidence] = await Promise.all([
       stageInputsForSmoke(args.projectId, 8),
       evidenceSummary(args.archive, args.content, args.report),
     ]);
     return await reviewBuildEvidence({
       projectId: args.projectId,
       actor: args.actor,
-      planAndApprovedInputs,
+      planAndApprovedInputs: stageInputs.inputs,
       evidence,
       sourceVersionIds: [args.archive.nodeId],
     });
