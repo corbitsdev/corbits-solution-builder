@@ -12,12 +12,13 @@ import {
   workflowDefinition,
   workflowRun,
 } from "@intx/db/schema";
+import { authorize } from "@intx/authz";
 import {
   WorkflowRunDispatchPayloadConflictError,
   type DB,
   type PrincipalKeyStore,
 } from "@intx/db";
-import type { GrantStore } from "@intx/types/authz";
+import type { ConditionRegistry, GrantStore } from "@intx/types/authz";
 import {
   correlationIdFromSignalName,
   deriveWorkflowRunId,
@@ -98,6 +99,9 @@ const DeliverSignal = type({
   signalName: "string > 0",
   signalId: "string > 0",
   "payload?": "unknown",
+  // Accepted so a caller cannot smuggle identity: the route overwrites it
+  // with the authenticated principal before the signal is delivered.
+  "principalId?": "string",
 });
 
 const WorkflowDeploymentResponse = type({
@@ -197,6 +201,54 @@ async function deploymentAnchorRunExists(
   return row !== undefined;
 }
 
+function stampSignalPrincipalId(payload: unknown, principalId: string): unknown {
+  if (payload === undefined || payload === null) {
+    return { principalId };
+  }
+  if (typeof payload === "object" && !Array.isArray(payload)) {
+    return { ...payload, principalId };
+  }
+  return payload;
+}
+
+function forbidden() {
+  return {
+    error: {
+      code: "forbidden" as const,
+      message: "You do not have permission to perform this action",
+    },
+  };
+}
+
+async function allowWorkflowRunSignal(args: {
+  grantStore: GrantStore;
+  conditionRegistry: ConditionRegistry;
+  principalId: string;
+  tenantId: string;
+  runId: string;
+  signalName: string;
+}): Promise<boolean> {
+  const resource = `workflow-run:${args.runId}`;
+  const named = await authorize(
+    args.grantStore,
+    args.principalId,
+    args.tenantId,
+    resource,
+    `signal:${args.signalName}`,
+    args.conditionRegistry,
+  );
+  if (named.effect === "allow") return true;
+  const manage = await authorize(
+    args.grantStore,
+    args.principalId,
+    args.tenantId,
+    resource,
+    "manage",
+    args.conditionRegistry,
+  );
+  return manage.effect === "allow";
+}
+
 export type CreateWorkflowRoutesDeps = {
   db: DB["db"];
   principalKeyStore: PrincipalKeyStore;
@@ -205,6 +257,7 @@ export type CreateWorkflowRoutesDeps = {
   sidecarRouter: SidecarRouter;
   repoStore: RepoStore;
   grantStore: GrantStore;
+  conditionRegistry: ConditionRegistry;
   requireGrant: RequireGrant;
 };
 
@@ -216,6 +269,7 @@ export function createWorkflowRoutes({
   sidecarRouter,
   repoStore,
   grantStore,
+  conditionRegistry,
   requireGrant,
 }: CreateWorkflowRoutesDeps): Hono<TenantEnv> {
   const app = new Hono<TenantEnv>();
@@ -482,12 +536,11 @@ export function createWorkflowRoutes({
 
   app.post(
     "/:runId/signals",
-    requireGrant(idResource("workflow-run", "runId"), "manage"),
     describeRoute({
       tags: ["Workflows"],
       summary: "Deliver a signal to a workflow run",
       description:
-        "Delivers a caller-supplied, stable signal to the named run of a workflow deployment. The signalId must be supplied by the caller; the run state machine dedups on it.",
+        "Delivers a caller-supplied, stable signal to the named run of a workflow deployment. The signalId must be supplied by the caller; the run state machine dedups on it. Authorized by workflow-run manage, or by the narrower signal:<signalName> action on that run. principalId on the delivered payload is the authenticated caller, never a caller-supplied value.",
       responses: {
         202: {
           description: "Signal accepted for delivery",
@@ -495,6 +548,11 @@ export function createWorkflowRoutes({
         400: {
           description:
             "Reserved signal name or a runId that is not the deployment's addressable run",
+          content: { "application/json": { schema: resolver(ErrorResponse) } },
+        },
+        403: {
+          description:
+            "Caller lacks workflow-run manage and the named signal:<signalName> grant",
           content: { "application/json": { schema: resolver(ErrorResponse) } },
         },
         404: {
@@ -519,8 +577,22 @@ export function createWorkflowRoutes({
     validator("json", DeliverSignal),
     async (c) => {
       const tenant = c.get("tenant");
+      const principal = c.get("principal");
       const anchorRunId = c.req.param("runId");
       const body = c.req.valid("json");
+      if (
+        !(await allowWorkflowRunSignal({
+          grantStore,
+          conditionRegistry,
+          principalId: principal.id,
+          tenantId: tenant.id,
+          runId: anchorRunId,
+          signalName: body.signalName,
+        }))
+      ) {
+        return c.json(forbidden(), 403);
+      }
+      const payload = stampSignalPrincipalId(body.payload, principal.id);
       const agentAddress = deriveRunAddress({
         runId: anchorRunId,
         domain: tenant.domain,
@@ -693,7 +765,7 @@ export function createWorkflowRoutes({
                   runId: body.runId,
                   signalName: body.signalName,
                   signalId: body.signalId,
-                  payload: body.payload ?? null,
+                  payload,
                 },
               },
               tx,
@@ -743,7 +815,7 @@ export function createWorkflowRoutes({
           runId: body.runId,
           signalName: body.signalName,
           signalId: body.signalId,
-          payload: body.payload,
+          payload,
         });
       } catch (err) {
         return c.json(
