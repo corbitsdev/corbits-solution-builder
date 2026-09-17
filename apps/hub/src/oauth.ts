@@ -174,8 +174,23 @@ export const PAGE_COPY: CallbackPageCopy = {
  */
 async function loadTokens(id: OAuthProviderId): Promise<Tokens | undefined> {
   // No credential row yet (never signed in, or mid sign-in before
-  // `finishOAuthConnect` records the connection) reads the same as absent.
-  const secret = await credentialSecretFor(id).catch(() => null);
+  // `finishOAuthConnect` records the connection) reads the same as absent —
+  // `credentialSecretFor` returns `null` for that case without throwing.
+  let secret: string | null;
+  try {
+    secret = await credentialSecretFor(id);
+  } catch (cause) {
+    // A thrown failure here means the credential row exists but its secret
+    // could not be resolved — a decrypt error, a hub the resolver could not
+    // reach — not "never signed in". Swallowing it as a plain absence would
+    // read as a silent logout on a transient fault, so it is reported loudly
+    // even though the caller still sees "no session" rather than a crash.
+    console.error(
+      `[oauth] the ${id} credential could not be resolved, treating this check as ` +
+        `no session rather than failing it: ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
+    return undefined;
+  }
   if (secret === null) return undefined;
 
   try {
