@@ -60,13 +60,13 @@ also allow-lists four more files as the embedding layer — `db`, `schema`,
 import at all; they reach Interchange's data model through raw SQL and a
 shared drizzle schema instead. `hub-migrations.ts` reaches the same layer by
 text-importing the vendored `.sql` files directly (relative paths, not
-package specifiers), so it needs no such exemption. Eight further files use
+package specifiers), so it needs no such exemption. Seven further files use
 only the platform's runtime surface (`@intx/inference`,
 `@intx/inference-catalog`, `@intx/agent`, `@intx/types`, `@intx/workflow`),
 which the same script treats as product code rather than platform code,
 because using the platform's own inference and workflow runtimes is the point
 of building on it: `agent-conversation`, `catalog`, `failure`,
-`lifecycle-run`, `inference`, `live-drafts`, `responses` and `workflow-seed`.
+`lifecycle-run`, `inference`, `responses` and `workflow-seed`.
 Everything else in the hub reaches Interchange only through `hub-client.ts`.
 The hub is also the only app allowed to reach a provider. Run state moves in
 the workflow definition in the app package, not in `command-dispatch.ts`. All three rules are enforced

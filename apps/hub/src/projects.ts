@@ -22,7 +22,6 @@ import { ledgerCommands, recordCommand, projectApprovals, projectFlags, projectQ
 import type { Stage } from "@solutions-builder/app/ledger";
 import { nextQuestion } from "./questions.js";
 import { openDecisionFor } from "./decisions.js";
-import { liveDraft } from "./live-drafts.js";
 import { currentAnchor } from "./lifecycle-run.js";
 import { activeRun, runsForProject } from "./runs.js";
 import { tenantId } from "./hub-client.js";
@@ -589,14 +588,11 @@ export async function listProjects() {
             nextQuestion(row.id, stage),
           ])
         : [[], null];
-      const turn: "writing" | "question" | "approve" | "idle" =
-        stage && liveDraft(row.id, stage) !== null
-          ? "writing"
-          : open
-            ? "question"
-            : drafts.length > 0
-              ? "approve"
-              : "idle";
+      const turn: "writing" | "question" | "approve" | "idle" = open
+        ? "question"
+        : drafts.length > 0
+          ? "approve"
+          : "idle";
       return {
         id: row.id,
         title: row.title,

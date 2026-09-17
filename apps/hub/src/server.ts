@@ -23,7 +23,6 @@ import { stopSpawnedSidecars } from "./sidecar-processes.js";
 import { ensureHub, hubFetch, resolveWorkspace } from "./hub-client.js";
 import { hub, hubIsMounted, hubWebSocket, setHostPort, SIDECAR_WS_PATH } from "./hub-mount.js";
 import { hubMountPath, hubProxyHeaders } from "./hub-proxy.js";
-import { attachLiveDrafts } from "./live-drafts.js";
 import { attachRoundSpend } from "./round-spend.js";
 import { rerankCatalogProviders } from "./catalog.js";
 import { currentSession, rememberSession, sessionPairFromCookieHeader, sessionPairFromSetCookieHeaders } from "./hub-session.js";
@@ -103,7 +102,6 @@ console.log(`Interchange hub: ${hubEndpoint.detail}`);
 // as that session. Do not mint an owner or create the tenant here; listen
 // without one.
 if (hubIsMounted()) {
-  attachLiveDrafts();
   attachRoundSpend();
 }
 

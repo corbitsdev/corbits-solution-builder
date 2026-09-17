@@ -86,7 +86,6 @@ const { createProject } = await import("../apps/hub/src/projects.js");
 const { localActor } = await import("../apps/hub/src/hub-client.js");
 const { titleFromProblem } = await import("../apps/hub/src/title.js");
 const { databaseDirectory } = await import("../apps/hub/src/paths.js");
-const { attachLiveDrafts } = await import("../apps/hub/src/live-drafts.js");
 const { stopSpawnedSidecars } = await import("../apps/hub/src/sidecar-processes.js");
 const { walkToStage } = await import("./lib/stage-walk.js");
 
@@ -98,7 +97,6 @@ setHostPort(port);
 const host = await openDatabase(databaseDirectory());
 await prepareDatabase(host);
 await mountHub();
-attachLiveDrafts();
 
 const server = Bun.serve({
   hostname: "127.0.0.1",

@@ -1,5 +1,4 @@
 import type { Hono } from "hono";
-import { streamSSE } from "hono/streaming";
 import { type Stage } from "@solutions-builder/app/ledger";
 import { EVALUATED_STAGE } from "@solutions-builder/app/workflows/stage-loop";
 import { notFound, HostError } from "./errors.js";
@@ -8,7 +7,6 @@ import { requestDraft, type PlanDocument } from "./stage-runs.js";
 import { evaluationIn, threadTurns } from "./stage-thread.js";
 import { stageIterations } from "./lifecycle-run.js";
 import { nextQuestion } from "./questions.js";
-import { liveDraft, liveDraftBegun, subscribeLiveDraft } from "./live-drafts.js";
 import { localActor } from "./hub-client.js";
 
 /** The stage 6 documents a request names, refused rather than guessed when one is not a document. */
@@ -32,34 +30,6 @@ export function registerStageRoutes(api: Hono) {
       turns: await threadTurns(projectId, stage),
       open: open ? { remaining: open.remaining, ordinal: open.ordinal } : null,
       evaluation,
-    });
-  });
-
-  /**
-   * The draft as it is being written, streamed. Sends what exists on connect,
-   * then every update, then `done`; stays open across drafts on the stage.
-   */
-  api.get("/projects/:projectId/stages/:stage/live", (context) => {
-    const projectId = context.req.param("projectId");
-    const stage = Number(context.req.param("stage"));
-    return streamSSE(context, async (stream) => {
-      let id = 0;
-      const send = (event: string, data: string) => stream.writeSSE({ event, data, id: String(id++) });
-      const current = liveDraft(projectId, stage);
-      if (current !== null) await send("text", JSON.stringify(current));
-      else if (liveDraftBegun(projectId, stage)) await send("begin", "1");
-      let closed = false;
-      const unsubscribe = subscribeLiveDraft(projectId, stage, (event) => {
-        if (closed) return;
-        void (event.type === "text"
-          ? send("text", JSON.stringify(event.text))
-          : send(event.type, "1"));
-      });
-      stream.onAbort(() => {
-        closed = true;
-        unsubscribe();
-      });
-      while (!closed) await stream.sleep(15_000).then(() => (closed ? undefined : send("ping", "")));
     });
   });
 

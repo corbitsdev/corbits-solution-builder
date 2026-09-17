@@ -1,13 +1,8 @@
 import { useEffect, useState } from "react";
 import type { StageTurn } from "../../client.js";
-import { Markdown } from "../../markdown.jsx";
 import { RollingNumber, stageName } from "../../components.jsx";
-import { WorkingLabel } from "./thread.jsx";
 import { Elapsed } from "./elapsed.jsx";
 import { STAGE_GOAL } from "./gate.jsx";
-
-/** Nothing back from the model for this long counts as a stall worth naming. */
-export const STALL_AFTER_MS = 25_000;
 
 export const STAGE_TIPS: Record<number, string[]> = {
   1: [
@@ -56,20 +51,12 @@ export const STAGE_TIPS: Record<number, string[]> = {
 export function Preparing({
   stage,
   said,
-  writing,
   busy,
-  begun,
-  stalled,
   since = null,
 }: {
   stage: number;
   said: StageTurn[];
-  writing: string | null;
   busy: boolean;
-  /** The host has handed the prompt to the model. */
-  begun: boolean;
-  /** Nothing has come back for a while. */
-  stalled: boolean;
   /** When the host says the draft step began, where it says so. */
   since?: string | null;
 }) {
@@ -90,42 +77,28 @@ export function Preparing({
         <p className="preparing-goal">{STAGE_GOAL[stage]}</p>
       </header>
 
-      {writing ? (
-        <div className="preparing-draft is-live">
-          <Markdown source={writing} />
+      <div className="preparing-activity">
+        {/* What the running process is doing, boxed and labelled so it reads
+            as status and not as another tip. The tips stay outside it. */}
+        <div className="preparing-status" role="status" aria-label="What is happening now">
+          <p className="preparing-status-label">Working</p>
+          {!busy ? (
+            <span className="thinking">Starting</span>
+          ) : (
+            <span className="thinking">
+              {stage === 4
+                ? "The designer is drawing the first mockup"
+                : said.length > 0
+                  ? "Reading what you wrote"
+                  : "Reading the approved work from earlier stages"}
+            </span>
+          )}
+          {busy ? <Elapsed stage={stage} since={since} /> : null}
         </div>
-      ) : (
-        <div className="preparing-activity">
-          {/* What the running process is doing, boxed and labelled so it reads
-              as status and not as another tip. The tips stay outside it. */}
-          <div className="preparing-status" role="status" aria-label="What is happening now">
-            <p className="preparing-status-label">Working</p>
-            {!busy ? (
-              <span className="thinking">Starting</span>
-            ) : begun ? (
-              <WorkingLabel stage={stage} />
-            ) : (
-              <span className="thinking">
-                {stage === 4
-                  ? "The designer is drawing the first mockup"
-                  : said.length > 0
-                    ? "Reading what you wrote"
-                    : "Reading the approved work from earlier stages"}
-              </span>
-            )}
-            {busy ? <Elapsed stage={stage} since={since} /> : null}
-            {stalled ? (
-              <p className="preparing-stall">
-                Still waiting on the model: nothing has come back for a while. If this keeps
-                happening, try another provider in Settings.
-              </p>
-            ) : null}
-          </div>
-          <p key={tip} className="preparing-tip">
-            {tips[tip]}
-          </p>
-        </div>
-      )}
+        <p key={tip} className="preparing-tip">
+          {tips[tip]}
+        </p>
+      </div>
     </section>
   );
 }

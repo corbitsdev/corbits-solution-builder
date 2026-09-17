@@ -31,7 +31,6 @@ import type { ArtifactKind } from "@solutions-builder/app/artifacts";
 import type { Stage } from "@solutions-builder/app/ledger";
 import type { HubRunEvent } from "./hub-client.js";
 import { readOutputRef, stageIterations, type StageIteration } from "./lifecycle-run.js";
-import { expectLiveDraft, stripOuterFence } from "./live-drafts.js";
 import { type Actor } from "./command-dispatch.js";
 import { runGateSideEffects } from "./gate-delivery.js";
 import { recordCommand } from "./command-ledger.js";
@@ -198,6 +197,12 @@ export function isInferenceErrorReply(reply: string): boolean {
  * reply: the stage's own specialist, one of stage 5's audience packages, or
  * one of stage 6's panel reviews.
  */
+function stripOuterFence(text: string): string {
+  const trimmed = text.trim();
+  const match = /^```[a-zA-Z]*\n([\s\S]*?)\n?```$/.exec(trimmed);
+  return match?.[1] ?? trimmed;
+}
+
 async function persistOutput(args: {
   projectId: string;
   stage: Stage;
@@ -583,8 +588,6 @@ export async function requestDraft(args: {
 
   /** One drafting round: the command, the run's answer, and its versions. */
   async function round(cap: number, plan: Round): Promise<RoundOutcome> {
-    expectLiveDraft(args.projectId, args.stage);
-
     // The iteration this round will run in is either already visible (parked,
     // awaiting the very signal about to be delivered) or not yet spawned.
     // `awaitIterationOutputs` tells the two apart from this snapshot.

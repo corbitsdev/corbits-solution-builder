@@ -55,8 +55,6 @@ setHostPort(port);
 const host = await openDatabase(join(dataDir, "pglite"));
 await prepareDatabase(host);
 await mountHub();
-const { attachLiveDrafts } = await import("../apps/hub/src/live-drafts.js");
-attachLiveDrafts();
 
 const server = Bun.serve({
   hostname: "127.0.0.1",

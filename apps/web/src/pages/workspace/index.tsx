@@ -31,11 +31,11 @@ import { DesignFeedbackView } from "../design.jsx";
 import { AddMaterial, Banner, Button, Screen, StateLabel, stageName, versionDigest } from "../../components.jsx";
 import { Dictated } from "../../dictation.jsx";
 import { StageGate, STAGE_GOAL } from "./gate.jsx";
-import { Preparing, STALL_AFTER_MS } from "./preparing.jsx";
+import { Preparing } from "./preparing.jsx";
 import { clock } from "./elapsed.jsx";
 import { StageDocument } from "./document.jsx";
 import { SELECTABLE_TARGETS } from "@solutions-builder/app/targets";
-import { runIsDrafting, type StageStatus } from "../../run-fold.ts";
+import type { StageStatus } from "../../run-fold.ts";
 
 export { StageDocument, DocumentBody } from "./document.jsx";
 export { ApprovalsRecord, STAGE_GOAL } from "./gate.jsx";
@@ -107,39 +107,6 @@ export function StageWorkspace({
       versionId: entry.id,
       contentHash: entry.contentHash,
     }));
-  // The draft as the model writes it. Open while a draft is in flight, so the
-  // document forms on screen instead of arriving whole a minute later.
-  const [writing, setWriting] = useState<string | null>(null);
-  // "begun" is the host saying the model has the prompt; until then the request
-  // is still on its way. "stalled" is nothing back for a while after that.
-  const [begun, setBegun] = useState(false);
-  const [stalled, setStalled] = useState(false);
-  // A draft is running when this window asked for one, or when the folded
-  // standing says a stage step is in flight — every stage 4 design begins the
-  // moment stage 3 is approved. The fold names the step, not the host GET.
-  const hostDrafting = runIsDrafting(standing);
-  const drafting = busy === "draft" || hostDrafting;
-  useEffect(() => {
-    if (!drafting) {
-      setWriting(null);
-      setBegun(false);
-      setStalled(false);
-      return;
-    }
-    const source = new EventSource(`/api/projects/${detail.project.id}/stages/${stage}/live`);
-    const stall = setTimeout(() => setStalled(true), STALL_AFTER_MS);
-    source.addEventListener("begin", () => setBegun(true));
-    source.addEventListener("text", (event) => {
-      clearTimeout(stall);
-      setStalled(false);
-      setBegun(true);
-      setWriting(JSON.parse((event as MessageEvent<string>).data) as string);
-    });
-    return () => {
-      source.close();
-      clearTimeout(stall);
-    };
-  }, [drafting, detail.project.id, stage]);
   const latest = stageNodes.find((node) => node.supersededByNodeId === null) ?? stageNodes.at(-1) ?? null;
   const active = stageNodes.find((node) => node.id === selectedNode) ?? latest;
 
@@ -372,11 +339,8 @@ export function StageWorkspace({
             <Preparing
               stage={stage}
               said={said}
-              writing={writing}
-              busy={drafting}
-              begun={begun}
-              stalled={stalled}
-              since={hostDrafting ? (standing?.since ?? null) : null}
+              busy={busy === "draft"}
+              since={standing?.since ?? null}
             />
             <p className="inline-note material-cue">
               Documents or images to hand over meanwhile? Drop them anywhere here, or{" "}
@@ -506,7 +470,6 @@ export function StageWorkspace({
       {active && stage <= 7 && stage !== 4 && stage !== 5 ? (
         <StageDocument
           node={active}
-          live={writing}
           newer={newer}
           draftOpen={draftOpen}
           versions={stageNodes}
