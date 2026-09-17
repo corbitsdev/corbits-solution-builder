@@ -47,9 +47,9 @@
  *   never mint rows under them.
  *
  * Grandfathered, not a precedent: the one-time legacy adoption in
- * `hub-gaps.ts` writes a `*`/`*` owner grant with origin `system` to link a
- * pre-identity workspace. It predates this convention, runs once, and no new
- * mint may use `*`.
+ * `hub-migrate.ts` (`adoptLegacyWorkspace`) writes a `*`/`*` owner grant with
+ * origin `system` to link a pre-identity workspace. It predates this
+ * convention, runs once, and no new mint may use `*`.
  */
 
 export const SOLUTIONS_BUILDER_APP = "solutions-builder";
