@@ -71,7 +71,7 @@ export function DecisionQueue({
   onInspect: (wait: Wait) => void;
   /** Starting something is the other thing this page is for. */
   onStart: () => void;
-  /** Re-runs delivery verification: the retry path out of a blocked delivery verdict. */
+  /** Re-runs delivery verification, but only while the verdict is blocked: the button only shows then. */
   onReverify: (wait: Wait) => void;
   /** `target` is the stage a send-back returns to; ignored for an approve. */
   onDecide: (wait: Wait, decision: "approve" | "reject" | "revise", reason: string, target: number) => void;
@@ -237,7 +237,7 @@ export function DecisionQueue({
             >
               Send back to {stageName(target)}
             </Button>
-            {current?.stage === 9 ? (
+            {current?.stage === 9 && current?.blockers != null ? (
               <Button
                 loading={busy === "reverify"}
                 onClick={() => current && onReverify(current)}

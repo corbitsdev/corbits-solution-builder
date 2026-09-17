@@ -189,9 +189,9 @@ export function registerDecisionRoutes(api: Hono) {
 
   /**
    * Re-runs delivery verification against the latest manifest and records
-   * the new report — the retry path out of a blocked verdict. Succeeds
-   * whenever there is a manifest; the caller re-reads project detail to
-   * decide whether Accept is now unblocked.
+   * the new report — the retry path out of a blocked verdict. Returns the
+   * passing report untouched when the manifest already verifies, and refuses
+   * with 409 when the bytes drifted without a new manifest.
    */
   api.post("/projects/:projectId/delivery/reverify", async (context) => {
     const projectId = context.req.param("projectId");

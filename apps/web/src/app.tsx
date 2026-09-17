@@ -531,8 +531,10 @@ export function App() {
 
   /**
    * The retry path out of a blocked delivery verdict: re-runs verification
-   * against the latest manifest and reloads, so a stale failure clears and
-   * Accept unblocks without redoing the delivery.
+   * against the latest manifest and reloads, so an execution-layer failure
+   * (a flaked run, a probe that has since learned the deliverable) can clear
+   * without redoing the delivery. Bytes that changed without a new manifest
+   * still mismatch — that failure says to record first.
    */
   const reverify = async (wait: Wait) => {
     setBusy("reverify");

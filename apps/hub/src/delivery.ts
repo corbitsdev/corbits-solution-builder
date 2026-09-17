@@ -201,10 +201,14 @@ export async function deliveryBlockers(projectId: string): Promise<string | null
 
 /**
  * Re-runs verification against the latest manifest and records the new
- * report — the retry path out of a blocked delivery verdict. The same
- * `verifyAndRecord` the accept guard runs, minus the guard: a stale failure
- * (e.g. from before a fix, or from a probe that has since learned to
- * recognise the deliverable) is re-checkable without redoing the delivery.
+ * report — the retry path out of a blocked delivery verdict. Only
+ * execution-layer staleness is re-checkable this way (a flaked run, or a
+ * probe that has since learned to recognise the deliverable): the manifest's
+ * recorded hashes do not move, so bytes that changed since it was recorded
+ * still mismatch, and that failure names recording a new delivery as the
+ * next move. A manifest whose latest verification already passes is returned
+ * as-is — re-running a green check would only burn time and stack another
+ * identical artifact.
  */
 export async function reverifyDelivery(
   projectId: string,
@@ -212,5 +216,15 @@ export async function reverifyDelivery(
 ): Promise<DeliveryVerificationReport> {
   const version = await latestManifest(projectId);
   if (!version) throw new HostError("not_found", "There is no delivery manifest to verify again.");
-  return verifyAndRecord(projectId, version, actor);
+  const latest = await latestVerification(version.node.id);
+  if (latest?.complete) return latest;
+  const report = await verifyAndRecord(projectId, version, actor);
+  const existence = describeBlockers(report);
+  if (existence) {
+    throw new HostError(
+      "conflict",
+      `${existence} The bytes changed without recording a new manifest — record the delivery again first, then verify. Re-running against this manifest cannot pass.`,
+    );
+  }
+  return report;
 }

@@ -279,9 +279,10 @@ export async function discoverEntryPoint(workspaceRoot: string, pkg: PackageMani
 /**
  * A long-running server never exits, so "still alive at the deadline" cannot
  * be a failure on its own — but aliveness alone is not evidence either (a
- * hung process is also still alive). These patterns look for the two shapes
- * of proof a server offers: a port it claims to serve on, and a readiness
- * line it printed.
+ * hung process is also still alive). The only proof accepted is a socket: a
+ * port the output names that answers HTTP over loopback. A printed readiness
+ * line proves nothing — any script can print "listening" — and neither does
+ * a port held by something else.
  */
 const SERVER_PORT_PATTERNS = [
   /https?:\/\/[^\s/:]+:(\d{2,5})/i,
@@ -291,8 +292,6 @@ const SERVER_PORT_PATTERNS = [
   /--port[= ](\d{2,5})/,
   /\bPORT[=: ](\d{2,5})/,
 ];
-const SERVER_READY_PATTERN =
-  /listening|server (?:started|running|ready)|started server|ready (?:on|for|to serve)|accepting connections|running on|serving/i;
 const MAX_SERVER_PORT_CANDIDATES = 5;
 const SERVER_PROBE_TIMEOUT_MS = 3_000;
 
@@ -330,10 +329,14 @@ async function servesHttp(port: number): Promise<boolean> {
 /**
  * Runs the entry point like `execBounded`, except a process that is still
  * alive at the deadline gets one more question before it is killed: is it
- * serving? A process that answers HTTP on a declared port, or that printed a
- * readiness line, passes as a live server; one that is merely still running
- * fails exactly as before. Exiting processes never reach the probe, so their
- * behavior is unchanged.
+ * serving? A process that answers HTTP on a port it brought from dark to
+ * serving during the run passes as a live server; one that is merely still
+ * running fails exactly as before. Exiting processes never reach the probe,
+ * so their behavior is unchanged.
+ *
+ * Attribution is the point: a port that already served before the spawn, or
+ * that keeps serving after the process dies, belongs to something else, not
+ * the deliverable — claiming it would let any ambient listener pass.
  */
 async function execEntryPoint(
   command: string[],
@@ -347,7 +350,15 @@ async function execEntryPoint(
   stderrTail: string;
   /** Why a process that never exited still counts as a live deliverable, or null. */
   serverEvidence: string | null;
+  /** Ports that answered HTTP but belong to another process, for the failure detail. */
+  ambientPorts: number[];
 }> {
+  // Ports the start command itself names that already serve are ambient: a
+  // deliverable cannot claim a port something else holds.
+  const alreadyServing = new Set<number>();
+  for (const port of portsFromText(startScript ?? "")) {
+    if (await servesHttp(port)) alreadyServing.add(port);
+  }
   const child = Bun.spawn(command, {
     cwd,
     stdout: "pipe",
@@ -367,30 +378,40 @@ async function execEntryPoint(
   if (exited || child.exitCode !== null) {
     await child.exited;
     const [stdoutTail, stderrTail] = await Promise.all(drains);
-    return { exitCode: child.exitCode, timedOut: false, stdoutTail, stderrTail, serverEvidence: null };
+    return { exitCode: child.exitCode, timedOut: false, stdoutTail, stderrTail, serverEvidence: null, ambientPorts: [] };
   }
   const output = `${startScript ?? ""}\n${liveOut.text}\n${liveErr.text}`;
-  let serverEvidence: string | null = null;
+  let candidate: number | null = null;
+  const ambientPorts: number[] = [];
   for (const port of portsFromText(output)) {
+    if (alreadyServing.has(port)) {
+      if (!ambientPorts.includes(port)) ambientPorts.push(port);
+      continue;
+    }
     if (await servesHttp(port)) {
-      serverEvidence = `still running after ${ENTRY_POINT_TIMEOUT_MS}ms and serving HTTP on port ${port} — treated as a live server`;
+      candidate = port;
       break;
     }
-  }
-  serverEvidence ??= output
-    .split("\n")
-    .map((line) => line.trim().slice(0, 160))
-    .find((line) => SERVER_READY_PATTERN.test(line)) ?? null;
-  if (serverEvidence && !serverEvidence.startsWith("still running")) {
-    serverEvidence = `still running after ${ENTRY_POINT_TIMEOUT_MS}ms and reporting readiness ("${serverEvidence}") — treated as a live server`;
   }
   child.kill("SIGTERM");
   await Promise.race([child.exited, Bun.sleep(KILL_GRACE_MS)]);
   if (child.exitCode === null) child.kill("SIGKILL");
   await child.exited;
   const [stdoutTail, stderrTail] = await Promise.all(drains);
-  if (serverEvidence) return { exitCode: null, timedOut: false, stdoutTail, stderrTail, serverEvidence };
-  return { exitCode: null, timedOut: true, stdoutTail, stderrTail, serverEvidence: null };
+  // The candidate served while the process lived. If it still serves now
+  // that the process is dead, it was never the deliverable's.
+  if (candidate !== null && !(await servesHttp(candidate))) {
+    return {
+      exitCode: null,
+      timedOut: false,
+      stdoutTail,
+      stderrTail,
+      serverEvidence: `still running after ${ENTRY_POINT_TIMEOUT_MS}ms and serving HTTP on port ${candidate} — treated as a live server`,
+      ambientPorts,
+    };
+  }
+  if (candidate !== null && !ambientPorts.includes(candidate)) ambientPorts.push(candidate);
+  return { exitCode: null, timedOut: true, stdoutTail, stderrTail, serverEvidence: null, ambientPorts };
 }
 
 async function runEntryPoint(
@@ -402,10 +423,14 @@ async function runEntryPoint(
   const raw = await execEntryPoint(command, workspaceRoot, home, startScript);
   const producedOutput = raw.stdoutTail.trim().length > 0 || raw.stderrTail.trim().length > 0;
   const ok = raw.serverEvidence !== null || (!raw.timedOut && raw.exitCode === 0 && producedOutput);
+  const ambientNote =
+    raw.ambientPorts.length > 0
+      ? `; port ${raw.ambientPorts.join(", ")} answered HTTP but belongs to another process (serving before the run, or still serving after it died)`
+      : "";
   const detail = raw.serverEvidence
     ? `entry point ${raw.serverEvidence}`
     : raw.timedOut
-      ? `entry point exceeded ${ENTRY_POINT_TIMEOUT_MS}ms and was killed`
+      ? `entry point exceeded ${ENTRY_POINT_TIMEOUT_MS}ms and was killed${ambientNote}; staying alive — or printing readiness — is not evidence, a live server answers HTTP on a port it serves`
       : raw.exitCode !== 0
         ? `entry point exited ${raw.exitCode}`
         : !producedOutput
