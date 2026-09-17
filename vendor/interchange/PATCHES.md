@@ -377,3 +377,23 @@ now reads it off the deployment it already fetched rather than making a
 second call.
 
 **Upstream-able.** Yes; it is one more field on an existing projection.
+
+## `packages/hub-api/src/routes/workflows.ts`, `packages/hub-api/src/app.ts` — `POST /:runId/signals` named-signal grant and principal stamp
+
+**Why.** CL-8089: the route required `workflow-run:<id>/manage` for every signal, so a
+principal granted only a named signal on that run could not deliver it. The
+payload also accepted a caller-supplied `principalId`, which a client could
+use to impersonate another actor.
+
+**What changed.** After the body is validated, the route authorizes
+`signal:<signalName>` on `workflow-run:<runId>`, or `manage` on the same
+resource. A missing grant is 403. The delivered payload's `principalId` is
+always the authenticated caller; a client-supplied value (top-level or on
+the payload object) is overwritten. Tests in `routes/workflows.test.ts`:
+403 without the grant, named `signal:<name>` allows that signal only, and
+a spoofed `principalId` is replaced.
+
+**Upstream-able.** Yes; it is a narrower grant on the existing run resource
+plus a server-side identity stamp, and it preserves `manage` as a
+superset.
+

@@ -1250,7 +1250,7 @@ describe("POST /workflows/:anchorRunId/signals", () => {
     expect(call.signalName).toBe("go");
     // The signalId is the caller-supplied stable id, never server-minted.
     expect(call.signalId).toBe("sig-caller-1");
-    expect(call.payload).toEqual({ ok: true });
+    expect(call.payload).toEqual({ ok: true, principalId: PRINCIPAL_ID });
   });
 
   test("durably queues a signal for a provisioned deployment", async () => {
@@ -1283,7 +1283,7 @@ describe("POST /workflows/:anchorRunId/signals", () => {
           runId: RUN_ID,
           signalName: "go",
           signalId: "sig-durable-1",
-          payload: { ok: true },
+          payload: { ok: true, principalId: PRINCIPAL_ID },
         },
       },
     ]);
@@ -1446,7 +1446,7 @@ describe("POST /workflows/:anchorRunId/signals", () => {
     const call = signalCalls[0];
     if (call === undefined) throw new Error("missing signal call");
     expect(call.signalId).toBe("sig-caller-2");
-    expect(call.payload).toBeUndefined();
+    expect(call.payload).toEqual({ principalId: PRINCIPAL_ID });
   });
 
   test("rejects a signal before the top-level run starts or after it terminates", async () => {
@@ -1513,7 +1513,7 @@ describe("POST /workflows/:anchorRunId/signals", () => {
     expect(signalCalls).toHaveLength(0);
   });
 
-  test("rejects a caller without the workflow-run manage grant", async () => {
+  test("rejects a caller without a named signal grant or workflow-run manage", async () => {
     const signalCalls: SignalCall[] = [];
     const app = createTestApp({
       grants: [makeGrant({ resource: "workflow:*", action: "read" })],
@@ -1532,6 +1532,87 @@ describe("POST /workflows/:anchorRunId/signals", () => {
 
     expect(res.status).toBe(403);
     expect(signalCalls).toHaveLength(0);
+  });
+
+  test("delivers a named signal when the caller holds only signal:<name> on the run", async () => {
+    const signalCalls: SignalCall[] = [];
+    const app = createTestApp({
+      grants: [
+        makeGrant({
+          resource: `workflow-run:${DEPLOYMENT_ID}`,
+          action: "signal:go",
+        }),
+      ],
+      signalCalls,
+      db: { deploymentRow },
+    });
+
+    const res = await app.fetch(
+      authedPost(`${base()}/${DEPLOYMENT_ID}/signals`, {
+        runId: RUN_ID,
+        signalName: "go",
+        signalId: "sig-named-grant",
+        payload: { ok: true },
+      }),
+    );
+
+    expect(res.status).toBe(202);
+    expect(signalCalls).toHaveLength(1);
+    const call = signalCalls[0];
+    if (call === undefined) throw new Error("missing signal call");
+    expect(call.signalName).toBe("go");
+    expect(call.payload).toEqual({ ok: true, principalId: PRINCIPAL_ID });
+  });
+
+  test("rejects a named-signal grant for a different signalName", async () => {
+    const signalCalls: SignalCall[] = [];
+    const app = createTestApp({
+      grants: [
+        makeGrant({
+          resource: `workflow-run:${DEPLOYMENT_ID}`,
+          action: "signal:other",
+        }),
+      ],
+      signalCalls,
+      db: { deploymentRow },
+    });
+
+    const res = await app.fetch(
+      authedPost(`${base()}/${DEPLOYMENT_ID}/signals`, {
+        runId: RUN_ID,
+        signalName: "go",
+        signalId: "sig-wrong-name",
+        payload: { ok: true },
+      }),
+    );
+
+    expect(res.status).toBe(403);
+    expect(signalCalls).toHaveLength(0);
+  });
+
+  test("overwrites a caller-supplied principalId with the authenticated caller", async () => {
+    const signalCalls: SignalCall[] = [];
+    const app = createTestApp({
+      grants: [manageGrant()],
+      signalCalls,
+      db: { deploymentRow },
+    });
+
+    const res = await app.fetch(
+      authedPost(`${base()}/${DEPLOYMENT_ID}/signals`, {
+        runId: RUN_ID,
+        signalName: "go",
+        signalId: "sig-spoof",
+        principalId: "prn_spoof",
+        payload: { ok: true, principalId: "prn_spoof" },
+      }),
+    );
+
+    expect(res.status).toBe(202);
+    expect(signalCalls).toHaveLength(1);
+    const call = signalCalls[0];
+    if (call === undefined) throw new Error("missing signal call");
+    expect(call.payload).toEqual({ ok: true, principalId: PRINCIPAL_ID });
   });
 
   test("rejects a blank caller-supplied signalId at the boundary", async () => {
