@@ -27,6 +27,7 @@ import { attachLiveDrafts } from "./live-drafts.js";
 import { attachRoundSpend } from "./round-spend.js";
 import { rerankCatalogProviders } from "./catalog.js";
 import { adoptLegacyWorkspaceOnce, ensureWorkspaceOnce, migrateCredentialsOnce } from "./installer-bridge.js";
+import { retryEnsureWorkspace } from "./workspace-boot.js";
 import {
   clientConnected,
   markReady,
@@ -99,17 +100,23 @@ const hubEndpoint = await ensureHub();
 console.log(`Interchange hub: ${hubEndpoint.detail}`);
 
 // Host-only repairs the installer package cannot do: mint the owner, adopt a
-// pre-identity tenant, then (once the workspace exists) carry legacy provider
-// secrets. The client runs `install()` over `/hub` after this.
-await ensureOwner().catch((cause: unknown) => {
-  console.error("Could not ensure the owner principal:", cause);
-});
-await adoptLegacyWorkspaceOnce().catch((cause: unknown) => {
-  console.error("Could not adopt a legacy workspace:", cause);
-});
-await ensureWorkspaceOnce().catch((cause: unknown) => {
-  console.error("Could not ensure the workspace tenant:", cause);
-});
+// pre-identity tenant, then create the workspace tenant in-process. The `/hub`
+// proxy refuses unscoped POST /api/tenants, so a swallowed failure here would
+// leave the client with 403 and no recovery except restart. Retry until it
+// succeeds; throw (and never listen) if it does not. The client runs
+// `install()` over `/hub` after this.
+await retryEnsureWorkspace(
+  async () => {
+    await ensureOwner();
+    await adoptLegacyWorkspaceOnce();
+    await ensureWorkspaceOnce();
+  },
+  {
+    onFailure: (cause, attempt) => {
+      console.error(`Could not ensure the workspace tenant (attempt ${attempt}):`, cause);
+    },
+  },
+);
 
 // The embedded hub is mounted in this process; a hosted one is not, and its
 // events reach a different process entirely. Nothing to attach to there yet.
