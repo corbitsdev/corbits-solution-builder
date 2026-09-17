@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { ApiError } from "@solutions-builder/installer";
-import { api, createHubTransport, rerankCatalogAfterSkillAssets } from "./client.ts";
+import { ApiError } from "@intx/hub-client";
+import { createHubTransport } from "./hub.ts";
+import { api, rerankCatalogAfterSkillAssets } from "./client.ts";
 
 describe("createHubTransport", () => {
   const original = globalThis.fetch;
@@ -80,5 +81,33 @@ describe("rerankCatalogAfterSkillAssets", () => {
 
   test("client install still passes that rerank as afterSkillAssets", () => {
     expect(api.install.toString()).toContain("rerankCatalogAfterSkillAssets");
+  });
+});
+
+describe("host mutation routes", () => {
+  const original = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = original;
+  });
+
+  test("submit, decide and command still post to the host /api, not /hub", async () => {
+    const urls: string[] = [];
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      urls.push(String(url));
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    await api.submit("p1", { runId: "r1" });
+    await api.decide("p1", { runId: "r1" });
+    await api.command("p1", "brief.approve", { runId: "r1" });
+
+    expect(urls).toEqual([
+      "/api/projects/p1/submit",
+      "/api/projects/p1/decide",
+      "/api/projects/p1/commands/brief.approve",
+    ]);
   });
 });

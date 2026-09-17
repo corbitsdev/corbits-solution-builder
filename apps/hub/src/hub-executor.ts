@@ -439,6 +439,11 @@ export function hasExecution(projectId: string): boolean {
   return anchors.has(projectId);
 }
 
+/** The deployment id the project's lifecycle is running under, once resolved. */
+export async function currentAnchor(projectId: string): Promise<string | null> {
+  return anchors.get(projectId) ?? (await anchorFor(projectId));
+}
+
 /**
  * The project behind an anchor run id, for callers that only have the run's
  * own address (a sidecar's `agent.event` frame carries `<anchorRunId>@domain`,

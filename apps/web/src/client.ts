@@ -20,6 +20,9 @@ import {
   type SidecarCapability,
 } from "@solutions-builder/installer";
 import { openCreatedProject } from "./create-project-open.ts";
+import { createHubTransport } from "./hub.ts";
+
+export { createHubTransport } from "./hub.ts";
 
 export type Remediation = {
   kind: "switch_provider" | "reconnect" | "retry";
@@ -283,7 +286,15 @@ export type ProjectDetail = {
     title: string;
     policy: unknown;
     archivedAt: string | null;
+    /** Workspace tenant the lifecycle is deployed in — for `/hub` fold and signal. */
+    tenantId: string;
+    /** Deployment id of the project's lifecycle run, or null when none is placed. */
+    anchorRunId: string | null;
   };
+  /** Same as `project.tenantId`; the workspace the run is folded in. */
+  tenantId: string;
+  /** Same as `project.anchorRunId`. */
+  anchorRunId: string | null;
   runs: Run[];
   current: Run | null;
   /** True when no principal other than the local actor holds this stage's approval authority. */
@@ -444,7 +455,7 @@ function installerFailure(cause: unknown): never {
       code: cause.code,
       message: cause.message,
       correlationId: "-",
-      retryable: false,
+      retryable: cause.code === "host_unreachable",
     });
   }
   throw new ApiFailure({
@@ -453,55 +464,6 @@ function installerFailure(cause: unknown): never {
     correlationId: "-",
     retryable: false,
   });
-}
-
-/**
- * Hub API over the host's `/hub` proxy. Same-origin credentials carry the
- * desktop handshake cookie; the proxy attaches the owner session after
- * `ensureOwner()`. The installer package is driven by this transport.
- */
-export function createHubTransport() {
-  return {
-    async fetch<T>(method: string, path: string, body?: unknown): Promise<T> {
-      let response: Response;
-      try {
-        const init: RequestInit = { method, credentials: "same-origin" };
-        if (body !== undefined) {
-          init.headers = { "content-type": "application/json" };
-          init.body = JSON.stringify(body);
-        }
-        response = await fetch(`/hub${path}`, init);
-      } catch {
-        throw new ApiFailure({
-          code: "host_unreachable",
-          message: "That request did not reach the host. Try again, or reopen the window.",
-          correlationId: "-",
-          retryable: true,
-        });
-      }
-
-      if (response.status === 204) return undefined as T;
-      const text = await response.text();
-      let parsed: unknown;
-      try {
-        parsed = text.length === 0 ? undefined : JSON.parse(text);
-      } catch {
-        parsed = undefined;
-      }
-      if (!response.ok) {
-        const detail = (parsed as { error?: { code?: string; message?: string } } | undefined)?.error;
-        throw new HubApiError(
-          response.status,
-          detail?.code ?? "unknown",
-          detail?.message ?? `HTTP ${response.status}`,
-        );
-      }
-      return parsed as T;
-    },
-    subscribe(_path: string, _onEvent: (event: unknown) => void): () => void {
-      throw new Error("The hub proxy has no socket to subscribe on.");
-    },
-  };
 }
 
 export const api = {
