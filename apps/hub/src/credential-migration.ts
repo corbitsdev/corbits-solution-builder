@@ -9,19 +9,29 @@
  * bootstrap secrets. A workspace that connected a provider before this
  * shipped still has that old copy, and an OAuth row still carries the
  * pointer instead of usable material — so this runs once, at boot, after the
- * workspace exists, and:
+ * workspace exists, and per legacy account:
  *
- *   1. probes the known legacy accounts (`provider:<id>` for the API-key
- *      providers, `oauth:<id>` for the two OAuth ones);
- *   2. for whatever is still found there, patches the matching hub
- *      credential row with the real secret (a no-op for the API-key case,
- *      whose row already carries it; the fix for the OAuth case, whose row
- *      carried only a pointer);
- *   3. deletes the old entry, so the next boot finds nothing there and skips
- *      it — the idempotence is "the old store is empty", not a flag;
- *   4. records what moved in the workspace tenant's own config, under
+ *   1. probes the account (`provider:<id>` for the API-key providers,
+ *      `oauth:<id>` for the two OAuth ones);
+ *   2. patches the matching hub credential row with the real secret (a no-op
+ *      for the API-key case, whose row already carries it; the fix for the
+ *      OAuth case, whose row carried only a pointer);
+ *   3. records the move in the workspace tenant's own config, under
  *      `credentialMigration`, so `smoke:upgrade` (and a person debugging a
- *      report) can see it happened.
+ *      report) can see it happened — durably, *before* the old entry is
+ *      touched, so a crash between the two never loses the audit trail;
+ *   4. only then deletes the old entry, so the next boot finds nothing there
+ *      and skips straight to a no-op.
+ *
+ * A crash between steps 3 and 4 leaves the mapping recorded and the old entry
+ * still present; the next run sees the account already recorded, skips the
+ * patch and the record, and safely retries just the delete — no duplicate
+ * mapping, no error.
+ *
+ * One account's failure — the keychain locked, the hub rejecting the patch —
+ * must not stop every other account from migrating, so each is wrapped in its
+ * own try/catch; failures are logged and returned, never left to abort the
+ * loop silently.
  *
  * Reading the old store here — after `host-secrets.ts` stopped being where a
  * provider secret lives — is not resurrecting it: the module survives for the
@@ -29,7 +39,7 @@
  * caller that legitimately still needs a raw read of an old-style account.
  */
 import { readSecretResult, secretReference, deleteSecret } from "./host-secrets.js";
-import { catalog, getTenant, patchTenant, tenantId, type HubCredential } from "./hub-client.js";
+import { catalog, getTenant, patchTenant, tenantId, type HubCredential, type HubTenant } from "./hub-client.js";
 import { OAUTH_PROVIDERS, type OAuthProviderId } from "./oauth.js";
 
 /** Every provider id CL-8076-era code ever wrote a keychain/file secret under. */
@@ -51,6 +61,17 @@ export type CredentialMigrationEntry = {
   readonly migratedAt: string;
 };
 
+export type CredentialMigrationFailure = {
+  readonly account: string;
+  readonly providerId: string;
+  readonly error: string;
+};
+
+export type CredentialMigrationResult = {
+  readonly migrated: CredentialMigrationEntry[];
+  readonly failures: CredentialMigrationFailure[];
+};
+
 type CredentialMigrationConfig = {
   readonly mappings: CredentialMigrationEntry[];
 };
@@ -59,47 +80,68 @@ function credentialRowFor(providerId: string, rows: HubCredential[]): HubCredent
   return rows.find((row) => row.name === `provider:${providerId}`);
 }
 
-/**
- * Carries every legacy secret this host's old store still holds into the hub's
- * credential rows. Safe to call on every boot: an account already emptied by a
- * prior run reads as missing and is skipped, so a second call does nothing.
- */
-export async function migrateLegacyProviderCredentials(): Promise<CredentialMigrationEntry[]> {
-  const migrated: CredentialMigrationEntry[] = [];
-  const credentialRows = await catalog.credentials();
-
-  for (const { providerId, account } of legacyAccounts()) {
-    const read = await readSecretResult(await secretReference(account));
-    if (read.status !== "found") continue;
-
-    const row = credentialRowFor(providerId, credentialRows);
-    if (!row) {
-      // The old store has a secret but the platform never got a matching
-      // catalog row — nothing to carry it into. Leaving the old entry alone
-      // is safer than discarding a secret with nowhere to go.
-      continue;
-    }
-
-    await catalog.patchCredential(row.id, { secret: read.secret, status: "active" });
-    await deleteSecret(await secretReference(account));
-    migrated.push({ account, providerId, credentialId: row.id, migratedAt: new Date().toISOString() });
-  }
-
-  if (migrated.length > 0) await recordMigration(migrated);
-  return migrated;
+function mappingsOf(tenant: HubTenant | null): CredentialMigrationEntry[] {
+  return (tenant?.config?.credentialMigration as CredentialMigrationConfig | undefined)?.mappings ?? [];
 }
 
-async function recordMigration(entries: CredentialMigrationEntry[]): Promise<void> {
-  const tenant = await getTenant(tenantId());
-  const existing = (tenant?.config?.credentialMigration as CredentialMigrationConfig | undefined) ?? {
-    mappings: [],
-  };
-  await patchTenant(tenantId(), {
-    config: {
-      ...tenant?.config,
-      credentialMigration: {
-        mappings: [...existing.mappings, ...entries],
-      } satisfies CredentialMigrationConfig,
-    },
-  });
+/**
+ * Carries every legacy secret this host's old store still holds into the hub's
+ * credential rows. Safe to call on every boot: an account already recorded
+ * and emptied by a prior run is skipped entirely; one already recorded but not
+ * yet cleaned up (a crash between recording and deleting) only has its
+ * leftover old entry removed. Every other account is migrated independently —
+ * one failing does not stop the rest.
+ */
+export async function migrateLegacyProviderCredentials(): Promise<CredentialMigrationResult> {
+  const migrated: CredentialMigrationEntry[] = [];
+  const failures: CredentialMigrationFailure[] = [];
+  const credentialRows = await catalog.credentials();
+
+  let tenant = await getTenant(tenantId());
+  let mappings = mappingsOf(tenant);
+
+  for (const { providerId, account } of legacyAccounts()) {
+    try {
+      const read = await readSecretResult(await secretReference(account));
+      if (read.status !== "found") continue;
+
+      const row = credentialRowFor(providerId, credentialRows);
+      if (!row) {
+        // The old store has a secret but the platform never got a matching
+        // catalog row — nothing to carry it into. Leaving the old entry alone
+        // is safer than discarding a secret with nowhere to go.
+        continue;
+      }
+
+      const already = mappings.find((entry) => entry.account === account);
+      if (!already) {
+        // The hub credential row is patched, and the mapping recorded, before
+        // the old entry is touched: a crash here leaves the old entry behind
+        // for a harmless retry, never an untracked secret with no audit trail.
+        await catalog.patchCredential(row.id, { secret: read.secret, status: "active" });
+        const entry: CredentialMigrationEntry = {
+          account,
+          providerId,
+          credentialId: row.id,
+          migratedAt: new Date().toISOString(),
+        };
+        mappings = [...mappings, entry];
+        tenant = await patchTenant(tenantId(), {
+          config: {
+            ...tenant?.config,
+            credentialMigration: { mappings } satisfies CredentialMigrationConfig,
+          },
+        });
+        migrated.push(entry);
+      }
+
+      await deleteSecret(await secretReference(account));
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      console.error(`[credential-migration] ${account} could not be migrated: ${message}`);
+      failures.push({ account, providerId, error: message });
+    }
+  }
+
+  return { migrated, failures };
 }

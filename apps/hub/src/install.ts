@@ -148,12 +148,24 @@ export async function ensureWorkspace(): Promise<Workspace | null> {
  * emptied by a prior run has nothing left to carry.
  */
 async function migrateCredentialsOnce(): Promise<void> {
-  await migrateLegacyProviderCredentials().catch((cause: unknown) => {
+  const result = await migrateLegacyProviderCredentials().catch((cause: unknown) => {
+    // A per-account failure is already caught and reported inside
+    // `migrateLegacyProviderCredentials`; this only catches something that
+    // failed before any account could be tried (the tenant or catalog reads
+    // themselves), so the rest of install still proceeds.
     console.error(
-      `[credential-migration] could not carry a legacy provider secret forward: ` +
+      `[credential-migration] could not carry legacy provider secrets forward: ` +
         `${cause instanceof Error ? cause.message : String(cause)}`,
     );
+    return null;
   });
+  if (result && result.failures.length > 0) {
+    console.error(
+      `[credential-migration] ${result.failures.length} legacy account(s) could not be migrated ` +
+        `this run and will be retried on the next boot: ` +
+        result.failures.map((failure) => `${failure.account} (${failure.error})`).join("; "),
+    );
+  }
 }
 
 /** Everything the tenant needs, in dependency order. Safe to run any time. */
