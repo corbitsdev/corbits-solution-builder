@@ -40,7 +40,10 @@ fails when that file is behind the vendor.
 the builder schema, mounts Interchange's hub app, and listens. Boot seeds
 nothing. The host is a client of that hub: embedded, `hub-client.ts` dispatches
 into the mounted Hono app; hosted (`SOLUTIONS_BUILDER_HUB_URL`), the same
-calls go over HTTPS. Platform writes go through the hub API, not drizzle on
+calls go over HTTPS. The desktop shell treats that same variable as a
+stronger switch: it loads the named origin in the webview and does not spawn
+the host sidecar at all. Local mode still starts the embed/host as here.
+Platform writes go through the hub API, not drizzle on
 public tables.
 
 Identity is the hub's. First launch signs up or in against `/hub/api/auth`.
@@ -135,10 +138,10 @@ OAuth sign-in uses PKCE over a loopback redirect. Tokens live in the keychain.
 
 | Script | What it does |
 |---|---|
-| `dev` | The host from source, hot-reloading, opens a browser |
+| `dev` | The host from source, hot-reloading, opens a browser. `SOLUTIONS_BUILDER_HUB_URL` skips the host and opens that origin |
 | `host` | The host alone; prints the launch URL |
 | `ui:build`, `ui:watch` | Build the interface |
-| `dev:desktop` | Tauri window with the host running from source |
+| `dev:desktop` | Tauri window with the host running from source; with `SOLUTIONS_BUILDER_HUB_URL`, the window loads that origin and no sidecar starts |
 | `dev:fresh` | `dev:desktop` on a new empty data directory |
 | `desktop:build` | `.app` and `.dmg`; signed and notarised when the Apple env vars are set, unsigned otherwise (see "Releasing the desktop app") |
 | `sidecar:build` | Compile the host to one self-contained binary |

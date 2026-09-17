@@ -5,6 +5,10 @@
  *   bun run dev:desktop         the same host inside the Tauri window
  *   bun run dev:fresh           the desktop app on a workspace that has never been used
  *
+ * `SOLUTIONS_BUILDER_HUB_URL` is remote mode: the shell opens that origin and
+ * does not spawn a local host. Local mode still builds the interface and
+ * starts the embed/host as below.
+ *
  * The packaged app runs a compiled sidecar; in development that would mean
  * recompiling the host on every backend edit. Instead this builds the interface
  * once, keeps rebuilding it in the background, and runs the host from source.
@@ -25,6 +29,7 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { desktopLaunchMode, shouldSpawnHost } from "./desktop-launch-mode";
 import { HOST_COMMAND } from "./host-command";
 
 const root = join(import.meta.dir, "..");
@@ -37,7 +42,9 @@ const env: Record<string, string | undefined> = {
   // Mounts the change stream, and only here; a packaged app never sets it.
   SOLUTIONS_BUILDER_DEV_RELOAD: "1",
 };
-if (fresh) {
+const mode = desktopLaunchMode(env);
+const spawnHost = shouldSpawnHost(mode);
+if (fresh && spawnHost) {
   env.SOLUTIONS_BUILDER_DATA_DIR = await mkdtemp(join(tmpdir(), "solutions-builder-fresh-"));
   console.log(`A new workspace: ${env.SOLUTIONS_BUILDER_DATA_DIR}\n`);
 }
@@ -50,12 +57,15 @@ function run(command: string[], cwd = root) {
 // compiled in. `bun run ui:build` stays a production build.
 const UI_BUILD = ["bunx", "vite", "build", "-c", join(root, "apps", "web", "vite.config.ts"), "--mode", "development"];
 
-console.log("Building the interface…");
-if ((await run(UI_BUILD).exited) !== 0) {
-  console.error("The interface build failed; not starting the host.");
-  process.exit(1);
+let watcher: ReturnType<typeof run> | undefined;
+if (spawnHost) {
+  console.log("Building the interface…");
+  if ((await run(UI_BUILD).exited) !== 0) {
+    console.error("The interface build failed; not starting the host.");
+    process.exit(1);
+  }
+  watcher = run([...UI_BUILD, "--watch"]);
 }
-const watcher = run([...UI_BUILD, "--watch"]);
 
 let status: number;
 if (desktop) {
@@ -66,8 +76,14 @@ if (desktop) {
   // Tauri's build script insists the binary exists even in `dev`, and a fresh
   // checkout has never run `sidecar:build`; the shell resolves the sidecar by
   // path at runtime, so nothing else depends on the entry here.
-  env.SOLUTIONS_BUILDER_HOST_COMMAND = HOST_COMMAND.join(" ");
-  console.log("Starting the desktop host…\n");
+  // Remote mode never sets the override: the Rust shell loads the hub URL
+  // and must not spawn a host to find a handshake.
+  if (spawnHost) {
+    env.SOLUTIONS_BUILDER_HOST_COMMAND = HOST_COMMAND.join(" ");
+    console.log("Starting the desktop host…\n");
+  } else if (mode.kind === "remote") {
+    console.log(`Opening the desktop shell on ${mode.url} (no local host)\n`);
+  }
   status = await run([
     "bunx",
     "@tauri-apps/cli@2",
@@ -75,10 +91,13 @@ if (desktop) {
     "--config",
     JSON.stringify({ bundle: { resources: null, externalBin: null } }),
   ], join(root, "apps", "desktop")).exited;
-} else {
+} else if (mode.kind === "local") {
   console.log("Starting the host…\n");
   status = await run([...HOST_COMMAND, "--open"]).exited;
+} else {
+  console.log(`Opening ${mode.url} (no local host)\n`);
+  status = await run(["open", mode.url]).exited;
 }
 
-watcher.kill();
+watcher?.kill();
 process.exit(status);

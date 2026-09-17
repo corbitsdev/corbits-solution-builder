@@ -1,8 +1,11 @@
 //! The native desktop host.
 //!
-//! It supervises the compiled Bun sidecar, waits for its loopback handshake,
-//! and opens a window on the URL the sidecar prints. The pattern is the proven
-//! one from the AgentFlight Alpha spike.
+//! Local mode supervises the compiled Bun sidecar, waits for its loopback
+//! handshake, and opens a window on the URL the sidecar prints. The pattern is
+//! the proven one from the AgentFlight Alpha spike.
+//!
+//! Remote mode (`SOLUTIONS_BUILDER_HUB_URL`) skips that sidecar entirely and
+//! opens the window on the named origin. There is no local hub process.
 //!
 //! One rule differs, and it is the point of this product's host model:
 //!
@@ -12,7 +15,7 @@
 //! client. Closing it hides the window and leaves already-authorised work
 //! running to its next human gate; the tray reflects that state and is the only
 //! place an explicit stop can be chosen. The sidecar is reaped on Quit, and on
-//! Quit alone.
+//! Quit alone. Remote mode has no sidecar to reap.
 
 pub mod dictation;
 
@@ -165,6 +168,15 @@ impl HostProcess {
         }
     }
 
+    /// Open a remote origin. No local hub is started.
+    fn remote(launch_url: tauri::Url) -> Self {
+        Self {
+            child: Mutex::new(None),
+            launch_url,
+            detached: false,
+        }
+    }
+
     /// Called on Quit only. Closing a window never reaches this.
     fn shutdown(&self) {
         if let Ok(mut slot) = self.child.lock() {
@@ -245,6 +257,51 @@ fn validate_launch_url(value: &str) -> AppResult<tauri::Url> {
         ));
     }
     Ok(url)
+}
+
+/// `SOLUTIONS_BUILDER_HUB_URL`, when set, is a remote origin: the shell loads
+/// it and must not spawn a host to wait for a handshake.
+fn configured_remote_hub_url() -> AppResult<Option<tauri::Url>> {
+    match std::env::var("SOLUTIONS_BUILDER_HUB_URL") {
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(std::env::VarError::NotUnicode(_)) => Err(invalid_input(
+            "SOLUTIONS_BUILDER_HUB_URL is not valid UTF-8",
+        )),
+        Ok(value) => remote_hub_url_from(Some(&value)),
+    }
+}
+
+fn remote_hub_url_from(value: Option<&str>) -> AppResult<Option<tauri::Url>> {
+    let Some(raw) = value else {
+        return Ok(None);
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(validate_remote_hub_url(trimmed)?))
+}
+
+fn validate_remote_hub_url(value: &str) -> AppResult<tauri::Url> {
+    let trimmed = value.trim().trim_end_matches('/');
+    let url = tauri::Url::parse(trimmed)?;
+    if (url.scheme() != "http" && url.scheme() != "https")
+        || url.host_str().is_none()
+        || url.username() != ""
+        || url.password().is_some()
+    {
+        return Err(invalid_input(
+            "SOLUTIONS_BUILDER_HUB_URL must be an http or https URL with a host",
+        ));
+    }
+    Ok(url)
+}
+
+fn resolve_shell_host(app: &AppHandle) -> AppResult<HostProcess> {
+    match configured_remote_hub_url()? {
+        Some(url) => Ok(HostProcess::remote(url)),
+        None => HostProcess::launch(app),
+    }
 }
 
 /// Mirrors the host's stderr to this process and keeps the last lines.
@@ -519,7 +576,7 @@ pub fn run() {
             // `did_finish_launching`, which aborts without unwinding and prints
             // a Rust backtrace — accurate, and useless to the person holding
             // the app.
-            let host = match HostProcess::launch(app.handle()) {
+            let host = match resolve_shell_host(app.handle()) {
                 Ok(host) => host,
                 Err(error) => {
                     show_startup_failure(app.handle(), &error.to_string());
@@ -581,4 +638,49 @@ pub fn run() {
         }
         _ => {}
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn absent_or_blank_hub_url_is_local_mode() {
+        assert!(remote_hub_url_from(None).unwrap().is_none());
+        assert!(remote_hub_url_from(Some("")).unwrap().is_none());
+        assert!(remote_hub_url_from(Some("  \n")).unwrap().is_none());
+    }
+
+    #[test]
+    fn remote_https_url_is_accepted_without_spawning() {
+        let url = remote_hub_url_from(Some("https://hub.example.com/"))
+            .unwrap()
+            .expect("remote");
+        assert_eq!(url.scheme(), "https");
+        assert_eq!(url.host_str(), Some("hub.example.com"));
+        let host = HostProcess::remote(url);
+        assert!(host.child.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn remote_http_loopback_is_accepted() {
+        let url = validate_remote_hub_url("http://127.0.0.1:8080/app/").unwrap();
+        assert_eq!(url.scheme(), "http");
+        assert_eq!(url.host_str(), Some("127.0.0.1"));
+        assert_eq!(url.port(), Some(8080));
+    }
+
+    #[test]
+    fn remote_file_and_userinfo_urls_are_refused() {
+        assert!(validate_remote_hub_url("file:///etc/passwd").is_err());
+        assert!(validate_remote_hub_url("ftp://hub.example.com").is_err());
+        assert!(validate_remote_hub_url("https://user:pass@hub.example.com").is_err());
+    }
+
+    #[test]
+    fn local_handshake_url_still_requires_loopback_token() {
+        let url = validate_launch_url("http://127.0.0.1:1234/?token=abc").unwrap();
+        assert_eq!(url.host_str(), Some("127.0.0.1"));
+        assert!(validate_launch_url("https://hub.example.com/").is_err());
+    }
 }

@@ -15,6 +15,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { desktopLaunchMode, shouldSpawnHost } from "./desktop-launch-mode";
 import { HOST_COMMAND } from "./host-command";
 
 const root = join(import.meta.dir, "..");
@@ -125,6 +126,28 @@ async function reachesHandshake(
     await stop();
     throw error;
   }
+}
+
+{
+  const remote = desktopLaunchMode({ SOLUTIONS_BUILDER_HUB_URL: "https://hub.example.com" });
+  check(
+    "a remote hub URL does not spawn the host sidecar",
+    remote.kind === "remote" && !shouldSpawnHost(remote),
+    remote.kind === "remote" ? remote.url : remote.kind,
+  );
+  check("local mode still spawns the host sidecar", shouldSpawnHost(desktopLaunchMode({})));
+  const rust = await Bun.file(join(root, "apps", "desktop", "src", "lib.rs")).text();
+  check(
+    "the desktop shell skips spawning when a hub URL is set",
+    rust.includes("configured_remote_hub_url")
+      && rust.includes("HostProcess::remote")
+      && rust.includes("resolve_shell_host"),
+  );
+  const launcher = await Bun.file(join(root, "scripts", "dev.ts")).text();
+  check(
+    "the development launcher only sets the host command in local mode",
+    launcher.includes("if (spawnHost)") && launcher.includes("SOLUTIONS_BUILDER_HOST_COMMAND"),
+  );
 }
 
 // The exact command `scripts/dev.ts` hands to the Rust host.

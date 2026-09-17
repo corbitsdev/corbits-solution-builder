@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The window loads the host's loopback URL, so that origin is the page: it needs the IPC to ask the shell for dictation and to hear its events, and to print: on macOS the webview's window.print is the shell's own print command.",
+  "description": "The window loads the host's loopback URL in local mode, or SOLUTIONS_BUILDER_HUB_URL in remote mode. That origin is the page: it needs the IPC to ask the shell for dictation and to hear its events, and to print: on macOS the webview's window.print is the shell's own print command.",
   "windows": [
     "main"
   ],
@@ -15,7 +15,8 @@
   "remote": {
     "urls": [
       "http://127.0.0.1:*",
-      "http://localhost:*"
+      "http://localhost:*",
+      "https://*"
     ]
   }
 }

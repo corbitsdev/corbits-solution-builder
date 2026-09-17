@@ -88,7 +88,8 @@ the Interchange hub's own modules directly.
 
 **The desktop shell** (`apps/desktop`) starts the hub, opens the window on the
 URL it prints, keeps a tray presence, and leaves the hub running when the
-window closes.
+window closes. When `SOLUTIONS_BUILDER_HUB_URL` is set, the shell opens that
+origin instead and does not spawn a local hub process.
 
 **What is not stored.** The decision waiting on a person is derived from the
 run parked at its gate plus the ledger: title, consequence, required authority
