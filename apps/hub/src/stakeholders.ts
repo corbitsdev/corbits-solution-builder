@@ -13,8 +13,8 @@
 import { AUTHORITIES, type Authority } from "@solutions-builder/app/ledger";
 import { HostError } from "./errors.js";
 import { forgetExecution } from "./hub-executor.js";
-import { installProjectAuthority, requireProject, updateProject } from "./installer-bridge.js";
-import type { ProjectPolicy } from "@solutions-builder/installer";
+import { installProjectAuthority } from "./project-authority.js";
+import { requireProject, updateProject, type ProjectPolicy } from "./project-records.js";
 
 export type Stakeholder = { name: string; role: Authority };
 

@@ -169,7 +169,8 @@ export async function install(
 
   // Every project is a tenant of its own with the same roles; a project opened
   // before roles lived there gets them here.
-  for (const project of await listProjectRecords(transport, ws.tenantId)) {
+  const projects = await listProjectRecords(transport, ws.tenantId);
+  for (const project of projects) {
     await installProjectAuthority(transport, project.id, project.policy);
   }
   await ensureSkillAssets(transport, ws.tenantId);
@@ -180,7 +181,14 @@ export async function install(
   // Model bindings are the catalog rows written when a provider connects, so
   // there is nothing to rebind here; re-running after a credential change is
   // what lets the lifecycle deploy once an offering exists to bind against.
-  void deployLifecycle(transport, sidecar, ws.tenantId);
+  // Each project has its own deployment; the workspace asset is the one
+  // installState reports.
+  void deployLifecycle(
+    transport,
+    sidecar,
+    ws.tenantId,
+    projects.map((project) => project.id),
+  );
   return installState(transport);
 }
 
@@ -188,17 +196,25 @@ export async function install(
 // source, which takes as long as spawning a process. Install returns at once
 // and installState() reports "deploying" until the hub has answered.
 let deploying: Promise<void> | null = null;
-export function deployLifecycle(transport: Transport, sidecar: SidecarCapability, tenantId: string): Promise<void> {
+export function deployLifecycle(
+  transport: Transport,
+  sidecar: SidecarCapability,
+  tenantId: string,
+  projectIds: readonly string[] = [],
+): Promise<void> {
   if (deploying) return deploying;
   lastDeployment = { status: "deploying", detail: "The hub is probing the lifecycle source." };
   deploying = ensureLifecycleDeployment(transport, sidecar, tenantId)
-    .then((deployed) => {
+    .then(async (deployed) => {
       lastDeployment =
         deployed.status === "no_offering"
           ? { status: "no_offering", detail: "Connect a provider to deploy the lifecycle." }
           : deployed.status === "no_host"
             ? { status: "no_host", detail: "The host is not serving, so no sidecar can dial in." }
             : { status: deployed.status, detail: `${deployed.deploymentId} is ${deployed.deploymentStatus}.` };
+      for (const projectId of projectIds) {
+        await ensureLifecycleDeployment(transport, sidecar, tenantId, projectId);
+      }
     })
     .catch((cause: unknown) => {
       lastDeployment = { status: "failed", detail: cause instanceof Error ? cause.message : String(cause) };

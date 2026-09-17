@@ -42,7 +42,7 @@ and does the host-only repairs (owner, legacy-tenant adoption, workspace
 tenant, credential migration). The client then runs this package over the
 host's `/hub` proxy on first launch and after every credential change
 (`apps/web/src/client.ts`); smokes still call the same package through
-`apps/hub/src/installer-bridge.ts`. What the hub still holds beside
+`scripts/host-install.ts`. What the hub still holds beside
 Interchange's tables is the part of the tree that shrinks as it becomes
 vanilla.
 

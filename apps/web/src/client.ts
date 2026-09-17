@@ -9,6 +9,7 @@ import { APP_VERSION } from "@solutions-builder/app/manifest";
 import {
   ApiError as HubApiError,
   createProject as installerCreateProject,
+  ensureLifecycleDeployment as installerEnsureLifecycleDeployment,
   install as installerInstall,
   installState as installerInstallState,
   InstallerError,
@@ -583,6 +584,7 @@ export const api = {
         });
       }
       const transport = createHubTransport();
+      const status = await request<HostStatus>("/status");
       const { project } = await installerCreateProject(transport, workspace.tenantId, {
         title,
         slug: projectSlug(),
@@ -591,6 +593,12 @@ export const api = {
           ? { delegatedCredentialIds: payload.delegatedCredentialIds }
           : {}),
       });
+      await installerEnsureLifecycleDeployment(
+        transport,
+        sidecarCapabilityOf(status),
+        workspace.tenantId,
+        project.id,
+      );
       const body = problem.length > 0 ? { problemStatement: problem } : {};
       return await openCreatedProject({
         projectId: project.id,

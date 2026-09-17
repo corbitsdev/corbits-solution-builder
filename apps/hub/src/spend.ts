@@ -16,7 +16,7 @@
  */
 import { catalog, hubList, tenantPath, type HubModel, type HubOffering } from "./hub-client.js";
 import { recordUsage, usageRecords, type UsageRecord } from "./engine-ledger.js";
-import { listProjectRecords } from "./installer-bridge.js";
+import { listProjectRecords } from "./project-records.js";
 import { newId } from "./ids.js";
 
 export type TokenCounts = { input: number; output: number; cacheRead: number; cacheWrite: number; thinking: number };

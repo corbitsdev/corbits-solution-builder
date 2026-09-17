@@ -20,10 +20,13 @@ process.env["SOLUTIONS_BUILDER_DATA_DIR"] = dataDir;
 const { openDatabase } = await import("../apps/hub/src/db.js");
 const { prepareDatabase } = await import("../apps/hub/src/migrate.js");
 const { hub, hubWebSocket, mountHub, setHostPort } = await import("../apps/hub/src/hub-mount.js");
-const { install, createProjectRecord, delegationStore } = await import("../apps/hub/src/installer-bridge.js");
+const { install } = await import("./host-install.js");
+const { createProjectRecord } = await import("../apps/hub/src/project-records.js");
+const { liveDelegationStore, delegateAtCreation, delegateMore, revokeAllDelegations } = await import(
+  "../apps/hub/src/project-delegation.js"
+);
 const { connectProvider } = await import("../apps/hub/src/providers.js");
 const { catalog, myPrincipalIn } = await import("../apps/hub/src/hub-client.js");
-const { delegateAtCreation, delegateMore, revokeAllDelegations } = await import("@solutions-builder/installer");
 const { resolveSourcesByOfferingIds } = await import("@intx/db");
 
 const checks: { name: string; ok: boolean }[] = [];
@@ -90,7 +93,7 @@ try {
   );
 
   if (offeringIds.length > 0 && credentialId !== undefined) {
-    const store = delegationStore();
+    const store = liveDelegationStore();
     const sealed = await createProjectRecord({
       title: "Smoke: sealed workbench",
       policy: {

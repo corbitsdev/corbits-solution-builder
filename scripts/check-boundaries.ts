@@ -16,6 +16,9 @@
  *       is driven by) and `@intx/types` — never a platform internal, and
  *       never the app package's own wider allowance (`arktype`, deck
  *       authoring's libraries) it has no use for.
+ *   1b. The hub never imports `@solutions-builder/installer` or
+ *       `packages/installer`. The client and scripts drive that package;
+ *       the hub talks to the same rows through `hub-client.ts`.
  *   2. Only the hub talks to a provider or an agent runtime, and only the
  *      hub's embedding files (`hub-mount`, `hub-keys`, `hub-migrate`,
  *      `db`, `schema`, `migrate`) plus
@@ -317,6 +320,29 @@ for (const file of files) {
         file: path,
         rule: "only the hub's embedding files and hub-executor may import the Interchange platform",
         detail: platform.join(", "),
+      });
+    }
+  }
+
+  if (area === "hub") {
+    const named = imports.filter(
+      (name) =>
+        name === "@solutions-builder/installer" ||
+        name.startsWith("@solutions-builder/installer/") ||
+        name.includes("packages/installer"),
+    );
+    const relative = imports.filter((name) => {
+      if (!name.startsWith(".")) return false;
+      const resolved = resolve(root, dirname(path), name).split(sep).join("/");
+      const installerRoot = join(root, INSTALLER).split(sep).join("/");
+      return resolved === installerRoot || resolved.startsWith(`${installerRoot}/`);
+    });
+    const hits = [...named, ...relative];
+    if (hits.length > 0) {
+      violations.push({
+        file: path,
+        rule: "the hub never imports the installer package; the client and scripts drive it",
+        detail: hits.join(", "),
       });
     }
   }

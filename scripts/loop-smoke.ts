@@ -24,7 +24,7 @@ import {
   localActor,
   tenantId,
 } from "../apps/hub/src/hub-client.js";
-import { install } from "../apps/hub/src/installer-bridge.js";
+import { install } from "./host-install.js";
 import {
   createProject,
   listProjects,

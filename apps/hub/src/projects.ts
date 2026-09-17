@@ -27,20 +27,21 @@ import { activityHeadline } from "@solutions-builder/app/next-step";
 import { executionUnavailable, projectExecutionStatus } from "./hub-executor.js";
 import { activeRun, runsForProject, type RunRecord } from "./runs.js";
 import { tenantId } from "./hub-client.js";
+import { installProjectAuthority } from "./project-authority.js";
 import {
   createProjectRecord,
   listProjectRecords,
   requireProject,
   updateProject,
-  delegationStore as liveDelegationStore,
-} from "./installer-bridge.js";
+} from "./project-records.js";
 import {
   delegateAtCreation,
+  liveDelegationStore,
   resolveDelegationConsent,
   revokeAllDelegations,
   type DelegationRecord,
   type DelegationStore,
-} from "@solutions-builder/installer";
+} from "./project-delegation.js";
 
 export async function createProject(
   args: {
@@ -83,6 +84,9 @@ export async function createProject(
   // human authority as a role there.
   const createRecord = deps.createRecord ?? createProjectRecord;
   const project = await createRecord({ title: args.title, policy: args.policy });
+  if (deps.createRecord === undefined) {
+    await installProjectAuthority(project.id, args.policy);
+  }
   const concealRecord =
     deps.concealRecord ??
     (async (projectId: string) => {
