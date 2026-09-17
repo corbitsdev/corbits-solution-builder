@@ -13,6 +13,69 @@ import type { HostDatabase } from "./db.js";
 import { dataDirectory } from "./paths.js";
 import { HUB_MIGRATIONS } from "./hub-migrations.js";
 
+type Row = Record<string, unknown>;
+
+/**
+ * Links a tenant created before the hub owned identity to the owner user,
+ * once. A pre-identity workspace has an owner principal that no user is
+ * linked to, and none of the owner role and grant `POST /api/tenants` would
+ * have created — this is a one-time repair of that shape, not an ongoing
+ * capability the platform is missing, so it lives beside the rest of the
+ * schema repair in this file rather than as a runtime call in `hub-client.ts`.
+ *
+ * Returns whether the legacy tenant existed. After this the tenant looks the
+ * way `POST /api/tenants` would have left it: the owner is a user-linked
+ * principal holding an `owner` role with an allow-everything grant, so every
+ * later call goes through the hub's own API like a fresh install's does.
+ * (Interchange INTR-522, first-operator bootstrap, is the native answer.)
+ */
+export async function adoptLegacyWorkspace(
+  host: HostDatabase,
+  userId: string,
+  legacyTenantId: string,
+): Promise<boolean> {
+  const { db } = host;
+  const tenants = (
+    await db.execute<Row>(sql`
+    SELECT "id" FROM "public"."tenant" WHERE "id" = ${legacyTenantId} LIMIT 1
+  `)
+  ).rows;
+  if (tenants.length === 0) return false;
+
+  // The principal the old boot created, whose ref was its own id.
+  await db.execute(sql`
+    UPDATE "public"."principal" SET "ref_id" = ${userId}, "updated_at" = now()
+    WHERE "tenant_id" = ${legacyTenantId} AND "kind" = 'user' AND "ref_id" = 'p_owner'
+  `);
+  const owners = (
+    await db.execute<{ id: string }>(sql`
+    SELECT "id" FROM "public"."principal"
+    WHERE "tenant_id" = ${legacyTenantId} AND "kind" = 'user' AND "ref_id" = ${userId}
+    LIMIT 1
+  `)
+  ).rows;
+  const owner = owners[0];
+  if (!owner) return true;
+
+  const roleId = `role_owner_${legacyTenantId}`;
+  await db.execute(sql`
+    INSERT INTO "public"."role" ("id","tenant_id","name","description","is_system")
+    VALUES (${roleId}, ${legacyTenantId}, 'owner', 'System owner role', true)
+    ON CONFLICT DO NOTHING
+  `);
+  await db.execute(sql`
+    INSERT INTO "public"."grant" ("id","tenant_id","role_id","resource","action","effect","origin")
+    VALUES (${`grant_owner_${legacyTenantId}`}, ${legacyTenantId}, ${roleId}, '*', '*', 'allow', 'system')
+    ON CONFLICT DO NOTHING
+  `);
+  await db.execute(sql`
+    INSERT INTO "public"."principal_role" ("principal_id","role_id")
+    VALUES (${owner.id}, ${roleId})
+    ON CONFLICT DO NOTHING
+  `);
+  return true;
+}
+
 /**
  * Raised when the workspace predates the hub. Its own class so the host can
  * report it as the actionable thing it is rather than as an internal error.

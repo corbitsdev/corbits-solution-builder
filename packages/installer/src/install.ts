@@ -114,8 +114,7 @@ export async function ensureWorkspace(transport: Transport, gaps: InstallerGaps)
   }
   const me = await transport.fetch<{ id: string }>("GET", "/api/me");
   if (await gaps.adoptLegacyWorkspace(me.id)) {
-    const adopted = await resolveWorkspace(transport);
-    if (adopted) {
+    const adopted = await resolveWorkspace(transport);    if (adopted) {
       workspace = adopted;
       return adopted;
     }
