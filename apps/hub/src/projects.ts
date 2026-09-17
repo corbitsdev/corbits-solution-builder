@@ -23,8 +23,7 @@ import type { Stage } from "@solutions-builder/app/ledger";
 import { nextQuestion } from "./questions.js";
 import { openDecisionFor } from "./decisions.js";
 import { liveDraft } from "./live-drafts.js";
-import { activityHeadline } from "@solutions-builder/app/next-step";
-import { currentAnchor, executionUnavailable, projectExecutionStatus } from "./lifecycle-run.js";
+import { currentAnchor } from "./lifecycle-run.js";
 import { activeRun, runsForProject } from "./runs.js";
 import { tenantId } from "./hub-client.js";
 import { installProjectAuthority } from "./project-authority.js";
@@ -633,50 +632,7 @@ export async function projectDetail(projectId: string, actorPrincipalId: string)
   const current = runs.filter((run) => run.endedAt === null).at(-1) ?? runs.at(-1) ?? null;
   const decision = await openDecisionFor(projectId, current);
   const waits = decision ? [decision] : [];
-
-  // "What is happening right now", not just the state enum: the runtime
-  // executor is asked where its own run for this stage actually is, and that
-  // — plus whether a draft already exists — is what turns "in_progress" into
-  // "Drafting" or "Revising the draft" instead of leaving the machine's own
-  // vocabulary on the screen.
-  let activity: {
-    headline: string;
-    stepId: string | null;
-    parked: boolean;
-    signalName: string | null;
-    since: string | null;
-  } | null = null;
-  let soloApproval = false;
-  if (current) {
-    const status = await projectExecutionStatus(projectId);
-    const unavailable = executionUnavailable(projectId);
-    const hasDraft = nodes.some((node) => node.stage === current.stage);
-    const quorum =
-      current.stage === 5
-        ? {
-            recorded: approvals.filter((approval) => approval.command === "audience.decide").length,
-            needed: (row.policy as { audienceQuorum?: number }).audienceQuorum ?? 0,
-            blocked: approvals.filter(
-              (approval) => approval.command === "audience.decide" && approval.decision !== "proceed",
-            ).length,
-          }
-        : undefined;
-    activity = {
-      headline: activityHeadline({
-        state: current.state,
-        stage: current.stage,
-        parked: status?.parked ?? false,
-        hasDraft,
-        ...(quorum ? { quorum } : {}),
-        ...(unavailable ? { executionUnavailable: unavailable } : {}),
-      }),
-      stepId: status?.stepId ?? null,
-      parked: status?.parked ?? false,
-      signalName: status?.signalName ?? null,
-      since: status?.since ?? null,
-    };
-    soloApproval = await soloApprovalFor(projectId, current.stage, actorPrincipalId);
-  }
+  const soloApproval = current ? await soloApprovalFor(projectId, current.stage, actorPrincipalId) : false;
 
   const workspaceTenantId = tenantId();
   const anchorRunId = await currentAnchor(projectId);
@@ -685,11 +641,11 @@ export async function projectDetail(projectId: string, actorPrincipalId: string)
     project: { ...row, tenantId: workspaceTenantId, anchorRunId },
     tenantId: workspaceTenantId,
     anchorRunId,
-    // History entries carry no `activity` — it is only ever computed for the
-    // currently active run, never for one long past — but the shape stays
-    // uniform so a caller can treat every entry in this array the same way.
-    runs: runs.map((entry) => ({ ...entry, activity: null })),
-    current: current ? { ...current, activity } : null,
+    // Run standing is not folded here. The client reads committed `/hub` events
+    // through `foldProject`; this GET is the ledger, artifacts, and the
+    // tenant/anchor the fold addresses — not a second copy of the machine.
+    runs,
+    current,
     soloApproval,
     nodes,
     approvals,

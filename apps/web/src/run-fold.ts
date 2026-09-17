@@ -1,10 +1,9 @@
 /**
  * Where a project's lifecycle run stands, folded in the browser.
  *
- * The host still answers `/projects/:id` with activity it folded itself; the
- * client prefers this read when it has a workspace tenant and an anchor, so
- * "what is happening" comes from the same events the run committed, over
- * `/hub`, rather than from a second copy of the machine. Ledger writes stay
+ * `GET /projects/:id` is the ledger, artifacts, and the tenant/anchor this
+ * fold addresses. Standing itself is this read: the same events the run
+ * committed, over `/hub`, through the app package's fold. Ledger writes stay
  * on the host.
  */
 import { listWorkflowRuns, readWorkflowRunEvents, type Transport } from "@intx/hub-client";
@@ -35,4 +34,21 @@ export async function foldProject(
   transport: Transport = createHubTransport(),
 ): Promise<StageStatus | null> {
   return projectState(await foldProjectRuns(tenantId, anchorRunId, transport));
+}
+
+/**
+ * Standing for a project GET: fold the hub events the tenant/anchor name.
+ * No anchor means the lifecycle is not placed yet, so there is nothing to fold.
+ */
+export async function standingForProject(
+  project: { tenantId: string; anchorRunId: string | null },
+  transport: Transport = createHubTransport(),
+): Promise<StageStatus | null> {
+  if (project.anchorRunId === null) return null;
+  return foldProject(project.tenantId, project.anchorRunId, transport);
+}
+
+/** A stage step is in flight — the model is writing, not waiting at a gate. */
+export function runIsDrafting(standing: StageStatus | null): boolean {
+  return standing !== null && standing.parked === false;
 }

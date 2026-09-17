@@ -245,16 +245,6 @@ export type ArtifactNode = {
   provenance: { producer: string; agentRole?: string; providerId?: string; model?: string };
 };
 
-/** "What is happening right now", resolved from the runtime executor's own step. */
-export type RunActivity = {
-  headline: string;
-  stepId: string | null;
-  parked: boolean;
-  signalName: string | null;
-  /** When the step in flight, or the wait, began. */
-  since: string | null;
-};
-
 export type Run = {
   id: string;
   kind: string;
@@ -264,8 +254,6 @@ export type Run = {
   endedAt: string | null;
   terminalReason: string | null;
   packetId: string | null;
-  /** Only ever set for the currently active run; `null` for run history. */
-  activity: RunActivity | null;
 };
 
 /** One worker event on a build run, as the host recorded it. */

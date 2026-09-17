@@ -35,6 +35,7 @@ import { Preparing, STALL_AFTER_MS } from "./preparing.jsx";
 import { clock } from "./elapsed.jsx";
 import { StageDocument } from "./document.jsx";
 import { SELECTABLE_TARGETS } from "@solutions-builder/app/targets";
+import { runIsDrafting, type StageStatus } from "../../run-fold.ts";
 
 export { StageDocument, DocumentBody } from "./document.jsx";
 export { ApprovalsRecord, STAGE_GOAL } from "./gate.jsx";
@@ -44,12 +45,15 @@ const UNREADABLE = "_This version could not be read. It is still on disk — try
 
 export function StageWorkspace({
   detail,
+  standing = null,
   draftOpen = true,
   onChanged,
   onOpenSettings,
   onOpenDecisions,
 }: {
   detail: ProjectDetail;
+  /** Where the run stands, folded from `/hub` events — not from GET `/projects/:id`. */
+  standing?: StageStatus | null;
   draftOpen?: boolean;
   onChanged: () => void;
   onOpenSettings: () => void;
@@ -110,10 +114,10 @@ export function StageWorkspace({
   // is still on its way. "stalled" is nothing back for a while after that.
   const [begun, setBegun] = useState(false);
   const [stalled, setStalled] = useState(false);
-  // A draft is running when this window asked for one, or when the host's
-  // workflow started one on its own — every stage 4 design begins the moment
-  // stage 3 is approved. The host's activity names the step in flight.
-  const hostDrafting = current?.activity?.stepId === "draft" && current.activity.parked === false;
+  // A draft is running when this window asked for one, or when the folded
+  // standing says a stage step is in flight — every stage 4 design begins the
+  // moment stage 3 is approved. The fold names the step, not the host GET.
+  const hostDrafting = runIsDrafting(standing);
   const drafting = busy === "draft" || hostDrafting;
   useEffect(() => {
     if (!drafting) {
@@ -372,7 +376,7 @@ export function StageWorkspace({
               busy={drafting}
               begun={begun}
               stalled={stalled}
-              since={hostDrafting ? (current?.activity?.since ?? null) : null}
+              since={hostDrafting ? (standing?.since ?? null) : null}
             />
             <p className="inline-note material-cue">
               Documents or images to hand over meanwhile? Drop them anywhere here, or{" "}

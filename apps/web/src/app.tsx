@@ -41,6 +41,7 @@ import {
 } from "@corbits/react-ui";
 import { Onboarding } from "./pages/onboarding.jsx";
 import { StageWorkspace } from "./pages/workspace.jsx";
+import { standingForProject, type StageStatus } from "./run-fold.ts";
 
 /**
  * Where you are. A project is not a separate destination from its stage: you
@@ -324,6 +325,7 @@ export function App() {
   >([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<ProjectDetail | null>(null);
+  const [standing, setStanding] = useState<StageStatus | null>(null);
   // The artifact the Artifacts panel opens on, when the rail sent us there.
   const [openedArtifact, setOpenedArtifact] = useState<string | null>(null);
   // Guidance describes one project at one moment. Showing yesterday's
@@ -423,13 +425,18 @@ export function App() {
   useEffect(() => {
     if (!selected) {
       setDetail(null);
+      setStanding(null);
       return;
     }
     let cancelled = false;
     void api
       .project(selected)
-      .then((result) => {
-        if (!cancelled) setDetail(result);
+      .then(async (result) => {
+        const nextStanding = await standingForProject(result).catch(() => null);
+        if (!cancelled) {
+          setDetail(result);
+          setStanding(nextStanding);
+        }
       })
       .catch(() => undefined);
     return () => {
@@ -452,7 +459,10 @@ export function App() {
       refresh(),
       selected ? api.project(selected).catch(() => null) : Promise.resolve(null),
     ]);
-    if (selected) setDetail(next);
+    if (selected) {
+      setDetail(next);
+      setStanding(next ? await standingForProject(next).catch(() => null) : null);
+    }
   }, [refresh, selected]);
 
   const openProject = (projectId: string) => {
@@ -777,6 +787,7 @@ export function App() {
                   <StageTour enabled={detail.current !== null} stage={detail.current?.stage ?? 1} />
                   <StageWorkspace
                     detail={detail}
+                    standing={standing}
                     draftOpen={draftOpen}
                     onChanged={reloadDetail}
                     onOpenSettings={() => setView("settings")}

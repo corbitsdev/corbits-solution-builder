@@ -75,11 +75,14 @@ by `check:boundaries`, not left to habit — this paragraph is drawn from its
 cross-checked against every literal `@intx` import under `apps/hub/src`.
 
 **The client** (`apps/web`) renders and asks: it reads and commands over the
-host's loopback API (`client.ts`), runs `install()` and `createProject()`
-through `@solutions-builder/installer` over `/hub`, and never writes
-persistence itself. It imports the app package for names and the document
-format, the installer package for those two calls, and never the
-Interchange hub's own modules directly.
+host's loopback API (`client.ts`), folds where the project's run stands from
+the same `/hub` events the run committed (`run-fold.ts`), runs `install()` and
+`createProject()` through `@solutions-builder/installer` over `/hub`, and never
+writes persistence itself. `GET /projects/:id` is the ledger, artifacts, and
+the tenant/anchor that fold addresses — not a second copy of the machine. It
+imports the app package for names, the document format and that fold, the
+installer package for those two calls, and never the Interchange hub's own
+modules directly.
 
 **The desktop shell** (`apps/desktop`) starts the hub, opens the window on the
 URL it prints, keeps a tray presence, and leaves the hub running when the
@@ -117,8 +120,10 @@ there (`project-tenant.ts`). Commands, approvals, audience decisions and
 their audit trail are turns in a per-project ledger agent session
 (`command-ledger.ts`). The product's run record (origin, source, cost
 approval, packet, checkpoint, why it ended) is folded from the run mutations
-those turns carry (`runs.ts`); where the run stands in the runtime is the
-hub's own workflow run on the project's deployment (`lifecycle-run.ts`).
+those turns carry (`runs.ts`); where the run stands in the runtime is folded
+from the hub's own workflow events on the project's deployment — by the host
+when it delivers a signal (`lifecycle-run.ts`), and by the client when it
+draws the stage (`apps/web/src/run-fold.ts`). The project GET does not fold.
 Decision flags, worker questions and their answers are fields on the ledger
 turn of the command that raised them; a build attempt's events are turns of
 their own on the same thread. The frozen build packet and the delivery
