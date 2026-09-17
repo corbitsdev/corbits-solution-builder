@@ -58,6 +58,13 @@ const ALLOWED: { method: string; path: RegExp }[] = [
   { method: "POST", path: new RegExp(`^${TENANT}/workflows/definitions$`) },
   { method: "GET", path: new RegExp(`^${TENANT}/workflows/deployments$`) },
   { method: "POST", path: new RegExp(`^${TENANT}/workflows/deployments$`) },
+  // The workflow routes the browser drives directly: signal a gate (the
+  // admit payload the client folds itself), then read back the runs and
+  // their committed events to fold client-side. Nothing else under a
+  // deployment is offered: firing, mail, and definitions stay host-side.
+  { method: "POST", path: new RegExp(`^${TENANT}/workflows/[^/]+/signals$`) },
+  { method: "GET", path: new RegExp(`^${TENANT}/workflows/[^/]+/runs$`) },
+  { method: "GET", path: new RegExp(`^${TENANT}/workflows/[^/]+/runs/[^/]+/events$`) },
 ];
 
 function parentIdOf(body: unknown): string | null {
@@ -95,4 +102,45 @@ export function stripHubProxyCookies(response: Response): Response {
     statusText: response.statusText,
     headers,
   });
+}
+
+const SIGNAL_PATH = new RegExp(`^${TENANT}/workflows/([^/]+)/signals$`);
+
+/**
+ * The run a signal request targets, or null when this is not a signal
+ * delivery. The wiring uses it to decide whether the authority stamp below
+ * applies; the allow-list above still decides whether it is forwarded.
+ */
+export function hubProxySignalRunId(method: string, pathWithQuery: string): string | null {
+  if (method.toUpperCase() !== "POST") return null;
+  const path = new URL(pathWithQuery, "http://hub.local").pathname;
+  return SIGNAL_PATH.exec(path)?.[1] ?? null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+/**
+ * Stamps a gate signal's admit context with the host-computed authority set,
+ * overwriting whatever the body carried. A gate signal that reaches this
+ * proxy left from this host's own UI over an authenticated origin, so the
+ * host's stamp — not the body's — is the authority set `admitGate` checks.
+ * Only `context.actorAuthorities` on a gate-command payload is touched;
+ * anything else returns the body unchanged (same reference).
+ */
+export function stampGateSignalBody(
+  body: unknown,
+  isGateCommand: (command: unknown) => boolean,
+  authorities: readonly string[],
+): unknown {
+  if (!isRecord(body)) return body;
+  const payload = body.payload;
+  if (!isRecord(payload)) return body;
+  if (!isGateCommand(payload.command)) return body;
+  const context = isRecord(payload.context) ? payload.context : {};
+  return {
+    ...body,
+    payload: { ...payload, context: { ...context, actorAuthorities: [...authorities] } },
+  };
 }

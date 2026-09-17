@@ -239,8 +239,17 @@ export async function recordGatesFromRunEvents(
   projectId: string,
   events: readonly { type: string; body: Record<string, unknown> }[],
 ): Promise<void> {
-  for (const event of events) {
-    if (event.type !== "SignalReceived") continue;
+  await recordAdmittedGates(projectId, [{ runId: "", awaited: new Set(), events }]);
+}
+
+/**
+ * Records the admitted gate commands in per-run committed signal traffic —
+ * the write-on-read path for client signals over `/hub`, which never call
+ * `commandFrom`. The status read calls this with the events already in hand;
+ * the parked names come from folding those same events.
+ */
+export async function recordAdmittedGates(projectId: string, runs: readonly RunSignalTraffic[]): Promise<void> {
+  for (const event of selectAdmittedGateSignals(runs)) {
     const raw = event.body.payload;
     const payload = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
     const command = typeof payload.command === "string" ? (payload.command as Command) : null;
@@ -249,6 +258,72 @@ export async function recordGatesFromRunEvents(
     if (!signalId) continue;
     await recordGateFromSignal({ projectId, command, payload, signalId });
   }
+}
+
+/**
+ * The gate commands a committed run signal can carry, in ledger terms: every
+ * command out of a stage gate, plus accept/fail, which park after the build
+ * agent on the evidence signal while the iteration is live. Values identical
+ * to `GATE_COMMANDS` in gate-delivery.ts — that is the canonical
+ * delivery-side filter; this one is local so the ledger module stays under
+ * the dispatch module instead of above it.
+ */
+const GATE_SIGNAL_COMMANDS: ReadonlySet<string> = new Set([
+  ...LEDGER.filter((row) => row.from?.kind === "stage").map((row) => row.command),
+  "build.accept_evidence",
+  "build.fail",
+]);
+
+/** One run's committed signal traffic plus the signal names it still awaits. */
+export type RunSignalTraffic = {
+  readonly runId: string;
+  readonly awaited: ReadonlySet<string>;
+  readonly events: readonly { readonly seq?: number; readonly type: string; readonly body: Record<string, unknown> }[];
+};
+
+/**
+ * Which committed `SignalReceived` events were admitted gate commands. A
+ * parked signal (its name still awaited) was never consumed; a `SignalAwaited`
+ * after the delivery re-parked the gate, so the delivered signal was refused
+ * and a later delivery supersedes it. Signal ids dedupe the awaiter/relay
+ * pair, which commit the same delivery twice under different names. Anything
+ * here still skips its write when `recordCommand` finds the receipt, so a
+ * gate recorded at delivery or by an earlier read is never written twice.
+ */
+export function selectAdmittedGateSignals(
+  runs: readonly RunSignalTraffic[],
+): { type: string; body: Record<string, unknown> }[] {
+  const selected: { type: string; body: Record<string, unknown> }[] = [];
+  const seen = new Set<string>();
+  for (const run of runs) {
+    const reArmed = new Map<string, number>();
+    for (const event of run.events) {
+      if (event.type !== "SignalAwaited") continue;
+      const name = event.body.signalName;
+      // Control-plane input parks reuse the await machinery on reserved
+      // channels, never on a gate name; only a gate re-park refuses.
+      if (typeof name !== "string" || event.body.parkKind === "input") continue;
+      // A seq-less re-park cannot be ordered; the refusal wins and every
+      // delivery of that name is skipped.
+      reArmed.set(name, Math.max(reArmed.get(name) ?? -1, event.seq ?? Number.POSITIVE_INFINITY));
+    }
+    for (const event of run.events) {
+      if (event.type !== "SignalReceived") continue;
+      const name = event.body.signalName;
+      if (typeof name !== "string" || run.awaited.has(name)) continue;
+      // A seq-less event cannot prove it predates the re-park; without order
+      // evidence the refusal wins and the delivery is skipped.
+      if ((reArmed.get(name) ?? -1) > (event.seq ?? -1)) continue;
+      const raw = event.body.payload;
+      const payload = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+      if (typeof payload.command !== "string" || !GATE_SIGNAL_COMMANDS.has(payload.command)) continue;
+      const signalId = event.body.signalId;
+      if (typeof signalId !== "string" || !signalId || seen.has(signalId)) continue;
+      seen.add(signalId);
+      selected.push({ type: event.type, body: event.body });
+    }
+  }
+  return selected;
 }
 
 /** Records one committed command as a ledger mail turn. Call only after the transaction that committed it has returned. A second call with the same idempotency key is a no-op, so a gate recorded at delivery is not written again from `commandFrom`. */
