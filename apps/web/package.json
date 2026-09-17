@@ -5,6 +5,7 @@
   "type": "module",
   "description": "The Solutions Builder client.",
   "dependencies": {
+    "@intx/hub-client": "workspace:*",
     "@solutions-builder/app": "workspace:*",
     "@solutions-builder/installer": "workspace:*"
   }

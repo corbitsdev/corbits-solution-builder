@@ -25,7 +25,9 @@
  *      `hub-executor` import Interchange internals. A second module
  *      reaching into the hub is how a parallel control plane starts.
  *   3. The client cannot write persistence: `apps/web` never imports the hub,
- *      the database, the schema, or the command engine.
+ *      the database, the schema, or the command engine. It may take
+ *      `@intx/hub-client` (the transport) to fold a run and deliver a signal
+ *      over `/hub`; it may not take any other `@intx/*` package.
  *   4. Run state moves in exactly one place. Only `engine.ts` (and
  *      `projects.ts`, opening the first run) records a run mutation on the
  *      ledger, so there is no second state machine.
@@ -162,6 +164,9 @@ const INSTALLER_ALLOWED = [
   // Its tests' runner; not a runtime dependency of the installed package.
   "bun:test",
 ];
+
+/** What the client may take from the platform: the hub transport, nothing else. */
+const WEB_ALLOWED = ["@intx/hub-client"];
 
 const PLATFORM_FILE = /^apps\/hub\/src\/(hub-mount|hub-keys|hub-migrate|hub-executor|db|schema|migrate)\.ts$/;
 
@@ -309,12 +314,14 @@ for (const file of files) {
     const toolsAllowed = area === "tools" && !!toolsPackage && platform.every((name) => startsWithAny(name, toolsPackage.allowed));
     const installerAllowed =
       area === "installer" && platform.every((name) => startsWithAny(name, INSTALLER_ALLOWED));
+    const webAllowed = area === "web" && platform.every((name) => startsWithAny(name, WEB_ALLOWED));
     const allowed =
       PLATFORM_FILE.test(path) ||
       (area === "hub" && runtimeOnly) ||
       packageAllowed ||
       toolsAllowed ||
-      installerAllowed;
+      installerAllowed ||
+      webAllowed;
     if (platform.length > 0 && !allowed) {
       violations.push({
         file: path,
@@ -354,7 +361,7 @@ for (const file of files) {
         name.includes("@solutions-builder/hub") ||
         name.startsWith("drizzle-orm") ||
         name.includes("@electric-sql/pglite") ||
-        name.includes("@intx/"),
+        (name.includes("@intx/") && !startsWithAny(name, WEB_ALLOWED)),
     );
     if (forbidden.length > 0) {
       violations.push({

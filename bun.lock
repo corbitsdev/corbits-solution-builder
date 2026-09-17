@@ -87,6 +87,7 @@
       "name": "@solutions-builder/web",
       "version": "0.1.0",
       "dependencies": {
+        "@intx/hub-client": "workspace:*",
         "@solutions-builder/app": "workspace:*",
         "@solutions-builder/installer": "workspace:*",
       },

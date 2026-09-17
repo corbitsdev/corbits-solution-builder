@@ -24,7 +24,7 @@ import { nextQuestion } from "./questions.js";
 import { openDecisionFor } from "./decisions.js";
 import { liveDraft } from "./live-drafts.js";
 import { activityHeadline } from "@solutions-builder/app/next-step";
-import { executionUnavailable, projectExecutionStatus } from "./hub-executor.js";
+import { currentAnchor, executionUnavailable, projectExecutionStatus } from "./hub-executor.js";
 import { activeRun, runsForProject, type RunRecord } from "./runs.js";
 import { tenantId } from "./hub-client.js";
 import { installProjectAuthority } from "./project-authority.js";
@@ -699,8 +699,13 @@ export async function projectDetail(projectId: string, actorPrincipalId: string)
     soloApproval = await soloApprovalFor(projectId, current.stage, actorPrincipalId);
   }
 
+  const workspaceTenantId = tenantId();
+  const anchorRunId = await currentAnchor(projectId);
+
   return {
-    project: row,
+    project: { ...row, tenantId: workspaceTenantId, anchorRunId },
+    tenantId: workspaceTenantId,
+    anchorRunId,
     // History entries carry no `activity` — it is only ever computed for the
     // currently active run, never for one long past — but the shape stays
     // uniform so a caller can treat every entry in this array the same way.
