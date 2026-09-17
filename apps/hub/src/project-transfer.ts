@@ -40,7 +40,8 @@ import {
   rewriteIds,
   type PortableArtifactNode,
 } from "./projects.js";
-import { createProjectRecord, readProject, updateProject, type ProjectPolicy } from "./project-tenant.js";
+import { createProjectRecord, readProject, updateProject } from "./installer-bridge.js";
+import type { ProjectPolicy } from "@solutions-builder/installer";
 
 export const BUNDLE_FORMAT = "solutions-builder.project";
 export const BUNDLE_VERSION = 1;

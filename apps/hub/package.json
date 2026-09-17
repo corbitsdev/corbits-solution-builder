@@ -6,6 +6,7 @@
   "description": "The Solutions Builder host: loopback API, persistence, and the embedded Interchange hub.",
   "dependencies": {
     "@solutions-builder/app": "workspace:*",
+    "@solutions-builder/installer": "workspace:*",
     "@solutions-builder/tools-deck": "workspace:*"
   },
   "devDependencies": {

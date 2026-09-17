@@ -316,8 +316,14 @@ function createRemoteTransport(): Transport {
   };
 }
 
-/** The same embedded/remote switch `hubMode()` has always driven, now selecting a `Transport`. */
-function hubTransport(): Transport {
+/**
+ * The same embedded/remote switch `hubMode()` has always driven, now
+ * selecting a `Transport`. Exported so `installer-bridge.ts` can hand the
+ * same authenticated transport to `@solutions-builder/installer`, which
+ * cannot reach `hubApi`/`hubMode` itself — everything in this file is
+ * `apps/hub/src`, off limits from `packages/installer/src`.
+ */
+export function hubTransport(): Transport {
   return hubMode() === "embedded" ? createEmbeddedTransport() : createRemoteTransport();
 }
 

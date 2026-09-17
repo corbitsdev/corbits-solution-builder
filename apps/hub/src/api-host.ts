@@ -13,7 +13,7 @@ import { credentialBackend } from "./host-secrets.js";
 import { BRIDGE_CAPABILITIES, BRIDGE_ID, bridgeAvailable } from "./corbits-exec.js";
 import { hostStatus, requestHostStop } from "./lifecycle.js";
 import { ensureHub, hubFetch } from "./hub-client.js";
-import { install, installState } from "./install.js";
+import { install, installState } from "./installer-bridge.js";
 
 export const API_VERSION = "1";
 

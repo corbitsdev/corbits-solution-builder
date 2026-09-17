@@ -1,8 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { HubGrant } from "./hub-client.js";
-import type { DelegationRecord, ProjectPolicy } from "./project-tenant.js";
+import { delegationResource, type DelegationRecord, type DelegationStore, type ProjectPolicy } from "@solutions-builder/installer";
 import { createProject, deleteProject, revokeProjectDelegations } from "./projects.js";
-import { delegationResource, type DelegationStore } from "./workbench-delegation.js";
 
 const POLICY: ProjectPolicy = {
   costTolerancePercent: 10,

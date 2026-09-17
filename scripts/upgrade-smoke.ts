@@ -30,7 +30,7 @@ import { prepareDatabase } from "../apps/hub/src/migrate.js";
 import { catalog, ensureHub, getTenant, tenantId } from "../apps/hub/src/hub-client.js";
 import { hub } from "../apps/hub/src/hub-mount.js";
 import { resolveCredentialSecret } from "../apps/hub/src/hub-gaps.js";
-import { install, installState } from "../apps/hub/src/install.js";
+import { install, installState } from "../apps/hub/src/installer-bridge.js";
 import { readSecretResult, secretReference, storeSecret } from "../apps/hub/src/host-secrets.js";
 import { migrateLegacyProviderCredentials } from "../apps/hub/src/credential-migration.js";
 import { expectedDefinitions } from "@solutions-builder/app/manifest";

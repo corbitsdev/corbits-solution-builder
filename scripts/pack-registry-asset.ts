@@ -78,12 +78,12 @@ import { getToolPackageSourceContentIdentity } from "@intx/types/tool-packages";
 
 import { openDatabase } from "../apps/hub/src/db.js";
 import { prepareDatabase } from "../apps/hub/src/migrate.js";
-import { install } from "../apps/hub/src/install.js";
+import { install } from "../apps/hub/src/installer-bridge.js";
 import { assets as hubAssets } from "../apps/hub/src/hub-client.js";
 import { hub } from "../apps/hub/src/hub-mount.js";
 import { databaseDirectory } from "../apps/hub/src/paths.js";
 import { packTarballFiles, tarballFilename, tarballIntegrity, type TarballFiles } from "../apps/hub/src/tarball.js";
-import { distFiles, readManifest, vendoredClosure, walk } from "../apps/hub/src/workflow-closure.js";
+import { distFiles, readManifest, vendoredClosure, walk } from "../packages/installer/src/workflow-closure.js";
 import { WORKFLOW_PACKAGE_DEPENDENCIES } from "@solutions-builder/app/workflows/lifecycle-source";
 
 /** The asset's human-readable name — how it's found and created. Distinct

@@ -8,8 +8,9 @@
  * asset and deployed through the hub's own route. The hub probes the
  * source in a sidecar, freezes a `workflow_definition`, and creates the
  * anchor `workflow_run`. That row is what stage gates will park on once the
- * in-process executor (`hub-executor.ts`) retires; until then both exist.
+ * host's own in-process executor retires; until then both exist.
  */
+import type { Transport } from "@intx/hub-client";
 import {
   LIFECYCLE_ENTRY_PATH,
   lifecycleEntrySource,
@@ -17,37 +18,27 @@ import {
   type InferenceSourcePin,
 } from "@solutions-builder/app/workflows/lifecycle-source";
 import { continuingCommands, ROUND_STEP_ID } from "@solutions-builder/app/workflows/stage-loop";
-import { assets, catalog, workflows, type HubDeployment } from "./hub-client.js";
+import { assetsFor, catalogFor, workflowsFor, type HubDeployment } from "./hub.js";
+import type { InstallerGaps } from "./gaps.js";
+import { readProject } from "./project-tenant.js";
+import {
+  closureFiles,
+  deckAppMemberFiles,
+  toolsDeckMemberFiles,
+  toolsDeliveryMemberFiles,
+  treeDigest,
+  workspaceCatalog,
+} from "./workflow-closure.js";
 
 /**
  * A deployment's status is its sidecar allocation's. These are the ones the
  * runtime still dispatches to (`isSidecarAllocationDispatchable` in
  * `@intx/types`); `releasing`, `released` and `failed` are not.
  */
-import { allocationBinding, readWorkflowSourceBlob, writeWorkflowSourceTree } from "./hub-gaps.js";
-import { canPlaceSidecars, hub } from "./hub-mount.js";
-
-/**
- * The deployment statuses the hub projects from a sidecar allocation that is
- * over: none of these can be fired or signalled again. Everything else —
- * "pending" while the sidecar is placed or reconnecting, "deployed" once it
- * is connected, "recovering" while it is replaced — is live. Named by
- * exclusion because the projection's healthy status is "deployed", and a
- * list of the live ones that left it out read every connected sidecar as
- * gone.
- */
 const ENDED_DEPLOYMENT_STATUSES = new Set(["releasing", "released", "failed"]);
 
 function isLive(deployment: HubDeployment | undefined): deployment is HubDeployment {
   return deployment !== undefined && !ENDED_DEPLOYMENT_STATUSES.has(deployment.status);
-}
-
-/**
- * Whether the deployment's sidecar is still placed, or on its way: released,
- * releasing and failed deployments cannot be fired or signalled again.
- */
-export async function deploymentIsLive(deploymentId: string): Promise<boolean> {
-  return isLive((await workflows.deployments()).find((entry: HubDeployment) => entry.id === deploymentId));
 }
 
 /**
@@ -58,19 +49,19 @@ export async function deploymentIsLive(deploymentId: string): Promise<boolean> {
  * delivered. (A deployment with no allocation yet is reachable: the
  * allocation it gets will be this host's.)
  */
-async function reachable(deploymentId: string): Promise<boolean> {
-  const binding = await allocationBinding(deploymentId);
-  return binding === null || binding === hub().sidecarBindingFingerprint;
+async function reachable(gaps: InstallerGaps, deploymentId: string): Promise<boolean> {
+  const binding = await gaps.allocationBinding(deploymentId);
+  return binding === null || binding === gaps.sidecarFingerprint();
 }
-import { readProject } from "./project-tenant.js";
-import {
-  closureFiles,
-  deckAppMemberFiles,
-  toolsDeckMemberFiles,
-  toolsDeliveryMemberFiles,
-  treeDigest,
-  workspaceCatalog,
-} from "./workflow-closure.js";
+
+/**
+ * Whether this deployment's sidecar is still placed, or on its way: released,
+ * releasing and failed deployments cannot be fired or signalled again.
+ */
+export async function deploymentIsLive(transport: Transport, tenantId: string, deploymentId: string): Promise<boolean> {
+  const workflows = workflowsFor(transport, tenantId);
+  return isLive((await workflows.deployments()).find((entry: HubDeployment) => entry.id === deploymentId));
+}
 
 export const LIFECYCLE_ASSET_NAME = "solutions-builder-project-lifecycle";
 const ENTRY_PATH = LIFECYCLE_ENTRY_PATH;
@@ -174,9 +165,14 @@ export function renderLifecycleSource(
  * agent's declared preference matches an approved source rather than falling
  * back to the default.
  */
-async function sourceFor(offering: { providerId: string; modelId: string }): Promise<InferenceSourcePin | undefined> {
+async function sourceFor(
+  transport: Transport,
+  tenantId: string,
+  offering: { providerId: string; modelId: string },
+): Promise<InferenceSourcePin | undefined> {
   // An offering points at a model provider (the catalog's `mpv_` row, whose
   // plugin names the inference adapter), not at the credential provider.
+  const catalog = catalogFor(transport, tenantId);
   const [providers, models] = await Promise.all([catalog.modelProviders(), catalog.models()]);
   const provider = providers.find((row) => row.id === offering.providerId);
   const model = models.find((row) => row.id === offering.modelId);
@@ -195,7 +191,8 @@ export type LifecycleDeployment =
       deploymentStatus: string;
     };
 
-async function lifecycleAsset(projectId?: string): Promise<string> {
+async function lifecycleAsset(transport: Transport, tenantId: string, projectId?: string): Promise<string> {
+  const assets = assetsFor(transport, tenantId);
   const name = lifecycleAssetName(projectId);
   const existing = (await assets.list("workflow")).find((asset) => asset.name === name);
   if (existing) return existing.id;
@@ -217,10 +214,13 @@ const commitsByAsset = new Map<string, string>();
 const queued = new Map<string | undefined, Promise<unknown>>();
 
 export function ensureLifecycleDeployment(
+  transport: Transport,
+  gaps: InstallerGaps,
+  tenantId: string,
   projectId?: string,
   options: { replace?: boolean } = {},
 ): Promise<LifecycleDeployment> {
-  const deploy = () => ensureLifecycleDeploymentUncached(projectId, options);
+  const deploy = () => ensureLifecycleDeploymentUncached(transport, gaps, tenantId, projectId, options);
   // Both arms are `deploy`, so this call starts once the one ahead has
   // settled, whether it succeeded or failed. The queue only orders; the
   // promise handed back is the real one, so a failure reaches its own caller
@@ -243,6 +243,9 @@ export function ensureLifecycleDeployment(
  * are; a project tenant holds none of its own.
  */
 async function ensureLifecycleDeploymentUncached(
+  transport: Transport,
+  gaps: InstallerGaps,
+  tenantId: string,
   projectId?: string,
   options: {
     /**
@@ -254,7 +257,8 @@ async function ensureLifecycleDeploymentUncached(
     replace?: boolean;
   } = {},
 ): Promise<LifecycleDeployment> {
-  if (!canPlaceSidecars()) return { status: "no_host" };
+  if (!gaps.canPlaceSidecars()) return { status: "no_host" };
+  const catalog = catalogFor(transport, tenantId);
   const offerings = (await catalog.offerings())
     .filter((offering) => !offering.disabled)
     .sort((a, b) => a.priority - b.priority);
@@ -263,11 +267,12 @@ async function ensureLifecycleDeploymentUncached(
   // A project's own deployment renders against that project's audiences, so
   // an audience added or renamed changes the digest and redeploys — the same
   // upgrade path any other lifecycle change takes.
-  const project = projectId ? await readProject(projectId) : null;
+  const project = projectId ? await readProject(transport, projectId) : null;
   const audiences = project?.policy.audiences;
-  const rendered = renderLifecycleSource(projectId, await sourceFor(offerings[0]!), audiences);
-  const assetId = await lifecycleAsset(projectId);
-  const head = await readWorkflowSourceBlob(assetId, DIGEST_PATH);
+  const rendered = renderLifecycleSource(projectId, await sourceFor(transport, tenantId, offerings[0]!), audiences);
+  const assetId = await lifecycleAsset(transport, tenantId, projectId);
+  const head = await gaps.readWorkflowSourceBlob(assetId, DIGEST_PATH);
+  const workflows = workflowsFor(transport, tenantId);
   // Only a deployment whose sidecar is still placed counts. Stopping the host
   // releases a project's sidecar, and a released deployment's anchor run is
   // terminal: it cannot be fired or signalled again. Handing that one back as
@@ -276,7 +281,7 @@ async function ensureLifecycleDeploymentUncached(
   const latest = (await workflows.deployments()).find(
     (deployment: HubDeployment) => deployment.definitionAssetId === assetId && isLive(deployment),
   );
-  if (latest && !(await reachable(latest.id))) {
+  if (latest && !(await reachable(gaps, latest.id))) {
     console.error(
       `[deploy] ${projectId ?? "workspace"}: deployment ${latest.id} is bound to a hub address this host no longer serves; deploying the lifecycle again.`,
     );
@@ -290,7 +295,7 @@ async function ensureLifecycleDeploymentUncached(
     };
   }
 
-  const { commitSha } = await writeWorkflowSourceTree({
+  const { commitSha } = await gaps.writeWorkflowSourceTree({
     assetId,
     files: { ...rendered },
     message: "Project lifecycle generated from the transition ledger",

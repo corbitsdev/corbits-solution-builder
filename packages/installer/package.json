@@ -1,0 +1,16 @@
+{
+  "name": "@solutions-builder/installer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Installs Solutions Builder into an Interchange tenant: owner, workspace, roles, grants, definitions, skill assets and the per-project lifecycle deployment, driven by a hub transport the host supplies.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@solutions-builder/app": "workspace:*",
+    "@intx/hub-client": "workspace:*",
+    "@intx/types": "workspace:*"
+  }
+}

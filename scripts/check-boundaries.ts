@@ -2,13 +2,20 @@
  * Dependency-direction check.
  *
  * The tree is a Bun workspace: `packages/solutions-builder` is the app package
- * (what will be installed into an Interchange tenant), `apps/hub` is the host,
- * `apps/web` is the client. This script is what makes the lines between them
- * true rather than aspirational:
+ * (what will be installed into an Interchange tenant), `packages/installer` is
+ * the installer package (what does the installing, driven by a hub transport
+ * the host supplies), `apps/hub` is the host, `apps/web` is the client. This
+ * script is what makes the lines between them true rather than aspirational:
  *
- *   1. The package depends on nothing in `apps/` and on no platform internals.
- *      It may use the workflow authoring surface and the platform's types,
- *      because the definitions it generates are Interchange workflows.
+ *   1. The app package depends on nothing in `apps/` and on no platform
+ *      internals. It may use the workflow authoring surface and the
+ *      platform's types, because the definitions it generates are
+ *      Interchange workflows.
+ *   1a. The installer package depends on nothing in `apps/` either. It may
+ *       take `@solutions-builder/app`, `@intx/hub-client` (the transport it
+ *       is driven by) and `@intx/types` — never a platform internal, and
+ *       never the app package's own wider allowance (`arktype`, deck
+ *       authoring's libraries) it has no use for.
  *   2. Only the hub talks to a provider or an agent runtime, and only the
  *      hub's embedding files (`hub-mount`, `hub-keys`, `hub-migrate`,
  *      `db`, `schema`, `migrate`) plus
@@ -27,10 +34,11 @@
  *      libraries (deck rendering's `pptxgenjs`/`jszip`).
  */
 import { readdir, readFile } from "node:fs/promises";
-import { extname, join, relative } from "node:path";
+import { dirname, extname, join, relative, resolve, sep } from "node:path";
 
 const root = join(import.meta.dir, "..");
 const PACKAGE = "packages/solutions-builder/src";
+const INSTALLER = "packages/installer/src";
 const HUB = "apps/hub/src";
 const WEB = "apps/web/src";
 const PACKAGES_ROOT = "packages";
@@ -135,6 +143,23 @@ const PACKAGE_ALLOWED = ["@intx/workflow", "@intx/types", "arktype", "pptxgenjs"
  *  to import it too. */
 const TOOLS_CORE_ALLOWED = ["@intx/agent", "@intx/workflow", "@intx/types", "@solutions-builder/app"];
 
+/**
+ * What the installer package may take from the platform: the transport it is
+ * driven by, and types. Not `arktype` or the deck authoring libraries — it
+ * generates nothing of its own that needs them — and never a platform
+ * internal beyond `@intx/hub-client`'s own public surface.
+ */
+const INSTALLER_ALLOWED = [
+  "@solutions-builder/app",
+  "@intx/hub-client",
+  "@intx/types",
+  // The one seeded definition's type, the same reason the app package allows
+  // it: the shape it generates is an Interchange workflow.
+  "@intx/workflow",
+  // Its tests' runner; not a runtime dependency of the installed package.
+  "bun:test",
+];
+
 const PLATFORM_FILE = /^apps\/hub\/src\/(hub-mount|hub-keys|hub-migrate|hub-executor|hub-gaps|db|schema|migrate)\.ts$/;
 
 type ToolsPackage = { dir: string; allowed: readonly string[] };
@@ -162,7 +187,7 @@ const TOOLS_PACKAGES = await toolsPackages();
 const TOOLS_DIRS = TOOLS_PACKAGES.map((pkg) => pkg.dir);
 
 const files = (
-  await Promise.all([PACKAGE, HUB, WEB, ...TOOLS_DIRS].map((area) => walk(join(root, area))))
+  await Promise.all([PACKAGE, INSTALLER, HUB, WEB, ...TOOLS_DIRS].map((area) => walk(join(root, area))))
 ).flat();
 
 for (const file of files) {
@@ -170,7 +195,15 @@ for (const file of files) {
   const text = await readFile(file, "utf8");
   const imports = importsOf(text);
   const toolsPackage = TOOLS_PACKAGES.find((pkg) => path.startsWith(pkg.dir));
-  const area = path.startsWith(PACKAGE) ? "package" : path.startsWith(HUB) ? "hub" : toolsPackage ? "tools" : "web";
+  const area = path.startsWith(PACKAGE)
+    ? "package"
+    : path.startsWith(INSTALLER)
+      ? "installer"
+      : path.startsWith(HUB)
+        ? "hub"
+        : toolsPackage
+          ? "tools"
+          : "web";
   const external = imports.filter((name) => !name.startsWith("."));
 
   if (area === "package") {
@@ -211,6 +244,40 @@ for (const file of files) {
     }
   }
 
+  if (area === "installer") {
+    const outside = external.filter(
+      (name) => !startsWithAny(name, INSTALLER_ALLOWED) && !name.startsWith("node:"),
+    );
+    if (outside.length > 0) {
+      violations.push({
+        file: path,
+        rule: "the installer package depends on nothing but @solutions-builder/app, @intx/hub-client and @intx/types",
+        detail: outside.join(", "),
+      });
+    }
+    // A relative import cannot walk out of the package into `apps/`: that is
+    // the same escape the app package rule above forbids by name, just spelled
+    // with dots instead of a bare specifier. Resolved to an absolute path
+    // against the repo root rather than string-matched on the joined
+    // (unresolved) path, so `../../../apps/hub/src/x.js` — which never
+    // contains a literal "/apps/" segment in its raw, un-normalised join
+    // when `path` itself already sits directly under a component named
+    // `apps` — cannot slip past by spelling.
+    const escapes = imports.filter((name) => {
+      if (!name.startsWith(".")) return false;
+      const resolved = resolve(root, dirname(path), name).split(sep).join("/");
+      const appsRoot = join(root, "apps").split(sep).join("/");
+      return resolved === appsRoot || resolved.startsWith(`${appsRoot}/`);
+    });
+    if (escapes.length > 0) {
+      violations.push({
+        file: path,
+        rule: "the installer package depends on nothing in apps/",
+        detail: escapes.join(", "),
+      });
+    }
+  }
+
   if (area !== "hub") {
     const provider = external.filter((name) => startsWithAny(name, PROVIDER_PACKAGES));
     if (provider.length > 0) {
@@ -233,7 +300,14 @@ for (const file of files) {
     // ever import it.
     const packageAllowed = area === "package" && platform.every((name) => startsWithAny(name, PACKAGE_ALLOWED));
     const toolsAllowed = area === "tools" && !!toolsPackage && platform.every((name) => startsWithAny(name, toolsPackage.allowed));
-    const allowed = PLATFORM_FILE.test(path) || (area === "hub" && runtimeOnly) || packageAllowed || toolsAllowed;
+    const installerAllowed =
+      area === "installer" && platform.every((name) => startsWithAny(name, INSTALLER_ALLOWED));
+    const allowed =
+      PLATFORM_FILE.test(path) ||
+      (area === "hub" && runtimeOnly) ||
+      packageAllowed ||
+      toolsAllowed ||
+      installerAllowed;
     if (platform.length > 0 && !allowed) {
       violations.push({
         file: path,

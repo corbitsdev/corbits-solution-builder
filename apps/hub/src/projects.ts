@@ -32,15 +32,15 @@ import {
   listProjectRecords,
   requireProject,
   updateProject,
-  type DelegationRecord,
-} from "./project-tenant.js";
+  delegationStore as liveDelegationStore,
+} from "./installer-bridge.js";
 import {
   delegateAtCreation,
-  liveDelegationStore,
   resolveDelegationConsent,
   revokeAllDelegations,
+  type DelegationRecord,
   type DelegationStore,
-} from "./workbench-delegation.js";
+} from "@solutions-builder/installer";
 
 export async function createProject(
   args: {

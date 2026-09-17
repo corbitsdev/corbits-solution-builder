@@ -1,0 +1,72 @@
+/**
+ * The public surface of `@solutions-builder/installer`.
+ *
+ * Everything here is driven by a `Transport` (`@intx/hub-client`) already
+ * authenticated as the workspace owner, and an `InstallerGaps` bridge for the
+ * handful of platform writes no hub route does yet (`./gaps.ts`). Both are
+ * the host's to build; this package never reaches a database or an
+ * Interchange internal itself.
+ */
+export * from "./errors.js";
+export * from "./gaps.js";
+export * from "./hub.js";
+export * from "./install.js";
+export * from "./project-tenant.js";
+export * from "./workbench-delegation.js";
+export * from "./workflow-closure.js";
+export * from "./workflow-deploy.js";
+export * from "./workflow-seed.js";
+export * from "./skill-assets.js";
+
+import type { Transport } from "@intx/hub-client";
+import type { InstallerGaps } from "./gaps.js";
+import {
+  createProjectRecord,
+  type DelegationRecord,
+  type ProjectPolicy,
+  type ProjectRecord,
+} from "./project-tenant.js";
+import {
+  delegateAtCreation,
+  liveDelegationStore,
+  resolveDelegationConsent,
+  revokeAllDelegations,
+} from "./workbench-delegation.js";
+
+/**
+ * Opens a project: the child tenant, its authority, and the credential
+ * delegation the creation payload consented to. This is the installer's
+ * `createProject` — the tenant-and-grant half of opening a project. The
+ * ledger's own `project.create` command (the run it opens, the command it
+ * records) stays the host's: `apps/hub/src/projects.ts` calls this first,
+ * then does that.
+ */
+export async function createProject(
+  transport: Transport,
+  gaps: InstallerGaps,
+  workspaceTenantId: string,
+  args: { title: string; slug: string; policy: ProjectPolicy; delegatedCredentialIds?: string[] },
+): Promise<{ project: ProjectRecord; delegations: DelegationRecord }> {
+  const store = liveDelegationStore(transport, workspaceTenantId);
+  const consent = resolveDelegationConsent(args.delegatedCredentialIds, await store.listDelegatableCredentials());
+
+  const project = await createProjectRecord(transport, workspaceTenantId, {
+    title: args.title,
+    slug: args.slug,
+    policy: args.policy,
+  });
+  try {
+    const delegations = await delegateAtCreation(store, { projectId: project.id, consent });
+    return { project, delegations };
+  } catch (cause) {
+    // The tenant exists but the project never opened: pull back whatever the
+    // delegation minted so a failed creation leaves no orphan grant behind.
+    // The tenant row itself is the caller's to conceal — it knows how a
+    // project is marked deleted (`updateProject`) and whether that is even
+    // this package's job for a tenant it just failed to finish opening.
+    await revokeAllDelegations(store, project.id).catch(() => {
+      // Best effort: the cause below is what the caller needs to see.
+    });
+    throw cause;
+  }
+}

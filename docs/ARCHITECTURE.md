@@ -18,6 +18,7 @@ apps/web/                        the client
 apps/desktop/                    the native shell and tray
 packages/solutions-builder/src/  the app package: the transition ledger, the lifecycle workflow generated from it,
                                  the specialist kit, the document format
+packages/installer/src/          installs the app package into a tenant, driven by a hub transport the host supplies
 vendor/interchange/              the Interchange control plane, vendored under LGPL-2.1
 ```
 
@@ -26,11 +27,21 @@ stated once: the ledger with every state, command, authority and transition
 and the three forbidden cases; the Interchange lifecycle workflow generated
 from it; the specialist kit and its prompts; and the document format the
 client and the hub both parse. It depends on nothing in the apps and on no
-platform internals. It is intended to become the package installed into any
-Interchange tenant. The hub boots vanilla (migrate, mount, serve) and the
-client installs the package into the tenant on first launch and after every
-credential change; what the hub still holds beside Interchange's tables is
-the part of the tree that shrinks as it becomes vanilla.
+platform internals.
+
+**The installer package** (`packages/installer`) does the installing: ensures
+the owner's workspace tenant, its roles and grants, the seeded workflow
+definition, the curated kit's skill assets, and the per-project lifecycle
+deployment; opening a project — its own tenant, authority and credential
+delegation — is its `createProject`. It takes a hub `Transport`
+(`@intx/hub-client`) already authenticated as the owner, plus a small
+`InstallerGaps` bridge for the platform writes no hub route does yet; it
+never reaches a database, a keychain or an Interchange internal itself, and
+depends on nothing in `apps/`. The hub boots vanilla (migrate, mount, serve)
+and calls this package to install on first launch and after every credential
+change (`apps/hub/src/installer-bridge.ts`); what the hub still holds beside
+Interchange's tables is the part of the tree that shrinks as it becomes
+vanilla.
 
 **The hub** (`apps/hub`) owns the loopback API, the database, the guard that
 enforces the ledger, the engine that applies commands, the providers and the

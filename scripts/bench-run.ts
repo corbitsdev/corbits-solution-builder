@@ -83,10 +83,10 @@ const { openDatabase } = await import("../apps/hub/src/db.js");
 const { prepareDatabase } = await import("../apps/hub/src/migrate.js");
 const { hub, hubWebSocket, mountHub, setHostPort } =
   await import("../apps/hub/src/hub-mount.js");
-const { install } = await import("../apps/hub/src/install.js");
+const { install } = await import("../apps/hub/src/installer-bridge.js");
 const { connectProvider } = await import("../apps/hub/src/providers.js");
 const { ensureLifecycleDeployment } =
-  await import("../apps/hub/src/workflow-deploy.js");
+  await import("../apps/hub/src/installer-bridge.js");
 const { createProject } = await import("../apps/hub/src/projects.js");
 const { localActor } = await import("../apps/hub/src/hub-client.js");
 const { titleFromProblem } = await import("../apps/hub/src/title.js");
