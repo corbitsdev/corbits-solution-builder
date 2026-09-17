@@ -34,5 +34,11 @@ export const smokeDataDir: string = process.env.SOLUTIONS_BUILDER_DATA_DIR!;
  * overwrite and delete, a developer's own signed-in credentials — the
  * keychain is one per machine, not one per test run, unlike the data
  * directory above. Every in-process smoke forces the file-backed store.
+ *
+ * `SOLUTIONS_BUILDER_SMOKE` is the marker `host-secrets.ts` checks before it
+ * honours the override at all — a real launch that somehow inherited
+ * `SOLUTIONS_BUILDER_CREDENTIAL_BACKEND` from its environment must not have
+ * its keychain silently downgraded to a file.
  */
+process.env.SOLUTIONS_BUILDER_SMOKE ??= "1";
 process.env.SOLUTIONS_BUILDER_CREDENTIAL_BACKEND ??= "file";

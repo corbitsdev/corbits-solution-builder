@@ -30,18 +30,35 @@ export type CredentialBackend = "keychain" | "file";
 
 let backend: CredentialBackend | null = null;
 
+/**
+ * Whether this process is a test/smoke run, not a real launch. Only under
+ * this condition does `detectBackend` honour
+ * `SOLUTIONS_BUILDER_CREDENTIAL_BACKEND` at all — the override exists so a
+ * smoke does not touch the real machine keychain with the production account
+ * names this module and `credential-migration.ts` use, and a real launch that
+ * somehow inherited the variable from its environment must not have its
+ * keychain silently downgraded to a file because of it.
+ */
+function isTestRun(): boolean {
+  return process.env.SOLUTIONS_BUILDER_SMOKE === "1" || process.env.NODE_ENV === "test";
+}
+
 async function detectBackend(): Promise<CredentialBackend> {
   if (backend) return backend;
-  // A test run forces `file`: the account names this module and
-  // `credential-migration.ts` use are real production names
-  // (`provider:anthropic`, `oauth:codex-oauth`, ...), and the real macOS
-  // keychain is one per machine, not per test run — a smoke that hit it for
-  // real could read, or worse overwrite and delete, a developer's own signed-in
-  // credentials. `scripts/smoke-env.ts` sets this for every in-process smoke.
   const forced = process.env.SOLUTIONS_BUILDER_CREDENTIAL_BACKEND;
-  if (forced === "file" || forced === "keychain") {
+  if ((forced === "file" || forced === "keychain") && isTestRun()) {
     backend = forced;
     return backend;
+  }
+  if (forced && !isTestRun()) {
+    // Said loudly rather than silently honoured or silently ignored: either
+    // a real launch's environment carries a variable meant only for tests
+    // (worth knowing), or a test run forgot to set the marker (worth fixing).
+    console.warn(
+      `[host-secrets] SOLUTIONS_BUILDER_CREDENTIAL_BACKEND=${forced} is set but this is not a ` +
+        "recognized test run (SOLUTIONS_BUILDER_SMOKE=1 or NODE_ENV=test), so it is being ignored " +
+        "and the real backend is being detected instead.",
+    );
   }
   if (process.platform === "darwin") {
     const probe = Bun.spawnSync(["security", "-h"], { stdout: "ignore", stderr: "ignore" });
