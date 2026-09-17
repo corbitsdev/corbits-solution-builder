@@ -50,7 +50,7 @@ If you need to break one, the honest move is to change the checker deliberately
 and say why, not to route around it.
 
 - **One state machine.** `packages/solutions-builder/src/ledger.ts` is the contract.
-  `apps/hub/src/guard.ts` is the only place it is enforced. `apps/hub/src/engine.ts` is
+  `packages/solutions-builder/src/guard.ts` is the only place it is enforced. `apps/hub/src/engine.ts` is
   the only place a run's state is written.
 - **The app package depends on nothing in the apps.** `packages/solutions-builder/src/`
   imports only the workflow authoring surface and the platform's types.

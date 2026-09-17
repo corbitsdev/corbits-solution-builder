@@ -1,11 +1,12 @@
 /**
- * The transition guard — the sole enforcement point for the ledger in `@solutions-builder/app/ledger`.
+ * The transition guard — the sole enforcement point for the ledger in `./ledger`.
  *
  * Every state change in the product goes through `evaluate`. It is deliberately
  * pure: it takes the current run and the command, and returns either the ledger
- * row that permits the change or a typed refusal. Persistence happens in the
- * command handler, so the rule and the write are separable and the rule is
- * readable on its own.
+ * row that permits the change or a typed refusal. It lives in the app package,
+ * not the hub, so nothing about it depends on a database or a provider — the
+ * lifecycle workflow can call it directly, ahead of a transition, the same way
+ * `apps/hub/src/engine.ts` does today.
  *
  * Two things this file exists to make impossible:
  *   - approving a version other than the one that was reviewed;
@@ -21,7 +22,7 @@ import {
   type RunState,
   type Stage,
   type Transition,
-} from "@solutions-builder/app/ledger";
+} from "./ledger.js";
 
 export type RunView = {
   readonly id: string;

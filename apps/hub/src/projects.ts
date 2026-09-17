@@ -13,7 +13,7 @@ import { withPostgresJsResultShape } from "./pg-compat.js";
 import * as table from "./schema.js";
 import { newId, sha256 } from "./ids.js";
 import { HostError, notFound } from "./errors.js";
-import { origin } from "./guard.js";
+import { origin } from "@solutions-builder/app/guard";
 import { ARTIFACT_STAGE, type ArtifactDraft } from "./domain.js";
 import { packageOutlineProblem } from "@solutions-builder/app/deck";
 import type { ProjectPolicy } from "./engine.js";
