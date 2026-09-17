@@ -18,8 +18,14 @@ import {
   type InferenceSourcePin,
 } from "@solutions-builder/app/workflows/lifecycle-source";
 import { continuingCommands, ROUND_STEP_ID } from "@solutions-builder/app/workflows/stage-loop";
-import { assetsFor, catalogFor, workflowsFor, type HubDeployment } from "./hub.js";
-import type { InstallerGaps } from "./gaps.js";
+import {
+  assetsFor,
+  catalogFor,
+  readWorkflowSourceBlob,
+  workflowsFor,
+  writeWorkflowSourceTree,
+  type HubDeployment,
+} from "./hub.js";
 import { readProject } from "./project-tenant.js";
 import {
   closureFiles,
@@ -42,25 +48,28 @@ function isLive(deployment: HubDeployment | undefined): deployment is HubDeploym
 }
 
 /**
- * Whether this host can reach the deployment's sidecar. The platform pins an
- * allocation to the hub address the sidecar dials, and leaves one pinned to
- * any other address alone forever: a host that came back on a different
- * port sees such a deployment as live, while nothing sent to it is ever
- * delivered. (A deployment with no allocation yet is reachable: the
- * allocation it gets will be this host's.)
- */
-async function reachable(gaps: InstallerGaps, deploymentId: string): Promise<boolean> {
-  const binding = await gaps.allocationBinding(deploymentId);
-  return binding === null || binding === gaps.sidecarFingerprint();
-}
-
-/**
  * Whether this deployment's sidecar is still placed, or on its way: released,
  * releasing and failed deployments cannot be fired or signalled again.
  */
 export async function deploymentIsLive(transport: Transport, tenantId: string, deploymentId: string): Promise<boolean> {
   const workflows = workflowsFor(transport, tenantId);
   return isLive((await workflows.deployments()).find((entry: HubDeployment) => entry.id === deploymentId));
+}
+
+/**
+ * Whether this host can reach the deployment's sidecar. The platform pins an
+ * allocation to the hub address the sidecar dials, and leaves one pinned to
+ * any other address alone forever: a host that came back on a different
+ * port sees such a deployment as live, while nothing sent to it is ever
+ * delivered. (A deployment with no allocation yet is reachable: the
+ * allocation it gets will be this host's.) The binding fingerprint travels
+ * on the deployment listing itself now (`vendor/interchange/PATCHES.md`),
+ * so no separate read is needed -- the caller's own fingerprint is the one
+ * fact only the host process knows, so it is a plain argument, not a gap.
+ */
+function reachable(deployment: HubDeployment, sidecarFingerprint: string): boolean {
+  const binding = deployment.provisionerBindingFingerprint ?? null;
+  return binding === null || binding === sidecarFingerprint;
 }
 
 export const LIFECYCLE_ASSET_NAME = "solutions-builder-project-lifecycle";
@@ -213,14 +222,22 @@ const commitsByAsset = new Map<string, string>();
  */
 const queued = new Map<string | undefined, Promise<unknown>>();
 
+/**
+ * The two facts about sidecar placement that only the host process knows --
+ * whether it is serving at all, and its own binding fingerprint -- passed in
+ * rather than reached for, since this package never imports the hub's
+ * embedding files.
+ */
+export type SidecarCapability = { canPlaceSidecars: boolean; sidecarFingerprint: string };
+
 export function ensureLifecycleDeployment(
   transport: Transport,
-  gaps: InstallerGaps,
+  sidecar: SidecarCapability,
   tenantId: string,
   projectId?: string,
   options: { replace?: boolean } = {},
 ): Promise<LifecycleDeployment> {
-  const deploy = () => ensureLifecycleDeploymentUncached(transport, gaps, tenantId, projectId, options);
+  const deploy = () => ensureLifecycleDeploymentUncached(transport, sidecar, tenantId, projectId, options);
   // Both arms are `deploy`, so this call starts once the one ahead has
   // settled, whether it succeeded or failed. The queue only orders; the
   // promise handed back is the real one, so a failure reaches its own caller
@@ -244,7 +261,7 @@ export function ensureLifecycleDeployment(
  */
 async function ensureLifecycleDeploymentUncached(
   transport: Transport,
-  gaps: InstallerGaps,
+  sidecar: SidecarCapability,
   tenantId: string,
   projectId?: string,
   options: {
@@ -257,7 +274,7 @@ async function ensureLifecycleDeploymentUncached(
     replace?: boolean;
   } = {},
 ): Promise<LifecycleDeployment> {
-  if (!gaps.canPlaceSidecars()) return { status: "no_host" };
+  if (!sidecar.canPlaceSidecars) return { status: "no_host" };
   const catalog = catalogFor(transport, tenantId);
   const offerings = (await catalog.offerings())
     .filter((offering) => !offering.disabled)
@@ -271,7 +288,7 @@ async function ensureLifecycleDeploymentUncached(
   const audiences = project?.policy.audiences;
   const rendered = renderLifecycleSource(projectId, await sourceFor(transport, tenantId, offerings[0]!), audiences);
   const assetId = await lifecycleAsset(transport, tenantId, projectId);
-  const head = await gaps.readWorkflowSourceBlob(assetId, DIGEST_PATH);
+  const head = await readWorkflowSourceBlob(transport, tenantId, assetId, DIGEST_PATH);
   const workflows = workflowsFor(transport, tenantId);
   // Only a deployment whose sidecar is still placed counts. Stopping the host
   // releases a project's sidecar, and a released deployment's anchor run is
@@ -281,7 +298,7 @@ async function ensureLifecycleDeploymentUncached(
   const latest = (await workflows.deployments()).find(
     (deployment: HubDeployment) => deployment.definitionAssetId === assetId && isLive(deployment),
   );
-  if (latest && !(await reachable(gaps, latest.id))) {
+  if (latest && !reachable(latest, sidecar.sidecarFingerprint)) {
     console.error(
       `[deploy] ${projectId ?? "workspace"}: deployment ${latest.id} is bound to a hub address this host no longer serves; deploying the lifecycle again.`,
     );
@@ -295,7 +312,7 @@ async function ensureLifecycleDeploymentUncached(
     };
   }
 
-  const { commitSha } = await gaps.writeWorkflowSourceTree({
+  const { commitSha } = await writeWorkflowSourceTree(transport, tenantId, {
     assetId,
     files: { ...rendered },
     message: "Project lifecycle generated from the transition ledger",

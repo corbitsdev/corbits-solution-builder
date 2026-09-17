@@ -1,7 +1,7 @@
 /**
  * The command ledger: every committed command as one mail turn in a
  * per-project ledger session, on Interchange's own conversation primitives
- * (`hub-gaps.ts`'s `writeConversationTurn` / `listConversationTurns`) rather
+ * (`hub-client.ts`'s `writeConversationTurn` / `listConversationTurns`) rather
  * than the `approval_record` / `audit_event` / `command_receipt` tables those
  * primitives duplicate.
  *
@@ -11,16 +11,17 @@
  * a transaction is still open on it.
  */
 import { PROJECT_LIFECYCLE_ID } from "@solutions-builder/app/workflows/project-lifecycle";
-import { definitionIdFor, tenantId } from "./hub-client.js";
 import {
   SPECIALIST_PRINCIPAL_ID,
+  definitionIdFor,
   ensureAgentSession,
   ensureSpecialistPrincipal,
   ensureUserPrincipal,
   listConversationTurns,
+  tenantId,
   writeConversationTurn,
   type ConversationPart,
-} from "./hub-gaps.js";
+} from "./hub-client.js";
 import { sha256 } from "./ids.js";
 import type { CommandOutcome } from "./engine.js";
 import { HOST_PRINCIPAL } from "./engine.js";

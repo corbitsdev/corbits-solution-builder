@@ -26,8 +26,10 @@ import {
   createDB,
   createGrantStore,
   createPrincipalKeyStore,
+  createPrincipalStore,
   createSidecarAllocationStore,
   createWorkflowRunDispatchStore,
+  resolveInferenceMaterials,
 } from "@intx/db";
 import { createEnvKeyCredentialCipher } from "@intx/crypto";
 import { hexDecode, hexEncode } from "@intx/types";
@@ -78,15 +80,36 @@ export type MountedHub = {
    * for a stage thread, the same way the sidecar signs mail for a run.
    */
   readonly principalKeyStore: ReturnType<typeof createPrincipalKeyStore>;
+  /**
+   * Mints a principal the hub has no invite-based route for yet: the
+   * specialist's platform identity, and a run's own actor principal.
+   * `createIfAbsent` derives the per-principal wrap a raw insert cannot.
+   */
+  readonly principalStore: ReturnType<typeof createPrincipalStore>;
+  /** Whether a principal row exists by id, a direct read `principalStore`'s natural-key upsert cannot express. */
+  principalExists(id: string): Promise<boolean>;
   /** The hub's own auth, so the host can sign the workspace owner in without a browser. */
   readonly auth: ReturnType<typeof createAuth>;
   /**
-   * The cipher a `credential` row's `secret` column is sealed under. Exposed
-   * so `hub-gaps.ts`'s `resolveCredentialSecret` can decrypt a provider's
-   * credential the same way the sidecar's own material resolution does,
-   * without a second, host-only store of the plaintext.
+   * The cipher a `credential` row's `secret` column is sealed under. Kept on
+   * the mount for the services composed here that need it (the workflow
+   * allocation service, the sidecar credential resolver); `hub-client.ts`
+   * reaches decrypted material through `resolveCredentialSecret` below, not
+   * this field directly.
    */
   readonly credentialCipher: ReturnType<typeof createEnvKeyCredentialCipher>;
+  /**
+   * The decrypted secret behind a `credential` row, tenant-scoped: a
+   * credential id outside the tenant's ancestor chain throws rather than
+   * resolving to a null secret. Not an upstream gap — the platform's own
+   * `resolveInferenceMaterials` is the single point of decrypt for this
+   * material (the same call a deployed workflow's allocation goes through to
+   * hand the sidecar its bearer); a host-side read (the outbound bearer for a
+   * host-driven call, a refresh probe) uses it too, reached from inside the
+   * process instead of over HTTP because the hub's own routes never hand a
+   * sealed secret back out, on purpose.
+   */
+  resolveCredentialSecret(tenantId: string, credentialId: string): Promise<string>;
   /** The hub's asset store; a workflow source tree is committed through it. */
   readonly assetService: ReturnType<typeof createAssetService>;
   /**
@@ -481,8 +504,27 @@ export async function mountHub(): Promise<MountedHub> {
     db,
     publicKeyHex: hexEncode(signingKey.publicKey),
     principalKeyStore,
+    principalStore: createPrincipalStore(db.db, principalKeyStore),
+    principalExists: async (id: string) =>
+      (
+        (await db.db.execute(
+          sql`SELECT "id" FROM "public"."principal" WHERE "id" = ${id} LIMIT 1`,
+        )) as unknown as { id: string }[]
+      ).length > 0,
     auth,
     credentialCipher,
+    resolveCredentialSecret: async (scopeTenantId: string, credentialId: string) => {
+      const [material] = await resolveInferenceMaterials(
+        db.db,
+        scopeTenantId,
+        [credentialId],
+        credentialCipher,
+      );
+      if (!material) {
+        throw new Error(`credential ${credentialId} could not be resolved for tenant ${scopeTenantId}`);
+      }
+      return material.secret;
+    },
     assetService,
     sidecars: {
       fence: (allocationId, generation) => socketRouter.fenceAllocation(allocationId, generation),

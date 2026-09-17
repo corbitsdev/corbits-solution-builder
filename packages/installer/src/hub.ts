@@ -12,7 +12,9 @@ import {
   ApiError,
   deployWorkflow,
   listWorkflowDeployments,
+  registerWorkflowDefinition,
   type DeployWorkflowInput,
+  type RegisterWorkflowDefinitionInput,
   type Transport,
   type WorkflowDeployment,
 } from "@intx/hub-client";
@@ -116,6 +118,11 @@ export async function getTenant(transport: Transport, scope: string): Promise<Hu
     if (cause instanceof ApiError && (cause.status === 404 || cause.status === 403)) return null;
     throw cause;
   }
+}
+
+/** Every tenant whose parent is `parentId`, oldest first. A bare array; this route does not paginate. */
+export async function listChildTenants(transport: Transport, parentId: string): Promise<HubTenant[]> {
+  return transport.fetch<HubTenant[]>("GET", `/api/tenants?parentId=${encodeURIComponent(parentId)}`);
 }
 
 export async function patchTenant(
@@ -250,6 +257,20 @@ export async function definitionIdFor(transport: Transport, scope: string, name:
   return rows[0]?.id ?? null;
 }
 
+/**
+ * Registers a definition row directly: for a caller (`workflow-seed.ts`) that
+ * generated the wire projection itself rather than deploying through the
+ * probe sidecar. Identity is keyed on (name, wireHash); an unchanged wireHash
+ * under the same name is a no-op.
+ */
+export async function registerDefinition(
+  transport: Transport,
+  scope: string,
+  input: RegisterWorkflowDefinitionInput,
+): Promise<{ id: string; created: boolean }> {
+  return registerWorkflowDefinition(transport, scope, input);
+}
+
 // --- The model catalog -----------------------------------------------------
 
 export type HubCredential = {
@@ -303,7 +324,50 @@ export function assetsFor(transport: Transport, scope: string) {
     list: (kind: string) => transport.fetch<HubAsset[]>("GET", tenantPathFor(scope, `/assets?kind=${kind}`)),
     create: (input: { kind: string; name: string; displayName?: string }) =>
       transport.fetch<HubAsset>("POST", tenantPathFor(scope, "/assets"), input),
+    /** Commits a tree of repo-relative files onto an asset's ref in one commit. */
+    writeTree: (assetId: string, input: { files: Record<string, string>; message: string; ref?: string }) =>
+      transport.fetch<{ commitSha: string }>(
+        "POST",
+        tenantPathFor(scope, `/assets/${assetId}/tree`),
+        input,
+      ),
   };
+}
+
+/**
+ * The bytes at `path` on an asset's ref (default the main branch), decoded as
+ * text, or null when the asset, ref or path is absent. The route hands the
+ * bytes back base64-encoded inside a JSON envelope precisely so a
+ * `Transport`-only caller (no raw-body access) can read it -- this package
+ * never gets the host's own raw `fetch`.
+ */
+export async function readWorkflowSourceBlob(
+  transport: Transport,
+  scope: string,
+  assetId: string,
+  path: string,
+): Promise<string | null> {
+  try {
+    const query = new URLSearchParams({ path });
+    const { content } = await transport.fetch<{ content: string }>(
+      "GET",
+      tenantPathFor(scope, `/assets/${assetId}/blob?${query.toString()}`),
+    );
+    const bytes = Uint8Array.from(atob(content), (ch) => ch.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  } catch (cause) {
+    if (cause instanceof ApiError && cause.status === 404) return null;
+    throw cause;
+  }
+}
+
+/** Writes a workflow source tree in one commit and returns the commit sha. */
+export async function writeWorkflowSourceTree(
+  transport: Transport,
+  scope: string,
+  args: { assetId: string; files: Record<string, string>; message: string },
+): Promise<{ commitSha: string }> {
+  return assetsFor(transport, scope).writeTree(args.assetId, { files: args.files, message: args.message });
 }
 
 // --- Workflow deployments ----------------------------------------------------

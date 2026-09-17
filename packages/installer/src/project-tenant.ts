@@ -14,11 +14,11 @@ import {
   ensureRole,
   ensureRoleGrant,
   getTenant,
+  listChildTenants,
   myPrincipalIn,
   patchTenant,
   type HubTenant,
 } from "./hub.js";
-import type { InstallerGaps } from "./gaps.js";
 import { InstallerError } from "./errors.js";
 
 export type ProjectPolicy = {
@@ -162,10 +162,9 @@ export async function writeDelegationRecord(
 /** Every live project under the workspace tenant, newest first. */
 export async function listProjectRecords(
   transport: Transport,
-  gaps: InstallerGaps,
   workspaceTenantId: string,
 ): Promise<ProjectRecord[]> {
-  const rows = await gaps.listChildTenants(workspaceTenantId);
+  const rows = await listChildTenants(transport, workspaceTenantId);
   return rows
     .map((row) => fromTenant(row))
     .filter((record): record is ProjectRecord => record !== null && !record.deletedAt)

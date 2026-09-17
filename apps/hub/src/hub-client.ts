@@ -11,8 +11,8 @@
  * The workspace owner is a real hub user. The host mints a password into the
  * keychain on first install, signs up, and signs in the way a browser would;
  * the session cookie is what every call below carries. There is no service
- * token and no direct table write here — if the hub cannot do it through a
- * route, that is an upstream ask, recorded in `hub-gaps.ts`.
+ * token and no direct table write here — every call goes through the hub's
+ * own routes.
  *
  * `SOLUTIONS_BUILDER_HUB_URL` selects a hosted hub. Absent, the hub is embedded.
  */
@@ -23,9 +23,11 @@ import {
   listWorkflowDeployments,
   listWorkflowRuns,
   readWorkflowRunEvents,
+  registerWorkflowDefinition,
   triggerWorkflowRun,
   type DeliverSignalInput,
   type DeployWorkflowInput,
+  type RegisterWorkflowDefinitionInput,
   type Transport,
   type WorkflowDeployment,
   type WorkflowRunEvent,
@@ -790,7 +792,40 @@ export const assets = {
       },
       { assetId, filename, bytes },
     ),
+  /** Commits a tree of repo-relative files onto an asset's ref in one commit. */
+  writeTree: (assetId: string, input: { files: Record<string, string>; message: string; ref?: string }) =>
+    hubPost<{ commitSha: string }>(tenantPath(`/assets/${assetId}/tree`), input),
+  /**
+   * The bytes at `path` on an asset's ref (default the main branch), or null
+   * when the asset, ref or path is absent. The route hands them back
+   * base64-encoded inside a JSON envelope (so a Transport-only caller can
+   * read them too, e.g. `@solutions-builder/installer`); decoded back to
+   * bytes here.
+   */
+  readBlob: async (assetId: string, path: string, ref?: string): Promise<Uint8Array | null> => {
+    const query = new URLSearchParams({ path, ...(ref ? { ref } : {}) });
+    const response = await hubApi(tenantPath(`/assets/${assetId}/blob?${query.toString()}`));
+    if (response.status === 404) return null;
+    if (!response.ok) throw new HubApiError(response.status, response.url, await response.text());
+    const { content } = (await response.json()) as { content: string };
+    return Uint8Array.from(atob(content), (ch) => ch.charCodeAt(0));
+  },
 };
+
+/** Writes a workflow source tree in one commit and returns the commit sha. */
+export async function writeWorkflowSourceTree(args: {
+  assetId: string;
+  files: Record<string, string>;
+  message: string;
+}): Promise<{ commitSha: string }> {
+  return assets.writeTree(args.assetId, { files: args.files, message: args.message });
+}
+
+/** The bytes at `path` on the asset's main branch, decoded as text, or null when absent. */
+export async function readWorkflowSourceBlob(assetId: string, path: string): Promise<string | null> {
+  const bytes = await assets.readBlob(assetId, path);
+  return bytes === null ? null : new TextDecoder().decode(bytes);
+}
 
 export const workflows = {
   deployments: () => listWorkflowDeployments(hubTransport(), tenantId()),
@@ -801,6 +836,167 @@ export const workflows = {
    */
   deploy: (input: DeployWorkflowInput) => deployWorkflow(hubTransport(), tenantId(), input),
 };
+
+/**
+ * Registers a definition row directly: for a caller (`workflow-seed.ts`) that
+ * generated the wire projection itself rather than deploying through the
+ * probe sidecar. Identity is keyed on (name, wireHash); an unchanged wireHash
+ * under the same name is a no-op.
+ */
+export async function registerDefinition(
+  scopeTenantId: string,
+  input: RegisterWorkflowDefinitionInput,
+): Promise<{ id: string; created: boolean }> {
+  return registerWorkflowDefinition(hubTransport(), scopeTenantId, input);
+}
+
+/** Every tenant whose parent is `parentId`, oldest first. A bare array; this route does not paginate. */
+export async function listChildTenants(parentId: string): Promise<HubTenant[]> {
+  return hubGet<HubTenant[]>(`/api/tenants?parentId=${encodeURIComponent(parentId)}`);
+}
+
+// --- Sessions and conversation turns ---------------------------------------
+
+/** Finds or creates an `agent_session` with a chosen id keyed to a definition. */
+export async function ensureAgentSession(args: {
+  sessionId: string;
+  tenantId: string;
+  definitionId: string;
+  principalId: string;
+}): Promise<void> {
+  await hubPost(tenantPathFor(args.tenantId, "/sessions"), {
+    sessionId: args.sessionId,
+    definitionId: args.definitionId,
+    principalId: args.principalId,
+  });
+}
+
+/**
+ * Writes one turn: the mail record the platform expects, and the
+ * inference-turn/turn-part pair the command ledger reads back from.
+ */
+export async function writeConversationTurn(args: {
+  sessionId: string;
+  tenantId: string;
+  runId: string;
+  role: "human" | "specialist";
+  body: string;
+  fromPrincipalId: string;
+  toPrincipalId: string;
+  metadata: Record<string, unknown>;
+  model: string;
+}): Promise<string> {
+  const written = await hubPost<{ id: string }>(
+    tenantPathFor(args.tenantId, `/sessions/${args.sessionId}/turns`),
+    {
+      runId: args.runId,
+      role: args.role,
+      body: args.body,
+      fromPrincipalId: args.fromPrincipalId,
+      toPrincipalId: args.toPrincipalId,
+      metadata: args.metadata,
+      model: args.model,
+    },
+  );
+  return written.id;
+}
+
+export type ConversationPart = {
+  id: string;
+  content: string;
+  metadata: Record<string, unknown> | null;
+  startedAt: string;
+};
+
+/** Every part on a session, oldest turn first. */
+export async function listConversationTurns(sessionId: string): Promise<ConversationPart[]> {
+  return hubGet<ConversationPart[]>(tenantPath(`/sessions/${sessionId}/turns`));
+}
+
+/**
+ * The decrypted secret behind a `credential` row, tenant-scoped like the
+ * platform's own resolution. Not an upstream gap — there is no route that
+ * hands a sealed secret back out, on purpose, so this reaches the mounted
+ * hub's own decrypt directly (`resolveInferenceMaterials`, behind
+ * `hub().resolveCredentialSecret`) the same way a deployed workflow's
+ * allocation resolves its bearer.
+ */
+export async function resolveCredentialSecret(credentialId: string): Promise<string> {
+  return hub().resolveCredentialSecret(tenantId(), credentialId);
+}
+
+// --- Principals not yet minted by a hub route -------------------------------
+
+export const SPECIALIST_PRINCIPAL_ID = "p_specialist";
+
+export type PrincipalSeed = {
+  id: string;
+  tenantId: string;
+  kind: "user" | "workflow";
+  refId: string;
+  status: "active";
+};
+
+export type PrincipalIo = {
+  exists(id: string): Promise<boolean>;
+  create(seed: PrincipalSeed): Promise<unknown>;
+};
+
+/**
+ * `POST /api/tenants/:tenantId/principals` mints a principal from an invite,
+ * not from a caller-chosen id, so the specialist's and a run's own actor
+ * principal still go through the principal store directly. The store's
+ * `createIfAbsent` derives the per-principal wrap a raw insert cannot; only
+ * the exists-by-id pre-check stays a direct read, because only the id is
+ * known (a real user row's refId is its auth user, not its id) and the
+ * store's natural-key upsert cannot express "this exact row exists".
+ */
+export function livePrincipalIo(): PrincipalIo {
+  return {
+    exists: (id: string) => hub().principalExists(id),
+    create: (seed: PrincipalSeed) => hub().principalStore.createIfAbsent(seed),
+  };
+}
+
+export async function ensurePrincipal(seed: PrincipalSeed, io: PrincipalIo): Promise<void> {
+  if (await io.exists(seed.id)) return;
+  // A null return is the store's lost-the-race signal: another writer claimed
+  // the natural key first, which still leaves a row for the identity.
+  await io.create(seed);
+}
+
+/**
+ * Registers the specialist's platform identity, once. A `principal` row is
+ * what a signing key and a session both attach to; `kind: "workflow"` is the
+ * enum's own name for "a workflow speaks as this".
+ */
+export async function ensureSpecialistPrincipal(
+  scopeTenantId: string,
+  io: PrincipalIo = livePrincipalIo(),
+): Promise<void> {
+  await ensurePrincipal(
+    {
+      id: SPECIALIST_PRINCIPAL_ID,
+      tenantId: scopeTenantId,
+      kind: "workflow",
+      refId: "solutions-builder.specialist",
+      status: "active",
+    },
+    io,
+  );
+}
+
+/** A user principal by id. Same gap: nothing creates a principal except signup or invite. */
+export async function ensureUserPrincipal(
+  scopeTenantId: string,
+  principalId: string,
+  io: PrincipalIo = livePrincipalIo(),
+): Promise<void> {
+  await ensurePrincipal(
+    { id: principalId, tenantId: scopeTenantId, kind: "user", refId: principalId, status: "active" },
+    io,
+  );
+}
 
 // --- Runs on a deployment ------------------------------------------------------
 

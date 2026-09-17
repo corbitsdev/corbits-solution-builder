@@ -6,7 +6,7 @@ import {
   ensureUserPrincipal,
   type PrincipalIo,
   type PrincipalSeed,
-} from "./hub-gaps.js";
+} from "./hub-client.js";
 
 const SEED: PrincipalSeed = {
   id: "p_test",

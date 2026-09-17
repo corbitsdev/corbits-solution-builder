@@ -12,7 +12,8 @@
  * creates a new version when it has. A running instance keeps the version it
  * started on.
  */
-import type { InstallerGaps } from "./gaps.js";
+import type { Transport } from "@intx/hub-client";
+import { registerDefinition } from "./hub.js";
 import type { WorkflowDefinition } from "@intx/workflow";
 import { projectLifecycleDefinition, PROJECT_LIFECYCLE_ID } from "@solutions-builder/app/workflows/project-lifecycle";
 
@@ -57,13 +58,13 @@ export async function expectedWorkflowDefinitions(): Promise<{ name: string; id:
   return expected;
 }
 
-export async function seedWorkflows(gaps: InstallerGaps, tenantId: string): Promise<SeededWorkflow[]> {
+export async function seedWorkflows(transport: Transport, tenantId: string): Promise<SeededWorkflow[]> {
   const seeded: SeededWorkflow[] = [];
   for (const entry of definitions()) {
     // The wire projection is what identity is keyed on upstream, so the hash is
     // taken over the definition exactly as it would be deployed.
     const wireHash = await sha256(JSON.stringify(entry.definition));
-    const written = await gaps.registerDefinition(tenantId, {
+    const written = await registerDefinition(transport, tenantId, {
       id: `wfd_${wireHash.slice(0, 24)}`,
       name: entry.name,
       description: entry.description,

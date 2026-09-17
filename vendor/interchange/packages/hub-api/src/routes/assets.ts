@@ -972,6 +972,10 @@ export function createAssetRoutes({
     commitSha: "string",
   });
 
+  const ReadAssetBlobResponse = type({
+    content: "string",
+  });
+
   app.post(
     "/:assetId/tree",
     requireGrant(idResource("asset", "assetId"), "write"),
@@ -1031,9 +1035,14 @@ export function createAssetRoutes({
       tags: ["Assets"],
       summary: "Read a blob from an asset's tree",
       description:
-        "Returns the raw bytes at ?path= on the asset's ref (default refs/heads/main). 404 when the asset, ref or path is absent.",
+        "Returns the base64-encoded bytes at ?path= on the asset's ref (default refs/heads/main), as JSON so a Transport-only caller (no raw-body access) can read it too. 404 when the asset, ref or path is absent.",
       responses: {
-        200: { description: "Blob bytes" },
+        200: {
+          description: "Blob bytes, base64-encoded",
+          content: {
+            "application/json": { schema: resolver(ReadAssetBlobResponse) },
+          },
+        },
         400: {
           description: "Missing path",
           content: { "application/json": { schema: resolver(ErrorResponse) } },
@@ -1068,9 +1077,7 @@ export function createAssetRoutes({
           path,
           ...(ref ? { ref } : {}),
         });
-        return new Response(bytes as BodyInit, {
-          headers: { "content-type": "application/octet-stream" },
-        });
+        return c.json({ content: Buffer.from(bytes).toString("base64") });
       } catch {
         return c.json(
           { error: { code: "not_found", message: "Blob not found" } },
