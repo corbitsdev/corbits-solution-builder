@@ -72,15 +72,16 @@ try {
   check("embedded: the hub runs inside the app", embedded.hub.mode === "embedded");
   check("embedded: the hub reports itself ready", embedded.hub.ready === true);
   check("embedded: it has no address, because it has no socket", embedded.hub.url === null);
+  check(
+    "the hub answers an authorised client",
+    (embedded.hub.reported as { status?: string } | null)?.status === "ok",
+  );
 
-  // The hub proxy is not an open door on loopback.
+  // The hub proxy is not an open door on loopback. Health lives on the host
+  // at GET /api/status (sidecar facts included); GET /hub/status is only
+  // forwarded after this outer door.
   const unauthorised = await fetch("http://127.0.0.1:8140/hub/status");
   check("the hub proxy refuses an unauthorised client", unauthorised.status === 401);
-
-  const authorised = await fetch("http://127.0.0.1:8140/hub/status", {
-    headers: { authorization: `Bearer ${hubHost.token}` },
-  }).then((response) => response.json() as Promise<{ status?: string }>);
-  check("the hub answers an authorised client", authorised.status === "ok");
 
   const me = await fetch("http://127.0.0.1:8140/hub/api/me", {
     headers: { authorization: `Bearer ${hubHost.token}` },

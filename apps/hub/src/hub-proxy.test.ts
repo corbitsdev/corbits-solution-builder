@@ -23,6 +23,7 @@ describe("hubProxyHeaders", () => {
 
 describe("hubProxyAllowed", () => {
   test("forwards installer and workflow routes", () => {
+    expect(hubProxyAllowed("GET", "/status")).toBe(true);
     expect(hubProxyAllowed("GET", "/api/me")).toBe(true);
     expect(hubProxyAllowed("GET", "/api/me/principals?limit=100")).toBe(true);
     expect(hubProxyAllowed("GET", "/api/tenants?parentId=t_workspace")).toBe(true);
@@ -36,6 +37,8 @@ describe("hubProxyAllowed", () => {
   });
 
   test("refuses git-tokens, auth, and creating a root tenant", () => {
+    expect(hubProxyAllowed("POST", "/status")).toBe(false);
+    expect(hubProxyAllowed("GET", "/api/status")).toBe(false);
     expect(hubProxyAllowed("POST", "/api/me/git-tokens")).toBe(false);
     expect(hubProxyAllowed("GET", "/api/tenants/t_workspace/git-tokens")).toBe(false);
     expect(hubProxyAllowed("POST", "/api/auth/sign-in/email")).toBe(false);
@@ -44,6 +47,7 @@ describe("hubProxyAllowed", () => {
       false,
     );
     expect(hubProxyAllowed("GET", "/api/tenants")).toBe(false);
+    expect(hubProxyAllowed("GET", "/api/tenants/t_workspace/providers")).toBe(false);
     expect(hubProxyAllowed("POST", "/api/tenants/t_workspace/runs")).toBe(false);
     // Catalog rerank is a host `/api` route, not a hub proxy hole, and
     // creating a root tenant stays refused.

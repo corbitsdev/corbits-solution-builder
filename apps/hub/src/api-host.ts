@@ -12,7 +12,7 @@ import { listProviders } from "./providers.js";
 import { credentialBackend } from "./host-secrets.js";
 import { BRIDGE_CAPABILITIES, BRIDGE_ID, bridgeAvailable } from "./corbits-exec.js";
 import { hostStatus, requestHostStop } from "./lifecycle.js";
-import { ensureHub, hubFetch } from "./hub-client.js";
+import { ensureHub, HubApiError, hubFetch } from "./hub-client.js";
 import { sidecarFacts } from "./hub-mount.js";
 
 export const API_VERSION = "1";
@@ -46,7 +46,13 @@ async function hubSummary() {
 
 export function registerHostRoutes(api: Hono) {
   api.get("/status", async (context) => {
-    const providers = await listProviders();
+    // Inference listing talks to hub catalog routes the `/hub` proxy does not
+    // offer. A hosted product still has to answer GET /api/status; 403 is
+    // "none connected", not an internal error.
+    const providers = await listProviders().catch((cause: unknown) => {
+      if (cause instanceof HubApiError && cause.status === 403) return [];
+      throw cause;
+    });
     const bridge = await bridgeAvailable();
     return context.json({
       apiVersion: API_VERSION,

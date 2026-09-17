@@ -8,8 +8,9 @@
  * two inner identities; drop the host's and attach the owner session instead.
  *
  * The proxy is not an open door onto the hub. Only the installer and workflow
- * routes the client actually drives are forwarded. Git tokens, the auth
- * surface, and creating a root tenant are refused even as the owner.
+ * routes the client actually drives are forwarded, plus GET /status so a
+ * hosted product can ask the hub if it is up. Git tokens, the auth surface,
+ * and creating a root tenant are refused even as the owner.
  */
 
 export function hubProxyHeaders(inbound: HeadersInit | undefined, ownerCookie: string | null): Headers {
@@ -34,6 +35,7 @@ export function remoteHubHeaders(inbound: HeadersInit | undefined, token: string
 const TENANT = "/api/tenants/[^/]+";
 
 const ALLOWED: { method: string; path: RegExp }[] = [
+  { method: "GET", path: /^\/status$/ },
   { method: "GET", path: /^\/api\/me$/ },
   { method: "GET", path: /^\/api\/me\/principals$/ },
   { method: "GET", path: new RegExp(`^${TENANT}$`) },
@@ -64,7 +66,7 @@ function parentIdOf(body: unknown): string | null {
   return typeof parentId === "string" && parentId.length > 0 ? parentId : null;
 }
 
-/** Whether the `/hub` proxy will forward this installer/workflow call. */
+/** Whether the `/hub` proxy will forward this call. */
 export function hubProxyAllowed(method: string, pathWithQuery: string, body?: unknown): boolean {
   const url = new URL(pathWithQuery, "http://hub.local");
   const path = url.pathname;
