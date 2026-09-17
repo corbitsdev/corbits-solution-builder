@@ -48,7 +48,7 @@ import { HostError, ReplyCutShort } from "./errors.js";
 import { packageOutlineProblem } from "@solutions-builder/app/deck";
 import { providerServingModel } from "./catalog.js";
 import { MATERIAL_KIND, materialText } from "./source-material.js";
-import { DECK_KIND, writeDeckFor } from "./deck.js";
+import { DECK_KIND } from "./deck.js";
 import { DEFAULT_DECK_DESIGN, deckGuidance, deckSettings, type DeckDesign } from "./deck-settings.js";
 import {
   cutShortTwice,
@@ -688,25 +688,6 @@ export async function requestDraft(args: {
           ...(drewOnBrief && context.brief ? { brief: context.brief } : {}),
         });
         persisted.set(stepId, result);
-        // Every stakeholder's package carries a deck outline (persistOutput
-        // refused it otherwise); the slides are built from it and kept beside
-        // the package. A deck the renderer cannot produce is logged, not a
-        // failure of the package it came from: the outline is still there,
-        // and "Save slides" builds from it again.
-        if (args.stage === 5 && variant !== undefined) {
-          const audience = audiences.find((entry) => entry.name === variant)!;
-          await writeDeckFor({
-            projectId: args.projectId,
-            projectTitle: args.projectTitle,
-            audience,
-            packageNodeId: result.nodeId,
-            markdown: result.content,
-            agentRole: role.id,
-            actor: args.actor,
-          }).catch((cause: unknown) => {
-            console.error(`[stage 5] ${args.projectId}: the slides for ${variant} could not be built:`, cause);
-          });
-        }
       } catch (cause) {
         // An empty, cut-short or outline-less package is that package's failure too.
         if (args.stage !== 5 || !(cause instanceof HostError)) throw cause;
