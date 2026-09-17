@@ -288,7 +288,7 @@ async function stampedSignalBody(
   method: string,
   path: string,
   parsedBody: unknown,
-): Promise<Uint8Array | undefined> {
+): Promise<ArrayBuffer | undefined> {
   const runId = hubProxySignalRunId(method, path);
   if (!runId || typeof parsedBody !== "object" || parsedBody === null) return undefined;
   const isGate = (command: unknown): boolean =>
@@ -303,7 +303,9 @@ async function stampedSignalBody(
   }
   const stamped = stampGateSignalBody(parsedBody, isGate, authorities);
   if (stamped === parsedBody) return undefined;
-  return new TextEncoder().encode(JSON.stringify(stamped));
+  // TextEncoder hands back an exactly-sized buffer, so the ArrayBuffer is the
+  // whole body. hubFetch takes BodyInit, which always accepts ArrayBuffer.
+  return new TextEncoder().encode(JSON.stringify(stamped)).buffer as ArrayBuffer;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -339,10 +341,11 @@ app.all("/hub/*", async (context) => {
   }
   await ensureOwner();
   const stamped = await stampedSignalBody(method, path, parsedBody);
+  const body: ArrayBuffer | undefined = stamped ?? payload;
   const response = await hubFetch(path, {
     method,
     headers: hubProxyHeaders(context.req.raw.headers, await ownerSession()),
-    ...(stamped !== undefined ? { body: stamped } : payload !== undefined ? { body: payload } : {}),
+    ...(body !== undefined ? { body } : {}),
   });
   return stripHubProxyCookies(response);
 });
