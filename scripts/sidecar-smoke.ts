@@ -623,9 +623,17 @@ try {
         );
         const { stageInputsForSmoke } = await import("../apps/hub/src/stage-runs.js");
         check("the slides are never handed to a later stage as an input", !(await stageInputsForSmoke(project.projectId, 6 as never)).includes("base64"));
-        // A package written before decks existed has none; asking for its
-        // slides builds them from the package as it is, once.
-        const { ensureDeckFor } = await import("../apps/hub/src/deck.js");
+        // Saving slides looks up the recorded deck. A package with none is
+        // refused; the host does not build PowerPoint on a save.
+        const { deckForPackage } = await import("../apps/hub/src/deck.js");
+        const { HostError } = await import("../apps/hub/src/errors.js");
+        const ownerPackage = current.find((node) => node.variant === "Project owner");
+        const ownerDeck = ownerPackage ? await deckForPackage(ownerPackage.id) : null;
+        check(
+          "saving slides finds the deck recorded beside the package",
+          ownerDeck !== null && decks.some((node) => node.id === ownerDeck.nodeId),
+          ownerDeck?.nodeId ?? "none",
+        );
         const older = await writeArtifact(
           {
             projectId: project.projectId,
@@ -639,87 +647,17 @@ try {
           },
           ACTOR,
         );
-        const deckOnce = await ensureDeckFor({ packageNodeId: older.nodeId, actor: ACTOR });
-        const deckAgain = await ensureDeckFor({ packageNodeId: older.nodeId, actor: ACTOR });
+        let missingMessage = "";
+        try {
+          await deckForPackage(older.nodeId);
+        } catch (cause) {
+          missingMessage = cause instanceof HostError ? cause.message : String(cause);
+        }
         check(
-          "slides asked for from a package without any are built from it, once",
-          deckOnce.built && !deckAgain.built && deckAgain.nodeId === deckOnce.nodeId,
-          `${deckOnce.built}/${deckAgain.built}`,
+          "a package with no recorded slides is not built by the host",
+          /no slides for this package/.test(missingMessage),
+          missingMessage.slice(0, 120),
         );
-        // A role's design changed in Settings: the next save builds a new
-        // version with the new look; the package is untouched.
-        const { saveDeckDesign } = await import("../apps/hub/src/deck-settings.js");
-        await saveDeckDesign("project_owner", { theme: "forest", typeface: "Georgia" });
-        const redesigned = await ensureDeckFor({ packageNodeId: older.nodeId, actor: ACTOR });
-        const redesignedAgain = await ensureDeckFor({ packageNodeId: older.nodeId, actor: ACTOR });
-        check(
-          "a changed deck design for the role builds the slides again, once",
-          redesigned.built && redesigned.nodeId !== deckOnce.nodeId && !redesignedAgain.built,
-          `${redesigned.built}/${redesignedAgain.built}`,
-        );
-        // Images: drawn by the connected provider's image model when the
-        // slides are asked for, one per slide plus the cover, and kept so a
-        // second build asks for nothing.
-        await saveDeckDesign("project_owner", { images: "some" });
-        const drawn = await ensureDeckFor({ packageNodeId: older.nodeId, actor: ACTOR });
-        const asked = imagePrompts.length;
-        const drawnAgain = await ensureDeckFor({ packageNodeId: older.nodeId, actor: ACTOR });
-        const { content: drawnContent } = await readArtifactNode(drawn.nodeId);
-        const drawnBytes = Buffer.from(/base64,(.*)$/s.exec(drawnContent)![1]!, "base64");
-        const { mkdtemp, rm } = await import("node:fs/promises");
-        const { tmpdir } = await import("node:os");
-        const dir = await mkdtemp(join(tmpdir(), "sb-deck-"));
-        await Bun.write(join(dir, "deck.pptx"), drawnBytes);
-        const mediaParts = Bun.spawnSync(["unzip", "-Z1", join(dir, "deck.pptx")]).stdout.toString().split("\n").filter((name) => /^ppt\/media\/image[\w-]*\.png$/.test(name));
-        await rm(dir, { recursive: true, force: true });
-        check(
-          "a model reads the deck and chooses the slides to illustrate; the image model draws those, and only those",
-          drawn.built && asked === 2 && mediaParts.length === 2 && imagePrompts.every((prompt) => /No text, no words/.test(prompt)),
-          `built=${drawn.built} asked=${asked} media=${mediaParts.length}`,
-        );
-        check(
-          "each picture is asked for as the art director's subject, drawn from the deck's content",
-          imagePrompts.some((prompt) => prompt.startsWith("A maintainer at a desk")) && imagePrompts.some((prompt) => prompt.startsWith("A Monday calendar page")),
-          imagePrompts.map((prompt) => prompt.slice(0, 40)).join(" | "),
-        );
-        check("and a second build draws nothing again", !drawnAgain.built && imagePrompts.length === asked, `${imagePrompts.length} prompts`);
-        await saveDeckDesign("project_owner", { images: "none", theme: "ember", typeface: "Calibri" });
-        // A style guide kept for the role: the next build is on that
-        // PowerPoint — its master survives, our slides sit on its layouts.
-        const { storeTemplate, removeTemplate } = await import("../apps/hub/src/deck-template.js");
-        const { default: PptxGenJS } = await import("pptxgenjs");
-        const fixture = new PptxGenJS();
-        fixture.defineSlideMaster({
-          title: "HOUSE",
-          background: { color: "0B3D91" },
-          objects: [
-            { placeholder: { options: { name: "title", type: "title", x: 0.5, y: 0.4, w: 9, h: 1 } } },
-            { placeholder: { options: { name: "body", type: "body", x: 0.5, y: 1.6, w: 9, h: 3.4 } } },
-          ],
-        });
-        fixture.addSlide({ masterName: "HOUSE" }).addText("Old", { placeholder: "title" });
-        const fixtureBytes = new Uint8Array((await fixture.write({ outputType: "nodebuffer" })) as Buffer);
-        await storeTemplate("project_owner", { name: "house.pptx", type: "application/vnd.openxmlformats-officedocument.presentationml.presentation", bytes: fixtureBytes });
-        const onTemplate = await ensureDeckFor({ packageNodeId: older.nodeId, actor: ACTOR });
-        const { content: templatedContent } = await readArtifactNode(onTemplate.nodeId);
-        const templatedBytes = Buffer.from(/base64,(.*)$/s.exec(templatedContent)![1]!, "base64");
-        const dir2 = await mkdtemp(join(tmpdir(), "sb-deck-"));
-        await Bun.write(join(dir2, "deck.pptx"), templatedBytes);
-        const templatedParts = Bun.spawnSync(["unzip", "-Z1", join(dir2, "deck.pptx")]).stdout.toString().split("\n");
-        // The library keeps a master's background on its layout; either way it is still there.
-        const master = templatedParts
-          .filter((name) => /^ppt\/(slideMasters|slideLayouts)\/[^/]+\.xml$/.test(name))
-          .map((name) => Bun.spawnSync(["unzip", "-p", join(dir2, "deck.pptx"), name]).stdout.toString())
-          .join("");
-        const slideCount = templatedParts.filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name)).length;
-        await rm(dir2, { recursive: true, force: true });
-        check(
-          "a style guide kept for the role makes the next build a deck on that PowerPoint",
-          onTemplate.built && master.includes("0B3D91") && slideCount === 3,
-          `built=${onTemplate.built} master=${master.includes("0B3D91")} slides=${slideCount}`,
-        );
-        await removeTemplate("project_owner");
-        await saveDeckDesign("project_owner", { template: null });
       }
       const { gate, next } = await advanceStage(walkCtx, stage);
       walked = gate?.stepId === gateStepId(stage) && next?.stage === stage + 1;

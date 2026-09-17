@@ -37,7 +37,7 @@ import {
   bundleFileName,
 } from "./project-transfer.js";
 import { bytesOf } from "./source-material.js";
-import { deckBytesOf, ensureDeckFor } from "./deck.js";
+import { deckBytesOf, deckForPackage } from "./deck.js";
 import { buildBytesOf, slugOf } from "./build-output.js";
 import { readProject } from "./project-records.js";
 import { delegateMore, delegationAudit, liveDelegationStore } from "./project-delegation.js";
@@ -297,17 +297,18 @@ export function registerProjectRoutes(api: Hono) {
   });
 
   /**
-   * A stakeholder's slides, saved into the Downloads folder: built from the
-   * package now when none exists for this version, and then saved. One
-   * request, because that is one act for the person.
+   * A stakeholder's slides, saved into the Downloads folder: the PowerPoint
+   * already recorded beside the package (or this deck node). The host never
+   * builds a deck on this route; stage 5's `render_deck` is what produced
+   * the bytes.
    */
   api.post("/artifacts/:nodeId/slides/save", async (context) => {
-    const deck = await ensureDeckFor({ packageNodeId: context.req.param("nodeId"), actor: localActor() });
+    const deck = await deckForPackage(context.req.param("nodeId"));
     const { node, content } = await readArtifactNode(deck.nodeId);
     const bytes = await deckBytesOf(content);
     if (!bytes) throw new HostError("internal_error", "The slides were recorded without their bytes.");
     const saved = await saveFile(fileNameFor(node.title, node.mediaType), bytes, exportDirectory());
-    return context.json({ ...saved, nodeId: deck.nodeId, built: deck.built });
+    return context.json({ ...saved, nodeId: deck.nodeId });
   });
 
   /**

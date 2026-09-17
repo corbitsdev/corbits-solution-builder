@@ -723,9 +723,9 @@ export const api = {
   },
   removeDeckTemplate: (role: string) =>
     request<{ role: string }>(`/deck-settings/${role}/template`, { method: "DELETE" }),
-  /** Builds a package's slides when none exist for it yet, then saves them into the Downloads folder; says where. */
+  /** Saves a package's already-recorded slides into the Downloads folder; says where. The host does not build them. */
   saveSlidesFor: (packageNodeId: string) =>
-    post<{ path: string; bytes: number; nodeId: string; built: boolean }>(`/artifacts/${packageNodeId}/slides/save`, {}),
+    post<{ path: string; bytes: number; nodeId: string }>(`/artifacts/${packageNodeId}/slides/save`, {}),
   /** Saves an artifact that is a file (a stakeholder's slides) into the Downloads folder; says where. */
   saveArtifactFile: (nodeId: string) => post<{ path: string; bytes: number }>(`/artifacts/${nodeId}/save`, {}),
   /** Where a design is served as a page of its own, for printing. A path, not a request. */

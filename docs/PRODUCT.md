@@ -75,16 +75,15 @@ stood.
 
 Every package carries a deck outline — a numbered list of slides under a
 "Deck outline" heading — and one without is refused rather than recorded,
-whoever wrote it. That outline becomes a PowerPoint deck for that stakeholder,
-kept as its own version beside the package. A deck's design — theme, typeface,
-how much a slide carries, whether it carries speaker notes, and what its
-outline should emphasise — is set once per role in Settings, where a role can
-also supply its own PowerPoint file as a style guide; where one is on file,
-the deck is built onto that file's own colours, fonts and slide proportions
-instead of the built-in look. When a role's design asks for illustrations, a
-model that has read the whole deck chooses which slides get one and what each
-should show, and the image generated from that description is placed on the
-slide.
+whoever wrote it. Stage 5's presentation-creator turns that outline into a
+PowerPoint through the `render_deck` tool in the sidecar; the host stores
+those bytes as their own version beside the package and never builds a
+deck on a save. A deck's design — theme, typeface, how much a slide
+carries, whether it carries speaker notes, and what its outline should
+emphasise — is set once per role in Settings, where a role can also supply
+its own PowerPoint file as a style guide; where one is on file, its
+colours, fonts and slide proportions feed `render_deck` instead of the
+built-in look.
 
 ## How a stage feels
 

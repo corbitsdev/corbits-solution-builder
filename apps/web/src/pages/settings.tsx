@@ -615,7 +615,7 @@ function StakeholderDecks() {
   return (
     <Section
       title="Stakeholder decks"
-      lead="How each stakeholder role's slides look, and what their deck outline should emphasise. A changed look rebuilds the slides the next time they are saved; changed guidance shapes the next package written for that role. For images, a model reads the whole deck, decides which slides a picture would help and what each should show, and the first connected provider that lists an image model draws them when the slides are saved; each is kept so it is drawn once."
+      lead="How each stakeholder role's slides look, and what their deck outline should emphasise. A changed look is used the next time stage 5 writes the package; changed guidance shapes that package's outline. Saving slides writes the PowerPoint already recorded — the host does not rebuild it."
     >
       {error ? <Banner tone="error" title={error} /> : null}
       {DECK_ROLES.map((role) => {

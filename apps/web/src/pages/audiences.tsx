@@ -202,34 +202,32 @@ export function AudiencePackages({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Slides are asked for one audience at a time, and a person moves on to
-  // the next while the first is still being built. So each package keeps
-  // its own state — being built, or where its slides went — rather than one
+  // the next while the first is still being saved. So each package keeps
+  // its own state — being saved, or where its slides went — rather than one
   // slot for whichever tab happens to be open.
-  const [building, setBuilding] = useState<ReadonlySet<string>>(new Set());
+  const [saving, setSaving] = useState<ReadonlySet<string>>(new Set());
   const [savedPaths, setSavedPaths] = useState<ReadonlyMap<string, string>>(new Map());
-  // The slides for a package are built from it the first time they are
-  // asked for — a package written before decks existed has none yet — and
-  // saved; after that, saved again from the deck already recorded.
+  // The slides for a package are the PowerPoint stage 5 already recorded
+  // beside it. Saving writes those bytes; the host does not build a deck.
   const saveSlides = async (packageNodeId: string) => {
-    setBuilding((before) => new Set(before).add(packageNodeId));
+    setSaving((before) => new Set(before).add(packageNodeId));
     setError(null);
     try {
       const result = await api.saveSlidesFor(packageNodeId);
       setSavedPaths((before) => new Map(before).set(packageNodeId, result.path));
-      if (result.built) onChanged();
     } catch (cause) {
       const name = packages.find((node) => node.id === packageNodeId)?.variant ?? "this stakeholder";
       setError(`Slides for ${name}: ${cause instanceof ApiFailure ? cause.detail.message : String(cause)}`);
     } finally {
-      setBuilding((before) => {
+      setSaving((before) => {
         const next = new Set(before);
         next.delete(packageNodeId);
         return next;
       });
     }
   };
-  const slidesState = (nodeId: string): "building" | "saved" | null =>
-    building.has(nodeId) ? "building" : savedPaths.has(nodeId) ? "saved" : null;
+  const slidesState = (nodeId: string): "saving" | "saved" | null =>
+    saving.has(nodeId) ? "saving" : savedPaths.has(nodeId) ? "saved" : null;
 
   const selected = packages.find((node) => node.variant === active) ?? packages[0] ?? null;
   // A stakeholder whose package was never written, or failed to be: the
@@ -423,15 +421,15 @@ export function AudiencePackages({
                 // The tab says where its slides stand, so the person need
                 // not come back to each one to find out.
                 label: `${node.variant ?? node.title}${
-                  slidesState(node.id) === "building" ? " · building slides…" : slidesState(node.id) === "saved" ? " · slides saved" : ""
+                  slidesState(node.id) === "saving" ? " · saving slides…" : slidesState(node.id) === "saved" ? " · slides saved" : ""
                 }`,
               }))}
             >
               {() => null}
             </Tabs>
-            {building.size > 0 ? (
+            {saving.size > 0 ? (
               <p className="inline-note" aria-live="polite">
-                Building slides for {packages.filter((node) => building.has(node.id)).map((node) => node.variant ?? node.title).join(", ")}.
+                Saving slides for {packages.filter((node) => saving.has(node.id)).map((node) => node.variant ?? node.title).join(", ")}.
                 Keep going; each tab says when its slides are saved.
               </p>
             ) : null}
@@ -474,8 +472,8 @@ export function AudiencePackages({
                     while the stage is open, a way to write the package again
                     on its own; the others keep their versions and decisions. */}
                 <div className="button-row">
-                  <Button variant="primary" loading={building.has(selected.id)} onClick={() => saveSlides(selected.id)}>
-                    {building.has(selected.id) ? "Building slides…" : "Save slides (.pptx)"}
+                  <Button variant="primary" loading={saving.has(selected.id)} onClick={() => saveSlides(selected.id)}>
+                    {saving.has(selected.id) ? "Saving slides…" : "Save slides (.pptx)"}
                   </Button>
                   {selected.variant && inProgress && !decisionFor(selected.variant) ? (
                     <Button loading={drafting} onClick={() => onDraftPackages([selected.variant!])}>

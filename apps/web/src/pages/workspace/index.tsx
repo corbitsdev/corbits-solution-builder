@@ -460,7 +460,7 @@ export function StageWorkspace({
                 return {
                   ...result,
                   ...(written.length > 0 && result.note === undefined
-                    ? { note: `Wrote the package for ${written.join(", ")} again. Save slides to rebuild the deck from it.` }
+                    ? { note: `Wrote the package for ${written.join(", ")} again.` }
                     : {}),
                 };
               })
