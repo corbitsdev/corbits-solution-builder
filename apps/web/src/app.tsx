@@ -529,6 +529,27 @@ export function App() {
     }
   };
 
+  /**
+   * The retry path out of a blocked delivery verdict: re-runs verification
+   * against the latest manifest and reloads, so an execution-layer failure
+   * (a flaked run, a probe that has since learned the deliverable) can clear
+   * without redoing the delivery. Bytes that changed without a new manifest
+   * still mismatch — that failure says to record first.
+   */
+  const reverify = async (wait: Wait) => {
+    setBusy("reverify");
+    setError(null);
+    try {
+      await api.reverifyDelivery(wait.projectId);
+      setSelected(wait.projectId);
+      await reloadDetail();
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   // Nothing is decided until the host has answered. Rendering the app shell
   // while `status` is still null and correcting to onboarding a moment later is
   // how a first launch flashes the wrong screen — the person sees an app they
@@ -737,6 +758,7 @@ export function App() {
             onInspect={(wait) => openProject(wait.projectId)}
             onStart={() => setView("projects")}
             onDecide={decide}
+            onReverify={reverify}
           />
         ) : null}
 

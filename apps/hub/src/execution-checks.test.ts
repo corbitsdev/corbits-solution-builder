@@ -217,6 +217,119 @@ describe("empty test files must not read as a passing suite", () => {
   });
 });
 
+describe("a long-running server as the entry point", () => {
+  test("an entry point that is still alive and serving HTTP at the deadline passes", async () => {
+    const workspace = await workspaceWith({
+      "package.json": JSON.stringify({ name: "server", scripts: { start: "bun run server.js" } }),
+      // Port 0 lets the OS assign a free port; logging it exercises the
+      // probe's port discovery. The self-destruct timer is only a backstop so
+      // a failed kill in the probe cannot leak this fixture forever.
+      "server.js": `const server = Bun.serve({ port: 0, fetch: () => new Response("alive") });
+console.log(\`listening on http://127.0.0.1:\${server.port}/\`);
+setTimeout(() => process.exit(0), 45_000);
+setInterval(() => {}, 1_000);
+`,
+    });
+
+    const execution = await runExecutionChecks(workspace);
+
+    const entry = execution.find((check) => check.kind === "entry_point");
+    expect(entry?.ok).toBe(true);
+    expect(entry?.timedOut).toBe(false);
+    expect(entry?.vacuous).toBe(false);
+    expect(entry?.detail).toContain("live server");
+    expect(hasWorkingDeliverable(execution)).toBe(true);
+  }, 60_000);
+
+  test("an entry point that is still alive but serves nothing still fails", async () => {
+    const workspace = await workspaceWith({
+      "package.json": JSON.stringify({ name: "hung", scripts: { start: "bun run hang.js" } }),
+      "hang.js": `setTimeout(() => process.exit(0), 45_000);
+setInterval(() => {}, 1_000);
+`,
+    });
+
+    const execution = await runExecutionChecks(workspace);
+
+    const entry = execution.find((check) => check.kind === "entry_point");
+    expect(entry?.ok).toBe(false);
+    expect(entry?.timedOut).toBe(true);
+    expect(entry?.detail).toContain("exceeded 15000ms and was killed");
+    expect(hasWorkingDeliverable(execution)).toBe(false);
+  }, 60_000);
+
+  test("a readiness line with no socket behind it does not pass — log output is not a server", async () => {
+    const workspace = await workspaceWith({
+      "package.json": JSON.stringify({ name: "spoof", scripts: { start: "bun run spoof.js" } }),
+      // "listening for input" matched the old readiness pattern and passed
+      // with no socket proof at all.
+      "spoof.js": `console.log("listening for input");\nsetTimeout(() => process.exit(0), 45_000);\nsetInterval(() => {}, 1_000);\n`,
+    });
+
+    const execution = await runExecutionChecks(workspace);
+
+    const entry = execution.find((check) => check.kind === "entry_point");
+    expect(entry?.ok).toBe(false);
+    expect(entry?.timedOut).toBe(true);
+    expect(hasWorkingDeliverable(execution)).toBe(false);
+  }, 60_000);
+
+  test("a port that already served before the run is ambient, not the deliverable's", async () => {
+    const ambient = Bun.serve({ port: 0, fetch: () => new Response("not yours") });
+    try {
+      const workspace = await workspaceWith({
+        "package.json": JSON.stringify({ name: "squat", scripts: { start: `bun run server.js --port ${ambient.port}` } }),
+        "server.js": `setTimeout(() => process.exit(0), 45_000);\nsetInterval(() => {}, 1_000);\n`,
+      });
+
+      const execution = await runExecutionChecks(workspace);
+
+      const entry = execution.find((check) => check.kind === "entry_point");
+      expect(entry?.ok).toBe(false);
+      expect(entry?.detail).toContain(String(ambient.port));
+      expect(hasWorkingDeliverable(execution)).toBe(false);
+    } finally {
+      ambient.stop(true);
+    }
+  }, 60_000);
+
+  test("a port that keeps serving after the process dies is ambient, not the deliverable's", async () => {
+    const ambient = Bun.serve({ port: 0, fetch: () => new Response("not yours") });
+    try {
+      const workspace = await workspaceWith({
+        "package.json": JSON.stringify({ name: "mimic", scripts: { start: "bun run server.js" } }),
+        // The port appears only in the runtime log, never in the start
+        // command, so no pre-spawn snapshot could have excluded it — only the
+        // still-serving-after-death check catches the squat.
+        "server.js": `console.log("listening on http://127.0.0.1:${ambient.port}/");\nsetTimeout(() => process.exit(0), 45_000);\nsetInterval(() => {}, 1_000);\n`,
+      });
+
+      const execution = await runExecutionChecks(workspace);
+
+      const entry = execution.find((check) => check.kind === "entry_point");
+      expect(entry?.ok).toBe(false);
+      expect(entry?.detail).toContain(String(ambient.port));
+      expect(hasWorkingDeliverable(execution)).toBe(false);
+    } finally {
+      ambient.stop(true);
+    }
+  }, 60_000);
+
+  test("an entry point that exits non-zero still fails as before", async () => {
+    const workspace = await workspaceWith({
+      "package.json": JSON.stringify({ name: "broken", scripts: { start: "bun run main.js" } }),
+      "main.js": `console.log("boom");\nprocess.exit(1);\n`,
+    });
+
+    const execution = await runExecutionChecks(workspace);
+
+    const entry = execution.find((check) => check.kind === "entry_point");
+    expect(entry?.ok).toBe(false);
+    expect(entry?.timedOut).toBe(false);
+    expect(entry?.detail).toContain("exited 1");
+  });
+});
+
 describe("the positive case: a real deliverable is complete", () => {
   test("a workspace member with a real entry point and real passing tests is a working deliverable", async () => {
     const dir = await workspaceWith({

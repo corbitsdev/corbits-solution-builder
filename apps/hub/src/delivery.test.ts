@@ -158,4 +158,48 @@ describe("verifyManifest execution checks", () => {
     expect(report.execution).toEqual([]);
     expect(report.complete).toBe(true);
   });
+
+  test("a fix without a new manifest stays blocked — re-running stale hashes cannot pass", async () => {
+    const workspace = await workspaceWith({
+      "package.json": JSON.stringify({ name: "stale", scripts: { start: "bun run src/cli.ts" } }),
+      "src/cli.ts": `process.exit(1);\n`,
+    });
+    const staleManifest = manifestOf([await descriptorFor(workspace, "src/cli.ts")]);
+
+    const blocked = await verifyManifest("n_manifest", staleManifest, workspace);
+    expect(blocked.complete).toBe(false);
+
+    // The deliverable is fixed, but the manifest is NOT re-recorded: the
+    // retry path re-checks these same stale hashes, so it must stay blocked.
+    await writeFile(join(workspace, "src/cli.ts"), `console.log("fixed");\n`);
+    const retried = await verifyManifest("n_manifest", staleManifest, workspace);
+    expect(retried.complete).toBe(false);
+    expect(retried.items.find((item) => item.path === "src/cli.ts")?.status).toBe("hash_mismatch");
+  });
+
+  test("re-running verification after a fix passes — a blocked verdict is re-attemptable, not a dead end", async () => {
+    const workspace = await workspaceWith({
+      "package.json": JSON.stringify({ name: "retry", scripts: { start: "bun run src/cli.ts" } }),
+      "src/cli.ts": `process.exit(1);\n`,
+    });
+
+    const blocked = await verifyManifest(
+      "n_manifest",
+      manifestOf([await descriptorFor(workspace, "src/cli.ts")]),
+      workspace,
+    );
+    expect(blocked.complete).toBe(false);
+    expect(blocked.failed).toContain("execution:entry_point");
+
+    // The deliverable is fixed; the manifest is re-recorded against the new
+    // bytes and verification runs again — this is what the retry path does.
+    await writeFile(join(workspace, "src/cli.ts"), `console.log("serving");\n`);
+    const retried = await verifyManifest(
+      "n_manifest",
+      manifestOf([await descriptorFor(workspace, "src/cli.ts")]),
+      workspace,
+    );
+    expect(retried.failed).toEqual([]);
+    expect(retried.complete).toBe(true);
+  });
 });
