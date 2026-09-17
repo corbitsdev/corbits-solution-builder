@@ -31,7 +31,7 @@ import {
   ensureLifecycleDeployment,
   lifecycleAssetName,
   type LifecycleDeployment,
-} from "./workflow-deploy.js";
+} from "./installer-bridge.js";
 
 /** What a signal delivery actually did, so a caller can tell nothing from broken. */
 export type DeliveryOutcome = "delivered" | "no_execution" | "failed";

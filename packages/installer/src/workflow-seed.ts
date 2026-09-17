@@ -12,11 +12,17 @@
  * creates a new version when it has. A running instance keeps the version it
  * started on.
  */
-import { registerDefinition } from "./hub-gaps.js";
-import { sha256 } from "./ids.js";
-import { tenantId } from "./hub-client.js";
+import type { InstallerGaps } from "./gaps.js";
 import type { WorkflowDefinition } from "@intx/workflow";
 import { projectLifecycleDefinition, PROJECT_LIFECYCLE_ID } from "@solutions-builder/app/workflows/project-lifecycle";
+
+/** SHA-256 over a string, hex-encoded. WebCrypto only, so no host import is needed for it. */
+async function sha256(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
 
 export type SeededWorkflow = {
   readonly id: string;
@@ -51,13 +57,13 @@ export async function expectedWorkflowDefinitions(): Promise<{ name: string; id:
   return expected;
 }
 
-export async function seedWorkflows(): Promise<SeededWorkflow[]> {
+export async function seedWorkflows(gaps: InstallerGaps, tenantId: string): Promise<SeededWorkflow[]> {
   const seeded: SeededWorkflow[] = [];
   for (const entry of definitions()) {
     // The wire projection is what identity is keyed on upstream, so the hash is
     // taken over the definition exactly as it would be deployed.
     const wireHash = await sha256(JSON.stringify(entry.definition));
-    const written = await registerDefinition(tenantId(), {
+    const written = await gaps.registerDefinition(tenantId, {
       id: `wfd_${wireHash.slice(0, 24)}`,
       name: entry.name,
       description: entry.description,

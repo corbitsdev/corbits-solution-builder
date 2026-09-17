@@ -34,7 +34,7 @@ import { readOutputRef, stageIterations, type StageIteration } from "./hub-execu
 import { expectLiveDraft, stripOuterFence } from "./live-drafts.js";
 import { execute, type Actor } from "./engine.js";
 import { readArtifactNode, writeArtifact } from "./projects.js";
-import { readProject } from "./project-tenant.js";
+import { readProject } from "./installer-bridge.js";
 import { stageContext } from "./agent-conversation.js";
 import { renderInputs, buildDraftPrompt, withChoiceReminder, ensureChoiceSection, type Inputs, type Quote } from "@solutions-builder/app/stage-prompt";
 import { database } from "./db.js";

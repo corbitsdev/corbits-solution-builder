@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { HostError } from "./errors.js";
-import type { HubGrant } from "./hub-client.js";
+import { InstallerError } from "./errors.js";
+import type { HubGrant } from "./hub.js";
 import type { DelegationRecord } from "./project-tenant.js";
 import {
   delegateAtCreation,
@@ -67,10 +67,10 @@ async function codeOf(run: () => Promise<unknown>): Promise<string> {
   try {
     await run();
   } catch (cause) {
-    if (cause instanceof HostError) return cause.code;
+    if (cause instanceof InstallerError) return cause.code;
     throw cause;
   }
-  throw new Error("expected a HostError");
+  throw new Error("expected an InstallerError");
 }
 
 describe("resolveDelegationConsent", () => {

@@ -9,15 +9,9 @@
  * none — is recorded on the project tenant beside the policy, which is what
  * makes the delegation auditable and revocable per workbench.
  */
-import { HostError } from "./errors.js";
-import {
-  catalog,
-  createPrincipalGrant,
-  deleteGrant,
-  listGrants,
-  myPrincipalIn,
-  type HubGrant,
-} from "./hub-client.js";
+import type { Transport } from "@intx/hub-client";
+import { InstallerError } from "./errors.js";
+import { catalogFor, createPrincipalGrant, deleteGrant, listGrants, myPrincipalIn, type HubGrant } from "./hub.js";
 import { readDelegationRecord, writeDelegationRecord, type DelegationRecord } from "./project-tenant.js";
 
 export const DELEGATION_ACTION = "use";
@@ -45,16 +39,20 @@ export type DelegationStore = {
   deleteChildGrant(projectId: string, grantId: string): Promise<void>;
 };
 
-/** The live store: the hub behind its own client, the tenant as the namespace. */
-export function liveDelegationStore(): DelegationStore {
+/**
+ * The live store: the hub's own tenant HTTP API through `transport`, the
+ * project tenant as the grant namespace and `workspaceTenantId` as the
+ * catalog's — credentials are workspace-owned, never a project's own.
+ */
+export function liveDelegationStore(transport: Transport, workspaceTenantId: string): DelegationStore {
   return {
-    listDelegatableCredentials: () => catalog.credentials(),
-    listChildGrants: (projectId) => listGrants(projectId),
-    ownerInChild: (projectId) => myPrincipalIn(projectId),
-    readRecord: (projectId) => readDelegationRecord(projectId),
-    writeRecord: (projectId, record) => writeDelegationRecord(projectId, record),
-    mintChildGrant: (projectId, input) => createPrincipalGrant(input, projectId),
-    deleteChildGrant: (projectId, grantId) => deleteGrant(grantId, projectId),
+    listDelegatableCredentials: () => catalogFor(transport, workspaceTenantId).credentials(),
+    listChildGrants: (projectId) => listGrants(transport, projectId),
+    ownerInChild: (projectId) => myPrincipalIn(transport, projectId),
+    readRecord: (projectId) => readDelegationRecord(transport, projectId),
+    writeRecord: (projectId, record) => writeDelegationRecord(transport, projectId, record),
+    mintChildGrant: (projectId, input) => createPrincipalGrant(transport, projectId, input),
+    deleteChildGrant: (projectId, grantId) => deleteGrant(transport, projectId, grantId),
   };
 }
 
@@ -75,9 +73,9 @@ export function resolveDelegationConsent(
   const byId = new Map(available.map((credential) => [credential.id, credential]));
   for (const id of credentialIds) {
     const credential = byId.get(id);
-    if (!credential) throw new HostError("validation_failed", `No credential with id "${id}".`);
+    if (!credential) throw new InstallerError("validation_failed", `No credential with id "${id}".`);
     if (credential.principalId !== null) {
-      throw new HostError(
+      throw new InstallerError(
         "validation_failed",
         `Credential "${id}" is personal to its owner and never crosses into a project.`,
       );
@@ -183,7 +181,7 @@ export async function delegateAtCreation(
     resolveDelegationConsent(args.delegatedCredentialIds, await store.listDelegatableCredentials());
   const principalId = await store.ownerInChild(args.projectId);
   if (!principalId) {
-    throw new HostError("internal_error", "The hub opened the project but the owner is not in it.");
+    throw new InstallerError("internal_error", "The hub opened the project but the owner is not in it.");
   }
   await store.writeRecord(args.projectId, {
     ...consent,
@@ -225,7 +223,7 @@ export async function delegateMore(
   );
   const principalId = await store.ownerInChild(args.projectId);
   if (!principalId) {
-    throw new HostError("internal_error", "The owner is not in that project.");
+    throw new InstallerError("internal_error", "The owner is not in that project.");
   }
   const grants = await ensureDelegationGrants(store, {
     projectId: args.projectId,

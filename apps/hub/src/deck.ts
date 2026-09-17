@@ -26,7 +26,7 @@ import { agentFor } from "@solutions-builder/app/kit";
 import { dataDirectory } from "./paths.js";
 import { HostError, notFound } from "./errors.js";
 import { artifactGraph, readArtifactNode, writeArtifact } from "./projects.js";
-import { readProject } from "./project-tenant.js";
+import { readProject } from "./installer-bridge.js";
 import { deckDesignFor, deckDesignHash, type DeckDesign } from "./deck-settings.js";
 import { templateFor, templateThemeFor } from "./deck-template.js";
 import { artDirection, chatSource, illustration, illustrationPrompt, imageSource } from "./deck-images.js";

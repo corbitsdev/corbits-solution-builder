@@ -12,9 +12,10 @@ import { givenDataDir } from "./smoke-env.js";
 import { openDatabase } from "../apps/hub/src/db.js";
 import { prepareDatabase } from "../apps/hub/src/migrate.js";
 import { ensureHub, localActor, listRoles } from "../apps/hub/src/hub-client.js";
-import { install } from "../apps/hub/src/install.js";
+import { install } from "../apps/hub/src/installer-bridge.js";
 import { createProject } from "../apps/hub/src/projects.js";
-import { readProject, audienceRoleName } from "../apps/hub/src/project-tenant.js";
+import { readProject } from "../apps/hub/src/installer-bridge.js";
+import { audienceRoleName } from "@solutions-builder/installer";
 import { setStakeholders, validateStakeholders, STAKEHOLDER_ROLES } from "../apps/hub/src/stakeholders.js";
 import { HostError } from "../apps/hub/src/errors.js";
 

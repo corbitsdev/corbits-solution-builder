@@ -6,6 +6,7 @@
  * config. Participants are principals holding roles in that tenant, so "may
  * this person approve here" is a question the hub's own evaluator answers.
  */
+import type { Transport } from "@intx/hub-client";
 import { AUTHORITIES, type Authority } from "@solutions-builder/app/ledger";
 import {
   assignRole,
@@ -15,12 +16,10 @@ import {
   getTenant,
   myPrincipalIn,
   patchTenant,
-  tenantId,
   type HubTenant,
-} from "./hub-client.js";
-import { listChildTenants } from "./hub-gaps.js";
-import { HostError, notFound } from "./errors.js";
-import { newId } from "./ids.js";
+} from "./hub.js";
+import type { InstallerGaps } from "./gaps.js";
+import { InstallerError } from "./errors.js";
 
 export type ProjectPolicy = {
   costTolerancePercent: number;
@@ -96,12 +95,17 @@ function toConfig(record: ProjectRecord, existing: Record<string, unknown> | und
   return { ...(existing ?? {}), [CONFIG_KEY]: stored };
 }
 
+function notFound(what: string): InstallerError {
+  return new InstallerError("conflict", `${what} was not found.`);
+}
+
 /** Opens the project tenant and gives the owner every human authority in it. */
-export async function createProjectRecord(args: {
-  title: string;
-  policy: ProjectPolicy;
-}): Promise<ProjectRecord> {
-  const tenant = await createChildTenant({ name: args.title, slug: newId.projectSlug() });
+export async function createProjectRecord(
+  transport: Transport,
+  workspaceTenantId: string,
+  args: { title: string; policy: ProjectPolicy; slug: string },
+): Promise<ProjectRecord> {
+  const tenant = await createChildTenant(transport, workspaceTenantId, { name: args.title, slug: args.slug });
   const record: ProjectRecord = {
     id: tenant.id,
     title: tenant.name,
@@ -112,45 +116,56 @@ export async function createProjectRecord(args: {
     deletedAt: null,
     createdAt: new Date(tenant.createdAt),
   };
-  await patchTenant(tenant.id, { config: toConfig(record, tenant.config) });
-  await installProjectAuthority(tenant.id, args.policy);
+  await patchTenant(transport, tenant.id, { config: toConfig(record, tenant.config) });
+  await installProjectAuthority(transport, tenant.id, args.policy);
   return record;
 }
 
 /** A live project, or null when it does not exist or was deleted. */
-export async function readProject(projectId: string): Promise<ProjectRecord | null> {
-  const tenant = await getTenant(projectId);
+export async function readProject(transport: Transport, projectId: string): Promise<ProjectRecord | null> {
+  const tenant = await getTenant(transport, projectId);
   const record = tenant ? fromTenant(tenant) : null;
   return record && !record.deletedAt ? record : null;
 }
 
-export async function requireProject(projectId: string): Promise<ProjectRecord> {
-  const record = await readProject(projectId);
+export async function requireProject(transport: Transport, projectId: string): Promise<ProjectRecord> {
+  const record = await readProject(transport, projectId);
   if (!record) throw notFound("That project");
   return record;
 }
 
 /** The recorded consent on a project, or null when nothing was ever consented. */
-export async function readDelegationRecord(projectId: string): Promise<DelegationRecord | null> {
-  const tenant = await getTenant(projectId);
+export async function readDelegationRecord(
+  transport: Transport,
+  projectId: string,
+): Promise<DelegationRecord | null> {
+  const tenant = await getTenant(transport, projectId);
   if (!tenant) throw notFound("That project");
   return (tenant.config?.[CONFIG_KEY] as StoredProject | undefined)?.delegation ?? null;
 }
 
 /** Records consent on the project tenant; read-modify-write like every config change. */
-export async function writeDelegationRecord(projectId: string, record: DelegationRecord): Promise<void> {
-  const tenant = await getTenant(projectId);
+export async function writeDelegationRecord(
+  transport: Transport,
+  projectId: string,
+  record: DelegationRecord,
+): Promise<void> {
+  const tenant = await getTenant(transport, projectId);
   if (!tenant) throw notFound("That project");
   const stored = (tenant.config?.[CONFIG_KEY] as StoredProject | undefined) ?? null;
   if (!stored) throw notFound("That project");
-  await patchTenant(projectId, {
+  await patchTenant(transport, projectId, {
     config: { ...(tenant.config ?? {}), [CONFIG_KEY]: { ...stored, delegation: record } },
   });
 }
 
-/** Every live project, newest first. */
-export async function listProjectRecords(): Promise<ProjectRecord[]> {
-  const rows = await listChildTenants(tenantId());
+/** Every live project under the workspace tenant, newest first. */
+export async function listProjectRecords(
+  transport: Transport,
+  gaps: InstallerGaps,
+  workspaceTenantId: string,
+): Promise<ProjectRecord[]> {
+  const rows = await gaps.listChildTenants(workspaceTenantId);
   return rows
     .map((row) => fromTenant(row))
     .filter((record): record is ProjectRecord => record !== null && !record.deletedAt)
@@ -163,14 +178,15 @@ export async function listProjectRecords(): Promise<ProjectRecord[]> {
  * is the tenant's only writer, and the engine serialises commands per key.
  */
 export async function updateProject(
+  transport: Transport,
   projectId: string,
   patch: Partial<Pick<ProjectRecord, "title" | "archivedAt" | "deletedAt" | "policy">>,
 ): Promise<ProjectRecord> {
-  const tenant = await getTenant(projectId);
+  const tenant = await getTenant(transport, projectId);
   const current = tenant ? fromTenant(tenant) : null;
   if (!tenant || !current) throw notFound("That project");
   const next: ProjectRecord = { ...current, ...patch, revision: current.revision + 1 };
-  const updated: HubTenant = await patchTenant(projectId, {
+  const updated: HubTenant = await patchTenant(transport, projectId, {
     ...(patch.title !== undefined ? { name: patch.title } : {}),
     config: toConfig(next, tenant.config),
   });
@@ -197,28 +213,33 @@ export function audienceRoleName(audience: string): string {
  * repairs a project opened before roles lived here.
  */
 export async function installProjectAuthority(
+  transport: Transport,
   projectId: string,
   policy: ProjectPolicy,
 ): Promise<void> {
-  const owner = await myPrincipalIn(projectId);
+  const owner = await myPrincipalIn(transport, projectId);
   if (!owner) {
-    throw new HostError("internal_error", "The hub opened the project but the owner is not in it.");
+    throw new InstallerError("internal_error", "The hub opened the project but the owner is not in it.");
   }
   for (const name of AUTHORITIES) {
     if (name === "system") continue;
-    const role = await ensureRole(name, ROLE_DESCRIPTIONS[name] ?? "", projectId);
-    await ensureRoleGrant(
-      { roleId: role.id, resource: `authority:${name}`, action: "hold", effect: "allow", origin: "role" },
-      projectId,
-    );
-    await assignRole(owner, role.id, projectId);
+    const role = await ensureRole(transport, projectId, name, ROLE_DESCRIPTIONS[name] ?? "");
+    await ensureRoleGrant(transport, projectId, {
+      roleId: role.id,
+      resource: `authority:${name}`,
+      action: "hold",
+      effect: "allow",
+      origin: "role",
+    });
+    await assignRole(transport, projectId, owner, role.id);
   }
   for (const audience of policy.audiences) {
     const role = await ensureRole(
+      transport,
+      projectId,
       audienceRoleName(audience.name),
       `Audience "${audience.name}" on this project.`,
-      projectId,
     );
-    await assignRole(owner, role.id, projectId);
+    await assignRole(transport, projectId, owner, role.id);
   }
 }

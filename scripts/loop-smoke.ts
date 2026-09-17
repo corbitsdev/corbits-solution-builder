@@ -16,7 +16,7 @@ import { givenDataDir } from "./smoke-env.js";
 import { openDatabase } from "../apps/hub/src/db.js";
 import { prepareDatabase } from "../apps/hub/src/migrate.js";
 import { ensureHub, evaluate, listRoles, assignRole, localActor, tenantId } from "../apps/hub/src/hub-client.js";
-import { install } from "../apps/hub/src/install.js";
+import { install } from "../apps/hub/src/installer-bridge.js";
 import { ensureUserPrincipal } from "../apps/hub/src/hub-gaps.js";
 import {
   createProject,
