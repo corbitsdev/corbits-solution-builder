@@ -56,15 +56,6 @@ export async function createProject(
     concealRecord?: (projectId: string) => Promise<void>;
   } = {},
 ): Promise<{ projectId: string; runId: string; delegations: DelegationRecord }> {
-  // `project.create` is the one command with no state to leave, so `evaluate`
-  // cannot judge it — but its ledger row still says what opening a project
-  // means, and this reads that rather than restating it.
-  const transition = origin("project.create");
-  if (!transition) throw new HostError("internal_error", "No ledger row opens a project.");
-  const stage = transition.stages?.[0] ?? 1;
-  const opening = transition.to;
-  if (!opening) throw new HostError("internal_error", "The opening transition names no state.");
-
   // The precondition the row names: "valid initial policy and workspace scope".
   if (args.title.trim().length === 0) {
     throw new HostError("validation_failed", "A project needs a title.");
@@ -87,8 +78,6 @@ export async function createProject(
   // human authority as a role there.
   const createRecord = deps.createRecord ?? createProjectRecord;
   const project = await createRecord({ title: args.title, policy: args.policy });
-  const runId = newId.run();
-  const created = { projectId: project.id, runId };
   let delegations: DelegationRecord;
   try {
     delegations = await delegateAtCreation(store, { projectId: project.id, consent });
@@ -109,12 +98,41 @@ export async function createProject(
     }
     throw cause;
   }
-  // The one run-opening write outside `engine.ts` — `project.create` has no
-  // source run to guard, so it never reaches `execute()`. The run is recorded
-  // on the project's first ledger turn, below.
+  const opened = await openProject({
+    projectId: project.id,
+    owner: args.owner,
+    ...(args.problemStatement !== undefined ? { problemStatement: args.problemStatement } : {}),
+  });
+  return { ...opened, delegations };
+}
+
+/**
+ * The ledger half of opening a project: `project.create` and the first run.
+ * The tenant, authority and credential delegation are the installer's
+ * `createProject`; this is the host-only write that follows.
+ */
+export async function openProject(args: {
+  projectId: string;
+  owner: { principalId: string; displayName: string };
+  problemStatement?: string;
+}): Promise<{ projectId: string; runId: string }> {
+  await requireProject(args.projectId);
+  const already = await existingOpening(args.projectId);
+  if (already) return already;
+
+  // `project.create` is the one command with no state to leave, so `evaluate`
+  // cannot judge it — but its ledger row still says what opening a project
+  // means, and this reads that rather than restating it.
+  const transition = origin("project.create");
+  if (!transition) throw new HostError("internal_error", "No ledger row opens a project.");
+  const stage = transition.stages?.[0] ?? 1;
+  const opening = transition.to;
+  if (!opening) throw new HostError("internal_error", "The opening transition names no state.");
+
+  const runId = newId.run();
   const opened: RunRecord = {
     id: runId,
-    projectId: project.id,
+    projectId: args.projectId,
     kind: opening.kind,
     stage,
     state: opening.state,
@@ -130,30 +148,41 @@ export async function createProject(
   };
 
   await recordCommand({
-    projectId: created.projectId,
+    projectId: args.projectId,
     actorPrincipalId: args.owner.principalId,
     authority: "project_owner",
     command: transition.command,
     transitionId: transition.id,
     correlationId: newId.correlation(),
     before: null,
-    after: { projectId: created.projectId, runId: created.runId, stage },
+    after: { projectId: args.projectId, runId, stage },
     idempotencyKey: newId.command(),
     result: {
-      runId: created.runId,
+      runId,
       stage,
       state: opening.state,
       transitionId: transition.id,
       replayed: false,
     },
     stage,
-    runId: created.runId,
+    runId,
     runs: [{ op: "create", run: opened }],
     ...(args.problemStatement?.trim() ? { message: args.problemStatement.trim() } : {}),
   });
-  await launchProjectRun({ projectId: created.projectId });
+  await launchProjectRun({ projectId: args.projectId });
+  return { projectId: args.projectId, runId };
+}
 
-  return { ...created, delegations };
+async function existingOpening(projectId: string): Promise<{ projectId: string; runId: string } | null> {
+  const opening = (await ledgerCommands(projectId)).find((command) => command.command === "project.create");
+  if (!opening) return null;
+  for (const raw of opening.runs) {
+    const mutation = raw as { op?: string; run?: { id?: string } };
+    if (mutation.op === "create" && typeof mutation.run?.id === "string") {
+      return { projectId, runId: mutation.run.id };
+    }
+  }
+  throw new HostError("conflict", "That project is already open.");
 }
 
 /**

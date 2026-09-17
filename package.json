@@ -64,7 +64,7 @@
     "assets:pack-registry": "bun --conditions intx-src scripts/pack-registry-asset.ts",
     "postinstall": "bun run vendor:build",
     "check:vendored-migrations": "bun --conditions intx-src scripts/check-vendored-migrations.ts",
-    "test": "bun test apps/hub/src packages/installer/src packages/tools-delivery/src",
+    "test": "bun test apps/hub/src packages/installer/src packages/tools-delivery/src apps/web/src",
     "test:vendored": "bun test vendor/interchange/packages/hub-api/src/routes/tenants.test.ts vendor/interchange/packages/hub-api/src/routes/sessions.test.ts vendor/interchange/packages/hub-api/src/routes/assets.test.ts vendor/interchange/packages/hub-api/src/routes/workflow-definitions.test.ts vendor/interchange/packages/hub-api/src/routes/workflows.test.ts vendor/interchange/packages/db/src/model-source-resolution.test.ts"
   },
   "dependencies": {

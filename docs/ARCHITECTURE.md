@@ -38,8 +38,11 @@ delegation — is its `createProject`. It takes a hub `Transport`
 facts about sidecar placement only the host process knows; it
 never reaches a database, a keychain or an Interchange internal itself, and
 depends on nothing in `apps/`. The hub boots vanilla (migrate, mount, serve)
-and calls this package to install on first launch and after every credential
-change (`apps/hub/src/installer-bridge.ts`); what the hub still holds beside
+and does the host-only repairs (owner, legacy-tenant adoption, workspace
+tenant, credential migration). The client then runs this package over the
+host's `/hub` proxy on first launch and after every credential change
+(`apps/web/src/client.ts`); smokes still call the same package through
+`apps/hub/src/installer-bridge.ts`. What the hub still holds beside
 Interchange's tables is the part of the tree that shrinks as it becomes
 vanilla.
 
@@ -71,8 +74,10 @@ by `check:boundaries`, not left to habit — this paragraph is drawn from its
 cross-checked against every literal `@intx` import under `apps/hub/src`.
 
 **The client** (`apps/web`) renders and asks: it reads and commands over the
-host's loopback API (`client.ts`), and never writes persistence itself. It
-imports the app package for names and the document format, and never the
+host's loopback API (`client.ts`), runs `install()` and `createProject()`
+through `@solutions-builder/installer` over `/hub`, and never writes
+persistence itself. It imports the app package for names and the document
+format, the installer package for those two calls, and never the
 Interchange hub's own modules directly.
 
 **The desktop shell** (`apps/desktop`) starts the hub, opens the window on the

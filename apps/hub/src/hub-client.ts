@@ -33,6 +33,7 @@ import {
   type WorkflowRunEvent,
 } from "@intx/hub-client";
 import { hub, hubIsMounted, mountHub } from "./hub-mount.js";
+import { remoteHubHeaders } from "./hub-proxy.js";
 import { pushTarball } from "./tarball.js";
 import { readSecretResult, secretReference, storeSecret } from "./host-secrets.js";
 import { HostError } from "./errors.js";
@@ -125,10 +126,7 @@ export async function hubFetch(path: string, init?: RequestInit): Promise<Respon
   const token = read.status === "found" ? read.secret : null;
   return fetch(`${url}${path}`, {
     ...init,
-    headers: {
-      ...init?.headers,
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-    },
+    headers: remoteHubHeaders(init?.headers, token),
   });
 }
 

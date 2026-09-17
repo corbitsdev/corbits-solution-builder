@@ -5,6 +5,19 @@
  * `request`, so an error contract change is a change here and nowhere else.
  * Clients read and command; they never write persistence.
  */
+import { APP_VERSION } from "@solutions-builder/app/manifest";
+import {
+  ApiError as HubApiError,
+  createProject as installerCreateProject,
+  install as installerInstall,
+  installState as installerInstallState,
+  InstallerError,
+  resolveWorkspace,
+  type InstallState as PackageInstallState,
+  type ProjectPolicy,
+  type SidecarCapability,
+} from "@solutions-builder/installer";
+
 export type Remediation = {
   kind: "switch_provider" | "reconnect" | "retry";
   label: string;
@@ -366,20 +379,73 @@ export type StageTurn = {
 /** The stage-1 brief evaluator's verdict. Advisory only — nothing gates on it. */
 export type Evaluation = { ready: boolean; notes: string[] };
 
-export type InstallState = {
-  deployment?: { status: string; detail: string };
-  installed: boolean;
-  appVersion: string;
-  stale: string[];
-  missing: string[];
-  detail: string;
+export type InstallState = PackageInstallState;
+
+const HOSTED_INSTALL: InstallState = {
+  installed: true,
+  appVersion: APP_VERSION,
+  missing: [],
+  stale: [],
+  deployment: { status: "hosted", detail: "Managed by the hub." },
+  detail: "Hosted hub: definitions are managed there.",
 };
+
+const TITLE_MAX = 60;
+const SLUG_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz";
+
+/** The fallback name: first line of the problem, trimmed to a title. */
+export function titleFromProblem(problem: string): string {
+  const line = problem.trim().split("\n")[0]!.trim();
+  return line.length > TITLE_MAX ? `${line.slice(0, TITLE_MAX - 1).trimEnd()}…` : line;
+}
+
+function projectSlug(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  let out = "sb-";
+  for (const byte of bytes) out += SLUG_ALPHABET[byte % SLUG_ALPHABET.length]!;
+  return out;
+}
+
+export function sidecarCapabilityOf(
+  status: Pick<HostStatus, "canPlaceSidecars" | "sidecarFingerprint">,
+): SidecarCapability {
+  const fingerprint = status.sidecarFingerprint;
+  if (!status.canPlaceSidecars || fingerprint === null || fingerprint.length === 0) {
+    return { canPlaceSidecars: false, sidecarFingerprint: "" };
+  }
+  return { canPlaceSidecars: true, sidecarFingerprint: fingerprint };
+}
+
+function installerFailure(cause: unknown): never {
+  if (cause instanceof ApiFailure) throw cause;
+  if (cause instanceof InstallerError) {
+    throw new ApiFailure({
+      code: cause.code,
+      message: cause.message,
+      correlationId: "-",
+      retryable: false,
+    });
+  }
+  if (cause instanceof HubApiError) {
+    throw new ApiFailure({
+      code: cause.code,
+      message: cause.message,
+      correlationId: "-",
+      retryable: false,
+    });
+  }
+  throw new ApiFailure({
+    code: "internal_error",
+    message: cause instanceof Error ? cause.message : String(cause),
+    correlationId: "-",
+    retryable: false,
+  });
+}
 
 /**
  * Hub API over the host's `/hub` proxy. Same-origin credentials carry the
  * desktop handshake cookie; the proxy attaches the owner session after
- * `ensureOwner()`. CL-8095 will hand this to `install()`; boot still uses
- * `POST /api/install` until then.
+ * `ensureOwner()`. The installer package is driven by this transport.
  */
 export function createHubTransport() {
   return {
@@ -410,14 +476,11 @@ export function createHubTransport() {
         parsed = undefined;
       }
       if (!response.ok) {
-        const detail = (parsed as { error?: ApiError } | undefined)?.error;
-        throw new ApiFailure(
-          detail ?? {
-            code: "internal_error",
-            message: `The hub answered ${response.status}.`,
-            correlationId: "-",
-            retryable: false,
-          },
+        const detail = (parsed as { error?: { code?: string; message?: string } } | undefined)?.error;
+        throw new HubApiError(
+          response.status,
+          detail?.code ?? "unknown",
+          detail?.message ?? `HTTP ${response.status}`,
         );
       }
       return parsed as T;
@@ -430,8 +493,24 @@ export function createHubTransport() {
 
 export const api = {
   status: () => request<HostStatus>("/status"),
-  installState: () => request<InstallState>("/install"),
-  install: () => post<InstallState>("/install"),
+  installState: async (): Promise<InstallState> => {
+    const status = await request<HostStatus>("/status");
+    if (status.hub.mode !== "embedded") return HOSTED_INSTALL;
+    try {
+      return await installerInstallState(createHubTransport());
+    } catch (cause) {
+      installerFailure(cause);
+    }
+  },
+  install: async (): Promise<InstallState> => {
+    const status = await request<HostStatus>("/status");
+    if (status.hub.mode !== "embedded") return HOSTED_INSTALL;
+    try {
+      return await installerInstall(createHubTransport(), sidecarCapabilityOf(status));
+    } catch (cause) {
+      installerFailure(cause);
+    }
+  },
   agents: () => request<{ agents: { id: string; title: string; mission: string; stages: number[]; boundary: string }[] }>("/agents"),
   providers: () =>
     request<{
@@ -462,8 +541,48 @@ export const api = {
     request<{ ok: true }>(`/providers/${providerId}`, { method: "DELETE" }),
   decisions: () => request<{ decisions: Wait[] }>("/decisions"),
   projects: () => request<{ projects: ProjectSummary[] }>("/projects"),
-  createProject: (payload: unknown) =>
-    post<{ projectId: string; runId: string }>("/projects", payload),
+  createProject: async (payload: {
+    title?: string;
+    problemStatement?: string;
+    policy: ProjectPolicy;
+    delegatedCredentialIds?: string[];
+  }) => {
+    const problem = payload.problemStatement?.trim() ?? "";
+    const title = (payload.title?.trim() || titleFromProblem(problem)).trim();
+    if (title.length === 0) {
+      throw new ApiFailure({
+        code: "validation_failed",
+        message: "A project needs a title.",
+        correlationId: "-",
+        retryable: false,
+      });
+    }
+    try {
+      const workspace = await resolveWorkspace(createHubTransport());
+      if (!workspace) {
+        throw new ApiFailure({
+          code: "conflict",
+          message: "The workspace is not installed yet.",
+          correlationId: "-",
+          retryable: false,
+          install: true,
+        });
+      }
+      const { project } = await installerCreateProject(createHubTransport(), workspace.tenantId, {
+        title,
+        slug: projectSlug(),
+        policy: payload.policy,
+        ...(payload.delegatedCredentialIds !== undefined
+          ? { delegatedCredentialIds: payload.delegatedCredentialIds }
+          : {}),
+      });
+      return await post<{ projectId: string; runId: string }>(`/projects/${project.id}/open`, {
+        ...(problem.length > 0 ? { problemStatement: problem } : {}),
+      });
+    } catch (cause) {
+      installerFailure(cause);
+    }
+  },
   project: (projectId: string) => request<ProjectDetail>(`/projects/${projectId}`),
   projectInfo: (projectId: string) => request<ProjectInfo>(`/projects/${projectId}/info`),
   spend: () => request<WorkspaceSpend>("/spend"),
