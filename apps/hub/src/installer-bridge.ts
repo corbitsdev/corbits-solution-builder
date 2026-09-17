@@ -42,7 +42,14 @@ import {
   type ProjectPolicy,
   type ProjectRecord,
 } from "@solutions-builder/installer";
-import { ensureOwner, hubMode, hubTransport, resolveWorkspace, tenantId } from "./hub-client.js";
+import {
+  ensureOwner,
+  forgetWorkspace as hubClientForgetWorkspace,
+  hubMode,
+  hubTransport,
+  resolveWorkspace,
+  tenantId,
+} from "./hub-client.js";
 import { APP_VERSION } from "@solutions-builder/app/manifest";
 import {
   adoptLegacyWorkspace,
@@ -146,11 +153,14 @@ export async function install(): Promise<InstallState> {
     }),
   );
   // The package resolved or created the workspace tenant by the same slug
-  // `hub-client.ts` looks up; forgetting its own cache and resolving again is
-  // what lets the rest of the hub — everyday per-request tenant scoping, far
-  // beyond installation, all of it synchronous against `hub-client.ts`'s own
-  // cache — see the same tenant rather than a stale miss.
+  // `hub-client.ts` looks up. Two independent module-level caches exist here
+  // (the package's own, and `hub-client.ts`'s own — the one every other
+  // per-request call in the hub reads synchronously) and both must be
+  // dropped before resolving again, or a `resolveWorkspace()` call earlier in
+  // this same process (an adopted legacy tenant, say) leaves `hub-client.ts`
+  // handing back its stale cached tenant instead of asking the hub again.
   installerForgetWorkspace();
+  hubClientForgetWorkspace();
   await resolveWorkspace();
   return result;
 }

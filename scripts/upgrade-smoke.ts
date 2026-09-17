@@ -27,7 +27,7 @@ import { HUB_MIGRATIONS } from "../apps/hub/src/hub-migrations.js";
 import { migrateHub, PreHubDatabaseError } from "../apps/hub/src/hub-migrate.js";
 import { openDatabase, type HostDatabase } from "../apps/hub/src/db.js";
 import { prepareDatabase } from "../apps/hub/src/migrate.js";
-import { catalog, ensureHub, getTenant, tenantId } from "../apps/hub/src/hub-client.js";
+import { catalog, ensureHub, getTenant, hubGet, tenantId } from "../apps/hub/src/hub-client.js";
 import { hub } from "../apps/hub/src/hub-mount.js";
 import { resolveCredentialSecret } from "../apps/hub/src/hub-gaps.js";
 import { install, installState } from "../apps/hub/src/installer-bridge.js";
@@ -242,6 +242,63 @@ try {
 
   const again = await install();
   check("a second install is a no-op", again.installed && (await count()) === definitions);
+
+  // --- installer-bridge.ts: the host's own tenant cache must not go stale ---
+  //
+  // `hub-client.ts` caches the resolved workspace independently of the
+  // installer package's own cache, and every other per-request call in the
+  // hub reads that cache, not the package's. Simulate the workspace tenant
+  // being replaced under the same owner — the first tenant's slug moved
+  // aside, a second tenant carrying the workspace slug given the same
+  // owner principal, exactly what a data repair or a re-adopted legacy
+  // tenant would leave behind — then install again. A stale `hub-client.ts`
+  // cache would keep every later `tenantId()` call answering with the first
+  // tenant forever, since its own `resolveWorkspace()` short-circuits on a
+  // cached value and never asks the hub again.
+  {
+    const firstTenantId = tenantId();
+    const me = await hubGet<{ id: string }>("/api/me");
+    await host.db.execute(sql`UPDATE "public"."tenant" SET "slug" = 'solutions-builder-superseded' WHERE "id" = ${firstTenantId}`);
+    await host.db.execute(sql`
+      INSERT INTO "public"."tenant" ("id","name","slug","domain")
+      VALUES ('t_superseding', 'Solutions Builder', 'solutions-builder', 'superseding.solutions-builder.invalid')
+    `);
+    await host.db.execute(sql`
+      INSERT INTO "public"."principal" ("id","tenant_id","kind","ref_id","status")
+      VALUES ('principal_superseding_owner', 't_superseding', 'user', ${me.id}, 'active')
+    `);
+    // `POST /api/tenants` bootstraps the creator as the tenant's owner (a
+    // role plus an allow-everything grant); a tenant assembled by hand, the
+    // same way `adoptLegacyWorkspace` (`hub-gaps.ts`) repairs one, needs the
+    // same two rows or every write below is refused as unauthorised.
+    await host.db.execute(sql`
+      INSERT INTO "public"."role" ("id","tenant_id","name","description","is_system")
+      VALUES ('role_owner_t_superseding', 't_superseding', 'owner', 'System owner role', true)
+    `);
+    await host.db.execute(sql`
+      INSERT INTO "public"."grant" ("id","tenant_id","role_id","resource","action","effect","origin")
+      VALUES ('grant_owner_t_superseding', 't_superseding', 'role_owner_t_superseding', '*', '*', 'allow', 'system')
+    `);
+    await host.db.execute(sql`
+      INSERT INTO "public"."principal_role" ("principal_id","role_id")
+      VALUES ('principal_superseding_owner', 'role_owner_t_superseding')
+    `);
+    // The lifecycle definition's id is content-derived, not tenant-scoped, so
+    // the first tenant's row would collide on the primary key once the same
+    // package installs the same definition into the second tenant. The first
+    // tenant is superseded, not a survivor this test cares about; clearing its
+    // row is the honest way around a schema property this test does not
+    // exist to exercise.
+    await host.db.execute(sql`DELETE FROM "public"."workflow_definition" WHERE "tenant_id" = ${firstTenantId}`);
+
+    const reinstalled = await install();
+    check("install follows the tenant now carrying the workspace slug", reinstalled.installed, reinstalled.detail);
+    check(
+      "the host's own tenant scope follows it too, not a stale earlier resolution",
+      tenantId() === "t_superseding",
+      tenantId(),
+    );
+  }
 
   // --- CL-8076: a pre-upgrade OAuth secret in the old keychain/file store is
   // carried into the hub's own credential row, once, on boot. ---
