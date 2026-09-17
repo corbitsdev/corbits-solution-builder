@@ -12,7 +12,6 @@ import {
   assignRole,
   createChildTenant,
   ensureRole,
-  ensureRoleGrant,
   getTenant,
   listChildTenants,
   myPrincipalIn,
@@ -20,6 +19,7 @@ import {
   type HubTenant,
 } from "./hub.js";
 import { InstallerError } from "./errors.js";
+import { ensureAuthorityGrants } from "./signal-grants.js";
 
 export type ProjectPolicy = {
   costTolerancePercent: number;
@@ -207,9 +207,10 @@ export function audienceRoleName(audience: string): string {
 
 /**
  * The ledger's authorities as roles in the project tenant, each with the
- * `authority:<name>/hold` grant the evaluator answers for, plus one role per
- * audience. The owner holds every human authority. Idempotent, so it also
- * repairs a project opened before roles lived here.
+ * `authority:<name>/hold` grant the evaluator answers for and the
+ * `workflow-run:*` / `signal:<name>` grants for commands that name holds,
+ * plus one role per audience. The owner holds every human authority.
+ * Idempotent, so it also repairs a project opened before roles lived here.
  */
 export async function installProjectAuthority(
   transport: Transport,
@@ -223,13 +224,7 @@ export async function installProjectAuthority(
   for (const name of AUTHORITIES) {
     if (name === "system") continue;
     const role = await ensureRole(transport, projectId, name, ROLE_DESCRIPTIONS[name] ?? "");
-    await ensureRoleGrant(transport, projectId, {
-      roleId: role.id,
-      resource: `authority:${name}`,
-      action: "hold",
-      effect: "allow",
-      origin: "role",
-    });
+    await ensureAuthorityGrants(transport, projectId, role.id, name);
     await assignRole(transport, projectId, owner, role.id);
   }
   for (const audience of policy.audiences) {
