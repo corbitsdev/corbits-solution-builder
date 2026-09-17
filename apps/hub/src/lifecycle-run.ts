@@ -123,15 +123,20 @@ async function runIdsUnder(anchor: string, current: boolean): Promise<string[]> 
   return listed;
 }
 
-/** Every run under the deployment, folded from its committed events. */
-async function foldRuns(anchorRunId: string): Promise<FoldedRun[]> {
+/** Every run under the deployment, folded from its committed events, with the events kept for the ledger hook below. */
+async function foldRunsWithEvents(anchorRunId: string): Promise<{ runId: string; events: HubRunEvent[]; folded: FoldedRun }[]> {
   const runIds = await deploymentRuns.list(anchorRunId);
-  const folded: FoldedRun[] = [];
+  const folded: { runId: string; events: HubRunEvent[]; folded: FoldedRun }[] = [];
   for (const runId of runIds) {
     const events = await deploymentRuns.events(anchorRunId, runId);
-    folded.push(foldRun(runId, events));
+    folded.push({ runId, events, folded: foldRun(runId, events) });
   }
   return folded;
+}
+
+/** Every run under the deployment, folded from its committed events. */
+async function foldRuns(anchorRunId: string): Promise<FoldedRun[]> {
+  return (await foldRunsWithEvents(anchorRunId)).map((entry) => entry.folded);
 }
 
 /**
@@ -153,7 +158,34 @@ export type { StageStatus };
 export async function projectExecutionStatus(projectId: string): Promise<StageStatus | null> {
   const anchor = anchors.get(projectId) ?? (await anchorFor(projectId));
   if (!anchor) return null;
-  return projectState(await foldRuns(anchor));
+  const withEvents = await foldRunsWithEvents(anchor);
+  const status = projectState(withEvents.map((entry) => entry.folded));
+  // Write-on-read: a client signal over `/hub` never calls `commandFrom`, so
+  // the admitted gate commands already committed on the run are recorded as
+  // ledger mail here, where the events are already in hand. Best-effort and
+  // idempotent — a receipt skips what delivery or an earlier read recorded —
+  // and never allowed to break the read itself.
+  try {
+    const awaitedByRun = new Map<string, Set<string>>();
+    for (const park of parkedSteps(withEvents.map((entry) => entry.folded))) {
+      if (park.signalName === null) continue;
+      const known = awaitedByRun.get(park.runId) ?? new Set<string>();
+      known.add(park.signalName);
+      awaitedByRun.set(park.runId, known);
+    }
+    const { recordAdmittedGates } = await import("./command-ledger.js");
+    await recordAdmittedGates(
+      projectId,
+      withEvents.map((entry) => ({
+        runId: entry.runId,
+        events: entry.events,
+        awaited: awaitedByRun.get(entry.runId) ?? new Set<string>(),
+      })),
+    );
+  } catch (cause) {
+    console.error(`[executor] ${projectId}: could not record admitted gates from the run:`, cause);
+  }
+  return status;
 }
 
 /**

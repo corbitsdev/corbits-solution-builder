@@ -20,10 +20,13 @@ import { openDatabase } from "./db.js";
 import { prepareDatabase } from "./migrate.js";
 import { databaseDirectory, dataDirectory, portFile } from "./paths.js";
 import { stopSpawnedSidecars } from "./sidecar-processes.js";
-import { ensureHub, ensureOwner, hubFetch, ownerSession, resolveWorkspace } from "./hub-client.js";
+import { ensureHub, ensureOwner, hubFetch, localActor, ownerSession, resolveWorkspace } from "./hub-client.js";
 import { hub, hubIsMounted, hubWebSocket, setHostPort, SIDECAR_WS_PATH } from "./hub-mount.js";
-import { hubProxyAllowed, hubProxyHeaders, stripHubProxyCookies } from "./hub-proxy.js";
+import { hubProxyAllowed, hubProxyHeaders, hubProxySignalRunId, stampGateSignalBody, stripHubProxyCookies } from "./hub-proxy.js";
 import { attachLiveDrafts } from "./live-drafts.js";
+import { authoritiesFor } from "./command-approvals.js";
+import { GATE_COMMANDS } from "./gate-delivery.js";
+import { projectForRun } from "./lifecycle-run.js";
 import { attachRoundSpend } from "./round-spend.js";
 import { rerankCatalogProviders } from "./catalog.js";
 import { adoptLegacyWorkspaceOnce, ensureWorkspaceOnce, migrateCredentialsOnce, retryEnsureWorkspace } from "./workspace-boot.js";
@@ -274,6 +277,39 @@ app.route("/api", createApi());
 // authenticated origin. Embedded, this dispatches in-process; pointed at a
 // hosted hub it forwards. Only the installer and workflow routes are offered:
 // git-tokens, auth, and creating a root tenant stay off this door.
+// The authority stamp for a client gate signal. The browser folds the admit
+// payload itself, but the authority set `admitGate` checks is computed here:
+// the signal's target run maps to its project on the host, and the stamp
+// overwrites whatever the body carried. A gate signal the host cannot map to
+// a project, or whose authorities it cannot read, is still forwarded — but
+// with an empty stamp, so the gate refuses it rather than trusting the
+// body's own claims or blocking the signal outright.
+async function stampedSignalBody(
+  method: string,
+  path: string,
+  parsedBody: unknown,
+): Promise<Uint8Array | undefined> {
+  const runId = hubProxySignalRunId(method, path);
+  if (!runId || typeof parsedBody !== "object" || parsedBody === null) return undefined;
+  const isGate = (command: unknown): boolean =>
+    typeof command === "string" && (GATE_COMMANDS as readonly string[]).includes(command);
+  if (!isRecord(parsedBody) || !isRecord(parsedBody.payload) || !isGate(parsedBody.payload.command)) return undefined;
+  let authorities: readonly string[] = [];
+  try {
+    const projectId = await projectForRun(runId);
+    if (projectId) authorities = await authoritiesFor(projectId, localActor().principalId);
+  } catch (cause) {
+    console.error(`[hub-proxy] ${runId}: stamping the signal with no authorities:`, cause);
+  }
+  const stamped = stampGateSignalBody(parsedBody, isGate, authorities);
+  if (stamped === parsedBody) return undefined;
+  return new TextEncoder().encode(JSON.stringify(stamped));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
 app.all("/hub/*", async (context) => {
   const url = new URL(context.req.url);
   const path = url.pathname.replace(/^\/hub/, "") + url.search;
@@ -302,10 +338,11 @@ app.all("/hub/*", async (context) => {
     );
   }
   await ensureOwner();
+  const stamped = await stampedSignalBody(method, path, parsedBody);
   const response = await hubFetch(path, {
     method,
     headers: hubProxyHeaders(context.req.raw.headers, await ownerSession()),
-    ...(payload !== undefined ? { body: payload } : {}),
+    ...(stamped !== undefined ? { body: stamped } : payload !== undefined ? { body: payload } : {}),
   });
   return stripHubProxyCookies(response);
 });
