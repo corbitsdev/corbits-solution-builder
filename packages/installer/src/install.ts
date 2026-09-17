@@ -5,12 +5,11 @@
  * *Solutions Builder* — the owner as a hub user with a tenant, human roles
  * and grants, project authority, the one lifecycle definition row the command
  * ledger's session keys on, and the per-project lifecycle deployment — is
- * installed here, driven by a hub `Transport` the host supplies (already
- * authenticated as the owner: minting that identity is a keychain-and-cookie
- * affair only the host can do, so the host calls its own `ensureOwner()`
- * before handing this a transport). First run and upgrade are the same call,
- * and it is idempotent, so the host can ask again whenever a credential
- * changes.
+ * installed here, driven by a hub `Transport` already authenticated as the
+ * signed-in principal. First run signs up or in against the hub, then this
+ * call creates the workspace tenant as that session. First run and upgrade
+ * are the same call, and it is idempotent, so the host can ask again whenever
+ * a credential changes.
  *
  * "Installed" is a comparison, not a marker: every definition the package
  * generates exists in the tenant at the hash it would deploy right now.

@@ -89,7 +89,7 @@ export type MountedHub = {
   readonly principalStore: ReturnType<typeof createPrincipalStore>;
   /** Whether a principal row exists by id, a direct read `principalStore`'s natural-key upsert cannot express. */
   principalExists(id: string): Promise<boolean>;
-  /** The hub's own auth, so the host can sign the workspace owner in without a browser. */
+  /** The hub's own auth. Smokes sign in through it; the product UI uses `/hub/api/auth`. */
   readonly auth: ReturnType<typeof createAuth>;
   /**
    * The cipher a `credential` row's `secret` column is sealed under. Kept on
@@ -157,6 +157,11 @@ let mounted: MountedHub | null = null;
 let hostPort = 0;
 export function setHostPort(port: number): void {
   hostPort = port;
+}
+
+/** Origin the embedded hub should see, so Better Auth cookies and CSRF match the window. */
+export function embeddedHubOrigin(): string {
+  return hostPort > 0 ? `http://127.0.0.1:${hostPort}` : "http://hub.local";
 }
 
 /** Whether a sidecar could dial back in: false when mounted without serving. */
@@ -355,6 +360,11 @@ export async function mountHub(): Promise<MountedHub> {
     },
   });
 
+  // Better Auth trusts `BETTER_AUTH_BASE_URL`. Absent, that is localhost:3000,
+  // and a first-run sign-up from this host's loopback origin is CSRF-rejected.
+  if (hostPort > 0) {
+    process.env.BETTER_AUTH_BASE_URL ??= `http://127.0.0.1:${hostPort}`;
+  }
   const auth = createAuth(db.db);
 
   // Workflows execute in Interchange's own sidecar, spawned as a child process

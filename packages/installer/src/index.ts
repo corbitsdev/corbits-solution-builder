@@ -2,7 +2,7 @@
  * The public surface of `@solutions-builder/installer`.
  *
  * Everything here is driven by a `Transport` (`@intx/hub-client`) already
- * authenticated as the workspace owner. This package never reaches a
+ * authenticated as the signed-in principal. This package never reaches a
  * database or an Interchange internal itself; every platform write goes
  * through a real hub route.
  */

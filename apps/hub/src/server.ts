@@ -20,12 +20,13 @@ import { openDatabase } from "./db.js";
 import { prepareDatabase } from "./migrate.js";
 import { databaseDirectory, dataDirectory, portFile } from "./paths.js";
 import { stopSpawnedSidecars } from "./sidecar-processes.js";
-import { ensureHub, ensureOwner, hubFetch, resolveWorkspace } from "./hub-client.js";
+import { ensureHub, hubFetch, resolveWorkspace } from "./hub-client.js";
 import { hub, hubIsMounted, hubWebSocket, setHostPort, SIDECAR_WS_PATH } from "./hub-mount.js";
 import { hubMountPath, hubProxyHeaders } from "./hub-proxy.js";
 import { attachLiveDrafts } from "./live-drafts.js";
 import { attachRoundSpend } from "./round-spend.js";
 import { rerankCatalogProviders } from "./catalog.js";
+import { currentSession, rememberSession, sessionPairFromCookieHeader, sessionPairFromSetCookieHeaders } from "./hub-session.js";
 import { adoptLegacyWorkspaceOnce, migrateCredentialsOnce } from "./workspace-boot.js";
 import {
   clientConnected,
@@ -98,21 +99,16 @@ if (migrated.builder.length > 0) {
 const hubEndpoint = await ensureHub();
 console.log(`Interchange hub: ${hubEndpoint.detail}`);
 
-// Host-only repairs the installer package cannot do: mint the owner, adopt a
-// pre-identity tenant. The workspace tenant is created by the installer or
-// first-run client, not here; listen proceeds without one.
-await ensureOwner();
-await adoptLegacyWorkspaceOnce();
-
-// The embedded hub is mounted in this process; a hosted one is not, and its
-// events reach a different process entirely. Nothing to attach to there yet.
+// First launch signs up or in, then the client creates the workspace tenant
+// as that session. Do not mint an owner or create the tenant here; listen
+// without one.
 if (hubIsMounted()) {
   attachLiveDrafts();
   attachRoundSpend();
 }
 
-// Not seeding: signing in. If the owner and their workspace already exist, the
-// host knows which tenant it serves; if not, the client installs one.
+// If a previous session's workspace is already resolvable (scripts that
+// signed in before serving), name it; otherwise the client installs one.
 const known = await resolveWorkspace().catch((cause: unknown) => {
   console.error("Could not resolve the workspace:", cause);
   return null;
@@ -135,7 +131,7 @@ if (known) {
 }
 
 // Boot ends here. Everything that makes this tenant Solutions Builder — the
-// owner principal, workflow definitions, roles, specialist prompts — is
+// user principal, workflow definitions, roles, specialist prompts — is
 // installed by the client through `@solutions-builder/installer` over `/hub`.
 
 /**
@@ -239,8 +235,22 @@ const unauthorised = {
   },
 };
 
+function rememberHubSession(cookieHeader: string | null | undefined, from: Headers | null): void {
+  const had = currentSession();
+  const inbound = sessionPairFromCookieHeader(cookieHeader);
+  const minted = from ? sessionPairFromSetCookieHeaders(from) : null;
+  const next = minted ?? inbound;
+  if (next) rememberSession(next);
+  if (!had && currentSession()) {
+    void adoptLegacyWorkspaceOnce().catch((cause: unknown) => {
+      console.error("Could not adopt a pre-identity workspace:", cause);
+    });
+  }
+}
+
 app.use("/api/*", async (context, next) => {
   if (!authorised(context)) return context.json(unauthorised, 401);
+  rememberHubSession(context.req.header("cookie"), null);
   await next();
 });
 
@@ -266,11 +276,14 @@ app.all("/hub/*", async (context) => {
   const method = context.req.method;
   const payload =
     method === "GET" || method === "HEAD" ? undefined : await context.req.raw.arrayBuffer();
+  const inbound = hubProxyHeaders(context.req.raw.headers);
+  rememberHubSession(inbound.get("cookie"), null);
   const response = await hubFetch(path, {
     method,
-    headers: hubProxyHeaders(context.req.raw.headers),
+    headers: inbound,
     ...(payload !== undefined ? { body: payload } : {}),
   });
+  rememberHubSession(null, response.headers);
   return response;
 });
 

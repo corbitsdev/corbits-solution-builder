@@ -43,20 +43,23 @@ into the mounted Hono app; hosted (`SOLUTIONS_BUILDER_HUB_URL`), the same
 calls go over HTTPS. Platform writes go through the hub API, not drizzle on
 public tables.
 
-The client installs the app over the host's `/hub` mount. On launch it
-asks `installState()` through `@solutions-builder/installer` (same-origin
-credentials; the mount forwards the browser's own cookies),
-which recomputes "installed" every time by comparing the tenant's workflow
-definitions against the hash the package would generate right now — there is
-no stored version flag — and calls `install()` when anything is missing or
-stale. The same `install()` runs on first launch, on upgrade, and after
-every credential change, and is idempotent, doing, in order:
+Identity is the hub's. First launch signs up or in against `/hub/api/auth`.
+That signup creates the user principal; the host does not mint an owner or a
+password. The signed-in principal creates the workspace tenant
+(`POST /api/tenants`) through `@solutions-builder/installer`. On launch the
+client asks `installState()` (same-origin credentials; the mount forwards
+the browser's own cookies), which recomputes "installed" every time by
+comparing the tenant's workflow definitions against the hash the package
+would generate right now — there is no stored version flag — and calls
+`install()` when anything is missing or stale. The same `install()` runs on
+first launch, on upgrade, and after every credential change, and is
+idempotent, doing, in order:
 
-- the owner principal (minted by the host at boot) and the local tenant
-  (created by the installer or first-run client, not at host listen)
+- the workspace tenant, created by the signed-in principal (the installer or
+  first-run client, not at host listen) if it does not already resolve by slug
 - the one workflow definition generated from the ledger, `project-lifecycle`
   — the row the command ledger's own session keys on
-- the roles the ledger names, held by the owner
+- the roles the ledger names, held by that principal
 - project authority for every project tenant
 - the curated kit's skills, installed as hub assets
 - the provider catalog reranked at boot, so a model that can no longer

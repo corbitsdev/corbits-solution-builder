@@ -67,9 +67,9 @@ type Membership = {
 };
 
 /**
- * Finds the workspace the signed-in owner belongs to: the tenant with this
+ * Finds the workspace the signed-in principal belongs to: the tenant with this
  * app's slug, or the tenant a workspace carried before the hub owned
- * identity. `null` when the owner holds no such tenant yet.
+ * identity. `null` when they hold no such tenant yet.
  */
 export async function resolveWorkspace(transport: Transport): Promise<Workspace | null> {
   const user = await transport.fetch<{ id: string } | null>("GET", "/api/me").catch(() => null);

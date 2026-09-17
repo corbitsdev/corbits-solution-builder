@@ -2,8 +2,9 @@
  * In-process install for smokes and seed scripts.
  *
  * The hub no longer imports `@solutions-builder/installer`. Scripts drive
- * that package with the host's authenticated transport, the same way the
- * client does over `/hub`.
+ * that package with a test-session transport, the same way the client does
+ * over `/hub` after a person signs up. This helper signs in (or up) as a
+ * script account so smokes have a principal; it is not the product actor.
  */
 import { APP_VERSION } from "@solutions-builder/app/manifest";
 import {
@@ -18,11 +19,12 @@ import {
 } from "@solutions-builder/installer";
 import { rerankCatalogProviders } from "../apps/hub/src/catalog.js";
 import {
-  ensureOwner,
   forgetWorkspace as hubClientForgetWorkspace,
   hubMode,
   hubTransport,
   resolveWorkspace,
+  signInEmail,
+  signUpEmail,
   tenantId,
 } from "../apps/hub/src/hub-client.js";
 import { canPlaceSidecars, hub } from "../apps/hub/src/hub-mount.js";
@@ -40,6 +42,10 @@ const HOSTED: InstallState = {
   detail: "Hosted hub: definitions are managed there.",
 };
 
+const SCRIPT_EMAIL = "you@solutions-builder.local";
+const SCRIPT_PASSWORD = "solutions-builder-script-session";
+const SCRIPT_NAME = "You";
+
 function sidecarCapability(): SidecarCapability {
   return { canPlaceSidecars: canPlaceSidecars(), sidecarFingerprint: hub().sidecarBindingFingerprint };
 }
@@ -51,7 +57,9 @@ export async function installState(): Promise<InstallState> {
 
 export async function install(): Promise<InstallState> {
   if (hubMode() !== "embedded") return HOSTED;
-  await ensureOwner();
+  if (!(await signInEmail(SCRIPT_EMAIL, SCRIPT_PASSWORD))) {
+    await signUpEmail({ email: SCRIPT_EMAIL, password: SCRIPT_PASSWORD, name: SCRIPT_NAME });
+  }
   await adoptLegacyWorkspaceOnce();
   const result = await installerInstall(hubTransport(), sidecarCapability(), {
     afterEnsureWorkspace: async () => {

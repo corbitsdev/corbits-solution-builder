@@ -8,11 +8,10 @@
  * Nothing above this file can tell the difference, which is what makes
  * "ships inside the desktop app now, hosted later" a configuration change.
  *
- * The workspace owner is a real hub user. The host mints a password into the
- * keychain on first install, signs up, and signs in the way a browser would;
- * the session cookie is what every call below carries. There is no service
- * token and no direct table write here — every call goes through the hub's
- * own routes.
+ * The signed-in hub user is a real account. First launch signs up or in
+ * against the mounted hub; that session is what every call below carries.
+ * There is no minted owner password and no service token — every call goes
+ * through the hub's own routes.
  *
  * `SOLUTIONS_BUILDER_HUB_URL` selects a hosted hub. Absent, the hub is embedded.
  */
@@ -32,8 +31,9 @@ import {
   type WorkflowDeployment,
   type WorkflowRunEvent,
 } from "@intx/hub-client";
-import { hub, hubIsMounted, mountHub } from "./hub-mount.js";
+import { hub, hubIsMounted, mountHub, embeddedHubOrigin } from "./hub-mount.js";
 import { remoteHubHeaders } from "./hub-proxy.js";
+import { currentSession, rememberSession, sessionPairFromSetCookieHeaders } from "./hub-session.js";
 import { pushTarball } from "./tarball.js";
 import { readSecretResult, secretReference, storeSecret } from "./host-secrets.js";
 import { HostError } from "./errors.js";
@@ -50,11 +50,9 @@ export type HubEndpoint = {
 };
 
 const REMOTE_TOKEN_ACCOUNT = "hub:remote-token";
-const OWNER_PASSWORD_ACCOUNT = "hub:owner-password";
 
-/** The workspace owner's identity in the hub. One person, one local account. */
-export const OWNER_EMAIL = "owner@solutions-builder.local";
-export const OWNER_DISPLAY_NAME = "You";
+/** Fallback display name when the signed-in profile has none. */
+const FALLBACK_DISPLAY_NAME = "You";
 /** The tenant this app installs into; found again by slug on every launch. */
 export const WORKSPACE_SLUG = "solutions-builder";
 /** The tenant id workspaces carried before the hub owned identity. */
@@ -100,18 +98,18 @@ export async function setRemoteToken(token: string): Promise<void> {
 /**
  * One raw call path to the hub, whichever side of the boundary it is on. No
  * identity is attached. The `/hub/*` mount strips the prefix and forwards the
- * browser's own cookies through this; it does not call `ensureOwner()` or
- * swap in the owner session. `hubApi` below is the authenticated path the
- * host itself uses.
+ * browser's own cookies through this; it does not mint an owner or swap in a
+ * host session. `hubApi` below is the authenticated path the host itself uses
+ * as the signed-in principal.
  */
 export async function hubFetch(path: string, init?: RequestInit): Promise<Response> {
   const url = configuredUrl();
 
   if (!url) {
     if (!hubIsMounted()) await mountHub();
-    // `app.fetch` takes a real Request; the origin is a formality the hub's
-    // routing ignores, and no socket is involved.
-    return hub().app.fetch(new Request(`http://hub.local${path}`, init));
+    // `app.fetch` takes a real Request. When the host is serving, the origin is
+    // the loopback window so Better Auth Set-Cookie and CSRF match the browser.
+    return hub().app.fetch(new Request(`${embeddedHubOrigin()}${path}`, init));
   }
 
   // A hosted hub without its token is a request that will fail on the other
@@ -130,7 +128,7 @@ export async function hubFetch(path: string, init?: RequestInit): Promise<Respon
   });
 }
 
-// --- The owner's session -------------------------------------------------
+// --- The signed-in session ------------------------------------------------
 
 type AuthApi = {
   api: {
@@ -142,76 +140,36 @@ type AuthApi = {
   };
 };
 
-let sessionCookie: string | null = null;
-
-/**
- * The owner's password lives in the keychain beside the provider keys. It is
- * never shown and never typed: it exists so the hub can have a real user
- * without the desktop app growing a login screen for a one-person workspace.
- */
-async function ownerPassword(mintIfMissing: boolean): Promise<string | null> {
-  const stored = await readSecretResult(await secretReference(OWNER_PASSWORD_ACCOUNT));
-  if (stored.status === "found") return stored.secret;
-  if (stored.status === "unavailable") {
-    throw new HostError(
-      "provider_unavailable",
-      `The keychain could not be read for the workspace owner: ${stored.detail}. ` +
-        "Unlock it, or allow this app access, and try again.",
-      {},
-      true,
-    );
+function captureSession(response: Response): string | null {
+  const pair = sessionPairFromSetCookieHeaders(response.headers);
+  if (pair) {
+    rememberSession(pair);
+    forgetWorkspace();
   }
-  if (!mintIfMissing) return null;
-  const minted = Array.from(crypto.getRandomValues(new Uint8Array(24)))
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-  await storeSecret(OWNER_PASSWORD_ACCOUNT, minted);
-  return minted;
+  return pair;
 }
 
-async function signIn(password: string): Promise<string | null> {
+/** Signs in as this email. Used by smokes and seed scripts, not the product UI. */
+export async function signInEmail(email: string, password: string): Promise<boolean> {
+  if (hubMode() !== "embedded") return false;
+  if (!hubIsMounted()) await mountHub();
   const auth = hub().auth as unknown as AuthApi;
   const response = await auth.api.signInEmail({
-    body: { email: OWNER_EMAIL, password },
+    body: { email, password },
     asResponse: true,
   });
-  if (!response.ok) return null;
-  const pair = response.headers.get("set-cookie")?.split(";")[0] ?? null;
-  return pair && pair.includes("=") ? pair : null;
+  if (!response.ok) return false;
+  return captureSession(response) !== null;
 }
 
-/**
- * The owner's session cookie, signing in if there is an owner to sign in as.
- * `null` means no owner exists yet: the workspace has not been installed.
- */
-export async function ownerSession(): Promise<string | null> {
-  if (hubMode() !== "embedded") return null;
-  if (sessionCookie) return sessionCookie;
-  if (!hubIsMounted()) await mountHub();
-  const password = await ownerPassword(false);
-  if (!password) return null;
-  sessionCookie = await signIn(password);
-  return sessionCookie;
-}
-
-/** Signs the owner up if the hub has never seen them, then in. */
-export async function ensureOwner(): Promise<void> {
+/** Creates the account and signs it in. Used by smokes and seed scripts. */
+export async function signUpEmail(input: { email: string; password: string; name: string }): Promise<void> {
   if (hubMode() !== "embedded") return;
   if (!hubIsMounted()) await mountHub();
-  const password = (await ownerPassword(true))!;
-  sessionCookie = await signIn(password);
-  if (sessionCookie) return;
   const auth = hub().auth as unknown as AuthApi;
-  await auth.api.signUpEmail({
-    body: { email: OWNER_EMAIL, password, name: OWNER_DISPLAY_NAME },
-  });
-  sessionCookie = await signIn(password);
-  if (!sessionCookie) {
-    throw new HostError(
-      "internal_error",
-      "The hub accepted the workspace owner but would not sign them in.",
-    );
-  }
+  await auth.api.signUpEmail({ body: input });
+  if (await signInEmail(input.email, input.password)) return;
+  throw new HostError("internal_error", "The hub accepted the account but would not sign them in.");
 }
 
 // --- The authenticated API -----------------------------------------------
@@ -227,23 +185,18 @@ export class HubApiError extends Error {
   }
 }
 
-/** A hub call as the workspace owner. Embedded: the cookie. Hosted: the token. */
+/** A hub call as the signed-in principal. Embedded: the session cookie. Hosted: the token. */
 export async function hubApi(path: string, init: RequestInit = {}): Promise<Response> {
-  const cookie = await ownerSession();
+  const cookie = currentSession();
   const headers = new Headers(init.headers);
   if (cookie) headers.set("cookie", cookie);
   if (init.body !== undefined && !headers.has("content-type")) {
     headers.set("content-type", "application/json");
   }
   const response = await hubFetch(path, { ...init, headers });
-  // A session that expired underneath us is signed in again, once.
   if (response.status === 401 && cookie) {
-    sessionCookie = null;
-    const fresh = await ownerSession();
-    if (fresh) {
-      headers.set("cookie", fresh);
-      return hubFetch(path, { ...init, headers });
-    }
+    rememberSession(null);
+    forgetWorkspace();
   }
   return response;
 }
@@ -386,6 +339,7 @@ export type Workspace = {
   readonly tenantId: string;
   readonly principalId: string;
   readonly userId: string;
+  readonly displayName: string;
 };
 
 let workspace: Workspace | null = null;
@@ -399,27 +353,28 @@ type Membership = {
 };
 
 /**
- * Finds the workspace the owner belongs to: the tenant with this app's slug,
- * or the tenant a workspace carried before the hub owned identity. `null`
- * when the owner does not exist or holds no tenant yet.
+ * Finds the workspace the signed-in principal belongs to: the tenant with
+ * this app's slug, or the tenant a workspace carried before the hub owned
+ * identity. `null` when nobody is signed in or they hold no tenant yet.
  */
 export async function resolveWorkspace(): Promise<Workspace | null> {
   if (workspace) return workspace;
-  if (hubMode() === "embedded" && !(await ownerSession())) return null;
+  if (hubMode() === "embedded" && !currentSession()) return null;
   const me = await hubApi("/api/me");
   if (!me.ok) return null;
-  const user = (await me.json()) as { id: string };
+  const user = (await me.json()) as { id: string; name?: string | null };
   const memberships = await hubList<Membership>("/api/me/principals");
   const mine = memberships.filter((entry) => entry.kind === "user" && entry.status === "active");
   const chosen =
     mine.find((entry) => entry.tenantSlug === WORKSPACE_SLUG) ??
     mine.find((entry) => entry.tenantId === LEGACY_TENANT_ID);
   if (!chosen) return null;
-  workspace = { tenantId: chosen.tenantId, principalId: chosen.principalId, userId: user.id };
+  const displayName = user.name?.trim() || FALLBACK_DISPLAY_NAME;
+  workspace = { tenantId: chosen.tenantId, principalId: chosen.principalId, userId: user.id, displayName };
   return workspace;
 }
 
-/** Creates the workspace tenant; the hub makes the owner its principal. */
+/** Creates the workspace tenant; the hub makes the signed-in user its principal. */
 export async function createWorkspace(): Promise<Workspace> {
   await hubPost("/api/tenants", { name: "Solutions Builder", slug: WORKSPACE_SLUG });
   workspace = null;
@@ -455,21 +410,22 @@ export function tenantId(): string {
   return required().tenantId;
 }
 
-/** The owner's principal in the workspace tenant. */
+/** The signed-in principal in the workspace tenant. */
 export function ownerPrincipalId(): string {
   return required().principalId;
 }
 
-/** The local single-user actor every product command runs as. */
+/** The signed-in principal every product command runs as. */
 export function localActor(): { principalId: string; displayName: string } {
-  return { principalId: ownerPrincipalId(), displayName: OWNER_DISPLAY_NAME };
+  const found = required();
+  return { principalId: found.principalId, displayName: found.displayName };
 }
 
 export function tenantPath(rest: string): string {
   return tenantPathFor(tenantId(), rest);
 }
 
-/** A path under any tenant the owner belongs to — a project is one. */
+/** A path under any tenant the signed-in principal belongs to — a project is one. */
 export function tenantPathFor(scope: string, rest: string): string {
   return `/api/tenants/${scope}${rest}`;
 }

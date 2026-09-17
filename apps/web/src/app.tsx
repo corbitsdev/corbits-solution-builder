@@ -40,8 +40,11 @@ import {
   BootScreen,
 } from "@corbits/react-ui";
 import { Onboarding } from "./pages/onboarding.jsx";
+import { Auth } from "./pages/auth.jsx";
 import { StageWorkspace } from "./pages/workspace.jsx";
 import { standingForProject, type StageStatus } from "./run-fold.ts";
+import { firstRunScreen, type HubAuthState } from "./first-run.ts";
+import { getHubSession } from "./hub-auth.ts";
 
 /**
  * Where you are. A project is not a separate destination from its stage: you
@@ -341,10 +344,12 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
   const [skippedSetup, setSkippedSetup] = useState(false);
-  // The client is the installer. Once the host answers, the tenant is checked
-  // against the app the client ships with; missing or stale, it is installed
-  // before any screen that depends on it renders. First run and upgrade are
-  // the same call.
+  // Signup/login first: the workspace tenant is created as that session.
+  const [auth, setAuth] = useState<HubAuthState>("unknown");
+  // The client is the installer. Once the host answers and a hub session
+  // exists, the tenant is checked against the app the client ships with;
+  // missing or stale, it is installed before any screen that depends on it
+  // renders. First run and upgrade are the same call.
   const [installed, setInstalled] = useState<"checking" | "installing" | "ready">("checking");
 
   const refresh = useCallback(async () => {
@@ -373,15 +378,15 @@ export function App() {
     }
   }, []);
 
-  // Runs once, when the host first answers. Deliberately not keyed on
-  // `installed`: the effect sets that state itself, and re-running on its own
-  // state change cancelled the install it was awaiting, so a first run stayed
-  // on "Setting up your workspace…" until someone reloaded. A ref rather than
-  // a cancellation flag, so StrictMode's second mount neither starts a second
-  // install nor abandons the first.
+  // Runs once the host has answered and a hub session exists. Deliberately
+  // not keyed on `installed`: the effect sets that state itself, and
+  // re-running on its own state change cancelled the install it was awaiting,
+  // so a first run stayed on "Setting up your workspace…" until someone
+  // reloaded. A ref rather than a cancellation flag, so StrictMode's second
+  // mount neither starts a second install nor abandons the first.
   const installStarted = useRef(false);
   useEffect(() => {
-    if (status === null || installStarted.current) return;
+    if (status === null || auth !== "signed-in" || installStarted.current) return;
     installStarted.current = true;
     void (async () => {
       try {
@@ -399,7 +404,14 @@ export function App() {
         setInstalled("ready");
       }
     })();
-  }, [status === null, refresh]);
+  }, [status === null, auth, refresh]);
+
+  useEffect(() => {
+    if (status === null) return;
+    void getHubSession()
+      .then((session) => setAuth(session ? "signed-in" : "signed-out"))
+      .catch(() => setAuth("signed-out"));
+  }, [status === null]);
 
   useEffect(() => {
     void refresh();
@@ -567,10 +579,14 @@ export function App() {
   //
   // The host is slow to start on purpose: pglite unpacks a WASM image and the
   // hub applies its schema. Saying so is better than guessing at a layout.
-  if (status === null) {
+  const screen = firstRunScreen({ status, auth, installed });
+  if (screen === "boot") {
     return <Booting offline={offline} />;
   }
-  if (installed !== "ready") {
+  if (screen === "auth") {
+    return <Auth onSignedIn={() => setAuth("signed-in")} />;
+  }
+  if (screen === "install") {
     return (
       <BootScreen
         message={installed === "installing" ? "Setting up your workspace…" : "Checking your workspace…"}
@@ -578,6 +594,9 @@ export function App() {
         footer={<span>Powered by Corbits</span>}
       />
     );
+  }
+  if (status === null) {
+    return <Booting offline={offline} />;
   }
 
   // Held until there is both somewhere to draft from and something to work on.

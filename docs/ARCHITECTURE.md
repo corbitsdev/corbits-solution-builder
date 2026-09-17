@@ -31,21 +31,21 @@ client and the hub both parse. It depends on nothing in the apps and on no
 platform internals.
 
 **The installer package** (`packages/installer`) does the installing: ensures
-the owner's workspace tenant, its roles and grants, the seeded workflow
-definition, the curated kit's skill assets, and the per-project lifecycle
-deployment; opening a project — its own tenant, authority and credential
-delegation — is its `createProject`. It takes a hub `Transport`
-(`@intx/hub-client`) already authenticated as the owner, plus the two
+the signed-in principal's workspace tenant, its roles and grants, the seeded
+workflow definition, the curated kit's skill assets, and the per-project
+lifecycle deployment; opening a project — its own tenant, authority and
+credential delegation — is its `createProject`. It takes a hub `Transport`
+(`@intx/hub-client`) already authenticated as that principal, plus the two
 facts about sidecar placement only the host process knows; it
 never reaches a database, a keychain or an Interchange internal itself, and
 depends on nothing in `apps/`. The hub boots vanilla (migrate, mount, serve)
-and does the host-only repairs (owner, legacy-tenant adoption,
-credential migration). The client then runs this package over the
-host's `/hub` proxy on first launch and after every credential change
-(`apps/web/src/client.ts`); smokes still call the same package through
-`scripts/host-install.ts`. What the hub still holds beside
-Interchange's tables is the part of the tree that shrinks as it becomes
-vanilla.
+and does the host-only repairs (legacy-tenant adoption, credential
+migration). First launch signs up or in against `/hub/api/auth`; the client
+then runs this package over the host's `/hub` mount as that session on first
+launch and after every credential change (`apps/web/src/client.ts`); smokes
+still call the same package through `scripts/host-install.ts`. What the hub
+still holds beside Interchange's tables is the part of the tree that shrinks
+as it becomes vanilla.
 
 **The hub** (`apps/hub`) owns the loopback API, the database, the guard that
 enforces the ledger, the command dispatch that applies host-side effects, the providers and the
@@ -74,15 +74,16 @@ by `check:boundaries`, not left to habit — this paragraph is drawn from its
 `PLATFORM_PACKAGES`/`RUNTIME_PACKAGES` lists and `PLATFORM_FILE` allowlist,
 cross-checked against every literal `@intx` import under `apps/hub/src`.
 
-**The client** (`apps/web`) renders and asks: it reads and commands over the
-host's loopback API (`client.ts`), folds where the project's run stands from
-the same `/hub` events the run committed (`run-fold.ts`), runs `install()` and
-`createProject()` through `@solutions-builder/installer` over `/hub`, and never
-writes persistence itself. `GET /projects/:id` is the ledger, artifacts, and
-the tenant/anchor that fold addresses — not a second copy of the machine. It
-imports the app package for names, the document format and that fold, the
-installer package for those two calls, and never the Interchange hub's own
-modules directly.
+**The client** (`apps/web`) renders and asks: it signs up or in against the
+mounted hub, then reads and commands over the host's loopback API
+(`client.ts`), folds where the project's run stands from the same `/hub`
+events the run committed (`run-fold.ts`), runs `install()` and
+`createProject()` through `@solutions-builder/installer` over `/hub` as that
+session, and never writes persistence itself. `GET /projects/:id` is the
+ledger, artifacts, and the tenant/anchor that fold addresses — not a second
+copy of the machine. It imports the app package for names, the document
+format and that fold, the installer package for those two calls, and never
+the Interchange hub's own modules directly.
 
 **The desktop shell** (`apps/desktop`) starts the hub, opens the window on the
 URL it prints, keeps a tray presence, and leaves the hub running when the

@@ -17,7 +17,8 @@
 import { Hono } from "hono";
 import { type } from "arktype";
 import { execute } from "./command-dispatch.js";
-import { localActor } from "./hub-client.js";
+import { localActor, resolveWorkspace } from "./hub-client.js";
+import { currentSession } from "./hub-session.js";
 import { HostError } from "./errors.js";
 import { newId } from "./ids.js";
 import { type Command } from "@solutions-builder/app/ledger";
@@ -59,6 +60,11 @@ export async function commandFrom(
 
 export function createApi() {
   const api = new Hono();
+
+  api.use("*", async (_, next) => {
+    if (currentSession()) await resolveWorkspace().catch(() => null);
+    await next();
+  });
 
   registerHostRoutes(api);
   registerProviderRoutes(api);

@@ -3,7 +3,7 @@
  *
  * A connection in Settings becomes the platform's `provider`, `credential`,
  * `model_provider`, `model` and `model_offering` rows, written through the
- * hub's API as the workspace owner. Nothing here touches a table: the hub
+ * hub's API as the signed-in principal. Nothing here touches a table: the hub
  * validates, authorises and records each row the same way it would for any
  * other client.
  *
