@@ -10,6 +10,7 @@
  * mail write uses the shared single-writer connection and must not run while
  * a transaction is still open on it.
  */
+import { LEDGER, type Command, type Stage } from "@solutions-builder/app/ledger";
 import { PROJECT_LIFECYCLE_ID } from "@solutions-builder/app/workflows/project-lifecycle";
 import {
   SPECIALIST_PRINCIPAL_ID,
@@ -18,6 +19,7 @@ import {
   ensureSpecialistPrincipal,
   ensureUserPrincipal,
   listConversationTurns,
+  localActor,
   tenantId,
   writeConversationTurn,
   type ConversationPart,
@@ -130,8 +132,121 @@ function summarize(entry: LedgerEntry): string {
   return `Committed ${entry.command}.`;
 }
 
-/** Records one committed command as a ledger mail turn. Call only after the transaction that committed it has returned. */
+function actorPrincipalIdOf(payload: Record<string, unknown>): string {
+  if (typeof payload.actorPrincipalId === "string" && payload.actorPrincipalId.length > 0) {
+    return payload.actorPrincipalId;
+  }
+  const actor = payload.actor;
+  if (actor && typeof actor === "object" && typeof (actor as { principalId?: unknown }).principalId === "string") {
+    return (actor as { principalId: string }).principalId;
+  }
+  try {
+    return localActor().principalId;
+  } catch {
+    return HOST_PRINCIPAL;
+  }
+}
+
+function runViewOf(payload: Record<string, unknown>): { id: string; stage: number; state: string } | null {
+  const run = payload.run;
+  if (!run || typeof run !== "object") return null;
+  const rec = run as Record<string, unknown>;
+  if (typeof rec.id !== "string" || typeof rec.stage !== "number" || typeof rec.state !== "string") return null;
+  return { id: rec.id, stage: rec.stage, state: rec.state };
+}
+
+/**
+ * Command-dispatch attaches the admit payload (`run` + `context`) and records
+ * the ledger turn after host-side effects. Recording at signal delivery would
+ * be a second write of the same gate.
+ */
+export function hostRecordsAfterAdmit(payload: Record<string, unknown>): boolean {
+  return payload.run !== undefined && payload.context !== undefined;
+}
+
+/**
+ * Records a human gate as ledger mail because the matching signal was
+ * delivered (or already committed on the run). Callers that still go through
+ * `commandFrom` keep recording after apply; this is the path that does not.
+ */
+export async function recordGateFromSignal(args: {
+  readonly projectId: string;
+  readonly command: Command;
+  readonly payload: Record<string, unknown>;
+  readonly signalId: string;
+  readonly expectedStage?: Stage;
+}): Promise<void> {
+  if (hostRecordsAfterAdmit(args.payload)) return;
+  const run = runViewOf(args.payload);
+  const runId =
+    typeof args.payload.runId === "string" && args.payload.runId.length > 0 ? args.payload.runId : (run?.id ?? "");
+  // Alignment walk-forward signals carry only `{ command, draft }`. A human
+  // gate names the run it acted on.
+  if (!runId) return;
+  const idempotencyKey =
+    typeof args.payload.idempotencyKey === "string" && args.payload.idempotencyKey.length > 0
+      ? args.payload.idempotencyKey
+      : args.signalId;
+  const stage = (args.expectedStage ?? run?.stage) as Stage | undefined;
+  const transition = LEDGER.find((row) => row.command === args.command && row.from !== null);
+  const state = run?.state ?? "in_progress";
+  const result: CommandOutcome = {
+    runId,
+    stage: (stage ?? 1) as Stage,
+    state,
+    transitionId: transition?.id ?? args.command,
+    replayed: false,
+    delivery: "delivered",
+  };
+  await recordCommand({
+    projectId: args.projectId,
+    actorPrincipalId: actorPrincipalIdOf(args.payload),
+    authority: null,
+    command: args.command,
+    transitionId: result.transitionId,
+    correlationId:
+      typeof args.payload.correlationId === "string" && args.payload.correlationId.length > 0
+        ? args.payload.correlationId
+        : args.signalId,
+    before: run ? { runId: run.id, stage: run.stage, state: run.state } : { runId, stage, state },
+    after: { runId, stage, state },
+    idempotencyKey,
+    result,
+    ...(stage !== undefined ? { stage } : {}),
+    runId,
+    ...(typeof args.payload.decision === "string" ? { decision: args.payload.decision } : {}),
+    ...(typeof args.payload.audienceName === "string" ? { audienceName: args.payload.audienceName } : {}),
+    ...(args.payload.versions !== undefined ? { versions: args.payload.versions } : {}),
+    ...(typeof args.payload.rationale === "string" ? { rationale: args.payload.rationale } : {}),
+    ...(args.payload.assumptions !== undefined ? { assumptions: args.payload.assumptions } : {}),
+    ...(typeof args.payload.message === "string" ? { message: args.payload.message } : {}),
+  });
+}
+
+/**
+ * Records human-gate `SignalReceived` events that are already on the run and
+ * have no ledger turn yet — the path a client signal over `/hub` takes, which
+ * never calls `commandFrom`.
+ */
+export async function recordGatesFromRunEvents(
+  projectId: string,
+  events: readonly { type: string; body: Record<string, unknown> }[],
+): Promise<void> {
+  for (const event of events) {
+    if (event.type !== "SignalReceived") continue;
+    const raw = event.body.payload;
+    const payload = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+    const command = typeof payload.command === "string" ? (payload.command as Command) : null;
+    if (!command) continue;
+    const signalId = typeof event.body.signalId === "string" ? event.body.signalId : "";
+    if (!signalId) continue;
+    await recordGateFromSignal({ projectId, command, payload, signalId });
+  }
+}
+
+/** Records one committed command as a ledger mail turn. Call only after the transaction that committed it has returned. A second call with the same idempotency key is a no-op, so a gate recorded at delivery is not written again from `commandFrom`. */
 export async function recordCommand(entry: LedgerEntry): Promise<void> {
+  if (await receiptFor(entry.projectId, entry.idempotencyKey)) return;
   const sessionId = await ensureLedgerSession(entry.projectId);
   // The mail is signed by the actor, so the actor needs a principal row to
   // hold a signing key against — `p_host`, the system actor, has never
