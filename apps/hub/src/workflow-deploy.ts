@@ -63,7 +63,14 @@ async function reachable(deploymentId: string): Promise<boolean> {
   return binding === null || binding === hub().sidecarBindingFingerprint;
 }
 import { readProject } from "./project-tenant.js";
-import { closureFiles, deckAppMemberFiles, toolsDeckMemberFiles, treeDigest, workspaceCatalog } from "./workflow-closure.js";
+import {
+  closureFiles,
+  deckAppMemberFiles,
+  toolsDeckMemberFiles,
+  toolsDeliveryMemberFiles,
+  treeDigest,
+  workspaceCatalog,
+} from "./workflow-closure.js";
 
 export const LIFECYCLE_ASSET_NAME = "solutions-builder-project-lifecycle";
 const ENTRY_PATH = LIFECYCLE_ENTRY_PATH;
@@ -149,11 +156,12 @@ export function renderLifecycleSource(
     // closures overlap on @intx/agent and @intx/types, which is fine.
     ...closureFiles("workflow"),
     ...closureFiles("tools-posix"),
-    // Stage 5's deck tool and the app's deck authoring it calls, so the
-    // sidecar resolves both from the asset rather than a registry that
-    // does not carry them.
+    // Stage 5's deck tool and stage 9's delivery-status tool, plus the
+    // app's deck/delivery modules they call, so the sidecar resolves both
+    // from the asset rather than a registry that does not carry them.
     ...deckAppMemberFiles(),
     ...toolsDeckMemberFiles(),
+    ...toolsDeliveryMemberFiles(),
   };
   files[DIGEST_PATH] = `${treeDigest(files)}\n`;
   return files;

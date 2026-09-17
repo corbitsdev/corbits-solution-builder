@@ -8,11 +8,20 @@
     "./sidecar-bundle": {
       "intx-src": "./src/sidecar-bundle.ts",
       "default": "./src/sidecar-bundle.ts"
+    },
+    "./print-page": {
+      "intx-src": "./src/print-page.ts",
+      "default": "./src/print-page.ts"
+    },
+    "./deck-theme": {
+      "intx-src": "./src/deck-theme.ts",
+      "default": "./src/deck-theme.ts"
     }
   },
   "dependencies": {
     "@intx/agent": "workspace:*",
     "@solutions-builder/app": "workspace:*",
-    "pptxgenjs": "4"
+    "pptxgenjs": "4",
+    "jszip": "3"
   }
 }

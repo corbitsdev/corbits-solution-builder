@@ -87,6 +87,30 @@ check(
 
 const deck = deckFrom({ projectTitle: "Triage for open source", audience: "You", role: "project owner", markdown: PACKAGE })!;
 const bytes = await renderDeck(deck);
+
+// The same outline, rendered through the stage 5 workflow tool a deployed
+// lifecycle actually calls (`render_deck`), not the bare authoring function
+// above. This is the sidecar's own entry point, run in-process.
+{
+  const { deck: renderDeckTool } = await import("../packages/tools-deck/src/sidecar-bundle.js");
+  const tool = renderDeckTool({} as never);
+  const controller = new AbortController();
+  const result = await tool.run(
+    {
+      id: "smoke-1",
+      name: "render_deck",
+      arguments: { projectTitle: "Triage for open source", audience: "You", role: "project owner", markdown: PACKAGE },
+    },
+    controller.signal,
+  );
+  check("render_deck tool succeeds", result.isError !== true, String(result.content).slice(0, 200));
+  const parsed = result.isError ? null : (JSON.parse(result.content as string) as { fileName: string; mediaType: string; dataUri: string });
+  check(
+    "render_deck returns a named PowerPoint data: URI",
+    parsed !== null && parsed.fileName === deckFileName("Triage for open source", "You") && parsed.dataUri.startsWith("data:application/vnd.openxmlformats-officedocument.presentationml.presentation;base64,"),
+    parsed ? parsed.fileName : "n/a",
+  );
+}
 check("the deck renders as a PowerPoint file", bytes.byteLength > 10_000 && String.fromCharCode(bytes[0]!, bytes[1]!) === "PK", `${bytes.byteLength} bytes`);
 // The file is read back with the system's unzip: a PowerPoint is a zip of
 // XML parts, and that is the one reader every machine this runs on has.
@@ -131,7 +155,7 @@ await rm(dir2, { recursive: true, force: true });
 
 // A style guide's theme is read from its XML: colours by sRGB or a system
 // colour's last value, typefaces from the major and minor fonts.
-const { themeFromXml, themeFromPptx } = await import("../apps/hub/src/deck-template.js");
+const { themeFromXml, themeFromPptx } = await import("../packages/tools-deck/src/deck-theme.js");
 const THEME_XML = `<a:theme xmlns:a="x"><a:themeElements><a:clrScheme name="Office">
 <a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1><a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1>
 <a:dk2><a:srgbClr val="44546A"/></a:dk2><a:lt2><a:srgbClr val="E7E6E6"/></a:lt2><a:accent1><a:srgbClr val="4472C4"/></a:accent1>

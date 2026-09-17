@@ -27,7 +27,7 @@ import { notFound } from "./errors.js";
 import { type RunState } from "@solutions-builder/app/ledger";
 import { parsed } from "./api.js";
 import { localActor } from "./hub-client.js";
-import { printableDesign } from "./print-page.js";
+import { printableDesign } from "@solutions-builder/tools-deck/print-page";
 import {
   exportDirectory,
   exportProject,
