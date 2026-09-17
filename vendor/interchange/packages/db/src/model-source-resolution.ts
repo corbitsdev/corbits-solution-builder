@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 
+import { evaluateGrants } from "@intx/authz";
 import {
   InvokerModelPreferences,
   ModelRequirements,
@@ -8,6 +9,7 @@ import {
   type ModelRequirement,
   type ProviderPreference,
 } from "@intx/types";
+import type { GrantRule } from "@intx/types/authz";
 import type { InferenceSource } from "@intx/types/runtime";
 import type { CredentialMaterialEntry } from "@intx/types/sidecar";
 
@@ -17,6 +19,7 @@ import {
 } from "./catalog-resolution";
 import type { DB } from "./client";
 import { resolveCredentialById } from "./credential-resolution";
+import { createGrantStore } from "./grant-store";
 import { parseModelOfferingRow } from "./parse-row";
 import { workflowDefinition } from "./schema/workflow-definitions";
 
@@ -117,11 +120,45 @@ function applyPreference(
   return preference.mode === "pin" ? named : [...named, ...rest];
 }
 
+/** The `credential:<id>/use` grant a delegated tenant's principal must hold. */
+export function credentialUseResource(credentialId: string): string {
+  return `credential:${credentialId}`;
+}
+
+/**
+ * Whether `grants` carry an `allow` on `credential:<id>/use` — the delegation
+ * a child tenant's principal must hold to use a credential it does not own
+ * itself. Pure so the policy is unit-testable against synthetic grants,
+ * independent of how the grants were collected.
+ */
+export async function credentialDelegationAllows(
+  grants: readonly GrantRule[],
+  credentialId: string,
+): Promise<boolean> {
+  const result = await evaluateGrants(
+    [...grants],
+    credentialUseResource(credentialId),
+    "use",
+  );
+  return result.effect === "allow";
+}
+
 async function buildSource(
   db: DB["db"],
   tenantId: string,
   resolved: ResolvedOffering,
   credentialCipher: CredentialCipher,
+  // CL-8133: the principal on whose behalf this resolution runs. Optional and
+  // additive -- omitted, resolution is exactly the prior ownership-only rule
+  // (`resolveModelSources`'s agent-launch callers are unchanged). Supplied
+  // (`resolveSourcesByOfferingIds`, the workflow-deploy path), a credential
+  // NOT owned by the resolving tenant itself (i.e. inherited from an
+  // ancestor -- a project inheriting its workspace's provider) additionally
+  // requires this principal to hold `credential:<id>/use` there, checked
+  // across the tenant's own ancestor chain (`collectGrantsInChain`, cl-8009)
+  // so a grant stamped on an ancestor still authorizes a descendant. Local
+  // patch; see PATCHES.md.
+  principalId?: string,
 ): Promise<
   | { ok: true; source: InferenceSource; material: CredentialMaterialEntry }
   | { ok: false; skip: SourceSkip }
@@ -175,6 +212,28 @@ async function buildSource(
     };
   }
 
+  // CL-8133: ownership within the hierarchy proves the credential is
+  // *reachable*, not that this tenant is *entitled* to it. A tenant using a
+  // credential it owns directly needs nothing more (unchanged above). A
+  // tenant using one inherited from an ancestor -- a project resolving its
+  // workspace's provider -- additionally needs its principal to hold
+  // `credential:<id>/use`, minted per project by the installer's delegation
+  // step (`workbench-delegation.ts`) and revocable the same way. Skipped
+  // entirely when no principal is supplied, so every caller that predates
+  // this check (agent launches via `resolveModelSources`) is unaffected.
+  if (principalId !== undefined && credential.tenantId !== tenantId) {
+    const grants = await createGrantStore(db).collectGrantsInChain(
+      principalId,
+      tenantId,
+    );
+    if (!(await credentialDelegationAllows(grants, credential.id))) {
+      return {
+        ok: false,
+        skip: { reason: "credential_unauthorized", provider: provider.name },
+      };
+    }
+  }
+
   // Validate the row once at this DB-to-runtime boundary. This narrows the
   // jsonb `quirks` from `unknown` to a `Record | null` and checks
   // `capabilities` against the curated enum. `quirks` is spread in only when
@@ -225,6 +284,11 @@ export async function resolveSourcesByOfferingIds(
   tenantId: string,
   offeringIds: readonly string[],
   credentialCipher: CredentialCipher,
+  // CL-8133: the deploying principal, checked against `credential:<id>/use`
+  // for any offering whose credential the resolving tenant only inherits.
+  // See `buildSource`. Catalog rows stay on the ancestor; this does not copy
+  // them into the resolving tenant.
+  principalId?: string,
 ): Promise<OfferingSourceResolution> {
   const visible = await listVisibleOfferings(db, tenantId);
   const byId = new Map(visible.map((entry) => [entry.offering.id, entry]));
@@ -234,7 +298,13 @@ export async function resolveSourcesByOfferingIds(
     if (offering === undefined) {
       return { ok: false, reason: "offering_unavailable", offeringId };
     }
-    const built = await buildSource(db, tenantId, offering, credentialCipher);
+    const built = await buildSource(
+      db,
+      tenantId,
+      offering,
+      credentialCipher,
+      principalId,
+    );
     if (!built.ok) {
       return {
         ok: false,
