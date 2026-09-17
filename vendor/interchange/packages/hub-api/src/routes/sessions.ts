@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { describeRoute, resolver, validator } from "hono-openapi";
 import { type } from "arktype";
@@ -17,6 +17,23 @@ const MAIL_DOMAIN = "local.solutions-builder.invalid";
 
 function addressOf(principalId: string): string {
   return `${principalId}@${MAIL_DOMAIN}`;
+}
+
+/**
+ * A session belongs to exactly the tenant it was created in; a caller
+ * authorized against `:tenantId` in the URL must not be able to read or
+ * write another tenant's session by guessing its id. Mirrors
+ * `resolveAssetById`'s tenant-scoped lookup in `assets.ts`.
+ */
+async function resolveSession(
+  db: DB["db"],
+  tenantId: string,
+  sessionId: string,
+): Promise<boolean> {
+  const row = await db.query.agentSession.findFirst({
+    where: and(eq(agentSession.id, sessionId), eq(agentSession.tenantId, tenantId)),
+  });
+  return row !== undefined;
 }
 
 async function ensureSigningKey(
@@ -132,6 +149,10 @@ export function createSessionRoutes({
           description: "Validation error",
           content: { "application/json": { schema: resolver(ErrorResponse) } },
         },
+        404: {
+          description: "No session with this id in this tenant",
+          content: { "application/json": { schema: resolver(ErrorResponse) } },
+        },
       },
     }),
     validator("json", WriteConversationTurn),
@@ -139,6 +160,13 @@ export function createSessionRoutes({
       const tenantCtx = c.get("tenant");
       const sessionId = c.req.param("sessionId");
       const body = c.req.valid("json");
+
+      if (!(await resolveSession(db, tenantCtx.id, sessionId))) {
+        return c.json(
+          { error: { code: "not_found", message: "Session not found" } },
+          404,
+        );
+      }
 
       await ensureSigningKey(principalKeyStore, body.fromPrincipalId);
       const from = addressOf(body.fromPrincipalId);
@@ -246,7 +274,8 @@ export function createSessionRoutes({
     describeRoute({
       tags: ["Sessions"],
       summary: "List a session's conversation turns",
-      description: "Every part on the session, oldest turn first.",
+      description:
+        "Every part on the session, oldest turn first. A session id this tenant does not own -- including one not created yet -- reads as empty, not an error: a fresh project's ledger session is asked about before its first command ever creates it.",
       responses: {
         200: {
           description: "Conversation parts",
@@ -259,7 +288,16 @@ export function createSessionRoutes({
       },
     }),
     async (c) => {
+      const tenantCtx = c.get("tenant");
       const sessionId = c.req.param("sessionId");
+
+      // Scoped to this tenant before any read: without it, a caller
+      // authorized only for `tenantCtx.id` could read another tenant's
+      // session turns by guessing its id, since turn_part carries no
+      // tenant_id column of its own to filter on directly.
+      if (!(await resolveSession(db, tenantCtx.id, sessionId))) {
+        return c.json([]);
+      }
 
       const [parts, turns] = await Promise.all([
         db.select().from(turnPart).where(eq(turnPart.sessionId, sessionId)),

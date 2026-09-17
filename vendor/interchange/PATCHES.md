@@ -323,6 +323,15 @@ be inside another caller's transaction); `GET /:sessionId/turns` reads every
 part on the session back, oldest turn first. Gated by an `agent-session:*`
 grant, matching the naming convention of every other tenant-scoped resource.
 
+Both turn routes look the session up by `(id, tenantId)` before touching
+`turn_part`/`inference_turn`/`session_mail` — `requireGrant("agent-session:*")`
+only scopes the check to the URL tenant, and `turn_part` carries no
+`tenant_id` column of its own, so without this a principal in one tenant
+could read or write another tenant's session by guessing its id. A write to
+an unresolved session 404s; a read of one reads back empty rather than
+erroring, because a same-tenant session not created yet (asked about before
+its first command) is a legitimate empty-history state, not a caller error.
+
 **Upstream-able.** Yes; it is additive, and it is the natural home for the
 turn-taking primitive `/api/me/sessions` is deferred pending.
 
