@@ -156,33 +156,24 @@ function runViewOf(payload: Record<string, unknown>): { id: string; stage: numbe
 }
 
 /**
- * Command-dispatch attaches the admit payload (`run` + `context`) and records
- * the ledger turn after host-side effects. Recording at signal delivery would
- * be a second write of the same gate.
+ * The ledger mail a delivered human-gate signal should write. Null when the
+ * payload is an alignment walk-forward (`{ command, draft }` with no run).
+ * `commandFrom` skips its own post-apply write when delivery succeeded, so a
+ * payload that carries the admit `run` + `context` still produces an entry.
  */
-export function hostRecordsAfterAdmit(payload: Record<string, unknown>): boolean {
-  return payload.run !== undefined && payload.context !== undefined;
-}
-
-/**
- * Records a human gate as ledger mail because the matching signal was
- * delivered (or already committed on the run). Callers that still go through
- * `commandFrom` keep recording after apply; this is the path that does not.
- */
-export async function recordGateFromSignal(args: {
+export function ledgerEntryFromGateSignal(args: {
   readonly projectId: string;
   readonly command: Command;
   readonly payload: Record<string, unknown>;
   readonly signalId: string;
   readonly expectedStage?: Stage;
-}): Promise<void> {
-  if (hostRecordsAfterAdmit(args.payload)) return;
+}): LedgerEntry | null {
   const run = runViewOf(args.payload);
   const runId =
     typeof args.payload.runId === "string" && args.payload.runId.length > 0 ? args.payload.runId : (run?.id ?? "");
   // Alignment walk-forward signals carry only `{ command, draft }`. A human
   // gate names the run it acted on.
-  if (!runId) return;
+  if (!runId) return null;
   const idempotencyKey =
     typeof args.payload.idempotencyKey === "string" && args.payload.idempotencyKey.length > 0
       ? args.payload.idempotencyKey
@@ -198,7 +189,7 @@ export async function recordGateFromSignal(args: {
     replayed: false,
     delivery: "delivered",
   };
-  await recordCommand({
+  return {
     projectId: args.projectId,
     actorPrincipalId: actorPrincipalIdOf(args.payload),
     authority: null,
@@ -220,7 +211,23 @@ export async function recordGateFromSignal(args: {
     ...(typeof args.payload.rationale === "string" ? { rationale: args.payload.rationale } : {}),
     ...(args.payload.assumptions !== undefined ? { assumptions: args.payload.assumptions } : {}),
     ...(typeof args.payload.message === "string" ? { message: args.payload.message } : {}),
-  });
+  };
+}
+
+/**
+ * Records a human gate as ledger mail because the matching signal was
+ * delivered (or already committed on the run).
+ */
+export async function recordGateFromSignal(args: {
+  readonly projectId: string;
+  readonly command: Command;
+  readonly payload: Record<string, unknown>;
+  readonly signalId: string;
+  readonly expectedStage?: Stage;
+}): Promise<void> {
+  const entry = ledgerEntryFromGateSignal(args);
+  if (!entry) return;
+  await recordCommand(entry);
 }
 
 /**
