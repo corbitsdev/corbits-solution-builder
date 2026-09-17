@@ -1,0 +1,10 @@
+{
+  "name": "@solutions-builder/keychain",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "OS keychain mint/read for the hub's CREDENTIAL_ENCRYPTION_KEY and PRINCIPAL_KEY_ENCRYPTION_KEY. Environment variables still win when set. Does not mint owner passwords or other host secrets.",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

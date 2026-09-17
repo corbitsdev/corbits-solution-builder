@@ -65,7 +65,7 @@
     "assets:pack-registry": "bun --conditions intx-src scripts/pack-registry-asset.ts",
     "postinstall": "bun run vendor:build",
     "check:vendored-migrations": "bun --conditions intx-src scripts/check-vendored-migrations.ts",
-    "test": "bun test apps/hub/src packages/installer/src packages/solutions-builder/src packages/tools-delivery/src apps/web/src",
+    "test": "bun test apps/hub/src packages/installer/src packages/keychain/src packages/solutions-builder/src packages/tools-delivery/src apps/web/src",
     "test:vendored": "bun test vendor/interchange/packages/hub-api/src/routes/tenants.test.ts vendor/interchange/packages/hub-api/src/routes/sessions.test.ts vendor/interchange/packages/hub-api/src/routes/assets.test.ts vendor/interchange/packages/hub-api/src/routes/workflow-definitions.test.ts vendor/interchange/packages/hub-api/src/routes/workflows.test.ts vendor/interchange/packages/db/src/model-source-resolution.test.ts"
   },
   "dependencies": {
@@ -105,6 +105,7 @@
     "@radix-ui/react-tooltip": "^1.2.16",
     "@solutions-builder/app": "workspace:*",
     "@solutions-builder/installer": "workspace:*",
+    "@solutions-builder/keychain": "workspace:*",
     "@solutions-builder/tools-deck": "workspace:*",
     "@tanstack/react-query": "^5.102.8",
     "@tauri-apps/api": "^2.8.0",

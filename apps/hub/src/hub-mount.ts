@@ -33,6 +33,7 @@ import {
 } from "@intx/db";
 import { createEnvKeyCredentialCipher } from "@intx/crypto";
 import { hexDecode, hexEncode } from "@intx/types";
+import { hubEncryptionKeys } from "@solutions-builder/keychain";
 import {
   createApp,
   createAuth,
@@ -66,7 +67,7 @@ import { drizzle } from "drizzle-orm/pglite";
 import * as intxSchema from "@intx/db/schema";
 import { database } from "./db.js";
 import { dataDirectory } from "./paths.js";
-import { hubEncryptionKeys, hubSigningKey } from "./hub-keys.js";
+import { hubSigningKey } from "./hub-keys.js";
 import { withPostgresJsResultShape } from "./pg-compat.js";
 
 export type MountedHub = {

@@ -19,6 +19,7 @@ apps/desktop/                    the native shell and tray
 packages/solutions-builder/src/  the app package: the transition ledger, the lifecycle workflow generated from it,
                                  the specialist kit, the document format
 packages/installer/src/          installs the app package into a tenant, driven by a hub transport the host supplies
+packages/keychain/src/           OS keychain mint/read for the hub's two at-rest encryption keys
 vendor/interchange/              the Interchange control plane, vendored under LGPL-2.1
 ```
 

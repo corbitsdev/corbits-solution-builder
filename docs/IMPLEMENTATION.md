@@ -103,7 +103,7 @@ The database is in `pglite/` under it. Build workspaces are in `builds/<run>`.
 | `SOLUTIONS_BUILDER_DIST_DIR` | Where the host serves the interface from; otherwise a `dist/` beside the executable, then the repo's |
 | `SOLUTIONS_BUILDER_HOST_COMMAND` | Debug builds of the shell only: run the host with this command instead of the bundled sidecar (the host compiled to one binary by `sidecar:build`) |
 | `SOLUTIONS_BUILDER_DEV_RELOAD` | Mount `/api/dev/reload`, a change stream the development bundle subscribes to |
-| `CREDENTIAL_ENCRYPTION_KEY`, `PRINCIPAL_KEY_ENCRYPTION_KEY` | Interchange's at-rest keys; minted into the keychain when unset |
+| `CREDENTIAL_ENCRYPTION_KEY`, `PRINCIPAL_KEY_ENCRYPTION_KEY` | Interchange's at-rest keys; `@solutions-builder/keychain` mints them into the keychain when unset |
 
 ## Credentials
 

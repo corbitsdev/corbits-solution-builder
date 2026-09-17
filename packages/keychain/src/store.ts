@@ -1,29 +1,20 @@
 /**
- * Secure storage for the hub's own bootstrap secrets.
+ * Secure storage used only by the hub's two at-rest encryption keys.
  *
  * Secrets go to the OS keychain through `security(1)` on macOS. Where no
- * OS-backed store is available the host falls back to a file with 0600
- * permissions inside the application data directory and *says so* — a fallback
- * that pretends to be a keychain is worse than one that admits what it is.
+ * OS-backed store is available this falls back to a file with 0600
+ * permissions inside the application data directory and *says so* — a
+ * fallback that pretends to be a keychain is worse than one that admits
+ * what it is.
  *
- * This is not where a *provider* credential lives (CL-8076 moved those into
- * Interchange's own `credential` table, sealed with its own credential cipher,
- * so delegation and the hub's own resolution govern them the same way a
- * deployed workflow's do). What stays here is genuinely circular otherwise:
- * the owner's mint-once password and a hosted hub's bearer token
- * (`hub-client.ts`), plus the hub's repo-signing seed (`hub-keys.ts`) —
- * secrets that cannot themselves live in a row the encryption keys would
- * have to decrypt. The two Interchange at-rest encryption keys live in
- * `@solutions-builder/keychain`.
- *
- * `credential-migration.ts` is the one other caller, and only once: reading
- * whatever a pre-CL-8076 install left behind in the old `provider:<id>` /
- * `oauth:<id>` accounts so it can be carried into the hub's own credential
- * store and deleted from here.
+ * Account names and the service id match the host's historical store so a
+ * key minted before this package existed still reads. Owner passwords,
+ * hub tokens, and the repo-signing seed stay in `apps/hub` — this module
+ * is not their home.
  */
-import { chmod, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
-import { dataDirectory } from "./paths.js";
 
 const SERVICE = "com.corbits.solutions-builder";
 
@@ -35,13 +26,25 @@ let backend: CredentialBackend | null = null;
  * Whether this process is a test/smoke run, not a real launch. Only under
  * this condition does `detectBackend` honour
  * `SOLUTIONS_BUILDER_CREDENTIAL_BACKEND` at all — the override exists so a
- * smoke does not touch the real machine keychain with the production account
- * names this module and `credential-migration.ts` use, and a real launch that
- * somehow inherited the variable from its environment must not have its
- * keychain silently downgraded to a file because of it.
+ * smoke does not touch the real machine keychain with the production
+ * account names, and a real launch that somehow inherited the variable
+ * from its environment must not have its keychain silently downgraded to
+ * a file because of it.
  */
 function isTestRun(): boolean {
   return process.env.SOLUTIONS_BUILDER_SMOKE === "1" || process.env.NODE_ENV === "test";
+}
+
+function dataDirectory(): string {
+  const override = process.env.SOLUTIONS_BUILDER_DATA_DIR?.trim();
+  if (override) return override;
+  if (process.platform === "darwin") {
+    return join(homedir(), "Library", "Application Support", "SolutionsBuilder");
+  }
+  if (process.platform === "win32") {
+    return join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "SolutionsBuilder");
+  }
+  return join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "SolutionsBuilder");
 }
 
 async function detectBackend(): Promise<CredentialBackend> {
@@ -52,11 +55,8 @@ async function detectBackend(): Promise<CredentialBackend> {
     return backend;
   }
   if (forced && !isTestRun()) {
-    // Said loudly rather than silently honoured or silently ignored: either
-    // a real launch's environment carries a variable meant only for tests
-    // (worth knowing), or a test run forgot to set the marker (worth fixing).
     console.warn(
-      `[host-secrets] SOLUTIONS_BUILDER_CREDENTIAL_BACKEND=${forced} is set but this is not a ` +
+      `[keychain] SOLUTIONS_BUILDER_CREDENTIAL_BACKEND=${forced} is set but this is not a ` +
         "recognized test run (SOLUTIONS_BUILDER_SMOKE=1 or NODE_ENV=test), so it is being ignored " +
         "and the real backend is being detected instead.",
     );
@@ -70,16 +70,6 @@ async function detectBackend(): Promise<CredentialBackend> {
   return backend;
 }
 
-export async function credentialBackend(): Promise<CredentialBackend> {
-  return detectBackend();
-}
-
-/**
- * The reference `storeSecret` would return for this account. Readers build
- * their reference from this rather than assuming the keychain: on a machine
- * without one the store is a file, and a hardcoded `keychain:` reference reads
- * a secret the host itself wrote as "unavailable".
- */
 export async function secretReference(account: string): Promise<string> {
   return `${await detectBackend()}:${account}`;
 }
@@ -90,7 +80,6 @@ function fallbackPath(account: string) {
 
 export async function storeSecret(account: string, secret: string): Promise<string> {
   if ((await detectBackend()) === "keychain") {
-    // `-U` updates in place so reconnecting does not leave a stale entry.
     const result = Bun.spawnSync(
       ["security", "add-generic-password", "-U", "-a", account, "-s", SERVICE, "-w", secret],
       { stdout: "ignore", stderr: "pipe" },
@@ -108,14 +97,6 @@ export async function storeSecret(account: string, secret: string): Promise<stri
   return `file:${account}`;
 }
 
-/**
- * The three answers a secret store can give, kept apart.
- *
- * "Nothing is stored" and "I could not tell you" are different facts, and
- * collapsing them into `null` is how a locked keychain, or one prompt someone
- * clicked Deny on, reads as first run — after which a caller mints a fresh key
- * over the good one and everything sealed under it is gone.
- */
 export type SecretRead =
   | { readonly status: "found"; readonly secret: string }
   | { readonly status: "missing" }
@@ -152,18 +133,6 @@ export async function readSecretResult(reference: string): Promise<SecretRead> {
   return code === "ENOENT"
     ? { status: "missing" }
     : { status: "unavailable", detail: String((contents as Error).message ?? contents) };
-}
-
-export async function deleteSecret(reference: string): Promise<void> {
-  const [kind, account] = splitReference(reference);
-  if (kind === "keychain") {
-    Bun.spawnSync(["security", "delete-generic-password", "-a", account, "-s", SERVICE], {
-      stdout: "ignore",
-      stderr: "ignore",
-    });
-    return;
-  }
-  await unlink(fallbackPath(account)).catch(() => undefined);
 }
 
 function splitReference(reference: string): [string, string] {

@@ -41,6 +41,7 @@
         "@radix-ui/react-tooltip": "^1.2.16",
         "@solutions-builder/app": "workspace:*",
         "@solutions-builder/installer": "workspace:*",
+        "@solutions-builder/keychain": "workspace:*",
         "@solutions-builder/tools-deck": "workspace:*",
         "@tanstack/react-query": "^5.102.8",
         "@tauri-apps/api": "^2.8.0",
@@ -76,6 +77,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@solutions-builder/app": "workspace:*",
+        "@solutions-builder/keychain": "workspace:*",
         "@solutions-builder/tools-deck": "workspace:*",
       },
       "devDependencies": {
@@ -100,6 +102,10 @@
         "@intx/types": "workspace:*",
         "@solutions-builder/app": "workspace:*",
       },
+    },
+    "packages/keychain": {
+      "name": "@solutions-builder/keychain",
+      "version": "0.1.0",
     },
     "packages/solutions-builder": {
       "name": "@solutions-builder/app",
@@ -991,6 +997,8 @@
     "@solutions-builder/hub": ["@solutions-builder/hub@workspace:apps/hub"],
 
     "@solutions-builder/installer": ["@solutions-builder/installer@workspace:packages/installer"],
+
+    "@solutions-builder/keychain": ["@solutions-builder/keychain@workspace:packages/keychain"],
 
     "@solutions-builder/tools-deck": ["@solutions-builder/tools-deck@workspace:packages/tools-deck"],
 
