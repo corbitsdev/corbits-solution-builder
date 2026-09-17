@@ -962,6 +962,124 @@ export function createAssetRoutes({
     },
   );
 
+  const WriteAssetTree = type({
+    "ref?": "string",
+    message: "string",
+    files: "Record<string, string>",
+  });
+
+  const WriteAssetTreeResponse = type({
+    commitSha: "string",
+  });
+
+  app.post(
+    "/:assetId/tree",
+    requireGrant(idResource("asset", "assetId"), "write"),
+    describeRoute({
+      tags: ["Assets"],
+      summary: "Write a tree of files into an asset",
+      description:
+        "Commits the given repo-relative files onto the asset's ref in one commit. The kind handler's validatePush runs before the ref advances, so an invalid codebase (e.g. a workflow asset missing package.json) is rejected. Gated by the session's own write grant on the asset -- the caller need not carry a git bearer token, matching the tarball PUT route.",
+      responses: {
+        200: {
+          description: "Tree written",
+          content: {
+            "application/json": { schema: resolver(WriteAssetTreeResponse) },
+          },
+        },
+        400: {
+          description: "Rejected by the kind handler",
+          content: { "application/json": { schema: resolver(ErrorResponse) } },
+        },
+        404: {
+          description: "Asset not found",
+          content: { "application/json": { schema: resolver(ErrorResponse) } },
+        },
+      },
+    }),
+    validator("json", WriteAssetTree),
+    async (c) => {
+      const tenantCtx = c.get("tenant");
+      const assetId = c.req.param("assetId");
+      const row = await resolveAssetById(db, tenantCtx.id, assetId);
+      if (row === null) {
+        return c.json(
+          { error: { code: "not_found", message: "Asset not found" } },
+          404,
+        );
+      }
+      const body = c.req.valid("json");
+      try {
+        const { commitSha } = await assetService.populateAsset({
+          assetId,
+          ref: body.ref ?? DEFAULT_ASSET_REF,
+          principal: hubPrincipal,
+          tree: { files: body.files, message: body.message },
+        });
+        return c.json({ commitSha });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return c.json({ error: { code: "bad_request", message } }, 400);
+      }
+    },
+  );
+
+  app.get(
+    "/:assetId/blob",
+    requireGrant(idResource("asset", "assetId"), "read"),
+    describeRoute({
+      tags: ["Assets"],
+      summary: "Read a blob from an asset's tree",
+      description:
+        "Returns the raw bytes at ?path= on the asset's ref (default refs/heads/main). 404 when the asset, ref or path is absent.",
+      responses: {
+        200: { description: "Blob bytes" },
+        400: {
+          description: "Missing path",
+          content: { "application/json": { schema: resolver(ErrorResponse) } },
+        },
+        404: {
+          description: "Asset, ref or path not found",
+          content: { "application/json": { schema: resolver(ErrorResponse) } },
+        },
+      },
+    }),
+    async (c) => {
+      const tenantCtx = c.get("tenant");
+      const assetId = c.req.param("assetId");
+      const row = await resolveAssetById(db, tenantCtx.id, assetId);
+      if (row === null) {
+        return c.json(
+          { error: { code: "not_found", message: "Asset not found" } },
+          404,
+        );
+      }
+      const path = c.req.query("path");
+      if (!path) {
+        return c.json(
+          { error: { code: "bad_request", message: "path is required" } },
+          400,
+        );
+      }
+      const ref = c.req.query("ref");
+      try {
+        const bytes = await assetService.readAssetBlob({
+          assetId,
+          path,
+          ...(ref ? { ref } : {}),
+        });
+        return new Response(bytes as BodyInit, {
+          headers: { "content-type": "application/octet-stream" },
+        });
+      } catch {
+        return c.json(
+          { error: { code: "not_found", message: "Blob not found" } },
+          404,
+        );
+      }
+    },
+  );
+
   // ----- Smart-HTTP route group -------------------------------------
   //
   // The bearer middleware is mounted by the app layer ahead of this
