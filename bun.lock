@@ -74,6 +74,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@solutions-builder/app": "workspace:*",
+        "@solutions-builder/tools-deck": "workspace:*",
       },
       "devDependencies": {
         "@types/ssri": "catalog:",
@@ -97,7 +98,16 @@
       "dependencies": {
         "@intx/agent": "workspace:*",
         "@solutions-builder/app": "workspace:*",
+        "jszip": "3",
         "pptxgenjs": "4",
+      },
+    },
+    "packages/tools-delivery": {
+      "name": "@solutions-builder/tools-delivery",
+      "version": "0.1.0",
+      "dependencies": {
+        "@intx/agent": "workspace:*",
+        "@solutions-builder/app": "workspace:*",
       },
     },
     "vendor/interchange/apps/sidecar": {
@@ -968,6 +978,8 @@
     "@solutions-builder/hub": ["@solutions-builder/hub@workspace:apps/hub"],
 
     "@solutions-builder/tools-deck": ["@solutions-builder/tools-deck@workspace:packages/tools-deck"],
+
+    "@solutions-builder/tools-delivery": ["@solutions-builder/tools-delivery@workspace:packages/tools-delivery"],
 
     "@solutions-builder/web": ["@solutions-builder/web@workspace:apps/web"],
 

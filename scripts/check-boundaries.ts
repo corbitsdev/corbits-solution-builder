@@ -19,6 +19,12 @@
  *   4. Run state moves in exactly one place. Only `engine.ts` (and
  *      `projects.ts`, opening the first run) records a run mutation on the
  *      ledger, so there is no second state machine.
+ *   5. A `packages/tools-*` package (a sidecar-deployed workflow tool bundle,
+ *      e.g. `tools-deck`) is bound by the same rule as the app package: it
+ *      runs in the workflow sidecar, never the hub, so it depends on nothing
+ *      in `apps/` and reaches the platform only through the workflow/agent
+ *      authoring surface, `@solutions-builder/app`, and its own authoring
+ *      libraries (deck rendering's `pptxgenjs`/`jszip`).
  */
 import { readdir, readFile } from "node:fs/promises";
 import { extname, join, relative } from "node:path";
@@ -27,6 +33,7 @@ const root = join(import.meta.dir, "..");
 const PACKAGE = "packages/solutions-builder/src";
 const HUB = "apps/hub/src";
 const WEB = "apps/web/src";
+const PACKAGES_ROOT = "packages";
 
 type Violation = { file: string; rule: string; detail: string };
 const violations: Violation[] = [];
@@ -118,15 +125,52 @@ const RUNTIME_PACKAGES = [
  */
 const PACKAGE_ALLOWED = ["@intx/workflow", "@intx/types", "arktype", "pptxgenjs", "jszip"];
 
+/** What every `packages/tools-*` package may take from outside itself
+ *  regardless of what it declares: the agent and workflow authoring
+ *  surfaces, and the app package it wraps. No `@solutions-builder/hub`, no
+ *  `@intx/db`. Beyond this core, each package's own offline authoring
+ *  libraries (deck rendering's `pptxgenjs`/`jszip`, say) are read from its
+ *  own `package.json` `dependencies` rather than allowed for every tool
+ *  package — a library one tool needs is not a license for every other one
+ *  to import it too. */
+const TOOLS_CORE_ALLOWED = ["@intx/agent", "@intx/workflow", "@intx/types", "@solutions-builder/app"];
+
 const PLATFORM_FILE = /^apps\/hub\/src\/(hub-mount|hub-keys|hub-migrate|hub-executor|hub-gaps|db|schema|migrate)\.ts$/;
 
-const files = (await Promise.all([PACKAGE, HUB, WEB].map((area) => walk(join(root, area))))).flat();
+type ToolsPackage = { dir: string; allowed: readonly string[] };
+
+/** Every `packages/tools-*` package's `src/`, discovered rather than
+ *  hardcoded so a new sidecar tool package (e.g. `tools-delivery`) is
+ *  checked for free, each scoped to its own declared dependencies. */
+async function toolsPackages(): Promise<ToolsPackage[]> {
+  const entries = await readdir(join(root, PACKAGES_ROOT), { withFileTypes: true });
+  const names = entries.filter((entry) => entry.isDirectory() && entry.name.startsWith("tools-")).map((entry) => entry.name);
+  return Promise.all(
+    names.map(async (name) => {
+      const manifest = JSON.parse(await readFile(join(root, PACKAGES_ROOT, name, "package.json"), "utf8")) as {
+        dependencies?: Record<string, string>;
+      };
+      return {
+        dir: `${PACKAGES_ROOT}/${name}/src`,
+        allowed: [...TOOLS_CORE_ALLOWED, ...Object.keys(manifest.dependencies ?? {})],
+      };
+    }),
+  );
+}
+
+const TOOLS_PACKAGES = await toolsPackages();
+const TOOLS_DIRS = TOOLS_PACKAGES.map((pkg) => pkg.dir);
+
+const files = (
+  await Promise.all([PACKAGE, HUB, WEB, ...TOOLS_DIRS].map((area) => walk(join(root, area))))
+).flat();
 
 for (const file of files) {
   const path = relative(root, file);
   const text = await readFile(file, "utf8");
   const imports = importsOf(text);
-  const area = path.startsWith(PACKAGE) ? "package" : path.startsWith(HUB) ? "hub" : "web";
+  const toolsPackage = TOOLS_PACKAGES.find((pkg) => path.startsWith(pkg.dir));
+  const area = path.startsWith(PACKAGE) ? "package" : path.startsWith(HUB) ? "hub" : toolsPackage ? "tools" : "web";
   const external = imports.filter((name) => !name.startsWith("."));
 
   if (area === "package") {
@@ -138,6 +182,31 @@ for (const file of files) {
         file: path,
         rule: "the app package depends on nothing outside itself, the workflow authoring surface and the platform's types",
         detail: outside.join(", "),
+      });
+    }
+  }
+
+  if (area === "tools" && toolsPackage) {
+    // `bun:test` is the test runner, not shipped: `toolsMemberFiles` in
+    // `workflow-closure.ts` leaves `*.test.ts` out of what reaches the
+    // sidecar, so a test file importing it is not a runtime dependency.
+    const isTest = /\.test\.tsx?$/.test(path);
+    const outside = external.filter(
+      (name) => !startsWithAny(name, toolsPackage.allowed) && !name.startsWith("node:") && !(isTest && name === "bun:test"),
+    );
+    if (outside.length > 0) {
+      violations.push({
+        file: path,
+        rule: "a tools package depends on nothing in apps/, no @intx/db, only the agent/workflow authoring surface, the app package, and what its own package.json declares",
+        detail: outside.join(", "),
+      });
+    }
+    const apps = imports.filter((name) => name.includes("apps/") || name.includes("@solutions-builder/hub"));
+    if (apps.length > 0) {
+      violations.push({
+        file: path,
+        rule: "a tools package never imports an app",
+        detail: apps.join(", "),
       });
     }
   }
@@ -163,7 +232,8 @@ for (const file of files) {
     // clause the two rules contradict each other and no package file could
     // ever import it.
     const packageAllowed = area === "package" && platform.every((name) => startsWithAny(name, PACKAGE_ALLOWED));
-    const allowed = PLATFORM_FILE.test(path) || (area === "hub" && runtimeOnly) || packageAllowed;
+    const toolsAllowed = area === "tools" && !!toolsPackage && platform.every((name) => startsWithAny(name, toolsPackage.allowed));
+    const allowed = PLATFORM_FILE.test(path) || (area === "hub" && runtimeOnly) || packageAllowed || toolsAllowed;
     if (platform.length > 0 && !allowed) {
       violations.push({
         file: path,

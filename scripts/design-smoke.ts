@@ -19,7 +19,7 @@ import {
   submitFeedback,
 } from "../apps/hub/src/design-feedback.js";
 import { HostError } from "../apps/hub/src/errors.js";
-import { printableDesign } from "../apps/hub/src/print-page.js";
+import { printableDesign } from "../packages/tools-deck/src/print-page.js";
 
 const checks: { name: string; ok: boolean; detail: string }[] = [];
 function check(name: string, ok: boolean, detail = "") {

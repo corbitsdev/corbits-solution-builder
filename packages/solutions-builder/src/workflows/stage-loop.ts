@@ -39,6 +39,16 @@ export const ROUND_STEP_ID = "round";
 /** The step that runs the stage's specialist once a round asks for a draft. */
 export const DRAFT_STEP_ID = "draft";
 /**
+ * Stage 9's own draft-equivalent step id. It cannot share `DRAFT_STEP_ID`:
+ * the deployed workflow's capability walk fails closed when one leaf step id
+ * recurs across loop bodies with different grants, and stage 9's specialist
+ * alone carries the delivery-status tool while every other drafted stage's
+ * "draft" step carries none.
+ */
+export const DELIVERY_STEP_ID = "delivery-check";
+/** The one stage whose drafting step is `DELIVERY_STEP_ID`, not `DRAFT_STEP_ID`. */
+export const DELIVERY_STAGE: Stage = 9;
+/**
  * Stage 6's first step: the requirements document the plan is written
  * against. It runs in a round of its own, ahead of the plan, because the
  * architect's prompt has to carry the requirements as an input and the host
@@ -93,6 +103,9 @@ export function agentStepIds(stage: Stage, audienceCount: number): string[] {
   }
   if (stage === EVALUATED_STAGE) {
     return [DRAFT_STEP_ID, EVALUATE_STEP_ID];
+  }
+  if (stage === DELIVERY_STAGE) {
+    return [DELIVERY_STEP_ID];
   }
   return [DRAFT_STEP_ID];
 }
