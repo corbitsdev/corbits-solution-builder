@@ -149,6 +149,7 @@ OAuth sign-in uses PKCE over a loopback redirect. Tokens live in the keychain.
 | `smoke:launch` | Desktop launch paths (binds a fixed port; a run left over from a failed check must be killed before a retry) |
 | `smoke:hub` | Embedded and hosted hub topologies |
 | `smoke:sidecar` | The embedded hub's own sidecar, deploying the lifecycle as a real workflow |
+| `smoke:sidecar-delegation` | A project tenant cannot use a workspace offering until the owner delegates that credential, and a revoke fails the next resolve |
 | `smoke:conversation`, `smoke:guidance` | Stage conversation and the product guide |
 | `smoke:material` | Source material attached to a project reaches the specialists |
 | `smoke:stakeholders` | Stakeholders changed while a project is under way |

@@ -63,6 +63,27 @@ declare module "@intx/db" {
     credentialIds: Iterable<string>,
     credentialCipher: unknown,
   ): Promise<CredentialMaterialEntry[]>;
+
+  /**
+   * Rebuild a source chain from catalog offering ids. When `principalId` is
+   * supplied, an inherited (ancestor) credential additionally requires
+   * `credential:<id>/use` on that principal.
+   */
+  export type OfferingSourceResolution =
+    | { ok: true; sources: unknown[] }
+    | {
+        ok: false;
+        reason: "offering_unavailable";
+        offeringId: string;
+        skip?: { reason: string; provider: string };
+      };
+  export function resolveSourcesByOfferingIds(
+    db: unknown,
+    tenantId: string,
+    offeringIds: readonly string[],
+    credentialCipher: unknown,
+    principalId?: string,
+  ): Promise<OfferingSourceResolution>;
 }
 
 declare module "@intx/db/schema" {
