@@ -1,16 +1,13 @@
 /**
- * The project lifecycle, running on the hub.
+ * The project's lifecycle deployment, as a thin hub client.
  *
  * Each project has its own deployment of the generated lifecycle
- * (`workflow-deploy.ts`); the hub places it on Interchange's own sidecar and
- * the sidecar runs it. This module is the thin client: it fires the
- * deployment's top-level run, delivers the ledger's gate commands as signals,
- * and reads where the run stands by folding the run's own committed events.
- * Nothing here executes a workflow; that is the sidecar's job.
- *
- * The product's own run record (origin, source, cost approval, packet,
- * checkpoint, why it ended) is folded from the ledger thread in `runs.ts`;
- * nothing about a run lives in process memory.
+ * (`lifecycle-deploy.ts`); the hub places it on Interchange's own sidecar and
+ * the sidecar runs it. This module fires the deployment's top-level run,
+ * delivers gate commands as signals, and reads where the run stands by folding
+ * the run's own committed events. Nothing here executes a workflow, and nothing
+ * here writes a host run record — run state moves in the workflow definition
+ * in the app package.
  */
 import { ApiError } from "@intx/hub-client";
 import { loopBodyRunId } from "@intx/workflow";

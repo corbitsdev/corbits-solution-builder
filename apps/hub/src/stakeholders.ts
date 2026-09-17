@@ -12,7 +12,7 @@
  */
 import { AUTHORITIES, type Authority } from "@solutions-builder/app/ledger";
 import { HostError } from "./errors.js";
-import { forgetExecution } from "./hub-executor.js";
+import { forgetExecution } from "./lifecycle-run.js";
 import { installProjectAuthority } from "./project-authority.js";
 import { requireProject, updateProject, type ProjectPolicy } from "./project-records.js";
 

@@ -22,7 +22,7 @@ import {
   hasExecution,
   launchProjectLifecycle,
   type DeliveryOutcome,
-} from "./hub-executor.js";
+} from "./lifecycle-run.js";
 import type { LedgerPosition } from "@solutions-builder/app/workflows/stage-loop";
 import type { CommandInput } from "./engine.js";
 
@@ -48,7 +48,7 @@ export const GATE_COMMANDS: readonly Command[] = [
 /**
  * Delivers a gate command to the waiting run: relaunches the project's run
  * if the executor lost it to a restart, then signals. Called before the
- * host transaction that would write a `RunDraft` — the executor is not
+ * host transaction that would write host-side effects — the executor is not
  * something the database's single writer connection can be reached from
  * mid-transaction, and a refused command never reaches that write.
  *

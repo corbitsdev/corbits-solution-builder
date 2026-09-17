@@ -14,7 +14,7 @@
  * spilled to a blob), so this module is not fully pure — but the round's own
  * payload never does: it is small and structured, so it is read straight off
  * `SignalReceived.payload` with no ref indirection, and every other read here
- * is a one-line `readOutputRef` await. `hub-executor.ts` owns every import of
+ * is a one-line `readOutputRef` await. `lifecycle-run.ts` owns every import of
  * the Interchange platform itself; this file only calls the plain functions
  * it exports.
  *
@@ -34,7 +34,7 @@ import {
 import type { Stage } from "@solutions-builder/app/ledger";
 import { briefVerdictIn, questionsIn, summaryIn } from "@solutions-builder/app/document";
 import type { HubRunEvent } from "./hub-client.js";
-import { readOutputRef, stageIterations, type StageIteration } from "./hub-executor.js";
+import { readOutputRef, stageIterations, type StageIteration } from "./lifecycle-run.js";
 import { database } from "./db.js";
 import * as table from "./schema.js";
 import { eq } from "drizzle-orm";

@@ -25,7 +25,7 @@ import { execute, type Actor } from "../../apps/hub/src/engine.js";
 import { newId } from "../../apps/hub/src/ids.js";
 import { writeArtifact, readArtifactNode, projectDetail } from "../../apps/hub/src/projects.js";
 import { requestDraft, type StageDraftResult } from "../../apps/hub/src/stage-runs.js";
-import { deliverStageSignal, projectExecutionStatus, type StageStatus } from "../../apps/hub/src/hub-executor.js";
+import { deliverStageSignal, projectExecutionStatus, type StageStatus } from "../../apps/hub/src/lifecycle-run.js";
 import { gateStepId } from "@solutions-builder/app/workflows/stage-loop";
 import type { Stage } from "@solutions-builder/app/ledger";
 

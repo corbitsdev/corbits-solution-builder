@@ -21,7 +21,7 @@
 import { parseRunAddress } from "@intx/types";
 import { hub } from "./hub-mount.js";
 import { catalog } from "./hub-client.js";
-import { projectForRun } from "./hub-executor.js";
+import { projectForRun } from "./lifecycle-run.js";
 import { recordRoundUsage, type TokenCounts } from "./spend.js";
 
 let attached = false;

@@ -1,18 +1,11 @@
 /**
- * The command engine — BUILD_PLAN_V3 sections 6, 7 and 11.
+ * Host command dispatch — artifacts, approvals, flags, and gate delivery.
  *
- * One entry point for every state change. It:
- *   1. dedupes on the envelope's idempotency key (at-least-once is assumed);
- *   2. resolves the actor's real authorities from the platform (`hub/authority.ts`);
- *   3. for a gate command, delivers the signal first — the workflow's
- *      `admitGate` is the admit authority; `evaluate` is not;
- *   4. commits the host run mutation only after a command is admitted
- *      (no `RunDraft` on a refusal);
- *   5. records the command as a ledger mail turn and fires any decision
- *      notification, both after the transaction has committed.
- *
- * Step 4 is why this is one module and not several: the atomicity claim is only
- * true if there is a single place that writes.
+ * Gate commands go to the project's lifecycle run first: `admitGate` in the
+ * app package is the admit authority. This module records the command as a
+ * ledger mail turn and writes host-side effects (artifact versions, decision
+ * flags, worker questions). It does not move run state: that lives in the
+ * workflow definition, not in a `RunDraft`.
  */
 import type { Command, Stage } from "@solutions-builder/app/ledger";
 import { classifyTarget, SELECTABLE_TARGETS } from "@solutions-builder/app/targets";
@@ -22,9 +15,9 @@ import { HostError, notFound } from "./errors.js";
 import { newId } from "./ids.js";
 import { database, type Db } from "./db.js";
 import type { Authority } from "@solutions-builder/app/ledger";
-import { launchProjectLifecycle, type DeliveryOutcome } from "./hub-executor.js";
+import { launchProjectLifecycle, projectExecutionStatus, type DeliveryOutcome } from "./lifecycle-run.js";
 import { loadRun } from "./engine-views.js";
-import { RunDraft, activeRun, readRun, runsForProject } from "./runs.js";
+import { activeRun, readRun, runsForProject } from "./runs.js";
 import {
   authoritiesFor,
   versionHashesMatch,
@@ -36,6 +29,7 @@ import {
   receiptFor,
   audienceDecisions,
   openQuestion,
+  ledgerCommands,
   type BuildAnswer,
   type BuildQuestion,
   type DecisionFlag,
@@ -115,38 +109,6 @@ export type CommandOutcome = {
 };
 
 type VersionRef = { artifactId: string; versionId: string; contentHash: string };
-
-function createRun(
-  draft: RunDraft,
-  args: {
-    projectId: string;
-    kind: "stage" | "build";
-    stage: Stage;
-    state: string;
-    sourceRunId?: string | null;
-    packetId?: string | null;
-    checkpointRef?: string | null;
-  },
-): string {
-  const id = newId.run();
-  return draft.create({
-    id,
-    projectId: args.projectId,
-    kind: args.kind,
-    stage: args.stage,
-    state: args.state as RunView["state"],
-    sourceRunId: args.sourceRunId ?? null,
-    // A new run is its own origin; attempts of it inherit this id.
-    originId: id,
-    terminalReason: null,
-    costApprovalVersionId: null,
-    routeTargetStage: null,
-    packetId: args.packetId ?? null,
-    checkpointRef: args.checkpointRef ?? null,
-    createdAt: new Date(),
-    endedAt: null,
-  });
-}
 
 /**
  * In-flight commands, keyed by idempotency key. A concurrent retry — one that
@@ -266,6 +228,48 @@ function expectRevision(input: CommandInput, current: number): void {
   }
 }
 
+function viewFromCommands(
+  runId: string,
+  openingRunId: string,
+  after: { state?: string; stage?: number } | undefined,
+  statusStage: Stage | undefined,
+): RunView {
+  const stage = (statusStage ?? after?.stage ?? 1) as Stage;
+  return {
+    id: runId,
+    kind: stage >= 8 ? "build" : "stage",
+    stage,
+    state: (after?.state ?? "in_progress") as RunView["state"],
+    originId: openingRunId,
+    routeTargetStage: null,
+    costApprovalVersionId: null,
+    checkpointRef: null,
+  };
+}
+
+async function resolveRun(runId: string, projectId: string): Promise<RunView> {
+  const commands = await ledgerCommands(projectId);
+  const opening = commands.find((command) => command.command === "project.create");
+  const openedId = (opening?.after as { runId?: string } | undefined)?.runId;
+  const last = [...commands].reverse().find((command) => {
+    const after = command.after as { runId?: string } | null;
+    return typeof after?.runId === "string" && (after.runId === runId || after.runId === openedId);
+  });
+  const after = last?.after as { state?: string; stage?: number } | undefined;
+  const status = await projectExecutionStatus(projectId);
+  try {
+    const loaded = await loadRun(runId, projectId);
+    return {
+      ...loaded,
+      stage: status?.stage ?? loaded.stage,
+      state: (after?.state ?? loaded.state) as RunView["state"],
+    };
+  } catch (cause) {
+    if (openedId !== runId) throw cause;
+    return viewFromCommands(runId, openedId, after, status?.stage);
+  }
+}
+
 async function runProjectDelete(input: CommandInput, authorities: Authority[]): Promise<CommandOutcome> {
   const authorised = PROJECT_DELETE.authority.some((role) => authorities.includes(role));
   if (!authorised) {
@@ -345,7 +349,7 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
 
   const runId = String(input.payload.runId ?? "");
   if (!runId) throw new HostError("validation_failed", "The command must name a run.");
-  const run = await loadRun(runId, input.projectId);
+  const run = await resolveRun(runId, input.projectId);
   const versions = Array.isArray(input.payload.versions) ? (input.payload.versions as VersionRef[]) : [];
   const needsExactVersions = (
     ["stage.approve", "cost.approve", "build.freeze", "audience.decide"] as string[]
@@ -415,7 +419,8 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
   };
 
   // Gate commands go to the run first: `admitGate` is the admit authority.
-  // `evaluate` below only decides whether this host writes a RunDraft.
+  // `evaluate` is not; a delivered gate still records host-side effects even
+  // when the host's own run view is stale. A refused command never writes.
   const delivery = GATE_COMMANDS.includes(input.type)
     ? await runGateSideEffects(
         { ...input, payload: { ...input.payload, command: input.type, run, context } },
@@ -426,24 +431,38 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
   const verdict =
     input.type === "audience.decide" ? evaluateAudienceDecision(run, context) : evaluate(input.type, run, context);
 
-  if (!verdict.ok) {
+  if (!verdict.ok && delivery !== "delivered") {
     throw new HostError("transition_refused", verdict.message, { refusal: verdict.code });
   }
 
-  // The run mutations this command makes are collected here and written to
-  // the ledger after the transaction returns, since the ledger mail lives on
-  // the same single-writer connection as `tx`. A refused command never
-  // reaches this: no RunDraft on refuse.
-  const draft = new RunDraft(await runsForProject(input.projectId));
+  const transition = verdict.ok
+    ? verdict.transition
+    : LEDGER.find((row) => row.command === input.type && row.from !== null);
+  if (!transition) {
+    throw new HostError(
+      "transition_refused",
+      verdict.ok ? `No ledger row for ${input.type}.` : verdict.message,
+      verdict.ok ? {} : { refusal: verdict.code },
+    );
+  }
+  const toStage: Stage = verdict.ok
+    ? verdict.toStage
+    : input.type === "stage.approve"
+      ? ((run.stage + 1) as Stage)
+      : input.type === "build.freeze"
+        ? 8
+        : input.type === "build.accept_evidence"
+          ? 9
+          : run.stage;
 
   const outcome = await db.transaction(async (tx) => {
-    const applied = await apply(tx, draft, {
+    const applied = await apply(tx, {
       input,
       run,
       policy,
       versions,
-      transitionId: verdict.transition.id,
-      toStage: verdict.toStage,
+      transitionId: transition.id,
+      toStage,
       authority: authorities[0] ?? "project_owner",
       ...(waiting ? { openQuestionId: waiting.id } : {}),
     });
@@ -452,7 +471,7 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
       runId: applied.runId,
       stage: applied.stage,
       state: applied.state,
-      transitionId: verdict.transition.id,
+      transitionId: transition.id,
       replayed: false,
     };
     return {
@@ -472,9 +491,7 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
   // that carries the packet learns the version id before the ledger turn is
   // written, so the fold sees both together.
   if (outcome.applied.artifact) {
-    const written = await writeArtifact(outcome.applied.artifact.draft, input.actor);
-    const carrier = outcome.applied.artifact.setPacketOn;
-    if (carrier) draft.patch(carrier, { packetId: written.nodeId });
+    await writeArtifact(outcome.applied.artifact.draft, input.actor);
     // A manifest is checked the moment it exists, so the stage 9 decision
     // opens knowing what is missing rather than discovering it on accept.
     if (outcome.applied.artifact.verifyDelivery) {
@@ -496,7 +513,6 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
     result: outcome.result,
     stage: run.stage,
     runId: outcome.applied.runId,
-    runs: draft.mutations,
     ...(outcome.applied.flag ? { flag: outcome.applied.flag } : {}),
     ...(outcome.applied.question ? { question: outcome.applied.question } : {}),
     ...(outcome.applied.answer ? { answer: outcome.applied.answer } : {}),
@@ -546,8 +562,7 @@ export type AppliedCommand = {
  * caller's transaction; nothing here re-checks a rule the guard already owns.
  */
 async function apply(
-  tx: Tx,
-  draft: RunDraft,
+  _tx: Tx,
   args: {
     input: CommandInput;
     run: RunView;
@@ -560,7 +575,6 @@ async function apply(
   },
 ): Promise<AppliedCommand> {
   const { input, run, toStage } = args;
-  const now = new Date();
 
   const approvalOf = (decision: string, audienceName?: string): AppliedApproval => ({
     decision,
@@ -569,10 +583,6 @@ async function apply(
     rationale: (input.payload.rationale as string | undefined) ?? null,
     assumptions: (input.payload.assumptions as unknown) ?? null,
   });
-
-  const terminalize = (state: string, reason: string) => {
-    draft.patch(run.id, { state: state as RunView["state"], terminalReason: reason, endedAt: now });
-  };
 
   switch (input.type) {
     case "audience.decide": {
@@ -597,29 +607,14 @@ async function apply(
     }
 
     case "stage.submit": {
-      draft.patch(run.id, { state: "waiting_approval" });
       return { runId: run.id, stage: run.stage, state: "waiting_approval", notifyRunId: run.id };
     }
 
     case "stage.approve": {
-      terminalize("approved", "approved and advanced");
-      const next = createRun(draft, {
-        projectId: input.projectId,
-        kind: "stage",
-        stage: toStage,
-        state: "in_progress",
-        sourceRunId: run.id,
-      });
-      return { runId: next, stage: toStage, state: "in_progress", approval: approvalOf("approve") };
+      return { runId: run.id, stage: toStage, state: "in_progress", approval: approvalOf("approve") };
     }
 
     case "cost.approve": {
-      // No stage advance. The cost approval is a field on this run, and
-      // build.freeze is the only thing that reads it.
-      draft.patch(run.id, {
-        state: "cost_approved",
-        costApprovalVersionId: args.versions[0]?.versionId ?? null,
-      });
       return { runId: run.id, stage: 7, state: "cost_approved", approval: approvalOf("approve") };
     }
 
@@ -656,42 +651,22 @@ async function apply(
       };
       // Stage 7 is terminal from here. It never returns to in_progress;
       // a material change re-enters through stage.backtracked routing.
-      terminalize("approved_frozen", "packet frozen");
-      const buildRun = createRun(draft, {
-        projectId: input.projectId,
-        kind: "build",
-        stage: 8,
-        state: "queued",
-        sourceRunId: run.id,
-      });
       return {
-        runId: buildRun,
+        runId: run.id,
         stage: 8,
         state: "queued",
-        artifact: { draft: draftPacket, setPacketOn: buildRun },
+        artifact: { draft: draftPacket },
       };
     }
 
     case "build.start_attempt": {
       if (run.state === "queued") {
-        draft.patch(run.id, { state: "running" });
         return { runId: run.id, stage: 8, state: "running" };
       }
-      // From a terminal build run: a new queued run linked to the unchanged source.
-      const source = draft.get(run.id);
-      const next = createRun(draft, {
-        projectId: input.projectId,
-        kind: "build",
-        stage: 8,
-        state: "queued",
-        sourceRunId: run.id,
-        packetId: source?.packetId ?? null,
-      });
-      return { runId: next, stage: 8, state: "queued" };
+      return { runId: run.id, stage: 8, state: "queued" };
     }
 
     case "build.wait_for_human": {
-      draft.patch(run.id, { state: "waiting_human" });
       const question: BuildQuestion = {
         id: newId.question(),
         runId: run.id,
@@ -711,7 +686,6 @@ async function apply(
         answer: String(input.payload.answer ?? ""),
         grantedCapabilities: (input.payload.grantedCapabilities as unknown) ?? null,
       };
-      draft.patch(run.id, { state: "running" });
       return { runId: run.id, stage: 8, state: "running", answer };
     }
 
@@ -732,7 +706,6 @@ async function apply(
           "build.accept_evidence requires a completed verifier report. No verification was performed for this build attempt, so there is nothing for a human to accept against.",
         );
       }
-      terminalize("evidence_accepted", `evidence accepted — verifier report: ${verifierReport.level} confidence (${verifierReport.source})`);
       // The manifest is an artifact version produced by the build run.
       const rawDescriptors = Array.isArray(input.payload.descriptors) ? input.payload.descriptors : [];
       const descriptors = rawDescriptors.map(normalizeDescriptor);
@@ -766,19 +739,12 @@ async function apply(
         sourceVersionIds: args.versions.map((version) => version.versionId),
         provenance: { producer: "human", runId: run.id },
       };
-      const delivery = createRun(draft, {
-        projectId: input.projectId,
-        kind: "stage",
-        stage: 9,
-        state: "delivery_review",
-        sourceRunId: run.id,
-      });
       return {
-        runId: delivery,
+        runId: run.id,
         stage: 9,
         state: "delivery_review",
         approval: approvalOf("accept"),
-        notifyRunId: delivery,
+        notifyRunId: run.id,
         artifact: { draft: draftManifest, verifyDelivery: true },
       };
     }
@@ -786,7 +752,6 @@ async function apply(
     case "delivery.accept": {
       // Acceptance is this command's own ledger turn; the manifest version
       // it accepts is unchanged.
-      terminalize("delivered", "accepted by the recipient");
       return { runId: run.id, stage: 9, state: "delivered", approval: approvalOf("accept") };
     }
 
@@ -810,19 +775,8 @@ async function apply(
         chosenRoute: toStage,
         rejectedRoutes: null,
       };
-      // The source run keeps its own history; the route lives on a new run so
-      // the backtrack is visible rather than an edit of what was decided.
-      terminalize("backtracked", reason || "routed back");
-      const routed = createRun(draft, {
-        projectId: input.projectId,
-        kind: "stage",
-        stage: toStage,
-        state: "backtracked",
-        sourceRunId: run.id,
-      });
-      draft.patch(routed, { routeTargetStage: toStage });
       return {
-        runId: routed,
+        runId: run.id,
         stage: toStage,
         state: "backtracked",
         approval: approvalOf(input.type.endsWith("reject") ? "reject" : "revise"),
@@ -831,15 +785,7 @@ async function apply(
     }
 
     case "stage.select_route": {
-      terminalize("routed", "route selected");
-      const next = createRun(draft, {
-        projectId: input.projectId,
-        kind: "stage",
-        stage: toStage,
-        state: "in_progress",
-        sourceRunId: run.id,
-      });
-      return { runId: next, stage: toStage, state: "in_progress" };
+      return { runId: run.id, stage: toStage, state: "in_progress" };
     }
 
     case "stage.fail":
@@ -852,24 +798,13 @@ async function apply(
       // could neither be shown nor started again.
       const state = LEDGER.find((row) => row.id === args.transitionId)?.to?.state;
       if (!state) throw new HostError("internal_error", `No ledger row named ${args.transitionId}.`);
-      terminalize(state, String(input.payload.reason ?? input.type));
       return { runId: run.id, stage: run.stage, state };
     }
 
     case "stage.retry":
     case "build.resume": {
-      const source = draft.get(run.id);
-      const next = createRun(draft, {
-        projectId: input.projectId,
-        kind: run.kind,
-        stage: run.stage,
-        state: run.kind === "build" ? "queued" : "in_progress",
-        sourceRunId: run.id,
-        packetId: source?.packetId ?? null,
-        checkpointRef: source?.checkpointRef ?? null,
-      });
       return {
-        runId: next,
+        runId: run.id,
         stage: run.stage,
         state: run.kind === "build" ? "queued" : "in_progress",
       };

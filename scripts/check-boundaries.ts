@@ -22,15 +22,16 @@
  *   2. Only the hub talks to a provider or an agent runtime, and only the
  *      hub's embedding files (`hub-mount`, `hub-keys`, `hub-migrate`,
  *      `db`, `schema`, `migrate`) plus
- *      `hub-executor` import Interchange internals. A second module
+ *      `lifecycle-run` import Interchange internals. A second module
  *      reaching into the hub is how a parallel control plane starts.
  *   3. The client cannot write persistence: `apps/web` never imports the hub,
  *      the database, the schema, or the command engine. It may take
  *      `@intx/hub-client` (the transport) to fold a run and deliver a signal
  *      over `/hub`; it may not take any other `@intx/*` package.
- *   4. Run state moves in exactly one place. Only `engine.ts` (and
- *      `projects.ts`, opening the first run) records a run mutation on the
- *      ledger, so there is no second state machine.
+ *   4. Run state moves in the workflow definition in the app package
+ *      (`packages/solutions-builder/src/workflows/`, `admit.ts`). The hub
+ *      does not record a run mutation; a `RunDraft` on a host route is a
+ *      second state machine.
  *   5. A `packages/tools-*` package (a sidecar-deployed workflow tool bundle,
  *      e.g. `tools-deck`) is bound by the same rule as the app package: it
  *      runs in the workflow sidecar, never the hub, so it depends on nothing
@@ -168,7 +169,7 @@ const INSTALLER_ALLOWED = [
 /** What the client may take from the platform: the hub transport, nothing else. */
 const WEB_ALLOWED = ["@intx/hub-client"];
 
-const PLATFORM_FILE = /^apps\/hub\/src\/(hub-mount|hub-keys|hub-migrate|hub-executor|db|schema|migrate)\.ts$/;
+const PLATFORM_FILE = /^apps\/hub\/src\/(hub-mount|hub-keys|hub-migrate|lifecycle-run|db|schema|migrate)\.ts$/;
 
 type ToolsPackage = { dir: string; allowed: readonly string[] };
 
@@ -325,7 +326,7 @@ for (const file of files) {
     if (platform.length > 0 && !allowed) {
       violations.push({
         file: path,
-        rule: "only the hub's embedding files and hub-executor may import the Interchange platform",
+        rule: "only the hub's embedding files and lifecycle-run may import the Interchange platform",
         detail: platform.join(", "),
       });
     }
@@ -372,17 +373,15 @@ for (const file of files) {
     }
   }
 
-  // The single-state-machine rule. A run's record is folded from the run
-  // mutations on the ledger thread (`runs.ts`), and only `engine.ts` records
-  // them; `projects.ts` opens the first run when a project is created, which
-  // is the one write the engine does not make. Anywhere else is a second
-  // state machine starting.
-  const STATE_WRITERS = [`${HUB}/engine.ts`, `${HUB}/projects.ts`];
-  if (!STATE_WRITERS.includes(path) && /\bnew RunDraft\s*\(|\bop: "create"|\bop: "patch"/.test(text) && path !== `${HUB}/runs.ts`) {
+  // Run state moves in the workflow definition in the app package. The hub
+  // may fold a run record (`runs.ts`) but must not write one: `new RunDraft`
+  // or a ledger `op: "create"` / `op: "patch"` on a host route is a second
+  // state machine.
+  if (area === "hub" && path !== `${HUB}/runs.ts` && /\bnew RunDraft\s*\(|\bop: "create"|\bop: "patch"/.test(text)) {
     violations.push({
       file: path,
-      rule: "only apps/hub/src/engine.ts and apps/hub/src/projects.ts move a run's state",
-      detail: "records run mutations",
+      rule: "only the workflow definition in the app package moves a run's state",
+      detail: "records run mutations on the host",
     });
   }
 }

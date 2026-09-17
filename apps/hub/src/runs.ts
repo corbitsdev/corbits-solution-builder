@@ -5,7 +5,7 @@
  * ledger turn): a run opened, a run patched. Folding those in order is the
  * run record — there is no table and no process memory holding a second copy.
  * Where the run actually stands in the runtime is the hub's own workflow run
- * (`hub-executor.ts`); what the product knows about it (origin, source, the
+ * (`lifecycle-run.ts`); what the product knows about it (origin, source, the
  * cost approval it carries, its packet, its checkpoint, why it ended) is here.
  */
 import { eq } from "drizzle-orm";

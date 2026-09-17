@@ -30,9 +30,11 @@ import {
 import type { ArtifactKind } from "@solutions-builder/app/artifacts";
 import type { Stage } from "@solutions-builder/app/ledger";
 import type { HubRunEvent } from "./hub-client.js";
-import { readOutputRef, stageIterations, type StageIteration } from "./hub-executor.js";
+import { readOutputRef, stageIterations, type StageIteration } from "./lifecycle-run.js";
 import { expectLiveDraft, stripOuterFence } from "./live-drafts.js";
-import { execute, type Actor } from "./engine.js";
+import { type Actor } from "./engine.js";
+import { runGateSideEffects } from "./engine-recovery.js";
+import { recordCommand } from "./engine-ledger.js";
 import { readArtifactNode, writeArtifact } from "./projects.js";
 import { readProject } from "./project-records.js";
 import { stageContext } from "./agent-conversation.js";
@@ -588,8 +590,8 @@ export async function requestDraft(args: {
     // `awaitIterationOutputs` tells the two apart from this snapshot.
     const before = await stageIterations(args.projectId, args.stage, { currentOnly: true });
 
-    const outcome = await execute({
-      type: "stage.draft",
+    const command = {
+      type: "stage.draft" as const,
       actor: args.actor,
       projectId: args.projectId,
       idempotencyKey: newId.command(),
@@ -604,9 +606,10 @@ export async function requestDraft(args: {
         ...(context.brief ? { brief: context.brief } : {}),
         inference: { maxTokens: cap },
       },
-    });
+    };
+    const delivery = await runGateSideEffects(command, { stage: args.stage, state: "in_progress" });
 
-    if (outcome.delivery !== "delivered") {
+    if (delivery !== "delivered") {
       throw new HostError(
         "provider_unavailable",
         `Stage ${args.stage} has no run waiting for this stage; nothing was drafted.`,
@@ -614,6 +617,28 @@ export async function requestDraft(args: {
         true,
       );
     }
+
+    await recordCommand({
+      projectId: args.projectId,
+      actorPrincipalId: args.actor.principalId,
+      authority: null,
+      command: "stage.draft",
+      transitionId: "stage.draft",
+      correlationId: command.correlationId,
+      before: { runId: args.runId, stage: args.stage, state: "in_progress" },
+      after: { runId: args.runId, stage: args.stage, state: "in_progress" },
+      idempotencyKey: command.idempotencyKey,
+      result: {
+        runId: args.runId,
+        stage: args.stage,
+        state: "in_progress",
+        transitionId: "stage.draft",
+        replayed: false,
+        delivery,
+      },
+      stage: args.stage,
+      runId: args.runId,
+    });
 
     // A stakeholder's package failing is that package's failure, not the
     // round's: the others are recorded and the failed ones are reported, so

@@ -3,7 +3,7 @@
  *
  * Where a project's lifecycle run stands is never held in process memory: it
  * is derived here, from the events the run itself committed, the same way on
- * the hub (`apps/hub/src/hub-executor.ts`, which fetches the events) and,
+ * the hub (`apps/hub/src/lifecycle-run.ts`, which fetches the events) and,
  * eventually, on the client (through `@intx/hub-client`, which fetches the
  * same events over the loopback API). Keeping the fold in the app package
  * means both readers apply the identical rule rather than two copies of it
