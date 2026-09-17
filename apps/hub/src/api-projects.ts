@@ -9,8 +9,6 @@ import {
   projectDetail,
   readArtifactNode,
   renameProject,
-  archiveProject,
-  deleteProject,
   revokeProjectDelegations,
 } from "./projects.js";
 import {
@@ -45,7 +43,7 @@ import { readProject } from "./project-records.js";
 import { delegateMore, delegationAudit, liveDelegationStore } from "./project-delegation.js";
 import { projectSpend, workspaceSpend } from "./spend.js";
 import { attachMaterial, MATERIAL_KIND, materialText, type IncomingFile } from "./source-material.js";
-import { setStakeholders, STAKEHOLDER_ROLES } from "./stakeholders.js";
+import { STAKEHOLDER_ROLES } from "./stakeholders.js";
 /** `<project>-<document>`: what a printed PDF is saved as, before the dialog adds its extension. */
 function printFileName(projectTitle: string, documentTitle: string): string {
   return `${slugOf(projectTitle)}-${slugOf(documentTitle)}`;
@@ -384,40 +382,11 @@ export function registerProjectRoutes(api: Hono) {
     });
   });
 
-  /** Housekeeping on a project: its name, whether it is filed away, and removal. */
-  api.patch("/projects/:projectId", async (context) => {
-    const projectId = context.req.param("projectId");
-    await projectDetail(projectId, localActor().principalId);
-    const body = (await context.req.json().catch(() => ({}))) as { title?: string; archived?: boolean };
-    const title = body.title?.trim();
-    if (title !== undefined) {
-      if (title.length === 0) throw new HostError("validation_failed", "A project needs a name.", {}, false);
-      await renameProject(projectId, title.slice(0, 120));
-    }
-    if (typeof body.archived === "boolean") await archiveProject(projectId, body.archived);
-    return context.json({ ok: true });
-  });
-
   /** The people stage 5 writes for and who each decide; the roles they may hold ride along for the editor. */
   api.get("/projects/:projectId/stakeholders", async (context) => {
     const detail = await projectDetail(context.req.param("projectId"), localActor().principalId);
     const policy = detail.project.policy as { audiences: { name: string; role: string }[]; audienceQuorum: number };
     return context.json({ audiences: policy.audiences, audienceQuorum: policy.audienceQuorum, roles: STAKEHOLDER_ROLES });
-  });
-
-  api.put("/projects/:projectId/stakeholders", async (context) => {
-    const projectId = context.req.param("projectId");
-    await projectDetail(projectId, localActor().principalId);
-    const body = (await context.req.json().catch(() => ({}))) as { audiences?: unknown; audienceQuorum?: unknown };
-    const policy = await setStakeholders(projectId, { audiences: body.audiences, audienceQuorum: body.audienceQuorum });
-    return context.json({ audiences: policy.audiences, audienceQuorum: policy.audienceQuorum, roles: STAKEHOLDER_ROLES });
-  });
-
-  api.delete("/projects/:projectId", async (context) => {
-    const projectId = context.req.param("projectId");
-    await projectDetail(projectId, localActor().principalId);
-    await deleteProject(projectId);
-    return context.json({ ok: true });
   });
 
   /**

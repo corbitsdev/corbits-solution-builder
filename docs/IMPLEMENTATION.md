@@ -69,6 +69,9 @@ idempotent, doing, in order:
 Opening a project is two steps: the installer's `createProject` (child
 tenant, authority, credential delegation) over `/hub`, then
 `POST /api/projects/:projectId/open` for the ledger's `project.create`.
+Rename, archive, delete, and stakeholder writes go the same way: the
+installer's `updateProject` over `/hub`. The host no longer serves
+`PATCH`/`DELETE /api/projects/:projectId` or `PUT /api/projects/:projectId/stakeholders`.
 
 The `/hub` mount is a same-origin prefix strip onto the hub app. The
 desktop handshake is the process door. After that, Interchange authz is

@@ -77,12 +77,13 @@ cross-checked against every literal `@intx` import under `apps/hub/src`.
 **The client** (`apps/web`) renders and asks: it signs up or in against the
 mounted hub, then reads and commands over the host's loopback API
 (`client.ts`), folds where the project's run stands from the same `/hub`
-events the run committed (`run-fold.ts`), runs `install()` and
-`createProject()` through `@solutions-builder/installer` over `/hub` as that
+events the run committed (`run-fold.ts`), runs `install()`, `createProject()`,
+and project housekeeping that is the hub tenant (rename, archive, delete,
+stakeholders) through `@solutions-builder/installer` over `/hub` as that
 session, and never writes persistence itself. `GET /projects/:id` is the
 ledger, artifacts, and the tenant/anchor that fold addresses — not a second
 copy of the machine. It imports the app package for names, the document
-format and that fold, the installer package for those two calls, and never
+format and that fold, the installer package for those calls, and never
 the Interchange hub's own modules directly.
 
 **The desktop shell** (`apps/desktop`) starts the hub, opens the window on the

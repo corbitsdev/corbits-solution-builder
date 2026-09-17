@@ -6,14 +6,19 @@
  * Clients read and command; they never write persistence.
  */
 import { APP_VERSION } from "@solutions-builder/app/manifest";
+import { AUTHORITIES, type Authority } from "@solutions-builder/app/ledger";
 import {
   ApiError as HubApiError,
   createProject as installerCreateProject,
   ensureLifecycleDeployment as installerEnsureLifecycleDeployment,
   install as installerInstall,
   installState as installerInstallState,
+  installProjectAuthority,
   InstallerError,
+  liveDelegationStore,
+  requireProject as installerRequireProject,
   resolveWorkspace,
+  revokeAllDelegations,
   updateProject as installerUpdateProject,
   type InstallState as PackageInstallState,
   type ProjectPolicy,
@@ -454,6 +459,92 @@ function installerFailure(cause: unknown): never {
   });
 }
 
+async function asWorkspaceOwner<T>(
+  work: (transport: ReturnType<typeof createHubTransport>, workspaceTenantId: string) => Promise<T>,
+): Promise<T> {
+  try {
+    const transport = createHubTransport();
+    const workspace = await resolveWorkspace(transport);
+    if (!workspace) {
+      throw new ApiFailure({
+        code: "conflict",
+        message: "The workspace is not installed yet.",
+        correlationId: "-",
+        retryable: false,
+        install: true,
+      });
+    }
+    return await work(transport, workspace.tenantId);
+  } catch (cause) {
+    installerFailure(cause);
+  }
+}
+
+const STAKEHOLDER_ROLES: readonly Authority[] = AUTHORITIES.filter((role) => role !== "system");
+const MAX_STAKEHOLDER_NAME = 80;
+
+function stakeholdersPolicy(
+  current: ProjectPolicy,
+  payload: { audiences: { name: string; role: string }[]; audienceQuorum: number },
+): ProjectPolicy {
+  const audiences: { name: string; role: Authority }[] = [];
+  for (const entry of payload.audiences) {
+    const name = typeof entry.name === "string" ? entry.name.trim() : "";
+    if (name.length === 0) {
+      throw new ApiFailure({
+        code: "validation_failed",
+        message: "Every stakeholder needs a name.",
+        correlationId: "-",
+        retryable: false,
+      });
+    }
+    if (name.length > MAX_STAKEHOLDER_NAME) {
+      throw new ApiFailure({
+        code: "validation_failed",
+        message: `${name.slice(0, 20)}… is too long a name; ${MAX_STAKEHOLDER_NAME} characters at most.`,
+        correlationId: "-",
+        retryable: false,
+      });
+    }
+    if (audiences.some((held) => held.name.toLowerCase() === name.toLowerCase())) {
+      throw new ApiFailure({
+        code: "validation_failed",
+        message: `${name} is listed twice.`,
+        correlationId: "-",
+        retryable: false,
+      });
+    }
+    const role = entry.role as Authority;
+    if (!STAKEHOLDER_ROLES.includes(role)) {
+      throw new ApiFailure({
+        code: "validation_failed",
+        message: `${name} has a role this project does not know: ${String(entry.role)}.`,
+        correlationId: "-",
+        retryable: false,
+      });
+    }
+    audiences.push({ name, role });
+  }
+  if (audiences.length === 0) {
+    throw new ApiFailure({
+      code: "validation_failed",
+      message: "A project needs at least one stakeholder.",
+      correlationId: "-",
+      retryable: false,
+    });
+  }
+  const quorum = Number(payload.audienceQuorum);
+  if (!Number.isInteger(quorum) || quorum < 0 || quorum > audiences.length) {
+    throw new ApiFailure({
+      code: "validation_failed",
+      message: `The quorum must be a whole number from 0 to ${audiences.length}.`,
+      correlationId: "-",
+      retryable: false,
+    });
+  }
+  return { ...current, audiences, audienceQuorum: quorum };
+}
+
 export const api = {
   status: () => request<HostStatus>("/status"),
   installState: async (): Promise<InstallState> => {
@@ -586,14 +677,40 @@ export const api = {
       `/projects/${projectId}/stakeholders`,
     ),
   setStakeholders: (projectId: string, payload: { audiences: { name: string; role: string }[]; audienceQuorum: number }) =>
-    request<{ audiences: { name: string; role: string }[]; audienceQuorum: number; roles: string[] }>(
-      `/projects/${projectId}/stakeholders`,
-      { method: "PUT", body: JSON.stringify(payload) },
-    ),
+    asWorkspaceOwner(async (transport) => {
+      const current = await installerRequireProject(transport, projectId);
+      const policy = stakeholdersPolicy(current.policy, payload);
+      const updated = await installerUpdateProject(transport, projectId, { policy });
+      await installProjectAuthority(transport, projectId, updated.policy);
+      return {
+        audiences: updated.policy.audiences,
+        audienceQuorum: updated.policy.audienceQuorum,
+        roles: [...STAKEHOLDER_ROLES],
+      };
+    }),
   updateProject: (projectId: string, payload: { title?: string; archived?: boolean }) =>
-    request<{ ok: true }>(`/projects/${projectId}`, { method: "PATCH", body: JSON.stringify(payload) }),
+    asWorkspaceOwner(async (transport) => {
+      const title = payload.title?.trim();
+      if (title !== undefined && title.length === 0) {
+        throw new ApiFailure({
+          code: "validation_failed",
+          message: "A project needs a name.",
+          correlationId: "-",
+          retryable: false,
+        });
+      }
+      await installerUpdateProject(transport, projectId, {
+        ...(title !== undefined ? { title: title.slice(0, 120) } : {}),
+        ...(typeof payload.archived === "boolean" ? { archivedAt: payload.archived ? new Date() : null } : {}),
+      });
+      return { ok: true as const };
+    }),
   deleteProject: (projectId: string) =>
-    request<{ ok: true }>(`/projects/${projectId}`, { method: "DELETE" }),
+    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      await revokeAllDelegations(liveDelegationStore(transport, workspaceTenantId), projectId);
+      await installerUpdateProject(transport, projectId, { deletedAt: new Date() });
+      return { ok: true as const };
+    }),
   artifact: (nodeId: string) =>
     request<{ node: ArtifactNode; content: string }>(`/artifacts/${nodeId}`),
   /** Exactly what the specialists are handed for an attached file. */
