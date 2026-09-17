@@ -417,7 +417,11 @@ resolving tenant (inherited) additionally requires that principal to hold
 is unchanged. Omitting `principalId` keeps the prior ownership-only rule
 so `resolveModelSources` callers are unaffected. The allocation service
 passes `sourceAuthorityPrincipalId` at prepare and at allocation recover.
-Tests in `packages/db/src/model-source-resolution.test.ts`.
+`credentialDelegationAllows` only consults credential-shaped grants
+(`credential:<id>` and `credential:*`), so a child tenant's owner `*/*`
+does not satisfy the check — that grant is what hub-api mints on every
+new tenant, and without the filter default-deny never holds. Tests in
+`packages/db/src/model-source-resolution.test.ts`.
 
 **Upstream-able.** Yes; it is an additive optional argument on the deploy
 resolution path, fail-closed for inherited credentials, and it reuses the

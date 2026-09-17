@@ -48,6 +48,16 @@ describe("credentialDelegationAllows — CL-8133", () => {
     expect(await credentialDelegationAllows(grants, CREDENTIAL_ID)).toBe(false);
   });
 
+  test("an owner */* grant does not authorize inherited credential use", async () => {
+    const grants = [grant({ resource: "*", action: "*", effect: "allow" })];
+    expect(await credentialDelegationAllows(grants, CREDENTIAL_ID)).toBe(false);
+  });
+
+  test("a catalog credential:* / use grant still authorizes", async () => {
+    const grants = [grant({ resource: "credential:*", action: "use", effect: "allow" })];
+    expect(await credentialDelegationAllows(grants, CREDENTIAL_ID)).toBe(true);
+  });
+
   test("a deny at equal specificity beats an allow — revocation wins", async () => {
     const grants = [
       grant({ resource: credentialUseResource(CREDENTIAL_ID), action: "use", effect: "allow" }),

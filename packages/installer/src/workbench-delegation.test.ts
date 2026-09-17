@@ -232,6 +232,28 @@ describe("creation, audit and revocation", () => {
     expect(await revokeAllDelegations(store, "project-never")).toEqual([]);
   });
 
+  test("default denies, one chosen credential allows, revoke denies again", async () => {
+    const store = fakeStore();
+    const created = await delegateAtCreation(store, { projectId: "project-a" });
+    expect(created.mode).toBe("default");
+    expect(created.credentialIds).toEqual([]);
+    expect(store.grants).toHaveLength(0);
+
+    const added = await delegateMore(store, {
+      projectId: "project-a",
+      delegatedCredentialIds: ["cred-shared"],
+    });
+    expect(added.mode).toBe("chosen");
+    expect(added.credentialIds).toEqual(["cred-shared"]);
+    expect(store.grants).toHaveLength(1);
+    expect(isDelegationGrant(store.grants[0]!, "principal-owner", "cred-shared")).toBe(true);
+
+    const revoked = await revokeAllDelegations(store, "project-a");
+    expect(revoked).toEqual(["cred-shared"]);
+    expect(store.grants).toHaveLength(0);
+    expect(store.records.get("project-a")).toMatchObject({ mode: "default", credentialIds: [] });
+  });
+
   test("a mint that dies midway still leaves a revocable record", async () => {
     const store = fakeStore();
     let mints = 0;

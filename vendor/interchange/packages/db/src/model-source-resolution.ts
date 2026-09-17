@@ -130,16 +130,22 @@ export function credentialUseResource(credentialId: string): string {
  * a child tenant's principal must hold to use a credential it does not own
  * itself. Pure so the policy is unit-testable against synthetic grants,
  * independent of how the grants were collected.
+ *
+ * Only credential-shaped grants count. A child tenant's owner role is minted
+ * with resource `*` and action `*` (hub-api `tenants.ts`); `evaluateGrants`
+ * would treat that as `credential:<id>/use` and default-deny would never hold.
+ * Catalog wildcards (`credential:*`) still authorize, matching the rest of
+ * credential-use.
  */
 export async function credentialDelegationAllows(
   grants: readonly GrantRule[],
   credentialId: string,
 ): Promise<boolean> {
-  const result = await evaluateGrants(
-    [...grants],
-    credentialUseResource(credentialId),
-    "use",
+  const resource = credentialUseResource(credentialId);
+  const credentialGrants = grants.filter(
+    (grant) => grant.resource === resource || grant.resource === "credential:*",
   );
+  const result = await evaluateGrants(credentialGrants, resource, "use");
   return result.effect === "allow";
 }
 
