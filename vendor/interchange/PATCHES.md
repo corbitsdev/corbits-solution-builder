@@ -265,3 +265,115 @@ identical repeat merges silently.
 **Upstream-able.** Yes — this is the upstream PR for INTR-545, collision
 policy included. Drop this patch when the vendored revision refreshes past
 the upstream fix.
+
+## `packages/hub-api/src/routes/workflow-definitions.ts`, `packages/types/src/workflows.ts`, `packages/hub-client/src/workflows.ts` — `POST /workflows/definitions`
+
+**Why.** CL-8075: the host had no route to register a `workflow_definition`
+row it generated itself (`registerDefinition` in `apps/hub/src/hub-gaps.ts`),
+because the only path that creates one is `POST /workflows/deployments`,
+which evaluates source on a probe sidecar. The lifecycle's own definition
+(`workflow-seed.ts`) is keyed to a name the command ledger's session anchors
+on before any deployment exists, so it still needs a direct register.
+
+**What changed.** `createWorkflowDefinitionRoutes` gains `POST /`, gated by
+`requireGrant("workflow-definition:*", "create")`. Identity is keyed on
+`(tenantId, name, wireHash)`: an existing row whose wire hash matches is
+returned unchanged (`created: false`); otherwise a row is inserted under a
+caller-supplied or generated id. `@intx/types` gains `CreateWorkflowDefinition`
+/ `CreateWorkflowDefinitionResponse`; `@intx/hub-client` gains
+`registerWorkflowDefinition(transport, tenantId, input)`.
+
+**Upstream-able.** Yes; it is a small addition alongside the existing
+list/rollback routes, gated the same way.
+
+## `packages/hub-api/src/routes/tenants.ts` — `GET /api/tenants?parentId=`
+
+**Why.** CL-8075: the host listed a project's child tenants by reading the
+`tenant` table directly (`listChildTenants` in `hub-gaps.ts`), because
+`GET /api/me/principals` lists the caller's own memberships, not the tenants
+under a given parent.
+
+**What changed.** `createTenantRoutes` gains `GET /`, requiring `?parentId=`
+and membership in that parent tenant, returning every tenant whose
+`parent_id` matches it, oldest first. Unpaginated, matching the asset list
+route's own bare-array shape (the workspace's project count does not
+approach page territory).
+
+**Upstream-able.** Yes; it fills the same gap `POST /` already implies
+(`parentId` is an accepted create field with no matching list).
+
+## `packages/hub-api/src/routes/sessions.ts` (new), `packages/hub-api/src/app.ts` — `POST /sessions`, `POST/GET /sessions/:id/turns`
+
+**Why.** CL-8075: `GET /api/me/sessions` is a stub returning `[]`, and no
+route created an `agent_session` with a caller-chosen id, or wrote/read the
+`session_mail` / `inference_turn` / `turn_part` rows a conversation turn is
+made of. The command ledger (`engine-ledger.ts`) keys its per-project session
+to the seeded lifecycle definition so it can record commands without an
+offering or a sidecar, and reads its own history back the same way; both
+went through direct table access (`ensureAgentSession`,
+`writeConversationTurn`, `listConversationTurns` in `hub-gaps.ts`).
+
+**What changed.** A new route group at `/api/tenants/:tenantId/sessions`:
+`POST /` finds-or-creates an `agent_session` by caller-chosen id (idempotent
+on id); `POST /:sessionId/turns` writes the mail record the platform expects
+(built and signed the same way `hub-gaps.ts` did — via the injected
+`principalKeyStore`) plus the `inference_turn`/`turn_part` pair, sequentially
+rather than in one transaction (a shared single-writer connection may already
+be inside another caller's transaction); `GET /:sessionId/turns` reads every
+part on the session back, oldest turn first. Gated by an `agent-session:*`
+grant, matching the naming convention of every other tenant-scoped resource.
+
+Both turn routes look the session up by `(id, tenantId)` before touching
+`turn_part`/`inference_turn`/`session_mail` — `requireGrant("agent-session:*")`
+only scopes the check to the URL tenant, and `turn_part` carries no
+`tenant_id` column of its own, so without this a principal in one tenant
+could read or write another tenant's session by guessing its id. A write to
+an unresolved session 404s; a read of one reads back empty rather than
+erroring, because a same-tenant session not created yet (asked about before
+its first command) is a legitimate empty-history state, not a caller error.
+
+**Upstream-able.** Yes; it is additive, and it is the natural home for the
+turn-taking primitive `/api/me/sessions` is deferred pending.
+
+## `packages/hub-api/src/routes/assets.ts` — `POST /:assetId/tree`, `GET /:assetId/blob`
+
+**Why.** CL-8075: the hub creates a `workflow` (and `skill`) asset over HTTP
+but offered no route to write its source tree or read a blob back short of
+git smart-HTTP, so the host called `assetService.populateAsset` /
+`readAssetBlob` in-process (`writeWorkflowSourceTree` / `readWorkflowSourceBlob`
+in `hub-gaps.ts`).
+
+**What changed.** Two routes beside the existing tarball PUT/GET pair, gated
+the same way (`requireGrant(idResource("asset", "assetId"), "write"|"read")`
+on the session's own grant, no git bearer token required — the tarball PUT
+route is the precedent: the `hubPrincipal` constant is reused for the write
+so the kind handler's `validatePush` still runs). `POST /:assetId/tree`
+commits the given repo-relative files onto the asset's ref (default
+`refs/heads/main`) in one commit and returns the commit sha; a rejection from
+the kind handler surfaces as 400. `GET /:assetId/blob?path=&ref=` returns
+`{ content }` -- the bytes at that path, base64-encoded inside a JSON
+envelope rather than as a raw octet-stream body, so a caller with only the
+`Transport` interface (JSON-only `fetch`, no raw body access -- this is what
+`@solutions-builder/installer` gets, since it may not import the host's own
+`hubApi`) can read it too, not only the host's direct-fetch clients. 404 when
+the asset, ref or path is absent.
+
+**Upstream-able.** Yes; additive, and it gives every asset kind a JSON write
+path the tarball routes only gave `package-registry`.
+
+## `packages/hub-api/src/routes/workflows.ts`, `packages/hub-client/src/workflows.ts` — the deployment listing carries its provisioner binding
+
+**Why.** CL-8075: `GET /workflows/deployments` projected an allocation's
+status but not the provisioner binding it is pinned to, so a deployment
+bound to another hub address could not be told apart from a reachable one
+without a direct `sidecar_allocation` read (`allocationBinding` in
+`hub-gaps.ts`).
+
+**What changed.** The deployment list query also selects
+`sidecar_allocation.provisioner_binding_fingerprint`, and
+`WorkflowDeploymentResponse` (both the route's and `@intx/hub-client`'s) gains
+an optional `provisionerBindingFingerprint`. `apps/hub/src/workflow-deploy.ts`
+now reads it off the deployment it already fetched rather than making a
+second call.
+
+**Upstream-able.** Yes; it is one more field on an existing projection.

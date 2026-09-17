@@ -339,6 +339,7 @@ declare module "@intx/hub-client" {
     definitionAssetId: string;
     status: string;
     createdAt: string;
+    provisionerBindingFingerprint?: string | null;
   }
   export interface WorkflowRunTrigger {
     runId: string;
@@ -394,6 +395,18 @@ declare module "@intx/hub-client" {
     input: TriggerWorkflowRunInput,
   ): Promise<WorkflowRunTrigger>;
   export function listWorkflowRuns(transport: Transport, tenantId: string, runId: string): Promise<string[]>;
+  export type RegisterWorkflowDefinitionInput = {
+    id?: string;
+    name: string;
+    description?: string;
+    wireHash: string;
+    grantRequirements?: readonly unknown[];
+  };
+  export function registerWorkflowDefinition(
+    transport: Transport,
+    tenantId: string,
+    input: RegisterWorkflowDefinitionInput,
+  ): Promise<{ id: string; created: boolean }>;
   export function readWorkflowRunEvents(
     transport: Transport,
     tenantId: string,

@@ -19,8 +19,8 @@
  *   2. Only the hub talks to a provider or an agent runtime, and only the
  *      hub's embedding files (`hub-mount`, `hub-keys`, `hub-migrate`,
  *      `db`, `schema`, `migrate`) plus
- *      `hub-executor` and `hub-gaps` import Interchange internals. A second
- *      module reaching into the hub is how a parallel control plane starts.
+ *      `hub-executor` import Interchange internals. A second module
+ *      reaching into the hub is how a parallel control plane starts.
  *   3. The client cannot write persistence: `apps/web` never imports the hub,
  *      the database, the schema, or the command engine.
  *   4. Run state moves in exactly one place. Only `engine.ts` (and
@@ -160,7 +160,7 @@ const INSTALLER_ALLOWED = [
   "bun:test",
 ];
 
-const PLATFORM_FILE = /^apps\/hub\/src\/(hub-mount|hub-keys|hub-migrate|hub-executor|hub-gaps|db|schema|migrate)\.ts$/;
+const PLATFORM_FILE = /^apps\/hub\/src\/(hub-mount|hub-keys|hub-migrate|hub-executor|db|schema|migrate)\.ts$/;
 
 type ToolsPackage = { dir: string; allowed: readonly string[] };
 
@@ -311,7 +311,7 @@ for (const file of files) {
     if (platform.length > 0 && !allowed) {
       violations.push({
         file: path,
-        rule: "only the hub's embedding files, hub-executor and hub-gaps may import the Interchange platform",
+        rule: "only the hub's embedding files and hub-executor may import the Interchange platform",
         detail: platform.join(", "),
       });
     }

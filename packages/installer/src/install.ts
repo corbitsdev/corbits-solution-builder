@@ -19,11 +19,10 @@ import type { Transport } from "@intx/hub-client";
 import { APP_VERSION } from "@solutions-builder/app/manifest";
 import { AUTHORITIES } from "@solutions-builder/app/ledger";
 import { assignRole, createWorkspace, definitionIdFor, ensureRole, ensureRoleGrant, resolveWorkspace, type Workspace } from "./hub.js";
-import type { InstallerGaps } from "./gaps.js";
 import { expectedWorkflowDefinitions, seedWorkflows } from "./workflow-seed.js";
 import { installProjectAuthority, listProjectRecords } from "./project-tenant.js";
 import { ensureSkillAssets } from "./skill-assets.js";
-import { ensureLifecycleDeployment } from "./workflow-deploy.js";
+import { ensureLifecycleDeployment, type SidecarCapability } from "./workflow-deploy.js";
 
 export type InstallState = {
   readonly installed: boolean;
@@ -101,24 +100,20 @@ export async function installState(transport: Transport): Promise<InstallState> 
 }
 
 /**
- * The owner's tenant, resolved or created. Creates neither twice. A legacy
- * workspace — one from before the hub owned identity — is adopted by the host
- * (`gaps.adoptLegacyWorkspace`) rather than abandoned, so its projects keep
- * their tenant; this only decides whether that adoption is needed.
+ * The owner's tenant, resolved or created. Creates neither twice.
+ *
+ * A workspace from before the hub owned identity is the host's own concern:
+ * `adoptLegacyWorkspace` (`apps/hub/src/hub-migrate.ts`) is a one-time
+ * repair of pre-identity rows, not a hub route, so it cannot live in this
+ * package (no `@intx/db`, ever). The host runs it once, before calling
+ * `install`/`ensureWorkspace` at all, so a legacy tenant already resolves by
+ * the time this looks.
  */
-export async function ensureWorkspace(transport: Transport, gaps: InstallerGaps): Promise<Workspace> {
+export async function ensureWorkspace(transport: Transport): Promise<Workspace> {
   const found = await resolveWorkspace(transport);
   if (found) {
     workspace = found;
     return found;
-  }
-  const me = await transport.fetch<{ id: string }>("GET", "/api/me");
-  if (await gaps.adoptLegacyWorkspace(me.id)) {
-    const adopted = await resolveWorkspace(transport);
-    if (adopted) {
-      workspace = adopted;
-      return adopted;
-    }
   }
   const created = await createWorkspace(transport);
   workspace = created;
@@ -144,15 +139,15 @@ export async function ensureWorkspace(transport: Transport, gaps: InstallerGaps)
  */
 export async function install(
   transport: Transport,
-  gaps: InstallerGaps,
+  sidecar: SidecarCapability,
   hooks: {
     afterEnsureWorkspace?: (workspace: Workspace) => Promise<void>;
     afterSkillAssets?: () => Promise<void>;
   } = {},
 ): Promise<InstallState> {
-  const ws = await ensureWorkspace(transport, gaps);
+  const ws = await ensureWorkspace(transport);
   await hooks.afterEnsureWorkspace?.(ws);
-  await seedWorkflows(gaps, ws.tenantId);
+  await seedWorkflows(transport, ws.tenantId);
 
   // Authority is the platform's: the ledger's authorities become roles, and
   // the owner holds every human one.
@@ -177,10 +172,10 @@ export async function install(
 
   // Every project is a tenant of its own with the same roles; a project opened
   // before roles lived there gets them here.
-  for (const project of await listProjectRecords(transport, gaps, ws.tenantId)) {
+  for (const project of await listProjectRecords(transport, ws.tenantId)) {
     await installProjectAuthority(transport, project.id, project.policy);
   }
-  await ensureSkillAssets(transport, gaps, ws.tenantId);
+  await ensureSkillAssets(transport, ws.tenantId);
   // A provider connected before its listing was read for what can answer
   // may still lead with a model that cannot; its offerings are put in order.
   await hooks.afterSkillAssets?.();
@@ -188,7 +183,7 @@ export async function install(
   // Model bindings are the catalog rows written when a provider connects, so
   // there is nothing to rebind here; re-running after a credential change is
   // what lets the lifecycle deploy once an offering exists to bind against.
-  void deployLifecycle(transport, gaps, ws.tenantId);
+  void deployLifecycle(transport, sidecar, ws.tenantId);
   return installState(transport);
 }
 
@@ -196,10 +191,10 @@ export async function install(
 // source, which takes as long as spawning a process. Install returns at once
 // and installState() reports "deploying" until the hub has answered.
 let deploying: Promise<void> | null = null;
-export function deployLifecycle(transport: Transport, gaps: InstallerGaps, tenantId: string): Promise<void> {
+export function deployLifecycle(transport: Transport, sidecar: SidecarCapability, tenantId: string): Promise<void> {
   if (deploying) return deploying;
   lastDeployment = { status: "deploying", detail: "The hub is probing the lifecycle source." };
-  deploying = ensureLifecycleDeployment(transport, gaps, tenantId)
+  deploying = ensureLifecycleDeployment(transport, sidecar, tenantId)
     .then((deployed) => {
       lastDeployment =
         deployed.status === "no_offering"

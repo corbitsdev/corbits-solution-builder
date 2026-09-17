@@ -11,6 +11,7 @@ export const WorkflowDeployment = type({
   definitionAssetId: "string",
   status: "string",
   createdAt: "string",
+  "provisionerBindingFingerprint?": "string | null",
 });
 export type WorkflowDeployment = typeof WorkflowDeployment.infer;
 
@@ -64,6 +65,43 @@ export type DeliverSignalInput = {
 
 function workflowsBasePath(tenantId: string): string {
   return `/api/tenants/${tenantId}/workflows`;
+}
+
+export type RegisterWorkflowDefinitionInput = {
+  /** Caller-chosen id, when the caller derives it deterministically (e.g. from a wire hash). */
+  id?: string;
+  name: string;
+  description?: string;
+  wireHash: string;
+  grantRequirements?: readonly unknown[];
+};
+
+const RegisterWorkflowDefinitionResponse = type({
+  id: "string",
+  created: "boolean",
+});
+
+/**
+ * Registers a definition row directly, for a caller that generated the wire
+ * projection itself rather than deploying through the probe sidecar. Identity
+ * is keyed on (name, wireHash): an unchanged wireHash under the same name is
+ * a no-op (`created: false`).
+ */
+export async function registerWorkflowDefinition(
+  transport: Transport,
+  tenantId: string,
+  input: RegisterWorkflowDefinitionInput,
+): Promise<{ id: string; created: boolean }> {
+  const raw = await transport.fetch<unknown>(
+    "POST",
+    `${workflowsBasePath(tenantId)}/definitions`,
+    input,
+  );
+  const parsed = RegisterWorkflowDefinitionResponse(raw);
+  if (parsed instanceof type.errors) {
+    throw new Error(`Invalid register-definition response: ${parsed.summary}`);
+  }
+  return parsed;
 }
 
 export async function listWorkflowDeployments(

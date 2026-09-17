@@ -67,16 +67,20 @@ the deliverable actually runs, and what the worker did when it got stuck.
    What is left in `engine.ts` (874) is transaction handling, in-flight
    deduplication and command application; `engine-ledger.ts` (493) writes each
    committed command onto Interchange's conversation primitives through
-   `hub-gaps`. Both are host mechanics. Moving them into packages would be
+   `hub-client.ts`. Both are host mechanics. Moving them into packages would be
    moving mechanism out of the host, which is the opposite of the goal.
 
 6. **Retire the bridge** (CL-7991) — blocked on corbits-code as a package.
    `corbits-exec.ts` is 770 lines of subprocess supervisor reimplementing
    continuation, progress and verdicts the substrate already has.
 
-7. **Close numbered gaps** (`hub-gaps.ts`): 1, 4, 5, 6, 7, 8, 9 remain (2 and 3
-   landed). Each one deletes a direct write. #9 is `createHubServer` — upstream
-   `apps/hub` is not vendored, so the mount is ours.
+7. **Close numbered gaps** — done (CL-8075). `hub-gaps.ts` is deleted: 1, 6, 7,
+   8, 10, 11 and the workflow source blob helpers each landed a route in the
+   vendored `hub-api` (`vendor/interchange/PATCHES.md`); 4 (legacy adoption)
+   moved into `hub-migrate.ts` as a one-time repair rather than a runtime gap.
+   `createHubServer` is the one gap left open on purpose — the vendored tree
+   has no factory that accepts an injected pglite handle and keychain keys,
+   so `hub-mount.ts` still composes the pieces itself.
 
 8. **Ledger as projection** — the dual-write is why `hub-executor.ts` needs
    `divergent`, `alignRunWithLedger`, `forgetExecution`, `awaitingSignalFor`.
@@ -175,7 +179,7 @@ and they are the acceptance criteria for the upstream fix, not a regression.
 Separately real and ours: `grantRequirementsFor` (`seed-kit.ts:225`) has no
 production caller — only `kit-smoke.ts` asserting its shape — and
 `workflow-seed.ts:60` registers definitions without `grantRequirements`, a
-field `hub-gaps.ts:95` already accepts. Not the cause of the above, but it
+field `registerDefinition` (`hub-client.ts`) already accepts. Not the cause of the above, but it
 will matter the moment the upstream defect is fixed.
 
 ## Deck, step 2 — and why it is not a deletion
@@ -201,9 +205,9 @@ Worth being straight about: after the prompt text is out, `apps/hub` is close
 to its floor under the current constraints. The bulk of what remains is
 plumbing that only shrinks if something outside this repo changes —
 `corbits-exec.ts` (797) goes when the bridge is retired and needs corbits-code
-as a package; `hub-gaps.ts` (489) shrinks one function at a time as upstream
-routes land; `migrate.ts` (671), `hub-client.ts` (771) and `hub-mount.ts` (490)
-are the seam to Interchange itself.
+as a package; `hub-gaps.ts` is gone (CL-8075 closed its gaps); `migrate.ts`
+(671), `hub-client.ts` and `hub-mount.ts` (490) are the seam to Interchange
+itself.
 
 So the honest reading of the scoreboard: the ratio improves a lot more from
 here by **packages growing** — workflows, tools and skills that run in the

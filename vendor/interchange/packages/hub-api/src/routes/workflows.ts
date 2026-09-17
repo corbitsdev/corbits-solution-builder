@@ -106,6 +106,7 @@ const WorkflowDeploymentResponse = type({
   definitionAssetId: "string",
   status: "string",
   createdAt: "string",
+  "provisionerBindingFingerprint?": "string | null",
 });
 
 const WorkflowRunListResponse = type({
@@ -128,6 +129,7 @@ function formatDeployment(
     createdAt: Date;
     allocationStatus?: SidecarAllocationStatus | null;
     allocationNextAttemptAt?: Date | null;
+    provisionerBindingFingerprint?: string | null;
   },
   statusOverride?: string,
 ) {
@@ -141,6 +143,7 @@ function formatDeployment(
     tenantId: row.tenantId,
     definitionAssetId: row.definitionAssetId,
     status: statusOverride ?? formatAllocationStatus(row),
+    provisionerBindingFingerprint: row.provisionerBindingFingerprint ?? null,
     createdAt: ts(row.createdAt),
   };
 }
@@ -453,6 +456,8 @@ export function createWorkflowRoutes({
           createdAt: workflowRun.createdAt,
           allocationStatus: sidecarAllocation.status,
           allocationNextAttemptAt: sidecarAllocation.nextAttemptAt,
+          provisionerBindingFingerprint:
+            sidecarAllocation.provisionerBindingFingerprint,
         })
         .from(workflowRun)
         .innerJoin(

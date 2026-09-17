@@ -27,9 +27,15 @@ import { HUB_MIGRATIONS } from "../apps/hub/src/hub-migrations.js";
 import { migrateHub, PreHubDatabaseError } from "../apps/hub/src/hub-migrate.js";
 import { openDatabase, type HostDatabase } from "../apps/hub/src/db.js";
 import { prepareDatabase } from "../apps/hub/src/migrate.js";
-import { catalog, ensureHub, getTenant, hubGet, tenantId } from "../apps/hub/src/hub-client.js";
+import {
+  catalog,
+  ensureHub,
+  getTenant,
+  hubGet,
+  resolveCredentialSecret,
+  tenantId,
+} from "../apps/hub/src/hub-client.js";
 import { hub } from "../apps/hub/src/hub-mount.js";
-import { resolveCredentialSecret } from "../apps/hub/src/hub-gaps.js";
 import { install, installState } from "../apps/hub/src/installer-bridge.js";
 import { readSecretResult, secretReference, storeSecret } from "../apps/hub/src/host-secrets.js";
 import { migrateLegacyProviderCredentials } from "../apps/hub/src/credential-migration.js";
@@ -269,7 +275,7 @@ try {
     `);
     // `POST /api/tenants` bootstraps the creator as the tenant's owner (a
     // role plus an allow-everything grant); a tenant assembled by hand, the
-    // same way `adoptLegacyWorkspace` (`hub-gaps.ts`) repairs one, needs the
+    // same way `adoptLegacyWorkspace` (`hub-migrate.ts`) repairs one, needs the
     // same two rows or every write below is refused as unauthorised.
     await host.db.execute(sql`
       INSERT INTO "public"."role" ("id","tenant_id","name","description","is_system")

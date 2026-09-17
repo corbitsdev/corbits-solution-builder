@@ -12,13 +12,13 @@
  * key lives in the OS keychain). The sidecar decrypts that column and sends
  * it as the bearer; a host-side read (refresh, the outbound bearer for a
  * host-driven call) decrypts the same row through `resolveCredentialSecret`
- * in `hub-gaps.ts`. There is no second, keychain-backed copy of a provider
+ * in `hub-client.ts`. There is no second, keychain-backed copy of a provider
  * secret: the row is the only place it lives.
  */
 import { catalogModels, catalogProviders } from "@intx/inference-catalog";
-import { resolveCredentialSecret } from "./hub-gaps.js";
 import {
   catalog,
+  resolveCredentialSecret,
   workspaceOrNull,
   type HubCredential,
   type HubModel,

@@ -19,8 +19,7 @@
 import type { Transport } from "@intx/hub-client";
 import type { SkillRecord } from "@solutions-builder/app/kit";
 import { kitSeed } from "@solutions-builder/app/seed-kit";
-import { assetsFor } from "./hub.js";
-import type { InstallerGaps } from "./gaps.js";
+import { assetsFor, readWorkflowSourceBlob, writeWorkflowSourceTree } from "./hub.js";
 import { treeDigest } from "./workflow-closure.js";
 
 const DIGEST_PATH = "digest.sha256";
@@ -55,7 +54,7 @@ function skillFiles(skill: SkillRecord): Record<string, string> {
  * at the tree the kit currently generates. Safe to call on every install:
  * an asset already at the current digest is a read, not a write.
  */
-export async function ensureSkillAssets(transport: Transport, gaps: InstallerGaps, tenantId: string): Promise<void> {
+export async function ensureSkillAssets(transport: Transport, tenantId: string): Promise<void> {
   const assets = assetsFor(transport, tenantId);
   const seed = kitSeed();
   const existing = await assets.list("skill");
@@ -64,9 +63,9 @@ export async function ensureSkillAssets(transport: Transport, gaps: InstallerGap
     const assetId = found ? found.id : (await assets.create({ kind: "skill", name: skill.key, displayName: skill.key })).id;
     const files = skillFiles(skill);
     const digest = treeDigest(files);
-    const head = await gaps.readWorkflowSourceBlob(assetId, DIGEST_PATH);
+    const head = await readWorkflowSourceBlob(transport, tenantId, assetId, DIGEST_PATH);
     if (head === `${digest}\n`) continue;
-    await gaps.writeWorkflowSourceTree({
+    await writeWorkflowSourceTree(transport, tenantId, {
       assetId,
       files: { ...files, [DIGEST_PATH]: `${digest}\n` },
       message: `Skill ${skill.key} generated from the curated kit`,

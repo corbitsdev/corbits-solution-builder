@@ -120,10 +120,19 @@ type DBState = {
    * by `(tenantId, kind, name)`, but the stub only needs to honour
    * the route's narrow query: we pre-seed which row to return. */
   assetLookupHint: { tenantId: string; kind: string; name: string } | null;
+  /** When set, the next `findFirst(asset)` returns the row with this id.
+   * `resolveAssetById` (the tree/blob routes' lookup) queries by id, not
+   * (kind, name); checked before `assetLookupHint`. */
+  assetIdLookup: string | null;
 };
 
 function makeMockDB(state: DBState): DB["db"] {
   function findFirstAsset(): Promise<AssetRow | undefined> {
+    if (state.assetIdLookup !== null) {
+      return Promise.resolve(
+        state.assets.find((a) => a.id === state.assetIdLookup),
+      );
+    }
     const hint = state.assetLookupHint;
     if (hint === null) return Promise.resolve(undefined);
     const match = state.assets.find(
@@ -353,7 +362,7 @@ type Harness = {
 async function setup(
   grants: GrantRule[] = [makeCreateGrant()],
 ): Promise<Harness> {
-  const state: DBState = { assets: [], assetLookupHint: null };
+  const state: DBState = { assets: [], assetLookupHint: null, assetIdLookup: null };
   const db = makeMockDB(state);
   const { dataDir, repoStore } = await createWiredSubstrate();
   const assetService = createAssetService({ db, repoStore });
@@ -764,5 +773,111 @@ describe("workflow-kind asset routes", () => {
     ).rejects.toThrow(
       /path_violation:.*workflow\.json envelope form is no longer supported/,
     );
+  });
+});
+
+describe("POST /:assetId/tree and GET /:assetId/blob", () => {
+  function makeActionGrant(action: string): GrantRule {
+    return {
+      id: `grant-${action}`,
+      resource: "asset:*",
+      action,
+      effect: "allow",
+      origin: "system",
+      conditions: null,
+      expiresAt: null,
+      roleId: null,
+      principalId: PRINCIPAL_ID,
+    };
+  }
+
+  async function setupWithAsset() {
+    const h = await setup([
+      makeCreateGrant(),
+      makeActionGrant("write"),
+      makeActionGrant("read"),
+    ]);
+    const createRes = await h.app.request(createURL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "workflow", name: "nightly-report" }),
+    });
+    const created = await parseAssetResponse(createRes);
+    // resolveAssetById (the tree/blob routes' lookup) queries by id; point
+    // the stub's next findFirst(asset) at the row this created.
+    h.state.assetIdLookup = created.id;
+    return { ...h, assetId: created.id };
+  }
+
+  test("writes a tree in one commit and reads a blob back from it", async () => {
+    const h = await setupWithAsset();
+
+    const writeRes = await h.app.request(`${createURL}/${h.assetId}/tree`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        message: "seed the codebase",
+        files: workflowCodebaseFiles(),
+      }),
+    });
+    expect(writeRes.status).toBe(200);
+    const writeBody = (await writeRes.json()) as { commitSha: string };
+    expect(typeof writeBody.commitSha).toBe("string");
+    expect(writeBody.commitSha.length).toBeGreaterThan(0);
+
+    const blobRes = await h.app.request(
+      `${createURL}/${h.assetId}/blob?path=${encodeURIComponent("package.json")}`,
+    );
+    expect(blobRes.status).toBe(200);
+    const blobBody = (await blobRes.json()) as { content: string };
+    const bytes = Uint8Array.from(atob(blobBody.content), (ch) => ch.charCodeAt(0));
+    expect(new TextDecoder().decode(bytes)).toBe(
+      workflowCodebaseFiles()["package.json"],
+    );
+  });
+
+  test("a tree the kind handler rejects (no package.json) 400s and writes nothing", async () => {
+    const h = await setupWithAsset();
+    const res = await h.app.request(`${createURL}/${h.assetId}/tree`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message: "bad tree", files: { "readme.md": "hi" } }),
+    });
+    expect(res.status).toBe(400);
+
+    const blobRes = await h.app.request(
+      `${createURL}/${h.assetId}/blob?path=readme.md`,
+    );
+    expect(blobRes.status).toBe(404);
+  });
+
+  test("GET blob 404s for a path absent from the tree", async () => {
+    const h = await setupWithAsset();
+    await h.app.request(`${createURL}/${h.assetId}/tree`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message: "seed", files: workflowCodebaseFiles() }),
+    });
+    const res = await h.app.request(
+      `${createURL}/${h.assetId}/blob?path=does-not-exist.txt`,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  test("both routes 404 for an asset id this tenant does not resolve", async () => {
+    const h = await setup([makeCreateGrant(), makeActionGrant("write"), makeActionGrant("read")]);
+    // No asset created, and assetIdLookup stays null: resolveAssetById's
+    // findFirst misses, the same as another tenant's asset id would.
+    const writeRes = await h.app.request(`${createURL}/ast_missing/tree`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message: "x", files: workflowCodebaseFiles() }),
+    });
+    expect(writeRes.status).toBe(404);
+
+    const blobRes = await h.app.request(
+      `${createURL}/ast_missing/blob?path=package.json`,
+    );
+    expect(blobRes.status).toBe(404);
   });
 });

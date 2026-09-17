@@ -34,8 +34,8 @@ the owner's workspace tenant, its roles and grants, the seeded workflow
 definition, the curated kit's skill assets, and the per-project lifecycle
 deployment; opening a project — its own tenant, authority and credential
 delegation — is its `createProject`. It takes a hub `Transport`
-(`@intx/hub-client`) already authenticated as the owner, plus a small
-`InstallerGaps` bridge for the platform writes no hub route does yet; it
+(`@intx/hub-client`) already authenticated as the owner, plus the two
+facts about sidecar placement only the host process knows; it
 never reaches a database, a keychain or an Interchange internal itself, and
 depends on nothing in `apps/`. The hub boots vanilla (migrate, mount, serve)
 and calls this package to install on first launch and after every credential
@@ -47,10 +47,10 @@ vanilla.
 enforces the ledger, the engine that applies commands, the providers and the
 agent runs. The Interchange hub is Interchange's own hub app, mounted in this
 process (`hub-mount.ts`). Platform writes go through that hub's HTTP API
-(`hub-client.ts`) — the same calls a hosted hub would serve. Only three files
+(`hub-client.ts`) — the same calls a hosted hub would serve. Only two files
 import an Interchange internal directly — `hub-mount.ts` (`@intx/crypto`,
-`@intx/db`, `@intx/hub-api`, `@intx/hub-sessions`), `hub-gaps.ts`
-(`@intx/crypto`) and `hub-keys.ts` (`@intx/crypto`). `scripts/check-boundaries.ts`
+`@intx/db`, `@intx/hub-api`, `@intx/hub-sessions`) and `hub-keys.ts`
+(`@intx/crypto`). `scripts/check-boundaries.ts`
 also allow-lists four more files as the embedding layer — `db`, `schema`,
 `migrate` and `hub-migrate` — though none of them currently has an `@intx`
 import at all; they reach Interchange's data model through raw SQL and a
@@ -117,5 +117,13 @@ Decision flags, worker questions and their answers are fields on the ledger
 turn of the command that raised them; a build attempt's events are turns of
 their own on the same thread. The frozen build packet and the delivery
 manifest are artifact versions, produced by the run that froze or delivered
-them; acceptance is the `delivery.accept` turn. Every direct table write
-that remains is named in `hub-gaps.ts` as an upstream gap.
+them; acceptance is the `delivery.accept` turn. Every write the host makes
+goes through a hub route now (CL-8075 closed the last of them: registering a
+definition, sessions and conversation turns, listing child tenants, reading
+a deployment's provisioner binding, and writing/reading a workflow asset's
+source tree, all landed in `vendor/interchange/packages/hub-api` — see
+`vendor/interchange/PATCHES.md`). `createHubServer` is the one gap left open
+on purpose: the vendored tree ships `@intx/hub-api`'s `createApp`/`createAuth`
+and `@intx/hub-sessions`'s factories, not a single entry point that accepts an
+injected pglite handle and keychain keys the way this desktop host needs, so
+`hub-mount.ts` still composes those factories itself instead of calling one.

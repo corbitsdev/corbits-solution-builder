@@ -13,9 +13,12 @@ import {
   WorkflowDefinitionVersion,
   WorkflowDefinitionResponse,
   WorkflowRollbackRequest,
+  CreateWorkflowDefinition,
+  CreateWorkflowDefinitionResponse,
   ErrorResponse,
   paginatedSchema,
 } from "@intx/types";
+import { generateId } from "@intx/hub-common";
 
 import type { TenantEnv } from "../context";
 import { ts } from "../format";
@@ -100,6 +103,62 @@ export function createWorkflowDefinitionRoutes({
       });
 
       return c.json(paginatedResponse(items, rows, limit));
+    },
+  );
+
+  app.post(
+    "/",
+    requireGrant("workflow-definition:*", "create"),
+    describeRoute({
+      tags: ["Workflow Definitions"],
+      summary: "Register a definition row directly",
+      description:
+        "For a caller that generated a wire projection itself rather than deploying through the probe sidecar. Identity is keyed on (name, wireHash): an existing row for that pair is returned unchanged (created: false); a new wireHash under an existing name registers as a new row.",
+      responses: {
+        200: {
+          description: "Definition registered (or already current)",
+          content: {
+            "application/json": {
+              schema: resolver(CreateWorkflowDefinitionResponse),
+            },
+          },
+        },
+        400: {
+          description: "Validation error",
+          content: {
+            "application/json": { schema: resolver(ErrorResponse) },
+          },
+        },
+      },
+    }),
+    validator("json", CreateWorkflowDefinition),
+    async (c) => {
+      const tenantCtx = c.get("tenant");
+      const body = c.req.valid("json");
+
+      const existing = await db.query.workflowDefinition.findMany({
+        where: and(
+          eq(workflowDefinition.tenantId, tenantCtx.id),
+          eq(workflowDefinition.name, body.name),
+        ),
+      });
+      const current = existing.find((row) => row.wireHash === body.wireHash);
+      if (current) {
+        return c.json({ id: current.id, created: false });
+      }
+
+      const id = body.id ?? generateId("workflow-definition");
+      await db.insert(workflowDefinition).values({
+        id,
+        tenantId: tenantCtx.id,
+        name: body.name,
+        description: body.description ?? null,
+        wireHash: body.wireHash,
+        ...(body.grantRequirements && body.grantRequirements.length > 0
+          ? { grantRequirements: body.grantRequirements }
+          : {}),
+      });
+      return c.json({ id, created: true });
     },
   );
 
