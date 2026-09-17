@@ -18,9 +18,10 @@
 import type { Transport } from "@intx/hub-client";
 import { APP_VERSION } from "@solutions-builder/app/manifest";
 import { AUTHORITIES } from "@solutions-builder/app/ledger";
-import { assignRole, createWorkspace, definitionIdFor, ensureRole, ensureRoleGrant, resolveWorkspace, type Workspace } from "./hub.js";
+import { assignRole, createWorkspace, definitionIdFor, ensureRole, resolveWorkspace, type Workspace } from "./hub.js";
 import { expectedWorkflowDefinitions, seedWorkflows } from "./workflow-seed.js";
 import { installProjectAuthority, listProjectRecords } from "./project-tenant.js";
+import { ensureAuthorityGrants } from "./signal-grants.js";
 import { ensureSkillAssets } from "./skill-assets.js";
 import { ensureLifecycleDeployment, type SidecarCapability } from "./workflow-deploy.js";
 
@@ -160,13 +161,9 @@ export async function install(
     if (name === "system") continue;
     // Role membership becomes a real platform grant `@intx/authz` can answer
     // for, not a "role name equals authority name" assumption in a reader.
-    await ensureRoleGrant(transport, ws.tenantId, {
-      roleId: roles.get(name)!,
-      resource: `authority:${name}`,
-      action: "hold",
-      effect: "allow",
-      origin: "role",
-    });
+    // Named-signal grants ride along: a role without the ledger authority
+    // never receives `workflow-run:*` / `signal:<name>` for that command.
+    await ensureAuthorityGrants(transport, ws.tenantId, roles.get(name)!, name);
     await assignRole(transport, ws.tenantId, ws.principalId, roles.get(name)!);
   }
 

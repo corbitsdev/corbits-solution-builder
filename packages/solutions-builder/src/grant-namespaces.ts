@@ -40,11 +40,15 @@
  *   human decision (`signal.propose`, `packet.freeze`, `provider.manage`) are
  *   asked for, never assumed.
  * - `conversation.` — appending to the project conversation. `workflow.` —
- *   reading workflow definitions. `mail.` — sending mail through sessions.
- *   `events.` — reading run events. All owned by the Interchange platform:
- *   only the platform materializes grants under them. Solutions Builder may
- *   declare them as requirements (its tools call platform surfaces) but must
- *   never mint rows under them.
+ *   reading workflow definitions. `workflow-run:` — a run the hub signals.
+ *   The installer mints `workflow-run:*` with action `signal:<awaiter>` from
+ *   the ledger onto each human authority role so a role without that
+ *   command cannot deliver the signal; the platform also mints manage/read
+ *   on specific run ids. `mail.` — sending mail through sessions.
+ *   `events.` — reading run events. `conversation.`, `workflow.`, `mail.`
+ *   and `events.` stay platform-minted. `workflow-run:` is the one platform
+ *   resource the installer writes, because the named-signal grant has to
+ *   exist before any run does.
  *
  * Grandfathered, not a precedent: the one-time legacy adoption in
  * `hub-migrate.ts` (`adoptLegacyWorkspace`) writes a `*`/`*` owner grant with
@@ -152,6 +156,14 @@ export const GRANT_NAMESPACES: readonly GrantNamespaceEntry[] = [
     meaning: "Appending to the project conversation. Owned by the platform; apps require, never mint.",
   },
   {
+    prefix: "workflow-run:",
+    owner: PLATFORM,
+    mintedBy: [BUILDER, PLATFORM],
+    requiredBy: [BUILDER, PLATFORM],
+    meaning:
+      "A workflow run. `workflow-run:*` with action `signal:<awaiter>` means the role may deliver that named signal on any run in the tenant. Minted by the installer from the ledger onto each human authority; the platform also mints manage/read on specific run ids.",
+  },
+  {
     prefix: "workflow.",
     owner: PLATFORM,
     mintedBy: [PLATFORM],
@@ -174,9 +186,15 @@ export const GRANT_NAMESPACES: readonly GrantNamespaceEntry[] = [
   },
 ];
 
-/** The convention entry a resource falls under, or undefined when namespaced nowhere. */
+/** The convention entry a resource falls under, or undefined when namespaced nowhere.
+ *  Longest prefix wins so `workflow-run:` is not swallowed by `workflow.`. */
 export function grantNamespaceOf(resource: string): GrantNamespaceEntry | undefined {
-  return GRANT_NAMESPACES.find((entry) => resource.startsWith(entry.prefix));
+  let best: GrantNamespaceEntry | undefined;
+  for (const entry of GRANT_NAMESPACES) {
+    if (!resource.startsWith(entry.prefix)) continue;
+    if (!best || entry.prefix.length > best.prefix.length) best = entry;
+  }
+  return best;
 }
 
 function refusal(verb: string, app: string, resource: string): Error {
