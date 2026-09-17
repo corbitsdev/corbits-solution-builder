@@ -13,10 +13,12 @@ import {
   installState as installerInstallState,
   InstallerError,
   resolveWorkspace,
+  updateProject as installerUpdateProject,
   type InstallState as PackageInstallState,
   type ProjectPolicy,
   type SidecarCapability,
 } from "@solutions-builder/installer";
+import { openCreatedProject } from "./create-project-open.ts";
 
 export type Remediation = {
   kind: "switch_provider" | "reconnect" | "retry";
@@ -568,7 +570,8 @@ export const api = {
           install: true,
         });
       }
-      const { project } = await installerCreateProject(createHubTransport(), workspace.tenantId, {
+      const transport = createHubTransport();
+      const { project } = await installerCreateProject(transport, workspace.tenantId, {
         title,
         slug: projectSlug(),
         policy: payload.policy,
@@ -576,8 +579,14 @@ export const api = {
           ? { delegatedCredentialIds: payload.delegatedCredentialIds }
           : {}),
       });
-      return await post<{ projectId: string; runId: string }>(`/projects/${project.id}/open`, {
-        ...(problem.length > 0 ? { problemStatement: problem } : {}),
+      const body = problem.length > 0 ? { problemStatement: problem } : {};
+      return await openCreatedProject({
+        projectId: project.id,
+        open: () => post<{ projectId: string; runId: string }>(`/projects/${project.id}/open`, body),
+        conceal: async (projectId) => {
+          await installerUpdateProject(transport, projectId, { deletedAt: new Date() });
+        },
+        retryable: (cause) => cause instanceof ApiFailure && cause.detail.retryable,
       });
     } catch (cause) {
       installerFailure(cause);
