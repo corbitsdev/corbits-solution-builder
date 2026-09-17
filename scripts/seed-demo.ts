@@ -14,7 +14,7 @@
 import { openDatabase } from "../apps/hub/src/db.js";
 import { prepareDatabase } from "../apps/hub/src/migrate.js";
 import { ensureHub, localActor } from "../apps/hub/src/hub-client.js";
-import { install } from "../apps/hub/src/installer-bridge.js";
+import { install } from "./host-install.js";
 import { createProject, projectDetail, writeArtifact } from "../apps/hub/src/projects.js";
 import { execute } from "../apps/hub/src/engine.js";
 import { newId } from "../apps/hub/src/ids.js";

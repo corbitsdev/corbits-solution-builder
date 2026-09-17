@@ -10,7 +10,7 @@ import { givenDataDir } from "./smoke-env.js";
 import { openDatabase } from "../apps/hub/src/db.js";
 import { prepareDatabase } from "../apps/hub/src/migrate.js";
 import { ensureHub, localActor } from "../apps/hub/src/hub-client.js";
-import { install } from "../apps/hub/src/installer-bridge.js";
+import { install } from "./host-install.js";
 import { createProject, writeArtifact } from "../apps/hub/src/projects.js";
 import {
   feedbackFor,

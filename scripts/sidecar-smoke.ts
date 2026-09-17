@@ -21,11 +21,8 @@ process.env["SOLUTIONS_BUILDER_DATA_DIR"] = dataDir;
 const { openDatabase } = await import("../apps/hub/src/db.js");
 const { prepareDatabase } = await import("../apps/hub/src/migrate.js");
 const { hub, hubWebSocket, mountHub, setHostPort } = await import("../apps/hub/src/hub-mount.js");
-const { install } = await import("../apps/hub/src/installer-bridge.js");
+const { install, ensureLifecycleDeployment, LIFECYCLE_ASSET_NAME } = await import("./host-install.js");
 const { connectProvider } = await import("../apps/hub/src/providers.js");
-const { ensureLifecycleDeployment, LIFECYCLE_ASSET_NAME } = await import(
-  "../apps/hub/src/installer-bridge.js"
-);
 const { assets } = await import("../apps/hub/src/hub-client.js");
 const { kitSeed } = await import("@solutions-builder/app/seed-kit");
 

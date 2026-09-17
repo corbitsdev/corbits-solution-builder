@@ -22,7 +22,7 @@ import { openDatabase } from "../apps/hub/src/db.js";
 import { prepareDatabase } from "../apps/hub/src/migrate.js";
 import { mountHub } from "../apps/hub/src/hub-mount.js";
 import { createProject, writeArtifact } from "../apps/hub/src/projects.js";
-import { install } from "../apps/hub/src/installer-bridge.js";
+import { install } from "./host-install.js";
 import { localActor } from "../apps/hub/src/hub-client.js";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";

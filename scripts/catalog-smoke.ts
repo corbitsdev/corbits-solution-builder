@@ -16,7 +16,7 @@ import { createServer } from "node:http";
 import { openDatabase } from "../apps/hub/src/db.js";
 import { prepareDatabase } from "../apps/hub/src/migrate.js";
 import { mountHub, hub } from "../apps/hub/src/hub-mount.js";
-import { install } from "../apps/hub/src/installer-bridge.js";
+import { install } from "./host-install.js";
 import { connectProvider } from "../apps/hub/src/providers.js";
 
 const checks: { name: string; ok: boolean; detail: string }[] = [];

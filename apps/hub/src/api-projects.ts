@@ -41,12 +41,11 @@ import {
 import { bytesOf } from "./source-material.js";
 import { deckBytesOf, ensureDeckFor } from "./deck.js";
 import { buildBytesOf, slugOf } from "./build-output.js";
-import { readProject, delegationStore as liveDelegationStore } from "./installer-bridge.js";
+import { readProject } from "./project-records.js";
+import { delegateMore, delegationAudit, liveDelegationStore } from "./project-delegation.js";
 import { projectSpend, workspaceSpend } from "./spend.js";
 import { attachMaterial, MATERIAL_KIND, materialText, type IncomingFile } from "./source-material.js";
 import { setStakeholders, STAKEHOLDER_ROLES } from "./stakeholders.js";
-import { delegateMore, delegationAudit } from "@solutions-builder/installer";
-
 /** `<project>-<document>`: what a printed PDF is saved as, before the dialog adds its extension. */
 function printFileName(projectTitle: string, documentTitle: string): string {
   return `${slugOf(projectTitle)}-${slugOf(documentTitle)}`;

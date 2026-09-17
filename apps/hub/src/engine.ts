@@ -54,8 +54,7 @@ import { join } from "node:path";
 import { dataDirectory } from "./paths.js";
 import { GATE_COMMANDS, runGateSideEffects } from "./engine-recovery.js";
 import { notifyDecision } from "./notify.js";
-import { readProject, updateProject } from "./installer-bridge.js";
-import type { ProjectPolicy } from "@solutions-builder/installer";
+import { readProject, updateProject, type ProjectPolicy } from "./project-records.js";
 
 export { requiredAuthorityFor, soloApprovalFor } from "./engine-approvals.js";
 
@@ -81,7 +80,7 @@ export type Actor = { readonly principalId: string; readonly displayName: string
  */
 export const HOST_PRINCIPAL = "p_host";
 
-export type { ProjectPolicy } from "@solutions-builder/installer";
+export type { ProjectPolicy } from "./project-records.js";
 
 export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 

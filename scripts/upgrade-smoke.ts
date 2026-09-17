@@ -36,7 +36,7 @@ import {
   tenantId,
 } from "../apps/hub/src/hub-client.js";
 import { hub } from "../apps/hub/src/hub-mount.js";
-import { install, installState } from "../apps/hub/src/installer-bridge.js";
+import { install, installState } from "./host-install.js";
 import { readSecretResult, secretReference, storeSecret } from "../apps/hub/src/host-secrets.js";
 import { migrateLegacyProviderCredentials } from "../apps/hub/src/credential-migration.js";
 import { expectedDefinitions } from "@solutions-builder/app/manifest";
@@ -249,7 +249,7 @@ try {
   const again = await install();
   check("a second install is a no-op", again.installed && (await count()) === definitions);
 
-  // --- installer-bridge.ts: the host's own tenant cache must not go stale ---
+  // --- host-install.ts: the host's own tenant cache must not go stale ---
   //
   // `hub-client.ts` caches the resolved workspace independently of the
   // installer package's own cache, and every other per-request call in the

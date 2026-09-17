@@ -13,7 +13,7 @@ import type { RunKind, RunState, Stage } from "@solutions-builder/app/ledger";
 import { database } from "./db.js";
 import * as table from "./schema.js";
 import { ledgerCommands } from "./engine-ledger.js";
-import { readProject } from "./installer-bridge.js";
+import { readProject } from "./project-records.js";
 
 export type RunRecord = {
   readonly id: string;

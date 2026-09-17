@@ -26,8 +26,7 @@ import { hubProxyAllowed, hubProxyHeaders, stripHubProxyCookies } from "./hub-pr
 import { attachLiveDrafts } from "./live-drafts.js";
 import { attachRoundSpend } from "./round-spend.js";
 import { rerankCatalogProviders } from "./catalog.js";
-import { adoptLegacyWorkspaceOnce, ensureWorkspaceOnce, migrateCredentialsOnce } from "./installer-bridge.js";
-import { retryEnsureWorkspace } from "./workspace-boot.js";
+import { adoptLegacyWorkspaceOnce, ensureWorkspaceOnce, migrateCredentialsOnce, retryEnsureWorkspace } from "./workspace-boot.js";
 import {
   clientConnected,
   markReady,

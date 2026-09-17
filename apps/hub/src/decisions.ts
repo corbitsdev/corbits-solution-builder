@@ -14,7 +14,7 @@ import { CONSEQUENCE, STATE_CONSEQUENCE } from "@solutions-builder/app/decision-
 import { database } from "./db.js";
 import * as table from "./schema.js";
 import { requiredAuthorityFor } from "./engine-approvals.js";
-import { listProjectRecords } from "./installer-bridge.js";
+import { listProjectRecords } from "./project-records.js";
 import { activeRun, type RunRecord } from "./runs.js";
 import { deliveryBlockers } from "./delivery.js";
 
