@@ -20,7 +20,7 @@
     "desktop:build:dry": "bun scripts/desktop-release.ts --dry-run",
     "sidecar:build": "bun run vendor:build && bun scripts/build-sidecar.ts",
     "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
-    "check:static": "bun run check:shards && bun run check:vendored-migrations && bun run check:ledger && bun run check:boundaries && bun run typecheck && bun run test",
+    "check:static": "bun run check:shards && bun run check:vendored-migrations && bun run check:ledger && bun run check:boundaries && bun run typecheck && bun run test && bun run test:vendored",
     "check:core": "bun run smoke && bun run smoke:upgrade && bun run smoke:db-lock",
     "check:launch": "bun run ui:build && bun run smoke:launch",
     "check:product": "bun run smoke:conversation && bun run smoke:catalog && bun run smoke:choices && bun run smoke:transfer && bun run smoke:material && bun run smoke:stakeholders && bun run smoke:deck",
@@ -64,7 +64,8 @@
     "assets:pack-registry": "bun --conditions intx-src scripts/pack-registry-asset.ts",
     "postinstall": "bun run vendor:build",
     "check:vendored-migrations": "bun --conditions intx-src scripts/check-vendored-migrations.ts",
-    "test": "bun test apps/hub/src packages/installer/src packages/tools-delivery/src"
+    "test": "bun test apps/hub/src packages/installer/src packages/tools-delivery/src",
+    "test:vendored": "bun test vendor/interchange/packages/hub-api/src/routes/tenants.test.ts vendor/interchange/packages/hub-api/src/routes/sessions.test.ts vendor/interchange/packages/hub-api/src/routes/assets.test.ts vendor/interchange/packages/hub-api/src/routes/workflow-definitions.test.ts vendor/interchange/packages/hub-api/src/routes/workflows.test.ts"
   },
   "dependencies": {
     "@corbits/artifacts": "github:corbitsdev/corbits-artifacts",

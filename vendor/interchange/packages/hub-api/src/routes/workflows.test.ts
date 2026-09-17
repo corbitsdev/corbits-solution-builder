@@ -1180,6 +1180,9 @@ describe("GET /workflows/deployments", () => {
         definitionAssetId: ASSET_ID,
         status: "deployed",
         createdAt: deploymentRow.createdAt.toISOString(),
+        // No allocation row in this fixture, so the binding fingerprint the
+        // deployment listing now carries (CL-8075) is null.
+        provisionerBindingFingerprint: null,
       },
     ]);
   });
