@@ -217,6 +217,62 @@ describe("empty test files must not read as a passing suite", () => {
   });
 });
 
+describe("a long-running server as the entry point", () => {
+  test("an entry point that is still alive and serving HTTP at the deadline passes", async () => {
+    const workspace = await workspaceWith({
+      "package.json": JSON.stringify({ name: "server", scripts: { start: "bun run server.js" } }),
+      // Port 0 lets the OS assign a free port; logging it exercises the
+      // probe's port discovery. The self-destruct timer is only a backstop so
+      // a failed kill in the probe cannot leak this fixture forever.
+      "server.js": `const server = Bun.serve({ port: 0, fetch: () => new Response("alive") });
+console.log(\`listening on http://127.0.0.1:\${server.port}/\`);
+setTimeout(() => process.exit(0), 45_000);
+setInterval(() => {}, 1_000);
+`,
+    });
+
+    const execution = await runExecutionChecks(workspace);
+
+    const entry = execution.find((check) => check.kind === "entry_point");
+    expect(entry?.ok).toBe(true);
+    expect(entry?.timedOut).toBe(false);
+    expect(entry?.vacuous).toBe(false);
+    expect(entry?.detail).toContain("live server");
+    expect(hasWorkingDeliverable(execution)).toBe(true);
+  }, 60_000);
+
+  test("an entry point that is still alive but serves nothing still fails", async () => {
+    const workspace = await workspaceWith({
+      "package.json": JSON.stringify({ name: "hung", scripts: { start: "bun run hang.js" } }),
+      "hang.js": `setTimeout(() => process.exit(0), 45_000);
+setInterval(() => {}, 1_000);
+`,
+    });
+
+    const execution = await runExecutionChecks(workspace);
+
+    const entry = execution.find((check) => check.kind === "entry_point");
+    expect(entry?.ok).toBe(false);
+    expect(entry?.timedOut).toBe(true);
+    expect(entry?.detail).toContain("exceeded 15000ms and was killed");
+    expect(hasWorkingDeliverable(execution)).toBe(false);
+  }, 60_000);
+
+  test("an entry point that exits non-zero still fails as before", async () => {
+    const workspace = await workspaceWith({
+      "package.json": JSON.stringify({ name: "broken", scripts: { start: "bun run main.js" } }),
+      "main.js": `console.log("boom");\nprocess.exit(1);\n`,
+    });
+
+    const execution = await runExecutionChecks(workspace);
+
+    const entry = execution.find((check) => check.kind === "entry_point");
+    expect(entry?.ok).toBe(false);
+    expect(entry?.timedOut).toBe(false);
+    expect(entry?.detail).toContain("exited 1");
+  });
+});
+
 describe("the positive case: a real deliverable is complete", () => {
   test("a workspace member with a real entry point and real passing tests is a working deliverable", async () => {
     const dir = await workspaceWith({

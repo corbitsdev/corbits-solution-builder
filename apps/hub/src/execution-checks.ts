@@ -182,7 +182,12 @@ async function findWorkspaceMemberWithScript(
 }
 
 /** Reads a pipe to a bounded tail: the last `maxBytes`, never the whole stream. */
-async function drainTail(pipe: ReadableStream<Uint8Array> | null, maxBytes: number): Promise<string> {
+async function drainTail(
+  pipe: ReadableStream<Uint8Array> | null,
+  maxBytes: number,
+  /** When set, receives the tail so far — so a watcher can see output while the pipe is still open. */
+  live?: { text: string },
+): Promise<string> {
   if (!pipe) return "";
   const decoder = new TextDecoder();
   const reader = pipe.getReader();
@@ -191,7 +196,10 @@ async function drainTail(pipe: ReadableStream<Uint8Array> | null, maxBytes: numb
     const { done, value } = await reader.read();
     if (done) break;
     tail = (tail + decoder.decode(value, { stream: true })).slice(-maxBytes);
+    if (live) live.text = tail;
   }
+  tail = (tail + decoder.decode()).slice(-maxBytes);
+  if (live) live.text = tail;
   return tail;
 }
 
@@ -268,17 +276,141 @@ export async function discoverEntryPoint(workspaceRoot: string, pkg: PackageMani
   return null;
 }
 
-async function runEntryPoint(command: string[], workspaceRoot: string, home: string): Promise<ExecutionCheck> {
-  const raw = await execBounded(command, workspaceRoot, ENTRY_POINT_TIMEOUT_MS, home);
+/**
+ * A long-running server never exits, so "still alive at the deadline" cannot
+ * be a failure on its own — but aliveness alone is not evidence either (a
+ * hung process is also still alive). These patterns look for the two shapes
+ * of proof a server offers: a port it claims to serve on, and a readiness
+ * line it printed.
+ */
+const SERVER_PORT_PATTERNS = [
+  /https?:\/\/[^\s/:]+:(\d{2,5})/i,
+  /(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d{2,5})/i,
+  /listening (?:on )?(?:port |:)?(\d{2,5})/i,
+  /(?:^|\s)port[=: ](\d{2,5})/i,
+  /--port[= ](\d{2,5})/,
+  /\bPORT[=: ](\d{2,5})/,
+];
+const SERVER_READY_PATTERN =
+  /listening|server (?:started|running|ready)|started server|ready (?:on|for|to serve)|accepting connections|running on|serving/i;
+const MAX_SERVER_PORT_CANDIDATES = 5;
+const SERVER_PROBE_TIMEOUT_MS = 3_000;
+
+/** Port numbers from a start script and the process output so far, in order of appearance. */
+function portsFromText(text: string): number[] {
+  const ports: number[] = [];
+  for (const source of SERVER_PORT_PATTERNS) {
+    const pattern = new RegExp(source.source, `${source.flags}g`);
+    for (const match of text.matchAll(pattern)) {
+      const port = Number(match[1]);
+      if (port >= 1 && port <= 65535 && !ports.includes(port)) ports.push(port);
+      if (ports.length >= MAX_SERVER_PORT_CANDIDATES) return ports;
+    }
+  }
+  return ports;
+}
+
+/**
+ * Whether anything answers HTTP on `port` over loopback. Any resolved
+ * response counts — even a 404 or 500 proves a server is behind the port,
+ * which is all the probe needs to know.
+ */
+async function servesHttp(port: number): Promise<boolean> {
+  for (const host of ["127.0.0.1", "localhost"]) {
+    try {
+      await fetch(`http://${host}:${port}/`, { signal: AbortSignal.timeout(SERVER_PROBE_TIMEOUT_MS) });
+      return true;
+    } catch {
+      continue;
+    }
+  }
+  return false;
+}
+
+/**
+ * Runs the entry point like `execBounded`, except a process that is still
+ * alive at the deadline gets one more question before it is killed: is it
+ * serving? A process that answers HTTP on a declared port, or that printed a
+ * readiness line, passes as a live server; one that is merely still running
+ * fails exactly as before. Exiting processes never reach the probe, so their
+ * behavior is unchanged.
+ */
+async function execEntryPoint(
+  command: string[],
+  cwd: string,
+  home: string,
+  startScript?: string,
+): Promise<{
+  exitCode: number | null;
+  timedOut: boolean;
+  stdoutTail: string;
+  stderrTail: string;
+  /** Why a process that never exited still counts as a live deliverable, or null. */
+  serverEvidence: string | null;
+}> {
+  const child = Bun.spawn(command, {
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+    stdin: "ignore",
+    // Same trimmed environment as `execBounded` above: PATH plus a scratch
+    // HOME, never the host's real one.
+    env: { PATH: process.env.PATH ?? "", HOME: home },
+  });
+  const liveOut = { text: "" };
+  const liveErr = { text: "" };
+  const drains: [Promise<string>, Promise<string>] = [
+    drainTail(child.stdout, OUTPUT_TAIL_BYTES, liveOut),
+    drainTail(child.stderr, OUTPUT_TAIL_BYTES, liveErr),
+  ];
+  const exited = await Promise.race([child.exited.then(() => true), Bun.sleep(ENTRY_POINT_TIMEOUT_MS).then(() => false)]);
+  if (exited || child.exitCode !== null) {
+    await child.exited;
+    const [stdoutTail, stderrTail] = await Promise.all(drains);
+    return { exitCode: child.exitCode, timedOut: false, stdoutTail, stderrTail, serverEvidence: null };
+  }
+  const output = `${startScript ?? ""}\n${liveOut.text}\n${liveErr.text}`;
+  let serverEvidence: string | null = null;
+  for (const port of portsFromText(output)) {
+    if (await servesHttp(port)) {
+      serverEvidence = `still running after ${ENTRY_POINT_TIMEOUT_MS}ms and serving HTTP on port ${port} — treated as a live server`;
+      break;
+    }
+  }
+  serverEvidence ??= output
+    .split("\n")
+    .map((line) => line.trim().slice(0, 160))
+    .find((line) => SERVER_READY_PATTERN.test(line)) ?? null;
+  if (serverEvidence && !serverEvidence.startsWith("still running")) {
+    serverEvidence = `still running after ${ENTRY_POINT_TIMEOUT_MS}ms and reporting readiness ("${serverEvidence}") — treated as a live server`;
+  }
+  child.kill("SIGTERM");
+  await Promise.race([child.exited, Bun.sleep(KILL_GRACE_MS)]);
+  if (child.exitCode === null) child.kill("SIGKILL");
+  await child.exited;
+  const [stdoutTail, stderrTail] = await Promise.all(drains);
+  if (serverEvidence) return { exitCode: null, timedOut: false, stdoutTail, stderrTail, serverEvidence };
+  return { exitCode: null, timedOut: true, stdoutTail, stderrTail, serverEvidence: null };
+}
+
+async function runEntryPoint(
+  command: string[],
+  workspaceRoot: string,
+  home: string,
+  startScript?: string,
+): Promise<ExecutionCheck> {
+  const raw = await execEntryPoint(command, workspaceRoot, home, startScript);
   const producedOutput = raw.stdoutTail.trim().length > 0 || raw.stderrTail.trim().length > 0;
-  const ok = !raw.timedOut && raw.exitCode === 0 && producedOutput;
-  const detail = raw.timedOut
-    ? `entry point exceeded ${ENTRY_POINT_TIMEOUT_MS}ms and was killed`
-    : raw.exitCode !== 0
-      ? `entry point exited ${raw.exitCode}`
-      : !producedOutput
-        ? "entry point exited 0 but produced no output on stdout or stderr"
-        : "entry point ran and produced output";
+  const ok = raw.serverEvidence !== null || (!raw.timedOut && raw.exitCode === 0 && producedOutput);
+  const detail = raw.serverEvidence
+    ? `entry point ${raw.serverEvidence}`
+    : raw.timedOut
+      ? `entry point exceeded ${ENTRY_POINT_TIMEOUT_MS}ms and was killed`
+      : raw.exitCode !== 0
+        ? `entry point exited ${raw.exitCode}`
+        : !producedOutput
+          ? "entry point exited 0 but produced no output on stdout or stderr"
+          : "entry point ran and produced output";
   return {
     kind: "entry_point",
     command: command.join(" "),
@@ -486,7 +618,7 @@ export async function runExecutionChecks(workspaceRoot: string): Promise<Executi
   try {
     const checks: ExecutionCheck[] = [];
     const entry = await discoverEntryPoint(workspaceRoot, pkg);
-    if (entry) checks.push(await runEntryPoint(entry, workspaceRoot, home));
+    if (entry) checks.push(await runEntryPoint(entry, workspaceRoot, home, pkg?.scripts?.start));
     for (const kind of ["test", "typecheck"] as const) {
       if (pkg?.scripts?.[kind]) {
         checks.push(await runDeclaredScript(kind, workspaceRoot, home));

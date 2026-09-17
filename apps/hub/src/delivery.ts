@@ -25,6 +25,7 @@ import {
 } from "@solutions-builder/app/delivery";
 import { type } from "arktype";
 import { database } from "./db.js";
+import { HostError } from "./errors.js";
 import * as table from "./schema.js";
 import { readArtifactNode, writeArtifact } from "./projects.js";
 import { workspaceFor } from "./corbits-exec.js";
@@ -196,4 +197,20 @@ export async function deliveryBlockers(projectId: string): Promise<string | null
   if (!existence && !execution) return null;
   if (existence && execution) return `${existence} ${execution}.`;
   return existence ?? `Delivery cannot be accepted yet. ${execution}.`;
+}
+
+/**
+ * Re-runs verification against the latest manifest and records the new
+ * report — the retry path out of a blocked delivery verdict. The same
+ * `verifyAndRecord` the accept guard runs, minus the guard: a stale failure
+ * (e.g. from before a fix, or from a probe that has since learned to
+ * recognise the deliverable) is re-checkable without redoing the delivery.
+ */
+export async function reverifyDelivery(
+  projectId: string,
+  actor: { principalId: string },
+): Promise<DeliveryVerificationReport> {
+  const version = await latestManifest(projectId);
+  if (!version) throw new HostError("not_found", "There is no delivery manifest to verify again.");
+  return verifyAndRecord(projectId, version, actor);
 }

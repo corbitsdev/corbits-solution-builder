@@ -535,6 +535,9 @@ export const api = {
     ),
   buildEvents: (projectId: string) =>
     request<{ events: BuildEvent[] }>(`/projects/${projectId}/build/events`),
+  /** Re-runs delivery verification against the latest manifest — the retry path out of a blocked verdict. */
+  reverifyDelivery: (projectId: string) =>
+    post<{ report: unknown }>(`/projects/${projectId}/delivery/reverify`, {}),
   design: (projectId: string) =>
     request<{
       designs: ArtifactNode[];

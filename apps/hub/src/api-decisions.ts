@@ -17,6 +17,7 @@ import { projectDetail } from "./projects.js";
 import { buildEvents } from "./engine-ledger.js";
 import { abortBuildAttempt, liveBuild, startBuildAttempt, subscribeBuildOutput } from "./build-attempt.js";
 import { acceptBuildEvidence } from "./build-output.js";
+import { reverifyDelivery } from "./delivery.js";
 import { streamSSE } from "hono/streaming";
 import { commandFrom, parsed } from "./api.js";
 import { localActor } from "./hub-client.js";
@@ -184,6 +185,18 @@ export function registerDecisionRoutes(api: Hono) {
       ...(typeof body.expectedRevision === "number" ? { expectedRevision: body.expectedRevision } : {}),
     });
     return context.json(accepted);
+  });
+
+  /**
+   * Re-runs delivery verification against the latest manifest and records
+   * the new report — the retry path out of a blocked verdict. Succeeds
+   * whenever there is a manifest; the caller re-reads project detail to
+   * decide whether Accept is now unblocked.
+   */
+  api.post("/projects/:projectId/delivery/reverify", async (context) => {
+    const projectId = context.req.param("projectId");
+    const report = await reverifyDelivery(projectId, localActor());
+    return context.json({ report });
   });
 
   api.get("/projects/:projectId/build/events", async (context) => {
