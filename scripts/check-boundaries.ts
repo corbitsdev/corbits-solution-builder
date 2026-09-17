@@ -375,9 +375,16 @@ for (const file of files) {
 
   // Run state moves in the workflow definition in the app package. The hub
   // may fold a run record (`runs.ts`) but must not write one: `new RunDraft`
-  // or a ledger `op: "create"` / `op: "patch"` on a host route is a second
-  // state machine.
-  if (area === "hub" && path !== `${HUB}/runs.ts` && /\bnew RunDraft\s*\(|\bop: "create"|\bop: "patch"/.test(text)) {
+  // anywhere, or a ledger `op: "create"` / `op: "patch"` on a host route, is a
+  // second state machine.
+  if (area === "hub" && /\bnew RunDraft\s*\(/.test(text)) {
+    violations.push({
+      file: path,
+      rule: "only the workflow definition in the app package moves a run's state",
+      detail: "records run mutations on the host",
+    });
+  }
+  if (area === "hub" && path !== `${HUB}/runs.ts` && /\bop: "create"|\bop: "patch"/.test(text)) {
     violations.push({
       file: path,
       rule: "only the workflow definition in the app package moves a run's state",

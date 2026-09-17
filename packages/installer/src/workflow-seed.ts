@@ -1,7 +1,7 @@
 /**
  * Seeds Solutions Builder's one workflow definition into the hub.
  *
- * The command ledger (`engine-ledger.ts`) keys its per-project session to this
+ * The command ledger (`command-ledger.ts`) keys its per-project session to this
  * row (`definitionIdFor(PROJECT_LIFECYCLE_ID)`); that is the only reason a
  * definition still needs to be registered here rather than through
  * `POST /workflows/deployments`, which the per-project lifecycle deployment

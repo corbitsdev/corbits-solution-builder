@@ -16,11 +16,11 @@ let projectPrincipals: HubPrincipal[] = [];
 let evaluateCalls: EvaluateCall[] = [];
 let allowed: ReadonlySet<string> = new Set();
 
-// `engine.js` is the command engine; only its host-principal constant is
-// needed here, and loading the real module would drag the whole engine graph
+// `command-dispatch.js` is host command dispatch; only its host-principal constant is
+// needed here, and loading the real module would drag the whole dispatch graph
 // into a grant-scoping test. Our cases never act as the host, so any value
 // distinct from the test principals would do; this mirrors the real one.
-mock.module("./engine.js", () => ({ HOST_PRINCIPAL: "p_host" }));
+mock.module("./command-dispatch.js", () => ({ HOST_PRINCIPAL: "p_host" }));
 
 // Stub the hub boundary: the tests pin what `authoritiesFor` asks of the
 // hub, not what the hub answers. Only the names the loaded graph imports
@@ -42,7 +42,7 @@ mock.module("./hub-client.js", () => ({
   LEGACY_TENANT_ID: "t_legacy",
 }));
 
-const { authoritiesFor } = await import("./engine-approvals.js");
+const { authoritiesFor } = await import("./command-approvals.js");
 
 function principal(id: string, tenantId: string, refId: string): HubPrincipal {
   return { id, tenantId, kind: "user", refId, status: "active", roles: [] };

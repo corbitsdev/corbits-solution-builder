@@ -10,9 +10,9 @@ import type { Authority } from "@solutions-builder/app/ledger";
 import * as table from "./schema.js";
 import { AUTHORITIES } from "@solutions-builder/app/ledger";
 import { evaluate, listPrincipals } from "./hub-client.js";
-import { HOST_PRINCIPAL } from "./engine.js";
-import type { Tx } from "./engine.js";
-import { audienceDecisions } from "./engine-ledger.js";
+import { HOST_PRINCIPAL } from "./command-dispatch.js";
+import type { Tx } from "./command-dispatch.js";
+import { audienceDecisions } from "./command-ledger.js";
 
 export function requiredAuthorityFor(stage: number): Authority {
   if (stage === 7) return "budget_approver";

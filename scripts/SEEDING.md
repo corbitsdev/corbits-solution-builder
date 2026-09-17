@@ -1,8 +1,8 @@
 # Seeding a workspace to any stage and state
 
 `bun run seed:workspace -- --stage <1-9> --state <name>` puts one project at
-the named stage, in the named state, through the same command engine a person
-or the host itself would use (`apps/hub/src/engine.ts`'s `execute`). Nothing is
+the named stage, in the named state, through the same command dispatch a person
+or the host itself would use (`apps/hub/src/command-dispatch.ts`'s `execute`). Nothing is
 written to a row directly, so nothing gets seeded into a state the product
 could not actually reach.
 

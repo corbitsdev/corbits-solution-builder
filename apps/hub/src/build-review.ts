@@ -33,7 +33,7 @@ import { assumptionsIn, questionsIn } from "@solutions-builder/app/document";
 import { complete, type CompletionRequest, type CompletionResult } from "./inference.js";
 import { writeArtifact } from "./projects.js";
 import { ArtifactDraft } from "./domain.js";
-import { type Actor } from "./engine.js";
+import { type Actor } from "./command-dispatch.js";
 import { type BuildArchive, buildBytesOf } from "./build-output.js";
 import { stageInputsForSmoke } from "./stage-runs.js";
 import { type } from "arktype";

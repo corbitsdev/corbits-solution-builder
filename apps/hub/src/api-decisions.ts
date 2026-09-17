@@ -10,11 +10,11 @@ import {
   StageApprovePayload,
 } from "./domain.js";
 import { COMMANDS, type Command } from "@solutions-builder/app/ledger";
-import { submitAndApprove } from "./engine.js";
+import { submitAndApprove } from "./command-dispatch.js";
 import { HostError } from "./errors.js";
 import { newId } from "./ids.js";
 import { projectDetail } from "./projects.js";
-import { buildEvents } from "./engine-ledger.js";
+import { buildEvents } from "./command-ledger.js";
 import { abortBuildAttempt, liveBuild, startBuildAttempt, subscribeBuildOutput } from "./build-attempt.js";
 import { acceptBuildEvidence } from "./build-output.js";
 import { reverifyDelivery } from "./delivery.js";

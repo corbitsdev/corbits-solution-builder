@@ -16,7 +16,7 @@
  */
 import { Hono } from "hono";
 import { type } from "arktype";
-import { execute } from "./engine.js";
+import { execute } from "./command-dispatch.js";
 import { localActor } from "./hub-client.js";
 import { HostError } from "./errors.js";
 import { newId } from "./ids.js";

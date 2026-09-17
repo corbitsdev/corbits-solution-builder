@@ -70,7 +70,7 @@ import { complete, type CompletionResult } from "./inference.js";
 import { runExecutionChecks, discoverEntryPoint, type ExecutionCheck, type PackageManifest } from "./execution-checks.js";
 
 export type { ConfidenceLevel, TargetVerification };
-/** Re-exported so a caller validating an untrusted payload (`engine.ts`, the smoke scripts) can check a level without duplicating this list. */
+/** Re-exported so a caller validating an untrusted payload (`command-dispatch.ts`, the smoke scripts) can check a level without duplicating this list. */
 export { CONFIDENCE_LEVELS, parseVerdict };
 
 const LEVELS = CONFIDENCE_LEVELS;

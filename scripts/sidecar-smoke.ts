@@ -803,7 +803,7 @@ try {
 
       // Each round call the stub answered is the project's spend, from the
       // same events: one record per inference.done, in the stub's own name.
-      const { usageRecords } = await import("../apps/hub/src/engine-ledger.js");
+      const { usageRecords } = await import("../apps/hub/src/command-ledger.js");
       const { projectSpend } = await import("../apps/hub/src/spend.js");
       const rounds = (await usageRecords(project.projectId)).filter((record) => record.source === "round");
       const spend = await projectSpend(project.projectId);

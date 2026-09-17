@@ -15,11 +15,11 @@
  * a terminal result beside it, and nothing a person could do about either.
  */
 import { targetGuidance } from "@solutions-builder/app/targets";
-import { execute, HOST_PRINCIPAL, type Actor, type CommandOutcome } from "./engine.js";
+import { execute, HOST_PRINCIPAL, type Actor, type CommandOutcome } from "./command-dispatch.js";
 import { HostError } from "./errors.js";
 import { newId } from "./ids.js";
 import { projectDetail, readArtifactNode } from "./projects.js";
-import { recordBuildEvent } from "./engine-ledger.js";
+import { recordBuildEvent } from "./command-ledger.js";
 import { readRun } from "./runs.js";
 import { localActor } from "./hub-client.js";
 import { recordBuildArchive, type BuildArchive } from "./build-output.js";

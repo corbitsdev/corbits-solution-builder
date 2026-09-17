@@ -12,7 +12,7 @@ import { eq } from "drizzle-orm";
 import type { RunKind, RunState, Stage } from "@solutions-builder/app/ledger";
 import { database } from "./db.js";
 import * as table from "./schema.js";
-import { ledgerCommands } from "./engine-ledger.js";
+import { ledgerCommands } from "./command-ledger.js";
 import { readProject } from "./project-records.js";
 
 export type RunRecord = {
@@ -38,37 +38,6 @@ export type RunPatch = Partial<Omit<RunRecord, "id" | "projectId" | "createdAt">
 export type RunMutation =
   | { readonly op: "create"; readonly run: RunRecord }
   | { readonly op: "patch"; readonly runId: string; readonly patch: RunPatch };
-
-/**
- * The run mutations a command wants to make, collected while the transaction
- * runs and written to the ledger after it commits. Reads see the draft first,
- * so a command that opens a run and then patches it works on its own change.
- */
-export class RunDraft {
-  readonly mutations: RunMutation[] = [];
-  private readonly runs: Map<string, RunRecord>;
-
-  constructor(current: readonly RunRecord[]) {
-    this.runs = new Map(current.map((run) => [run.id, run]));
-  }
-
-  create(run: RunRecord): string {
-    this.runs.set(run.id, run);
-    this.mutations.push({ op: "create", run });
-    return run.id;
-  }
-
-  patch(runId: string, patch: RunPatch): void {
-    const existing = this.runs.get(runId);
-    if (!existing) throw new Error(`runs: no run ${runId} to patch`);
-    this.runs.set(runId, { ...existing, ...patch });
-    this.mutations.push({ op: "patch", runId, patch });
-  }
-
-  get(runId: string): RunRecord | undefined {
-    return this.runs.get(runId);
-  }
-}
 
 type Wire = Record<string, unknown>;
 

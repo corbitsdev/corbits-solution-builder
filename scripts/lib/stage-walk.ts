@@ -21,7 +21,7 @@
  *   artifacts are legitimately `provenance.producer: "human"` — nobody's
  *   model wrote them.
  */
-import { execute, type Actor } from "../../apps/hub/src/engine.js";
+import { execute, type Actor } from "../../apps/hub/src/command-dispatch.js";
 import { newId } from "../../apps/hub/src/ids.js";
 import { writeArtifact, readArtifactNode, projectDetail } from "../../apps/hub/src/projects.js";
 import { requestDraft, type StageDraftResult } from "../../apps/hub/src/stage-runs.js";

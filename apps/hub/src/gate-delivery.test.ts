@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from "bun:test";
-import type { CommandInput } from "./engine.js";
+import type { CommandInput } from "./command-dispatch.js";
 
 const delivered: string[] = [];
 
@@ -18,7 +18,7 @@ mock.module("./lifecycle-run.js", () => ({
   launchProjectLifecycle: async () => undefined,
 }));
 
-const { GATE_COMMANDS, runGateSideEffects } = await import("./engine-recovery.js");
+const { GATE_COMMANDS, runGateSideEffects } = await import("./gate-delivery.js");
 
 function input(overrides: Partial<CommandInput> = {}): CommandInput {
   return {
@@ -50,9 +50,9 @@ describe("runGateSideEffects", () => {
   });
 });
 
-describe("engine admit order", () => {
+describe("command-dispatch admit order", () => {
   test("GATE_COMMANDS deliver first; evaluate is not the admit authority; host never writes RunDraft", async () => {
-    const source = await Bun.file(new URL("./engine.ts", import.meta.url)).text();
+    const source = await Bun.file(new URL("./command-dispatch.ts", import.meta.url)).text();
     const deliver = source.indexOf("runGateSideEffects(");
     const verdict = source.indexOf("evaluate(input.type, run, context)");
     const refuse = source.indexOf('if (!verdict.ok && delivery !== "delivered")');
@@ -60,6 +60,8 @@ describe("engine admit order", () => {
     expect(verdict).toBeGreaterThan(deliver);
     expect(refuse).toBeGreaterThan(verdict);
     expect(source.search(/new RunDraft\s*\(/)).toBe(-1);
+    const runsSource = await Bun.file(new URL("./runs.ts", import.meta.url)).text();
+    expect(runsSource.search(/\bclass RunDraft\b/)).toBe(-1);
     expect(source).toContain("admitGate` is the admit authority");
   });
 });

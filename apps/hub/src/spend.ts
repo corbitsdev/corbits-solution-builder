@@ -15,7 +15,7 @@
  * tokens and marked unpriced. A total is only ever over what has a price.
  */
 import { catalog, hubList, tenantPath, type HubModel, type HubOffering } from "./hub-client.js";
-import { recordUsage, usageRecords, type UsageRecord } from "./engine-ledger.js";
+import { recordUsage, usageRecords, type UsageRecord } from "./command-ledger.js";
 import { listProjectRecords } from "./project-records.js";
 import { newId } from "./ids.js";
 

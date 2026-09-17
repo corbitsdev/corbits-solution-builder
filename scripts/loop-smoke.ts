@@ -32,7 +32,7 @@ import {
   readArtifactNode,
   writeArtifact,
 } from "../apps/hub/src/projects.js";
-import { execute, HOST_PRINCIPAL, submitAndApprove } from "../apps/hub/src/engine.js";
+import { execute, HOST_PRINCIPAL, submitAndApprove } from "../apps/hub/src/command-dispatch.js";
 import { activeRun } from "../apps/hub/src/runs.js";
 import { newId } from "../apps/hub/src/ids.js";
 import { HostError } from "../apps/hub/src/errors.js";
@@ -40,7 +40,7 @@ import { openDecisionFor } from "../apps/hub/src/decisions.js";
 import { workspaceFor } from "../apps/hub/src/corbits-exec.js";
 import { ensureDeckFor } from "../apps/hub/src/deck.js";
 import { abortBuildAttempt, liveBuild, startBuildAttempt, subscribeBuildOutput } from "../apps/hub/src/build-attempt.js";
-import { buildEvents } from "../apps/hub/src/engine-ledger.js";
+import { buildEvents } from "../apps/hub/src/command-ledger.js";
 import { buildArchiveName, packageBuild } from "../apps/hub/src/build-output.js";
 import { judgeCompletion, verifierReportOf } from "../apps/hub/src/completion-judge.js";
 import { projectSpend, recordHostUsage } from "../apps/hub/src/spend.js";
@@ -262,7 +262,7 @@ for (const stage of [1, 2, 3, 4] as Stage[]) {
   // The collapsed "Approve and continue" submits and approves in one; a
   // stage already under review — stage 5's packages go with the first
   // decision — has nothing left to submit, and the approval alone must run.
-  const { submitAndApprove } = await import("../apps/hub/src/engine.js");
+  const { submitAndApprove } = await import("../apps/hub/src/command-dispatch.js");
   const advanced = await submitAndApprove({
     actor: ACTOR,
     projectId,
