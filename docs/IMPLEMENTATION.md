@@ -43,9 +43,9 @@ into the mounted Hono app; hosted (`SOLUTIONS_BUILDER_HUB_URL`), the same
 calls go over HTTPS. Platform writes go through the hub API, not drizzle on
 public tables.
 
-The client installs the app over the host's `/hub` proxy. On launch it
+The client installs the app over the host's `/hub` mount. On launch it
 asks `installState()` through `@solutions-builder/installer` (same-origin
-credentials; the proxy attaches the owner session after `ensureOwner()`),
+credentials; the mount forwards the browser's own cookies),
 which recomputes "installed" every time by comparing the tenant's workflow
 definitions against the hash the package would generate right now — there is
 no stored version flag — and calls `install()` when anything is missing or
@@ -53,8 +53,7 @@ stale. The same `install()` runs on first launch, on upgrade, and after
 every credential change, and is idempotent, doing, in order:
 
 - the owner principal (minted by the host at boot) and the local tenant
-  (created in-process at boot so the proxy never offers a root
-  `POST /api/tenants`)
+  (created in-process at boot; dropping that boot ensure is CL-8247)
 - the one workflow definition generated from the ledger, `project-lifecycle`
   — the row the command ledger's own session keys on
 - the roles the ledger names, held by the owner
@@ -68,17 +67,19 @@ Opening a project is two steps: the installer's `createProject` (child
 tenant, authority, credential delegation) over `/hub`, then
 `POST /api/projects/:projectId/open` for the ledger's `project.create`.
 
-The `/hub` proxy only forwards installer and workflow routes. Git-token
-and auth surfaces are refused, as is creating a root tenant. Hub
-`Set-Cookie` is stripped so the browser never holds the owner session.
+The `/hub` mount is a same-origin prefix strip onto the hub app. The
+desktop handshake is the process door. After that, Interchange authz is
+policy: auth, root tenant create, git-tokens, and catalog are not
+host-refused. Hub `Set-Cookie` is forwarded so the browser can hold a
+hub session.
 
 The provider list calls install again after any credential change so bindings
 follow credentials.
 
 It prints a launch URL carrying a session token. Every API request must present
-that token. The hub proxy is guarded the same way; after that outer door it
-calls `ensureOwner()` and forwards the owner session, so the browser does not
-have to hold a second cookie.
+that token. The hub mount is guarded the same way; after that outer door it
+forwards the browser's own cookies, so Interchange authz — not an owner-session
+swap — is policy.
 
 `GET /api/status` includes `canPlaceSidecars` and `sidecarFingerprint` from
 the embedded mount, so a client can tell whether this host can place a sidecar.

@@ -20,13 +20,10 @@ import { openDatabase } from "./db.js";
 import { prepareDatabase } from "./migrate.js";
 import { databaseDirectory, dataDirectory, portFile } from "./paths.js";
 import { stopSpawnedSidecars } from "./sidecar-processes.js";
-import { ensureHub, ensureOwner, hubFetch, localActor, ownerSession, resolveWorkspace } from "./hub-client.js";
+import { ensureHub, ensureOwner, hubFetch, resolveWorkspace } from "./hub-client.js";
 import { hub, hubIsMounted, hubWebSocket, setHostPort, SIDECAR_WS_PATH } from "./hub-mount.js";
-import { hubProxyAllowed, hubProxyHeaders, hubProxySignalRunId, stampGateSignalBody, stripHubProxyCookies } from "./hub-proxy.js";
+import { hubMountPath, hubProxyHeaders } from "./hub-proxy.js";
 import { attachLiveDrafts } from "./live-drafts.js";
-import { authoritiesFor } from "./command-approvals.js";
-import { GATE_COMMANDS } from "./gate-delivery.js";
-import { projectForRun } from "./lifecycle-run.js";
 import { attachRoundSpend } from "./round-spend.js";
 import { rerankCatalogProviders } from "./catalog.js";
 import { adoptLegacyWorkspaceOnce, ensureWorkspaceOnce, migrateCredentialsOnce, retryEnsureWorkspace } from "./workspace-boot.js";
@@ -102,11 +99,10 @@ const hubEndpoint = await ensureHub();
 console.log(`Interchange hub: ${hubEndpoint.detail}`);
 
 // Host-only repairs the installer package cannot do: mint the owner, adopt a
-// pre-identity tenant, then create the workspace tenant in-process. The `/hub`
-// proxy refuses unscoped POST /api/tenants, so a swallowed failure here would
-// leave the client with 403 and no recovery except restart. Retry until it
-// succeeds; throw (and never listen) if it does not. The client runs
-// `install()` over `/hub` after this.
+// pre-identity tenant, then create the workspace tenant in-process. Retry
+// until it succeeds; throw (and never listen) if it does not. The client
+// runs `install()` over `/hub` after this. Unblocking root tenant create on
+// the mount is this change; dropping this boot ensure is CL-8247.
 await retryEnsureWorkspace(
   async () => {
     await ensureOwner();
@@ -260,12 +256,11 @@ app.use("/api/*", async (context, next) => {
   await next();
 });
 
-// The hub proxy is guarded too. Without this the host would be an open proxy
+// The hub mount is guarded too. Without this the host would be an open proxy
 // into the hub for anything on the machine, which is the loopback assumption
-// the rest of the host explicitly rejects. This is the outer door. The inner
-// identity is the workspace owner: the handler below calls ensureOwner() and
-// forwards that session, because the browser only holds this host's handshake
-// cookie, which the hub would not accept.
+// the rest of the host explicitly rejects. This is the outer door. After it,
+// Interchange authz is policy: the handler strips `/hub` and forwards the
+// browser's own cookies, without swapping in the owner session.
 app.use("/hub/*", async (context, next) => {
   if (!authorised(context)) return context.json(unauthorised, 401);
   await next();
@@ -273,81 +268,22 @@ app.use("/hub/*", async (context, next) => {
 
 app.route("/api", createApi());
 
-// The hub's own API, proxied under /hub so a client reaches it through the same
-// authenticated origin. Embedded, this dispatches in-process; pointed at a
-// hosted hub it forwards. Only the installer and workflow routes are offered:
-// git-tokens, auth, and creating a root tenant stay off this door.
-// The authority stamp for a client gate signal. The browser folds the admit
-// payload itself, but the authority set `admitGate` checks is computed here:
-// the signal's target run maps to its project on the host, and the stamp
-// overwrites whatever the body carried. A gate signal the host cannot map to
-// a project, or whose authorities it cannot read, is still forwarded — but
-// with an empty stamp, so the gate refuses it rather than trusting the
-// body's own claims or blocking the signal outright.
-async function stampedSignalBody(
-  method: string,
-  path: string,
-  parsedBody: unknown,
-): Promise<ArrayBuffer | undefined> {
-  const runId = hubProxySignalRunId(method, path);
-  if (!runId || typeof parsedBody !== "object" || parsedBody === null) return undefined;
-  const isGate = (command: unknown): boolean =>
-    typeof command === "string" && (GATE_COMMANDS as readonly string[]).includes(command);
-  if (!isRecord(parsedBody) || !isRecord(parsedBody.payload) || !isGate(parsedBody.payload.command)) return undefined;
-  let authorities: readonly string[] = [];
-  try {
-    const projectId = await projectForRun(runId);
-    if (projectId) authorities = await authoritiesFor(projectId, localActor().principalId);
-  } catch (cause) {
-    console.error(`[hub-proxy] ${runId}: stamping the signal with no authorities:`, cause);
-  }
-  const stamped = stampGateSignalBody(parsedBody, isGate, authorities);
-  if (stamped === parsedBody) return undefined;
-  // TextEncoder hands back an exactly-sized buffer, so the ArrayBuffer is the
-  // whole body. hubFetch takes BodyInit, which always accepts ArrayBuffer.
-  return new TextEncoder().encode(JSON.stringify(stamped)).buffer as ArrayBuffer;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
+// The hub's own API, mounted under /hub so a client reaches it through the
+// same authenticated origin. Embedded, this dispatches in-process; pointed at
+// a hosted hub it forwards. Prefix strip only: no allowlist, no owner-cookie
+// swap, no Set-Cookie stripping.
 app.all("/hub/*", async (context) => {
   const url = new URL(context.req.url);
-  const path = url.pathname.replace(/^\/hub/, "") + url.search;
+  const path = hubMountPath(url.pathname, url.search);
   const method = context.req.method;
   const payload =
     method === "GET" || method === "HEAD" ? undefined : await context.req.raw.arrayBuffer();
-  let parsedBody: unknown;
-  if (payload && payload.byteLength > 0) {
-    try {
-      parsedBody = JSON.parse(new TextDecoder().decode(payload));
-    } catch {
-      parsedBody = undefined;
-    }
-  }
-  if (!hubProxyAllowed(method, path, parsedBody)) {
-    return context.json(
-      {
-        error: {
-          code: "not_authorized",
-          message: "The hub proxy does not offer that route.",
-          correlationId: "-",
-          retryable: false,
-        },
-      },
-      403,
-    );
-  }
-  await ensureOwner();
-  const stamped = await stampedSignalBody(method, path, parsedBody);
-  const body: ArrayBuffer | undefined = stamped ?? payload;
   const response = await hubFetch(path, {
     method,
-    headers: hubProxyHeaders(context.req.raw.headers, await ownerSession()),
-    ...(body !== undefined ? { body } : {}),
+    headers: hubProxyHeaders(context.req.raw.headers),
+    ...(payload !== undefined ? { body: payload } : {}),
   });
-  return stripHubProxyCookies(response);
+  return response;
 });
 
 const server = Bun.serve({

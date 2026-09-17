@@ -1,11 +1,10 @@
 /**
  * Boot must create the workspace tenant before the host listens.
  *
- * The `/hub` proxy refuses unscoped `POST /api/tenants` — creating a root
- * tenant is a host-only act, via `ensureWorkspaceOnce`. If that call is
- * swallowed and the host still serves, the client install hits 403 and only
- * a restart recovers (CL-8138). Retry the in-process ensure; if it never
- * succeeds, throw so `Bun.serve` is never reached.
+ * Creating a root tenant used to be host-only because the `/hub` policy proxy
+ * refused unscoped `POST /api/tenants`. The mount no longer refuses that
+ * route (CL-8246); this in-process ensure stays until CL-8247. Retry it; if
+ * it never succeeds, throw so `Bun.serve` is never reached.
  *
  * Legacy-tenant adoption and credential carry are the other host-only
  * repairs: they touch the database and the keychain, so they cannot live
@@ -40,15 +39,15 @@ const DEFAULT_DELAY_MS = 250;
  * was one), so it is safe to call on every install.
  */
 export async function adoptLegacyWorkspaceOnce(): Promise<void> {
+  if (hubMode() !== "embedded") return;
   if (await resolveWorkspace()) return;
   const me = await hubGet<{ id: string }>("/api/me");
   await adoptLegacyWorkspace(database(), me.id, LEGACY_TENANT_ID);
 }
 
 /**
- * The workspace tenant, created in-process so the `/hub` proxy never has to
- * offer `POST /api/tenants` without a parent. Idempotent: a tenant that
- * already resolves is left alone.
+ * The workspace tenant, created in-process. Idempotent: a tenant that
+ * already resolves is left alone. Dropping this boot path is CL-8247.
  */
 export async function ensureWorkspaceOnce(): Promise<void> {
   if (hubMode() !== "embedded") return;

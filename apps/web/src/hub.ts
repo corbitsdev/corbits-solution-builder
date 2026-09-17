@@ -1,11 +1,11 @@
 /**
- * Hub API over the host's `/hub` proxy.
+ * Hub API over the host's `/hub` mount.
  *
  * The browser never talks to Interchange internals. It uses `@intx/hub-client`'s
  * `Transport` against the same authenticated origin the rest of the UI uses;
  * the host strips `/hub` and dispatches. Same-origin credentials carry the
- * desktop handshake cookie; the proxy attaches the owner session after
- * `ensureOwner()`.
+ * browser's own cookies, including any hub session the hub set. The mount
+ * does not swap in an owner session.
  */
 import { ApiError, type Transport } from "@intx/hub-client";
 

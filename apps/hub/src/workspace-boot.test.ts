@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { hubProxyAllowed } from "./hub-proxy.js";
 import { retryEnsureWorkspace } from "./workspace-boot.js";
 
 describe("retryEnsureWorkspace", () => {
@@ -59,9 +58,5 @@ describe("retryEnsureWorkspace", () => {
     }
     expect(calls).toBe(3);
     expect(listening).toBe(false);
-    // The 403 path the client used to hit is still refused; recovery is boot, not a proxy hole.
-    expect(
-      hubProxyAllowed("POST", "/api/tenants", { name: "Solutions Builder", slug: "solutions-builder" }),
-    ).toBe(false);
   });
 });

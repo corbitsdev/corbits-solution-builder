@@ -46,11 +46,11 @@ async function hubSummary() {
 
 export function registerHostRoutes(api: Hono) {
   api.get("/status", async (context) => {
-    // Inference listing talks to hub catalog routes the `/hub` proxy does not
-    // offer. A hosted product still has to answer GET /api/status; 403 is
-    // "none connected", not an internal error.
+    // Inference listing talks to hub catalog routes. A hosted product still
+    // has to answer GET /api/status; Interchange 401/403 is "none connected",
+    // not an internal error.
     const providers = await listProviders().catch((cause: unknown) => {
-      if (cause instanceof HubApiError && cause.status === 403) return [];
+      if (cause instanceof HubApiError && (cause.status === 401 || cause.status === 403)) return [];
       throw cause;
     });
     const bridge = await bridgeAvailable();

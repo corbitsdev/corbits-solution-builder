@@ -77,20 +77,37 @@ try {
     (embedded.hub.reported as { status?: string } | null)?.status === "ok",
   );
 
-  // The hub proxy is not an open door on loopback. Health lives on the host
+  // The hub mount is not an open door on loopback. Health lives on the host
   // at GET /api/status (sidecar facts included); GET /hub/status is only
   // forwarded after this outer door.
   const unauthorised = await fetch("http://127.0.0.1:8140/hub/status");
-  check("the hub proxy refuses an unauthorised client", unauthorised.status === 401);
+  check("the hub mount refuses an unauthorised client", unauthorised.status === 401);
 
-  const me = await fetch("http://127.0.0.1:8140/hub/api/me", {
-    headers: { authorization: `Bearer ${hubHost.token}` },
-  });
-  const meBody = (await me.json().catch(() => null)) as { id?: string } | null;
+  const headers = { authorization: `Bearer ${hubHost.token}` };
+  const statusThroughHub = await fetch("http://127.0.0.1:8140/hub/status", { headers });
   check(
-    "the hub proxy attaches the owner session",
-    me.ok && typeof meBody?.id === "string",
-    me.ok ? String(meBody?.id) : `${me.status}`,
+    "the hub mount forwards /status after the outer door",
+    statusThroughHub.ok,
+    `${statusThroughHub.status}`,
+  );
+
+  const me = await fetch("http://127.0.0.1:8140/hub/api/me", { headers });
+  check(
+    "the hub mount does not attach the owner session",
+    me.status === 401,
+    `${me.status}`,
+  );
+
+  const authSession = await fetch("http://127.0.0.1:8140/hub/api/auth/get-session", { headers });
+  const rootTenant = await fetch("http://127.0.0.1:8140/hub/api/tenants", {
+    method: "POST",
+    headers: { ...headers, "content-type": "application/json" },
+    body: JSON.stringify({ name: "Solutions Builder", slug: "solutions-builder" }),
+  });
+  check(
+    "auth and root tenant create are not host-refused",
+    authSession.status !== 403 && rootTenant.status !== 403,
+    `auth=${authSession.status} tenants=${rootTenant.status}`,
   );
 
   const status = embedded as {
