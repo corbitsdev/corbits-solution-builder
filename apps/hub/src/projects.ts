@@ -54,6 +54,11 @@ export async function createProject(
     store?: DelegationStore;
     createRecord?: (input: { title: string; policy: ProjectPolicy }) => Promise<{ id: string }>;
     concealRecord?: (projectId: string) => Promise<void>;
+    open?: (args: {
+      projectId: string;
+      owner: { principalId: string; displayName: string };
+      problemStatement?: string;
+    }) => Promise<{ projectId: string; runId: string }>;
   } = {},
 ): Promise<{ projectId: string; runId: string; delegations: DelegationRecord }> {
   // The precondition the row names: "valid initial policy and workspace scope".
@@ -78,16 +83,24 @@ export async function createProject(
   // human authority as a role there.
   const createRecord = deps.createRecord ?? createProjectRecord;
   const project = await createRecord({ title: args.title, policy: args.policy });
-  let delegations: DelegationRecord;
+  const concealRecord =
+    deps.concealRecord ??
+    (async (projectId: string) => {
+      await updateProject(projectId, { deletedAt: new Date() });
+    });
+  const open = deps.open ?? openProject;
   try {
-    delegations = await delegateAtCreation(store, { projectId: project.id, consent });
+    const delegations = await delegateAtCreation(store, { projectId: project.id, consent });
+    const opened = await open({
+      projectId: project.id,
+      owner: args.owner,
+      ...(args.problemStatement !== undefined ? { problemStatement: args.problemStatement } : {}),
+    });
+    return { ...opened, delegations };
   } catch (cause) {
     // The tenant exists but the project never opened: pull it back off the
     // listing (and drop whatever the delegation minted) so a failed creation
-    // leaves no orphan behind, then report the failure that caused it.
-    const concealRecord = deps.concealRecord ?? (async (projectId: string) => {
-      await updateProject(projectId, { deletedAt: new Date() });
-    });
+    // — mint or POST /projects/:id/open — leaves no orphan behind.
     await revokeAllDelegations(store, project.id).catch((revokeCause: unknown) => {
       console.error("[projects] a failed creation kept its delegation grants:", revokeCause);
     });
@@ -98,12 +111,6 @@ export async function createProject(
     }
     throw cause;
   }
-  const opened = await openProject({
-    projectId: project.id,
-    owner: args.owner,
-    ...(args.problemStatement !== undefined ? { problemStatement: args.problemStatement } : {}),
-  });
-  return { ...opened, delegations };
 }
 
 /**

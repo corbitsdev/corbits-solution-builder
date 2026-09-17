@@ -98,6 +98,32 @@ describe("createProject rollback", () => {
     expect(tenants.listable()).toEqual([]);
     expect(store.grants).toHaveLength(0);
   });
+
+  test("an open failure after the tenant exists leaves no listable tenant", async () => {
+    const store = fakeStore();
+    const tenants = fakeTenants();
+    const opened: string[] = [];
+    await expect(
+      createProject(
+        {
+          title: "Doomed workbench",
+          policy: POLICY,
+          owner: { principalId: "principal-owner", displayName: "Owner" },
+        },
+        {
+          store,
+          createRecord: tenants.createRecord,
+          concealRecord: tenants.concealRecord,
+          open: async ({ projectId }) => {
+            opened.push(projectId);
+            throw new Error("the host would not open the run");
+          },
+        },
+      ),
+    ).rejects.toThrow("the host would not open the run");
+    expect(opened).toEqual(["project-1"]);
+    expect(tenants.listable()).toEqual([]);
+  });
 });
 
 describe("deleteProject revocation", () => {
