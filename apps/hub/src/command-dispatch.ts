@@ -16,14 +16,14 @@ import { newId } from "./ids.js";
 import { database, type Db } from "./db.js";
 import type { Authority } from "@solutions-builder/app/ledger";
 import { launchProjectLifecycle, projectExecutionStatus, type DeliveryOutcome } from "./lifecycle-run.js";
-import { loadRun } from "./engine-views.js";
+import { loadRun } from "./run-views.js";
 import { activeRun, readRun, runsForProject } from "./runs.js";
 import {
   authoritiesFor,
   versionHashesMatch,
   audienceTally,
   packetExists,
-} from "./engine-approvals.js";
+} from "./command-approvals.js";
 import {
   recordCommand,
   receiptFor,
@@ -34,7 +34,7 @@ import {
   type BuildQuestion,
   type DecisionFlag,
   type RetentionReceipt,
-} from "./engine-ledger.js";
+} from "./command-ledger.js";
 import { eq } from "drizzle-orm";
 import * as table from "./schema.js";
 import { writeArtifact } from "./projects.js";
@@ -46,11 +46,11 @@ import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { dataDirectory } from "./paths.js";
-import { GATE_COMMANDS, runGateSideEffects } from "./engine-recovery.js";
+import { GATE_COMMANDS, runGateSideEffects } from "./gate-delivery.js";
 import { notifyDecision } from "./notify.js";
 import { readProject, updateProject, type ProjectPolicy } from "./project-records.js";
 
-export { requiredAuthorityFor, soloApprovalFor } from "./engine-approvals.js";
+export { requiredAuthorityFor, soloApprovalFor } from "./command-approvals.js";
 
 /**
  * Launches a project's `project-lifecycle` run in the runtime executor. Called

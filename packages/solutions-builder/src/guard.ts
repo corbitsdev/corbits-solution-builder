@@ -6,7 +6,7 @@
  * row that permits the change or a typed refusal. It lives in the app package,
  * not the hub, so nothing about it depends on a database or a provider — the
  * lifecycle workflow can call it directly, ahead of a transition, the same way
- * `apps/hub/src/engine.ts` still does for host-side effects.
+ * `apps/hub/src/command-dispatch.ts` still does for host-side effects.
  *
  * Two things this file exists to make impossible:
  *   - approving a version other than the one that was reviewed;

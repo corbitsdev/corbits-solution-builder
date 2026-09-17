@@ -23,8 +23,8 @@ import {
   type ConversationPart,
 } from "./hub-client.js";
 import { sha256 } from "./ids.js";
-import type { CommandOutcome } from "./engine.js";
-import { HOST_PRINCIPAL } from "./engine.js";
+import type { CommandOutcome } from "./command-dispatch.js";
+import { HOST_PRINCIPAL } from "./command-dispatch.js";
 import type { RunMutation } from "./runs.js";
 
 /** The `agent_session` id for a project's ledger, deterministic in the project id. */

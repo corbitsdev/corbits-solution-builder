@@ -44,7 +44,7 @@ const { connectProvider, selectModel } = await import("../apps/hub/src/providers
 const { createProject, projectDetail, writeArtifact } = await import("../apps/hub/src/projects.js");
 const { requestDraft } = await import("../apps/hub/src/stage-runs.js");
 const { projectExecutionStatus } = await import("../apps/hub/src/lifecycle-run.js");
-const { execute } = await import("../apps/hub/src/engine.js");
+const { execute } = await import("../apps/hub/src/command-dispatch.js");
 const { newId } = await import("../apps/hub/src/ids.js");
 
 const probe = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() });

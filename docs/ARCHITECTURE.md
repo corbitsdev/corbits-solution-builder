@@ -13,7 +13,7 @@ events — it does not execute the workflow itself.
 ## Components
 
 ```
-apps/hub/src/                    the host: loopback API, guard, engine, persistence, the embedded Interchange hub
+apps/hub/src/                    the host: loopback API, guard, command dispatch, persistence, the embedded Interchange hub
 apps/web/                        the client
 apps/desktop/                    the native shell and tray
 packages/solutions-builder/src/  the app package: the transition ledger, the lifecycle workflow generated from it,
@@ -47,7 +47,7 @@ Interchange's tables is the part of the tree that shrinks as it becomes
 vanilla.
 
 **The hub** (`apps/hub`) owns the loopback API, the database, the guard that
-enforces the ledger, the engine that applies commands, the providers and the
+enforces the ledger, the command dispatch that applies host-side effects, the providers and the
 agent runs. The Interchange hub is Interchange's own hub app, mounted in this
 process (`hub-mount.ts`). Platform writes go through that hub's HTTP API
 (`hub-client.ts`) — the same calls a hosted hub would serve. Only two files
@@ -68,7 +68,7 @@ of building on it: `agent-conversation`, `catalog`, `failure`,
 `lifecycle-run`, `inference`, `live-drafts`, `responses` and `workflow-seed`.
 Everything else in the hub reaches Interchange only through `hub-client.ts`.
 The hub is also the only app allowed to reach a provider. Run state moves in
-the workflow definition in the app package, not in `engine.ts`. All three rules are enforced
+the workflow definition in the app package, not in `command-dispatch.ts`. All three rules are enforced
 by `check:boundaries`, not left to habit — this paragraph is drawn from its
 `PLATFORM_PACKAGES`/`RUNTIME_PACKAGES` lists and `PLATFORM_FILE` allowlist,
 cross-checked against every literal `@intx` import under `apps/hub/src`.
@@ -114,7 +114,7 @@ A project is a child tenant of the workspace tenant; its policy and revision
 live in the tenant config, and its participants are principals holding roles
 there (`project-tenant.ts`). Commands, approvals, audience decisions and
 their audit trail are turns in a per-project ledger agent session
-(`engine-ledger.ts`). The product's run record (origin, source, cost
+(`command-ledger.ts`). The product's run record (origin, source, cost
 approval, packet, checkpoint, why it ended) is folded from the run mutations
 those turns carry (`runs.ts`); where the run stands in the runtime is the
 hub's own workflow run on the project's deployment (`lifecycle-run.ts`).

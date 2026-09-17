@@ -13,7 +13,7 @@ import { STAGE_TITLES } from "@solutions-builder/app/ledger";
 import { CONSEQUENCE, STATE_CONSEQUENCE } from "@solutions-builder/app/decision-copy";
 import { database } from "./db.js";
 import * as table from "./schema.js";
-import { requiredAuthorityFor } from "./engine-approvals.js";
+import { requiredAuthorityFor } from "./command-approvals.js";
 import { listProjectRecords } from "./project-records.js";
 import { activeRun, type RunRecord } from "./runs.js";
 import { deliveryBlockers } from "./delivery.js";

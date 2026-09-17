@@ -16,7 +16,7 @@ import { prepareDatabase } from "../apps/hub/src/migrate.js";
 import { ensureHub, localActor } from "../apps/hub/src/hub-client.js";
 import { install } from "./host-install.js";
 import { createProject, projectDetail, writeArtifact } from "../apps/hub/src/projects.js";
-import { execute } from "../apps/hub/src/engine.js";
+import { execute } from "../apps/hub/src/command-dispatch.js";
 import { newId } from "../apps/hub/src/ids.js";
 import { databaseDirectory } from "../apps/hub/src/paths.js";
 import type { ArtifactKind } from "../apps/hub/src/domain.js";

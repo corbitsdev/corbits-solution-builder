@@ -4,8 +4,8 @@
  * `scripts/seed-demo.ts` gets one fixed workspace to an early stage so the app
  * has something real to open onto. This generalises that: name any stage and
  * any state it can be in, and the script drives a fresh project there through
- * the same command engine a person or a build worker would use
- * (`apps/hub/src/engine.ts`'s `execute`) — never a direct row write. What
+ * the same command dispatch a person or a build worker would use
+ * (`apps/hub/src/command-dispatch.ts`'s `execute`) — never a direct row write. What
  * comes out the other end is a state the product could actually reach.
  *
  * Usage:
@@ -35,7 +35,7 @@ import {
   projectDetail,
   writeArtifact,
 } from "../apps/hub/src/projects.js";
-import { execute, HOST_PRINCIPAL, type Actor, type CommandOutcome } from "../apps/hub/src/engine.js";
+import { execute, HOST_PRINCIPAL, type Actor, type CommandOutcome } from "../apps/hub/src/command-dispatch.js";
 import { newId } from "../apps/hub/src/ids.js";
 import { databaseDirectory } from "../apps/hub/src/paths.js";
 import { workspaceFor } from "../apps/hub/src/corbits-exec.js";

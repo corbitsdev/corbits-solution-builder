@@ -24,9 +24,9 @@ import {
   type DeliveryOutcome,
 } from "./lifecycle-run.js";
 import type { LedgerPosition } from "@solutions-builder/app/workflows/stage-loop";
-import type { CommandInput } from "./engine.js";
+import type { CommandInput } from "./command-dispatch.js";
 
-/** The run's stage and state before the command, as the engine read them. */
+/** The run's stage and state before the command, as dispatch read them. */
 export type RunBefore = { readonly stage: Stage; readonly state: string };
 
 /**
