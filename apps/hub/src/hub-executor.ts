@@ -13,18 +13,27 @@
  * nothing about a run lives in process memory.
  */
 import { ApiError } from "@intx/hub-client";
-import { applyEvent, emptyState, loopBodyRunId, type WorkflowEvent } from "@intx/workflow";
+import { loopBodyRunId } from "@intx/workflow";
 import type { Command, Stage } from "@solutions-builder/app/ledger";
 import {
   alignmentStep,
   exhaustedSignal,
   positionOfSignal,
   reviseStepId,
-  stageOfStepId,
   stageSignal,
   type LedgerPosition,
   type StageSignal,
 } from "@solutions-builder/app/workflows/stage-loop";
+import {
+  anchorIsDead,
+  currentStep,
+  foldRun,
+  parkedSteps,
+  projectState,
+  type FoldedRun,
+  type Parked,
+  type StageStatus,
+} from "@solutions-builder/app/project-state";
 import { assets, deploymentRuns, HubApiError, workflows, type HubRunEvent } from "./hub-client.js";
 import {
   deploymentIsLive,
@@ -117,93 +126,15 @@ async function runIdsUnder(anchor: string, current: boolean): Promise<string[]> 
   return listed;
 }
 
-type FoldedRun = {
-  readonly runId: string;
-  readonly state: ReturnType<typeof emptyState>;
-  /** When the run's newest event was committed, or null for a run with none. */
-  readonly lastAt: number | null;
-  /** When each step's latest attempt started, by step id: how long a step has been at it. */
-  readonly stepStartedAt: ReadonlyMap<string, number>;
-};
-
 /** Every run under the deployment, folded from its committed events. */
 async function foldRuns(anchorRunId: string): Promise<FoldedRun[]> {
   const runIds = await deploymentRuns.list(anchorRunId);
   const folded: FoldedRun[] = [];
   for (const runId of runIds) {
     const events = await deploymentRuns.events(anchorRunId, runId);
-    let state = emptyState(runId);
-    let lastAt: number | null = null;
-    const stepStartedAt = new Map<string, number>();
-    for (const event of events) {
-      // The hub stores the discriminator as `type`; the runtime reads it as
-      // `kind`. The stored body already carries `seq` and `type`.
-      state = applyEvent(state, { ...event.body, seq: event.seq, kind: event.type } as unknown as WorkflowEvent);
-      const at = typeof event.body.at === "string" ? Date.parse(event.body.at) : Number.NaN;
-      if (!Number.isNaN(at) && (lastAt === null || at > lastAt)) lastAt = at;
-      if (event.type === "StepStarted" && !Number.isNaN(at) && typeof event.body.stepId === "string") {
-        stepStartedAt.set(event.body.stepId, at);
-      }
-    }
-    folded.push({ runId, state, lastAt, stepStartedAt });
+    folded.push(foldRun(runId, events));
   }
   return folded;
-}
-
-type Parked = {
-  readonly runId: string;
-  readonly stepId: string;
-  readonly stage: Stage;
-  readonly signalName: string | null;
-  readonly since: string | null;
-};
-
-/**
- * The steps waiting on a person. Every gate lives on the top-level run: a
- * stage's revise loop awaits its round signal through the loop's relay, and
- * its gate awaits the approve signal directly. Both step ids carry the stage.
- * A loop iteration's own run also parks on the round signal; it reports under
- * the loop step that spawned it.
- */
-function parkedSteps(runs: FoldedRun[]): Parked[] {
-  const spawnedBy = new Map<string, string>();
-  for (const run of runs) {
-    for (const [childRunId, child] of run.state.children) spawnedBy.set(childRunId, child.spawnedBy);
-  }
-  const parked: Parked[] = [];
-  for (const run of runs) {
-    for (const step of run.state.steps.values()) {
-      if (step.phase !== "awaiting-signal") continue;
-      const stepId = spawnedBy.get(run.runId) ?? step.stepId;
-      const stage = stageOfStepId(stepId);
-      if (stage === null) continue;
-      parked.push({
-        runId: run.runId,
-        stepId,
-        stage,
-        signalName: step.awaitingSignal?.name ?? null,
-        since: sinceOf(run, step.stepId),
-      });
-    }
-  }
-  return parked;
-}
-
-/** When a step's latest attempt started, as the hub recorded it, or null when it never started. */
-function sinceOf(run: FoldedRun, stepId: string): string | null {
-  const at = run.stepStartedAt.get(stepId);
-  return at === undefined ? null : new Date(at).toISOString();
-}
-
-/** The top-level stage step currently running, when nothing is parked. */
-function currentStep(runs: FoldedRun[]): { stepId: string; stage: Stage; since: string | null } | null {
-  for (const run of runs) {
-    for (const step of run.state.steps.values()) {
-      const stage = stageOfStepId(step.stepId);
-      if (step.phase === "in-flight" && stage !== null) return { stepId: step.stepId, stage, since: sinceOf(run, step.stepId) };
-    }
-  }
-  return null;
 }
 
 /**
@@ -219,25 +150,13 @@ export async function launchProjectLifecycle(args: { readonly projectId: string 
   await deploymentRuns.trigger(anchor, JSON.stringify({ projectId: args.projectId }));
 }
 
-export type StageStatus = {
-  readonly stage: Stage;
-  readonly stepId: string;
-  readonly parked: boolean;
-  readonly signalName: string | null;
-  /** When the step began — running, or waiting — so a window can count from it. */
-  readonly since: string | null;
-};
+export type { StageStatus };
 
 /** Where the project's run stands, read from the hub's own event log. */
 export async function projectExecutionStatus(projectId: string): Promise<StageStatus | null> {
   const anchor = anchors.get(projectId) ?? (await anchorFor(projectId));
   if (!anchor) return null;
-  const runs = await foldRuns(anchor);
-  const [parked] = parkedSteps(runs);
-  if (parked) return { stage: parked.stage, stepId: parked.stepId, parked: true, signalName: parked.signalName, since: parked.since };
-  const running = currentStep(runs);
-  if (running) return { ...running, parked: false, signalName: null };
-  return null;
+  return projectState(await foldRuns(anchor));
 }
 
 /**
@@ -345,46 +264,8 @@ async function consumed(anchor: string, step: Parked): Promise<void> {
  */
 const SETTLE_MS = 750;
 
-/** The run phases nothing follows (`isTerminalRunPhase` in the runtime's state machine). */
-const ENDED = new Set(["completed", "failed", "cancelled"]);
-
-/**
- * How long a fired run may sit with nothing parked and nothing in flight
- * before it is taken to have died without a trace. A run that crashes in
- * the sidecar's own process can leave the hub's log with no terminal event
- * at all; folded, it reads as running, and it never moves again.
- */
-const STALLED_AFTER_MS = 60_000;
-
 /** How often the wait for a park re-reads whether the deployment is still live. */
 const LIVENESS_CHECK_MS = 2_000;
-
-/**
- * The deployment has fired its lifecycle run and nothing on it will ever
- * park again: every run under it has ended, or the runs sit with nothing
- * parked and nothing in flight and their newest event is old, or a stage
- * step on the lifecycle run itself has failed. The deployment itself stays
- * allocated when its run fails, so its allocation status cannot say this;
- * only the runs can. (A deployment with no runs yet is not dead — it has
- * not been fired.)
- *
- * The failed stage step is the case a restart used to be the only way out
- * of: a signal landing inside the runtime's own commit fails the stage's
- * loop, the runtime routes on to the stage's gates, and those park but
- * never complete. Folded, the run reads as parked, so the executor kept
- * signalling a run that could not move.
- */
-function anchorIsDead(anchor: string, runs: FoldedRun[]): boolean {
-  if (runs.length === 0) return false;
-  if (runs.every((run) => ENDED.has(run.state.phase))) return true;
-  const lifecycle = runs.find((run) => run.runId === anchor);
-  if (lifecycle && [...lifecycle.state.steps.values()].some((step) => step.phase === "failed" && stageOfStepId(step.stepId) !== null)) {
-    return true;
-  }
-  if (parkedSteps(runs).length > 0 || currentStep(runs) !== null) return false;
-  const newest = Math.max(...runs.map((run) => run.lastAt ?? 0));
-  return newest > 0 && Date.now() - newest > STALLED_AFTER_MS;
-}
 
 /**
  * The first parked stage step with a position this module knows, waiting for
@@ -592,10 +473,7 @@ export async function debugRuns(projectId: string): Promise<unknown> {
   for (const runId of runIds) {
     try {
       const events = await deploymentRuns.events(anchor, runId);
-      let state = emptyState(runId);
-      for (const event of events) {
-        state = applyEvent(state, { ...event.body, seq: event.seq, kind: event.type } as unknown as WorkflowEvent);
-      }
+      const { state } = foldRun(runId, events);
       out[runId] = {
         kinds: events.map((event) => `${event.seq}:${event.type}`),
         steps: [...state.steps.values()].map((step) => `${step.stepId}=${step.phase}${step.awaitingSignal ? `(${step.awaitingSignal.name})` : ""}`),

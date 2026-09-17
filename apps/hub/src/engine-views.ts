@@ -2,7 +2,7 @@
  * RunView shaping — turning a run record into the guard's `RunView`, and the
  * scoped lookup by run id that every command starts from.
  */
-import type { RunView } from "./guard.js";
+import type { RunView } from "@solutions-builder/app/guard";
 import { notFound } from "./errors.js";
 import { readRun, type RunRecord } from "./runs.js";
 

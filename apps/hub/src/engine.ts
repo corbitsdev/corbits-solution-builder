@@ -15,7 +15,7 @@
 import type { Command, Stage } from "@solutions-builder/app/ledger";
 import { classifyTarget, SELECTABLE_TARGETS } from "@solutions-builder/app/targets";
 import { LEDGER, PROJECT_DELETE } from "@solutions-builder/app/ledger";
-import { evaluate, evaluateAudienceDecision, type GuardContext, type RunView } from "./guard.js";
+import { evaluate, evaluateAudienceDecision, type GuardContext, type RunView } from "@solutions-builder/app/guard";
 import { HostError, notFound } from "./errors.js";
 import { newId } from "./ids.js";
 import { database, type Db } from "./db.js";
