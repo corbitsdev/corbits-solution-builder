@@ -471,6 +471,9 @@ export function createWorkflowAllocationService({
         args.tenantId,
         args.sourceOfferingIds,
         credentialCipher,
+        // CL-8133: gate an ancestor-inherited credential on the deploying
+        // principal's delegation grant. See `model-source-resolution.ts`.
+        args.sourceAuthorityPrincipalId,
       ),
       resolveTenantSidecarCapabilityPolicies(db, args.tenantId),
     ]);
@@ -726,6 +729,10 @@ export function createWorkflowAllocationService({
       allocation.tenantId,
       spec.sourceOfferingIds,
       credentialCipher,
+      // CL-8133: re-checked on every (re)deploy of the allocation, so a
+      // revoked delegation is enforced the next time this run's sidecar
+      // connects, not only at the original deploy.
+      spec.sourceAuthorityPrincipalId,
     );
     if (!resolved.ok) {
       throw new Error(
