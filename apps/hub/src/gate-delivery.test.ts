@@ -43,4 +43,12 @@ describe("host command routes still exist", () => {
     expect(source).toContain('api.post("/projects/:projectId/submit"');
     expect(source).toContain('api.post("/projects/:projectId/decide"');
   });
+
+  test("the host delivery reverify/judge route is gone", async () => {
+    const source = await Bun.file(new URL("./api-decisions.ts", import.meta.url)).text();
+    expect(source).not.toContain('api.post("/projects/:projectId/delivery/reverify"');
+    expect(source).not.toContain("reverifyDelivery");
+    const delivery = await Bun.file(new URL("./delivery.ts", import.meta.url)).text();
+    expect(delivery).not.toContain("export async function reverifyDelivery");
+  });
 });
