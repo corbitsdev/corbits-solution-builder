@@ -9,10 +9,12 @@
  *   `@corbits/codex-provider`  Login-with-ChatGPT configuration and token mapping.
  *
  * What stays here is what the plan says the *host* owns and the libraries
- * explicitly do not: secure persistence, session lifecycle, cancellation,
- * logout, and provider policy. oauth-core is not a credential vault, so tokens
- * go to the OS keychain through `credentials.ts` and never touch a row, a
- * response body, a log line, an artifact or a prompt.
+ * explicitly do not: session lifecycle, cancellation, logout, and provider
+ * policy. oauth-core is not a credential vault, so persistence goes through
+ * `catalog.ts` into Interchange's own credential row — the same store an API
+ * key lands in, and the same one a deployed workflow's sidecar resolves
+ * against — never to a keychain copy of its own, a response body, a log line,
+ * an artifact or a prompt.
  */
 import {
   buildAuthorizeUrl,
@@ -48,7 +50,7 @@ import {
   callbackPageHtml,
   type CallbackPageCopy,
 } from "./oauth-page.js";
-import { deleteSecret, readSecretResult, secretReference, storeSecret } from "./provider-credentials.js";
+import { credentialSecretFor, setCredentialSecret } from "./catalog.js";
 
 export const OAUTH_PROVIDERS = ["codex-oauth", "xai-oauth"] as const;
 export type OAuthProviderId = (typeof OAUTH_PROVIDERS)[number];
@@ -165,25 +167,34 @@ export const PAGE_COPY: CallbackPageCopy = {
   githubLabel: "github.com/corbitsdev/solutions-builder-alpha",
 };
 
-const credentialAccount = (id: OAuthProviderId) => `oauth:${id}`;
-
+/**
+ * The connected provider's own catalog id — `oauth.ts`'s `codex-oauth` /
+ * `xai-oauth` are already the `providerId` `catalog.ts` names a credential
+ * row by (`provider:codex-oauth`), so no separate account scheme is needed.
+ */
 async function loadTokens(id: OAuthProviderId): Promise<Tokens | undefined> {
-  const read = await readSecretResult(await secretReference(credentialAccount(id)));
-
-  // A keychain that cannot answer is not a person who never signed in. Treated
-  // as absence, a locked keychain silently signs somebody out and offers them
-  // the login they already completed.
-  if (read.status === "unavailable") {
-    throw new HostError(
-      "not_authorized",
-      `The keychain could not be read for ${id}: ${read.detail}. ` +
-        "Unlock it, or allow this app access, and try again — you are still signed in.",
+  // No credential row yet (never signed in, or mid sign-in before
+  // `finishOAuthConnect` records the connection) reads the same as absent —
+  // `credentialSecretFor` returns `null` for that case without throwing.
+  let secret: string | null;
+  try {
+    secret = await credentialSecretFor(id);
+  } catch (cause) {
+    // A thrown failure here means the credential row exists but its secret
+    // could not be resolved — a decrypt error, a hub the resolver could not
+    // reach — not "never signed in". Swallowing it as a plain absence would
+    // read as a silent logout on a transient fault, so it is reported loudly
+    // even though the caller still sees "no session" rather than a crash.
+    console.error(
+      `[oauth] the ${id} credential could not be resolved, treating this check as ` +
+        `no session rather than failing it: ${cause instanceof Error ? cause.message : String(cause)}`,
     );
+    return undefined;
   }
-  if (read.status === "missing") return undefined;
+  if (secret === null) return undefined;
 
   try {
-    return JSON.parse(read.secret) as Tokens;
+    return JSON.parse(secret) as Tokens;
   } catch {
     // Stored, but not a token this build understands: a re-login is the fix,
     // and that is what `undefined` asks for.
@@ -191,8 +202,14 @@ async function loadTokens(id: OAuthProviderId): Promise<Tokens | undefined> {
   }
 }
 
-async function saveTokens(id: OAuthProviderId, tokens: Tokens): Promise<string> {
-  return storeSecret(credentialAccount(id), JSON.stringify(tokens));
+/**
+ * Rewrites the credential row's sealed tokens in place. A no-op before the
+ * row exists — the initial exchange's `saveProfile` callback fires before
+ * `finishOAuthConnect` has created it, and `completeLogin` hands the caller
+ * the tokens directly rather than reloading them, so nothing is lost.
+ */
+async function saveTokens(id: OAuthProviderId, tokens: Tokens): Promise<void> {
+  await setCredentialSecret(id, JSON.stringify(tokens));
 }
 
 /**
@@ -281,7 +298,8 @@ export function openBrowser(url: string): { opened: boolean; detail: string } {
 /** Waits for the callback, then commits the tokens to secure storage. */
 export async function completeLogin(): Promise<{
   providerId: OAuthProviderId;
-  credentialRef: string;
+  /** The token pair as JSON — the real material `finishOAuthConnect` seals into the credential row. */
+  secret: string;
   models: string[];
   baseUrl: string;
   expiresAt: number;
@@ -306,7 +324,7 @@ export async function completeLogin(): Promise<{
 
     return {
       providerId: current.id,
-      credentialRef: await secretReference(credentialAccount(current.id)),
+      secret: JSON.stringify(tokens),
       models,
       baseUrl: definition.baseUrl,
       // `expiresAt` is optional on BaseTokens when the issuer omits
@@ -375,11 +393,15 @@ export async function accessTokenFor(id: OAuthProviderId): Promise<Tokens> {
   }
 }
 
-/** Clears the local session. Provider-side revocation is not claimed. */
+/**
+ * Clears the local session cache. Provider-side revocation is not claimed.
+ * The credential row itself — the connection's only stored material — is
+ * removed by `disconnectCatalogProvider`, called right after this by
+ * `disconnectProvider` in `providers.ts`.
+ */
 export async function logout(id: OAuthProviderId): Promise<{ revoked: false; detail: string }> {
   cancelLogin();
   sessions.delete(id);
-  await deleteSecret(await secretReference(credentialAccount(id)));
   return {
     revoked: false,
     detail:

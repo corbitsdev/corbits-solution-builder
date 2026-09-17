@@ -15,6 +15,7 @@
  *
  * Usage: bun --conditions intx-src scripts/upgrade-smoke.ts
  */
+import "./smoke-env.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -26,9 +27,12 @@ import { HUB_MIGRATIONS } from "../apps/hub/src/hub-migrations.js";
 import { migrateHub, PreHubDatabaseError } from "../apps/hub/src/hub-migrate.js";
 import { openDatabase, type HostDatabase } from "../apps/hub/src/db.js";
 import { prepareDatabase } from "../apps/hub/src/migrate.js";
-import { ensureHub } from "../apps/hub/src/hub-client.js";
+import { catalog, ensureHub, getTenant, tenantId } from "../apps/hub/src/hub-client.js";
 import { hub } from "../apps/hub/src/hub-mount.js";
+import { resolveCredentialSecret } from "../apps/hub/src/hub-gaps.js";
 import { install, installState } from "../apps/hub/src/install.js";
+import { readSecretResult, secretReference, storeSecret } from "../apps/hub/src/host-secrets.js";
+import { migrateLegacyProviderCredentials } from "../apps/hub/src/credential-migration.js";
 import { expectedDefinitions } from "@solutions-builder/app/manifest";
 
 const checks: { name: string; ok: boolean; detail: string }[] = [];
@@ -238,6 +242,243 @@ try {
 
   const again = await install();
   check("a second install is a no-op", again.installed && (await count()) === definitions);
+
+  // --- CL-8076: a pre-upgrade OAuth secret in the old keychain/file store is
+  // carried into the hub's own credential row, once, on boot. ---
+  //
+  // The OAuth case is the one this migration exists to fix: pre-CL-8076 code
+  // sealed a useless keychain-reference *string* into the credential row's
+  // `secret` column (the real tokens lived only in the keychain), so the row
+  // existed but could not have authenticated anything. Seeded here exactly
+  // that way, then `install()` — which runs the migration once the workspace
+  // is resolvable — must overwrite the row with the real tokens and delete
+  // the old keychain entry.
+  {
+    const legacyProviderId = "codex-oauth";
+    const legacyAccount = `oauth:${legacyProviderId}`;
+    const realTokens = JSON.stringify({ access: "at-legacy", refresh: "rt-legacy", expiresAt: 0 });
+    await storeSecret(legacyAccount, realTokens);
+
+    const legacyProvider = await catalog.createProvider({
+      name: legacyProviderId,
+      plugin: legacyProviderId,
+      apiBaseUrl: "https://chatgpt.com/backend-api/codex",
+      metadata: { label: "ChatGPT (Codex)" },
+    });
+    await catalog.createCredential({
+      providerId: legacyProvider.id,
+      name: `provider:${legacyProviderId}`,
+      type: "oauth_token",
+      // The useless pointer pre-CL-8076 code sealed here instead of real
+      // material — `upsertCredential` had no `secret` to fall back to.
+      secret: `keychain:${legacyAccount}`,
+      description: "pre-migration placeholder",
+    });
+
+    const beforeMigration = await readSecretResult(await secretReference(legacyAccount));
+    check("the legacy keychain entry exists before migration", beforeMigration.status === "found");
+
+    await install();
+
+    const credentialRows = await (
+      hub().db.db as unknown as { execute: (q: unknown) => Promise<{ rows: { id: string }[] }> }
+    ).execute(sql`SELECT "id" FROM "public"."credential" WHERE "name" = ${`provider:${legacyProviderId}`}`);
+    const credentialId = credentialRows.rows[0]?.id;
+    check("the credential row still exists after migration", typeof credentialId === "string");
+
+    const decrypted = credentialId ? await resolveCredentialSecret(credentialId) : null;
+    check(
+      "the credential row now carries the real tokens, not the old pointer",
+      decrypted === realTokens,
+      String(decrypted),
+    );
+
+    const afterMigration = await readSecretResult(await secretReference(legacyAccount));
+    check(
+      "the old keychain entry is gone after migration",
+      afterMigration.status === "missing",
+    );
+
+    const tenantConfig = (await getTenant(tenantId()))?.config as
+      | { credentialMigration?: { mappings: { account: string; credentialId: string }[] } }
+      | undefined;
+    const mappings = tenantConfig?.credentialMigration?.mappings ?? [];
+    check(
+      "the migration is recorded on the workspace tenant's config",
+      mappings.some((entry) => entry.account === legacyAccount && entry.credentialId === credentialId),
+      JSON.stringify(mappings),
+    );
+
+    await install();
+    const tenantConfigAgain = (await getTenant(tenantId()))?.config as
+      | { credentialMigration?: { mappings: { account: string; credentialId: string }[] } }
+      | undefined;
+    check(
+      "running the migration again is a no-op, not a duplicate mapping",
+      (tenantConfigAgain?.credentialMigration?.mappings ?? []).length === mappings.length,
+    );
+  }
+
+  // --- CL-8076: the API-key case — the row already carried the real secret ---
+  //
+  // Pre-CL-8076 code sealed the real key into the credential row for an
+  // API-key connection (only the OAuth row was ever a useless pointer), so
+  // this account's migration is a no-op on the row and a straight cleanup of
+  // the old keychain entry.
+  {
+    const legacyProviderId = "anthropic";
+    const legacyAccount = `provider:${legacyProviderId}`;
+    const realKey = "sk-ant-legacy-real-key";
+    await storeSecret(legacyAccount, realKey);
+
+    const legacyProvider = await catalog.createProvider({
+      name: legacyProviderId,
+      plugin: legacyProviderId,
+      apiBaseUrl: "https://api.anthropic.com/v1",
+      metadata: { label: "Anthropic" },
+    });
+    await catalog.createCredential({
+      providerId: legacyProvider.id,
+      name: legacyAccount,
+      type: "api_key",
+      secret: realKey,
+      description: "already real, pre-migration",
+    });
+
+    await install();
+
+    const credentialRows = await (
+      hub().db.db as unknown as { execute: (q: unknown) => Promise<{ rows: { id: string }[] }> }
+    ).execute(sql`SELECT "id" FROM "public"."credential" WHERE "name" = ${legacyAccount}`);
+    const credentialId = credentialRows.rows[0]?.id;
+    const decrypted = credentialId ? await resolveCredentialSecret(credentialId) : null;
+    check(
+      "an API-key row that already carried the real secret still does after migration",
+      decrypted === realKey,
+      String(decrypted),
+    );
+
+    const afterMigration = await readSecretResult(await secretReference(legacyAccount));
+    check("its old keychain entry is deleted too", afterMigration.status === "missing");
+  }
+
+  // --- CL-8076: an orphaned legacy secret — no matching credential row ---
+  //
+  // A secret can still be in the old store with nothing on the platform side
+  // to carry it into (a row deleted separately, or a store left over from an
+  // even older build). Migrating must leave it alone rather than discard it.
+  {
+    const orphanProviderId = "openrouter";
+    const orphanAccount = `provider:${orphanProviderId}`;
+    await storeSecret(orphanAccount, "sk-orphan-should-not-move");
+
+    await install();
+
+    const stillThere = await readSecretResult(await secretReference(orphanAccount));
+    check(
+      "an orphaned legacy secret with no matching credential row is left alone",
+      stillThere.status === "found",
+    );
+
+    const tenantConfig = (await getTenant(tenantId()))?.config as
+      | { credentialMigration?: { mappings: { account: string }[] } }
+      | undefined;
+    check(
+      "and it is not recorded as migrated",
+      !(tenantConfig?.credentialMigration?.mappings ?? []).some((entry) => entry.account === orphanAccount),
+    );
+  }
+
+  // --- CL-8076: one account's failure must not stop the others ---
+  //
+  // `catalog.patchCredential` is stubbed to fail for exactly one of two
+  // otherwise-identical legacy accounts, standing in for a hub that rejects
+  // one account's patch (a transient fault, a locked row). The other account
+  // must still migrate, and the failure must be reported rather than thrown
+  // past the loop.
+  {
+    const okProviderId = "xai";
+    const okAccount = `provider:${okProviderId}`;
+    const okSecret = "sk-xai-legacy-real-key";
+    await storeSecret(okAccount, okSecret);
+    const okProvider = await catalog.createProvider({
+      name: okProviderId,
+      plugin: okProviderId,
+      apiBaseUrl: "https://api.x.ai/v1",
+      metadata: { label: "xAI" },
+    });
+    const okCredential = await catalog.createCredential({
+      providerId: okProvider.id,
+      name: okAccount,
+      type: "api_key",
+      secret: "stale-pre-migration-value",
+      description: "pre-migration",
+    });
+
+    const failProviderId = "compatible";
+    const failAccount = `provider:${failProviderId}`;
+    await storeSecret(failAccount, "sk-compatible-legacy-real-key");
+    const failProvider = await catalog.createProvider({
+      name: failProviderId,
+      plugin: failProviderId,
+      apiBaseUrl: "http://localhost:1234/v1",
+      metadata: { label: "Compatible" },
+    });
+    const failCredential = await catalog.createCredential({
+      providerId: failProvider.id,
+      name: failAccount,
+      type: "api_key",
+      secret: "stale-pre-migration-value",
+      description: "pre-migration",
+    });
+
+    const originalPatchCredential = catalog.patchCredential;
+    catalog.patchCredential = (id, input) => {
+      if (id === failCredential.id) {
+        return Promise.reject(new Error("simulated hub rejection for the failure-path test"));
+      }
+      return originalPatchCredential(id, input);
+    };
+
+    let result: Awaited<ReturnType<typeof migrateLegacyProviderCredentials>>;
+    try {
+      result = await migrateLegacyProviderCredentials();
+    } finally {
+      catalog.patchCredential = originalPatchCredential;
+    }
+
+    check(
+      "a failing account is reported as a failure, not thrown past the loop",
+      result.failures.some((entry) => entry.account === failAccount),
+      JSON.stringify(result.failures),
+    );
+    check(
+      "the other account still migrates despite the failure",
+      result.migrated.some((entry) => entry.account === okAccount && entry.credentialId === okCredential.id),
+      JSON.stringify(result.migrated),
+    );
+
+    const okStillThere = await readSecretResult(await secretReference(okAccount));
+    check("the succeeding account's old entry is deleted", okStillThere.status === "missing");
+
+    const failStillThere = await readSecretResult(await secretReference(failAccount));
+    check(
+      "the failing account's old entry is left in place, safe to retry",
+      failStillThere.status === "found",
+    );
+
+    // The retry itself: with the stub removed, the next run finishes what
+    // the simulated failure interrupted.
+    const retried = await migrateLegacyProviderCredentials();
+    check(
+      "retrying after the failure migrates the previously-failing account",
+      retried.migrated.some((entry) => entry.account === failAccount && entry.credentialId === failCredential.id),
+      JSON.stringify(retried.migrated),
+    );
+    const failGoneAfterRetry = await readSecretResult(await secretReference(failAccount));
+    check("and its old entry is finally deleted", failGoneAfterRetry.status === "missing");
+  }
+
   await host.close();
 }
 

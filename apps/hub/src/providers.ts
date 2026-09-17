@@ -21,12 +21,11 @@
  */
 import { HostError, notFound } from "./errors.js";
 import { forgetAllExecutions } from "./hub-executor.js";
-import { storeSecret, deleteSecret, readSecret } from "./provider-credentials.js";
 import {
   registerProviderCatalog,
   listCatalogProviders,
   getCatalogProvider,
-  getCredentialRef,
+  credentialSecretFor,
   touchCredentialValidated,
   setCatalogProviderPriority,
   setCatalogSelectedModel,
@@ -386,9 +385,10 @@ async function validateApiKey(
 /**
  * Connects a provider and validates it before recording it as ready.
  *
- * An API-key secret is validated, stored in the keychain for host-side
- * reads, and sealed into Interchange's credential row so the sidecar can
- * present it as the bearer. Plaintext never lands in a log or a response.
+ * An API-key secret is validated, then sealed straight into Interchange's
+ * credential row — the only place it is stored — so the sidecar can present
+ * it as the bearer and a host-side call decrypts the same row. Plaintext
+ * never lands in a log or a response.
  */
 export async function connectProvider(
   request: ProviderConnectRequest,
@@ -415,7 +415,6 @@ export async function connectProvider(
       providerId: LOCAL_PROVIDER_ID,
       label: request.label,
       kind: "local_endpoint",
-      credentialRef: null,
       baseUrl: validatedBaseUrl,
     });
     catalogChanged();
@@ -450,22 +449,19 @@ export async function connectProvider(
   const providerId = request.providerId as keyof typeof CATALOG;
   const models = await validateApiKey(providerId, request.secret, request.baseUrl);
   const baseUrl = request.baseUrl?.replace(/\/+$/, "") || CATALOG[providerId].baseUrl;
-  const credentialRef = await storeSecret(`provider:${request.providerId}`, request.secret);
 
   // §5: the hub learns the connection exists, and the catalog the
   // credential authenticates. Without these rows there is nothing for a
   // workflow definition to resolve a canonical model name against — the
   // connection would be a secret the host holds privately rather than a
   // capability the platform can deploy. There is no host-side fallback left
-  // for either write failing, so a failure here must not read as success: the
-  // secret is dropped and the caller is told to try again.
+  // for a write failing, so a failure here must not read as success.
   const priority = (await listProviders()).length;
   try {
     const link = await upsertCredential({
       providerId: request.providerId,
       label: request.label,
       kind: request.kind,
-      credentialRef,
       secret: request.secret,
       baseUrl,
     });
@@ -481,12 +477,10 @@ export async function connectProvider(
       priority,
     });
   } catch (cause) {
-    // Roll the platform back too, not just the keychain. Dropping the secret
-    // alone left a `credential` row pointing at an entry that no longer
-    // exists — a connection that reads as present and cannot authenticate,
-    // until some later reconnect happens to overwrite it.
+    // Roll the platform back: a `credential` row left behind after this
+    // fails would read as present and cannot authenticate, until some later
+    // reconnect happens to overwrite it.
     await disconnectCatalogProvider(request.providerId).catch(() => {});
-    await deleteSecret(credentialRef).catch(() => {});
     throw new HostError(
       "provider_unavailable",
       `${request.label} validated, but could not be recorded: ` +
@@ -532,7 +526,7 @@ export async function finishOAuthConnect(): Promise<ProviderSummary> {
       providerId: completed.providerId,
       label: definition.label,
       kind: "oauth",
-      credentialRef: completed.credentialRef,
+      secret: completed.secret,
       baseUrl: completed.baseUrl,
     });
     if (!link) throw new Error("the hub did not return a credential reference");
@@ -575,7 +569,7 @@ export async function refreshProviderModels(providerId: string): Promise<Provide
       ? await refreshModels(providerId as OAuthProviderId)
       : await validateApiKey(
           providerId as keyof typeof CATALOG,
-          (await readSecret((await getCredentialRef(providerId)) ?? "")) ?? "",
+          (await credentialSecretFor(providerId)) ?? "",
           catalogRow.baseUrl || undefined,
         );
 
@@ -606,10 +600,9 @@ export async function disconnectProvider(providerId: string): Promise<void> {
 
   if ((OAUTH_PROVIDERS as readonly string[]).includes(providerId)) {
     await oauthLogout(providerId as OAuthProviderId);
-  } else if (providerId !== LOCAL_PROVIDER_ID) {
-    const ref = await getCredentialRef(providerId);
-    if (ref) await deleteSecret(ref);
   }
+  // The credential row — the only place a provider's secret lives — goes
+  // with `disconnectCatalogProvider` below; there is no second store to clear.
   await disconnectCatalogProvider(providerId);
   catalogChanged();
 }
@@ -625,8 +618,7 @@ export async function credentialFor(provider: ProviderSummary): Promise<string |
     return tokens.access;
   }
   if (!provider.hasCredential) return null;
-  const ref = await getCredentialRef(provider.providerId);
-  return ref ? readSecret(ref) : null;
+  return credentialSecretFor(provider.providerId);
 }
 
 export function catalogEntry(providerId: string) {

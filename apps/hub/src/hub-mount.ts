@@ -80,6 +80,13 @@ export type MountedHub = {
   readonly principalKeyStore: ReturnType<typeof createPrincipalKeyStore>;
   /** The hub's own auth, so the host can sign the workspace owner in without a browser. */
   readonly auth: ReturnType<typeof createAuth>;
+  /**
+   * The cipher a `credential` row's `secret` column is sealed under. Exposed
+   * so `hub-gaps.ts`'s `resolveCredentialSecret` can decrypt a provider's
+   * credential the same way the sidecar's own material resolution does,
+   * without a second, host-only store of the plaintext.
+   */
+  readonly credentialCipher: ReturnType<typeof createEnvKeyCredentialCipher>;
   /** The hub's asset store; a workflow source tree is committed through it. */
   readonly assetService: ReturnType<typeof createAssetService>;
   /**
@@ -475,6 +482,7 @@ export async function mountHub(): Promise<MountedHub> {
     publicKeyHex: hexEncode(signingKey.publicKey),
     principalKeyStore,
     auth,
+    credentialCipher,
     assetService,
     sidecars: {
       fence: (allocationId, generation) => socketRouter.fenceAllocation(allocationId, generation),

@@ -1,13 +1,24 @@
 /**
- * Secure credential storage.
+ * Secure storage for the hub's own bootstrap secrets.
  *
  * Secrets go to the OS keychain through `security(1)` on macOS. Where no
  * OS-backed store is available the host falls back to a file with 0600
  * permissions inside the application data directory and *says so* — a fallback
  * that pretends to be a keychain is worse than one that admits what it is.
  *
- * Nothing in this module returns a secret to a route. `readSecret` has exactly
- * one caller, in the provider registry, on the path to an outbound request.
+ * This is not where a *provider* credential lives (CL-8076 moved those into
+ * Interchange's own `credential` table, sealed with its own credential cipher,
+ * so delegation and the hub's own resolution govern them the same way a
+ * deployed workflow's do). What stays here is genuinely circular otherwise:
+ * the hub's own at-rest encryption keys (`hub-keys.ts`), and the owner's
+ * mint-once password and a hosted hub's bearer token (`hub-client.ts`) —
+ * secrets that cannot themselves live in a row this store's own key would
+ * have to decrypt.
+ *
+ * `credential-migration.ts` is the one other caller, and only once: reading
+ * whatever a pre-CL-8076 install left behind in the old `provider:<id>` /
+ * `oauth:<id>` accounts so it can be carried into the hub's own credential
+ * store and deleted from here.
  */
 import { chmod, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -19,8 +30,36 @@ export type CredentialBackend = "keychain" | "file";
 
 let backend: CredentialBackend | null = null;
 
+/**
+ * Whether this process is a test/smoke run, not a real launch. Only under
+ * this condition does `detectBackend` honour
+ * `SOLUTIONS_BUILDER_CREDENTIAL_BACKEND` at all — the override exists so a
+ * smoke does not touch the real machine keychain with the production account
+ * names this module and `credential-migration.ts` use, and a real launch that
+ * somehow inherited the variable from its environment must not have its
+ * keychain silently downgraded to a file because of it.
+ */
+function isTestRun(): boolean {
+  return process.env.SOLUTIONS_BUILDER_SMOKE === "1" || process.env.NODE_ENV === "test";
+}
+
 async function detectBackend(): Promise<CredentialBackend> {
   if (backend) return backend;
+  const forced = process.env.SOLUTIONS_BUILDER_CREDENTIAL_BACKEND;
+  if ((forced === "file" || forced === "keychain") && isTestRun()) {
+    backend = forced;
+    return backend;
+  }
+  if (forced && !isTestRun()) {
+    // Said loudly rather than silently honoured or silently ignored: either
+    // a real launch's environment carries a variable meant only for tests
+    // (worth knowing), or a test run forgot to set the marker (worth fixing).
+    console.warn(
+      `[host-secrets] SOLUTIONS_BUILDER_CREDENTIAL_BACKEND=${forced} is set but this is not a ` +
+        "recognized test run (SOLUTIONS_BUILDER_SMOKE=1 or NODE_ENV=test), so it is being ignored " +
+        "and the real backend is being detected instead.",
+    );
+  }
   if (process.platform === "darwin") {
     const probe = Bun.spawnSync(["security", "-h"], { stdout: "ignore", stderr: "ignore" });
     backend = probe.exitCode === 0 ? "keychain" : "file";
@@ -112,12 +151,6 @@ export async function readSecretResult(reference: string): Promise<SecretRead> {
   return code === "ENOENT"
     ? { status: "missing" }
     : { status: "unavailable", detail: String((contents as Error).message ?? contents) };
-}
-
-/** Absence and failure both as `null`, for callers where the difference cannot matter. */
-export async function readSecret(reference: string): Promise<string | null> {
-  const read = await readSecretResult(reference);
-  return read.status === "found" ? read.secret : null;
 }
 
 export async function deleteSecret(reference: string): Promise<void> {
