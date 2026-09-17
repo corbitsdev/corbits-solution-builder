@@ -45,6 +45,10 @@ describe("hubProxyAllowed", () => {
     );
     expect(hubProxyAllowed("GET", "/api/tenants")).toBe(false);
     expect(hubProxyAllowed("POST", "/api/tenants/t_workspace/runs")).toBe(false);
+    // Catalog rerank is a host `/api` route, not a hub proxy hole, and
+    // creating a root tenant stays refused.
+    expect(hubProxyAllowed("POST", "/api/catalog/rerank")).toBe(false);
+    expect(hubProxyAllowed("POST", "/api/tenants")).toBe(false);
   });
 });
 

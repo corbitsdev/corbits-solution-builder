@@ -14,6 +14,7 @@ import {
   setProviderOrder,
 } from "./providers.js";
 import { cancelLogin, loginInFlight } from "./oauth.js";
+import { rerankCatalogProviders } from "./catalog.js";
 import { parsed } from "./api.js";
 
 export function registerProviderRoutes(api: Hono) {
@@ -52,6 +53,18 @@ export function registerProviderRoutes(api: Hono) {
 
   api.get("/providers/oauth/status", (context) =>
     context.json({ inFlight: loginInFlight() }),
+  );
+
+  /**
+   * The same reorder the host used to run as install's `afterSkillAssets`.
+   * The client drives install now and cannot rank offerings itself
+   * (`rerankCatalogProviders` is catalog/plugin knowledge), so it asks here
+   * after skill assets. Connect and disconnect re-run install; without this
+   * the catalog would keep leading with a model that cannot answer until the
+   * next boot.
+   */
+  api.post("/catalog/rerank", async (context) =>
+    context.json({ reordered: await rerankCatalogProviders() }),
   );
 
   api.put("/providers/order", async (context) => {
