@@ -65,7 +65,12 @@ The provider list calls install again after any credential change so bindings
 follow credentials.
 
 It prints a launch URL carrying a session token. Every API request must present
-that token. The hub proxy is guarded the same way.
+that token. The hub proxy is guarded the same way; after that outer door it
+calls `ensureOwner()` and forwards the owner session, so the browser does not
+have to hold a second cookie.
+
+`GET /api/status` includes `canPlaceSidecars` and `sidecarFingerprint` from
+the embedded mount, so a client can tell whether this host can place a sidecar.
 
 Closing the window does not stop the process. Only an explicit stop does.
 

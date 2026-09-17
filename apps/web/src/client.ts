@@ -108,6 +108,8 @@ export type HostStatus = {
   };
   credentialBackend: "keychain" | "file";
   inference: { connected: boolean; active: string | null };
+  canPlaceSidecars: boolean;
+  sidecarFingerprint: string | null;
   hub: {
     mode: "embedded" | "remote";
     url: string | null;
@@ -372,6 +374,59 @@ export type InstallState = {
   missing: string[];
   detail: string;
 };
+
+/**
+ * Hub API over the host's `/hub` proxy. Same-origin credentials carry the
+ * desktop handshake cookie; the proxy attaches the owner session after
+ * `ensureOwner()`. CL-8095 will hand this to `install()`; boot still uses
+ * `POST /api/install` until then.
+ */
+export function createHubTransport() {
+  return {
+    async fetch<T>(method: string, path: string, body?: unknown): Promise<T> {
+      let response: Response;
+      try {
+        const init: RequestInit = { method, credentials: "same-origin" };
+        if (body !== undefined) {
+          init.headers = { "content-type": "application/json" };
+          init.body = JSON.stringify(body);
+        }
+        response = await fetch(`/hub${path}`, init);
+      } catch {
+        throw new ApiFailure({
+          code: "host_unreachable",
+          message: "That request did not reach the host. Try again, or reopen the window.",
+          correlationId: "-",
+          retryable: true,
+        });
+      }
+
+      if (response.status === 204) return undefined as T;
+      const text = await response.text();
+      let parsed: unknown;
+      try {
+        parsed = text.length === 0 ? undefined : JSON.parse(text);
+      } catch {
+        parsed = undefined;
+      }
+      if (!response.ok) {
+        const detail = (parsed as { error?: ApiError } | undefined)?.error;
+        throw new ApiFailure(
+          detail ?? {
+            code: "internal_error",
+            message: `The hub answered ${response.status}.`,
+            correlationId: "-",
+            retryable: false,
+          },
+        );
+      }
+      return parsed as T;
+    },
+    subscribe(_path: string, _onEvent: (event: unknown) => void): () => void {
+      throw new Error("The hub proxy has no socket to subscribe on.");
+    },
+  };
+}
 
 export const api = {
   status: () => request<HostStatus>("/status"),

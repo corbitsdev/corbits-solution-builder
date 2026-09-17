@@ -98,8 +98,10 @@ export async function setRemoteToken(token: string): Promise<void> {
 
 /**
  * One raw call path to the hub, whichever side of the boundary it is on. No
- * identity is attached: this is what the `/hub/*` proxy uses, where the caller
- * brings its own. `hubApi` below is the authenticated one.
+ * identity is attached. The `/hub/*` proxy calls `ensureOwner()` then
+ * `hubProxyHeaders` before this, so the forwarded request carries the owner
+ * session rather than the desktop handshake. `hubApi` below is the
+ * authenticated path the host itself uses.
  */
 export async function hubFetch(path: string, init?: RequestInit): Promise<Response> {
   const url = configuredUrl();

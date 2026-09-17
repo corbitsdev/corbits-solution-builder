@@ -82,6 +82,27 @@ try {
   }).then((response) => response.json() as Promise<{ status?: string }>);
   check("the hub answers an authorised client", authorised.status === "ok");
 
+  const me = await fetch("http://127.0.0.1:8140/hub/api/me", {
+    headers: { authorization: `Bearer ${hubHost.token}` },
+  });
+  const meBody = (await me.json().catch(() => null)) as { id?: string } | null;
+  check(
+    "the hub proxy attaches the owner session",
+    me.ok && typeof meBody?.id === "string",
+    me.ok ? String(meBody?.id) : `${me.status}`,
+  );
+
+  const status = embedded as {
+    hub: Record<string, unknown>;
+    canPlaceSidecars?: boolean;
+    sidecarFingerprint?: string | null;
+  };
+  check(
+    "GET /status names sidecar placement from the mount",
+    status.canPlaceSidecars === true && typeof status.sidecarFingerprint === "string" && status.sidecarFingerprint.length > 0,
+    `canPlaceSidecars=${String(status.canPlaceSidecars)} fingerprint=${String(status.sidecarFingerprint)}`,
+  );
+
   // --- Topology 2: the hub hosted in another process ---
   const { setRemoteToken } = await import("../apps/hub/src/hub-client.js");
   await setRemoteToken(hubHost.token);
