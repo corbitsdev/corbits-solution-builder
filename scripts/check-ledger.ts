@@ -170,6 +170,8 @@ for (const terminal of TERMINAL_STATES) {
     stageSignal,
     continuingCommands,
     ROUND_STEP_ID,
+    GATE_WAIT_STEP_ID,
+    ADMIT_STEP_ID,
   } = await import("@solutions-builder/app/workflows/stage-loop");
   // stage.draft is the round command that keeps a stage open: it must be a
   // continuing command everywhere, and land on the round signal at every stage.
@@ -188,16 +190,22 @@ for (const terminal of TERMINAL_STATES) {
     {
       kind?: string;
       name?: string;
+      handler?: string;
+      while?: string;
       maxIterations?: number;
       onExhausted?: string;
       after?: string[];
-      body?: { steps?: Record<string, { kind?: string; name?: string }>; stepOrder?: string[] };
+      body?: {
+        steps?: Record<string, { kind?: string; name?: string; handler?: string }>;
+        stepOrder?: string[];
+      };
     }
   >;
 
-  // Every stage is a bounded revise loop followed by a human gate, both on the
-  // top-level run so the hub can signal them. A stage that could complete
-  // without a person is an automatic advancement, which section 7 forbids.
+  // Every stage is a bounded revise loop followed by two human gate loops
+  // (ordinary and exhausted), both on the top-level run so the hub can
+  // signal them. A stage that could complete without a person is an
+  // automatic advancement, which section 7 forbids.
   for (const stage of STAGES) {
     const revise = steps[reviseStepId(stage)];
     const gate = steps[stageStepId(stage)];
@@ -212,9 +220,29 @@ for (const terminal of TERMINAL_STATES) {
       problems.push(`Loop ${reviseStepId(stage)} does not route to a gate when exhausted`);
     }
     const exhausted = steps[exhaustedStepId(stage)];
-    if (!exhausted || exhausted.kind !== "awaitSignal" || exhausted.name !== exhaustedSignal(stage)) {
-      problems.push(`Stage ${stage}'s exhaustion does not end at a human gate`);
+    function gateLoop(
+      step: (typeof steps)[string] | undefined,
+      label: string,
+      signal: string,
+    ): void {
+      if (!step || step.kind !== "loop" || step.while !== "gateRefused") {
+        problems.push(`${label} is not a gateRefused loop`);
+        return;
+      }
+      if (typeof step.maxIterations !== "number" || step.maxIterations <= 0) {
+        problems.push(`${label} is not bounded`);
+      }
+      const body = step.body?.steps ?? {};
+      const wait = body[GATE_WAIT_STEP_ID];
+      const admit = body[ADMIT_STEP_ID];
+      if (!wait || wait.kind !== "awaitSignal" || wait.name !== signal) {
+        problems.push(`${label} does not wait on ${signal}`);
+      }
+      if (!admit || admit.kind !== "action" || admit.handler !== "admitGate") {
+        problems.push(`${label} does not admit through admitGate`);
+      }
     }
+    gateLoop(exhausted, `Stage ${stage}'s exhaustion`, exhaustedSignal(stage));
     // The round is the one thing every iteration always has, even once a
     // drafting round grows a gate and agent steps after it: it must be the
     // only awaitSignal in the body, and it must run first — nothing else can
@@ -232,13 +260,12 @@ for (const terminal of TERMINAL_STATES) {
     if (iterationOrder && iterationOrder[0] !== ROUND_STEP_ID) {
       problems.push(`Stage ${stage}'s round does not come first in its iteration`);
     }
-    if (!gate || gate.kind !== "awaitSignal" || gate.name !== approveSignal(stage)) {
-      problems.push(`The native workflow has no human gate for stage ${stage}`);
-    } else if (!gate.after?.includes(reviseStepId(stage))) {
+    gateLoop(gate, `Stage ${stage}'s gate`, approveSignal(stage));
+    if (gate && !gate.after?.includes(reviseStepId(stage))) {
       problems.push(`Stage ${stage}'s gate does not follow its revise loop`);
     }
     // Every command the ledger allows out of the stage lands on one of its two
-    // signals, so the run can never be asked for something it cannot consume.
+    // 8091 signals, so the run can never be asked for something it cannot consume.
     for (const command of loopExits(stage)) {
       if (stageSignal(stage, command).name !== roundSignal(stage)) {
         problems.push(`${command} leaves in_progress but is not a round signal at stage ${stage}`);
@@ -251,7 +278,8 @@ for (const terminal of TERMINAL_STATES) {
       }
     }
   }
-  if (definition.stepOrder.length !== STAGES.length * 3) {
+  // revise, gate loop, exhausted loop, gate-cap, exhausted-cap
+  if (definition.stepOrder.length !== STAGES.length * 5) {
     problems.push(
       `The native workflow has ${definition.stepOrder.length} steps for ${STAGES.length} stages`,
     );

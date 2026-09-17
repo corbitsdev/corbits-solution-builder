@@ -207,8 +207,12 @@ for (const file of files) {
   const external = imports.filter((name) => !name.startsWith("."));
 
   if (area === "package") {
+    // `bun:test` is the runner, not shipped: app-package tests sit next to
+    // the modules they cover and never reach the sidecar embed.
+    const isTest = /\.test\.tsx?$/.test(path);
     const outside = external.filter(
-      (name) => !startsWithAny(name, PACKAGE_ALLOWED) && !name.startsWith("node:"),
+      (name) =>
+        !startsWithAny(name, PACKAGE_ALLOWED) && !name.startsWith("node:") && !(isTest && name === "bun:test"),
     );
     if (outside.length > 0) {
       violations.push({

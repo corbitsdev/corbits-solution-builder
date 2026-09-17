@@ -29,6 +29,9 @@ describe("workflow-closure embed", () => {
     const members = deckAppMemberFiles();
     expect(members["packages/solutions-builder-app/src/deck.ts"]).toBe(deck);
     expect(members["packages/solutions-builder-app/src/delivery.ts"]).toBe(delivery);
+    expect(members["packages/solutions-builder-app/src/admit.ts"]).toContain("admitGate");
+    expect(members["packages/solutions-builder-app/src/guard.ts"]).toContain("export function evaluate");
+    expect(members["packages/solutions-builder-app/src/project-state.ts"]).toContain("export function projectState");
     expect(Object.keys(toolsDeckMemberFiles()).some((path) => path.endsWith("src/sidecar-bundle.ts"))).toBe(true);
     expect(Object.keys(toolsDeliveryMemberFiles()).some((path) => path.endsWith("src/sidecar-bundle.ts"))).toBe(true);
     expect(Object.keys(workspaceCatalog()).length).toBeGreaterThan(0);

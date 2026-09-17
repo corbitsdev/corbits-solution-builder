@@ -1,8 +1,16 @@
 /**
- * Recovery from a host restart: the executor's run map is in memory, so a
- * restart mid-flight loses it. Relaunching is idempotent, and doing it right
- * before a gate signal — rather than only at project creation — is what
- * keeps the runtime alive across a closed window.
+ * Recovery from a host restart, and delivery of a gate command to the run.
+ *
+ * The executor's run map is in memory, so a restart mid-flight loses it.
+ * Relaunching is idempotent, and doing it right before a gate signal —
+ * rather than only at project creation — is what keeps the runtime alive
+ * across a closed window.
+ *
+ * A gate command is delivered first: `admitGate` in the app package is the
+ * admit authority; this module does not evaluate the ledger. A fresh UUID
+ * is the signal id every time, so a refused wait can hear the next
+ * delivery instead of treating it as a duplicate of the command's
+ * idempotency key.
  *
  * Nothing here writes run state; `hasExecution`/`launchProjectLifecycle`/
  * `deliverStageSignal` all live in the executor itself.
@@ -32,12 +40,11 @@ export const GATE_COMMANDS: readonly Command[] = [
 ];
 
 /**
- * Best-effort shadow of a committed gate transition: relaunches the
- * project's run if the executor lost it to a restart, then delivers the
- * stage signal. Called outside the transaction that committed the
- * transition — the executor is not something the database's single writer
- * connection can be reached from mid-transaction, and this is not part of
- * what made the transition valid.
+ * Delivers a gate command to the waiting run: relaunches the project's run
+ * if the executor lost it to a restart, then signals. Called before the
+ * host transaction that would write a `RunDraft` — the executor is not
+ * something the database's single writer connection can be reached from
+ * mid-transaction, and a refused command never reaches that write.
  *
  * Returns the delivery outcome so a caller that needs the round to have
  * actually reached a waiting run (a drafting request) can tell "delivered"
@@ -74,7 +81,10 @@ export async function runGateSideEffects(input: CommandInput, before?: RunBefore
       console.error(`[executor] ${input.projectId}: could not relaunch after restart:`, cause);
     });
   }
-  return deliverStageSignal(input.projectId, input.type, input.payload, input.idempotencyKey, position?.stage).catch(
+  // A fresh signal id every delivery: the gate loop may refuse and wait
+  // again, and reusing the command's idempotency key would make the second
+  // delivery look like a duplicate of the first.
+  return deliverStageSignal(input.projectId, input.type, input.payload, crypto.randomUUID(), position?.stage).catch(
     (cause: unknown): DeliveryOutcome => {
       console.error(`[executor] ${input.projectId}: signal delivery threw:`, cause);
       return "failed";

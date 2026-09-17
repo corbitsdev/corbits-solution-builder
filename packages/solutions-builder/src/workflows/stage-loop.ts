@@ -20,6 +20,7 @@
  * approve or send back.
  */
 import {
+  action,
   awaitSignal,
   defineWorkflow,
   loop,
@@ -63,6 +64,10 @@ export const NO_DRAFT_STEP_ID = "no-draft";
 export const EVALUATE_STEP_ID = "evaluate";
 /** The one stage whose draft is followed by the brief evaluator. */
 export const EVALUATED_STAGE: Stage = 1;
+/** The awaiter inside a gate loop: the person sends the command. */
+export const GATE_WAIT_STEP_ID = "wait";
+/** The action inside a gate loop: the ledger guard admits or refuses. */
+export const ADMIT_STEP_ID = "admit";
 /**
  * How long one drafting agent step may run before the runtime fails it.
  * Matches `DEFAULT_TIMEOUT_MS` in `apps/hub/src/inference.ts`, the timeout
@@ -293,6 +298,15 @@ export function exhaustedStepId(stage: Stage): string {
   return `exhausted-${stage}`;
 }
 
+/** Dead-end park if a gate loop hits its refusal cap. Not a 8091 signal. */
+export function gateCapStepId(stage: Stage): string {
+  return `gate-cap-${stage}`;
+}
+
+export function exhaustedCapStepId(stage: Stage): string {
+  return `exhausted-cap-${stage}`;
+}
+
 /** The steps a stage ends on; the next stage starts after both. */
 export function stageEnds(stage: Stage): string[] {
   return [gateStepId(stage), exhaustedStepId(stage)];
@@ -300,7 +314,7 @@ export function stageEnds(stage: Stage): string[] {
 
 /** The stage a top-level step belongs to, or null for a step that is not a stage's. */
 export function stageOfStepId(stepId: string): Stage | null {
-  const match = /^(?:revise|gate|exhausted)-(\d+)/.exec(stepId);
+  const match = /^(?:revise|gate|exhausted)(?:-cap)?-(\d+)/.exec(stepId);
   return match ? (Number(match[1]) as Stage) : null;
 }
 
@@ -327,6 +341,26 @@ export function iteration(stage: Stage): WorkflowDefinition {
   });
 }
 
+/** One gate iteration: wait for the 8091 signal, then admit. */
+export function gateIteration(stage: Stage, gate: "gate" | "exhausted"): WorkflowDefinition {
+  return defineWorkflow({
+    id: `${STAGE_WORKFLOW_ID}.admit.${gate}.${stage}`,
+    triggers: [{ type: "manual" }],
+    steps: {
+      [GATE_WAIT_STEP_ID]: awaitSignal({
+        name: gate === "gate" ? approveSignal(stage) : exhaustedSignal(stage),
+        drainBehavior: "wait",
+      }),
+      [ADMIT_STEP_ID]: action({
+        handler: "admitGate",
+        input: { from: `steps.${GATE_WAIT_STEP_ID}.output` },
+        drainBehavior: "wait",
+        after: [GATE_WAIT_STEP_ID],
+      }),
+    } as never,
+  });
+}
+
 /** The top-level steps a stage contributes to the lifecycle: the loop and its two gates. */
 export function stageSteps(stage: Stage, after: readonly string[] | null): Record<string, unknown> {
   return {
@@ -346,15 +380,33 @@ export function stageSteps(stage: Stage, after: readonly string[] | null): Recor
       drainBehavior: "wait",
       ...(after ? { after: [...after] } : {}),
     }),
-    [gateStepId(stage)]: awaitSignal({
-      name: approveSignal(stage),
+    [gateStepId(stage)]: loop({
+      body: gateIteration(stage, "gate"),
+      while: "gateRefused",
+      carry: "carryGate",
+      maxIterations: MAX_REVISIONS,
+      onExhausted: gateCapStepId(stage),
       drainBehavior: "wait",
       after: [reviseStepId(stage)],
     }),
-    [exhaustedStepId(stage)]: awaitSignal({
-      name: exhaustedSignal(stage),
+    [exhaustedStepId(stage)]: loop({
+      body: gateIteration(stage, "exhausted"),
+      while: "gateRefused",
+      carry: "carryGate",
+      maxIterations: MAX_REVISIONS,
+      onExhausted: exhaustedCapStepId(stage),
       drainBehavior: "wait",
       after: [reviseStepId(stage)],
+    }),
+    [gateCapStepId(stage)]: awaitSignal({
+      name: `${STAGE_WORKFLOW_ID}.${stage}.gate-cap`,
+      drainBehavior: "wait",
+      after: [gateStepId(stage)],
+    }),
+    [exhaustedCapStepId(stage)]: awaitSignal({
+      name: `${STAGE_WORKFLOW_ID}.${stage}.exhausted-cap`,
+      drainBehavior: "wait",
+      after: [exhaustedStepId(stage)],
     }),
   };
 }

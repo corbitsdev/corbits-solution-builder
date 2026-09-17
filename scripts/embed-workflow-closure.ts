@@ -85,6 +85,22 @@ function collect(): Record<string, string> {
     "packages/solutions-builder/src/delivery.ts": readUtf8(
       join(ROOT, "packages", "solutions-builder", "src", "delivery.ts"),
     ),
+    "packages/solutions-builder/src/admit.ts": readUtf8(join(ROOT, "packages", "solutions-builder", "src", "admit.ts")),
+    "packages/solutions-builder/src/guard.ts": readUtf8(join(ROOT, "packages", "solutions-builder", "src", "guard.ts")),
+    "packages/solutions-builder/src/project-state.ts": readUtf8(
+      join(ROOT, "packages", "solutions-builder", "src", "project-state.ts"),
+    ),
+    "packages/solutions-builder/src/ledger.ts": readUtf8(join(ROOT, "packages", "solutions-builder", "src", "ledger.ts")),
+    "packages/solutions-builder/src/kit.ts": readUtf8(join(ROOT, "packages", "solutions-builder", "src", "kit.ts")),
+    "packages/solutions-builder/src/artifacts.ts": readUtf8(
+      join(ROOT, "packages", "solutions-builder", "src", "artifacts.ts"),
+    ),
+    "packages/solutions-builder/src/requirements-example.ts": readUtf8(
+      join(ROOT, "packages", "solutions-builder", "src", "requirements-example.ts"),
+    ),
+    "packages/solutions-builder/src/workflows/stage-loop.ts": readUtf8(
+      join(ROOT, "packages", "solutions-builder", "src", "workflows", "stage-loop.ts"),
+    ),
   };
   collectTools("tools-deck", files);
   collectTools("tools-delivery", files);

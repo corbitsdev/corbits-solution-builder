@@ -17,7 +17,7 @@ import {
   WORKFLOW_PACKAGE_DEPENDENCIES,
   type InferenceSourcePin,
 } from "@solutions-builder/app/workflows/lifecycle-source";
-import { continuingCommands, ROUND_STEP_ID } from "@solutions-builder/app/workflows/stage-loop";
+import { continuingCommands, ADMIT_STEP_ID, ROUND_STEP_ID } from "@solutions-builder/app/workflows/stage-loop";
 import {
   assetsFor,
   catalogFor,
@@ -76,6 +76,7 @@ export const LIFECYCLE_ASSET_NAME = "solutions-builder-project-lifecycle";
 const ENTRY_PATH = LIFECYCLE_ENTRY_PATH;
 const ENTRY = `./${ENTRY_PATH}`;
 const LOOPS_PATH = "loops.js";
+const ACTIONS_PATH = "actions.js";
 /** The workflow member inside the asset; the vendored @intx packages sit beside it. */
 const LIFECYCLE_DIR = "packages/lifecycle";
 const DIGEST_PATH = "closure.sha256";
@@ -83,13 +84,15 @@ const DIGEST_PATH = "closure.sha256";
 /**
  * The stage loop's `while` and `carry` refs, resolved by export name from the
  * package's own loops module. Pure data functions over the iteration's output,
- * which the runtime hands over as a record keyed by body step id: the one
- * `round` step's output is the signal payload, and the payload names the
- * ledger command a person issued. The loop goes on only while that command
- * keeps the stage in progress; a submit ends it and the run moves to the gate.
- * A terminal command (cancel, fail) ends it the same way and the run then
- * parks at the gate — the run is a shadow of the ledger, which is what
- * refuses or allows what happens next.
+ * which the runtime hands over as a record keyed by body step id.
+ *
+ * The revise loop's `round` step output is the signal payload, and the payload
+ * names the ledger command a person issued. The loop goes on only while that
+ * command keeps the stage in progress; a submit ends it and the run moves to
+ * the gate. A terminal command (cancel, fail) ends it the same way and the run
+ * then parks at the gate — the run is a shadow of the ledger.
+ *
+ * A gate loop's `admit` step output is the verdict: refused means wait again.
  */
 function loopsModule(): string {
   const continues = JSON.stringify(continuingCommands());
@@ -106,6 +109,24 @@ export function carryRound(childOutput, carry) {
   const round = childOutput && typeof childOutput === "object" ? childOutput[${JSON.stringify(ROUND_STEP_ID)}] : null;
   return round ?? carry;
 }
+function admitOutput(childOutput) {
+  const admit = childOutput && typeof childOutput === "object" ? childOutput[${JSON.stringify(ADMIT_STEP_ID)}] : null;
+  return admit && typeof admit === "object" ? admit : null;
+}
+export function gateRefused(childOutput) {
+  const admit = admitOutput(childOutput);
+  return admit !== null && admit.refused === true;
+}
+export function carryGate(childOutput, carry) {
+  const admit = admitOutput(childOutput);
+  return admit ?? carry;
+}
+`;
+}
+
+/** The `interchange.actions` module: the gate loop names `admitGate`. */
+function actionsModule(): string {
+  return `export { admitGate } from "@solutions-builder/app/admit";
 `;
 }
 
@@ -143,7 +164,7 @@ export function renderLifecycleSource(
     private: true,
     type: "module",
     dependencies: WORKFLOW_PACKAGE_DEPENDENCIES,
-    interchange: { workflow: ENTRY, loops: `./${LOOPS_PATH}` },
+    interchange: { workflow: ENTRY, loops: `./${LOOPS_PATH}`, actions: `./${ACTIONS_PATH}` },
   };
   const files: Record<string, string> = {
     "package.json": `${JSON.stringify(root, null, 2)}\n`,
@@ -152,6 +173,7 @@ export function renderLifecycleSource(
       source ? { source, ...(audiences ? { audiences } : {}) } : {},
     ),
     [`${LIFECYCLE_DIR}/${LOOPS_PATH}`]: loopsModule(),
+    [`${LIFECYCLE_DIR}/${ACTIONS_PATH}`]: actionsModule(),
     // The build agent's tools ride beside the workflow runtime; the two
     // closures overlap on @intx/agent and @intx/types, which is fine.
     ...closureFiles("workflow"),

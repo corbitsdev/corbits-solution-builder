@@ -137,19 +137,13 @@ export function closureFiles(root: string): Record<string, string> {
 }
 
 /**
- * `@solutions-builder/app`'s pure, tool-imported modules, shipped as one
- * member so `@solutions-builder/tools-deck` and `@solutions-builder/tools-delivery`
- * — both carried by the deployed workflow — resolve `@solutions-builder/app/deck`
- * and `@solutions-builder/app/delivery` in the sidecar the same way they
- * resolve them in this repo. Only these modules ride along: each is the one
- * the corresponding tool imports, and neither has a relative import of its
- * own (only the npm packages `pptxgenjs` and `arktype`), so shipping them
- * alone avoids dragging the rest of the app package — its host-only modules
- * and their host-only dependencies — into an asset that never runs them.
- * Unlike the vendored `@intx/*` members, this ships as TypeScript source:
- * the package is consumed as source everywhere in this repo (see
- * `scripts/pack-registry-asset.ts`'s `appTarballFiles`), so there is no
- * `dist/` to copy.
+ * `@solutions-builder/app`'s modules the deployed lifecycle actually runs:
+ * deck/delivery for the tools, and admit/guard/project-state (plus the
+ * files they import) so the gate loop's `admitGate` action resolves in the
+ * sidecar. Only these ride along. Unlike the vendored `@intx/*` members,
+ * this ships as TypeScript source: the package is consumed as source
+ * everywhere in this repo (see `scripts/pack-registry-asset.ts`'s
+ * `appTarballFiles`), so there is no `dist/` to copy.
  */
 export function deckAppMemberFiles(): Record<string, string> {
   const dir = "packages/solutions-builder-app";
@@ -158,12 +152,25 @@ export function deckAppMemberFiles(): Record<string, string> {
     version: "0.1.0",
     type: "module",
     exports: { "./*": "./src/*.ts" },
-    dependencies: { pptxgenjs: "4", arktype: "catalog:" },
+    dependencies: {
+      pptxgenjs: "4",
+      arktype: "catalog:",
+      "@intx/workflow": "workspace:*",
+      "@intx/types": "workspace:*",
+    },
   };
   return {
     [`${dir}/package.json`]: `${JSON.stringify(manifest, null, 2)}\n`,
     [`${dir}/src/deck.ts`]: embedFile("packages/solutions-builder/src/deck.ts"),
     [`${dir}/src/delivery.ts`]: embedFile("packages/solutions-builder/src/delivery.ts"),
+    [`${dir}/src/admit.ts`]: embedFile("packages/solutions-builder/src/admit.ts"),
+    [`${dir}/src/guard.ts`]: embedFile("packages/solutions-builder/src/guard.ts"),
+    [`${dir}/src/project-state.ts`]: embedFile("packages/solutions-builder/src/project-state.ts"),
+    [`${dir}/src/ledger.ts`]: embedFile("packages/solutions-builder/src/ledger.ts"),
+    [`${dir}/src/kit.ts`]: embedFile("packages/solutions-builder/src/kit.ts"),
+    [`${dir}/src/artifacts.ts`]: embedFile("packages/solutions-builder/src/artifacts.ts"),
+    [`${dir}/src/requirements-example.ts`]: embedFile("packages/solutions-builder/src/requirements-example.ts"),
+    [`${dir}/src/workflows/stage-loop.ts`]: embedFile("packages/solutions-builder/src/workflows/stage-loop.ts"),
   };
 }
 
