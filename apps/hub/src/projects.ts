@@ -24,8 +24,8 @@ import { nextQuestion } from "./questions.js";
 import { openDecisionFor } from "./decisions.js";
 import { liveDraft } from "./live-drafts.js";
 import { activityHeadline } from "@solutions-builder/app/next-step";
-import { currentAnchor, executionUnavailable, projectExecutionStatus } from "./hub-executor.js";
-import { activeRun, runsForProject, type RunRecord } from "./runs.js";
+import { currentAnchor, executionUnavailable, projectExecutionStatus } from "./lifecycle-run.js";
+import { activeRun, runsForProject } from "./runs.js";
 import { tenantId } from "./hub-client.js";
 import { installProjectAuthority } from "./project-authority.js";
 import {
@@ -141,22 +141,6 @@ export async function openProject(args: {
   if (!opening) throw new HostError("internal_error", "The opening transition names no state.");
 
   const runId = newId.run();
-  const opened: RunRecord = {
-    id: runId,
-    projectId: args.projectId,
-    kind: opening.kind,
-    stage,
-    state: opening.state,
-    sourceRunId: null,
-    originId: runId,
-    terminalReason: null,
-    costApprovalVersionId: null,
-    routeTargetStage: null,
-    packetId: null,
-    checkpointRef: null,
-    createdAt: new Date(),
-    endedAt: null,
-  };
 
   await recordCommand({
     projectId: args.projectId,
@@ -166,7 +150,7 @@ export async function openProject(args: {
     transitionId: transition.id,
     correlationId: newId.correlation(),
     before: null,
-    after: { projectId: args.projectId, runId, stage },
+    after: { projectId: args.projectId, runId, stage, state: opening.state },
     idempotencyKey: newId.command(),
     result: {
       runId,
@@ -177,7 +161,6 @@ export async function openProject(args: {
     },
     stage,
     runId,
-    runs: [{ op: "create", run: opened }],
     ...(args.problemStatement?.trim() ? { message: args.problemStatement.trim() } : {}),
   });
   await launchProjectRun({ projectId: args.projectId });
@@ -187,12 +170,8 @@ export async function openProject(args: {
 async function existingOpening(projectId: string): Promise<{ projectId: string; runId: string } | null> {
   const opening = (await ledgerCommands(projectId)).find((command) => command.command === "project.create");
   if (!opening) return null;
-  for (const raw of opening.runs) {
-    const mutation = raw as { op?: string; run?: { id?: string } };
-    if (mutation.op === "create" && typeof mutation.run?.id === "string") {
-      return { projectId, runId: mutation.run.id };
-    }
-  }
+  const after = opening.after as { runId?: string } | undefined;
+  if (typeof after?.runId === "string") return { projectId, runId: after.runId };
   throw new HostError("conflict", "That project is already open.");
 }
 

@@ -20,7 +20,7 @@
  * row's mere existence.
  */
 import { HostError, notFound } from "./errors.js";
-import { forgetAllExecutions } from "./hub-executor.js";
+import { forgetAllExecutions } from "./lifecycle-run.js";
 import {
   registerProviderCatalog,
   listCatalogProviders,

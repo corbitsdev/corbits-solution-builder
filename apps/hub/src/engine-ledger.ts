@@ -204,6 +204,9 @@ export type LedgerCommand = {
   createdAt: string;
   /** The human text this command opened with, when it carried one. */
   message: string | null;
+  /** Where the command left the run, when it recorded one. */
+  after: unknown;
+  result: CommandOutcome | null;
 };
 
 /**
@@ -246,6 +249,8 @@ export async function ledgerCommands(projectId: string): Promise<LedgerCommand[]
     answer: (part.metadata?.answer as BuildAnswer | undefined) ?? null,
     createdAt: part.startedAt,
     message: typeof part.metadata?.message === "string" ? part.metadata.message : null,
+    after: part.metadata?.after ?? null,
+    result: (part.metadata?.result as CommandOutcome | undefined) ?? null,
   }));
 }
 

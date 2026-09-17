@@ -31,7 +31,7 @@ const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull(
 /**
  * There is no `run` table. A project's run record folds from the ledger
  * thread (`runs.ts`); where it stands in the runtime is the hub's own
- * workflow run on the project's deployment (`hub-executor.ts`).
+ * workflow run on the project's deployment (`lifecycle-run.ts`).
  */
 
 /**

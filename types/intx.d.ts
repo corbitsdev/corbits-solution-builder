@@ -673,7 +673,7 @@ declare module "@intx/workflow" {
   export function createInMemoryBlobSubstrate(): BlobSubstrate;
   export function createNoopDrainController(definition: WorkflowDefinition): DrainController;
 
-  // --- State-machine read surface (apps/hub/src/hub-executor.ts) ---
+  // --- State-machine read surface (apps/hub/src/lifecycle-run.ts) ---
   // Folding a run's committed events into its current step phases, to read
   // "is this run parked, and on what signal" without a dedicated status API.
 

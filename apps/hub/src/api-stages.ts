@@ -6,7 +6,7 @@ import { notFound, HostError } from "./errors.js";
 import { projectDetail } from "./projects.js";
 import { requestDraft, type PlanDocument } from "./stage-runs.js";
 import { evaluationIn, threadTurns } from "./stage-thread.js";
-import { stageIterations } from "./hub-executor.js";
+import { stageIterations } from "./lifecycle-run.js";
 import { nextQuestion } from "./questions.js";
 import { liveDraft, liveDraftBegun, subscribeLiveDraft } from "./live-drafts.js";
 import { localActor } from "./hub-client.js";

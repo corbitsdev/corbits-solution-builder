@@ -16,7 +16,7 @@
  */
 import { parseRunAddress } from "@intx/types";
 import { hub } from "./hub-mount.js";
-import { projectForAnchor } from "./hub-executor.js";
+import { projectForAnchor } from "./lifecycle-run.js";
 
 type Listener = (event: LiveEvent) => void;
 

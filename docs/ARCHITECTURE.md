@@ -5,7 +5,7 @@ the window and the tray are clients. The host embeds the Interchange control
 plane over an embedded database. Each project's nine-stage lifecycle runs as
 a deployment placed on an Interchange workflow sidecar — a child process the
 host spawns per allocation, not a routine inside the host's own process
-(`workflow-deploy.ts`, `hub-mount.ts`). `hub-executor.ts` is the in-process
+(`workflow-deploy.ts`, `hub-mount.ts`). `lifecycle-run.ts` is the in-process
 client of that deployment: it fires the run, delivers gate commands to it as
 signals, and derives where the run stands by folding the run's own committed
 events — it does not execute the workflow itself.
@@ -65,10 +65,10 @@ only the platform's runtime surface (`@intx/inference`,
 which the same script treats as product code rather than platform code,
 because using the platform's own inference and workflow runtimes is the point
 of building on it: `agent-conversation`, `catalog`, `failure`,
-`hub-executor`, `inference`, `live-drafts`, `responses` and `workflow-seed`.
+`lifecycle-run`, `inference`, `live-drafts`, `responses` and `workflow-seed`.
 Everything else in the hub reaches Interchange only through `hub-client.ts`.
-The hub is also the only app allowed to reach a provider, and within it only
-`engine.ts` and `projects.ts` move a run's state. All three rules are enforced
+The hub is also the only app allowed to reach a provider. Run state moves in
+the workflow definition in the app package, not in `engine.ts`. All three rules are enforced
 by `check:boundaries`, not left to habit — this paragraph is drawn from its
 `PLATFORM_PACKAGES`/`RUNTIME_PACKAGES` lists and `PLATFORM_FILE` allowlist,
 cross-checked against every literal `@intx` import under `apps/hub/src`.
@@ -117,7 +117,7 @@ their audit trail are turns in a per-project ledger agent session
 (`engine-ledger.ts`). The product's run record (origin, source, cost
 approval, packet, checkpoint, why it ended) is folded from the run mutations
 those turns carry (`runs.ts`); where the run stands in the runtime is the
-hub's own workflow run on the project's deployment (`hub-executor.ts`).
+hub's own workflow run on the project's deployment (`lifecycle-run.ts`).
 Decision flags, worker questions and their answers are fields on the ledger
 turn of the command that raised them; a build attempt's events are turns of
 their own on the same thread. The frozen build packet and the delivery

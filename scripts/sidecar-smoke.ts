@@ -269,7 +269,7 @@ try {
   // first stage parks on the person, and a gate command lands as a signal.
   const { createProject } = await import("../apps/hub/src/projects.js");
   const { localActor, deploymentRuns, hubApi, tenantPath } = await import("../apps/hub/src/hub-client.js");
-  const { projectExecutionStatus, deliverStageSignal, parkedSignalNames } = await import("../apps/hub/src/hub-executor.js");
+  const { projectExecutionStatus, deliverStageSignal, parkedSignalNames } = await import("../apps/hub/src/lifecycle-run.js");
   const projectTitle = "Smoke: runs on the hub";
   const project = await createProject({
     title: projectTitle,
@@ -349,7 +349,7 @@ try {
         liveEvents.push(event.type === "text" ? { type: event.type, text: event.text } : { type: event.type });
       });
 
-      const { stageIterations } = await import("../apps/hub/src/hub-executor.js");
+      const { stageIterations } = await import("../apps/hub/src/lifecycle-run.js");
       const beforeRound = await stageIterations(project.projectId, 1, { currentOnly: true });
 
       let drafted: Awaited<ReturnType<typeof requestDraft>> | { error: string };
@@ -425,7 +425,7 @@ try {
         (await (await import("../apps/hub/src/questions.js")).nextQuestion(project.projectId, 1))?.ordinal === 0,
       );
 
-      const iterationsAfterDraft = await (await import("../apps/hub/src/hub-executor.js")).stageIterations(
+      const iterationsAfterDraft = await (await import("../apps/hub/src/lifecycle-run.js")).stageIterations(
         project.projectId,
         1,
       );
@@ -486,7 +486,7 @@ try {
         failedTurn ? failedTurn.body.slice(0, 300) : `no failed turn; request said ${JSON.stringify(refusedError).slice(0, 300)}`,
       );
       if (!failedTurn) {
-        const { debugRuns } = await import("../apps/hub/src/hub-executor.js");
+        const { debugRuns } = await import("../apps/hub/src/lifecycle-run.js");
         console.log("DIAG", JSON.stringify(await debugRuns(project.projectId), null, 1).slice(0, 6000));
         console.log("THREAD", JSON.stringify(await threadTurns(project.projectId, 1)).slice(0, 3000));
       }
@@ -497,7 +497,7 @@ try {
     const stage1 = await advanceStage(walkCtx, 1, briefVersion);
     check("stage.submit lands on the parked loop as its round signal", stage1.submitDelivery === "delivered", stage1.submitDelivery);
     if (!stage1.gate) {
-      const { debugRuns } = await import("../apps/hub/src/hub-executor.js");
+      const { debugRuns } = await import("../apps/hub/src/lifecycle-run.js");
       console.log("DIAG", JSON.stringify(await debugRuns(project.projectId), null, 1).slice(0, 6000));
     }
     check(
@@ -773,7 +773,7 @@ try {
           : `no authorised completion reached the stub (${requests.slice(beforeRequests).join("; ") || "no requests"})`,
       );
       if (!seen) {
-        const { debugRuns } = await import("../apps/hub/src/hub-executor.js");
+        const { debugRuns } = await import("../apps/hub/src/lifecycle-run.js");
         console.log("STUB REQUESTS", JSON.stringify(requests.slice(-10)));
         console.log("DIAG", JSON.stringify(await debugRuns(project.projectId), null, 1).slice(0, 12000));
       }
@@ -824,7 +824,7 @@ try {
         afterBuild ? `${afterBuild.stepId} ${afterBuild.signalName ?? ""}` : "no status",
       );
       if (!afterBuild?.parked) {
-        const { debugRuns } = await import("../apps/hub/src/hub-executor.js");
+        const { debugRuns } = await import("../apps/hub/src/lifecycle-run.js");
         console.log("DIAG", JSON.stringify(await debugRuns(project.projectId), null, 1).slice(0, 8000));
       }
 

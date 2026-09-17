@@ -43,7 +43,7 @@ const { localActor } = await import("../apps/hub/src/hub-client.js");
 const { connectProvider, selectModel } = await import("../apps/hub/src/providers.js");
 const { createProject, projectDetail, writeArtifact } = await import("../apps/hub/src/projects.js");
 const { requestDraft } = await import("../apps/hub/src/stage-runs.js");
-const { projectExecutionStatus } = await import("../apps/hub/src/hub-executor.js");
+const { projectExecutionStatus } = await import("../apps/hub/src/lifecycle-run.js");
 const { execute } = await import("../apps/hub/src/engine.js");
 const { newId } = await import("../apps/hub/src/ids.js");
 
