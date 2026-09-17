@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { ApiError } from "@solutions-builder/installer";
-import { createHubTransport } from "./client.ts";
+import { api, createHubTransport, rerankCatalogAfterSkillAssets } from "./client.ts";
 
 describe("createHubTransport", () => {
   const original = globalThis.fetch;
@@ -54,5 +54,31 @@ describe("createHubTransport", () => {
       expect((cause as ApiError).status).toBe(401);
       expect((cause as ApiError).code).toBe("unauthenticated");
     }
+  });
+});
+
+describe("rerankCatalogAfterSkillAssets", () => {
+  const original = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = original;
+  });
+
+  test("posts the host rerank install used to run as afterSkillAssets", async () => {
+    const calls: { url: string; method: string | undefined }[] = [];
+    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), method: init?.method });
+      return new Response(JSON.stringify({ reordered: 2 }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+
+    await rerankCatalogAfterSkillAssets();
+    expect(calls.map((call) => call.url)).toEqual(["/api/catalog/rerank"]);
+    expect(calls[0]?.method).toBe("POST");
+  });
+
+  test("client install still passes that rerank as afterSkillAssets", () => {
+    expect(api.install.toString()).toContain("rerankCatalogAfterSkillAssets");
   });
 });

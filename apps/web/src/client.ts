@@ -408,6 +408,16 @@ function projectSlug(): string {
   return out;
 }
 
+/**
+ * The host's `afterSkillAssets` step: reorder offerings by what each
+ * provider's plugin can serve. The installer package cannot judge that;
+ * credential connect/disconnect re-runs install, and this is how that
+ * install still reranks without a new `POST /install`.
+ */
+export async function rerankCatalogAfterSkillAssets(): Promise<void> {
+  await post("/catalog/rerank");
+}
+
 export function sidecarCapabilityOf(
   status: Pick<HostStatus, "canPlaceSidecars" | "sidecarFingerprint">,
 ): SidecarCapability {
@@ -508,7 +518,9 @@ export const api = {
     const status = await request<HostStatus>("/status");
     if (status.hub.mode !== "embedded") return HOSTED_INSTALL;
     try {
-      return await installerInstall(createHubTransport(), sidecarCapabilityOf(status));
+      return await installerInstall(createHubTransport(), sidecarCapabilityOf(status), {
+        afterSkillAssets: rerankCatalogAfterSkillAssets,
+      });
     } catch (cause) {
       installerFailure(cause);
     }
