@@ -196,6 +196,8 @@ function toolsMemberFiles(name: string, packageDir: string): Record<string, stri
   const paths: string[] = [];
   walk(join(packageDir, "src"), paths);
   for (const full of paths) {
+    // Tests exercise the tool in this workspace; the sidecar only ever runs it.
+    if (/\.test\.tsx?$/.test(full)) continue;
     const rel = relative(packageDir, full).split("\\").join("/");
     files[`${dir}/${rel}`] = readFileSync(full, "utf8");
   }

@@ -18,6 +18,8 @@ import {
   BUILD_STEP_ID,
   BUILD_STEP_TIMEOUT_MS,
   DECIDE_STEP_ID,
+  DELIVERY_STAGE,
+  DELIVERY_STEP_ID,
   DRAFT_STEP_ID,
   DRAFT_STEP_TIMEOUT_MS,
   EVALUATE_STEP_ID,
@@ -45,13 +47,17 @@ import { skillTextFor } from "../seed-kit.js";
  * `@intx/tools-posix` does, so a running workflow renders a stakeholder's
  * slides itself instead of asking the hub to do it (`apps/hub/src/workflow-closure.ts`
  * ships its files, and `@solutions-builder/app`'s deck authoring it depends
- * on, into the same asset).
+ * on, into the same asset). `@solutions-builder/tools-delivery` is the same
+ * shape for stage 9's delivery-verifier: it summarizes a manifest's
+ * already-checked descriptors into a completeness report without a hub
+ * round trip.
  */
 export const WORKFLOW_PACKAGE_DEPENDENCIES: Readonly<Record<string, string>> = {
   "@intx/workflow": "workspace:*",
   "@intx/agent": "workspace:*",
   "@intx/tools-posix": "workspace:*",
   "@solutions-builder/tools-deck": "workspace:*",
+  "@solutions-builder/tools-delivery": "workspace:*",
   hono: "^4.0.0",
 };
 
@@ -75,6 +81,13 @@ export const BUILD_STAGE = 8;
 
 /** The stage whose rounds write one package per stakeholder, each behind its own gate. */
 export const PACKAGE_STAGE = 5;
+
+// `DELIVERY_STAGE` (the stage whose specialist checks a delivery manifest) is
+// defined in `stage-loop.js`, imported above, and re-exported here: it names
+// both the stage number and, via `DELIVERY_STEP_ID`, the step id that number
+// renders to, and `check-ledger.ts` reads both off this module the same way
+// it reads `BUILD_STAGE`.
+export { DELIVERY_STAGE };
 
 /**
  * The stage whose rounds write the requirements and then the plan, each
@@ -140,7 +153,10 @@ function roleIdForStep(stage: Stage, stepId: string): string {
  */
 function inputForStep(stage: Stage, stepId: string, index: number, audienceCount: number): { from: string } {
   if (index < gatedStepCount(stage, audienceCount)) return { from: `steps.${ROUND_STEP_ID}.output.prompts[${index}]` };
-  if (stepId === DRAFT_STEP_ID) return { from: `steps.${ROUND_STEP_ID}.output.prompt` };
+  // Stage 9's one step is named `DELIVERY_STEP_ID`, not `DRAFT_STEP_ID` (see
+  // its definition), but is the same "first, ungated, reads the round's
+  // prompt" shape every other single-step drafted stage has.
+  if (stepId === DRAFT_STEP_ID || stepId === DELIVERY_STEP_ID) return { from: `steps.${ROUND_STEP_ID}.output.prompt` };
   return { from: `steps.${DRAFT_STEP_ID}.output.reply` };
 }
 
@@ -183,6 +199,7 @@ export function lifecycleEntrySource(options: LifecycleSourceOptions = {}): stri
     ? `import { defineAgent } from ${JSON.stringify("@intx/agent")};
 import { posix } from ${JSON.stringify("@intx/tools-posix/sidecar-bundle")};
 import { deck } from ${JSON.stringify("@solutions-builder/tools-deck/sidecar-bundle")};
+import { delivery } from ${JSON.stringify("@solutions-builder/tools-delivery/sidecar-bundle")};
 `
     : "";
   // The build agent is the kit's stage 8 specialist, given a workspace. Every
@@ -213,17 +230,20 @@ const buildAgent = defineAgent({
   // Every other stage's specialist: capabilities-free, pinned to the same
   // offering as the build agent. Rendered as pure data (ids, prompts,
   // selectors) and reassembled into `defineAgent` calls here, in the sidecar,
-  // never carried across as functions. Stage 5's specialist alone carries a
-  // tool — the deck renderer — since it is the one that turns a stakeholder's
-  // package into slides; every other rendered stage stays tools-free.
+  // never carried across as functions. Stage 5's specialist carries the deck
+  // renderer, since it is the one that turns a stakeholder's package into
+  // slides; stage 9's specialist carries the delivery-status summarizer,
+  // since it is the one that checks a manifest against what was built. Every
+  // other rendered stage stays tools-free.
   const agentsBlock = source
     ? `
 const AGENTS = {
 ${rolesInUse(audienceCount)
-  .map(
-    (role) =>
-      `  ${JSON.stringify(role.id)}: defineAgent({ id: ${JSON.stringify(role.id)}, systemPrompt: ${JSON.stringify(renderedPrompt(role))}, tools: [${role.id === agentFor(PACKAGE_STAGE).id ? "deck" : ""}], capabilities: [], inference: { sources: [SOURCE] } }),`,
-  )
+  .map((role) => {
+    const tool =
+      role.id === agentFor(PACKAGE_STAGE).id ? "deck" : role.id === agentFor(DELIVERY_STAGE).id ? "delivery" : "";
+    return `  ${JSON.stringify(role.id)}: defineAgent({ id: ${JSON.stringify(role.id)}, systemPrompt: ${JSON.stringify(renderedPrompt(role))}, tools: [${tool}], capabilities: [], inference: { sources: [SOURCE] } }),`;
+  })
   .join("\n")}
 };
 `

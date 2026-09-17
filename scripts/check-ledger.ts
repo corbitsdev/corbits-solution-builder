@@ -24,6 +24,9 @@ import {
 const { deck: renderDeckTool } = (await import("../packages/tools-deck/src/sidecar-bundle.ts")) as {
   deck: { id: string };
 };
+const { delivery: deliveryStatusTool } = (await import("../packages/tools-delivery/src/sidecar-bundle.ts")) as {
+  delivery: { id: string };
+};
 
 const problems: string[] = [];
 const seen = new Set<string>();
@@ -261,12 +264,13 @@ for (const terminal of TERMINAL_STATES) {
     const { mkdtemp, mkdir, symlink, writeFile, rm, realpath } = await import("node:fs/promises");
     const { tmpdir } = await import("node:os");
     const { join } = await import("node:path");
-    const { LIFECYCLE_ENTRY_PATH, lifecycleEntrySource, withoutStateSchemas, BUILD_STAGE } = await import(
+    const { LIFECYCLE_ENTRY_PATH, lifecycleEntrySource, withoutStateSchemas, BUILD_STAGE, DELIVERY_STAGE } = await import(
       "@solutions-builder/app/workflows/lifecycle-source"
     );
     const {
       BUILD_STEP_ID,
       DRAFT_STEP_ID,
+      DELIVERY_STEP_ID,
       DECIDE_STEP_ID,
       NO_DRAFT_STEP_ID,
       EVALUATE_STEP_ID,
@@ -340,16 +344,18 @@ for (const terminal of TERMINAL_STATES) {
         const pkg = await realpath(join(import.meta.dir, "..", "node_modules", "@intx", name));
         await symlink(pkg, join(dir, "node_modules", "@intx", name), "dir");
       }
-      // Same reasoning for the deck tool and the app package it depends on:
-      // the tools-deck package itself is not a workspace root dependency
-      // (only the rendered lifecycle source names it), so it never lands in
-      // the workspace's own node_modules; symlink it and its dependency by
-      // repo path instead.
-      await symlink(
-        join(import.meta.dir, "..", "packages", "tools-deck"),
-        join(dir, "node_modules", "@solutions-builder", "tools-deck"),
-        "dir",
-      );
+      // Same reasoning for the deck and delivery tools and the app package
+      // they depend on: neither tool package is a workspace root dependency
+      // (only the rendered lifecycle source names them), so they never land
+      // in the workspace's own node_modules; symlink them and their
+      // dependency by repo path instead.
+      for (const name of ["tools-deck", "tools-delivery"]) {
+        await symlink(
+          join(import.meta.dir, "..", "packages", name),
+          join(dir, "node_modules", "@solutions-builder", name),
+          "dir",
+        );
+      }
       await symlink(
         await realpath(join(import.meta.dir, "..", "node_modules", "@solutions-builder", "app")),
         join(dir, "node_modules", "@solutions-builder", "app"),
@@ -411,13 +417,18 @@ for (const terminal of TERMINAL_STATES) {
       // requirements' gate, and is checked in full below.
       for (const stage of STAGES) {
         if (stage === 5 || (stage as number) === BUILD_STAGE) continue;
+        // Stage 9 renders its one step under `DELIVERY_STEP_ID`, not
+        // `DRAFT_STEP_ID`: the deployed workflow's capability walk refuses a
+        // leaf step id that recurs with different grants across loop bodies,
+        // and stage 9 alone carries the delivery_status tool.
+        const stepId = (stage as number) === DELIVERY_STAGE ? DELIVERY_STEP_ID : DRAFT_STEP_ID;
         const iteration = withSourceSteps[revise(stage)]?.body;
         const decide = iteration?.steps?.[DECIDE_STEP_ID];
-        const draft = iteration?.steps?.[DRAFT_STEP_ID];
+        const draft = iteration?.steps?.[stepId];
         const gated = (stage as number) === 6;
         if (!decide || decide.kind !== "gate" || decide.when?.from !== `steps.${ROUND_STEP_ID}.output.draft`) {
           problems.push(`Stage ${stage}'s decide gate does not read the round's draft flag`);
-        } else if (decide.then !== (gated ? "pick-0" : DRAFT_STEP_ID) || decide.else !== NO_DRAFT_STEP_ID) {
+        } else if (decide.then !== (gated ? "pick-0" : stepId) || decide.else !== NO_DRAFT_STEP_ID) {
           problems.push(`Stage ${stage}'s decide gate does not branch to draft/no-draft`);
         }
         if (!draft || draft.kind !== "step" || draft.agent?.id !== agentFor(stage).id) {
@@ -428,6 +439,11 @@ for (const terminal of TERMINAL_STATES) {
           problems.push(`Stage ${stage}'s draft step does not read the round's prompt`);
         } else if (!gated && !draft.after?.includes(DECIDE_STEP_ID)) {
           problems.push(`Stage ${stage}'s draft step does not follow its decide gate`);
+        } else if (
+          (stage as number) === DELIVERY_STAGE &&
+          !draft.agent?.toolFactories?.some((tool) => tool.id === deliveryStatusTool.id)
+        ) {
+          problems.push(`Stage ${stage}'s draft step does not carry the delivery_status tool`);
         }
         const noDraft = iteration?.steps?.[NO_DRAFT_STEP_ID];
         if (!noDraft || noDraft.kind !== "escalation" || !noDraft.after?.includes(DECIDE_STEP_ID)) {

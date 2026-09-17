@@ -1,0 +1,17 @@
+{
+  "name": "@solutions-builder/tools-delivery",
+  "description": "Delivery verification summary as a workflow tool: the sidecar turns a manifest's checked items into the completeness report and blocker sentence the decision queue shows, using the pure delivery evidence in @solutions-builder/app/delivery. Hashing the workspace and reading the manifest stay host-side (they need the build workspace and the database); only the deterministic summarizing moves here.",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./sidecar-bundle": {
+      "intx-src": "./src/sidecar-bundle.ts",
+      "default": "./src/sidecar-bundle.ts"
+    }
+  },
+  "dependencies": {
+    "@intx/agent": "workspace:*",
+    "@solutions-builder/app": "workspace:*"
+  }
+}
