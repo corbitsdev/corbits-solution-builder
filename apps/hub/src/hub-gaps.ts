@@ -61,11 +61,11 @@
  * Everything else the host asks of the platform goes through `hub-client.ts`.
  */
 import { and, eq, sql, type Column } from "drizzle-orm";
-import { createPrincipalStore } from "@intx/db";
+import { createPrincipalStore, resolveInferenceMaterials } from "@intx/db";
 import { createDetachedSignatureWithSigner } from "@intx/crypto";
 import { assembleMessage, assembleSignedContent, generateMessageId } from "@intx/mime";
 import { hub } from "./hub-mount.js";
-import { LEGACY_TENANT_ID } from "./hub-client.js";
+import { LEGACY_TENANT_ID, tenantId } from "./hub-client.js";
 import { newId } from "./ids.js";
 
 type Row = Record<string, unknown>;
@@ -85,6 +85,35 @@ type Handle = {
 
 function handle(): Handle {
   return hub().db.db as unknown as Handle;
+}
+
+// --- resolveCredentialSecret -------------------------------------------------
+//
+// Not an upstream gap — the platform's own mechanism, just reached from
+// inside the process instead of over HTTP. A `credential` row's `secret`
+// column is ciphertext, and there is no route that decrypts one for a
+// caller: the hub's own routes never hand a sealed secret back out, on
+// purpose. `resolveInferenceMaterials` is the platform's single point of
+// decrypt for exactly this material — the same call a deployed workflow's
+// allocation goes through to hand the sidecar its bearer — so a host-side
+// read (the outbound bearer for a host-driven call, a refresh probe) uses it
+// too, rather than keeping a second, host-only copy of the plaintext.
+//
+// It is tenant-scoped and fails closed the same way: a credential id outside
+// `tenantId()`'s ancestor chain throws, never resolves to a null secret.
+
+/** The decrypted secret behind a `credential` row, tenant-scoped like the platform's own resolution. */
+export async function resolveCredentialSecret(credentialId: string): Promise<string> {
+  const [material] = await resolveInferenceMaterials(
+    hub().db.db,
+    tenantId(),
+    [credentialId],
+    hub().credentialCipher,
+  );
+  if (!material) {
+    throw new Error(`credential ${credentialId} could not be resolved for tenant ${tenantId()}`);
+  }
+  return material.secret;
 }
 
 // --- 1. registerDefinition -------------------------------------------------

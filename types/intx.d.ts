@@ -43,6 +43,26 @@ declare module "@intx/db" {
   ): {
     createIfAbsent(row: unknown): Promise<unknown>;
   };
+
+  export type CredentialMaterialEntry = {
+    credentialId: string;
+    providerKey: string;
+    origin: string;
+    secret: string;
+  };
+  /**
+   * The platform's single point of decrypt for an inference credential: the
+   * tenant-ownership check a deployed workflow's own resolution uses, then
+   * the cipher's decrypt at the row this build seals a provider's secret
+   * into. `hub-gaps.ts`'s `resolveCredentialSecret` is the one host-side
+   * caller — see CL-8076.
+   */
+  export function resolveInferenceMaterials(
+    db: unknown,
+    tenantId: string,
+    credentialIds: Iterable<string>,
+    credentialCipher: unknown,
+  ): Promise<CredentialMaterialEntry[]>;
 }
 
 declare module "@intx/db/schema" {

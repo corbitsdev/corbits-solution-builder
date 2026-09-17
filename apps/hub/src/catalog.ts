@@ -7,13 +7,16 @@
  * validates, authorises and records each row the same way it would for any
  * other client.
  *
- * The API key is sealed into the credential row with Interchange's own
- * credential cipher (the encryption key lives in the OS keychain). The
- * sidecar decrypts that column and sends it as the bearer. A keychain
- * copy remains for host-side reads (refresh, disconnect); it is not what
- * the sidecar authenticates with.
+ * The secret — an API key, or a signed-in OAuth token pair — is sealed into
+ * the credential row with Interchange's own credential cipher (the encryption
+ * key lives in the OS keychain). The sidecar decrypts that column and sends
+ * it as the bearer; a host-side read (refresh, the outbound bearer for a
+ * host-driven call) decrypts the same row through `resolveCredentialSecret`
+ * in `hub-gaps.ts`. There is no second, keychain-backed copy of a provider
+ * secret: the row is the only place it lives.
  */
 import { catalogModels, catalogProviders } from "@intx/inference-catalog";
+import { resolveCredentialSecret } from "./hub-gaps.js";
 import {
   catalog,
   workspaceOrNull,
@@ -140,36 +143,37 @@ async function credentialFor(providerId: string): Promise<HubCredential | null> 
 }
 
 /**
- * Records a connection's credential. An API key is sealed into the row so
- * Interchange can deliver it to the sidecar as the bearer; a keychain
- * reference is kept in metadata for host-side reads. A keyless connection
- * (a local endpoint) gets the smallest honest stand-in the platform's
- * "exactly one credential per model provider" rule allows: a credential
- * typed `other`, holding no material, tagged keyless so every reader tells
- * it apart from a real one.
+ * Records a connection's credential. The real material — an API key, or an
+ * OAuth token pair as JSON — is sealed straight into the row with
+ * Interchange's own credential cipher; the row's own id is the reference
+ * everything downstream needs, and there is no second copy anywhere else. A
+ * keyless connection (a local endpoint) gets the smallest honest stand-in the
+ * platform's "exactly one credential per model provider" rule allows: a
+ * credential typed `other`, holding no material, tagged keyless so every
+ * reader tells it apart from a real one.
  */
 export async function upsertCredential(input: {
   providerId: string;
   label: string;
   kind: "api_key" | "oauth" | "local_endpoint";
-  credentialRef: string | null;
-  /** The material Interchange seals. API keys pass the key; omit for OAuth. */
+  /** The material Interchange seals. Required for `api_key`/`oauth`; omit for `local_endpoint`. */
   secret?: string | null;
   baseUrl?: string;
   scopes?: string[];
 }): Promise<HubCredential> {
   const provider = await ensureProviderRow(input.providerId, input.label, input.baseUrl);
-  const keyless = input.kind === "local_endpoint" || !input.credentialRef;
-  const sealed = keyless ? KEYLESS_SECRET : (input.secret ?? input.credentialRef!);
+  const keyless = input.kind === "local_endpoint";
+  if (!keyless && !input.secret) {
+    throw new Error(`upsertCredential: ${input.kind} connection for ${input.providerId} needs a secret.`);
+  }
+  const sealed = keyless ? KEYLESS_SECRET : input.secret!;
   const row = {
     type: keyless ? ("other" as const) : input.kind === "oauth" ? ("oauth_token" as const) : ("api_key" as const),
     secret: sealed,
     description: keyless
       ? "Placeholder for a keyless local endpoint — carries no secret material."
-      : input.secret
-        ? `${input.label}, sealed at rest. The encryption key lives in the OS keychain.`
-        : `${input.label}, held in the OS keychain. This row carries the reference, never the secret.`,
-    metadata: keyless ? { keyless: true } : { ref: input.credentialRef! },
+      : `${input.label}, sealed at rest. The encryption key lives in the OS keychain.`,
+    metadata: keyless ? { keyless: true } : {},
     ...(input.scopes ? { scopes: input.scopes } : {}),
   };
 
@@ -186,11 +190,28 @@ export async function upsertCredential(input: {
   });
 }
 
-/** The keychain reference a provider authenticates with, or null when keyless. */
-export async function getCredentialRef(providerId: string): Promise<string | null> {
+/**
+ * The decrypted secret behind a provider's credential row — the same material
+ * a deployed workflow's sidecar would be handed — or `null` when the provider
+ * is not connected or is keyless. The one host-side path to a provider
+ * secret; every reader (the outbound bearer, a refresh probe) goes through
+ * this rather than a store of its own.
+ */
+export async function credentialSecretFor(providerId: string): Promise<string | null> {
   const row = await credentialFor(providerId);
-  const ref = row?.metadata?.ref;
-  return typeof ref === "string" ? ref : null;
+  if (!row || row.metadata?.keyless) return null;
+  return resolveCredentialSecret(row.id);
+}
+
+/**
+ * Rewrites a connected provider's sealed secret in place — an OAuth token
+ * rotation, not a reconnect. `null` when the provider has no credential row
+ * yet (a login in flight, before `finishOAuthConnect` records the connection).
+ */
+export async function setCredentialSecret(providerId: string, secret: string): Promise<HubCredential | null> {
+  const row = await credentialFor(providerId);
+  if (!row) return null;
+  return catalog.patchCredential(row.id, { secret, status: "active" });
 }
 
 /** Marks a credential validated again — after a successful models refresh. */
