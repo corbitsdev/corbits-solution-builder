@@ -25,6 +25,7 @@ import {
   deploymentIsLive as installerDeploymentIsLive,
   deployLifecycle as installerDeployLifecycle,
   ensureLifecycleDeployment as installerEnsureLifecycleDeployment,
+  ensureWorkspace as installerEnsureWorkspace,
   forgetWorkspace as installerForgetWorkspace,
   install as installerInstall,
   installProjectAuthority as installerInstallProjectAuthority,
@@ -77,10 +78,23 @@ function sidecarCapability(): SidecarCapability {
  * no-op once the legacy tenant is gone or already adopted (or there never
  * was one), so it is safe to call on every install.
  */
-async function adoptLegacyWorkspaceOnce(): Promise<void> {
+export async function adoptLegacyWorkspaceOnce(): Promise<void> {
   if (await resolveWorkspace()) return;
   const me = await hubGet<{ id: string }>("/api/me");
   await adoptLegacyWorkspace(database(), me.id, LEGACY_TENANT_ID);
+}
+
+/**
+ * The workspace tenant, created in-process so the `/hub` proxy never has to
+ * offer `POST /api/tenants` without a parent. Idempotent: a tenant that
+ * already resolves is left alone.
+ */
+export async function ensureWorkspaceOnce(): Promise<void> {
+  if (hubMode() !== "embedded") return;
+  await bridged(() => installerEnsureWorkspace(hubTransport()));
+  installerForgetWorkspace();
+  hubClientForgetWorkspace();
+  await resolveWorkspace();
 }
 
 /** Rethrows the package's own error shape as the host's, same code and message. */
@@ -118,7 +132,7 @@ export async function installState(): Promise<InstallState> {
  * install: an old store already emptied by a prior run has nothing left to
  * carry.
  */
-async function migrateCredentialsOnce(): Promise<void> {
+export async function migrateCredentialsOnce(): Promise<void> {
   const result = await migrateLegacyProviderCredentials().catch((cause: unknown) => {
     // A per-account failure is already caught and reported inside
     // `migrateLegacyProviderCredentials`; this only catches something that

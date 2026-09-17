@@ -22,10 +22,11 @@ import { databaseDirectory, dataDirectory, portFile } from "./paths.js";
 import { stopSpawnedSidecars } from "./sidecar-processes.js";
 import { ensureHub, ensureOwner, hubFetch, ownerSession, resolveWorkspace } from "./hub-client.js";
 import { hub, hubIsMounted, hubWebSocket, setHostPort, SIDECAR_WS_PATH } from "./hub-mount.js";
-import { hubProxyHeaders } from "./hub-proxy.js";
+import { hubProxyAllowed, hubProxyHeaders, stripHubProxyCookies } from "./hub-proxy.js";
 import { attachLiveDrafts } from "./live-drafts.js";
 import { attachRoundSpend } from "./round-spend.js";
 import { rerankCatalogProviders } from "./catalog.js";
+import { adoptLegacyWorkspaceOnce, ensureWorkspaceOnce, migrateCredentialsOnce } from "./installer-bridge.js";
 import {
   clientConnected,
   markReady,
@@ -97,6 +98,19 @@ if (migrated.builder.length > 0) {
 const hubEndpoint = await ensureHub();
 console.log(`Interchange hub: ${hubEndpoint.detail}`);
 
+// Host-only repairs the installer package cannot do: mint the owner, adopt a
+// pre-identity tenant, then (once the workspace exists) carry legacy provider
+// secrets. The client runs `install()` over `/hub` after this.
+await ensureOwner().catch((cause: unknown) => {
+  console.error("Could not ensure the owner principal:", cause);
+});
+await adoptLegacyWorkspaceOnce().catch((cause: unknown) => {
+  console.error("Could not adopt a legacy workspace:", cause);
+});
+await ensureWorkspaceOnce().catch((cause: unknown) => {
+  console.error("Could not ensure the workspace tenant:", cause);
+});
+
 // The embedded hub is mounted in this process; a hosted one is not, and its
 // events reach a different process entirely. Nothing to attach to there yet.
 if (hubIsMounted()) {
@@ -117,6 +131,9 @@ console.log(known ? `Workspace: tenant ${known.tenantId}` : "Workspace: not inst
 // otherwise keep leading with a model that cannot, and the client asks for
 // an install only when something is missing, which here nothing is.
 if (known) {
+  await migrateCredentialsOnce().catch((cause: unknown) => {
+    console.error("Could not carry legacy provider secrets forward:", cause);
+  });
   const reordered = await rerankCatalogProviders().catch((cause: unknown) => {
     console.error("Could not put the providers' models in order:", cause);
     return 0;
@@ -126,7 +143,7 @@ if (known) {
 
 // Boot ends here. Everything that makes this tenant Solutions Builder — the
 // owner principal, workflow definitions, roles, specialist prompts — is
-// installed on the client's request through `POST /api/install`.
+// installed by the client through `@solutions-builder/installer` over `/hub`.
 
 /**
  * Held on `globalThis` so `bun --hot` keeps the same token across a reload;
@@ -249,19 +266,42 @@ app.route("/api", createApi());
 
 // The hub's own API, proxied under /hub so a client reaches it through the same
 // authenticated origin. Embedded, this dispatches in-process; pointed at a
-// hosted hub it forwards. Clients cannot tell the difference, which is the
-// point of the seam.
+// hosted hub it forwards. Only the installer and workflow routes are offered:
+// git-tokens, auth, and creating a root tenant stay off this door.
 app.all("/hub/*", async (context) => {
   const url = new URL(context.req.url);
   const path = url.pathname.replace(/^\/hub/, "") + url.search;
+  const method = context.req.method;
+  const payload =
+    method === "GET" || method === "HEAD" ? undefined : await context.req.raw.arrayBuffer();
+  let parsedBody: unknown;
+  if (payload && payload.byteLength > 0) {
+    try {
+      parsedBody = JSON.parse(new TextDecoder().decode(payload));
+    } catch {
+      parsedBody = undefined;
+    }
+  }
+  if (!hubProxyAllowed(method, path, parsedBody)) {
+    return context.json(
+      {
+        error: {
+          code: "not_authorized",
+          message: "The hub proxy does not offer that route.",
+          correlationId: "-",
+          retryable: false,
+        },
+      },
+      403,
+    );
+  }
   await ensureOwner();
-  return hubFetch(path, {
-    method: context.req.method,
+  const response = await hubFetch(path, {
+    method,
     headers: hubProxyHeaders(context.req.raw.headers, await ownerSession()),
-    ...(context.req.method === "GET" || context.req.method === "HEAD"
-      ? {}
-      : { body: await context.req.raw.arrayBuffer() }),
+    ...(payload !== undefined ? { body: payload } : {}),
   });
+  return stripHubProxyCookies(response);
 });
 
 const server = Bun.serve({

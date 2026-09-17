@@ -14,7 +14,6 @@ import { BRIDGE_CAPABILITIES, BRIDGE_ID, bridgeAvailable } from "./corbits-exec.
 import { hostStatus, requestHostStop } from "./lifecycle.js";
 import { ensureHub, hubFetch } from "./hub-client.js";
 import { sidecarFacts } from "./hub-mount.js";
-import { install, installState } from "./installer-bridge.js";
 
 export const API_VERSION = "1";
 
@@ -96,14 +95,6 @@ export function registerHostRoutes(api: Hono) {
       })),
     }),
   );
-
-  /**
-   * The client is the installer: it reads this on launch and asks for an
-   * install when the tenant is missing definitions or holds an older version.
-   * Idempotent, so it is also asked after any credential change.
-   */
-  api.get("/install", async (context) => context.json(await installState()));
-  api.post("/install", async (context) => context.json(await install()));
 
   api.post("/host/stop", async (context) => {
     // An explicit host stop, distinct from closing a window.

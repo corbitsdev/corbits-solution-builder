@@ -43,23 +43,34 @@ into the mounted Hono app; hosted (`SOLUTIONS_BUILDER_HUB_URL`), the same
 calls go over HTTPS. Platform writes go through the hub API, not drizzle on
 public tables.
 
-The client installs the app. On launch it reads `GET /api/install`, which
-recomputes "installed" every time by comparing the tenant's workflow
+The client installs the app over the host's `/hub` proxy. On launch it
+asks `installState()` through `@solutions-builder/installer` (same-origin
+credentials; the proxy attaches the owner session after `ensureOwner()`),
+which recomputes "installed" every time by comparing the tenant's workflow
 definitions against the hash the package would generate right now — there is
-no stored version flag — and calls `POST /api/install` when anything is
-missing or stale. The same `POST /api/install` runs on first launch, on
-upgrade, and after every credential change, and is idempotent, doing, in
-order:
+no stored version flag — and calls `install()` when anything is missing or
+stale. The same `install()` runs on first launch, on upgrade, and after
+every credential change, and is idempotent, doing, in order:
 
-- the owner principal and the local tenant
+- the owner principal (minted by the host at boot) and the local tenant
+  (created in-process at boot so the proxy never offers a root
+  `POST /api/tenants`)
 - the one workflow definition generated from the ledger, `project-lifecycle`
   — the row the command ledger's own session keys on
 - the roles the ledger names, held by the owner
 - project authority for every project tenant
 - the curated kit's skills, installed as hub assets
-- the provider catalog reranked, so a model that can no longer answer drops
-  behind the ones that can
+- the provider catalog reranked at boot, so a model that can no longer
+  answer drops behind the ones that can
 - the per-project lifecycle deployment, once a provider is connected
+
+Opening a project is two steps: the installer's `createProject` (child
+tenant, authority, credential delegation) over `/hub`, then
+`POST /api/projects/:projectId/open` for the ledger's `project.create`.
+
+The `/hub` proxy only forwards installer and workflow routes. Git-token
+and auth surfaces are refused, as is creating a root tenant. Hub
+`Set-Cookie` is stripped so the browser never holds the owner session.
 
 The provider list calls install again after any credential change so bindings
 follow credentials.

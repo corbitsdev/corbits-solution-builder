@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { ApiFailure, createHubTransport } from "./client.ts";
+import { ApiError } from "@solutions-builder/installer";
+import { createHubTransport } from "./client.ts";
 
 describe("createHubTransport", () => {
   const original = globalThis.fetch;
@@ -39,7 +40,7 @@ describe("createHubTransport", () => {
     expect(calls[0]?.init?.body).toBe(JSON.stringify({ name: "workspace" }));
   });
 
-  test("surfaces a hub error as ApiFailure", async () => {
+  test("surfaces a hub error as ApiError with status", async () => {
     globalThis.fetch = (async () =>
       new Response(JSON.stringify({ error: { code: "unauthenticated", message: "no" } }), {
         status: 401,
@@ -47,10 +48,11 @@ describe("createHubTransport", () => {
 
     try {
       await createHubTransport().fetch("GET", "/api/me");
-      throw new Error("expected ApiFailure");
+      throw new Error("expected ApiError");
     } catch (cause) {
-      expect(cause).toBeInstanceOf(ApiFailure);
-      expect((cause as ApiFailure).detail.code).toBe("unauthenticated");
+      expect(cause).toBeInstanceOf(ApiError);
+      expect((cause as ApiError).status).toBe(401);
+      expect((cause as ApiError).code).toBe("unauthenticated");
     }
   });
 });

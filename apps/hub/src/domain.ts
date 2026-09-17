@@ -46,33 +46,14 @@ export const ExactVersionRef = type({
 });
 export type ExactVersionRef = typeof ExactVersionRef.infer;
 
-export const ProjectCreatePayload = type({
+export const ProjectOpenPayload = type({
   /**
-   * Optional: the host names a project from the problem it was opened with.
-   * A caller may still choose the name, but nobody has to invent one, and the
-   * first line of what somebody typed is not a title.
+   * What they typed when they opened the project. Recorded on the
+   * `project.create` command itself so stage 1 already knows the problem.
    */
-  "title?": type("string <= 200"),
   "problemStatement?": "string <= 4000",
-  /**
-   * The parent credentials delegated into the new project tenant. Chosen ids
-   * mint `credential:<id>/use` on the owner inside the child tenant; absent
-   * is the explicit default of none. Personal credentials never cross and
-   * fail the creation before any tenant exists.
-   */
-  "delegatedCredentialIds?": type("string > 0").array(),
-  policy: {
-    /** Cost tolerance as a percentage and an absolute figure; both apply. */
-    costTolerancePercent: "number >= 0",
-    costToleranceAbsolute: "number >= 0",
-    /** Named audiences for stage 5, with the quorum fixed before review. */
-    audiences: type({ name: "string > 0", role: Authority }).array(),
-    audienceQuorum: "number >= 0",
-    /** Providers may receive project content only when this permits it. */
-    allowExternalProviders: "boolean",
-  },
 });
-export type ProjectCreatePayload = typeof ProjectCreatePayload.infer;
+export type ProjectOpenPayload = typeof ProjectOpenPayload.infer;
 
 /** Adds credentials to a workbench's consented set after creation. */
 export const DelegationUpdatePayload = type({

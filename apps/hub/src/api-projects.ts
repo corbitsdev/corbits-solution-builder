@@ -1,11 +1,11 @@
 import type { Hono } from "hono";
-import { DelegationUpdatePayload, ProjectCreatePayload } from "./domain.js";
+import { DelegationUpdatePayload, ProjectOpenPayload } from "./domain.js";
 import { HostError } from "./errors.js";
 import { openDecisions } from "./decisions.js";
 import {
   artifactGraph,
-  createProject,
   listProjects,
+  openProject,
   projectDetail,
   readArtifactNode,
   renameProject,
@@ -21,7 +21,7 @@ import {
   type Direction,
 } from "./design-feedback.js";
 import { requestDraft } from "./stage-runs.js";
-import { nameProject, titleFromProblem } from "./title.js";
+import { nameProject } from "./title.js";
 import { runGuidance } from "./guide.js";
 import { notFound } from "./errors.js";
 import { type RunState } from "@solutions-builder/app/ledger";
@@ -59,23 +59,17 @@ export function registerProjectRoutes(api: Hono) {
 
   api.get("/projects", async (context) => context.json({ projects: await listProjects() }));
 
-  api.post("/projects", async (context) => {
-    const payload = parsed(ProjectCreatePayload(await context.req.json()));
+  /**
+   * The ledger's `project.create`: the tenant already exists (the client ran
+   * the installer's `createProject`), and this records the opening run.
+   */
+  api.post("/projects/:projectId/open", async (context) => {
+    const payload = parsed(ProjectOpenPayload(await context.req.json().catch(() => ({}))));
     const problem = payload.problemStatement?.trim() ?? "";
-
-    // Opened with the plain first line so a project exists whether or not a
-    // model is reachable; the real name follows below. What they typed IS the
-    // first thing they said, recorded on the `project.create` command itself
-    // — not a best-effort side write — so stage 1 opens already knowing the
-    // problem rather than asking for it again.
-    const created = await createProject({
-      title: payload.title || titleFromProblem(problem),
-      policy: payload.policy,
+    const opened = await openProject({
+      projectId: context.req.param("projectId"),
       owner: localActor(),
       ...(problem.length > 0 ? { problemStatement: problem } : {}),
-      ...(payload.delegatedCredentialIds !== undefined
-        ? { delegatedCredentialIds: payload.delegatedCredentialIds }
-        : {}),
     });
 
     if (problem.length > 0) {
@@ -83,13 +77,13 @@ export function registerProjectRoutes(api: Hono) {
       // never blocking: a project that will not open because a model is busy
       // is a far worse failure than a plainly-named one.
       await nameProject(problem)
-        .then((name) => renameProject(created.projectId, name))
+        .then((name) => renameProject(opened.projectId, name))
         .catch((cause: unknown) => {
           console.error("[projects] the project kept its opening name:", cause);
         });
     }
 
-    return context.json(created, 201);
+    return context.json(opened, 201);
   });
 
   api.get("/projects/:projectId", async (context) =>
