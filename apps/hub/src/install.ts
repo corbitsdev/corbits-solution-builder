@@ -34,6 +34,7 @@ import { installProjectAuthority, listProjectRecords } from "./project-tenant.js
 import { ensureSkillAssets } from "./skill-assets.js";
 import { rerankCatalogProviders } from "./catalog.js";
 import { ensureLifecycleDeployment } from "./workflow-deploy.js";
+import { migrateLegacyProviderCredentials } from "./credential-migration.js";
 
 export type InstallState = {
   readonly installed: boolean;
@@ -120,15 +121,39 @@ export async function ensureWorkspace(): Promise<Workspace | null> {
   if (hubMode() !== "embedded") return resolveWorkspace();
   await ensureOwner();
   const found = await resolveWorkspace();
-  if (found) return found;
+  if (found) {
+    await migrateCredentialsOnce();
+    return found;
+  }
   // The owner exists but holds no tenant: a fresh install, or a legacy one.
   const me = await hubGet<{ id: string }>("/api/me");
   if (await adoptLegacyWorkspace(me.id)) {
     forgetWorkspace();
     const adopted = await resolveWorkspace();
-    if (adopted) return adopted;
+    if (adopted) {
+      await migrateCredentialsOnce();
+      return adopted;
+    }
   }
-  return createWorkspace();
+  const created = await createWorkspace();
+  await migrateCredentialsOnce();
+  return created;
+}
+
+/**
+ * CL-8076: the one-time carry of a pre-upgrade keychain/file provider secret
+ * into the hub's own credential row (`credential-migration.ts`). Runs once
+ * the workspace is resolvable — it needs `tenantId()` and the catalog API —
+ * and is safe to call on every `ensureWorkspace`: an old store already
+ * emptied by a prior run has nothing left to carry.
+ */
+async function migrateCredentialsOnce(): Promise<void> {
+  await migrateLegacyProviderCredentials().catch((cause: unknown) => {
+    console.error(
+      `[credential-migration] could not carry a legacy provider secret forward: ` +
+        `${cause instanceof Error ? cause.message : String(cause)}`,
+    );
+  });
 }
 
 /** Everything the tenant needs, in dependency order. Safe to run any time. */
