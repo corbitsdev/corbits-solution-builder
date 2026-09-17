@@ -15,6 +15,22 @@ describe("renderLifecycleSource admit gate", () => {
     expect(loops).toContain("export function gateRefused");
     expect(loops).toContain("export function carryGate");
     expect(loops).toContain("admit.refused === true");
+    expect(loops).toContain('["evidence"]');
+  });
+
+  test("stillOpen reads the evidence command, not the round start_attempt", async () => {
+    const files = renderLifecycleSource();
+    const loops = files["packages/lifecycle/loops.js"]!;
+    const mod = (await import(`data:text/javascript,${encodeURIComponent(loops)}`)) as {
+      stillOpen: (output: Record<string, unknown>) => boolean;
+      carryRound: (output: Record<string, unknown>, carry: unknown) => unknown;
+    };
+    const start = { round: { command: "build.start_attempt" } };
+    expect(mod.stillOpen(start)).toBe(true);
+    expect(mod.stillOpen({ ...start, evidence: { command: "build.fail" } })).toBe(true);
+    expect(mod.stillOpen({ ...start, evidence: { command: "build.accept_evidence" } })).toBe(false);
+    const carried = { command: "build.accept_evidence" };
+    expect(mod.carryRound({ ...start, evidence: carried }, start.round)).toEqual(carried);
   });
 
   test("closes the app member for admit, guard, and project-state", () => {

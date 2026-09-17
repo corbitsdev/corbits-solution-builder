@@ -24,6 +24,8 @@ import {
   DRAFT_STEP_TIMEOUT_MS,
   EVALUATE_STEP_ID,
   EVALUATED_STAGE,
+  EVIDENCE_ADMIT_STEP_ID,
+  EVIDENCE_STEP_ID,
   GATE_WAIT_STEP_ID,
   ADMIT_STEP_ID,
   MAX_REVISIONS,
@@ -230,6 +232,22 @@ const buildAgent = defineAgent({
         after: [ROUND],
       }),`
     : "";
+  // Accept and fail park here, after the build agent, not on gate-8 while the
+  // iteration is still live. admitGate is the 8092 helper.
+  const evidenceSteps = source
+    ? `
+      ${JSON.stringify(EVIDENCE_STEP_ID)}: awaitSignal({
+        name: STAGE_ID + "." + stage + ".evidence",
+        drainBehavior: "wait",
+        after: [${JSON.stringify(BUILD_STEP_ID)}],
+      }),
+      ${JSON.stringify(EVIDENCE_ADMIT_STEP_ID)}: action({
+        handler: "admitGate",
+        input: { from: "steps." + ${JSON.stringify(EVIDENCE_STEP_ID)} + ".output" },
+        drainBehavior: "wait",
+        after: [${JSON.stringify(EVIDENCE_STEP_ID)}],
+      }),`
+    : "";
   // Every other stage's specialist: capabilities-free, pinned to the same
   // offering as the build agent. Rendered as pure data (ids, prompts,
   // selectors) and reassembled into `defineAgent` calls here, in the sidecar,
@@ -275,13 +293,14 @@ ${buildAgent}${agentsBlock}${agentStepSpecs}
 // stage's specialist steps run in order, each after the last. If not, the
 // gate's empty branch is a pure-data escalation — nothing to do this round.
 // At the build stage the round is followed by the build agent on every
-// round, regardless of the draft flag: that behaviour is unchanged.
+// round, and the evidence park after that agent: accept and fail land
+// there, not on gate-8, while the iteration is live.
 function iteration(stage) {
   const steps = {
     [ROUND]: awaitSignal({ name: STAGE_ID + "." + stage + ".round", drainBehavior: "wait" }),
   };
   if (stage === BUILD_STAGE) {
-    Object.assign(steps, {${buildStep}
+    Object.assign(steps, {${buildStep}${evidenceSteps}
     });
   } else if (typeof AGENT_STEP_SPECS !== "undefined") {
     const specs = AGENT_STEP_SPECS[stage] || [];

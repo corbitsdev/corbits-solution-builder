@@ -172,6 +172,7 @@ for (const terminal of TERMINAL_STATES) {
     ROUND_STEP_ID,
     GATE_WAIT_STEP_ID,
     ADMIT_STEP_ID,
+    evidenceSignal,
   } = await import("@solutions-builder/app/workflows/stage-loop");
   // stage.draft is the round command that keeps a stage open: it must be a
   // continuing command everywhere, and land on the round signal at every stage.
@@ -264,8 +265,8 @@ for (const terminal of TERMINAL_STATES) {
     if (gate && !gate.after?.includes(reviseStepId(stage))) {
       problems.push(`Stage ${stage}'s gate does not follow its revise loop`);
     }
-    // Every command the ledger allows out of the stage lands on one of its two
-    // 8091 signals, so the run can never be asked for something it cannot consume.
+    // Every command the ledger allows out of the stage lands on one of its
+    // signals, so the run can never be asked for something it cannot consume.
     for (const command of loopExits(stage)) {
       if (stageSignal(stage, command).name !== roundSignal(stage)) {
         problems.push(`${command} leaves in_progress but is not a round signal at stage ${stage}`);
@@ -273,7 +274,7 @@ for (const terminal of TERMINAL_STATES) {
     }
     for (const command of commandsAtStage(stage)) {
       const { name } = stageSignal(stage, command);
-      if (name !== roundSignal(stage) && name !== approveSignal(stage)) {
+      if (name !== roundSignal(stage) && name !== approveSignal(stage) && name !== evidenceSignal(stage)) {
         problems.push(`${command} has no signal on stage ${stage}'s run`);
       }
     }
@@ -303,15 +304,20 @@ for (const terminal of TERMINAL_STATES) {
       NO_DRAFT_STEP_ID,
       EVALUATE_STEP_ID,
       EVALUATED_STAGE,
+      EVIDENCE_ADMIT_STEP_ID,
+      EVIDENCE_STEP_ID,
       REQUIREMENTS_STEP_ID,
       panelStepId,
       audienceStepId,
       reviseStepId: revise,
+      evidenceSignal,
     } = await import("@solutions-builder/app/workflows/stage-loop");
     const { agentFor, agentById, panelPrincipals } = await import("@solutions-builder/app/kit");
 
     type AgentStepJson = {
       kind?: string;
+      name?: string;
+      handler?: string;
       agent?: {
         id?: string;
         toolFactories?: { id?: string }[];
@@ -343,6 +349,9 @@ for (const terminal of TERMINAL_STATES) {
         const kept: Record<string, unknown> = {};
         for (const [id, step] of Object.entries(rawSteps)) {
           if (step && ["step", "gate", "escalation"].includes(step.kind ?? "")) continue;
+          // Evidence park is additive with the offering (it follows the build
+          // agent); the in-process, gates-only iteration has none.
+          if (id === EVIDENCE_STEP_ID || id === EVIDENCE_ADMIT_STEP_ID) continue;
           kept[id] = stripAgentPrimitives(step);
         }
         const out: Record<string, unknown> = {};
@@ -436,6 +445,30 @@ for (const terminal of TERMINAL_STATES) {
         if (declared?.provider !== source.provider || declared?.model !== source.model) {
           problems.push("The build agent does not declare the offering it was rendered with");
         }
+      }
+
+      const evidence = buildBody[EVIDENCE_STEP_ID];
+      const evidenceAdmit = buildBody[EVIDENCE_ADMIT_STEP_ID];
+      if (
+        !evidence ||
+        evidence.kind !== "awaitSignal" ||
+        evidence.name !== evidenceSignal(BUILD_STAGE as never) ||
+        !evidence.after?.includes(BUILD_STEP_ID)
+      ) {
+        problems.push("The build stage's iteration has no evidence park after the build agent");
+      }
+      if (!evidenceAdmit || evidenceAdmit.kind !== "action" || evidenceAdmit.handler !== "admitGate") {
+        problems.push("The evidence park does not admit through admitGate");
+      } else if (!evidenceAdmit.after?.includes(EVIDENCE_STEP_ID)) {
+        problems.push("The evidence admit does not follow the evidence awaiter");
+      }
+      const buildOrder = withSourceSteps[revise(BUILD_STAGE as never)]?.body?.stepOrder ?? [];
+      if (
+        !buildOrder.includes(ROUND_STEP_ID) ||
+        !buildOrder.includes(BUILD_STEP_ID) ||
+        !buildOrder.includes(EVIDENCE_STEP_ID)
+      ) {
+        problems.push("Stage 8 with a source is not round, build, evidence");
       }
 
       // Every drafted stage (everything but 5 and 8) is: round, a decide gate

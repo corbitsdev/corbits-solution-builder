@@ -169,6 +169,12 @@ export function continuingCommands(): Command[] {
 export const BUILD_STEP_ID = "build";
 /** How long one build attempt may run before the runtime fails the step. */
 export const BUILD_STEP_TIMEOUT_MS = 30 * 60 * 1000;
+/** The awaiter after the build agent: accept or fail the attempt's evidence. */
+export const EVIDENCE_STEP_ID = "evidence";
+/** The admit action that follows the evidence awaiter, naming `admitGate`. */
+export const EVIDENCE_ADMIT_STEP_ID = "admit-evidence";
+/** The stage whose rounds run the builder; a run is never driven through it. */
+const BUILD_STAGE: Stage = 8;
 
 /**
  * Whether a command is a round of its stage rather than the gate out of it.
@@ -183,6 +189,11 @@ function isRoundCommand(command: Command): boolean {
       ((row.from?.kind === "stage" && row.from.state === "in_progress") ||
         (row.from?.kind === "build" && row.to?.kind === "build")),
   );
+}
+
+/** Accept and fail park after the build agent, not on the round or gate-8. */
+function isEvidenceCommand(command: Command): boolean {
+  return command === "build.accept_evidence" || command === "build.fail";
 }
 
 /** The signal a stage's revise loop consumes once per iteration. */
@@ -204,6 +215,11 @@ export function exhaustedSignal(stage: Stage): string {
   return `${STAGE_WORKFLOW_ID}.${stage}.approve-after-exhaustion`;
 }
 
+/** The signal the evidence park after the build agent consumes. */
+export function evidenceSignal(stage: Stage): string {
+  return `${STAGE_WORKFLOW_ID}.${stage}.evidence`;
+}
+
 export type StageSignal = {
   readonly name: string;
   readonly payload: { readonly command: Command; readonly draft: boolean };
@@ -211,22 +227,46 @@ export type StageSignal = {
 
 /**
  * The signal a ledger command lands as. A round command ends the current
- * round; every other stage command resolves the gate. The command rides in the
- * payload so the loop's own functions can read it; `draft` is what the
- * iteration's `decide` gate reads to tell a drafting round from any other
- * command that also happens to keep the stage open.
+ * round; accept/fail resolve the evidence park after the build agent; every
+ * other stage command resolves the gate. The command rides in the payload so
+ * the loop's own functions can read it; `draft` is what the iteration's
+ * `decide` gate reads to tell a drafting round from any other command that
+ * also happens to keep the stage open.
  */
 export function stageSignal(
   stage: Stage,
   command: Command,
   gate: "gate" | "exhausted" = "gate",
 ): StageSignal {
-  const name = isRoundCommand(command)
-    ? roundSignal(stage)
-    : gate === "gate"
-      ? approveSignal(stage)
-      : exhaustedSignal(stage);
+  const name = isEvidenceCommand(command)
+    ? evidenceSignal(stage)
+    : isRoundCommand(command)
+      ? roundSignal(stage)
+      : gate === "gate"
+        ? approveSignal(stage)
+        : exhaustedSignal(stage);
   return { name, payload: { command, draft: command === "stage.draft" } };
+}
+
+/**
+ * The evidence park: wait for accept/fail, then admit. `after` is the build
+ * agent when an offering rendered one; the in-process, gates-only iteration
+ * has no such park.
+ */
+export function evidenceGate(after: readonly string[]): Record<string, unknown> {
+  return {
+    [EVIDENCE_STEP_ID]: awaitSignal({
+      name: evidenceSignal(BUILD_STAGE),
+      drainBehavior: "wait",
+      after: [...after],
+    }),
+    [EVIDENCE_ADMIT_STEP_ID]: action({
+      handler: "admitGate",
+      input: { from: `steps.${EVIDENCE_STEP_ID}.output` },
+      drainBehavior: "wait",
+      after: [EVIDENCE_STEP_ID],
+    }),
+  };
 }
 
 // --- Following the ledger --------------------------------------------------
@@ -236,7 +276,7 @@ export type RunPosition = { readonly stage: Stage; readonly at: "round" | "gate"
 
 /** The position a parked signal name stands for, or null for a name this module never issued. */
 export function positionOfSignal(stage: Stage, signalName: string): RunPosition | null {
-  if (signalName === roundSignal(stage)) return { stage, at: "round" };
+  if (signalName === roundSignal(stage) || signalName === evidenceSignal(stage)) return { stage, at: "round" };
   if (signalName === approveSignal(stage) || signalName === exhaustedSignal(stage)) return { stage, at: "gate" };
   return null;
 }
@@ -249,9 +289,6 @@ export type AlignmentStep =
   | { readonly kind: "deliver"; readonly command: Command }
   | { readonly kind: "ahead" }
   | { readonly kind: "unsupported"; readonly reason: string };
-
-/** The stage whose rounds run the builder; a run is never driven through it. */
-const BUILD_STAGE: Stage = 8;
 
 /**
  * The next signal that brings a run parked at `run` toward where the ledger

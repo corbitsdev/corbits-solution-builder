@@ -31,12 +31,18 @@ export type RunBefore = { readonly stage: Stage; readonly state: string };
 
 /**
  * The commands that correspond to a stage gate — the ones `stage-loop.ts`
- * models as a signal a stage's run waits on. Committing one of these is what
- * "the platform run advances" means for this pass, so it is the one place
- * that talks to the runtime executor.
+ * models as a signal a stage's run waits on — plus accept/fail, which park
+ * after the build agent on the evidence signal, not on gate-8, while the
+ * iteration is live. Committing one of these is what "the platform run
+ * advances" means for this pass, so it is the one place that talks to the
+ * runtime executor.
  */
 export const GATE_COMMANDS: readonly Command[] = [
-  ...new Set(LEDGER.filter((row) => row.from?.kind === "stage").map((row) => row.command)),
+  ...new Set([
+    ...LEDGER.filter((row) => row.from?.kind === "stage").map((row) => row.command),
+    "build.accept_evidence",
+    "build.fail",
+  ]),
 ];
 
 /**

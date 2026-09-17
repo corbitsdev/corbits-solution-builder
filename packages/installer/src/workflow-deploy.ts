@@ -17,7 +17,7 @@ import {
   WORKFLOW_PACKAGE_DEPENDENCIES,
   type InferenceSourcePin,
 } from "@solutions-builder/app/workflows/lifecycle-source";
-import { continuingCommands, ADMIT_STEP_ID, ROUND_STEP_ID } from "@solutions-builder/app/workflows/stage-loop";
+import { continuingCommands, ADMIT_STEP_ID, EVIDENCE_STEP_ID, ROUND_STEP_ID } from "@solutions-builder/app/workflows/stage-loop";
 import {
   assetsFor,
   catalogFor,
@@ -87,10 +87,10 @@ const DIGEST_PATH = "closure.sha256";
  * which the runtime hands over as a record keyed by body step id.
  *
  * The revise loop's `round` step output is the signal payload, and the payload
- * names the ledger command a person issued. The loop goes on only while that
- * command keeps the stage in progress; a submit ends it and the run moves to
- * the gate. A terminal command (cancel, fail) ends it the same way and the run
- * then parks at the gate — the run is a shadow of the ledger.
+ * names the ledger command a person issued. At stage 8 the evidence park after
+ * the build agent is the command that decides whether the loop goes on: fail
+ * starts another round, accept ends it. Other stages still read `round`.
+ * A submit ends the loop and the run moves to the gate.
  *
  * A gate loop's `admit` step output is the verdict: refused means wait again.
  */
@@ -98,6 +98,8 @@ function loopsModule(): string {
   const continues = JSON.stringify(continuingCommands());
   return `const CONTINUES = new Set(${continues});
 function roundCommand(childOutput) {
+  const evidence = childOutput && typeof childOutput === "object" ? childOutput[${JSON.stringify(EVIDENCE_STEP_ID)}] : null;
+  if (evidence && typeof evidence === "object" && typeof evidence.command === "string") return evidence.command;
   const round = childOutput && typeof childOutput === "object" ? childOutput[${JSON.stringify(ROUND_STEP_ID)}] : null;
   return round && typeof round === "object" && typeof round.command === "string" ? round.command : null;
 }
@@ -106,6 +108,8 @@ export function stillOpen(childOutput) {
   return command !== null && CONTINUES.has(command);
 }
 export function carryRound(childOutput, carry) {
+  const evidence = childOutput && typeof childOutput === "object" ? childOutput[${JSON.stringify(EVIDENCE_STEP_ID)}] : null;
+  if (evidence) return evidence;
   const round = childOutput && typeof childOutput === "object" ? childOutput[${JSON.stringify(ROUND_STEP_ID)}] : null;
   return round ?? carry;
 }
