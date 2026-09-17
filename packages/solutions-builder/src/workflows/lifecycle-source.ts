@@ -24,6 +24,8 @@ import {
   DRAFT_STEP_TIMEOUT_MS,
   EVALUATE_STEP_ID,
   EVALUATED_STAGE,
+  GATE_WAIT_STEP_ID,
+  ADMIT_STEP_ID,
   MAX_REVISIONS,
   NO_DRAFT_STEP_ID,
   REQUIREMENTS_STEP_ID,
@@ -56,6 +58,7 @@ export const WORKFLOW_PACKAGE_DEPENDENCIES: Readonly<Record<string, string>> = {
   "@intx/workflow": "workspace:*",
   "@intx/agent": "workspace:*",
   "@intx/tools-posix": "workspace:*",
+  "@solutions-builder/app": "workspace:*",
   "@solutions-builder/tools-deck": "workspace:*",
   "@solutions-builder/tools-delivery": "workspace:*",
   hono: "^4.0.0",
@@ -253,12 +256,14 @@ ${rolesInUse(audienceCount)
 const AGENT_STEP_SPECS = ${JSON.stringify(agentStepSpecsByStage(audienceCount))};
 `
     : "";
-  return `import { awaitSignal, defineWorkflow, escalation, gate, loop, step } from "@intx/workflow/definition";
+  return `import { action, awaitSignal, defineWorkflow, escalation, gate, loop, step } from "@intx/workflow/definition";
 ${sourceImports}
 const STAGES = ${JSON.stringify([...STAGES])};
 const STAGE_ID = ${JSON.stringify(STAGE_WORKFLOW_ID)};
 const MAX_REVISIONS = ${MAX_REVISIONS};
 const ROUND = ${JSON.stringify(ROUND_STEP_ID)};
+const WAIT = ${JSON.stringify(GATE_WAIT_STEP_ID)};
+const ADMIT = ${JSON.stringify(ADMIT_STEP_ID)};
 const DECIDE = ${JSON.stringify(DECIDE_STEP_ID)};
 const NO_DRAFT = ${JSON.stringify(NO_DRAFT_STEP_ID)};
 const DRAFT_TIMEOUT = ${DRAFT_STEP_TIMEOUT_MS};
@@ -342,10 +347,26 @@ function iteration(stage) {
   });
 }
 
-// A stage is a bounded revise loop and two human gates: the ordinary one, and
-// the one reached when the loop ran out of revisions. The runtime prunes a
-// loop's exhaustion branch on convergence, so the two gates cannot be one
-// step; the next stage follows either.
+// A stage is a bounded revise loop and two human gates. Each gate is a loop:
+function gateIteration(stage, gate) {
+  const name = gate === "gate"
+    ? STAGE_ID + "." + stage + ".approve"
+    : STAGE_ID + "." + stage + ".approve-after-exhaustion";
+  return defineWorkflow({
+    id: STAGE_ID + ".admit." + gate + "." + stage,
+    triggers: [{ type: "manual" }],
+    steps: {
+      [WAIT]: awaitSignal({ name, drainBehavior: "wait" }),
+      [ADMIT]: action({
+        handler: "admitGate",
+        input: { from: "steps." + WAIT + ".output" },
+        drainBehavior: "wait",
+        after: [WAIT],
+      }),
+    },
+  });
+}
+
 function stageSteps(stage, after) {
   return {
     ["revise-" + stage]: loop({
@@ -357,15 +378,33 @@ function stageSteps(stage, after) {
       drainBehavior: "wait",
       ...(after ? { after } : {}),
     }),
-    ["gate-" + stage]: awaitSignal({
-      name: STAGE_ID + "." + stage + ".approve",
+    ["gate-" + stage]: loop({
+      body: gateIteration(stage, "gate"),
+      while: "gateRefused",
+      carry: "carryGate",
+      maxIterations: MAX_REVISIONS,
+      onExhausted: "gate-cap-" + stage,
       drainBehavior: "wait",
       after: ["revise-" + stage],
     }),
-    ["exhausted-" + stage]: awaitSignal({
-      name: STAGE_ID + "." + stage + ".approve-after-exhaustion",
+    ["exhausted-" + stage]: loop({
+      body: gateIteration(stage, "exhausted"),
+      while: "gateRefused",
+      carry: "carryGate",
+      maxIterations: MAX_REVISIONS,
+      onExhausted: "exhausted-cap-" + stage,
       drainBehavior: "wait",
       after: ["revise-" + stage],
+    }),
+    ["gate-cap-" + stage]: awaitSignal({
+      name: STAGE_ID + "." + stage + ".gate-cap",
+      drainBehavior: "wait",
+      after: ["gate-" + stage],
+    }),
+    ["exhausted-cap-" + stage]: awaitSignal({
+      name: STAGE_ID + "." + stage + ".exhausted-cap",
+      drainBehavior: "wait",
+      after: ["exhausted-" + stage],
     }),
   };
 }
