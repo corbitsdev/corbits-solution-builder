@@ -1,36 +1,20 @@
 /**
- * Boot must create the workspace tenant before the host listens.
+ * Host-only repairs the installer package cannot do: they touch the
+ * database and the keychain.
  *
- * Creating a root tenant used to be host-only because the `/hub` policy proxy
- * refused unscoped `POST /api/tenants`. The mount no longer refuses that
- * route (CL-8246); this in-process ensure stays until CL-8247. Retry it; if
- * it never succeeds, throw so `Bun.serve` is never reached.
- *
- * Legacy-tenant adoption and credential carry are the other host-only
- * repairs: they touch the database and the keychain, so they cannot live
- * in `@solutions-builder/installer`.
+ * Legacy-tenant adoption and credential carry stay here. Creating the
+ * workspace tenant is the installer's (or first-run client's) job; boot
+ * no longer requires one before listen.
  */
 import { database } from "./db.js";
 import { adoptLegacyWorkspace } from "./hub-migrate.js";
 import {
-  createWorkspace,
   hubGet,
   hubMode,
   LEGACY_TENANT_ID,
   resolveWorkspace,
 } from "./hub-client.js";
 import { migrateLegacyProviderCredentials } from "./credential-migration.js";
-
-export type RetryEnsureOptions = {
-  /** Tries including the first. Exhaustion throws rather than listening. */
-  attempts?: number;
-  delayMs?: number;
-  sleep?: (ms: number) => Promise<void>;
-  onFailure?: (cause: unknown, attempt: number) => void;
-};
-
-const DEFAULT_ATTEMPTS = 8;
-const DEFAULT_DELAY_MS = 250;
 
 /**
  * The one-time repair for a tenant created before the hub owned identity:
@@ -43,16 +27,6 @@ export async function adoptLegacyWorkspaceOnce(): Promise<void> {
   if (await resolveWorkspace()) return;
   const me = await hubGet<{ id: string }>("/api/me");
   await adoptLegacyWorkspace(database(), me.id, LEGACY_TENANT_ID);
-}
-
-/**
- * The workspace tenant, created in-process. Idempotent: a tenant that
- * already resolves is left alone. Dropping this boot path is CL-8247.
- */
-export async function ensureWorkspaceOnce(): Promise<void> {
-  if (hubMode() !== "embedded") return;
-  if (await resolveWorkspace()) return;
-  await createWorkspace();
 }
 
 /**
@@ -81,32 +55,4 @@ export async function migrateCredentialsOnce(): Promise<void> {
         result.failures.map((failure) => `${failure.account} (${failure.error})`).join("; "),
     );
   }
-}
-
-export async function retryEnsureWorkspace(
-  ensure: () => Promise<void>,
-  options: RetryEnsureOptions = {},
-): Promise<void> {
-  const attempts = options.attempts ?? DEFAULT_ATTEMPTS;
-  const delayMs = options.delayMs ?? DEFAULT_DELAY_MS;
-  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-  if (attempts < 1) throw new Error("retryEnsureWorkspace requires at least one attempt.");
-
-  let last: unknown;
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    try {
-      await ensure();
-      return;
-    } catch (cause) {
-      last = cause;
-      options.onFailure?.(cause, attempt);
-      if (attempt === attempts) break;
-      await sleep(delayMs);
-    }
-  }
-  const detail = last instanceof Error ? last.message : String(last);
-  throw new Error(
-    `Could not ensure the workspace tenant after ${attempts} attempt${attempts === 1 ? "" : "s"}: ${detail}. The host will not listen until the workspace exists.`,
-    last instanceof Error ? { cause: last } : undefined,
-  );
 }

@@ -26,7 +26,7 @@ import { hubMountPath, hubProxyHeaders } from "./hub-proxy.js";
 import { attachLiveDrafts } from "./live-drafts.js";
 import { attachRoundSpend } from "./round-spend.js";
 import { rerankCatalogProviders } from "./catalog.js";
-import { adoptLegacyWorkspaceOnce, ensureWorkspaceOnce, migrateCredentialsOnce, retryEnsureWorkspace } from "./workspace-boot.js";
+import { adoptLegacyWorkspaceOnce, migrateCredentialsOnce } from "./workspace-boot.js";
 import {
   clientConnected,
   markReady,
@@ -99,22 +99,10 @@ const hubEndpoint = await ensureHub();
 console.log(`Interchange hub: ${hubEndpoint.detail}`);
 
 // Host-only repairs the installer package cannot do: mint the owner, adopt a
-// pre-identity tenant, then create the workspace tenant in-process. Retry
-// until it succeeds; throw (and never listen) if it does not. The client
-// runs `install()` over `/hub` after this. Unblocking root tenant create on
-// the mount is this change; dropping this boot ensure is CL-8247.
-await retryEnsureWorkspace(
-  async () => {
-    await ensureOwner();
-    await adoptLegacyWorkspaceOnce();
-    await ensureWorkspaceOnce();
-  },
-  {
-    onFailure: (cause, attempt) => {
-      console.error(`Could not ensure the workspace tenant (attempt ${attempt}):`, cause);
-    },
-  },
-);
+// pre-identity tenant. The workspace tenant is created by the installer or
+// first-run client, not here; listen proceeds without one.
+await ensureOwner();
+await adoptLegacyWorkspaceOnce();
 
 // The embedded hub is mounted in this process; a hosted one is not, and its
 // events reach a different process entirely. Nothing to attach to there yet.

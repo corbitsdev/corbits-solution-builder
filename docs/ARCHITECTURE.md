@@ -39,8 +39,8 @@ delegation — is its `createProject`. It takes a hub `Transport`
 facts about sidecar placement only the host process knows; it
 never reaches a database, a keychain or an Interchange internal itself, and
 depends on nothing in `apps/`. The hub boots vanilla (migrate, mount, serve)
-and does the host-only repairs (owner, legacy-tenant adoption, workspace
-tenant, credential migration). The client then runs this package over the
+and does the host-only repairs (owner, legacy-tenant adoption,
+credential migration). The client then runs this package over the
 host's `/hub` proxy on first launch and after every credential change
 (`apps/web/src/client.ts`); smokes still call the same package through
 `scripts/host-install.ts`. What the hub still holds beside

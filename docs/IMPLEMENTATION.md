@@ -53,7 +53,7 @@ stale. The same `install()` runs on first launch, on upgrade, and after
 every credential change, and is idempotent, doing, in order:
 
 - the owner principal (minted by the host at boot) and the local tenant
-  (created in-process at boot; dropping that boot ensure is CL-8247)
+  (created by the installer or first-run client, not at host listen)
 - the one workflow definition generated from the ledger, `project-lifecycle`
   — the row the command ledger's own session keys on
 - the roles the ledger names, held by the owner

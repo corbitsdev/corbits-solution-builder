@@ -1,62 +1,24 @@
 import { describe, expect, test } from "bun:test";
-import { retryEnsureWorkspace } from "./workspace-boot.js";
+import * as workspaceBoot from "./workspace-boot.js";
 
-describe("retryEnsureWorkspace", () => {
-  test("returns without sleeping when the first ensure succeeds", async () => {
-    let calls = 0;
-    let slept = 0;
-    await retryEnsureWorkspace(
-      async () => {
-        calls += 1;
-      },
-      {
-        sleep: async () => {
-          slept += 1;
-        },
-      },
-    );
-    expect(calls).toBe(1);
-    expect(slept).toBe(0);
+describe("workspace boot", () => {
+  test("does not create or retry a workspace tenant before listen", () => {
+    expect("ensureWorkspaceOnce" in workspaceBoot).toBe(false);
+    expect("retryEnsureWorkspace" in workspaceBoot).toBe(false);
   });
 
-  test("retries a transient failure then succeeds, so listen can proceed", async () => {
-    let calls = 0;
-    const delays: number[] = [];
-    await retryEnsureWorkspace(
-      async () => {
-        calls += 1;
-        if (calls < 3) throw new Error("hub not ready");
-      },
-      {
-        attempts: 5,
-        delayMs: 10,
-        sleep: async (ms) => {
-          delays.push(ms);
-        },
-      },
-    );
-    expect(calls).toBe(3);
-    expect(delays).toEqual([10, 10]);
+  test("legacy adopt and credential migration remain host-only repairs", () => {
+    expect(typeof workspaceBoot.adoptLegacyWorkspaceOnce).toBe("function");
+    expect(typeof workspaceBoot.migrateCredentialsOnce).toBe("function");
   });
 
-  test("throws after exhausting attempts so the host never listens", async () => {
-    let calls = 0;
-    let listening = false;
-    try {
-      await retryEnsureWorkspace(
-        async () => {
-          calls += 1;
-          throw new Error("cannot create workspace");
-        },
-        { attempts: 3, sleep: async () => {} },
-      );
-      listening = true;
-    } catch (cause) {
-      expect(cause).toBeInstanceOf(Error);
-      expect((cause as Error).message).toContain("will not listen");
-      expect((cause as Error).message).toContain("cannot create workspace");
-    }
-    expect(calls).toBe(3);
-    expect(listening).toBe(false);
+  test("the host listens without a workspace tenant", async () => {
+    const source = await Bun.file(new URL("./server.ts", import.meta.url)).text();
+    expect(source).not.toContain("ensureWorkspaceOnce");
+    expect(source).not.toContain("retryEnsureWorkspace");
+    expect(source).toContain("await ensureOwner()");
+    expect(source).toContain("await adoptLegacyWorkspaceOnce()");
+    expect(source).toContain("migrateCredentialsOnce");
+    expect(source).toContain('Workspace: not installed yet');
   });
 });
