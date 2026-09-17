@@ -26,6 +26,12 @@ import {
 } from "@solutions-builder/installer";
 import { openCreatedProject } from "./create-project-open.ts";
 import { createHubTransport } from "./hub.ts";
+import {
+  API_KEY_CONNECT_OPTIONS,
+  OAUTH_CONNECT_OPTIONS,
+  listConnectedProviders,
+  rerankCatalogViaHub,
+} from "./provider-catalog.ts";
 
 export { createHubTransport } from "./hub.ts";
 
@@ -414,13 +420,17 @@ function projectSlug(): string {
 }
 
 /**
- * The host's `afterSkillAssets` step: reorder offerings by what each
- * provider's plugin can serve. The installer package cannot judge that;
- * credential connect/disconnect re-runs install, and this is how that
- * install still reranks without a new `POST /install`.
+ * Reorder offerings by what each provider can serve, over hub catalog
+ * routes. The installer package cannot judge that; credential
+ * connect/disconnect re-runs install, and this is how that install still
+ * reranks without a host provider-domain call.
  */
 export async function rerankCatalogAfterSkillAssets(): Promise<void> {
-  await post("/catalog/rerank");
+  try {
+    await rerankCatalogViaHub(createHubTransport());
+  } catch (cause) {
+    installerFailure(cause);
+  }
 }
 
 export function sidecarCapabilityOf(
@@ -568,12 +578,17 @@ export const api = {
     }
   },
   agents: () => request<{ agents: { id: string; title: string; mission: string; stages: number[]; boundary: string }[] }>("/agents"),
-  providers: () =>
-    request<{
-      providers: Provider[];
-      apiKeyProviders: { providerId: string; label: string; needsBaseUrl: boolean }[];
-      oauthCandidates: { providerId: string; label: string; redirectUri: string }[];
-    }>("/providers"),
+  providers: async () => {
+    try {
+      return {
+        providers: await listConnectedProviders(createHubTransport()),
+        apiKeyProviders: [...API_KEY_CONNECT_OPTIONS],
+        oauthCandidates: [...OAUTH_CONNECT_OPTIONS],
+      };
+    } catch (cause) {
+      installerFailure(cause);
+    }
+  },
   connectProvider: (payload: unknown) => post<{ provider: Provider }>("/providers", payload),
   startOAuth: (providerId: string) =>
     post<{ authorizeUrl: string; browserOpened: boolean; detail: string }>(

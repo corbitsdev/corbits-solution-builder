@@ -305,12 +305,25 @@ export type HubOffering = {
   disabled: boolean;
 };
 
+export type HubProvider = {
+  id: string;
+  name: string;
+  plugin: string;
+  apiBaseUrl: string | null;
+  metadata: Record<string, unknown> | null;
+};
+
 export function catalogFor(transport: Transport, scope: string) {
   return {
     credentials: () => list<HubCredential>(transport, tenantPathFor(scope, "/credentials")),
+    providers: () => list<HubProvider>(transport, tenantPathFor(scope, "/providers")),
     modelProviders: () => list<HubModelProvider>(transport, tenantPathFor(scope, "/catalog/providers")),
     models: () => list<HubModel>(transport, tenantPathFor(scope, "/catalog/models")),
     offerings: () => list<HubOffering>(transport, tenantPathFor(scope, "/catalog/offerings")),
+    patchOffering: (
+      id: string,
+      input: { priority?: number; disabled?: boolean; capabilities?: string[]; quirks?: Record<string, unknown> | null },
+    ) => transport.fetch<HubOffering>("PATCH", tenantPathFor(scope, `/catalog/offerings/${id}`), input),
   };
 }
 

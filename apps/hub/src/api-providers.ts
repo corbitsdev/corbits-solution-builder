@@ -2,11 +2,8 @@ import type { Hono } from "hono";
 import { HostError } from "./errors.js";
 import { ProviderConnectRequest } from "./domain.js";
 import {
-  API_KEY_PROVIDERS,
-  OAUTH_CANDIDATES,
   connectProvider,
   disconnectProvider,
-  listProviders,
   selectModel,
   startOAuthConnect,
   finishOAuthConnect,
@@ -14,19 +11,9 @@ import {
   setProviderOrder,
 } from "./providers.js";
 import { cancelLogin, loginInFlight } from "./oauth.js";
-import { rerankCatalogProviders } from "./catalog.js";
 import { parsed } from "./api.js";
 
 export function registerProviderRoutes(api: Hono) {
-  api.get("/providers", async (context) =>
-    context.json({
-      // `hasCredential` is a boolean. The secret itself has no route.
-      providers: await listProviders(),
-      apiKeyProviders: API_KEY_PROVIDERS,
-      oauthCandidates: OAUTH_CANDIDATES,
-    }),
-  );
-
   api.post("/providers", async (context) => {
     const request = parsed(ProviderConnectRequest(await context.req.json()));
     const provider = await connectProvider(request);
@@ -53,18 +40,6 @@ export function registerProviderRoutes(api: Hono) {
 
   api.get("/providers/oauth/status", (context) =>
     context.json({ inFlight: loginInFlight() }),
-  );
-
-  /**
-   * The same reorder the host used to run as install's `afterSkillAssets`.
-   * The client drives install now and cannot rank offerings itself
-   * (`rerankCatalogProviders` is catalog/plugin knowledge), so it asks here
-   * after skill assets. Connect and disconnect re-run install; without this
-   * the catalog would keep leading with a model that cannot answer until the
-   * next boot.
-   */
-  api.post("/catalog/rerank", async (context) =>
-    context.json({ reordered: await rerankCatalogProviders() }),
   );
 
   api.put("/providers/order", async (context) => {

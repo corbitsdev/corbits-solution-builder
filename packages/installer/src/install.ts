@@ -134,8 +134,8 @@ export async function ensureWorkspace(transport: Transport): Promise<Workspace> 
  *
  * `afterSkillAssets` is the one step this cannot do itself: reordering the
  * catalog's offerings by what each provider's plugin can actually serve is
- * host/provider knowledge (`apps/hub/src/catalog.ts`'s `rerankCatalogProviders`),
- * not something the installer generates or judges.
+ * product knowledge the client applies over hub catalog routes, not
+ * something this package generates or judges.
  */
 export async function install(
   transport: Transport,

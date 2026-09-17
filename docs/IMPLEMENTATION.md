@@ -79,8 +79,10 @@ catalog are not host-refused. Hub `Set-Cookie` is forwarded so the browser
 holds a hub session. The mount does not attach a host session, strip
 cookies, or impersonate a principal.
 
-The provider list calls install again after any credential change so bindings
-follow credentials.
+The connected provider list is read from the hub catalog over `/hub`, not
+from a host provider-domain GET. Connect, OAuth loopback, order, refresh
+and disconnect still go through the host. The list calls install again
+after any credential change so bindings follow credentials.
 
 It prints a launch URL carrying a session token. Every API request must present
 that token. The hub mount is guarded the same way; after that outer door it
