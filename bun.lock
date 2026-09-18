@@ -44,6 +44,7 @@
         "@solutions-builder/installer": "workspace:*",
         "@solutions-builder/keychain": "workspace:*",
         "@solutions-builder/tools-deck": "workspace:*",
+        "@solutions-builder/tools-delivery": "workspace:*",
         "@tanstack/react-query": "^5.102.8",
         "@tauri-apps/api": "^2.8.0",
         "arktype": "^2.1.29",
