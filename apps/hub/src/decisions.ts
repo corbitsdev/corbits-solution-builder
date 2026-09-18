@@ -16,7 +16,6 @@ import * as table from "./schema.js";
 import { requiredAuthorityFor } from "./command-approvals.js";
 import { listProjectRecords } from "./project-records.js";
 import { activeRun, type RunRecord } from "./runs.js";
-import { deliveryBlockers } from "./delivery.js";
 
 export type Decision = {
   /** Stable for as long as this run sits in this state. */
@@ -88,10 +87,9 @@ export async function openDecisionFor(
   const id = decisionIdFor(run);
   const said = announced.get(id);
   const since = nodes[0]?.createdAt ?? run.createdAt;
-  // Stage 9 is a decision about bytes. When the latest verification found a
-  // required item missing, mismatched or unreachable, the queue says which,
-  // so nobody is asked to accept evidence that is not there.
-  const blockers = run.stage === 9 ? await deliveryBlockers(projectId) : null;
+  // Delivery verification (what blocks a stage 9 accept) is the
+  // tools-delivery workflow step's job now, not the host's — see CL-8340.
+  const blockers = null;
   return {
     blockers,
     id,

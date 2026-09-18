@@ -44,15 +44,30 @@ import { eq } from "drizzle-orm";
 import * as table from "./schema.js";
 import { writeArtifact } from "./projects.js";
 import type { ArtifactDraft } from "./domain.js";
-import { describeBlockers, normalizeDescriptor, type DeliveryManifest } from "@solutions-builder/app/delivery";
-import { latestManifest, verifyAndRecord } from "./delivery.js";
-import { readVerifierReport } from "./completion-judge.js";
+import { normalizeDescriptor, type DeliveryManifest } from "@solutions-builder/app/delivery";
+import { CONFIDENCE_LEVELS, type ConfidenceLevel } from "@solutions-builder/app/verifier-prompt";
 import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { dataDirectory } from "./paths.js";
-import { notifyDecision } from "./notify.js";
 import { readProject, updateProject, type ProjectPolicy } from "./project-records.js";
+
+/**
+ * The verifier's own verdict, read back off an untrusted command payload.
+ * Delivery verification itself (running the deliverable, judging it against
+ * requirements) is the tools-delivery sidecar's job now, not the host's; this
+ * only checks the shape of the report the sidecar already produced.
+ */
+type VerifierReport = { level: ConfidenceLevel; reasoning: string; source: "mechanical" | "judge" | "unavailable" };
+
+function readVerifierReport(value: unknown): VerifierReport | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { level, reasoning, source } = value as Record<string, unknown>;
+  if (typeof level !== "string" || !CONFIDENCE_LEVELS.includes(level as ConfidenceLevel)) return null;
+  if (typeof reasoning !== "string" || reasoning.trim().length === 0) return null;
+  if (source !== "mechanical" && source !== "judge" && source !== "unavailable") return null;
+  return { level: level as ConfidenceLevel, reasoning, source };
+}
 
 export { requiredAuthorityFor, soloApprovalFor } from "./command-approvals.js";
 
@@ -346,21 +361,6 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
   // same reason: build.answer resumes exactly the attempt that asked.
   const waiting = input.type === "build.answer" ? await openQuestion(input.projectId, run.id) : undefined;
 
-  // Stage 9 accepts bytes, not a manifest: the latest manifest is verified
-  // again now, and a required descriptor that is missing, mismatched or
-  // unreachable refuses the acceptance and names itself.
-  if (input.type === "delivery.accept") {
-    const version = await latestManifest(input.projectId);
-    if (!version) throw new HostError("transition_refused", "There is no delivery manifest to accept.");
-    const report = await verifyAndRecord(input.projectId, version, input.actor);
-    if (!report.complete) {
-      throw new HostError("transition_refused", describeBlockers(report) ?? "Delivery evidence is incomplete.", {
-        failed: report.failed,
-        items: report.items,
-      });
-    }
-  }
-
   const context: GuardContext = {
     actorAuthorities: authorities,
     ...(typeof input.payload.targetStage === "number" ? { targetStage: input.payload.targetStage as Stage } : {}),
@@ -416,12 +416,6 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
   // written, so the fold sees both together.
   if (outcome.applied.artifact) {
     await writeArtifact(outcome.applied.artifact.draft, input.actor);
-    // A manifest is checked the moment it exists, so the stage 9 decision
-    // opens knowing what is missing rather than discovering it on accept.
-    if (outcome.applied.artifact.verifyDelivery) {
-      const version = await latestManifest(input.projectId);
-      if (version) await verifyAndRecord(input.projectId, version, input.actor);
-    }
   }
 
   // A draft round is relayed to the run after the guard allowed it, and
@@ -448,10 +442,6 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
     ...(outcome.applied.approval ?? {}),
   });
 
-  if (outcome.applied.notifyRunId) {
-    await notifyDecision(input.projectId, outcome.applied.notifyRunId).catch(() => undefined);
-  }
-
   return delivery === undefined ? outcome.result : { ...outcome.result, delivery };
 }
 
@@ -470,8 +460,6 @@ export type AppliedCommand = {
   state: string;
   /** Set when this transition records a decision — the ledger's `approvals` shape. */
   approval?: AppliedApproval;
-  /** Set when this transition parks a run on a person; notified after commit. */
-  notifyRunId?: string;
   /** Set when this transition raises a decision flag, recorded on the ledger turn. */
   flag?: DecisionFlag;
   /** Set when this transition asks a person something on the worker's behalf. */
@@ -483,7 +471,7 @@ export type AppliedCommand = {
    * delivery manifest). Written after commit; `setPacketOn` names the run whose
    * `packetId` becomes the written version.
    */
-  artifact?: { draft: ArtifactDraft; setPacketOn?: string; verifyDelivery?: boolean };
+  artifact?: { draft: ArtifactDraft; setPacketOn?: string };
 };
 
 /**
@@ -536,7 +524,7 @@ async function apply(
     }
 
     case "stage.submit": {
-      return { runId: run.id, stage: run.stage, state: "waiting_approval", notifyRunId: run.id };
+      return { runId: run.id, stage: run.stage, state: "waiting_approval" };
     }
 
     case "stage.approve": {
@@ -604,7 +592,7 @@ async function apply(
         prompt: String(input.payload.prompt ?? ""),
         scopeImpact: (input.payload.scopeImpact as unknown) ?? null,
       };
-      return { runId: run.id, stage: 8, state: "waiting_human", notifyRunId: run.id, question };
+      return { runId: run.id, stage: 8, state: "waiting_human", question };
     }
 
     case "build.answer": {
@@ -673,8 +661,7 @@ async function apply(
         stage: 9,
         state: "delivery_review",
         approval: approvalOf("accept"),
-        notifyRunId: run.id,
-        artifact: { draft: draftManifest, verifyDelivery: true },
+        artifact: { draft: draftManifest },
       };
     }
 
