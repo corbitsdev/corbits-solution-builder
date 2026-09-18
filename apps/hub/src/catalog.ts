@@ -1,24 +1,18 @@
 /**
- * Connected providers, as rows in Interchange's own model catalog.
- *
- * A connection in Settings becomes the platform's `provider`, `credential`,
- * `model_provider`, `model` and `model_offering` rows, written through the
- * hub's API as the signed-in principal. Nothing here touches a table: the hub
- * validates, authorises and records each row the same way it would for any
- * other client.
- *
+ * Connected providers, as rows in Interchange's own model catalog — read
+ * side only. Connecting, reordering, choosing a model and disconnecting
+ * (including an OAuth sign-in's own credential) are the client's job now
+ * (`packages/installer/src/provider-connect.ts` and
+ * `apps/web/src/provider-catalog.ts`, over `/hub`'s own catalog routes); the
+ * host mutated these rows directly before PR #313 deleted that path, and
+ * host-side inference that used to read a connected secret back is gone too.
  * The secret — an API key, or a signed-in OAuth token pair — is sealed into
- * the credential row with Interchange's own credential cipher (the encryption
- * key lives in the OS keychain). The sidecar decrypts that column and sends
- * it as the bearer; a host-side read (refresh, the outbound bearer for a
- * host-driven call) decrypts the same row through `resolveCredentialSecret`
- * in `hub-client.ts`. There is no second, keychain-backed copy of a provider
- * secret: the row is the only place it lives.
+ * the credential row with Interchange's own credential cipher; nothing here
+ * decrypts it.
  */
-import { catalogModels, catalogProviders } from "@intx/inference-catalog";
+import { catalogModels } from "@intx/inference-catalog";
 import {
   catalog,
-  resolveCredentialSecret,
   workspaceOrNull,
   type HubCredential,
   type HubModel,
@@ -28,35 +22,6 @@ import {
 } from "./hub-client.js";
 
 export type Plugin = "anthropic" | "openai" | "openai-compatible" | "google-genai";
-
-function slug(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-}
-
-/**
- * The capabilities and quirks a model offering carries, drawn from the
- * discovery support matrix baked into `@intx/inference-catalog`.
- *
- * A model the catalog does not know (a local endpoint's own model, an unlisted
- * relay) gets whatever the probe learned, and the OpenAI-compatible `/models`
- * listing this build probes carries nothing beyond an id. So nothing is
- * claimed: recording "plain-text" would be a guess dressed as a fact.
- */
-export function catalogCapabilitiesFor(
-  canonicalName: string,
-  plugin: Plugin,
-): { capabilities: string[]; quirks: Record<string, unknown> | null } {
-  const candidates = catalogProviders.flatMap((provider) =>
-    provider.offerings
-      .filter((offering) => offering.model === canonicalName)
-      .map((offering) => ({ plugin: provider.plugin, offering })),
-  );
-  const match = candidates.find((entry) => entry.plugin === plugin) ?? candidates[0];
-  if (match) {
-    return { capabilities: [...match.offering.capabilities], quirks: match.offering.quirks };
-  }
-  return { capabilities: [], quirks: null };
-}
 
 /**
  * Model ids that can never answer a chat completion, by family: embeddings,
@@ -102,192 +67,6 @@ export function servableModels(models: readonly string[], plugin: Plugin): strin
     .map((canonicalName, index) => ({ canonicalName, index, rank: rank(canonicalName) }))
     .sort((a, b) => a.rank - b.rank || a.index - b.index)
     .map((entry) => entry.canonicalName);
-}
-
-export function catalogDisplayNameFor(canonicalName: string): string {
-  return (
-    catalogModels.find((entry) => entry.canonicalName === canonicalName)?.displayName ??
-    canonicalName
-  );
-}
-
-const KEYLESS_SECRET = "keyless:no-credential-required";
-
-async function ensureProviderRow(
-  providerId: string,
-  label: string,
-  baseUrl: string | undefined,
-): Promise<HubProvider> {
-  const existing = (await catalog.providers()).find((row) => row.name === providerId);
-  if (existing) {
-    const wants = { apiBaseUrl: baseUrl, metadata: { ...(existing.metadata ?? {}), label } };
-    if (existing.apiBaseUrl !== (baseUrl ?? existing.apiBaseUrl) || existing.metadata?.label !== label) {
-      return catalog.patchProvider(existing.id, {
-        ...(baseUrl ? { apiBaseUrl: wants.apiBaseUrl! } : {}),
-        metadata: wants.metadata,
-      });
-    }
-    return existing;
-  }
-  return catalog.createProvider({
-    name: providerId,
-    plugin: providerId,
-    ...(baseUrl ? { apiBaseUrl: baseUrl } : {}),
-    metadata: { label },
-  });
-}
-
-async function credentialFor(providerId: string): Promise<HubCredential | null> {
-  const name = `provider:${providerId}`;
-  return (await catalog.credentials()).find((row) => row.name === name) ?? null;
-}
-
-/**
- * Records a connection's credential. The real material — an API key, or an
- * OAuth token pair as JSON — is sealed straight into the row with
- * Interchange's own credential cipher; the row's own id is the reference
- * everything downstream needs, and there is no second copy anywhere else. A
- * keyless connection (a local endpoint) gets the smallest honest stand-in the
- * platform's "exactly one credential per model provider" rule allows: a
- * credential typed `other`, holding no material, tagged keyless so every
- * reader tells it apart from a real one.
- */
-export async function upsertCredential(input: {
-  providerId: string;
-  label: string;
-  kind: "api_key" | "oauth" | "local_endpoint";
-  /** The material Interchange seals. Required for `api_key`/`oauth`; omit for `local_endpoint`. */
-  secret?: string | null;
-  baseUrl?: string;
-  scopes?: string[];
-}): Promise<HubCredential> {
-  const provider = await ensureProviderRow(input.providerId, input.label, input.baseUrl);
-  const keyless = input.kind === "local_endpoint";
-  if (!keyless && !input.secret) {
-    throw new Error(`upsertCredential: ${input.kind} connection for ${input.providerId} needs a secret.`);
-  }
-  const sealed = keyless ? KEYLESS_SECRET : input.secret!;
-  const row = {
-    type: keyless ? ("other" as const) : input.kind === "oauth" ? ("oauth_token" as const) : ("api_key" as const),
-    secret: sealed,
-    description: keyless
-      ? "Placeholder for a keyless local endpoint — carries no secret material."
-      : `${input.label}, sealed at rest. The encryption key lives in the OS keychain.`,
-    metadata: keyless ? { keyless: true } : {},
-    ...(input.scopes ? { scopes: input.scopes } : {}),
-  };
-
-  const existing = await credentialFor(input.providerId);
-  if (existing) {
-    // A (re)connection is validated before this is called, so it is active
-    // again even if the previous key had gone stale.
-    return catalog.patchCredential(existing.id, { ...row, status: "active" });
-  }
-  return catalog.createCredential({
-    providerId: provider.id,
-    name: `provider:${input.providerId}`,
-    ...row,
-  });
-}
-
-/**
- * The decrypted secret behind a provider's credential row — the same material
- * a deployed workflow's sidecar would be handed — or `null` when the provider
- * is not connected or is keyless. The one host-side path to a provider
- * secret; every reader (the outbound bearer, a refresh probe) goes through
- * this rather than a store of its own.
- */
-export async function credentialSecretFor(providerId: string): Promise<string | null> {
-  const row = await credentialFor(providerId);
-  if (!row || row.metadata?.keyless) return null;
-  return resolveCredentialSecret(row.id);
-}
-
-/**
- * Rewrites a connected provider's sealed secret in place — an OAuth token
- * rotation, not a reconnect. `null` when the provider has no credential row
- * yet (a login in flight, before `finishOAuthConnect` records the connection).
- */
-export async function setCredentialSecret(providerId: string, secret: string): Promise<HubCredential | null> {
-  const row = await credentialFor(providerId);
-  if (!row) return null;
-  return catalog.patchCredential(row.id, { secret, status: "active" });
-}
-
-/** Marks a credential validated again — after a successful models refresh. */
-export async function touchCredentialValidated(providerId: string): Promise<void> {
-  const row = await credentialFor(providerId);
-  if (row) await catalog.patchCredential(row.id, { status: "active" });
-}
-
-/**
- * Records a connected provider and everything it can serve. Idempotent by
- * natural key: reconnecting updates rows rather than accumulating duplicates.
- */
-export async function registerProviderCatalog(input: {
-  providerId: string;
-  label: string;
-  plugin: Plugin;
-  baseUrl: string;
-  credentialId: string;
-  models: readonly string[];
-  priority?: number;
-}): Promise<{ providerRowId: string; offerings: number }> {
-  const name = slug(input.providerId);
-  const modelProviders = await catalog.modelProviders();
-  let providerRow = modelProviders.find((row) => row.name === name) ?? null;
-  if (providerRow) {
-    if (providerRow.baseURL !== input.baseUrl || providerRow.disabled) {
-      providerRow = await catalog.patchModelProvider(providerRow.id, {
-        baseURL: input.baseUrl,
-        disabled: false,
-      });
-    }
-  } else {
-    providerRow = await catalog.createModelProvider({
-      name,
-      plugin: input.plugin,
-      baseURL: input.baseUrl,
-      credentialId: input.credentialId,
-    });
-  }
-
-  const models = await catalog.models();
-  const offerings = (await catalog.offerings()).filter(
-    (row) => row.providerId === providerRow!.id,
-  );
-
-  const serving = servableModels(input.models, input.plugin);
-  await retireUnservable(offerings, models, serving, input.priority ?? 0);
-  await ensureOneServes(offerings, models, serving);
-
-  let count = 0;
-  for (const [index, canonicalName] of serving.entries()) {
-    const modelRow =
-      models.find((row) => row.canonicalName === canonicalName) ??
-      (await catalog.createModel({ canonicalName, displayName: catalogDisplayNameFor(canonicalName) }));
-    const { capabilities, quirks } = catalogCapabilitiesFor(canonicalName, input.plugin);
-    // The operator's provider order decides which offering wins; within one
-    // provider the order the models were discovered in is the tiebreak.
-    const priority = (input.priority ?? 0) * 1000 + index;
-    const existing = offerings.find((row) => row.modelId === modelRow.id);
-    if (existing) {
-      // Reconnecting must not silently re-enable an offering the operator
-      // narrowed to a single selected model, so `disabled` is left alone.
-      await catalog.patchOffering(existing.id, { priority, capabilities, quirks });
-    } else {
-      await catalog.createOffering({
-        modelId: modelRow.id,
-        providerId: providerRow.id,
-        priority,
-        capabilities,
-        ...(quirks ? { quirks } : {}),
-      });
-    }
-    count += 1;
-  }
-
-  return { providerRowId: providerRow.id, offerings: count };
 }
 
 /**
@@ -375,31 +154,6 @@ export async function rerankCatalogProviders(): Promise<number> {
     }
   }
   return changed;
-}
-
-/**
- * The provider that serves a model, by the label the operator sees, or null
- * when no offering carries it. Read when a call fails, so the failure names
- * who was asked and which model, which Settings alone cannot say once the
- * host has picked among "best available".
- */
-export async function providerServingModel(canonicalName: string): Promise<{ label: string; providerId: string } | null> {
-  if (!workspaceOrNull()) return null;
-  const [providerRows, modelRows, offeringRows, vendorRows] = await Promise.all([
-    catalog.modelProviders(),
-    catalog.models(),
-    catalog.offerings(),
-    catalog.providers(),
-  ]);
-  const model = modelRows.find((row) => row.canonicalName === canonicalName);
-  if (!model) return null;
-  const offering = offeringRows
-    .filter((row) => row.modelId === model.id)
-    .sort((a, b) => Number(a.disabled) - Number(b.disabled) || a.priority - b.priority)[0];
-  const provider = offering ? providerRows.find((row) => row.id === offering.providerId) : undefined;
-  if (!provider) return null;
-  const label = vendorRows.find((row) => row.name === provider.name)?.metadata?.label;
-  return { label: typeof label === "string" ? label : provider.name, providerId: provider.name };
 }
 
 export type CatalogModelRow = {
@@ -492,45 +246,3 @@ function toProviderRow(
   };
 }
 
-export async function getCatalogProvider(providerId: string): Promise<CatalogProviderRow | null> {
-  const name = slug(providerId);
-  return (await listCatalogProviders()).find((row) => row.providerId === name) ?? null;
-}
-
-/** Reorders a connected provider: every offering it carries moves to the new base. */
-export async function setCatalogProviderPriority(
-  providerId: string,
-  basePriority: number,
-): Promise<void> {
-  const providerRow = await getCatalogProvider(providerId);
-  if (!providerRow) return;
-  const ordered = [...providerRow.models].sort((a, b) => a.priority - b.priority);
-  for (const [index, entry] of ordered.entries()) {
-    await catalog.patchOffering(entry.offeringId, { priority: basePriority * 1000 + index });
-  }
-}
-
-/**
- * Records the operator's chosen model: every other offering this provider
- * carries is disabled. `null` clears the choice and re-enables every offering.
- */
-export async function setCatalogSelectedModel(
-  providerId: string,
-  canonicalName: string | null,
-): Promise<void> {
-  const providerRow = await getCatalogProvider(providerId);
-  if (!providerRow) return;
-  for (const entry of providerRow.models) {
-    const disabled = canonicalName !== null && entry.canonicalName !== canonicalName;
-    if (disabled !== entry.disabled) await catalog.patchOffering(entry.offeringId, { disabled });
-  }
-}
-
-/** Removes a connected provider's offerings, its adapter row, and its credential. */
-export async function disconnectCatalogProvider(providerId: string): Promise<void> {
-  const providerRow = await getCatalogProvider(providerId);
-  if (!providerRow) return;
-  for (const entry of providerRow.models) await catalog.deleteOffering(entry.offeringId);
-  await catalog.deleteModelProvider(providerRow.providerRowId);
-  if (providerRow.credentialId) await catalog.deleteCredential(providerRow.credentialId);
-}

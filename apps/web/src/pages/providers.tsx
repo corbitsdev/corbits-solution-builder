@@ -8,10 +8,11 @@
  * owns provider mutation (PR #313); this now drives the hub's own catalog
  * routes directly (`client.ts` -> `provider-catalog.ts` -> `@solutions-builder/installer`).
  * An API-key provider gets the full flow: connect, reorder, pick a model,
- * disconnect. An OAuth provider (ChatGPT via Codex, xAI via Grok sign-in) has
- * no hub-side connect route yet -- signing in needs a bound local loopback
- * port, which nothing client-driven can open -- so it stays listed, API-key
- * only for now.
+ * disconnect. An OAuth provider (ChatGPT via Codex, xAI via Grok sign-in)
+ * signs in through the loopback the embedded hub itself mounts on
+ * `@corbits/oauth-core` (`packages/embed-hub/src/oauth-mount.ts`) -- the hub
+ * runs on the same machine as the operator, so it can bind the local
+ * callback port a browser client cannot.
  */
 import { useState } from "react";
 import type { Provider } from "../client.js";
@@ -151,14 +152,56 @@ export function ProviderList({
         }}
       />
 
-      {oauthCandidates.length > 0 ? (
-        <p className="provider-oauth-note">
-          <small>
-            {oauthCandidates.map((entry) => entry.label).join(", ")}: API key only for now. Signing in needs a
-            local step nothing here can drive yet.
-          </small>
-        </p>
-      ) : null}
+      <ConnectOAuthProvider
+        candidates={oauthCandidates.filter((entry) => !ordered.includes(entry.providerId))}
+        onConnected={async () => {
+          await onChanged?.();
+        }}
+      />
+    </div>
+  );
+}
+
+/** One "Sign in" button per unconnected OAuth candidate (ChatGPT via Codex, xAI via Grok). */
+function ConnectOAuthProvider({
+  candidates,
+  onConnected,
+}: {
+  candidates: OAuthCandidate[];
+  onConnected: () => Promise<void>;
+}) {
+  const [signingInId, setSigningInId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  if (candidates.length === 0) return null;
+
+  const signIn = async (candidate: OAuthCandidate) => {
+    setSigningInId(candidate.providerId);
+    setError(null);
+    try {
+      await api.connectOAuthProvider({ providerId: candidate.providerId, label: candidate.label });
+      await onConnected();
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setSigningInId(null);
+    }
+  };
+
+  return (
+    <div className="provider-connect">
+      {error ? <Banner tone="error" title="Sign-in did not go through">{error}</Banner> : null}
+      {candidates.map((candidate) => (
+        <Button
+          key={candidate.providerId}
+          variant="ghost"
+          loading={signingInId === candidate.providerId}
+          disabled={signingInId !== null && signingInId !== candidate.providerId}
+          onClick={() => void signIn(candidate)}
+        >
+          Sign in to {candidate.label}
+        </Button>
+      ))}
     </div>
   );
 }

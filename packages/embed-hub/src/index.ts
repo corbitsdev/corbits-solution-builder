@@ -67,6 +67,7 @@ import { drizzle } from "drizzle-orm/pglite";
 import * as intxSchema from "@intx/db/schema";
 import { withPostgresJsResultShape } from "./pg-compat.js";
 import { retireDeadSidecars } from "./retire-dead-sidecars.js";
+import { mountProviderOAuth } from "./oauth-mount.js";
 
 /** The path a sidecar's WebSocket connects to; part of `@intx/hub-api`'s own contract. */
 export const SIDECAR_WS_PATH = "/api/sidecars/ws";
@@ -420,6 +421,12 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
     }),
   });
 
+  // Provider sign-in (ChatGPT/Codex, xAI/Grok): PKCE + loopback OAuth login
+  // through `@corbits/oauth-core`, not something vendor Interchange's own
+  // routes provide. Persisting the exchanged tokens as a credential is the
+  // client's job (`packages/installer/src/provider-connect.ts`), same as an
+  // API key.
+  mountProviderOAuth(app);
   // `@corbits/artifacts` is a mountable Interchange module, not host code:
   // it owns its own schema/migrations and reads tenant/principal off the
   // context the hub's own `/api/tenants/:tenantId/*` middleware places

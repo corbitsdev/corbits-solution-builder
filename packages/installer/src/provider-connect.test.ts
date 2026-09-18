@@ -7,6 +7,7 @@ import {
   selectModel,
   setProviderOrder,
   upsertApiKeyProvider,
+  upsertOAuthProvider,
 } from "./provider-connect.js";
 import type { HubCredential, HubModel, HubModelProvider, HubOffering, HubProvider } from "./hub.js";
 
@@ -280,5 +281,83 @@ describe("disconnectProvider", () => {
     });
 
     await expect(disconnectProvider(transport, SCOPE, "mp")).resolves.toBeUndefined();
+  });
+});
+
+describe("upsertOAuthProvider", () => {
+  test("stores the exchanged token pair as an oauth_token credential", async () => {
+    const providers: HubProvider[] = [];
+    const credentials: HubCredential[] = [];
+    const { transport, calls } = createMockTransport((call) => {
+      if (call.method === "GET" && call.path.includes("/tenants/ten_workspace/providers?limit=100")) return page(providers);
+      if (call.method === "POST" && call.path.endsWith("/providers")) {
+        const row = { id: "provider_1", name: "", plugin: "", apiBaseUrl: null, metadata: null, ...(call.body as object) } as HubProvider;
+        providers.push(row);
+        return row;
+      }
+      if (call.method === "POST" && call.path.endsWith("/credentials")) {
+        const row = {
+          id: "credential_1",
+          status: "active",
+          updatedAt: "now",
+          principalId: null,
+          metadata: null,
+          ...(call.body as object),
+        } as HubCredential;
+        credentials.push(row);
+        return row;
+      }
+      throw new Error(`unexpected call: ${call.method} ${call.path}`);
+    });
+
+    const result = await upsertOAuthProvider(transport, SCOPE, {
+      providerId: "codex-oauth",
+      label: "ChatGPT (Codex)",
+      tokens: { access: "at_1", refresh: "rt_1", expiresAt: 1_700_000_000_000 },
+    });
+
+    expect(result).toEqual({ vendorProviderId: "provider_1", credentialId: "credential_1" });
+    expect(credentials[0]).toMatchObject({
+      type: "oauth_token",
+      secret: "at_1",
+      refreshSecret: "rt_1",
+      name: "provider:codex-oauth",
+    });
+    expect(calls.some((c) => c.method === "POST" && c.path.endsWith("/credentials"))).toBe(true);
+  });
+
+  test("rotates the same credential on reconnect (409)", async () => {
+    const providers: HubProvider[] = [
+      { id: "provider_1", name: "xai-oauth", plugin: "openai-compatible", apiBaseUrl: "", metadata: { label: "xAI (Grok)" } },
+    ];
+    const existing: HubCredential = {
+      id: "credential_1",
+      providerId: "provider_1",
+      name: "provider:xai-oauth",
+      type: "oauth_token",
+      status: "active",
+      principalId: null,
+      metadata: null,
+      updatedAt: "before",
+    };
+    const { transport } = createMockTransport((call) => {
+      if (call.method === "GET" && call.path.includes("/tenants/ten_workspace/providers?limit=100")) return page(providers);
+      if (call.method === "POST" && call.path.endsWith("/credentials")) {
+        throw new ApiError(409, "conflict", "Credential already exists");
+      }
+      if (call.method === "GET" && call.path.includes("/credentials/resolve/")) return existing;
+      if (call.method === "PATCH" && call.path.endsWith("/credentials/credential_1")) {
+        return { ...existing, ...(call.body as object) };
+      }
+      throw new Error(`unexpected call: ${call.method} ${call.path}`);
+    });
+
+    const result = await upsertOAuthProvider(transport, SCOPE, {
+      providerId: "xai-oauth",
+      label: "xAI (Grok)",
+      tokens: { access: "at_2", refresh: "rt_2" },
+    });
+
+    expect(result).toEqual({ vendorProviderId: "provider_1", credentialId: "credential_1" });
   });
 });

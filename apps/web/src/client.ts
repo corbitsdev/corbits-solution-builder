@@ -36,6 +36,7 @@ import {
   API_KEY_CONNECT_OPTIONS,
   OAUTH_CONNECT_OPTIONS,
   connectApiKeyProvider,
+  connectOAuthProvider,
   disconnectProvider,
   listConnectedProviders,
   rerankCatalogViaHub,
@@ -623,6 +624,13 @@ export const api = {
   connectProvider: async (input: { providerId: string; label: string; baseUrl?: string; apiKey: string }): Promise<Provider> => {
     try {
       return await connectApiKeyProvider(createHubTransport(), input);
+    } catch (cause) {
+      installerFailure(cause);
+    }
+  },
+  connectOAuthProvider: async (input: { providerId: string; label: string }): Promise<void> => {
+    try {
+      await connectOAuthProvider(createHubTransport(), input);
     } catch (cause) {
       installerFailure(cause);
     }

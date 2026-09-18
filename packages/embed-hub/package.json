@@ -9,8 +9,11 @@
     "./pg-compat": "./src/pg-compat.ts"
   },
   "dependencies": {
+    "@corbits/codex-provider": "github:corbitsdev/corbits-codex-provider",
+    "@corbits/oauth-core": "github:corbitsdev/corbits-oauth-core",
     "@corbits/artifacts": "github:corbitsdev/corbits-artifacts",
     "@corbits/process-provisioner": "workspace:*",
+    "@corbits/xai-provider": "github:corbitsdev/corbits-xai-provider",
     "@electric-sql/pglite": "^0.3.16",
     "@intx/authz": "workspace:*",
     "@intx/crypto": "workspace:*",

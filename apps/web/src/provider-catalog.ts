@@ -23,6 +23,7 @@ import {
   selectModel as selectModelViaHub,
   setProviderOrder as setProviderOrderViaHub,
   upsertApiKeyProvider,
+  upsertOAuthProvider,
   type HubCredential,
   type HubModel,
   type HubModelProvider,
@@ -291,6 +292,63 @@ export async function connectApiKeyProvider(
   const row = connected.find((entry) => entry.id === modelProviderId);
   if (!row) throw new Error("The provider connected, but did not come back in the catalog listing.");
   return row;
+}
+
+type OAuthLoginStatus =
+  | { status: "idle" }
+  | { status: "pending" }
+  | { status: "done"; tokens: { access: string; refresh: string; expiresAt?: number } }
+  | { status: "error"; message: string };
+
+const OAUTH_POLL_INTERVAL_MS = 1_000;
+const OAUTH_LOGIN_TIMEOUT_MS = 180_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Waits for a login started by `POST /oauth/:id/start` to land: polls the
+ * mounted route's status until the loopback callback exchanges a code for
+ * tokens, or the login errors or times out.
+ */
+async function waitForOAuthTokens(
+  transport: Transport,
+  providerId: string,
+): Promise<{ access: string; refresh: string; expiresAt?: number }> {
+  const deadline = Date.now() + OAUTH_LOGIN_TIMEOUT_MS;
+  for (;;) {
+    const state = await transport.fetch<OAuthLoginStatus>("GET", `/oauth/${providerId}/status`);
+    if (state.status === "done") return state.tokens;
+    if (state.status === "error") throw new Error(state.message);
+    if (Date.now() >= deadline) throw new Error("Sign-in timed out. Try again.");
+    await sleep(OAUTH_POLL_INTERVAL_MS);
+  }
+}
+
+/**
+ * Signs in to an OAuth provider (ChatGPT via Codex, xAI via Grok) through
+ * the loopback flow the hub mounts on `@corbits/oauth-core`
+ * (`packages/embed-hub/src/oauth-mount.ts`), then records the exchanged
+ * tokens as the workspace tenant's credential. An OAuth-connected provider
+ * has no discovered model listing -- its adapter's servable models are
+ * fixed, not probed -- so unlike an API-key connect this does not register a
+ * model provider or offerings; that registration is the adapter's own
+ * follow-on concern.
+ */
+export async function connectOAuthProvider(
+  transport: Transport,
+  input: { providerId: string; label: string },
+): Promise<void> {
+  const workspace = await resolveWorkspace(transport);
+  if (!workspace) throw new Error("The workspace is not installed yet.");
+  await transport.fetch<{ authorizeUrl: string }>("POST", `/oauth/${input.providerId}/start`);
+  const tokens = await waitForOAuthTokens(transport, input.providerId);
+  await upsertOAuthProvider(transport, workspace.tenantId, {
+    providerId: input.providerId,
+    label: input.label,
+    tokens,
+  });
 }
 
 /** Disconnects a provider: removes it and its credential from the workspace catalog. */

@@ -41,7 +41,7 @@ function credentialNameFor(providerId: string): string {
 
 async function ensureVendorProvider(
   catalog: ReturnType<typeof catalogFor>,
-  input: UpsertApiKeyProviderInput,
+  input: { providerId: string; label: string; plugin: string; baseURL: string },
 ): Promise<HubProvider> {
   const existing = (await catalog.providers()).find((row) => row.name === input.providerId);
   if (existing) return existing;
@@ -112,6 +112,70 @@ export async function upsertApiKeyProvider(
   );
   const modelProvider = await ensureModelProvider(catalog, input, credential.id);
   return { vendorProviderId: vendorProvider.id, credentialId: credential.id, modelProviderId: modelProvider.id };
+}
+
+export type UpsertOAuthProviderInput = {
+  /** Vendor provider name, e.g. "codex-oauth" -- also the credential's natural key. */
+  providerId: string;
+  label: string;
+  /** The exchanged OAuth tokens, as `@corbits/oauth-core`'s `BaseTokens`. */
+  tokens: { access: string; refresh: string; expiresAt?: number };
+};
+
+export type UpsertOAuthProviderResult = {
+  vendorProviderId: string;
+  credentialId: string;
+};
+
+async function ensureOAuthCredential(
+  catalog: ReturnType<typeof catalogFor>,
+  vendorProviderId: string,
+  name: string,
+  tokens: UpsertOAuthProviderInput["tokens"],
+): Promise<HubCredential> {
+  const fields = {
+    type: "oauth_token" as const,
+    secret: tokens.access,
+    refreshSecret: tokens.refresh,
+    ...(tokens.expiresAt !== undefined ? { expiresAt: new Date(tokens.expiresAt).toISOString() } : {}),
+  };
+  try {
+    return await catalog.createCredential({ providerId: vendorProviderId, name, ...fields });
+  } catch (cause) {
+    if (!(cause instanceof ApiError && cause.status === 409)) throw cause;
+    const existing = await catalog.resolveCredential(name);
+    if (!existing) throw cause;
+    return catalog.patchCredential(existing.id, {
+      secret: fields.secret,
+      refreshSecret: fields.refreshSecret,
+      status: "active",
+      ...(tokens.expiresAt !== undefined ? { expiresAt: fields.expiresAt } : {}),
+    });
+  }
+}
+
+/**
+ * Records a signed-in OAuth provider: the vendor `provider` row and its
+ * sealed credential, holding the access/refresh token pair. Mirrors
+ * `upsertApiKeyProvider`'s shape, minus the model provider/offering step --
+ * an OAuth-connected provider's servable models are fixed by the adapter
+ * (`@corbits/codex-provider`, `@corbits/xai-provider`), not discovered from a
+ * live listing, so registering them is that adapter's own concern.
+ */
+export async function upsertOAuthProvider(
+  transport: Transport,
+  scope: string,
+  input: UpsertOAuthProviderInput,
+): Promise<UpsertOAuthProviderResult> {
+  const catalog = catalogFor(transport, scope);
+  const vendorProvider = await ensureVendorProvider(catalog, {
+    providerId: input.providerId,
+    label: input.label,
+    plugin: "openai-compatible",
+    baseURL: "",
+  });
+  const credential = await ensureOAuthCredential(catalog, vendorProvider.id, credentialNameFor(input.providerId), input.tokens);
+  return { vendorProviderId: vendorProvider.id, credentialId: credential.id };
 }
 
 /**
