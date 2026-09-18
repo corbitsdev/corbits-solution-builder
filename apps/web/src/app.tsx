@@ -38,7 +38,9 @@ import {
   SidebarSection,
   Tabs,
   BootScreen,
+  NotificationsBell,
 } from "@corbits/react-ui";
+import { subscribeInbox, type InboxState } from "./inbox.ts";
 import { Onboarding } from "./pages/onboarding.jsx";
 import { Auth } from "./pages/auth.jsx";
 import { StageWorkspace } from "./pages/workspace.jsx";
@@ -421,6 +423,12 @@ export function App() {
     return () => clearInterval(timer);
   }, [refresh]);
 
+  // The bell owns its own unread state; a mailbox event also refreshes the
+  // decision queue immediately rather than waiting on the 5s poll above —
+  // an inbox item is often exactly the nudge that a decision landed.
+  const [inbox, setInbox] = useState<InboxState>({ items: [], unreadCount: 0 });
+  useEffect(() => subscribeInbox(setInbox, () => void refresh()), [refresh]);
+
   // The Decision Queue renders the exact versions a gate would freeze, and it
   // reads them from the open project. Without this the primary action on the
   // primary screen is disabled on first load, because nothing is selected yet.
@@ -653,6 +661,20 @@ export function App() {
           )}
 
           <div className="head-actions">
+          <NotificationsBell count={inbox.unreadCount}>
+            {inbox.items.length === 0 ? (
+              <p className="inbox-empty">Nothing in your inbox.</p>
+            ) : (
+              <ul className="inbox-list">
+                {inbox.items.map((item) => (
+                  <li key={item.uid} className={item.unread ? "is-unread" : ""}>
+                    <strong>{item.subject}</strong>
+                    <span>{item.from}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </NotificationsBell>
           {view === "project" && detail ? (
             <>
               <Tabs
