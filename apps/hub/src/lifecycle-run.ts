@@ -38,6 +38,7 @@ import {
   lifecycleAssetName,
   type LifecycleDeployment,
 } from "./lifecycle-deploy.js";
+import { readProject } from "./project-records.js";
 
 /** What a signal delivery actually did, so a caller can tell nothing from broken. */
 export type DeliveryOutcome = "delivered" | "no_execution" | "failed";
@@ -49,12 +50,35 @@ export type ExecutionUnavailableReason = Extract<LifecycleDeployment["status"], 
 
 /** Anchor run id (= deployment id) per project, remembered once resolved. */
 const anchors = new Map<string, string>();
+/**
+ * The tenant's `policyVersion` the cached anchor was resolved at. A stakeholder
+ * write goes through the installer over `/hub`, never through this process, so
+ * the cached anchor cannot be told it is stale — it has to be asked. A policy
+ * write moves `policyVersion` (and only a policy write does), which is what
+ * tells a stale anchor apart from a current one on reuse.
+ */
+const anchorPolicyVersions = new Map<string, number>();
 /** Why a project has no execution, for the status line. */
 const unavailable = new Map<string, ExecutionUnavailableReason>();
 
+/**
+ * Resolves the anchor deployment for a project, reusing the remembered one.
+ * Reuse is conditional on the tenant's `policyVersion` still matching the one
+ * the anchor was resolved at: an installer stakeholder write lands as a
+ * version bump this process never sees directly, so a mismatch forgets the
+ * anchor and the resolve below redeploys/realigns from the new policy. A
+ * tenant read that fails or finds nothing keeps the remembered anchor rather
+ * than stranding a live execution.
+ */
 async function anchorFor(projectId: string, replace = false): Promise<string | null> {
   const known = anchors.get(projectId);
-  if (known && !replace) return known;
+  if (known && !replace) {
+    const seen = anchorPolicyVersions.get(projectId);
+    const current = await readPolicyVersion(projectId);
+    if (current === undefined || current === seen) return known;
+    anchors.delete(projectId);
+    anchorPolicyVersions.delete(projectId);
+  }
   const deployment = await ensureLifecycleDeployment(projectId, { replace });
   if (deployment.status === "no_offering" || deployment.status === "no_host") {
     unavailable.set(projectId, deployment.status);
@@ -62,7 +86,18 @@ async function anchorFor(projectId: string, replace = false): Promise<string | n
   }
   unavailable.delete(projectId);
   anchors.set(projectId, deployment.deploymentId);
+  const version = await readPolicyVersion(projectId);
+  if (version !== undefined) anchorPolicyVersions.set(projectId, version);
   return deployment.deploymentId;
+}
+
+/** The tenant's `policyVersion`, or undefined when the tenant cannot be read. */
+async function readPolicyVersion(projectId: string): Promise<number | undefined> {
+  try {
+    return (await readProject(projectId))?.policyVersion;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -94,7 +129,7 @@ export async function projectForRun(runId: string): Promise<string | null> {
 const anchorHistory = new Map<string, string[]>();
 
 async function anchorsFor(projectId: string): Promise<string[]> {
-  const current = anchors.get(projectId) ?? (await anchorFor(projectId));
+  const current = await anchorFor(projectId);
   let history = anchorHistory.get(projectId);
   if (!history) {
     const name = lifecycleAssetName(projectId);
@@ -156,7 +191,7 @@ export type { StageStatus };
 
 /** Where the project's run stands, read from the hub's own event log. */
 export async function projectExecutionStatus(projectId: string): Promise<StageStatus | null> {
-  const anchor = anchors.get(projectId) ?? (await anchorFor(projectId));
+  const anchor = await anchorFor(projectId);
   if (!anchor) return null;
   const withEvents = await foldRunsWithEvents(anchor);
   const status = projectState(withEvents.map((entry) => entry.folded));
@@ -234,7 +269,7 @@ export async function deliverStageSignal(
   signalId: string = crypto.randomUUID(),
   expectedStage?: Stage,
 ): Promise<DeliveryOutcome> {
-  const anchor = anchors.get(projectId) ?? (await anchorFor(projectId));
+  const anchor = await anchorFor(projectId);
   if (!anchor) return "no_execution";
   const signal = await awaitingSignalFor(anchor, command, expectedStage);
   if (!signal) return "no_execution";
@@ -388,6 +423,7 @@ export async function alignRunWithLedger(projectId: string, ledger: LedgerPositi
  */
 export function forgetExecution(projectId: string): void {
   anchors.delete(projectId);
+  anchorPolicyVersions.delete(projectId);
 }
 
 /**
@@ -401,11 +437,12 @@ export function forgetExecution(projectId: string): void {
  */
 export function forgetAllExecutions(): void {
   anchors.clear();
+  anchorPolicyVersions.clear();
   unavailable.clear();
 }
 
 async function alignOnce(projectId: string, ledger: LedgerPosition): Promise<"aligned" | "no_execution" | "failed"> {
-  const anchor = anchors.get(projectId) ?? (await anchorFor(projectId));
+  const anchor = await anchorFor(projectId);
   if (!anchor) return "no_execution";
   await launchProjectLifecycle({ projectId });
   // Two signals per stage below the ledger's, and one more to read the result.
@@ -485,7 +522,7 @@ export function hasExecution(projectId: string): boolean {
 
 /** The deployment id the project's lifecycle is running under, once resolved. */
 export async function currentAnchor(projectId: string): Promise<string | null> {
-  return anchors.get(projectId) ?? (await anchorFor(projectId));
+  return anchorFor(projectId);
 }
 
 /**
@@ -508,14 +545,14 @@ export function executionUnavailable(projectId: string): ExecutionUnavailableRea
 
 /** Every signal name the project's run is currently parked on, for diagnosis. */
 export async function parkedSignalNames(projectId: string): Promise<string[]> {
-  const anchor = anchors.get(projectId) ?? (await anchorFor(projectId));
+  const anchor = await anchorFor(projectId);
   if (!anchor) return [];
   return parkedSteps(await foldRuns(anchor)).flatMap((step) => (step.signalName ? [step.signalName] : []));
 }
 
 /** Diagnostic view of every run under the project's deployment: step phases and any read error. */
 export async function debugRuns(projectId: string): Promise<unknown> {
-  const anchor = anchors.get(projectId) ?? (await anchorFor(projectId));
+  const anchor = await anchorFor(projectId);
   if (!anchor) return { anchor: null };
   const runIds = await deploymentRuns.list(anchor);
   const out: Record<string, unknown> = { anchor, runIds };
@@ -566,7 +603,7 @@ export async function stageIterations(
     readonly currentOnly?: boolean;
   } = {},
 ): Promise<StageIteration[]> {
-  const current = anchors.get(projectId) ?? (await anchorFor(projectId));
+  const current = await anchorFor(projectId);
   const history = options.currentOnly ? (current ? [current] : []) : await anchorsFor(projectId);
   const loopId = reviseStepId(stage);
   const iterations: StageIteration[] = [];

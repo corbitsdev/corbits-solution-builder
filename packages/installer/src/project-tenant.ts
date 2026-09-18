@@ -173,8 +173,12 @@ export async function listProjectRecords(
 
 /**
  * Applies a change and moves the revision, which is what makes an expected
- * revision mean anything. Read-modify-write on the tenant's config: the host
- * is the tenant's only writer, and the engine serialises commands per key.
+ * revision mean anything. A policy write moves `policyVersion` too: the
+ * rendered lifecycle is built from the policy, and the host — which never
+ * sees this write directly — tells a stakeholder change apart from any other
+ * revision bump by it, and forgets the deployment it resolved. Read-modify-write
+ * on the tenant's config: the host is the tenant's only writer, and the engine
+ * serialises commands per key.
  */
 export async function updateProject(
   transport: Transport,
@@ -184,7 +188,12 @@ export async function updateProject(
   const tenant = await getTenant(transport, projectId);
   const current = tenant ? fromTenant(tenant) : null;
   if (!tenant || !current) throw notFound("That project");
-  const next: ProjectRecord = { ...current, ...patch, revision: current.revision + 1 };
+  const next: ProjectRecord = {
+    ...current,
+    ...patch,
+    ...(patch.policy !== undefined ? { policyVersion: current.policyVersion + 1 } : {}),
+    revision: current.revision + 1,
+  };
   const updated: HubTenant = await patchTenant(transport, projectId, {
     ...(patch.title !== undefined ? { name: patch.title } : {}),
     config: toConfig(next, tenant.config),
