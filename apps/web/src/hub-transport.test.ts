@@ -222,7 +222,7 @@ describe("host mutation routes", () => {
     globalThis.fetch = original;
   });
 
-  test("submit, decide and command still post to the host /api, not /hub", async () => {
+  test("a host effect posts to the host /api; there is no submit or decide client", async () => {
     const urls: string[] = [];
     globalThis.fetch = (async (url: string | URL | Request) => {
       urls.push(String(url));
@@ -232,14 +232,10 @@ describe("host mutation routes", () => {
       });
     }) as typeof fetch;
 
-    await api.submit("p1", { runId: "r1" });
-    await api.decide("p1", { runId: "r1" });
-    await api.command("p1", "brief.approve", { runId: "r1" });
+    await api.command("p1", "build.freeze", { runId: "r1" });
 
-    expect(urls).toEqual([
-      "/api/projects/p1/submit",
-      "/api/projects/p1/decide",
-      "/api/projects/p1/commands/brief.approve",
-    ]);
+    expect(urls).toEqual(["/api/projects/p1/commands/build.freeze"]);
+    expect("submit" in api).toBe(false);
+    expect("decide" in api).toBe(false);
   });
 });

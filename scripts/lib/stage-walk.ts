@@ -27,11 +27,12 @@ import { newId } from "../../apps/hub/src/ids.js";
 import { writeArtifact, readArtifactNode, projectDetail, exportArtifactNodes, type PortableArtifactNode } from "../../apps/hub/src/projects.js";
 import { roundInference } from "../../apps/hub/src/stage-runs.js";
 import {
+  deliverStageSignal,
   projectExecutionStatus,
   type DeliveryOutcome,
   type StageStatus,
 } from "../../apps/hub/src/lifecycle-run.js";
-import { runGateSideEffects } from "../../apps/hub/src/gate-delivery.js";
+import { deliverRound } from "../../apps/hub/src/gate-delivery.js";
 import { DRAFT_STEP_TIMEOUT_MS, gateStepId } from "@solutions-builder/app/workflows/stage-loop";
 import type { Command, Stage } from "@solutions-builder/app/ledger";
 
@@ -108,7 +109,7 @@ export interface DraftSignal {
  * versions exist (see `awaitFreshVersions`).
  */
 export async function signalDraft(ctx: WalkContext, stage: Stage, signal: DraftSignal = {}): Promise<DeliveryOutcome> {
-  const delivery = await runGateSideEffects(
+  const delivery = await deliverRound(
     {
       type: "stage.draft",
       actor: ctx.actor,
@@ -124,7 +125,7 @@ export async function signalDraft(ctx: WalkContext, stage: Stage, signal: DraftS
         inference: await roundInference(stage),
       },
     },
-    { stage, state: "in_progress" },
+    stage,
   );
   if (delivery !== "delivered") {
     throw new Error(`walkToStage: stage ${stage} has no run waiting for this stage (delivery ${delivery ?? "none"}); nothing was drafted.`);
@@ -249,29 +250,23 @@ export async function advanceStage(ctx: WalkContext, stage: Stage, versions?: Ar
     const next = await settleStatus(ctx.projectId, (s) => s.parked && s.stage === stage + 1);
     return { submitDelivery: submitted.delivery ?? "none", gate, approveDelivery: approved.delivery ?? "none", next };
   }
-  const submitDelivery = await runGateSideEffects(
-    {
-      type: "stage.submit",
-      actor: ctx.actor,
-      projectId: ctx.projectId,
-      idempotencyKey: `walk-submit-${stage}-${ctx.projectId}`,
-      correlationId: newId.correlation(),
-      payload: { runId: ctx.runId },
-    },
-    { stage, state: "in_progress" },
+  // The same named signals a person's client delivers, with the same thin
+  // intent; the ledger records them on the next status read.
+  const submitDelivery = await deliverStageSignal(
+    ctx.projectId,
+    "stage.submit",
+    { command: "stage.submit", runId: ctx.runId },
+    `walk-submit-${stage}-${ctx.projectId}`,
+    stage,
   );
   const gate = await settleStatus(ctx.projectId, (s) => s.parked && s.stepId === gateStepId(stage));
   const advance: Command = stage === 7 ? "cost.approve" : "stage.approve";
-  const approveDelivery = await runGateSideEffects(
-    {
-      type: advance,
-      actor: ctx.actor,
-      projectId: ctx.projectId,
-      idempotencyKey: `walk-approve-${stage}-${ctx.projectId}`,
-      correlationId: newId.correlation(),
-      payload: { runId: ctx.runId },
-    },
-    { stage, state: "waiting_approval" },
+  const approveDelivery = await deliverStageSignal(
+    ctx.projectId,
+    advance,
+    { command: advance, runId: ctx.runId },
+    `walk-approve-${stage}-${ctx.projectId}`,
+    stage,
   );
   const next = await settleStatus(ctx.projectId, (s) => s.parked && s.stage === stage + 1);
   return { submitDelivery: submitDelivery ?? "none", gate, approveDelivery: approveDelivery ?? "none", next };

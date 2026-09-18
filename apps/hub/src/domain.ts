@@ -61,43 +61,6 @@ export const DelegationUpdatePayload = type({
 });
 export type DelegationUpdatePayload = typeof DelegationUpdatePayload.infer;
 
-export const StageApprovePayload = type({
-  runId: id,
-  versions: ExactVersionRef.array().atLeastLength(1),
-  "rationale?": "string <= 4000",
-});
-
-/**
- * The one-action approval: `stage.submit` immediately followed by whichever
- * command actually leaves `waiting_approval` (`stage.approve` for stages
- * 1-6, `cost.approve` at stage 7). `forecastUsd`/`assumptions` only matter
- * when the resolved stage is 7; optional here because the route does not
- * know the stage until it has read the run.
- */
-export const SoloDecidePayload = type({
-  runId: id,
-  versions: ExactVersionRef.array().atLeastLength(1),
-  "rationale?": "string <= 4000",
-  "forecastUsd?": "number >= 0",
-  "assumptions?": type("string > 0").array(),
-});
-
-export const AudienceDecidePayload = type({
-  runId: id,
-  audienceName: "string > 0",
-  decision: "'proceed' | 'reject' | 'revise'",
-  versions: ExactVersionRef.array().atLeastLength(1),
-  "rationale?": "string <= 4000",
-});
-
-export const CostApprovePayload = type({
-  runId: id,
-  versions: ExactVersionRef.array().atLeastLength(1),
-  forecastUsd: "number >= 0",
-  assumptions: type("string > 0").array(),
-  "rationale?": "string <= 4000",
-});
-
 export const BuildFreezePayload = type({
   runId: id,
   /** Every input the packet freezes, by exact version. */
@@ -106,24 +69,11 @@ export const BuildFreezePayload = type({
   targets: type("string > 0").array(),
 });
 
-export const RoutePayload = type({
-  runId: id,
-  targetStage: StageT,
-  reason: type("string > 0").to("string <= 4000"),
-});
-
 export const BuildAnswerPayload = type({
   runId: id,
   questionId: id,
   answer: type("string > 0").to("string <= 8000"),
   "grantedCapabilities?": type("string > 0").array(),
-});
-
-export const DeliveryDecisionPayload = type({
-  runId: id,
-  manifestVersion: ExactVersionRef,
-  "rationale?": "string <= 4000",
-  "targetStage?": StageT,
 });
 
 export { ARTIFACT_KINDS, ARTIFACT_STAGE, type ArtifactKind } from "@solutions-builder/app/artifacts";

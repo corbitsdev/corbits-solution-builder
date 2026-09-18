@@ -12,6 +12,7 @@
  */
 import { LEDGER, type Command, type Stage } from "@solutions-builder/app/ledger";
 import { PROJECT_LIFECYCLE_ID } from "@solutions-builder/app/workflows/project-lifecycle";
+import { stageOfSignal } from "@solutions-builder/app/workflows/stage-loop";
 import {
   SPECIALIST_PRINCIPAL_ID,
   definitionIdFor,
@@ -19,7 +20,6 @@ import {
   ensureSpecialistPrincipal,
   ensureUserPrincipal,
   listConversationTurns,
-  localActor,
   tenantId,
   writeConversationTurn,
   type ConversationPart,
@@ -132,78 +132,72 @@ function summarize(entry: LedgerEntry): string {
   return `Committed ${entry.command}.`;
 }
 
-function actorPrincipalIdOf(payload: Record<string, unknown>): string {
-  if (typeof payload.actorPrincipalId === "string" && payload.actorPrincipalId.length > 0) {
-    return payload.actorPrincipalId;
-  }
-  const actor = payload.actor;
-  if (actor && typeof actor === "object" && typeof (actor as { principalId?: unknown }).principalId === "string") {
-    return (actor as { principalId: string }).principalId;
-  }
-  try {
-    return localActor().principalId;
-  } catch {
-    return HOST_PRINCIPAL;
-  }
-}
-
-function runViewOf(payload: Record<string, unknown>): { id: string; stage: number; state: string } | null {
-  const run = payload.run;
-  if (!run || typeof run !== "object") return null;
-  const rec = run as Record<string, unknown>;
-  if (typeof rec.id !== "string" || typeof rec.stage !== "number" || typeof rec.state !== "string") return null;
-  return { id: rec.id, stage: rec.stage, state: rec.state };
+/**
+ * Where the ledger says a command leaves a run: the row's `to` state, and the
+ * stage the row moves to — forward for an approval, back to the named target
+ * for a route, into the build for a freeze, into delivery for accepted
+ * evidence. The same table `admitGate` reads, so the ledger can never say a
+ * gate went somewhere the run did not.
+ */
+function landing(command: Command, stage: Stage, payload: Record<string, unknown>): { state: string; stage: Stage; transition: string } | null {
+  const row = LEDGER.find((entry) => entry.command === command && entry.from !== null);
+  if (!row) return null;
+  const target = typeof payload.targetStage === "number" ? (payload.targetStage as Stage) : stage;
+  const toStage: Stage =
+    command === "stage.approve"
+      ? ((stage + 1) as Stage)
+      : command === "build.freeze"
+        ? 8
+        : command === "build.accept_evidence"
+          ? 9
+          : row.to?.state === "backtracked"
+            ? target
+            : stage;
+  return { state: row.to?.state ?? row.from!.state, stage: toStage, transition: row.id };
 }
 
 /**
- * The ledger mail a delivered human-gate signal should write. Null when the
- * payload is an alignment walk-forward (`{ command, draft }` with no run).
- * `commandFrom` skips its own post-apply write when delivery succeeded, so a
- * payload that carries the admit `run` + `context` still produces an entry.
+ * The ledger mail a gate signal committed on the run should write. The
+ * intent is thin — `command`, `runId`, and what the person said — so the
+ * stage comes from the signal's name, the landing from the ledger row, the
+ * actor from the `principalId` the hub stamped on delivery, and idempotency
+ * from the `signalId` the runtime deduplicated on. Null when the signal is
+ * not a stage's or names no run.
  */
 export function ledgerEntryFromGateSignal(args: {
   readonly projectId: string;
   readonly command: Command;
   readonly payload: Record<string, unknown>;
   readonly signalId: string;
-  readonly expectedStage?: Stage;
+  readonly signalName: string;
 }): LedgerEntry | null {
-  const run = runViewOf(args.payload);
-  const runId =
-    typeof args.payload.runId === "string" && args.payload.runId.length > 0 ? args.payload.runId : (run?.id ?? "");
-  // Alignment walk-forward signals carry only `{ command, draft }`. A human
-  // gate names the run it acted on.
-  if (!runId) return null;
-  const idempotencyKey =
-    typeof args.payload.idempotencyKey === "string" && args.payload.idempotencyKey.length > 0
-      ? args.payload.idempotencyKey
-      : args.signalId;
-  const stage = (args.expectedStage ?? run?.stage) as Stage | undefined;
-  const transition = LEDGER.find((row) => row.command === args.command && row.from !== null);
-  const state = run?.state ?? "in_progress";
+  const runId = typeof args.payload.runId === "string" && args.payload.runId.length > 0 ? args.payload.runId : null;
+  const stage = stageOfSignal(args.signalName);
+  if (!runId || stage === null) return null;
+  const to = landing(args.command, stage, args.payload);
+  if (!to) return null;
+  const from = LEDGER.find((entry) => entry.command === args.command && entry.from !== null)!.from!;
   const result: CommandOutcome = {
     runId,
-    stage: (stage ?? 1) as Stage,
-    state,
-    transitionId: transition?.id ?? args.command,
+    stage: to.stage,
+    state: to.state,
+    transitionId: to.transition,
     replayed: false,
     delivery: "delivered",
   };
+  const actor = typeof args.payload.principalId === "string" && args.payload.principalId.length > 0 ? args.payload.principalId : HOST_PRINCIPAL;
   return {
     projectId: args.projectId,
-    actorPrincipalId: actorPrincipalIdOf(args.payload),
+    actorPrincipalId: actor,
     authority: null,
     command: args.command,
-    transitionId: result.transitionId,
-    correlationId:
-      typeof args.payload.correlationId === "string" && args.payload.correlationId.length > 0
-        ? args.payload.correlationId
-        : args.signalId,
-    before: run ? { runId: run.id, stage: run.stage, state: run.state } : { runId, stage, state },
-    after: { runId, stage, state },
-    idempotencyKey,
+    transitionId: to.transition,
+    correlationId: args.signalId,
+    before: { runId, stage, state: from.state },
+    after: { runId, stage: to.stage, state: to.state },
+    idempotencyKey: args.signalId,
     result,
-    ...(stage !== undefined ? { stage } : {}),
+    stage,
     runId,
     ...(typeof args.payload.decision === "string" ? { decision: args.payload.decision } : {}),
     ...(typeof args.payload.audienceName === "string" ? { audienceName: args.payload.audienceName } : {}),
@@ -214,17 +208,8 @@ export function ledgerEntryFromGateSignal(args: {
   };
 }
 
-/**
- * Records a human gate as ledger mail because the matching signal was
- * delivered (or already committed on the run).
- */
-export async function recordGateFromSignal(args: {
-  readonly projectId: string;
-  readonly command: Command;
-  readonly payload: Record<string, unknown>;
-  readonly signalId: string;
-  readonly expectedStage?: Stage;
-}): Promise<void> {
+/** Records a gate the run committed as ledger mail; a receipt under the same signal id makes this a no-op. */
+export async function recordGateFromSignal(args: Parameters<typeof ledgerEntryFromGateSignal>[0]): Promise<void> {
   const entry = ledgerEntryFromGateSignal(args);
   if (!entry) return;
   await recordCommand(entry);
@@ -255,23 +240,23 @@ export async function recordAdmittedGates(projectId: string, runs: readonly RunS
     const command = typeof payload.command === "string" ? (payload.command as Command) : null;
     if (!command) continue;
     const signalId = typeof event.body.signalId === "string" ? event.body.signalId : "";
-    if (!signalId) continue;
-    await recordGateFromSignal({ projectId, command, payload, signalId });
+    const signalName = typeof event.body.signalName === "string" ? event.body.signalName : "";
+    if (!signalId || !signalName) continue;
+    await recordGateFromSignal({ projectId, command, payload, signalId, signalName });
   }
 }
 
 /**
- * The gate commands a committed run signal can carry, in ledger terms: every
- * command out of a stage gate, plus accept/fail, which park after the build
- * agent on the evidence signal while the iteration is live. Values identical
- * to `GATE_COMMANDS` in gate-delivery.ts — that is the canonical
- * delivery-side filter; this one is local so the ledger module stays under
- * the dispatch module instead of above it.
+ * The commands a committed run signal can carry, in ledger terms: every
+ * command out of a stage, plus the build decisions a person takes on the
+ * run — accept/fail on the evidence park, cancel/interrupt on the round.
  */
 const GATE_SIGNAL_COMMANDS: ReadonlySet<string> = new Set([
   ...LEDGER.filter((row) => row.from?.kind === "stage").map((row) => row.command),
   "build.accept_evidence",
   "build.fail",
+  "build.cancel",
+  "build.interrupt",
 ]);
 
 /** One run's committed signal traffic plus the signal names it still awaits. */

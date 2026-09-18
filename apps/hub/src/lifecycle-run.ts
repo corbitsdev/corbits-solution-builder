@@ -12,28 +12,17 @@
 import { ApiError } from "@intx/hub-client";
 import { loopBodyRunId } from "@intx/workflow";
 import type { Command, Stage } from "@solutions-builder/app/ledger";
+import { reviseStepId, stageSignal, type StageSignal } from "@solutions-builder/app/workflows/stage-loop";
 import {
-  alignmentStep,
-  exhaustedSignal,
-  positionOfSignal,
-  reviseStepId,
-  stageSignal,
-  type LedgerPosition,
-  type StageSignal,
-} from "@solutions-builder/app/workflows/stage-loop";
-import {
-  anchorIsDead,
   currentStep,
   foldRun,
   parkedSteps,
   projectState,
   type FoldedRun,
-  type Parked,
   type StageStatus,
 } from "@solutions-builder/app/project-state";
-import { assets, deploymentRuns, HubApiError, workflows, type HubRunEvent } from "./hub-client.js";
+import { assets, deploymentRuns, workflows, type HubRunEvent } from "./hub-client.js";
 import {
-  deploymentIsLive,
   ensureLifecycleDeployment,
   lifecycleAssetName,
   type LifecycleDeployment,
@@ -224,12 +213,6 @@ export async function projectExecutionStatus(projectId: string): Promise<StageSt
 }
 
 /**
- * Delivers a gate command as the signal the parked stage waits on. Refused
- * as `no_execution` when nothing awaits that name, so a command the ledger
- * accepted but the run cannot consume is visible rather than swallowed. `signalId` is the command's own idempotency key, so a retried
- * command is a deduplicated signal, never a second one.
- */
-/**
  * How long a delivery waits for the run to park between steps. A round that
  * has just finished leaves the loop spawning its next iteration for a moment;
  * a command that arrives in that gap must not read as "nothing awaits it".
@@ -262,6 +245,13 @@ async function awaitingSignalFor(anchor: string, command: Command, expectedStage
   }
 }
 
+/**
+ * Delivers a host-relayed command as the signal the parked stage waits on.
+ * `no_execution` when nothing awaits that name, so a round the run cannot
+ * consume is visible rather than swallowed. `signalId` is the command's own
+ * idempotency key: a retried command is one signal on the runtime and one
+ * turn on the ledger. The ledger turn itself is the caller's to write.
+ */
 export async function deliverStageSignal(
   projectId: string,
   command: Command,
@@ -283,19 +273,6 @@ export async function deliverStageSignal(
       payload: { ...payload, ...signal.payload },
     });
     divergent.delete(projectId);
-    // Dynamic import: command-ledger reads HOST_PRINCIPAL from dispatch, which
-    // imports this module. A delivered gate is ledger mail even when the
-    // caller never went through `commandFrom`.
-    const { recordGateFromSignal } = await import("./command-ledger.js");
-    await recordGateFromSignal({
-      projectId,
-      command,
-      payload,
-      signalId,
-      ...(expectedStage !== undefined ? { expectedStage } : {}),
-    }).catch((cause: unknown) => {
-      console.error(`[executor] ${projectId}: could not record the delivered gate:`, cause);
-    });
     return "delivered";
   } catch (cause) {
     // Only a refusal the transport actually reported — an `ApiError` off a
@@ -313,110 +290,6 @@ export async function deliverStageSignal(
 }
 
 /**
- * How long a freshly fired run gets to park for the first time. A new
- * deployment materialises the lifecycle's closure and starts a sidecar
- * before its run can take a step, and on a slow disk that has taken well
- * over half a minute.
- */
-const FIRST_PARK_WAIT_MS = 180_000;
-
-/** Waits until `step` is no longer parked on its signal, or the park wait runs out. */
-async function consumed(anchor: string, step: Parked): Promise<void> {
-  const deadline = Date.now() + PARK_WAIT_MS;
-  while (Date.now() < deadline) {
-    const still = parkedSteps(await foldRuns(anchor)).some(
-      (candidate) =>
-        candidate.runId === step.runId && candidate.stepId === step.stepId && candidate.signalName === step.signalName,
-    );
-    if (!still) return;
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-}
-
-/**
- * A pause after every signal the executor sends on a person's behalf. The
- * runtime commits its own events to the run's log as a step ends and the
- * next one starts; a signal landing inside that commit has been seen to
- * collide with it (two events at one sequence number), which fails the
- * whole run. Waiting for the next park is not enough on its own, since the
- * park is written before the commit that follows it settles.
- */
-const SETTLE_MS = 750;
-
-/** How often the wait for a park re-reads whether the deployment is still live. */
-const LIVENESS_CHECK_MS = 2_000;
-
-/**
- * The first parked stage step with a position this module knows, waiting for
- * a run that is still starting. "dead" when the run has ended instead — a run
- * that failed leaves nothing parked, and waiting for it would only time out.
- */
-async function parkedPosition(anchor: string, waitMs: number): Promise<Parked | "dead" | null> {
-  const deadline = Date.now() + waitMs;
-  let checkLiveAt = 0;
-  for (;;) {
-    // The platform gives up on a sidecar that never dials back in and
-    // releases the deployment under the run; nothing sent to it since was
-    // delivered, and nothing will be. Read that as dead as soon as it lands
-    // rather than after the full wait.
-    if (Date.now() >= checkLiveAt) {
-      checkLiveAt = Date.now() + LIVENESS_CHECK_MS;
-      if (!(await deploymentIsLive(anchor))) return "dead";
-    }
-    const runs = await foldRuns(anchor);
-    if (anchorIsDead(anchor, runs)) return "dead";
-    const parked = parkedSteps(runs).find(
-      (step) => step.signalName !== null && positionOfSignal(step.stage, step.signalName) !== null,
-    );
-    if (parked) return parked;
-    if (Date.now() >= deadline) return null;
-    await new Promise((resolve) => setTimeout(resolve, 500));
-  }
-}
-
-/**
- * Brings the project's run to where the ledger says the project stands.
- *
- * A run can fall behind the ledger: a project drafted before the specialists
- * lived in the run, or whose deployment was re-rendered, gets a fresh run
- * that starts at stage 1 while the ledger is at stage 5. The ledger is the
- * state machine, so the run is walked forward to it with the signals a person
- * would have sent, one stage at a time (`alignmentStep`), and nothing is
- * delivered to a stage the ledger has already left. Fires the run first when
- * the deployment has none, which is also what a restart needs.
- *
- * "aligned" when the run is parked where the ledger is; "no_execution" when
- * there is no deployment to align; "failed" when the run could not be brought
- * there, with the reason logged — the command that follows then reads as
- * undeliverable rather than landing on the wrong stage.
- */
-/** How many fresh deployments the alignment will try when each one's run dies under it. */
-const REPLACEMENTS = 3;
-
-export async function alignRunWithLedger(projectId: string, ledger: LedgerPosition): Promise<"aligned" | "no_execution" | "failed"> {
-  for (let replaced = 0; ; replaced += 1) {
-    try {
-      return await alignOnce(projectId, ledger);
-    } catch (cause) {
-      // The anchor this process remembered is dead: its sidecar was released
-      // under it, or its run failed. Forget it and resolve the deployment
-      // again, which deploys a live one, then try again; anything else is
-      // the failure it was. The replacement's own run can die the same way
-      // while it is walked to the ledger, so this is a bounded loop rather
-      // than one more try.
-      const conflict = (cause instanceof HubApiError || cause instanceof ApiError) && cause.status === 409;
-      if (!conflict || replaced >= REPLACEMENTS) throw cause;
-      console.error(`[executor] ${projectId}: the run's deployment is no longer live; deploying the lifecycle again.`);
-      forgetExecution(projectId);
-      // A replacement, not a re-resolution: a dead run leaves its deployment
-      // allocated and its digest current, so resolving again would hand the
-      // same dead anchor back.
-      if ((await anchorFor(projectId, true)) === null) return "no_execution";
-    }
-  }
-}
-
-/**
  * Forgets the deployment this process resolved for a project, so the next
  * command resolves it again: a fresh deployment when the rendered lifecycle
  * changed (a stakeholder added), or when the old one is dead.
@@ -429,83 +302,13 @@ export function forgetExecution(projectId: string): void {
 /**
  * Forgets every project's deployment. The lifecycle is rendered with the
  * model it will draft with, pinned at deploy time, so a change to what the
- * catalog serves — a model chosen, providers reordered, one connected or
- * disconnected — is a different lifecycle. The next command on any project
- * resolves its deployment again, which deploys the new shape and walks its
- * run to the ledger; until then the old one would keep drafting with the
- * old model, whatever Settings says.
+ * catalog serves is a different lifecycle. The next command on any project
+ * resolves its deployment again, which deploys the new shape.
  */
 export function forgetAllExecutions(): void {
   anchors.clear();
   anchorPolicyVersions.clear();
   unavailable.clear();
-}
-
-async function alignOnce(projectId: string, ledger: LedgerPosition): Promise<"aligned" | "no_execution" | "failed"> {
-  const anchor = await anchorFor(projectId);
-  if (!anchor) return "no_execution";
-  await launchProjectLifecycle({ projectId });
-  // Two signals per stage below the ledger's, and one more to read the result.
-  for (let sent = 0; sent <= 2 * ledger.stage; sent += 1) {
-    const parked = await parkedPosition(anchor, FIRST_PARK_WAIT_MS);
-    if (parked === "dead") {
-      // The same path a refused signal takes: the caller forgets this
-      // deployment and deploys again.
-      throw new HubApiError(409, anchor, "the deployment's run has ended");
-    }
-    if (!parked || parked.signalName === null) {
-      // The shape of every run under the deployment goes with the message:
-      // which steps are parked or in flight, and what failed. Without it the
-      // line says only that a wait ran out.
-      const shape = (await debugRuns(projectId)) as Record<string, { kinds?: unknown } | unknown>;
-      for (const value of Object.values(shape)) if (value && typeof value === "object") delete (value as { kinds?: unknown }).kinds;
-      console.error(
-        `[executor] ${projectId}: the run never parked, so it could not be brought to stage ${ledger.stage}. ${JSON.stringify(shape)}`,
-      );
-      return "failed";
-    }
-    const position = positionOfSignal(parked.stage, parked.signalName)!;
-    const step = alignmentStep(position, ledger);
-    if (step.kind === "aligned") {
-      if (sent > 0) console.log(`[executor] ${projectId}: the run now stands with the ledger at stage ${ledger.stage} (${ledger.state}).`);
-      return "aligned";
-    }
-    if (step.kind !== "deliver") {
-      console.error(
-        `[executor] ${projectId}: the run is parked at stage ${position.stage} (${position.at}) and the ledger at ${ledger.stage} (${ledger.state}): ` +
-          (step.kind === "ahead" ? "the run is ahead of the ledger and is not rewound." : step.reason),
-      );
-      return "failed";
-    }
-    const gate = parked.signalName === exhaustedSignal(parked.stage) ? "exhausted" : "gate";
-    const signal = stageSignal(position.stage, step.command, gate);
-    try {
-      await deploymentRuns.signal(anchor, {
-        runId: anchor,
-        signalName: signal.name,
-        signalId: crypto.randomUUID(),
-        payload: { ...signal.payload },
-      });
-    } catch (cause) {
-      if (cause instanceof ApiError && cause.status === 409) throw new HubApiError(409, signal.name, cause.message);
-      // As in `deliverStageSignal`: only a reported `ApiError` reads as a
-      // refused signal. Anything else propagates rather than being read as
-      // "the run rejected this stage".
-      if (!(cause instanceof ApiError)) throw cause;
-      console.error(
-        `[executor] ${projectId}: the hub did not accept ${signal.name} while bringing the run to stage ${ledger.stage} (${cause.status}) ${cause.message}.`,
-      );
-      return "failed";
-    }
-    // The signal is accepted before the sidecar consumes it, and the fold
-    // shows the step parked until then. Read again only once it has moved:
-    // a second signal to the same step would queue behind the first and be
-    // consumed by a round nobody asked to leave.
-    await consumed(anchor, parked);
-    await new Promise((resolve) => setTimeout(resolve, SETTLE_MS));
-  }
-  console.error(`[executor] ${projectId}: the run did not reach stage ${ledger.stage} within the expected number of signals.`);
-  return "failed";
 }
 
 /** Projects whose last signal the hub refused: the ledger and the run disagree. */

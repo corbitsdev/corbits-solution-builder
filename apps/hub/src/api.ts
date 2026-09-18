@@ -46,10 +46,10 @@ export async function commandFrom(
     type: type_,
     actor: localActor(),
     projectId,
-    idempotencyKey: (payload.idempotencyKey as string) ?? newId.command(),
+    idempotencyKey: newId.command(),
     correlationId: newId.correlation(),
     // §6: a caller that has read the project says which revision it read, and
-    // a decision taken against a stale one is refused rather than applied.
+    // an effect applied against a stale one is refused rather than applied.
     ...(typeof payload.expectedRevision === "number"
       ? { expectedRevision: payload.expectedRevision }
       : {}),

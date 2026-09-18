@@ -43,6 +43,8 @@ import { Onboarding } from "./pages/onboarding.jsx";
 import { Auth } from "./pages/auth.jsx";
 import { StageWorkspace } from "./pages/workspace.jsx";
 import { standingForProject, type StageStatus } from "./run-fold.ts";
+import { deliverGate, type GateIntent } from "./run-signal.ts";
+import type { Stage } from "@solutions-builder/app/ledger";
 import { firstRunScreen, type HubAuthState } from "./first-run.ts";
 import { getHubSession } from "./hub-auth.ts";
 
@@ -520,28 +522,21 @@ export function App() {
               ? "stage.reject"
               : "stage.revise";
 
-      const payload: Record<string, unknown> = {
+      const intent: GateIntent = {
+        command,
         runId: wait.runId,
         versions,
         rationale: reason,
+        ...(decision !== "approve"
+          ? {
+              reason: reason || "Routed back without a stated reason.",
+              targetStage: Math.min(wait.stage, Math.max(1, Math.round(target))),
+            }
+          : {}),
       };
-      if (decision !== "approve") {
-        payload.reason = reason || "Routed back without a stated reason.";
-        payload.targetStage = Math.min(wait.stage, Math.max(1, Math.round(target)));
-      }
-      if (command === "cost.approve") {
-        payload.forecastUsd = 0;
-        payload.assumptions = ["Recorded from the approved estimate artifact."];
-      }
-      if (command === "delivery.accept" || command === "delivery.reject" || command === "delivery.revise") {
-        payload.manifestVersion = versions[0] ?? {
-          artifactId: "-",
-          versionId: "-",
-          contentHash: "0".repeat(64),
-        };
-      }
 
-      await api.command(wait.projectId, command, payload);
+      // The decision is a signal on the run, by this person, at this gate.
+      await deliverGate(project, wait.stage as Stage, await standingForProject(project).catch(() => null), intent);
       setSelected(wait.projectId);
       await reloadDetail();
     } catch (cause) {

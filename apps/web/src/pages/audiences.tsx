@@ -8,6 +8,8 @@
  */
 import { useEffect, useState } from "react";
 import { api, ApiFailure, type ProjectDetail } from "../client.js";
+import { deliverGate, submitThen } from "../run-signal.ts";
+import { standingForProject } from "../run-fold.ts";
 import { Banner, Button, Field, Screen, StateLabel, versionDigest } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
 import {
@@ -286,8 +288,8 @@ export function AudiencePackages({
     setError(null);
     try {
       const versions = packages.map((entry) => ({ artifactId: entry.artifactId, versionId: entry.id, contentHash: entry.contentHash }));
-      await api.command(detail.project.id, "stage.revise", {
-        expectedRevision: detail.project.revision,
+      await deliverGate(detail, 5, await standingForProject(detail).catch(() => null), {
+        command: "stage.revise",
         runId: detail.current.id,
         versions,
         rationale: "Reopened to revise the packages.",
@@ -315,31 +317,31 @@ export function AudiencePackages({
     setBusy(audienceName);
     setError(null);
     try {
-      let revision = detail.project.revision;
-      if (inProgress) {
-        await api.submit(detail.project.id, {
-          expectedRevision: revision,
-          runId: detail.current.id,
-          versions: packages.map((entry) => ({
-            artifactId: entry.artifactId,
-            versionId: entry.id,
-            contentHash: entry.contentHash,
-          })),
-        });
-        // Sending moved the project on; the decision is recorded against
-        // where it stands now, not where the screen last read it.
-        revision = (await api.project(detail.project.id)).project.revision;
-      }
-      await api.command(detail.project.id, "audience.decide", {
-        expectedRevision: revision,
+      const standing = await standingForProject(detail).catch(() => null);
+      const intent = {
+        command: "audience.decide" as const,
         runId: detail.current.id,
         audienceName,
         decision,
-        versions: [
-          { artifactId: node.artifactId, versionId: node.id, contentHash: node.contentHash },
-        ],
+        versions: [{ artifactId: node.artifactId, versionId: node.id, contentHash: node.contentHash }],
         rationale,
-      });
+      };
+      // The first stakeholder to decide sends the packages for review; the
+      // run parks at the gate and the decision lands there.
+      if (inProgress) {
+        await submitThen(
+          detail,
+          5,
+          standing,
+          {
+            runId: detail.current.id,
+            versions: packages.map((entry) => ({ artifactId: entry.artifactId, versionId: entry.id, contentHash: entry.contentHash })),
+          },
+          intent,
+        );
+      } else {
+        await deliverGate(detail, 5, standing, intent);
+      }
       setRationale("");
       onChanged();
     } catch (cause) {

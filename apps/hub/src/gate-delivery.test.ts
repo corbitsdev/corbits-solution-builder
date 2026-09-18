@@ -1,54 +1,60 @@
 import { describe, expect, test } from "bun:test";
 
-describe("runGateSideEffects", () => {
-  test("accept and fail are delivered as gate commands, not left on gate-8's mapping", async () => {
-    const { GATE_COMMANDS } = await import("./gate-delivery.js");
-    expect(GATE_COMMANDS).toContain("build.accept_evidence");
-    expect(GATE_COMMANDS).toContain("build.fail");
+const read = (path: string) => Bun.file(new URL(path, import.meta.url)).text();
+
+describe("the host relays rounds and nothing else", () => {
+  test("gate-delivery relays stage.draft only; a gate command is refused", async () => {
+    const { ROUND_COMMAND, deliverRound } = await import("./gate-delivery.js");
+    expect(ROUND_COMMAND).toBe("stage.draft");
+    await expect(
+      deliverRound(
+        { type: "stage.approve", actor: { principalId: "p", displayName: "P" }, projectId: "tnt_1", idempotencyKey: "k", correlationId: "c", payload: {} },
+        3,
+      ),
+    ).rejects.toThrow(/decided on the run/);
+    const source = await read("./gate-delivery.ts");
+    expect(source).not.toContain("GATE_COMMANDS");
+    expect(source).not.toContain("alignRunWithLedger");
+    expect(source).not.toContain("actorAuthorities");
   });
 
-  test("a delivered gate records a ledger turn without going through api-decisions", async () => {
-    const source = await Bun.file(new URL("./gate-delivery.ts", import.meta.url)).text();
-    expect(source).toContain("recordGateFromSignal");
-    expect(source).toContain("crypto.randomUUID()");
-    expect(source).not.toMatch(/from ["']\.\/api-decisions/);
-    expect(source).not.toMatch(/from ["']\.\/api\.js["']/);
-    const lifecycle = await Bun.file(new URL("./lifecycle-run.ts", import.meta.url)).text();
-    expect(lifecycle).toContain("recordGateFromSignal");
-  });
-});
-
-describe("command-dispatch admit order", () => {
-  test("GATE_COMMANDS deliver first; evaluate is not the admit authority; host never writes RunDraft", async () => {
-    const source = await Bun.file(new URL("./command-dispatch.ts", import.meta.url)).text();
-    const deliver = source.indexOf("runGateSideEffects(");
-    const verdict = source.indexOf("evaluate(input.type, run, context)");
-    const refuse = source.indexOf('if (!verdict.ok && delivery !== "delivered")');
-    expect(deliver).toBeGreaterThan(0);
-    expect(verdict).toBeGreaterThan(deliver);
-    expect(refuse).toBeGreaterThan(verdict);
-    expect(source.search(/new RunDraft\s*\(/)).toBe(-1);
-    const runsSource = await Bun.file(new URL("./runs.ts", import.meta.url)).text();
-    expect(runsSource.search(/\bclass RunDraft\b/)).toBe(-1);
-    expect(source).toContain("admitGate` is the admit authority");
-    expect(source).toContain('if (delivery !== "delivered")');
-    expect(source).toContain("await recordCommand({");
+  test("command-dispatch has no submitAndApprove, no gate branch, no host-built run context in a signal", async () => {
+    const source = await read("./command-dispatch.ts");
+    expect(source).not.toContain("submitAndApprove");
+    expect(source).not.toContain("runGateSideEffects");
+    expect(source).not.toMatch(/payload: \{ \.\.\.input\.payload, command: input\.type, run, context \}/);
+    expect(source).toContain("deliverRound(input, run.stage)");
+    const lifecycle = await read("./lifecycle-run.ts");
+    expect(lifecycle).not.toContain("alignRunWithLedger");
+    expect(lifecycle).not.toContain("recordGateFromSignal");
   });
 });
 
-describe("host command routes still exist", () => {
-  test("command, submit and decide routes are still registered", async () => {
-    const source = await Bun.file(new URL("./api-decisions.ts", import.meta.url)).text();
-    expect(source).toContain('api.post("/projects/:projectId/commands/:command"');
-    expect(source).toContain('api.post("/projects/:projectId/submit"');
-    expect(source).toContain('api.post("/projects/:projectId/decide"');
+describe("AC5: authority is the hub's signal grant", () => {
+  test("the vendored signal route authorizes signal:<name> (else manage) and 403s without it", async () => {
+    const route = await Bun.file(new URL("../../../vendor/interchange/packages/hub-api/src/routes/workflows.ts", import.meta.url)).text();
+    expect(route).toContain("`signal:${args.signalName}`");
+    expect(route).toContain("if (named.effect === \"allow\") return true;");
+    expect(route).toContain("return c.json(forbidden(), 403);");
+    expect(route).toContain("stampSignalPrincipalId(body.payload, principal.id)");
   });
 
-  test("the host delivery reverify/judge route is gone", async () => {
-    const source = await Bun.file(new URL("./api-decisions.ts", import.meta.url)).text();
-    expect(source).not.toContain('api.post("/projects/:projectId/delivery/reverify"');
-    expect(source).not.toContain("reverifyDelivery");
-    const delivery = await Bun.file(new URL("./delivery.ts", import.meta.url)).text();
-    expect(delivery).not.toContain("export async function reverifyDelivery");
+  test("the /hub mount forwards the browser's own cookies and never swaps in the owner session", async () => {
+    const server = await read("./server.ts");
+    const mount = server.slice(server.indexOf('app.all("/hub/*"'), server.indexOf("const server = Bun.serve("));
+    expect(mount).toContain("hubProxyHeaders(context.req.raw.headers)");
+    expect(mount).not.toContain("currentSession()");
+    expect(mount).not.toContain("localActor");
+  });
+
+  test("the host has no route a gate decision could take instead", async () => {
+    const source = await read("./api-decisions.ts");
+    expect(source).not.toContain('"/projects/:projectId/submit"');
+    expect(source).not.toContain('"/projects/:projectId/decide"');
+    expect(source).not.toContain("abortBuildAttempt");
+    const { HOST_EFFECT_COMMANDS } = await import("./api-decisions.js");
+    for (const gate of ["stage.submit", "stage.approve", "cost.approve", "stage.reject", "stage.revise", "audience.decide", "delivery.accept", "build.cancel", "build.interrupt"]) {
+      expect(HOST_EFFECT_COMMANDS).not.toContain(gate);
+    }
   });
 });

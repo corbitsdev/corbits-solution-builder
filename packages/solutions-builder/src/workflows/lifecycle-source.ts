@@ -79,6 +79,8 @@ export type LifecycleSourceOptions = {
   readonly source?: InferenceSourcePin;
   /** The project's audience packages, in stage 5 fan-out order. */
   readonly audiences?: readonly { readonly name: string; readonly role: string }[];
+  /** How many audiences must say proceed before stage 5 approves; the gate carries the tally. */
+  readonly audienceQuorum?: number;
 };
 
 /** The stage whose rounds run the build agent. */
@@ -243,7 +245,7 @@ const buildAgent = defineAgent({
       }),
       ${JSON.stringify(EVIDENCE_ADMIT_STEP_ID)}: action({
         handler: "admitGate",
-        input: { from: "steps." + ${JSON.stringify(EVIDENCE_STEP_ID)} + ".output" },
+        input: admitInput(${JSON.stringify(EVIDENCE_STEP_ID)}, { stage: BUILD_STAGE, gate: "evidence" }),
         drainBehavior: "wait",
         after: [${JSON.stringify(EVIDENCE_STEP_ID)}],
       }),`
@@ -286,6 +288,18 @@ const DECIDE = ${JSON.stringify(DECIDE_STEP_ID)};
 const NO_DRAFT = ${JSON.stringify(NO_DRAFT_STEP_ID)};
 const DRAFT_TIMEOUT = ${DRAFT_STEP_TIMEOUT_MS};
 const BUILD_STAGE = ${BUILD_STAGE};
+const AUDIENCE_QUORUM = ${options.audienceQuorum === undefined ? "undefined" : JSON.stringify(options.audienceQuorum)};
+// The admit reads the carried tally, then the person's intent, then the
+// gate's own literals last: the stage and gate are the workflow's to say.
+function admitInput(waitStepId, literal) {
+  return {
+    merge: [
+      { project: { from: "trigger.payload" }, fields: ["audience"] },
+      { from: "steps." + waitStepId + ".output" },
+      { literal },
+    ],
+  };
+}
 ${source ? `const SOURCE = ${JSON.stringify(source)};` : ""}
 ${buildAgent}${agentsBlock}${agentStepSpecs}
 // One iteration: the workflow waits to hear what the person did. A gate right
@@ -378,7 +392,7 @@ function gateIteration(stage, gate) {
       [WAIT]: awaitSignal({ name, drainBehavior: "wait" }),
       [ADMIT]: action({
         handler: "admitGate",
-        input: { from: "steps." + WAIT + ".output" },
+        input: admitInput(WAIT, { stage, gate, ...(stage === 5 && AUDIENCE_QUORUM !== undefined ? { quorum: AUDIENCE_QUORUM } : {}) }),
         drainBehavior: "wait",
         after: [WAIT],
       }),

@@ -68,6 +68,24 @@ export const EVALUATED_STAGE: Stage = 1;
 export const GATE_WAIT_STEP_ID = "wait";
 /** The action inside a gate loop: the ledger guard admits or refuses. */
 export const ADMIT_STEP_ID = "admit";
+
+/**
+ * What the admit action reads, in override order: the tally the loop carried
+ * from the last iteration, the delivered intent, then the gate's own literals
+ * last — the stage and kind of gate are the workflow's, never the client's.
+ */
+export function admitInput(
+  waitStepId: string,
+  literal: { readonly stage: Stage; readonly gate: "gate" | "exhausted" | "evidence"; readonly quorum?: number },
+): Record<string, unknown> {
+  return {
+    merge: [
+      { project: { from: "trigger.payload" }, fields: ["audience"] },
+      { from: `steps.${waitStepId}.output` },
+      { literal },
+    ],
+  };
+}
 /**
  * How long one drafting agent step may run before the runtime fails it.
  * Matches `DEFAULT_TIMEOUT_MS` in `apps/hub/src/inference.ts`, the timeout
@@ -262,7 +280,7 @@ export function evidenceGate(after: readonly string[]): Record<string, unknown> 
     }),
     [EVIDENCE_ADMIT_STEP_ID]: action({
       handler: "admitGate",
-      input: { from: `steps.${EVIDENCE_STEP_ID}.output` },
+      input: admitInput(EVIDENCE_STEP_ID, { stage: BUILD_STAGE, gate: "evidence" }),
       drainBehavior: "wait",
       after: [EVIDENCE_STEP_ID],
     }),
@@ -274,47 +292,17 @@ export function evidenceGate(after: readonly string[]): Record<string, unknown> 
 /** Where a run is parked, in the ledger's terms: a stage's round, or the gate out of it. */
 export type RunPosition = { readonly stage: Stage; readonly at: "round" | "gate" };
 
+/** The stage a signal name this module issued belongs to, or null for any other name. */
+export function stageOfSignal(signalName: string): Stage | null {
+  const match = new RegExp(`^${STAGE_WORKFLOW_ID.replace(/\./g, "\\.")}\\.([1-9])\\.`).exec(signalName);
+  return match ? (Number(match[1]) as Stage) : null;
+}
+
 /** The position a parked signal name stands for, or null for a name this module never issued. */
 export function positionOfSignal(stage: Stage, signalName: string): RunPosition | null {
   if (signalName === roundSignal(stage) || signalName === evidenceSignal(stage)) return { stage, at: "round" };
   if (signalName === approveSignal(stage) || signalName === exhaustedSignal(stage)) return { stage, at: "gate" };
   return null;
-}
-
-/** The ledger states a run can be brought to; anything else is left alone. */
-export type LedgerPosition = { readonly stage: Stage; readonly state: "in_progress" | "waiting_approval" };
-
-export type AlignmentStep =
-  | { readonly kind: "aligned" }
-  | { readonly kind: "deliver"; readonly command: Command }
-  | { readonly kind: "ahead" }
-  | { readonly kind: "unsupported"; readonly reason: string };
-
-/**
- * The next signal that brings a run parked at `run` toward where the ledger
- * says the project stands. The ledger is the only state machine (§7); the run
- * follows it, never the other way round. A run behind the ledger — fired
- * fresh after its definition changed, or from before the specialists lived in
- * it — is walked forward with the signals a person would have sent: a round
- * is left with `stage.submit`, a gate with the approval that leaves it, which
- * at stage 7 is the cost approval. A round left this way asks for no draft,
- * so nothing is drawn and no turn appears in any thread.
- *
- * Never through the build stage: a stage-8 round runs the builder whether or
- * not it asked for a draft, and that is not something to do on a person's
- * behalf. A run ahead of the ledger is reported, not rewound.
- */
-export function alignmentStep(run: RunPosition, ledger: LedgerPosition): AlignmentStep {
-  const want: RunPosition = { stage: ledger.stage, at: ledger.state === "in_progress" ? "round" : "gate" };
-  if (run.stage > want.stage || (run.stage === want.stage && run.at === "gate" && want.at === "round")) {
-    return { kind: "ahead" };
-  }
-  if (run.stage === want.stage && run.at === want.at) return { kind: "aligned" };
-  if (run.stage >= BUILD_STAGE) {
-    return { kind: "unsupported", reason: `the run is inside the build stage (${run.stage}), which is never driven on a person's behalf` };
-  }
-  if (run.at === "round") return { kind: "deliver", command: "stage.submit" };
-  return { kind: "deliver", command: run.stage === 7 ? "cost.approve" : "stage.approve" };
 }
 
 export function reviseStepId(stage: Stage): string {
@@ -378,8 +366,8 @@ export function iteration(stage: Stage): WorkflowDefinition {
   });
 }
 
-/** One gate iteration: wait for the 8091 signal, then admit. */
-export function gateIteration(stage: Stage, gate: "gate" | "exhausted"): WorkflowDefinition {
+/** One gate iteration: wait for the named signal, then admit. `quorum` is stage 5's audience quorum. */
+export function gateIteration(stage: Stage, gate: "gate" | "exhausted", quorum?: number): WorkflowDefinition {
   return defineWorkflow({
     id: `${STAGE_WORKFLOW_ID}.admit.${gate}.${stage}`,
     triggers: [{ type: "manual" }],
@@ -390,7 +378,7 @@ export function gateIteration(stage: Stage, gate: "gate" | "exhausted"): Workflo
       }),
       [ADMIT_STEP_ID]: action({
         handler: "admitGate",
-        input: { from: `steps.${GATE_WAIT_STEP_ID}.output` },
+        input: admitInput(GATE_WAIT_STEP_ID, { stage, gate, ...(quorum !== undefined ? { quorum } : {}) }),
         drainBehavior: "wait",
         after: [GATE_WAIT_STEP_ID],
       }),
@@ -399,7 +387,7 @@ export function gateIteration(stage: Stage, gate: "gate" | "exhausted"): Workflo
 }
 
 /** The top-level steps a stage contributes to the lifecycle: the loop and its two gates. */
-export function stageSteps(stage: Stage, after: readonly string[] | null): Record<string, unknown> {
+export function stageSteps(stage: Stage, after: readonly string[] | null, quorum?: number): Record<string, unknown> {
   return {
     [reviseStepId(stage)]: loop({
       body: iteration(stage),
@@ -418,7 +406,7 @@ export function stageSteps(stage: Stage, after: readonly string[] | null): Recor
       ...(after ? { after: [...after] } : {}),
     }),
     [gateStepId(stage)]: loop({
-      body: gateIteration(stage, "gate"),
+      body: gateIteration(stage, "gate", quorum),
       while: "gateRefused",
       carry: "carryGate",
       maxIterations: MAX_REVISIONS,
@@ -427,7 +415,7 @@ export function stageSteps(stage: Stage, after: readonly string[] | null): Recor
       after: [reviseStepId(stage)],
     }),
     [exhaustedStepId(stage)]: loop({
-      body: gateIteration(stage, "exhausted"),
+      body: gateIteration(stage, "exhausted", quorum),
       while: "gateRefused",
       carry: "carryGate",
       maxIterations: MAX_REVISIONS,

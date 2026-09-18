@@ -1,12 +1,15 @@
 /**
- * Host command dispatch — artifacts, approvals, flags, and gate delivery.
+ * Host command dispatch — the host's own effects on a project.
  *
- * Gate commands go to the project's lifecycle run first: `admitGate` in the
- * app package is the admit authority. A delivered gate is recorded as a ledger
- * mail turn from `runGateSideEffects`, not from the HTTP `commandFrom` envelope.
- * This module still records non-gate commands and host-side effects (artifact
- * versions, decision flags, worker questions). It does not move run state: that
- * lives in the workflow definition, not in a `RunDraft`.
+ * A person's decision at a gate is not dispatched here. It is a named signal
+ * the client delivers to the run over `/hub`; the hub authorizes it by grant,
+ * the runtime deduplicates it by `signalId`, `admitGate` admits it inside the
+ * run, and the ledger records it on read (`recordAdmittedGates`). What this
+ * module runs is what only the host can do: write an artifact version (a
+ * frozen packet, a delivery manifest), start or settle a build attempt,
+ * answer a worker, archive or delete a project, and relay a draft round
+ * (`deliverRound`) with the inference the specialist drafts with. It does not
+ * move run state: that lives in the workflow definition.
  */
 import type { Command, Stage } from "@solutions-builder/app/ledger";
 import { classifyTarget, SELECTABLE_TARGETS } from "@solutions-builder/app/targets";
@@ -17,8 +20,9 @@ import { newId } from "./ids.js";
 import { database, type Db } from "./db.js";
 import type { Authority } from "@solutions-builder/app/ledger";
 import { launchProjectLifecycle, projectExecutionStatus, type DeliveryOutcome } from "./lifecycle-run.js";
+import { deliverRound, ROUND_COMMAND } from "./gate-delivery.js";
 import { loadRun } from "./run-views.js";
-import { activeRun, readRun, runsForProject } from "./runs.js";
+import { activeRun, runsForProject } from "./runs.js";
 import {
   authoritiesFor,
   versionHashesMatch,
@@ -47,7 +51,6 @@ import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { dataDirectory } from "./paths.js";
-import { GATE_COMMANDS, runGateSideEffects } from "./gate-delivery.js";
 import { notifyDecision } from "./notify.js";
 import { readProject, updateProject, type ProjectPolicy } from "./project-records.js";
 
@@ -101,10 +104,9 @@ export type CommandOutcome = {
   readonly transitionId: string;
   readonly replayed: boolean;
   /**
-   * What `runGateSideEffects` did with the signal this command produced.
-   * Present only for a gate command; a caller that needs the round to have
-   * actually reached a waiting run (a drafting request) reads this rather
-   * than assuming delivery from a bare commit.
+   * What `deliverRound` did with the round this command relayed. Present only
+   * for `stage.draft`; a caller that needs the round to have actually reached
+   * a waiting run reads this rather than assuming delivery from a bare commit.
    */
   readonly delivery?: DeliveryOutcome;
 };
@@ -144,73 +146,6 @@ export function execute(input: CommandInput): Promise<CommandOutcome> {
 
   inflight.set(input.idempotencyKey, attempt);
   return attempt.finally(() => inflight.delete(input.idempotencyKey));
-}
-
-/**
- * The one-action approval: `stage.submit` immediately followed by whichever
- * command actually leaves `waiting_approval` at this stage (`stage.approve`
- * for stages 1-6, `cost.approve` at stage 7 — stage 7 never accepts
- * `stage.approve`, per the ledger's own forbidden-transition note).
- *
- * Both commands still go through `execute` — through the guard, through
- * authority, through the audit trail — so this changes nothing about what is
- * allowed, only how many times a solo approver has to say so. If the submit
- * commits and the approval is then refused (a stale version, a quorum not
- * yet met), that refusal is what the caller sees: the submit is not rolled
- * back, and the run is left exactly where a plain `stage.submit` would have
- * left it — `waiting_approval`.
- */
-export async function submitAndApprove(input: {
-  readonly actor: Actor;
-  readonly projectId: string;
-  readonly runId: string;
-  readonly versions: unknown[];
-  readonly rationale?: string;
-  readonly forecastUsd?: number;
-  readonly assumptions?: unknown;
-  readonly idempotencyKey: string;
-  readonly correlationId: string;
-  readonly expectedRevision?: number;
-}): Promise<CommandOutcome> {
-  const before = await readRun(input.runId, input.projectId);
-  if (!before) throw notFound("That run");
-
-  // A stage already sent for review — stage 5's packages go when the first
-  // stakeholder decides — has nothing left to submit; only the approval
-  // remains, checked against the revision the caller saw.
-  const alreadySubmitted = before.state === "waiting_approval";
-  const submitted = alreadySubmitted
-    ? { runId: input.runId }
-    : await execute({
-        type: "stage.submit",
-        actor: input.actor,
-        projectId: input.projectId,
-        idempotencyKey: `${input.idempotencyKey}#submit`,
-        correlationId: input.correlationId,
-        ...(input.expectedRevision !== undefined ? { expectedRevision: input.expectedRevision } : {}),
-        payload: { runId: input.runId, versions: input.versions },
-      });
-
-  const approveType: Command = before.stage === 7 ? "cost.approve" : "stage.approve";
-  return execute({
-    type: approveType,
-    actor: input.actor,
-    projectId: input.projectId,
-    // The submit above already advanced the project's revision; re-checking
-    // the caller's original one against the post-submit row would refuse a
-    // legitimate chain, so the second step trusts the first rather than
-    // re-asserting a revision that has deliberately moved.
-    idempotencyKey: `${input.idempotencyKey}#approve`,
-    correlationId: input.correlationId,
-    ...(alreadySubmitted && input.expectedRevision !== undefined ? { expectedRevision: input.expectedRevision } : {}),
-    payload: {
-      runId: submitted.runId,
-      versions: input.versions,
-      ...(input.rationale !== undefined ? { rationale: input.rationale } : {}),
-      ...(input.forecastUsd !== undefined ? { forecastUsd: input.forecastUsd } : {}),
-      ...(input.assumptions !== undefined ? { assumptions: input.assumptions } : {}),
-    },
-  });
 }
 
 /**
@@ -419,42 +354,10 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
     ...(input.type === "build.resume" ? { checkpointResumeVerified: run.checkpointRef !== null } : {}),
   };
 
-  // Gate commands go to the run first: `admitGate` is the admit authority.
-  // `evaluate` is not; a delivered gate still records host-side effects even
-  // when the host's own run view is stale. A refused command never writes.
-  const delivery = GATE_COMMANDS.includes(input.type)
-    ? await runGateSideEffects(
-        { ...input, payload: { ...input.payload, command: input.type, run, context } },
-        { stage: run.stage, state: run.state },
-      )
-    : undefined;
-
   const verdict =
     input.type === "audience.decide" ? evaluateAudienceDecision(run, context) : evaluate(input.type, run, context);
-
-  if (!verdict.ok && delivery !== "delivered") {
-    throw new HostError("transition_refused", verdict.message, { refusal: verdict.code });
-  }
-
-  const transition = verdict.ok
-    ? verdict.transition
-    : LEDGER.find((row) => row.command === input.type && row.from !== null);
-  if (!transition) {
-    throw new HostError(
-      "transition_refused",
-      verdict.ok ? `No ledger row for ${input.type}.` : verdict.message,
-      verdict.ok ? {} : { refusal: verdict.code },
-    );
-  }
-  const toStage: Stage = verdict.ok
-    ? verdict.toStage
-    : input.type === "stage.approve"
-      ? ((run.stage + 1) as Stage)
-      : input.type === "build.freeze"
-        ? 8
-        : input.type === "build.accept_evidence"
-          ? 9
-          : run.stage;
+  if (!verdict.ok) throw new HostError("transition_refused", verdict.message, { refusal: verdict.code });
+  const { transition, toStage } = verdict;
 
   const outcome = await db.transaction(async (tx) => {
     const applied = await apply(tx, {
@@ -501,26 +404,29 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
     }
   }
 
-  if (delivery !== "delivered") {
-    await recordCommand({
-      projectId: input.projectId,
-      actorPrincipalId: input.actor.principalId,
-      authority: authorities[0] ?? null,
-      command: input.type,
-      transitionId: outcome.result.transitionId,
-      correlationId: input.correlationId,
-      before: outcome.before,
-      after: { runId: outcome.applied.runId, state: outcome.applied.state, stage: outcome.applied.stage },
-      idempotencyKey: input.idempotencyKey,
-      result: outcome.result,
-      stage: run.stage,
-      runId: outcome.applied.runId,
-      ...(outcome.applied.flag ? { flag: outcome.applied.flag } : {}),
-      ...(outcome.applied.question ? { question: outcome.applied.question } : {}),
-      ...(outcome.applied.answer ? { answer: outcome.applied.answer } : {}),
-      ...(outcome.applied.approval ?? {}),
-    });
-  }
+  // A draft round is relayed to the run after the guard allowed it, and
+  // recorded here under the same key the signal carries, so the run's own
+  // `SignalReceived` is one turn on the ledger, not two.
+  const delivery = input.type === ROUND_COMMAND ? await deliverRound(input, run.stage) : undefined;
+
+  await recordCommand({
+    projectId: input.projectId,
+    actorPrincipalId: input.actor.principalId,
+    authority: authorities[0] ?? null,
+    command: input.type,
+    transitionId: outcome.result.transitionId,
+    correlationId: input.correlationId,
+    before: outcome.before,
+    after: { runId: outcome.applied.runId, state: outcome.applied.state, stage: outcome.applied.stage },
+    idempotencyKey: input.idempotencyKey,
+    result: outcome.result,
+    stage: run.stage,
+    runId: outcome.applied.runId,
+    ...(outcome.applied.flag ? { flag: outcome.applied.flag } : {}),
+    ...(outcome.applied.question ? { question: outcome.applied.question } : {}),
+    ...(outcome.applied.answer ? { answer: outcome.applied.answer } : {}),
+    ...(outcome.applied.approval ?? {}),
+  });
 
   if (outcome.applied.notifyRunId) {
     await notifyDecision(input.projectId, outcome.applied.notifyRunId).catch(() => undefined);
@@ -604,8 +510,8 @@ async function apply(
 
     case "stage.draft": {
       // Keeps the stage open: no run mutation, no approval, no notify. Its
-      // only durable effect is the round signal `runGateSideEffects` delivers
-      // to the run after this command commits.
+      // only durable effect is the round `deliverRound` relays to the run
+      // after this command commits.
       return { runId: run.id, stage: run.stage, state: run.state };
     }
 

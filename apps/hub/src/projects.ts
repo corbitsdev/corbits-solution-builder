@@ -22,7 +22,7 @@ import { ledgerCommands, recordCommand, projectApprovals, projectFlags, projectQ
 import type { Stage } from "@solutions-builder/app/ledger";
 import { nextQuestion } from "./questions.js";
 import { openDecisionFor } from "./decisions.js";
-import { currentAnchor } from "./lifecycle-run.js";
+import { currentAnchor, projectExecutionStatus } from "./lifecycle-run.js";
 import { activeRun, runsForProject } from "./runs.js";
 import { tenantId } from "./hub-client.js";
 import { installProjectAuthority } from "./project-authority.js";
@@ -613,6 +613,11 @@ export async function listProjects() {
 export async function projectDetail(projectId: string, actorPrincipalId: string) {
   const { db } = database();
   const row = await requireProject(projectId);
+  // The ledger follows the run: a gate a person signalled over `/hub` becomes
+  // a ledger turn here, before the runs and approvals below are read.
+  await projectExecutionStatus(projectId).catch((cause: unknown) => {
+    console.error(`[executor] ${projectId}: could not read the run before the project:`, cause);
+  });
 
   const runs = await runsForProject(projectId);
   const nodes = await db

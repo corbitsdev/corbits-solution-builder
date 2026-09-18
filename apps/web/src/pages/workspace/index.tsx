@@ -36,6 +36,8 @@ import { clock } from "./elapsed.jsx";
 import { StageDocument } from "./document.jsx";
 import { SELECTABLE_TARGETS } from "@solutions-builder/app/targets";
 import type { StageStatus } from "../../run-fold.ts";
+import { approvalCommand, deliverGate, submitThen } from "../../run-signal.ts";
+import type { Stage } from "@solutions-builder/app/ledger";
 
 export { StageDocument, DocumentBody } from "./document.jsx";
 export { ApprovalsRecord, STAGE_GOAL } from "./gate.jsx";
@@ -288,8 +290,8 @@ export function StageWorkspace({
           }
           onApprove={() =>
             run("submit", () =>
-              api.decide(detail.project.id, {
-                expectedRevision: detail.project.revision,
+              deliverGate(detail, stage as Stage, standing, {
+                command: approvalCommand(stage as Stage),
                 runId: current!.id,
                 versions: approvedVersions(active),
               }),
@@ -402,7 +404,7 @@ export function StageWorkspace({
         </Screen>
       ) : null}
 
-      {stage === 4 ? <DesignPanel detail={detail} onChanged={onChanged} /> : null}
+      {stage === 4 ? <DesignPanel detail={detail} standing={standing} onChanged={onChanged} /> : null}
 
       {/* The stage fills the window and clips, so a stage that is a stack of
           screens rather than the document layout needs a region of its own
@@ -504,15 +506,14 @@ export function StageWorkspace({
           }}
           soloApproval={detail.soloApproval}
           onSubmit={() =>
-            run("submit", () =>
+            run("submit", () => {
+              const submit = { runId: current!.id, versions: approvedVersions(active) };
               // One decision when nobody else can take it: submitting a thing
               // to yourself and then approving it is two clicks for one act.
-              (detail.soloApproval ? api.decide : api.submit)(detail.project.id, {
-                expectedRevision: detail.project.revision,
-                runId: current!.id,
-                versions: approvedVersions(active),
-              }),
-            )
+              return detail.soloApproval
+                ? submitThen(detail, stage as Stage, standing, submit, { command: approvalCommand(stage as Stage), ...submit })
+                : deliverGate(detail, stage as Stage, standing, { command: "stage.submit", ...submit });
+            })
           }
         />
       ) : null}
@@ -524,7 +525,7 @@ export function StageWorkspace({
 }
 
 /** Loads the stage-4 design history and its feedback, then renders the flow. */
-function DesignPanel({ detail, onChanged }: { detail: ProjectDetail; onChanged: () => void }) {
+function DesignPanel({ detail, standing, onChanged }: { detail: ProjectDetail; standing: StageStatus | null; onChanged: () => void }) {
   const [designs, setDesigns] = useState<ArtifactNode[]>([]);
   const [feedbackByNode, setFeedbackByNode] = useState(
     new Map<string, { feedback?: DesignFeedback; prompt?: string }>(),
@@ -589,14 +590,15 @@ function DesignPanel({ detail, onChanged }: { detail: ProjectDetail; onChanged: 
           // One decision when nobody else can take it, as on the written
           // stages: submitting a thing to yourself and then approving it is
           // two clicks for one act.
-          onApprove: (design) =>
-            (detail.soloApproval ? api.decide : api.submit)(detail.project.id, {
-              expectedRevision: detail.project.revision,
+          onApprove: (design) => {
+            const submit = {
               runId: detail.current!.id,
-              versions: [
-                { artifactId: design.artifactId, versionId: design.id, contentHash: design.contentHash },
-              ],
-            }),
+              versions: [{ artifactId: design.artifactId, versionId: design.id, contentHash: design.contentHash }],
+            };
+            return detail.soloApproval
+              ? submitThen(detail, 4, standing, submit, { command: "stage.approve", ...submit })
+              : deliverGate(detail, 4, standing, { command: "stage.submit", ...submit });
+          },
         }}
         onChanged={() => {
           void load();
@@ -957,8 +959,9 @@ function BuildPanel({
               loading={busy === "cancel"}
               onClick={() =>
                 act("cancel", async () => {
-                  await api.command(detail.project.id, "build.cancel", {
-                    expectedRevision: detail.project.revision,
+                  // A signal on the run; the worker follows the run and stops.
+                  await deliverGate(detail, 8, null, {
+                    command: "build.cancel",
                     runId: current.id,
                     reason: "Stopped from the build supervision screen.",
                   });

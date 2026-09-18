@@ -1,18 +1,21 @@
 import { describe, expect, test } from "bun:test";
 
 describe("GET /projects/:id standing", () => {
-  test("projectDetail does not fold a second run standing", async () => {
+  test("projectDetail returns no run standing; it lets the ledger follow the run and leaves the fold to the client", async () => {
     const source = await Bun.file(new URL("./projects.ts", import.meta.url)).text();
-    expect(source).not.toContain("projectExecutionStatus");
-    expect(source).not.toContain("activityHeadline");
-    expect(source).toContain("not a second copy of the machine");
-    expect(source).toContain("foldProject");
+    const detail = source.slice(source.indexOf("export async function projectDetail("));
+    expect(detail).not.toContain("standing:");
+    expect(detail).not.toContain("activityHeadline");
+    expect(detail).toContain("not a second copy of the machine");
+    expect(detail).toContain("foldProject");
+    // Write-on-read: a gate a person signalled over /hub is a ledger turn before the runs are read.
+    expect(detail).toContain("await projectExecutionStatus(projectId)");
   });
 
-  test("command, submit and decide routes still exist", async () => {
+  test("the host has no submit or decide route; /commands is for host effects", async () => {
     const source = await Bun.file(new URL("./api-decisions.ts", import.meta.url)).text();
     expect(source).toContain('api.post("/projects/:projectId/commands/:command"');
-    expect(source).toContain('api.post("/projects/:projectId/submit"');
-    expect(source).toContain('api.post("/projects/:projectId/decide"');
+    expect(source).not.toContain('"/projects/:projectId/submit"');
+    expect(source).not.toContain('"/projects/:projectId/decide"');
   });
 });

@@ -722,11 +722,10 @@ export const api = {
       `/projects/${projectId}/stages/${stage}/reply`,
       payload,
     ),
-  submit: (projectId: string, payload: unknown) =>
-    post<CommandOutcome>(`/projects/${projectId}/submit`, payload),
-  /** Submit and approve in one, for the person who is the only approver. */
-  decide: (projectId: string, payload: unknown) =>
-    post<CommandOutcome>(`/projects/${projectId}/decide`, payload),
+  /**
+   * A host effect (a frozen packet, a build attempt, a route selection). A
+   * gate decision is not one: it is a named signal on the run (`run-signal.ts`).
+   */
   command: (projectId: string, command: string, payload: unknown) =>
     post<CommandOutcome>(`/projects/${projectId}/commands/${command}`, payload),
   /**

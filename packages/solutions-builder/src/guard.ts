@@ -73,6 +73,8 @@ export const REFUSALS = [
   "missing_cost_approval",
   "origin_mismatch",
   "checkpoint_unavailable",
+  /** Not a refusal of the person: a record-only command (an audience decision) was taken and the gate stays open. */
+  "recorded",
 ] as const;
 export type RefusalCode = (typeof REFUSALS)[number];
 
@@ -134,6 +136,11 @@ function resolveTargetStage(
  */
 export function origin(command: Command): Transition | null {
   return LEDGER.find((row) => row.command === command && row.from === null) ?? null;
+}
+
+/** Every authority the ledger names for a command, across its rows. */
+export function authoritiesFor(command: Command): Authority[] {
+  return [...new Set(LEDGER.filter((row) => row.command === command).flatMap((row) => row.authority))];
 }
 
 export function evaluate(

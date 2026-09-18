@@ -152,6 +152,7 @@ export function renderLifecycleSource(
   projectId?: string,
   source?: InferenceSourcePin,
   audiences?: readonly { name: string; role: string }[],
+  audienceQuorum?: number,
 ): LifecycleSource {
   const name = lifecycleAssetName(projectId);
   const root = {
@@ -174,7 +175,9 @@ export function renderLifecycleSource(
     "package.json": `${JSON.stringify(root, null, 2)}\n`,
     [`${LIFECYCLE_DIR}/package.json`]: `${JSON.stringify(member, null, 2)}\n`,
     [`${LIFECYCLE_DIR}/${ENTRY_PATH}`]: lifecycleEntrySource(
-      source ? { source, ...(audiences ? { audiences } : {}) } : {},
+      source
+        ? { source, ...(audiences ? { audiences } : {}), ...(audienceQuorum !== undefined ? { audienceQuorum } : {}) }
+        : {},
     ),
     [`${LIFECYCLE_DIR}/${LOOPS_PATH}`]: loopsModule(),
     [`${LIFECYCLE_DIR}/${ACTIONS_PATH}`]: actionsModule(),
@@ -312,7 +315,12 @@ async function ensureLifecycleDeploymentUncached(
   // upgrade path any other lifecycle change takes.
   const project = projectId ? await readProject(transport, projectId) : null;
   const audiences = project?.policy.audiences;
-  const rendered = renderLifecycleSource(projectId, await sourceFor(transport, tenantId, offerings[0]!), audiences);
+  const rendered = renderLifecycleSource(
+    projectId,
+    await sourceFor(transport, tenantId, offerings[0]!),
+    audiences,
+    project?.policy.audienceQuorum,
+  );
   const assetId = await lifecycleAsset(transport, tenantId, projectId);
   const head = await readWorkflowSourceBlob(transport, tenantId, assetId, DIGEST_PATH);
   const workflows = workflowsFor(transport, tenantId);
