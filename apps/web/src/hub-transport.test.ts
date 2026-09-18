@@ -9,7 +9,7 @@ describe("createHubTransport", () => {
     globalThis.fetch = original;
   });
 
-  test("calls /hub with same-origin credentials", async () => {
+  test("calls the hub directly with same-origin credentials", async () => {
     const calls: { url: string; init?: RequestInit }[] = [];
     globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
       calls.push({ url: String(url), ...(init !== undefined ? { init } : {}) });
@@ -21,10 +21,10 @@ describe("createHubTransport", () => {
 
     const body = await createHubTransport().fetch<{ id: string }>("GET", "/api/me");
     expect(body).toEqual({ id: "u1" });
-    expect(calls).toEqual([{ url: "/hub/api/me", init: { method: "GET", credentials: "same-origin" } }]);
+    expect(calls).toEqual([{ url: "/api/me", init: { method: "GET", credentials: "same-origin" } }]);
   });
 
-  test("posts JSON to /hub and keeps same-origin credentials", async () => {
+  test("posts JSON to the hub and keeps same-origin credentials", async () => {
     const calls: { url: string; init?: RequestInit }[] = [];
     globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
       calls.push({ url: String(url), ...(init !== undefined ? { init } : {}) });
@@ -35,7 +35,7 @@ describe("createHubTransport", () => {
     }) as typeof fetch;
 
     await createHubTransport().fetch("POST", "/api/tenants", { name: "workspace" });
-    expect(calls[0]?.url).toBe("/hub/api/tenants");
+    expect(calls[0]?.url).toBe("/api/tenants");
     expect(calls[0]?.init?.credentials).toBe("same-origin");
     expect(calls[0]?.init?.headers).toEqual({ "content-type": "application/json" });
     expect(calls[0]?.init?.body).toBe(JSON.stringify({ name: "workspace" }));
@@ -73,12 +73,14 @@ describe("rerankCatalogAfterSkillAssets", () => {
     }) as typeof fetch;
 
     await rerankCatalogAfterSkillAssets();
-    expect(calls.some((call) => call.url.startsWith("/api/"))).toBe(false);
-    expect(calls.map((call) => call.url)).toContain("/hub/api/tenants/t_ws/catalog/providers?limit=100");
-    expect(calls.map((call) => call.url)).toContain("/hub/api/tenants/t_ws/catalog/offerings?limit=100");
+    expect(calls.some((call) => call.url === "/api/providers" || call.url.startsWith("/api/providers?"))).toBe(
+      false,
+    );
+    expect(calls.map((call) => call.url)).toContain("/api/tenants/t_ws/catalog/providers?limit=100");
+    expect(calls.map((call) => call.url)).toContain("/api/tenants/t_ws/catalog/offerings?limit=100");
     expect(calls.filter((call) => call.method === "PATCH").map((call) => call.url)).toEqual([
-      "/hub/api/tenants/t_ws/catalog/offerings/o-emb",
-      "/hub/api/tenants/t_ws/catalog/offerings/o-chat",
+      "/api/tenants/t_ws/catalog/offerings/o-emb",
+      "/api/tenants/t_ws/catalog/offerings/o-chat",
     ]);
   });
 });
@@ -99,7 +101,7 @@ describe("api.providers", () => {
 
     const listed = await api.providers();
     expect(urls.some((href) => href === "/api/providers" || href.startsWith("/api/providers?"))).toBe(false);
-    expect(urls).toContain("/hub/api/tenants/t_ws/catalog/providers?limit=100");
+    expect(urls).toContain("/api/tenants/t_ws/catalog/providers?limit=100");
     expect(listed.providers).toEqual([
       {
         id: "mp1",
@@ -130,7 +132,7 @@ describe("api.providers", () => {
 
     const listed = await api.providers();
     expect(listed.providers).toEqual([]);
-    expect(urls.some((href) => href.startsWith("/api/"))).toBe(false);
+    expect(urls.some((href) => href === "/api/providers" || href.startsWith("/api/providers?"))).toBe(false);
   });
 });
 
@@ -147,8 +149,8 @@ function jsonForCatalog(href: string): Response {
 }
 
 function catalogBody(href: string): unknown {
-  if (href === "/hub/api/me") return { id: "u1" };
-  if (href.startsWith("/hub/api/me/principals")) {
+  if (href === "/api/me") return { id: "u1" };
+  if (href.startsWith("/api/me/principals")) {
     return page([
       {
         principalId: "prn1",
@@ -159,7 +161,7 @@ function catalogBody(href: string): unknown {
       },
     ]);
   }
-  if (href.startsWith("/hub/api/tenants/t_ws/catalog/providers")) {
+  if (href.startsWith("/api/tenants/t_ws/catalog/providers")) {
     return page([
       {
         id: "mp1",
@@ -171,7 +173,7 @@ function catalogBody(href: string): unknown {
       },
     ]);
   }
-  if (href.startsWith("/hub/api/tenants/t_ws/credentials")) {
+  if (href.startsWith("/api/tenants/t_ws/credentials")) {
     return page([
       {
         id: "c1",
@@ -185,19 +187,19 @@ function catalogBody(href: string): unknown {
       },
     ]);
   }
-  if (href.startsWith("/hub/api/tenants/t_ws/catalog/models")) {
+  if (href.startsWith("/api/tenants/t_ws/catalog/models")) {
     return page([
       { id: "m-emb", canonicalName: "text-embedding-3-small", displayName: "emb" },
       { id: "m-chat", canonicalName: "gpt-4o", displayName: "GPT-4o" },
     ]);
   }
-  if (href.startsWith("/hub/api/tenants/t_ws/catalog/offerings") && !href.includes("/o-")) {
+  if (href.startsWith("/api/tenants/t_ws/catalog/offerings") && !href.includes("/o-")) {
     return page([
       { id: "o-emb", modelId: "m-emb", providerId: "mp1", priority: 0, capabilities: [], quirks: null, disabled: false },
       { id: "o-chat", modelId: "m-chat", providerId: "mp1", priority: 1, capabilities: ["plain-text"], quirks: null, disabled: false },
     ]);
   }
-  if (href.startsWith("/hub/api/tenants/t_ws/providers")) {
+  if (href.startsWith("/api/tenants/t_ws/providers")) {
     return page([
       {
         id: "p1",
@@ -208,6 +210,6 @@ function catalogBody(href: string): unknown {
       },
     ]);
   }
-  if (href.startsWith("/hub/api/tenants/t_ws/catalog/offerings/")) return { ok: true };
+  if (href.startsWith("/api/tenants/t_ws/catalog/offerings/")) return { ok: true };
   return {};
 }

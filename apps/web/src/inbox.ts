@@ -2,11 +2,12 @@
  * The mailbox inbox, kept live over `@corbits/mailbox`'s SSE stream.
  *
  * `@corbits/mailbox` is mounted on embed-hub under `/me/inbox*` (see PR #332),
- * reachable from the browser at `/hub/api/me/inbox*` the same way every other
- * hub route is. A `mailbox` event on `/hub/api/me/inbox/events` carries only
+ * reachable from the browser at `/api/me/inbox*` the same way every other
+ * hub route is. A `mailbox` event on `/api/me/inbox/events` carries only
  * `{ id, op? }` — a nudge, never the row — so every event triggers a refetch
  * of the list rather than an attempt to apply the event in place.
  */
+import { hubCredentials, hubEventSourceCredentials, hubOrigin } from "./hub-origin.ts";
 
 export type InboxItem = {
   uid: number;
@@ -38,7 +39,7 @@ type MailboxListResponse = {
 const EMPTY_INBOX: InboxState = { items: [], unreadCount: 0 };
 
 async function fetchInbox(): Promise<InboxState> {
-  const response = await fetch("/hub/api/me/inbox", { credentials: "same-origin" });
+  const response = await fetch(`${hubOrigin()}/api/me/inbox`, { credentials: hubCredentials() });
   if (!response.ok) return EMPTY_INBOX;
   const body = (await response.json()) as MailboxListResponse;
   const items = body.messages.map((message) => ({
@@ -73,7 +74,9 @@ export function subscribeInbox(
 
   refresh();
 
-  const source = new EventSource("/hub/api/me/inbox/events", { withCredentials: true });
+  const source = new EventSource(`${hubOrigin()}/api/me/inbox/events`, {
+    withCredentials: hubEventSourceCredentials(),
+  });
   source.addEventListener("mailbox", (event) => {
     if (closed) return;
     try {

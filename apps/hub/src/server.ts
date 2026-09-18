@@ -19,10 +19,8 @@ import { API_VERSION, createApi } from "./api.js";
 import { openDatabase } from "./db.js";
 import { databaseDirectory, dataDirectory, portFile } from "./paths.js";
 import { stopSpawnedSidecars } from "./sidecar-processes.js";
-import { ensureHub, hubFetch, hubMode, resolveWorkspace } from "./hub-client.js";
+import { ensureHub, hubMode, remoteHubOrigin, resolveWorkspace } from "./hub-client.js";
 import { hub, hubWebSocket, setHostPort, SIDECAR_WS_PATH } from "./hub-mount.js";
-import { hubMountPath, hubProxyHeaders } from "./hub-proxy.js";
-import { rememberSession, sessionPairFromCookieHeader, sessionPairFromSetCookieHeaders } from "./hub-session.js";
 import {
   clientConnected,
   markReady,
@@ -141,6 +139,24 @@ async function resolveDist(): Promise<string> {
 
 const dist = await resolveDist();
 
+/**
+ * Tells the served interface where the hub lives. Embedded, this is absent —
+ * the hub is mounted on this same origin, so the transport uses relative
+ * paths. Remote, it is `SOLUTIONS_BUILDER_HUB_URL`: the interface reads it
+ * (`apps/web/src/hub-origin.ts`) and calls that origin directly, with
+ * `credentials: "include"`, rather than through this host.
+ *
+ * A `<script type="application/json">` block, not an executable inline
+ * script: the CSP below only allows `script-src 'self'`, and a JSON block is
+ * inert data the page reads, not a script the CSP would need to permit.
+ */
+function injectHubOrigin(html: string): string {
+  const config = { hubUrl: remoteHubOrigin() };
+  const json = JSON.stringify(config).replace(/<\//g, "<\\/");
+  const block = `<script type="application/json" id="sb-hub-config">${json}</script>`;
+  return html.includes("</head>") ? html.replace("</head>", `${block}</head>`) : `${block}${html}`;
+}
+
 const mime: Record<string, string> = {
   ".html": "text/html",
   ".js": "text/javascript",
@@ -216,51 +232,37 @@ const unauthorised = {
   },
 };
 
-function rememberHubSession(cookieHeader: string | null | undefined, from: Headers | null): void {
-  const inbound = sessionPairFromCookieHeader(cookieHeader);
-  const minted = from ? sessionPairFromSetCookieHeaders(from) : null;
-  const next = minted ?? inbound;
-  if (next) rememberSession(next);
-}
-
+// The outer door. Without this the host would be an open proxy into the hub
+// for anything on the machine, which is the loopback assumption the rest of
+// the host explicitly rejects. Everything past it — the host's own routes
+// and, embedded, the hub's own mounted routes — sees the client's own
+// cookies untouched. There is no owner-cookie swap here.
+//
+// The hub's own bare `/status` is deliberately outside this door: it is
+// public on the hub's own side too (`vendor/interchange/packages/hub-api/src
+// /app.ts`'s auth `skip`), so mounting it behind a token here would make
+// this host less permissive than the hub it embeds, for a route that
+// answers nothing but `{ status: "ok" }`.
 app.use("/api/*", async (context, next) => {
-  if (!authorised(context)) return context.json(unauthorised, 401);
-  rememberHubSession(context.req.header("cookie"), null);
-  await next();
-});
-
-// The hub mount is guarded too. Without this the host would be an open proxy
-// into the hub for anything on the machine, which is the loopback assumption
-// the rest of the host explicitly rejects. This is the outer door. After it,
-// Interchange authz is policy: the handler strips `/hub` and forwards the
-// browser's own cookies, without swapping in the owner session.
-app.use("/hub/*", async (context, next) => {
   if (!authorised(context)) return context.json(unauthorised, 401);
   await next();
 });
 
 app.route("/api", createApi());
 
-// The hub's own API, mounted under /hub so a client reaches it through the
-// same authenticated origin. Embedded, this dispatches in-process; pointed at
-// a hosted hub it forwards. Prefix strip only: no allowlist, no owner-cookie
-// swap, no Set-Cookie stripping.
-app.all("/hub/*", async (context) => {
-  const url = new URL(context.req.url);
-  const path = hubMountPath(url.pathname, url.search);
-  const method = context.req.method;
-  const payload =
-    method === "GET" || method === "HEAD" ? undefined : await context.req.raw.arrayBuffer();
-  const inbound = hubProxyHeaders(context.req.raw.headers);
-  rememberHubSession(inbound.get("cookie"), null);
-  const response = await hubFetch(path, {
-    method,
-    headers: inbound,
-    ...(payload !== undefined ? { body: payload } : {}),
-  });
-  rememberHubSession(null, response.headers);
-  return response;
-});
+// The client connects to the hub directly: embedded, its own Hono app is
+// mounted here unmodified, at its own paths (`/api/tenants/...`, `/api/me`,
+// `/api/auth/...`, the bare `/status` health route) — no prefix, no fetch
+// relay, no rewritten cookies. `registerHostRoutes` above already claimed
+// every path the host itself owns, so this only ever answers what host
+// routes did not.
+//
+// Remote (`SOLUTIONS_BUILDER_HUB_URL` set): there is no local hub to mount.
+// The browser is handed that origin directly (see the `index.html` injection
+// below) and talks to it itself; this host forwards nothing on its behalf.
+if (hubMode() === "embedded") {
+  app.route("/", hub().app);
+}
 
 const server = Bun.serve({
   hostname: "127.0.0.1",
@@ -321,9 +323,11 @@ const server = Bun.serve({
       });
     }
 
-    // Both the Builder API and the proxied hub go to Hono; everything else is
-    // the built interface.
-    if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/hub/")) {
+    // The host's own routes and the hub's own routes (`/api/tenants/...`,
+    // `/api/me`, `/api/auth/...`, and the hub's bare `/status`) both go to
+    // Hono, at their own paths with no prefix; everything else is the built
+    // interface.
+    if (url.pathname.startsWith("/api/") || url.pathname === "/status") {
       return app.fetch(request);
     }
 
@@ -337,6 +341,18 @@ const server = Bun.serve({
         "The Solutions Builder interface has not been built. Run `bun run ui:build`.",
         { status: 503, headers: { "content-type": "text/plain" } },
       );
+    }
+    // The SPA fallback always serves index.html, so this covers every
+    // client-side route too, not just `/`.
+    if (extname(selected) === ".html") {
+      const html = await file.text();
+      return new Response(injectHubOrigin(html), {
+        headers: {
+          "content-type": "text/html",
+          "cache-control": "no-store",
+          "content-security-policy": CSP,
+        },
+      });
     }
     return new Response(file, {
       headers: {

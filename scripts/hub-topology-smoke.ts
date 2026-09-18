@@ -74,29 +74,23 @@ try {
     (embedded.hub.reported as { status?: string } | null)?.status === "ok",
   );
 
-  // The hub mount is not an open door on loopback. Health lives on the host
-  // at GET /api/status (sidecar facts included); GET /hub/status is only
-  // forwarded after this outer door.
-  const unauthorised = await fetch("http://127.0.0.1:8140/hub/status");
+  // The hub mount is not an open door on loopback. Host lifecycle status
+  // lives at GET /api/status; the hub's own routes (/api/me, /api/tenants,
+  // ...) are forwarded to directly, at their own paths, only after this
+  // outer door -- there is no /hub prefix or rewrite in between.
+  const unauthorised = await fetch("http://127.0.0.1:8140/api/me");
   check("the hub mount refuses an unauthorised client", unauthorised.status === 401);
 
   const headers = { authorization: `Bearer ${hubHost.token}` };
-  const statusThroughHub = await fetch("http://127.0.0.1:8140/hub/status", { headers });
-  check(
-    "the hub mount forwards /status after the outer door",
-    statusThroughHub.ok,
-    `${statusThroughHub.status}`,
-  );
-
-  const me = await fetch("http://127.0.0.1:8140/hub/api/me", { headers });
+  const me = await fetch("http://127.0.0.1:8140/api/me", { headers });
   check(
     "the hub mount does not attach the owner session",
     me.status === 401,
     `${me.status}`,
   );
 
-  const authSession = await fetch("http://127.0.0.1:8140/hub/api/auth/get-session", { headers });
-  const rootTenant = await fetch("http://127.0.0.1:8140/hub/api/tenants", {
+  const authSession = await fetch("http://127.0.0.1:8140/api/auth/get-session", { headers });
+  const rootTenant = await fetch("http://127.0.0.1:8140/api/tenants", {
     method: "POST",
     headers: { ...headers, "content-type": "application/json" },
     body: JSON.stringify({ name: "Solutions Builder", slug: "solutions-builder" }),
@@ -119,17 +113,23 @@ try {
   );
 
   // --- Topology 2: the hub hosted in another process ---
-  const { setRemoteToken } = await import("../apps/hub/src/hub-client.js");
-  await setRemoteToken(hubHost.token);
-
-  clientHost = await startHost(8141, clientDir, `http://127.0.0.1:8140/hub`);
+  //
+  // Remote mode forwards nothing: there is no local hub to mount, and the
+  // client host does not relay authenticated requests to the hosted one on
+  // anyone's behalf (no owner token, no identity swap). All this host still
+  // does for a hosted hub is what it needs for its own lifecycle reporting:
+  // a plain, unauthenticated readiness ping at the hub's public `/status`.
+  // The browser is the one that talks to the hosted hub directly, which this
+  // process-level smoke cannot exercise -- see the `agent-browser` pass for
+  // that leg.
+  clientHost = await startHost(8141, clientDir, `http://127.0.0.1:8140`);
   const remote = await fetch(`http://127.0.0.1:8141/api/status`, {
     headers: { authorization: `Bearer ${clientHost.token}` },
   }).then((response) => response.json() as Promise<{ hub: Record<string, unknown> }>);
 
   check("remote: the product points at the hosted hub", remote.hub.mode === "remote");
   check(
-    "remote: the hosted hub answers through the seam",
+    "remote: the hosted hub's public readiness answers through the ping",
     remote.hub.ready === true &&
       (remote.hub.reported as { status?: string } | null)?.status === "ok",
     String(remote.hub.url),

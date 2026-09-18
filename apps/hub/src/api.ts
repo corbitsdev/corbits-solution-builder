@@ -16,8 +16,7 @@
  */
 import { Hono } from "hono";
 import { type } from "arktype";
-import { resolveWorkspace } from "./hub-client.js";
-import { currentSession } from "./hub-session.js";
+import { currentSession, resolveWorkspace } from "./hub-client.js";
 import { HostError } from "./errors.js";
 import { registerHostRoutes, API_VERSION as HOST_API_VERSION } from "./api-host.js";
 
@@ -41,6 +40,10 @@ export function createApi() {
 
   registerHostRoutes(api);
 
+  // No fallback here to the hub: this app is only the host's own routes.
+  // `server.ts` mounts the hub's own Hono app directly, at its own paths, so
+  // an unmatched request under this `api` app is genuinely a 404 — never
+  // relayed on with a swapped-in identity.
   api.onError((cause, context) => {
     const correlationId = `cor_${crypto.randomUUID()}`;
     if (cause instanceof HostError) {

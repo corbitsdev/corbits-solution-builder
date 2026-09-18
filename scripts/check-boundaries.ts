@@ -236,8 +236,6 @@ const HUB_DONE_STATE_ALLOWLIST = [
   "api",
   "api-host",
   "hub-mount",
-  "hub-proxy",
-  "hub-session",
   "hub-keys",
   "hub-migrate",
   "hub-migrations",
@@ -445,7 +443,6 @@ for (const file of files) {
         name.includes("@solutions-builder/app") ||
         name.includes("@solutions-builder/installer") ||
         name.includes("command-dispatch") ||
-        name.includes("hub-proxy") ||
         name.includes("api-projects"),
     );
     if (product.length > 0) {

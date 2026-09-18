@@ -38,6 +38,7 @@ import { MATERIAL_KIND } from "@solutions-builder/app/artifacts";
 import { artifactGraphFor } from "./artifact-graph.ts";
 import { openCreatedProject } from "./create-project-open.ts";
 import { createHubTransport } from "./hub.ts";
+import { hubCredentials, hubOrigin } from "./hub-origin.ts";
 import { listProjectSummaries } from "./project-list.ts";
 import { openDecisions } from "./decisions-fold.ts";
 import { loadProjectView, toArtifactNode } from "./project-view.ts";
@@ -271,7 +272,7 @@ export type ProjectDetail = {
     title: string;
     policy: unknown;
     archivedAt: string | null;
-    /** Workspace tenant the lifecycle is deployed in — for `/hub` fold and signal. */
+    /** Workspace tenant the lifecycle is deployed in — for the hub fold and signal. */
     tenantId: string;
     /** Deployment id of the project's lifecycle run, or null when none is placed. */
     anchorRunId: string | null;
@@ -368,20 +369,23 @@ export function sidecarCapabilityOf(
 }
 
 /**
- * A `RegistryTarballUploader` over the hub's own `/hub` passthrough, for one
- * tenant scope. `createHubTransport`'s `Transport.fetch` always JSON-encodes
- * its body, so the tarball's raw bytes are PUT with a plain `fetch` instead,
- * the same `/hub`-prefixed, same-origin-credentialed route the rest of the
- * browser client uses.
+ * A `RegistryTarballUploader` over the hub's own origin, for one tenant
+ * scope. `createHubTransport`'s `Transport.fetch` always JSON-encodes its
+ * body, so the tarball's raw bytes are PUT with a plain `fetch` instead, the
+ * same hub route the rest of the browser client calls directly, with no
+ * relay in between.
  */
 function hubTarballUploaderFor(scope: string): RegistryTarballUploader {
   return {
     async putTarball(assetId, filename, bytes) {
-      const response = await fetch(`/hub/api/tenants/${encodeURIComponent(scope)}/assets/${assetId}/tarballs/${filename}`, {
-        method: "PUT",
-        credentials: "same-origin",
-        body: new Uint8Array(bytes),
-      });
+      const response = await fetch(
+        `${hubOrigin()}/api/tenants/${encodeURIComponent(scope)}/assets/${assetId}/tarballs/${filename}`,
+        {
+          method: "PUT",
+          credentials: hubCredentials(),
+          body: new Uint8Array(bytes),
+        },
+      );
       if (!response.ok) {
         throw new Error(`tarball upload failed: ${filename} (HTTP ${String(response.status)})`);
       }
@@ -441,14 +445,14 @@ async function lifecycleClosureSource(): Promise<ClosureSource> {
  * Pushes the lifecycle's rendered tree into its `workflow`-kind asset over
  * the hub's stock git smart-HTTP route, the same stock-routes path
  * `corbitsdev/workbench` PR #861 took for Myra: isomorphic-git in the
- * browser speaks the pack, this file only supplies the `/hub`-prefixed,
- * same-origin-credentialed URL `pushSourceTree` cannot construct itself
- * (it does not know the host mounts the hub at `/hub`).
+ * browser speaks the pack, this file only supplies the same-origin-
+ * credentialed URL `pushSourceTree` cannot construct itself.
  */
 const lifecycleGitPush: WorkflowGitPush = ({ scope, assetKind, assetName, token, tree, message }) => {
+  const base = hubOrigin() || window.location.origin;
   const url = new URL(
-    `/hub/api/tenants/${encodeURIComponent(scope)}/assets/${assetKind}/${assetName}.git`,
-    window.location.origin,
+    `/api/tenants/${encodeURIComponent(scope)}/assets/${assetKind}/${assetName}.git`,
+    base,
   ).toString();
   return pushSourceTree({ url, token, tree, message });
 };

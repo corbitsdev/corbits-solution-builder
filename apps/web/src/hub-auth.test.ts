@@ -8,7 +8,7 @@ describe("hub email auth", () => {
     globalThis.fetch = original;
   });
 
-  test("reads the session from /hub/api/auth/get-session with same-origin credentials", async () => {
+  test("reads the session from /api/auth/get-session with same-origin credentials", async () => {
     const calls: { url: string; init?: RequestInit }[] = [];
     globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
       calls.push({ url: String(url), ...(init !== undefined ? { init } : {}) });
@@ -20,7 +20,7 @@ describe("hub email auth", () => {
 
     const session = await getHubSession();
     expect(session?.user).toEqual({ id: "u1", email: "you@example.com", name: "You" });
-    expect(calls[0]?.url).toBe("/hub/api/auth/get-session");
+    expect(calls[0]?.url).toBe("/api/auth/get-session");
     expect(calls[0]?.init?.credentials).toBe("same-origin");
   });
 
@@ -29,7 +29,7 @@ describe("hub email auth", () => {
     expect(await getHubSession()).toBeNull();
   });
 
-  test("signs up against /hub/api/auth/sign-up/email", async () => {
+  test("signs up against /api/auth/sign-up/email", async () => {
     const calls: { url: string; init?: RequestInit }[] = [];
     globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
       calls.push({ url: String(url), ...(init !== undefined ? { init } : {}) });
@@ -41,14 +41,14 @@ describe("hub email auth", () => {
 
     const user = await signUpHub({ email: "you@example.com", password: "password1", name: "You" });
     expect(user.email).toBe("you@example.com");
-    expect(calls[0]?.url).toBe("/hub/api/auth/sign-up/email");
+    expect(calls[0]?.url).toBe("/api/auth/sign-up/email");
     expect(calls[0]?.init?.method).toBe("POST");
     expect(calls[0]?.init?.credentials).toBe("same-origin");
   });
 
-  test("signs in against /hub/api/auth/sign-in/email", async () => {
+  test("signs in against /api/auth/sign-in/email", async () => {
     globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
-      expect(String(url)).toBe("/hub/api/auth/sign-in/email");
+      expect(String(url)).toBe("/api/auth/sign-in/email");
       expect(init?.credentials).toBe("same-origin");
       return new Response(JSON.stringify({ user: { id: "u1", email: "you@example.com" } }), {
         status: 200,

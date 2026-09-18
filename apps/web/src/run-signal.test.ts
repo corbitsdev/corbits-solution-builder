@@ -54,7 +54,7 @@ describe("signalRun", () => {
     expect(calls.some((call) => /\/(commands|submit|decide)(\/|$)/.test(call.path))).toBe(false);
   });
 
-  test("the browser transport prefixes that path with /hub", async () => {
+  test("the browser transport calls the hub's own path directly", async () => {
     const original = globalThis.fetch;
     const urls: string[] = [];
     globalThis.fetch = (async (url: string | URL | Request) => {
@@ -63,7 +63,7 @@ describe("signalRun", () => {
     }) as typeof fetch;
     try {
       await signalRun({ tenantId: "tnt_ws", anchorRunId: "dep_1", signalName: "stage-1-round", signalId: "sig_1" }, createHubTransport());
-      expect(urls).toEqual(["/hub/api/tenants/tnt_ws/workflows/dep_1/signals"]);
+      expect(urls).toEqual(["/api/tenants/tnt_ws/workflows/dep_1/signals"]);
     } finally {
       globalThis.fetch = original;
     }
@@ -142,7 +142,7 @@ describe("AC6: the body is intent, never authority", () => {
 });
 
 describe("AC1: cancel is a signal on the run", () => {
-  test("build.cancel lands on the stage-8 round through /hub, not a host command", async () => {
+  test("build.cancel lands on the stage-8 round through the hub, not a host command", async () => {
     const { calls, transport } = recording();
     await deliverGate(PROJECT, 8, null, { command: "build.cancel", runId: "run_8", reason: "stop" }, transport);
     expect(calls).toHaveLength(1);

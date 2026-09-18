@@ -48,7 +48,7 @@ describe("client project tenant writes", () => {
       const href = String(url);
       const method = (init?.method ?? "GET").toUpperCase();
       calls.push({ url: href, method });
-      const path = href.replace(/^\/hub/, "");
+      const path = href;
 
       if (path === "/api/me") return json({ id: "user-1" });
       if (path.startsWith("/api/me/principals")) {
@@ -110,7 +110,7 @@ describe("client project tenant writes", () => {
     const { calls, current } = mockHub();
     await expect(api.updateProject("proj-1", { title: "Beta" })).resolves.toEqual({ ok: true });
     expect(calls.some((call) => call.url.startsWith("/api/projects"))).toBe(false);
-    expect(calls).toContainEqual({ url: "/hub/api/tenants/proj-1", method: "PATCH" });
+    expect(calls).toContainEqual({ url: "/api/tenants/proj-1", method: "PATCH" });
     expect(current().name).toBe("Beta");
   });
 
@@ -118,7 +118,7 @@ describe("client project tenant writes", () => {
     const { calls, current } = mockHub();
     await expect(api.deleteProject("proj-1")).resolves.toEqual({ ok: true });
     expect(calls.some((call) => call.method === "DELETE" && call.url.includes("/projects/"))).toBe(false);
-    expect(calls).toContainEqual({ url: "/hub/api/tenants/proj-1", method: "PATCH" });
+    expect(calls).toContainEqual({ url: "/api/tenants/proj-1", method: "PATCH" });
     expect(current().config.solutionsBuilder.deletedAt).not.toBeNull();
   });
 
@@ -132,7 +132,7 @@ describe("client project tenant writes", () => {
       audienceQuorum: 2,
     });
     expect(calls.some((call) => call.method === "PUT" && call.url.includes("/stakeholders"))).toBe(false);
-    expect(calls).toContainEqual({ url: "/hub/api/tenants/proj-1", method: "PATCH" });
+    expect(calls).toContainEqual({ url: "/api/tenants/proj-1", method: "PATCH" });
     expect(current().config.solutionsBuilder.policy.audiences.map((row) => row.name)).toEqual(["You", "Dana"]);
     expect(result.audienceQuorum).toBe(2);
   });

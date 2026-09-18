@@ -32,11 +32,57 @@ import {
   type WorkflowRunEvent,
 } from "@intx/hub-client";
 import { hub, hubIsMounted, mountHub, embeddedHubOrigin } from "./hub-mount.js";
-import { remoteHubHeaders } from "./hub-proxy.js";
-import { currentSession, rememberSession, sessionPairFromSetCookieHeaders } from "./hub-session.js";
-import { readSecretResult, secretReference, storeSecret } from "./host-secrets.js";
 import { HostError } from "./errors.js";
 import { SOLUTIONS_BUILDER_APP, assertMayMintGrant } from "@solutions-builder/app/grant-namespaces";
+
+/** The Better Auth session pair from an inbound `Cookie` header, if any. */
+function sessionPairFromCookieHeader(header: string | null | undefined): string | null {
+  if (!header) return null;
+  for (const part of header.split(";")) {
+    const pair = part.trim();
+    const eq = pair.indexOf("=");
+    if (eq < 0) continue;
+    const name = pair.slice(0, eq).trim();
+    if (name === "better-auth.session_token" || name.endsWith("better-auth.session_token")) {
+      return pair;
+    }
+  }
+  return null;
+}
+
+/** The `name=value` pair Better Auth puts on `Set-Cookie`. */
+function sessionPairFromSetCookie(header: string | null | undefined): string | null {
+  if (!header) return null;
+  const named = sessionPairFromCookieHeader(header);
+  if (named) return named;
+  const pair = header.split(";")[0]?.trim() ?? "";
+  return pair.includes("=") ? pair : null;
+}
+
+/** Prefer `getSetCookie()` so a second Set-Cookie is not lost to `Headers.get`. */
+function sessionPairFromSetCookieHeaders(headers: Headers): string | null {
+  const listed = typeof headers.getSetCookie === "function" ? headers.getSetCookie() : [];
+  for (const header of listed) {
+    const named = sessionPairFromCookieHeader(header);
+    if (named) return named;
+  }
+  return sessionPairFromSetCookie(headers.get("set-cookie"));
+}
+
+/**
+ * The hub session cookie this process reuses for its own in-process hub
+ * calls — minted by `signInEmail`/`signUpEmail` (scripts and seeds only; the
+ * browser talks to the mounted hub directly and carries its own cookie jar).
+ */
+let sessionCookie: string | null = null;
+
+export function currentSession(): string | null {
+  return sessionCookie;
+}
+
+export function rememberSession(cookie: string | null): void {
+  sessionCookie = cookie;
+}
 
 export type HubMode = "embedded" | "remote";
 
@@ -47,8 +93,6 @@ export type HubEndpoint = {
   readonly ready: boolean;
   readonly detail: string;
 };
-
-const REMOTE_TOKEN_ACCOUNT = "hub:remote-token";
 
 /** Fallback display name when the signed-in profile has none. */
 const FALLBACK_DISPLAY_NAME = "You";
@@ -90,16 +134,18 @@ export async function ensureHub(): Promise<HubEndpoint> {
   };
 }
 
-export async function setRemoteToken(token: string): Promise<void> {
-  await storeSecret(REMOTE_TOKEN_ACCOUNT, token);
-}
-
 /**
- * One raw call path to the hub, whichever side of the boundary it is on. No
- * identity is attached. The `/hub/*` mount strips the prefix and forwards the
- * browser's own cookies through this; it does not mint an owner or swap in a
- * host session. `hubApi` below is the authenticated path the host itself uses
- * as the signed-in principal.
+ * The host's own read of the hub, for the two things this process needs
+ * to know about it itself: whether it is reachable (readiness, `GET
+ * /status` — public, unauthenticated on the hub's own side, see
+ * `vendor/interchange/packages/hub-api/src/app.ts`'s auth `skip`), and, for
+ * scripts running against the embedded hub, the signed-in session's own
+ * calls (`hubApi` below). This is not a request-path relay: the browser
+ * never reaches the hub through this file. Embedded, it dispatches straight
+ * into the mounted Hono app with no socket. Remote, `SOLUTIONS_BUILDER_HUB_URL`
+ * is the browser's own hub origin too — this call is the host checking the
+ * same public readiness the browser could check itself, nothing more; no
+ * owner token is attached, no identity is swapped in.
  */
 export async function hubFetch(path: string, init?: RequestInit): Promise<Response> {
   const url = configuredUrl();
@@ -111,20 +157,13 @@ export async function hubFetch(path: string, init?: RequestInit): Promise<Respon
     return hub().app.fetch(new Request(`${embeddedHubOrigin()}${path}`, init));
   }
 
-  // A hosted hub without its token is a request that will fail on the other
-  // side with no explanation here. If the keychain cannot answer, say so now.
-  const read = await readSecretResult(await secretReference(REMOTE_TOKEN_ACCOUNT));
-  if (read.status === "unavailable") {
-    throw new Error(
-      `The keychain could not be read for the hub token: ${read.detail}. ` +
-        "Unlock it, or allow this app access, and try again.",
-    );
-  }
-  const token = read.status === "found" ? read.secret : null;
-  return fetch(`${url}${path}`, {
-    ...init,
-    headers: remoteHubHeaders(init?.headers, token),
-  });
+  return fetch(`${url}${path}`, init);
+}
+
+/** The configured remote hub origin, or `null` when the hub is embedded — the
+ *  browser's own base URL in remote mode (see `apps/web/src/hub-origin.ts`). */
+export function remoteHubOrigin(): string | null {
+  return configuredUrl();
 }
 
 // --- The signed-in session ------------------------------------------------

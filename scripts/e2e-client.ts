@@ -3,11 +3,11 @@
  *
  * Drives the product exactly as the browser does -- `packages/installer`,
  * `@intx/hub-client`, and the mounted corbitsdev routes reached through the
- * host's `/hub` mount over an embedded hub (the same one `packages/embed-hub`
+ * host's direct hub mount over an embedded hub (the same one `packages/embed-hub`
  * composes; booted here by spawning the app's own host, `apps/hub/src/server.ts`,
  * the way `scripts/hub-topology-smoke.ts` and `scripts/launch-smoke.ts` already
  * do). This script owns nothing in `apps/hub/src`; every product call below
- * goes through `/hub/*` -- the same seam the browser is limited to -- and the
+ * goes through the hub's own paths -- the same seam the browser is limited to -- and the
  * two host routes it does call (`GET /api/status` for sidecar placement facts,
  * the outer-door bearer) are the same read-only boot facts the existing
  * smokes already reach for.
@@ -76,7 +76,7 @@ const ENTRY = join(root, "apps", "hub", "src", "server.ts");
 
 type Host = { process: Bun.Subprocess; token: string; port: number };
 
-/** Boots the app's own host, which mounts `packages/embed-hub`'s app at `/hub`. */
+/** Boots the app's own host, which mounts `packages/embed-hub`'s app directly, with no prefix. */
 async function startHost(dataDir: string): Promise<Host> {
   const child = Bun.spawn(["bun", "--conditions", "intx-src", ENTRY, "--port", "0"], {
     cwd: root,
@@ -110,7 +110,7 @@ async function startHost(dataDir: string): Promise<Host> {
 }
 
 /**
- * A `Transport` against a real origin's `/hub` mount: the outer-door bearer
+ * A `Transport` against a real origin's hub mount: the outer-door bearer
  * plus whatever session cookie the last auth call set, so every call after
  * sign-up rides the same session a browser tab would keep in its cookie jar.
  */
@@ -125,7 +125,7 @@ function createTransport(origin: string, hostToken: string): { transport: Transp
         headers["content-type"] = "application/json";
         init.body = JSON.stringify(body);
       }
-      const response = await fetch(`${origin}/hub${path}`, init);
+      const response = await fetch(`${origin}${path}`, init);
       const setCookie = (response.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie?.() ?? [];
       for (const raw of setCookie) {
         const pair = raw.split(";")[0];
@@ -164,7 +164,7 @@ async function authFetch(
   body: unknown,
   method: "GET" | "POST" = "POST",
 ) {
-  const response = await fetch(`${origin}/hub/api/auth${path}`, {
+  const response = await fetch(`${origin}/api/auth${path}`, {
     method,
     headers: {
       authorization: `Bearer ${hostToken}`,
@@ -205,7 +205,7 @@ const PROJECT_POLICY: ProjectPolicy = {
  * The closure/git-push capabilities `installerInstall`/`ensureLifecycleDeployment`
  * need (CL-8334), built the same way `scripts/pack-registry-asset.ts` builds
  * them for its own embedded-hub install call: the manifest in-memory from
- * the packer, and the push over the spawned host's real `/hub`-mounted git
+ * the packer, and the push over the spawned host's real hub-mounted git
  * smart-HTTP route -- unlike that script, this one talks to a real listening
  * socket, so the push rides the plain global `fetch` `pushSourceTree`
  * defaults to, no `app.fetch` adapter needed.
@@ -225,7 +225,7 @@ async function closureAndPush(origin: string): Promise<{ closure: ClosureSource;
   const gitPush: WorkflowGitPush = async ({ scope, assetKind, assetName, token, tree, message }) => {
     const dir = await mkdtemp(join(tmpdir(), "e2e-client-push-"));
     try {
-      const url = `${origin}/hub/api/tenants/${encodeURIComponent(scope)}/assets/${assetKind}/${assetName}.git`;
+      const url = `${origin}/api/tenants/${encodeURIComponent(scope)}/assets/${assetKind}/${assetName}.git`;
       return await pushSourceTree({ url, token, tree, message, fsBackend: { fs, dir } });
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -251,7 +251,7 @@ async function main(): Promise<void> {
     // (1) Sign up / session.
     const email = `owner+${Date.now()}@e2e-client-proof.invalid`;
     const password = "Sm0ke-Test-Pass-2026!";
-    await step("1. sign up over /hub/api/auth/sign-up/email", async () => {
+    await step("1. sign up over /api/auth/sign-up/email", async () => {
       const { response, parsed } = await authFetch(origin, host!.token, cookieJar, "/sign-up/email", {
         email,
         password,
@@ -259,7 +259,7 @@ async function main(): Promise<void> {
       });
       const user = (parsed as { user?: { id?: string; email?: string } } | undefined)?.user;
       check(
-        "1. sign up over /hub/api/auth/sign-up/email",
+        "1. sign up over /api/auth/sign-up/email",
         response.ok && typeof user?.id === "string",
         response.ok ? "" : `HTTP ${response.status} ${JSON.stringify(parsed).slice(0, 200)}`,
       );
@@ -430,10 +430,10 @@ async function main(): Promise<void> {
 
     // (8) Confirm the mailbox inbox has an item for the parked gate.
     await step("8. mailbox inbox carries an item for the parked gate", async () => {
-      const response = await fetch(`${origin}/hub/api/me/inbox`, {
+      const response = await fetch(`${origin}/api/me/inbox`, {
         headers: { authorization: `Bearer ${host!.token}`, cookie: cookieJar.value },
       });
-      if (!response.ok) throw new Error(`GET /hub/api/me/inbox -> HTTP ${response.status}`);
+      if (!response.ok) throw new Error(`GET /api/me/inbox -> HTTP ${response.status}`);
       const body = (await response.json()) as { messages?: unknown[] };
       const ok = Array.isArray(body.messages) && body.messages.length > 0;
       check("8. mailbox inbox carries an item for the parked gate", ok, `${body.messages?.length ?? 0} message(s)`);

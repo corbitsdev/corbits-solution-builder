@@ -1,10 +1,14 @@
 /**
- * Hub email auth over `/hub/api/auth/*`.
+ * Hub email auth on the hub's own origin, at `/api/auth/*` — no `/hub`
+ * prefix, no host relay.
  *
- * Same-origin credentials carry the desktop handshake cookie (the outer door)
- * and, after a successful sign-up or sign-in, Better Auth's session cookie.
+ * Embedded, credentials are same-origin and carry the desktop handshake
+ * cookie (the outer door) and, after a successful sign-up or sign-in, Better
+ * Auth's session cookie. Remote, credentials are `"include"` against the
+ * hub's own origin directly.
  */
 import { ApiError } from "@intx/hub-client";
+import { hubCredentials, hubOrigin } from "./hub-origin.ts";
 
 export type HubUser = {
   id: string;
@@ -26,7 +30,7 @@ type AuthJson = {
 async function hubAuth(path: string, init: RequestInit): Promise<{ response: Response; parsed: unknown }> {
   let response: Response;
   try {
-    response = await fetch(`/hub/api/auth${path}`, { ...init, credentials: "same-origin" });
+    response = await fetch(`${hubOrigin()}/api/auth${path}`, { ...init, credentials: hubCredentials() });
   } catch {
     throw new ApiError(
       0,
