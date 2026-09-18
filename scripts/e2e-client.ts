@@ -637,9 +637,13 @@ async function main(): Promise<void> {
     };
 
     /**
-     * On a poll timeout for a chat-occurrence step (`draft-1`, `draft-2`,
-     * `gate-N`...), dumps that run's own events, plus the anchor run's
-     * events when the polled run is not the anchor itself.
+     * When a poll for a chat-occurrence step (`draft-1`, `draft-2`,
+     * `gate-N`...) times out or fails fast, dumps that run's own events
+     * (with the full body on every `StepFailed`/`RunFailed`/signal event --
+     * `eventLine` handles that), plus the anchor run's events when the
+     * polled run is not the anchor itself. A `StepFailed` on the polled
+     * step is often a symptom: the run's other events -- an earlier step's
+     * own `StepFailed` -- carry the actual root cause.
      */
     const dumpTimeoutEvents = async (stepId: string, runId: string): Promise<void> => {
       if (!workspace || !anchorRunId) return;
@@ -660,6 +664,7 @@ async function main(): Promise<void> {
         return events as RunEvent[];
       });
       if (result.kind === "failed") {
+        await dumpTimeoutEvents(stepId, chatRunId);
         throw new Error(`${stepId} in ${chatRunId} failed: ${JSON.stringify(result.event.body).slice(0, FULL_BODY_LIMIT)}`);
       }
       if (result.kind === "timeout") {
@@ -772,7 +777,7 @@ async function main(): Promise<void> {
         transport,
       );
       const result = await pollStep(60_000, 2_000, gateStepId(1), readAnchorEvents);
-      if (result.kind === "timeout" && anchorRunId) await dumpTimeoutEvents(gateStepId(1), anchorRunId);
+      if (result.kind !== "completed" && anchorRunId) await dumpTimeoutEvents(gateStepId(1), anchorRunId);
       check(
         "8. approve stage 1 (deliverGate) and poll gate-1 completed",
         result.kind === "completed",
