@@ -643,6 +643,10 @@ export function createWorkflowAllocationService({
           "prepareProvisionedDeployment: install did not yield an approved definition",
         );
       }
+      const narrowed = {
+        ...approved,
+        approval: approved.approval,
+      };
       const config = createProvisionedHarnessConfig({
         tenantId: args.tenantId,
         anchorRunId: args.anchorRunId,
