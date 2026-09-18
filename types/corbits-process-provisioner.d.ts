@@ -1,6 +1,6 @@
 // Declarations for the vendored @corbits/process-provisioner, typed loosely the
 // way the other vendored dependencies are: their internals are their own tree's
-// to typecheck. Only the surface hub-mount.ts uses is named.
+// to typecheck. Only the surface packages/embed-hub uses is named.
 declare module "@corbits/process-provisioner" {
   export type ProcessProvisionerRole = "deployment" | "probe";
   export type ProcessProvisionerConfig = {

@@ -22,8 +22,10 @@
  *   2. Only the hub talks to a provider or an agent runtime, and only the
  *      hub's embedding files (`hub-mount`, `hub-keys`, `hub-migrate`,
  *      `db`, `schema`, `migrate`) plus
- *      `lifecycle-run` import Interchange internals. A second module
- *      reaching into the hub is how a parallel control plane starts.
+ *      `lifecycle-run` and `packages/embed-hub` (the pglite / createApp /
+ *      process-provisioner composition, extracted so a second host can embed
+ *      a hub too) import Interchange internals. A second module reaching
+ *      into the hub is how a parallel control plane starts.
  *   3. The client cannot write persistence: `apps/web` never imports the hub,
  *      the database, the schema, or the command engine. It may take
  *      `@intx/hub-client` (the transport) to fold a run and deliver a signal
@@ -48,6 +50,14 @@ const INSTALLER = "packages/installer/src";
 const HUB = "apps/hub/src";
 const WEB = "apps/web/src";
 const PACKAGES_ROOT = "packages";
+/**
+ * `@solutions-builder/embed-hub`: composes the Interchange platform for an
+ * embedding host, the same job `apps/hub`'s embedding files do. It may import
+ * `PLATFORM_PACKAGES` freely for that reason, but is otherwise held to the
+ * same provider-package rule as everything but the hub, and must not import
+ * product APIs or anything in `apps/`.
+ */
+const HUB_EMBED = "packages/embed-hub/src";
 
 type Violation = { file: string; rule: string; detail: string };
 const violations: Violation[] = [];
@@ -101,6 +111,13 @@ const PROVIDER_PACKAGES = [
  * The Interchange platform's internals: the hub, its database and its
  * identity. Infrastructure the host mounts and owns, not a provider it talks
  * to, so it belongs to the hub's platform files and nowhere else.
+ * `@solutions-builder/embed-hub` is on this list too, not just given its own
+ * exempt area: it is a wrapper around every package above, so a file that
+ * cannot import `@intx/hub-sessions` directly must not be able to reach the
+ * same internals (or `MountedHub`'s `db`/`auth`/`assetService`) by importing
+ * the wrapper instead. Treating it as platform closes that hole; the
+ * `area === "hub-embed"` clause below is what still lets the package's own
+ * source import the packages it wraps.
  */
 const PLATFORM_PACKAGES = [
   "@intx/db",
@@ -114,6 +131,7 @@ const PLATFORM_PACKAGES = [
   "@intx/types",
   "@intx/mailbox",
   "@intx/storage-isogit",
+  "@solutions-builder/embed-hub",
 ];
 
 /** The runtime surface the hub's product code may use without being a platform file. */
@@ -196,7 +214,7 @@ const TOOLS_PACKAGES = await toolsPackages();
 const TOOLS_DIRS = TOOLS_PACKAGES.map((pkg) => pkg.dir);
 
 const files = (
-  await Promise.all([PACKAGE, INSTALLER, HUB, WEB, ...TOOLS_DIRS].map((area) => walk(join(root, area))))
+  await Promise.all([PACKAGE, INSTALLER, HUB, WEB, HUB_EMBED, ...TOOLS_DIRS].map((area) => walk(join(root, area))))
 ).flat();
 
 for (const file of files) {
@@ -208,11 +226,13 @@ for (const file of files) {
     ? "package"
     : path.startsWith(INSTALLER)
       ? "installer"
-      : path.startsWith(HUB)
-        ? "hub"
-        : toolsPackage
-          ? "tools"
-          : "web";
+      : path.startsWith(HUB_EMBED)
+        ? "hub-embed"
+        : path.startsWith(HUB)
+          ? "hub"
+          : toolsPackage
+            ? "tools"
+            : "web";
   const external = imports.filter((name) => !name.startsWith("."));
 
   if (area === "package") {
@@ -322,12 +342,33 @@ for (const file of files) {
       packageAllowed ||
       toolsAllowed ||
       installerAllowed ||
-      webAllowed;
+      webAllowed ||
+      area === "hub-embed";
     if (platform.length > 0 && !allowed) {
       violations.push({
         file: path,
-        rule: "only the hub's embedding files and lifecycle-run may import the Interchange platform",
+        rule: "only the hub's embedding files, lifecycle-run and @solutions-builder/embed-hub may import the Interchange platform",
         detail: platform.join(", "),
+      });
+    }
+  }
+
+  if (area === "hub-embed") {
+    const product = imports.filter(
+      (name) =>
+        name.includes("apps/") ||
+        name.includes("@solutions-builder/hub") ||
+        name.includes("@solutions-builder/app") ||
+        name.includes("@solutions-builder/installer") ||
+        name.includes("command-dispatch") ||
+        name.includes("hub-proxy") ||
+        name.includes("api-projects"),
+    );
+    if (product.length > 0) {
+      violations.push({
+        file: path,
+        rule: "embed-hub owns composition only: no product APIs, no apps/, no installer",
+        detail: product.join(", "),
       });
     }
   }

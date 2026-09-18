@@ -77,6 +77,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@solutions-builder/app": "workspace:*",
+        "@solutions-builder/embed-hub": "workspace:*",
         "@solutions-builder/keychain": "workspace:*",
         "@solutions-builder/tools-deck": "workspace:*",
       },
@@ -92,6 +93,21 @@
         "@intx/hub-client": "workspace:*",
         "@solutions-builder/app": "workspace:*",
         "@solutions-builder/installer": "workspace:*",
+      },
+    },
+    "packages/embed-hub": {
+      "name": "@solutions-builder/embed-hub",
+      "version": "0.1.0",
+      "dependencies": {
+        "@corbits/process-provisioner": "workspace:*",
+        "@electric-sql/pglite": "^0.3.16",
+        "@intx/crypto": "workspace:*",
+        "@intx/db": "workspace:*",
+        "@intx/hub-api": "workspace:*",
+        "@intx/hub-sessions": "workspace:*",
+        "@intx/types": "workspace:*",
+        "drizzle-orm": "catalog:",
+        "hono": "catalog:",
       },
     },
     "packages/installer": {
@@ -993,6 +1009,8 @@
     "@rollup/rollup-win32-x64-msvc": ["@rollup/rollup-win32-x64-msvc@4.63.1", "", { "os": "win32", "cpu": "x64" }, "sha512-at8QVep6S3h5Y6gSbdGU06bRY5WJkf6WUduM9YtvYMbYhB1MOFfUgc6kehitQXzOtMSaT70q7f9ydPhpqu821w=="],
 
     "@solutions-builder/app": ["@solutions-builder/app@workspace:packages/solutions-builder"],
+
+    "@solutions-builder/embed-hub": ["@solutions-builder/embed-hub@workspace:packages/embed-hub"],
 
     "@solutions-builder/hub": ["@solutions-builder/hub@workspace:apps/hub"],
 

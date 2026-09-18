@@ -1,18 +1,15 @@
 /**
  * Mounts the Interchange hub inside the Solutions Builder host.
  *
- * This composes the same services Interchange's hub server composes —
- * `createAuth`, the sidecar router, session and workflow services, the event
- * collector registry, and `createApp` — because the vendored tree has no
- * `createHubServer` that accepts this process's pglite handle and keychain
- * keys. Two differences, both required by a desktop app and neither of which
- * forks behaviour:
+ * The composition itself — pglite binding, `createAuth`/`createApp`, and the
+ * process provisioner — lives in `@solutions-builder/embed-hub`. What's left
+ * here is this host's own concerns, none of which the package could know:
  *
- *   1. the database is the host's pglite handle, injected through the vendored
- *      `createDB` patch, so no Postgres server has to be running;
- *   2. the at-rest encryption keys are minted into the OS keychain on first run
- *      instead of being demanded from the environment, which still wins when
- *      set.
+ *   1. the database is the host's pglite handle (`db.ts`);
+ *   2. the at-rest encryption keys and the signing keypair are minted into
+ *      the OS keychain on first run (`hub-keys.ts`);
+ *   3. the sidecar entry and runtime paths are this checkout's, and the
+ *      WebSocket URL they dial is this host's own port.
  *
  * The result is a Hono app. `hub-client.ts` decides whether the rest of the
  * product talks to *this* app in-process or to a hosted one over HTTP — which
@@ -20,131 +17,17 @@
  * configuration change rather than a rewrite.
  */
 import { join } from "node:path";
-import { mkdir } from "node:fs/promises";
-import type { Hono } from "hono";
 import {
-  createDB,
-  createGrantStore,
-  createPrincipalKeyStore,
-  createPrincipalStore,
-  createSidecarAllocationStore,
-  createWorkflowRunDispatchStore,
-  resolveInferenceMaterials,
-} from "@intx/db";
-import { createEnvKeyCredentialCipher } from "@intx/crypto";
-import { hexDecode, hexEncode } from "@intx/types";
-import { hubEncryptionKeys } from "@solutions-builder/keychain";
-import {
-  createApp,
-  createAuth,
-  createMailTriggeredRunGrantsMaterializer,
-} from "@intx/hub-api";
-import {
-  createAgentRepoStore,
-  createAssetService,
-  createEventCollectorRegistry,
-  createHubSessionLookups,
-  createHubSessionOrchestrator,
-  createSessionService,
-  createSidecarAllocationReconciler,
-  createSidecarCredentialResolver,
-  createSidecarPluginRegistry,
-  createSidecarRouter,
-  createWorkflowAllocationService,
-  createWorkflowDispatchService,
-  WORKSPACE_BUILTINS_REGISTRY,
-  type SidecarLookups,
-  type WsHandle,
-} from "@intx/hub-sessions";
-import {
-  createProcessSidecarProvisioner,
-  readProcessProvisionerConfig,
-  type ProcessProvisionerRole,
-} from "@corbits/process-provisioner";
-import { upgradeWebSocket, websocket } from "hono/bun";
-import { sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/pglite";
-import * as intxSchema from "@intx/db/schema";
+  createEmbeddedHub,
+  SIDECAR_WS_PATH,
+  type MountedHub,
+} from "@solutions-builder/embed-hub";
+import { websocket } from "hono/bun";
 import { database } from "./db.js";
 import { dataDirectory } from "./paths.js";
-import { hubSigningKey } from "./hub-keys.js";
-import { withPostgresJsResultShape } from "./pg-compat.js";
+import { hubEncryptionKeys, hubSigningKey } from "./hub-keys.js";
 
-export type MountedHub = {
-  readonly app: Hono;
-  /** The hub's own database handle, for callers that need its stores. */
-  readonly db: ReturnType<typeof createDB>;
-  readonly publicKeyHex: string;
-  /**
-   * Signs mail on a principal's behalf. Exposed so `hub/conversation.ts` can
-   * mint a principal a signing key on first use and sign the mail it composes
-   * for a stage thread, the same way the sidecar signs mail for a run.
-   */
-  readonly principalKeyStore: ReturnType<typeof createPrincipalKeyStore>;
-  /**
-   * Mints a principal the hub has no invite-based route for yet: the
-   * specialist's platform identity, and a run's own actor principal.
-   * `createIfAbsent` derives the per-principal wrap a raw insert cannot.
-   */
-  readonly principalStore: ReturnType<typeof createPrincipalStore>;
-  /** Whether a principal row exists by id, a direct read `principalStore`'s natural-key upsert cannot express. */
-  principalExists(id: string): Promise<boolean>;
-  /** The hub's own auth. Smokes sign in through it; the product UI uses `/hub/api/auth`. */
-  readonly auth: ReturnType<typeof createAuth>;
-  /**
-   * The cipher a `credential` row's `secret` column is sealed under. Kept on
-   * the mount for the services composed here that need it (the workflow
-   * allocation service, the sidecar credential resolver); `hub-client.ts`
-   * reaches decrypted material through `resolveCredentialSecret` below, not
-   * this field directly.
-   */
-  readonly credentialCipher: ReturnType<typeof createEnvKeyCredentialCipher>;
-  /**
-   * The decrypted secret behind a `credential` row, tenant-scoped: a
-   * credential id outside the tenant's ancestor chain throws rather than
-   * resolving to a null secret. Not an upstream gap — the platform's own
-   * `resolveInferenceMaterials` is the single point of decrypt for this
-   * material (the same call a deployed workflow's allocation goes through to
-   * hand the sidecar its bearer); a host-side read (the outbound bearer for a
-   * host-driven call, a refresh probe) uses it too, reached from inside the
-   * process instead of over HTTP because the hub's own routes never hand a
-   * sealed secret back out, on purpose.
-   */
-  resolveCredentialSecret(tenantId: string, credentialId: string): Promise<string>;
-  /** The hub's asset store; a workflow source tree is committed through it. */
-  readonly assetService: ReturnType<typeof createAssetService>;
-  /**
-   * The sidecar router's fence and connection view. The allocation reconciler
-   * fences a generation before it spawns; the sidecar smoke does the same for
-   * its fixture, then watches for the registration.
-   */
-  readonly sidecars: {
-    fence(allocationId: string, generation: number): void;
-    connected(): string[];
-  };
-  /**
-   * The sidecar router's event emitter, re-emitting frames such as
-   * `agent.event` (an agent step's live inference stream) after the wire
-   * layer decodes them. Exposed so the host can feed the live-draft pane
-   * from a run's own signals instead of an in-process callback.
-   */
-  readonly events: ReturnType<typeof createSidecarRouter>["events"];
-  /**
-   * What the deployment provisioner pins a sidecar allocation to: the sidecar
-   * entry and the hub address it dials. The platform leaves an allocation
-   * bound to any other fingerprint alone forever, so a deployment whose
-   * allocation carries a different one is not reachable from this host.
-   */
-  readonly sidecarBindingFingerprint: string;
-  /**
-   * Stops the reconcile loop from rescheduling itself. Idempotent, and safe
-   * to call mid-cycle: the loop only checks the flag in its own `finally`, so
-   * an in-flight tick still finishes. A caller tearing down this mount's
-   * database before the process exits needs this — otherwise the loop keeps
-   * ticking against a closed handle for as long as the process stays up.
-   */
-  readonly stopReconcile: () => void;
-};
+export type { MountedHub };
 
 let mounted: MountedHub | null = null;
 
@@ -190,7 +73,7 @@ export function sidecarFacts(): {
  * so the socket cannot be rewritten on the way in. The host lets this one
  * path through without its session token; the hub checks the sidecar's own.
  */
-export const SIDECAR_WS_PATH = "/api/sidecars/ws";
+export { SIDECAR_WS_PATH };
 
 /** Bun's WebSocket handler for the sidecar socket; `Bun.serve` needs it beside `fetch`. */
 export { websocket as hubWebSocket };
@@ -199,63 +82,6 @@ const SIDECAR_ENTRY = join(
   import.meta.dir, "..", "..", "..", "vendor", "interchange", "apps", "sidecar", "src", "index.ts",
 );
 const SIDECAR_RUNTIME = join(import.meta.dir, "..", "bin", "sidecar-runtime");
-
-/**
- * An allocated sidecar is a child process of the host that placed it, and
- * stopping the host stops them all. On the next start the reconciler waits
- * its full connect timeout for each one to dial back in before it gives the
- * allocation up, and every command on that deployment waits with it. When
- * the process is gone the wait is pointless, so its deadline is moved to the
- * past and the reconciler releases the allocation on its next pass; the
- * deployment reads as released, and the lifecycle is deployed again on
- * first use. An allocation bound to another hub address is left alone: the
- * reconciler will not act on it, and `workflow-deploy.ts` steps around it.
- */
-type AllocationRow = {
-  readonly id: string;
-  readonly status: string;
-  readonly generation: number;
-  readonly provisionerBindingFingerprint: string;
-  readonly externalRef?: string;
-};
-type AllocationStore = {
-  listActive(): Promise<AllocationRow[]>;
-  markConnectionLost(args: {
-    allocationId: string;
-    generation: number;
-    connectDeadline: Date;
-    now: Date;
-  }): Promise<unknown>;
-};
-
-async function retireDeadSidecars(untyped: unknown, bindingFingerprint: string): Promise<void> {
-  // The typecheck stub of the platform's store package has no method types.
-  const store = untyped as AllocationStore;
-  const now = new Date();
-  for (const allocation of await store.listActive()) {
-    if (allocation.status !== "allocated") continue;
-    if (allocation.provisionerBindingFingerprint !== bindingFingerprint) continue;
-    if (processAlive(allocation.externalRef)) continue;
-    await store.markConnectionLost({
-      allocationId: allocation.id,
-      generation: allocation.generation,
-      connectDeadline: new Date(0),
-      now,
-    });
-  }
-}
-
-/** The process provisioner's external ref is `<allocation>:<generation>:<pid>`. */
-function processAlive(externalRef: string | undefined): boolean {
-  const pid = Number(externalRef?.split(":").at(-1));
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 export function hub(): MountedHub {
   if (!mounted) throw new Error("The Interchange hub is not mounted.");
@@ -271,296 +97,26 @@ export async function mountHub(): Promise<MountedHub> {
 
   const host = database();
   const keys = await hubEncryptionKeys();
-
-  // The handle must be bound to Interchange's schema, not bare: better-auth's
-  // drizzle adapter and every `db.query.*` lookup in the hub resolve tables
-  // through that binding, and an unbound handle reports the tables as missing
-  // even though they exist.
-  //
-  // It also needs the postgres.js result shape: Interchange's stores expect
-  // `execute` to resolve to a row array, and pglite's resolves to `{ rows }`.
-  const bound = drizzle(host.raw, { schema: intxSchema });
-  const db = createDB({
-    handle: withPostgresJsResultShape(bound),
-    close: async () => undefined,
-  });
-
-  const credentialCipher = createEnvKeyCredentialCipher(hexDecode(keys.credentialKeyHex));
-  const principalKeyStore = createPrincipalKeyStore({
-    db: db.db,
-    cipher: createEnvKeyCredentialCipher(hexDecode(keys.principalKeyHex)),
-  });
-
-  const hubDataDir = join(dataDirectory(), "hub");
-  await mkdir(hubDataDir, { recursive: true });
-
   // Persisted, not minted per mount: a deploy commit signed on one run has to
   // still verify on the next.
   const signingKey = await hubSigningKey();
-  const agentRepoStore = createAgentRepoStore({
-    dataDir: hubDataDir,
-    signingKey,
-    gc: {
-      packThreshold: 64,
-      looseThreshold: 2048,
-      warnBytes: 256 * 1024 * 1024,
-      retention: "keep-history",
-    },
-  });
-
-  const httpRegistries = new Map([["npmjs", { url: "https://registry.npmjs.org" }]]);
-  const assetService = createAssetService({
-    db: db.db,
-    repoStore: agentRepoStore.repoStore,
-    reservedPackageRegistryNames: new Set(httpRegistries.keys()),
-  });
-
-  const lookups: SidecarLookups = {
-    ...createHubSessionLookups({ db: db.db, agentRepoStore }),
-    materializeMailTriggeredRunGrants: createMailTriggeredRunGrantsMaterializer({
-      db: db.db,
-      principalKeyStore,
-      grantStore: createGrantStore(db.db),
-    }),
-  };
-
-  const sidecarCredentials = createSidecarCredentialResolver({ db: db.db });
-  const sidecarRouter = createSidecarRouter({
-    hubPublicKey: hexEncode(signingKey.publicKey),
-    authenticateSidecar: async ({ token }: { token: string }) =>
-      sidecarCredentials.resolve(token),
-    validateSidecarIdentity: sidecarCredentials.isCurrent,
-    lookups,
-  });
-
-  // The registry's `onUsage` sink is not wired: in this Interchange revision
-  // nothing creates a collector, so `dispatch` drops every frame and the sink
-  // never fires. A round's spend is read from the `agent.event` stream itself,
-  // in `round-spend.ts`; a sink here as well would count a call twice once a
-  // revision does create collectors.
-  const eventCollectors = createEventCollectorRegistry({ db: db.db });
-
-  createHubSessionOrchestrator({
-    events: sidecarRouter.events,
-    router: sidecarRouter,
-    db: db.db,
-    eventCollectors,
-  });
-
-  const sessionService = createSessionService({
-    sidecarRouter,
-    sidecarAllocationRouter: sidecarRouter,
-    agentRepoStore,
-    assetService,
-    db: db.db,
-    toolPackageRegistries: {
-      httpRegistries,
-      defaultRegistry: "npmjs",
-      scopeRouting: [{ scope: "@intx", registry: WORKSPACE_BUILTINS_REGISTRY }],
-    },
-  });
+  const hubDataDir = join(dataDirectory(), "hub");
 
   // Better Auth trusts `BETTER_AUTH_BASE_URL`. Absent, that is localhost:3000,
   // and a first-run sign-up from this host's loopback origin is CSRF-rejected.
   if (hostPort > 0) {
     process.env.BETTER_AUTH_BASE_URL ??= `http://127.0.0.1:${hostPort}`;
   }
-  const auth = createAuth(db.db);
 
-  // Workflows execute in Interchange's own sidecar, spawned as a child process
-  // of this host per allocation. The sidecar seals credentials under a key of
-  // its own; it gets the hub's from the environment the provisioner forwards.
-  process.env["SIDECAR_CREDENTIAL_ENCRYPTION_KEY"] ??= keys.credentialKeyHex;
-  const hubWebSocketUrl = `ws://127.0.0.1:${hostPort}${SIDECAR_WS_PATH}`;
-  const provisionerFor = (role: ProcessProvisionerRole) =>
-    createProcessSidecarProvisioner({
-      role,
-      config: readProcessProvisionerConfig({
-        env: {
-          PROCESS_PROVISIONER_SIDECAR_ENTRY: SIDECAR_ENTRY,
-          PROCESS_PROVISIONER_RUNTIME: SIDECAR_RUNTIME,
-        },
-        dataDir: join(hubDataDir, role === "probe" ? "process-provisioner-probe" : "process-provisioner"),
-        hubWebSocketUrl,
-      }),
-    });
-  const deploymentProvisioner = provisionerFor("deployment");
-  // The typecheck stub of the provisioner package does not type the field.
-  const bindingFingerprint = String((deploymentProvisioner as { bindingFingerprint?: unknown }).bindingFingerprint ?? "");
-  const sidecarPlugins = createSidecarPluginRegistry({ provisioners: [deploymentProvisioner] });
-  const probeSidecarPlugins = createSidecarPluginRegistry({ provisioners: [provisionerFor("probe")] });
-
-  const workflowAllocationService = createWorkflowAllocationService({
-    db: db.db,
-    deploymentPlugins: sidecarPlugins,
-    probePlugins: probeSidecarPlugins,
-    preparedDeployer: sessionService,
-    credentialCipher,
-    allocationRouter: sidecarRouter,
-    hubWebSocketUrl,
+  mounted = await createEmbeddedHub({
+    pglite: host.raw,
+    credentialKeyHex: keys.credentialKeyHex,
+    principalKeyHex: keys.principalKeyHex,
+    signingKey,
+    dataDir: hubDataDir,
+    hubWebSocketUrl: `ws://127.0.0.1:${hostPort}${SIDECAR_WS_PATH}`,
+    sidecarEntry: SIDECAR_ENTRY,
+    sidecarRuntime: SIDECAR_RUNTIME,
   });
-  const sidecarAllocationStore = createSidecarAllocationStore(db.db);
-  const workflowDispatchService = createWorkflowDispatchService({
-    dispatchStore: createWorkflowRunDispatchStore(db.db),
-    allocationStore: sidecarAllocationStore,
-    router: sidecarRouter,
-    resolveAnchorAddress: async (anchorRunId: string) => {
-      const rows = (await bound.execute(
-        sql`SELECT "address" FROM "public"."workflow_run" WHERE "id" = ${anchorRunId} LIMIT 1`,
-      )) as unknown as { rows?: { address: string | null }[] } | { address: string | null }[];
-      const row = Array.isArray(rows) ? rows[0] : rows.rows?.[0];
-      return row?.address ?? null;
-    },
-  });
-  const sidecarAllocationReconciler = createSidecarAllocationReconciler({
-    allocationStore: sidecarAllocationStore,
-    plugins: sidecarPlugins,
-    router: sidecarRouter,
-    hubWebSocketUrl,
-    onReady: async (allocation: { anchorRunId: string }) => {
-      await workflowAllocationService.deployReadyAllocation(allocation);
-      await workflowDispatchService.requeueForReadyAllocation(allocation.anchorRunId);
-    },
-  });
-  await workflowAllocationService.initialize?.();
-  await sidecarAllocationReconciler.initialize();
-  await retireDeadSidecars(sidecarAllocationStore, bindingFingerprint);
-  type Allocated = Record<string, unknown> | undefined;
-  sidecarRouter.events.on("sidecar.disconnect", ({ allocated }: { allocated: Allocated }) => {
-    if (allocated === undefined) return;
-    return sidecarAllocationReconciler.handleDisconnect(allocated);
-  });
-  sidecarRouter.events.on("sidecar.allocated.connected", (allocated: Allocated) =>
-    sidecarAllocationReconciler.handleConnected(allocated),
-  );
-  sidecarRouter.events.on(
-    "mail.inbound.acknowledged",
-    ({ messageId, allocated }: { messageId: string; allocated: Allocated }) => {
-      if (allocated === undefined) return;
-      return workflowDispatchService.acknowledge({ ...allocated, messageId });
-    },
-  );
-  const socketRouter = sidecarRouter as unknown as {
-    handleOpen(ws: WsHandle): void;
-    handleMessage(ws: WsHandle, data: string): void;
-    handleClose(ws: WsHandle): void;
-    fenceAllocation(allocationId: string, generation: number): void;
-    getConnectedSidecars(): string[];
-  };
-
-  // The same cadence Interchange's own hub uses. Timers are unref'd so a host
-  // that is stopping does not wait on them.
-  const RECONCILE_MS = 1_000;
-  const REPAIR_MS = 30_000;
-  let nextRepairAt = Date.now() + REPAIR_MS;
-  let nextProbeCleanupAt = Date.now() + REPAIR_MS;
-  // Set by `stopReconcile()`. A tick already in flight when it is set still
-  // runs to completion against whatever the caller is tearing down — if that
-  // is the database, the tick fails, but a stopping mount asked for exactly
-  // that, so it is not logged as a failure. It just does not reschedule.
-  let reconcileStopped = false;
-  const reconcile = async () => {
-    try {
-      if (Date.now() >= nextProbeCleanupAt) {
-        nextProbeCleanupAt = Date.now() + REPAIR_MS;
-        await workflowAllocationService.reconcileReleasingProbes?.();
-      }
-      await sidecarAllocationReconciler.reconcileUntilIdle();
-      await workflowDispatchService.reconcileUntilIdle();
-      if (Date.now() >= nextRepairAt) {
-        nextRepairAt = Date.now() + REPAIR_MS;
-        await sidecarAllocationReconciler.repairUnscheduledConnections();
-      }
-    } catch (cause) {
-      if (!reconcileStopped) {
-        console.error(`Sidecar reconciliation failed: ${cause instanceof Error ? cause.message : String(cause)}`);
-      }
-    } finally {
-      if (!reconcileStopped) setTimeout(() => void reconcile(), RECONCILE_MS).unref();
-    }
-  };
-  setTimeout(() => void reconcile(), 0).unref();
-
-  const app = createApp({
-    getSession: async (headers: Headers) => {
-      const result = (await auth.api.getSession({ headers })) as {
-        user?: unknown;
-        session?: unknown;
-      } | null;
-      return result ? { user: result.user, session: result.session } : null;
-    },
-    authHandler: (context: { req: { raw: Request } }) => auth.handler(context.req.raw),
-    db: db.db,
-    sidecarRouter,
-    sessionService,
-    eventCollectors,
-    credentialCipher,
-    principalKeyStore,
-    assetService,
-    repoStore: agentRepoStore.repoStore,
-    maxTarballBytes: 10 * 1024 * 1024,
-    workflowAllocationService,
-    workflowDispatchService,
-    sidecarWsHandler: upgradeWebSocket(() => {
-      let handle: WsHandle;
-      return {
-        onOpen(_event, ws) {
-          handle = {
-            send(data: string) {
-              ws.send(data);
-            },
-            close() {
-              ws.close();
-            },
-          };
-          socketRouter.handleOpen(handle);
-        },
-        onMessage(event) {
-          socketRouter.handleMessage(handle, String(event.data));
-        },
-        onClose() {
-          socketRouter.handleClose(handle);
-        },
-      };
-    }),
-  });
-
-  mounted = {
-    app,
-    db,
-    publicKeyHex: hexEncode(signingKey.publicKey),
-    principalKeyStore,
-    principalStore: createPrincipalStore(db.db, principalKeyStore),
-    principalExists: async (id: string) =>
-      (
-        (await db.db.execute(
-          sql`SELECT "id" FROM "public"."principal" WHERE "id" = ${id} LIMIT 1`,
-        )) as unknown as { id: string }[]
-      ).length > 0,
-    auth,
-    credentialCipher,
-    resolveCredentialSecret: async (scopeTenantId: string, credentialId: string) => {
-      const [material] = await resolveInferenceMaterials(
-        db.db,
-        scopeTenantId,
-        [credentialId],
-        credentialCipher,
-      );
-      if (!material) {
-        throw new Error(`credential ${credentialId} could not be resolved for tenant ${scopeTenantId}`);
-      }
-      return material.secret;
-    },
-    assetService,
-    sidecars: {
-      fence: (allocationId, generation) => socketRouter.fenceAllocation(allocationId, generation),
-      connected: () => socketRouter.getConnectedSidecars(),
-    },
-    events: sidecarRouter.events,
-    sidecarBindingFingerprint: bindingFingerprint,
-    stopReconcile: () => {
-      reconcileStopped = true;
-    },
-  };
   return mounted;
 }

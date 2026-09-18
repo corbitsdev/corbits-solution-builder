@@ -1,0 +1,21 @@
+{
+  "name": "@solutions-builder/embed-hub",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Embeds an Interchange hub in-process: binds a pglite handle, composes createApp/createAuth, and places sidecars through the process provisioner.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@corbits/process-provisioner": "workspace:*",
+    "@electric-sql/pglite": "^0.3.16",
+    "@intx/crypto": "workspace:*",
+    "@intx/db": "workspace:*",
+    "@intx/hub-api": "workspace:*",
+    "@intx/hub-sessions": "workspace:*",
+    "@intx/types": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "hono": "catalog:"
+  }
+}

@@ -56,8 +56,8 @@ and say why, not to route around it.
 - **The app package depends on nothing in the apps.** `packages/solutions-builder/src/`
   imports only the workflow authoring surface and the platform's types.
 - **Only `apps/hub/src/` touches a provider** or an agent runtime, and only its
-  platform files (`hub-*.ts`, `db.ts`, `schema.ts`, `migrate.ts`) import
-  Interchange internals.
+  platform files (`hub-*.ts`, `db.ts`, `schema.ts`, `migrate.ts`) plus
+  `packages/embed-hub` import Interchange internals.
 - **The client never writes persistence.** No database, schema or command-dispatch import
   in `apps/web/`.
 

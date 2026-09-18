@@ -20,6 +20,7 @@ and derives where the run stands by folding the run's own committed events.
 apps/hub/src/                    the desktop host: loopback API, the part of persistence that is not yet native, an optional in-process Interchange hub, sidecar placement
 apps/web/                        the client: hub session, install, project open, the interface
 apps/desktop/                    the native shell and tray
+packages/embed-hub/src/          pglite + createApp/createAuth + process provisioner composition the host mounts
 packages/solutions-builder/src/  the app package: the transition ledger, the lifecycle workflow generated from it, the specialist kit, the document format
 packages/installer/src/          installs the app package into a tenant, driven by a hub transport the signed-in principal already holds
 vendor/interchange/              the Interchange control plane, vendored under LGPL-2.1
@@ -51,11 +52,13 @@ for product commands, the local database when the hub is embedded, the
 guard that admits a command against the ledger, and the providers. It is a
 client of Interchange, not Interchange itself and not the lifecycle's
 executor. The Interchange hub is Interchange's own hub app, either mounted
-in this process (`hub-mount.ts`) or reached over HTTPS. Platform writes go
-through that hub's HTTP API (`hub-client.ts`) — the same calls a hosted hub
-would serve. Only two files import an Interchange internal directly —
-`hub-mount.ts` (`@intx/crypto`, `@intx/db`, `@intx/hub-api`,
-`@intx/hub-sessions`) and `hub-keys.ts` (`@intx/crypto`).
+in this process (`hub-mount.ts` calling `@solutions-builder/embed-hub`) or
+reached over HTTPS. Platform writes go through that hub's HTTP API
+(`hub-client.ts`) — the same calls a hosted hub would serve. The composition
+that binds pglite, `createApp`/`createAuth` and the process provisioner lives
+in `packages/embed-hub`; `hub-mount.ts` supplies the host's handle, keychain
+keys and sidecar paths. `hub-keys.ts` still imports `@intx/crypto` to expand
+the signing seed.
 `scripts/check-boundaries.ts` also allow-lists four more files as the
 embedding layer — `db`, `schema`, `migrate` and `hub-migrate` — though none
 of them currently has an `@intx` import at all; they reach Interchange's
@@ -202,7 +205,7 @@ and writing/reading a workflow asset's source tree, all landed in
 open on purpose: the vendored tree ships `@intx/hub-api`'s
 `createApp`/`createAuth` and `@intx/hub-sessions`'s factories, not a
 single entry point that accepts an injected pglite handle and keychain
-keys the way this desktop embed needs, so `hub-mount.ts` still composes
+keys the way this desktop embed needs, so `packages/embed-hub` still composes
 those factories itself instead of calling one.
 
 ## What still lives beside Interchange
