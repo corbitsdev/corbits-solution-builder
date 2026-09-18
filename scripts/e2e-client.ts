@@ -25,7 +25,7 @@ import fs from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type Transport } from "@intx/hub-client";
+import { ApiError, type Transport } from "@intx/hub-client";
 import {
   createProject as installerCreateProject,
   ensureLifecycleDeployment,
@@ -118,7 +118,7 @@ function createTransport(origin: string, hostToken: string): { transport: Transp
   const cookieJar = { value: "" };
   const transport: Transport = {
     async fetch<T>(method: string, path: string, body?: unknown): Promise<T> {
-      const headers: Record<string, string> = { authorization: `Bearer ${hostToken}` };
+      const headers: Record<string, string> = { authorization: `Bearer ${hostToken}`, origin };
       if (cookieJar.value) headers.cookie = cookieJar.value;
       const init: RequestInit = { method, headers };
       if (body !== undefined) {
@@ -141,7 +141,9 @@ function createTransport(origin: string, hostToken: string): { transport: Transp
       }
       if (!response.ok) {
         const detail = (parsed as { error?: { code?: string; message?: string } } | undefined)?.error;
-        throw new Error(
+        throw new ApiError(
+          response.status,
+          detail?.code ?? "unknown",
           `${method} ${path} -> HTTP ${response.status} ${detail?.code ?? "unknown"}: ${detail?.message ?? text.slice(0, 300)}`,
         );
       }
@@ -154,15 +156,23 @@ function createTransport(origin: string, hostToken: string): { transport: Transp
   return { transport, cookieJar };
 }
 
-async function authFetch(origin: string, hostToken: string, cookieJar: { value: string }, path: string, body: unknown) {
+async function authFetch(
+  origin: string,
+  hostToken: string,
+  cookieJar: { value: string },
+  path: string,
+  body: unknown,
+  method: "GET" | "POST" = "POST",
+) {
   const response = await fetch(`${origin}/hub/api/auth${path}`, {
-    method: "POST",
+    method,
     headers: {
       authorization: `Bearer ${hostToken}`,
       "content-type": "application/json",
+      origin,
       ...(cookieJar.value ? { cookie: cookieJar.value } : {}),
     },
-    body: JSON.stringify(body),
+    ...(method === "POST" ? { body: JSON.stringify(body) } : {}),
   });
   const setCookie = (response.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie?.() ?? [];
   for (const raw of setCookie) {
@@ -253,7 +263,7 @@ async function main(): Promise<void> {
         response.ok && typeof user?.id === "string",
         response.ok ? "" : `HTTP ${response.status} ${JSON.stringify(parsed).slice(0, 200)}`,
       );
-      const session = await authFetch(origin, host!.token, cookieJar, "/get-session", {});
+      const session = await authFetch(origin, host!.token, cookieJar, "/get-session", undefined, "GET");
       const sessionUser = (session.parsed as { user?: { email?: string } } | undefined)?.user;
       check("1. the session carries the signed-up user", sessionUser?.email === email, JSON.stringify(session.parsed).slice(0, 200));
     });
