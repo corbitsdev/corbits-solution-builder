@@ -21,8 +21,7 @@ import { database, type Db } from "./db.js";
 import type { Authority } from "@solutions-builder/app/ledger";
 import { launchProjectLifecycle, projectExecutionStatus, type DeliveryOutcome } from "./lifecycle-run.js";
 import { deliverRound, ROUND_COMMAND } from "./gate-delivery.js";
-import { loadRun } from "./run-views.js";
-import { activeRun, runsForProject } from "./runs.js";
+import { activeRun, readRun, runsForProject, type RunRecord } from "./runs.js";
 import {
   authoritiesFor,
   versionHashesMatch,
@@ -181,6 +180,26 @@ function viewFromCommands(
     costApprovalVersionId: null,
     checkpointRef: null,
   };
+}
+
+function toRunView(record: RunRecord): RunView {
+  return {
+    id: record.id,
+    kind: record.kind,
+    stage: record.stage,
+    state: record.state,
+    originId: record.originId,
+    routeTargetStage: record.routeTargetStage,
+    costApprovalVersionId: record.costApprovalVersionId,
+    checkpointRef: record.checkpointRef,
+  };
+}
+
+/** Scoped lookup: a run in another project is not found, not forbidden. */
+async function loadRun(runId: string, projectId: string): Promise<RunView> {
+  const record = await readRun(runId, projectId);
+  if (!record) throw notFound("That run");
+  return toRunView(record);
 }
 
 async function resolveRun(runId: string, projectId: string): Promise<RunView> {
