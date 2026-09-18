@@ -110,6 +110,9 @@ export type HubTenant = {
   parentId: string | null;
   config?: Record<string, unknown>;
   createdAt: string;
+  /** The mail domain principals and runs in this tenant answer at
+   *  (`<refId-or-runId>@<domain>`) -- present on a live tenant. */
+  domain?: string;
 };
 
 /** A tenant under `parentId`; the hub makes the signed-in owner its first principal. */

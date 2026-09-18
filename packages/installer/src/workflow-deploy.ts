@@ -162,7 +162,7 @@ export async function renderLifecycleSource(
  * agent's declared preference matches an approved source rather than falling
  * back to the default.
  */
-async function sourceFor(
+export async function sourceFor(
   transport: Transport,
   tenantId: string,
   offering: { providerId: string; modelId: string },
@@ -367,4 +367,45 @@ async function ensureLifecycleDeploymentUncached(
     deploymentId: deployment.id,
     deploymentStatus: deployment.status,
   };
+}
+
+/**
+ * Create-or-find a `workflow`-kind asset by name: the same idempotent shape
+ * `lifecycleAsset` above uses, generalized so another workflow deploy (a
+ * stage specialist's, e.g.) can share it without its own lifecycle.
+ */
+export async function ensureWorkflowAsset(
+  transport: Transport,
+  tenantId: string,
+  name: string,
+  displayName: string,
+): Promise<string> {
+  const assets = assetsFor(transport, tenantId);
+  const existing = (await assets.list("workflow")).find((asset) => asset.name === name);
+  if (existing) return existing.id;
+  return (await assets.create({ kind: "workflow", name, displayName })).id;
+}
+
+/**
+ * Pushes a rendered source tree onto a workflow asset's `main`, minting and
+ * revoking a short-lived push token around the push -- the same push-token
+ * lifecycle `ensureLifecycleDeploymentUncached` above runs, generalized for
+ * another workflow deploy that needs the same shape.
+ */
+export async function pushWorkflowSourceTree(
+  transport: Transport,
+  tenantId: string,
+  assetId: string,
+  assetName: string,
+  tree: Record<string, string>,
+  message: string,
+  gitPush: WorkflowGitPush,
+): Promise<string> {
+  const gitTokens = gitTokensFor(transport, tenantId);
+  const minted = await gitTokens.mint(assetId, `${assetName}-deploy`, PUSH_TOKEN_LIFETIME_MS);
+  try {
+    return await gitPush({ scope: tenantId, assetKind: "workflow", assetName, token: minted.secret, tree, message });
+  } finally {
+    await gitTokens.revoke(minted.id);
+  }
 }
