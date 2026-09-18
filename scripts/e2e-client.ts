@@ -28,10 +28,10 @@ import fs from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ApiError, readWorkflowRunEvents, triggerWorkflowRun, type Transport } from "@intx/hub-client";
+import { ApiError, listWorkflowDeployments, readWorkflowRunEvents, type Transport } from "@intx/hub-client";
 import {
+  createArtifact,
   createProject as installerCreateProject,
-  ensureLifecycleDeployment,
   install as installerInstall,
   listArtifacts,
   pushSourceTree,
@@ -44,97 +44,49 @@ import {
   type SidecarCapability,
   type WorkflowGitPush,
 } from "@solutions-builder/installer";
+import { ARTIFACT_STAGE, type ArtifactKind } from "@solutions-builder/app/artifacts";
 import { buildManifest, buildPackedEntries } from "./closure-pack.ts";
-import { openDecisionFor } from "../apps/web/src/decisions-fold.ts";
-import { notifyDecisionOpen } from "../apps/web/src/decision-notify.ts";
 import { listProjectSummaries } from "../apps/web/src/project-list.ts";
-import { deliverGate, sendStageMail } from "../apps/web/src/run-signal.ts";
-import { approveSignal } from "@solutions-builder/app/workflows/stage-loop";
 
 /**
- * The chat section's fixed step ids -- unchanged across the whole rebuild
- * (`chat-section-contract.md`): the `onTrigger` container is `chat`, its
- * per-stage draft is `draft-<stage>`, the approve chain's top-level gate is
- * `gate-<stage>`, and the namer step (rendered once an offering exists) is
- * `name`. Hardcoded here rather than imported from the still-moving
- * `stage-loop.ts`/`project-lifecycle.ts` (owned by other lanes): only
- * `approveSignal`, the one export this lane depends on beyond these names.
+ * `ensureSpecialistDeployment(transport, sidecar, closure, gitPush,
+ * workspaceTenantId, projectId, stage) -> {deploymentId, address}` is being
+ * added concurrently in `packages/installer/src/specialist-deploy.ts` (CL-8598
+ * contract, workbench shape) and is not yet present at this commit. Imported
+ * dynamically, through a non-literal specifier so tsc never tries to resolve
+ * the module at typecheck time, with a typed local shim standing in for its
+ * signature and a fallback that fails loudly (not silently) if the export
+ * still is not there when this actually runs.
  */
-const CHAT_STEP_ID = "chat";
-const NAME_STEP_ID = "name";
-function draftStepId(stage: number): string {
-  return `draft-${stage}`;
+type SpecialistDeployment = { deploymentId: string; address: string };
+type EnsureSpecialistDeployment = (
+  transport: Transport,
+  sidecar: SidecarCapability,
+  closure: ClosureSource,
+  gitPush: WorkflowGitPush,
+  workspaceTenantId: string,
+  projectId: string,
+  stage: number,
+) => Promise<SpecialistDeployment>;
+const SPECIALIST_DEPLOY_SPECIFIER = "@solutions-builder/installer/specialist-deploy";
+async function loadEnsureSpecialistDeployment(): Promise<EnsureSpecialistDeployment> {
+  const specifier: string = SPECIALIST_DEPLOY_SPECIFIER;
+  const mod = (await import(specifier).catch(() => null)) as
+    | { ensureSpecialistDeployment?: EnsureSpecialistDeployment }
+    | null;
+  if (!mod?.ensureSpecialistDeployment) {
+    throw new Error(`ensureSpecialistDeployment is not exported from ${SPECIALIST_DEPLOY_SPECIFIER} yet (CL-8598 concurrent lane)`);
+  }
+  return mod.ensureSpecialistDeployment;
 }
-function gateStepId(stage: number): string {
-  return `gate-${stage}`;
+
+/** The kind stage 1's specialist writes its brief as (`ARTIFACT_STAGE`'s stage-1 producer kind, not the human-upload `source_material` kind). */
+const STAGE1_ARTIFACT_KIND: ArtifactKind = "problem_brief";
+if (ARTIFACT_STAGE[STAGE1_ARTIFACT_KIND] !== 1) {
+  throw new Error(`ARTIFACT_STAGE[${STAGE1_ARTIFACT_KIND}] is ${ARTIFACT_STAGE[STAGE1_ARTIFACT_KIND]}, not stage 1`);
 }
 
 type RunEvent = { readonly seq: number; readonly type: string; readonly body: Record<string, unknown> };
-
-/** Every `childRunId` an `onTrigger` container (or any step) spawned, in occurrence order. */
-function childRunIds(events: readonly RunEvent[], stepId: string): string[] {
-  return events
-    .filter((event) => event.type === "ChildSpawned" && event.body["stepId"] === stepId)
-    .map((event) => event.body["childRunId"] as string);
-}
-
-function stepCompleted(events: readonly RunEvent[], stepId: string): RunEvent | undefined {
-  return events.find((event) => event.type === "StepCompleted" && event.body["stepId"] === stepId);
-}
-
-/** A `RunFailed` (the whole run died) or a `StepFailed` for the polled step. */
-function stepOrRunFailed(events: readonly RunEvent[], stepId: string): RunEvent | undefined {
-  return events.find(
-    (event) => event.type === "RunFailed" || (event.type === "StepFailed" && event.body["stepId"] === stepId),
-  );
-}
-
-type PollStepResult =
-  | { readonly kind: "completed"; readonly event: RunEvent }
-  | { readonly kind: "failed"; readonly event: RunEvent }
-  | { readonly kind: "timeout" };
-
-/**
- * Polls `fetchEvents` for `stepId`'s completion, but stops the instant the
- * run (or that step) fails instead of waiting out the full timeout.
- */
-async function pollStep(
-  timeoutMs: number,
-  intervalMs: number,
-  stepId: string,
-  fetchEvents: () => Promise<RunEvent[]>,
-): Promise<PollStepResult> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const events = await fetchEvents();
-    const failed = stepOrRunFailed(events, stepId);
-    if (failed) return { kind: "failed", event: failed };
-    const completed = stepCompleted(events, stepId);
-    if (completed) return { kind: "completed", event: completed };
-    if (Date.now() >= deadline) return { kind: "timeout" };
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-}
-
-/**
- * Resolves a step output ref the same way `apps/web/src/stage-thread.ts`'s
- * `readRefOver` does: `inline:<json>` parsed directly, `blob:<sha>` fetched
- * through the deployment's blob route (no upstream `@intx/hub-client` op).
- * Reimplemented here rather than imported, since this lane owns nothing in
- * `apps/web/src`.
- */
-async function resolveStepOutputRef(
-  transport: Transport,
-  tenantId: string,
-  anchorRunId: string,
-  runId: string,
-  ref: string,
-): Promise<unknown> {
-  if (ref.startsWith("inline:")) return JSON.parse(ref.slice("inline:".length));
-  const match = /^blob:(.+)$/.exec(ref);
-  if (!match) throw new Error(`Unrecognized step output ref: ${ref}`);
-  return transport.fetch("GET", `/api/tenants/${tenantId}/workflows/${anchorRunId}/runs/${runId}/blobs/${match[1]}`);
-}
 
 /** Polls `attempt` until it returns non-null, or `timeoutMs` elapses (then returns null). */
 async function pollUntil<T>(timeoutMs: number, intervalMs: number, attempt: () => Promise<T | null>): Promise<T | null> {
@@ -422,7 +374,7 @@ const PROJECT_POLICY: ProjectPolicy = {
 };
 
 /**
- * The closure/git-push capabilities `installerInstall`/`ensureLifecycleDeployment`
+ * The closure/git-push capabilities `installerInstall`/`ensureSpecialistDeployment`
  * need (CL-8334), built the same way `scripts/pack-registry-asset.ts` builds
  * them for its own embedded-hub install call: the manifest in-memory from
  * the packer, and the push over the spawned host's real hub-mounted git
@@ -592,30 +544,6 @@ async function main(): Promise<void> {
       return created;
     });
 
-    const deployment = await step("4. ensureLifecycleDeployment places the project's run", async () => {
-      if (!workspace || !project || !sidecar) throw new Error("no project/workspace/sidecar to deploy against");
-      const deployed = await ensureLifecycleDeployment(transport, sidecar, closure, gitPush, workspace.tenantId, project.id);
-      const ok = deployed.status === "deployed" || deployed.status === "current";
-      check(
-        "4. ensureLifecycleDeployment places the project's run",
-        ok,
-        JSON.stringify(deployed).slice(0, 200),
-      );
-      if (!ok || !("deploymentId" in deployed)) throw new Error(`deployment did not place a run: ${JSON.stringify(deployed)}`);
-      return deployed;
-    });
-
-    // (4b) Fire the deployment's top-level run once, the way `apps/web/src/client.ts`'s
-    // `createProject` does immediately after `ensureLifecycleDeployment` -- the host no
-    // longer launches the lifecycle, so nothing else starts this run.
-    await step("4b. trigger the deployment's top-level run", async () => {
-      if (!workspace || !deployment || !("deploymentId" in deployment)) throw new Error("no deployment to trigger");
-      await triggerWorkflowRun(transport, workspace.tenantId, deployment.deploymentId, {
-        content: JSON.stringify({ projectId: project!.id, problemStatement: "Build a small internal tool that tracks team OKRs." }),
-      });
-      check("4b. trigger the deployment's top-level run", true);
-    });
-
     // (5) List projects via apps/web/src/project-list.ts's helper.
     await step("5. list projects via project-list.ts's listProjectSummaries", async () => {
       const summaries = await listProjectSummaries(transport);
@@ -627,203 +555,210 @@ async function main(): Promise<void> {
       );
     });
 
-    const anchorRunId = deployment && "deploymentId" in deployment ? deployment.deploymentId : null;
+    const ensureSpecialistDeployment = await step(
+      "5. load ensureSpecialistDeployment (installer)",
+      loadEnsureSpecialistDeployment,
+    );
 
-    /** Reads the anchor's own event log (its `chat` container's occurrences are `ChildSpawned` there, not on the child). */
-    const readAnchorEvents = async (): Promise<RunEvent[]> => {
-      if (!workspace || !anchorRunId) throw new Error("no anchor run to read events from");
-      const { events } = await readWorkflowRunEvents(transport, workspace.tenantId, anchorRunId, anchorRunId);
-      return events as RunEvent[];
+    /** Dumps a specialist deployment's own agent run events on a poll timeout, per CL-8598's report contract. */
+    const dumpDeploymentEvents = async (label: string, tenantId: string, deploymentId: string): Promise<void> => {
+      const { events } = await readWorkflowRunEvents(transport, tenantId, deploymentId, deploymentId);
+      dumpRunEvents(label, events as RunEvent[]);
     };
+
+    /** Polls `listWorkflowDeployments` until `deploymentId` reports `status`, or times out. */
+    const pollDeploymentStatus = async (
+      tenantId: string,
+      deploymentId: string,
+      status: string,
+      timeoutMs = 120_000,
+    ): Promise<boolean> => {
+      const found = await pollUntil(timeoutMs, 3_000, async () => {
+        const deployments = await listWorkflowDeployments(transport, tenantId);
+        const mine = deployments.find((entry) => entry.id === deploymentId);
+        return mine?.status === status ? mine : null;
+      });
+      if (!found) await dumpDeploymentEvents(`deployment ${deploymentId}`, tenantId, deploymentId);
+      return found !== null;
+    };
+
+    /** One `GET .../mailbox/me/inbox` page, as `@corbits/mailbox`'s native store shapes it. */
+    type MailboxListItem = { uid: number; envelope: { from: string; subject?: string; date: string }; raw: string };
 
     /**
-     * When a poll for a chat-occurrence step (`draft-1`, `draft-2`,
-     * `gate-N`...) times out or fails fast, dumps that run's own events
-     * (with the full body on every `StepFailed`/`RunFailed`/signal event --
-     * `eventLine` handles that), plus the anchor run's events when the
-     * polled run is not the anchor itself. A `StepFailed` on the polled
-     * step is often a symptom: the run's other events -- an earlier step's
-     * own `StepFailed` -- carry the actual root cause.
+     * First `text/plain` leaf of a MIME entity, descending nested multiparts
+     * (an agent reply is `multipart/signed` around `multipart/mixed`) --
+     * same algorithm as `apps/web/src/stage-mail.ts`'s `textPart`,
+     * reimplemented here since that module's exports are bound to
+     * `createHubTransport()` (browser cookies/relative paths), not this
+     * script's bearer-token transport against a spawned host.
      */
-    const dumpTimeoutEvents = async (stepId: string, runId: string): Promise<void> => {
-      if (!workspace || !anchorRunId) return;
-      const { events } = await readWorkflowRunEvents(transport, workspace.tenantId, anchorRunId, runId);
-      dumpRunEvents(`${stepId} in ${runId}`, events as RunEvent[]);
-      if (runId !== anchorRunId) dumpRunEvents(`anchor ${anchorRunId}`, await readAnchorEvents());
+    function textPart(entity: string): string | undefined {
+      const split = entity.indexOf("\n\n");
+      if (split < 0) return undefined;
+      const headers = entity.slice(0, split);
+      const body = entity.slice(split + 2);
+      const boundary = /boundary="?([^";\n]+)"?/i.exec(headers)?.[1];
+      if (boundary === undefined) {
+        return /content-type:\s*text\/plain/i.test(headers) || !/content-type:/i.test(headers) ? body.trim() : undefined;
+      }
+      for (const part of body.split(`--${boundary}`).slice(1)) {
+        if (part.startsWith("--")) break;
+        const found = textPart(part.replace(/^\n/, ""));
+        if (found !== undefined) return found;
+      }
+      return undefined;
+    }
+
+    /** The readable text of a base64-raw RFC 5322 mailbox message. */
+    function mailboxRawBody(rawBase64: string): string {
+      const decoded = Buffer.from(rawBase64, "base64").toString("utf8").replace(/\r\n/g, "\n");
+      return textPart(decoded) ?? "";
+    }
+
+    /** `POST /api/tenants/:t/mailbox/me/inbox/send` -- mail from the caller's own mailbox, to a specialist's run address. */
+    const sendMail = async (tenantId: string, to: string, subject: string, body: string): Promise<void> => {
+      await transport.fetch("POST", `/api/tenants/${tenantId}/mailbox/me/inbox/send`, { to: [to], subject, body });
     };
 
-    /**
-     * Polls a chat occurrence's own run until `stepId` completes, then
-     * resolves its output ref. Stops immediately (no waiting out the
-     * timeout) the instant the run or that step fails.
-     */
-    const pollDraft = async (chatRunId: string, stepId: string, timeoutMs = 180_000): Promise<unknown> => {
-      if (!workspace || !anchorRunId) throw new Error("no anchor/workspace to poll a draft under");
-      const result = await pollStep(timeoutMs, 3_000, stepId, async () => {
-        const { events } = await readWorkflowRunEvents(transport, workspace.tenantId, anchorRunId, chatRunId);
-        return events as RunEvent[];
+    /** Polls `GET /api/tenants/:t/mailbox/me/inbox` for a message FROM `fromAddress` past `afterUid`. */
+    const pollReplyFrom = async (
+      tenantId: string,
+      fromAddress: string,
+      afterUid: number,
+      timeoutMs = 180_000,
+    ): Promise<MailboxListItem | null> =>
+      pollUntil(timeoutMs, 3_000, async () => {
+        const { messages } = await transport.fetch<{ messages: MailboxListItem[] }>(
+          "GET",
+          `/api/tenants/${tenantId}/mailbox/me/inbox`,
+        );
+        return messages.find((message) => message.envelope.from === fromAddress && message.uid > afterUid) ?? null;
       });
-      if (result.kind === "failed") {
-        await dumpTimeoutEvents(stepId, chatRunId);
-        throw new Error(`${stepId} in ${chatRunId} failed: ${JSON.stringify(result.event.body).slice(0, FULL_BODY_LIMIT)}`);
+
+    // (5) Deploy the stage-1 specialist and wait for it to come up.
+    const stage1 = await step("5. ensureSpecialistDeployment for stage 1", async () => {
+      if (!workspace || !project || !sidecar || !ensureSpecialistDeployment) {
+        throw new Error("no workspace/project/sidecar/ensureSpecialistDeployment to deploy against");
       }
-      if (result.kind === "timeout") {
-        await dumpTimeoutEvents(stepId, chatRunId);
-        throw new Error(`${stepId} in ${chatRunId} never completed within ${String(timeoutMs)}ms`);
+      const deployed = await ensureSpecialistDeployment(transport, sidecar, closure, gitPush, workspace.tenantId, project.id, 1);
+      check("5. ensureSpecialistDeployment for stage 1", true, JSON.stringify(deployed));
+      return deployed;
+    });
+
+    await step("5. stage-1 deployment reaches status deployed", async () => {
+      if (!workspace || !stage1) throw new Error("no stage-1 deployment to poll");
+      const ok = await pollDeploymentStatus(workspace.tenantId, stage1.deploymentId, "deployed");
+      check("5. stage-1 deployment reaches status deployed", ok, ok ? stage1.deploymentId : "timed out waiting for status deployed");
+      if (!ok) throw new Error("stage-1 deployment never reached status deployed");
+    });
+
+    // (6) Mail the opening problem statement to the stage-1 specialist, then
+    // poll the caller's own inbox for its reply.
+    const OPENING_PROBLEM_STATEMENT = "Build a small internal tool that tracks team OKRs.";
+    let lastSeenUid = 0;
+    const firstReply = await step("6. mail the opening problem statement and poll for a reply", async () => {
+      if (!workspace || !stage1) throw new Error("no workspace/stage-1 deployment to mail");
+      await sendMail(workspace.tenantId, stage1.address, "New project", OPENING_PROBLEM_STATEMENT);
+      const reply = await pollReplyFrom(workspace.tenantId, stage1.address, lastSeenUid);
+      if (!reply) await dumpDeploymentEvents(`deployment ${stage1.deploymentId}`, workspace.tenantId, stage1.deploymentId);
+      check(
+        "6. mail the opening problem statement and poll for a reply",
+        reply !== null,
+        reply ? `uid ${reply.uid}` : "no reply within 180s",
+      );
+      if (!reply) throw new Error(`no reply from ${stage1.address} within 180s`);
+      lastSeenUid = reply.uid;
+      return reply;
+    });
+
+    await step("6. the reply carries a non-empty body", async () => {
+      if (!firstReply) throw new Error("no first reply to read");
+      const body = mailboxRawBody(firstReply.raw);
+      check("6. the reply carries a non-empty body", body.trim().length > 0, body.slice(0, 200));
+    });
+
+    // (7) Tighten the brief: a second round, same address, second reply.
+    const secondReply = await step("7. mail a tightening round and poll for a second reply", async () => {
+      if (!workspace || !stage1) throw new Error("no workspace/stage-1 deployment to mail");
+      await sendMail(workspace.tenantId, stage1.address, "Re: New project", "Tighten the brief to one paragraph.");
+      const reply = await pollReplyFrom(workspace.tenantId, stage1.address, lastSeenUid);
+      if (!reply) await dumpDeploymentEvents(`deployment ${stage1.deploymentId}`, workspace.tenantId, stage1.deploymentId);
+      check(
+        "7. mail a tightening round and poll for a second reply",
+        reply !== null,
+        reply ? `uid ${reply.uid}` : "no second reply within 180s",
+      );
+      if (!reply) throw new Error(`no second reply from ${stage1.address} within 180s`);
+      lastSeenUid = reply.uid;
+      return reply;
+    });
+
+    let approvedBrief = "";
+    await step("7. the second reply carries a non-empty body", async () => {
+      if (!secondReply) throw new Error("no second reply to read");
+      approvedBrief = mailboxRawBody(secondReply.raw);
+      check("7. the second reply carries a non-empty body", approvedBrief.trim().length > 0, approvedBrief.slice(0, 200));
+    });
+
+    // (8) "Approve" stage 1: the client writes the reply as the stage-1
+    // artifact -- no gate signal, no admit chain (contract's "Deletions").
+    await step("8. approve stage 1 by writing the artifact (createArtifact)", async () => {
+      if (!workspace || !project) throw new Error("no workspace/project to write an artifact under");
+      if (!approvedBrief.trim()) throw new Error("no approved brief text to write as the stage-1 artifact");
+      const artifact = await createArtifact(transport, workspace.tenantId, {
+        title: "Problem brief",
+        content: approvedBrief,
+        metadata: {
+          sb: {
+            projectId: project.id,
+            kind: STAGE1_ARTIFACT_KIND,
+            stage: 1,
+            mediaType: "text/markdown",
+            sourceVersionIds: [],
+            provenance: { producer: "agent" },
+          },
+        },
+      });
+      check("8. approve stage 1 by writing the artifact (createArtifact)", true, `artifact ${artifact.id}`);
+    });
+
+    // (9) Deploy the stage-2 specialist, mail it the approved brief, poll for its reply.
+    const stage2 = await step("9. ensureSpecialistDeployment for stage 2", async () => {
+      if (!workspace || !project || !sidecar || !ensureSpecialistDeployment) {
+        throw new Error("no workspace/project/sidecar/ensureSpecialistDeployment to deploy against");
       }
-      const ref = (result.event.body["output"] as { ref?: string } | undefined)?.ref;
-      if (typeof ref !== "string") throw new Error(`${stepId}'s StepCompleted carried no output ref`);
-      return resolveStepOutputRef(transport, workspace.tenantId, anchorRunId, chatRunId, ref);
-    };
+      const deployed = await ensureSpecialistDeployment(transport, sidecar, closure, gitPush, workspace.tenantId, project.id, 2);
+      check("9. ensureSpecialistDeployment for stage 2", true, JSON.stringify(deployed));
+      return deployed;
+    });
 
-    // (5) The opening mail fired in (4b) drives the `name` step and the
-    // `chat` section's first occurrence directly off the run's own firing
-    // trigger -- nothing more to send.
-    await step("5. anchor shows the name step and the chat section started", async () => {
-      const events = await pollUntil(120_000, 2_000, async () => {
-        const current = await readAnchorEvents();
-        const nameShown = current.some((event) => event.body["stepId"] === NAME_STEP_ID);
-        const chatStarted = childRunIds(current, CHAT_STEP_ID).length > 0;
-        return nameShown && chatStarted ? current : null;
-      });
+    await step("9. stage-2 deployment reaches status deployed", async () => {
+      if (!workspace || !stage2) throw new Error("no stage-2 deployment to poll");
+      const ok = await pollDeploymentStatus(workspace.tenantId, stage2.deploymentId, "deployed");
+      check("9. stage-2 deployment reaches status deployed", ok, ok ? stage2.deploymentId : "timed out waiting for status deployed");
+      if (!ok) throw new Error("stage-2 deployment never reached status deployed");
+    });
+
+    await step("9. mail the approved brief to stage 2 and poll for a reply", async () => {
+      if (!workspace || !stage2) throw new Error("no workspace/stage-2 deployment to mail");
+      await sendMail(workspace.tenantId, stage2.address, "Approved brief", approvedBrief);
+      const reply = await pollReplyFrom(workspace.tenantId, stage2.address, 0);
+      if (!reply) await dumpDeploymentEvents(`deployment ${stage2.deploymentId}`, workspace.tenantId, stage2.deploymentId);
+      const body = reply ? mailboxRawBody(reply.raw) : "";
       check(
-        "5. anchor shows the name step and the chat section started",
-        events !== null,
-        events === null ? "timed out waiting for name/chat" : `${events.length} anchor event(s)`,
+        "9. mail the approved brief to stage 2 and poll for a reply",
+        reply !== null && body.trim().length > 0,
+        reply ? `uid ${reply.uid}` : "no reply within 180s",
       );
-      if (!events) throw new Error("the anchor never showed the name step and a chat occurrence");
-    });
-
-    // (6) The chat section's first occurrence (`chat__0`) is the opening
-    // mail's own reply: find its run id off the anchor's `ChildSpawned`,
-    // then poll it for `draft-1`'s completion and assert a real reply.
-    const chatRunId0 = await step("6. find the chat body's first occurrence run id", async () => {
-      const events = await readAnchorEvents();
-      const [runId] = childRunIds(events, CHAT_STEP_ID);
-      check("6. find the chat body's first occurrence run id", typeof runId === "string", runId ?? "no ChildSpawned for chat");
-      if (typeof runId !== "string") throw new Error("no chat occurrence run id on the anchor's events");
-      return runId;
-    });
-
-    await step("6. draft-1 completes with a non-empty reply", async () => {
-      if (!chatRunId0) throw new Error("no first chat occurrence to poll");
-      const output = (await pollDraft(chatRunId0, draftStepId(1))) as { reply?: unknown };
-      const ok = typeof output.reply === "string" && output.reply.trim().length > 0;
-      check("6. draft-1 completes with a non-empty reply", ok, JSON.stringify(output).slice(0, 200));
-    });
-
-    // (7) A stage-1 round is mail to the anchor, same as the opening: it
-    // drives the chat section's SECOND occurrence (`chat__1`), a fresh
-    // child run with its own `draft-1`.
-    await step("7. send a stage-1 round as mail", async () => {
-      if (!workspace || !anchorRunId) throw new Error("no project/anchor run to mail");
-      await sendStageMail(
-        { tenantId: workspace.tenantId, anchorRunId },
-        { stage: 1, command: "stage.draft", runId: anchorRunId, message: "Tighten the brief to one paragraph." },
-        transport,
-      );
-      check("7. send a stage-1 round as mail", true);
-    });
-
-    const chatRunId1 = await step("7. find the chat body's second occurrence run id", async () => {
-      const events = await pollUntil(60_000, 2_000, async () => {
-        const current = await readAnchorEvents();
-        const runIds = childRunIds(current, CHAT_STEP_ID);
-        return runIds.length >= 2 ? runIds : null;
-      });
-      check("7. find the chat body's second occurrence run id", events !== null, events ? events[1]! : "second occurrence never spawned");
-      if (!events) throw new Error("the anchor never spawned a second chat occurrence");
-      return events[1]!;
-    });
-
-    await step("7. the stage-1 round's draft-1 completes with a reply", async () => {
-      if (!chatRunId1) throw new Error("no second chat occurrence to poll");
-      const output = (await pollDraft(chatRunId1, draftStepId(1))) as { reply?: unknown };
-      const ok = typeof output.reply === "string" && output.reply.trim().length > 0;
-      check("7. the stage-1 round's draft-1 completes with a reply", ok, JSON.stringify(output).slice(0, 200));
-    });
-
-    // (8) Write the mailbox item the same way the client does, while stage
-    // 1's gate is still open -- there is no host-side writer any more (the
-    // announcement stub in `apps/hub/src/decisions.ts` is gone) -- then
-    // confirm the inbox has it.
-    await step("8. mailbox inbox carries an item for the open gate", async () => {
-      if (!workspace || !anchorRunId) throw new Error("no workspace/anchor run to notify for");
-      // The anchor's deployment lives in the workspace tenant (steps 5-7 read it
-      // there too), not the project's own tenant -- `openDecisionFor`'s
-      // "projectId" is really the scope its `GET /api/tenants/<scope>/...` calls
-      // address, so that scope has to be `workspace.tenantId` here.
-      const decision = await openDecisionFor(workspace.tenantId, anchorRunId, transport);
-      if (decision) await notifyDecisionOpen(decision, transport);
-      const response = await fetch(`${origin}/api/me/inbox`, {
-        headers: { authorization: `Bearer ${host!.token}`, cookie: cookieJar.value },
-      });
-      if (!response.ok) throw new Error(`GET /api/me/inbox -> HTTP ${response.status}`);
-      const body = (await response.json()) as { messages?: unknown[] };
-      const ok = Array.isArray(body.messages) && body.messages.length > 0;
-      check("8. mailbox inbox carries an item for the open gate", ok, `${body.messages?.length ?? 0} message(s)`);
-    });
-
-    // (8) Approve stage 1 on the flat top-level gate chain: a signal, not a
-    // mail, straight on `approveSignal(1)` -- there is no admit/submit
-    // prerequisite left in the workflow (contract's "Deletions").
-    await step("8. approve stage 1 (deliverGate) and poll gate-1 completed", async () => {
-      if (!workspace || !anchorRunId) throw new Error("no project/anchor run to signal");
-      await deliverGate(
-        { tenantId: workspace.tenantId, anchorRunId },
-        1,
-        null,
-        { command: "stage.approve", runId: anchorRunId },
-        transport,
-      );
-      const result = await pollStep(60_000, 2_000, gateStepId(1), readAnchorEvents);
-      if (result.kind !== "completed" && anchorRunId) await dumpTimeoutEvents(gateStepId(1), anchorRunId);
-      check(
-        "8. approve stage 1 (deliverGate) and poll gate-1 completed",
-        result.kind === "completed",
-        result.kind === "completed"
-          ? `${approveSignal(1)} -> gate-1 completed`
-          : result.kind === "failed"
-            ? `gate-1 failed: ${JSON.stringify(result.event.body).slice(0, FULL_BODY_LIMIT)}`
-            : "gate-1 never completed",
-      );
-    });
-
-    // (9) A stage-2 mail drives the chat section's THIRD occurrence
-    // (`chat__2`), routed by `route`'s own `at.2` to `draft-2`.
-    await step("9. send a stage-2 mail", async () => {
-      if (!workspace || !anchorRunId) throw new Error("no project/anchor run to mail");
-      await sendStageMail(
-        { tenantId: workspace.tenantId, anchorRunId },
-        { stage: 2, command: "stage.draft", runId: anchorRunId, message: "Draft the stage 2 plan." },
-        transport,
-      );
-      check("9. send a stage-2 mail", true);
-    });
-
-    const chatRunId2 = await step("9. find the chat body's third occurrence run id", async () => {
-      const events = await pollUntil(60_000, 2_000, async () => {
-        const current = await readAnchorEvents();
-        const runIds = childRunIds(current, CHAT_STEP_ID);
-        return runIds.length >= 3 ? runIds : null;
-      });
-      check("9. find the chat body's third occurrence run id", events !== null, events ? events[2]! : "third occurrence never spawned");
-      if (!events) throw new Error("the anchor never spawned a third chat occurrence");
-      return events[2]!;
-    });
-
-    await step("9. the stage-2 mail's draft-2 completes with a reply", async () => {
-      if (!chatRunId2) throw new Error("no third chat occurrence to poll");
-      const output = (await pollDraft(chatRunId2, draftStepId(2))) as { reply?: unknown };
-      const ok = typeof output.reply === "string" && output.reply.trim().length > 0;
-      check("9. the stage-2 mail's draft-2 completes with a reply", ok, JSON.stringify(output).slice(0, 200));
     });
 
     // (10) List artifacts via the artifacts client.
     await step("10. list artifacts via the artifacts client", async () => {
-      if (!project) throw new Error("no project to list artifacts under");
-      const artifacts = await listArtifacts(transport, project.id);
-      check("10. list artifacts via the artifacts client", true, `${artifacts.length} artifact(s)`);
+      if (!workspace || !project) throw new Error("no workspace/project to list artifacts under");
+      const artifacts = await listArtifacts(transport, workspace.tenantId);
+      const mine = artifacts.filter((entry) => (entry.metadata?.["sb"] as { projectId?: string } | undefined)?.projectId === project.id);
+      check("10. list artifacts via the artifacts client", mine.length > 0, `${mine.length} artifact(s) for this project`);
     });
 
   } finally {
