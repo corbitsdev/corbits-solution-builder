@@ -57,6 +57,11 @@ const STAGE_DRAFT_KIND: Readonly<Record<number, string>> = {
 import { artifactGraphFor } from "./artifact-graph.ts";
 import { openCreatedProject } from "./create-project-open.ts";
 import { createHubTransport } from "./hub.ts";
+import {
+  readStageThread as readStageThreadViaHub,
+  sendStageMail as sendStageMailViaHub,
+  type ChatMessage,
+} from "./stage-mail.ts";
 import { hubCredentials, hubOrigin } from "./hub-origin.ts";
 import { listProjectSummaries } from "./project-list.ts";
 import { openDecisions } from "./decisions-fold.ts";
@@ -938,4 +943,22 @@ export const api = {
       return { nodes: graph.nodes.map(toArtifactNode), edges: graph.edges };
     }),
   stopHost: () => post<{ stopping: boolean }>("/host/stop"),
+  sendStageMail: async (
+    tenantId: string,
+    agentAddress: string,
+    input: { body: string; subject?: string; inReplyTo?: string },
+  ): Promise<void> => {
+    try {
+      await sendStageMailViaHub(tenantId, agentAddress, input);
+    } catch (cause) {
+      installerFailure(cause);
+    }
+  },
+  readStageThread: async (tenantId: string, agentAddresses: string[]): Promise<ChatMessage[]> => {
+    try {
+      return await readStageThreadViaHub(tenantId, agentAddresses);
+    } catch (cause) {
+      installerFailure(cause);
+    }
+  },
 };
