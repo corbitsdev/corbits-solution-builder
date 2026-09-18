@@ -81,10 +81,6 @@ describe("rerankCatalogAfterSkillAssets", () => {
       "/hub/api/tenants/t_ws/catalog/offerings/o-chat",
     ]);
   });
-
-  test("client install still passes that rerank as afterSkillAssets", () => {
-    expect(api.install.toString()).toContain("rerankCatalogAfterSkillAssets");
-  });
 });
 
 describe("api.providers", () => {

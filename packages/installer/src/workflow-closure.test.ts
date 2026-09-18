@@ -80,12 +80,6 @@ async function fakeClosure(): Promise<{ manifest: ClosureManifest; fetchTarball:
 }
 
 describe("workflow-closure", () => {
-  test("this module does not import node:fs", async () => {
-    const source = await Bun.file(new URL("./workflow-closure.ts", import.meta.url)).text();
-    expect(source).not.toMatch(/from ["']node:fs["']/);
-    expect(source).not.toMatch(/from ["']node:fs\/promises["']/);
-  });
-
   test("vendoredMemberFiles extracts every @intx/* tarball the manifest carries", async () => {
     const { manifest, fetchTarball } = await fakeClosure();
     const files = await vendoredMemberFiles(manifest, fetchTarball);

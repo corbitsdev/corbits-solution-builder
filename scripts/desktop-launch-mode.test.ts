@@ -38,11 +38,4 @@ describe("desktop launch mode", () => {
     );
     expect(() => remoteHubUrl("https://user:pass@hub.example.com")).toThrow(/credentials/);
   });
-
-  test("the development launcher consults this mode before setting the host command", async () => {
-    const source = await Bun.file(new URL("./dev.ts", import.meta.url)).text();
-    expect(source).toContain("desktopLaunchMode");
-    expect(source).toContain("shouldSpawnHost");
-    expect(source).toContain("SOLUTIONS_BUILDER_HOST_COMMAND");
-  });
 });

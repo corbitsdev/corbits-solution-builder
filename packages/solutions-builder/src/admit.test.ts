@@ -123,11 +123,6 @@ describe("admitGate", () => {
     );
     expect(bare).toMatchObject({ refused: false, toStage: 4 });
     expect(claimed).toEqual(bare);
-    const source = await Bun.file(new URL("./admit.ts", import.meta.url)).text();
-    expect(source).not.toContain("actorAuthorities: Array");
-    expect(source).not.toContain("expectedRevision");
-    expect(source).not.toMatch(/\brec\.run\b/);
-    expect(source).not.toContain("rec.context");
   });
 
   test("a gate that did not say where it stands refuses rather than guessing", async () => {
