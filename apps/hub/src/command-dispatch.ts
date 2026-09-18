@@ -4,9 +4,10 @@
  * A person's decision at a gate is not dispatched here. It is a named signal
  * the client delivers to the run over `/hub`; the hub authorizes it by grant,
  * the runtime deduplicates it by `signalId`, `admitGate` admits it inside the
- * run, and the ledger records it on read (`recordAdmittedGates`). What this
- * module runs is what only the host can do: write an artifact version (a
- * frozen packet, a delivery manifest), start or settle a build attempt,
+ * run, and the ledger records it on read (`recordAdmittedGates`). `build.fail`
+ * is one such signal: the workflow's stage-8 evidence park admits it, same as
+ * `build.accept_evidence`. What this module runs is what only the host can
+ * do: write an artifact version (a frozen packet), start a build attempt,
  * answer a worker, archive or delete a project, and relay a draft round
  * (`deliverRound`) with the inference the specialist drafts with. It does not
  * move run state: that lives in the workflow definition.
@@ -717,10 +718,7 @@ async function apply(
     }
 
     case "stage.fail":
-    case "stage.cancel":
-    case "build.fail":
-    case "build.cancel":
-    case "build.interrupt": {
+    case "stage.cancel": {
       // The ledger row names the terminal state. Spelling it from the command
       // wrote "canceled", a state the ledger does not have, so a cancelled run
       // could neither be shown nor started again.

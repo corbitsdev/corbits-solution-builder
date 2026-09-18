@@ -859,14 +859,14 @@ function BuildPanel({
   const tryAgain = (continuing: boolean) =>
     act(continuing ? "continue" : "retry", async () => {
       if (!current) return;
-      let from = current.id;
+      const from = current.id;
       if (ended) {
-        const failed = await api.command(detail.project.id, "build.fail", {
-          expectedRevision: detail.project.revision,
+        // A signal on the run's evidence park; the workflow settles the attempt.
+        await deliverGate(detail, 8, null, {
+          command: "build.fail",
           runId: current.id,
           reason: "Failed to try the build again from the build supervision screen.",
         });
-        from = failed.runId;
       }
       const queued = await api.command(detail.project.id, "build.start_attempt", {
         ...(ended ? {} : { expectedRevision: detail.project.revision }),
@@ -989,8 +989,9 @@ function BuildPanel({
                 loading={busy === "fail"}
                 onClick={() =>
                   act("fail", async () => {
-                    await api.command(detail.project.id, "build.fail", {
-                      expectedRevision: detail.project.revision,
+                    // A signal on the run's evidence park; the workflow settles the attempt.
+                    await deliverGate(detail, 8, null, {
+                      command: "build.fail",
                       runId: current.id,
                       reason: `Marked failed from the build supervision screen after the worker ended${
                         exitStatus === null ? "" : ` with exit status ${exitStatus}`

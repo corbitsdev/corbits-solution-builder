@@ -16,7 +16,6 @@ export const HOST_EFFECT_COMMANDS: readonly Command[] = [
   "build.freeze",
   "build.start_attempt",
   "build.answer",
-  "build.fail",
   "stage.select_route",
   "stage.retry",
   "build.resume",
