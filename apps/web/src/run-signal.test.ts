@@ -3,7 +3,16 @@ import type { Transport } from "@intx/hub-client";
 import { approveSignal, roundSignal } from "@solutions-builder/app/workflows/stage-loop";
 import { createHubTransport } from "./hub.ts";
 import type { StageStatus } from "./run-fold.ts";
-import { approvalCommand, deliverGate, gateSignalName, signalIdFor, signalRun, submitThen } from "./run-signal.ts";
+import {
+  approvalCommand,
+  deliverDraft,
+  deliverGate,
+  DRAFT_MAX_TOKENS_DEFAULT,
+  gateSignalName,
+  signalIdFor,
+  signalRun,
+  submitThen,
+} from "./run-signal.ts";
 
 type Call = { method: string; path: string; body?: unknown };
 
@@ -139,6 +148,67 @@ describe("AC1: cancel is a signal on the run", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]!.path).toBe("/api/tenants/tnt_ws/workflows/dep_1/signals");
     expect(calls[0]!.body).toMatchObject({ signalName: roundSignal(8), payload: { command: "build.cancel", runId: "run_8" } });
+  });
+});
+
+describe("deliverDraft", () => {
+  test("delivers a stage.draft round to the stage's own round signal, not the gate's", async () => {
+    const { calls, transport } = recording();
+    await deliverDraft(
+      PROJECT,
+      6,
+      {
+        command: "stage.draft",
+        runId: "run_1",
+        message: "write it up",
+        mode: "final",
+        draft: true,
+        inference: { maxTokens: DRAFT_MAX_TOKENS_DEFAULT },
+        documents: ["plan"],
+      },
+      transport,
+    );
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.path).toBe("/api/tenants/tnt_ws/workflows/dep_1/signals");
+    const body = calls[0]!.body as { signalName: string; payload: Record<string, unknown> };
+    expect(body.signalName).toBe(roundSignal(6));
+    expect(body.payload).toEqual({
+      command: "stage.draft",
+      runId: "run_1",
+      message: "write it up",
+      mode: "final",
+      draft: true,
+      inference: { maxTokens: DRAFT_MAX_TOKENS_DEFAULT },
+      documents: ["plan"],
+    });
+  });
+
+  test("the same intent sent twice is the same signalId: a retry dedups on the runtime", async () => {
+    const { calls, transport } = recording();
+    const intent = {
+      command: "stage.draft" as const,
+      runId: "run_1",
+      message: "",
+      mode: "final" as const,
+      draft: true as const,
+      inference: { maxTokens: DRAFT_MAX_TOKENS_DEFAULT },
+    };
+    const first = await deliverDraft(PROJECT, 1, intent, transport);
+    const second = await deliverDraft(PROJECT, 1, intent, transport);
+    expect(first.signalId).toBe(second.signalId);
+    expect(calls[0]!.body).toEqual(calls[1]!.body);
+  });
+
+  test("a project without a placed run has no round to draft", async () => {
+    const { transport } = recording();
+    await expect(
+      deliverDraft(
+        { tenantId: "tnt_ws", anchorRunId: null },
+        1,
+        { command: "stage.draft", runId: "r", message: "", mode: "final", draft: true, inference: { maxTokens: DRAFT_MAX_TOKENS_DEFAULT } },
+        transport,
+      ),
+    ).rejects.toThrow(/not placed/);
   });
 });
 

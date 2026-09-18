@@ -3,19 +3,13 @@
  *
  * The drafting round itself — rendering the specialist prompt, waiting for
  * the workflow's agent steps, and persisting their replies as versions — now
- * lives in the workflow: the client delivers a `stage.draft` signal (through
- * the stage routes, which are thin relays) and the loop owns prompt and
- * persist from there. What remains here is the host-owned half the workflow
- * cannot do for itself:
- *
- * - the approved-inputs read (`stageInputsForSmoke`), still used by the
- *   build-review host path and the smoke scripts;
- * - the round envelope's execution policy (`roundInference`): the output cap
- *   the specialist step's `inference` selector reads off the round. The cap
- *   comes from host-side settings the workflow cannot read, so it rides the
- *   signal; the prompt it caps is the workflow's.
- * - `PlanDocument`, the stage 6 documents-list shape the stages route
- *   validates before it relays.
+ * lives in the workflow. `stage.draft`/`stage.reply` are client-delivered run
+ * signals (`apps/web/src/run-signal.ts`), not host routes, and stage 4's own
+ * output cap is a deploy-time literal baked into the workflow from the
+ * tenant's designer settings (`packages/installer/src/workflow-deploy.ts`),
+ * not a per-round host computation any more. What remains here is the
+ * approved-inputs read (`stageInputsForSmoke`), still used by the
+ * build-review host path and the smoke scripts.
  */
 import type { Stage } from "@solutions-builder/app/ledger";
 import { materialText, MATERIAL_KIND } from "./source-material.js";
@@ -25,45 +19,6 @@ import { asc, eq, isNull, and } from "drizzle-orm";
 import { database } from "./db.js";
 import * as table from "./schema.js";
 import { readArtifactNode } from "./projects.js";
-import { assets, readWorkflowSourceBlob } from "./hub-client.js";
-import {
-  DEFAULT_DESIGNER_SETTINGS,
-  DESIGNER_SETTINGS_ASSET_KIND,
-  DESIGNER_SETTINGS_ASSET_NAME,
-  DESIGNER_SETTINGS_PATH,
-  parseDesignerSettings,
-} from "@solutions-builder/app/designer-settings";
-
-/** The designer's settings as the client saved them on the tenant, defaulted when absent. */
-async function designerSettings() {
-  const found = (await assets.list(DESIGNER_SETTINGS_ASSET_KIND)).find(
-    (asset) => asset.name === DESIGNER_SETTINGS_ASSET_NAME,
-  );
-  if (!found) return DEFAULT_DESIGNER_SETTINGS;
-  const raw = await readWorkflowSourceBlob(found.id, DESIGNER_SETTINGS_PATH);
-  return raw === null ? DEFAULT_DESIGNER_SETTINGS : parseDesignerSettings(JSON.parse(raw));
-}
-
-/** A stage 6 documents-list entry: the plan it attaches and the labels it files under. */
-export interface PlanDocument {
-  readonly planId: string;
-  readonly tags: readonly string[];
-}
-
-/** The document output cap a round carries when no designer setting overrides it. */
-const DOCUMENT_OUTPUT_TOKENS = 16_000;
-
-/**
- * The round envelope's execution policy: the output cap the specialist
- * step's `inference` selector reads off the round signal. The stage 4
- * designer's own configured cap wins when one is set; every other stage runs
- * under the host's document cap. The prompt the cap applies to is rendered
- * workflow-side — this only carries the number.
- */
-export async function roundInference(stage: Stage): Promise<{ maxTokens: number }> {
-  const designer = stage === 4 ? await designerSettings() : null;
-  return { maxTokens: designer?.maxTokens ?? DOCUMENT_OUTPUT_TOKENS };
-}
 
 /** Latest-live human-approved inputs, oldest stage first — stage 9 reads these, not a draft. */
 export async function approvedInputs(projectId: string) {

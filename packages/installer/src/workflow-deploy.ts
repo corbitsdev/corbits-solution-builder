@@ -27,6 +27,7 @@ import {
   type HubDeployment,
 } from "./hub.js";
 import { readProject } from "./project-tenant.js";
+import { readDesignerSettings } from "./designer-settings.js";
 import {
   closureFiles,
   deckAppMemberFiles,
@@ -128,9 +129,14 @@ export function carryGate(childOutput, carry) {
 `;
 }
 
-/** The `interchange.actions` module: the gate loop names `admitGate`. */
+/**
+ * The `interchange.actions` module: the gate loop names `admitGate`, and a
+ * drafted stage's round names `admitDraftGate` right after its own signal —
+ * the workflow's own check on a `stage.draft` round's intent, since the
+ * client delivers that signal straight to the run.
+ */
 function actionsModule(): string {
-  return `export { admitGate } from "@solutions-builder/app/admit";
+  return `export { admitGate, admitDraftGate } from "@solutions-builder/app/admit";
 `;
 }
 
@@ -153,6 +159,7 @@ export function renderLifecycleSource(
   source?: InferenceSourcePin,
   audiences?: readonly { name: string; role: string }[],
   audienceQuorum?: number,
+  designerMaxTokens?: number,
 ): LifecycleSource {
   const name = lifecycleAssetName(projectId);
   const root = {
@@ -176,7 +183,12 @@ export function renderLifecycleSource(
     [`${LIFECYCLE_DIR}/package.json`]: `${JSON.stringify(member, null, 2)}\n`,
     [`${LIFECYCLE_DIR}/${ENTRY_PATH}`]: lifecycleEntrySource(
       source
-        ? { source, ...(audiences ? { audiences } : {}), ...(audienceQuorum !== undefined ? { audienceQuorum } : {}) }
+        ? {
+            source,
+            ...(audiences ? { audiences } : {}),
+            ...(audienceQuorum !== undefined ? { audienceQuorum } : {}),
+            ...(designerMaxTokens !== undefined ? { designerMaxTokens } : {}),
+          }
         : {},
     ),
     [`${LIFECYCLE_DIR}/${LOOPS_PATH}`]: loopsModule(),
@@ -315,11 +327,15 @@ async function ensureLifecycleDeploymentUncached(
   // upgrade path any other lifecycle change takes.
   const project = projectId ? await readProject(transport, projectId) : null;
   const audiences = project?.policy.audiences;
+  // Stage 4's own output cap, from the workspace tenant's designer settings
+  // asset — the same one the settings page reads and writes.
+  const designerMaxTokens = (await readDesignerSettings(transport, tenantId)).maxTokens;
   const rendered = renderLifecycleSource(
     projectId,
     await sourceFor(transport, tenantId, offerings[0]!),
     audiences,
     project?.policy.audienceQuorum,
+    designerMaxTokens,
   );
   const assetId = await lifecycleAsset(transport, tenantId, projectId);
   const head = await readWorkflowSourceBlob(transport, tenantId, assetId, DIGEST_PATH);

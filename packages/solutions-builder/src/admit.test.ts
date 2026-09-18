@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { admit, admitGate, gateRunView } from "./admit.js";
+import { admit, admitDraft, admitDraftGate, admitGate, gateRunView } from "./admit.js";
 import { FORBIDDEN } from "./ledger.js";
 
 describe("admit", () => {
@@ -134,5 +134,43 @@ describe("admitGate", () => {
     expect(await admitGate({ command: "stage.approve", runId: "run_1" })).toMatchObject({ refused: true, code: "wrong_state" });
     expect(await admitGate(input({ runId: "run_1" }))).toMatchObject({ refused: true, code: "unknown_command" });
     expect(await admitGate(input({ command: "stage.approve" }))).toMatchObject({ refused: true, code: "unknown_command" });
+  });
+});
+
+describe("admitDraft", () => {
+  test("stage 5 refuses a round naming an audience the deploy-time roster does not carry", () => {
+    const verdict = admitDraft({ stage: 5, draft: true, audiences: ["Legal", "Sales"], audienceNames: ["Legal"] });
+    expect(verdict).toMatchObject({ draft: false, refused: true, code: "forbidden" });
+    if (verdict.draft === false && verdict.refused) {
+      expect(verdict.message).toContain("Sales");
+    }
+    expect(admitDraft({ stage: 5, draft: true, audiences: ["Legal"], audienceNames: ["Legal"] })).toEqual({ draft: true });
+  });
+
+  test("stage 6 refuses a round naming a document that is not requirements or plan", () => {
+    const verdict = admitDraft({ stage: 6, draft: true, documents: ["plan", "roadmap"] });
+    expect(verdict).toMatchObject({ draft: false, refused: true, code: "forbidden" });
+    if (verdict.draft === false && verdict.refused) {
+      expect(verdict.message).toContain("roadmap");
+    }
+    expect(admitDraft({ stage: 6, draft: true, documents: ["plan"] })).toEqual({ draft: true });
+  });
+});
+
+describe("admitDraftGate", () => {
+  test("carries the deploy-time audienceNames literal from the round's own gate literal, not the client's payload", async () => {
+    const refused = await admitDraftGate({
+      stage: 5,
+      draft: true,
+      audiences: ["Legal", "Sales"],
+      audienceNames: ["Legal"],
+    });
+    expect(refused).toMatchObject({ draft: false, refused: true, code: "forbidden" });
+    const admitted = await admitDraftGate({ stage: 5, draft: true, audiences: ["Legal"], audienceNames: ["Legal"] });
+    expect(admitted).toEqual({ draft: true });
+  });
+
+  test("a round that did not say which stage it stands at is refused rather than guessed", async () => {
+    expect(await admitDraftGate({ draft: true })).toMatchObject({ draft: false, refused: true, code: "forbidden" });
   });
 });

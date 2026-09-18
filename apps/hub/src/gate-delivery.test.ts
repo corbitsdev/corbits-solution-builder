@@ -18,12 +18,16 @@ describe("the host relays rounds and nothing else", () => {
     expect(source).not.toContain("actorAuthorities");
   });
 
-  test("command-dispatch has no submitAndApprove, no gate branch, no host-built run context in a signal", async () => {
+  test("command-dispatch has no submitAndApprove, no gate branch, no host-built run context in a signal, and relays no draft round any more", async () => {
     const source = await read("./command-dispatch.ts");
     expect(source).not.toContain("submitAndApprove");
     expect(source).not.toContain("runGateSideEffects");
     expect(source).not.toMatch(/payload: \{ \.\.\.input\.payload, command: input\.type, run, context \}/);
-    expect(source).toContain("deliverRound(input, run.stage)");
+    // `stage.draft` is client-delivered now (`apps/web/src/run-signal.ts`'s
+    // `deliverDraft`), the same way a gate decision is: the host's own
+    // `deliverRound` has no caller left here.
+    expect(source).not.toContain("deliverRound");
+    expect(source).not.toContain('"stage.draft"');
     const lifecycle = await read("./lifecycle-run.ts");
     expect(lifecycle).not.toContain("alignRunWithLedger");
     expect(lifecycle).not.toContain("recordGateFromSignal");

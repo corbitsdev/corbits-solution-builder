@@ -68,6 +68,14 @@ export const EVALUATED_STAGE: Stage = 1;
 export const GATE_WAIT_STEP_ID = "wait";
 /** The action inside a gate loop: the ledger guard admits or refuses. */
 export const ADMIT_STEP_ID = "admit";
+/**
+ * The action right after the round, on a stage that drafts: the ledger guard
+ * admits or refuses the round's own intent (a stage 5 audience name, a
+ * stage 6 document name) before any specialist runs. A client delivers
+ * `stage.draft`/`stage.reply` straight to the round's signal, bypassing the
+ * host, so this is the one place that intent is ever checked.
+ */
+export const ADMIT_DRAFT_STEP_ID = "admit-draft";
 
 /**
  * What the admit action reads, in override order: the tally the loop carried

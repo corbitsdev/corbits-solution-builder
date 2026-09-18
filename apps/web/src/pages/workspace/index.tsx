@@ -37,7 +37,7 @@ import { StageDocument } from "./document.jsx";
 import { SELECTABLE_TARGETS } from "@solutions-builder/app/targets";
 import { EVALUATED_STAGE } from "@solutions-builder/app/workflows/stage-loop";
 import type { StageStatus } from "../../run-fold.ts";
-import { approvalCommand, deliverGate, submitThen } from "../../run-signal.ts";
+import { approvalCommand, deliverDraft, deliverGate, DRAFT_MAX_TOKENS_DEFAULT, submitThen } from "../../run-signal.ts";
 import { foldEvaluation, foldStageThread, nextOpenQuestion } from "../../stage-thread.ts";
 import type { Stage } from "@solutions-builder/app/ledger";
 
@@ -255,7 +255,16 @@ export function StageWorkspace({
     const key = `${detail.project.id}:${stage}`;
     if (startedRef.current === key) return;
     startedRef.current = key;
-    void run("draft", () => api.draft(detail.project.id, stage, ""));
+    void run("draft", () =>
+      deliverDraft(detail, stage as Stage, {
+        command: "stage.draft",
+        runId: current!.id,
+        message: "",
+        mode: "final",
+        draft: true,
+        inference: { maxTokens: DRAFT_MAX_TOKENS_DEFAULT },
+      }),
+    );
   }, [detail.project.id, stage, inProgress, stageNodes.length, said.length]);
 
   // One view at a time, and a new one settles in rather than snapping: the
@@ -342,7 +351,14 @@ export function StageWorkspace({
                 loading={busy === "draft"}
                 onClick={() =>
                   run("draft", async () => {
-                    await api.draft(detail.project.id, stage, input);
+                    await deliverDraft(detail, stage as Stage, {
+                      command: "stage.draft",
+                      runId: current!.id,
+                      message: input,
+                      mode: "final",
+                      draft: true,
+                      inference: { maxTokens: DRAFT_MAX_TOKENS_DEFAULT },
+                    });
                     setInput("");
                   })
                 }
@@ -434,10 +450,18 @@ export function StageWorkspace({
             drafting={busy === "draft"}
             onDraftPackages={(audiences) =>
               run("draft", async () => {
-                const result = await api.draft(detail.project.id, stage, "", [], audiences);
+                await deliverDraft(detail, stage as Stage, {
+                  command: "stage.draft",
+                  runId: current!.id,
+                  message: "",
+                  mode: "final",
+                  draft: true,
+                  inference: { maxTokens: DRAFT_MAX_TOKENS_DEFAULT },
+                  audiences,
+                });
                 // Said once the round is delivered: the rewrite itself lands
                 // through the workflow's own persist, and the pane refetches.
-                return { ...result, note: `Asked for ${audiences.join(", ")} again. The packages update here when the new versions land.` };
+                return { note: `Asked for ${audiences.join(", ")} again. The packages update here when the new versions land.` };
               })
             }
           />
@@ -469,7 +493,15 @@ export function StageWorkspace({
               // of the requirements writes the plan again too. The rewrite
               // itself lands through the workflow's own persist, and the pane
               // refetches.
-              await api.draft(detail.project.id, stage, "", [], undefined, ["requirements", "plan"]);
+              await deliverDraft(detail, stage as Stage, {
+                command: "stage.draft",
+                runId: current!.id,
+                message: "",
+                mode: "final",
+                draft: true,
+                inference: { maxTokens: DRAFT_MAX_TOKENS_DEFAULT },
+                documents: ["requirements", "plan"],
+              });
               return { note: "Rewriting the requirements, and the plan against them. They update here when the new versions land." };
             })
           }
@@ -512,11 +544,21 @@ export function StageWorkspace({
                 },
               ]);
             }
+            // Interview-vs-final is the client's call: the thread's own
+            // open-question state already says whether one is outstanding.
+            const mode: "interview" | "final" =
+              !revise && openQuestion !== null && message.trim().length > 0 && openQuestion.remaining > 0
+                ? "interview"
+                : "final";
             void run("draft", () =>
-              api.reply(detail.project.id, stage, {
+              deliverDraft(detail, stage as Stage, {
+                command: "stage.draft",
+                runId: current!.id,
                 message,
-                quotes,
-                ...(revise ? { revise: true } : {}),
+                ...(quotes.length > 0 ? { quotes } : {}),
+                mode,
+                draft: true,
+                inference: { maxTokens: DRAFT_MAX_TOKENS_DEFAULT },
               }),
             );
           }}
@@ -616,6 +658,16 @@ function DesignPanel({ detail, standing, onChanged }: { detail: ProjectDetail; s
               : deliverGate(detail, 4, standing, { command: "stage.submit", ...submit });
           },
         }}
+        revise={(prompt) =>
+          deliverDraft(detail, 4, {
+            command: "stage.draft",
+            runId: detail.current!.id,
+            message: prompt,
+            mode: "final",
+            draft: true,
+            inference: { maxTokens: DRAFT_MAX_TOKENS_DEFAULT },
+          })
+        }
         onChanged={() => {
           void load();
           onChanged();

@@ -15,6 +15,7 @@
  */
 import { NAME_STEP_ID, PROJECT_LIFECYCLE_ID } from "./project-lifecycle.js";
 import {
+  ADMIT_DRAFT_STEP_ID,
   BUILD_STEP_ID,
   BUILD_STEP_TIMEOUT_MS,
   DECIDE_STEP_ID,
@@ -39,6 +40,7 @@ import {
 import { agentById, agentFor, panelPrincipals, type AgentRole } from "../kit.js";
 import { STAGES, type Stage } from "../ledger.js";
 import { skillTextFor } from "../seed-kit.js";
+import { DESIGNER_TOKENS_DEFAULT } from "../designer-settings.js";
 
 /**
  * What the deployed package depends on. `@intx/workflow` is a workspace member
@@ -81,6 +83,14 @@ export type LifecycleSourceOptions = {
   readonly audiences?: readonly { readonly name: string; readonly role: string }[];
   /** How many audiences must say proceed before stage 5 approves; the gate carries the tally. */
   readonly audienceQuorum?: number;
+  /**
+   * Stage 4's own output-token cap, read from the tenant's designer settings
+   * asset at deploy time. Baked in the same way `audienceQuorum` is: the
+   * client no longer computes this (there is no host route left to do it),
+   * so the round's own `inference.maxTokens` is a client literal the
+   * workflow does not trust for stage 4 — this literal overrides it there.
+   */
+  readonly designerMaxTokens?: number;
 };
 
 /** The stage whose rounds run the build agent. */
@@ -311,12 +321,24 @@ const MAX_REVISIONS = ${MAX_REVISIONS};
 const ROUND = ${JSON.stringify(ROUND_STEP_ID)};
 const WAIT = ${JSON.stringify(GATE_WAIT_STEP_ID)};
 const ADMIT = ${JSON.stringify(ADMIT_STEP_ID)};
+const ADMIT_DRAFT = ${JSON.stringify(ADMIT_DRAFT_STEP_ID)};
 const DECIDE = ${JSON.stringify(DECIDE_STEP_ID)};
 const NO_DRAFT = ${JSON.stringify(NO_DRAFT_STEP_ID)};
 const NAME = ${JSON.stringify(NAME_STEP_ID)};
 const DRAFT_TIMEOUT = ${DRAFT_STEP_TIMEOUT_MS};
 const BUILD_STAGE = ${BUILD_STAGE};
 const AUDIENCE_QUORUM = ${options.audienceQuorum === undefined ? "undefined" : JSON.stringify(options.audienceQuorum)};
+// Baked in at deploy render time from the project's own policy (the same
+// read AUDIENCE_QUORUM comes from), never from a client's signal: a round
+// naming an audience the workflow was not rendered with is refused before
+// any specialist runs (see admitDraft in admit.ts).
+const AUDIENCE_NAMES = ${options.audiences ? JSON.stringify(options.audiences.map((audience) => audience.name)) : "undefined"};
+// Stage 4's output-token cap, read off the tenant's designer settings asset
+// at deploy time (packages/installer/src/designer-settings.ts) — the same
+// place the settings page itself reads and writes. There is no host route
+// left to compute this per round, so the literal wins over whatever a
+// client's own round signal sent for stage 4's specialist step.
+const DESIGNER_MAX_TOKENS = ${JSON.stringify(options.designerMaxTokens ?? DESIGNER_TOKENS_DEFAULT)};
 // The admit reads the carried tally, then the person's intent, then the
 // gate's own literals last: the stage and gate are the workflow's to say.
 function admitInput(waitStepId, literal) {
@@ -358,11 +380,22 @@ function iteration(stage) {
       // the plan.
       const first = specs[0].gated ? "pick-0" : specs[0].id;
       Object.assign(steps, {
+        [ADMIT_DRAFT]: action({
+          handler: "admitDraftGate",
+          input: {
+            merge: [
+              { from: "steps." + ROUND + ".output" },
+              { literal: { stage, audienceNames: AUDIENCE_NAMES } },
+            ],
+          },
+          drainBehavior: "wait",
+          after: [ROUND],
+        }),
         [DECIDE]: gate({
-          when: { from: "steps." + ROUND + ".output.draft" },
+          when: { from: "steps." + ADMIT_DRAFT + ".output.draft" },
           then: first,
           else: NO_DRAFT,
-          after: [ROUND],
+          after: [ADMIT_DRAFT],
         }),
         [NO_DRAFT]: escalation({ to: NO_DRAFT, after: [DECIDE] }),
       });
@@ -372,9 +405,13 @@ function iteration(stage) {
           step({
             agent: AGENTS[spec.roleId],
             input: spec.input,
-            // The round carries the call's options — the output cap the
-            // person set for a design — since the agent is fixed at deploy.
-            inference: { from: "steps." + ROUND + ".output.inference" },
+            // Every other stage's round carries the call's own options; stage
+            // 4's output cap is the tenant's own designer setting, baked in
+            // at deploy time above, which wins over whatever the client's
+            // round signal sent — there is no host route left to police it.
+            inference: stage === 4
+              ? { literal: { maxTokens: DESIGNER_MAX_TOKENS } }
+              : { from: "steps." + ROUND + ".output.inference" },
             timeout: DRAFT_TIMEOUT,
             drainBehavior: "wait",
             after,

@@ -87,6 +87,7 @@ export function DesignFeedbackView({
   contentByNode,
   approval,
   onChanged,
+  revise,
 }: {
   projectId: string;
   designs: ArtifactNode[];
@@ -94,6 +95,8 @@ export function DesignFeedbackView({
   contentByNode: Map<string, string>;
   approval: DesignApproval;
   onChanged: () => void;
+  /** Delivers the revision prompt to the run as a `stage.draft` signal. */
+  revise: (prompt: string) => Promise<unknown>;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(designs.at(-1)?.id ?? null);
   const [feedbackMode, setFeedbackMode] = useState(false);
@@ -424,7 +427,7 @@ export function DesignFeedbackView({
             <Button
               variant="primary"
               loading={busy === "revise"}
-              onClick={() => run("revise", () => api.reviseDesign(projectId, design!.id))}
+              onClick={() => run("revise", () => revise(stored?.prompt ?? ""))}
             >
               Generate the next design version
             </Button>

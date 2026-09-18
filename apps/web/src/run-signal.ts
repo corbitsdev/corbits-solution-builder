@@ -65,7 +65,7 @@ export function gateSignalName(stage: Stage, command: Command, standing: StageSt
 }
 
 /** The same intent on the same gate is the same signal: a retry or a double-click dedups on the runtime. */
-export async function signalIdFor(anchorRunId: string, signalName: string, intent: GateIntent): Promise<string> {
+export async function signalIdFor(anchorRunId: string, signalName: string, intent: unknown): Promise<string> {
   const bytes = new TextEncoder().encode(JSON.stringify([anchorRunId, signalName, intent]));
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -85,6 +85,62 @@ export async function deliverGate(
     throw new Error("This project's lifecycle is not placed on a run yet, so there is no gate to decide at.");
   }
   const signalName = gateSignalName(stage, intent.command, standing);
+  const signalId = await signalIdFor(project.anchorRunId, signalName, intent);
+  await signalRun(
+    { tenantId: project.tenantId, anchorRunId: project.anchorRunId, signalName, signalId, payload: intent },
+    transport,
+  );
+  return { signalName, signalId };
+}
+
+/**
+ * The output cap a round carries when nothing more specific applies. Matches
+ * the designer settings' own default (`DESIGNER_TOKENS_DEFAULT` in
+ * `apps/hub/src/designer-settings.ts`) and the web settings page's own
+ * `TOKENS_DEFAULT` (`apps/web/src/pages/settings.tsx`).
+ */
+export const DRAFT_MAX_TOKENS_DEFAULT = 32_000;
+
+/**
+ * A stage's own draft or reply: the same round a specialist drafts against,
+ * delivered straight to the run instead of through a host route. `stage.draft`
+ * is the one ledger command that carries both a fresh draft and an interview
+ * reply — `mode` tells the workflow which; the client decides it from the
+ * thread's own `open` question state, the same state it already fetched to
+ * show the conversation.
+ */
+export type DraftIntent = {
+  readonly command: "stage.draft";
+  readonly runId: string;
+  readonly message: string;
+  readonly quotes?: readonly { readonly quote: string }[];
+  readonly mode: "interview" | "final";
+  readonly draft: true;
+  readonly inference: { readonly maxTokens: number };
+  /** Stage 5: write these stakeholders' packages only, by name. */
+  readonly audiences?: readonly string[];
+  /** Stage 6: write the requirements, the plan, or both. */
+  readonly documents?: readonly string[];
+};
+
+/**
+ * Delivers a stage's draft/reply round to its run, the same way a gate
+ * decision is delivered: a thin, client-trusted intent, deduped by a digest
+ * of itself. Whether the intent is admitted — a named stage 5 audience, a
+ * named stage 6 document — is the workflow's own round admit's call
+ * (`admitDraft` in `packages/solutions-builder/src/admit.ts`), not this
+ * function's or the hub's.
+ */
+export async function deliverDraft(
+  project: Anchored,
+  stage: Stage,
+  intent: DraftIntent,
+  transport: Transport = createHubTransport(),
+): Promise<Delivered> {
+  if (project.anchorRunId === null) {
+    throw new Error("This project's lifecycle is not placed on a run yet, so there is no round to draft.");
+  }
+  const signalName = stageSignal(stage, intent.command).name;
   const signalId = await signalIdFor(project.anchorRunId, signalName, intent);
   await signalRun(
     { tenantId: project.tenantId, anchorRunId: project.anchorRunId, signalName, signalId, payload: intent },

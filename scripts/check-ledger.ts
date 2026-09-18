@@ -307,6 +307,7 @@ for (const terminal of TERMINAL_STATES) {
       DRAFT_STEP_ID,
       DELIVERY_STEP_ID,
       DECIDE_STEP_ID,
+      ADMIT_DRAFT_STEP_ID,
       NO_DRAFT_STEP_ID,
       EVALUATE_STEP_ID,
       EVALUATED_STAGE,
@@ -330,7 +331,7 @@ for (const terminal of TERMINAL_STATES) {
         inference?: { sources?: { provider?: string; model?: string }[] };
       };
       input?: { from?: string };
-      inference?: { from?: string };
+      inference?: { from?: string; literal?: { maxTokens?: number } };
       after?: string[];
     };
     type IterationJson = {
@@ -356,8 +357,10 @@ for (const terminal of TERMINAL_STATES) {
         for (const [id, step] of Object.entries(rawSteps)) {
           if (step && ["step", "gate", "escalation"].includes(step.kind ?? "")) continue;
           // Evidence park is additive with the offering (it follows the build
-          // agent); the in-process, gates-only iteration has none.
-          if (id === EVIDENCE_STEP_ID || id === EVIDENCE_ADMIT_STEP_ID) continue;
+          // agent); the in-process, gates-only iteration has none. Same for
+          // the round's own admit-draft: it exists only once a drafting round
+          // has agent steps to admit ahead of.
+          if (id === EVIDENCE_STEP_ID || id === EVIDENCE_ADMIT_STEP_ID || id === ADMIT_DRAFT_STEP_ID) continue;
           kept[id] = stripAgentPrimitives(step);
         }
         const out: Record<string, unknown> = {};
@@ -511,15 +514,28 @@ for (const terminal of TERMINAL_STATES) {
         const decide = iteration?.steps?.[DECIDE_STEP_ID];
         const draft = iteration?.steps?.[stepId];
         const gated = (stage as number) === 6;
-        if (!decide || decide.kind !== "gate" || decide.when?.from !== `steps.${ROUND_STEP_ID}.output.draft`) {
-          problems.push(`Stage ${stage}'s decide gate does not read the round's draft flag`);
+        const admitDraft = iteration?.steps?.[ADMIT_DRAFT_STEP_ID];
+        if (!admitDraft || admitDraft.kind !== "action" || admitDraft.handler !== "admitDraftGate") {
+          problems.push(`Stage ${stage} does not admit its round through admitDraftGate`);
+        } else if (!admitDraft.after?.includes(ROUND_STEP_ID)) {
+          problems.push(`Stage ${stage}'s admit-draft does not follow the round`);
+        }
+        if (!decide || decide.kind !== "gate" || decide.when?.from !== `steps.${ADMIT_DRAFT_STEP_ID}.output.draft`) {
+          problems.push(`Stage ${stage}'s decide gate does not read the admitted draft flag`);
         } else if (decide.then !== (gated ? "pick-0" : stepId) || decide.else !== NO_DRAFT_STEP_ID) {
           problems.push(`Stage ${stage}'s decide gate does not branch to draft/no-draft`);
         }
+        // Stage 4 alone does not trust the round's own inference cap: there
+        // is no host route left to police it, so the deploy-time designer
+        // setting is baked in as a literal instead (`lifecycle-source.ts`).
+        const draftReadsInferenceOffRound =
+          (stage as number) === 4
+            ? typeof draft?.inference?.literal?.maxTokens === "number"
+            : draft?.inference?.from === `steps.${ROUND_STEP_ID}.output.inference`;
         if (!draft || draft.kind !== "step" || draft.agent?.id !== agentFor(stage).id) {
           problems.push(`Stage ${stage}'s draft step is not the kit's specialist`);
-        } else if (draft.inference?.from !== `steps.${ROUND_STEP_ID}.output.inference`) {
-          problems.push(`Stage ${stage}'s draft step does not read its inference options off the round`);
+        } else if (!draftReadsInferenceOffRound) {
+          problems.push(`Stage ${stage}'s draft step does not carry its output-token cap correctly`);
         } else if (!gated && draft.input?.from !== `steps.${ROUND_STEP_ID}.output.prompt`) {
           problems.push(`Stage ${stage}'s draft step does not read the round's prompt`);
         } else if (!gated && !draft.after?.includes(DECIDE_STEP_ID)) {

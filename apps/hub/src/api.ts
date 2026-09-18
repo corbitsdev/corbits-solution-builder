@@ -24,7 +24,6 @@ import { newId } from "./ids.js";
 import { type Command } from "@solutions-builder/app/ledger";
 import { registerHostRoutes, API_VERSION as HOST_API_VERSION } from "./api-host.js";
 import { registerProjectRoutes } from "./api-projects.js";
-import { registerStageRoutes } from "./api-stages.js";
 import { registerDecisionRoutes } from "./api-decisions.js";
 
 export const API_VERSION = HOST_API_VERSION;
@@ -67,7 +66,6 @@ export function createApi() {
 
   registerHostRoutes(api);
   registerProjectRoutes(api);
-  registerStageRoutes(api);
   registerDecisionRoutes(api);
 
   api.onError((cause, context) => {

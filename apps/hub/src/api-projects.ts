@@ -15,8 +15,6 @@ import {
   submitFeedback,
   type Direction,
 } from "./design-feedback.js";
-import { roundInference } from "./stage-runs.js";
-import { commandFrom } from "./api.js";
 import { runGuidance } from "./guide.js";
 import { notFound } from "./errors.js";
 import { type RunState } from "@solutions-builder/app/ledger";
@@ -112,41 +110,6 @@ export function registerProjectRoutes(api: Hono) {
       ...(body.acceptanceCriteria ? { acceptanceCriteria: body.acceptanceCriteria } : {}),
     });
     return context.json(result);
-  });
-
-  /**
-   * Revising the design from recorded feedback.
-   *
-   * A thin relay: it hands the deterministic revision prompt to the
-   * workflow as a `stage.draft` round envelope and returns the delivery
-   * outcome. The revision prompt (rather than a chat history) is what will
-   * make the resulting version attributable to exactly the feedback that
-   * was submitted, once the workflow persists it. Dispositions resume when
-   * the workflow's own persist writes the new version — there is no new
-   * node to disposition against yet.
-   */
-  api.post("/projects/:projectId/design/revise", async (context) => {
-    const projectId = context.req.param("projectId");
-    const body = (await context.req.json()) as { designNodeId: string };
-    const detail = await projectDetail(projectId, localActor().principalId);
-    if (!detail.current) throw notFound("An open run for that project");
-
-    const stored = await feedbackFor(body.designNodeId);
-    if (!stored) {
-      throw new HostError(
-        "validation_failed",
-        "No feedback has been submitted against that design version.",
-      );
-    }
-
-    const outcome = await commandFrom("stage.draft", projectId, {
-      runId: detail.current.id,
-      message: stored.prompt,
-      mode: "final",
-      draft: true,
-      inference: await roundInference(4),
-    });
-    return context.json(outcome);
   });
 
   api.get("/projects/:projectId/graph", async (context) =>

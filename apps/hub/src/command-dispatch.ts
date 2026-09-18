@@ -6,11 +6,12 @@
  * the runtime deduplicates it by `signalId`, `admitGate` admits it inside the
  * run, and the ledger records it on read (`recordAdmittedGates`). `build.fail`
  * is one such signal: the workflow's stage-8 evidence park admits it, same as
- * `build.accept_evidence`. What this module runs is what only the host can
- * do: write an artifact version (a frozen packet), start a build attempt,
- * answer a worker, archive or delete a project, and relay a draft round
- * (`deliverRound`) with the inference the specialist drafts with. It does not
- * move run state: that lives in the workflow definition.
+ * `build.accept_evidence`. `stage.draft` is client-delivered the same way
+ * now (`apps/web/src/run-signal.ts`'s `deliverDraft`); nothing here relays a
+ * round any more. What this module runs is what only the host can do: write
+ * an artifact version (a frozen packet), start a build attempt, answer a
+ * worker, archive or delete a project. It does not move run state: that
+ * lives in the workflow definition.
  */
 import type { Command, Stage } from "@solutions-builder/app/ledger";
 import { classifyTarget, SELECTABLE_TARGETS } from "@solutions-builder/app/targets";
@@ -21,7 +22,6 @@ import { newId } from "./ids.js";
 import { database, type Db } from "./db.js";
 import type { Authority } from "@solutions-builder/app/ledger";
 import { launchProjectLifecycle, projectExecutionStatus, type DeliveryOutcome } from "./lifecycle-run.js";
-import { deliverRound, ROUND_COMMAND } from "./gate-delivery.js";
 import { activeRun, readRun, runsForProject, type RunRecord } from "./runs.js";
 import {
   authoritiesFor,
@@ -120,9 +120,9 @@ export type CommandOutcome = {
   readonly transitionId: string;
   readonly replayed: boolean;
   /**
-   * What `deliverRound` did with the round this command relayed. Present only
-   * for `stage.draft`; a caller that needs the round to have actually reached
-   * a waiting run reads this rather than assuming delivery from a bare commit.
+   * Set only when the ledger entry came from a client-delivered gate signal
+   * (`command-ledger.ts`'s `ledgerEntryFromGateSignal`), never by this
+   * module's own `applyCommand` — a host effect commits or it does not.
    */
   readonly delivery?: DeliveryOutcome;
 };
@@ -419,11 +419,6 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
     await writeArtifact(outcome.applied.artifact.draft, input.actor);
   }
 
-  // A draft round is relayed to the run after the guard allowed it, and
-  // recorded here under the same key the signal carries, so the run's own
-  // `SignalReceived` is one turn on the ledger, not two.
-  const delivery = input.type === ROUND_COMMAND ? await deliverRound(input, run.stage) : undefined;
-
   await recordCommand({
     projectId: input.projectId,
     actorPrincipalId: input.actor.principalId,
@@ -443,7 +438,7 @@ async function runCommand(input: CommandInput): Promise<CommandOutcome> {
     ...(outcome.applied.approval ?? {}),
   });
 
-  return delivery === undefined ? outcome.result : { ...outcome.result, delivery };
+  return outcome.result;
 }
 
 /** A decision recorded on this run, carried through to the post-commit ledger write. */
@@ -515,13 +510,6 @@ async function apply(
         state: run.state,
         approval: approvalOf(decision, audienceName),
       };
-    }
-
-    case "stage.draft": {
-      // Keeps the stage open: no run mutation, no approval, no notify. Its
-      // only durable effect is the round `deliverRound` relays to the run
-      // after this command commits.
-      return { runId: run.id, stage: run.stage, state: run.state };
     }
 
     case "stage.submit": {

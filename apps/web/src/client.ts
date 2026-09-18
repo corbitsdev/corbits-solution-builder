@@ -794,30 +794,6 @@ export const api = {
   saveArtifactFile: (nodeId: string) => post<{ path: string; bytes: number }>(`/artifacts/${nodeId}/save`, {}),
   /** Where a design is served as a page of its own, for printing. A path, not a request. */
   printPage: (nodeId: string) => `/api/artifacts/${nodeId}/print`,
-  /**
-   * Asks the stage specialist for a draft. A signal, not the draft: the
-   * route delivers the round envelope as a `stage.draft` command and this
-   * resolves with the delivery outcome. The versions land through the
-   * workflow's own persist, and the pane learns of them through its own
-   * refetch. At stage 5, `audiences` names the stakeholders whose package
-   * to write (all when absent). At stage 6, `documents` names which of the
-   * requirements and the plan to write (whatever the stage lacks when
-   * absent).
-   */
-  draft: (
-    projectId: string,
-    stage: number,
-    input: string,
-    quotes: Quote[] = [],
-    audiences?: string[],
-    documents?: ("requirements" | "plan")[],
-  ) =>
-    post<CommandOutcome & { delivery?: string }>(`/projects/${projectId}/stages/${stage}/draft`, {
-      input,
-      quotes,
-      ...(audiences ? { audiences } : {}),
-      ...(documents ? { documents } : {}),
-    }),
   preferences: () => request<{ preferences: Record<string, unknown> }>("/preferences"),
   setPreference: (key: string, value: unknown) =>
     request<{ key: string }>(`/preferences/${key}`, {
@@ -831,15 +807,6 @@ export const api = {
     }),
   guidance: (projectId: string) =>
     request<{ guidance: Guidance }>(`/projects/${projectId}/guidance`),
-  reply: (
-    projectId: string,
-    stage: number,
-    payload: { message: string; quotes?: Quote[]; revise?: boolean },
-  ) =>
-    post<CommandOutcome & { asked: boolean; remaining: number; delivery?: string }>(
-      `/projects/${projectId}/stages/${stage}/reply`,
-      payload,
-    ),
   /**
    * A host effect (a frozen packet, a build attempt, a route selection). A
    * gate decision is not one: it is a named signal on the run (`run-signal.ts`).
@@ -876,17 +843,6 @@ export const api = {
     post<{ feedback: DesignFeedback; prompt: string; feedbackNodeId: string }>(
       `/projects/${projectId}/design/feedback`,
       payload,
-    ),
-  /**
-   * Asks the designer for a revision from recorded feedback. A signal, not
-   * the revision: the route delivers the round envelope as a `stage.draft`
-   * command and this resolves with the delivery outcome. Dispositions resume
-   * when the workflow's own persist writes the new version.
-   */
-  reviseDesign: (projectId: string, designNodeId: string) =>
-    post<CommandOutcome & { delivery?: string }>(
-      `/projects/${projectId}/design/revise`,
-      { designNodeId },
     ),
   graph: (projectId: string) =>
     request<{

@@ -168,3 +168,110 @@ export async function admitGate(input: unknown): Promise<AdmitVerdict> {
     decision: rec.decision,
   });
 }
+
+/**
+ * The stage 6 documents a `stage.draft` round may name. Fixed by the ledger's
+ * own shape of stage 6, not by anything a project configures, so it needs no
+ * deploy-time literal the way stage 5's audience roster does.
+ */
+const STAGE_6_DOCUMENTS = ["requirements", "plan"] as const;
+
+export type AdmitDraftVerdict =
+  | { readonly draft: true }
+  | { readonly draft: false; readonly refused: false }
+  | { readonly draft: false; readonly refused: true; readonly code: "forbidden"; readonly message: string };
+
+function asStringArray(value: unknown): readonly string[] | undefined {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : undefined;
+}
+
+/**
+ * Admits a stage's round intent, ahead of the specialist steps that would
+ * otherwise run on it. Pure, like `admit`: stage 5's audience names and
+ * stage 6's document names are the only things a round's own intent can get
+ * wrong (everything else — the run, the stage, the authority to signal it at
+ * all — the ledger transition and the hub's own grant already cover). A
+ * refusal here is not a way the loop stops: `stage.draft` is still what
+ * arrived, so the revise loop is still `stillOpen` and simply waits for the
+ * next, corrected, round instead of running a specialist on this one.
+ */
+export function admitDraft(input: {
+  readonly stage: Stage;
+  readonly draft?: unknown;
+  readonly audiences?: unknown;
+  readonly documents?: unknown;
+  /** Baked in at deploy time from the project's own policy — never the client's. */
+  readonly audienceNames?: readonly string[];
+}): AdmitDraftVerdict {
+  if (input.draft !== true) return { draft: false, refused: false };
+
+  if (input.stage === 5) {
+    const requested = asStringArray(input.audiences);
+    if (requested) {
+      const configured = input.audienceNames ?? [];
+      const unknown = requested.filter((name) => !configured.includes(name));
+      if (unknown.length > 0) {
+        return {
+          draft: false,
+          refused: true,
+          code: "forbidden",
+          message: `Stage 5 has no audience called ${unknown.map((name) => JSON.stringify(name)).join(", ")}.`,
+        };
+      }
+      if (configured.length === 0) {
+        return {
+          draft: false,
+          refused: true,
+          code: "forbidden",
+          message: "No audiences named yet at stage 5: the run is still gathering them.",
+        };
+      }
+    }
+  }
+
+  if (input.stage === 6) {
+    const requested = asStringArray(input.documents);
+    if (requested) {
+      const unknown = requested.filter((name) => !(STAGE_6_DOCUMENTS as readonly string[]).includes(name));
+      if (unknown.length > 0) {
+        return {
+          draft: false,
+          refused: true,
+          code: "forbidden",
+          message: `Stage 6 has no document called ${unknown.map((name) => JSON.stringify(name)).join(", ")}.`,
+        };
+      }
+      if (requested.length === 0) {
+        return {
+          draft: false,
+          refused: true,
+          code: "forbidden",
+          message: "Either name one of the stage 6 documents, or let the draft decide.",
+        };
+      }
+    }
+  }
+
+  return { draft: true };
+}
+
+/**
+ * The `interchange.actions` export the round's admit step names. Input is
+ * the round signal's own output merged with the gate's literal (`stage`, the
+ * deploy-time `audienceNames`) — see `lifecycle-source.ts`'s `iteration`.
+ */
+export async function admitDraftGate(input: unknown): Promise<AdmitDraftVerdict> {
+  const rec = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  const stage = asStage(rec.stage);
+  if (stage === null) {
+    return { draft: false, refused: true, code: "forbidden", message: "The round did not say which stage it stands at." };
+  }
+  const audienceNames = asStringArray(rec.audienceNames);
+  return admitDraft({
+    stage,
+    draft: rec.draft,
+    audiences: rec.audiences,
+    documents: rec.documents,
+    ...(audienceNames ? { audienceNames } : {}),
+  });
+}
