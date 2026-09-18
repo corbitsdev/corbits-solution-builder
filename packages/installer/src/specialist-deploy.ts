@@ -175,7 +175,7 @@ export async function ensureSpecialistDeployment(
 
   const offeringIds = offerings.map((offering) => offering.id);
   const deployment = await workflows.deploy({
-    source: { kind: "asset", assetId, package: { format: "source", commitSha } },
+    source: { kind: "asset", assetId, package: { format: "source", commitSha, packageName: assetName } },
     entry: `./${SPECIALIST_ENTRY_PATH}`,
     sourceOfferingIds: offeringIds,
     defaultSourceOfferingId: offeringIds[0]!,
