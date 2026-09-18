@@ -26,6 +26,7 @@ import {
 } from "@solutions-builder/installer";
 import { openCreatedProject } from "./create-project-open.ts";
 import { createHubTransport } from "./hub.ts";
+import { designerSettings as loadDesignerSettings, saveDesignerSettings, type DesignerSettings } from "./designer-settings.ts";
 import {
   API_KEY_CONNECT_OPTIONS,
   OAUTH_CONNECT_OPTIONS,
@@ -36,6 +37,8 @@ import {
   reorderProviders,
   selectProviderModel,
 } from "./provider-catalog.ts";
+
+export type { DesignerSettings } from "./designer-settings.ts";
 
 export { createHubTransport } from "./hub.ts";
 
@@ -740,6 +743,11 @@ export const api = {
     request<{ key: string }>(`/preferences/${key}`, {
       method: "PUT",
       body: JSON.stringify(value),
+    }),
+  designerSettings: () => loadDesignerSettings(createHubTransport()),
+  saveDesignerSetting: <K extends keyof DesignerSettings>(key: K, value: DesignerSettings[K]) =>
+    saveDesignerSettings(createHubTransport(), { [key]: value } as Partial<DesignerSettings>).catch((cause) => {
+      installerFailure(cause);
     }),
   guidance: (projectId: string) =>
     request<{ guidance: Guidance }>(`/projects/${projectId}/guidance`),

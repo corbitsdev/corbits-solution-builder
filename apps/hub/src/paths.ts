@@ -47,11 +47,6 @@ export function deckSettingsFile(): string {
   return join(dataDirectory(), "decks.json");
 }
 
-/** The designer's settings: surface, design language, token limit, policy. */
-export function designerSettingsFile(): string {
-  return join(dataDirectory(), "designer.json");
-}
-
 /** Which coding agent stage 8 runs, and where its executable is. */
 export function buildWorkerSettingsFile(): string {
   return join(dataDirectory(), "build-worker.json");

@@ -3,17 +3,18 @@
  * how many output tokens a design may use, and what happens when one uses
  * them all.
  *
- * A file beside the start-at-login marker rather than rows: these are one
- * person's preferences for one workspace, read once per draft, and the
- * builder schema deliberately carries no preference table any more. The
- * client reads and writes them through the host's preferences API under
- * `designer.*` keys; only the host touches the file.
+ * One person's preferences for one workspace tenant, held as a hub asset
+ * (kind `DESIGNER_SETTINGS_ASSET_KIND`, a single JSON file) rather than a
+ * builder-schema table or a host file. The client writes it through
+ * `@solutions-builder/installer`; the stage-4 workflow step reads it off the
+ * tenant. This module is the shared shape and validation both sides use, and
+ * the prompt text a stage-4 draft carries.
  */
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
 import { type } from "arktype";
-import { HostError } from "./errors.js";
-import { designerSettingsFile } from "./paths.js";
+
+export const DESIGNER_SETTINGS_ASSET_KIND = "designer-settings";
+export const DESIGNER_SETTINGS_ASSET_NAME = "designer-settings";
+export const DESIGNER_SETTINGS_PATH = "settings.json";
 
 export const DESIGNER_TOKENS_MIN = 1_000;
 export const DESIGNER_TOKENS_MAX = 64_000;
@@ -47,35 +48,21 @@ export const DEFAULT_DESIGNER_SETTINGS: DesignerSettings = {
   onLimit: "tell",
 };
 
-/** The settings as saved, with defaults for anything missing or unreadable. */
-export async function designerSettings(): Promise<DesignerSettings> {
-  try {
-    const raw = JSON.parse(await readFile(designerSettingsFile(), "utf8")) as unknown;
-    const parsed = Settings({ ...DEFAULT_DESIGNER_SETTINGS, ...(raw as object) });
-    return parsed instanceof type.errors ? DEFAULT_DESIGNER_SETTINGS : parsed;
-  } catch {
-    return DEFAULT_DESIGNER_SETTINGS;
-  }
+/** Defaults filled in over whatever was read back, valid or not; never throws. */
+export function parseDesignerSettings(raw: unknown): DesignerSettings {
+  const parsed = Settings({ ...DEFAULT_DESIGNER_SETTINGS, ...(typeof raw === "object" && raw !== null ? raw : {}) });
+  return parsed instanceof type.errors ? DEFAULT_DESIGNER_SETTINGS : parsed;
 }
 
-/** Saves are one after another: two in flight at once would each write the other's change away. */
-let writing: Promise<unknown> = Promise.resolve();
-
-/** Saves a change to one or more settings, refusing a value the type rejects. */
-export function saveDesignerSettings(patch: Partial<DesignerSettings>): Promise<DesignerSettings> {
-  const turn = writing.then(() => writeDesignerSettings(patch));
-  writing = turn.catch(() => undefined);
-  return turn;
-}
-
-async function writeDesignerSettings(patch: Partial<DesignerSettings>): Promise<DesignerSettings> {
-  const next = Settings({ ...(await designerSettings()), ...patch });
+/** The result of merging a patch onto a base, refusing a value the type rejects. */
+export function mergeDesignerSettings(
+  base: DesignerSettings,
+  patch: Partial<DesignerSettings>,
+): DesignerSettings {
+  const next = Settings({ ...base, ...patch });
   if (next instanceof type.errors) {
-    throw new HostError("validation_failed", `Designer settings: ${next.summary}`);
+    throw new Error(`Designer settings: ${next.summary}`);
   }
-  const file = designerSettingsFile();
-  await mkdir(dirname(file), { recursive: true });
-  await writeFile(file, `${JSON.stringify(next, null, 2)}\n`);
   return next;
 }
 
@@ -99,7 +86,6 @@ export function designerGuidance(settings: DesignerSettings): string {
   ].join("\n\n");
 }
 
-/** Added to a retry after a design was cut short, under the `reduce` policy. */
 /**
  * What a person is told when the retry the policy asked for was cut short as
  * well. Said in full: the policy fired, both attempts ran, both failed, and how

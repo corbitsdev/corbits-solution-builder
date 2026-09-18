@@ -25,7 +25,24 @@ import { asc, eq, isNull, and } from "drizzle-orm";
 import { database } from "./db.js";
 import * as table from "./schema.js";
 import { readArtifactNode } from "./projects.js";
-import { designerSettings } from "./designer-settings.js";
+import { assets, readWorkflowSourceBlob } from "./hub-client.js";
+import {
+  DEFAULT_DESIGNER_SETTINGS,
+  DESIGNER_SETTINGS_ASSET_KIND,
+  DESIGNER_SETTINGS_ASSET_NAME,
+  DESIGNER_SETTINGS_PATH,
+  parseDesignerSettings,
+} from "@solutions-builder/app/designer-settings";
+
+/** The designer's settings as the client saved them on the tenant, defaulted when absent. */
+async function designerSettings() {
+  const found = (await assets.list(DESIGNER_SETTINGS_ASSET_KIND)).find(
+    (asset) => asset.name === DESIGNER_SETTINGS_ASSET_NAME,
+  );
+  if (!found) return DEFAULT_DESIGNER_SETTINGS;
+  const raw = await readWorkflowSourceBlob(found.id, DESIGNER_SETTINGS_PATH);
+  return raw === null ? DEFAULT_DESIGNER_SETTINGS : parseDesignerSettings(JSON.parse(raw));
+}
 
 /** A stage 6 documents-list entry: the plan it attaches and the labels it files under. */
 export interface PlanDocument {

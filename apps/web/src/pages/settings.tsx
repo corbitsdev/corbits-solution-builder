@@ -14,7 +14,7 @@
  */
 import { Input, Switch, Textarea } from "@corbits/react-ui";
 import { useEffect, useState } from "react";
-import { api, ApiFailure, type HostStatus, type Provider } from "../client.js";
+import { api, ApiFailure, type DesignerSettings, type HostStatus, type Provider } from "../client.js";
 import { Banner, Button, StateLabel } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
 import { ProviderList, type ApiKeyProvider, type OAuthCandidate } from "./providers.jsx";
@@ -115,14 +115,6 @@ function Inference({
 
 /* ----------------------------------------------------------------- designer */
 
-type DesignerSurface = "light" | "dark" | "brief";
-type DesignerOnLimit = "tell" | "raise" | "reduce";
-type DesignerSettings = {
-  surface: DesignerSurface;
-  language: string;
-  maxTokens: number;
-  onLimit: DesignerOnLimit;
-};
 const TOKENS_MIN = 1000;
 const TOKENS_MAX = 64000;
 /** What the host uses when nothing is saved; kept in step with the host's own default. */
@@ -142,15 +134,9 @@ function Designer() {
   useEffect(() => {
     let cancelled = false;
     void api
-      .preferences()
-      .then(({ preferences }) => {
+      .designerSettings()
+      .then((loaded) => {
         if (cancelled) return;
-        const loaded: DesignerSettings = {
-          surface: (preferences["designer.surface"] as DesignerSurface | undefined) ?? "light",
-          language: String(preferences["designer.language"] ?? ""),
-          maxTokens: Number(preferences["designer.maxTokens"] ?? TOKENS_DEFAULT),
-          onLimit: (preferences["designer.onLimit"] as DesignerOnLimit | undefined) ?? "tell",
-        };
         setSettings(loaded);
         setLanguage(loaded.language);
         setTokens(String(loaded.maxTokens));
@@ -169,7 +155,7 @@ function Designer() {
     const before = settings;
     setSettings({ ...settings, [key]: value });
     try {
-      await api.setPreference(`designer.${key}`, value);
+      await api.saveDesignerSetting(key, value);
     } catch (cause) {
       setSettings(before);
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
@@ -199,7 +185,7 @@ function Designer() {
           aria-label="Surface"
           value={settings?.surface ?? "light"}
           disabled={!settings}
-          onChange={(event) => void save("surface", event.target.value as DesignerSurface)}
+          onChange={(event) => void save("surface", event.target.value as DesignerSettings["surface"])}
         >
           <option value="light">Light</option>
           <option value="dark">Dark</option>
@@ -256,7 +242,7 @@ function Designer() {
           aria-label="If a design exceeds the limit"
           value={settings?.onLimit ?? "tell"}
           disabled={!settings}
-          onChange={(event) => void save("onLimit", event.target.value as DesignerOnLimit)}
+          onChange={(event) => void save("onLimit", event.target.value as DesignerSettings["onLimit"])}
         >
           <option value="tell">Tell me and do nothing else</option>
           <option value="raise">Raise the limit and try again</option>
