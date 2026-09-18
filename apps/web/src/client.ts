@@ -26,6 +26,7 @@ import {
 } from "@solutions-builder/installer";
 import { openCreatedProject } from "./create-project-open.ts";
 import { createHubTransport } from "./hub.ts";
+import { listProjectSummaries } from "./project-list.ts";
 import { designerSettings as loadDesignerSettings, saveDesignerSettings, type DesignerSettings } from "./designer-settings.ts";
 import {
   API_KEY_CONNECT_OPTIONS,
@@ -584,7 +585,14 @@ export const api = {
     }
   },
   decisions: () => request<{ decisions: Wait[] }>("/decisions"),
-  projects: () => request<{ projects: ProjectSummary[] }>("/projects"),
+  /** Project tenants under the workspace, read straight off the hub -- see `./project-list.ts`. */
+  projects: async () => {
+    try {
+      return { projects: await listProjectSummaries(createHubTransport()) };
+    } catch (cause) {
+      installerFailure(cause);
+    }
+  },
   createProject: async (payload: {
     title?: string;
     problemStatement?: string;
