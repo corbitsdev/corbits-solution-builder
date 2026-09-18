@@ -114,7 +114,34 @@ export function StageWorkspace({
       contentHash: entry.contentHash,
     }));
   const latest = stageNodes.find((node) => node.supersededByNodeId === null) ?? stageNodes.at(-1) ?? null;
-  const active = stageNodes.find((node) => node.id === selectedNode) ?? latest;
+  const hasArtifact = stageNodes.length > 0;
+
+  // Under the mail-chat contract nothing workflow-side writes a stage
+  // artifact until approval (CL-8599): the specialist's reply in the thread
+  // *is* the draft. A version only exists once someone has approved it, so
+  // gating the document/gate/approve controls on `stageNodes` left every
+  // unapproved stage with nothing to show. The latest specialist turn stands
+  // in for a version here; real artifact nodes (approved stages) still win
+  // when they exist.
+  const latestReply = turns.filter((turn) => turn.role === "specialist").at(-1) ?? null;
+  const replyNode: ArtifactNode | null = latestReply
+    ? {
+        id: `reply:${latestReply.id}`,
+        kind: "specialist_reply",
+        variant: null,
+        stage,
+        title: stageName(stage),
+        version: (latest?.version ?? 0) + 1,
+        artifactId: `reply:${latestReply.id}`,
+        contentHash: "",
+        sizeBytes: latestReply.body.length,
+        mediaType: "text/markdown",
+        createdAt: latestReply.createdAt,
+        supersededByNodeId: null,
+        provenance: { producer: "specialist" },
+      }
+    : null;
+  const active = stageNodes.find((node) => node.id === selectedNode) ?? latest ?? replyNode;
 
   // The document follows the conversation: each answer writes a new version,
   // and a reader who has not gone back to an older one sees it land. Someone
@@ -132,6 +159,12 @@ export function StageWorkspace({
       setContent("");
       return;
     }
+    // No persisted version exists yet: the document is the specialist's
+    // latest reply text itself, not something to fetch by artifact id.
+    if (active === replyNode) {
+      setContent(latestReply?.body ?? "");
+      return;
+    }
     let cancelled = false;
     void api
       .artifactContent(tenantId, active.id)
@@ -144,7 +177,7 @@ export function StageWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [active?.id, tenantId]);
+  }, [active?.id, tenantId, replyNode, latestReply?.body]);
 
   /**
    * Reads the stage's conversation.
@@ -264,7 +297,9 @@ export function StageWorkspace({
   const startedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!inProgress || stage > 7) return;
-    if (stageNodes.length > 0) return;
+    // A specialist reply already stands in for this stage's draft; nothing
+    // workflow-side writes an artifact before approval any more.
+    if (hasArtifact || latestReply) return;
     // Stage 1 has nothing to read until the problem is described. Every later
     // stage has the approved work, so it starts on its own.
     if (stage === 1 && said.length === 0) return;
@@ -279,12 +314,12 @@ export function StageWorkspace({
         inference: { maxTokens: DRAFT_MAX_TOKENS_DEFAULT },
       }),
     );
-  }, [detail.project.id, stage, inProgress, stageNodes.length, said.length]);
+  }, [detail.project.id, stage, inProgress, hasArtifact, latestReply, said.length]);
 
   // One view at a time, and a new one settles in rather than snapping: the
   // stage advancing is the biggest moment in the app and a hard cut reads as
   // a glitch. Keyed so React mounts fresh when the stage or its phase changes.
-  const phase = stageNodes.length === 0 ? "preparing" : awaitingReview ? "waiting" : "drafting";
+  const phase = !hasArtifact && !latestReply ? "preparing" : awaitingReview ? "waiting" : "drafting";
   return (
     <div
       key={`${stage}:${phase}`}
@@ -342,7 +377,7 @@ export function StageWorkspace({
 
       {/* Stage 5 shows its own stakeholder rows, each with a way to write
           the package, so its preparing view is only for the round under way. */}
-      {stageNodes.length === 0 && inProgress && stage <= 7 && (stage !== 5 || busy === "draft") ? (
+      {!hasArtifact && !latestReply && inProgress && stage <= 7 && (stage !== 5 || busy === "draft") ? (
         stage === 1 && said.length === 0 ? (
           <Screen title={`Stage 1 of 9 · ${stageName(1)}`} description={STAGE_GOAL[1]} tight>
             <div className="screen-body">
