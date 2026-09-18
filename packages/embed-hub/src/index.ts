@@ -21,7 +21,9 @@ import {
   createPrincipalStore,
   createSidecarAllocationStore,
   createWorkflowRunDispatchStore,
+  resolveFrameSenderKey,
   resolveInferenceMaterials,
+  resolveSenderKey as resolveSenderKeyStrict,
 } from "@intx/db";
 import { createEnvKeyCredentialCipher } from "@intx/crypto";
 import { hexDecode, hexEncode } from "@intx/types";
@@ -254,6 +256,15 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
       principalKeyStore,
       grantStore: createGrantStore(db.db),
     }),
+    // A provisioned deployment's mail dispatch co-delivers the sender's key
+    // on the run.grants barrier (`sendWorkflowRunDispatchToAllocation`) so the
+    // sidecar's admission policy can verify the signed trigger mail instead of
+    // resolving the sender to "unknown" and rejecting it. Without these, every
+    // dispatched trigger/signal mail is rejected forever and the run never
+    // leaves "pending".
+    resolveSenderKey: (address: string) => resolveFrameSenderKey(db.db, principalKeyStore, address),
+    resolveSenderKeyStrict: async (address: string) =>
+      (await resolveSenderKeyStrict(db.db, principalKeyStore, address))?.publicKey ?? null,
   };
 
   const sidecarCredentials = createSidecarCredentialResolver({ db: db.db });
@@ -343,8 +354,8 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
     plugins: sidecarPlugins,
     router: sidecarRouter,
     hubWebSocketUrl: options.hubWebSocketUrl,
-    onReady: async (allocation: { anchorRunId: string }) => {
-      await workflowAllocationService.deployReadyAllocation(allocation);
+    onReady: async (allocation: { anchorRunId: string }, reconciliation: { signal: AbortSignal }) => {
+      await workflowAllocationService.deployReadyAllocation(allocation, reconciliation);
       await workflowDispatchService.requeueForReadyAllocation(allocation.anchorRunId);
     },
   });

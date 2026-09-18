@@ -28,7 +28,7 @@ import fs from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ApiError, type Transport } from "@intx/hub-client";
+import { ApiError, triggerWorkflowRun, type Transport } from "@intx/hub-client";
 import {
   createProject as installerCreateProject,
   ensureLifecycleDeployment,
@@ -405,6 +405,17 @@ async function main(): Promise<void> {
       return deployed;
     });
 
+    // (4b) Fire the deployment's top-level run once, the way `apps/web/src/client.ts`'s
+    // `createProject` does immediately after `ensureLifecycleDeployment` -- the host no
+    // longer launches the lifecycle, so nothing else starts this run.
+    await step("4b. trigger the deployment's top-level run", async () => {
+      if (!workspace || !deployment || !("deploymentId" in deployment)) throw new Error("no deployment to trigger");
+      await triggerWorkflowRun(transport, workspace.tenantId, deployment.deploymentId, {
+        content: JSON.stringify({ projectId: project!.id, problemStatement: "Build a small internal tool that tracks team OKRs." }),
+      });
+      check("4b. trigger the deployment's top-level run", true);
+    });
+
     // (5) List projects via apps/web/src/project-list.ts's helper.
     await step("5. list projects via project-list.ts's listProjectSummaries", async () => {
       const summaries = await listProjectSummaries(transport);
@@ -419,30 +430,44 @@ async function main(): Promise<void> {
     // (6) Deliver stage.draft, then the gate approve, folding the run between.
     const anchorRunId = deployment && "deploymentId" in deployment ? deployment.deploymentId : null;
     await step("6. deliver stage.draft over the run-signal pattern", async () => {
-      if (!project || !anchorRunId) throw new Error("no project/anchor run to signal");
-      await deliverDraft(
-        { tenantId: project.id, anchorRunId },
-        1,
-        {
-          command: "stage.draft",
-          runId: anchorRunId,
-          message: "Build a small internal tool that tracks team OKRs.",
-          mode: "final",
-          draft: true,
-          inference: { maxTokens: 32_000 },
-        },
-        transport,
-      );
+      if (!project || !anchorRunId || !workspace) throw new Error("no project/anchor run to signal");
+      // The trigger fired in (4b) starts the run asynchronously (mail
+      // dispatch -> sidecar admission -> RunStarted); give it a few retries
+      // to leave "pending" before failing the signal as undeliverable, the
+      // same tolerance a human driving the browser gets for free.
+      const deadline = Date.now() + 30_000;
+      for (;;) {
+        try {
+          await deliverDraft(
+            { tenantId: workspace.tenantId, anchorRunId },
+            1,
+            {
+              command: "stage.draft",
+              runId: anchorRunId,
+              message: "Build a small internal tool that tracks team OKRs.",
+              mode: "final",
+              draft: true,
+              inference: { maxTokens: 32_000 },
+            },
+            transport,
+          );
+          break;
+        } catch (cause) {
+          const notRunningYet = cause instanceof ApiError && cause.code === "workflow_run_not_running";
+          if (!notRunningYet || Date.now() >= deadline) throw cause;
+          await new Promise((resolve) => setTimeout(resolve, 2_000));
+        }
+      }
       check("6. deliver stage.draft over the run-signal pattern", true);
     });
 
     const partedAtGate = await step("6. fold the run until it parks at stage 1's gate", async () => {
-      if (!project || !anchorRunId) throw new Error("no project/anchor run to fold");
+      if (!project || !anchorRunId || !workspace) throw new Error("no project/anchor run to fold");
       const deadline = Date.now() + 120_000;
-      let status = await foldProject(project.id, anchorRunId, transport);
+      let status = await foldProject(workspace.tenantId, anchorRunId, transport);
       while (Date.now() < deadline && !(status?.parked && status.stage === 1)) {
         await new Promise((resolve) => setTimeout(resolve, 2_000));
-        status = await foldProject(project.id, anchorRunId, transport);
+        status = await foldProject(workspace.tenantId, anchorRunId, transport);
       }
       const ok = status?.parked === true && status.stage === 1;
       check(
@@ -455,9 +480,9 @@ async function main(): Promise<void> {
     });
 
     await step("6. deliver the gate approve signal", async () => {
-      if (!project || !anchorRunId) throw new Error("no project/anchor run to signal");
+      if (!project || !anchorRunId || !workspace) throw new Error("no project/anchor run to signal");
       await deliverGate(
-        { tenantId: project.id, anchorRunId },
+        { tenantId: workspace.tenantId, anchorRunId },
         1,
         partedAtGate,
         { command: "stage.approve", runId: anchorRunId },
@@ -467,13 +492,13 @@ async function main(): Promise<void> {
     });
 
     await step("6. fold the run past the approved gate", async () => {
-      if (!project || !anchorRunId) throw new Error("no project/anchor run to fold");
+      if (!project || !anchorRunId || !workspace) throw new Error("no project/anchor run to fold");
       const deadline = Date.now() + 60_000;
-      let status = await foldProject(project.id, anchorRunId, transport);
+      let status = await foldProject(workspace.tenantId, anchorRunId, transport);
       const before = partedAtGate?.stage;
       while (Date.now() < deadline && status !== null && status.stage === before && status.parked) {
         await new Promise((resolve) => setTimeout(resolve, 2_000));
-        status = await foldProject(project.id, anchorRunId, transport);
+        status = await foldProject(workspace.tenantId, anchorRunId, transport);
       }
       check(
         "6. fold the run past the approved gate",

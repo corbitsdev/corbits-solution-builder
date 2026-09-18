@@ -37,6 +37,27 @@ declare module "@intx/db" {
   };
   export function createSidecarAllocationStore(db: unknown): unknown;
   export function createWorkflowRunDispatchStore(db: unknown): unknown;
+
+  /**
+   * Best-effort resolution of a signed mail sender's durable public key
+   * (hex-encoded), for co-delivery on the run.grants barrier. Never throws;
+   * a `null` means the sender has no resolvable key or resolution degraded.
+   */
+  export function resolveFrameSenderKey(
+    db: unknown,
+    principalKeyStore: unknown,
+    address: string,
+  ): Promise<string | null>;
+  /**
+   * Strict sibling of `resolveFrameSenderKey`: throws on a genuine fault
+   * (an ambiguous user address, a keyless principal) instead of degrading to
+   * `null`. Used for the reconnect reconciliation's strict resolver.
+   */
+  export function resolveSenderKey(
+    db: unknown,
+    principalKeyStore: unknown,
+    address: string,
+  ): Promise<{ source: "run" | "user"; publicKey: string } | null>;
   export function createPrincipalStore(
     db: unknown,
     keyStore: unknown,
@@ -583,6 +604,7 @@ declare module "@intx/hub-sessions" {
   export function createHubSessionLookups(opts: Record<string, unknown>): Record<string, unknown>;
   export function createHubSessionOrchestrator(opts: Record<string, unknown>): unknown;
   export function createSessionService(opts: Record<string, unknown>): unknown;
+  export type SidecarReconciliationContext = { signal: AbortSignal };
   export function createSidecarAllocationReconciler(opts: Record<string, unknown>): {
     initialize: () => Promise<void>;
     reconcileUntilIdle: () => Promise<void>;
@@ -604,7 +626,10 @@ declare module "@intx/hub-sessions" {
   export function createWorkflowAllocationService(opts: Record<string, unknown>): {
     initialize?: () => Promise<void>;
     reconcileReleasingProbes?: () => Promise<void>;
-    deployReadyAllocation: (allocation: unknown) => Promise<void>;
+    // The reconciler always calls `onReady` with the allocation row and its
+    // reconciliation context; `deployReadyAllocation` reads `reconciliation.signal`
+    // on entry, so both arguments are required, not just the allocation.
+    deployReadyAllocation: (allocation: unknown, reconciliation: SidecarReconciliationContext) => Promise<void>;
   };
   export function createWorkflowDispatchService(opts: Record<string, unknown>): {
     reconcileUntilIdle: () => Promise<void>;
