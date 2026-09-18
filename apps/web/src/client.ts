@@ -318,8 +318,6 @@ export type ProjectDetail = {
   carriedTurns: { stage: number; turn: StageTurn }[];
 };
 
-};
-
 /** Orientation from the Product guide, or the deterministic checklist. */
 export type Guidance = {
   summary: string;
