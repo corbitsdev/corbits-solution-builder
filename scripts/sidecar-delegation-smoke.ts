@@ -23,10 +23,10 @@ const { hub, hubWebSocket, mountHub, setHostPort } = await import("../apps/hub/s
 const { install } = await import("./host-install.js");
 const { createProjectRecord } = await import("../apps/hub/src/project-records.js");
 const { liveDelegationStore, delegateAtCreation, delegateMore, revokeAllDelegations } = await import(
-  "../apps/hub/src/project-delegation.js"
+  "@solutions-builder/installer"
 );
 const { connectProvider } = await import("./lib/dev-provider.js");
-const { catalog, myPrincipalIn } = await import("../apps/hub/src/hub-client.js");
+const { catalog, myPrincipalIn, hubTransport, tenantId } = await import("../apps/hub/src/hub-client.js");
 const { resolveSourcesByOfferingIds } = await import("@intx/db");
 
 const checks: { name: string; ok: boolean }[] = [];
@@ -93,7 +93,7 @@ try {
   );
 
   if (offeringIds.length > 0 && credentialId !== undefined) {
-    const store = liveDelegationStore();
+    const store = liveDelegationStore(hubTransport(), tenantId());
     const sealed = await createProjectRecord({
       title: "Smoke: sealed workbench",
       policy: {

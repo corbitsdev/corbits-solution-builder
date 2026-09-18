@@ -623,11 +623,16 @@ export const api = {
   /** Brings an exported project in as a new project here. */
   importProject: (bundle: unknown) =>
     post<{ projectId: string; nodes: number; commands: number }>("/projects/import", bundle),
-  /** The stakeholders stage 5 writes for, and the roles one may hold. */
+  /** The stakeholders stage 5 writes for, and the roles one may hold — read off the hub tenant directly. */
   stakeholders: (projectId: string) =>
-    request<{ audiences: { name: string; role: string }[]; audienceQuorum: number; roles: string[] }>(
-      `/projects/${projectId}/stakeholders`,
-    ),
+    asWorkspaceOwner(async (transport) => {
+      const project = await installerRequireProject(transport, projectId);
+      return {
+        audiences: project.policy.audiences,
+        audienceQuorum: project.policy.audienceQuorum,
+        roles: [...STAKEHOLDER_ROLES],
+      };
+    }),
   setStakeholders: (projectId: string, payload: { audiences: { name: string; role: string }[]; audienceQuorum: number }) =>
     asWorkspaceOwner(async (transport) => {
       const current = await installerRequireProject(transport, projectId);

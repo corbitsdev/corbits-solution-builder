@@ -16,7 +16,6 @@ import { HostError, notFound } from "./errors.js";
 import { origin } from "@solutions-builder/app/guard";
 import { ARTIFACT_STAGE, type ArtifactDraft } from "./domain.js";
 import { packageOutlineProblem } from "@solutions-builder/app/deck";
-import type { ProjectPolicy } from "./command-dispatch.js";
 import { launchProjectRun, soloApprovalFor } from "./command-dispatch.js";
 import { ledgerCommands, recordCommand, projectApprovals, projectFlags, projectQuestions } from "./command-ledger.js";
 import type { Stage } from "@solutions-builder/app/ledger";
@@ -25,95 +24,7 @@ import { openDecisionFor } from "./decisions.js";
 import { currentAnchor, projectExecutionStatus } from "./lifecycle-run.js";
 import { activeRun, runsForProject } from "./runs.js";
 import { tenantId } from "./hub-client.js";
-import { installProjectAuthority } from "./project-authority.js";
-import {
-  createProjectRecord,
-  listProjectRecords,
-  requireProject,
-  updateProject,
-} from "./project-records.js";
-import {
-  delegateAtCreation,
-  liveDelegationStore,
-  resolveDelegationConsent,
-  revokeAllDelegations,
-  type DelegationRecord,
-  type DelegationStore,
-} from "./project-delegation.js";
-
-export async function createProject(
-  args: {
-    title: string;
-    policy: ProjectPolicy;
-    owner: { principalId: string; displayName: string };
-    problemStatement?: string;
-    delegatedCredentialIds?: string[];
-  },
-  deps: {
-    store?: DelegationStore;
-    createRecord?: (input: { title: string; policy: ProjectPolicy }) => Promise<{ id: string }>;
-    concealRecord?: (projectId: string) => Promise<void>;
-    open?: (args: {
-      projectId: string;
-      owner: { principalId: string; displayName: string };
-      problemStatement?: string;
-    }) => Promise<{ projectId: string; runId: string }>;
-  } = {},
-): Promise<{ projectId: string; runId: string; delegations: DelegationRecord }> {
-  // The precondition the row names: "valid initial policy and workspace scope".
-  if (args.title.trim().length === 0) {
-    throw new HostError("validation_failed", "A project needs a title.");
-  }
-  if (args.policy.audienceQuorum < 0) {
-    throw new HostError("validation_failed", "An audience quorum cannot be negative.");
-  }
-
-  // Refused consent fails before any tenant exists: no half-created project.
-  // The settled consent travels into the delegation step, so the catalog is
-  // fetched and validated once — never re-read mid-creation.
-  const store = deps.store ?? liveDelegationStore();
-  const consent = resolveDelegationConsent(
-    args.delegatedCredentialIds,
-    await store.listDelegatableCredentials(),
-  );
-
-  // The project is a tenant under the workspace; the hub makes the owner its
-  // first principal and `createProjectRecord` gives that principal every
-  // human authority as a role there.
-  const createRecord = deps.createRecord ?? createProjectRecord;
-  const project = await createRecord({ title: args.title, policy: args.policy });
-  if (deps.createRecord === undefined) {
-    await installProjectAuthority(project.id, args.policy);
-  }
-  const concealRecord =
-    deps.concealRecord ??
-    (async (projectId: string) => {
-      await updateProject(projectId, { deletedAt: new Date() });
-    });
-  const open = deps.open ?? openProject;
-  try {
-    const delegations = await delegateAtCreation(store, { projectId: project.id, consent });
-    const opened = await open({
-      projectId: project.id,
-      owner: args.owner,
-      ...(args.problemStatement !== undefined ? { problemStatement: args.problemStatement } : {}),
-    });
-    return { ...opened, delegations };
-  } catch (cause) {
-    // The tenant exists but the project never opened: pull it back off the
-    // listing (and drop whatever the delegation minted) so a failed creation
-    // — mint or POST /projects/:id/open — leaves no orphan behind.
-    await revokeAllDelegations(store, project.id).catch((revokeCause: unknown) => {
-      console.error("[projects] a failed creation kept its delegation grants:", revokeCause);
-    });
-    try {
-      await concealRecord(project.id);
-    } catch (concealCause) {
-      console.error("[projects] a failed creation left its project behind:", concealCause);
-    }
-    throw cause;
-  }
-}
+import { listProjectRecords, requireProject, updateProject } from "./project-records.js";
 
 /**
  * The ledger half of opening a project: `project.create` and the first run.
@@ -305,50 +216,6 @@ export async function writeArtifact(
  */
 export async function renameProject(projectId: string, title: string): Promise<void> {
   await updateProject(projectId, { title });
-}
-
-/** Archived projects stay listed, folded away; nothing about them is lost. */
-export async function archiveProject(projectId: string, archived: boolean): Promise<void> {
-  await updateProject(projectId, { archivedAt: archived ? new Date() : null });
-}
-
-/**
- * A soft delete: the row is hidden from every listing, and its artifacts and
- * approvals stay on disk. Dropping someone's work is not a thing a UI button
- * should be able to do irreversibly.
- */
-export async function deleteProject(
-  projectId: string,
-  deps: {
-    store?: DelegationStore;
-    markDeleted?: (projectId: string) => Promise<void>;
-  } = {},
-): Promise<void> {
-  // Revocation runs before the delete mark, and its failure stops the delete:
-  // a marked project 404s every route, so swallowing this would strand the
-  // surviving grants where no retry could reach them. The project stays live
-  // and the delete (or the revocation route) can be retried.
-  await revokeAllDelegations(deps.store ?? liveDelegationStore(), projectId);
-  const markDeleted =
-    deps.markDeleted ??
-    (async (id: string) => {
-      await updateProject(id, { deletedAt: new Date() });
-    });
-  await markDeleted(projectId);
-}
-
-/**
- * Revokes a deleted project's surviving delegation grants. The delete mark
- * hides the project from every listing, but the tenant — its consent record
- * and its grants — is still there, so revocation never needed the project
- * to be live. This is the way out for a delete that predates the
- * revoke-before-delete ordering above.
- */
-export async function revokeProjectDelegations(
-  projectId: string,
-  store: DelegationStore = liveDelegationStore(),
-): Promise<string[]> {
-  return revokeAllDelegations(store, projectId);
 }
 
 /** One artifact node as carried between instances: the row, and the bytes the store holds for it. */

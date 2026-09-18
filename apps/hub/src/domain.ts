@@ -55,12 +55,6 @@ export const ProjectOpenPayload = type({
 });
 export type ProjectOpenPayload = typeof ProjectOpenPayload.infer;
 
-/** Adds credentials to a workbench's consented set after creation. */
-export const DelegationUpdatePayload = type({
-  credentialIds: type("string > 0").array(),
-});
-export type DelegationUpdatePayload = typeof DelegationUpdatePayload.infer;
-
 export const BuildFreezePayload = type({
   runId: id,
   /** Every input the packet freezes, by exact version. */

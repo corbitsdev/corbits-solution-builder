@@ -1,5 +1,5 @@
 import type { Hono } from "hono";
-import { DelegationUpdatePayload, ProjectOpenPayload } from "./domain.js";
+import { ProjectOpenPayload } from "./domain.js";
 import { HostError } from "./errors.js";
 import { openDecisions } from "./decisions.js";
 import {
@@ -9,7 +9,6 @@ import {
   projectDetail,
   readArtifactNode,
   renameProject,
-  revokeProjectDelegations,
 } from "./projects.js";
 import {
   designHistory,
@@ -39,9 +38,7 @@ import {
 import { bytesOf } from "./source-material.js";
 import { deckBytesOf, deckForPackage } from "./deck.js";
 import { readProject } from "./project-records.js";
-import { delegateMore, delegationAudit, liveDelegationStore } from "./project-delegation.js";
 import { attachMaterial, MATERIAL_KIND, materialText, type IncomingFile } from "./source-material.js";
-import { STAKEHOLDER_ROLES } from "./stakeholders.js";
 /** A title as a file-name segment: lower case, hyphens, nothing a shell minds. */
 function slugOf(title: string): string {
   return (
@@ -376,44 +373,4 @@ export function registerProjectRoutes(api: Hono) {
     });
   });
 
-  /** The people stage 5 writes for and who each decide; the roles they may hold ride along for the editor. */
-  api.get("/projects/:projectId/stakeholders", async (context) => {
-    const detail = await projectDetail(context.req.param("projectId"), localActor().principalId);
-    const policy = detail.project.policy as { audiences: { name: string; role: string }[]; audienceQuorum: number };
-    return context.json({ audiences: policy.audiences, audienceQuorum: policy.audienceQuorum, roles: STAKEHOLDER_ROLES });
-  });
-
-  /**
-   * The delegation audit: what the owner consented to at creation, and the
-   * live `use` grants in this tenant that carry it. Consent after creation
-   * and revocation per workbench live here too.
-   */
-  api.get("/projects/:projectId/delegations", async (context) => {
-    const projectId = context.req.param("projectId");
-    await projectDetail(projectId, localActor().principalId);
-    return context.json(await delegationAudit(liveDelegationStore(), projectId));
-  });
-
-  api.post("/projects/:projectId/delegations", async (context) => {
-    const projectId = context.req.param("projectId");
-    await projectDetail(projectId, localActor().principalId);
-    const payload = parsed(DelegationUpdatePayload(await context.req.json()));
-    return context.json(
-      await delegateMore(liveDelegationStore(), { projectId, delegatedCredentialIds: payload.credentialIds }),
-      201,
-    );
-  });
-
-  api.delete("/projects/:projectId/delegations", async (context) => {
-    const projectId = context.req.param("projectId");
-    try {
-      await projectDetail(projectId, localActor().principalId);
-    } catch (cause) {
-      // A deleted project 404s its detail, but its tenant — and any surviving
-      // delegation grants — are still there. Revocation stays reachable so a
-      // stranded delete can be cleaned up; anything but not-found still throws.
-      if (!(cause instanceof HostError) || cause.code !== "not_found") throw cause;
-    }
-    return context.json({ revoked: await revokeProjectDelegations(projectId) });
-  });
 }

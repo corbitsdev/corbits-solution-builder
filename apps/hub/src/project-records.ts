@@ -37,7 +37,8 @@ export type ProjectRecord = {
   createdAt: Date;
 };
 
-export type DelegationRecord = {
+/** What the client's own delegation writes (over the installer) store here; the host only preserves it on rewrite. */
+type DelegationRecord = {
   mode: "chosen" | "default";
   credentialIds: string[];
   principalId: string;
@@ -118,24 +119,6 @@ export async function requireProject(projectId: string): Promise<ProjectRecord> 
   const record = await readProject(projectId);
   if (!record) throw notFound("That project");
   return record;
-}
-
-/** The recorded consent on a project, or null when nothing was ever consented. */
-export async function readDelegationRecord(projectId: string): Promise<DelegationRecord | null> {
-  const tenant = await getTenant(projectId);
-  if (!tenant) throw notFound("That project");
-  return (tenant.config?.[CONFIG_KEY] as StoredProject | undefined)?.delegation ?? null;
-}
-
-/** Records consent on the project tenant; read-modify-write like every config change. */
-export async function writeDelegationRecord(projectId: string, record: DelegationRecord): Promise<void> {
-  const tenant = await getTenant(projectId);
-  if (!tenant) throw notFound("That project");
-  const stored = (tenant.config?.[CONFIG_KEY] as StoredProject | undefined) ?? null;
-  if (!stored) throw notFound("That project");
-  await patchTenant(projectId, {
-    config: { ...(tenant.config ?? {}), [CONFIG_KEY]: { ...stored, delegation: record } },
-  });
 }
 
 /** Every live project under the workspace tenant, newest first. */

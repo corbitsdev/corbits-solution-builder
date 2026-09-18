@@ -8,6 +8,7 @@
  */
 import { APP_VERSION } from "@solutions-builder/app/manifest";
 import {
+  createProject as installerCreateProject,
   ensureLifecycleDeployment as installerEnsureLifecycleDeployment,
   forgetWorkspace as installerForgetWorkspace,
   install as installerInstall,
@@ -15,6 +16,7 @@ import {
   LIFECYCLE_ASSET_NAME,
   lifecycleAssetName,
   type InstallState,
+  type ProjectPolicy,
   type SidecarCapability,
 } from "@solutions-builder/installer";
 import { rerankCatalogProviders } from "../apps/hub/src/catalog.js";
@@ -28,6 +30,8 @@ import {
   tenantId,
 } from "../apps/hub/src/hub-client.js";
 import { canPlaceSidecars, hub } from "../apps/hub/src/hub-mount.js";
+import { newId } from "../apps/hub/src/ids.js";
+import { openProject } from "../apps/hub/src/projects.js";
 import { adoptLegacyWorkspaceOnce } from "../apps/hub/src/workspace-boot.js";
 
 export { LIFECYCLE_ASSET_NAME, lifecycleAssetName };
@@ -77,4 +81,29 @@ export async function ensureLifecycleDeployment(
   options: { replace?: boolean } = {},
 ) {
   return installerEnsureLifecycleDeployment(hubTransport(), sidecarCapability(), tenantId(), projectId, options);
+}
+
+/**
+ * Opens a project the way the client does: the tenant and its delegation
+ * through the installer, over the same transport, then the host's own
+ * `project.create` ledger write.
+ */
+export async function createProject(args: {
+  title: string;
+  policy: ProjectPolicy;
+  owner: { principalId: string; displayName: string };
+  problemStatement?: string;
+  delegatedCredentialIds?: string[];
+}): Promise<{ projectId: string; runId: string }> {
+  const { project } = await installerCreateProject(hubTransport(), tenantId(), {
+    title: args.title,
+    slug: newId.projectSlug(),
+    policy: args.policy,
+    ...(args.delegatedCredentialIds !== undefined ? { delegatedCredentialIds: args.delegatedCredentialIds } : {}),
+  });
+  return openProject({
+    projectId: project.id,
+    owner: args.owner,
+    ...(args.problemStatement !== undefined ? { problemStatement: args.problemStatement } : {}),
+  });
 }

@@ -254,7 +254,7 @@ try {
 
   // A project runs on its own deployment. Creating one fires the run; the
   // first stage parks on the person, and a gate command lands as a signal.
-  const { createProject } = await import("../apps/hub/src/projects.js");
+  const { createProject } = await import("./host-install.js");
   const { localActor, deploymentRuns, hubApi, tenantPath } = await import("../apps/hub/src/hub-client.js");
   const { projectExecutionStatus, parkedSignalNames } = await import("../apps/hub/src/lifecycle-run.js");
   const projectTitle = "Smoke: runs on the hub";
