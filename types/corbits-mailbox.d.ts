@@ -39,6 +39,8 @@ declare module "@corbits/mailbox" {
 
   export function mountMailbox(app: Hono, opts: MountMailboxOpts): void;
 
+  export function runMailboxMigrations(db: MailboxDb): Promise<void>;
+
   export type InboxItem = {
     tenantId: string;
     principalId: string;

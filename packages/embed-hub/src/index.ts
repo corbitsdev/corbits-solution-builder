@@ -61,7 +61,13 @@ import {
   readProcessProvisionerConfig,
   type ProcessProvisionerRole,
 } from "@corbits/process-provisioner";
-import { createInMemoryMailboxEventBus, deliverInboxItems, mountMailbox, type InboxItem } from "@corbits/mailbox";
+import {
+  createInMemoryMailboxEventBus,
+  deliverInboxItems,
+  mountMailbox,
+  runMailboxMigrations,
+  type InboxItem,
+} from "@corbits/mailbox";
 import { upgradeWebSocket } from "hono/bun";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
@@ -427,6 +433,7 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
     }
     return `${principalRow.refId}@${tenantRow.domain}`;
   }
+  await runMailboxMigrations(mailboxDb);
   const mailboxApp = new Hono();
   mountMailbox(mailboxApp, {
     db: mailboxDb,
