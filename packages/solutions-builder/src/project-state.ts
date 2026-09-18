@@ -13,6 +13,7 @@ import { applyEvent, emptyState, type RunState } from "@intx/workflow";
 import { stageOfSignal, stageOfStepId } from "./workflows/stage-loop.js";
 import { NAME_STEP_ID } from "./workflows/project-lifecycle.js";
 import type { Stage } from "./ledger.js";
+import type { Anchor, Direction } from "./design-prompt.js";
 
 /**
  * The minimal shape this module needs from a committed run event. The hub
@@ -61,6 +62,22 @@ export type FoldedQuestion = {
   readonly answer: { readonly answer: string; readonly grantedCapabilities: unknown; readonly at: string | null } | null;
 };
 
+/**
+ * A stage-4 design-feedback submission, as carried in a `stage.draft` round's
+ * intent alongside the deterministic revision prompt it produced. There is no
+ * host record of this beyond the run's own event log: the comments, the
+ * chosen direction and the note are the record.
+ */
+export type FoldedFeedback = {
+  readonly runId: string;
+  readonly designNodeId: string;
+  readonly direction: Direction;
+  readonly overallNote: string;
+  readonly comments: readonly { readonly anchor: Anchor; readonly body: string }[];
+  readonly prompt: string;
+  readonly at: string | null;
+};
+
 export type FoldedRun = {
   readonly runId: string;
   readonly state: RunState;
@@ -74,6 +91,8 @@ export type FoldedRun = {
   readonly flags: readonly FoldedFlag[];
   /** Every worker question this run raised, oldest first, joined to its answer. */
   readonly questions: readonly FoldedQuestion[];
+  /** Every stage-4 design-feedback submission this run's committed signals carried, oldest first. */
+  readonly feedback: readonly FoldedFeedback[];
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -88,6 +107,7 @@ export function foldRun(runId: string, events: readonly RunEvent[]): FoldedRun {
   const approvals: FoldedApproval[] = [];
   const flags: FoldedFlag[] = [];
   const questions: FoldedQuestion[] = [];
+  const feedback: FoldedFeedback[] = [];
   const answers = new Map<string, { answer: string; grantedCapabilities: unknown; at: string | null }>();
   for (const event of events) {
     state = applyEvent(state, { ...event.body, seq: event.seq, kind: event.type } as unknown as Parameters<
@@ -154,6 +174,20 @@ export function foldRun(runId: string, events: readonly RunEvent[]): FoldedRun {
         answer: null,
       });
     }
+    const feedbackPayload = asRecord(payload.feedback);
+    if (feedbackPayload && typeof feedbackPayload.designNodeId === "string") {
+      feedback.push({
+        runId,
+        designNodeId: feedbackPayload.designNodeId,
+        direction: (feedbackPayload.direction as Direction | undefined) ?? "revise",
+        overallNote: typeof feedbackPayload.overallNote === "string" ? feedbackPayload.overallNote : "",
+        comments: Array.isArray(feedbackPayload.comments)
+          ? (feedbackPayload.comments as { anchor: Anchor; body: string }[])
+          : [],
+        prompt: typeof payload.message === "string" ? payload.message : "",
+        at: atIso,
+      });
+    }
   }
   return {
     runId,
@@ -163,6 +197,7 @@ export function foldRun(runId: string, events: readonly RunEvent[]): FoldedRun {
     approvals,
     flags,
     questions: questions.map((question) => ({ ...question, answer: answers.get(question.id) ?? null })),
+    feedback,
   };
 }
 
@@ -336,6 +371,18 @@ export function projectFlags(runs: readonly FoldedRun[]): FoldedFlag[] {
 /** Every worker question raised across a project's runs, oldest first, each joined to its answer. */
 export function projectQuestions(runs: readonly FoldedRun[]): FoldedQuestion[] {
   return runs.flatMap((run) => run.questions);
+}
+
+/** Every design-feedback submission recorded across a project's runs, oldest first. */
+export function projectFeedback(runs: readonly FoldedRun[]): FoldedFeedback[] {
+  return runs.flatMap((run) => run.feedback);
+}
+
+/** The newest feedback submitted against a design version, if any. */
+export function feedbackForDesign(runs: readonly FoldedRun[], designNodeId: string): FoldedFeedback | undefined {
+  return projectFeedback(runs)
+    .filter((entry) => entry.designNodeId === designNodeId)
+    .at(-1);
 }
 
 /** The newest unanswered worker question on a run, if any. */

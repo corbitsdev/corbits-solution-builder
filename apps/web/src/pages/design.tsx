@@ -22,22 +22,18 @@ import {
  * a `srcdoc` frame permits without granting the frame anything.
  */
 import { useEffect, useRef, useState } from "react";
-import {
-  api,
-  ApiFailure,
-  type ArtifactNode,
-  type DesignAnchor,
-  type DesignFeedback,
-} from "../client.js";
-import { Banner, Button, Field, Screen, StateLabel, shortHash } from "../components.jsx";
+import { ApiFailure, type ArtifactNode } from "../client.js";
+import { revisionPrompt, type Anchor, type Direction } from "@solutions-builder/app/design-prompt";
+import { Banner, Button, Field, Screen, StateLabel } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
 import { PrintButton } from "../print.jsx";
 import { Elapsed } from "./workspace/elapsed.jsx";
+import type { FoldedFeedback } from "../run-fold.ts";
 
-type PendingComment = { anchor: DesignAnchor; body: string };
+type PendingComment = { anchor: Anchor; body: string };
 
 /** Builds an anchor for a clicked element, preferring a stable id. */
-function anchorFor(element: Element): DesignAnchor {
+function anchorFor(element: Element): Anchor {
   const testId =
     element.getAttribute("data-testid") ??
     element.getAttribute("data-test-id") ??
@@ -64,7 +60,7 @@ function anchorFor(element: Element): DesignAnchor {
   };
 }
 
-export function anchorLabel(anchor: DesignAnchor): string {
+export function anchorLabel(anchor: Anchor): string {
   if (anchor.testId) return `#${anchor.testId}`;
   return anchor.domPath ?? "(whole design)";
 }
@@ -81,7 +77,6 @@ export type DesignApproval = {
 };
 
 export function DesignFeedbackView({
-  projectId,
   designs,
   feedbackByNode,
   contentByNode,
@@ -90,23 +85,29 @@ export function DesignFeedbackView({
   onChanged,
   revise,
 }: {
-  projectId: string;
   designs: ArtifactNode[];
-  feedbackByNode: Map<string, { feedback?: DesignFeedback; prompt?: string }>;
+  /** The feedback recorded against each design version, folded from the run's own events. */
+  feedbackByNode: Map<string, FoldedFeedback>;
   contentByNode: Map<string, string>;
   /** The workspace tenant artifacts are recorded under. */
   tenantId: string;
   approval: DesignApproval;
   onChanged: () => void;
-  /** Delivers the revision prompt to the run as a `stage.draft` signal. */
-  revise: (prompt: string) => Promise<unknown>;
+  /**
+   * Delivers the feedback and its deterministic revision prompt to the run
+   * together, as one `stage.draft` signal — submitting is revising.
+   */
+  revise: (
+    feedback: { designNodeId: string; direction: Direction; overallNote: string; comments: PendingComment[] },
+    prompt: string,
+  ) => Promise<unknown>;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(designs.at(-1)?.id ?? null);
   const [feedbackMode, setFeedbackMode] = useState(false);
   const [pending, setPending] = useState<PendingComment[]>([]);
-  const [draftAnchor, setDraftAnchor] = useState<DesignAnchor | null>(null);
+  const [draftAnchor, setDraftAnchor] = useState<Anchor | null>(null);
   const [draftBody, setDraftBody] = useState("");
-  const [direction, setDirection] = useState<"choose" | "combine" | "revise" | "reject">("revise");
+  const [direction, setDirection] = useState<Direction>("revise");
   const [overallNote, setOverallNote] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -114,8 +115,7 @@ export function DesignFeedbackView({
 
   const design = designs.find((entry) => entry.id === selectedId) ?? designs.at(-1) ?? null;
   const content = design ? (contentByNode.get(design.id) ?? "") : "";
-  const stored = design ? feedbackByNode.get(design.id) : undefined;
-  const submitted = stored?.feedback;
+  const submitted = design ? feedbackByNode.get(design.id) : undefined;
 
   useEffect(() => {
     setPending([]);
@@ -379,25 +379,38 @@ export function DesignFeedbackView({
             loading={busy === "submit"}
             disabled={!design}
             onClick={() =>
-              run("submit", () =>
-                api.submitFeedback(projectId, {
-                  designNodeId: design!.id,
+              run("submit", () => {
+                const comments = pending.map((comment, index) => ({
+                  id: String(index),
+                  anchor: comment.anchor,
+                  body: comment.body,
+                  author: "",
+                  disposition: "open" as const,
+                }));
+                const prompt = revisionPrompt({
+                  designTitle: design!.title,
+                  designVersion: design!.version,
+                  designContentHash: design!.contentHash,
                   direction,
                   overallNote,
-                  comments: pending,
-                }),
-              )
+                  comments,
+                  acceptanceCriteria: [],
+                });
+                return revise({ designNodeId: design!.id, direction, overallNote, comments: pending }, prompt);
+              })
             }
           >
-            Submit feedback
-          </Button></Screen>
+            Submit feedback and generate the next version
+          </Button>
+          {busy === "submit" ? <Elapsed stage={4} /> : null}
+          </Screen>
       ) : null}
 
       {submitted ? (
         <Screen
           title={`Feedback: ${submitted.direction}`}
           description={submitted.overallNote || "No overall note was recorded."}
-          status={<StateLabel tone="selected">prompt {shortHash(submitted.promptHash)}</StateLabel>}
+          status={<StateLabel tone="success">Feedback submitted</StateLabel>}
           tight
         >
           <Table>
@@ -405,41 +418,21 @@ export function DesignFeedbackView({
               <TableRow>
                 <TableHead>Anchor</TableHead>
                 <TableHead>Comment</TableHead>
-                <TableHead>Disposition</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {submitted.comments.map((comment) => (
-                <TableRow key={comment.id}>
+              {submitted.comments.map((comment, index) => (
+                <TableRow key={`${anchorLabel(comment.anchor)}-${index}`}>
                   <TableCell className="hash">{anchorLabel(comment.anchor)}</TableCell>
                   <TableCell>{comment.body}</TableCell>
-                  <TableCell>
-                    {comment.disposition === "addressed" ? (
-                      <StateLabel tone="success">Addressed</StateLabel>
-                    ) : comment.disposition === "declined" ? (
-                      <StateLabel tone="warning">Declined</StateLabel>
-                    ) : (
-                      <StateLabel tone="info">Open</StateLabel>
-                    )}
-                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
           <div className="screen-body">
-            <Button
-              variant="primary"
-              loading={busy === "revise"}
-              onClick={() => run("revise", () => revise(stored?.prompt ?? ""))}
-            >
-              Generate the next design version
-            </Button>
-            {busy === "revise" ? <Elapsed stage={4} /> : null}
-            {stored?.prompt ? (
-              <div className="artifact">
-                <pre>{stored.prompt}</pre>
-              </div>
-            ) : null}
+            <div className="artifact">
+              <pre>{submitted.prompt}</pre>
+            </div>
           </div>
         </Screen>
       ) : null}

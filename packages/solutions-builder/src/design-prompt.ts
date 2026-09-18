@@ -5,9 +5,9 @@
  * design version, choosing an overall direction, and turning both into a
  * revision prompt. The revision prompt is deterministic — the same feedback
  * produces byte-identical bytes, so a regenerated design is attributable.
- * Nothing here touches the database or the artifact store — the host
- * (`apps/hub`'s `design-feedback.ts`) builds the pieces and this module only
- * renders them.
+ * Nothing here touches the database or the artifact store — the caller
+ * (`apps/web`'s design page) builds the pieces and delivers the result as a
+ * `stage.draft` run signal; this module only renders the prompt.
  *
  * Anchors degrade rather than break: a stable test id where one exists, a DOM
  * path plus a role and text fingerprint where one does not. A stale anchor is

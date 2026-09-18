@@ -13,6 +13,7 @@
 import { deliverWorkflowSignal, type Transport } from "@intx/hub-client";
 import type { Command, Stage } from "@solutions-builder/app/ledger";
 import { positionOfSignal, stageSignal } from "@solutions-builder/app/workflows/stage-loop";
+import type { Anchor, Direction } from "@solutions-builder/app/design-prompt";
 import { createHubTransport } from "./hub.ts";
 import { foldProject, type StageStatus } from "./run-fold.ts";
 
@@ -153,6 +154,18 @@ export type DraftIntent = {
   readonly audiences?: readonly string[];
   /** Stage 6: write the requirements, the plan, or both. */
   readonly documents?: readonly string[];
+  /**
+   * Stage 4: the design feedback this round's prompt was built from. Carried
+   * alongside the deterministic prompt so the feedback thread can be folded
+   * back from the run's own events (`feedbackForDesign` in
+   * `@solutions-builder/app/project-state`) instead of a host record.
+   */
+  readonly feedback?: {
+    readonly designNodeId: string;
+    readonly direction: Direction;
+    readonly overallNote: string;
+    readonly comments: readonly { readonly anchor: Anchor; readonly body: string }[];
+  };
 };
 
 /**

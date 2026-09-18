@@ -318,27 +318,6 @@ export type ProjectDetail = {
   carriedTurns: { stage: number; turn: StageTurn }[];
 };
 
-export type DesignAnchor = {
-  testId?: string;
-  domPath?: string;
-  role?: string;
-  textFingerprint?: string;
-};
-
-export type DesignFeedback = {
-  id: string;
-  designNodeId: string;
-  direction: "choose" | "combine" | "revise" | "reject";
-  overallNote: string;
-  submittedAt: string;
-  promptHash: string;
-  comments: {
-    id: string;
-    anchor: DesignAnchor;
-    body: string;
-    author: string;
-    disposition: "open" | "addressed" | "declined" | "superseded";
-  }[];
 };
 
 /** Orientation from the Product guide, or the deterministic checklist. */
@@ -809,20 +788,6 @@ export const api = {
     }),
   guidance: (projectId: string) =>
     request<{ guidance: Guidance }>(`/projects/${projectId}/guidance`),
-  design: (projectId: string) =>
-    request<{
-      designs: ArtifactNode[];
-      feedback: {
-        designNodeId: string;
-        feedback?: DesignFeedback;
-        prompt?: string;
-      }[];
-    }>(`/projects/${projectId}/design`),
-  submitFeedback: (projectId: string, payload: unknown) =>
-    post<{ feedback: DesignFeedback; prompt: string; feedbackNodeId: string }>(
-      `/projects/${projectId}/design/feedback`,
-      payload,
-    ),
   graph: (projectId: string) =>
     request<{
       nodes: ArtifactNode[];

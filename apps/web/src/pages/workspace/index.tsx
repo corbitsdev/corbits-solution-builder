@@ -12,13 +12,12 @@
  * draft and then hands it back, which is both how people actually read and the
  * only way the specialist sees the notes as one coherent set.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
   ApiFailure,
   type ArtifactNode,
   type BuildEvent,
-  type DesignFeedback,
   type Evaluation,
   type ProjectDetail,
   type Quote,
@@ -36,7 +35,7 @@ import { clock } from "./elapsed.jsx";
 import { StageDocument } from "./document.jsx";
 import { SELECTABLE_TARGETS } from "@solutions-builder/app/targets";
 import { EVALUATED_STAGE } from "@solutions-builder/app/workflows/stage-loop";
-import type { StageStatus } from "../../run-fold.ts";
+import { foldProjectRuns, projectFeedback, type FoldedFeedback, type StageStatus } from "../../run-fold.ts";
 import { approvalCommand, deliverDraft, deliverGate, deliverRound, DRAFT_MAX_TOKENS_DEFAULT, submitThen } from "../../run-signal.ts";
 import { foldEvaluation, foldStageThread, nextOpenQuestion } from "../../stage-thread.ts";
 import type { Stage } from "@solutions-builder/app/ledger";
@@ -594,36 +593,32 @@ function DesignPanel({
   tenantId: string;
   onChanged: () => void;
 }) {
-  const [designs, setDesigns] = useState<ArtifactNode[]>([]);
-  const [feedbackByNode, setFeedbackByNode] = useState(
-    new Map<string, { feedback?: DesignFeedback; prompt?: string }>(),
+  // The design history is just this project's `design_artifact` nodes —
+  // already on `detail`, so no route of its own is needed to read it.
+  const designs = useMemo(
+    () => detail.nodes.filter((node) => node.kind === "design_artifact").sort((left, right) => left.version - right.version),
+    [detail.nodes],
   );
+  const [feedbackByNode, setFeedbackByNode] = useState(new Map<string, FoldedFeedback>());
   const [contentByNode, setContentByNode] = useState(new Map<string, string>());
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    // A design history that fails to load renders as "no design yet", which is
-    // a different and much more alarming statement than "I could not read it".
-    const result = await api.design(detail.project.id).catch((cause: unknown) => {
-      setLoadError(
-        `The design history could not be read: ${
-          cause instanceof ApiFailure ? cause.detail.message : String(cause)
-        }`,
-      );
-      return null;
-    });
-    if (!result) return;
-    setDesigns(result.designs);
-    setFeedbackByNode(
-      new Map(
-        result.feedback.map((entry) => [
-          entry.designNodeId,
-          { ...(entry.feedback ? { feedback: entry.feedback } : {}), ...(entry.prompt ? { prompt: entry.prompt } : {}) },
-        ]),
-      ),
-    );
+    if (detail.anchorRunId !== null) {
+      // The feedback thread is not a host record: it is folded from the same
+      // `/hub` events a revise round already committed.
+      const runs = await foldProjectRuns(detail.tenantId, detail.anchorRunId).catch((cause: unknown) => {
+        setLoadError(`The design feedback could not be read: ${cause instanceof Error ? cause.message : String(cause)}`);
+        return null;
+      });
+      if (runs) {
+        const byNode = new Map<string, FoldedFeedback>();
+        for (const entry of projectFeedback(runs)) byNode.set(entry.designNodeId, entry);
+        setFeedbackByNode(byNode);
+      }
+    }
     const contents = await Promise.all(
-      result.designs.map(async (design) => {
+      designs.map(async (design) => {
         // An unreadable version is not an empty one. Saying so on the version
         // itself keeps the rest of the history usable.
         const artifact = await api.artifactContent(tenantId, design.id).catch(() => null);
@@ -631,7 +626,7 @@ function DesignPanel({
       }),
     );
     setContentByNode(new Map(contents));
-  }, [detail.project.id, detail.nodes.length, tenantId]);
+  }, [designs, detail.tenantId, detail.anchorRunId, tenantId]);
 
   useEffect(() => {
     void load();
@@ -648,7 +643,6 @@ function DesignPanel({
         </Banner>
       ) : null}
       <DesignFeedbackView
-        projectId={detail.project.id}
         designs={designs}
         feedbackByNode={feedbackByNode}
         contentByNode={contentByNode}
@@ -669,7 +663,7 @@ function DesignPanel({
               : deliverGate(detail, 4, standing, { command: "stage.submit", ...submit });
           },
         }}
-        revise={(prompt) =>
+        revise={(feedback, prompt) =>
           deliverDraft(detail, 4, {
             command: "stage.draft",
             runId: detail.current!.id,
@@ -677,6 +671,7 @@ function DesignPanel({
             mode: "final",
             draft: true,
             inference: { maxTokens: DRAFT_MAX_TOKENS_DEFAULT },
+            feedback,
           })
         }
         onChanged={() => {

@@ -9,12 +9,15 @@
 import { listWorkflowRuns, readWorkflowRunEvents, type Transport } from "@intx/hub-client";
 import {
   foldRun,
+  feedbackForDesign,
   projectApprovals,
+  projectFeedback,
   projectFlags,
   projectQuestions,
   projectState,
   projectTitle,
   type FoldedApproval,
+  type FoldedFeedback,
   type FoldedFlag,
   type FoldedQuestion,
   type FoldedRun,
@@ -22,8 +25,8 @@ import {
 } from "@solutions-builder/app/project-state";
 import { createHubTransport } from "./hub.ts";
 
-export type { FoldedApproval, FoldedFlag, FoldedQuestion, FoldedRun, StageStatus };
-export { projectApprovals, projectFlags, projectQuestions, projectTitle };
+export type { FoldedApproval, FoldedFeedback, FoldedFlag, FoldedQuestion, FoldedRun, StageStatus };
+export { feedbackForDesign, projectApprovals, projectFeedback, projectFlags, projectQuestions, projectTitle };
 
 /** Every run under the deployment, folded from its committed `/hub` events. */
 export async function foldProjectRuns(

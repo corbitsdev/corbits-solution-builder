@@ -9,12 +9,6 @@ import {
   projectDetail,
   readArtifactNode,
 } from "./projects.js";
-import {
-  designHistory,
-  feedbackFor,
-  submitFeedback,
-  type Direction,
-} from "./design-feedback.js";
 import { runGuidance } from "./guide.js";
 import { notFound } from "./errors.js";
 import { type RunState } from "@solutions-builder/app/ledger";
@@ -60,41 +54,6 @@ export function registerProjectRoutes(api: Hono) {
   api.get("/projects/:projectId", async (context) =>
     context.json(await projectDetail(context.req.param("projectId"), localActor().principalId)),
   );
-
-  /** Stage 4: the design history and any feedback already recorded on it. */
-  api.get("/projects/:projectId/design", async (context) => {
-    const projectId = context.req.param("projectId");
-    const designs = await designHistory(projectId);
-    const feedback = await Promise.all(
-      designs.map(async (design) => ({
-        designNodeId: design.id,
-        ...(await feedbackFor(design.id)),
-      })),
-    );
-    return context.json({ designs, feedback });
-  });
-
-  /** Submits immutable feedback and returns the deterministic revision prompt. */
-  api.post("/projects/:projectId/design/feedback", async (context) => {
-    const projectId = context.req.param("projectId");
-    const body = (await context.req.json()) as {
-      designNodeId: string;
-      direction: Direction;
-      overallNote?: string;
-      comments?: { anchor: Record<string, unknown>; body: string }[];
-      acceptanceCriteria?: string[];
-    };
-    const result = await submitFeedback({
-      projectId,
-      designNodeId: body.designNodeId,
-      direction: body.direction,
-      overallNote: body.overallNote ?? "",
-      comments: body.comments ?? [],
-      author: localActor().principalId,
-      ...(body.acceptanceCriteria ? { acceptanceCriteria: body.acceptanceCriteria } : {}),
-    });
-    return context.json(result);
-  });
 
   api.get("/projects/:projectId/graph", async (context) =>
     context.json(await artifactGraph(context.req.param("projectId"))),
