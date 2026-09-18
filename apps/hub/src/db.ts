@@ -23,7 +23,7 @@ import { PGlite } from "@electric-sql/pglite";
 import wasmPath from "../../../node_modules/@electric-sql/pglite/dist/pglite.wasm" with { type: "file" };
 import dataPath from "../../../node_modules/@electric-sql/pglite/dist/pglite.data" with { type: "file" };
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
-import { withPostgresJsResultShape } from "./pg-compat.js";
+import { withPostgresJsResultShape } from "@solutions-builder/embed-hub/pg-compat";
 import type { ArtifactDb } from "@corbits/artifacts";
 
 export type Db = PgliteDatabase<Record<string, never>>;

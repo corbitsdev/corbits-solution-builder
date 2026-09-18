@@ -9,7 +9,7 @@
 import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { createArtifact, writeArtifactVersion } from "@corbits/artifacts";
 import { database } from "./db.js";
-import { withPostgresJsResultShape } from "./pg-compat.js";
+import { withPostgresJsResultShape } from "@solutions-builder/embed-hub/pg-compat";
 import * as table from "./schema.js";
 import { newId, sha256 } from "./ids.js";
 import { HostError, notFound } from "./errors.js";

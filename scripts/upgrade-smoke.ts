@@ -22,7 +22,7 @@ import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { sql } from "drizzle-orm";
-import { withPostgresJsResultShape } from "../apps/hub/src/pg-compat.js";
+import { withPostgresJsResultShape } from "@solutions-builder/embed-hub/pg-compat";
 import { HUB_MIGRATIONS } from "../apps/hub/src/hub-migrations.js";
 import { migrateHub, PreHubDatabaseError } from "../apps/hub/src/hub-migrate.js";
 import { openDatabase, type HostDatabase } from "../apps/hub/src/db.js";
