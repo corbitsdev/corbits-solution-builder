@@ -55,12 +55,17 @@ export async function listArtifacts(
 export async function createArtifact(
   transport: Transport,
   tenantId: string,
-  input: { title: string; content: string },
+  input: { title: string; content: string; metadata?: Record<string, unknown> | null },
 ): Promise<Artifact> {
   const { artifact } = await transport.fetch<{ artifact: Artifact }>(
     "POST",
     tenantPathFor(tenantId, "/artifacts"),
-    { mode: "text", title: input.title, content: input.content },
+    {
+      mode: "text",
+      title: input.title,
+      content: input.content,
+      ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
+    },
   );
   return artifact;
 }
@@ -87,7 +92,7 @@ export async function reviseArtifact(
   transport: Transport,
   tenantId: string,
   artifactId: string,
-  input: { title?: string; content?: string },
+  input: { title?: string; content?: string; metadata?: Record<string, unknown> | null },
 ): Promise<Artifact> {
   return transport.fetch<Artifact>(
     "POST",

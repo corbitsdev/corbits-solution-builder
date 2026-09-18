@@ -811,16 +811,20 @@ export type HubArtifact = {
 
 export const artifacts = {
   /** `mode: "text"` imports a pasted body; there is no bare "create a document" verb beyond this. */
-  create: (input: { title: string; content: string }, scope: string = tenantId()) =>
+  create: (
+    input: { title: string; content: string; metadata?: Record<string, unknown> | null },
+    scope: string = tenantId(),
+  ) =>
     hubPost<{ artifact: HubArtifact }>(tenantPathFor(scope, "/artifacts"), {
       mode: "text",
       title: input.title,
       content: input.content,
+      ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
     }).then((r) => r.artifact),
   /** Bumps the artifact's version; requires `write` on `artifact:<id>`. */
   revise: (
     artifactId: string,
-    input: { title?: string; content?: string },
+    input: { title?: string; content?: string; metadata?: Record<string, unknown> | null },
     scope: string = tenantId(),
   ) => hubPost<HubArtifact>(tenantPathFor(scope, `/artifacts/${artifactId}/versions`), input),
   /** The artifact at its CURRENT version — see `HubArtifact`'s note on historical versions. */
