@@ -47,7 +47,7 @@ import {
 import { buildManifest, buildPackedEntries } from "./closure-pack.ts";
 import { listProjectSummaries } from "../apps/web/src/project-list.ts";
 import { foldProject } from "../apps/web/src/run-fold.ts";
-import { deliverDraft, deliverGate } from "../apps/web/src/run-signal.ts";
+import { deliverDraft, submitThen } from "../apps/web/src/run-signal.ts";
 
 const checks: { name: string; ok: boolean; detail: string }[] = [];
 function check(name: string, ok: boolean, detail = ""): boolean {
@@ -479,16 +479,23 @@ async function main(): Promise<void> {
       return status;
     });
 
-    await step("6. deliver the gate approve signal", async () => {
+    // The round the client parked on (`solutions-builder.stage.1.round`) only
+    // ends on `stage.submit` -- `stage.draft` is "the one command that keeps
+    // a stage open" (ledger.ts). `stage.approve` itself requires the ledger
+    // state `waiting_approval`, which only `stage.submit` reaches, so it has
+    // to land first, on the same round signal `submitThen` already knows how
+    // to wait out before sending the approve.
+    await step("6. submit the draft, then approve it (submitThen)", async () => {
       if (!project || !anchorRunId || !workspace) throw new Error("no project/anchor run to signal");
-      await deliverGate(
+      await submitThen(
         { tenantId: workspace.tenantId, anchorRunId },
         1,
         partedAtGate,
+        { runId: anchorRunId, versions: [] },
         { command: "stage.approve", runId: anchorRunId },
         transport,
       );
-      check("6. deliver the gate approve signal", true);
+      check("6. submit the draft, then approve it (submitThen)", true);
     });
 
     await step("6. fold the run past the approved gate", async () => {
