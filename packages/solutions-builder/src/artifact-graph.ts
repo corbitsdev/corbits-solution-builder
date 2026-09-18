@@ -32,6 +32,11 @@ export type ArtifactGraphMetadata = {
   /** Exact versions this draft was generated from. Empty only at a graph root. */
   sourceVersionIds: string[];
   provenance: ArtifactProvenance;
+  /**
+   * The draft's own media type. `@corbits/artifacts` does not model this, so
+   * the fold reads it back here to fill `ArtifactGraphNode.mediaType` (CL-8501).
+   */
+  mediaType: string;
 };
 
 /** The metadata contract on an artifact version: everything Builder owns lives under `sb`. */
@@ -118,6 +123,7 @@ export function foldArtifactGraph(artifacts: ArtifactListEntry[], projectId: str
     stage: sb.stage,
     variant: sb.variant ?? null,
     title: entry.title,
+    mediaType: sb.mediaType,
     supersededByNodeId: supersededBy.get(entry.id) ?? null,
     provenance: sb.provenance,
     createdAt: entry.createdAt,

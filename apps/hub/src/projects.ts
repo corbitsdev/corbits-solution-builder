@@ -6,7 +6,7 @@
  * Artifact writes are here too: they are how a stage produces something, and
  * they never transition anything.
  */
-import { and, asc, desc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { database } from "./db.js";
 import * as table from "./schema.js";
 import { newId, sha256 } from "./ids.js";
@@ -21,6 +21,7 @@ import { projectApprovals, projectFlags, projectQuestions } from "@solutions-bui
 import { foldedRunsFor, openDecisionFor } from "./decisions.js";
 import { currentAnchor } from "./lifecycle-run.js";
 import { activeRun, runsForProject } from "./runs.js";
+import { versionIdFor } from "@solutions-builder/app/artifact-graph";
 import { artifacts, tenantId } from "./hub-client.js";
 import { listProjectRecords, requireProject } from "./project-records.js";
 
@@ -142,6 +143,39 @@ export async function writeArtifact(
 
   const nodeId = newId.node();
 
+  // `draft.sourceVersionIds` names source *nodes* (this table's own ids); the
+  // fold (step A, CL-8500) reads `sb.sourceVersionIds` as `<artifactId>@<version>`,
+  // since the mounted module's list route has no separate version-row id.
+  const sourceNodes = draft.sourceVersionIds.length
+    ? await db
+        .select({ id: table.artifactNode.id, artifactId: table.artifactNode.artifactId, version: table.artifactNode.version })
+        .from(table.artifactNode)
+        .where(inArray(table.artifactNode.id, draft.sourceVersionIds))
+    : [];
+  const sourceNodeById = new Map(sourceNodes.map((node) => [node.id, node]));
+  const sbSourceVersionIds = draft.sourceVersionIds.map((sourceId) => {
+    const node = sourceNodeById.get(sourceId);
+    return node ? versionIdFor(node.artifactId, node.version) : sourceId;
+  });
+
+  // The mounted module's own metadata, folded by the client from the
+  // artifacts list — see CL-8500. `supersedes` names the artifact this write
+  // replaces; absent at a graph root or a new kind/variant. `mediaType` fills
+  // ArtifactNode.mediaType on the fold's side, which the module's own row
+  // otherwise leaves empty.
+  const sbMetadata = {
+    sb: {
+      projectId: draft.projectId,
+      kind: draft.kind,
+      stage,
+      mediaType: draft.mediaType,
+      ...(draft.variant !== undefined ? { variant: draft.variant } : {}),
+      ...(existing ? { supersedes: existing.artifactId } : {}),
+      sourceVersionIds: sbSourceVersionIds,
+      provenance: draft.provenance,
+    },
+  };
+
   let artifactId: string;
   let version: number;
   if (existing) {
@@ -149,10 +183,11 @@ export async function writeArtifact(
     const revised = await artifacts.revise(artifactId, {
       title: draft.title,
       content: draft.content,
+      metadata: sbMetadata,
     });
     version = revised.version;
   } else {
-    const row = await artifacts.create({ title: draft.title, content: draft.content });
+    const row = await artifacts.create({ title: draft.title, content: draft.content, metadata: sbMetadata });
     artifactId = row.id;
     version = row.version;
   }
