@@ -163,39 +163,36 @@ for (const terminal of TERMINAL_STATES) {
   if (!reachable) problems.push(`Terminal state ${terminal} is never reached by any transition`);
 }
 
-// The native Interchange workflow is generated from this ledger, so the two
-// cannot disagree by construction — but a generator can still drop something.
-// These assert the properties that matter if it ever does.
+// stage.approve must offer cost.approve at stage 7 instead, straight off the
+// ledger: `project-lifecycle.ts` deleted its `commandsAtStage` helper along
+// with the loop-based shape, and the cost-approval interlock is a ledger
+// property, not a workflow one — already asserted above (`approve?.stages`),
+// restated here from the stage-7 side for symmetry.
 {
-  const { projectLifecycleDefinition, commandsAtStage, stageStepId, NAME_STEP_ID } = await import(
+  const coversStage7 = (row: (typeof LEDGER)[number]) => row.stages === null || row.stages.includes(7);
+  if (LEDGER.some((row) => row.command === "stage.approve" && coversStage7(row))) {
+    problems.push("Stage 7 offers stage.approve; it must offer cost.approve instead");
+  }
+  if (!LEDGER.some((row) => row.command === "cost.approve" && coversStage7(row))) {
+    problems.push("Stage 7 does not offer cost.approve");
+  }
+}
+
+// The native Interchange workflow is generated from this ledger and rendered
+// as source for the deployed package (`lifecycle-source.ts`); the two must
+// never disagree. It is one `onTrigger` chat section (person mail resumes it,
+// every stage — see `chat-section-contract.md`) plus a top-level approve
+// chain the hub signals directly: gate-1..gate-8, with a freeze and an
+// evidence park between gate-7 and gate-8. No loops, no rounds, no
+// exhaustion caps, no MAX_REVISIONS: those all belonged to the old
+// loop-per-stage shape and are gone with it.
+{
+  const { projectLifecycleDefinition, NAME_STEP_ID } = await import(
     "@solutions-builder/app/workflows/project-lifecycle"
   );
-  const {
-    reviseStepId,
-    exhaustedStepId,
-    exhaustedCapStepId,
-    roundSignal,
-    approveSignal,
-    exhaustedSignal,
-    loopExits,
-    stageSignal,
-    continuingCommands,
-    ROUND_STEP_ID,
-    GATE_WAIT_STEP_ID,
-    ADMIT_STEP_ID,
-    evidenceSignal,
-    DELIVERY_STAGE,
-  } = await import("@solutions-builder/app/workflows/stage-loop");
-  // stage.draft is the round command that keeps a stage open: it must be a
-  // continuing command everywhere, and land on the round signal at every stage.
-  if (!continuingCommands().includes("stage.draft")) {
-    problems.push("continuingCommands() does not include stage.draft");
-  }
-  for (const stage of STAGES) {
-    if (stageSignal(stage, "stage.draft").name !== roundSignal(stage)) {
-      problems.push(`stage.draft does not land on the round signal at stage ${stage}`);
-    }
-  }
+  const { approveSignal, freezeSignal, evidenceSignal, gateStepId, CHAT_STEP_ID } = await import(
+    "@solutions-builder/app/workflows/stage-loop"
+  );
 
   const definition = projectLifecycleDefinition();
   const steps = definition.steps as Record<
@@ -203,150 +200,78 @@ for (const terminal of TERMINAL_STATES) {
     {
       kind?: string;
       name?: string;
-      handler?: string;
-      while?: string;
-      maxIterations?: number;
-      onExhausted?: string;
       after?: string[];
-      body?: {
-        steps?: Record<string, { kind?: string; name?: string; handler?: string }>;
-        stepOrder?: string[];
-      };
+      body?: unknown;
     }
   >;
 
-  // Every stage is a bounded revise loop followed by two human gate loops
-  // (ordinary and exhausted), both on the top-level run so the hub can
-  // signal them. A stage that could complete without a person is an
-  // automatic advancement, which section 7 forbids.
-  for (const stage of STAGES) {
-    const revise = steps[reviseStepId(stage)];
-    if (!revise || revise.kind !== "loop") {
-      problems.push(`The native workflow has no revise loop for stage ${stage}`);
-      continue;
-    }
-    if (typeof revise.maxIterations !== "number" || revise.maxIterations <= 0) {
-      problems.push(`Loop ${reviseStepId(stage)} is not bounded`);
-    }
-
-    // Stage 9's delivery gate is the specialist's own `deliver` tool call,
-    // parked on a stock hub approval — no gate-9/exhausted-9 loop and no
-    // approveSignal(9)/exhaustedSignal(9) awaiter exist. Its revise loop
-    // routes exhaustion straight to a dead-end park instead of a gate.
-    if (stage === DELIVERY_STAGE) {
-      if (revise.onExhausted !== exhaustedCapStepId(stage)) {
-        problems.push(`Loop ${reviseStepId(stage)} does not route to a dead-end park when exhausted`);
-      }
-      if (stageStepId(stage) in steps) {
-        problems.push(`Stage ${stage} has a gate loop; it must be resolved through the deliver approval instead`);
-      }
-      if (exhaustedStepId(stage) in steps) {
-        problems.push(`Stage ${stage} has an exhaustion gate loop; it must not`);
-      }
-      const iterationSteps = revise.body?.steps ?? {};
-      const awaitSignals = Object.entries(iterationSteps).filter(([, step]) => step.kind === "awaitSignal");
-      if (
-        awaitSignals.length !== 1 ||
-        awaitSignals[0]?.[0] !== ROUND_STEP_ID ||
-        awaitSignals[0]?.[1].name !== roundSignal(stage)
-      ) {
-        problems.push(`Stage ${stage}'s iteration's round is not its only awaitSignal`);
-      }
-      // stage.draft/stage.submit still ride the round signal, same as every
-      // other stage.
-      for (const command of loopExits(stage)) {
-        if (stageSignal(stage, command).name !== roundSignal(stage)) {
-          problems.push(`${command} leaves in_progress but is not a round signal at stage ${stage}`);
-        }
-      }
-      // Every other command that used to land on stage 9's gate
-      // (delivery.accept/.reject/.revise, and the generic post-submit
-      // governance commands — stage.reject, stage.revise, stage.route_back,
-      // stage.select_route, stage.retry, project.archive) rides no workflow
-      // signal at stage 9 any more: the deliver tool's approval is the one
-      // decision left there. Whether the generic governance commands still
-      // need a way to reach stage 9 is a product question outside delivery
-      // accept's scope, not answered by this change — see CL-8566.
-      continue;
-    }
-
-    if (revise.onExhausted !== exhaustedStepId(stage)) {
-      problems.push(`Loop ${reviseStepId(stage)} does not route to a gate when exhausted`);
-    }
-    const gate = steps[stageStepId(stage)];
-    const exhausted = steps[exhaustedStepId(stage)];
-    function gateLoop(
-      step: (typeof steps)[string] | undefined,
-      label: string,
-      signal: string,
-    ): void {
-      if (!step || step.kind !== "loop" || step.while !== "gateRefused") {
-        problems.push(`${label} is not a gateRefused loop`);
-        return;
-      }
-      if (typeof step.maxIterations !== "number" || step.maxIterations <= 0) {
-        problems.push(`${label} is not bounded`);
-      }
-      const body = step.body?.steps ?? {};
-      const wait = body[GATE_WAIT_STEP_ID];
-      const admit = body[ADMIT_STEP_ID];
-      if (!wait || wait.kind !== "awaitSignal" || wait.name !== signal) {
-        problems.push(`${label} does not wait on ${signal}`);
-      }
-      if (!admit || admit.kind !== "action" || admit.handler !== "admitGate") {
-        problems.push(`${label} does not admit through admitGate`);
-      }
-    }
-    gateLoop(exhausted, `Stage ${stage}'s exhaustion`, exhaustedSignal(stage));
-    // The round is the one thing every iteration always has, even once a
-    // drafting round grows a gate and agent steps after it: it must be the
-    // only awaitSignal in the body, and it must run first — nothing else can
-    // be there to receive the signal before it does.
-    const iterationSteps = revise.body?.steps ?? {};
-    const awaitSignals = Object.entries(iterationSteps).filter(([, step]) => step.kind === "awaitSignal");
-    if (
-      awaitSignals.length !== 1 ||
-      awaitSignals[0]?.[0] !== ROUND_STEP_ID ||
-      awaitSignals[0]?.[1].name !== roundSignal(stage)
-    ) {
-      problems.push(`Stage ${stage}'s iteration's round is not its only awaitSignal`);
-    }
-    const iterationOrder = revise.body?.stepOrder;
-    if (iterationOrder && iterationOrder[0] !== ROUND_STEP_ID) {
-      problems.push(`Stage ${stage}'s round does not come first in its iteration`);
-    }
-    gateLoop(gate, `Stage ${stage}'s gate`, approveSignal(stage));
-    if (gate && !gate.after?.includes(reviseStepId(stage))) {
-      problems.push(`Stage ${stage}'s gate does not follow its revise loop`);
-    }
-    // Every command the ledger allows out of the stage lands on one of its
-    // signals, so the run can never be asked for something it cannot consume.
-    for (const command of loopExits(stage)) {
-      if (stageSignal(stage, command).name !== roundSignal(stage)) {
-        problems.push(`${command} leaves in_progress but is not a round signal at stage ${stage}`);
-      }
-    }
-    for (const command of commandsAtStage(stage)) {
-      const { name } = stageSignal(stage, command);
-      if (name !== roundSignal(stage) && name !== approveSignal(stage) && name !== evidenceSignal(stage)) {
-        problems.push(`${command} has no signal on stage ${stage}'s run`);
-      }
-    }
-  }
-  // revise, gate loop, exhausted loop, gate-cap, exhausted-cap for every
-  // stage but 9 (revise, exhausted-cap only), plus the freeze loop and its
-  // cap between stage 7 and stage 8.
-  const expectedStepCount = (STAGES.length - 1) * 5 + 2 + 2;
-  if (definition.stepOrder.length !== expectedStepCount) {
-    problems.push(
-      `The native workflow has ${definition.stepOrder.length} steps for ${STAGES.length} stages, expected ${expectedStepCount}`,
-    );
-  }
-
   // No step in the in-process, gates-only definition carries an agent — the
-  // naming step is additive, rendered only once an offering exists.
+  // naming step and the chat body's specialists are additive, rendered only
+  // once an offering exists.
   if (NAME_STEP_ID in steps) {
     problems.push("The in-process lifecycle definition carries a naming step; it must stay gates-only");
+  }
+
+  // The approve chain: gate-1 through gate-8, each an awaitSignal on
+  // `approveSignal(stage)`, chained in order by `after`; a freeze and an
+  // evidence park sit between gate-7 and gate-8.
+  let previous: string | null = null;
+  for (let stage = 1; stage <= 7; stage++) {
+    const id = gateStepId(stage as never);
+    const gateStep = steps[id];
+    if (!gateStep || gateStep.kind !== "awaitSignal") {
+      problems.push(`${id} is not an awaitSignal step`);
+      continue;
+    }
+    if ((gateStep as { name?: string }).name !== approveSignal(stage as never)) {
+      problems.push(`${id} does not wait on ${approveSignal(stage as never)}`);
+    }
+    if (previous && !gateStep.after?.includes(previous)) {
+      problems.push(`${id} does not follow ${previous}`);
+    }
+    if (stage === 1 && gateStep.after && gateStep.after.length > 0) {
+      problems.push("gate-1 must not follow anything; it is the chain's start");
+    }
+    previous = id;
+  }
+
+  const freezeStep = steps["freeze"];
+  if (!freezeStep || freezeStep.kind !== "awaitSignal" || (freezeStep as { name?: string }).name !== freezeSignal()) {
+    problems.push("freeze does not wait on the freeze signal");
+  } else if (!freezeStep.after?.includes(gateStepId(7 as never))) {
+    problems.push("freeze does not follow gate-7");
+  }
+
+  const evidenceStep = steps["evidence"];
+  if (
+    !evidenceStep ||
+    evidenceStep.kind !== "awaitSignal" ||
+    (evidenceStep as { name?: string }).name !== evidenceSignal(8 as never)
+  ) {
+    problems.push("evidence does not wait on the build stage's evidence signal");
+  } else if (!evidenceStep.after?.includes("freeze")) {
+    problems.push("evidence does not follow freeze");
+  }
+
+  const gate8 = steps[gateStepId(8 as never)];
+  if (!gate8 || gate8.kind !== "awaitSignal" || (gate8 as { name?: string }).name !== approveSignal(8 as never)) {
+    problems.push("gate-8 does not wait on the approve signal");
+  } else if (!gate8.after?.includes("evidence")) {
+    problems.push("gate-8 does not follow evidence");
+  }
+
+  // The chat section itself: a single onTrigger step, top-level, following
+  // nothing — a section never self-completes and nothing may be `after` it.
+  const chatStep = steps[CHAT_STEP_ID];
+  if (!chatStep || chatStep.kind !== "onTrigger") {
+    problems.push("The lifecycle has no top-level onTrigger chat section");
+  } else if (chatStep.after && chatStep.after.length > 0) {
+    problems.push("The chat section carries an `after`; nothing may follow into it and it may follow nothing");
+  }
+
+  // Projects are started by a person, never a schedule or inbound mail.
+  if (!definition.triggers.some((trigger) => (trigger as { type?: string }).type === "manual")) {
+    problems.push("The native workflow is not manually triggered");
   }
 
   // The deployed package is source, not this object: an entry module the
@@ -359,32 +284,16 @@ for (const terminal of TERMINAL_STATES) {
     const { LIFECYCLE_ENTRY_PATH, lifecycleEntrySource, withoutStateSchemas, BUILD_STAGE, DELIVERY_STAGE } = await import(
       "@solutions-builder/app/workflows/lifecycle-source"
     );
-    const {
-      BUILD_STEP_ID,
-      DRAFT_STEP_ID,
-      DELIVERY_STEP_ID,
-      DECIDE_STEP_ID,
-      ADMIT_DRAFT_STEP_ID,
-      NO_DRAFT_STEP_ID,
-      EVALUATE_STEP_ID,
-      EVALUATED_STAGE,
-      EVIDENCE_ADMIT_STEP_ID,
-      EVIDENCE_STEP_ID,
-      REQUIREMENTS_STEP_ID,
-      ROUND_ADMIT_STEP_ID,
-      ROUND_DECIDE_STEP_ID,
-      ROUND_REFUSED_STEP_ID,
-      panelStepId,
-      audienceStepId,
-      reviseStepId: revise,
-      evidenceSignal,
-    } = await import("@solutions-builder/app/workflows/stage-loop");
-    const { agentFor, agentById, panelPrincipals } = await import("@solutions-builder/app/kit");
+    const { DELIVERY_STEP_ID: deliveryStepId } = await import("@solutions-builder/app/workflows/stage-loop");
+    const { agentFor, panelPrincipals } = await import("@solutions-builder/app/kit");
 
-    type AgentStepJson = {
+    type PrimitiveJson = {
       kind?: string;
       name?: string;
       handler?: string;
+      then?: string;
+      else?: string;
+      when?: { from?: string };
       agent?: {
         id?: string;
         toolFactories?: { id?: string }[];
@@ -393,52 +302,9 @@ for (const terminal of TERMINAL_STATES) {
       input?: { from?: string };
       inference?: { from?: string; literal?: { maxTokens?: number } };
       after?: string[];
+      body?: { inline?: { steps?: Record<string, PrimitiveJson> } };
     };
-    type IterationJson = {
-      steps?: Record<string, AgentStepJson & { kind?: string; then?: string; else?: string; when?: { from?: string } }>;
-      stepOrder?: string[];
-    };
-    type RenderedDefinition = { steps: Record<string, { body?: IterationJson }> };
-
-    /**
-     * Strips every `step`/`gate`/`escalation` primitive (and its id from
-     * `stepOrder`) out of every iteration body, recursively — the shape a
-     * source-less render never carries, so what remains is exactly what the
-     * in-process, gates-only definition builds. Generalises the old
-     * build-step-only removal to every stage's agent steps at once.
-     */
-    function stripAgentPrimitives(node: unknown): unknown {
-      if (Array.isArray(node)) return node.map(stripAgentPrimitives);
-      if (!node || typeof node !== "object") return node;
-      const obj = node as Record<string, unknown>;
-      if (obj.steps && typeof obj.steps === "object") {
-        const rawSteps = obj.steps as Record<string, { kind?: string }>;
-        const kept: Record<string, unknown> = {};
-        for (const [id, step] of Object.entries(rawSteps)) {
-          if (step && ["step", "gate", "escalation"].includes(step.kind ?? "")) continue;
-          // Evidence park is additive with the offering (it follows the build
-          // agent); the in-process, gates-only iteration has none. Same for
-          // the round's own admit-draft: it exists only once a drafting round
-          // has agent steps to admit ahead of.
-          if (id === EVIDENCE_STEP_ID || id === EVIDENCE_ADMIT_STEP_ID || id === ADMIT_DRAFT_STEP_ID) continue;
-          kept[id] = stripAgentPrimitives(step);
-        }
-        const out: Record<string, unknown> = {};
-        for (const [key, value] of Object.entries(obj)) {
-          if (key === "steps") {
-            out.steps = kept;
-          } else if (key === "stepOrder" && Array.isArray(value)) {
-            out.stepOrder = (value as string[]).filter((id) => id in kept);
-          } else {
-            out[key] = stripAgentPrimitives(value);
-          }
-        }
-        return out;
-      }
-      const out: Record<string, unknown> = {};
-      for (const [key, value] of Object.entries(obj)) out[key] = stripAgentPrimitives(value);
-      return out;
-    }
+    type RenderedDefinition = { steps: Record<string, PrimitiveJson> };
 
     const dir = await mkdtemp(join(tmpdir(), "sb-lifecycle-source-"));
     try {
@@ -490,89 +356,12 @@ for (const terminal of TERMINAL_STATES) {
 
       const withSource = (await import(withSourcePath)) as { default: RenderedDefinition };
       const withSourceSteps = withSource.default.steps;
-
-      // Stripping every step/gate/escalation out of the drafted render must
-      // leave exactly the in-process, gates-only definition: whatever an
-      // offering adds is additive, never a different shape underneath it.
-      if (JSON.stringify(stripAgentPrimitives(withSource.default)) !== inProcess) {
-        problems.push("The lifecycle rendered with a source differs from the package beyond its agent steps");
-      }
-
-      // With an offering the build stage's round is followed by the build
-      // agent: a real step under the sidecar, with the kit's stage 8 prompt,
-      // the posix tools, and the offering as its declared source.
-      const buildBody = withSourceSteps[revise(BUILD_STAGE as never)]?.body?.steps ?? {};
-
-      // The round is admitted before anything builds: guard.ts runs against
-      // the run's own carried build state, and a refused command skips the
-      // build agent entirely rather than running it anyway.
-      const roundAdmit = buildBody[ROUND_ADMIT_STEP_ID];
-      const roundDecide = buildBody[ROUND_DECIDE_STEP_ID];
-      const roundRefused = buildBody[ROUND_REFUSED_STEP_ID];
-      if (!roundAdmit || roundAdmit.kind !== "action" || roundAdmit.handler !== "admitGate") {
-        problems.push("The build stage's round does not admit through admitGate");
-      } else if (!roundAdmit.after?.includes(ROUND_STEP_ID)) {
-        problems.push("The round admit does not follow the round awaiter");
-      }
-      if (!roundDecide || roundDecide.kind !== "gate" || roundDecide.when?.from !== `steps.${ROUND_ADMIT_STEP_ID}.output.refused`) {
-        problems.push("The round's decide gate does not read the round admit's refusal");
-      } else if (roundDecide.then !== ROUND_REFUSED_STEP_ID || roundDecide.else !== BUILD_STEP_ID) {
-        problems.push("The round's decide gate does not branch to refused/build");
-      }
-      if (!roundRefused) problems.push("The build stage's iteration has no refused branch for the round");
-
-      const buildStep = buildBody[BUILD_STEP_ID];
-      if (!buildStep || buildStep.kind !== "step" || buildStep.agent?.id !== agentFor(BUILD_STAGE as never).id) {
-        problems.push("The build stage's iteration has no agent step for the kit's stage 8 specialist");
-      } else {
-        if (!buildStep.after?.includes(ROUND_DECIDE_STEP_ID)) {
-          problems.push("The build agent does not run after the round's decide gate");
-        }
-        if (!buildStep.agent?.toolFactories?.some((tool) => tool.id === "@intx/tools-posix/sidecar-bundle")) {
-          problems.push("The build agent carries no posix tools");
-        }
-        const declared = buildStep.agent?.inference?.sources?.[0];
-        if (declared?.provider !== source.provider || declared?.model !== source.model) {
-          problems.push("The build agent does not declare the offering it was rendered with");
-        }
-      }
-
-      const evidence = buildBody[EVIDENCE_STEP_ID];
-      const evidenceAdmit = buildBody[EVIDENCE_ADMIT_STEP_ID];
-      if (
-        !evidence ||
-        evidence.kind !== "awaitSignal" ||
-        evidence.name !== evidenceSignal(BUILD_STAGE as never) ||
-        !evidence.after?.includes(BUILD_STEP_ID)
-      ) {
-        problems.push("The build stage's iteration has no evidence park after the build agent");
-      }
-      if (!evidenceAdmit || evidenceAdmit.kind !== "action" || evidenceAdmit.handler !== "admitGate") {
-        problems.push("The evidence park does not admit through admitGate");
-      } else if (!evidenceAdmit.after?.includes(EVIDENCE_STEP_ID)) {
-        problems.push("The evidence admit does not follow the evidence awaiter");
-      }
-      const buildOrder = withSourceSteps[revise(BUILD_STAGE as never)]?.body?.stepOrder ?? [];
-      if (
-        !buildOrder.includes(ROUND_STEP_ID) ||
-        !buildOrder.includes(ROUND_ADMIT_STEP_ID) ||
-        !buildOrder.includes(BUILD_STEP_ID) ||
-        !buildOrder.includes(EVIDENCE_STEP_ID)
-      ) {
-        problems.push("Stage 8 with a source is not round, round-admit, build, evidence");
-      }
+      const chatBodyWithSource = withSourceSteps[CHAT_STEP_ID]?.body?.inline?.steps ?? {};
 
       // The naming step: top level, the kit's namer, reads the run's opening
       // problem statement, and never gates stage 1 — it carries no `after`.
-      // Input is the whole `trigger.payload`, not a `.problemStatement` field
-      // selector: a trigger fired as a signed conversation message hands the
-      // step invoker a mail envelope, and a field selector into it throws
-      // (`SelectorError: missing key problemStatement`). The invoker itself
-      // projects a `Mail`-shaped payload's text/plain parts into the turn; a
-      // flat payload gets JSON-stringified whole. Either way the namer's own
-      // prompt reads `problemStatement` out of the JSON body it receives.
-      const namer = agentById("namer");
-      const nameStep = withSourceSteps[NAME_STEP_ID] as unknown as AgentStepJson | undefined;
+      const namer = (await import("@solutions-builder/app/kit")).agentById("namer");
+      const nameStep = withSourceSteps[NAME_STEP_ID];
       if (!nameStep || nameStep.kind !== "step" || nameStep.agent?.id !== namer?.id) {
         problems.push("The rendered lifecycle has no naming step for the kit's namer");
       } else {
@@ -587,223 +376,176 @@ for (const terminal of TERMINAL_STATES) {
         problems.push("The source-less rendered lifecycle carries a naming step");
       }
 
-      // Every drafted stage (everything but 5 and 8) is: round, a decide gate
-      // reading the round's draft flag, and a draft step for the kit's
-      // specialist. Stage 1 also carries the brief evaluator after its draft.
-      // Stage 6's draft sits behind a gate of its own, after the
-      // requirements' gate, and is checked in full below.
-      for (const stage of STAGES) {
-        if (stage === 5 || (stage as number) === BUILD_STAGE) continue;
-        // Stage 9 renders its one step under `DELIVERY_STEP_ID`, not
-        // `DRAFT_STEP_ID`: the deployed workflow's capability walk refuses a
-        // leaf step id that recurs with different grants across loop bodies,
-        // and stage 9 alone carries the delivery_status tool.
-        const stepId = (stage as number) === DELIVERY_STAGE ? DELIVERY_STEP_ID : DRAFT_STEP_ID;
-        const iteration = withSourceSteps[revise(stage)]?.body;
-        const decide = iteration?.steps?.[DECIDE_STEP_ID];
-        const draft = iteration?.steps?.[stepId];
-        const gated = (stage as number) === 6;
-        const admitDraft = iteration?.steps?.[ADMIT_DRAFT_STEP_ID];
-        if (!admitDraft || admitDraft.kind !== "action" || admitDraft.handler !== "admitDraftGate") {
-          problems.push(`Stage ${stage} does not admit its round through admitDraftGate`);
-        } else if (!admitDraft.after?.includes(ROUND_STEP_ID)) {
-          problems.push(`Stage ${stage}'s admit-draft does not follow the round`);
+      // The chat body's router: is-1..is-8 pointing at the first agent step of
+      // each stage (or `none`), and `route` first.
+      const route = chatBodyWithSource["route"];
+      if (!route || route.kind !== "action" || route.handler !== "routeMessage") {
+        problems.push("The chat body's route step is not an action calling routeMessage");
+      } else if (route.input?.from !== "trigger.payload") {
+        problems.push("The chat body's route step does not read the run's whole trigger payload");
+      }
+
+      // Every stage but 5 and 8 is a draft step reading the router's output,
+      // reached through its own `is-N` gate. Stage 1 also carries the brief
+      // evaluator after its draft; stage 6's plan sits behind its own
+      // requirements step; stage 5 fans out one package per audience.
+      for (const stage of [1, 2, 3, 4, 6, 7] as const) {
+        const draftId = stage === 6 ? `draft-${stage}` : `draft-${stage}`;
+        const isGate = chatBodyWithSource[`is-${stage}`];
+        const draft = chatBodyWithSource[draftId];
+        if (!isGate || isGate.kind !== "gate" || isGate.when?.from !== `steps.route.output.at.${stage}`) {
+          problems.push(`Stage ${stage}'s router gate does not read the routed flag`);
         }
-        if (!decide || decide.kind !== "gate" || decide.when?.from !== `steps.${ADMIT_DRAFT_STEP_ID}.output.draft`) {
-          problems.push(`Stage ${stage}'s decide gate does not read the admitted draft flag`);
-        } else if (decide.then !== (gated ? "pick-0" : stepId) || decide.else !== NO_DRAFT_STEP_ID) {
-          problems.push(`Stage ${stage}'s decide gate does not branch to draft/no-draft`);
+        if (stage !== 6 && (!isGate || isGate.then !== draftId)) {
+          problems.push(`Stage ${stage}'s router gate does not lead to its draft step`);
         }
-        // Stage 4 alone does not trust the round's own inference cap: there
-        // is no host route left to police it, so the deploy-time designer
-        // setting is baked in as a literal instead (`lifecycle-source.ts`).
-        const draftReadsInferenceOffRound =
-          (stage as number) === 4
-            ? typeof draft?.inference?.literal?.maxTokens === "number"
-            : draft?.inference?.from === `steps.${ROUND_STEP_ID}.output.inference`;
-        // Stage 1's draft reads the whole round output merged with the run's
-        // trigger payload — the only stage whose specialist may need the
-        // opening problem statement instead of a round's `message` (the
-        // round that fires it starts with an empty one). Every other
-        // ungated stage reads the round output alone: the round's own
-        // signal (`apps/web/src/run-signal.ts`'s `DraftIntent`) never
-        // carried a `prompt` field, so a selector reaching for one throws.
-        const draftInputOk =
-          (stage as number) === EVALUATED_STAGE
-            ? Array.isArray((draft?.input as { merge?: unknown } | undefined)?.merge) &&
-              ((draft?.input as { merge?: { from?: string }[] }).merge?.[0]?.from === "trigger.payload") &&
-              ((draft?.input as { merge?: { from?: string }[] }).merge?.[1]?.from === `steps.${ROUND_STEP_ID}.output`)
-            : draft?.input?.from === `steps.${ROUND_STEP_ID}.output`;
-        if (!draft || draft.kind !== "step" || draft.agent?.id !== agentFor(stage).id) {
+        if (!draft || draft.kind !== "step" || draft.agent?.id !== agentFor(stage as never).id) {
           problems.push(`Stage ${stage}'s draft step is not the kit's specialist`);
-        } else if (!draftReadsInferenceOffRound) {
-          problems.push(`Stage ${stage}'s draft step does not carry its output-token cap correctly`);
-        } else if (!gated && !draftInputOk) {
-          problems.push(`Stage ${stage}'s draft step does not read the round's output`);
-        } else if (!gated && !draft.after?.includes(DECIDE_STEP_ID)) {
-          problems.push(`Stage ${stage}'s draft step does not follow its decide gate`);
-        } else if (
-          (stage as number) === DELIVERY_STAGE &&
-          !draft.agent?.toolFactories?.some((tool) => tool.id === deliveryStatusTool.id)
-        ) {
-          problems.push(`Stage ${stage}'s draft step does not carry the delivery_status tool`);
-        } else if (
-          (stage as number) === DELIVERY_STAGE &&
-          !draft.agent?.toolFactories?.some((tool) => tool.id === deliverTool.id)
-        ) {
-          problems.push(`Stage ${stage}'s draft step does not carry the deliver tool`);
+          continue;
         }
-        const noDraft = iteration?.steps?.[NO_DRAFT_STEP_ID];
-        if (!noDraft || noDraft.kind !== "escalation" || !noDraft.after?.includes(DECIDE_STEP_ID)) {
-          problems.push(`Stage ${stage} has no no-draft escalation after its decide gate`);
+        if (stage === 4) {
+          if (typeof draft.inference?.literal?.maxTokens !== "number") {
+            problems.push("Stage 4's draft step does not carry the designer's literal token cap");
+          }
+        } else if (draft.inference?.from !== "steps.route.output.inference") {
+          problems.push(`Stage ${stage}'s draft step does not read the router's inference field`);
         }
-        if (stage === EVALUATED_STAGE) {
-          const evaluator = agentById("brief-evaluator");
-          const evaluate = iteration?.steps?.[EVALUATE_STEP_ID];
-          if (!evaluate || evaluate.kind !== "step" || evaluate.agent?.id !== evaluator?.id) {
-            problems.push("Stage 1 has no brief-evaluator step after its draft");
-          } else if (evaluate.input?.from !== `steps.${DRAFT_STEP_ID}.output.reply`) {
-            problems.push("Stage 1's evaluator does not read the draft's reply");
-          } else if (!evaluate.after?.includes(DRAFT_STEP_ID)) {
-            problems.push("Stage 1's evaluator does not follow the draft");
+        if (stage === 6) {
+          if (draft.input?.from !== "steps.requirements-6.output.reply") {
+            problems.push("Stage 6's draft step does not read the requirements' reply");
+          }
+          if (!draft.after?.includes("requirements-6")) {
+            problems.push("Stage 6's draft step does not follow the requirements step");
+          }
+        } else {
+          if (draft.input?.from !== "steps.route.output") {
+            problems.push(`Stage ${stage}'s draft step does not read the router's output`);
+          }
+          if (!draft.after?.includes(`is-${stage}`)) {
+            problems.push(`Stage ${stage}'s draft step does not follow its router gate`);
           }
         }
       }
 
-      // Stage 6: the requirements author writes, behind a gate reading
-      // wanted[0]; the architect drafts behind a gate reading wanted[1] that
-      // follows the requirements either way; then the four panel principals
-      // review the plan in order, each after the last, all reading the same
-      // draft reply. The first review follows the draft alone, so a round
-      // that skips the plan skips its reviews with it.
-      {
-        const iteration = withSourceSteps[revise(6 as never)]?.body;
-        const author = agentById("requirements-author");
-        const pick0 = iteration?.steps?.["pick-0"];
-        const skip0 = iteration?.steps?.["skip-0"];
-        const requirements = iteration?.steps?.[REQUIREMENTS_STEP_ID];
-        if (!pick0 || pick0.kind !== "gate" || pick0.then !== REQUIREMENTS_STEP_ID || pick0.else !== "skip-0") {
-          problems.push("Stage 6 has no pick-0 gate choosing between requirements and skip-0");
-        } else if ((pick0.when as { from?: string } | undefined)?.from !== `steps.${ROUND_STEP_ID}.output.wanted[0]`) {
-          problems.push("Stage 6's pick-0 does not read wanted[0]");
-        } else if (!pick0.after?.includes(DECIDE_STEP_ID)) {
-          problems.push("Stage 6's pick-0 does not follow the decide gate");
-        }
-        if (!skip0 || skip0.kind !== "escalation" || !skip0.after?.includes("pick-0")) {
-          problems.push("Stage 6's skip-0 is not an escalation after pick-0");
-        }
-        if (!requirements || requirements.kind !== "step" || requirements.agent?.id !== author?.id) {
-          problems.push("Stage 6 has no requirements step for the kit's requirements author");
-        } else if (requirements.input?.from !== `steps.${ROUND_STEP_ID}.output`) {
-          problems.push("Stage 6's requirements step does not read the round output");
-        } else if (!requirements.after?.includes("pick-0")) {
-          problems.push("Stage 6's requirements step does not follow pick-0");
-        }
-        const pick1 = iteration?.steps?.["pick-1"];
-        const skip1 = iteration?.steps?.["skip-1"];
-        const draft = iteration?.steps?.[DRAFT_STEP_ID];
-        if (!pick1 || pick1.kind !== "gate" || pick1.then !== DRAFT_STEP_ID || pick1.else !== "skip-1") {
-          problems.push("Stage 6 has no pick-1 gate choosing between draft and skip-1");
-        } else if ((pick1.when as { from?: string } | undefined)?.from !== `steps.${ROUND_STEP_ID}.output.wanted[1]`) {
-          problems.push("Stage 6's pick-1 does not read wanted[1]");
-        } else if (![REQUIREMENTS_STEP_ID, "skip-0"].every((id) => pick1.after?.includes(id))) {
-          problems.push("Stage 6's pick-1 does not follow requirements and skip-0");
-        }
-        if (!skip1 || skip1.kind !== "escalation" || !skip1.after?.includes("pick-1")) {
-          problems.push("Stage 6's skip-1 is not an escalation after pick-1");
-        }
-        if (draft?.input?.from !== `steps.${ROUND_STEP_ID}.output`) {
-          problems.push("Stage 6's draft step does not read the round output");
-        } else if (!draft.after?.includes("pick-1")) {
-          problems.push("Stage 6's draft step does not follow pick-1");
-        }
-        const firstReview = iteration?.steps?.[panelStepId(panelPrincipals()[0]!.id.replace(/^senior-engineer-/, ""))];
-        if (firstReview?.after?.includes("skip-1")) {
-          problems.push("Stage 6's first review follows the plan's skip marker, so it would review a plan not written this round");
-        }
-        let previous = DRAFT_STEP_ID;
-        for (const role of panelPrincipals()) {
-          const specialty = role.id.replace(/^senior-engineer-/, "");
-          const stepId = panelStepId(specialty);
-          const review = iteration?.steps?.[stepId];
-          if (!review || review.kind !== "step" || review.agent?.id !== role.id) {
-            problems.push(`Stage 6 has no ${stepId} step for ${role.id}`);
-          } else if (review.input?.from !== `steps.${DRAFT_STEP_ID}.output.reply`) {
-            problems.push(`Stage 6's ${stepId} does not read the draft's reply`);
-          } else if (!review.after?.includes(previous)) {
-            problems.push(`Stage 6's ${stepId} does not follow ${previous}`);
-          }
-          previous = stepId;
+      // Stage 1's evaluator.
+      const evaluator = (await import("@solutions-builder/app/kit")).agentById("brief-evaluator");
+      const evaluate = chatBodyWithSource["evaluate-1"];
+      if (!evaluate || evaluate.kind !== "step" || evaluate.agent?.id !== evaluator?.id) {
+        problems.push("Stage 1 has no brief-evaluator step after its draft");
+      } else if (evaluate.input?.from !== "steps.draft-1.output.reply") {
+        problems.push("Stage 1's evaluator does not read the draft's reply");
+      } else if (!evaluate.after?.includes("draft-1")) {
+        problems.push("Stage 1's evaluator does not follow the draft");
+      }
+
+      // Stage 6's requirements step and its panel reviews.
+      const requirementsAuthor = (await import("@solutions-builder/app/kit")).agentById("requirements-author");
+      const requirements = chatBodyWithSource["requirements-6"];
+      const is6 = chatBodyWithSource["is-6"];
+      if (!is6 || is6.then !== "requirements-6") {
+        problems.push("Stage 6's router gate does not lead to the requirements step");
+      }
+      if (!requirements || requirements.kind !== "step" || requirements.agent?.id !== requirementsAuthor?.id) {
+        problems.push("Stage 6 has no requirements step for the kit's requirements author");
+      } else if (requirements.input?.from !== "steps.route.output") {
+        problems.push("Stage 6's requirements step does not read the router's output");
+      } else if (!requirements.after?.includes("is-6")) {
+        problems.push("Stage 6's requirements step does not follow its router gate");
+      }
+      for (const role of panelPrincipals()) {
+        const specialty = role.id.replace(/^senior-engineer-/, "");
+        const stepId = `review-6-${specialty}`;
+        const review = chatBodyWithSource[stepId];
+        if (!review || review.kind !== "step" || review.agent?.id !== role.id) {
+          problems.push(`Stage 6 has no ${stepId} step for ${role.id}`);
+        } else if (review.input?.from !== "steps.draft-6.output.reply") {
+          problems.push(`Stage 6's ${stepId} does not read the plan's reply`);
+        } else if (!review.after?.includes("draft-6")) {
+          problems.push(`Stage 6's ${stepId} does not follow the plan draft`);
         }
       }
 
-      // Stage 5: one package step per audience, in order, each reading its
-      // own slot of the round's rendered prompts, and each behind a gate of
-      // its own that reads the round's "wanted" flag for that audience: a
-      // round may write one stakeholder's package again and leave the rest.
-      // The gate's empty branch is a skip marker, and the next gate follows
-      // both, so the chain goes on whichever way each gate went.
+      // Stage 8's build step: the kit's stage 8 specialist, posix tools, the
+      // offering it was rendered with, timed out at BUILD_STEP_TIMEOUT_MS.
+      const is8 = chatBodyWithSource["is-8"];
+      const build = chatBodyWithSource["build-8"];
+      if (!is8 || is8.then !== "build-8") {
+        problems.push("Stage 8's router gate does not lead to the build step");
+      }
+      if (!build || build.kind !== "step" || build.agent?.id !== agentFor(BUILD_STAGE as never).id) {
+        problems.push("The chat body has no build step for the kit's stage 8 specialist");
+      } else {
+        if (!build.after?.includes("is-8")) {
+          problems.push("The build step does not follow its router gate");
+        }
+        if (!build.agent?.toolFactories?.some((tool) => tool.id === "@intx/tools-posix/sidecar-bundle")) {
+          problems.push("The build step carries no posix tools");
+        }
+        const declared = build.agent?.inference?.sources?.[0];
+        if (declared?.provider !== source.provider || declared?.model !== source.model) {
+          problems.push("The build step does not declare the offering it was rendered with");
+        }
+      }
+
+      // Stage 9's delivery-check step: standalone, after gate-8, carrying the
+      // delivery-status and deliver tools — not part of the chat body's router,
+      // since routeMessage's output only ever carries flags for stages 1..8.
+      const delivery = withSourceSteps[deliveryStepId];
+      if (!delivery || delivery.kind !== "step" || delivery.agent?.id !== agentFor(DELIVERY_STAGE as never).id) {
+        problems.push("The rendered lifecycle has no delivery-check step for the kit's stage 9 specialist");
+      } else {
+        if (!delivery.after?.includes(gateStepId(8 as never))) {
+          problems.push("The delivery-check step does not follow gate-8");
+        }
+        if (!delivery.agent?.toolFactories?.some((tool) => tool.id === deliveryStatusTool.id)) {
+          problems.push("The delivery-check step does not carry the delivery_status tool");
+        }
+        if (!delivery.agent?.toolFactories?.some((tool) => tool.id === deliverTool.id)) {
+          problems.push("The delivery-check step does not carry the deliver tool");
+        }
+      }
+      if (deliveryStepId in chatBodyWithSource) {
+        problems.push("The delivery-check step is wired into the chat body's router; it must be standalone");
+      }
+
+      // Stage 5: one package step per audience, all reached directly off
+      // `is-5` (a round may write one stakeholder's package again and leave
+      // the rest, so nothing chains them to each other).
       {
         const withAudiences = (await import(withAudiencesPath)) as { default: RenderedDefinition };
-        const iteration = withAudiences.default.steps[revise(5 as never)]?.body;
-        const decide = iteration?.steps?.[DECIDE_STEP_ID];
-        if (decide?.then !== "pick-0") {
-          problems.push(`Stage 5's decide gate does not lead to the first package's gate (leads to ${String(decide?.then)})`);
+        const chatBodyWithAudiences =
+          withAudiences.default.steps[CHAT_STEP_ID]?.body?.inline?.steps ?? {};
+        const is5 = chatBodyWithAudiences["is-5"];
+        if (!is5 || is5.then !== "package-5-0") {
+          problems.push("Stage 5's router gate does not lead to the first package step");
         }
-        let previous: string[] = [DECIDE_STEP_ID];
         audiences.forEach((_audience, index) => {
-          const stepId = audienceStepId(index);
-          const pickId = `pick-${index}`;
-          const skipId = `skip-${index}`;
-          const pick = iteration?.steps?.[pickId];
-          const skip = iteration?.steps?.[skipId];
-          const packageStep = iteration?.steps?.[stepId];
-          if (!pick || pick.kind !== "gate" || pick.then !== stepId || pick.else !== skipId) {
-            problems.push(`Stage 5 has no ${pickId} gate choosing between ${stepId} and ${skipId}`);
-          } else if ((pick.when as { from?: string } | undefined)?.from !== `steps.${ROUND_STEP_ID}.output.wanted[${index}]`) {
-            problems.push(`Stage 5's ${pickId} does not read wanted[${index}]`);
-          } else if (!previous.every((id) => pick.after?.includes(id))) {
-            problems.push(`Stage 5's ${pickId} does not follow ${previous.join(" and ")}`);
-          }
-          if (!skip || skip.kind !== "escalation" || !skip.after?.includes(pickId)) {
-            problems.push(`Stage 5's ${skipId} is not an escalation after ${pickId}`);
-          }
+          const stepId = `package-5-${index}`;
+          const packageStep = chatBodyWithAudiences[stepId];
           if (!packageStep || packageStep.kind !== "step" || packageStep.agent?.id !== agentFor(5 as never).id) {
             problems.push(`Stage 5 has no ${stepId} step for the kit's presentation specialist`);
-          } else if (packageStep.input?.from !== `steps.${ROUND_STEP_ID}.output`) {
-            problems.push(`Stage 5's ${stepId} does not read the round output`);
-          } else if (!packageStep.after?.includes(pickId)) {
-            problems.push(`Stage 5's ${stepId} does not follow ${pickId}`);
+          } else if (packageStep.input?.from !== "steps.route.output") {
+            problems.push(`Stage 5's ${stepId} does not read the router's output`);
+          } else if (!packageStep.after?.includes("is-5")) {
+            problems.push(`Stage 5's ${stepId} does not follow its router gate`);
           } else if (!packageStep.agent?.toolFactories?.some((tool) => tool.id === renderDeckTool.id)) {
             problems.push(`Stage 5's ${stepId} does not carry the render_deck tool`);
           }
-          previous = [stepId, skipId];
         });
 
-        // Zero audiences renders no package step and no gate either — a
-        // stage with no agent step stays gates-only, exactly like today.
-        const noAudiences = withSourceSteps[revise(5 as never)]?.body;
-        if (Object.keys(noAudiences?.steps ?? {}).some((id) => id !== ROUND_STEP_ID)) {
-          problems.push("Stage 5 with no audiences renders more than the round");
+        // Zero audiences renders no package step, and its router gate leads
+        // straight to `none` — a stage with no agent step stays gates-only.
+        const chatBodyNoAudiences = withSourceSteps[CHAT_STEP_ID]?.body?.inline?.steps ?? {};
+        if (Object.keys(chatBodyNoAudiences).some((id) => id.startsWith("package-5-"))) {
+          problems.push("Stage 5 with no audiences renders a package step");
+        }
+        if (chatBodyNoAudiences["is-5"]?.then !== "none") {
+          problems.push("Stage 5 with no audiences does not route straight to none");
         }
       }
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
-  }
-
-  // The stage-7 interlock has to survive into the native definition: cost
-  // approval, not stage approval, is what leaves that gate.
-  if (commandsAtStage(7).includes("stage.approve")) {
-    problems.push("The native workflow offers stage.approve at stage 7");
-  }
-  if (!commandsAtStage(7).includes("cost.approve")) {
-    problems.push("The native workflow does not offer cost.approve at stage 7");
-  }
-
-  // Projects start when a person starts one.
-  if (!definition.triggers.some((trigger) => (trigger as { type?: string }).type === "manual")) {
-    problems.push("The native workflow is not manually triggered");
   }
 }
 

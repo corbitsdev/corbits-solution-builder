@@ -34,7 +34,6 @@ import { Preparing } from "./preparing.jsx";
 import { clock } from "./elapsed.jsx";
 import { StageDocument } from "./document.jsx";
 import { SELECTABLE_TARGETS } from "@solutions-builder/app/targets";
-import { EVALUATED_STAGE } from "@solutions-builder/app/workflows/stage-loop";
 import { foldProjectRuns, projectFeedback, type FoldedFeedback, type StageStatus } from "../../run-fold.ts";
 import { approvalCommand, deliverGate, DRAFT_MAX_TOKENS_DEFAULT, sendStageMail, submitThen } from "../../run-signal.ts";
 import { foldEvaluation, foldStageThread, nextOpenQuestion } from "../../stage-thread.ts";
@@ -200,7 +199,7 @@ export function StageWorkspace({
           opening: stage === 1 ? detail.opening : null,
           carried,
         }),
-        stage === EVALUATED_STAGE
+        stage === 1
           ? foldEvaluation({ tenantId: detail.tenantId, anchorRunId: detail.anchorRunId, stage: stage as Stage })
           : Promise.resolve(null),
       ]);

@@ -1,12 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { Transport } from "@intx/hub-client";
 import { AUTHORITIES, type Authority } from "@solutions-builder/app/ledger";
-import {
-  approveSignal,
-  evidenceSignal,
-  exhaustedSignal,
-  roundSignal,
-} from "@solutions-builder/app/workflows/stage-loop";
+import { approveSignal, evidenceSignal, freezeSignal } from "@solutions-builder/app/workflows/stage-loop";
 import type { HubGrant, HubRole } from "./hub.js";
 import { installProjectAuthority } from "./project-tenant.js";
 import {
@@ -39,6 +34,14 @@ describe("signalGrantsFor", () => {
     expect(signalGrantsFor("system")).toEqual([]);
   });
 
+  test("a draft round never mints a signal: the chat section drives rounds by mail", () => {
+    expect(authorityHoldsCommand("project_owner", "stage.draft")).toBe(true);
+    const owner = actionsFor("project_owner");
+    for (let stage = 1; stage <= 9; stage++) {
+      expect(owner.has(signalGrantAction(`solutions-builder.stage.${stage}.round`))).toBe(false);
+    }
+  });
+
   test("a role without the authority does not get that command's signal", () => {
     const owner = actionsFor("project_owner");
     const budget = actionsFor("budget_approver");
@@ -46,21 +49,11 @@ describe("signalGrantsFor", () => {
     const audience = actionsFor("audience_member");
     const delivery = actionsFor("delivery_recipient");
 
-    expect(authorityHoldsCommand("project_owner", "stage.draft")).toBe(true);
-    expect(authorityHoldsCommand("budget_approver", "stage.draft")).toBe(false);
-    expect(budget.has(signalGrantAction(roundSignal(1)))).toBe(false);
-    expect(audience.has(signalGrantAction(roundSignal(1)))).toBe(false);
-    expect(delivery.has(signalGrantAction(roundSignal(1)))).toBe(false);
-    expect(builder.has(signalGrantAction(roundSignal(1)))).toBe(false);
-    expect(owner.has(signalGrantAction(roundSignal(1)))).toBe(true);
-
     expect(authorityHoldsCommand("budget_approver", "cost.approve")).toBe(true);
     expect(authorityHoldsCommand("delivery_recipient", "cost.approve")).toBe(false);
     expect(authorityHoldsCommand("audience_member", "cost.approve")).toBe(false);
     expect(budget.has(signalGrantAction(approveSignal(7)))).toBe(true);
-    expect(budget.has(signalGrantAction(exhaustedSignal(7)))).toBe(true);
     expect(delivery.has(signalGrantAction(approveSignal(7)))).toBe(false);
-    expect(delivery.has(signalGrantAction(exhaustedSignal(7)))).toBe(false);
 
     expect(authorityHoldsCommand("builder_operator", "audience.decide")).toBe(false);
     expect(authorityHoldsCommand("audience_member", "audience.decide")).toBe(true);
@@ -72,12 +65,12 @@ describe("signalGrantsFor", () => {
     expect(owner.has(signalGrantAction(evidenceSignal(8)))).toBe(true);
     expect(builder.has(signalGrantAction(evidenceSignal(8)))).toBe(true);
     expect(budget.has(signalGrantAction(evidenceSignal(8)))).toBe(false);
-  });
 
-  test("a gate command mints both the live gate and the exhaustion gate", () => {
-    const technical = actionsFor("technical_approver");
-    expect(technical.has(signalGrantAction(approveSignal(6)))).toBe(true);
-    expect(technical.has(signalGrantAction(exhaustedSignal(6)))).toBe(true);
+    expect(authorityHoldsCommand("builder_operator", "build.freeze")).toBe(true);
+    expect(authorityHoldsCommand("project_owner", "build.freeze")).toBe(true);
+    expect(builder.has(signalGrantAction(freezeSignal()))).toBe(true);
+    expect(owner.has(signalGrantAction(freezeSignal()))).toBe(true);
+    expect(budget.has(signalGrantAction(freezeSignal()))).toBe(false);
   });
 });
 
@@ -190,7 +183,7 @@ describe("installProjectAuthority", () => {
     expect(
       budget.some(
         (grant) =>
-          grant.resource === WORKFLOW_RUN_RESOURCE && grant.action === signalGrantAction(roundSignal(1)),
+          grant.resource === WORKFLOW_RUN_RESOURCE && grant.action === signalGrantAction(approveSignal(1)),
       ),
     ).toBe(false);
     expect(

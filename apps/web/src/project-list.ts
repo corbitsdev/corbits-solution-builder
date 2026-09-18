@@ -20,7 +20,6 @@ import {
   workflowsFor,
   type HubDeployment,
 } from "@solutions-builder/installer";
-import { positionOfSignal } from "@solutions-builder/app/workflows/stage-loop";
 import type { ProjectSummary } from "./client.ts";
 import { createHubTransport } from "./hub.ts";
 import { foldProjectStanding } from "./run-fold.ts";
@@ -54,9 +53,10 @@ export async function listProjectSummaries(transport: Transport = createHubTrans
       if (title !== null && title !== record.title) {
         updateProject(transport, record.id, { title }).catch(() => {});
       }
-      const position = status?.parked && status.signalName ? positionOfSignal(status.stage, status.signalName) : null;
-      const turn: ProjectSummary["turn"] =
-        status === null ? "idle" : !status.parked ? "writing" : position?.at === "round" ? "question" : "approve";
+      // Every parked position is the stage's approve-chain gate now — there
+      // is no separate round step to distinguish a question from an
+      // approval wait (see `packages/solutions-builder/src/workflows/stage-loop.ts`).
+      const turn: ProjectSummary["turn"] = status === null ? "idle" : !status.parked ? "writing" : "approve";
       return {
         id: record.id,
         revision: record.revision,

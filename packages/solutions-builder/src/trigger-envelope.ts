@@ -76,3 +76,72 @@ export function openingFromTrigger(payload: unknown): Opening | null {
   }
   return fromFlat(decoded);
 }
+
+/**
+ * A round's own mail: `{ stage, command, message, audiences, documents,
+ * feedback, inference }`, the JSON text a client sends with every stage
+ * input (BUILD_PLAN_V3, the "chat section" contract). `stage` defaults to
+ * `1` and `command` to `"stage.draft"` when the decoded body carries no
+ * `command` at all — which is exactly the shape of the opening mail from
+ * project creation, so that mail is treated as `{ stage: 1, command:
+ * "stage.draft", message: <opening text> }` rather than as a round this
+ * module does not recognize.
+ */
+export interface RoundEnvelope {
+  readonly stage: number;
+  readonly command: string;
+  readonly message?: string;
+  readonly audiences?: readonly string[];
+  readonly documents?: readonly string[];
+  readonly feedback?: string;
+  readonly inference?: Record<string, unknown>;
+}
+
+function isStage(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 9;
+}
+
+function asStringArray(value: unknown): readonly string[] | undefined {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string") ? (value as string[]) : undefined;
+}
+
+function fromRoundBody(payload: unknown): RoundEnvelope | null {
+  if (!isRecord(payload)) return null;
+  const { command, stage, message, audiences, documents, feedback, inference } = payload;
+  if (typeof command !== "string") return null;
+  const audienceList = asStringArray(audiences);
+  const documentList = asStringArray(documents);
+  return {
+    stage: isStage(stage) ? stage : 1,
+    command,
+    ...(typeof message === "string" ? { message } : {}),
+    ...(audienceList ? { audiences: audienceList } : {}),
+    ...(documentList ? { documents: documentList } : {}),
+    ...(typeof feedback === "string" ? { feedback } : {}),
+    ...(isRecord(inference) ? { inference } : {}),
+  };
+}
+
+/**
+ * A round's mail, from a run's raw `trigger.payload` in either shape it may
+ * arrive in — see `openingFromTrigger`. Defaults to `{ stage: 1, command:
+ * "stage.draft" }` when the payload names no `command` and carries no
+ * opening problem statement either.
+ */
+export function roundFromTrigger(payload: unknown): RoundEnvelope {
+  const bodyText = bodyTextOf(payload);
+  if (bodyText !== null) {
+    try {
+      const round = fromRoundBody(JSON.parse(bodyText));
+      if (round) return round;
+    } catch {
+      // Not JSON, or not a round shape: fall through to the opening shape.
+    }
+  } else {
+    const round = fromRoundBody(payload);
+    if (round) return round;
+  }
+  const opening = openingFromTrigger(payload);
+  if (opening) return { stage: 1, command: "stage.draft", message: opening.problemStatement };
+  return { stage: 1, command: "stage.draft" };
+}

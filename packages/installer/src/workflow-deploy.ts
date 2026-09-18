@@ -21,13 +21,6 @@ import {
   type InferenceSourcePin,
 } from "@solutions-builder/app/workflows/lifecycle-source";
 import {
-  continuingCommands,
-  ADMIT_STEP_ID,
-  EVIDENCE_STEP_ID,
-  ROUND_ADMIT_STEP_ID,
-  ROUND_STEP_ID,
-} from "@solutions-builder/app/workflows/stage-loop";
-import {
   assetsFor,
   catalogFor,
   gitTokensFor,
@@ -70,80 +63,19 @@ export async function deploymentIsLive(transport: Transport, tenantId: string, d
 export const LIFECYCLE_ASSET_NAME = "solutions-builder-project-lifecycle";
 const ENTRY_PATH = LIFECYCLE_ENTRY_PATH;
 const ENTRY = `./${ENTRY_PATH}`;
-const LOOPS_PATH = "loops.js";
 const ACTIONS_PATH = "actions.js";
 /** The workflow member inside the asset; the vendored @intx packages sit beside it. */
 const LIFECYCLE_DIR = "packages/lifecycle";
 const DIGEST_PATH = "closure.sha256";
 
 /**
- * The stage loop's `while` and `carry` refs, resolved by export name from the
- * package's own loops module. Pure data functions over the iteration's output,
- * which the runtime hands over as a record keyed by body step id.
- *
- * The revise loop's `round` step output is the signal payload, and the payload
- * names the ledger command a person issued. At stage 8 the evidence park after
- * the build agent is the command that decides whether the loop goes on: fail
- * starts another round, accept ends it. Other stages still read `round`.
- * A submit ends the loop and the run moves to the gate.
- *
- * A gate loop's `admit` step output is the verdict: refused means wait again.
- */
-function loopsModule(): string {
-  const continues = JSON.stringify(continuingCommands());
-  return `const CONTINUES = new Set(${continues});
-function roundCommand(childOutput) {
-  const evidence = childOutput && typeof childOutput === "object" ? childOutput[${JSON.stringify(EVIDENCE_STEP_ID)}] : null;
-  if (evidence && typeof evidence === "object" && typeof evidence.command === "string") return evidence.command;
-  const round = childOutput && typeof childOutput === "object" ? childOutput[${JSON.stringify(ROUND_STEP_ID)}] : null;
-  return round && typeof round === "object" && typeof round.command === "string" ? round.command : null;
-}
-// The build stage's round is admitted before it is counted: a refused command
-// (the wrong ledger row for the run's own state, a stale question, an
-// unverified checkpoint) never reaches CONTINUES at all — the loop goes
-// straight back to waiting on the same signal, with the round's carried
-// build state unchanged.
-function roundAdmitOutput(childOutput) {
-  const admit = childOutput && typeof childOutput === "object" ? childOutput[${JSON.stringify(ROUND_ADMIT_STEP_ID)}] : null;
-  return admit && typeof admit === "object" ? admit : null;
-}
-export function stillOpen(childOutput) {
-  const admit = roundAdmitOutput(childOutput);
-  if (admit && admit.refused === true) return true;
-  const command = roundCommand(childOutput);
-  return command !== null && CONTINUES.has(command);
-}
-export function carryRound(childOutput, carry) {
-  const admit = roundAdmitOutput(childOutput);
-  if (admit) return admit;
-  const evidence = childOutput && typeof childOutput === "object" ? childOutput[${JSON.stringify(EVIDENCE_STEP_ID)}] : null;
-  if (evidence) return evidence;
-  const round = childOutput && typeof childOutput === "object" ? childOutput[${JSON.stringify(ROUND_STEP_ID)}] : null;
-  return round ?? carry;
-}
-function admitOutput(childOutput) {
-  const admit = childOutput && typeof childOutput === "object" ? childOutput[${JSON.stringify(ADMIT_STEP_ID)}] : null;
-  return admit && typeof admit === "object" ? admit : null;
-}
-export function gateRefused(childOutput) {
-  const admit = admitOutput(childOutput);
-  return admit !== null && admit.refused === true;
-}
-export function carryGate(childOutput, carry) {
-  const admit = admitOutput(childOutput);
-  return admit ?? carry;
-}
-`;
-}
-
-/**
- * The `interchange.actions` module: the gate loop names `admitGate`, and a
- * drafted stage's round names `admitDraftGate` right after its own signal —
- * the workflow's own check on a `stage.draft` round's intent, since the
- * client delivers that signal straight to the run.
+ * The `interchange.actions` module: the chat section's `route` step names
+ * `routeMessage`, which parses the trigger envelope into the stage/command
+ * the router gate chain reads (CL-8598; no loop body, no admit action --
+ * rounds are chat-section steps now, not a loop the runtime iterates).
  */
 function actionsModule(): string {
-  return `export { admitGate, admitDraftGate } from "@solutions-builder/app/admit";
+  return `export { routeMessage } from "@solutions-builder/app/admit";
 `;
 }
 
@@ -165,7 +97,7 @@ export type ClosureSource = { manifest: ClosureManifest; fetchTarball: ClosureTa
 /**
  * The asset the sidecar evaluates: a workspace whose members are the lifecycle
  * package (a code entry that builds the definition with `@intx/workflow`, and
- * the loops module) and the vendored `@intx` packages it imports, so the
+ * the actions module) and the vendored `@intx` packages it imports, so the
  * closure resolves to the vendored revision rather than npm. A digest of every
  * file sits at the root so a changed byte anywhere is a new deployment.
  */
@@ -192,7 +124,7 @@ export async function renderLifecycleSource(
     private: true,
     type: "module",
     dependencies: WORKFLOW_PACKAGE_DEPENDENCIES,
-    interchange: { workflow: ENTRY, loops: `./${LOOPS_PATH}`, actions: `./${ACTIONS_PATH}` },
+    interchange: { workflow: ENTRY, actions: `./${ACTIONS_PATH}` },
   };
   const files: Record<string, string> = {
     "package.json": `${JSON.stringify(root, null, 2)}\n`,
@@ -207,7 +139,6 @@ export async function renderLifecycleSource(
           }
         : {},
     ),
-    [`${LIFECYCLE_DIR}/${LOOPS_PATH}`]: loopsModule(),
     [`${LIFECYCLE_DIR}/${ACTIONS_PATH}`]: actionsModule(),
     // The build agent's tools ride beside the workflow runtime, as the
     // manifest's full `@intx/*` set (workflow's and tools-posix's closures

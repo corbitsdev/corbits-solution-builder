@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Transport } from "@intx/hub-client";
-import { approveSignal, roundSignal } from "@solutions-builder/app/workflows/stage-loop";
+import { approveSignal } from "@solutions-builder/app/workflows/stage-loop";
 import { createHubTransport } from "./hub.ts";
 import type { StageStatus } from "./run-fold.ts";
 import {
@@ -72,22 +72,19 @@ describe("signalRun", () => {
 describe("gate = wait + named signal", () => {
   test("AC4: the stage-9 (final) gate maps to its named signal", () => {
     for (const command of ["delivery.accept", "delivery.reject", "delivery.revise"] as const) {
-      expect(gateSignalName(9, command, null)).toBe("solutions-builder.stage.9.approve");
+      expect(gateSignalName(9, command)).toBe(approveSignal(9));
     }
-    expect(gateSignalName(9, "delivery.accept", parked(9, "solutions-builder.stage.9.approve-after-exhaustion"))).toBe(
-      "solutions-builder.stage.9.approve-after-exhaustion",
-    );
   });
 
   test("the approval a stage leaves by is the ledger's: cost at 7, the draft before it", () => {
     expect(approvalCommand(7)).toBe("cost.approve");
     expect(approvalCommand(3)).toBe("stage.approve");
-    expect(gateSignalName(7, "cost.approve", null)).toBe(approveSignal(7));
+    expect(gateSignalName(7, "cost.approve")).toBe(approveSignal(7));
   });
 
-  test("a parked name for another stage or another park is not borrowed", () => {
-    expect(gateSignalName(3, "stage.approve", parked(2, approveSignal(2)))).toBe(approveSignal(3));
-    expect(gateSignalName(3, "stage.submit", parked(3, approveSignal(3)))).toBe(roundSignal(3));
+  test("stage.submit lands on the same gate signal as the decision that follows it", () => {
+    expect(gateSignalName(3, "stage.submit")).toBe(approveSignal(3));
+    expect(gateSignalName(3, "stage.approve")).toBe(approveSignal(3));
   });
 });
 
@@ -141,12 +138,12 @@ describe("AC6: the body is intent, never authority", () => {
 });
 
 describe("AC1: cancel is a signal on the run", () => {
-  test("build.cancel lands on the stage-8 round through the hub, not a host command", async () => {
+  test("build.cancel lands on the stage-8 gate through the hub, not a host command", async () => {
     const { calls, transport } = recording();
     await deliverGate(PROJECT, 8, null, { command: "build.cancel", runId: "run_8", reason: "stop" }, transport);
     expect(calls).toHaveLength(1);
     expect(calls[0]!.path).toBe("/api/tenants/tnt_ws/workflows/dep_1/signals");
-    expect(calls[0]!.body).toMatchObject({ signalName: roundSignal(8), payload: { command: "build.cancel", runId: "run_8" } });
+    expect(calls[0]!.body).toMatchObject({ signalName: approveSignal(8), payload: { command: "build.cancel", runId: "run_8" } });
   });
 });
 
@@ -192,19 +189,17 @@ describe("sendStageMail", () => {
 });
 
 describe("submitThen", () => {
-  test("submits, waits for the gate to park, then decides on the parked gate", async () => {
+  test("submits then decides, both landing on the stage's own gate signal", async () => {
     const { calls, transport } = recording();
-    const folds: (StageStatus | null)[] = [parked(3, roundSignal(3)), parked(3, "solutions-builder.stage.3.approve-after-exhaustion")];
     const delivered = await submitThen(
       PROJECT,
       3,
-      parked(3, roundSignal(3)),
+      null,
       { runId: "run_1", versions: [] },
       { command: "stage.approve", runId: "run_1", versions: [] },
       transport,
-      async () => folds.shift() ?? null,
     );
-    expect(delivered.map((entry) => entry.signalName)).toEqual([roundSignal(3), "solutions-builder.stage.3.approve-after-exhaustion"]);
+    expect(delivered.map((entry) => entry.signalName)).toEqual([approveSignal(3), approveSignal(3)]);
     expect(calls.map((call) => (call.body as { payload: { command: string } }).payload.command)).toEqual(["stage.submit", "stage.approve"]);
   });
 

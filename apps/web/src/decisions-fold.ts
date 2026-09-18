@@ -12,7 +12,7 @@ import { listProjectRecords, resolveWorkspace, workflowsFor } from "@solutions-b
 import { currentDeployment } from "./project-list.ts";
 import { STAGE_TITLES, type Stage } from "@solutions-builder/app/ledger";
 import { CONSEQUENCE, STATE_CONSEQUENCE, requiredAuthorityFor } from "@solutions-builder/app/decision-copy";
-import { DELIVERY_STAGE, EVIDENCE_STEP_ID, FREEZE_STEP_ID, exhaustedStepId, gateStepId } from "@solutions-builder/app/workflows/stage-loop";
+import { DELIVERY_STAGE, EVIDENCE_STEP_ID, FREEZE_STEP_ID, gateStepId } from "@solutions-builder/app/workflows/stage-loop";
 import { openQuestion, parkedSteps, type FoldedRun } from "@solutions-builder/app/project-state";
 import type { Wait } from "./client.ts";
 import { notifyDecisionOpen } from "./decision-notify.ts";
@@ -26,7 +26,7 @@ type ParkedDecision =
 
 function parkedDecision(runs: readonly FoldedRun[]): Omit<ParkedDecision, "kind" | "approvalId"> & { kind: "gate" | "freeze" | "evidence" | "question" } | null {
   for (const parked of parkedSteps(runs)) {
-    if (parked.stepId === gateStepId(parked.stage) || parked.stepId === exhaustedStepId(parked.stage)) {
+    if (parked.stepId === gateStepId(parked.stage)) {
       return { runId: parked.runId, stage: parked.stage, kind: "gate" };
     }
     if (parked.stepId === FREEZE_STEP_ID) return { runId: parked.runId, stage: parked.stage, kind: "freeze" };

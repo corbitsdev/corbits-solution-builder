@@ -4,23 +4,55 @@
  * The hub signal route authorizes `POST /:runId/signals` with `signal:<signalName>` on
  * `workflow-run:<runId>` (or `manage` as a superset). Run ids do not exist at
  * install time, so the installer mints the matching wildcard: `workflow-run:*`
- * with action `signal:<awaiter>`. The awaiter names are the ones
- * `stageSignal` already produces from the ledger — a round command lands on
- * that stage's round, everything else on its gate — so a role that cannot
- * issue a command never receives the grant for the signal that command would
- * send.
+ * with action `signal:<awaiter>`. The awaiter names are the ones `stageSignal`
+ * already produces from the ledger, so a role that cannot issue a command
+ * never receives the grant for the signal that command would send.
+ *
+ * The chat section drives every round by mail, not by a signal (CL-8598), so
+ * round names are never minted here — only the approve chain: a stage's
+ * approve gate (which also carries reject/revise), the stage-7 freeze, and
+ * the stage-8 evidence park.
  *
  * Stage 9 is the one exception: its gate is a stock hub approval on the
  * delivery specialist's own `deliver` tool call (CL-8566), not a named
- * signal, so `approveSignal`/`exhaustedSignal` at stage 9 are excluded here
- * and `ensureAuthorityGrants` mints the approval-resolve grant instead.
+ * signal, so `approveSignal` at stage 9 is excluded here and
+ * `ensureAuthorityGrants` mints the approval-resolve grant instead.
  *
  * `system` is never minted: the host acts as system, it does not grant it.
  */
 import type { Transport } from "@intx/hub-client";
-import { LEDGER, STAGES, type Authority, type Command } from "@solutions-builder/app/ledger";
-import { approveSignal, DELIVERY_STAGE, exhaustedSignal, stageSignal } from "@solutions-builder/app/workflows/stage-loop";
+import { LEDGER, STAGES, type Authority, type Command, type Stage } from "@solutions-builder/app/ledger";
+import { approveSignal, DELIVERY_STAGE, evidenceSignal, freezeSignal } from "@solutions-builder/app/workflows/stage-loop";
 import { ensureRoleGrant } from "./hub.js";
+
+/** The two ledger commands that resolve the stage-8 evidence hand-off. */
+const EVIDENCE_COMMANDS: ReadonlySet<Command> = new Set(["build.accept_evidence", "build.fail"]);
+
+/**
+ * Every ledger command that lands on the approve chain: a stage's gate
+ * (`stage.approve`, its `stage.revise` reject companion, stage 7's
+ * `cost.approve`, stage 5's `audience.decide`), stage 9's delivery decision
+ * (excluded below — see the module doc), `build.freeze`, and the evidence
+ * commands. Every other command is a chat-section round, driven by mail, and
+ * never mints a signal grant.
+ */
+const APPROVE_CHAIN_COMMANDS: ReadonlySet<Command> = new Set([
+  "stage.approve",
+  "stage.revise",
+  "cost.approve",
+  "audience.decide",
+  "delivery.accept",
+  "delivery.reject",
+  "delivery.revise",
+]);
+
+/** The signal name a ledger command lands on, or null for a round-only command. */
+function approveChainSignal(stage: Stage, command: Command): string | null {
+  if (command === "build.freeze") return freezeSignal();
+  if (EVIDENCE_COMMANDS.has(command)) return evidenceSignal(stage);
+  if (APPROVE_CHAIN_COMMANDS.has(command)) return approveSignal(stage);
+  return null;
+}
 
 /** Wildcard covering every run in the tenant; the route matches it to a run id. */
 export const WORKFLOW_RUN_RESOURCE = "workflow-run:*";
@@ -34,15 +66,16 @@ export function signalGrantAction(signalName: string): `signal:${string}` {
   return `signal:${signalName}`;
 }
 
-/** The two stage-9 gate signals the deployed workflow no longer waits on. */
-const NO_LONGER_SIGNALED = new Set<string>([approveSignal(DELIVERY_STAGE), exhaustedSignal(DELIVERY_STAGE)]);
+/** The stage-9 gate signal the deployed workflow no longer waits on. */
+const NO_LONGER_SIGNALED = new Set<string>([approveSignal(DELIVERY_STAGE)]);
 
 /**
  * The awaiter names a human authority may deliver, read from the ledger.
  * Empty for `system`. A command with no `from` never becomes a run signal
- * (`project.create` opens the project; it does not park a step). Stage 9's
- * gate signals are excluded: the deployed workflow has no step waiting on
- * them any more (see the module doc).
+ * (`project.create` opens the project; it does not park a step). Round names
+ * are excluded: the chat section drives every round by mail, so no step ever
+ * waits on one. Stage 9's gate signal is excluded too: the deployed workflow
+ * has no step waiting on it any more (see the module doc).
  */
 export function signalNamesFor(authority: Authority): readonly string[] {
   if (authority === "system") return [];
@@ -51,8 +84,8 @@ export function signalNamesFor(authority: Authority): readonly string[] {
     if (!row.authority.includes(authority) || row.from === null) continue;
     const stages = row.stages ?? STAGES;
     for (const stage of stages) {
-      names.add(stageSignal(stage, row.command, "gate").name);
-      names.add(stageSignal(stage, row.command, "exhausted").name);
+      const name = approveChainSignal(stage, row.command);
+      if (name !== null) names.add(name);
     }
   }
   for (const name of NO_LONGER_SIGNALED) names.delete(name);

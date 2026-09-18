@@ -9,42 +9,40 @@
  * rendered as text with the ledger's constants baked in.
  *
  * The shape here and the shape `stage-loop.ts`/`project-lifecycle.ts` build
- * in-process must be the same definition. `check:ledger` evaluates this
- * source against the workspace's `@intx/workflow` and compares the two, so a
- * drift fails the gate rather than the probe.
+ * in-process must be the same definition: one `onTrigger` chat section
+ * (`chat`, on mail) carrying every person input for every stage, plus a flat
+ * approve chain of top-level signal gates. The deployed package cannot import
+ * `stage-loop.ts`'s `chatBody()`/`approveChain()` directly — the sidecar only
+ * ships the `@intx/workflow` definition API, not this package's source — so
+ * this mirrors their construction in the rendered JS text instead.
+ * `check:ledger` evaluates this source against the workspace's own
+ * `@intx/workflow` and compares the two, so a drift fails the gate rather
+ * than the probe.
  */
 import { NAME_STEP_ID, PROJECT_LIFECYCLE_ID } from "./project-lifecycle.js";
 import {
-  ADMIT_DRAFT_STEP_ID,
   BUILD_STEP_ID,
   BUILD_STEP_TIMEOUT_MS,
-  DECIDE_STEP_ID,
+  CHAT_STEP_ID,
   DELIVERY_STAGE,
   DELIVERY_STEP_ID,
-  DRAFT_STEP_ID,
   DRAFT_STEP_TIMEOUT_MS,
   EVALUATE_STEP_ID,
-  EVALUATED_STAGE,
-  EVIDENCE_ADMIT_STEP_ID,
-  EVIDENCE_STEP_ID,
-  GATE_WAIT_STEP_ID,
-  ADMIT_STEP_ID,
-  FREEZE_CAP_STEP_ID,
-  FREEZE_STEP_ID,
-  MAX_REVISIONS,
-  NO_DRAFT_STEP_ID,
+  NONE_STEP_ID,
   REQUIREMENTS_STEP_ID,
-  ROUND_ADMIT_STEP_ID,
-  ROUND_DECIDE_STEP_ID,
-  ROUND_REFUSED_STEP_ID,
-  ROUND_STEP_ID,
+  ROUTE_STEP_ID,
   STAGE_WORKFLOW_ID,
+  UNROUTED_STEP_ID,
   agentStepIds,
+  approveSignal,
+  draftStepId,
+  evidenceSignal,
   freezeSignal,
-  gatedStepCount,
+  gateStepId,
+  routerStepId,
 } from "./stage-loop.js";
 import { agentById, agentFor, panelPrincipals, type AgentRole } from "../kit.js";
-import { STAGES, type Stage } from "../ledger.js";
+import type { Stage } from "../ledger.js";
 import { skillTextFor } from "../seed-kit.js";
 import { DESIGNER_TOKENS_DEFAULT } from "../designer-settings.js";
 
@@ -78,8 +76,8 @@ export const WORKFLOW_PACKAGE_DEPENDENCIES: Readonly<Record<string, string>> = {
  * The (provider plugin, canonical model) pair every rendered agent step
  * declares as its inference source, pinned against one of the tenant's
  * offerings. Absent when no offering exists yet; the lifecycle then carries
- * no agent step at all and every stage is gates only, which is what the
- * in-process definition builds.
+ * no agent step at all and the chat body's router leads every `is-N`
+ * straight to `none`, which is what the in-process definition builds.
  */
 export type InferenceSourcePin = { readonly provider: string; readonly model: string };
 
@@ -119,22 +117,10 @@ export { DELIVERY_STAGE };
  */
 export const PLAN_STAGE = 6;
 
-/** Every stage whose round is followed by its kit specialist under the "draft" id. */
-const DRAFTED_STAGES: readonly Stage[] = [1, 2, 3, 4, 6, 7, 9];
+/** Every stage the chat section's router covers: every stage but delivery. */
+const CHAT_STAGES: readonly Stage[] = [1, 2, 3, 4, 5, 6, 7, 8] as const;
 
 export const LIFECYCLE_ENTRY_PATH = "workflow.js";
-
-/**
- * One agent step the rendered iteration wires: its id, the role that runs it,
- * its input, and whether it sits behind a gate reading the round's "wanted"
- * flag at its own index.
- */
-type AgentStepSpec = {
-  readonly id: string;
-  readonly roleId: string;
-  readonly input: { readonly from: string } | { readonly merge: readonly { readonly from: string }[] };
-  readonly gated: boolean;
-};
 
 /**
  * A role's kit prompt has no runtime after this point to load a skill from: an
@@ -147,21 +133,26 @@ function renderedPrompt(role: AgentRole): string {
   return `${role.system}\n\n${skillTextFor(role)}`;
 }
 
-/** The role that runs a given agent step id at a given stage. */
+/**
+ * The role that runs a given chat-body agent step. Every step id the chat
+ * section renders carries its stage number (`draft-2`, `package-5-0`,
+ * `review-6-<specialty>`, …), so the role is read off the id's own shape
+ * rather than a fixed step id, plus the stage it belongs to.
+ */
 function roleIdForStep(stage: Stage, stepId: string): string {
-  if (stage === 5) return agentFor(5).id;
-  if (stage === EVALUATED_STAGE && stepId === EVALUATE_STEP_ID) {
+  if (stage === PACKAGE_STAGE) return agentFor(PACKAGE_STAGE).id;
+  if (stepId === EVALUATE_STEP_ID) {
     const evaluator = agentById("brief-evaluator");
     if (!evaluator) throw new Error("brief-evaluator role missing from the kit");
     return evaluator.id;
   }
-  if (stage === PLAN_STAGE && stepId === REQUIREMENTS_STEP_ID) {
+  if (stepId === REQUIREMENTS_STEP_ID) {
     const author = agentById("requirements-author");
     if (!author) throw new Error("requirements-author role missing from the kit");
     return author.id;
   }
-  if (stage === PLAN_STAGE && stepId !== DRAFT_STEP_ID) {
-    const specialty = stepId.replace(/^review-/, "");
+  if (stage === PLAN_STAGE && stepId.startsWith("review-")) {
+    const specialty = stepId.replace(/^review-6-/, "");
     const role = panelPrincipals().find((entry) => entry.id === `senior-engineer-${specialty}`);
     if (!role) throw new Error(`No panel principal for step ${stepId}`);
     return role.id;
@@ -170,68 +161,36 @@ function roleIdForStep(stage: Stage, stepId: string): string {
 }
 
 /**
- * What a given agent step reads: the round's own signal payload whole, or
- * the draft it revises.
- *
- * The round used to carry a host-assembled `prompt`/`prompts[index]` field
- * (`roundInference`, deleted — see CL-8331); the client's own `DraftIntent`
- * (`apps/web/src/run-signal.ts`) never carried one, so a selector reaching
- * for it throws "missing key prompt" the instant a round actually fires. The
- * fix is the same one the namer step takes: the whole round output, merged
- * with the run's trigger payload at stage 1 (where the very first round's
- * `message` is empty and the person's opening problem statement — see
- * `trigger-envelope.ts` — is the only thing to draft from). The specialist's
- * own prompt (`SHARED_RULES` in `kit.ts`) says where to find `message` and
- * an opening statement in the JSON body it receives. A gated step (stage 5's
- * per-audience packaging, stage 6's requirements/plan) gets the same whole
- * round output as every other gated step in its round; which of them the
- * round actually wants is the round's own `audiences`/`documents` field, not
- * a per-index slot.
+ * What a given chat-body agent step reads. Every step reads the router's own
+ * `route` output as a whole (the person's parsed intent for this occurrence)
+ * except the ones chained after another specialist within the same stage:
+ * stage 1's evaluator reads its draft's reply, stage 6's plan draft reads the
+ * requirements' reply, and stage 6's reviews read the plan's reply.
  */
-function inputForStep(
-  stage: Stage,
-  stepId: string,
-  index: number,
-  audienceCount: number,
-): { from: string } | { merge: readonly { from: string }[] } {
-  if (stage === EVALUATED_STAGE && stepId === DRAFT_STEP_ID) {
-    return { merge: [{ from: "trigger.payload" }, { from: `steps.${ROUND_STEP_ID}.output` }] };
+function inputForStep(stage: Stage, stepId: string): { readonly from: string } {
+  if (stepId === EVALUATE_STEP_ID) return { from: `steps.${draftStepId(stage)}.output.reply` };
+  if (stage === PLAN_STAGE && stepId === draftStepId(stage)) {
+    return { from: `steps.${REQUIREMENTS_STEP_ID}.output.reply` };
   }
-  if (index < gatedStepCount(stage, audienceCount)) return { from: `steps.${ROUND_STEP_ID}.output` };
-  // Stage 9's one step is named `DELIVERY_STEP_ID`, not `DRAFT_STEP_ID` (see
-  // its definition), but is the same "first, ungated, reads the round's
-  // signal" shape every other single-step drafted stage has.
-  if (stepId === DRAFT_STEP_ID || stepId === DELIVERY_STEP_ID) return { from: `steps.${ROUND_STEP_ID}.output` };
-  return { from: `steps.${DRAFT_STEP_ID}.output.reply` };
+  if (stage === PLAN_STAGE && stepId.startsWith("review-")) {
+    return { from: `steps.${draftStepId(stage)}.output.reply` };
+  }
+  return { from: `steps.${ROUTE_STEP_ID}.output` };
 }
 
-/** Every agent step spec for every stage that carries one, keyed by stage number. */
-function agentStepSpecsByStage(audienceCount: number): Readonly<Record<number, readonly AgentStepSpec[]>> {
-  const out: Record<number, AgentStepSpec[]> = {};
-  for (const stage of [...DRAFTED_STAGES, 5 as Stage]) {
-    out[stage] = agentStepIds(stage, audienceCount).map((id, index) => ({
-      id,
-      roleId: roleIdForStep(stage, id),
-      input: inputForStep(stage, id, index, audienceCount),
-      gated: index < gatedStepCount(stage, audienceCount),
-    }));
-  }
-  return out;
-}
-
-/** Every role a rendered agent step references, deduplicated by role id. */
-function rolesInUse(audienceCount: number): AgentRole[] {
-  const specs = agentStepSpecsByStage(audienceCount);
-  const byId = new Map<string, AgentRole>();
-  for (const list of Object.values(specs)) {
-    for (const spec of list) {
-      if (byId.has(spec.roleId)) continue;
-      const role = agentById(spec.roleId);
-      if (!role) throw new Error(`No seeded role for id ${spec.roleId}`);
-      byId.set(spec.roleId, role);
-    }
-  }
-  return [...byId.values()];
+/**
+ * What a given chat-body agent step follows. A stage's first step follows the
+ * router's branch for that stage (`is-N`); stage 5's packages all follow
+ * `is-5` directly rather than each other, since a round may write one
+ * stakeholder's package and leave the rest; stage 6's plan follows its
+ * requirements, and every review follows the plan directly (not each other),
+ * since a round that skips the plan skips its reviews with it.
+ */
+function afterForStep(stage: Stage, stepId: string): string[] {
+  if (stepId === EVALUATE_STEP_ID) return [draftStepId(stage)];
+  if (stage === PLAN_STAGE && stepId === draftStepId(stage)) return [REQUIREMENTS_STEP_ID];
+  if (stage === PLAN_STAGE && stepId.startsWith("review-")) return [draftStepId(stage)];
+  return [routerStepId(stage)];
 }
 
 /** The entry module the workflow package ships, as source. */
@@ -247,75 +206,112 @@ import { deck } from ${JSON.stringify("@solutions-builder/tools-deck/sidecar-bun
 import { delivery, deliver } from ${JSON.stringify("@solutions-builder/tools-delivery/sidecar-bundle")};
 `
     : "";
-  // The build agent is the kit's stage 8 specialist, given a workspace. Every
-  // posix tool asks before it acts, so a tool call parks the step and the hub
-  // records an approval a person resolves; the agent cannot act on its own.
-  const buildAgent = source
+
+  // One entry per chat-body agent step, and the id of the first step of each
+  // stage (or `none` when that stage renders no agent step at all — a stage 5
+  // with no audiences, or every stage when there is no offering to run
+  // against yet). Every role a step references is collected once, by id.
+  const chatStepEntries: string[] = [];
+  const routerThens = new Map<Stage, string>();
+  const rolesUsed = new Map<string, AgentRole>();
+
+  for (const stage of CHAT_STAGES) {
+    const ids = source ? agentStepIds(stage, audienceCount) : [];
+    routerThens.set(stage, ids.length > 0 ? ids[0]! : NONE_STEP_ID);
+    if (!source) continue;
+    for (const id of ids) {
+      const roleId = roleIdForStep(stage, id);
+      const role = agentById(roleId);
+      if (!role) throw new Error(`No seeded role for id ${roleId}`);
+      rolesUsed.set(roleId, role);
+      const input = inputForStep(stage, id);
+      const after = afterForStep(stage, id);
+      // Stage 4 alone does not trust the round's own inference cap: there is
+      // no host route left to police it, so the deploy-time designer setting
+      // (baked in below) wins over whatever the person's message carried.
+      const inference =
+        stage === 4
+          ? "{ literal: { maxTokens: DESIGNER_MAX_TOKENS } }"
+          : `{ from: ${JSON.stringify(`steps.${ROUTE_STEP_ID}.output.inference`)} }`;
+      const timeout = id === BUILD_STEP_ID ? "BUILD_TIMEOUT" : "DRAFT_TIMEOUT";
+      chatStepEntries.push(`    ${JSON.stringify(id)}: step({
+      agent: AGENTS[${JSON.stringify(roleId)}],
+      input: ${JSON.stringify(input)},
+      inference: ${inference},
+      timeout: ${timeout},
+      drainBehavior: "wait",
+      triggers: 1,
+      after: ${JSON.stringify(after)},
+    }),`);
+    }
+  }
+
+  // Every rendered role, reassembled into `defineAgent` calls in the sidecar
+  // rather than carried across as functions. Stage 5's specialist carries the
+  // deck renderer; stage 8's build agent carries the posix tools; every other
+  // rendered role stays tools-free (stage 9's delivery specialist is its own
+  // standalone agent below, since `delivery-check` sits outside the chat body).
+  const agentsBlock = source
     ? `
-const buildAgent = defineAgent({
-  id: ${JSON.stringify(agentFor(BUILD_STAGE).id)},
-  systemPrompt: ${JSON.stringify(renderedPrompt(agentFor(BUILD_STAGE)))},
-  tools: [posix],
-  capabilities: [],
-  inference: { sources: [SOURCE] },
-});
+const AGENTS = {
+${[...rolesUsed.values()]
+  .map((role) => {
+    const tool =
+      role.id === agentFor(PACKAGE_STAGE).id ? "deck" : role.id === agentFor(BUILD_STAGE).id ? "posix" : "";
+    return `  ${JSON.stringify(role.id)}: defineAgent({ id: ${JSON.stringify(role.id)}, systemPrompt: ${JSON.stringify(renderedPrompt(role))}, tools: [${tool}], capabilities: [], inference: { sources: [SOURCE] } }),`;
+  })
+  .join("\n")}
+};
 `
     : "";
-  // The round is admitted, not merely awaited: the ledger guard runs against
-  // the run's own carried build state before anything else this iteration
-  // does. Unconditional — even the gates-only, no-offering skeleton admits a
-  // round command, since a refusal is what sends the loop back to wait again.
-  const roundAdmit = `
-      ${JSON.stringify(ROUND_ADMIT_STEP_ID)}: action({
-        handler: "admitGate",
-        input: roundAdmitInput(ROUND),
-        drainBehavior: "wait",
-        after: [ROUND],
-      }),`;
-  // The branch a real build agent needs to skip on a refused round: nothing
-  // to build this iteration, so the loop's own carried state (the admit's
-  // verdict) is all that changes.
-  const roundDecide = source
-    ? `
-      ${JSON.stringify(ROUND_DECIDE_STEP_ID)}: gate({
-        when: { from: "steps." + ROUND_ADMIT + ".output.refused" },
-        then: ${JSON.stringify(ROUND_REFUSED_STEP_ID)},
-        else: ${JSON.stringify(BUILD_STEP_ID)},
-        after: [ROUND_ADMIT],
-      }),
-      ${JSON.stringify(ROUND_REFUSED_STEP_ID)}: escalation({ to: ${JSON.stringify(ROUND_REFUSED_STEP_ID)}, after: [ROUND_DECIDE] }),`
-    : "";
-  const buildStep = source
-    ? `
-      ${JSON.stringify(BUILD_STEP_ID)}: step({
-        agent: buildAgent,
-        input: { from: "steps." + ROUND + ".output" },
-        timeout: ${BUILD_STEP_TIMEOUT_MS},
-        triggers: 1,
-        drainBehavior: "wait",
-        after: [ROUND_DECIDE],
-      }),`
-    : "";
-  // Accept and fail park here, after the build agent, not on gate-8 while the
-  // iteration is still live. admitGate is the 8092 helper.
-  const evidenceSteps = source
-    ? `
-      ${JSON.stringify(EVIDENCE_STEP_ID)}: awaitSignal({
-        name: STAGE_ID + "." + stage + ".evidence",
-        drainBehavior: "wait",
-        after: [${JSON.stringify(BUILD_STEP_ID)}],
-      }),
-      ${JSON.stringify(EVIDENCE_ADMIT_STEP_ID)}: action({
-        handler: "admitGate",
-        input: admitInput(${JSON.stringify(EVIDENCE_STEP_ID)}, { stage: BUILD_STAGE, gate: "evidence" }),
-        drainBehavior: "wait",
-        after: [${JSON.stringify(EVIDENCE_STEP_ID)}],
-      }),`
-    : "";
+
+  // The router: a binary gate chain, `is-1` through `is-8`, mirroring
+  // `chatBody()` exactly. `is-1` follows `route`; every other `is-N` follows
+  // `is-(N-1)`. Every stage's `then`, when it carries no agent step, lands on
+  // `none`. The last stage's `else` is its own terminal, `unrouted` — not
+  // `none` — since the deploy validator rejects a gate whose `then` and
+  // `else` are the same step, which `is-8` would otherwise hit in the
+  // gates-only render (its `then` falls back to `none` too, with no offering).
+  const routerEntries: string[] = [];
+  CHAT_STAGES.forEach((stage, index) => {
+    const id = routerStepId(stage);
+    const after = index === 0 ? [ROUTE_STEP_ID] : [routerStepId(CHAT_STAGES[index - 1]!)];
+    const elseId = index === CHAT_STAGES.length - 1 ? UNROUTED_STEP_ID : routerStepId(CHAT_STAGES[index + 1]!);
+    routerEntries.push(`    ${JSON.stringify(id)}: gate({
+      when: { from: ${JSON.stringify(`steps.${ROUTE_STEP_ID}.output.at.${stage}`)} },
+      then: ${JSON.stringify(routerThens.get(stage))},
+      else: ${JSON.stringify(elseId)},
+      after: ${JSON.stringify(after)},
+    }),`);
+  });
+  const lastStage = CHAT_STAGES[CHAT_STAGES.length - 1]!;
+  const noneEntry = `    ${JSON.stringify(NONE_STEP_ID)}: escalation({ to: ${JSON.stringify(NONE_STEP_ID)}, after: [${JSON.stringify(routerStepId(lastStage))}] }),`;
+  const unroutedEntry = `    ${JSON.stringify(UNROUTED_STEP_ID)}: escalation({ to: ${JSON.stringify(UNROUTED_STEP_ID)}, after: [${JSON.stringify(routerStepId(lastStage))}] }),`;
+  const routeEntry = `    ${JSON.stringify(ROUTE_STEP_ID)}: action({ handler: "routeMessage", input: { from: "trigger.payload" } }),`;
+
+  // The chat section's body: a full sub-DAG, authored inline and re-triggered
+  // by each occurrence of the mail address it subscribes to. Every person
+  // input for every stage arrives here as conversation mail (see the module
+  // doc), so `route` parses it once and the router above picks the branch.
+  const chatBodySource = `defineWorkflow({
+    id: ${JSON.stringify(`${STAGE_WORKFLOW_ID}.chat`)},
+    triggers: [{ type: "manual" }],
+    steps: {
+${routeEntry}
+${routerEntries.join("\n")}
+${noneEntry}
+${unroutedEntry}
+${chatStepEntries.join("\n")}
+    },
+  })`;
+
   // The naming agent: the kit's namer, given the run's opening problem
-  // statement. Additive the same way the build agent is — rendered only once
-  // an offering exists — and never gates stage 1: it carries no `after`, so
-  // it starts the instant the run fires.
+  // statement. Additive the same way every other agent step is — rendered
+  // only once an offering exists — and never gates stage 1: it carries no
+  // `after`, so it starts the instant the run fires. Input is the whole
+  // `trigger.payload` (a mail envelope): the invoker projects its text/plain
+  // parts into the namer's inbound turn when it recognizes the shape as
+  // `Mail`, the same way `route`'s own input does.
   const namerRole = agentById("namer");
   if (source && !namerRole) throw new Error("namer role missing from the kit");
   const namerAgent = source
@@ -329,333 +325,89 @@ const namerAgent = defineAgent({
 });
 `
     : "";
-  // The run's trigger fires through a signed conversation message, so the
-  // workflow-host step invoker projects the whole `trigger.payload` (a mail
-  // envelope) into the namer's inbound turn itself when it recognizes the
-  // shape as `Mail`, joining its text/plain parts — the same way workbench's
-  // Myra step reads `{ from: "trigger.payload" }` whole rather than reaching
-  // into a field that selector evaluation cannot see inside an envelope.
-  // A trigger fired with the flat object directly (no envelope) still
-  // resolves: the invoker JSON-stringifies whatever is not `Mail`, so the
-  // namer sees the same JSON text either way (see the namer's own prompt).
-  const nameStepAssignment = source
+  const nameEntry = source
+    ? `    ${JSON.stringify(NAME_STEP_ID)}: step({
+      agent: namerAgent,
+      input: { from: "trigger.payload" },
+      timeout: DRAFT_TIMEOUT,
+      drainBehavior: "wait",
+    }),`
+    : "";
+
+  // Stage 9's own specialist: a standalone step after the approve chain's
+  // last gate, not part of the chat body's router (`routeMessage`'s output
+  // only ever carries flags for stages 1..8 — see admit.ts). It carries the
+  // delivery-status and deliver tools, the way the build agent carries posix:
+  // the deliver tool's own `approval: "ask"` is stage 9's gate, not a named
+  // signal.
+  const deliveryAgent = source
     ? `
-steps[NAME] = step({
-  agent: namerAgent,
-  input: { from: "trigger.payload" },
-  timeout: DRAFT_TIMEOUT,
-  drainBehavior: "wait",
+const deliveryAgent = defineAgent({
+  id: ${JSON.stringify(agentFor(DELIVERY_STAGE).id)},
+  systemPrompt: ${JSON.stringify(renderedPrompt(agentFor(DELIVERY_STAGE)))},
+  tools: [delivery, deliver],
+  capabilities: [],
+  inference: { sources: [SOURCE] },
 });
 `
     : "";
-  // Every other stage's specialist: capabilities-free, pinned to the same
-  // offering as the build agent. Rendered as pure data (ids, prompts,
-  // selectors) and reassembled into `defineAgent` calls here, in the sidecar,
-  // never carried across as functions. Stage 5's specialist carries the deck
-  // renderer, since it is the one that turns a stakeholder's package into
-  // slides; stage 9's specialist carries the delivery-status summarizer,
-  // since it is the one that checks a manifest against what was built. Every
-  // other rendered stage stays tools-free.
-  const agentsBlock = source
-    ? `
-const AGENTS = {
-${rolesInUse(audienceCount)
-  .map((role) => {
-    const tool =
-      role.id === agentFor(PACKAGE_STAGE).id ? "deck" : role.id === agentFor(DELIVERY_STAGE).id ? "delivery, deliver" : "";
-    return `  ${JSON.stringify(role.id)}: defineAgent({ id: ${JSON.stringify(role.id)}, systemPrompt: ${JSON.stringify(renderedPrompt(role))}, tools: [${tool}], capabilities: [], inference: { sources: [SOURCE] } }),`;
-  })
-  .join("\n")}
-};
-`
+  const deliveryEntry = source
+    ? `    ${JSON.stringify(DELIVERY_STEP_ID)}: step({
+      agent: deliveryAgent,
+      input: { from: "trigger.payload" },
+      timeout: DRAFT_TIMEOUT,
+      drainBehavior: "wait",
+      triggers: 1,
+      after: [${JSON.stringify(gateStepId(BUILD_STAGE as Stage))}],
+    }),`
     : "";
-  const agentStepSpecs = source
-    ? `
-const AGENT_STEP_SPECS = ${JSON.stringify(agentStepSpecsByStage(audienceCount))};
-`
-    : "";
-  return `import { action, awaitSignal, defineWorkflow, escalation, gate, loop, step } from "@intx/workflow/definition";
+
+  // The approve chain, mirroring `approveChain()` exactly: gate-1 through
+  // gate-7 chained in order, then freeze, then evidence, then gate-8 — the
+  // one place the flat N-follows-(N-1) chain bends, since a stage-7 approval
+  // only frees the run to be frozen into a build, and the build's own
+  // evidence hand-off has to resolve before stage 8 can be approved. No
+  // admit actions, no loops, no exhaustion caps: the ledger guard stays
+  // client-side.
+  const approveEntries: string[] = [];
+  for (let stage = 1; stage <= 7; stage++) {
+    const id = gateStepId(stage as Stage);
+    const after = stage === 1 ? [] : [gateStepId((stage - 1) as Stage)];
+    approveEntries.push(
+      `    ${JSON.stringify(id)}: awaitSignal({ name: ${JSON.stringify(approveSignal(stage as Stage))}, drainBehavior: "wait"${after.length > 0 ? `, after: ${JSON.stringify(after)}` : ""} }),`,
+    );
+  }
+  const freezeEntry = `    "freeze": awaitSignal({ name: ${JSON.stringify(freezeSignal())}, drainBehavior: "wait", after: [${JSON.stringify(gateStepId(7 as Stage))}] }),`;
+  const evidenceEntry = `    "evidence": awaitSignal({ name: ${JSON.stringify(evidenceSignal(BUILD_STAGE as Stage))}, drainBehavior: "wait", after: ["freeze"] }),`;
+  const gate8Entry = `    ${JSON.stringify(gateStepId(BUILD_STAGE as Stage))}: awaitSignal({ name: ${JSON.stringify(approveSignal(BUILD_STAGE as Stage))}, drainBehavior: "wait", after: ["evidence"] }),`;
+
+  return `import { action, awaitSignal, defineWorkflow, escalation, gate, onTrigger, step } from "@intx/workflow/definition";
 ${sourceImports}
-const STAGES = ${JSON.stringify([...STAGES])};
-const STAGE_ID = ${JSON.stringify(STAGE_WORKFLOW_ID)};
-const MAX_REVISIONS = ${MAX_REVISIONS};
-const ROUND = ${JSON.stringify(ROUND_STEP_ID)};
-const ROUND_ADMIT = ${JSON.stringify(ROUND_ADMIT_STEP_ID)};
-const ROUND_DECIDE = ${JSON.stringify(ROUND_DECIDE_STEP_ID)};
-const WAIT = ${JSON.stringify(GATE_WAIT_STEP_ID)};
-const ADMIT = ${JSON.stringify(ADMIT_STEP_ID)};
-const FREEZE = ${JSON.stringify(FREEZE_STEP_ID)};
-const FREEZE_CAP = ${JSON.stringify(FREEZE_CAP_STEP_ID)};
-const FREEZE_SIGNAL = ${JSON.stringify(freezeSignal())};
-const ADMIT_DRAFT = ${JSON.stringify(ADMIT_DRAFT_STEP_ID)};
-const DECIDE = ${JSON.stringify(DECIDE_STEP_ID)};
-const NO_DRAFT = ${JSON.stringify(NO_DRAFT_STEP_ID)};
-const NAME = ${JSON.stringify(NAME_STEP_ID)};
 const DRAFT_TIMEOUT = ${DRAFT_STEP_TIMEOUT_MS};
-const BUILD_STAGE = ${BUILD_STAGE};
-const DELIVERY_STAGE = ${DELIVERY_STAGE};
-const AUDIENCE_QUORUM = ${options.audienceQuorum === undefined ? "undefined" : JSON.stringify(options.audienceQuorum)};
-// Baked in at deploy render time from the project's own policy (the same
-// read AUDIENCE_QUORUM comes from), never from a client's signal: a round
-// naming an audience the workflow was not rendered with is refused before
-// any specialist runs (see admitDraft in admit.ts).
-const AUDIENCE_NAMES = ${options.audiences ? JSON.stringify(options.audiences.map((audience) => audience.name)) : "undefined"};
+const BUILD_TIMEOUT = ${BUILD_STEP_TIMEOUT_MS};
 // Stage 4's output-token cap, read off the tenant's designer settings asset
 // at deploy time (packages/installer/src/designer-settings.ts) — the same
 // place the settings page itself reads and writes. There is no host route
-// left to compute this per round, so the literal wins over whatever a
-// client's own round signal sent for stage 4's specialist step.
+// left to compute this per occurrence, so the literal wins over whatever the
+// person's own message carried for stage 4's specialist step.
 const DESIGNER_MAX_TOKENS = ${JSON.stringify(options.designerMaxTokens ?? DESIGNER_TOKENS_DEFAULT)};
-// The admit reads the carried tally, then the person's intent, then the
-// gate's own literals last: the stage and gate are the workflow's to say.
-function admitInput(waitStepId, literal) {
-  return {
-    merge: [
-      { project: { from: "trigger.payload" }, fields: ["audience"] },
-      { from: "steps." + waitStepId + ".output" },
-      { literal },
-    ],
-  };
-}
-// Same shape, keyed on the build state the round carried forward instead of
-// an audience tally: the build stage's round has no quorum, and every other
-// stage's round has no run state of its own to carry.
-function roundAdmitInput(waitStepId) {
-  return {
-    merge: [
-      { project: { from: "trigger.payload" }, fields: ["buildState"] },
-      { from: "steps." + waitStepId + ".output" },
-      { literal: { stage: BUILD_STAGE, gate: "round" } },
-    ],
-  };
-}
 ${source ? `const SOURCE = ${JSON.stringify(source)};` : ""}
-${buildAgent}${namerAgent}${agentsBlock}${agentStepSpecs}
-// One iteration: the workflow waits to hear what the person did. A gate right
-// after the round reads whether this round asked for a draft; if so, the
-// stage's specialist steps run in order, each after the last. If not, the
-// gate's empty branch is a pure-data escalation — nothing to do this round.
-// At the build stage the round is followed by the build agent on every
-// round, and the evidence park after that agent: accept and fail land
-// there, not on gate-8, while the iteration is live.
-function iteration(stage) {
-  const steps = {
-    [ROUND]: awaitSignal({ name: STAGE_ID + "." + stage + ".round", drainBehavior: "wait" }),
-  };
-  if (stage === BUILD_STAGE) {
-    Object.assign(steps, {${roundAdmit}${roundDecide}${buildStep}${evidenceSteps}
-    });
-  } else if (typeof AGENT_STEP_SPECS !== "undefined") {
-    const specs = AGENT_STEP_SPECS[stage] || [];
-    if (specs.length > 0) {
-      // A round may ask for only some of a stage's steps: at stage 5 the
-      // packages that failed last time, or one to be written again; at
-      // stage 6 the requirements in one round and the plan in the next.
-      // Such a step sits behind its own gate, read from the round's
-      // "wanted" flags; one not wanted is skipped, and the next gate joins
-      // both branches so the chain goes on either way. A step with no gate
-      // of its own follows the step before it, never that step's skip
-      // marker: a review of a plan not written this round is skipped with
-      // the plan.
-      const first = specs[0].gated ? "pick-0" : specs[0].id;
-      Object.assign(steps, {
-        [ADMIT_DRAFT]: action({
-          handler: "admitDraftGate",
-          input: {
-            merge: [
-              { from: "steps." + ROUND + ".output" },
-              { literal: { stage, audienceNames: AUDIENCE_NAMES } },
-            ],
-          },
-          drainBehavior: "wait",
-          after: [ROUND],
-        }),
-        [DECIDE]: gate({
-          when: { from: "steps." + ADMIT_DRAFT + ".output.draft" },
-          then: first,
-          else: NO_DRAFT,
-          after: [ADMIT_DRAFT],
-        }),
-        [NO_DRAFT]: escalation({ to: NO_DRAFT, after: [DECIDE] }),
-      });
-      let previous = [DECIDE];
-      specs.forEach((spec, index) => {
-        const agentStep = (after) =>
-          step({
-            agent: AGENTS[spec.roleId],
-            input: spec.input,
-            // Every other stage's round carries the call's own options; stage
-            // 4's output cap is the tenant's own designer setting, baked in
-            // at deploy time above, which wins over whatever the client's
-            // round signal sent — there is no host route left to police it.
-            inference: stage === 4
-              ? { literal: { maxTokens: DESIGNER_MAX_TOKENS } }
-              : { from: "steps." + ROUND + ".output.inference" },
-            timeout: DRAFT_TIMEOUT,
-            drainBehavior: "wait",
-            after,
-          });
-        if (spec.gated) {
-          const pick = "pick-" + index;
-          const skip = "skip-" + index;
-          Object.assign(steps, {
-            [pick]: gate({
-              when: { from: "steps." + ROUND + ".output.wanted[" + index + "]" },
-              then: spec.id,
-              else: skip,
-              after: previous,
-            }),
-            [skip]: escalation({ to: skip, after: [pick] }),
-            [spec.id]: agentStep([pick]),
-          });
-          previous = [spec.id, skip];
-        } else {
-          const after = index > 0 && specs[index - 1].gated ? [specs[index - 1].id] : previous;
-          Object.assign(steps, { [spec.id]: agentStep(after) });
-          previous = [spec.id];
-        }
-      });
-    }
-  }
-  return defineWorkflow({
-    id: STAGE_ID + ".iteration." + stage,
-    triggers: [{ type: "manual" }],
-    steps,
-  });
-}
-
-// A stage is a bounded revise loop and two human gates. Each gate is a loop:
-function gateIteration(stage, gate) {
-  const name = gate === "gate"
-    ? STAGE_ID + "." + stage + ".approve"
-    : STAGE_ID + "." + stage + ".approve-after-exhaustion";
-  return defineWorkflow({
-    id: STAGE_ID + ".admit." + gate + "." + stage,
-    triggers: [{ type: "manual" }],
-    steps: {
-      [WAIT]: awaitSignal({ name, drainBehavior: "wait" }),
-      [ADMIT]: action({
-        handler: "admitGate",
-        input: admitInput(WAIT, { stage, gate, ...(stage === 5 && AUDIENCE_QUORUM !== undefined ? { quorum: AUDIENCE_QUORUM } : {}) }),
-        drainBehavior: "wait",
-        after: [WAIT],
-      }),
-    },
-  });
-}
-
-// The freeze between stage 7's gate and stage 8's round: its own admission,
-// sharing the gate loop's WAIT/ADMIT step ids since it lives in its own
-// child workflow scope and reuses the same gateRefused/carryGate loop refs.
-function freezeIteration() {
-  return defineWorkflow({
-    id: STAGE_ID + ".admit.freeze",
-    triggers: [{ type: "manual" }],
-    steps: {
-      [WAIT]: awaitSignal({ name: FREEZE_SIGNAL, drainBehavior: "wait" }),
-      [ADMIT]: action({
-        handler: "admitGate",
-        input: admitInput(WAIT, { stage: 7, gate: "freeze" }),
-        drainBehavior: "wait",
-        after: [WAIT],
-      }),
-    },
-  });
-}
-
-function freezeSteps(after) {
-  return {
-    [FREEZE]: loop({
-      body: freezeIteration(),
-      while: "gateRefused",
-      carry: "carryGate",
-      maxIterations: MAX_REVISIONS,
-      onExhausted: FREEZE_CAP,
-      drainBehavior: "wait",
-      after,
-    }),
-    [FREEZE_CAP]: awaitSignal({
-      name: STAGE_ID + ".7.freeze-cap",
-      drainBehavior: "wait",
-      after: [FREEZE],
-    }),
-  };
-}
-
-// Stage 9's delivery gate is the specialist's own deliver tool call, parked
-// on a stock hub approval rather than a named signal: no gate-9/exhausted-9
-// loop here. Its revise loop routes an exhaustion straight to a dead-end
-// park instead.
-function stageSteps(stage, after) {
-  const revise = {
-    ["revise-" + stage]: loop({
-      body: iteration(stage),
-      while: "stillOpen",
-      carry: "carryRound",
-      maxIterations: MAX_REVISIONS,
-      onExhausted: stage === DELIVERY_STAGE ? "exhausted-cap-" + stage : "exhausted-" + stage,
-      drainBehavior: "wait",
-      ...(after ? { after } : {}),
-    }),
-  };
-  if (stage === DELIVERY_STAGE) {
-    return {
-      ...revise,
-      ["exhausted-cap-" + stage]: awaitSignal({
-        name: STAGE_ID + "." + stage + ".exhausted-cap",
-        drainBehavior: "wait",
-        after: ["revise-" + stage],
-      }),
-    };
-  }
-  return {
-    ...revise,
-    ["gate-" + stage]: loop({
-      body: gateIteration(stage, "gate"),
-      while: "gateRefused",
-      carry: "carryGate",
-      maxIterations: MAX_REVISIONS,
-      onExhausted: "gate-cap-" + stage,
-      drainBehavior: "wait",
-      after: ["revise-" + stage],
-    }),
-    ["exhausted-" + stage]: loop({
-      body: gateIteration(stage, "exhausted"),
-      while: "gateRefused",
-      carry: "carryGate",
-      maxIterations: MAX_REVISIONS,
-      onExhausted: "exhausted-cap-" + stage,
-      drainBehavior: "wait",
-      after: ["revise-" + stage],
-    }),
-    ["gate-cap-" + stage]: awaitSignal({
-      name: STAGE_ID + "." + stage + ".gate-cap",
-      drainBehavior: "wait",
-      after: ["gate-" + stage],
-    }),
-    ["exhausted-cap-" + stage]: awaitSignal({
-      name: STAGE_ID + "." + stage + ".exhausted-cap",
-      drainBehavior: "wait",
-      after: ["exhausted-" + stage],
-    }),
-  };
-}
-
-let steps = {};
-let previousEnds = null;
-for (const stage of STAGES) {
-  steps = { ...steps, ...stageSteps(stage, previousEnds) };
-  previousEnds = ["gate-" + stage, "exhausted-" + stage];
-  if (stage === 7) {
-    steps = { ...steps, ...freezeSteps(previousEnds) };
-    previousEnds = [FREEZE, FREEZE_CAP];
-  }
-}
-${nameStepAssignment}
+${namerAgent}${deliveryAgent}${agentsBlock}
 export default defineWorkflow({
   id: ${JSON.stringify(PROJECT_LIFECYCLE_ID)},
   triggers: [{ type: "manual" }],
-  steps,
+  steps: {
+${nameEntry}
+    ${JSON.stringify(CHAT_STEP_ID)}: onTrigger({
+      on: { type: "mail", to: ${JSON.stringify("lifecycle@solutions-builder.local")} },
+      body: ${chatBodySource},
+    }),
+${approveEntries.join("\n")}
+${freezeEntry}
+${evidenceEntry}
+${gate8Entry}
+${deliveryEntry}
+  },
 });
 `;
 }

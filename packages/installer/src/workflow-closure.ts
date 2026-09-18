@@ -4,8 +4,9 @@
  *
  * A code-sourced workflow package resolves its dependencies through the hub's
  * closure resolver: workspace members from the asset tree, everything else
- * from npm. The published `@intx/workflow` predates the loop signal relay the
- * lifecycle relies on, so the deployed package must see the vendored revision.
+ * from npm. The published `@intx/workflow` predates the `onTrigger` chat
+ * section the lifecycle relies on, so the deployed package must see the
+ * vendored revision.
  * Carrying that revision's `dist/` as members of the asset is the one path
  * that needs no registry plumbing: the resolver already walks members, and the
  * sidecar lays a member out from the same git pack the workflow itself arrives
@@ -76,9 +77,9 @@ export async function vendoredMemberFiles(
 
 /**
  * `@solutions-builder/app`'s files, as a workspace member: the deck/delivery
- * tools' own imports, the gate loop's `admitGate` action, and everything
- * else `src/` carries. Shipped as source, matching every other environment
- * this package runs consumed-as-source in.
+ * tools' own imports, the chat section's `routeMessage` action, and
+ * everything else `src/` carries. Shipped as source, matching every other
+ * environment this package runs consumed-as-source in.
  */
 export async function appMemberFiles(
   manifest: ClosureManifest,

@@ -695,6 +695,18 @@ declare module "@intx/workflow" {
     after?: readonly string[];
     onFailure?: string;
   }): Primitive;
+  /**
+   * Long-lived, event-driven section: subscribes to `on` and runs `body`
+   * once per occurrence, within the one living workflow run. The chat
+   * section is one of these.
+   */
+  export function onTrigger(opts: {
+    on: Trigger;
+    body: WorkflowDefinition;
+    drainBehavior?: "wait" | "cancel";
+    onBodyFailure?: "end" | "tolerate";
+    after?: readonly string[];
+  }): Primitive;
 
   // --- Low-level runtime surface (the in-process executor) ---
   // The in-process runtime body and its in-memory env adapters, exported for

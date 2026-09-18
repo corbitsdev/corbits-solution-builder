@@ -1,7 +1,3 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { describe, expect, test } from "bun:test";
 import type { ClosureManifest } from "./registry-tarballs.js";
 import { packTarballFiles, tarballFilename } from "./tarball-pack.js";
@@ -25,6 +21,7 @@ async function fakeClosure(): Promise<ClosureSource> {
       version: "0.1.0",
       files: {
         "package.json": '{"name":"@solutions-builder/app","version":"0.1.0"}\n',
+        "src/index.ts": "export async function routeMessage() {}\n",
         "src/admit.ts": "export async function admitGate() {}\n",
         "src/guard.ts": "export function evaluate() {}\n",
         "src/project-state.ts": "export function projectState() {}\n",
@@ -64,45 +61,17 @@ async function fakeClosure(): Promise<ClosureSource> {
   };
 }
 
-describe("renderLifecycleSource admit gate", () => {
-  test("declares interchange.actions admitGate and gateRefused in loops", async () => {
+describe("renderLifecycleSource actions module", () => {
+  test("declares interchange.actions routeMessage and drops loops", async () => {
     const files = await renderLifecycleSource(await fakeClosure());
     const member = JSON.parse(files["packages/lifecycle/package.json"]!) as {
       interchange: { actions?: string; loops?: string };
     };
     expect(member.interchange.actions).toBe("./actions.js");
-    expect(member.interchange.loops).toBe("./loops.js");
-    expect(files["packages/lifecycle/actions.js"]).toContain("admitGate");
-    expect(files["packages/lifecycle/actions.js"]).toContain("@solutions-builder/app/admit");
-    const loops = files["packages/lifecycle/loops.js"]!;
-    expect(loops).toContain("export function gateRefused");
-    expect(loops).toContain("export function carryGate");
-    expect(loops).toContain("admit.refused === true");
-    expect(loops).toContain('["evidence"]');
-  });
-
-  test("stillOpen reads the evidence command, not the round start_attempt", async () => {
-    const files = await renderLifecycleSource(await fakeClosure());
-    const loops = files["packages/lifecycle/loops.js"]!;
-    // Bun does not evaluate `data:text/javascript` as ESM (named exports vanish),
-    // so the generated loops module is loaded from a file the way the sidecar would.
-    const dir = await mkdtemp(join(tmpdir(), "lifecycle-loops-"));
-    const path = join(dir, "loops.js");
-    await writeFile(path, loops);
-    try {
-      const mod = (await import(pathToFileURL(path).href)) as {
-        stillOpen: (output: Record<string, unknown>) => boolean;
-        carryRound: (output: Record<string, unknown>, carry: unknown) => unknown;
-      };
-      const start = { round: { command: "build.start_attempt" } };
-      expect(mod.stillOpen(start)).toBe(true);
-      expect(mod.stillOpen({ ...start, evidence: { command: "build.fail" } })).toBe(true);
-      expect(mod.stillOpen({ ...start, evidence: { command: "build.accept_evidence" } })).toBe(false);
-      const carried = { command: "build.accept_evidence" };
-      expect(mod.carryRound({ ...start, evidence: carried }, start.round)).toEqual(carried);
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+    expect(member.interchange.loops).toBeUndefined();
+    expect(files["packages/lifecycle/actions.js"]).toContain("routeMessage");
+    expect(files["packages/lifecycle/actions.js"]).toContain("@solutions-builder/app");
+    expect(files["packages/lifecycle/loops.js"]).toBeUndefined();
   });
 
   test("closes the app member for admit, guard, and project-state", async () => {
