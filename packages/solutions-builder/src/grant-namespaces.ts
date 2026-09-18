@@ -44,11 +44,17 @@
  *   The installer mints `workflow-run:*` with action `signal:<awaiter>` from
  *   the ledger onto each human authority role so a role without that
  *   command cannot deliver the signal; the platform also mints manage/read
- *   on specific run ids. `mail.` — sending mail through sessions.
- *   `events.` — reading run events. `conversation.`, `workflow.`, `mail.`
- *   and `events.` stay platform-minted. `workflow-run:` is the one platform
- *   resource the installer writes, because the named-signal grant has to
- *   exist before any run does.
+ *   on specific run ids. `approval:` — a tool call parked on a stock hub
+ *   approval (`vendor/interchange/packages/hub-api/src/routes/approvals.ts`).
+ *   The installer mints `approval:*` with action `resolve` onto the
+ *   authorities the ledger names for stage 9's delivery decision
+ *   (`delivery.accept`/`.reject`/`.revise`), the one gate that is an
+ *   approval rather than a named signal (CL-8566). `mail.` — sending mail
+ *   through sessions. `events.` — reading run events. `conversation.`,
+ *   `workflow.`, `mail.` and `events.` stay platform-minted.
+ *   `workflow-run:` and `approval:` are the platform resources the
+ *   installer writes itself, because those grants have to exist before any
+ *   run does.
  *
  * Grandfathered, not a precedent: the one-time legacy adoption in
  * `hub-migrate.ts` (`adoptLegacyWorkspace`) writes a `*`/`*` owner grant with
@@ -169,6 +175,14 @@ export const GRANT_NAMESPACES: readonly GrantNamespaceEntry[] = [
     mintedBy: [PLATFORM],
     requiredBy: [BUILDER, PLATFORM],
     meaning: "Reading workflow definitions. Owned by the platform; apps require, never mint.",
+  },
+  {
+    prefix: "approval:",
+    owner: PLATFORM,
+    mintedBy: [BUILDER, PLATFORM],
+    requiredBy: [BUILDER, PLATFORM],
+    meaning:
+      "A tool call parked on a stock hub approval. `approval:*` with action `resolve` means the role may list and resolve any pending approval in the tenant. Minted by the installer onto the authorities the ledger names for stage 9's delivery decision; the platform also mints manage/read where it needs to.",
   },
   {
     prefix: "mail.",

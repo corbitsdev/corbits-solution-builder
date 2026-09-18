@@ -222,7 +222,7 @@ export function lifecycleEntrySource(options: LifecycleSourceOptions = {}): stri
     ? `import { defineAgent } from ${JSON.stringify("@intx/agent")};
 import { posix } from ${JSON.stringify("@intx/tools-posix/sidecar-bundle")};
 import { deck } from ${JSON.stringify("@solutions-builder/tools-deck/sidecar-bundle")};
-import { delivery } from ${JSON.stringify("@solutions-builder/tools-delivery/sidecar-bundle")};
+import { delivery, deliver } from ${JSON.stringify("@solutions-builder/tools-delivery/sidecar-bundle")};
 `
     : "";
   // The build agent is the kit's stage 8 specialist, given a workspace. Every
@@ -331,7 +331,7 @@ const AGENTS = {
 ${rolesInUse(audienceCount)
   .map((role) => {
     const tool =
-      role.id === agentFor(PACKAGE_STAGE).id ? "deck" : role.id === agentFor(DELIVERY_STAGE).id ? "delivery" : "";
+      role.id === agentFor(PACKAGE_STAGE).id ? "deck" : role.id === agentFor(DELIVERY_STAGE).id ? "delivery, deliver" : "";
     return `  ${JSON.stringify(role.id)}: defineAgent({ id: ${JSON.stringify(role.id)}, systemPrompt: ${JSON.stringify(renderedPrompt(role))}, tools: [${tool}], capabilities: [], inference: { sources: [SOURCE] } }),`;
   })
   .join("\n")}
@@ -362,6 +362,7 @@ const NO_DRAFT = ${JSON.stringify(NO_DRAFT_STEP_ID)};
 const NAME = ${JSON.stringify(NAME_STEP_ID)};
 const DRAFT_TIMEOUT = ${DRAFT_STEP_TIMEOUT_MS};
 const BUILD_STAGE = ${BUILD_STAGE};
+const DELIVERY_STAGE = ${DELIVERY_STAGE};
 const AUDIENCE_QUORUM = ${options.audienceQuorum === undefined ? "undefined" : JSON.stringify(options.audienceQuorum)};
 // Baked in at deploy render time from the project's own policy (the same
 // read AUDIENCE_QUORUM comes from), never from a client's signal: a round
@@ -550,17 +551,34 @@ function freezeSteps(after) {
   };
 }
 
+// Stage 9's delivery gate is the specialist's own deliver tool call, parked
+// on a stock hub approval rather than a named signal: no gate-9/exhausted-9
+// loop here. Its revise loop routes an exhaustion straight to a dead-end
+// park instead.
 function stageSteps(stage, after) {
-  return {
+  const revise = {
     ["revise-" + stage]: loop({
       body: iteration(stage),
       while: "stillOpen",
       carry: "carryRound",
       maxIterations: MAX_REVISIONS,
-      onExhausted: "exhausted-" + stage,
+      onExhausted: stage === DELIVERY_STAGE ? "exhausted-cap-" + stage : "exhausted-" + stage,
       drainBehavior: "wait",
       ...(after ? { after } : {}),
     }),
+  };
+  if (stage === DELIVERY_STAGE) {
+    return {
+      ...revise,
+      ["exhausted-cap-" + stage]: awaitSignal({
+        name: STAGE_ID + "." + stage + ".exhausted-cap",
+        drainBehavior: "wait",
+        after: ["revise-" + stage],
+      }),
+    };
+  }
+  return {
+    ...revise,
     ["gate-" + stage]: loop({
       body: gateIteration(stage, "gate"),
       while: "gateRefused",

@@ -12,15 +12,18 @@ import { listProjectRecords, resolveWorkspace, workflowsFor } from "@solutions-b
 import { currentDeployment } from "./project-list.ts";
 import { STAGE_TITLES, type Stage } from "@solutions-builder/app/ledger";
 import { CONSEQUENCE, STATE_CONSEQUENCE, requiredAuthorityFor } from "@solutions-builder/app/decision-copy";
-import { EVIDENCE_STEP_ID, FREEZE_STEP_ID, exhaustedStepId, gateStepId } from "@solutions-builder/app/workflows/stage-loop";
+import { DELIVERY_STAGE, EVIDENCE_STEP_ID, FREEZE_STEP_ID, exhaustedStepId, gateStepId } from "@solutions-builder/app/workflows/stage-loop";
 import { openQuestion, parkedSteps, type FoldedRun } from "@solutions-builder/app/project-state";
 import type { Wait } from "./client.ts";
 import { createHubTransport } from "./hub.ts";
+import { deliveryApprovalFor, pendingApprovals } from "./pending-approvals.ts";
 import { foldProjectRuns } from "./run-fold.ts";
 
-type ParkedDecision = { runId: string; stage: Stage; kind: "gate" | "freeze" | "evidence" | "question" };
+type ParkedDecision =
+  | { runId: string; stage: Stage; kind: "gate" | "freeze" | "evidence" | "question" }
+  | { runId: string; stage: Stage; kind: "approval"; approvalId: string };
 
-function parkedDecision(runs: readonly FoldedRun[]): ParkedDecision | null {
+function parkedDecision(runs: readonly FoldedRun[]): Omit<ParkedDecision, "kind" | "approvalId"> & { kind: "gate" | "freeze" | "evidence" | "question" } | null {
   for (const parked of parkedSteps(runs)) {
     if (parked.stepId === gateStepId(parked.stage) || parked.stepId === exhaustedStepId(parked.stage)) {
       return { runId: parked.runId, stage: parked.stage, kind: "gate" };
@@ -52,7 +55,16 @@ export async function openDecisionFor(
   transport: Transport = createHubTransport(),
 ): Promise<Omit<Wait, "projectTitle"> | null> {
   const runs = await foldProjectRuns(projectId, anchorRunId, transport);
-  const park = parkedDecision(runs);
+  let park: ParkedDecision | null = parkedDecision(runs);
+  // Stage 9's delivery gate is a stock hub approval on the specialist's own
+  // `deliver` tool call, not a step the run's own event history parks on the
+  // way every other gate does (CL-8566) — read it off the tenant's pending
+  // approvals instead.
+  if (!park) {
+    const approvals = await pendingApprovals(projectId, transport);
+    const delivery = deliveryApprovalFor(approvals, anchorRunId);
+    if (delivery) park = { runId: delivery.runId, stage: DELIVERY_STAGE, kind: "approval", approvalId: delivery.id };
+  }
   if (!park) return null;
   return {
     id: decisionIdFor(park),
@@ -63,6 +75,7 @@ export async function openDecisionFor(
     consequence: consequenceFor(park),
     blockers: null,
     requiredAuthority: requiredAuthorityFor(park.stage),
+    ...(park.kind === "approval" ? { approvalId: park.approvalId } : {}),
   };
 }
 

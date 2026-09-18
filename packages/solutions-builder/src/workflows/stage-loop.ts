@@ -431,6 +431,9 @@ export function exhaustedCapStepId(stage: Stage): string {
 
 /** The steps a stage ends on; the next stage starts after both. */
 export function stageEnds(stage: Stage): string[] {
+  // Stage 9 has no gate/exhausted loop: its own revise loop and dead-end
+  // exhaustion park are the whole of it (see `stageSteps`).
+  if (stage === DELIVERY_STAGE) return [reviseStepId(stage), exhaustedCapStepId(stage)];
   return [gateStepId(stage), exhaustedStepId(stage)];
 }
 
@@ -508,9 +511,19 @@ export function gateIteration(stage: Stage, gate: "gate" | "exhausted", quorum?:
   });
 }
 
-/** The top-level steps a stage contributes to the lifecycle: the loop and its two gates. */
+/**
+ * Stage 9's delivery gate is a stock hub approval on the specialist's own
+ * `deliver` tool call, not a named signal the run waits on: there is no
+ * `gate-9`/`exhausted-9` loop to admit a `delivery.accept`/`.reject` signal.
+ * Approving the tool call *is* the decision; rejecting it (with a message)
+ * hands the specialist feedback in the same turn, and it revises and calls
+ * `deliver` again without the round loop ever seeing a second signal. What
+ * remains is the same bounded revise loop every stage has, routed straight
+ * to a dead-end park if it is ever exhausted without a delivery — the
+ * ordinary gate's `onExhausted` twin without a gate behind it.
+ */
 export function stageSteps(stage: Stage, after: readonly string[] | null, quorum?: number): Record<string, unknown> {
-  return {
+  const revise = {
     [reviseStepId(stage)]: loop({
       body: iteration(stage),
       // Both refs are export names in the package's loops module
@@ -523,10 +536,23 @@ export function stageSteps(stage: Stage, after: readonly string[] | null, quorum
       // Not a failure. Exhaustion means this has been drafted many times
       // without anyone submitting it, and the answer to that is a person,
       // not an error.
-      onExhausted: exhaustedStepId(stage),
+      onExhausted: stage === DELIVERY_STAGE ? exhaustedCapStepId(stage) : exhaustedStepId(stage),
       drainBehavior: "wait",
       ...(after ? { after: [...after] } : {}),
     }),
+  };
+  if (stage === DELIVERY_STAGE) {
+    return {
+      ...revise,
+      [exhaustedCapStepId(stage)]: awaitSignal({
+        name: `${STAGE_WORKFLOW_ID}.${stage}.exhausted-cap`,
+        drainBehavior: "wait",
+        after: [reviseStepId(stage)],
+      }),
+    };
+  }
+  return {
+    ...revise,
     [gateStepId(stage)]: loop({
       body: gateIteration(stage, "gate", quorum),
       while: "gateRefused",

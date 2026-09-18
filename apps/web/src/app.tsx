@@ -45,6 +45,7 @@ import { Auth } from "./pages/auth.jsx";
 import { StageWorkspace } from "./pages/workspace.jsx";
 import { standingForProject, type StageStatus } from "./run-fold.ts";
 import { deliverGate, type GateIntent } from "./run-signal.ts";
+import { approveDelivery, rejectDelivery } from "./pending-approvals.ts";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { firstRunScreen, type HubAuthState } from "./first-run.ts";
 import { getHubSession } from "./hub-auth.ts";
@@ -501,6 +502,23 @@ export function App() {
     setBusy(decision);
     setError(null);
     try {
+      // Stage 9's delivery gate is a stock hub approval on the specialist's
+      // own deliver tool call (CL-8566), not a ledger command on a workflow
+      // signal: approving resolves the parked call and the run is delivered;
+      // rejecting carries the reason back to the specialist as the tool's
+      // own refusal message, which it sees in the same turn. "revise" has no
+      // separate meaning here — a rejection is already the "revise" case.
+      if (wait.approvalId) {
+        if (decision === "approve") {
+          await approveDelivery(wait.projectId, wait.approvalId);
+        } else {
+          await rejectDelivery(wait.projectId, wait.approvalId, reason);
+        }
+        setSelected(wait.projectId);
+        await reloadDetail();
+        return;
+      }
+
       const project = await api.projectView(wait.projectId);
       const versions = project.nodes
         .filter((node) => node.stage === wait.stage && node.supersededByNodeId === null)
@@ -511,21 +529,17 @@ export function App() {
         }));
 
       // The command depends on the stage, because the ledger says so: stage 7
-      // approves a cost, stage 9 accepts a manifest, everything else approves.
+      // approves a cost, everything else approves. Stage 9 never reaches
+      // here — the branch above returns for it, since its decision is a
+      // stock hub approval, not a ledger command on a workflow signal.
       const command =
         decision === "approve"
           ? wait.stage === 7
             ? "cost.approve"
-            : wait.stage === 9
-              ? "delivery.accept"
-              : "stage.approve"
-          : wait.stage === 9
-            ? decision === "reject"
-              ? "delivery.reject"
-              : "delivery.revise"
-            : decision === "reject"
-              ? "stage.reject"
-              : "stage.revise";
+            : "stage.approve"
+          : decision === "reject"
+            ? "stage.reject"
+            : "stage.revise";
 
       const intent: GateIntent = {
         command,

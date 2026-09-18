@@ -24,12 +24,22 @@ import {
 const { deck: renderDeckTool } = (await import("../packages/tools-deck/src/sidecar-bundle.ts")) as {
   deck: { id: string };
 };
-const { delivery: deliveryStatusTool } = (await import("../packages/tools-delivery/src/sidecar-bundle.ts")) as {
+const { delivery: deliveryStatusTool, deliver: deliverTool } = (await import(
+  "../packages/tools-delivery/src/sidecar-bundle.ts"
+)) as {
   delivery: { id: string };
+  deliver: { id: string; definitions: readonly { name: string; approval?: string }[] };
 };
 
 const problems: string[] = [];
 const seen = new Set<string>();
+
+// Stage 9's own hub approval, not a named signal: the deliver tool must
+// declare `approval: "ask"` so the platform parks the specialist's call and
+// writes an approval row instead of letting it run straight through.
+if (!deliverTool.definitions.some((entry) => entry.name === "deliver" && entry.approval === "ask")) {
+  problems.push("The deliver tool does not declare approval: \"ask\"");
+}
 
 /** Commands whose effect is on the project, not on the run's own state. */
 const PROJECT_LEVEL: string[] = ["project.archive", "project.delete"];
@@ -163,6 +173,7 @@ for (const terminal of TERMINAL_STATES) {
   const {
     reviseStepId,
     exhaustedStepId,
+    exhaustedCapStepId,
     roundSignal,
     approveSignal,
     exhaustedSignal,
@@ -173,6 +184,7 @@ for (const terminal of TERMINAL_STATES) {
     GATE_WAIT_STEP_ID,
     ADMIT_STEP_ID,
     evidenceSignal,
+    DELIVERY_STAGE,
   } = await import("@solutions-builder/app/workflows/stage-loop");
   // stage.draft is the round command that keeps a stage open: it must be a
   // continuing command everywhere, and land on the round signal at every stage.
@@ -209,7 +221,6 @@ for (const terminal of TERMINAL_STATES) {
   // automatic advancement, which section 7 forbids.
   for (const stage of STAGES) {
     const revise = steps[reviseStepId(stage)];
-    const gate = steps[stageStepId(stage)];
     if (!revise || revise.kind !== "loop") {
       problems.push(`The native workflow has no revise loop for stage ${stage}`);
       continue;
@@ -217,9 +228,52 @@ for (const terminal of TERMINAL_STATES) {
     if (typeof revise.maxIterations !== "number" || revise.maxIterations <= 0) {
       problems.push(`Loop ${reviseStepId(stage)} is not bounded`);
     }
+
+    // Stage 9's delivery gate is the specialist's own `deliver` tool call,
+    // parked on a stock hub approval — no gate-9/exhausted-9 loop and no
+    // approveSignal(9)/exhaustedSignal(9) awaiter exist. Its revise loop
+    // routes exhaustion straight to a dead-end park instead of a gate.
+    if (stage === DELIVERY_STAGE) {
+      if (revise.onExhausted !== exhaustedCapStepId(stage)) {
+        problems.push(`Loop ${reviseStepId(stage)} does not route to a dead-end park when exhausted`);
+      }
+      if (stageStepId(stage) in steps) {
+        problems.push(`Stage ${stage} has a gate loop; it must be resolved through the deliver approval instead`);
+      }
+      if (exhaustedStepId(stage) in steps) {
+        problems.push(`Stage ${stage} has an exhaustion gate loop; it must not`);
+      }
+      const iterationSteps = revise.body?.steps ?? {};
+      const awaitSignals = Object.entries(iterationSteps).filter(([, step]) => step.kind === "awaitSignal");
+      if (
+        awaitSignals.length !== 1 ||
+        awaitSignals[0]?.[0] !== ROUND_STEP_ID ||
+        awaitSignals[0]?.[1].name !== roundSignal(stage)
+      ) {
+        problems.push(`Stage ${stage}'s iteration's round is not its only awaitSignal`);
+      }
+      // stage.draft/stage.submit still ride the round signal, same as every
+      // other stage.
+      for (const command of loopExits(stage)) {
+        if (stageSignal(stage, command).name !== roundSignal(stage)) {
+          problems.push(`${command} leaves in_progress but is not a round signal at stage ${stage}`);
+        }
+      }
+      // Every other command that used to land on stage 9's gate
+      // (delivery.accept/.reject/.revise, and the generic post-submit
+      // governance commands — stage.reject, stage.revise, stage.route_back,
+      // stage.select_route, stage.retry, project.archive) rides no workflow
+      // signal at stage 9 any more: the deliver tool's approval is the one
+      // decision left there. Whether the generic governance commands still
+      // need a way to reach stage 9 is a product question outside delivery
+      // accept's scope, not answered by this change — see CL-8566.
+      continue;
+    }
+
     if (revise.onExhausted !== exhaustedStepId(stage)) {
       problems.push(`Loop ${reviseStepId(stage)} does not route to a gate when exhausted`);
     }
+    const gate = steps[stageStepId(stage)];
     const exhausted = steps[exhaustedStepId(stage)];
     function gateLoop(
       step: (typeof steps)[string] | undefined,
@@ -279,11 +333,13 @@ for (const terminal of TERMINAL_STATES) {
       }
     }
   }
-  // revise, gate loop, exhausted loop, gate-cap, exhausted-cap, plus the
-  // freeze loop and its cap between stage 7 and stage 8.
-  if (definition.stepOrder.length !== STAGES.length * 5 + 2) {
+  // revise, gate loop, exhausted loop, gate-cap, exhausted-cap for every
+  // stage but 9 (revise, exhausted-cap only), plus the freeze loop and its
+  // cap between stage 7 and stage 8.
+  const expectedStepCount = (STAGES.length - 1) * 5 + 2 + 2;
+  if (definition.stepOrder.length !== expectedStepCount) {
     problems.push(
-      `The native workflow has ${definition.stepOrder.length} steps for ${STAGES.length} stages`,
+      `The native workflow has ${definition.stepOrder.length} steps for ${STAGES.length} stages, expected ${expectedStepCount}`,
     );
   }
 
@@ -571,6 +627,11 @@ for (const terminal of TERMINAL_STATES) {
           !draft.agent?.toolFactories?.some((tool) => tool.id === deliveryStatusTool.id)
         ) {
           problems.push(`Stage ${stage}'s draft step does not carry the delivery_status tool`);
+        } else if (
+          (stage as number) === DELIVERY_STAGE &&
+          !draft.agent?.toolFactories?.some((tool) => tool.id === deliverTool.id)
+        ) {
+          problems.push(`Stage ${stage}'s draft step does not carry the deliver tool`);
         }
         const noDraft = iteration?.steps?.[NO_DRAFT_STEP_ID];
         if (!noDraft || noDraft.kind !== "escalation" || !noDraft.after?.includes(DECIDE_STEP_ID)) {

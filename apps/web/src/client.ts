@@ -186,6 +186,13 @@ export type Wait = {
   consequence: string;
   blockers: string | null;
   requiredAuthority: string;
+  /**
+   * Set only for stage 9's delivery gate: a stock hub approval on the
+   * specialist's own `deliver` tool call, not a workflow signal (CL-8566).
+   * Its presence is what tells `decide()` to resolve it through the
+   * approval routes instead of `deliverGate`.
+   */
+  approvalId?: string;
 };
 
 export type ProjectSummary = {

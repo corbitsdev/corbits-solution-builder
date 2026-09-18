@@ -112,7 +112,10 @@ export function DecisionQueue({
         (node) => node.stage === current.stage && node.supersededByNodeId === null,
       )
     : [];
-  const canApprove = versions.length > 0;
+  // Stage 9's delivery is a stock hub approval on the specialist's own
+  // deliver tool call (CL-8566): what is being approved is the pending
+  // approval itself, not an artifact version at this stage.
+  const canApprove = current?.approvalId ? true : versions.length > 0;
 
   return (
     <Screen
@@ -181,27 +184,29 @@ export function DecisionQueue({
             </Dictated>
           </div>
 
-          <div className="field">
-            <label htmlFor="decision-target">Send back to</label>
-            <select
-              id="decision-target"
-              className="setting-select decision-target"
-              value={target}
-              onChange={(event) => setTarget(Number(event.target.value))}
-            >
-              {stagesBack.map((stage) => (
-                <option key={stage} value={stage}>
-                  Stage {stage} — {stageName(stage)}
-                  {stage === current?.stage ? " (this stage again)" : RETURN_TO[stage] ? `, to ${RETURN_TO[stage]}` : ""}
-                </option>
-              ))}
-            </select>
-            <p className="inline-note">
-              {target === current?.stage
-                ? "The work is redone at this stage. What was decided is kept as history."
-                : `Stages ${target} to ${current?.stage} are walked again from there. Each specialist revises its current document against the change rather than starting over.`}
-            </p>
-          </div>
+          {current?.approvalId ? null : (
+            <div className="field">
+              <label htmlFor="decision-target">Send back to</label>
+              <select
+                id="decision-target"
+                className="setting-select decision-target"
+                value={target}
+                onChange={(event) => setTarget(Number(event.target.value))}
+              >
+                {stagesBack.map((stage) => (
+                  <option key={stage} value={stage}>
+                    Stage {stage} — {stageName(stage)}
+                    {stage === current?.stage ? " (this stage again)" : RETURN_TO[stage] ? `, to ${RETURN_TO[stage]}` : ""}
+                  </option>
+                ))}
+              </select>
+              <p className="inline-note">
+                {target === current?.stage
+                  ? "The work is redone at this stage. What was decided is kept as history."
+                  : `Stages ${target} to ${current?.stage} are walked again from there. Each specialist revises its current document against the change rather than starting over.`}
+              </p>
+            </div>
+          )}
 
           <div className="action-row">
             <Button
@@ -212,11 +217,14 @@ export function DecisionQueue({
             >
               {ACTION[current?.stage ?? 1] ?? "Approve"}
             </Button>
+            {/* Stage 9's delivery gate has no "send back to an earlier stage"
+                move: rejecting hands the specialist the reason as feedback
+                and it revises and resubmits in the same turn (CL-8566). */}
             <Button
-              loading={busy === "revise"}
-              onClick={() => current && onDecide(current, "revise", reason, target)}
+              loading={busy === "revise" || busy === "reject"}
+              onClick={() => current && onDecide(current, current.approvalId ? "reject" : "revise", reason, target)}
             >
-              Send back to {stageName(target)}
+              {current?.approvalId ? "Reject with feedback" : `Send back to ${stageName(target)}`}
             </Button>
             <Button onClick={() => current && onInspect(current)}>Inspect evidence</Button>
           </div>
