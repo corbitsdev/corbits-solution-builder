@@ -20,7 +20,6 @@ import { notFound } from "./errors.js";
 import { type RunState } from "@solutions-builder/app/ledger";
 import { parsed } from "./api.js";
 import { localActor } from "./hub-client.js";
-import { printableDesign } from "@solutions-builder/tools-deck/print-page";
 import {
   exportDirectory,
   exportProject,
@@ -32,23 +31,8 @@ import {
   bundleFileName,
 } from "./project-transfer.js";
 import { bytesOf } from "./source-material.js";
-import { deckBytesOf, deckForPackage } from "./deck.js";
 import { readProject } from "./project-records.js";
 import { attachMaterial, MATERIAL_KIND, type IncomingFile } from "./source-material.js";
-/** A title as a file-name segment: lower case, hyphens, nothing a shell minds. */
-function slugOf(title: string): string {
-  return (
-    title
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "")
-      .slice(0, 60) || "project"
-  );
-}
-/** `<project>-<document>`: what a printed PDF is saved as, before the dialog adds its extension. */
-function printFileName(projectTitle: string, documentTitle: string): string {
-  return `${slugOf(projectTitle)}-${slugOf(documentTitle)}`;
-}
 
 export function registerProjectRoutes(api: Hono) {
   api.get("/decisions", async (context) =>
@@ -210,53 +194,11 @@ export function registerProjectRoutes(api: Hono) {
   api.post("/artifacts/:nodeId/save", async (context) => {
     const { node, content } = await readArtifactNode(context.req.param("nodeId"));
     const stored = bytesOf(content);
-    const bytes =
-      stored?.bytes ?? (node.kind === "audience_deck" ? await deckBytesOf(content) : null);
-    if (!bytes) {
+    if (!stored) {
       throw new HostError("validation_failed", "Only a file is saved this way; documents print from the app.", {}, false);
     }
-    const saved = await saveFile(fileNameFor(node.title, stored?.mime ?? node.mediaType), bytes, exportDirectory());
+    const saved = await saveFile(fileNameFor(node.title, stored.mime ?? node.mediaType), stored.bytes, exportDirectory());
     return context.json(saved);
-  });
-
-  /**
-   * A stakeholder's slides, saved into the Downloads folder: the PowerPoint
-   * already recorded beside the package (or this deck node). The host never
-   * builds a deck on this route; stage 5's `render_deck` is what produced
-   * the bytes.
-   */
-  api.post("/artifacts/:nodeId/slides/save", async (context) => {
-    const deck = await deckForPackage(context.req.param("nodeId"));
-    const { node, content } = await readArtifactNode(deck.nodeId);
-    const bytes = await deckBytesOf(content);
-    if (!bytes) throw new HostError("internal_error", "The slides were recorded without their bytes.");
-    const saved = await saveFile(fileNameFor(node.title, node.mediaType), bytes, exportDirectory());
-    return context.json({ ...saved, nodeId: deck.nodeId });
-  });
-
-  /**
-   * A design as a page of its own, with a print bar, so it can be printed or
-   * saved as a PDF. Markdown documents print from inside the app, which
-   * renders them; only an HTML artifact needs to be left for.
-   */
-  api.get("/artifacts/:nodeId/print", async (context) => {
-    const { node, content } = await readArtifactNode(context.req.param("nodeId"));
-    if (node.mediaType !== "text/html") {
-      throw new HostError(
-        "validation_failed",
-        "Only a design is served as a page of its own; other documents print from the app.",
-        {},
-        false,
-      );
-    }
-    const project = await readProject(node.projectId);
-    const page = printableDesign({
-      html: content,
-      title: node.title,
-      version: node.version,
-      fileName: printFileName(project?.title ?? "project", node.title),
-    });
-    return new Response(page.body, { headers: page.headers });
   });
 
   /**
