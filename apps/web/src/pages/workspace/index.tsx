@@ -94,19 +94,19 @@ export function StageWorkspace({
 
   // The specialist for this project's stage: deployed lazily the first time
   // the stage is opened (CL-8612 contract v6 — one mail agent per stage,
-  // never a lifecycle workflow run).
+  // never a lifecycle workflow run). `agentAddress` is the single source of
+  // truth for "the agent is known" — the composer and every stage panel key
+  // off it directly rather than a separate readiness flag, so there is no
+  // window where the address is known but something built on top of it is
+  // still disabled.
   const [agentAddress, setAgentAddress] = useState<string | null>(null);
-  const [agentReady, setAgentReady] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    setAgentReady(false);
     setAgentAddress(null);
     api
       .ensureStageAgent(detail.project.id, stage)
       .then((deployment) => {
-        if (cancelled) return;
-        setAgentAddress(deployment.address);
-        setAgentReady(true);
+        if (!cancelled) setAgentAddress(deployment.address);
       })
       .catch((cause: unknown) => {
         if (cancelled) return;
@@ -145,6 +145,29 @@ export function StageWorkspace({
   const [sending, setSending] = useState(false);
   const [approving, setApproving] = useState(false);
 
+  // Stage 1's own opening problem statement, read straight off its
+  // lifecycle deployment (`api.projectOpening`, scoped to the workspace
+  // tenant `createProject` actually deployed it into) rather than
+  // `detail.opening` — `loadProjectView`'s own fold reads that scoped to
+  // the project's own child tenant, where that deployment never lived, and
+  // so always comes back null, silently starving the auto-send below.
+  const [opening, setOpening] = useState<{ body: string } | null | undefined>(undefined);
+  useEffect(() => {
+    if (stage !== 1) return;
+    let cancelled = false;
+    api
+      .projectOpening(detail.project.id)
+      .then((result) => {
+        if (!cancelled) setOpening(result);
+      })
+      .catch(() => {
+        if (!cancelled) setOpening(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detail.project.id, stage]);
+
   // The stage-1 opening problem statement is the first message of that
   // stage's thread, sent once. A later stage's opening is instead the just-
   // approved draft, sent from `approve()` below the moment the stage
@@ -152,8 +175,8 @@ export function StageWorkspace({
   const openedRef = useRef<string | null>(null);
   const [pendingOpening, setPendingOpening] = useState<{ stage: number; body: string } | null>(null);
   useEffect(() => {
-    if (!agentReady || !agentAddress || messages.length > 0) return;
-    const body = stage === 1 ? (detail.opening?.body ?? null) : pendingOpening?.stage === stage ? pendingOpening.body : null;
+    if (!agentAddress || messages.length > 0) return;
+    const body = stage === 1 ? (opening?.body ?? null) : pendingOpening?.stage === stage ? pendingOpening.body : null;
     if (!body) return;
     const key = `${detail.project.id}:${stage}`;
     if (openedRef.current === key) return;
@@ -164,7 +187,7 @@ export function StageWorkspace({
       .catch((cause: unknown) => {
         setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
       });
-  }, [agentReady, agentAddress, messages.length, stage, detail.project.id, detail.opening, pendingOpening, tenantId, loadThread]);
+  }, [agentAddress, messages.length, stage, detail.project.id, opening, pendingOpening, tenantId, loadThread]);
 
   const send = async (body: string) => {
     if (!agentAddress || body.trim().length === 0) return;
@@ -242,13 +265,13 @@ export function StageWorkspace({
         />
       ) : null}
 
-      {!agentReady ? (
+      {!agentAddress ? (
         <Screen title={`Stage ${stage} of 9 · ${stageName(stage)}`} description={STAGE_GOAL[stage]} tight>
           <p className="inline-note">Starting the {stageName(stage).toLowerCase()} specialist…</p>
         </Screen>
       ) : null}
 
-      {agentReady && stage === 4 ? (
+      {agentAddress && stage === 4 ? (
         <DesignPanel
           detail={detail}
           tenantId={tenantId}
@@ -259,7 +282,7 @@ export function StageWorkspace({
         />
       ) : null}
 
-      {agentReady && stage === 5 ? (
+      {agentAddress && stage === 5 ? (
         <div className="stage-scroll">
           <AudiencePackages
             detail={detail}
@@ -271,19 +294,19 @@ export function StageWorkspace({
         </div>
       ) : null}
 
-      {agentReady && stage === 8 ? (
+      {agentAddress && stage === 8 ? (
         <div className="stage-scroll">
           <BuildPanel detail={detail} tenantId={tenantId} onChanged={onChanged} onOpenSettings={onOpenSettings} />
         </div>
       ) : null}
 
-      {agentReady && (requirements || panelReviews.length > 0) ? (
+      {agentAddress && (requirements || panelReviews.length > 0) ? (
         <div className="stage-companions">
           {requirements ? (
             <ProductRequirements
               node={requirements}
               tenantId={tenantId}
-              canRewrite={agentReady}
+              canRewrite={agentAddress !== null}
               busy={sending}
               onRewrite={() => void send("Write the requirements again, and the plan against them.")}
             />
@@ -292,7 +315,7 @@ export function StageWorkspace({
         </div>
       ) : null}
 
-      {agentReady && stage !== 4 && stage !== 5 && stage !== 8 ? (
+      {agentAddress && stage !== 4 && stage !== 5 && stage !== 8 ? (
         <>
           <Screen
             title={`Stage ${stage} of 9 · ${stageName(stage)}`}
@@ -310,8 +333,10 @@ export function StageWorkspace({
               <div className="document-body">
                 <Markdown source={latestSpecialistMessage.body} />
               </div>
-            ) : (
+            ) : messages.length > 0 ? (
               <p className="inline-note">Waiting on the specialist's first reply…</p>
+            ) : (
+              <p className="inline-note">Say what you'd like below to start the conversation.</p>
             )}
           </Screen>
           <StageConversation

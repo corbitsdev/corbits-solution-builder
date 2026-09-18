@@ -11,6 +11,7 @@ import { AUTHORITIES, type Authority, type Stage } from "@solutions-builder/app/
 import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
 import {
   ApiError as HubApiError,
+  assetsFor,
   createArtifact as installerCreateArtifact,
   createProject as installerCreateProject,
   ensureLifecycleDeployment as installerEnsureLifecycleDeployment,
@@ -20,6 +21,7 @@ import {
   installState as installerInstallState,
   installProjectAuthority,
   InstallerError,
+  lifecycleAssetName,
   liveDelegationStore,
   ensureRegistryTarballs,
   pushSourceTree,
@@ -27,6 +29,7 @@ import {
   resolveWorkspace,
   revokeAllDelegations,
   updateProject as installerUpdateProject,
+  workflowsFor,
   type ClosureManifest,
   type ClosureSource,
   type InstallState as PackageInstallState,
@@ -64,9 +67,10 @@ import {
   type ChatMessage,
 } from "./stage-mail.ts";
 import { hubCredentials, hubOrigin } from "./hub-origin.ts";
-import { listProjectSummaries } from "./project-list.ts";
+import { currentDeployment, listProjectSummaries } from "./project-list.ts";
 import { openDecisions } from "./decisions-fold.ts";
 import { loadProjectView, toArtifactNode } from "./project-view.ts";
+import { foldOpening } from "./run-fold.ts";
 import { designerSettings as loadDesignerSettings, saveDesignerSettings, type DesignerSettings } from "./designer-settings.ts";
 import {
   API_KEY_CONNECT_OPTIONS,
@@ -981,5 +985,29 @@ export const api = {
         projectId,
         stage as Stage,
       );
+    }),
+  /**
+   * The project's opening problem statement, read off its lifecycle
+   * deployment's own `RunStarted` trigger event. Scoped to the *workspace*
+   * tenant the deployment actually lives in — the same tenant
+   * `createProject`'s own `ensureLifecycleDeployment` call deploys it into
+   * (`workspaceTenantId`, not the project's own child tenant) — rather than
+   * `loadProjectView`'s `detail.opening`, which reads `workflowsFor` and
+   * `foldOpening` scoped to `projectId` and so never finds this deployment.
+   * Answers null once there is nothing to open on: no lifecycle asset was
+   * ever deployed for this project, or it never ran.
+   */
+  projectOpening: (projectId: string): Promise<{ body: string; createdAt: string } | null> =>
+    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      const assetName = lifecycleAssetName(projectId);
+      const [assets, deployments] = await Promise.all([
+        assetsFor(transport, workspaceTenantId).list("workflow"),
+        workflowsFor(transport, workspaceTenantId).deployments(),
+      ]);
+      const asset = assets.find((entry) => entry.name === assetName);
+      if (!asset) return null;
+      const deployment = currentDeployment(deployments.filter((entry) => entry.definitionAssetId === asset.id));
+      if (!deployment) return null;
+      return foldOpening(workspaceTenantId, deployment.id, transport);
     }),
 };
