@@ -10,6 +10,8 @@
  * Verified against corbits-artifacts @ 8d4e156 by the Gate 2 spike.
  */
 declare module "@corbits/artifacts" {
+  import type { Hono } from "hono";
+
   /**
    * The package types this as drizzle's `PostgresJsDatabase`. Builder hands it
    * a pglite handle wrapped by `withPostgresJsResultShape`; see that module for
@@ -93,4 +95,23 @@ declare module "@corbits/artifacts" {
     row: ArtifactRow,
     archive: boolean,
   ): Promise<ArtifactRow>;
+
+  /** The host's grant middleware factory, `@intx/hub-api`'s `RequireGrant`. */
+  export type RequireGrant = (resource: unknown, action: string) => unknown;
+
+  export type ContentStore = Record<string, unknown>;
+  export const InlineContentStore: ContentStore;
+
+  export type MountArtifactsOpts = {
+    db: ArtifactDb;
+    contentStore: ContentStore;
+    requireGrant: RequireGrant;
+    decorate?: (tenantId: string, rows: readonly Record<string, unknown>[]) => Promise<void>;
+    onArtifactCreated?: (tx: ArtifactTx, row: ArtifactRow, scope: ResolvedPrincipal) => Promise<void>;
+    uploadPolicy?: Record<string, unknown>;
+  };
+
+  /** Mounts the module's artifact/version/upload routes onto a `Hono<TenantEnv>` app. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export function mountArtifacts(app: Hono<any>, opts: MountArtifactsOpts): Hono<any>;
 }

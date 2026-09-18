@@ -17,12 +17,12 @@
  * checksum of its statements, so an edited migration fails loudly on the next
  * start instead of silently diverging from the database it created.
  *
- * `@corbits/artifacts` owns its own schema and its own ledger; this runner
- * calls that package's migrator after ours, because its tables carry foreign
- * keys into the control-plane tables migration 0001 creates.
+ * `@corbits/artifacts` owns its own schema and its own ledger; `packages/embed-hub`
+ * runs that package's migrator as part of mounting it, once, alongside
+ * Interchange's own migrations — not here. This runner never imports that
+ * package.
  */
 import { sql, type SQL } from "drizzle-orm";
-import { runArtifactMigrations } from "@corbits/artifacts";
 import { BUILDER_SCHEMA } from "./schema.js";
 import type { HostDatabase } from "./db.js";
 
@@ -655,16 +655,6 @@ export async function migrate(host: HostDatabase): Promise<{ applied: string[] }
       );
     });
     applied.push(migration.id);
-  }
-
-  // `@corbits/artifacts` foreign-keys into `public.tenant` and
-  // `public.principal`, so its tables can only exist where the control plane
-  // does. With an embedded hub that is this database. With a hosted hub it is
-  // not, and artifact storage has to move to the hub alongside it. That is
-  // future work, not papered over with a second control plane here.
-  const { hubMode } = await import("./hub-client.js");
-  if (hubMode() === "embedded") {
-    await runArtifactMigrations(host.artifactDb);
   }
 
   return { applied };

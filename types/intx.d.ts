@@ -125,6 +125,8 @@ declare module "@intx/authz" {
     action: string,
     registry?: unknown,
   ): Promise<AuthzResult>;
+
+  export function timeWindowEvaluator(condition: unknown, context: unknown): boolean;
 }
 
 declare module "@intx/crypto" {
@@ -428,6 +430,14 @@ declare module "@intx/hub-api" {
     handler: (request: Request) => Promise<Response>;
   };
   export function createMailTriggeredRunGrantsMaterializer(opts: Record<string, unknown>): unknown;
+
+  export type TenantEnv = { Variables: { tenant: unknown; principal: unknown } };
+  export type RequireGrant = (resource: unknown, action: string) => unknown;
+  export function createRequireGrant(opts: {
+    grantStore: unknown;
+    conditionRegistry: Record<string, unknown>;
+  }): RequireGrant;
+  export function idResource(kind: string, param: string): unknown;
 }
 
 declare module "@intx/hub-client" {

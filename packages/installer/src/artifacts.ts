@@ -1,0 +1,97 @@
+/**
+ * A typed client for the `@corbits/artifacts` module the hub mounts
+ * (`packages/embed-hub`), over nothing but `Transport` — the same interface
+ * `apps/hub/src/hub-client.ts`'s `artifacts` helpers are built on, rebuilt
+ * here because `packages/installer/src` may not import `apps/hub/src`.
+ *
+ * `content` on `Artifact` is always the CURRENT version: the module's HTTP
+ * surface has no route for an older version's body, only its metadata
+ * (`versions`).
+ */
+import type { Transport } from "@intx/hub-client";
+
+function tenantPathFor(scope: string, rest: string): string {
+  return `/api/tenants/${scope}${rest}`;
+}
+
+export type Artifact = {
+  id: string;
+  kind: string;
+  title: string;
+  source: Record<string, unknown> & { origin: string };
+  version: number;
+  ownerPrincipalId: string | null;
+  metadata: Record<string, unknown> | null;
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  content: string;
+};
+
+export type ArtifactListItem = Omit<Artifact, "content">;
+
+/** Every artifact in the tenant, newest-updated first (the route's default order). */
+export async function listArtifacts(
+  transport: Transport,
+  tenantId: string,
+  filters: { kind?: string } = {},
+): Promise<ArtifactListItem[]> {
+  const items: ArtifactListItem[] = [];
+  let cursor: string | null = null;
+  do {
+    const params = new URLSearchParams({ limit: "100", ...(filters.kind ? { kind: filters.kind } : {}) });
+    if (cursor) params.set("cursor", cursor);
+    const page = await transport.fetch<{ artifacts: ArtifactListItem[]; nextCursor: string | null }>(
+      "GET",
+      tenantPathFor(tenantId, `/artifacts?${params.toString()}`),
+    );
+    items.push(...page.artifacts);
+    cursor = page.nextCursor;
+  } while (cursor);
+  return items;
+}
+
+/** Imports a pasted body as a new artifact, version 1. */
+export async function createArtifact(
+  transport: Transport,
+  tenantId: string,
+  input: { title: string; content: string },
+): Promise<Artifact> {
+  const { artifact } = await transport.fetch<{ artifact: Artifact }>(
+    "POST",
+    tenantPathFor(tenantId, "/artifacts"),
+    { mode: "text", title: input.title, content: input.content },
+  );
+  return artifact;
+}
+
+/** The artifact at its current version, or null if it does not exist (or is not visible). */
+export async function getArtifact(
+  transport: Transport,
+  tenantId: string,
+  artifactId: string,
+): Promise<Artifact | null> {
+  try {
+    const { artifact } = await transport.fetch<{ artifact: Artifact }>(
+      "GET",
+      tenantPathFor(tenantId, `/artifacts/${artifactId}`),
+    );
+    return artifact;
+  } catch {
+    return null;
+  }
+}
+
+/** Revises an artifact, bumping its version. Requires `write` on `artifact:<id>`. */
+export async function reviseArtifact(
+  transport: Transport,
+  tenantId: string,
+  artifactId: string,
+  input: { title?: string; content?: string },
+): Promise<Artifact> {
+  return transport.fetch<Artifact>(
+    "POST",
+    tenantPathFor(tenantId, `/artifacts/${artifactId}/versions`),
+    input,
+  );
+}

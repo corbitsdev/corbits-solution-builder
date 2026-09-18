@@ -7,9 +7,7 @@
  * they never transition anything.
  */
 import { and, asc, desc, eq, isNull } from "drizzle-orm";
-import { createArtifact, writeArtifactVersion } from "@corbits/artifacts";
 import { database } from "./db.js";
-import { withPostgresJsResultShape } from "@solutions-builder/embed-hub/pg-compat";
 import * as table from "./schema.js";
 import { newId, sha256 } from "./ids.js";
 import { HostError, notFound } from "./errors.js";
@@ -29,7 +27,7 @@ import type { Stage } from "@solutions-builder/app/ledger";
 import { openDecisionFor } from "./decisions.js";
 import { currentAnchor, projectExecutionStatus } from "./lifecycle-run.js";
 import { activeRun, runsForProject } from "./runs.js";
-import { tenantId } from "./hub-client.js";
+import { artifacts, tenantId } from "./hub-client.js";
 import { listProjectRecords, requireProject } from "./project-records.js";
 
 /**
@@ -96,16 +94,23 @@ async function existingOpening(projectId: string): Promise<{ projectId: string; 
 /**
  * Writes an artifact version and its lineage edges.
  *
- * Bytes go to the adopted `@corbits/artifacts` store; the node row here carries
- * what that package does not model — stage, branch, exact-version hash, source
- * edges and provenance. A model drafts; this function is what makes it an
- * artifact.
+ * Bytes go to the mounted `@corbits/artifacts` module, over its own HTTP
+ * routes; the node row here carries what that module does not model — stage,
+ * branch, exact-version hash, source edges and provenance. A model drafts;
+ * this function is what makes it an artifact.
+ *
+ * The artifact write and the node insert are no longer one database
+ * transaction: the module is reached over HTTP (in-process today, a separate
+ * service once a hub is hosted), so a failure between the two now leaves a
+ * committed artifact version with no graph node pointing at it, recoverable
+ * by content hash rather than guaranteed unreachable by construction. That
+ * tradeoff is the cost of the module owning its own storage.
  */
 export async function writeArtifact(
   draft: ArtifactDraft,
   actor: { principalId: string },
 ): Promise<{ nodeId: string; artifactId: string; version: number; contentHash: string }> {
-  const { db, artifactDb } = database();
+  const { db } = database();
   const stage = ARTIFACT_STAGE[draft.kind] as Stage;
   // A stakeholder's package is where their slides come from, so a package
   // without a deck outline is not a package, whoever wrote it: the
@@ -122,12 +127,6 @@ export async function writeArtifact(
     }
   }
   const contentHash = await sha256(draft.content);
-
-  const scope = {
-    tenantId: tenantId(),
-    principalId: actor.principalId,
-    identity: { kind: "user" as const, principalId: actor.principalId },
-  };
 
   // Revising an existing artifact of the same kind on the same branch adds a
   // version; a new kind starts a new artifact. Corrections create versions —
@@ -151,40 +150,22 @@ export async function writeArtifact(
 
   const nodeId = newId.node();
 
-  // The bytes and the lineage row commit together or not at all. Written as
-  // two transactions, a failure between them left a committed artifact version
-  // no graph node pointed at — invisible to every reader, and the next write
-  // stacked version N+1 on a phantom N. `artifactDb` is the same handle as
-  // `db`, so the artifact package's own transaction nests as a savepoint.
-  const { artifactId, version } = await db.transaction(async (tx) => {
-    const artifactTx = withPostgresJsResultShape(tx) as unknown as typeof artifactDb;
+  let artifactId: string;
+  let version: number;
+  if (existing) {
+    artifactId = existing.artifactId;
+    const revised = await artifacts.revise(artifactId, {
+      title: draft.title,
+      content: draft.content,
+    });
+    version = revised.version;
+  } else {
+    const row = await artifacts.create({ title: draft.title, content: draft.content });
+    artifactId = row.id;
+    version = row.version;
+  }
 
-    let artifactId: string;
-    let version: number;
-    if (existing) {
-      artifactId = existing.artifactId;
-      const revised = await writeArtifactVersion(artifactTx, {
-        scope,
-        artifactId,
-        title: draft.title,
-        content: draft.content,
-      });
-      version = revised.version;
-    } else {
-      const row = await createArtifact(artifactTx as never, {
-        scope,
-        // The workspace owner owns everything a specialist drafts on their
-        // behalf; provenance of *who produced it* lives on the graph node.
-        ownerPrincipalId: actor.principalId,
-        kind: "document",
-        title: draft.title,
-        content: draft.content,
-        source: { origin: draft.provenance.producer === "agent" ? "agent" : "manual" },
-      });
-      artifactId = row.id;
-      version = row.version;
-    }
-
+  await db.transaction(async (tx) => {
     await tx.insert(table.artifactNode).values({
       id: nodeId,
       projectId: draft.projectId,
@@ -210,7 +191,6 @@ export async function writeArtifact(
         .set({ supersededByNodeId: nodeId })
         .where(eq(table.artifactNode.id, existing.id));
     }
-    return { artifactId, version };
   });
 
   return { nodeId, artifactId, version, contentHash };
@@ -235,21 +215,35 @@ export type PortableArtifactNode = {
   content: string;
 };
 
-/** Every artifact node on a project with its content, oldest first, and the lineage edges among them. */
+/**
+ * Every artifact node on a project with its content, oldest first, and the
+ * lineage edges among them.
+ *
+ * The mounted module's HTTP surface has no route for a specific historical
+ * version's body — only its current one (`GET /artifacts/:id`) and a
+ * metadata-only version list. A superseded node (one with a
+ * `supersededByNodeId`) therefore carries the artifact's CURRENT content here,
+ * not the exact bytes it had at that version, which the in-process reader this
+ * replaces was able to do. Every export is a real behavior change for any
+ * project with a revised (not just superseded-by-a-new-kind) artifact.
+ */
 export async function exportArtifactNodes(projectId: string): Promise<{
   nodes: PortableArtifactNode[];
   edges: { childNodeId: string; sourceNodeId: string }[];
 }> {
-  const { db, artifactDb } = database();
-  const { getArtifactVersion } = await import("@corbits/artifacts");
+  const { db } = database();
   const rows = await db
     .select()
     .from(table.artifactNode)
     .where(eq(table.artifactNode.projectId, projectId))
     .orderBy(asc(table.artifactNode.createdAt), asc(table.artifactNode.version));
+  const contentByArtifactId = new Map<string, string>();
   const nodes: PortableArtifactNode[] = [];
   for (const row of rows) {
-    const stored = await getArtifactVersion(artifactDb, row.artifactId, row.version);
+    if (!contentByArtifactId.has(row.artifactId)) {
+      const stored = await artifacts.get(row.artifactId);
+      contentByArtifactId.set(row.artifactId, stored?.content ?? "");
+    }
     nodes.push({
       id: row.id,
       artifactId: row.artifactId,
@@ -265,7 +259,7 @@ export async function exportArtifactNodes(projectId: string): Promise<{
       provenance: row.provenance,
       supersededByNodeId: row.supersededByNodeId,
       createdAt: row.createdAt.toISOString(),
-      content: stored?.content ?? "",
+      content: contentByArtifactId.get(row.artifactId) ?? "",
     });
   }
   const ids = new Set(nodes.map((node) => node.id));
@@ -299,12 +293,7 @@ export async function importArtifactNodes(args: {
 }): Promise<Map<string, string>> {
   const nodeIds = new Map<string, string>(args.nodes.map((node) => [node.id, newId.node()]));
   const renamed = (value: string | null): string | null => (value === null ? null : (nodeIds.get(value) ?? value));
-  const { db, artifactDb } = database();
-  const scope = {
-    tenantId: tenantId(),
-    principalId: args.actor.principalId,
-    identity: { kind: "user" as const, principalId: args.actor.principalId },
-  };
+  const { db } = database();
   // A JSON record that names other nodes — a design's feedback names the
   // design — is written with the new names, and its hash is of what was
   // written. Documents are bytes and are never touched.
@@ -329,48 +318,43 @@ export async function importArtifactNodes(args: {
   for (const node of args.nodes) {
     byArtifact.set(node.artifactId, [...(byArtifact.get(node.artifactId) ?? []), node]);
   }
+  // Written through the mounted module's own routes, in version order, one
+  // artifact at a time — outside the builder transaction below, the same
+  // service-boundary tradeoff `writeArtifact` takes.
   const artifactIds = new Map<string, string>();
-  await db.transaction(async (tx) => {
-    const artifactTx = withPostgresJsResultShape(tx) as unknown as typeof artifactDb;
-    for (const [carriedId, versions] of byArtifact) {
-      versions.sort((left, right) => left.version - right.version);
-      let artifactId: string | null = null;
-      for (const [index, node] of versions.entries()) {
-        const expected = index + 1;
-        if (node.version !== expected) {
-          throw new HostError(
-            "validation_failed",
-            `Artifact ${carriedId} carries version ${node.version} where ${expected} was expected; the bundle is incomplete.`,
-          );
+  for (const [carriedId, versions] of byArtifact) {
+    versions.sort((left, right) => left.version - right.version);
+    let artifactId: string | null = null;
+    for (const [index, node] of versions.entries()) {
+      const expected = index + 1;
+      if (node.version !== expected) {
+        throw new HostError(
+          "validation_failed",
+          `Artifact ${carriedId} carries version ${node.version} where ${expected} was expected; the bundle is incomplete.`,
+        );
+      }
+      if (artifactId === null) {
+        const row = await artifacts.create({
+          title: node.title,
+          content: contents.get(node.id) ?? node.content,
+        });
+        artifactId = row.id;
+        if (row.version !== node.version) {
+          throw new HostError("internal_error", `The artifact store opened ${carriedId} at version ${row.version}.`);
         }
-        const producer = (node.provenance as { producer?: string } | null)?.producer;
-        if (artifactId === null) {
-          const row = await createArtifact(artifactTx as never, {
-            scope,
-            ownerPrincipalId: args.actor.principalId,
-            kind: "document",
-            title: node.title,
-            content: contents.get(node.id) ?? node.content,
-            source: { origin: producer === "agent" ? "agent" : "manual" },
-          });
-          artifactId = row.id;
-          if (row.version !== node.version) {
-            throw new HostError("internal_error", `The artifact store opened ${carriedId} at version ${row.version}.`);
-          }
-        } else {
-          const revised = await writeArtifactVersion(artifactTx, {
-            scope,
-            artifactId,
-            title: node.title,
-            content: contents.get(node.id) ?? node.content,
-          });
-          if (revised.version !== node.version) {
-            throw new HostError("internal_error", `The artifact store wrote ${carriedId} v${node.version} as v${revised.version}.`);
-          }
+      } else {
+        const revised = await artifacts.revise(artifactId, {
+          title: node.title,
+          content: contents.get(node.id) ?? node.content,
+        });
+        if (revised.version !== node.version) {
+          throw new HostError("internal_error", `The artifact store wrote ${carriedId} v${node.version} as v${revised.version}.`);
         }
       }
-      artifactIds.set(carriedId, artifactId!);
     }
+    artifactIds.set(carriedId, artifactId!);
+  }
+  await db.transaction(async (tx) => {
     for (const node of args.nodes) {
       await tx.insert(table.artifactNode).values({
         id: nodeIds.get(node.id)!,
@@ -412,15 +396,20 @@ export function rewriteIds(value: unknown, ids: Map<string, string>): unknown {
   return value;
 }
 
+/**
+ * A node's content, over the mounted module's routes. Only its CURRENT
+ * version is fetchable that way (see `exportArtifactNodes`'s note) — a
+ * superseded node's exact historical bytes are no longer reachable, so this
+ * answers with whatever the artifact holds now.
+ */
 export async function readArtifactNode(nodeId: string) {
-  const { db, artifactDb } = database();
+  const { db } = database();
   const [node] = await db
     .select()
     .from(table.artifactNode)
     .where(eq(table.artifactNode.id, nodeId));
   if (!node) throw notFound("That artifact version");
-  const { getArtifactVersion } = await import("@corbits/artifacts");
-  const stored = await getArtifactVersion(artifactDb, node.artifactId, node.version);
+  const stored = await artifacts.get(node.artifactId);
   return { node, content: stored?.content ?? "" };
 }
 
@@ -563,12 +552,10 @@ async function deliveryManifests(
 > {
   const manifestNodes = nodes.filter((node) => node.kind === "delivery_manifest");
   if (manifestNodes.length === 0) return [];
-  const { artifactDb } = database();
-  const { getArtifactVersion } = await import("@corbits/artifacts");
   const acceptances = (await ledgerCommands(projectId)).filter((command) => command.command === "delivery.accept");
   return Promise.all(
     manifestNodes.map(async (node) => {
-      const stored = await getArtifactVersion(artifactDb, node.artifactId, node.version);
+      const stored = await artifacts.get(node.artifactId);
       const body = stored ? (JSON.parse(stored.content) as { descriptors?: unknown }) : {};
       const accepted = acceptances.find((command) => command.createdAt >= node.createdAt.toISOString());
       return {

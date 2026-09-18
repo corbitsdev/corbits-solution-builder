@@ -13,7 +13,7 @@
 import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
 import type { PGlite } from "@electric-sql/pglite";
-import type { Hono } from "hono";
+import { Hono } from "hono";
 import {
   createDB,
   createGrantStore,
@@ -29,7 +29,16 @@ import {
   createApp,
   createAuth,
   createMailTriggeredRunGrantsMaterializer,
+  createRequireGrant,
+  type TenantEnv,
 } from "@intx/hub-api";
+import { timeWindowEvaluator } from "@intx/authz";
+import {
+  InlineContentStore,
+  mountArtifacts,
+  runArtifactMigrations,
+  type ArtifactDb,
+} from "@corbits/artifacts";
 import {
   createAgentRepoStore,
   createAssetService,
@@ -410,6 +419,40 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
       };
     }),
   });
+
+  // `@corbits/artifacts` is a mountable Interchange module, not host code:
+  // it owns its own schema/migrations and reads tenant/principal off the
+  // context the hub's own `/api/tenants/:tenantId/*` middleware places
+  // there. Migrating and mounting here — the hub's own composition step —
+  // is what makes its routes reachable from outside apps/hub/src.
+  const artifactDb = withPostgresJsResultShape(db.db) as unknown as ArtifactDb;
+  await runArtifactMigrations(artifactDb);
+  const artifactsApi = new Hono<TenantEnv>();
+  mountArtifacts(artifactsApi, {
+    db: artifactDb,
+    contentStore: InlineContentStore,
+    requireGrant: createRequireGrant({
+      grantStore: createGrantStore(db.db),
+      conditionRegistry: { time_window: timeWindowEvaluator },
+    }),
+    // The package mints no grants itself (see its README). Without this, a
+    // caller who just created an artifact could never revise or archive it —
+    // `POST /artifacts/:id/versions` and `/archive` both require a `write`/
+    // `archive` grant on `artifact:<id>` that nothing else would ever mint.
+    onArtifactCreated: async (tx, row, scope) => {
+      const now = new Date();
+      for (const action of ["write", "archive"] as const) {
+        await tx.execute(sql`
+          INSERT INTO "grant"
+            ("id", "tenant_id", "role_id", "principal_id", "resource", "action", "effect", "conditions", "origin", "expires_at", "created_at", "updated_at")
+          VALUES
+            (${`grant_${row.id}_${action}`}, ${scope.tenantId}, NULL, ${scope.principalId}, ${`artifact:${row.id}`}, ${action}, 'allow', NULL, 'creator', NULL, ${now}, ${now})
+          ON CONFLICT DO NOTHING
+        `);
+      }
+    },
+  });
+  app.route("/api/tenants/:tenantId", artifactsApi);
 
   return {
     app,

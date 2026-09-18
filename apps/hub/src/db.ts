@@ -23,8 +23,6 @@ import { PGlite } from "@electric-sql/pglite";
 import wasmPath from "../../../node_modules/@electric-sql/pglite/dist/pglite.wasm" with { type: "file" };
 import dataPath from "../../../node_modules/@electric-sql/pglite/dist/pglite.data" with { type: "file" };
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
-import { withPostgresJsResultShape } from "@solutions-builder/embed-hub/pg-compat";
-import type { ArtifactDb } from "@corbits/artifacts";
 
 export type Db = PgliteDatabase<Record<string, never>>;
 
@@ -53,11 +51,6 @@ export type HostDatabase = {
    * statement. Nothing else should reach past `db`.
    */
   readonly raw: PGlite;
-  /**
-   * The same database, shaped for packages written against postgres.js.
-   * `@corbits/artifacts` takes this one; Builder's own code takes `db`.
-   */
-  readonly artifactDb: ArtifactDb;
   readonly close: () => Promise<void>;
 };
 
@@ -148,7 +141,6 @@ export async function openDatabase(dataDir?: string): Promise<HostDatabase> {
   open = {
     db,
     raw: client,
-    artifactDb: withPostgresJsResultShape(db) as unknown as ArtifactDb,
     close: async () => {
       open = null;
       try {

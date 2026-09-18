@@ -787,6 +787,54 @@ export async function listChildTenants(parentId: string): Promise<HubTenant[]> {
   return hubGet<HubTenant[]>(`/api/tenants?parentId=${encodeURIComponent(parentId)}`);
 }
 
+// --- Artifacts (`@corbits/artifacts`, mounted by `packages/embed-hub`) ------
+
+/**
+ * The module's own detail/create/revise response shape. `content` is always
+ * the artifact's CURRENT version — the mounted routes expose no way to read
+ * an older version's body (only its metadata, via `versions`), which is a
+ * real gap in its HTTP surface relative to the in-process API it replaces.
+ */
+export type HubArtifact = {
+  id: string;
+  kind: string;
+  title: string;
+  source: Record<string, unknown> & { origin: string };
+  version: number;
+  ownerPrincipalId: string | null;
+  metadata: Record<string, unknown> | null;
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  content: string;
+};
+
+export const artifacts = {
+  /** `mode: "text"` imports a pasted body; there is no bare "create a document" verb beyond this. */
+  create: (input: { title: string; content: string }, scope: string = tenantId()) =>
+    hubPost<{ artifact: HubArtifact }>(tenantPathFor(scope, "/artifacts"), {
+      mode: "text",
+      title: input.title,
+      content: input.content,
+    }).then((r) => r.artifact),
+  /** Bumps the artifact's version; requires `write` on `artifact:<id>`. */
+  revise: (
+    artifactId: string,
+    input: { title?: string; content?: string },
+    scope: string = tenantId(),
+  ) => hubPost<HubArtifact>(tenantPathFor(scope, `/artifacts/${artifactId}/versions`), input),
+  /** The artifact at its CURRENT version — see `HubArtifact`'s note on historical versions. */
+  get: async (artifactId: string, scope: string = tenantId()): Promise<HubArtifact | null> => {
+    const response = await hubApi(tenantPathFor(scope, `/artifacts/${artifactId}`));
+    if (response.status === 404) return null;
+    const { artifact } = await body<{ artifact: HubArtifact }>(
+      response,
+      `/artifacts/${artifactId}`,
+    );
+    return artifact;
+  },
+};
+
 // --- Sessions and conversation turns ---------------------------------------
 
 /** Finds or creates an `agent_session` with a chosen id keyed to a definition. */

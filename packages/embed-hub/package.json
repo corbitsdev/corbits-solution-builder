@@ -9,8 +9,10 @@
     "./pg-compat": "./src/pg-compat.ts"
   },
   "dependencies": {
+    "@corbits/artifacts": "github:corbitsdev/corbits-artifacts",
     "@corbits/process-provisioner": "workspace:*",
     "@electric-sql/pglite": "^0.3.16",
+    "@intx/authz": "workspace:*",
     "@intx/crypto": "workspace:*",
     "@intx/db": "workspace:*",
     "@intx/hub-api": "workspace:*",
