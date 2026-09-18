@@ -90,22 +90,6 @@ async function readPolicyVersion(projectId: string): Promise<number | undefined>
 }
 
 /**
- * The project whose lifecycle a run belongs to, by the run's id: a loop
- * iteration's id is its anchor's followed by `__`, and an anchor is a
- * deployment of one project's lifecycle asset. Null for a run that is not a
- * project's.
- */
-export async function projectForRun(runId: string): Promise<string | null> {
-  const anchor = runId.split("__")[0] ?? runId;
-  for (const [projectId, known] of anchors) if (known === anchor) return projectId;
-  const deployment = (await workflows.deployments()).find((entry) => entry.id === anchor);
-  if (!deployment) return null;
-  const asset = (await assets.list("workflow")).find((entry) => entry.id === deployment.definitionAssetId);
-  const match = asset ? /^solutions-builder-project-lifecycle-tnt-([a-z0-9]+)$/.exec(asset.name) : null;
-  return match ? `tnt_${match[1]}` : null;
-}
-
-/**
  * Every anchor the project's lifecycle has run under, oldest first: one per
  * deployment of its asset. Stopping the host releases the sidecar, so each
  * start deploys the lifecycle again under a new anchor and aligns it to
@@ -282,7 +266,6 @@ export async function deliverStageSignal(
       signalId,
       payload: { ...payload, ...signal.payload },
     });
-    divergent.delete(projectId);
     return "delivered";
   } catch (cause) {
     // Only a refusal the transport actually reported — an `ApiError` off a
@@ -294,38 +277,8 @@ export async function deliverStageSignal(
       `[executor] ${projectId}: the hub did not accept ${signal.name} (${cause.status}) ${cause.message}; ` +
         `the ledger has moved and the run has not.`,
     );
-    divergent.add(projectId);
     return "failed";
   }
-}
-
-/**
- * Forgets the deployment this process resolved for a project, so the next
- * command resolves it again: a fresh deployment when the rendered lifecycle
- * changed (a stakeholder added), or when the old one is dead.
- */
-export function forgetExecution(projectId: string): void {
-  anchors.delete(projectId);
-  anchorPolicyVersions.delete(projectId);
-}
-
-/**
- * Forgets every project's deployment. The lifecycle is rendered with the
- * model it will draft with, pinned at deploy time, so a change to what the
- * catalog serves is a different lifecycle. The next command on any project
- * resolves its deployment again, which deploys the new shape.
- */
-export function forgetAllExecutions(): void {
-  anchors.clear();
-  anchorPolicyVersions.clear();
-  unavailable.clear();
-}
-
-/** Projects whose last signal the hub refused: the ledger and the run disagree. */
-const divergent = new Set<string>();
-
-export function divergentProjects(): readonly string[] {
-  return [...divergent];
 }
 
 /** Whether the project's deployment has a fired run this process knows of. */
@@ -338,56 +291,9 @@ export async function currentAnchor(projectId: string): Promise<string | null> {
   return anchorFor(projectId);
 }
 
-/**
- * The project behind an anchor run id, for callers that only have the run's
- * own address (a sidecar's `agent.event` frame carries `<anchorRunId>@domain`,
- * never the project id). `null` when the anchor is not one this process has
- * resolved a deployment for yet.
- */
-export function projectForAnchor(anchorRunId: string): string | null {
-  for (const [projectId, anchor] of anchors) {
-    if (anchor === anchorRunId) return projectId;
-  }
-  return null;
-}
-
 /** Why a project has no run: no offering connected yet, or a host that cannot place sidecars. */
 export function executionUnavailable(projectId: string): ExecutionUnavailableReason | null {
   return unavailable.get(projectId) ?? null;
-}
-
-/** Every signal name the project's run is currently parked on, for diagnosis. */
-export async function parkedSignalNames(projectId: string): Promise<string[]> {
-  const anchor = await anchorFor(projectId);
-  if (!anchor) return [];
-  return parkedSteps(await foldRuns(anchor)).flatMap((step) => (step.signalName ? [step.signalName] : []));
-}
-
-/** Diagnostic view of every run under the project's deployment: step phases and any read error. */
-export async function debugRuns(projectId: string): Promise<unknown> {
-  const anchor = await anchorFor(projectId);
-  if (!anchor) return { anchor: null };
-  const runIds = await deploymentRuns.list(anchor);
-  const out: Record<string, unknown> = { anchor, runIds };
-  for (const runId of runIds) {
-    try {
-      const events = await deploymentRuns.events(anchor, runId);
-      const { state } = foldRun(runId, events);
-      out[runId] = {
-        kinds: events.map((event) => `${event.seq}:${event.type}`),
-        steps: [...state.steps.values()].map((step) => `${step.stepId}=${step.phase}${step.awaitingSignal ? `(${step.awaitingSignal.name})` : ""}`),
-        children: [...state.children.entries()].map(([id, child]) => `${id}<-${child.spawnedBy}`),
-        // A failed or cancelled step carries its reason in the event body; the
-        // kinds list alone cannot say why a step ended.
-        failures: events
-          .filter((event) => /fail|error|cancel|timeout/i.test(event.type))
-          .map((event) => ({ seq: event.seq, type: event.type, body: event.body })),
-      };
-    } catch (cause) {
-      out[runId] = { error: cause instanceof Error ? cause.message : String(cause) };
-    }
-  }
-  return out;
 }
 
 export type StageIteration = { readonly runId: string; readonly events: HubRunEvent[] };
