@@ -13,7 +13,7 @@
  * source against the workspace's `@intx/workflow` and compares the two, so a
  * drift fails the gate rather than the probe.
  */
-import { PROJECT_LIFECYCLE_ID } from "./project-lifecycle.js";
+import { NAME_STEP_ID, PROJECT_LIFECYCLE_ID } from "./project-lifecycle.js";
 import {
   BUILD_STEP_ID,
   BUILD_STEP_TIMEOUT_MS,
@@ -250,6 +250,33 @@ const buildAgent = defineAgent({
         after: [${JSON.stringify(EVIDENCE_STEP_ID)}],
       }),`
     : "";
+  // The naming agent: the kit's namer, given the run's opening problem
+  // statement. Additive the same way the build agent is — rendered only once
+  // an offering exists — and never gates stage 1: it carries no `after`, so
+  // it starts the instant the run fires.
+  const namerRole = agentById("namer");
+  if (source && !namerRole) throw new Error("namer role missing from the kit");
+  const namerAgent = source
+    ? `
+const namerAgent = defineAgent({
+  id: ${JSON.stringify(namerRole!.id)},
+  systemPrompt: ${JSON.stringify(renderedPrompt(namerRole!))},
+  tools: [],
+  capabilities: [],
+  inference: { sources: [SOURCE] },
+});
+`
+    : "";
+  const nameStepAssignment = source
+    ? `
+steps[NAME] = step({
+  agent: namerAgent,
+  input: { from: "trigger.payload.problemStatement" },
+  timeout: DRAFT_TIMEOUT,
+  drainBehavior: "wait",
+});
+`
+    : "";
   // Every other stage's specialist: capabilities-free, pinned to the same
   // offering as the build agent. Rendered as pure data (ids, prompts,
   // selectors) and reassembled into `defineAgent` calls here, in the sidecar,
@@ -286,6 +313,7 @@ const WAIT = ${JSON.stringify(GATE_WAIT_STEP_ID)};
 const ADMIT = ${JSON.stringify(ADMIT_STEP_ID)};
 const DECIDE = ${JSON.stringify(DECIDE_STEP_ID)};
 const NO_DRAFT = ${JSON.stringify(NO_DRAFT_STEP_ID)};
+const NAME = ${JSON.stringify(NAME_STEP_ID)};
 const DRAFT_TIMEOUT = ${DRAFT_STEP_TIMEOUT_MS};
 const BUILD_STAGE = ${BUILD_STAGE};
 const AUDIENCE_QUORUM = ${options.audienceQuorum === undefined ? "undefined" : JSON.stringify(options.audienceQuorum)};
@@ -301,7 +329,7 @@ function admitInput(waitStepId, literal) {
   };
 }
 ${source ? `const SOURCE = ${JSON.stringify(source)};` : ""}
-${buildAgent}${agentsBlock}${agentStepSpecs}
+${buildAgent}${namerAgent}${agentsBlock}${agentStepSpecs}
 // One iteration: the workflow waits to hear what the person did. A gate right
 // after the round reads whether this round asked for a draft; if so, the
 // stage's specialist steps run in order, each after the last. If not, the
@@ -448,7 +476,7 @@ for (const stage of STAGES) {
   steps = { ...steps, ...stageSteps(stage, previousEnds) };
   previousEnds = ["gate-" + stage, "exhausted-" + stage];
 }
-
+${nameStepAssignment}
 export default defineWorkflow({
   id: ${JSON.stringify(PROJECT_LIFECYCLE_ID)},
   triggers: [{ type: "manual" }],

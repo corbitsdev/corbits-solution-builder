@@ -4,13 +4,10 @@
  * Connecting, reordering, selecting a model and disconnecting are now the
  * client's job: it talks to Interchange's own catalog (`provider`,
  * `credential`, `model_provider`, `model`, `model_offering`) directly over
- * `/hub`. This module keeps only what the host's own inference execution
- * (`inference.ts`, `deck-images.ts`) still needs to read: which providers are
- * connected, in what order, and how to get a bearer for one.
+ * `/hub`. This module keeps only what `GET /api/status` still needs to read:
+ * which providers are connected and which one is active.
  */
-import { listCatalogProviders, credentialSecretFor, type CatalogProviderRow, type CatalogModelRow } from "./catalog.js";
-import { XAI_API_KEY_BASE_URL } from "@corbits/xai-provider";
-import { accessTokenFor, OAUTH_PROVIDERS, type OAuthProviderId } from "./oauth.js";
+import { listCatalogProviders, type CatalogProviderRow, type CatalogModelRow } from "./catalog.js";
 
 export type ProviderCapabilities = {
   text: boolean;
@@ -38,20 +35,6 @@ export type ProviderSummary = {
   selectedModel: string | null;
   /** Present so the UI can say "connected" without ever seeing the secret. */
   hasCredential: boolean;
-};
-
-/** Known API-key providers, for the base URL a connected row's own is missing. */
-const CATALOG: Record<string, { label: string; baseUrl: string }> = {
-  anthropic: { label: "Anthropic", baseUrl: "https://api.anthropic.com/v1" },
-  openai: { label: "OpenAI", baseUrl: "https://api.openai.com/v1" },
-  openrouter: { label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1" },
-  /**
-   * xAI by API key. A different route to the same models as the OAuth
-   * sign-in — different base URL, different entitlement — so the base comes
-   * from the provider package rather than being restated here.
-   */
-  xai: { label: "xAI (API key)", baseUrl: XAI_API_KEY_BASE_URL },
-  compatible: { label: "OpenAI-compatible endpoint", baseUrl: "" },
 };
 
 function summarizeCapabilities(models: CatalogModelRow[]): ProviderCapabilities {
@@ -91,35 +74,4 @@ function catalogToSummary(row: CatalogProviderRow): ProviderSummary {
 export async function listProviders(): Promise<ProviderSummary[]> {
   const catalogRows = await listCatalogProviders();
   return catalogRows.map(catalogToSummary).sort((a, b) => a.priority - b.priority);
-}
-
-/**
- * Providers to try, in the operator's order.
- *
- * More than one can be connected, and the order is theirs to set. This is not
- * a hidden failover: the host only moves down the list when the one above it
- * refuses the request, and it reports which provider actually answered, so a
- * switch is visible in the artifact's provenance rather than silent.
- */
-export async function providerOrder(): Promise<ProviderSummary[]> {
-  const providers = await listProviders();
-  return providers.filter((provider) => provider.status === "ready");
-}
-
-/**
- * Resolves the bearer token for a call. The only reader; never crosses the API.
- * An OAuth provider goes through the token session, so an expired access token
- * is refreshed here rather than failing the request.
- */
-export async function credentialFor(provider: ProviderSummary): Promise<string | null> {
-  if ((OAUTH_PROVIDERS as readonly string[]).includes(provider.providerId)) {
-    const tokens = await accessTokenFor(provider.providerId as OAuthProviderId);
-    return tokens.access;
-  }
-  if (!provider.hasCredential) return null;
-  return credentialSecretFor(provider.providerId);
-}
-
-export function catalogEntry(providerId: string) {
-  return CATALOG[providerId];
 }

@@ -168,12 +168,22 @@ async function foldRuns(anchorRunId: string): Promise<FoldedRun[]> {
  * whose top-level run already has events is left alone, and the hub itself
  * refuses to fire a terminal run twice.
  */
-export async function launchProjectLifecycle(args: { readonly projectId: string }): Promise<void> {
+export async function launchProjectLifecycle(args: {
+  readonly projectId: string;
+  /** Fed to the naming agent step; a run fired without one names nothing. */
+  readonly problemStatement?: string;
+}): Promise<void> {
   const anchor = await anchorFor(args.projectId);
   if (!anchor) return;
   const runIds = await deploymentRuns.list(anchor);
   if (runIds.length > 0) return;
-  await deploymentRuns.trigger(anchor, JSON.stringify({ projectId: args.projectId }));
+  await deploymentRuns.trigger(
+    anchor,
+    JSON.stringify({
+      projectId: args.projectId,
+      ...(args.problemStatement ? { problemStatement: args.problemStatement } : {}),
+    }),
+  );
 }
 
 export type { StageStatus };

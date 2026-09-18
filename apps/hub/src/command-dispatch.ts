@@ -79,6 +79,7 @@ export { requiredAuthorityFor, soloApprovalFor } from "./command-approvals.js";
  */
 export async function launchProjectRun(args: {
   readonly projectId: string;
+  readonly problemStatement?: string;
 }): Promise<void> {
   await launchProjectLifecycle(args);
 }

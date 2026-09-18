@@ -157,7 +157,7 @@ for (const terminal of TERMINAL_STATES) {
 // cannot disagree by construction — but a generator can still drop something.
 // These assert the properties that matter if it ever does.
 {
-  const { projectLifecycleDefinition, commandsAtStage, stageStepId } = await import(
+  const { projectLifecycleDefinition, commandsAtStage, stageStepId, NAME_STEP_ID } = await import(
     "@solutions-builder/app/workflows/project-lifecycle"
   );
   const {
@@ -284,6 +284,12 @@ for (const terminal of TERMINAL_STATES) {
     problems.push(
       `The native workflow has ${definition.stepOrder.length} steps for ${STAGES.length} stages`,
     );
+  }
+
+  // No step in the in-process, gates-only definition carries an agent — the
+  // naming step is additive, rendered only once an offering exists.
+  if (NAME_STEP_ID in steps) {
+    problems.push("The in-process lifecycle definition carries a naming step; it must stay gates-only");
   }
 
   // The deployed package is source, not this object: an entry module the
@@ -469,6 +475,24 @@ for (const terminal of TERMINAL_STATES) {
         !buildOrder.includes(EVIDENCE_STEP_ID)
       ) {
         problems.push("Stage 8 with a source is not round, build, evidence");
+      }
+
+      // The naming step: top level, the kit's namer, reads the run's opening
+      // problem statement, and never gates stage 1 — it carries no `after`.
+      const namer = agentById("namer");
+      const nameStep = withSourceSteps[NAME_STEP_ID] as unknown as AgentStepJson | undefined;
+      if (!nameStep || nameStep.kind !== "step" || nameStep.agent?.id !== namer?.id) {
+        problems.push("The rendered lifecycle has no naming step for the kit's namer");
+      } else {
+        if (nameStep.input?.from !== "trigger.payload.problemStatement") {
+          problems.push("The naming step does not read the run's opening problem statement");
+        }
+        if (nameStep.after && nameStep.after.length > 0) {
+          problems.push("The naming step gates on something; it must start with the run");
+        }
+      }
+      if (NAME_STEP_ID in (evaluated.default as { steps?: Record<string, unknown> }).steps!) {
+        problems.push("The source-less rendered lifecycle carries a naming step");
       }
 
       // Every drafted stage (everything but 5 and 8) is: round, a decide gate

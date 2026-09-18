@@ -28,6 +28,18 @@ import {
 
 export const PROJECT_LIFECYCLE_ID = "solutions-builder.project-lifecycle";
 
+/**
+ * The naming agent step: runs once, at the top level, alongside stage 1 —
+ * never gating it — from the run's opening problem statement, and writes the
+ * project's name as its output. It carries no `after`, so it starts the
+ * moment the run fires rather than depending on any stage's steps, and it is
+ * additive the same way the build agent is: the in-process definition below
+ * never carries it (no step here carries an agent — see the module doc), and
+ * the rendered lifecycle (`lifecycle-source.ts`) adds it only once an
+ * offering exists to run it against.
+ */
+export const NAME_STEP_ID = "name";
+
 /** The step a stage ends at: its gate. Stable, and referenced by the run projection. */
 export function stageStepId(stage: Stage): string {
   return gateStepId(stage);

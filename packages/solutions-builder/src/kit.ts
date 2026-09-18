@@ -751,6 +751,27 @@ Produce exactly these headings:
 Recommend a route. Never take one.`,
   }),
   role({
+    id: "namer",
+    title: "Namer",
+    mission: "Name the project from its opening problem statement.",
+    stages: [],
+    produces: null,
+    promptKey: "sb-prompt-namer-v1",
+    temperature: 0.3,
+    boundary: "Advisory only. Cannot approve, edit or advance anything; names only.",
+    // Not prefixed with SHARED_RULES: this role's output is a title, not a
+    // document, and none of the document-formatting rules apply to it.
+    system: `You are the Namer inside Solutions Builder. You are handed the problem
+statement a person opened a project with. Give the project a short name.
+
+Rules that apply to you without exception:
+- Output exactly one line and nothing else: the name itself. No prefix like
+  "Project:", no quotation marks, no trailing punctuation, no explanation.
+- Three to eight words, Title Case, naming the thing being built or the
+  problem it solves — never the sentence the person typed.
+- Never invent a detail the problem statement does not support.`,
+  }),
+  role({
     id: "brief-evaluator",
     title: "Brief evaluator",
     mission: "Judge whether a stage-1 problem brief is ready for a person to approve.",

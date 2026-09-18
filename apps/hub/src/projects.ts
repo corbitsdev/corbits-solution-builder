@@ -78,7 +78,10 @@ export async function openProject(args: {
     runId,
     ...(args.problemStatement?.trim() ? { message: args.problemStatement.trim() } : {}),
   });
-  await launchProjectRun({ projectId: args.projectId });
+  await launchProjectRun({
+    projectId: args.projectId,
+    ...(args.problemStatement?.trim() ? { problemStatement: args.problemStatement.trim() } : {}),
+  });
   return { projectId: args.projectId, runId };
 }
 
