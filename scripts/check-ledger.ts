@@ -564,13 +564,20 @@ for (const terminal of TERMINAL_STATES) {
 
       // The naming step: top level, the kit's namer, reads the run's opening
       // problem statement, and never gates stage 1 — it carries no `after`.
+      // Input is the whole `trigger.payload`, not a `.problemStatement` field
+      // selector: a trigger fired as a signed conversation message hands the
+      // step invoker a mail envelope, and a field selector into it throws
+      // (`SelectorError: missing key problemStatement`). The invoker itself
+      // projects a `Mail`-shaped payload's text/plain parts into the turn; a
+      // flat payload gets JSON-stringified whole. Either way the namer's own
+      // prompt reads `problemStatement` out of the JSON body it receives.
       const namer = agentById("namer");
       const nameStep = withSourceSteps[NAME_STEP_ID] as unknown as AgentStepJson | undefined;
       if (!nameStep || nameStep.kind !== "step" || nameStep.agent?.id !== namer?.id) {
         problems.push("The rendered lifecycle has no naming step for the kit's namer");
       } else {
-        if (nameStep.input?.from !== "trigger.payload.problemStatement") {
-          problems.push("The naming step does not read the run's opening problem statement");
+        if (nameStep.input?.from !== "trigger.payload") {
+          problems.push("The naming step does not read the run's whole trigger payload");
         }
         if (nameStep.after && nameStep.after.length > 0) {
           problems.push("The naming step gates on something; it must start with the run");
@@ -614,12 +621,25 @@ for (const terminal of TERMINAL_STATES) {
           (stage as number) === 4
             ? typeof draft?.inference?.literal?.maxTokens === "number"
             : draft?.inference?.from === `steps.${ROUND_STEP_ID}.output.inference`;
+        // Stage 1's draft reads the whole round output merged with the run's
+        // trigger payload — the only stage whose specialist may need the
+        // opening problem statement instead of a round's `message` (the
+        // round that fires it starts with an empty one). Every other
+        // ungated stage reads the round output alone: the round's own
+        // signal (`apps/web/src/run-signal.ts`'s `DraftIntent`) never
+        // carried a `prompt` field, so a selector reaching for one throws.
+        const draftInputOk =
+          (stage as number) === EVALUATED_STAGE
+            ? Array.isArray((draft?.input as { merge?: unknown } | undefined)?.merge) &&
+              ((draft?.input as { merge?: { from?: string }[] }).merge?.[0]?.from === "trigger.payload") &&
+              ((draft?.input as { merge?: { from?: string }[] }).merge?.[1]?.from === `steps.${ROUND_STEP_ID}.output`)
+            : draft?.input?.from === `steps.${ROUND_STEP_ID}.output`;
         if (!draft || draft.kind !== "step" || draft.agent?.id !== agentFor(stage).id) {
           problems.push(`Stage ${stage}'s draft step is not the kit's specialist`);
         } else if (!draftReadsInferenceOffRound) {
           problems.push(`Stage ${stage}'s draft step does not carry its output-token cap correctly`);
-        } else if (!gated && draft.input?.from !== `steps.${ROUND_STEP_ID}.output.prompt`) {
-          problems.push(`Stage ${stage}'s draft step does not read the round's prompt`);
+        } else if (!gated && !draftInputOk) {
+          problems.push(`Stage ${stage}'s draft step does not read the round's output`);
         } else if (!gated && !draft.after?.includes(DECIDE_STEP_ID)) {
           problems.push(`Stage ${stage}'s draft step does not follow its decide gate`);
         } else if (
@@ -674,8 +694,8 @@ for (const terminal of TERMINAL_STATES) {
         }
         if (!requirements || requirements.kind !== "step" || requirements.agent?.id !== author?.id) {
           problems.push("Stage 6 has no requirements step for the kit's requirements author");
-        } else if (requirements.input?.from !== `steps.${ROUND_STEP_ID}.output.prompts[0]`) {
-          problems.push("Stage 6's requirements step does not read prompts[0]");
+        } else if (requirements.input?.from !== `steps.${ROUND_STEP_ID}.output`) {
+          problems.push("Stage 6's requirements step does not read the round output");
         } else if (!requirements.after?.includes("pick-0")) {
           problems.push("Stage 6's requirements step does not follow pick-0");
         }
@@ -692,8 +712,8 @@ for (const terminal of TERMINAL_STATES) {
         if (!skip1 || skip1.kind !== "escalation" || !skip1.after?.includes("pick-1")) {
           problems.push("Stage 6's skip-1 is not an escalation after pick-1");
         }
-        if (draft?.input?.from !== `steps.${ROUND_STEP_ID}.output.prompts[1]`) {
-          problems.push("Stage 6's draft step does not read prompts[1]");
+        if (draft?.input?.from !== `steps.${ROUND_STEP_ID}.output`) {
+          problems.push("Stage 6's draft step does not read the round output");
         } else if (!draft.after?.includes("pick-1")) {
           problems.push("Stage 6's draft step does not follow pick-1");
         }
@@ -750,8 +770,8 @@ for (const terminal of TERMINAL_STATES) {
           }
           if (!packageStep || packageStep.kind !== "step" || packageStep.agent?.id !== agentFor(5 as never).id) {
             problems.push(`Stage 5 has no ${stepId} step for the kit's presentation specialist`);
-          } else if (packageStep.input?.from !== `steps.${ROUND_STEP_ID}.output.prompts[${index}]`) {
-            problems.push(`Stage 5's ${stepId} does not read prompts[${index}]`);
+          } else if (packageStep.input?.from !== `steps.${ROUND_STEP_ID}.output`) {
+            problems.push(`Stage 5's ${stepId} does not read the round output`);
           } else if (!packageStep.after?.includes(pickId)) {
             problems.push(`Stage 5's ${stepId} does not follow ${pickId}`);
           } else if (!packageStep.agent?.toolFactories?.some((tool) => tool.id === renderDeckTool.id)) {

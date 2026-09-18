@@ -23,6 +23,7 @@ import {
   type FoldedRun,
   type StageStatus,
 } from "@solutions-builder/app/project-state";
+import { openingFromTrigger } from "@solutions-builder/app/trigger-envelope";
 import { createHubTransport } from "./hub.ts";
 
 export type { FoldedApproval, FoldedFeedback, FoldedFlag, FoldedQuestion, FoldedRun, StageStatus };
@@ -85,9 +86,13 @@ export function runIsDrafting(standing: StageStatus | null): boolean {
 /**
  * The stage-1 opening problem statement, read off the anchor run's own
  * `RunStarted` event rather than the ledger (`ProjectDetail.opening` used
- * to ride the `GET /projects/:id` read) — the run's trigger payload is the
- * same `{ projectId, problemStatement }` body `client.ts`'s `createProject`
+ * to ride the `GET /projects/:id` read) — the run's trigger payload carries
+ * the same `{ projectId, problemStatement }` `client.ts`'s `createProject`
  * fires the deployment with, so it needs no host record of its own.
+ *
+ * The trigger fires through a signed conversation message, so `trigger.payload`
+ * on the event is the mail envelope the hub wraps that content in, not the
+ * flat object directly — `openingFromTrigger` unwraps either shape.
  */
 export async function foldOpening(
   tenantId: string,
@@ -98,9 +103,8 @@ export async function foldOpening(
   const started = events.find((event) => event.type === "RunStarted");
   if (!started) return null;
   const trigger = started.body.trigger as { payload?: unknown } | undefined;
-  const payload = trigger?.payload as { problemStatement?: unknown } | undefined;
-  const body = typeof payload?.problemStatement === "string" ? payload.problemStatement.trim() : "";
-  if (body.length === 0) return null;
+  const opening = openingFromTrigger(trigger?.payload);
+  if (!opening) return null;
   const createdAt = typeof started.body.at === "string" ? started.body.at : new Date().toISOString();
-  return { body, createdAt };
+  return { body: opening.problemStatement, createdAt };
 }

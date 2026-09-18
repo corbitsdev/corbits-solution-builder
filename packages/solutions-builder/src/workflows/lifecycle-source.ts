@@ -132,7 +132,7 @@ export const LIFECYCLE_ENTRY_PATH = "workflow.js";
 type AgentStepSpec = {
   readonly id: string;
   readonly roleId: string;
-  readonly input: { readonly from: string };
+  readonly input: { readonly from: string } | { readonly merge: readonly { readonly from: string }[] };
   readonly gated: boolean;
 };
 
@@ -170,16 +170,38 @@ function roleIdForStep(stage: Stage, stepId: string): string {
 }
 
 /**
- * What a given agent step reads: the round's prompt, or the draft it revises.
- * A gated step reads its own slot of the round's prompts, at the same index
- * as its "wanted" flag.
+ * What a given agent step reads: the round's own signal payload whole, or
+ * the draft it revises.
+ *
+ * The round used to carry a host-assembled `prompt`/`prompts[index]` field
+ * (`roundInference`, deleted — see CL-8331); the client's own `DraftIntent`
+ * (`apps/web/src/run-signal.ts`) never carried one, so a selector reaching
+ * for it throws "missing key prompt" the instant a round actually fires. The
+ * fix is the same one the namer step takes: the whole round output, merged
+ * with the run's trigger payload at stage 1 (where the very first round's
+ * `message` is empty and the person's opening problem statement — see
+ * `trigger-envelope.ts` — is the only thing to draft from). The specialist's
+ * own prompt (`SHARED_RULES` in `kit.ts`) says where to find `message` and
+ * an opening statement in the JSON body it receives. A gated step (stage 5's
+ * per-audience packaging, stage 6's requirements/plan) gets the same whole
+ * round output as every other gated step in its round; which of them the
+ * round actually wants is the round's own `audiences`/`documents` field, not
+ * a per-index slot.
  */
-function inputForStep(stage: Stage, stepId: string, index: number, audienceCount: number): { from: string } {
-  if (index < gatedStepCount(stage, audienceCount)) return { from: `steps.${ROUND_STEP_ID}.output.prompts[${index}]` };
+function inputForStep(
+  stage: Stage,
+  stepId: string,
+  index: number,
+  audienceCount: number,
+): { from: string } | { merge: readonly { from: string }[] } {
+  if (stage === EVALUATED_STAGE && stepId === DRAFT_STEP_ID) {
+    return { merge: [{ from: "trigger.payload" }, { from: `steps.${ROUND_STEP_ID}.output` }] };
+  }
+  if (index < gatedStepCount(stage, audienceCount)) return { from: `steps.${ROUND_STEP_ID}.output` };
   // Stage 9's one step is named `DELIVERY_STEP_ID`, not `DRAFT_STEP_ID` (see
   // its definition), but is the same "first, ungated, reads the round's
-  // prompt" shape every other single-step drafted stage has.
-  if (stepId === DRAFT_STEP_ID || stepId === DELIVERY_STEP_ID) return { from: `steps.${ROUND_STEP_ID}.output.prompt` };
+  // signal" shape every other single-step drafted stage has.
+  if (stepId === DRAFT_STEP_ID || stepId === DELIVERY_STEP_ID) return { from: `steps.${ROUND_STEP_ID}.output` };
   return { from: `steps.${DRAFT_STEP_ID}.output.reply` };
 }
 
@@ -307,11 +329,20 @@ const namerAgent = defineAgent({
 });
 `
     : "";
+  // The run's trigger fires through a signed conversation message, so the
+  // workflow-host step invoker projects the whole `trigger.payload` (a mail
+  // envelope) into the namer's inbound turn itself when it recognizes the
+  // shape as `Mail`, joining its text/plain parts — the same way workbench's
+  // Myra step reads `{ from: "trigger.payload" }` whole rather than reaching
+  // into a field that selector evaluation cannot see inside an envelope.
+  // A trigger fired with the flat object directly (no envelope) still
+  // resolves: the invoker JSON-stringifies whatever is not `Mail`, so the
+  // namer sees the same JSON text either way (see the namer's own prompt).
   const nameStepAssignment = source
     ? `
 steps[NAME] = step({
   agent: namerAgent,
-  input: { from: "trigger.payload.problemStatement" },
+  input: { from: "trigger.payload" },
   timeout: DRAFT_TIMEOUT,
   drainBehavior: "wait",
 });

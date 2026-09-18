@@ -16,13 +16,17 @@ describe("the naming step", () => {
     expect(rendered).not.toContain('steps[NAME] = step(');
   });
 
-  test("runs the kit's namer against the run's opening problem statement, once an offering exists", () => {
+  test("runs the kit's namer against the run's whole trigger payload, once an offering exists", () => {
     const rendered = lifecycleEntrySource({ source: SOURCE });
     expect(rendered).toContain(`const NAME = ${JSON.stringify(NAME_STEP_ID)};`);
     expect(rendered).toContain("const namerAgent = defineAgent({\n  id: \"namer\",");
     expect(rendered).toContain("steps[NAME] = step({");
     expect(rendered).toContain("agent: namerAgent");
-    expect(rendered).toContain('input: { from: "trigger.payload.problemStatement" }');
+    // Whole `trigger.payload`, not a `.problemStatement` field selector: a
+    // trigger fired as a signed conversation message hands a mail envelope,
+    // and a field selector into it throws. See `admit.ts`'s neighbor comment
+    // and `trigger-envelope.ts`.
+    expect(rendered).toContain('input: { from: "trigger.payload" }');
   });
 
   test("carries no `after`, so it never gates stage 1", () => {
