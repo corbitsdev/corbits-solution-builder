@@ -29,41 +29,21 @@ describe("foldProject", () => {
     expect(await foldProjectRuns("tnt_ws", "dep_1", transport)).toEqual([]);
   });
 
-  test("reads every run under the deployment and folds the same events", async () => {
+  test("before any gate has started, standing is stage 1 with the chat section drafting", async () => {
     const transport = transportFor({
-      dep_1: [{ seq: 1, type: "RunStarted", body: { at: AT } }],
-      "dep_1__child": [{ seq: 1, type: "RunStarted", body: { at: "2026-01-01T00:00:01.000Z" } }],
-    });
-    const folded = await foldProjectRuns("tnt_ws", "dep_1", transport);
-    expect(folded.map((run) => run.runId)).toEqual(["dep_1", "dep_1__child"]);
-    expect(folded[0]?.lastAt).toBe(Date.parse(AT));
-    expect(await foldProject("tnt_ws", "dep_1", transport)).toBeNull();
-  });
-
-  test("an in-flight stage step is standing, not parked", async () => {
-    const transport = transportFor({
-      dep_1: [
-        { seq: 1, type: "RunStarted", body: { at: AT, definitionHash: "x" } },
-        { seq: 2, type: "StepStarted", body: { at: AT, stepId: "revise-1", attempt: 1, input: { ref: "inline:null" } } },
-      ],
+      dep_1: [{ seq: 1, type: "RunStarted", body: { at: AT, definitionHash: "x" } }],
     });
     const standing = await foldProject("tnt_ws", "dep_1", transport);
-    expect(standing).toEqual({
-      stage: 1,
-      stepId: "revise-1",
-      parked: false,
-      signalName: null,
-      since: AT,
-    });
+    expect(standing).toEqual({ stage: 1, stepId: "chat", parked: false, signalName: null, since: null });
     expect(runIsDrafting(standing)).toBe(true);
   });
 
-  test("a parked gate is standing, not drafting", async () => {
+  test("a parked gate-1 is standing, not drafting", async () => {
     const transport = transportFor({
       dep_1: [
         { seq: 1, type: "RunStarted", body: { at: AT, definitionHash: "x" } },
         { seq: 2, type: "StepStarted", body: { at: AT, stepId: "gate-1", attempt: 1, input: { ref: "inline:null" } } },
-        { seq: 3, type: "SignalAwaited", body: { at: AT, stepId: "gate-1", signalName: "stage.approve-1" } },
+        { seq: 3, type: "SignalAwaited", body: { at: AT, stepId: "gate-1", signalName: "solutions-builder.stage.1.approve" } },
       ],
     });
     const standing = await foldProject("tnt_ws", "dep_1", transport);
@@ -71,10 +51,86 @@ describe("foldProject", () => {
       stage: 1,
       stepId: "gate-1",
       parked: true,
-      signalName: "stage.approve-1",
+      signalName: "solutions-builder.stage.1.approve",
       since: AT,
     });
     expect(runIsDrafting(standing)).toBe(false);
+  });
+
+  test("gate-1 approved moves standing to stage 2, drafting again", async () => {
+    const transport = transportFor({
+      dep_1: [
+        { seq: 1, type: "RunStarted", body: { at: AT, definitionHash: "x" } },
+        { seq: 2, type: "StepStarted", body: { at: AT, stepId: "gate-1", attempt: 1, input: { ref: "inline:null" } } },
+        { seq: 3, type: "SignalAwaited", body: { at: AT, stepId: "gate-1", signalName: "solutions-builder.stage.1.approve" } },
+        { seq: 4, type: "SignalReceived", body: { at: AT, stepId: "gate-1", signalName: "solutions-builder.stage.1.approve", payload: { command: "stage.submit" } } },
+        { seq: 5, type: "StepCompleted", body: { at: AT, stepId: "gate-1", output: { ref: "inline:{}" } } },
+      ],
+    });
+    const standing = await foldProject("tnt_ws", "dep_1", transport);
+    expect(standing).toEqual({ stage: 2, stepId: "chat", parked: false, signalName: null, since: null });
+    expect(runIsDrafting(standing)).toBe(true);
+  });
+
+  test("a parked freeze reads as stage 7 (cost approved), and evidence as stage 8", async () => {
+    const gate7Completed = [
+      { seq: 1, type: "RunStarted", body: { at: AT, definitionHash: "x" } },
+      { seq: 2, type: "StepCompleted", body: { at: AT, stepId: "gate-7", output: { ref: "inline:{}" } } },
+    ];
+    const freezeParked = transportFor({
+      dep_1: [
+        ...gate7Completed,
+        { seq: 3, type: "StepStarted", body: { at: AT, stepId: "freeze", attempt: 1 } },
+        { seq: 4, type: "SignalAwaited", body: { at: AT, stepId: "freeze", signalName: "solutions-builder.stage.7.freeze" } },
+      ],
+    });
+    expect(await foldProject("tnt_ws", "dep_1", freezeParked)).toEqual({
+      stage: 7,
+      stepId: "freeze",
+      parked: true,
+      signalName: "solutions-builder.stage.7.freeze",
+      since: AT,
+    });
+
+    const evidenceParked = transportFor({
+      dep_1: [
+        ...gate7Completed,
+        { seq: 3, type: "StepCompleted", body: { at: AT, stepId: "freeze", output: { ref: "inline:{}" } } },
+        { seq: 4, type: "StepStarted", body: { at: AT, stepId: "evidence", attempt: 1 } },
+        { seq: 5, type: "SignalAwaited", body: { at: AT, stepId: "evidence", signalName: "solutions-builder.stage.8.evidence" } },
+      ],
+    });
+    expect(await foldProject("tnt_ws", "dep_1", evidenceParked)).toEqual({
+      stage: 8,
+      stepId: "evidence",
+      parked: true,
+      signalName: "solutions-builder.stage.8.evidence",
+      since: AT,
+    });
+  });
+
+  test("delivery-check in flight after gate-8 reads as stage 9, in progress", async () => {
+    const transport = transportFor({
+      dep_1: [
+        { seq: 1, type: "RunStarted", body: { at: AT, definitionHash: "x" } },
+        { seq: 2, type: "StepCompleted", body: { at: AT, stepId: "gate-8", output: { ref: "inline:{}" } } },
+        { seq: 3, type: "StepStarted", body: { at: AT, stepId: "delivery-check", attempt: 1 } },
+      ],
+    });
+    const standing = await foldProject("tnt_ws", "dep_1", transport);
+    expect(standing).toEqual({ stage: 9, stepId: "delivery-check", parked: false, signalName: null, since: AT });
+    expect(runIsDrafting(standing)).toBe(true);
+  });
+
+  test("delivery-check completed leaves nothing to stand on", async () => {
+    const transport = transportFor({
+      dep_1: [
+        { seq: 1, type: "RunStarted", body: { at: AT, definitionHash: "x" } },
+        { seq: 2, type: "StepCompleted", body: { at: AT, stepId: "gate-8", output: { ref: "inline:{}" } } },
+        { seq: 3, type: "StepCompleted", body: { at: AT, stepId: "delivery-check", output: { ref: "inline:{}" } } },
+      ],
+    });
+    expect(await foldProject("tnt_ws", "dep_1", transport)).toBeNull();
   });
 });
 
@@ -90,13 +146,14 @@ describe("standingForProject", () => {
     const transport = transportFor({
       dep_1: [
         { seq: 1, type: "RunStarted", body: { at: AT, definitionHash: "x" } },
-        { seq: 2, type: "StepStarted", body: { at: AT, stepId: "revise-2", attempt: 1, input: { ref: "inline:null" } } },
+        { seq: 2, type: "StepStarted", body: { at: AT, stepId: "gate-2", attempt: 1 } },
+        { seq: 3, type: "SignalAwaited", body: { at: AT, stepId: "gate-2", signalName: "solutions-builder.stage.2.approve" } },
       ],
     });
     const standing = await standingForProject({ tenantId: "tnt_ws", anchorRunId: "dep_1" }, transport);
-    expect(standing?.stepId).toBe("revise-2");
-    expect(standing?.parked).toBe(false);
-    expect(runIsDrafting(standing)).toBe(true);
+    expect(standing?.stepId).toBe("gate-2");
+    expect(standing?.parked).toBe(true);
+    expect(runIsDrafting(standing)).toBe(false);
   });
 });
 

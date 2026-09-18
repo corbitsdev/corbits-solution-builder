@@ -5,6 +5,13 @@
  * fold addresses. Standing itself is this read: the same events the run
  * committed, over `/hub`, through the app package's fold. Ledger writes stay
  * on the host.
+ *
+ * Lifecycle v4 (CL-8598): a stage is no longer a bounded revise/gate loop.
+ * The whole approve chain — `gate-1`..`gate-8`, `freeze`, `evidence` — lives
+ * as top-level `awaitSignal` steps directly on the anchor run, in that fixed
+ * order (`gate-7` -> `freeze` -> `evidence` -> `gate-8`), followed by the
+ * stage-9 `delivery-check` agent step. Standing is read straight off those
+ * step phases: no round/exhausted/cap folding, no loop child runs to walk.
  */
 import { listWorkflowRuns, readWorkflowRunEvents, type Transport } from "@intx/hub-client";
 import {
@@ -14,20 +21,101 @@ import {
   projectFeedback,
   projectFlags,
   projectQuestions,
-  projectState,
   projectTitle,
   type FoldedApproval,
   type FoldedFeedback,
   type FoldedFlag,
   type FoldedQuestion,
   type FoldedRun,
-  type StageStatus,
 } from "@solutions-builder/app/project-state";
 import { openingFromTrigger } from "@solutions-builder/app/trigger-envelope";
+import type { Stage } from "@solutions-builder/app/ledger";
 import { createHubTransport } from "./hub.ts";
 
-export type { FoldedApproval, FoldedFeedback, FoldedFlag, FoldedQuestion, FoldedRun, StageStatus };
+export type { FoldedApproval, FoldedFeedback, FoldedFlag, FoldedQuestion, FoldedRun };
 export { feedbackForDesign, projectApprovals, projectFeedback, projectFlags, projectQuestions, projectTitle };
+
+/** Where a project's run stands: the top-level approve-chain step it is at. */
+export type StageStatus = {
+  readonly stage: Stage;
+  /** The top-level step id standing for this position: a `gate-N`, `freeze`,
+   * `evidence` or `delivery-check` once the run has reached it, or `"chat"`
+   * while the chat section is still drafting the stage ahead of its gate. */
+  readonly stepId: string;
+  /** True once the run is parked at a gate awaiting a person's signal. */
+  readonly parked: boolean;
+  readonly signalName: string | null;
+  /** When the step began — running, or waiting — so a window can count from it. */
+  readonly since: string | null;
+};
+
+/**
+ * The approve chain's top-level steps, in the fixed order the definition
+ * wires them: `gate-1`..`gate-7`, then `freeze` and `evidence` between
+ * `gate-7` and `gate-8` (cost approved -> frozen into a build -> its
+ * evidence hand-off), then `gate-8`, then stage 9's `delivery-check`.
+ */
+const POSITION_STEPS = [
+  "gate-1",
+  "gate-2",
+  "gate-3",
+  "gate-4",
+  "gate-5",
+  "gate-6",
+  "gate-7",
+  "freeze",
+  "evidence",
+  "gate-8",
+  "delivery-check",
+] as const;
+
+/** The stage a position step stands for. */
+function stageOfPositionStep(stepId: string): Stage {
+  if (stepId === "freeze") return 7 as Stage;
+  if (stepId === "evidence") return 8 as Stage;
+  if (stepId === "delivery-check") return 9 as Stage;
+  const match = /^gate-(\d)$/.exec(stepId);
+  return match ? (Number(match[1]) as Stage) : (1 as Stage);
+}
+
+/** When a step's latest attempt started, as the hub recorded it, or null when it never started. */
+function sinceOf(run: FoldedRun, stepId: string): string | null {
+  const at = run.stepStartedAt.get(stepId);
+  return at === undefined ? null : new Date(at).toISOString();
+}
+
+/**
+ * Where the anchor run stands, read off the approve chain's own step phases:
+ * the first `POSITION_STEPS` entry that has not completed is the frontier.
+ * Parked (awaiting its signal) means at that gate; in flight (`delivery-check`
+ * drafting) or not started yet (the chat section still drafting the stage
+ * ahead of its gate) both mean in progress. Null once `delivery-check` has
+ * completed: there is nothing left to stand on.
+ */
+function anchorPosition(run: FoldedRun): StageStatus | null {
+  let lastCompletedIndex = -1;
+  for (let index = 0; index < POSITION_STEPS.length; index += 1) {
+    if (run.state.steps.get(POSITION_STEPS[index]!)?.phase === "completed") lastCompletedIndex = index;
+  }
+  const currentIndex = lastCompletedIndex + 1;
+  if (currentIndex >= POSITION_STEPS.length) return null;
+  const stepId = POSITION_STEPS[currentIndex]!;
+  const stage = stageOfPositionStep(stepId);
+  const step = run.state.steps.get(stepId);
+  if (step?.phase === "awaiting-signal") {
+    return { stage, stepId, parked: true, signalName: step.awaitingSignal?.name ?? null, since: sinceOf(run, stepId) };
+  }
+  if (step?.phase === "in-flight") {
+    return { stage, stepId, parked: false, signalName: null, since: sinceOf(run, stepId) };
+  }
+  return { stage, stepId: "chat", parked: false, signalName: null, since: null };
+}
+
+/** Where the anchor run stands, picked out of an already-folded run list. */
+export function positionFromRuns(runs: readonly FoldedRun[], anchorRunId: string): StageStatus | null {
+  const anchor = runs.find((run) => run.runId === anchorRunId);
+  return anchor ? anchorPosition(anchor) : null;
+}
 
 /** Every run under the deployment, folded from its committed `/hub` events. */
 export async function foldProjectRuns(
@@ -50,7 +138,8 @@ export async function foldProject(
   anchorRunId: string,
   transport: Transport = createHubTransport(),
 ): Promise<StageStatus | null> {
-  return projectState(await foldProjectRuns(tenantId, anchorRunId, transport));
+  const runs = await foldProjectRuns(tenantId, anchorRunId, transport);
+  return positionFromRuns(runs, anchorRunId);
 }
 
 /**
@@ -63,7 +152,7 @@ export async function foldProjectStanding(
   transport: Transport = createHubTransport(),
 ): Promise<{ status: StageStatus | null; title: string | null }> {
   const runs = await foldProjectRuns(tenantId, anchorRunId, transport);
-  return { status: projectState(runs), title: projectTitle(runs) };
+  return { status: positionFromRuns(runs, anchorRunId), title: projectTitle(runs) };
 }
 
 /**

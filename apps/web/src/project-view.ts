@@ -25,13 +25,11 @@
 import type { Transport } from "@intx/hub-client";
 import { requireProject as installerRequireProject, resolveWorkspace, workflowsFor } from "@solutions-builder/installer";
 import { currentDeployment } from "./project-list.ts";
-import { positionOfSignal } from "@solutions-builder/app/workflows/stage-loop";
-import { projectState } from "@solutions-builder/app/project-state";
 import { requiredAuthorityFor } from "@solutions-builder/app/decision-copy";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { createHubTransport } from "./hub.ts";
 import { artifactGraphFor } from "./artifact-graph.ts";
-import { foldOpening, foldProjectRuns, projectApprovals, type StageStatus } from "./run-fold.ts";
+import { foldOpening, foldProjectRuns, positionFromRuns, projectApprovals, type StageStatus } from "./run-fold.ts";
 import type { ArtifactNode, ProjectDetail, Run } from "./client.ts";
 
 type Page<T> = { data: T[]; nextCursor: string | null };
@@ -76,9 +74,7 @@ async function soloApprovalFor(transport: Transport, projectId: string, stage: S
 /** The command-state string the stage workspace actually branches on, folded from `standing`. */
 function currentStateFrom(standing: StageStatus | null): string {
   if (standing === null || !standing.parked) return "in_progress";
-  const position = positionOfSignal(standing.stage, standing.signalName ?? "");
-  if (position?.at === "gate") return standing.stage === 7 ? "cost_approved" : "waiting_approval";
-  return "in_progress";
+  return standing.stage === 7 ? "cost_approved" : "waiting_approval";
 }
 
 function currentRunFrom(anchorRunId: string | null, standing: StageStatus | null): Run | null {
@@ -133,7 +129,7 @@ export async function loadProjectView(projectId: string, transport: Transport = 
   const nodes = graph.nodes.map(toArtifactNode);
 
   const runs = anchorRunId ? await foldProjectRuns(projectId, anchorRunId, transport) : [];
-  const standing = projectState(runs);
+  const standing = anchorRunId ? positionFromRuns(runs, anchorRunId) : null;
   const current = currentRunFrom(anchorRunId, standing);
 
   const [opening, soloApproval] = await Promise.all([
