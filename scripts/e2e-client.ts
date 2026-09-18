@@ -16,10 +16,13 @@
  * client-driven chain shows up as one failed step rather than an aborted run.
  *
  * Usage: bun --conditions intx-src scripts/e2e-client.ts
- *   SMOKE_PROVIDER_API_KEY (or ANTHROPIC_API_KEY) -- an Anthropic key to
- *   connect as the workspace's provider. Absent, step 3 is skipped and every
- *   step after it that needs a servable offering is expected to report
- *   "no_offering" rather than fail outright.
+ *   SMOKE_PROVIDER_BASE_URL -- an OpenAI-compatible base URL to connect as
+ *   the workspace's provider (default: an Ollama server the operator runs,
+ *   serving gpt-oss:20b, qwen2.5:14b, llama3.2:3b).
+ *   SMOKE_PROVIDER_API_KEY -- its API key (default "ollama", the placeholder
+ *   Ollama's OpenAI-compatible endpoint accepts).
+ *   ANTHROPIC_API_KEY -- if set (and SMOKE_PROVIDER_API_KEY is not), connects
+ *   Anthropic directly instead of the OpenAI-compatible default.
  */
 import fs from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -50,9 +53,6 @@ function check(name: string, ok: boolean, detail = ""): boolean {
   checks.push({ name, ok, detail });
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? ` - ${detail}` : ""}`);
   return ok;
-}
-function skip(name: string, detail: string): void {
-  console.log(`SKIP  ${name} - ${detail}`);
 }
 
 /** Runs one numbered step; a thrown error is a FAIL that does not abort the run. */
@@ -193,6 +193,26 @@ const DEFAULT_BASE_URL: Record<string, string> = {
   anthropic: "https://api.anthropic.com/v1",
 };
 
+const DEFAULT_SMOKE_PROVIDER_BASE_URL = "https://thegreataxios-home-studio.tail87f5aa.ts.net/v1";
+
+/**
+ * Lists the models a live key can actually serve, by asking the provider
+ * itself -- the same `GET {base}/v1/models` call `apps/web/src/provider-catalog.ts`'s
+ * `connectApiKeyProvider` makes before writing anything.
+ */
+async function discoverModels(baseUrl: string, apiKey: string): Promise<string[]> {
+  const url = `${baseUrl.replace(/\/+$/, "")}/models`;
+  const response = await fetch(url, { headers: { Authorization: `Bearer ${apiKey}` } });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(`the provider rejected this key (HTTP ${response.status})${detail ? `: ${detail.slice(0, 200)}` : ""}`);
+  }
+  const body = (await response.json().catch(() => null)) as { data?: { id?: string }[] } | null;
+  const ids = (body?.data ?? []).map((entry) => entry.id).filter((id): id is string => typeof id === "string");
+  if (ids.length === 0) throw new Error("this key works, but the provider did not list any model");
+  return ids;
+}
+
 const PROJECT_POLICY: ProjectPolicy = {
   costTolerancePercent: 20,
   costToleranceAbsolute: 500,
@@ -296,26 +316,48 @@ async function main(): Promise<void> {
       return resolved;
     });
 
-    // (3) Connect an API-key provider.
-    const apiKey = process.env.SMOKE_PROVIDER_API_KEY ?? process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-      skip("3. connect an API-key provider", "no SMOKE_PROVIDER_API_KEY (or ANTHROPIC_API_KEY) in the environment");
-    } else if (workspace) {
+    // (3) Connect an API-key provider. Prefers Anthropic directly when only
+    // ANTHROPIC_API_KEY is set; otherwise connects the OpenAI-compatible
+    // endpoint at SMOKE_PROVIDER_BASE_URL (an Ollama server by default) with
+    // SMOKE_PROVIDER_API_KEY (default "ollama"), discovering its servable
+    // models live the same way `connectApiKeyProvider` does.
+    const anthropicKey = process.env.SMOKE_PROVIDER_API_KEY ? undefined : process.env.ANTHROPIC_API_KEY;
+    if (workspace) {
       await step("3. connect an API-key provider", async () => {
+        if (anthropicKey) {
+          const { modelProviderId } = await upsertApiKeyProvider(transport, workspace.tenantId, {
+            providerId: "anthropic",
+            label: "Anthropic",
+            plugin: "anthropic",
+            baseURL: DEFAULT_BASE_URL.anthropic!,
+            apiKey: anthropicKey,
+          });
+          // Model discovery calls the vendor's own API (the "inference step");
+          // this smoke skips it and records the canonical name it already knows.
+          await registerProviderModels(transport, workspace.tenantId, {
+            modelProviderId,
+            canonicalNames: ["claude-3-5-sonnet-20241022"],
+          });
+          check("3. connect an API-key provider", true, `model provider ${modelProviderId} (anthropic)`);
+          return;
+        }
+
+        const baseURL = (process.env.SMOKE_PROVIDER_BASE_URL ?? DEFAULT_SMOKE_PROVIDER_BASE_URL).replace(/\/+$/, "");
+        const apiKey = process.env.SMOKE_PROVIDER_API_KEY ?? "ollama";
+        const canonicalNames = await discoverModels(baseURL, apiKey);
         const { modelProviderId } = await upsertApiKeyProvider(transport, workspace.tenantId, {
-          providerId: "anthropic",
-          label: "Anthropic",
-          plugin: "anthropic",
-          baseURL: DEFAULT_BASE_URL.anthropic!,
+          providerId: "smoke-openai-compatible",
+          label: "Smoke OpenAI-compatible",
+          plugin: "openai-compatible",
+          baseURL,
           apiKey,
         });
-        // Model discovery calls the vendor's own API (the "inference step");
-        // this smoke skips it and records the canonical name it already knows.
-        await registerProviderModels(transport, workspace.tenantId, {
-          modelProviderId,
-          canonicalNames: ["claude-3-5-sonnet-20241022"],
-        });
-        check("3. connect an API-key provider", true, `model provider ${modelProviderId}`);
+        await registerProviderModels(transport, workspace.tenantId, { modelProviderId, canonicalNames });
+        check(
+          "3. connect an API-key provider",
+          true,
+          `model provider ${modelProviderId} (openai-compatible, ${canonicalNames.length} model(s) at ${baseURL})`,
+        );
       });
     }
 
