@@ -7,28 +7,22 @@
  * identical rule over the same `/hub` events. This module only supplies what
  * the fold cannot get on its own: the iterations' events and blob refs (over
  * `lifecycle-run.ts`), and the DB-backed nodes, opening command and carried
- * turns a still-running host process needs for its own purposes —
- * `agent-conversation.ts`'s draft-prompt context and `api-stages.ts`'s
- * `/reply` interview-mode decision, until those move to run signals.
+ * turns `project-transfer.ts` needs to move a project's conversation with it.
  */
 import {
-  evaluationIn as foldEvaluation,
-  failedRoundBody,
-  nextOpenQuestion,
   projectStageThread,
   type ArtifactNodeRef,
   type OutputResolver,
 } from "@solutions-builder/app/stage-thread";
 import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
 import type { Stage } from "@solutions-builder/app/ledger";
-import { readOutputRef, stageIterations, type StageIteration } from "./lifecycle-run.js";
+import { readOutputRef, stageIterations } from "./lifecycle-run.js";
 import { database } from "./db.js";
 import * as table from "./schema.js";
 import { eq } from "drizzle-orm";
 import { carriedTurns, ledgerCommands } from "./command-ledger.js";
 
 export type { Quote, StageTurn, ArtifactNodeRef };
-export { nextOpenQuestion, failedRoundBody };
 
 const readRef: OutputResolver = (anchor, runId, ref) => readOutputRef(anchor, runId, ref);
 
@@ -47,9 +41,9 @@ async function openingFor(
 /**
  * The stage thread, assembled: every iteration's turns, the project's live
  * artifact nodes (for `resultNodeId`) and, at stage 1, the opening problem
- * statement. The shape a route or `questions.ts` reads.
+ * statement.
  */
-export async function threadTurns(projectId: string, stage: number): Promise<StageTurn[]> {
+async function threadTurns(projectId: string, stage: number): Promise<StageTurn[]> {
   const { db } = database();
   const [iterations, nodes, opening, carried] = await Promise.all([
     stageIterations(projectId, stage as Stage),
@@ -73,11 +67,4 @@ export async function threadTurns(projectId: string, stage: number): Promise<Sta
 /** The stage's conversation as it can travel: every turn that ran here or was carried here, the opening statement aside since it rides on the ledger. */
 export async function portableThread(projectId: string, stage: number): Promise<StageTurn[]> {
   return (await threadTurns(projectId, stage)).filter((turn) => turn.id !== "opening");
-}
-
-/** The latest brief-evaluator verdict for the stage, or null before one has run. */
-export async function evaluationIn(
-  iterations: readonly StageIteration[],
-): Promise<{ ready: boolean; notes: string[] } | null> {
-  return foldEvaluation(iterations, readRef);
 }

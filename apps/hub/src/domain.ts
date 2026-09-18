@@ -7,31 +7,8 @@
  */
 import { type } from "arktype";
 import { ARTIFACT_KINDS } from "@solutions-builder/app/artifacts";
-import { AUTHORITIES, COMMANDS, STAGES } from "@solutions-builder/app/ledger";
 
 const id = type("string > 0");
-const iso = type("string.date.iso");
-
-export const Authority = type.enumerated(...AUTHORITIES);
-export const CommandType = type.enumerated(...COMMANDS);
-export const StageT = type.enumerated(...STAGES);
-
-/** Every command arrives inside this envelope. Section 6, "Command envelope". */
-export const CommandEnvelope = type({
-  schemaVersion: "'1'",
-  commandId: id,
-  type: CommandType,
-  actor: {
-    id,
-    /** Roles the actor holds in this workspace; authority is derived, never sent. */
-    roles: Authority.array().atLeastLength(1),
-  },
-  scope: { workspaceId: id, "projectId?": id },
-  correlationId: id,
-  idempotencyKey: id,
-  "payload?": "unknown",
-});
-export type CommandEnvelope = typeof CommandEnvelope.infer;
 
 /**
  * Approvals name exact versions. This type exists so no route can accept an
@@ -94,22 +71,6 @@ export const ArtifactDraft = type({
   },
 });
 export type ArtifactDraft = typeof ArtifactDraft.infer;
-
-export const ProviderConnectRequest = type({
-  kind: "'api_key' | 'local_endpoint' | 'oauth'",
-  providerId: type("string > 0").to("string <= 64"),
-  label: type("string > 0").to("string <= 120"),
-  /**
-   * Present only for `api_key`. The host writes it to secure storage and drops
-   * it; no route ever reads it back, and it never reaches a response body.
-   */
-  "secret?": "string > 0",
-  /** Present only for `local_endpoint`: the base URL of whatever server is running. */
-  "baseUrl?": "string.url",
-});
-export type ProviderConnectRequest = typeof ProviderConnectRequest.infer;
-
-export { id as IdSchema, iso as IsoDateSchema };
 
 /**
  * What the Product guide returns — BUILD_PLAN_V3 section 8.

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ensureChoiceSection, withChoiceReminder } from "@solutions-builder/app/stage-prompt";
+import { ensureChoiceSection, withChoiceReminder } from "./stage-prompt.js";
 
 describe("withChoiceReminder records a stage-3 choice in the document", () => {
   test("a stage-3 choice names the Chosen approach section the approval gate reads", () => {
