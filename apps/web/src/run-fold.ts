@@ -81,3 +81,26 @@ export async function standingForProject(
 export function runIsDrafting(standing: StageStatus | null): boolean {
   return standing !== null && standing.parked === false;
 }
+
+/**
+ * The stage-1 opening problem statement, read off the anchor run's own
+ * `RunStarted` event rather than the ledger (`ProjectDetail.opening` used
+ * to ride the `GET /projects/:id` read) — the run's trigger payload is the
+ * same `{ projectId, problemStatement }` body `client.ts`'s `createProject`
+ * fires the deployment with, so it needs no host record of its own.
+ */
+export async function foldOpening(
+  tenantId: string,
+  anchorRunId: string,
+  transport: Transport = createHubTransport(),
+): Promise<{ body: string; createdAt: string } | null> {
+  const { events } = await readWorkflowRunEvents(transport, tenantId, anchorRunId, anchorRunId);
+  const started = events.find((event) => event.type === "RunStarted");
+  if (!started) return null;
+  const trigger = started.body.trigger as { payload?: unknown } | undefined;
+  const payload = trigger?.payload as { problemStatement?: unknown } | undefined;
+  const body = typeof payload?.problemStatement === "string" ? payload.problemStatement.trim() : "";
+  if (body.length === 0) return null;
+  const createdAt = typeof started.body.at === "string" ? started.body.at : new Date().toISOString();
+  return { body, createdAt };
+}

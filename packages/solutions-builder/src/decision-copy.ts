@@ -22,3 +22,14 @@ export const STATE_CONSEQUENCE: Record<string, string> = {
   cost_approved: "Freezing locks this exact plan and cost and queues the build. Nothing is spent until then.",
   waiting_human: "Answering resumes the same build attempt with exactly what you grant, and nothing more.",
 };
+
+/**
+ * The stage-to-authority mapping: pure and stage-only, so both the hub (guard
+ * inputs) and the client (the decision-queue fold) apply the identical rule.
+ */
+export function requiredAuthorityFor(stage: number): import("./ledger.js").Authority {
+  if (stage === 7) return "budget_approver";
+  if (stage === 6) return "technical_approver";
+  if (stage === 9) return "delivery_recipient";
+  return "project_owner";
+}

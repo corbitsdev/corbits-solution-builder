@@ -27,7 +27,7 @@ import { Textarea, Tabs } from "@corbits/react-ui";
 import { Markdown } from "../../markdown.jsx";
 import { AudiencePackages } from "../audiences.jsx";
 import { DesignFeedbackView } from "../design.jsx";
-import { AddMaterial, Banner, Button, Screen, StateLabel, stageName, versionDigest } from "../../components.jsx";
+import { AddMaterial, Banner, Button, downloadArtifact, Screen, StateLabel, stageName, versionDigest } from "../../components.jsx";
 import { Dictated } from "../../dictation.jsx";
 import { StageGate, STAGE_GOAL } from "./gate.jsx";
 import { Preparing } from "./preparing.jsx";
@@ -1123,7 +1123,10 @@ function BuildPanel({
               <div>
                 <dt>Packaged</dt>
                 <dd>
-                  <BuildArchiveRow archive={final.payload.archive as { nodeId: string; name: string; root: string; sizeBytes: number }} />
+                  <BuildArchiveRow
+                    archive={final.payload.archive as { nodeId: string; name: string; root: string; sizeBytes: number }}
+                    tenantId={detail.tenantId}
+                  />
                 </dd>
               </div>
             ) : typeof final.payload.archiveError === "string" ? (
@@ -1181,9 +1184,16 @@ function BuildPanel({
   );
 }
 
-/** The build as packaged when the worker ended: its name, its size, where it unpacks, and a way to save it. */
-function BuildArchiveRow({ archive }: { archive: { nodeId: string; name: string; root: string; sizeBytes: number } }) {
-  const [state, setState] = useState<{ busy: boolean; saved: string | null; error: string | null }>({ busy: false, saved: null, error: null });
+/** The build as packaged when the worker ended: its name, its size, where it unpacks, and a way to download it. */
+function BuildArchiveRow({
+  archive,
+  tenantId,
+}: {
+  archive: { nodeId: string; name: string; root: string; sizeBytes: number };
+  /** The workspace tenant artifacts are recorded under. */
+  tenantId: string;
+}) {
+  const [state, setState] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
   const size = archive.sizeBytes >= 1024 * 1024 ? `${(archive.sizeBytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(archive.sizeBytes / 1024))} KB`;
   return (
     <>
@@ -1193,16 +1203,18 @@ function BuildArchiveRow({ archive }: { archive: { nodeId: string; name: string;
         variant="link"
         loading={state.busy}
         onClick={() => {
-          setState({ busy: true, saved: null, error: null });
+          setState({ busy: true, error: null });
           api
-            .saveArtifactFile(archive.nodeId)
-            .then((result) => setState({ busy: false, saved: result.path, error: null }))
-            .catch((cause) => setState({ busy: false, saved: null, error: cause instanceof ApiFailure ? cause.detail.message : String(cause) }));
+            .artifactContent(tenantId, archive.nodeId)
+            .then((result) => {
+              downloadArtifact(result.content, archive.name);
+              setState({ busy: false, error: null });
+            })
+            .catch((cause) => setState({ busy: false, error: cause instanceof ApiFailure ? cause.detail.message : String(cause) }));
         }}
       >
-        Save it
+        Download it
       </Button>
-      {state.saved ? <span className="inline-note"> Saved to {state.saved}</span> : null}
       {state.error ? <span className="inline-note"> {state.error}</span> : null}
     </>
   );

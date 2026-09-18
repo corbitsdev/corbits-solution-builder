@@ -449,7 +449,7 @@ export function App() {
     }
     let cancelled = false;
     void api
-      .project(selected)
+      .projectView(selected)
       .then(async (result) => {
         const nextStanding = await standingForProject(result).catch(() => null);
         if (!cancelled) {
@@ -466,7 +466,7 @@ export function App() {
   useEffect(() => {
     if (view !== "project" || !selected) return;
     void api
-      .graph(selected)
+      .artifactGraph(selected)
       .then(setGraph)
       .catch(() => setGraph({ nodes: [], edges: [] }));
   }, [view, selected, detail]);
@@ -476,7 +476,7 @@ export function App() {
     // lands, so a serial refresh here was dead time on every approval.
     const [, next] = await Promise.all([
       refresh(),
-      selected ? api.project(selected).catch(() => null) : Promise.resolve(null),
+      selected ? api.projectView(selected).catch(() => null) : Promise.resolve(null),
     ]);
     if (selected) {
       setDetail(next);
@@ -501,7 +501,7 @@ export function App() {
     setBusy(decision);
     setError(null);
     try {
-      const project = await api.project(wait.projectId);
+      const project = await api.projectView(wait.projectId);
       const versions = project.nodes
         .filter((node) => node.stage === wait.stage && node.supersededByNodeId === null)
         .map((node) => ({

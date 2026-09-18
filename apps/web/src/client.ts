@@ -11,6 +11,7 @@ import { AUTHORITIES, type Authority } from "@solutions-builder/app/ledger";
 import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
 import {
   ApiError as HubApiError,
+  createArtifact as installerCreateArtifact,
   createProject as installerCreateProject,
   ensureLifecycleDeployment as installerEnsureLifecycleDeployment,
   getArtifact as installerGetArtifact,
@@ -33,10 +34,13 @@ import {
   type SidecarCapability,
   type WorkflowGitPush,
 } from "@solutions-builder/installer";
+import { MATERIAL_KIND } from "@solutions-builder/app/artifacts";
 import { artifactGraphFor } from "./artifact-graph.ts";
 import { openCreatedProject } from "./create-project-open.ts";
 import { createHubTransport } from "./hub.ts";
 import { listProjectSummaries } from "./project-list.ts";
+import { openDecisions } from "./decisions-fold.ts";
+import { loadProjectView, toArtifactNode } from "./project-view.ts";
 import { designerSettings as loadDesignerSettings, saveDesignerSettings, type DesignerSettings } from "./designer-settings.ts";
 import {
   API_KEY_CONNECT_OPTIONS,
@@ -79,29 +83,6 @@ export class ApiFailure extends Error {
     this.name = "ApiFailure";
     this.detail = detail;
   }
-}
-
-/** A multipart post: the browser sets the content type, boundary and all. */
-async function requestForm<T>(path: string, form: FormData): Promise<T> {
-  let response: Response;
-  try {
-    response = await fetch(`/api${path}`, { method: "POST", body: form });
-  } catch {
-    throw new ApiFailure({
-      code: "host_unreachable",
-      message: "That request did not reach the host. Try again, or reopen the window.",
-      correlationId: "-",
-      retryable: true,
-    });
-  }
-  const body: unknown = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const detail = (body as { error?: ApiError }).error;
-    throw new ApiFailure(
-      detail ?? { code: "internal_error", message: `The host answered ${response.status}.`, correlationId: "-", retryable: false },
-    );
-  }
-  return body as T;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -260,6 +241,13 @@ export type Run = {
   id: string;
   kind: string;
   stage: number;
+  /**
+   * Coarsened from the host's own ledger-run states: `loadProjectView`
+   * (`./project-view.ts`) folds only what the stage workspace actually
+   * branches on — `"in_progress"`, `"waiting_approval"`, and stage 7's
+   * `"cost_approved"` hand-off to the freeze — from the run fold's own
+   * parked/running signal. See that file's header for what this drops.
+   */
   state: string;
   createdAt: string;
   endedAt: string | null;
@@ -280,8 +268,6 @@ export type BuildEvent = {
 export type ProjectDetail = {
   project: {
     id: string;
-    /** §6's expected mutable revision, sent with every decision. */
-    revision: number;
     title: string;
     policy: unknown;
     archivedAt: string | null;
@@ -310,16 +296,18 @@ export type ProjectDetail = {
     createdAt: string;
     versions: { versionId: string; contentHash: string }[];
   }[];
-  waits: Wait[];
-  flags: { id: string; trigger: string; classification: string; evidence: unknown; chosenRoute: number | null; createdAt: string }[];
-  questions: { id: string; prompt: string; answeredAt: string | null; answer: string | null }[];
-  manifests: { id: string; manifestHash: string; acceptedAt: string | null; descriptors: unknown }[];
   /**
-   * The stage-1 opening problem statement, off the `project.create` command —
-   * ledger data the stage-thread fold cannot read out of `/hub` events.
+   * The stage-1 opening problem statement, read off the anchor run's own
+   * `RunStarted` trigger event (`./run-fold.ts`'s `foldOpening`) now, not the
+   * ledger's `project.create` command.
    */
   opening: { body: string; createdAt: string } | null;
-  /** Turns carried in from another instance on import, by stage — ledger data, same reason. */
+  /**
+   * Turns carried in from another project instance on import. Always empty
+   * now — `GET /projects/:id` read this off `command-ledger.ts`, which has
+   * no run-event fold; project-transfer needs its own client fold to bring
+   * this back.
+   */
   carriedTurns: { stage: number; turn: StageTurn }[];
 };
 
@@ -653,7 +641,13 @@ export const api = {
       installerFailure(cause);
     }
   },
-  decisions: () => request<{ decisions: Wait[] }>("/decisions"),
+  decisions: async () => {
+    try {
+      return { decisions: await openDecisions(createHubTransport()) };
+    } catch (cause) {
+      installerFailure(cause);
+    }
+  },
   /** Project tenants under the workspace, read straight off the hub -- see `./project-list.ts`. */
   projects: async () => {
     try {
@@ -710,16 +704,24 @@ export const api = {
       // Fires the deployment's top-level run once: the host no longer
       // launches the lifecycle (`apps/hub/src/lifecycle-run.ts`'s
       // `launchProjectLifecycle` is gone), so a freshly-created project's
-      // anchor run is the client's to start.
-      if (deployment.status === "current" || deployment.status === "deployed") {
-        await triggerWorkflowRun(transport, workspace.tenantId, deployment.deploymentId, {
-          content: JSON.stringify({ projectId: project.id, ...(problem ? { problemStatement: problem } : {}) }),
-        });
-      }
-      const body = problem.length > 0 ? { problemStatement: problem } : {};
+      // anchor run is the client's to start. The trigger's own payload is
+      // now the project's stage-1 opening statement too (`run-fold.ts`'s
+      // `foldOpening` reads it back off the run's `RunStarted` event) — the
+      // ledger's separate `project.create`/`POST /projects/:id/open` write
+      // is gone (CL-8510); a retried trigger on the same deployment is the
+      // workflow runtime's own at-most-once `RunStarted`, so retrying here
+      // is safe.
       return await openCreatedProject({
         projectId: project.id,
-        open: () => post<{ projectId: string; runId: string }>(`/projects/${project.id}/open`, body),
+        open: async () => {
+          if (deployment.status !== "current" && deployment.status !== "deployed") {
+            return { projectId: project.id, runId: "" };
+          }
+          await triggerWorkflowRun(transport, workspace.tenantId, deployment.deploymentId, {
+            content: JSON.stringify({ projectId: project.id, ...(problem ? { problemStatement: problem } : {}) }),
+          });
+          return { projectId: project.id, runId: deployment.deploymentId };
+        },
         conceal: async (projectId) => {
           await installerUpdateProject(transport, projectId, { deletedAt: new Date() });
         },
@@ -729,17 +731,68 @@ export const api = {
       installerFailure(cause);
     }
   },
-  project: (projectId: string) => request<ProjectDetail>(`/projects/${projectId}`),
-  projectInfo: (projectId: string) => request<ProjectInfo>(`/projects/${projectId}/info`),
-  /** Hands files over with the problem; each becomes a version the specialists read. */
-  attachMaterial: (projectId: string, files: File[]) => {
-    const form = new FormData();
-    for (const file of files) form.append("files", file, file.name);
-    return requestForm<{ attached: { nodeId: string; name: string; mediaType: string; sizeBytes: number }[] }>(
-      `/projects/${projectId}/material`,
-      form,
-    );
-  },
+  /** The project's detail, folded client-side — see `./project-view.ts`. Replaces `GET /projects/:id`. */
+  projectView: (projectId: string) => loadProjectView(projectId, createHubTransport()).catch((cause: unknown) => { installerFailure(cause); }),
+  /** One project, described — folded from the same tenant record and run/artifact folds as `projectView`. */
+  projectInfo: (projectId: string): Promise<ProjectInfo> =>
+    asWorkspaceOwner(async (transport) => {
+      const [project, detail] = await Promise.all([
+        installerRequireProject(transport, projectId),
+        loadProjectView(projectId, transport),
+      ]);
+      const live = detail.nodes.filter((node) => node.supersededByNodeId === null);
+      const stamps = [...detail.nodes.map((node) => node.createdAt), ...detail.approvals.map((approval) => approval.createdAt)];
+      return {
+        project: {
+          id: project.id,
+          title: project.title,
+          createdAt: project.createdAt.toISOString(),
+          archivedAt: project.archivedAt?.toISOString() ?? null,
+        },
+        stage: detail.current ? { stage: detail.current.stage, state: detail.current.state } : null,
+        // No per-version byte count rides the mounted artifacts module's list
+        // metadata (CL-8500 decision 3), so this no longer totals bytes.
+        artifacts: { versions: detail.nodes.length, live: live.length, bytes: 0, byKind: [] },
+        runs: { total: detail.runs.length, builds: 0 },
+        approvals: detail.approvals.length,
+        lastActivityAt: stamps.sort().at(-1) ?? project.createdAt.toISOString(),
+      };
+    }),
+  /**
+   * Hands files over with the problem; each becomes a `source_material`
+   * artifact version the specialists read, written straight to the mounted
+   * `@corbits/artifacts` module — no host route left (CL-8510). Unlike the
+   * deleted host route, a same-named re-upload always starts a fresh
+   * artifact rather than a new version of the same one.
+   */
+  attachMaterial: (projectId: string, files: File[]) =>
+    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      const attached = await Promise.all(
+        files.map(async (file) => {
+          const mediaType = file.type || "application/octet-stream";
+          const content = mediaType.startsWith("text/") || mediaType === "application/json"
+            ? await file.text()
+            : `data:${mediaType};base64,${btoa(String.fromCharCode(...new Uint8Array(await file.arrayBuffer())))}`;
+          const artifact = await installerCreateArtifact(transport, workspaceTenantId, {
+            title: file.name,
+            content,
+            metadata: {
+              sb: {
+                projectId,
+                kind: MATERIAL_KIND,
+                stage: 1,
+                variant: file.name,
+                sourceVersionIds: [],
+                provenance: { producer: "human" as const },
+                mediaType,
+              },
+            },
+          });
+          return { nodeId: artifact.id, name: file.name, mediaType, sizeBytes: file.size };
+        }),
+      );
+      return { attached };
+    }),
   /** The stakeholders stage 5 writes for, and the roles one may hold — read off the hub tenant directly. */
   stakeholders: (projectId: string) =>
     asWorkspaceOwner(async (transport) => {
@@ -795,8 +848,6 @@ export const api = {
   /** Saves a package's already-recorded slides into the Downloads folder; says where. The host does not build them. */
   saveSlidesFor: (packageNodeId: string) =>
     post<{ path: string; bytes: number; nodeId: string }>(`/artifacts/${packageNodeId}/slides/save`, {}),
-  /** Saves an artifact that is a file (a stakeholder's slides) into the Downloads folder; says where. */
-  saveArtifactFile: (nodeId: string) => post<{ path: string; bytes: number }>(`/artifacts/${nodeId}/save`, {}),
   /** Where a design is served as a page of its own, for printing. A path, not a request. */
   printPage: (nodeId: string) => `/api/artifacts/${nodeId}/print`,
   preferences: () => request<{ preferences: Record<string, unknown> }>("/preferences"),
@@ -810,18 +861,17 @@ export const api = {
     saveDesignerSettings(createHubTransport(), { [key]: value } as Partial<DesignerSettings>).catch((cause) => {
       installerFailure(cause);
     }),
-  graph: (projectId: string) =>
-    request<{
-      nodes: ArtifactNode[];
-      edges: { childNodeId: string; sourceNodeId: string }[];
-    }>(`/projects/${projectId}/graph`),
   /**
    * The metadata-folded artifact graph — CL-8500 decision 3. Client-side
    * only: lists the tenant's artifacts over the mounted `@corbits/artifacts`
-   * module and folds them to one project, no host route involved. Not yet
-   * wired into a page; `graph` above is still what the UI reads.
+   * module and folds them to one project, no host route involved. Replaces
+   * `GET /projects/:id/graph` (CL-8510); nodes come back in the same
+   * `ArtifactNode` shape `projectView`'s `nodes` already use.
    */
   artifactGraph: (projectId: string) =>
-    asWorkspaceOwner((transport, workspaceTenantId) => artifactGraphFor(transport, workspaceTenantId, projectId)),
+    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      const graph = await artifactGraphFor(transport, workspaceTenantId, projectId);
+      return { nodes: graph.nodes.map(toArtifactNode), edges: graph.edges };
+    }),
   stopHost: () => post<{ stopping: boolean }>("/host/stop"),
 };

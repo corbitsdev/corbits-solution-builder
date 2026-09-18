@@ -4,15 +4,10 @@
  * what the guard needs to decide.
  */
 import type { Stage } from "@solutions-builder/app/ledger";
-import type { Authority } from "@solutions-builder/app/ledger";
+import { requiredAuthorityFor } from "@solutions-builder/app/decision-copy";
 import { listPrincipals } from "./hub-client.js";
 
-export function requiredAuthorityFor(stage: number): Authority {
-  if (stage === 7) return "budget_approver";
-  if (stage === 6) return "technical_approver";
-  if (stage === 9) return "delivery_recipient";
-  return "project_owner";
-}
+export { requiredAuthorityFor };
 
 /**
  * The actor's principal in the project tenant: the one referring to the same

@@ -431,6 +431,22 @@ export function documentName(kind: string): string {
   return DOCUMENT_NAMES[kind] ?? kind.replace(/_/g, " ");
 }
 
+/**
+ * Downloads an artifact's current content through the browser's own save
+ * dialog: a `data:` URL (a binary file, stored that way) downloads directly,
+ * text content is wrapped in a blob first. Replaces the deleted
+ * `POST /artifacts/:id/save`, which wrote to the host's Downloads folder —
+ * the window downloads it itself now (CL-8510).
+ */
+export function downloadArtifact(content: string, filename: string): void {
+  const href = content.startsWith("data:") ? content : URL.createObjectURL(new Blob([content]));
+  const link = document.createElement("a");
+  link.href = href;
+  link.download = filename;
+  link.click();
+  if (!content.startsWith("data:")) URL.revokeObjectURL(href);
+}
+
 /** What the specialists can read: the same list the Projects page and the Artifacts tab accept. */
 export const MATERIAL_ACCEPT = ".txt,.md,.csv,.json,.html,.xlsx,.xls,.docx,.doc,.pptx,.ppt,.pdf,.png,.jpg,.jpeg,.gif,.webp";
 

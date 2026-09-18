@@ -9,7 +9,7 @@ import { EmptyState } from "@corbits/react-ui";
 import { useEffect, useState } from "react";
 import { api, ApiFailure, type ArtifactNode } from "../client.js";
 import { Markdown } from "../markdown.jsx";
-import { AddMaterial, Banner, Button, documentName, stageName } from "../components.jsx";
+import { AddMaterial, Banner, Button, documentName, downloadArtifact, stageName } from "../components.jsx";
 import { PrintButton } from "../print.jsx";
 
 type ArtifactEdge = { childNodeId: string; sourceNodeId: string };
@@ -292,9 +292,9 @@ function ArtifactReader({
           node.kind === "source_material" ? (
             <Material node={node} content={content} />
           ) : node.kind === "audience_deck" ? (
-            <DeckFile node={node} />
+            <DeckFile node={node} tenantId={tenantId} />
           ) : node.kind === "build_evidence" ? (
-            <BuildFile node={node} />
+            <BuildFile node={node} tenantId={tenantId} />
           ) : node.kind === "design_feedback" ? (
             <FeedbackRecord content={content} />
           ) : node.mediaType === "text/html" || node.kind === "design_artifact" ? (
@@ -363,12 +363,8 @@ function ArtifactReader({
  * Markdown — a CSV is not prose, and a data URL is not a document.
  */
 /** A stakeholder's slides: bytes, not a page, so what is offered is a save. */
-function DeckFile({ node }: { node: ArtifactNode }) {
-  const [state, setState] = useState<{ busy: boolean; saved: string | null; error: string | null }>({
-    busy: false,
-    saved: null,
-    error: null,
-  });
+function DeckFile({ node, tenantId }: { node: ArtifactNode; tenantId: string }) {
+  const [state, setState] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
   const size = `${Math.max(1, Math.round(node.sizeBytes / 1024))} KB`;
   return (
     <div className="deck-file">
@@ -381,19 +377,19 @@ function DeckFile({ node }: { node: ArtifactNode }) {
           variant="primary"
           loading={state.busy}
           onClick={() => {
-            setState({ busy: true, saved: null, error: null });
+            setState({ busy: true, error: null });
             api
-              .saveArtifactFile(node.id)
-              .then((result) => setState({ busy: false, saved: result.path, error: null }))
-              .catch((cause) =>
-                setState({ busy: false, saved: null, error: cause instanceof ApiFailure ? cause.detail.message : String(cause) }),
-              );
+              .artifactContent(tenantId, node.id)
+              .then((result) => {
+                downloadArtifact(result.content, `${node.title}.pptx`);
+                setState({ busy: false, error: null });
+              })
+              .catch((cause) => setState({ busy: false, error: cause instanceof ApiFailure ? cause.detail.message : String(cause) }));
           }}
         >
-          Save slides (.pptx)
+          Download slides (.pptx)
         </Button>
       </div>
-      {state.saved ? <Banner tone="okay" title={`Saved to ${state.saved}`} /> : null}
       {state.error ? <Banner tone="error" title={state.error} /> : null}
     </div>
   );
@@ -404,12 +400,8 @@ function DeckFile({ node }: { node: ArtifactNode }) {
  * attempt's workspace, named after the project. Saved, not shown — a
  * source tree is not a document.
  */
-function BuildFile({ node }: { node: ArtifactNode }) {
-  const [state, setState] = useState<{ busy: boolean; saved: string | null; error: string | null }>({
-    busy: false,
-    saved: null,
-    error: null,
-  });
+function BuildFile({ node, tenantId }: { node: ArtifactNode; tenantId: string }) {
+  const [state, setState] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
   const size = node.sizeBytes >= 1024 * 1024 ? `${(node.sizeBytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(node.sizeBytes / 1024))} KB`;
   return (
     <div className="deck-file">
@@ -423,19 +415,19 @@ function BuildFile({ node }: { node: ArtifactNode }) {
           variant="primary"
           loading={state.busy}
           onClick={() => {
-            setState({ busy: true, saved: null, error: null });
+            setState({ busy: true, error: null });
             api
-              .saveArtifactFile(node.id)
-              .then((result) => setState({ busy: false, saved: result.path, error: null }))
-              .catch((cause) =>
-                setState({ busy: false, saved: null, error: cause instanceof ApiFailure ? cause.detail.message : String(cause) }),
-              );
+              .artifactContent(tenantId, node.id)
+              .then((result) => {
+                downloadArtifact(result.content, `${node.title}.tar.gz`);
+                setState({ busy: false, error: null });
+              })
+              .catch((cause) => setState({ busy: false, error: cause instanceof ApiFailure ? cause.detail.message : String(cause) }));
           }}
         >
-          Save the build (.tar.gz)
+          Download the build (.tar.gz)
         </Button>
       </div>
-      {state.saved ? <Banner tone="okay" title={`Saved to ${state.saved}`} /> : null}
       {state.error ? <Banner tone="error" title={state.error} /> : null}
     </div>
   );

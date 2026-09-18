@@ -27,7 +27,7 @@ import { foldProjectStanding } from "./run-fold.ts";
 const ENDED_DEPLOYMENT_STATUSES = new Set(["releasing", "released", "failed"]);
 
 /** The deployment a project's run is folded against: the live one, or the newest if none is live. */
-function currentDeployment(deployments: readonly HubDeployment[]): HubDeployment | null {
+export function currentDeployment(deployments: readonly HubDeployment[]): HubDeployment | null {
   if (deployments.length === 0) return null;
   const live = deployments.filter((deployment) => !ENDED_DEPLOYMENT_STATUSES.has(deployment.status));
   const pool = live.length > 0 ? live : deployments;
