@@ -265,7 +265,7 @@ function BuildWorker({ status, onChanged }: { status: HostStatus | null; onChang
   const [executable, setExecutable] = useState("");
   const [saved, setSaved] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const workers = status?.build.workers ?? [];
+  const workers = status?.build?.workers ?? [];
   const chosen = workers.find((entry) => entry.id === worker);
 
   useEffect(() => {
@@ -305,7 +305,7 @@ function BuildWorker({ status, onChanged }: { status: HostStatus | null; onChang
       title="Build worker"
       lead="The coding agent stage 8 hands the frozen packet to. It runs on this computer, with your own configuration of that tool."
       status={
-        status ? (
+        status?.build ? (
           <StateLabel tone={status.build.available ? "success" : "error"}>
             {status.build.available ? "Available" : "Unavailable"}
           </StateLabel>
@@ -359,7 +359,7 @@ function BuildWorker({ status, onChanged }: { status: HostStatus | null; onChang
         />
         </Dictated>
       </div>
-      {status ? <p className="setting-note">{status.build.detail}</p> : null}
+      {status?.build ? <p className="setting-note">{status.build.detail}</p> : null}
     </Section>
   );
 }
@@ -438,7 +438,7 @@ function ThisComputer({ status }: { status: HostStatus | null }) {
 
 function Diagnostics({ status }: { status: HostStatus | null }) {
   if (!status) return null;
-  const capabilities = Object.entries(status.build.capabilities);
+  const capabilities = Object.entries(status.build?.capabilities ?? {});
   return (
     <details className="settings-diagnostics">
       <summary>Diagnostics</summary>
@@ -468,12 +468,14 @@ function Diagnostics({ status }: { status: HostStatus | null }) {
             {status.hub.ready ? (status.hub.mode === "embedded" ? "Embedded, in this app" : `Hosted at ${status.hub.url}`) : `Unavailable: ${status.hub.detail}`}
           </dd>
         </div>
-        <div>
-          <dt>Build worker</dt>
-          <dd>
-            {status.build.detail} ({capabilities.filter(([, ok]) => ok).length} of {capabilities.length} controls)
-          </dd>
-        </div>
+        {status.build ? (
+          <div>
+            <dt>Build worker</dt>
+            <dd>
+              {status.build.detail} ({capabilities.filter(([, ok]) => ok).length} of {capabilities.length} controls)
+            </dd>
+          </div>
+        ) : null}
       </dl>
     </details>
   );

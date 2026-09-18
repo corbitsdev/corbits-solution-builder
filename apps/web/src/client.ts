@@ -165,7 +165,8 @@ export type HostStatus = {
     detail: string;
     reported: { status?: string } | null;
   };
-  build: {
+  /** Absent while the host's build-worker bridge is mid-removal (CL-8072). */
+  build?: {
     integration: string;
     /** The worker stage 8 runs now, and the executable it resolves to. */
     worker: { id: string; label: string; command: string };

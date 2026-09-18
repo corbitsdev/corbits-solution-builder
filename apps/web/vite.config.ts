@@ -1,7 +1,18 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+
+const require = createRequire(import.meta.url);
+// `@corbits/oauth-core`'s package.json only exposes the "." entry (its
+// `src/index.ts` barrel), which re-exports the desktop-only `browser.ts`
+// (spawns a system browser) and `callback-server.ts` (a loopback HTTP
+// server) alongside the token-exchange helpers the providers below actually
+// use. Those Node-only files would drag `node:child_process`/`os`/`http`/
+// `net` into the web bundle, so this resolves the package directory and
+// points a browser-safe shim straight at its `client.ts`/`tokens.ts`.
+const oauthCoreDir = dirname(require.resolve("@corbits/oauth-core"));
 
 // `@intx/hub-client` ships TypeScript source, not a published `dist/`. Vite
 // would load its tsconfig, which extends `../../tsconfig.base.json` — a file
@@ -56,6 +67,48 @@ export const fileURLToPath = dummy;
 export const pathToFileURL = dummy;
 export const cwd = dummy;
 export const env = {};
+export const platform = dummy;
+export const arch = dummy;
+export const hostname = dummy;
+export const release = dummy;
+export const type = dummy;
+export const spawn = dummy;
+export const spawnSync = dummy;
+export const exec = dummy;
+export const execSync = dummy;
+export const fork = dummy;
+`;
+    },
+  };
+}
+
+/**
+ * `@corbits/codex-provider` and `@corbits/xai-provider` import only
+ * `exchangeCode`, `refreshTokenRequest`, `baseTokensFromResponse`, and the
+ * `BaseTokens`/`OAuthClientConfig` types from `@corbits/oauth-core` — all
+ * defined in its Node-free `client.ts`/`tokens.ts`. Redirect the barrel
+ * import to a virtual module built from those two files directly, skipping
+ * the desktop-only `browser.ts`/`callback-server.ts` re-exports (see above).
+ */
+function oauthCoreBrowserShim(): Plugin {
+  const virtualId = "\0oauth-core-browser-shim";
+  return {
+    name: "oauth-core-browser-shim",
+    enforce: "pre",
+    resolveId(id) {
+      if (id === "@corbits/oauth-core") return virtualId;
+    },
+    load(id) {
+      if (id !== virtualId) return;
+      return `export {
+  buildAuthorizeUrl,
+  baseTokensFromResponse,
+  exchangeCode,
+  refreshTokenRequest,
+  OAuthTokenEndpointError,
+  OAuthTokenResponseSchemaError,
+  OAuthMissingRefreshTokenError,
+} from ${JSON.stringify(join(oauthCoreDir, "client.ts"))};
 `;
     },
   };
@@ -63,7 +116,7 @@ export const env = {};
 
 export default defineConfig({
   root: import.meta.dirname,
-  plugins: [stubNodeBuiltins(), markdownAsText(), react()],
+  plugins: [stubNodeBuiltins(), oauthCoreBrowserShim(), markdownAsText(), react()],
   resolve: {
     alias: {
       "@intx/hub-client": hubClient,

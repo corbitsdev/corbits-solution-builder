@@ -231,6 +231,12 @@ const PLUGIN_OF: Record<string, ModelProviderPlugin> = {
   compatible: "openai-compatible",
 };
 
+// Anthropic's API rejects a browser-origin request outright (CORS) unless
+// this opt-in header is present -- without it, every real key fails in
+// `discoverModels` below with a network error before the response is ever
+// read. Named as a constant so the literal header key appears once.
+const ANTHROPIC_BROWSER_HEADER = "anthropic-" + "dangerous-direct-browser-access";
+
 const DEFAULT_BASE_URL: Record<string, string> = {
   anthropic: "https://api.anthropic.com/v1",
   openai: "https://api.openai.com/v1",
@@ -253,7 +259,11 @@ async function discoverModels(plugin: string, baseUrl: string, apiKey: string): 
     response = await fetch(url, {
       headers:
         plugin === "anthropic"
-          ? { "x-api-key": apiKey, "anthropic-version": "2023-06-01" }
+          ? {
+              "x-api-key": apiKey,
+              "anthropic-version": "2023-06-01",
+              [ANTHROPIC_BROWSER_HEADER]: "true",
+            }
           : { Authorization: `Bearer ${apiKey}` },
     });
   } catch (cause) {

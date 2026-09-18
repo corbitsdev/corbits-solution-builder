@@ -1,7 +1,9 @@
 /**
- * Browser stand-in for the one `node:crypto` call the installer bundle makes:
- * `createHash("sha256")` in `workflow-closure`. WebCrypto's digest is async
- * and `treeDigest` is sync, so this hashes the same bytes in-process.
+ * Browser stand-in for the `node:crypto` calls bundled code makes:
+ * `createHash("sha256")` in `workflow-closure` (WebCrypto's digest is async
+ * and `treeDigest` is sync, so this hashes the same bytes in-process) and
+ * `randomBytes` in `@corbits/oauth-core`'s PKCE helper (WebCrypto's
+ * `getRandomValues` is sync, so it stands in directly).
  */
 
 const K = new Uint32Array([
@@ -109,6 +111,12 @@ function concat(parts: Uint8Array[]): Uint8Array {
 
 function hex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+export function randomBytes(size: number): Uint8Array {
+  const bytes = new Uint8Array(size);
+  crypto.getRandomValues(bytes);
+  return bytes;
 }
 
 export function createHash(algorithm: string) {
