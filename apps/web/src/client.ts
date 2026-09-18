@@ -33,6 +33,7 @@ import {
   type SidecarCapability,
   type WorkflowGitPush,
 } from "@solutions-builder/installer";
+import { artifactGraphFor } from "./artifact-graph.ts";
 import { openCreatedProject } from "./create-project-open.ts";
 import { createHubTransport } from "./hub.ts";
 import { listProjectSummaries } from "./project-list.ts";
@@ -813,5 +814,13 @@ export const api = {
       nodes: ArtifactNode[];
       edges: { childNodeId: string; sourceNodeId: string }[];
     }>(`/projects/${projectId}/graph`),
+  /**
+   * The metadata-folded artifact graph — CL-8500 decision 3. Client-side
+   * only: lists the tenant's artifacts over the mounted `@corbits/artifacts`
+   * module and folds them to one project, no host route involved. Not yet
+   * wired into a page; `graph` above is still what the UI reads.
+   */
+  artifactGraph: (projectId: string) =>
+    asWorkspaceOwner((transport, workspaceTenantId) => artifactGraphFor(transport, workspaceTenantId, projectId)),
   stopHost: () => post<{ stopping: boolean }>("/host/stop"),
 };

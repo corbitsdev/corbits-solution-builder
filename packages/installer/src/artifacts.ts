@@ -30,7 +30,15 @@ export type Artifact = {
 
 export type ArtifactListItem = Omit<Artifact, "content">;
 
-/** Every artifact in the tenant, newest-updated first (the route's default order). */
+/**
+ * Every artifact in the tenant, newest-updated first (the route's default
+ * order). `ArtifactListItem.metadata` already mirrors the current version's
+ * `metadata` (the mount's own list serializer keeps them in lockstep), so
+ * this is also the read path `@solutions-builder/app/artifact-graph`'s
+ * `foldArtifactGraph` needs: no per-artifact fetch to see `metadata.sb` — see
+ * CL-8500 decision 3 and CL-8502. The route filters by kind/owner/date only,
+ * never by project, so scoping to one project happens in that fold, not here.
+ */
 export async function listArtifacts(
   transport: Transport,
   tenantId: string,
