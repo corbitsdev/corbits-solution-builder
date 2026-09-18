@@ -6,22 +6,17 @@
  * permissions inside the application data directory and *says so* — a fallback
  * that pretends to be a keychain is worse than one that admits what it is.
  *
- * This is not where a *provider* credential lives (CL-8076 moved those into
- * Interchange's own `credential` table, sealed with its own credential cipher,
- * so delegation and the hub's own resolution govern them the same way a
- * deployed workflow's do). What stays here is genuinely circular otherwise:
+ * This is not where a *provider* credential lives — those are Interchange's
+ * own `credential` table rows, sealed with its own credential cipher, so
+ * delegation and the hub's own resolution govern them the same way a
+ * deployed workflow's do. What stays here is genuinely circular otherwise:
  * the owner's mint-once password and a hosted hub's bearer token
  * (`hub-client.ts`), plus the hub's repo-signing seed (`hub-keys.ts`) —
  * secrets that cannot themselves live in a row the encryption keys would
  * have to decrypt. The two Interchange at-rest encryption keys live in
  * `@solutions-builder/keychain`.
- *
- * `credential-migration.ts` is the one other caller, and only once: reading
- * whatever a pre-CL-8076 install left behind in the old `provider:<id>` /
- * `oauth:<id>` accounts so it can be carried into the hub's own credential
- * store and deleted from here.
  */
-import { chmod, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { dataDirectory } from "./paths.js";
 
@@ -152,18 +147,6 @@ export async function readSecretResult(reference: string): Promise<SecretRead> {
   return code === "ENOENT"
     ? { status: "missing" }
     : { status: "unavailable", detail: String((contents as Error).message ?? contents) };
-}
-
-export async function deleteSecret(reference: string): Promise<void> {
-  const [kind, account] = splitReference(reference);
-  if (kind === "keychain") {
-    Bun.spawnSync(["security", "delete-generic-password", "-a", account, "-s", SERVICE], {
-      stdout: "ignore",
-      stderr: "ignore",
-    });
-    return;
-  }
-  await unlink(fallbackPath(account)).catch(() => undefined);
 }
 
 function splitReference(reference: string): [string, string] {

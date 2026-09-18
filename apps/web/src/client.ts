@@ -348,21 +348,6 @@ export type CommandOutcome = {
   waitId?: string;
 };
 
-/**
- * Addresses worth offering when someone connects a local endpoint. Any server
- * speaking the OpenAI-compatible surface belongs here; these are starting
- * points, not a supported list, and the field takes anything.
- */
-export const LOCAL_ENDPOINT_SUGGESTIONS: ReadonlyArray<{ label: string; baseUrl: string }> = [
-  { label: "Ollama", baseUrl: "http://localhost:11434/v1" },
-  { label: "LM Studio", baseUrl: "http://localhost:1234/v1" },
-  { label: "vLLM", baseUrl: "http://localhost:8000/v1" },
-  { label: "llama.cpp", baseUrl: "http://localhost:8080/v1" },
-];
-
-/** What the field opens on: the most common address, not a product assumption. */
-export const DEFAULT_LOCAL_BASE_URL = LOCAL_ENDPOINT_SUGGESTIONS[0]!.baseUrl;
-
 /** Orientation from the Product guide, or the deterministic checklist. */
 export type Guidance = {
   summary: string;
@@ -589,27 +574,6 @@ export const api = {
       installerFailure(cause);
     }
   },
-  connectProvider: (payload: unknown) => post<{ provider: Provider }>("/providers", payload),
-  startOAuth: (providerId: string) =>
-    post<{ authorizeUrl: string; browserOpened: boolean; detail: string }>(
-      `/providers/oauth/${providerId}/start`,
-    ),
-  finishOAuth: () => post<{ provider: Provider }>("/providers/oauth/finish"),
-  cancelOAuth: () => post<{ cancelled: true }>("/providers/oauth/cancel"),
-  setProviderOrder: (providerIds: string[]) =>
-    request<{ providers: Provider[] }>("/providers/order", {
-      method: "PUT",
-      body: JSON.stringify({ providerIds }),
-    }),
-  refreshModels: (providerId: string) =>
-    post<{ provider: Provider }>(`/providers/${providerId}/refresh`),
-  selectModel: (providerId: string, model: string) =>
-    request<{ provider: Provider }>(`/providers/${providerId}/model`, {
-      method: "PUT",
-      body: JSON.stringify({ model }),
-    }),
-  disconnectProvider: (providerId: string) =>
-    request<{ ok: true }>(`/providers/${providerId}`, { method: "DELETE" }),
   decisions: () => request<{ decisions: Wait[] }>("/decisions"),
   projects: () => request<{ projects: ProjectSummary[] }>("/projects"),
   createProject: async (payload: {

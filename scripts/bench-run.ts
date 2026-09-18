@@ -81,7 +81,7 @@ const { prepareDatabase } = await import("../apps/hub/src/migrate.js");
 const { hub, hubWebSocket, mountHub, setHostPort } =
   await import("../apps/hub/src/hub-mount.js");
 const { install, ensureLifecycleDeployment } = await import("./host-install.js");
-const { connectProvider } = await import("../apps/hub/src/providers.js");
+const { connectProvider } = await import("./lib/dev-provider.js");
 const { createProject } = await import("../apps/hub/src/projects.js");
 const { localActor } = await import("../apps/hub/src/hub-client.js");
 const { titleFromProblem } = await import("../apps/hub/src/title.js");

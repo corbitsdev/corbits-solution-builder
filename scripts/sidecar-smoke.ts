@@ -22,7 +22,7 @@ const { openDatabase } = await import("../apps/hub/src/db.js");
 const { prepareDatabase } = await import("../apps/hub/src/migrate.js");
 const { hub, hubWebSocket, mountHub, setHostPort } = await import("../apps/hub/src/hub-mount.js");
 const { install, ensureLifecycleDeployment, LIFECYCLE_ASSET_NAME } = await import("./host-install.js");
-const { connectProvider } = await import("../apps/hub/src/providers.js");
+const { connectProvider } = await import("./lib/dev-provider.js");
 const { assets } = await import("../apps/hub/src/hub-client.js");
 const { kitSeed } = await import("@solutions-builder/app/seed-kit");
 

@@ -25,7 +25,7 @@ const { createProjectRecord } = await import("../apps/hub/src/project-records.js
 const { liveDelegationStore, delegateAtCreation, delegateMore, revokeAllDelegations } = await import(
   "../apps/hub/src/project-delegation.js"
 );
-const { connectProvider } = await import("../apps/hub/src/providers.js");
+const { connectProvider } = await import("./lib/dev-provider.js");
 const { catalog, myPrincipalIn } = await import("../apps/hub/src/hub-client.js");
 const { resolveSourcesByOfferingIds } = await import("@intx/db");
 

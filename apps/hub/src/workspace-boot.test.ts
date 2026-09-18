@@ -6,7 +6,6 @@ describe("workspace boot", () => {
     expect(source).not.toContain("ensureWorkspaceOnce");
     expect(source).not.toContain("retryEnsureWorkspace");
     expect(source).toContain("export async function adoptLegacyWorkspaceOnce");
-    expect(source).toContain("export async function migrateCredentialsOnce");
   });
 
   test("the host listens without minting an owner or a workspace tenant", async () => {
@@ -16,7 +15,6 @@ describe("workspace boot", () => {
     expect(source).not.toContain("ensureOwner");
     expect(source).not.toContain("OWNER_EMAIL");
     expect(source).toContain("adoptLegacyWorkspaceOnce()");
-    expect(source).toContain("migrateCredentialsOnce");
     expect(source).toContain("Workspace: not installed yet");
   });
 });

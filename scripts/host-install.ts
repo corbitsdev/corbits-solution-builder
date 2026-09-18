@@ -28,7 +28,7 @@ import {
   tenantId,
 } from "../apps/hub/src/hub-client.js";
 import { canPlaceSidecars, hub } from "../apps/hub/src/hub-mount.js";
-import { adoptLegacyWorkspaceOnce, migrateCredentialsOnce } from "../apps/hub/src/workspace-boot.js";
+import { adoptLegacyWorkspaceOnce } from "../apps/hub/src/workspace-boot.js";
 
 export { LIFECYCLE_ASSET_NAME, lifecycleAssetName };
 export type { InstallState };
@@ -62,9 +62,6 @@ export async function install(): Promise<InstallState> {
   }
   await adoptLegacyWorkspaceOnce();
   const result = await installerInstall(hubTransport(), sidecarCapability(), {
-    afterEnsureWorkspace: async () => {
-      await migrateCredentialsOnce();
-    },
     afterSkillAssets: async () => {
       await rerankCatalogProviders();
     },

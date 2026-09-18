@@ -26,7 +26,7 @@ import { hubMountPath, hubProxyHeaders } from "./hub-proxy.js";
 import { attachRoundSpend } from "./round-spend.js";
 import { rerankCatalogProviders } from "./catalog.js";
 import { currentSession, rememberSession, sessionPairFromCookieHeader, sessionPairFromSetCookieHeaders } from "./hub-session.js";
-import { adoptLegacyWorkspaceOnce, migrateCredentialsOnce } from "./workspace-boot.js";
+import { adoptLegacyWorkspaceOnce } from "./workspace-boot.js";
 import {
   clientConnected,
   markReady,
@@ -118,9 +118,6 @@ console.log(known ? `Workspace: tenant ${known.tenantId}` : "Workspace: not inst
 // otherwise keep leading with a model that cannot, and the client asks for
 // an install only when something is missing, which here nothing is.
 if (known) {
-  await migrateCredentialsOnce().catch((cause: unknown) => {
-    console.error("Could not carry legacy provider secrets forward:", cause);
-  });
   const reordered = await rerankCatalogProviders().catch((cause: unknown) => {
     console.error("Could not put the providers' models in order:", cause);
     return 0;

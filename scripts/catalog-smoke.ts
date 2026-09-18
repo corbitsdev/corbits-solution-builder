@@ -17,7 +17,7 @@ import { openDatabase } from "../apps/hub/src/db.js";
 import { prepareDatabase } from "../apps/hub/src/migrate.js";
 import { mountHub, hub } from "../apps/hub/src/hub-mount.js";
 import { install } from "./host-install.js";
-import { connectProvider } from "../apps/hub/src/providers.js";
+import { connectProvider } from "./lib/dev-provider.js";
 
 const checks: { name: string; ok: boolean; detail: string }[] = [];
 function check(name: string, ok: boolean, detail = "") {
@@ -135,7 +135,7 @@ check(
 // The failure this file was written to catch was invisible because it was
 // logged. The binding must say so instead.
 const { listProviders, setProviderOrder, disconnectProvider, selectModel } = await import(
-  "../apps/hub/src/providers.js"
+  "./lib/dev-provider.js"
 );
 const bindings = await listProviders();
 check(
@@ -309,7 +309,7 @@ stub.close();
   const localPort = (local.address() as { port: number }).port;
 
   const { connectProvider, listProviders, setProviderOrder, selectModel, disconnectProvider } =
-    await import("../apps/hub/src/providers.js");
+    await import("./lib/dev-provider.js");
 
   const connected = await connectProvider({
     providerId: "local",
