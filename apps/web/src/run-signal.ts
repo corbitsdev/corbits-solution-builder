@@ -10,12 +10,51 @@
  * twice is the same signal and the runtime deduplicates it; the ledger on the
  * host follows the run on its next read.
  */
-import { deliverWorkflowSignal, type Transport } from "@intx/hub-client";
+import {
+  deliverWorkflowSignal,
+  findAwaitingSignal,
+  listWorkflowRuns,
+  readWorkflowRunEvents,
+  type Transport,
+} from "@intx/hub-client";
 import type { Command, Stage } from "@solutions-builder/app/ledger";
 import { positionOfSignal, stageSignal } from "@solutions-builder/app/workflows/stage-loop";
 import type { Anchor, Direction } from "@solutions-builder/app/design-prompt";
 import { createHubTransport } from "./hub.ts";
 import { foldProject, type StageStatus } from "./run-fold.ts";
+
+/** How long to wait for a loop's child iteration to arm its awaiter before giving up and sending anyway. */
+const SIGNAL_ARM_TIMEOUT_MS = 20_000;
+const SIGNAL_ARM_POLL_MS = 300;
+
+/**
+ * Waits until some run under the anchor (the anchor itself, or a loop's
+ * current child iteration) has an unresolved `SignalAwaited` for exactly
+ * `signalName`, so a signal sent right after is relayed instead of landing
+ * before the awaiter is armed and being lost on the runtime's container
+ * relay (`driveContainerSignalRelayAwait` in the vendored
+ * `packages/workflow/src/runtime/run.ts`). Best-effort: returns `false` on
+ * timeout rather than blocking a delivery forever, since the caller may be
+ * signaling a run this helper cannot see into (e.g. it isn't in a loop).
+ */
+export async function awaitSignalArmed(
+  tenantId: string,
+  anchorRunId: string,
+  signalName: string,
+  transport: Transport = createHubTransport(),
+  timeoutMs: number = SIGNAL_ARM_TIMEOUT_MS,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const runIds = await listWorkflowRuns(transport, tenantId, anchorRunId);
+    for (const runId of runIds) {
+      const { events } = await readWorkflowRunEvents(transport, tenantId, anchorRunId, runId);
+      if (findAwaitingSignal(events)?.signalName === signalName) return true;
+    }
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, SIGNAL_ARM_POLL_MS));
+  }
+}
 
 export async function signalRun(
   args: {
@@ -87,6 +126,7 @@ export async function deliverGate(
   }
   const signalName = gateSignalName(stage, intent.command, standing);
   const signalId = await signalIdFor(project.anchorRunId, signalName, intent);
+  await awaitSignalArmed(project.tenantId, project.anchorRunId, signalName, transport);
   await signalRun(
     { tenantId: project.tenantId, anchorRunId: project.anchorRunId, signalName, signalId, payload: intent },
     transport,
@@ -119,6 +159,7 @@ export async function deliverRound(
   }
   const signalName = stageSignal(stage, intent.command).name;
   const signalId = await signalIdFor(project.anchorRunId, signalName, intent);
+  await awaitSignalArmed(project.tenantId, project.anchorRunId, signalName, transport);
   await signalRun(
     { tenantId: project.tenantId, anchorRunId: project.anchorRunId, signalName, signalId, payload: intent },
     transport,
@@ -187,6 +228,7 @@ export async function deliverDraft(
   }
   const signalName = stageSignal(stage, intent.command).name;
   const signalId = await signalIdFor(project.anchorRunId, signalName, intent);
+  await awaitSignalArmed(project.tenantId, project.anchorRunId, signalName, transport);
   await signalRun(
     { tenantId: project.tenantId, anchorRunId: project.anchorRunId, signalName, signalId, payload: intent },
     transport,
