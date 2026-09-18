@@ -12,9 +12,6 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { sql } from "drizzle-orm";
-import { openDatabase } from "../apps/hub/src/db.js";
-import { prepareDatabase } from "../apps/hub/src/migrate.js";
 
 const checks: { name: string; ok: boolean; detail: string }[] = [];
 function check(name: string, ok: boolean, detail = "") {
@@ -148,74 +145,6 @@ try {
   clientHost?.process.kill();
   await rm(hubDir, { recursive: true, force: true });
   await rm(clientDir, { recursive: true, force: true });
-}
-
-// Authority is Interchange's to own: Builder's tenant and principal columns
-// reference the hub's tables, so a project cannot exist under a tenant the
-// control plane has never heard of. Embedded only — with a hosted hub the
-// control plane is a different database.
-{
-  const dir = await mkdtemp(join(tmpdir(), "solutions-builder-authz-"));
-  const host = await openDatabase(join(dir, "pglite"));
-  await prepareDatabase(host);
-
-  const rows = await host.db.execute(
-    sql.raw(
-      `SELECT c.conname, c.convalidated
-         FROM pg_constraint c
-         JOIN pg_class t ON t.oid = c.conrelid
-         JOIN pg_namespace n ON n.oid = t.relnamespace
-        WHERE n.nspname = 'builder' AND c.contype = 'f'
-          AND c.confrelid = '"public"."tenant"'::regclass`,
-    ),
-  );
-  // pglite answers `{ rows }` and postgres-js answers an array; the host's
-  // shim normalises the query builder but not a raw execute.
-  const returned = (rows as unknown as { rows?: { conname: string }[] }).rows ??
-    (rows as unknown as { conname: string }[]);
-  const names = returned.map((row) => row.conname).sort();
-  const expected = ["artifact_node"].map(
-    (name) => `${name}_project_tenant_fk`,
-  );
-  check(
-    "every project_id in the builder schema references the hub's tenant table",
-    JSON.stringify(names) === JSON.stringify(expected),
-    names.join(", ") || "none",
-  );
-
-  // The constraint has to bite, and the proof has to be that *only* the
-  // unknown tenant is refused — otherwise a malformed statement would look
-  // exactly like an enforced constraint. So the same insert is tried twice,
-  // once under a tenant the hub knows and once under one it does not.
-  const insert = (tenantId: string, id: string) =>
-    host.db
-      .execute(
-        sql.raw(
-          `INSERT INTO "builder"."artifact_node"
-             ("id","project_id","artifact_id","version","kind","stage","title","media_type","content_hash","size_bytes","provenance")
-           VALUES ('${id}','${tenantId}','art_${id}',1,'problem_statement',1,'Probe','text/markdown','h',1,'{}'::jsonb)`,
-        ),
-      )
-      .then(() => "")
-      .catch((cause: unknown) => (cause instanceof Error ? cause.message : String(cause)));
-
-  // Only the tenant row is needed here; the hub is not mounted in this probe.
-  await host.db.execute(sql`
-    INSERT INTO "public"."tenant" ("id","name","slug","domain")
-    VALUES ('t_local', 'Local workspace', 'local', 'local.solutions-builder.invalid')
-    ON CONFLICT ("id") DO NOTHING
-  `);
-  const known = await insert("t_local", "an_known");
-  const unknown = await insert("t_nonexistent", "an_orphan");
-
-  check("a document under a project tenant the hub knows is allowed", known === "", known.slice(0, 60));
-  check(
-    "and one under a tenant the hub has never seen is refused",
-    unknown !== "",
-    unknown ? unknown.slice(0, 50) : "it was allowed",
-  );
-
-  await host.close();
 }
 
 const failed = checks.filter((entry) => !entry.ok);

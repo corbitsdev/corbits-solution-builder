@@ -20,9 +20,8 @@
  *       `packages/installer`. The client and scripts drive that package;
  *       the hub talks to the same rows through `hub-client.ts`.
  *   2. Only the hub talks to a provider or an agent runtime, and only the
- *      hub's embedding files (`hub-mount`, `hub-keys`, `hub-migrate`,
- *      `db`, `schema`, `migrate`) plus
- *      `lifecycle-run` and `packages/embed-hub` (the pglite / createApp /
+ *      hub's embedding files (`hub-mount`, `hub-keys`, `hub-migrate`, `db`)
+ *      plus `packages/embed-hub` (the pglite / createApp /
  *      process-provisioner composition, extracted so a second host can embed
  *      a hub too) import Interchange internals. A second module reaching
  *      into the hub is how a parallel control plane starts.
@@ -218,20 +217,19 @@ const INSTALLER_ALLOWED = [
 /** What the client may take from the platform: the hub transport, nothing else. */
 const WEB_ALLOWED = ["@intx/hub-client"];
 
-const PLATFORM_FILE = /^apps\/hub\/src\/(hub-mount|hub-keys|hub-migrate|lifecycle-run|db|schema|migrate)\.ts$/;
+const PLATFORM_FILE = /^apps\/hub\/src\/(hub-mount|hub-keys|hub-migrate|db)\.ts$/;
 
 /**
  * CL-8072's done state for `apps/hub/src`: embedding only (server, the API
  * mount, the hub's own session/proxy/keys/migration plumbing, its db/paths/
  * error surface, sidecar process wiring, lifecycle, and the one host-secrets
  * module bootstrap secrets still need). Everything else in `apps/hub/src`
- * today is product code other lanes are still deleting.
+ * is product code, and belongs in `packages/*` reached over `@intx/hub-client`
+ * instead (CL-8518, Step D).
  *
- * This is a WARNING for now, not a failure: several lanes are mid-flight and
- * files outside this list still exist on purpose. Pass
- * `--enforce-hub-allowlist` (or set `CHECK_BOUNDARIES_ENFORCE_HUB_ALLOWLIST=1`)
- * to turn every warning here into a hard failure, once the epic's cutover is
- * actually done and this list should hold.
+ * Enforced by default now that the cutover is done. Pass
+ * `--no-enforce-hub-allowlist` (or set `CHECK_BOUNDARIES_ENFORCE_HUB_ALLOWLIST=0`)
+ * to drop back to a warning, if a lane needs to land a file here temporarily.
  */
 const HUB_DONE_STATE_ALLOWLIST = [
   "server",
@@ -250,11 +248,15 @@ const HUB_DONE_STATE_ALLOWLIST = [
   "sidecar-processes",
   "lifecycle",
   "host-secrets",
+  // Test files that exercise `hub-client.ts` under a name of their own
+  // scenario rather than the module's.
+  "hub-principal",
+  "grant-namespaces",
 ];
 
 const ENFORCE_HUB_ALLOWLIST =
-  process.argv.includes("--enforce-hub-allowlist") ||
-  process.env.CHECK_BOUNDARIES_ENFORCE_HUB_ALLOWLIST === "1";
+  !process.argv.includes("--no-enforce-hub-allowlist") &&
+  process.env.CHECK_BOUNDARIES_ENFORCE_HUB_ALLOWLIST !== "0";
 
 /** `foo.test.ts` and `foo.ts` are the same module for this list's purposes. */
 function hubModuleNameOf(path: string): string {

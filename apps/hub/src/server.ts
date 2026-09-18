@@ -17,13 +17,11 @@ import { watch } from "node:fs";
 import { Hono } from "hono";
 import { API_VERSION, createApi } from "./api.js";
 import { openDatabase } from "./db.js";
-import { prepareDatabase } from "./migrate.js";
 import { databaseDirectory, dataDirectory, portFile } from "./paths.js";
 import { stopSpawnedSidecars } from "./sidecar-processes.js";
-import { ensureHub, hubFetch, resolveWorkspace } from "./hub-client.js";
+import { ensureHub, hubFetch, hubMode, resolveWorkspace } from "./hub-client.js";
 import { hub, hubWebSocket, setHostPort, SIDECAR_WS_PATH } from "./hub-mount.js";
 import { hubMountPath, hubProxyHeaders } from "./hub-proxy.js";
-import { rerankCatalogProviders } from "./catalog.js";
 import { rememberSession, sessionPairFromCookieHeader, sessionPairFromSetCookieHeaders } from "./hub-session.js";
 import {
   clientConnected,
@@ -83,14 +81,15 @@ await mkdir(databaseDirectory(), { recursive: true });
 
 const host = await openDatabase(databaseDirectory());
 
-// Interchange owns the control plane and its schema is applied first, because
-// Builder's foreign keys point into it. `prepareDatabase` owns that order.
-const migrated = await prepareDatabase(host);
-if (migrated.interchange > 0) {
-  console.log(`Applied ${migrated.interchange} Interchange migrations`);
-}
-if (migrated.builder.length > 0) {
-  console.log(`Applied Builder migrations: ${migrated.builder.join(", ")}`);
+// A hosted hub owns its own schema and its own database. Applying
+// Interchange's migrations locally in that mode would create a second,
+// divergent control plane — the exact thing the hub exists to prevent.
+if (hubMode() === "embedded") {
+  const { migrateHub } = await import("./hub-migrate.js");
+  const migrated = await migrateHub(host);
+  if (migrated.applied.length > 0) {
+    console.log(`Applied Interchange migrations: ${migrated.applied.join(", ")}`);
+  }
 }
 
 const hubEndpoint = await ensureHub();
@@ -104,17 +103,9 @@ const known = await resolveWorkspace().catch((cause: unknown) => {
 });
 console.log(known ? `Workspace: tenant ${known.tenantId}` : "Workspace: not installed yet");
 
-// What each provider serves is read again for what can answer, every boot:
-// a workspace connected before the listing was read this way would
-// otherwise keep leading with a model that cannot, and the client asks for
-// an install only when something is missing, which here nothing is.
-if (known) {
-  const reordered = await rerankCatalogProviders().catch((cause: unknown) => {
-    console.error("Could not put the providers' models in order:", cause);
-    return 0;
-  });
-  if (reordered > 0) console.log(`Put ${reordered} model offerings in order.`);
-}
+// What each provider serves is reordered client-side, after every install
+// (`apps/web/src/provider-catalog.ts`'s `rerankCatalogViaHub`, wired through
+// `packages/installer`'s `afterSkillAssets` hook) — not on every boot.
 
 // Boot ends here. Everything that makes this tenant Solutions Builder — the
 // user principal, workflow definitions, roles, specialist prompts — is
@@ -173,10 +164,14 @@ const CSP = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data:",
   "font-src 'self' data:",
-  // The desktop shell's IPC: the page calls the shell over the `ipc` scheme
-  // on macOS and `http://ipc.localhost` elsewhere. Meaningless to a browser,
-  // which has neither, and harmless there.
-  "connect-src 'self' ipc: http://ipc.localhost",
+  // The desktop shell's IPC (the page calls the shell over the `ipc` scheme
+  // on macOS and `http://ipc.localhost` elsewhere; meaningless to a browser,
+  // which has neither, and harmless there), plus `https:` so
+  // `apps/web/src/provider-catalog.ts`'s `discoverModels` can validate a
+  // candidate API key by calling the provider's own `/models` endpoint
+  // directly from the browser — the hub never calls out to a third-party
+  // inference endpoint on the tenant's behalf.
+  "connect-src 'self' ipc: http://ipc.localhost https:",
   "object-src 'none'",
   "frame-ancestors 'none'",
   "base-uri 'none'",

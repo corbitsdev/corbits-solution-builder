@@ -86,8 +86,8 @@ import {
   type WorkflowGitPush,
 } from "@solutions-builder/installer";
 import { openDatabase } from "../apps/hub/src/db.js";
-import { prepareDatabase } from "../apps/hub/src/migrate.js";
-import { rerankCatalogProviders } from "../apps/hub/src/catalog.js";
+import { migrateHub } from "../apps/hub/src/hub-migrate.js";
+import { rerankCatalogViaHub } from "../apps/web/src/provider-catalog.js";
 import {
   assets as hubAssets,
   forgetWorkspace as hubClientForgetWorkspace,
@@ -155,7 +155,7 @@ async function install(): Promise<void> {
     { canPlaceSidecars: canPlaceSidecars(), sidecarFingerprint: hub().sidecarBindingFingerprint },
     closure,
     gitPush,
-    { afterSkillAssets: async () => { await rerankCatalogProviders(); } },
+    { afterSkillAssets: async () => { await rerankCatalogViaHub(hubTransport()); } },
   );
   hubClientForgetWorkspace();
   await resolveWorkspace();
@@ -276,7 +276,7 @@ async function main(): Promise<void> {
   for (const entry of entries) console.log(`  packed ${entry.filename} (${String(entry.bytes.byteLength)} bytes)`);
 
   const host = await openDatabase(databaseDirectory());
-  await prepareDatabase(host);
+  await migrateHub(host);
   await install();
 
   const assetId = await ensureRegistryAssetId();

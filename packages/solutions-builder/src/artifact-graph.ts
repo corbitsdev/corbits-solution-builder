@@ -6,12 +6,12 @@
  *
  * The `sb` metadata contract below is what a writer stamps on an artifact
  * version's opaque `metadata` field so this fold can read it back. Field
- * names mirror `apps/hub/src/schema.ts`'s `artifactNode` table and
- * `ArtifactDraft.provenance` in `apps/hub/src/domain.ts` on purpose, so the
- * old table and the new metadata read the same during the migration.
+ * names mirror the deleted `apps/hub/src/schema.ts`'s `artifactNode` table
+ * and the deleted `apps/hub/src/domain.ts`'s `ArtifactDraft.provenance` on
+ * purpose, so the old shape and the new metadata read the same.
  */
 
-/** Mirrors `ArtifactDraft.provenance` in `apps/hub/src/domain.ts`. */
+/** Mirrors the deleted `apps/hub/src/domain.ts`'s `ArtifactDraft.provenance`. */
 export type ArtifactProvenance = {
   producer: "human" | "agent";
   agentRole?: string;
@@ -21,7 +21,7 @@ export type ArtifactProvenance = {
   promptKey?: string;
 };
 
-/** Mirrors `apps/hub/src/schema.ts`'s `artifactNode` columns, minus what `@corbits/artifacts` already owns (id, version, title, createdAt). */
+/** Mirrors the deleted `apps/hub/src/schema.ts`'s `artifactNode` columns, minus what `@corbits/artifacts` already owns (id, version, title, createdAt). */
 export type ArtifactGraphMetadata = {
   projectId: string;
   kind: string;

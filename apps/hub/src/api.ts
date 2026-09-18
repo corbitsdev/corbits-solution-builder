@@ -19,9 +19,7 @@ import { type } from "arktype";
 import { resolveWorkspace } from "./hub-client.js";
 import { currentSession } from "./hub-session.js";
 import { HostError } from "./errors.js";
-import { newId } from "./ids.js";
 import { registerHostRoutes, API_VERSION as HOST_API_VERSION } from "./api-host.js";
-import { registerProjectRoutes } from "./api-projects.js";
 
 export const API_VERSION = HOST_API_VERSION;
 
@@ -42,10 +40,9 @@ export function createApi() {
   });
 
   registerHostRoutes(api);
-  registerProjectRoutes(api);
 
   api.onError((cause, context) => {
-    const correlationId = newId.correlation();
+    const correlationId = `cor_${crypto.randomUUID()}`;
     if (cause instanceof HostError) {
       return context.json(cause.body(correlationId), cause.status as 400);
     }
