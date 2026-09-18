@@ -13,11 +13,6 @@ import { COMMANDS, type Command } from "@solutions-builder/app/ledger";
 import { submitAndApprove } from "./command-dispatch.js";
 import { HostError } from "./errors.js";
 import { newId } from "./ids.js";
-import { projectDetail } from "./projects.js";
-import { buildEvents } from "./command-ledger.js";
-import { abortBuildAttempt, liveBuild, startBuildAttempt, subscribeBuildOutput } from "./build-attempt.js";
-import { acceptBuildEvidence } from "./build-output.js";
-import { streamSSE } from "hono/streaming";
 import { commandFrom, parsed } from "./api.js";
 import { localActor } from "./hub-client.js";
 
@@ -64,9 +59,6 @@ export function registerDecisionRoutes(api: Hono) {
     }
 
     const outcome = await commandFrom(command, projectId, body);
-    // The ledger has decided; a worker still running for that run is stopped
-    // now, and the attempt records that ending rather than a failure.
-    if (command === "build.cancel" || command === "build.interrupt") abortBuildAttempt(outcome.runId);
     return context.json(outcome);
   });
 
@@ -106,92 +98,5 @@ export function registerDecisionRoutes(api: Hono) {
       ...(typeof body.expectedRevision === "number" ? { expectedRevision: body.expectedRevision } : {}),
     });
     return context.json(outcome);
-  });
-
-  /**
-   * Starts a build attempt through the bounded bridge. Answers as soon as the
-   * ledger says the run is running; the worker keeps going and its outcome
-   * reaches the ledger on its own, where the events route and the run's state
-   * report it. Holding the response for the whole attempt meant a person
-   * watched a spinner for up to thirty minutes with nothing they could do.
-   */
-  api.post("/projects/:projectId/build/start", async (context) => {
-    const projectId = context.req.param("projectId");
-    const body = (await context.req.json()) as { runId: string; expectedRevision?: number; continueFromRunId?: string };
-    const started = await startBuildAttempt({
-      actor: localActor(),
-      projectId,
-      runId: body.runId,
-      ...(typeof body.expectedRevision === "number" ? { expectedRevision: body.expectedRevision } : {}),
-      ...(typeof body.continueFromRunId === "string" && body.continueFromRunId ? { continueFromRunId: body.continueFromRunId } : {}),
-    });
-    started.attempt.catch((cause) => {
-      console.error(`[build] ${started.run.runId}: the attempt could not be settled on the ledger`, cause);
-    });
-    return context.json({ run: started.run });
-  });
-
-  /**
-   * A running attempt's output, streamed: when it started, what the worker
-   * has written so far, then each chunk as it lands, then `done`. The text is
-   * the process's own, in arrival order — the bridge holds the pipes and
-   * nothing more, so this is what it can honestly show. `idle` when this host
-   * is not running an attempt for the run, which after a host restart is the
-   * truth about a run the ledger still calls running.
-   */
-  api.get("/projects/:projectId/build/live", (context) => {
-    const runId = context.req.query("runId") ?? "";
-    return streamSSE(context, async (stream) => {
-      let id = 0;
-      const send = (event: string, data: string) => stream.writeSSE({ event, data, id: String(id++) });
-      const live = liveBuild(runId);
-      if (!live) {
-        await send("idle", "1");
-        return;
-      }
-      await send("begin", JSON.stringify({ startedAt: live.startedAt }));
-      if (live.transcript.length > 0) await send("text", JSON.stringify(live.transcript));
-      let closed = false;
-      const unsubscribe = subscribeBuildOutput(runId, (event) => {
-        if (closed) return;
-        if (event.type === "text") void send("text", JSON.stringify(event.text));
-        else {
-          closed = true;
-          void send("done", "1");
-        }
-      });
-      stream.onAbort(() => {
-        closed = true;
-        unsubscribe();
-      });
-      while (!closed) await stream.sleep(15_000).then(() => (closed ? undefined : send("ping", "")));
-    });
-  });
-
-  /**
-   * Accepts an ended attempt's work as the build's evidence: the workspace
-   * is packaged into an archive named after the project, recorded as a
-   * version, and the ledger moves to delivery review with that archive as
-   * what stage 9 verifies.
-   */
-  api.post("/projects/:projectId/build/accept", async (context) => {
-    const projectId = context.req.param("projectId");
-    const body = (await context.req.json()) as { runId: string; expectedRevision?: number };
-    const accepted = await acceptBuildEvidence({
-      actor: localActor(),
-      projectId,
-      runId: body.runId,
-      ...(typeof body.expectedRevision === "number" ? { expectedRevision: body.expectedRevision } : {}),
-    });
-    return context.json(accepted);
-  });
-
-  api.get("/projects/:projectId/build/events", async (context) => {
-    const projectId = context.req.param("projectId");
-    const detail = await projectDetail(projectId, localActor().principalId);
-    const buildRuns = detail.runs.filter((run) => run.kind === "build").map((run) => run.id);
-    if (buildRuns.length === 0) return context.json({ events: [] });
-    const events = await buildEvents(projectId, buildRuns.at(-1)!);
-    return context.json({ events });
   });
 }

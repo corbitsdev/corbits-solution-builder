@@ -3,11 +3,12 @@
  * dev server on that same data directory.
  *
  *   bun run seed                          stage 3, the default
- *   bun run seed --stage 8
- *   bun run seed --stage 8 --problem problem.txt
+ *   bun run seed --stage 7
+ *   bun run seed --stage 7 --problem problem.txt
  *
- * Reaching stage 8 parks the run at the build round, ready for a
- * `build.start_attempt` — this script never fires that itself.
+ * Reaching stage 7 parks the run at the build round; build itself now runs
+ * as a sidecar tool, outside this host — this script has nothing left to
+ * fire there.
  *
  * The data directory is retained, never deleted, and printed on exit as
  * `SOLUTIONS_BUILDER_DATA_DIR=<path>` so it can be reattached later:
@@ -27,11 +28,7 @@
  * The stage walk lives in `scripts/lib/stage-walk.ts`, shared with
  * `sidecar-smoke.ts` for stages 1-4 (produce the stage artifact, submit,
  * settle at the gate, approve, settle at the next stage) so the two cannot
- * drift there. Stages 5-7 go through the same engine for real too — the
- * smoke's own stages 5-7 only move its shadow workflow forward, which is
- * enough to test the sidecar's build-stage mechanics but never actually
- * moves the ledger, so it would leave the ledger parked at stage 5 forever
- * and `build.start_attempt` would find no real `build/queued` run to start.
+ * drift there. Stages 5-7 go through the same engine for real too.
  */
 import { mkdtemp } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -48,13 +45,13 @@ function flag(name: string): boolean {
 }
 
 const stage = Number(arg("stage") ?? "3");
-if (!Number.isInteger(stage) || stage < 1 || stage > 8) {
+if (!Number.isInteger(stage) || stage < 1 || stage > 7) {
   console.error(
-    `Usage: bun run seed --stage <1-8> (default 3) [--problem <path>] [--seed-artifacts]\nGot: ${arg("stage") ?? "(none)"}`,
+    `Usage: bun run seed --stage <1-7> (default 3) [--problem <path>] [--seed-artifacts]\nGot: ${arg("stage") ?? "(none)"}`,
   );
   process.exit(1);
 }
-const targetStage = stage as 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+const targetStage = stage as 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 // Default: every stage 1-7 artifact is drafted by a real specialist round
 // through a `stage.draft` round signal — this is what an end-to-end walk means. `--seed-artifacts`
@@ -233,61 +230,6 @@ try {
     );
   }
   console.log(`Project "${project.projectId}" parked at stage ${targetStage}.`);
-
-  // Only stage 8 has a build to run. Below it the walk is the whole errand and
-  // the data directory printed on exit is what the caller wanted, so there is
-  // nothing to fire and no --out to demand -- which is what `--stage 7` used
-  // to fail on, after doing all the work.
-  if (targetStage === 8) {
-    // The whole point of the bench at stage 8: fire the build attempt in this
-    // same process, so the workspace is never handed to a dev server that has to
-    // be killed -- a hard kill leaves the PGlite dir unopenable (CL-7958).
-    const outDir = arg("out");
-    if (outDir === undefined)
-      throw new Error("--out <dir> is required when --stage is 8");
-    const { saveBuildWorkerSettings } =
-      await import("../apps/hub/src/build-worker.js");
-    const { startBuildAttempt, subscribeBuildOutput } =
-      await import("../apps/hub/src/build-attempt.js");
-    await saveBuildWorkerSettings({
-      worker: (process.env["BENCH_WORKER_ID"] ?? "corbits-code") as
-        "corbits-code" | "claude-code" | "codex",
-      executable: process.env["BENCH_WORKER"] ?? "",
-    });
-
-    const startedAt = Date.now();
-    // `build.freeze` at the end of the walk opens a NEW run of kind "build";
-    // the stage run is not the one an attempt applies to.
-    const { projectDetail } = await import("../apps/hub/src/projects.js");
-    const detail = await projectDetail(project.projectId, actor.principalId);
-    const buildRunId = detail.current?.id;
-    if (buildRunId === undefined || detail.current?.kind !== "build") {
-      throw new Error(
-        `expected a queued build run, got ${JSON.stringify(detail.current)}`,
-      );
-    }
-    const { run, attempt } = await startBuildAttempt({
-      actor,
-      projectId: project.projectId,
-      runId: buildRunId,
-    });
-    console.log(`BENCH attempt=${run.runId} state=${run.state}`);
-    const transcript: string[] = [];
-    subscribeBuildOutput(run.runId, (event) => {
-      if (event.type === "text") transcript.push(event.text);
-    });
-    const outcome = await attempt;
-    const seconds = Math.round((Date.now() - startedAt) / 1000);
-    await Bun.write(`${outDir}/transcript.txt`, transcript.join(""));
-    await Bun.write(
-      `${outDir}/outcome.json`,
-      JSON.stringify({ seconds, dataDir, outcome }, null, 2),
-    );
-    console.log(
-      `BENCH_DONE seconds=${seconds} available=${JSON.stringify(outcome?.available)}`,
-    );
-  }
-
   console.log(`SOLUTIONS_BUILDER_DATA_DIR=${dataDir}`);
 } finally {
   stub?.close();

@@ -13,7 +13,8 @@
  */
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
+import { join } from "node:path";
 import { and, desc, eq } from "drizzle-orm";
 import {
   DeliveryManifest,
@@ -27,7 +28,7 @@ import { type } from "arktype";
 import { database } from "./db.js";
 import * as table from "./schema.js";
 import { readArtifactNode, writeArtifact } from "./projects.js";
-import { workspaceFor } from "./corbits-exec.js";
+import { dataDirectory } from "./paths.js";
 import { containedPath, runExecutionChecks, hasWorkingDeliverable, type ExecutionCheck } from "./execution-checks.js";
 
 export type { ExecutionCheck, ExecutionKind } from "./execution-checks.js";
@@ -143,6 +144,17 @@ export async function latestVerification(manifestNodeId: string): Promise<Delive
     newest = { report: JSON.parse(content) as DeliveryVerificationReport, createdAt: node.createdAt };
   }
   return newest?.report ?? null;
+}
+
+/**
+ * Where a build run's bytes were recorded. The build itself runs as a
+ * sidecar tool, not on this host; verification reads the recorded bytes
+ * back from the run's directory, it does not resolve a live workspace.
+ */
+async function workspaceFor(buildRunId: string): Promise<string> {
+  const path = join(dataDirectory(), "builds", buildRunId);
+  await mkdir(path, { recursive: true });
+  return path;
 }
 
 /**

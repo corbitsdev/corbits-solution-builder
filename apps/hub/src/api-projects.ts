@@ -38,12 +38,21 @@ import {
 } from "./project-transfer.js";
 import { bytesOf } from "./source-material.js";
 import { deckBytesOf, deckForPackage } from "./deck.js";
-import { buildBytesOf, slugOf } from "./build-output.js";
 import { readProject } from "./project-records.js";
 import { delegateMore, delegationAudit, liveDelegationStore } from "./project-delegation.js";
 import { projectSpend, workspaceSpend } from "./spend.js";
 import { attachMaterial, MATERIAL_KIND, materialText, type IncomingFile } from "./source-material.js";
 import { STAKEHOLDER_ROLES } from "./stakeholders.js";
+/** A title as a file-name segment: lower case, hyphens, nothing a shell minds. */
+function slugOf(title: string): string {
+  return (
+    title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 60) || "project"
+  );
+}
 /** `<project>-<document>`: what a printed PDF is saved as, before the dialog adds its extension. */
 function printFileName(projectTitle: string, documentTitle: string): string {
   return `${slugOf(projectTitle)}-${slugOf(documentTitle)}`;
@@ -278,8 +287,7 @@ export function registerProjectRoutes(api: Hono) {
     const { node, content } = await readArtifactNode(context.req.param("nodeId"));
     const stored = bytesOf(content);
     const bytes =
-      stored?.bytes ??
-      (node.kind === "audience_deck" ? await deckBytesOf(content) : node.kind === "build_evidence" ? await buildBytesOf(content) : null);
+      stored?.bytes ?? (node.kind === "audience_deck" ? await deckBytesOf(content) : null);
     if (!bytes) {
       throw new HostError("validation_failed", "Only a file is saved this way; documents print from the app.", {}, false);
     }

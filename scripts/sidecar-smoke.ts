@@ -258,7 +258,7 @@ try {
   // first stage parks on the person, and a gate command lands as a signal.
   const { createProject } = await import("../apps/hub/src/projects.js");
   const { localActor, deploymentRuns, hubApi, tenantPath } = await import("../apps/hub/src/hub-client.js");
-  const { projectExecutionStatus, deliverStageSignal, parkedSignalNames } = await import("../apps/hub/src/lifecycle-run.js");
+  const { projectExecutionStatus, parkedSignalNames } = await import("../apps/hub/src/lifecycle-run.js");
   const projectTitle = "Smoke: runs on the hub";
   const project = await createProject({
     title: projectTitle,
@@ -436,12 +436,10 @@ try {
         // round's own packages cover this once the workflow owns the prompt
         // again (the CL-8279 follow-up); here the hand-written package below
         // carries the deck checks.
-        const { readArtifactNode } = await import("../apps/hub/src/projects.js");
         const { stageInputsForSmoke } = await import("../apps/hub/src/stage-runs.js");
         check("the slides are never handed to a later stage as an input", !(await stageInputsForSmoke(project.projectId, 6 as never)).inputs.includes("base64"));
         // A package written before decks existed has none; asking for its
         // slides builds them from the package as it is, once.
-        const { ensureDeckFor } = await import("../apps/hub/src/deck.js");
         const { deckForPackage } = await import("../apps/hub/src/deck.js");
         const { HostError } = await import("../apps/hub/src/errors.js");
         const older = await writeArtifact(
@@ -479,69 +477,6 @@ try {
       atStage8 ? `${atStage8.stepId} ${atStage8.signalName ?? ""}` : "no status",
     );
 
-    if (atStage8?.parked && atStage8.stage === 8) {
-      const beforeBuild = completions.length;
-
-      const attempt = await deliverStageSignal(project.projectId, "build.start_attempt", { runId: project.runId }, `smoke-attempt-${project.projectId}`);
-      check("build.start_attempt lands on the stage 8 round", attempt === "delivered", attempt);
-      const buildStarted = Date.now();
-      const beforeRequests = requests.length;
-      let seen = false;
-      const authorizedCompletion = () =>
-        requests
-          .slice(beforeRequests)
-          .find((line) => line.includes("POST") && line.includes("/chat/completions") && line.endsWith(" authorized"));
-      while (Date.now() - buildStarted < 120_000) {
-        if (authorizedCompletion() !== undefined && completions.length > beforeBuild) {
-          seen = true;
-          break;
-        }
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      }
-      // The agent step ran under the sidecar, presented the sealed key as the
-      // bearer, and the stub answered. A 401 here means the credential row
-      // still holds a keychain reference instead of the key.
-      check(
-        "the build agent runs under the sidecar and calls the tenant's offering",
-        seen,
-        seen
-          ? `${authorizedCompletion()} after ${((Date.now() - buildStarted) / 1000).toFixed(1)}s, answered (${completions.at(-1)?.messages.length} messages)`
-          : `no authorised completion reached the stub (${requests.slice(beforeRequests).join("; ") || "no requests"})`,
-      );
-      if (!seen) {
-        const { debugRuns } = await import("../apps/hub/src/lifecycle-run.js");
-        console.log("STUB REQUESTS", JSON.stringify(requests.slice(-10)));
-        console.log("DIAG", JSON.stringify(await debugRuns(project.projectId), null, 1).slice(0, 12000));
-      }
-
-      // Each round call the stub answered is the project's spend, from the
-      // same events: one record per inference.done, in the stub's own name.
-      const { usageRecords } = await import("../apps/hub/src/command-ledger.js");
-      const { projectSpend } = await import("../apps/hub/src/spend.js");
-      const rounds = (await usageRecords(project.projectId)).filter((record) => record.source === "round");
-      const spend = await projectSpend(project.projectId);
-      const stubRow = spend.rows.find((row) => row.provider === "compatible" && row.model === "stub-large");
-      check(
-        "every round's call is recorded as the project's spend, under the connected provider that answered",
-        rounds.length >= 1 &&
-          rounds.every((record) => record.provider === "compatible" && record.model === "stub-large" && record.calls === 1 && record.runId?.startsWith("run_") === true) &&
-          stubRow !== undefined &&
-          stubRow.calls >= rounds.length,
-        `${rounds.length} round records ${JSON.stringify(rounds.slice(0, 2))}; rows=${JSON.stringify(spend.rows)}`,
-      );
-
-      const afterBuild = await settle((s) => s.parked && s.stage === 8 && s.signalName === roundSignal(8));
-      check(
-        "the attempt's round ends and the build stage waits for the next command",
-        afterBuild?.parked === true && afterBuild.stage === 8,
-        afterBuild ? `${afterBuild.stepId} ${afterBuild.signalName ?? ""}` : "no status",
-      );
-      if (!afterBuild?.parked) {
-        const { debugRuns } = await import("../apps/hub/src/lifecycle-run.js");
-        console.log("DIAG", JSON.stringify(await debugRuns(project.projectId), null, 1).slice(0, 8000));
-      }
-
-    }
   }
 } finally {
   stub.close();
