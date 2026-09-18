@@ -45,6 +45,8 @@ import {
   type WorkflowGitPush,
 } from "@solutions-builder/installer";
 import { buildManifest, buildPackedEntries } from "./closure-pack.ts";
+import { openDecisionFor } from "../apps/web/src/decisions-fold.ts";
+import { notifyDecisionOpen } from "../apps/web/src/decision-notify.ts";
 import { listProjectSummaries } from "../apps/web/src/project-list.ts";
 import { foldProject } from "../apps/web/src/run-fold.ts";
 import { deliverDraft, submitThen } from "../apps/web/src/run-signal.ts";
@@ -479,6 +481,23 @@ async function main(): Promise<void> {
       return status;
     });
 
+    // (8) Write the mailbox item the same way the client does, while stage
+    // 1's gate is still open -- there is no host-side writer any more (the
+    // announcement stub in `apps/hub/src/decisions.ts` is gone) -- then
+    // confirm the inbox has it.
+    await step("8. mailbox inbox carries an item for the parked gate", async () => {
+      if (!project || !anchorRunId) throw new Error("no project/anchor run to notify for");
+      const decision = await openDecisionFor(project.id, anchorRunId, transport);
+      if (decision) await notifyDecisionOpen(decision, transport);
+      const response = await fetch(`${origin}/api/me/inbox`, {
+        headers: { authorization: `Bearer ${host!.token}`, cookie: cookieJar.value },
+      });
+      if (!response.ok) throw new Error(`GET /api/me/inbox -> HTTP ${response.status}`);
+      const body = (await response.json()) as { messages?: unknown[] };
+      const ok = Array.isArray(body.messages) && body.messages.length > 0;
+      check("8. mailbox inbox carries an item for the parked gate", ok, `${body.messages?.length ?? 0} message(s)`);
+    });
+
     // The round the client parked on (`solutions-builder.stage.1.round`) only
     // ends on `stage.submit` -- `stage.draft` is "the one command that keeps
     // a stage open" (ledger.ts). `stage.approve` itself requires the ledger
@@ -521,16 +540,6 @@ async function main(): Promise<void> {
       check("7. list artifacts via the artifacts client", true, `${artifacts.length} artifact(s)`);
     });
 
-    // (8) Confirm the mailbox inbox has an item for the parked gate.
-    await step("8. mailbox inbox carries an item for the parked gate", async () => {
-      const response = await fetch(`${origin}/api/me/inbox`, {
-        headers: { authorization: `Bearer ${host!.token}`, cookie: cookieJar.value },
-      });
-      if (!response.ok) throw new Error(`GET /api/me/inbox -> HTTP ${response.status}`);
-      const body = (await response.json()) as { messages?: unknown[] };
-      const ok = Array.isArray(body.messages) && body.messages.length > 0;
-      check("8. mailbox inbox carries an item for the parked gate", ok, `${body.messages?.length ?? 0} message(s)`);
-    });
   } finally {
     host?.process.kill();
     await rm(dataDir, { recursive: true, force: true });

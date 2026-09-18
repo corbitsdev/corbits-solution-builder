@@ -15,6 +15,7 @@ import { CONSEQUENCE, STATE_CONSEQUENCE, requiredAuthorityFor } from "@solutions
 import { DELIVERY_STAGE, EVIDENCE_STEP_ID, FREEZE_STEP_ID, exhaustedStepId, gateStepId } from "@solutions-builder/app/workflows/stage-loop";
 import { openQuestion, parkedSteps, type FoldedRun } from "@solutions-builder/app/project-state";
 import type { Wait } from "./client.ts";
+import { notifyDecisionOpen } from "./decision-notify.ts";
 import { createHubTransport } from "./hub.ts";
 import { deliveryApprovalFor, pendingApprovals } from "./pending-approvals.ts";
 import { foldProjectRuns } from "./run-fold.ts";
@@ -66,7 +67,7 @@ export async function openDecisionFor(
     if (delivery) park = { runId: delivery.runId, stage: DELIVERY_STAGE, kind: "approval", approvalId: delivery.id };
   }
   if (!park) return null;
-  return {
+  const decision = {
     id: decisionIdFor(park),
     projectId,
     runId: park.runId,
@@ -77,6 +78,8 @@ export async function openDecisionFor(
     requiredAuthority: requiredAuthorityFor(park.stage),
     ...(park.kind === "approval" ? { approvalId: park.approvalId } : {}),
   };
+  void notifyDecisionOpen(decision, transport);
+  return decision;
 }
 
 /** Every open decision across the workspace's projects, oldest first — the queue. */
