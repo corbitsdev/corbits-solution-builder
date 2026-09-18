@@ -115,16 +115,28 @@ export async function upsertApiKeyProvider(
 }
 
 export type UpsertOAuthProviderInput = {
-  /** Vendor provider name, e.g. "codex-oauth" -- also the credential's natural key. */
+  /** Vendor provider name, e.g. "codex-oauth" -- also the credential's natural key
+   * and the model provider's own name. */
   providerId: string;
   label: string;
   /** The exchanged OAuth tokens, as `@corbits/oauth-core`'s `BaseTokens`. */
   tokens: { access: string; refresh: string; expiresAt?: number };
+  /** The adapter's wire protocol -- "openai-compatible" for a Responses-protocol
+   * adapter (Codex, xAI), since neither has a dedicated plugin entry. */
+  plugin: ModelProviderPlugin;
+  /** The adapter's own fixed inference endpoint (e.g. `CODEX_BASE_URL`,
+   * `XAI_OAUTH_PROXY_BASE_URL`) -- an OAuth-connected provider has no
+   * bring-your-own base URL. */
+  baseURL: string;
+  /** The models this adapter serves -- its own exported list (`XAI_DEFAULT_MODELS`)
+   * or, absent one, the small set its README documents (Codex). */
+  canonicalNames: readonly string[];
 };
 
 export type UpsertOAuthProviderResult = {
   vendorProviderId: string;
   credentialId: string;
+  modelProviderId: string;
 };
 
 async function ensureOAuthCredential(
@@ -155,12 +167,12 @@ async function ensureOAuthCredential(
 }
 
 /**
- * Records a signed-in OAuth provider: the vendor `provider` row and its
- * sealed credential, holding the access/refresh token pair. Mirrors
- * `upsertApiKeyProvider`'s shape, minus the model provider/offering step --
- * an OAuth-connected provider's servable models are fixed by the adapter
- * (`@corbits/codex-provider`, `@corbits/xai-provider`), not discovered from a
- * live listing, so registering them is that adapter's own concern.
+ * Records a signed-in OAuth provider: the vendor `provider` row, its sealed
+ * credential, and the model provider bound to it, registered with the
+ * caller-supplied `canonicalNames` -- an OAuth-connected provider's servable
+ * models are fixed by the adapter (`@corbits/codex-provider`,
+ * `@corbits/xai-provider`), never discovered from a live listing, so the
+ * caller passes them rather than this module probing anything.
  */
 export async function upsertOAuthProvider(
   transport: Transport,
@@ -171,11 +183,20 @@ export async function upsertOAuthProvider(
   const vendorProvider = await ensureVendorProvider(catalog, {
     providerId: input.providerId,
     label: input.label,
-    plugin: "openai-compatible",
-    baseURL: "",
+    plugin: input.plugin,
+    baseURL: input.baseURL,
   });
   const credential = await ensureOAuthCredential(catalog, vendorProvider.id, credentialNameFor(input.providerId), input.tokens);
-  return { vendorProviderId: vendorProvider.id, credentialId: credential.id };
+  const modelProvider = await ensureModelProvider(
+    catalog,
+    { providerId: input.providerId, label: input.label, plugin: input.plugin, baseURL: input.baseURL, apiKey: "" },
+    credential.id,
+  );
+  await registerProviderModels(transport, scope, {
+    modelProviderId: modelProvider.id,
+    canonicalNames: input.canonicalNames,
+  });
+  return { vendorProviderId: vendorProvider.id, credentialId: credential.id, modelProviderId: modelProvider.id };
 }
 
 /**

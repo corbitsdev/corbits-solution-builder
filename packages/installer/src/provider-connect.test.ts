@@ -285,11 +285,20 @@ describe("disconnectProvider", () => {
 });
 
 describe("upsertOAuthProvider", () => {
-  test("stores the exchanged token pair as an oauth_token credential", async () => {
+  test("stores the exchanged token pair and registers a model provider with its offerings", async () => {
     const providers: HubProvider[] = [];
     const credentials: HubCredential[] = [];
+    const modelProviders: HubModelProvider[] = [];
+    const models: HubModel[] = [];
+    const offerings: HubOffering[] = [];
     const { transport, calls } = createMockTransport((call) => {
       if (call.method === "GET" && call.path.includes("/tenants/ten_workspace/providers?limit=100")) return page(providers);
+      if (call.method === "GET" && call.path.endsWith("/catalog/providers?limit=100")) return page(modelProviders);
+      if (call.method === "POST" && call.path.endsWith("/catalog/providers")) {
+        const row = { id: "modelProvider_1", disabled: false, ...(call.body as object) } as HubModelProvider;
+        modelProviders.push(row);
+        return row;
+      }
       if (call.method === "POST" && call.path.endsWith("/providers")) {
         const row = { id: "provider_1", name: "", plugin: "", apiBaseUrl: null, metadata: null, ...(call.body as object) } as HubProvider;
         providers.push(row);
@@ -307,6 +316,24 @@ describe("upsertOAuthProvider", () => {
         credentials.push(row);
         return row;
       }
+      if (call.method === "GET" && call.path.endsWith("/catalog/models?limit=100")) return page(models);
+      if (call.method === "GET" && call.path.endsWith("/catalog/offerings?limit=100")) return page(offerings);
+      if (call.method === "POST" && call.path.endsWith("/catalog/models")) {
+        const row = { id: "model_1", ...(call.body as object) } as HubModel;
+        return row;
+      }
+      if (call.method === "POST" && call.path.endsWith("/catalog/offerings")) {
+        return {
+          id: "offering_1",
+          modelId: "",
+          providerId: "",
+          priority: 0,
+          disabled: false,
+          capabilities: [],
+          quirks: null,
+          ...(call.body as object),
+        } as HubOffering;
+      }
       throw new Error(`unexpected call: ${call.method} ${call.path}`);
     });
 
@@ -314,9 +341,12 @@ describe("upsertOAuthProvider", () => {
       providerId: "codex-oauth",
       label: "ChatGPT (Codex)",
       tokens: { access: "at_1", refresh: "rt_1", expiresAt: 1_700_000_000_000 },
+      plugin: "openai-compatible",
+      baseURL: "https://chatgpt.com/backend-api",
+      canonicalNames: ["gpt-5.5"],
     });
 
-    expect(result).toEqual({ vendorProviderId: "provider_1", credentialId: "credential_1" });
+    expect(result).toEqual({ vendorProviderId: "provider_1", credentialId: "credential_1", modelProviderId: "modelProvider_1" });
     expect(credentials[0]).toMatchObject({
       type: "oauth_token",
       secret: "at_1",
@@ -324,13 +354,18 @@ describe("upsertOAuthProvider", () => {
       name: "provider:codex-oauth",
     });
     expect(calls.some((c) => c.method === "POST" && c.path.endsWith("/credentials"))).toBe(true);
+    expect(
+      calls.some(
+        (c) => c.method === "POST" && c.path.endsWith("/catalog/offerings") && (c.body as { modelId: string }).modelId === "model_1",
+      ),
+    ).toBe(true);
   });
 
-  test("rotates the same credential on reconnect (409)", async () => {
+  test("rotates the same credential and reuses the existing model provider on reconnect (409)", async () => {
     const providers: HubProvider[] = [
-      { id: "provider_1", name: "xai-oauth", plugin: "openai-compatible", apiBaseUrl: "", metadata: { label: "xAI (Grok)" } },
+      { id: "provider_1", name: "xai-oauth", plugin: "openai-compatible", apiBaseUrl: "https://cli-chat-proxy.grok.com/v1", metadata: { label: "xAI (Grok)" } },
     ];
-    const existing: HubCredential = {
+    const existingCredential: HubCredential = {
       id: "credential_1",
       providerId: "provider_1",
       name: "provider:xai-oauth",
@@ -340,14 +375,40 @@ describe("upsertOAuthProvider", () => {
       metadata: null,
       updatedAt: "before",
     };
+    const existingModelProvider: HubModelProvider = {
+      id: "modelProvider_1",
+      name: "xai-oauth",
+      plugin: "openai-compatible",
+      baseURL: "https://cli-chat-proxy.grok.com/v1",
+      credentialId: "credential_1",
+      disabled: false,
+    };
     const { transport } = createMockTransport((call) => {
       if (call.method === "GET" && call.path.includes("/tenants/ten_workspace/providers?limit=100")) return page(providers);
       if (call.method === "POST" && call.path.endsWith("/credentials")) {
         throw new ApiError(409, "conflict", "Credential already exists");
       }
-      if (call.method === "GET" && call.path.includes("/credentials/resolve/")) return existing;
+      if (call.method === "GET" && call.path.includes("/credentials/resolve/")) return existingCredential;
       if (call.method === "PATCH" && call.path.endsWith("/credentials/credential_1")) {
-        return { ...existing, ...(call.body as object) };
+        return { ...existingCredential, ...(call.body as object) };
+      }
+      if (call.method === "GET" && call.path.endsWith("/catalog/providers?limit=100")) return page([existingModelProvider]);
+      if (call.method === "GET" && call.path.endsWith("/catalog/models?limit=100")) return page([]);
+      if (call.method === "GET" && call.path.endsWith("/catalog/offerings?limit=100")) return page([]);
+      if (call.method === "POST" && call.path.endsWith("/catalog/models")) {
+        return { id: "model_1", ...(call.body as object) } as HubModel;
+      }
+      if (call.method === "POST" && call.path.endsWith("/catalog/offerings")) {
+        return {
+          id: "offering_1",
+          modelId: "",
+          providerId: "",
+          priority: 0,
+          disabled: false,
+          capabilities: [],
+          quirks: null,
+          ...(call.body as object),
+        } as HubOffering;
       }
       throw new Error(`unexpected call: ${call.method} ${call.path}`);
     });
@@ -356,8 +417,11 @@ describe("upsertOAuthProvider", () => {
       providerId: "xai-oauth",
       label: "xAI (Grok)",
       tokens: { access: "at_2", refresh: "rt_2" },
+      plugin: "openai-compatible",
+      baseURL: "https://cli-chat-proxy.grok.com/v1",
+      canonicalNames: ["grok-4.5", "grok-4.6", "grok-composer-2.5-fast"],
     });
 
-    expect(result).toEqual({ vendorProviderId: "provider_1", credentialId: "credential_1" });
+    expect(result).toEqual({ vendorProviderId: "provider_1", credentialId: "credential_1", modelProviderId: "modelProvider_1" });
   });
 });

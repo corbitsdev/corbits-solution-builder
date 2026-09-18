@@ -31,6 +31,8 @@ import {
   type HubProvider,
   type ModelProviderPlugin,
 } from "@solutions-builder/installer";
+import { CODEX_BASE_URL } from "@corbits/codex-provider";
+import { XAI_DEFAULT_MODELS, XAI_OAUTH_PROXY_BASE_URL } from "@corbits/xai-provider";
 import type { Transport } from "./hub.ts";
 
 export type ListedProvider = {
@@ -61,6 +63,17 @@ export const OAUTH_CONNECT_OPTIONS: ReadonlyArray<{ providerId: string; label: s
   { providerId: "codex-oauth", label: "ChatGPT (Codex)", redirectUri: "" },
   { providerId: "xai-oauth", label: "xAI (Grok)", redirectUri: "" },
 ];
+
+/**
+ * An OAuth adapter's fixed wire protocol, endpoint and servable models --
+ * `@corbits/xai-provider` exports its own model list (`XAI_DEFAULT_MODELS`);
+ * `@corbits/codex-provider` exports none, so this carries the one model its
+ * README and adapter tests document (`gpt-5.5`) instead.
+ */
+const OAUTH_ADAPTER_OF: Record<string, { plugin: ModelProviderPlugin; baseURL: string; canonicalNames: readonly string[] }> = {
+  "codex-oauth": { plugin: "openai-compatible", baseURL: CODEX_BASE_URL, canonicalNames: ["gpt-5.5"] },
+  "xai-oauth": { plugin: "openai-compatible", baseURL: XAI_OAUTH_PROXY_BASE_URL, canonicalNames: [...XAI_DEFAULT_MODELS] },
+};
 
 /**
  * First-party OpenAI `/models` mixes embeddings, speech and images into one
@@ -330,16 +343,18 @@ async function waitForOAuthTokens(
  * Signs in to an OAuth provider (ChatGPT via Codex, xAI via Grok) through
  * the loopback flow the hub mounts on `@corbits/oauth-core`
  * (`packages/embed-hub/src/oauth-mount.ts`), then records the exchanged
- * tokens as the workspace tenant's credential. An OAuth-connected provider
- * has no discovered model listing -- its adapter's servable models are
- * fixed, not probed -- so unlike an API-key connect this does not register a
- * model provider or offerings; that registration is the adapter's own
- * follow-on concern.
+ * tokens plus a model provider and offerings on the workspace tenant, so the
+ * provider appears connected with selectable models right away. An
+ * OAuth-connected provider has no discovered model listing -- its adapter's
+ * servable models are fixed, not probed -- so the models registered are
+ * `OAUTH_ADAPTER_OF`'s static list rather than anything this call fetches.
  */
 export async function connectOAuthProvider(
   transport: Transport,
   input: { providerId: string; label: string },
 ): Promise<void> {
+  const adapter = OAUTH_ADAPTER_OF[input.providerId];
+  if (!adapter) throw new Error(`${input.label} has no registered inference adapter.`);
   const workspace = await resolveWorkspace(transport);
   if (!workspace) throw new Error("The workspace is not installed yet.");
   await transport.fetch<{ authorizeUrl: string }>("POST", `/oauth/${input.providerId}/start`);
@@ -348,6 +363,9 @@ export async function connectOAuthProvider(
     providerId: input.providerId,
     label: input.label,
     tokens,
+    plugin: adapter.plugin,
+    baseURL: adapter.baseURL,
+    canonicalNames: adapter.canonicalNames,
   });
 }
 
