@@ -24,8 +24,7 @@ import { ensureHub, hubFetch, resolveWorkspace } from "./hub-client.js";
 import { hub, hubWebSocket, setHostPort, SIDECAR_WS_PATH } from "./hub-mount.js";
 import { hubMountPath, hubProxyHeaders } from "./hub-proxy.js";
 import { rerankCatalogProviders } from "./catalog.js";
-import { currentSession, rememberSession, sessionPairFromCookieHeader, sessionPairFromSetCookieHeaders } from "./hub-session.js";
-import { adoptLegacyWorkspaceOnce } from "./workspace-boot.js";
+import { rememberSession, sessionPairFromCookieHeader, sessionPairFromSetCookieHeaders } from "./hub-session.js";
 import {
   clientConnected,
   markReady,
@@ -223,16 +222,10 @@ const unauthorised = {
 };
 
 function rememberHubSession(cookieHeader: string | null | undefined, from: Headers | null): void {
-  const had = currentSession();
   const inbound = sessionPairFromCookieHeader(cookieHeader);
   const minted = from ? sessionPairFromSetCookieHeaders(from) : null;
   const next = minted ?? inbound;
   if (next) rememberSession(next);
-  if (!had && currentSession()) {
-    void adoptLegacyWorkspaceOnce().catch((cause: unknown) => {
-      console.error("Could not adopt a pre-identity workspace:", cause);
-    });
-  }
 }
 
 app.use("/api/*", async (context, next) => {

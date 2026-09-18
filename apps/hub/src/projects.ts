@@ -14,7 +14,7 @@ import { HostError, notFound } from "./errors.js";
 import { origin } from "@solutions-builder/app/guard";
 import { ARTIFACT_STAGE, type ArtifactDraft } from "./domain.js";
 import { packageOutlineProblem } from "@solutions-builder/app/deck";
-import { launchProjectRun, soloApprovalFor } from "./command-dispatch.js";
+import { soloApprovalFor } from "./command-dispatch.js";
 import {
   allCarriedTurns,
   ledgerCommands,
@@ -25,7 +25,7 @@ import {
 } from "./command-ledger.js";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { openDecisionFor } from "./decisions.js";
-import { currentAnchor, projectExecutionStatus } from "./lifecycle-run.js";
+import { currentAnchor } from "./lifecycle-run.js";
 import { activeRun, runsForProject } from "./runs.js";
 import { artifacts, tenantId } from "./hub-client.js";
 import { listProjectRecords, requireProject } from "./project-records.js";
@@ -76,10 +76,8 @@ export async function openProject(args: {
     runId,
     ...(args.problemStatement?.trim() ? { message: args.problemStatement.trim() } : {}),
   });
-  await launchProjectRun({
-    projectId: args.projectId,
-    ...(args.problemStatement?.trim() ? { problemStatement: args.problemStatement.trim() } : {}),
-  });
+  // The client fires the deployment's run right after this: `createProject`
+  // in `apps/web/src/client.ts`, via `@intx/hub-client`'s `triggerWorkflowRun`.
   return { projectId: args.projectId, runId };
 }
 
@@ -464,12 +462,6 @@ export async function listProjects() {
 export async function projectDetail(projectId: string, actorPrincipalId: string) {
   const { db } = database();
   const row = await requireProject(projectId);
-  // The ledger follows the run: a gate a person signalled over `/hub` becomes
-  // a ledger turn here, before the runs and approvals below are read.
-  await projectExecutionStatus(projectId).catch((cause: unknown) => {
-    console.error(`[executor] ${projectId}: could not read the run before the project:`, cause);
-  });
-
   const runs = await runsForProject(projectId);
   const nodes = await db
     .select()

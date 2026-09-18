@@ -8,8 +8,6 @@ describe("GET /projects/:id standing", () => {
     expect(detail).not.toContain("activityHeadline");
     expect(detail).toContain("not a second copy of the machine");
     expect(detail).toContain("foldProject");
-    // Write-on-read: a gate a person signalled over /hub is a ledger turn before the runs are read.
-    expect(detail).toContain("await projectExecutionStatus(projectId)");
   });
 
   test("the host has no submit, decide or commands route; the last host effects moved off it too", async () => {

@@ -91,7 +91,6 @@ import {
 import { canPlaceSidecars, hub } from "../apps/hub/src/hub-mount.js";
 import { databaseDirectory } from "../apps/hub/src/paths.js";
 import { tarballIntegrity } from "./lib/tarball.js";
-import { adoptLegacyWorkspaceOnce } from "../apps/hub/src/workspace-boot.js";
 import { buildPackedEntries, VENDOR_PACKAGES_DIR, type PackedEntry } from "./closure-pack.js";
 
 /** Signs in (or up) a script account and drives the installer through the
@@ -106,7 +105,6 @@ async function install(): Promise<void> {
   if (!(await signInEmail(SCRIPT_EMAIL, SCRIPT_PASSWORD))) {
     await signUpEmail({ email: SCRIPT_EMAIL, password: SCRIPT_PASSWORD, name: SCRIPT_NAME });
   }
-  await adoptLegacyWorkspaceOnce();
   await installerInstall(
     hubTransport(),
     { canPlaceSidecars: canPlaceSidecars(), sidecarFingerprint: hub().sidecarBindingFingerprint },

@@ -16,28 +16,22 @@
  * calls (`apps/web/src/client.ts`'s `updateProject`/`deleteProject`, PR #298),
  * and `stage.select_route`/`stage.retry` (re-entering a stage after a
  * backtrack) have no workflow primitive to land on yet — CL-8461 — so the two
- * UI actions that used them are disabled rather than kept half-wired. What is
- * left is what launches a run in the first place; the run's own transitions
- * live in the workflow definition.
+ * UI actions that used them are disabled rather than kept half-wired.
+ *
+ * Launching a project's lifecycle run is gone too: the client fires it
+ * (`apps/web/src/client.ts`'s `createProject`, `@intx/hub-client`'s
+ * `triggerWorkflowRun`) right after the installer deploys the lifecycle,
+ * same call that used to be `launchProjectRun`/`launchProjectLifecycle`
+ * here. All that is left is host principal/authority plumbing the ledger
+ * still needs.
  */
 import type { Stage } from "@solutions-builder/app/ledger";
-import { launchProjectLifecycle, type DeliveryOutcome } from "./lifecycle-run.js";
 import type { Db } from "./db.js";
 
 export { requiredAuthorityFor, soloApprovalFor } from "./command-approvals.js";
 
-/**
- * Launches a project's `project-lifecycle` run in the runtime executor. Called
- * once, right after `store/projects.ts` commits the project and its first
- * run — outside any transaction, since the executor is not something the
- * database's single writer connection can be reached from mid-transaction.
- */
-export async function launchProjectRun(args: {
-  readonly projectId: string;
-  readonly problemStatement?: string;
-}): Promise<void> {
-  await launchProjectLifecycle(args);
-}
+/** What a client-delivered gate signal's delivery actually did, so a stored ledger result can tell nothing from broken. */
+export type DeliveryOutcome = "delivered" | "no_execution" | "failed";
 
 /**
  * The host's own principal. It holds `system` authority and nothing else, which

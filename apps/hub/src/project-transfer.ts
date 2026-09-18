@@ -33,7 +33,6 @@ import {
 } from "./command-ledger.js";
 import { portableThread } from "./stage-thread.js";
 import { STAGES } from "@solutions-builder/app/ledger";
-import { launchProjectRun } from "./command-dispatch.js";
 import {
   exportArtifactNodes,
   importArtifactNodes,
@@ -245,6 +244,9 @@ export async function importProject(
   if (bundle.project.archivedAt) {
     await updateProject(record.id, { archivedAt: new Date(bundle.project.archivedAt) });
   }
-  await launchProjectRun({ projectId: record.id });
+  // A carried-in project has no client-created tenant of its own here, so
+  // there is nothing to deploy or fire a lifecycle run on yet (the host
+  // itself no longer launches one) -- same no-op this already was before an
+  // offering/host existed for it.
   return { projectId: record.id, nodes: bundle.artifacts.nodes.length, commands: bundle.ledger.length };
 }

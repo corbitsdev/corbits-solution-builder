@@ -6,6 +6,7 @@
  * Clients read and command; they never write persistence.
  */
 import { APP_VERSION } from "@solutions-builder/app/manifest";
+import { triggerWorkflowRun } from "@intx/hub-client";
 import { AUTHORITIES, type Authority } from "@solutions-builder/app/ledger";
 import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
 import {
@@ -700,12 +701,21 @@ export const api = {
           ? { delegatedCredentialIds: payload.delegatedCredentialIds }
           : {}),
       });
-      await installerEnsureLifecycleDeployment(
+      const deployment = await installerEnsureLifecycleDeployment(
         transport,
         sidecarCapabilityOf(status),
         workspace.tenantId,
         project.id,
       );
+      // Fires the deployment's top-level run once: the host no longer
+      // launches the lifecycle (`apps/hub/src/lifecycle-run.ts`'s
+      // `launchProjectLifecycle` is gone), so a freshly-created project's
+      // anchor run is the client's to start.
+      if (deployment.status === "current" || deployment.status === "deployed") {
+        await triggerWorkflowRun(transport, workspace.tenantId, deployment.deploymentId, {
+          content: JSON.stringify({ projectId: project.id, ...(problem ? { problemStatement: problem } : {}) }),
+        });
+      }
       const body = problem.length > 0 ? { problemStatement: problem } : {};
       return await openCreatedProject({
         projectId: project.id,
