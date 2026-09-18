@@ -36,7 +36,6 @@ import type {
 
 import { createMeRoutes } from "./routes/me";
 import { createTenantRoutes } from "./routes/tenants";
-import { createSessionRoutes } from "./routes/sessions";
 import { createTenantFederationRoutes } from "./routes/tenant-federation";
 import { createPrincipalRoutes, createInviteRoutes } from "./routes/principals";
 import { createRoleRoutes, createRoleAssignRoutes } from "./routes/roles";
@@ -341,11 +340,6 @@ export function mountHubRoutes(
   app.route(
     "/api/tenants/:tenantId/workflows/definitions",
     createWorkflowDefinitionRoutes({ db, requireGrant }),
-  );
-
-  app.route(
-    "/api/tenants/:tenantId/sessions",
-    createSessionRoutes({ db, principalKeyStore, requireGrant }),
   );
 
   // The workflow deploy + signal + listing surface reads the workflow-run

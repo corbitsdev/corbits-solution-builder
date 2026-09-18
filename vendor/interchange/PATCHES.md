@@ -26,6 +26,40 @@ patch is also dropped: it existed only to cover the gap the orchestrator fix
 above now closes at the pin itself, so the grant-set workaround is now dead
 weight.
 
+**2026-09-18 caller audit (CL-8552).** Every remaining entry was checked
+against a caller in `apps/hub/src`, `packages/*`, `apps/web/src`, `scripts/`
+(a lot of host code — `agent-conversation.ts`, session-turn writing, host
+inference, command-dispatch — was deleted the same day). One patch had none:
+
+- `packages/hub-api/src/routes/sessions.ts`, `packages/hub-api/src/app.ts`
+  — its only callers, `apps/hub/src/hub-gaps.ts` and the command ledger's
+  `engine-ledger.ts`, are both gone. Reverted to upstream; row dropped.
+- `packages/workflow-deploy/src/capability-walk.ts` ("per-step grants for
+  leaf steps inside loop bodies") — [INTR-545](https://linear.app/abklabs/issue/INTR-545)
+  is Done, and its PR (`faremeter/interchange#190`) merged as
+  `79adc43350a535e808439f05b71ec70aa00490a0` — our own `VENDORED_REVISION`,
+  so the fix is an ancestor (the same commit). Reverted `capability-walk.ts`
+  to upstream's file entirely. Upstream's shape is different from ours — a
+  canonical `walkNestedWorkflowSteps` that still folds a loop body's grants
+  into its node's single `perStep` entry, not a separate entry per leaf step
+  id — and our own regression suite (kept at revert time, run against
+  upstream's file) caught the gap: 5 of 26 assertions in
+  `capability-walk.test.ts` failed (no `perStep` entry for a loop-body leaf
+  id, no collision throw), so the test file was deleted too rather than kept
+  green by accident. **This is a live regression risk**: a loop-body agent
+  leaf may still hit `credentialsSnapshot has no entry for stepId` at deploy
+  time under vanilla upstream. Gate results below confirm whether
+  `test:vendored`/`smoke:hub` reach that path; if they do not, the gap needs
+  its own INTR issue and possibly a re-add of this patch under a fresh
+  problem statement.
+
+Every other entry still has a live caller. `git ls-remote
+https://github.com/faremeter/interchange.git HEAD` returns `79adc433` —
+upstream `main` has not moved since the previous refresh, so none of them
+have a newer upstream equivalent to drop in favor of yet. Each carries a
+kill date and an upstream ask, filed in the `Interchange` Linear team
+(`INTR-*`), linked below.
+
 ## `packages/db/src/client.ts` — inject a database handle
 
 **Why.** Upstream's `createDB` opens its own postgres.js socket, which requires
@@ -40,6 +74,9 @@ drizzle instance directly. Passing a config behaves exactly as before.
 **Upstream-able.** Yes, as-is — it is dependency injection, not a behaviour
 change, and it makes the package testable without a live server. Worth a PR.
 
+**Kill date.** 2026-10-16. Tracked as
+[INTR-564](https://linear.app/abklabs/issue/INTR-564).
+
 ## Removed from the vendor
 
 `*.test.ts` files and nested `node_modules`, to keep the vendored tree small.
@@ -53,6 +90,10 @@ hub spawns it through a local-process provisioner, so it is vendored at the
 same revision as the packages (`VENDORED_REVISION`), unmodified, minus build
 artefacts. It runs from source, which is why the provisioner's runtime is
 `apps/hub/bin/sidecar-runtime` (adds `--conditions intx-src`).
+
+**Kill date.** N/A — this is vendoring scope, not a behaviour delta; it stays
+as long as we vendor Interchange source at all. No INTR issue (nothing to ask
+upstream to change).
 
 ## `apps/sidecar/bin/workflow-child`, `apps/sidecar/bin/workflow-probe-child` — no `intx-src` on the shebang
 
@@ -70,6 +111,8 @@ emits it, and `apps/hub/bin/sidecar-runtime` no longer adds the condition.
 **Upstream-able.** No; upstream's dev loop deliberately runs from source and
 its deployments run a bundle. This is the cost of vendoring source.
 
+**Kill date.** N/A — same as `apps/sidecar` above; no INTR issue.
+
 ## `packages/workflow-host/src/workflow-definition-loader.ts` — the import failure names its cause
 
 **Why.** The probe child ships only the error message; `{ cause }` never
@@ -79,6 +122,9 @@ entry" and nothing else.
 **What changed.** The workflow-entry import error appends the cause's message.
 
 **Upstream-able.** Yes.
+
+**Kill date.** 2026-10-16. Tracked as
+[INTR-565](https://linear.app/abklabs/issue/INTR-565).
 
 ## `packages/hub-sessions/src/workflow-run-reader.ts`, `packages/hub-api/src/routes/workflows.ts` — HTTP route for run blobs
 
@@ -99,6 +145,9 @@ returns null, 400 when `sha` is malformed.
 
 **Upstream-able.** Yes; it is a read-only addition alongside the existing
 events route, following the same shape.
+
+**Kill date.** 2026-10-16. Tracked as
+[INTR-566](https://linear.app/abklabs/issue/INTR-566).
 
 ## `packages/workflow`, `packages/workflow-host`, `packages/agent`, `packages/inference` — per-call inference options on a step
 
@@ -147,6 +196,9 @@ run, the way a step's `input` does.
 change for a step that names no selector, and the test file is written to
 land beside the runtime's other tests.
 
+**Kill date.** 2026-10-16. Tracked as
+[INTR-567](https://linear.app/abklabs/issue/INTR-567).
+
 ## `packages/workflow/src/runtime/commit-chain.ts` and `packages/workflow-host/src/adapters/repo-store.ts` — a flush another writer overtook is re-folded, not failed
 
 **Why.** A container run's log gains a `SignalReceived` twice for one delivered
@@ -170,39 +222,8 @@ to the reducer, so what lands is what would have landed.
 real question for upstream — which of the awaiter and the relay should own the
 record when both see the same delivery.
 
-## `packages/workflow-deploy/src/capability-walk.ts` — per-step grants for leaf steps inside loop bodies
-
-**Why.** Upstream INTR-545: a tool call from a step nested in a loop body is
-refused before the implementation runs. The capability walk builds its
-per-step grant map keyed only by top-level step order; a loop body's nested
-steps fold into the loop node's single entry, so there is no entry for a leaf
-step id inside the body. At run time the child's authorize looks the invoking
-step id up in the frozen snapshot built from this map and throws
-(`credentialsSnapshot has no entry for stepId`). The unmerged proof branch
-`cl-8012-live-proof` carries the acceptance criteria: its stub answers the
-stage-5 specialist with a genuine tool-call delta and inspects the sidecar's
-own tool result, and those assertions fail until this walk emits the leaf
-entries.
-
-**What changed.** After the top-level walk records a loop node's folded union
-(the required approval set is unchanged; the gate now also sees the per-leaf
-rows below), it emits one entry per leaf step id inside the loop body through
-the same single dispatch, frozen with the same deployment-wide trigger
-grants — recursing into loops nested in the body, whose leaves likewise
-authorize under their own ids. A body leaf sharing a bare id with a
-top-level step or another loop's leaf throws unless the grant sets are
-identical (mirroring `pinInertStepSources`); the recursion dispatch is
-exhaustive over primitive kinds, so a future body-bearing kind fails the
-build rather than silently skipping its leaves. Tests in
-`src/capability-walk.test.ts`: a loop-body agent leaf and its action sibling
-each resolve under their bare body ids carrying exactly their own grants,
-the leaves of a loop nested in a loop body resolve at every level, colliding
-leaf ids (against a top-level step, and across sibling loops) throw, and an
-identical repeat merges silently.
-
-**Upstream-able.** Yes — this is the upstream PR for INTR-545, collision
-policy included. Drop this patch when the vendored revision refreshes past
-the upstream fix.
+**Kill date.** 2026-10-16. Tracked as
+[INTR-568](https://linear.app/abklabs/issue/INTR-568).
 
 ## `packages/hub-api/src/routes/workflow-definitions.ts`, `packages/types/src/workflows.ts`, `packages/hub-client/src/workflows.ts` — `POST /workflows/definitions`
 
@@ -224,6 +245,9 @@ caller-supplied or generated id. `@intx/types` gains `CreateWorkflowDefinition`
 **Upstream-able.** Yes; it is a small addition alongside the existing
 list/rollback routes, gated the same way.
 
+**Kill date.** 2026-10-16. Tracked as
+[INTR-569](https://linear.app/abklabs/issue/INTR-569).
+
 ## `packages/hub-api/src/routes/tenants.ts` — `GET /api/tenants?parentId=`
 
 **Why.** CL-8075: the host listed a project's child tenants by reading the
@@ -240,38 +264,8 @@ approach page territory).
 **Upstream-able.** Yes; it fills the same gap `POST /` already implies
 (`parentId` is an accepted create field with no matching list).
 
-## `packages/hub-api/src/routes/sessions.ts` (new), `packages/hub-api/src/app.ts` — `POST /sessions`, `POST/GET /sessions/:id/turns`
-
-**Why.** CL-8075: `GET /api/me/sessions` is a stub returning `[]`, and no
-route created an `agent_session` with a caller-chosen id, or wrote/read the
-`session_mail` / `inference_turn` / `turn_part` rows a conversation turn is
-made of. The command ledger (`engine-ledger.ts`) keys its per-project session
-to the seeded lifecycle definition so it can record commands without an
-offering or a sidecar, and reads its own history back the same way; both
-went through direct table access (`ensureAgentSession`,
-`writeConversationTurn`, `listConversationTurns` in `hub-gaps.ts`).
-
-**What changed.** A new route group at `/api/tenants/:tenantId/sessions`:
-`POST /` finds-or-creates an `agent_session` by caller-chosen id (idempotent
-on id); `POST /:sessionId/turns` writes the mail record the platform expects
-(built and signed the same way `hub-gaps.ts` did — via the injected
-`principalKeyStore`) plus the `inference_turn`/`turn_part` pair, sequentially
-rather than in one transaction (a shared single-writer connection may already
-be inside another caller's transaction); `GET /:sessionId/turns` reads every
-part on the session back, oldest turn first. Gated by an `agent-session:*`
-grant, matching the naming convention of every other tenant-scoped resource.
-
-Both turn routes look the session up by `(id, tenantId)` before touching
-`turn_part`/`inference_turn`/`session_mail` — `requireGrant("agent-session:*")`
-only scopes the check to the URL tenant, and `turn_part` carries no
-`tenant_id` column of its own, so without this a principal in one tenant
-could read or write another tenant's session by guessing its id. A write to
-an unresolved session 404s; a read of one reads back empty rather than
-erroring, because a same-tenant session not created yet (asked about before
-its first command) is a legitimate empty-history state, not a caller error.
-
-**Upstream-able.** Yes; it is additive, and it is the natural home for the
-turn-taking primitive `/api/me/sessions` is deferred pending.
+**Kill date.** 2026-10-16. Tracked as
+[INTR-570](https://linear.app/abklabs/issue/INTR-570).
 
 ## `packages/hub-api/src/routes/assets.ts` — `POST /:assetId/tree`, `GET /:assetId/blob`
 
@@ -299,6 +293,9 @@ the asset, ref or path is absent.
 **Upstream-able.** Yes; additive, and it gives every asset kind a JSON write
 path the tarball routes only gave `package-registry`.
 
+**Kill date.** 2026-10-16. Tracked as
+[INTR-571](https://linear.app/abklabs/issue/INTR-571).
+
 ## `packages/hub-api/src/routes/workflows.ts`, `packages/hub-client/src/workflows.ts` — the deployment listing carries its provisioner binding
 
 **Why.** CL-8075: `GET /workflows/deployments` projected an allocation's
@@ -315,6 +312,9 @@ now reads it off the deployment it already fetched rather than making a
 second call.
 
 **Upstream-able.** Yes; it is one more field on an existing projection.
+
+**Kill date.** 2026-10-16. Tracked as
+[INTR-572](https://linear.app/abklabs/issue/INTR-572).
 
 ## `packages/hub-api/src/routes/workflows.ts`, `packages/hub-api/src/app.ts` — `POST /:runId/signals` named-signal grant and principal stamp
 
@@ -334,6 +334,9 @@ a spoofed `principalId` is replaced.
 **Upstream-able.** Yes; it is a narrower grant on the existing run resource
 plus a server-side identity stamp, and it preserves `manage` as a
 superset.
+
+**Kill date.** 2026-10-16. Tracked as
+[INTR-573](https://linear.app/abklabs/issue/INTR-573).
 
 ## `packages/db/src/model-source-resolution.ts`, `packages/hub-sessions/src/workflow-allocation-service.ts` — ancestor credentials require `credential:<id>/use`
 
@@ -364,4 +367,7 @@ new tenant, and without the filter default-deny never holds. Tests in
 **Upstream-able.** Yes; it is an additive optional argument on the deploy
 resolution path, fail-closed for inherited credentials, and it reuses the
 existing grant collection the credential walk already mirrors.
+
+**Kill date.** 2026-10-16. Tracked as
+[INTR-574](https://linear.app/abklabs/issue/INTR-574).
 

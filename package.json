@@ -49,7 +49,7 @@
     "postinstall": "bun run vendor:build",
     "check:vendored-migrations": "bun --conditions intx-src scripts/check-vendored-migrations.ts",
     "test": "bun test apps/hub/src packages/embed-hub/src packages/installer/src packages/keychain/src packages/solutions-builder/src packages/tools-delivery/src apps/web/src scripts/desktop-launch-mode.test.ts scripts/closure-pack.test.ts scripts/lib/tarball.test.ts",
-    "test:vendored": "bun test vendor/interchange/packages/hub-api/src/routes/tenants.test.ts vendor/interchange/packages/hub-api/src/routes/sessions.test.ts vendor/interchange/packages/hub-api/src/routes/assets.test.ts vendor/interchange/packages/hub-api/src/routes/workflow-definitions.test.ts vendor/interchange/packages/hub-api/src/routes/workflows.test.ts vendor/interchange/packages/db/src/model-source-resolution.test.ts"
+    "test:vendored": "bun test vendor/interchange/packages/hub-api/src/routes/tenants.test.ts vendor/interchange/packages/hub-api/src/routes/assets.test.ts vendor/interchange/packages/hub-api/src/routes/workflow-definitions.test.ts vendor/interchange/packages/hub-api/src/routes/workflows.test.ts vendor/interchange/packages/db/src/model-source-resolution.test.ts"
   },
   "dependencies": {
     "@corbits/artifacts": "github:corbitsdev/corbits-artifacts",
