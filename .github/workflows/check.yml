@@ -1,11 +1,11 @@
 # The merge gate. `bun run check` is what the repository already calls the gate
 # (AGENTS.md); this only makes it run where nobody can forget to.
 #
-# The gate is split across parallel jobs because it was one sequential run in
-# which the deploying smoke — the slowest step by a wide margin — held every
-# other step behind it. The steps are independent processes sharing no state,
-# and on separate runners even the launch smoke's fixed port stops being a
-# hazard. `check:shards` asserts this matrix and `bun run check` stay in step.
+# The gate is split across parallel jobs because it was one sequential run
+# where the slowest step held every other step behind it. The steps are
+# independent processes sharing no state, and on separate runners even the
+# launch smoke's fixed port stops being a hazard. `check:shards` asserts this
+# matrix and `bun run check` stay in step.
 name: check
 
 on:
@@ -26,7 +26,7 @@ jobs:
       # One shard's failure should not hide the others' results.
       fail-fast: false
       matrix:
-        shard: [static, core, launch, ui, product, behaviour, deploy]
+        shard: [static, core, launch, ui, product, behaviour]
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2

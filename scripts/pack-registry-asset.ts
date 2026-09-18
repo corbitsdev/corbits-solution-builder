@@ -76,15 +76,46 @@ import {
 } from "@intx/tool-packaging";
 import { getToolPackageSourceContentIdentity } from "@intx/types/tool-packages";
 
+import { install as installerInstall } from "@solutions-builder/installer";
 import { openDatabase } from "../apps/hub/src/db.js";
 import { prepareDatabase } from "../apps/hub/src/migrate.js";
-import { install } from "./host-install.js";
-import { assets as hubAssets } from "../apps/hub/src/hub-client.js";
-import { hub } from "../apps/hub/src/hub-mount.js";
+import { rerankCatalogProviders } from "../apps/hub/src/catalog.js";
+import {
+  assets as hubAssets,
+  forgetWorkspace as hubClientForgetWorkspace,
+  hubTransport,
+  resolveWorkspace,
+  signInEmail,
+  signUpEmail,
+} from "../apps/hub/src/hub-client.js";
+import { canPlaceSidecars, hub } from "../apps/hub/src/hub-mount.js";
 import { databaseDirectory } from "../apps/hub/src/paths.js";
 import { packTarballFiles, tarballFilename, tarballIntegrity, type TarballFiles } from "../apps/hub/src/tarball.js";
+import { adoptLegacyWorkspaceOnce } from "../apps/hub/src/workspace-boot.js";
 import { distFiles, readManifest, vendoredClosure } from "../packages/installer/src/workflow-closure.js";
 import { WORKFLOW_PACKAGE_DEPENDENCIES } from "@solutions-builder/app/workflows/lifecycle-source";
+
+/** Signs in (or up) a script account and drives the installer through the
+ *  hub's own transport, the same way `host-install.ts` did for smokes before
+ *  it was deleted (CL-8344) — this asset-packing script still needs an
+ *  installed workspace to push into. */
+const SCRIPT_EMAIL = "you@solutions-builder.local";
+const SCRIPT_PASSWORD = "solutions-builder-script-session";
+const SCRIPT_NAME = "You";
+
+async function install(): Promise<void> {
+  if (!(await signInEmail(SCRIPT_EMAIL, SCRIPT_PASSWORD))) {
+    await signUpEmail({ email: SCRIPT_EMAIL, password: SCRIPT_PASSWORD, name: SCRIPT_NAME });
+  }
+  await adoptLegacyWorkspaceOnce();
+  await installerInstall(
+    hubTransport(),
+    { canPlaceSidecars: canPlaceSidecars(), sidecarFingerprint: hub().sidecarBindingFingerprint },
+    { afterSkillAssets: async () => { await rerankCatalogProviders(); } },
+  );
+  hubClientForgetWorkspace();
+  await resolveWorkspace();
+}
 
 /** The asset's human-readable name — how it's found and created. Distinct
  *  from the resolver's internal registry name (see `resolveAndPrintClosure`),

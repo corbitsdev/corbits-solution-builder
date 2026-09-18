@@ -12,9 +12,7 @@ import { join } from "node:path";
 const ROOT = join(import.meta.dirname, "..");
 const WORKFLOW = join(ROOT, ".github", "workflows", "check.yml");
 
-const UNGATED = new Map([
-  ["smoke:agent", "exits 0 without a model endpoint, so it cannot fail unattended"],
-]);
+const UNGATED = new Map<string, string>([]);
 
 const { scripts } = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
   scripts: Record<string, string>;
