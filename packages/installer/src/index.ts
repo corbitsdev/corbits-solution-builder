@@ -14,6 +14,7 @@ export * from "./assets.js";
 export * from "./install.js";
 export * from "./project-tenant.js";
 export * from "./provider-connect.js";
+export * from "./registry-tarballs.js";
 export * from "./workbench-delegation.js";
 export * from "./workflow-closure.js";
 export * from "./workflow-deploy.js";

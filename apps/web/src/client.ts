@@ -17,12 +17,15 @@ import {
   installProjectAuthority,
   InstallerError,
   liveDelegationStore,
+  ensureRegistryTarballs,
   requireProject as installerRequireProject,
   resolveWorkspace,
   revokeAllDelegations,
   updateProject as installerUpdateProject,
+  type ClosureManifest,
   type InstallState as PackageInstallState,
   type ProjectPolicy,
+  type RegistryTarballUploader,
   type SidecarCapability,
 } from "@solutions-builder/installer";
 import { openCreatedProject } from "./create-project-open.ts";
@@ -415,6 +418,59 @@ export function sidecarCapabilityOf(
   return { canPlaceSidecars: true, sidecarFingerprint: fingerprint };
 }
 
+/**
+ * A `RegistryTarballUploader` over the hub's own `/hub` passthrough, for one
+ * tenant scope. `createHubTransport`'s `Transport.fetch` always JSON-encodes
+ * its body, so the tarball's raw bytes are PUT with a plain `fetch` instead,
+ * the same `/hub`-prefixed, same-origin-credentialed route the rest of the
+ * browser client uses.
+ */
+function hubTarballUploaderFor(scope: string): RegistryTarballUploader {
+  return {
+    async putTarball(assetId, filename, bytes) {
+      const response = await fetch(`/hub/api/tenants/${encodeURIComponent(scope)}/assets/${assetId}/tarballs/${filename}`, {
+        method: "PUT",
+        credentials: "same-origin",
+        body: new Uint8Array(bytes),
+      });
+      if (!response.ok) {
+        throw new Error(`tarball upload failed: ${filename} (HTTP ${String(response.status)})`);
+      }
+    },
+  };
+}
+
+/**
+ * Makes the workspace's registry asset hold every tarball
+ * `scripts/pack-closure-static.ts` shipped, uploading only what is missing.
+ * Best-effort and non-blocking: a dev tree without the static closure built
+ * (`bun run assets:pack-closure`), or a hub that cannot be reached, must not
+ * fail `install()` — the source-tree deploy arm still works either way until
+ * the tarball arm is switched on (CL-8334).
+ */
+async function ensureClosureRegistryAsset(tenantId: string): Promise<void> {
+  try {
+    const response = await fetch("/closure/manifest.json", { credentials: "same-origin" });
+    if (!response.ok) return;
+    const manifest = (await response.json()) as ClosureManifest;
+    await ensureRegistryTarballs(
+      createHubTransport(),
+      tenantId,
+      hubTarballUploaderFor(tenantId),
+      manifest,
+      async (filename) => {
+        const tarball = await fetch(`/closure/${filename}`, { credentials: "same-origin" });
+        if (!tarball.ok) throw new Error(`could not fetch closure tarball ${filename}`);
+        return new Uint8Array(await tarball.arrayBuffer());
+      },
+    );
+  } catch (cause) {
+    // Best effort: the source-tree deploy arm is still what `createProject`
+    // relies on until CL-8334 switches it.
+    console.warn("ensureClosureRegistryAsset failed", cause);
+  }
+}
+
 function installerFailure(cause: unknown): never {
   if (cause instanceof ApiFailure) throw cause;
   if (cause instanceof InstallerError) {
@@ -542,9 +598,12 @@ export const api = {
     const status = await request<HostStatus>("/status");
     if (status.hub.mode !== "embedded") return HOSTED_INSTALL;
     try {
-      return await installerInstall(createHubTransport(), sidecarCapabilityOf(status), {
+      const state = await installerInstall(createHubTransport(), sidecarCapabilityOf(status), {
         afterSkillAssets: rerankCatalogAfterSkillAssets,
       });
+      const workspace = await resolveWorkspace(createHubTransport());
+      if (workspace) void ensureClosureRegistryAsset(workspace.tenantId);
+      return state;
     } catch (cause) {
       installerFailure(cause);
     }

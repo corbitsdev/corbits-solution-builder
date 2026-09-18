@@ -44,9 +44,10 @@
     "smoke:choices": "bun scripts/choices-smoke.ts",
     "vendor:build": "bun scripts/vendor-build.ts",
     "assets:pack-registry": "bun --conditions intx-src scripts/pack-registry-asset.ts",
+    "assets:pack-closure": "bun --conditions intx-src scripts/pack-closure-static.ts",
     "postinstall": "bun run vendor:build",
     "check:vendored-migrations": "bun --conditions intx-src scripts/check-vendored-migrations.ts",
-    "test": "bun test apps/hub/src packages/embed-hub/src packages/installer/src packages/keychain/src packages/solutions-builder/src packages/tools-delivery/src apps/web/src scripts/desktop-launch-mode.test.ts",
+    "test": "bun test apps/hub/src packages/embed-hub/src packages/installer/src packages/keychain/src packages/solutions-builder/src packages/tools-delivery/src apps/web/src scripts/desktop-launch-mode.test.ts scripts/closure-pack.test.ts",
     "test:vendored": "bun test vendor/interchange/packages/hub-api/src/routes/tenants.test.ts vendor/interchange/packages/hub-api/src/routes/sessions.test.ts vendor/interchange/packages/hub-api/src/routes/assets.test.ts vendor/interchange/packages/hub-api/src/routes/workflow-definitions.test.ts vendor/interchange/packages/hub-api/src/routes/workflows.test.ts vendor/interchange/packages/db/src/model-source-resolution.test.ts"
   },
   "dependencies": {
