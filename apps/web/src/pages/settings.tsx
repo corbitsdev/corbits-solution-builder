@@ -35,7 +35,6 @@ export function Settings({
   return (
     <div className="settings">
       <Inference
-        status={status}
         providers={providers}
         apiKeyProviders={apiKeyProviders}
         oauthCandidates={oauthCandidates}
@@ -77,25 +76,24 @@ function Section({
 /* ---------------------------------------------------------------- inference */
 
 function Inference({
-  status,
   providers,
   apiKeyProviders,
   oauthCandidates,
   onChanged,
 }: {
-  status: HostStatus | null;
   providers: Provider[];
   apiKeyProviders: ApiKeyProvider[];
   oauthCandidates: OAuthCandidate[];
   onChanged: () => void;
 }) {
   const active = providers.find((provider) => provider.active) ?? providers[0];
+  const connected = providers.some((provider) => provider.status === "ready");
   return (
     <Section
       title="Inference"
       lead="The models that draft every stage. Connected providers are tried top to bottom; if the first cannot answer, the next one does, and each version records who wrote it."
       status={
-        status?.inference.connected && active ? (
+        connected && active ? (
           <StateLabel tone="success">Connected · {active.label}</StateLabel>
         ) : (
           <StateLabel tone="warning">Nothing connected</StateLabel>

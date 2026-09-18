@@ -121,7 +121,7 @@ export type SecretRead =
  * Every other non-zero exit is a failure to answer: locked, denied, or the
  * tool itself unhappy.
  */
-export function classifySecurityExit(exitCode: number, stderr: string): SecretRead | null {
+function classifySecurityExit(exitCode: number, stderr: string): SecretRead | null {
   if (exitCode === 0) return null;
   if (exitCode === 44) return { status: "missing" };
   return {

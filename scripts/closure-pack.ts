@@ -21,7 +21,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 
-import { packTarballFiles, tarballFilename, type TarballFiles } from "../apps/hub/src/tarball.js";
+import { packTarballFiles, tarballFilename, type TarballFiles } from "./lib/tarball.js";
 import { distFiles, readManifest, vendoredClosure } from "../packages/installer/src/workflow-closure.js";
 import { WORKFLOW_PACKAGE_DEPENDENCIES } from "@solutions-builder/app/workflows/lifecycle-source";
 

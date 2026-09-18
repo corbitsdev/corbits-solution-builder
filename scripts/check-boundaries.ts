@@ -42,7 +42,7 @@
  *      libraries (deck rendering's `pptxgenjs`/`jszip`).
  */
 import { readdir, readFile } from "node:fs/promises";
-import { dirname, extname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 
 const root = join(import.meta.dir, "..");
 const PACKAGE = "packages/solutions-builder/src";
@@ -61,6 +61,7 @@ const HUB_EMBED = "packages/embed-hub/src";
 
 type Violation = { file: string; rule: string; detail: string };
 const violations: Violation[] = [];
+const hubAllowlistWarnings: string[] = [];
 
 async function walk(directory: string): Promise<string[]> {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -197,6 +198,47 @@ const INSTALLER_ALLOWED = [
 const WEB_ALLOWED = ["@intx/hub-client"];
 
 const PLATFORM_FILE = /^apps\/hub\/src\/(hub-mount|hub-keys|hub-migrate|lifecycle-run|db|schema|migrate)\.ts$/;
+
+/**
+ * CL-8072's done state for `apps/hub/src`: embedding only (server, the API
+ * mount, the hub's own session/proxy/keys/migration plumbing, its db/paths/
+ * error surface, sidecar process wiring, lifecycle, and the one host-secrets
+ * module bootstrap secrets still need). Everything else in `apps/hub/src`
+ * today is product code other lanes are still deleting.
+ *
+ * This is a WARNING for now, not a failure: several lanes are mid-flight and
+ * files outside this list still exist on purpose. Pass
+ * `--enforce-hub-allowlist` (or set `CHECK_BOUNDARIES_ENFORCE_HUB_ALLOWLIST=1`)
+ * to turn every warning here into a hard failure, once the epic's cutover is
+ * actually done and this list should hold.
+ */
+const HUB_DONE_STATE_ALLOWLIST = [
+  "server",
+  "api",
+  "api-host",
+  "hub-mount",
+  "hub-proxy",
+  "hub-session",
+  "hub-keys",
+  "hub-migrate",
+  "hub-migrations",
+  "hub-client",
+  "db",
+  "paths",
+  "errors",
+  "sidecar-processes",
+  "lifecycle",
+  "host-secrets",
+];
+
+const ENFORCE_HUB_ALLOWLIST =
+  process.argv.includes("--enforce-hub-allowlist") ||
+  process.env.CHECK_BOUNDARIES_ENFORCE_HUB_ALLOWLIST === "1";
+
+/** `foo.test.ts` and `foo.ts` are the same module for this list's purposes. */
+function hubModuleNameOf(path: string): string {
+  return basename(path, extname(path)).replace(/\.test$/, "");
+}
 
 type ToolsPackage = { dir: string; allowed: readonly string[] };
 
@@ -441,6 +483,28 @@ for (const file of files) {
       detail: "records run mutations on the host",
     });
   }
+
+  if (area === "hub" && !HUB_DONE_STATE_ALLOWLIST.includes(hubModuleNameOf(path))) {
+    const message = `${path} is outside CL-8072's done-state allow-list for apps/hub/src`;
+    if (ENFORCE_HUB_ALLOWLIST) {
+      violations.push({
+        file: path,
+        rule: "apps/hub/src holds only the embedding allow-list (--enforce-hub-allowlist)",
+        detail: "not on the allow-list",
+      });
+    } else {
+      hubAllowlistWarnings.push(message);
+    }
+  }
+}
+
+if (hubAllowlistWarnings.length > 0 && !ENFORCE_HUB_ALLOWLIST) {
+  console.warn(
+    `\napps/hub/src allow-list: ${hubAllowlistWarnings.length} file(s) not yet on CL-8072's done-state list ` +
+      "(warning only; pass --enforce-hub-allowlist to fail once it is met):\n",
+  );
+  for (const warning of hubAllowlistWarnings) console.warn(`  ${warning}`);
+  console.warn("");
 }
 
 if (violations.length > 0) {

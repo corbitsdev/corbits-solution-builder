@@ -151,7 +151,6 @@ export type HostStatus = {
     windowlessWorkContinues: true;
   };
   credentialBackend: "keychain" | "file";
-  inference: { connected: boolean; active: string | null };
   canPlaceSidecars: boolean;
   sidecarFingerprint: string | null;
   hub: {

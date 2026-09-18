@@ -3,10 +3,9 @@ import type { Hono } from "hono";
 import { startAtLoginMarker } from "./paths.js";
 import { COMMANDS, LEDGER, STAGE_TITLES } from "@solutions-builder/app/ledger";
 import { AGENT_KIT } from "@solutions-builder/app/kit";
-import { listProviders } from "./providers.js";
 import { credentialBackend } from "./host-secrets.js";
 import { hostStatus, requestHostStop } from "./lifecycle.js";
-import { ensureHub, HubApiError, hubFetch } from "./hub-client.js";
+import { ensureHub, hubFetch } from "./hub-client.js";
 import { sidecarFacts } from "./hub-mount.js";
 
 export const API_VERSION = "1";
@@ -40,21 +39,13 @@ async function hubSummary() {
 
 export function registerHostRoutes(api: Hono) {
   api.get("/status", async (context) => {
-    // Inference listing talks to hub catalog routes. A hosted product still
-    // has to answer GET /api/status; Interchange 401/403 is "none connected",
-    // not an internal error.
-    const providers = await listProviders().catch((cause: unknown) => {
-      if (cause instanceof HubApiError && (cause.status === 401 || cause.status === 403)) return [];
-      throw cause;
-    });
+    // Connected inference is read straight from the hub catalog routes by
+    // the client (apps/web/src/provider-catalog.ts); this host no longer
+    // vouches for it.
     return context.json({
       apiVersion: API_VERSION,
       host: hostStatus(),
       credentialBackend: await credentialBackend(),
-      inference: {
-        connected: providers.some((provider) => provider.status === "ready"),
-        active: providers.find((provider) => provider.active)?.providerId ?? null,
-      },
       ...sidecarFacts(),
       hub: await hubSummary(),
     });

@@ -1,25 +1,18 @@
 /**
- * Connected providers, as rows in Interchange's own model catalog — read
- * side only. Connecting, reordering, choosing a model and disconnecting
- * (including an OAuth sign-in's own credential) are the client's job now
- * (`packages/installer/src/provider-connect.ts` and
- * `apps/web/src/provider-catalog.ts`, over `/hub`'s own catalog routes); the
- * host mutated these rows directly before PR #313 deleted that path, and
- * host-side inference that used to read a connected secret back is gone too.
- * The secret — an API key, or a signed-in OAuth token pair — is sealed into
- * the credential row with Interchange's own credential cipher; nothing here
+ * Reads and reorders a workspace's connected providers in Interchange's own
+ * model catalog. Connecting, reordering on request, choosing a model and
+ * disconnecting (including an OAuth sign-in's own credential) are the
+ * client's job now (`packages/installer/src/provider-connect.ts` and
+ * `apps/web/src/provider-catalog.ts`, over `/hub`'s own catalog routes); this
+ * module is left with the one thing done host-side — reordering every
+ * provider's offerings at boot, run from `server.ts` and from
+ * `scripts/pack-registry-asset.ts` after a skill asset is packed. The
+ * secret — an API key, or a signed-in OAuth token pair — is sealed into the
+ * credential row with Interchange's own credential cipher; nothing here
  * decrypts it.
  */
 import { catalogModels } from "@intx/inference-catalog";
-import {
-  catalog,
-  workspaceOrNull,
-  type HubCredential,
-  type HubModel,
-  type HubModelProvider,
-  type HubOffering,
-  type HubProvider,
-} from "./hub-client.js";
+import { catalog, workspaceOrNull, type HubModel, type HubOffering } from "./hub-client.js";
 
 export type Plugin = "anthropic" | "openai" | "openai-compatible" | "google-genai";
 
@@ -156,93 +149,4 @@ export async function rerankCatalogProviders(): Promise<number> {
   return changed;
 }
 
-export type CatalogModelRow = {
-  offeringId: string;
-  canonicalName: string;
-  displayName: string;
-  priority: number;
-  capabilities: string[];
-  disabled: boolean;
-};
-
-export type CatalogProviderRow = {
-  providerRowId: string;
-  providerId: string;
-  label: string;
-  plugin: Plugin;
-  baseUrl: string;
-  kind: "api_key" | "oauth" | "local";
-  credentialId: string;
-  /** From `credential.status`: "active" reads as ready, anything else as-is. */
-  status: string;
-  validatedAt: Date | null;
-  /** Lowest first — the operator's order of preference. */
-  basePriority: number;
-  models: CatalogModelRow[];
-};
-
-/** Every connected provider in the workspace, unordered. Empty before install. */
-export async function listCatalogProviders(): Promise<CatalogProviderRow[]> {
-  if (!workspaceOrNull()) return [];
-
-  const [providerRows, credentialRows, modelRows, offeringRows, vendorRows] = await Promise.all([
-    catalog.modelProviders(),
-    catalog.credentials(),
-    catalog.models(),
-    catalog.offerings(),
-    catalog.providers(),
-  ]);
-  return providerRows.map((row) =>
-    toProviderRow(row, credentialRows, modelRows, offeringRows, vendorRows),
-  );
-}
-
-function toProviderRow(
-  row: HubModelProvider,
-  credentialRows: HubCredential[],
-  modelRows: HubModel[],
-  offeringRows: HubOffering[],
-  vendorRows: HubProvider[],
-): CatalogProviderRow {
-  const credentialRow = credentialRows.find((entry) => entry.id === row.credentialId) ?? null;
-  const vendorRow = vendorRows.find((entry) => entry.name === row.name) ?? null;
-  const label = vendorRow?.metadata?.label;
-
-  const models = offeringRows
-    .filter((offering) => offering.providerId === row.id)
-    .map((offering): CatalogModelRow => {
-      const modelRow = modelRows.find((entry) => entry.id === offering.modelId);
-      const canonicalName = modelRow?.canonicalName ?? "";
-      return {
-        offeringId: offering.id,
-        canonicalName,
-        displayName: modelRow?.displayName ?? canonicalName,
-        priority: offering.priority,
-        capabilities: offering.capabilities ?? [],
-        disabled: offering.disabled,
-      };
-    })
-    // A retired offering is not one the provider serves: out of the rows, so
-    // it is neither offered as a choice nor read as one already made.
-    .filter((entry) => isServableModel(entry.canonicalName, row.plugin as Plugin))
-    .sort((a, b) => a.priority - b.priority);
-
-  return {
-    providerRowId: row.id,
-    providerId: row.name,
-    label: typeof label === "string" ? label : row.name,
-    plugin: row.plugin as Plugin,
-    baseUrl: row.baseURL ?? "",
-    kind: credentialRow?.metadata?.keyless
-      ? "local"
-      : credentialRow?.type === "oauth_token"
-        ? "oauth"
-        : "api_key",
-    credentialId: row.credentialId ?? "",
-    status: credentialRow?.status === "active" ? "ready" : (credentialRow?.status ?? "error"),
-    validatedAt: credentialRow?.updatedAt ? new Date(credentialRow.updatedAt) : null,
-    basePriority: models.length > 0 ? Math.floor(models[0]!.priority / 1000) : 0,
-    models,
-  };
-}
 

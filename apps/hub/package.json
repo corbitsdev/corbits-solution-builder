@@ -9,9 +9,5 @@
     "@solutions-builder/embed-hub": "workspace:*",
     "@solutions-builder/keychain": "workspace:*",
     "@solutions-builder/tools-deck": "workspace:*"
-  },
-  "devDependencies": {
-    "ssri": "catalog:",
-    "@types/ssri": "catalog:"
   }
 }

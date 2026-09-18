@@ -90,7 +90,7 @@ import {
 } from "../apps/hub/src/hub-client.js";
 import { canPlaceSidecars, hub } from "../apps/hub/src/hub-mount.js";
 import { databaseDirectory } from "../apps/hub/src/paths.js";
-import { tarballIntegrity } from "../apps/hub/src/tarball.js";
+import { tarballIntegrity } from "./lib/tarball.js";
 import { adoptLegacyWorkspaceOnce } from "../apps/hub/src/workspace-boot.js";
 import { buildPackedEntries, VENDOR_PACKAGES_DIR, type PackedEntry } from "./closure-pack.js";
 

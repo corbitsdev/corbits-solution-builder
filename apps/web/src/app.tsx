@@ -590,8 +590,8 @@ export function App() {
   // Connecting a model and then landing on an empty app is not an onboarding.
   // Inference is required — the product cannot draft a stage without it, so
   // step 1 is not skippable. Only the first-project step can be deferred.
-  const showOnboarding =
-    !status.inference.connected || (projects.length === 0 && !skippedSetup);
+  const inferenceConnected = providers.some((provider) => provider.status === "ready");
+  const showOnboarding = !inferenceConnected || (projects.length === 0 && !skippedSetup);
 
   if (showOnboarding) {
     return (
@@ -618,7 +618,7 @@ export function App() {
         projects={projects}
         collapsed={narrow}
         offline={offline}
-        connected={status?.inference.connected ?? false}
+        connected={inferenceConnected}
         onNavigate={setView}
         onInspect={(projectId: string) => {
           setSelected(projectId);
