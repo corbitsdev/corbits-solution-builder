@@ -28,6 +28,50 @@ import { api, ApiFailure, type ProjectInfo, type ProjectSummary } from "../clien
 import { Button, Banner, StageRing, StateLabel, stageName } from "../components.jsx";
 import { DEFAULT_POLICY } from "./onboarding.jsx";
 import { Dictated } from "../dictation.jsx";
+import { foldStageThread, nextOpenQuestion } from "../stage-thread.ts";
+import type { Stage } from "@solutions-builder/app/ledger";
+
+/**
+ * The open-question badge, folded client-side from `/hub` events: the host
+ * only says whether there is a draft to approve (`projects.ts`'s `turn`), so
+ * a project idle on that count is checked here, one fold per idle row.
+ */
+function useOpenQuestions(projects: ProjectSummary[]): Map<string, { ordinal: number; remaining: number }> {
+  const [open, setOpen] = useState(new Map<string, { ordinal: number; remaining: number }>());
+  const pending = projects.filter((project) => !project.archivedAt && project.turn === "idle" && project.stage);
+  const key = pending.map((project) => `${project.id}:${project.anchorRunId ?? ""}`).join(",");
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all(
+      pending.map(async (project) => {
+        const turns = await foldStageThread({
+          tenantId: project.tenantId,
+          anchorRunId: project.anchorRunId,
+          stage: project.stage as unknown as Stage,
+          nodes: [],
+          opening: null,
+          carried: [],
+        }).catch(() => []);
+        const found = nextOpenQuestion(turns);
+        return [project.id, found ? { ordinal: found.ordinal, remaining: found.remaining } : null] as const;
+      }),
+    ).then((entries) => {
+      if (cancelled) return;
+      setOpen(new Map(entries.filter((entry): entry is [string, { ordinal: number; remaining: number }] => entry[1] !== null)));
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return open;
+}
+
+/** A project row with its host-computed `turn`/`question` overridden by the client fold, when one is open. */
+function withOpenQuestion(project: ProjectSummary, open: Map<string, { ordinal: number; remaining: number }>): ProjectSummary {
+  const question = open.get(project.id);
+  return question ? { ...project, turn: "question", question } : project;
+}
 
 export function Projects({
   projects,
@@ -80,7 +124,8 @@ export function Projects({
 
   // Whatever waits on the person first, then the furthest along. Archived ones
   // fold away.
-  const live = projects.filter((project) => !project.archivedAt);
+  const openQuestions = useOpenQuestions(projects);
+  const live = projects.filter((project) => !project.archivedAt).map((project) => withOpenQuestion(project, openQuestions));
   const archived = projects.filter((project) => project.archivedAt);
   const yourMove = (project: ProjectSummary) =>
     project.needsDecision || project.turn === "question" || project.turn === "approve";

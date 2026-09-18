@@ -7,6 +7,7 @@
  */
 import { APP_VERSION } from "@solutions-builder/app/manifest";
 import { AUTHORITIES, type Authority } from "@solutions-builder/app/ledger";
+import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
 import {
   ApiError as HubApiError,
   createProject as installerCreateProject,
@@ -207,9 +208,17 @@ export type ProjectSummary = {
   archivedAt: string | null;
   needsDecision: boolean;
   waits: Wait[];
-  /** Whose move it is on the current stage. */
+  /**
+   * Whose move it is on the current stage. Host-computed as `"approve"` or
+   * `"idle"` only — the open-question case is folded client-side, from
+   * `tenantId`/`anchorRunId`, the same way the workspace's own thread is.
+   */
   turn: "writing" | "question" | "approve" | "idle";
   question?: { ordinal: number; remaining: number };
+  /** Workspace tenant the lifecycle is deployed in — for the client's open-question fold. */
+  tenantId: string;
+  /** Deployment id of the project's lifecycle run, or null when none is placed. */
+  anchorRunId: string | null;
 };
 
 export type ProjectInfo = {
@@ -235,7 +244,8 @@ export type ArtifactNode = {
   mediaType?: string;
   createdAt: string;
   supersededByNodeId: string | null;
-  provenance: { producer: string; agentRole?: string; providerId?: string; model?: string };
+  /** `stepRef` is the stage-thread fold's lookup key: `${iterationRunId}/${stepId}` for the step that wrote this version. */
+  provenance: { producer: string; agentRole?: string; providerId?: string; model?: string; stepRef?: string };
 };
 
 export type Run = {
@@ -296,6 +306,13 @@ export type ProjectDetail = {
   flags: { id: string; trigger: string; classification: string; evidence: unknown; chosenRoute: number | null; createdAt: string }[];
   questions: { id: string; prompt: string; answeredAt: string | null; answer: string | null }[];
   manifests: { id: string; manifestHash: string; acceptedAt: string | null; descriptors: unknown }[];
+  /**
+   * The stage-1 opening problem statement, off the `project.create` command —
+   * ledger data the stage-thread fold cannot read out of `/hub` events.
+   */
+  opening: { body: string; createdAt: string } | null;
+  /** Turns carried in from another instance on import, by stage — ledger data, same reason. */
+  carriedTurns: { stage: number; turn: StageTurn }[];
 };
 
 export type DesignAnchor = {
@@ -342,19 +359,7 @@ export type Guidance = {
   origin: "agent" | "deterministic";
 };
 
-/** A passage the person selected before writing. */
-export type Quote = { quote: string };
-
-export type StageTurn = {
-  id: string;
-  role: "human" | "specialist";
-  body: string;
-  quotes: Quote[];
-  resultNodeId: string | null;
-  createdAt: string;
-  /** Set on a specialist turn that reports a round the platform could not complete. */
-  failed?: true;
-};
+export type { Quote, StageTurn };
 
 /** The stage-1 brief evaluator's verdict. Advisory only — nothing gates on it. */
 export type Evaluation = { ready: boolean; notes: string[] };
@@ -759,13 +764,6 @@ export const api = {
     }),
   guidance: (projectId: string) =>
     request<{ guidance: Guidance }>(`/projects/${projectId}/guidance`),
-  thread: (projectId: string, stage: number) =>
-    request<{
-      turns: StageTurn[];
-      open: { remaining: number; ordinal: number } | null;
-      /** Absent on a hub that does not evaluate this stage yet. */
-      evaluation?: Evaluation | null;
-    }>(`/projects/${projectId}/stages/${stage}/thread`),
   reply: (
     projectId: string,
     stage: number,

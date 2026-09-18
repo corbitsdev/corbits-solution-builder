@@ -17,9 +17,15 @@ import { origin } from "@solutions-builder/app/guard";
 import { ARTIFACT_STAGE, type ArtifactDraft } from "./domain.js";
 import { packageOutlineProblem } from "@solutions-builder/app/deck";
 import { launchProjectRun, soloApprovalFor } from "./command-dispatch.js";
-import { ledgerCommands, recordCommand, projectApprovals, projectFlags, projectQuestions } from "./command-ledger.js";
+import {
+  allCarriedTurns,
+  ledgerCommands,
+  recordCommand,
+  projectApprovals,
+  projectFlags,
+  projectQuestions,
+} from "./command-ledger.js";
 import type { Stage } from "@solutions-builder/app/ledger";
-import { nextQuestion } from "./questions.js";
 import { openDecisionFor } from "./decisions.js";
 import { currentAnchor, projectExecutionStatus } from "./lifecycle-run.js";
 import { activeRun, runsForProject } from "./runs.js";
@@ -429,6 +435,7 @@ export async function readArtifactNode(nodeId: string) {
 export async function listProjects() {
   const { db } = database();
   const projects = await listProjectRecords();
+  const workspaceTenantId = tenantId();
 
   return Promise.all(
     projects.map(async (row) => {
@@ -436,30 +443,25 @@ export async function listProjects() {
       const decision = await openDecisionFor(row.id, current);
       const waits = decision ? [decision] : [];
       // Whose move it is on the current stage. "In progress" alone cannot tell
-      // a list apart: the model writing, a question waiting on the person and
-      // a draft waiting to be approved are all "in progress".
+      // a list apart: a draft waiting to be approved is not the same as an
+      // open interview question — but the question case is a fold of `/hub`
+      // events, so it is left to the client (`tenantId`/`anchorRunId` below);
+      // this only says whether there is a draft to approve.
       const stage = current?.stage ?? null;
-      const [drafts, open] = stage
-        ? await Promise.all([
-            db
-              .select({ id: table.artifactNode.id })
-              .from(table.artifactNode)
-              .where(
-                and(
-                  eq(table.artifactNode.projectId, row.id),
-                  eq(table.artifactNode.stage, stage),
-                  isNull(table.artifactNode.supersededByNodeId),
-                ),
-              )
-              .limit(1),
-            nextQuestion(row.id, stage),
-          ])
-        : [[], null];
-      const turn: "writing" | "question" | "approve" | "idle" = open
-        ? "question"
-        : drafts.length > 0
-          ? "approve"
-          : "idle";
+      const drafts = stage
+        ? await db
+            .select({ id: table.artifactNode.id })
+            .from(table.artifactNode)
+            .where(
+              and(
+                eq(table.artifactNode.projectId, row.id),
+                eq(table.artifactNode.stage, stage),
+                isNull(table.artifactNode.supersededByNodeId),
+              ),
+            )
+            .limit(1)
+        : [];
+      const turn: "writing" | "question" | "approve" | "idle" = drafts.length > 0 ? "approve" : "idle";
       return {
         id: row.id,
         title: row.title,
@@ -467,11 +469,12 @@ export async function listProjects() {
         stage,
         state: current?.state ?? null,
         turn,
-        ...(open ? { question: { ordinal: open.ordinal, remaining: open.remaining } } : {}),
         runId: current?.id ?? null,
         policy: row.policy,
         needsDecision: waits.length > 0,
         waits,
+        tenantId: workspaceTenantId,
+        anchorRunId: stage ? await currentAnchor(row.id) : null,
       };
     }),
   );
@@ -504,6 +507,12 @@ export async function projectDetail(projectId: string, actorPrincipalId: string)
 
   const workspaceTenantId = tenantId();
   const anchorRunId = await currentAnchor(projectId);
+  // The stage-1 opening statement and any turns carried in from another
+  // instance are ledger data, not run events, so the client's fold of the
+  // stage thread (`@solutions-builder/app/stage-thread`) cannot derive them
+  // from `/hub` alone. They ride here instead.
+  const opening = (await ledgerCommands(projectId)).find((command) => command.command === "project.create");
+  const carriedTurns = await allCarriedTurns(projectId);
 
   return {
     project: { ...row, tenantId: workspaceTenantId, anchorRunId },
@@ -521,6 +530,9 @@ export async function projectDetail(projectId: string, actorPrincipalId: string)
     flags,
     questions,
     manifests,
+    opening:
+      opening?.message ? { body: opening.message, createdAt: opening.createdAt } : null,
+    carriedTurns,
   };
 }
 

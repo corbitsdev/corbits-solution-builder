@@ -35,8 +35,10 @@ import { Preparing } from "./preparing.jsx";
 import { clock } from "./elapsed.jsx";
 import { StageDocument } from "./document.jsx";
 import { SELECTABLE_TARGETS } from "@solutions-builder/app/targets";
+import { EVALUATED_STAGE } from "@solutions-builder/app/workflows/stage-loop";
 import type { StageStatus } from "../../run-fold.ts";
 import { approvalCommand, deliverGate, submitThen } from "../../run-signal.ts";
+import { foldEvaluation, foldStageThread, nextOpenQuestion } from "../../stage-thread.ts";
 import type { Stage } from "@solutions-builder/app/ledger";
 
 export { StageDocument, DocumentBody } from "./document.jsx";
@@ -153,10 +155,23 @@ export function StageWorkspace({
    */
   const loadThread = useCallback(async () => {
     try {
-      const result = await api.thread(detail.project.id, stage);
-      setTurns(result.turns);
-      setOpenQuestion(result.open);
-      setEvaluation(result.evaluation ?? null);
+      const carried = detail.carriedTurns.filter((entry) => entry.stage === stage).map((entry) => entry.turn);
+      const [threadTurns, evaluationResult] = await Promise.all([
+        foldStageThread({
+          tenantId: detail.tenantId,
+          anchorRunId: detail.anchorRunId,
+          stage: stage as Stage,
+          nodes: detail.nodes,
+          opening: stage === 1 ? detail.opening : null,
+          carried,
+        }),
+        stage === EVALUATED_STAGE
+          ? foldEvaluation({ tenantId: detail.tenantId, anchorRunId: detail.anchorRunId, stage: stage as Stage })
+          : Promise.resolve(null),
+      ]);
+      setTurns(threadTurns);
+      setOpenQuestion(nextOpenQuestion(threadTurns));
+      setEvaluation(evaluationResult);
     } catch (cause) {
       // An empty thread and a thread that could not be read look identical on
       // screen — and that screen then asks for what the person already said.
@@ -492,6 +507,7 @@ export function StageWorkspace({
                   body: message,
                   quotes,
                   resultNodeId: null,
+                  questions: null,
                   createdAt: new Date().toISOString(),
                 },
               ]);

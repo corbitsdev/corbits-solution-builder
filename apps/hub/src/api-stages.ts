@@ -1,11 +1,8 @@
 import type { Hono } from "hono";
 import { type Stage } from "@solutions-builder/app/ledger";
-import { EVALUATED_STAGE } from "@solutions-builder/app/workflows/stage-loop";
 import { notFound, HostError } from "./errors.js";
 import { projectDetail } from "./projects.js";
 import { roundInference, type PlanDocument } from "./stage-runs.js";
-import { evaluationIn, threadTurns } from "./stage-thread.js";
-import { stageIterations } from "./lifecycle-run.js";
 import { commandFrom } from "./api.js";
 import { readProject } from "./project-records.js";
 import { nextQuestion } from "./questions.js";
@@ -21,20 +18,6 @@ function planDocumentsIn(names: unknown[]): PlanDocument[] {
 
 
 export function registerStageRoutes(api: Hono) {
-  /** The conversation with a stage specialist, oldest turn first. */
-  api.get("/projects/:projectId/stages/:stage/thread", async (context) => {
-    const projectId = context.req.param("projectId");
-    const stage = Number(context.req.param("stage"));
-    const open = await nextQuestion(projectId, stage);
-    const evaluation =
-      stage === EVALUATED_STAGE ? await evaluationIn(await stageIterations(projectId, stage as Stage)) : null;
-    return context.json({
-      turns: await threadTurns(projectId, stage),
-      open: open ? { remaining: open.remaining, ordinal: open.ordinal } : null,
-      evaluation,
-    });
-  });
-
   /**
    * Replying in the conversation.
    *
