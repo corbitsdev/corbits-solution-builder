@@ -114,10 +114,44 @@ async function pollUntil<T>(timeoutMs: number, intervalMs: number, attempt: () =
 }
 
 const checks: { name: string; ok: boolean; detail: string }[] = [];
+let currentHost: Host | undefined;
+let dumpedHostOnFirstFailure = false;
+
 function check(name: string, ok: boolean, detail = ""): boolean {
   checks.push({ name, ok, detail });
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? ` - ${detail}` : ""}`);
+  if (!ok && !dumpedHostOnFirstFailure && currentHost) {
+    dumpedHostOnFirstFailure = true;
+    dumpHostOutput(currentHost);
+  }
   return ok;
+}
+
+/** For each event: `seq type stepId status/error`, reading whichever of those the event carries. */
+function eventLine(event: RunEvent): string {
+  const stepId = event.body["stepId"];
+  const statusOrError = event.body["status"] ?? event.body["error"] ?? event.body["reason"] ?? event.body["message"];
+  return [
+    String(event.seq),
+    event.type,
+    stepId !== undefined ? String(stepId) : "-",
+    statusOrError !== undefined ? String(statusOrError) : "",
+  ]
+    .join(" ")
+    .trimEnd();
+}
+
+function dumpRunEvents(label: string, events: readonly RunEvent[]): void {
+  console.log(`--- ${label} events ---`);
+  for (const event of events) console.log(eventLine(event));
+}
+
+/** Last ~300 lines of the host's stdout/stderr, so a failure shows what the host actually did. */
+function dumpHostOutput(host: Host): void {
+  console.log("--- host stderr ---");
+  console.log(host.stderrRing.get().join("\n"));
+  console.log("--- host stdout ---");
+  console.log(host.stdoutRing.get().join("\n"));
 }
 
 /** Runs one numbered step; a thrown error is a FAIL that does not abort the run. */
@@ -139,9 +173,27 @@ async function step<T>(name: string, run: () => Promise<T>): Promise<T | null> {
 const root = join(import.meta.dir, "..");
 const ENTRY = join(root, "apps", "hub", "src", "server.ts");
 
-type Host = { process: Bun.Subprocess; token: string; port: number };
+/** A capped tail of lines, so a failure dump never grows unbounded. */
+type RingBuffer = { push(chunk: string): void; get(): readonly string[] };
+function makeRingBuffer(limit: number): RingBuffer {
+  let lines: string[] = [];
+  return {
+    push(chunk: string) {
+      lines.push(...chunk.split("\n"));
+      if (lines.length > limit) lines = lines.slice(-limit);
+    },
+    get: () => lines,
+  };
+}
 
-/** Boots the app's own host, which mounts `packages/embed-hub`'s app directly, with no prefix. */
+type Host = { process: Bun.Subprocess; token: string; port: number; stdoutRing: RingBuffer; stderrRing: RingBuffer };
+
+/**
+ * Boots the app's own host, which mounts `packages/embed-hub`'s app directly,
+ * with no prefix. Stdout/stderr are drained into ring buffers (last ~300
+ * lines each) for the whole life of the process, past the handshake, so a
+ * later failure can show what the host actually did.
+ */
 async function startHost(dataDir: string): Promise<Host> {
   const child = Bun.spawn(["bun", "--conditions", "intx-src", ENTRY, "--port", "0"], {
     cwd: root,
@@ -149,6 +201,9 @@ async function startHost(dataDir: string): Promise<Host> {
     stdout: "pipe",
     stderr: "pipe",
   });
+
+  const stdoutRing = makeRingBuffer(300);
+  const stderrRing = makeRingBuffer(300);
 
   const deadline = Date.now() + 150_000;
   let token = "";
@@ -159,19 +214,52 @@ async function startHost(dataDir: string): Promise<Host> {
   while (Date.now() < deadline && !token) {
     const { done, value } = await reader.read();
     if (done) break;
-    buffer += decoder.decode(value, { stream: true });
+    const text = decoder.decode(value, { stream: true });
+    buffer += text;
+    stdoutRing.push(text);
     const match = /launch URL: http:\/\/127\.0\.0\.1:(\d+)\/\?token=([a-f0-9-]+)/.exec(buffer);
     if (match) {
       port = Number(match[1]);
       token = match[2]!;
     }
   }
-  reader.releaseLock();
   if (!token) {
+    reader.releaseLock();
     const stderr = await new Response(child.stderr).text().catch(() => "");
     throw new Error(`the host never reached its handshake - ${stderr.slice(-400) || buffer.slice(-200)}`);
   }
-  return { process: child, token, port };
+
+  // Keep draining both streams in the background for the rest of the run.
+  void (async () => {
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        stdoutRing.push(decoder.decode(value, { stream: true }));
+      }
+    } catch {
+      // process exited / stream closed; nothing more to drain
+    } finally {
+      reader.releaseLock();
+    }
+  })();
+  void (async () => {
+    const stderrReader = child.stderr.getReader();
+    const stderrDecoder = new TextDecoder();
+    try {
+      for (;;) {
+        const { done, value } = await stderrReader.read();
+        if (done) break;
+        stderrRing.push(stderrDecoder.decode(value, { stream: true }));
+      }
+    } catch {
+      // process exited / stream closed; nothing more to drain
+    } finally {
+      stderrReader.releaseLock();
+    }
+  })();
+
+  return { process: child, token, port, stdoutRing, stderrRing };
 }
 
 /**
@@ -348,6 +436,7 @@ async function main(): Promise<void> {
       return;
     }
     check("boot: embedded hub reaches its handshake", true);
+    currentHost = host;
     const origin = `http://127.0.0.1:${host.port}`;
     const { transport, cookieJar } = createTransport(origin, host.token);
 
@@ -500,6 +589,18 @@ async function main(): Promise<void> {
       return events as RunEvent[];
     };
 
+    /**
+     * On a poll timeout for a chat-occurrence step (`draft-1`, `draft-2`,
+     * `gate-N`...), dumps that run's own events, plus the anchor run's
+     * events when the polled run is not the anchor itself.
+     */
+    const dumpTimeoutEvents = async (stepId: string, runId: string): Promise<void> => {
+      if (!workspace || !anchorRunId) return;
+      const { events } = await readWorkflowRunEvents(transport, workspace.tenantId, anchorRunId, runId);
+      dumpRunEvents(`${stepId} in ${runId}`, events as RunEvent[]);
+      if (runId !== anchorRunId) dumpRunEvents(`anchor ${anchorRunId}`, await readAnchorEvents());
+    };
+
     /** Polls a chat occurrence's own run until `stepId` completes, then resolves its output ref. */
     const pollDraft = async (chatRunId: string, stepId: string, timeoutMs = 180_000): Promise<unknown> => {
       if (!workspace || !anchorRunId) throw new Error("no anchor/workspace to poll a draft under");
@@ -507,7 +608,10 @@ async function main(): Promise<void> {
         const { events } = await readWorkflowRunEvents(transport, workspace.tenantId, anchorRunId, chatRunId);
         return stepCompleted(events as RunEvent[], stepId) ?? null;
       });
-      if (!completed) throw new Error(`${stepId} in ${chatRunId} never completed within ${String(timeoutMs)}ms`);
+      if (!completed) {
+        await dumpTimeoutEvents(stepId, chatRunId);
+        throw new Error(`${stepId} in ${chatRunId} never completed within ${String(timeoutMs)}ms`);
+      }
       const ref = (completed.body["output"] as { ref?: string } | undefined)?.ref;
       if (typeof ref !== "string") throw new Error(`${stepId}'s StepCompleted carried no output ref`);
       return resolveStepOutputRef(transport, workspace.tenantId, anchorRunId, chatRunId, ref);
@@ -585,8 +689,12 @@ async function main(): Promise<void> {
     // announcement stub in `apps/hub/src/decisions.ts` is gone) -- then
     // confirm the inbox has it.
     await step("8. mailbox inbox carries an item for the open gate", async () => {
-      if (!project || !anchorRunId) throw new Error("no project/anchor run to notify for");
-      const decision = await openDecisionFor(project.id, anchorRunId, transport);
+      if (!workspace || !anchorRunId) throw new Error("no workspace/anchor run to notify for");
+      // The anchor's deployment lives in the workspace tenant (steps 5-7 read it
+      // there too), not the project's own tenant -- `openDecisionFor`'s
+      // "projectId" is really the scope its `GET /api/tenants/<scope>/...` calls
+      // address, so that scope has to be `workspace.tenantId` here.
+      const decision = await openDecisionFor(workspace.tenantId, anchorRunId, transport);
       if (decision) await notifyDecisionOpen(decision, transport);
       const response = await fetch(`${origin}/api/me/inbox`, {
         headers: { authorization: `Bearer ${host!.token}`, cookie: cookieJar.value },
@@ -613,6 +721,7 @@ async function main(): Promise<void> {
         const current = await readAnchorEvents();
         return stepCompleted(current, gateStepId(1)) ?? null;
       });
+      if (!events && anchorRunId) await dumpTimeoutEvents(gateStepId(1), anchorRunId);
       check(
         "8. approve stage 1 (deliverGate) and poll gate-1 completed",
         events !== null,
@@ -669,5 +778,6 @@ const failed = checks.filter((entry) => !entry.ok);
 console.log(`\nClient-driven end-to-end proof: ${checks.length - failed.length}/${checks.length} checks passed`);
 if (failed.length > 0) {
   console.log(`First failure: ${failed[0]!.name} - ${failed[0]!.detail}`);
+  if (currentHost) dumpHostOutput(currentHost);
 }
 process.exit(failed.length === 0 ? 0 : 1);
