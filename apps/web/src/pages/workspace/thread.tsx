@@ -1,6 +1,67 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { ChatInput, ChatThread, type ChatMessage as UiChatMessage } from "@corbits/react-ui";
 import { Markdown } from "../../markdown.jsx";
+import { stageName } from "../../components.jsx";
+import type { ChatMessage } from "../../stage-mail.ts";
 import { choicesIn } from "./choices.js";
+
+/** A stage-mail turn, rendered as a `@corbits/react-ui` chat message: the
+ *  person's turns on the right, the specialist's on the left. */
+function toUiMessages(messages: readonly ChatMessage[]): UiChatMessage[] {
+  return messages.map((message) => ({
+    id: message.id,
+    role: message.author === "me" ? "user" : "agent",
+    parts: [{ type: "text", text: message.body }],
+    createdAt: message.at,
+  }));
+}
+
+/**
+ * The stage's conversation with its specialist: a mail thread rendered as
+ * chat. The composer is always visible — sending is always possible, whether
+ * or not a draft exists yet, since the specialist is a mail agent that just
+ * answers whatever it is sent.
+ */
+export function StageConversation({
+  stage,
+  messages,
+  value,
+  onValueChange,
+  onSend,
+  working = false,
+  disabled = false,
+  placeholder = "Say what should change…",
+}: {
+  stage: number;
+  messages: readonly ChatMessage[];
+  value: string;
+  onValueChange: (value: string) => void;
+  onSend: () => void;
+  /** The specialist has not replied to the last turn yet. */
+  working?: boolean;
+  disabled?: boolean;
+  placeholder?: string;
+}) {
+  const uiMessages = useMemo(() => toUiMessages(messages), [messages]);
+  return (
+    <div className="stage-conversation">
+      <ChatThread
+        messages={uiMessages}
+        identity={{ name: stageName(stage) }}
+        renderBody={(message) => <Markdown source={message.parts.map((part) => (part.type === "text" ? part.text : "")).join("")} />}
+        empty={<p className="inline-note">No messages yet.</p>}
+      />
+      <ChatInput
+        value={value}
+        onValueChange={onValueChange}
+        onSend={onSend}
+        working={working}
+        disabled={disabled}
+        placeholder={placeholder}
+      />
+    </div>
+  );
+}
 
 /**
  * What the specialist is doing while it writes, in its own stage's terms. One

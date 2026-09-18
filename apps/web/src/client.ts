@@ -7,13 +7,14 @@
  */
 import { APP_VERSION } from "@solutions-builder/app/manifest";
 import { triggerWorkflowRun } from "@intx/hub-client";
-import { AUTHORITIES, type Authority } from "@solutions-builder/app/ledger";
+import { AUTHORITIES, type Authority, type Stage } from "@solutions-builder/app/ledger";
 import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
 import {
   ApiError as HubApiError,
   createArtifact as installerCreateArtifact,
   createProject as installerCreateProject,
   ensureLifecycleDeployment as installerEnsureLifecycleDeployment,
+  ensureSpecialistDeployment,
   getArtifact as installerGetArtifact,
   install as installerInstall,
   installState as installerInstallState,
@@ -43,7 +44,7 @@ import { MATERIAL_KIND } from "@solutions-builder/app/artifacts";
  * mail-chat specialist's reply is the draft, held only in the mailbox, until
  * approval turns it into the stage's document of record.
  */
-const STAGE_DRAFT_KIND: Readonly<Record<number, string>> = {
+export const STAGE_DRAFT_KIND: Readonly<Record<number, string>> = {
   1: "problem_brief",
   2: "solution_constraints",
   3: "chosen_approach",
@@ -961,4 +962,24 @@ export const api = {
       installerFailure(cause);
     }
   },
+  /**
+   * Makes sure `projectId`'s stage-`stage` specialist is deployed, the same
+   * transport/sidecar/closure/gitPush plumbing `createProject` uses for the
+   * lifecycle deployment above, and hands back its mail address. Deploys
+   * lazily, once per stage per project (`ensureSpecialistDeployment` itself
+   * is idempotent against a live deployment on the same asset).
+   */
+  ensureStageAgent: (projectId: string, stage: number) =>
+    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      const status = await request<HostStatus>("/status");
+      return ensureSpecialistDeployment(
+        transport,
+        sidecarCapabilityOf(status),
+        await lifecycleClosureSource(),
+        lifecycleGitPush,
+        workspaceTenantId,
+        projectId,
+        stage as Stage,
+      );
+    }),
 };
