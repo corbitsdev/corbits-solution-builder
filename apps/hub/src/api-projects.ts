@@ -34,7 +34,7 @@ import {
 import { bytesOf } from "./source-material.js";
 import { deckBytesOf, deckForPackage } from "./deck.js";
 import { readProject } from "./project-records.js";
-import { attachMaterial, MATERIAL_KIND, materialText, type IncomingFile } from "./source-material.js";
+import { attachMaterial, MATERIAL_KIND, type IncomingFile } from "./source-material.js";
 /** A title as a file-name segment: lower case, hyphens, nothing a shell minds. */
 function slugOf(title: string): string {
   return (
@@ -200,23 +200,6 @@ export function registerProjectRoutes(api: Hono) {
       approvals: detail.approvals.length,
       lastActivityAt: stamps.sort().at(-1) ?? project.createdAt.toISOString(),
     });
-  });
-
-  api.get("/artifacts/:nodeId", async (context) =>
-    context.json(await readArtifactNode(context.req.param("nodeId"))),
-  );
-
-  /**
-   * What the specialists are handed for one piece of material — the text of
-   * what can be read, or the note that it cannot — so the person can read
-   * exactly what the specialist reads, caps and all.
-   */
-  api.get("/artifacts/:nodeId/reading", async (context) => {
-    const { node, content } = await readArtifactNode(context.req.param("nodeId"));
-    if (node.kind !== MATERIAL_KIND) {
-      throw new HostError("validation_failed", "Only material the person attached has a reading; documents are read as written.");
-    }
-    return context.json({ text: await materialText(node, content) });
   });
 
   /**

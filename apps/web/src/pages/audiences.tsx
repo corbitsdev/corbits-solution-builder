@@ -171,11 +171,14 @@ function Stakeholders({
 
 export function AudiencePackages({
   detail,
+  tenantId,
   onChanged,
   drafting,
   onDraftPackages,
 }: {
   detail: ProjectDetail;
+  /** The workspace tenant artifacts are recorded under. */
+  tenantId: string;
   onChanged: () => void;
   /** A round is under way: the rows say so instead of offering another. */
   drafting: boolean;
@@ -243,13 +246,13 @@ export function AudiencePackages({
       return;
     }
     let cancelled = false;
-    void api.artifact(selected.id).then((result) => {
+    void api.artifactContent(tenantId, selected.id).then((result) => {
       if (!cancelled) setContent(result.content);
     });
     return () => {
       cancelled = true;
     };
-  }, [selected?.id]);
+  }, [selected?.id, tenantId]);
 
   // A decision belongs to the review it was recorded on. Reopening the stage
   // starts a new run and a clean review; what was decided before is history,

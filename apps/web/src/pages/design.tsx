@@ -85,6 +85,7 @@ export function DesignFeedbackView({
   designs,
   feedbackByNode,
   contentByNode,
+  tenantId,
   approval,
   onChanged,
   revise,
@@ -93,6 +94,8 @@ export function DesignFeedbackView({
   designs: ArtifactNode[];
   feedbackByNode: Map<string, { feedback?: DesignFeedback; prompt?: string }>;
   contentByNode: Map<string, string>;
+  /** The workspace tenant artifacts are recorded under. */
+  tenantId: string;
   approval: DesignApproval;
   onChanged: () => void;
   /** Delivers the revision prompt to the run as a `stage.draft` signal. */
@@ -262,7 +265,7 @@ export function DesignFeedbackView({
             <span>
               Reviewing {design.title}, version {design.version}.
             </span>
-            <PrintButton node={design} content={null} />
+            <PrintButton node={design} tenantId={tenantId} content={content || null} />
           </p>
         ) : null}
 

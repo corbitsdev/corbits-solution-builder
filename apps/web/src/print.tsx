@@ -21,7 +21,7 @@ import { api, type ArtifactNode } from "./client.js";
 import { Button, documentName, stageName } from "./components.jsx";
 import { Markdown } from "./markdown.jsx";
 
-export type PrintTarget = { node: ArtifactNode; content: string | null };
+export type PrintTarget = { node: ArtifactNode; content: string | null; tenantId: string };
 
 let target: PrintTarget | null = null;
 const listeners = new Set<() => void>();
@@ -76,17 +76,25 @@ function isPage(node: ArtifactNode): boolean {
 }
 
 /** Opens the document for printing. `content` may be null; it is fetched then. */
-export function printArtifact(node: ArtifactNode, content: string | null = null): void {
+export function printArtifact(node: ArtifactNode, tenantId: string, content: string | null = null): void {
   if (isPage(node)) {
     window.location.assign(api.printPage(node.id));
     return;
   }
-  set({ node, content });
+  set({ node, content, tenantId });
 }
 
-export function PrintButton({ node, content }: { node: ArtifactNode; content: string | null }) {
+export function PrintButton({
+  node,
+  tenantId,
+  content,
+}: {
+  node: ArtifactNode;
+  tenantId: string;
+  content: string | null;
+}) {
   return (
-    <Button variant="ghost" onClick={() => printArtifact(node, content)}>
+    <Button variant="ghost" onClick={() => printArtifact(node, tenantId, content)}>
       <Printer aria-hidden="true" />
       Print or save as PDF
     </Button>
@@ -172,12 +180,16 @@ function useFetched(shown: PrintTarget): string | null {
     if (known !== null) return;
     let cancelled = false;
     void api
-      .artifact(shown.node.id)
+      .artifactContent(shown.tenantId, shown.node.id)
       .then((result) => {
-        if (!cancelled && target?.node.id === shown.node.id) set({ node: shown.node, content: result.content });
+        if (!cancelled && target?.node.id === shown.node.id) {
+          set({ node: shown.node, content: result.content, tenantId: shown.tenantId });
+        }
       })
       .catch(() => {
-        if (!cancelled && target?.node.id === shown.node.id) set({ node: shown.node, content: "" });
+        if (!cancelled && target?.node.id === shown.node.id) {
+          set({ node: shown.node, content: "", tenantId: shown.tenantId });
+        }
       });
     return () => {
       cancelled = true;

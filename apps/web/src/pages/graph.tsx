@@ -128,12 +128,15 @@ export function ArtifactGraph({
   nodes,
   edges,
   contents,
+  tenantId,
   openedId: openedIdProp,
   onAddMaterial,
 }: {
   nodes: ArtifactNode[];
   edges: ArtifactEdge[];
   contents?: Record<string, string> | undefined;
+  /** The workspace tenant artifacts are recorded under. */
+  tenantId: string;
   openedId?: string;
   /** Hands files over as material, mid-project. Absent where nothing can be added. */
   onAddMaterial?: ((files: File[]) => Promise<void>) | undefined;
@@ -212,6 +215,7 @@ export function ArtifactGraph({
           nodes={nodes}
           edges={edges}
           contents={contents}
+          tenantId={tenantId}
           onOpen={openNode}
         />
       </article>
@@ -224,12 +228,15 @@ function ArtifactReader({
   nodes,
   edges,
   contents,
+  tenantId,
   onOpen,
 }: {
   node: ArtifactNode;
   nodes: ArtifactNode[];
   edges: ArtifactEdge[];
   contents?: Record<string, string> | undefined;
+  /** The workspace tenant artifacts are recorded under. */
+  tenantId: string;
   onOpen: (id: string) => void;
 }) {
   const injected = contents?.[node.id];
@@ -243,7 +250,7 @@ function ArtifactReader({
     let cancelled = false;
     setContent(null);
     void api
-      .artifact(node.id)
+      .artifactContent(tenantId, node.id)
       .then((result) => {
         if (!cancelled) setContent(result.content);
       })
@@ -253,7 +260,7 @@ function ArtifactReader({
     return () => {
       cancelled = true;
     };
-  }, [node.id, contents]);
+  }, [node.id, contents, tenantId]);
 
   const replaced = replacedByVersion(node, nodes);
   const kicker =
@@ -274,7 +281,9 @@ function ArtifactReader({
           <h2>{documentLabel(node, nodes)}</h2>
           <p>{kicker}</p>
         </div>
-        {node.kind === "audience_deck" || node.kind === "build_evidence" ? null : <PrintButton node={node} content={content} />}
+        {node.kind === "audience_deck" || node.kind === "build_evidence" ? null : (
+          <PrintButton node={node} tenantId={tenantId} content={content} />
+        )}
       </header>
       <div className="document-body">
         {content === null ? (
@@ -454,47 +463,7 @@ function Material({ node, content }: { node: ArtifactNode; content: string }) {
       {node.title} · {mediaType} · {size}. Kept with the project.
     </p>
   );
-  return (
-    <>
-      {shown}
-      <Reading nodeId={node.id} />
-    </>
-  );
-}
-
-/**
- * What the specialists are handed for this file, word for word: a
- * spreadsheet's values and structure, a PDF's text, or the note that nothing
- * here reads it. Folded, and fetched when opened, because the file itself is
- * what the person came to see; this is for checking that the part that
- * matters made it through before a draft leans on it.
- */
-function Reading({ nodeId }: { nodeId: string }) {
-  const [text, setText] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const load = () => {
-    if (text !== null || error !== null) return;
-    api
-      .materialReading(nodeId)
-      .then((result) => setText(result.text))
-      .catch((cause) => setError(cause instanceof ApiFailure ? cause.detail.message : String(cause)));
-  };
-  return (
-    <details className="document-fold material-reading" onToggle={(event) => event.currentTarget.open && load()}>
-      <summary className="document-fold-summary">
-        <span className="document-fold-title">What the specialists can read of this</span>
-      </summary>
-      {error ? (
-        <p className="inline-note">{error}</p>
-      ) : text === null ? (
-        <p className="inline-note">Loading…</p>
-      ) : (
-        <div className="artifact">
-          <pre>{text}</pre>
-        </div>
-      )}
-    </details>
-  );
+  return shown;
 }
 
 /**

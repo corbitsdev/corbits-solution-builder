@@ -42,6 +42,7 @@ export function StageDocument({
   node,
   versions,
   content,
+  tenantId,
   turns,
   openQuestion,
   evaluation = null,
@@ -59,6 +60,8 @@ export function StageDocument({
   node: ArtifactNode;
   versions: ArtifactNode[];
   content: string;
+  /** The workspace tenant artifacts are recorded under. */
+  tenantId: string;
   turns: StageTurn[];
   /** Set while the specialist is still waiting on an answer. */
   openQuestion: { remaining: number; ordinal: number } | null;
@@ -100,7 +103,7 @@ export function StageDocument({
     if (!previous) return;
     let cancelled = false;
     void api
-      .artifact(previous.id)
+      .artifactContent(tenantId, previous.id)
       .then((result) => {
         if (!cancelled) setPreviousContent(result.content);
       })
@@ -108,7 +111,7 @@ export function StageDocument({
     return () => {
       cancelled = true;
     };
-  }, [previous?.id]);
+  }, [previous?.id, tenantId]);
   // Closed by default. While the specialist is still asking, the document is
   // the thing being written rather than the thing being read, and a wall of
   // draft beside a question is what made this feel like homework.
@@ -464,7 +467,7 @@ export function StageDocument({
                 <span>Changes since v{previous.version}</span>
               </label>
             ) : null}
-            <PrintButton node={node} content={content || null} />
+            <PrintButton node={node} tenantId={tenantId} content={content || null} />
           </div>
         </header>
         <div className="document-body" data-tour="document-body" onMouseUp={attachSelection}>

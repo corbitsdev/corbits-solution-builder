@@ -208,6 +208,7 @@ function Conversation({ withDocument }: { withDocument?: boolean }) {
       node={node}
       versions={[node]}
       content={brief}
+      tenantId="demo"
       turns={turns}
       openQuestion={{ remaining: 4, ordinal: 1 }}
       // Renders the evaluator's ready cue on the approve control, so the
@@ -256,6 +257,7 @@ const screens: Record<string, ReactNode> = {
           nodes={[node]}
           edges={[]}
           contents={{ nod_1: brief }}
+          tenantId="demo"
         />
       }
     />
@@ -271,6 +273,7 @@ const screens: Record<string, ReactNode> = {
           nodes={[replacedBrief, currentBrief]}
           edges={[{ childNodeId: "nod_2", sourceNodeId: "nod_1" }]}
           contents={{ nod_1: brief, nod_2: brief }}
+          tenantId="demo"
         />
       }
     />

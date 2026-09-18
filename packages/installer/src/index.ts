@@ -6,6 +6,7 @@
  * database or an Interchange internal itself; every platform write goes
  * through a real hub route.
  */
+export * from "./artifacts.js";
 export * from "./designer-settings.js";
 export * from "./errors.js";
 export * from "./hub.js";

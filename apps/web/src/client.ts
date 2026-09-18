@@ -12,6 +12,7 @@ import {
   ApiError as HubApiError,
   createProject as installerCreateProject,
   ensureLifecycleDeployment as installerEnsureLifecycleDeployment,
+  getArtifact as installerGetArtifact,
   install as installerInstall,
   installState as installerInstallState,
   installProjectAuthority,
@@ -781,10 +782,13 @@ export const api = {
       await installerUpdateProject(transport, projectId, { deletedAt: new Date() });
       return { ok: true as const };
     }),
-  artifact: (nodeId: string) =>
-    request<{ node: ArtifactNode; content: string }>(`/artifacts/${nodeId}`),
-  /** Exactly what the specialists are handed for an attached file. */
-  materialReading: (nodeId: string) => request<{ text: string }>(`/artifacts/${nodeId}/reading`),
+  /** The workspace tenant artifacts are recorded under; resolved once and threaded down as a prop. */
+  workspaceTenantId: () => resolveWorkspace(createHubTransport()).then((workspace) => workspace?.tenantId ?? null),
+  /** An artifact's current content, over the mounted `@corbits/artifacts` module — no host route left. */
+  artifactContent: async (tenantId: string, nodeId: string): Promise<{ content: string }> => {
+    const artifact = await installerGetArtifact(createHubTransport(), tenantId, nodeId);
+    return { content: artifact?.content ?? "" };
+  },
   /** Saves a package's already-recorded slides into the Downloads folder; says where. The host does not build them. */
   saveSlidesFor: (packageNodeId: string) =>
     post<{ path: string; bytes: number; nodeId: string }>(`/artifacts/${packageNodeId}/slides/save`, {}),

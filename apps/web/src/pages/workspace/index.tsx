@@ -51,6 +51,7 @@ export function StageWorkspace({
   detail,
   standing = null,
   draftOpen = true,
+  tenantId,
   onChanged,
   onOpenSettings,
   onOpenDecisions,
@@ -59,6 +60,8 @@ export function StageWorkspace({
   /** Where the run stands, folded from `/hub` events — not from GET `/projects/:id`. */
   standing?: StageStatus | null;
   draftOpen?: boolean;
+  /** The workspace tenant artifacts are recorded under. */
+  tenantId: string;
   onChanged: () => void;
   onOpenSettings: () => void;
   onOpenDecisions?: () => void;
@@ -132,7 +135,7 @@ export function StageWorkspace({
     }
     let cancelled = false;
     void api
-      .artifact(active.id)
+      .artifactContent(tenantId, active.id)
       .then((result) => {
         if (!cancelled) setContent(result.content);
       })
@@ -142,7 +145,7 @@ export function StageWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [active?.id]);
+  }, [active?.id, tenantId]);
 
   /**
    * Reads the stage's conversation.
@@ -428,7 +431,7 @@ export function StageWorkspace({
         </Screen>
       ) : null}
 
-      {stage === 4 ? <DesignPanel detail={detail} standing={standing} onChanged={onChanged} /> : null}
+      {stage === 4 ? <DesignPanel detail={detail} standing={standing} tenantId={tenantId} onChanged={onChanged} /> : null}
 
       {/* The stage fills the window and clips, so a stage that is a stack of
           screens rather than the document layout needs a region of its own
@@ -439,6 +442,7 @@ export function StageWorkspace({
         <div className="stage-scroll">
           <AudiencePackages
             detail={detail}
+            tenantId={tenantId}
             onChanged={onChanged}
             drafting={busy === "draft"}
             onDraftPackages={(audiences) =>
@@ -478,6 +482,7 @@ export function StageWorkspace({
       {requirements ? (
         <ProductRequirements
           node={requirements}
+          tenantId={tenantId}
           canRewrite={inProgress}
           busy={busy === "draft"}
           onRewrite={() =>
@@ -501,7 +506,7 @@ export function StageWorkspace({
         />
       ) : null}
 
-      {panelReviews.length > 0 ? <PanelReviews reviews={panelReviews} /> : null}
+      {panelReviews.length > 0 ? <PanelReviews reviews={panelReviews} tenantId={tenantId} /> : null}
         </div>
       ) : null}
 
@@ -512,6 +517,7 @@ export function StageWorkspace({
           draftOpen={draftOpen}
           versions={stageNodes}
           content={content}
+          tenantId={tenantId}
           onSelectVersion={setSelectedNode}
           onAddMaterial={inProgress ? attach : undefined}
           busy={busy}
@@ -576,7 +582,18 @@ export function StageWorkspace({
 }
 
 /** Loads the stage-4 design history and its feedback, then renders the flow. */
-function DesignPanel({ detail, standing, onChanged }: { detail: ProjectDetail; standing: StageStatus | null; onChanged: () => void }) {
+function DesignPanel({
+  detail,
+  standing,
+  tenantId,
+  onChanged,
+}: {
+  detail: ProjectDetail;
+  standing: StageStatus | null;
+  /** The workspace tenant artifacts are recorded under. */
+  tenantId: string;
+  onChanged: () => void;
+}) {
   const [designs, setDesigns] = useState<ArtifactNode[]>([]);
   const [feedbackByNode, setFeedbackByNode] = useState(
     new Map<string, { feedback?: DesignFeedback; prompt?: string }>(),
@@ -609,12 +626,12 @@ function DesignPanel({ detail, standing, onChanged }: { detail: ProjectDetail; s
       result.designs.map(async (design) => {
         // An unreadable version is not an empty one. Saying so on the version
         // itself keeps the rest of the history usable.
-        const artifact = await api.artifact(design.id).catch(() => null);
+        const artifact = await api.artifactContent(tenantId, design.id).catch(() => null);
         return [design.id, artifact?.content ?? UNREADABLE] as const;
       }),
     );
     setContentByNode(new Map(contents));
-  }, [detail.project.id, detail.nodes.length]);
+  }, [detail.project.id, detail.nodes.length, tenantId]);
 
   useEffect(() => {
     void load();
@@ -635,6 +652,7 @@ function DesignPanel({ detail, standing, onChanged }: { detail: ProjectDetail; s
         designs={designs}
         feedbackByNode={feedbackByNode}
         contentByNode={contentByNode}
+        tenantId={tenantId}
         approval={{
           soloApproval: detail.soloApproval,
           canApprove: detail.current?.state === "in_progress",
@@ -1262,11 +1280,14 @@ function LiveOutput({ startedAt, text }: { startedAt: string | null; text: strin
  */
 function ProductRequirements({
   node,
+  tenantId,
   canRewrite,
   busy,
   onRewrite,
 }: {
   node: ArtifactNode;
+  /** The workspace tenant artifacts are recorded under. */
+  tenantId: string;
   canRewrite: boolean;
   busy: boolean;
   onRewrite: () => void;
@@ -1276,7 +1297,7 @@ function ProductRequirements({
     let cancelled = false;
     setContent(null);
     void api
-      .artifact(node.id)
+      .artifactContent(tenantId, node.id)
       .then((result) => {
         if (!cancelled) setContent(result.content);
       })
@@ -1286,7 +1307,7 @@ function ProductRequirements({
     return () => {
       cancelled = true;
     };
-  }, [node.id]);
+  }, [node.id, tenantId]);
   return (
     <Screen
       title="Product requirements"
@@ -1314,7 +1335,7 @@ function ProductRequirements({
   );
 }
 
-function PanelReviews({ reviews }: { reviews: ArtifactNode[] }) {
+function PanelReviews({ reviews, tenantId }: { reviews: ArtifactNode[]; tenantId: string }) {
   const live = reviews.filter((node) => node.supersededByNodeId === null);
   const [openId, setOpenId] = useState<string | null>(live[0]?.id ?? null);
   const [contents, setContents] = useState(new Map<string, string>());
@@ -1323,7 +1344,7 @@ function PanelReviews({ reviews }: { reviews: ArtifactNode[] }) {
     let cancelled = false;
     void Promise.all(
       live.map(async (node) => {
-        const result = await api.artifact(node.id).catch(() => null);
+        const result = await api.artifactContent(tenantId, node.id).catch(() => null);
         return [node.id, result?.content ?? UNREADABLE] as const;
       }),
     ).then((entries) => {
@@ -1332,7 +1353,7 @@ function PanelReviews({ reviews }: { reviews: ArtifactNode[] }) {
     return () => {
       cancelled = true;
     };
-  }, [live.map((node) => node.id).join(",")]);
+  }, [live.map((node) => node.id).join(","), tenantId]);
 
   const open = live.find((node) => node.id === openId) ?? live[0] ?? null;
   const body = open ? (contents.get(open.id) ?? "") : "";

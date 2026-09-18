@@ -333,6 +333,9 @@ export function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<ProjectDetail | null>(null);
   const [standing, setStanding] = useState<StageStatus | null>(null);
+  // Resolved once and threaded down as a prop: every artifact read goes
+  // through `@corbits/artifacts` over `/hub`, which is tenant-scoped.
+  const [tenantId, setTenantId] = useState<string | null>(null);
   // The artifact the Artifacts panel opens on, when the rail sent us there.
   const [openedArtifact, setOpenedArtifact] = useState<string | null>(null);
   // Guidance describes one project at one moment. Showing yesterday's
@@ -365,9 +368,10 @@ export function App() {
       // run never set `status` and the boot screen never went away. Until the
       // install, an uninstalled workspace is an empty one.
       const [statusResult, providersResult] = await Promise.all([api.status(), api.providers()]);
-      const [decisionsResult, projectsResult] = await Promise.all([
+      const [decisionsResult, projectsResult, tenantIdResult] = await Promise.all([
         api.decisions().catch(emptyUntilInstalled({ decisions: [] })),
         api.projects().catch(emptyUntilInstalled({ projects: [] })),
+        api.workspaceTenantId().catch(() => null),
       ]);
       setStatus(statusResult);
       setDecisions(decisionsResult.decisions);
@@ -375,6 +379,7 @@ export function App() {
       setProviders(providersResult.providers);
       setApiKeyProviders(providersResult.apiKeyProviders);
       setOauthCandidates(providersResult.oauthCandidates);
+      setTenantId(tenantIdResult);
       setOffline(false);
     } catch {
       // The host going away is a visible state, not a blank screen.
@@ -803,6 +808,7 @@ export function App() {
                     detail={detail}
                     standing={standing}
                     draftOpen={draftOpen}
+                    tenantId={tenantId ?? ""}
                     onChanged={reloadDetail}
                     onOpenSettings={() => setView("settings")}
                     onOpenDecisions={() => setView("decisions")}
@@ -812,6 +818,7 @@ export function App() {
                 <ArtifactGraph
                   nodes={graph.nodes}
                   edges={graph.edges}
+                  tenantId={tenantId ?? ""}
                   {...(openedArtifact ? { openedId: openedArtifact } : {})}
                   onAddMaterial={async (files) => {
                     await api.attachMaterial(detail.project.id, files);
