@@ -197,6 +197,9 @@ export async function sendStageMail(
   }
   const content = JSON.stringify(intent);
   const trigger = await triggerWorkflowRun(transport, project.tenantId, project.anchorRunId, { content });
+  // CL-8605: no messageId/inReplyTo/references in this body either — same
+  // route-minted-id caveat as `decision-notify.ts`'s send. Best-effort mirror
+  // only, so swallow rather than surface it.
   await transport
     .fetch("POST", "/api/me/inbox/send", { to: [trigger.address], subject: intent.command, body: content })
     .catch(() => {});

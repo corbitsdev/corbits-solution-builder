@@ -67,6 +67,13 @@ export async function notifyDecisionOpen(
     const holders = await grantHolders(transport, decision.projectId, resource, action);
     if (holders.length === 0) return;
 
+    // CL-8605: this body carries no messageId/inReplyTo/references — the
+    // route mints its own Message-ID from the session's resolved sender
+    // address (`@corbits/mailbox`'s `/me/inbox/send`, via
+    // `packages/embed-hub`'s `principalAddress`), never from anything sent
+    // here. A malformed tenant domain can still make that minted id fail the
+    // route's own `assertMsgId` and 500 uncaught; the catch below is the only
+    // guard this call can offer against that.
     await transport.fetch("POST", "/api/me/inbox/send", {
       to: holders.map((holder) => holder.address),
       subject: `${marker} ${decision.title}`,
