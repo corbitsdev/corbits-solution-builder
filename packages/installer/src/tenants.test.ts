@@ -23,10 +23,18 @@ function tenantRow(id: string, parentId: string | null) {
 function fakeTransport(rows: ReturnType<typeof tenantRow>[]): Transport {
   return {
     async fetch<T>(method: string, path: string): Promise<T> {
-      const [pathname, query] = path.split("?");
-      if (method === "GET" && pathname === "/api/tenants") {
-        const parentId = new URLSearchParams(query).get("parentId");
-        return rows.filter((row) => row.parentId === parentId) as T;
+      const [pathname] = path.split("?");
+      if (method === "GET" && pathname === "/api/me/principals") {
+        return {
+          data: rows.map((row) => ({
+            principalId: `pr_${row.id}`,
+            tenantId: row.id,
+            tenantSlug: row.slug,
+            kind: "user",
+            status: "active",
+          })),
+          nextCursor: null,
+        } as T;
       }
       const match = /^\/api\/tenants\/([^/]+)$/.exec(pathname ?? "");
       if (method === "GET" && match) {

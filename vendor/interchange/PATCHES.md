@@ -248,25 +248,6 @@ list/rollback routes, gated the same way.
 **Kill date.** 2026-10-16. Tracked as
 [INTR-569](https://linear.app/abklabs/issue/INTR-569).
 
-## `packages/hub-api/src/routes/tenants.ts` — `GET /api/tenants?parentId=`
-
-**Why.** CL-8075: the host listed a project's child tenants by reading the
-`tenant` table directly (`listChildTenants` in `hub-gaps.ts`), because
-`GET /api/me/principals` lists the caller's own memberships, not the tenants
-under a given parent.
-
-**What changed.** `createTenantRoutes` gains `GET /`, requiring `?parentId=`
-and membership in that parent tenant, returning every tenant whose
-`parent_id` matches it, oldest first. Unpaginated, matching the asset list
-route's own bare-array shape (the workspace's project count does not
-approach page territory).
-
-**Upstream-able.** Yes; it fills the same gap `POST /` already implies
-(`parentId` is an accepted create field with no matching list).
-
-**Kill date.** 2026-10-16. Tracked as
-[INTR-570](https://linear.app/abklabs/issue/INTR-570).
-
 ## `packages/hub-api/src/routes/assets.ts` — `POST /:assetId/tree`, `GET /:assetId/blob`
 
 **Why.** CL-8075: the hub creates a `workflow` (and `skill`) asset over HTTP

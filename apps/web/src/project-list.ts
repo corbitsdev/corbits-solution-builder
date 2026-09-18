@@ -3,7 +3,8 @@
  * hub -- no host DB read.
  *
  * Name and created date come off the project's own tenant row
- * (`listProjectRecords`, already the hub's `GET /api/tenants?parentId=`).
+ * (`listProjectRecords`, folded from the caller's own memberships over
+ * `GET /api/me/principals`, the same as workbench).
  * Where each stands comes off the run fold the rest of the client already
  * uses (`./run-fold.ts`), against the project tenant's own lifecycle
  * deployment. This is a coarser read than the host's `/projects` route: it

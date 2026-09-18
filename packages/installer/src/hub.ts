@@ -130,9 +130,20 @@ export async function getTenant(transport: Transport, scope: string): Promise<Hu
   }
 }
 
-/** Every tenant whose parent is `parentId`, oldest first. A bare array; this route does not paginate. */
+/**
+ * Every tenant whose parent is `parentId`, oldest first: read off the
+ * caller's own memberships (`/api/me/principals`, stock) and filtered
+ * client-side, the same way workbench's `listWorkbenchTenants` lists a
+ * bench's children -- there is no stock route to list a tenant's children
+ * directly.
+ */
 export async function listChildTenants(transport: Transport, parentId: string): Promise<HubTenant[]> {
-  return transport.fetch<HubTenant[]>("GET", `/api/tenants?parentId=${encodeURIComponent(parentId)}`);
+  const memberships = await list<Membership>(transport, "/api/me/principals");
+  const mine = memberships.filter((entry) => entry.kind === "user" && entry.status === "active");
+  const tenants = await Promise.all(mine.map((entry) => getTenant(transport, entry.tenantId)));
+  return tenants
+    .filter((tenant): tenant is HubTenant => tenant !== null && tenant.parentId === parentId)
+    .sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
 }
 
 export async function patchTenant(

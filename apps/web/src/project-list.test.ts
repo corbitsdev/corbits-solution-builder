@@ -9,9 +9,10 @@ type RunEvent = { seq: number; type: string; body: Record<string, unknown> };
 
 /**
  * Serves exactly the calls `listProjectSummaries` makes: workspace
- * resolution, the workspace's child tenants (project records), each
- * project's deployments, and each deployment's run events -- the same
- * routes `run-fold.test.ts` fakes for the fold itself.
+ * resolution, the caller's own memberships (`/api/me/principals`, which
+ * `listChildTenants` filters by parent tenant), each membership's tenant
+ * row, each project's deployments, and each deployment's run events --
+ * the same routes `run-fold.test.ts` fakes for the fold itself.
  */
 function fakeTransport(args: {
   projects: { id: string; name: string; config: Record<string, unknown>; createdAt: string }[];
@@ -20,19 +21,30 @@ function fakeTransport(args: {
 }): Transport {
   return {
     async fetch<T>(_method: string, path: string): Promise<T> {
-      const [pathname, query] = path.split("?");
-      const params = new URLSearchParams(query);
+      const [pathname] = path.split("?");
       if (pathname === "/api/me") return { id: "usr_1" } as T;
       if (pathname === "/api/me/principals") {
         return {
           data: [
             { principalId: "pr_1", tenantId: "tnt_ws", tenantSlug: "solutions-builder", kind: "user", status: "active" },
+            ...args.projects.map((project) => ({
+              principalId: `pr_${project.id}`,
+              tenantId: project.id,
+              tenantSlug: project.id,
+              kind: "user",
+              status: "active",
+            })),
           ],
           nextCursor: null,
         } as T;
       }
-      if (pathname === "/api/tenants" && params.get("parentId") === "tnt_ws") {
-        return args.projects as T;
+      if (pathname === "/api/tenants/tnt_ws") {
+        return { id: "tnt_ws", name: "Solutions Builder", slug: "solutions-builder", parentId: null, createdAt: AT } as T;
+      }
+      const tenantMatch = /^\/api\/tenants\/([^/]+)$/.exec(pathname ?? "");
+      if (tenantMatch) {
+        const project = args.projects.find((row) => row.id === tenantMatch[1]);
+        if (project) return { ...project, slug: project.id, parentId: "tnt_ws", domain: `${project.id}.localhost` } as T;
       }
       const deployMatch = /^\/api\/tenants\/([^/]+)\/workflows\/deployments$/.exec(pathname ?? "");
       if (deployMatch) return (args.deployments[deployMatch[1]!] ?? []) as T;
