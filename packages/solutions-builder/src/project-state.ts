@@ -10,7 +10,7 @@
  * drifting apart.
  */
 import { applyEvent, emptyState, type RunState } from "@intx/workflow";
-import { stageOfStepId } from "./workflows/stage-loop.js";
+import { stageOfSignal, stageOfStepId } from "./workflows/stage-loop.js";
 import { NAME_STEP_ID } from "./workflows/project-lifecycle.js";
 import type { Stage } from "./ledger.js";
 
@@ -25,6 +25,42 @@ export type RunEvent = {
   readonly body: Record<string, unknown>;
 };
 
+/** One decision a gate signal carried, as committed on the run — no ledger turn behind it. */
+export type FoldedApproval = {
+  readonly runId: string;
+  readonly stage: Stage;
+  readonly command: string;
+  readonly decision: string;
+  readonly audienceName: string | null;
+  readonly rationale: string | null;
+  readonly at: string | null;
+  readonly versions: { versionId: string; contentHash: string }[];
+};
+
+/** One decision flag a gate signal raised, as committed on the run. */
+export type FoldedFlag = {
+  readonly runId: string;
+  readonly id: string;
+  readonly trigger: string;
+  readonly classification: string;
+  readonly evidence: unknown;
+  readonly chosenRoute: number | null;
+  readonly rejectedRoutes: unknown;
+  readonly at: string | null;
+};
+
+/** One worker question a run raised, joined to its answer once one lands. */
+export type FoldedQuestion = {
+  readonly runId: string;
+  readonly id: string;
+  readonly originId: string;
+  readonly kind: string;
+  readonly prompt: string;
+  readonly scopeImpact: unknown;
+  readonly at: string | null;
+  readonly answer: { readonly answer: string; readonly grantedCapabilities: unknown; readonly at: string | null } | null;
+};
+
 export type FoldedRun = {
   readonly runId: string;
   readonly state: RunState;
@@ -32,24 +68,102 @@ export type FoldedRun = {
   readonly lastAt: number | null;
   /** When each step's latest attempt started, by step id: how long a step has been at it. */
   readonly stepStartedAt: ReadonlyMap<string, number>;
+  /** Every gate decision this run's committed signals carried, oldest first. */
+  readonly approvals: readonly FoldedApproval[];
+  /** Every decision flag this run's committed signals raised, oldest first. */
+  readonly flags: readonly FoldedFlag[];
+  /** Every worker question this run raised, oldest first, joined to its answer. */
+  readonly questions: readonly FoldedQuestion[];
 };
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" ? (value as Record<string, unknown>) : null;
+}
 
 /** Folds one run's committed events into its current state. */
 export function foldRun(runId: string, events: readonly RunEvent[]): FoldedRun {
   let state = emptyState(runId);
   let lastAt: number | null = null;
   const stepStartedAt = new Map<string, number>();
+  const approvals: FoldedApproval[] = [];
+  const flags: FoldedFlag[] = [];
+  const questions: FoldedQuestion[] = [];
+  const answers = new Map<string, { answer: string; grantedCapabilities: unknown; at: string | null }>();
   for (const event of events) {
     state = applyEvent(state, { ...event.body, seq: event.seq, kind: event.type } as unknown as Parameters<
       typeof applyEvent
     >[1]);
     const at = typeof event.body.at === "string" ? Date.parse(event.body.at) : Number.NaN;
+    const atIso = typeof event.body.at === "string" ? event.body.at : null;
     if (!Number.isNaN(at) && (lastAt === null || at > lastAt)) lastAt = at;
     if (event.type === "StepStarted" && !Number.isNaN(at) && typeof event.body.stepId === "string") {
       stepStartedAt.set(event.body.stepId, at);
     }
+    if (event.type !== "SignalReceived") continue;
+    const payload = asRecord(event.body.payload);
+    if (!payload) continue;
+    const command = typeof payload.command === "string" ? payload.command : null;
+    if (!command) continue;
+    const signalName = typeof event.body.signalName === "string" ? event.body.signalName : "";
+    const stage = stageOfSignal(signalName);
+    if (typeof payload.decision === "string" && stage !== null) {
+      approvals.push({
+        runId,
+        stage,
+        command,
+        decision: payload.decision,
+        audienceName: typeof payload.audienceName === "string" ? payload.audienceName : null,
+        rationale: typeof payload.rationale === "string" ? payload.rationale : null,
+        at: atIso,
+        versions: Array.isArray(payload.versions)
+          ? (payload.versions as { versionId: string; contentHash: string }[])
+          : [],
+      });
+    }
+    const flag = asRecord(payload.flag);
+    if (flag) {
+      flags.push({
+        runId,
+        id: String(flag.id ?? ""),
+        trigger: String(flag.trigger ?? ""),
+        classification: String(flag.classification ?? ""),
+        evidence: flag.evidence,
+        chosenRoute: typeof flag.chosenRoute === "number" ? flag.chosenRoute : null,
+        rejectedRoutes: flag.rejectedRoutes,
+        at: atIso,
+      });
+    }
+    const answer = asRecord(payload.answer);
+    if (answer && typeof answer.questionId === "string") {
+      answers.set(answer.questionId, {
+        answer: String(answer.answer ?? ""),
+        grantedCapabilities: answer.grantedCapabilities,
+        at: atIso,
+      });
+    }
+    const question = asRecord(payload.question);
+    if (question) {
+      questions.push({
+        runId,
+        id: String(question.id ?? ""),
+        originId: String(question.originId ?? ""),
+        kind: String(question.kind ?? ""),
+        prompt: String(question.prompt ?? ""),
+        scopeImpact: question.scopeImpact,
+        at: atIso,
+        answer: null,
+      });
+    }
   }
-  return { runId, state, lastAt, stepStartedAt };
+  return {
+    runId,
+    state,
+    lastAt,
+    stepStartedAt,
+    approvals,
+    flags,
+    questions: questions.map((question) => ({ ...question, answer: answers.get(question.id) ?? null })),
+  };
 }
 
 export type Parked = {
@@ -207,4 +321,26 @@ export function projectState(runs: readonly FoldedRun[]): StageStatus | null {
   const running = currentStep(runs);
   if (running) return { ...running, parked: false, signalName: null };
   return null;
+}
+
+/** Every gate decision recorded across a project's runs, oldest first. */
+export function projectApprovals(runs: readonly FoldedRun[]): FoldedApproval[] {
+  return runs.flatMap((run) => run.approvals);
+}
+
+/** Every decision flag raised across a project's runs, oldest first. */
+export function projectFlags(runs: readonly FoldedRun[]): FoldedFlag[] {
+  return runs.flatMap((run) => run.flags);
+}
+
+/** Every worker question raised across a project's runs, oldest first, each joined to its answer. */
+export function projectQuestions(runs: readonly FoldedRun[]): FoldedQuestion[] {
+  return runs.flatMap((run) => run.questions);
+}
+
+/** The newest unanswered worker question on a run, if any. */
+export function openQuestion(runs: readonly FoldedRun[], runId: string): FoldedQuestion | undefined {
+  return projectQuestions(runs)
+    .filter((question) => question.runId === runId && question.answer === null)
+    .at(-1);
 }
