@@ -7,10 +7,11 @@
  * on the host.
  */
 import { listWorkflowRuns, readWorkflowRunEvents, type Transport } from "@intx/hub-client";
-import { foldRun, projectState, type FoldedRun, type StageStatus } from "@solutions-builder/app/project-state";
+import { foldRun, projectState, projectTitle, type FoldedRun, type StageStatus } from "@solutions-builder/app/project-state";
 import { createHubTransport } from "./hub.ts";
 
 export type { FoldedRun, StageStatus };
+export { projectTitle };
 
 /** Every run under the deployment, folded from its committed `/hub` events. */
 export async function foldProjectRuns(
@@ -34,6 +35,19 @@ export async function foldProject(
   transport: Transport = createHubTransport(),
 ): Promise<StageStatus | null> {
   return projectState(await foldProjectRuns(tenantId, anchorRunId, transport));
+}
+
+/**
+ * Where the project's run stands, and its real title once the namer step's
+ * output has folded, from a single pass over `/hub` events.
+ */
+export async function foldProjectStanding(
+  tenantId: string,
+  anchorRunId: string,
+  transport: Transport = createHubTransport(),
+): Promise<{ status: StageStatus | null; title: string | null }> {
+  const runs = await foldProjectRuns(tenantId, anchorRunId, transport);
+  return { status: projectState(runs), title: projectTitle(runs) };
 }
 
 /**

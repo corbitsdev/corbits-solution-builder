@@ -8,7 +8,6 @@ import {
   openProject,
   projectDetail,
   readArtifactNode,
-  renameProject,
 } from "./projects.js";
 import {
   designHistory,
@@ -18,7 +17,6 @@ import {
 } from "./design-feedback.js";
 import { roundInference } from "./stage-runs.js";
 import { commandFrom } from "./api.js";
-import { nameProject } from "./title.js";
 import { runGuidance } from "./guide.js";
 import { notFound } from "./errors.js";
 import { type RunState } from "@solutions-builder/app/ledger";
@@ -73,17 +71,6 @@ export function registerProjectRoutes(api: Hono) {
       owner: localActor(),
       ...(problem.length > 0 ? { problemStatement: problem } : {}),
     });
-
-    if (problem.length > 0) {
-      // A name for the thing, not a sentence about the person. Best effort and
-      // never blocking: a project that will not open because a model is busy
-      // is a far worse failure than a plainly-named one.
-      await nameProject(problem)
-        .then((name) => renameProject(opened.projectId, name))
-        .catch((cause: unknown) => {
-          console.error("[projects] the project kept its opening name:", cause);
-        });
-    }
 
     return context.json(opened, 201);
   });

@@ -30,7 +30,7 @@ import { openDecisionFor } from "./decisions.js";
 import { currentAnchor, projectExecutionStatus } from "./lifecycle-run.js";
 import { activeRun, runsForProject } from "./runs.js";
 import { tenantId } from "./hub-client.js";
-import { listProjectRecords, requireProject, updateProject } from "./project-records.js";
+import { listProjectRecords, requireProject } from "./project-records.js";
 
 /**
  * The ledger half of opening a project: `project.create` and the first run.
@@ -214,17 +214,6 @@ export async function writeArtifact(
   });
 
   return { nodeId, artifactId, version, contentHash };
-}
-
-/**
- * Renames a project.
- *
- * A project is opened with the first line of what somebody typed, because it
- * has to open whether or not a model is reachable. The real name arrives a
- * moment later, from a specialist that read the whole problem.
- */
-export async function renameProject(projectId: string, title: string): Promise<void> {
-  await updateProject(projectId, { title });
 }
 
 /** One artifact node as carried between instances: the row, and the bytes the store holds for it. */

@@ -11,6 +11,7 @@
  */
 import { applyEvent, emptyState, type RunState } from "@intx/workflow";
 import { stageOfStepId } from "./workflows/stage-loop.js";
+import { NAME_STEP_ID } from "./workflows/project-lifecycle.js";
 import type { Stage } from "./ledger.js";
 
 /**
@@ -143,6 +144,51 @@ export function anchorIsDead(anchor: string, runs: readonly FoldedRun[]): boolea
   if (parkedSteps(runs).length > 0 || currentStep(runs) !== null) return false;
   const newest = Math.max(...runs.map((run) => run.lastAt ?? 0));
   return newest > 0 && Date.now() - newest > STALLED_AFTER_MS;
+}
+
+// A step's output rides its `StepCompleted` event as a substrate ref: values
+// small enough to inline (everything this fold cares about) carry the
+// JSON-encoded payload verbatim after this prefix; anything larger spills to
+// a blob this fold does not read back.
+const INLINE_OUTPUT_PREFIX = "inline:";
+
+/**
+ * The namer agent step's completed output on one run, resolved from its
+ * inline ref. The step's output is the agent's raw reply (`{ reply: "..." }`,
+ * the same shape every agent step's output takes), so the title is its
+ * `reply` field trimmed. Null when the step has not completed on this run,
+ * or its output did not land inline (a title is always a few words, so this
+ * is not expected in practice).
+ */
+function namedTitle(run: FoldedRun): string | null {
+  const step = run.state.steps.get(NAME_STEP_ID);
+  if (step?.phase !== "completed" || step.outputRef === undefined) return null;
+  if (!step.outputRef.startsWith(INLINE_OUTPUT_PREFIX)) return null;
+  let output: unknown;
+  try {
+    output = JSON.parse(step.outputRef.slice(INLINE_OUTPUT_PREFIX.length));
+  } catch {
+    return null;
+  }
+  const reply =
+    output !== null && typeof output === "object" && "reply" in output
+      ? (output as { reply: unknown }).reply
+      : undefined;
+  const title = typeof reply === "string" ? reply.trim() : "";
+  return title.length > 0 ? title : null;
+}
+
+/**
+ * The project's real title, folded from the namer agent step's committed
+ * output once it completes on any of the project's runs. Null until then --
+ * callers fall back to the tenant name or the trimmed problem statement.
+ */
+export function projectTitle(runs: readonly FoldedRun[]): string | null {
+  for (const run of runs) {
+    const title = namedTitle(run);
+    if (title !== null) return title;
+  }
+  return null;
 }
 
 export type StageStatus = {

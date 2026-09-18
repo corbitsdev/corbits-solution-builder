@@ -12,11 +12,17 @@
  * comes from the host for now.
  */
 import type { Transport } from "@intx/hub-client";
-import { listProjectRecords, resolveWorkspace, workflowsFor, type HubDeployment } from "@solutions-builder/installer";
+import {
+  listProjectRecords,
+  resolveWorkspace,
+  updateProject,
+  workflowsFor,
+  type HubDeployment,
+} from "@solutions-builder/installer";
 import { positionOfSignal } from "@solutions-builder/app/workflows/stage-loop";
 import type { ProjectSummary } from "./client.ts";
 import { createHubTransport } from "./hub.ts";
-import { foldProject } from "./run-fold.ts";
+import { foldProjectStanding } from "./run-fold.ts";
 
 const ENDED_DEPLOYMENT_STATUSES = new Set(["releasing", "released", "failed"]);
 
@@ -37,14 +43,23 @@ export async function listProjectSummaries(transport: Transport = createHubTrans
     records.map(async (record): Promise<ProjectSummary> => {
       const deployments = await workflowsFor(transport, record.id).deployments();
       const deployment = currentDeployment(deployments);
-      const status = deployment ? await foldProject(record.id, deployment.id, transport) : null;
+      const { status, title } = deployment
+        ? await foldProjectStanding(record.id, deployment.id, transport)
+        : { status: null, title: null };
+      // The namer's folded title is the project's real name; the tenant
+      // carries the opening fallback until the step completes. Rename it
+      // once, best-effort -- a project the caller cannot yet write to keeps
+      // showing the folded title this request, and every request after.
+      if (title !== null && title !== record.title) {
+        updateProject(transport, record.id, { title }).catch(() => {});
+      }
       const position = status?.parked && status.signalName ? positionOfSignal(status.stage, status.signalName) : null;
       const turn: ProjectSummary["turn"] =
         status === null ? "idle" : !status.parked ? "writing" : position?.at === "round" ? "question" : "approve";
       return {
         id: record.id,
         revision: record.revision,
-        title: record.title,
+        title: title ?? record.title,
         stage: status?.stage ?? null,
         state: status ? (status.parked ? "waiting" : "running") : null,
         runId: deployment?.id ?? null,
