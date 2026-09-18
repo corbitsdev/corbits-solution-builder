@@ -2,11 +2,11 @@
  * Local declaration of the `@corbits/mailbox` surface Builder uses.
  *
  * The package is installed as a bare git dependency (never published to
- * npm); its own build cannot resolve this repo's untyped vendored `@intx/*`
- * copies (see `scripts/fix-mailbox-dist.ts`). Declaring the surface we
- * actually call keeps our typecheck about our code, the same seam
- * `corbits-artifacts.d.ts` and `corbits-providers.d.ts` use for the other
- * bare-git corbitsdev packages.
+ * npm); its own `prepare` script builds `dist/` on install, but that build
+ * emits no rewritten `.d.ts` for its own vendored `@intx/*` copies (see
+ * VENDORED.md in the package). Declaring the surface we actually call keeps
+ * our typecheck about our code, the same seam `corbits-artifacts.d.ts` and
+ * `corbits-providers.d.ts` use for the other bare-git corbitsdev packages.
  */
 declare module "@corbits/mailbox" {
   import type { Hono } from "hono";
