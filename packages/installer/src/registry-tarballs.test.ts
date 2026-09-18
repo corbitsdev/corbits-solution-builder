@@ -40,7 +40,7 @@ function fakeTransport(state: {
 }
 
 function manifest(entries: { name: string; version: string; filename: string; sha256: string }[]): ClosureManifest {
-  return { digest: "d", packages: entries };
+  return { digest: "d", packages: entries, catalog: {} };
 }
 
 describe("ensureRegistryTarballs", () => {

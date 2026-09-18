@@ -431,6 +431,33 @@ export async function writeWorkflowSourceTree(
   return assetsFor(transport, scope).writeTree(args.assetId, { files: args.files, message: args.message });
 }
 
+export type GitTokenMint = { id: string; secret: string };
+
+/**
+ * Short-lived git push tokens (`/api/tenants/:scope/git-tokens`): plain
+ * JSON in and out, so this rides `Transport` like everything else in this
+ * file. The push itself does not -- see `git-push.ts`'s note on raw
+ * pkt-lines -- and goes over a capability the caller supplies instead.
+ */
+export function gitTokensFor(transport: Transport, scope: string) {
+  return {
+    /** Mints a push-only token scoped to `refs/heads/main` on one asset,
+     *  expiring `ttlMs` from now (minimum enforced by the hub is 60s). */
+    mint: (assetId: string, name: string, ttlMs: number) =>
+      transport.fetch<GitTokenMint>("POST", tenantPathFor(scope, "/git-tokens"), {
+        name,
+        resource: `asset:${assetId}`,
+        refPattern: "refs/heads/main",
+        // The ref advertisement before a push is itself a read, so a
+        // push-only token would be refused at info/refs.
+        actions: ["can_read", "can_push"],
+        expiresAt: new Date(Date.now() + ttlMs).toISOString(),
+      }),
+    revoke: (tokenId: string) =>
+      transport.fetch<void>("DELETE", tenantPathFor(scope, `/git-tokens/${tokenId}`)),
+  };
+}
+
 // --- Workflow deployments ----------------------------------------------------
 
 export function workflowsFor(transport: Transport, scope: string) {

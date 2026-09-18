@@ -20,15 +20,18 @@ import {
   InstallerError,
   liveDelegationStore,
   ensureRegistryTarballs,
+  pushSourceTree,
   requireProject as installerRequireProject,
   resolveWorkspace,
   revokeAllDelegations,
   updateProject as installerUpdateProject,
   type ClosureManifest,
+  type ClosureSource,
   type InstallState as PackageInstallState,
   type ProjectPolicy,
   type RegistryTarballUploader,
   type SidecarCapability,
+  type WorkflowGitPush,
 } from "@solutions-builder/installer";
 import { openCreatedProject } from "./create-project-open.ts";
 import { createHubTransport } from "./hub.ts";
@@ -413,31 +416,64 @@ function hubTarballUploaderFor(scope: string): RegistryTarballUploader {
  * `scripts/pack-closure-static.ts` shipped, uploading only what is missing.
  * Best-effort and non-blocking: a dev tree without the static closure built
  * (`bun run assets:pack-closure`), or a hub that cannot be reached, must not
- * fail `install()` — the source-tree deploy arm still works either way until
- * the tarball arm is switched on (CL-8334).
+ * fail `install()` — this is the `format: "tarball"` deploy arm's own asset
+ * (CL-8382/PR #333), separate from the `format: "source"` lifecycle push
+ * `lifecycleClosureSource`/`lifecycleGitPush` drive below (CL-8334).
  */
 async function ensureClosureRegistryAsset(tenantId: string): Promise<void> {
   try {
-    const response = await fetch("/closure/manifest.json", { credentials: "same-origin" });
-    if (!response.ok) return;
-    const manifest = (await response.json()) as ClosureManifest;
+    const manifest = await fetchClosureManifestOrThrow();
     await ensureRegistryTarballs(
       createHubTransport(),
       tenantId,
       hubTarballUploaderFor(tenantId),
       manifest,
-      async (filename) => {
-        const tarball = await fetch(`/closure/${filename}`, { credentials: "same-origin" });
-        if (!tarball.ok) throw new Error(`could not fetch closure tarball ${filename}`);
-        return new Uint8Array(await tarball.arrayBuffer());
-      },
+      fetchClosureTarball,
     );
   } catch (cause) {
-    // Best effort: the source-tree deploy arm is still what `createProject`
-    // relies on until CL-8334 switches it.
     console.warn("ensureClosureRegistryAsset failed", cause);
   }
 }
+
+/** The static closure manifest `scripts/pack-closure-static.ts` writes to
+ *  `apps/web/public/closure/manifest.json` (wired into `bun run ui:build`).
+ *  Throws when the manifest is missing or unreachable, rather than
+ *  returning null, so a caller that needs the closure (the lifecycle push)
+ *  fails loudly instead of silently deploying an empty tree. */
+async function fetchClosureManifestOrThrow(): Promise<ClosureManifest> {
+  const response = await fetch("/closure/manifest.json", { credentials: "same-origin" });
+  if (!response.ok) throw new Error(`closure manifest unavailable (HTTP ${String(response.status)})`);
+  return (await response.json()) as ClosureManifest;
+}
+
+async function fetchClosureTarball(filename: string): Promise<Uint8Array> {
+  const tarball = await fetch(`/closure/${filename}`, { credentials: "same-origin" });
+  if (!tarball.ok) throw new Error(`could not fetch closure tarball ${filename}`);
+  return new Uint8Array(await tarball.arrayBuffer());
+}
+
+/** The lifecycle deploy's closure source: the same static tarballs
+ *  `ensureClosureRegistryAsset` uploads, read back and extracted in the
+ *  browser rather than uploaded to a registry asset (CL-8334). */
+async function lifecycleClosureSource(): Promise<ClosureSource> {
+  return { manifest: await fetchClosureManifestOrThrow(), fetchTarball: fetchClosureTarball };
+}
+
+/**
+ * Pushes the lifecycle's rendered tree into its `workflow`-kind asset over
+ * the hub's stock git smart-HTTP route, the same stock-routes path
+ * `corbitsdev/workbench` PR #861 took for Myra: isomorphic-git in the
+ * browser speaks the pack, this file only supplies the `/hub`-prefixed,
+ * same-origin-credentialed URL `pushSourceTree` cannot construct itself
+ * (it does not know the host mounts the hub at `/hub`).
+ */
+const lifecycleGitPush: WorkflowGitPush = ({ scope, assetKind, assetName, token, tree, message }) => {
+  const url = new URL(
+    `/hub/api/tenants/${encodeURIComponent(scope)}/assets/${assetKind}/${assetName}.git`,
+    window.location.origin,
+  ).toString();
+  return pushSourceTree({ url, token, tree, message });
+};
 
 function installerFailure(cause: unknown): never {
   if (cause instanceof ApiFailure) throw cause;
@@ -566,9 +602,13 @@ export const api = {
     const status = await request<HostStatus>("/status");
     if (status.hub.mode !== "embedded") return HOSTED_INSTALL;
     try {
-      const state = await installerInstall(createHubTransport(), sidecarCapabilityOf(status), {
-        afterSkillAssets: rerankCatalogAfterSkillAssets,
-      });
+      const state = await installerInstall(
+        createHubTransport(),
+        sidecarCapabilityOf(status),
+        await lifecycleClosureSource(),
+        lifecycleGitPush,
+        { afterSkillAssets: rerankCatalogAfterSkillAssets },
+      );
       const workspace = await resolveWorkspace(createHubTransport());
       if (workspace) void ensureClosureRegistryAsset(workspace.tenantId);
       return state;
@@ -672,6 +712,8 @@ export const api = {
       const deployment = await installerEnsureLifecycleDeployment(
         transport,
         sidecarCapabilityOf(status),
+        await lifecycleClosureSource(),
+        lifecycleGitPush,
         workspace.tenantId,
         project.id,
       );

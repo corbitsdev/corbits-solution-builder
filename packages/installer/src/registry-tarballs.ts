@@ -47,6 +47,9 @@ export type ClosureManifestEntry = {
 export type ClosureManifest = {
   readonly digest: string;
   readonly packages: readonly ClosureManifestEntry[];
+  /** The workspace root's `catalog` field, so a `catalog:` specifier in a
+   *  closure member's manifest can be expanded without `node:fs`. */
+  readonly catalog: Record<string, string>;
 };
 
 /** Raw byte access the ensure step needs beyond what `Transport` carries. */

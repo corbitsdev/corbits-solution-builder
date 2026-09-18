@@ -21,6 +21,7 @@
  *   step after it that needs a servable offering is expected to report
  *   "no_offering" rather than fail outright.
  */
+import fs from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -30,12 +31,16 @@ import {
   ensureLifecycleDeployment,
   install as installerInstall,
   listArtifacts,
+  pushSourceTree,
   registerProviderModels,
   resolveWorkspace,
   upsertApiKeyProvider,
+  type ClosureSource,
   type ProjectPolicy,
   type SidecarCapability,
+  type WorkflowGitPush,
 } from "@solutions-builder/installer";
+import { buildManifest, buildPackedEntries } from "./closure-pack.ts";
 import { listProjectSummaries } from "../apps/web/src/project-list.ts";
 import { foldProject } from "../apps/web/src/run-fold.ts";
 import { deliverDraft, deliverGate } from "../apps/web/src/run-signal.ts";
@@ -186,6 +191,39 @@ const PROJECT_POLICY: ProjectPolicy = {
   allowExternalProviders: false,
 };
 
+/**
+ * The closure/git-push capabilities `installerInstall`/`ensureLifecycleDeployment`
+ * need (CL-8334), built the same way `scripts/pack-registry-asset.ts` builds
+ * them for its own embedded-hub install call: the manifest in-memory from
+ * the packer, and the push over the spawned host's real `/hub`-mounted git
+ * smart-HTTP route -- unlike that script, this one talks to a real listening
+ * socket, so the push rides the plain global `fetch` `pushSourceTree`
+ * defaults to, no `app.fetch` adapter needed.
+ */
+async function closureAndPush(origin: string): Promise<{ closure: ClosureSource; gitPush: WorkflowGitPush }> {
+  const entries = await buildPackedEntries();
+  const manifest = buildManifest("scripts/e2e-client.ts", entries);
+  const byFilename = new Map(entries.map((entry) => [entry.filename, entry.bytes]));
+  const closure: ClosureSource = {
+    manifest,
+    fetchTarball: async (filename) => {
+      const bytes = byFilename.get(filename);
+      if (bytes === undefined) throw new Error(`no packed entry for ${filename}`);
+      return bytes;
+    },
+  };
+  const gitPush: WorkflowGitPush = async ({ scope, assetKind, assetName, token, tree, message }) => {
+    const dir = await mkdtemp(join(tmpdir(), "e2e-client-push-"));
+    try {
+      const url = `${origin}/hub/api/tenants/${encodeURIComponent(scope)}/assets/${assetKind}/${assetName}.git`;
+      return await pushSourceTree({ url, token, tree, message, fsBackend: { fs, dir } });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  };
+  return { closure, gitPush };
+}
+
 async function main(): Promise<void> {
   const dataDir = await mkdtemp(join(tmpdir(), "sb-e2e-"));
   let host: Host | undefined;
@@ -231,10 +269,12 @@ async function main(): Promise<void> {
       return { canPlaceSidecars: true, sidecarFingerprint: body.sidecarFingerprint! } satisfies SidecarCapability;
     });
 
+    const { closure, gitPush } = await closureAndPush(origin);
+
     // (2) Workspace tenant install.
     const workspace = await step("2. workspace tenant install (installer install path)", async () => {
       if (!sidecar) throw new Error("no sidecar capability from the boot step");
-      const state = await installerInstall(transport, sidecar);
+      const state = await installerInstall(transport, sidecar, closure, gitPush);
       check(
         "2. workspace tenant install (installer install path)",
         state.missing.length === 0 && state.stale.length === 0,
@@ -283,7 +323,7 @@ async function main(): Promise<void> {
 
     const deployment = await step("4. ensureLifecycleDeployment places the project's run", async () => {
       if (!workspace || !project || !sidecar) throw new Error("no project/workspace/sidecar to deploy against");
-      const deployed = await ensureLifecycleDeployment(transport, sidecar, workspace.tenantId, project.id);
+      const deployed = await ensureLifecycleDeployment(transport, sidecar, closure, gitPush, workspace.tenantId, project.id);
       const ok = deployed.status === "deployed" || deployed.status === "current";
       check(
         "4. ensureLifecycleDeployment places the project's run",

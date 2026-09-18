@@ -11,6 +11,9 @@
   "dependencies": {
     "@solutions-builder/app": "workspace:*",
     "@intx/hub-client": "workspace:*",
-    "@intx/types": "workspace:*"
+    "@intx/types": "workspace:*",
+    "@isomorphic-git/lightning-fs": "^4.7.0",
+    "buffer": "^6.0.3",
+    "isomorphic-git": "catalog:"
   }
 }

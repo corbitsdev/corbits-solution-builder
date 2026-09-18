@@ -22,7 +22,7 @@ import { expectedWorkflowDefinitions, seedWorkflows } from "./workflow-seed.js";
 import { installProjectAuthority, listProjectRecords } from "./project-tenant.js";
 import { ensureAuthorityGrants } from "./signal-grants.js";
 import { ensureSkillAssets } from "./skill-assets.js";
-import { ensureLifecycleDeployment, type SidecarCapability } from "./workflow-deploy.js";
+import { ensureLifecycleDeployment, type ClosureSource, type SidecarCapability, type WorkflowGitPush } from "./workflow-deploy.js";
 
 export type InstallState = {
   readonly installed: boolean;
@@ -140,6 +140,8 @@ export async function ensureWorkspace(transport: Transport): Promise<Workspace> 
 export async function install(
   transport: Transport,
   sidecar: SidecarCapability,
+  closure: ClosureSource,
+  gitPush: WorkflowGitPush,
   hooks: {
     afterEnsureWorkspace?: (workspace: Workspace) => Promise<void>;
     afterSkillAssets?: () => Promise<void>;
@@ -185,6 +187,8 @@ export async function install(
   void deployLifecycle(
     transport,
     sidecar,
+    closure,
+    gitPush,
     ws.tenantId,
     projects.map((project) => project.id),
   );
@@ -198,12 +202,14 @@ let deploying: Promise<void> | null = null;
 export function deployLifecycle(
   transport: Transport,
   sidecar: SidecarCapability,
+  closure: ClosureSource,
+  gitPush: WorkflowGitPush,
   tenantId: string,
   projectIds: readonly string[] = [],
 ): Promise<void> {
   if (deploying) return deploying;
   lastDeployment = { status: "deploying", detail: "The hub is probing the lifecycle source." };
-  deploying = ensureLifecycleDeployment(transport, sidecar, tenantId)
+  deploying = ensureLifecycleDeployment(transport, sidecar, closure, gitPush, tenantId)
     .then(async (deployed) => {
       lastDeployment =
         deployed.status === "no_offering"
@@ -212,7 +218,7 @@ export function deployLifecycle(
             ? { status: "no_host", detail: "The host is not serving, so no sidecar can dial in." }
             : { status: deployed.status, detail: `${deployed.deploymentId} is ${deployed.deploymentStatus}.` };
       for (const projectId of projectIds) {
-        await ensureLifecycleDeployment(transport, sidecar, tenantId, projectId);
+        await ensureLifecycleDeployment(transport, sidecar, closure, gitPush, tenantId, projectId);
       }
     })
     .catch((cause: unknown) => {

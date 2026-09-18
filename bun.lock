@@ -125,7 +125,10 @@
       "dependencies": {
         "@intx/hub-client": "workspace:*",
         "@intx/types": "workspace:*",
+        "@isomorphic-git/lightning-fs": "^4.7.0",
         "@solutions-builder/app": "workspace:*",
+        "buffer": "^6.0.3",
+        "isomorphic-git": "catalog:",
       },
     },
     "packages/keychain": {

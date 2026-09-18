@@ -190,6 +190,13 @@ const INSTALLER_ALLOWED = [
   // The one seeded definition's type, the same reason the app package allows
   // it: the shape it generates is an Interchange workflow.
   "@intx/workflow",
+  // `git-push.ts`: pushes the rendered lifecycle tree into its workflow
+  // asset over the hub's stock git smart-HTTP route from the browser
+  // (CL-8334) -- offline authoring libraries, like the app package's
+  // `pptxgenjs`/`jszip` allowance, not a platform internal or a provider.
+  "isomorphic-git",
+  "@isomorphic-git/lightning-fs",
+  "buffer",
   // Its tests' runner; not a runtime dependency of the installed package.
   "bun:test",
 ];

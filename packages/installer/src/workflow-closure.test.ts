@@ -1,39 +1,110 @@
 import { describe, expect, test } from "bun:test";
+import { packTarballFiles, tarballFilename } from "./tarball-pack.js";
 import {
-  closureFiles,
-  deckAppMemberFiles,
+  appMemberFiles,
+  memberDir,
   toolsDeckMemberFiles,
   toolsDeliveryMemberFiles,
   treeDigest,
-  workspaceCatalog,
+  vendoredMemberFiles,
+  type ClosureTarballFetcher,
 } from "./workflow-closure.js";
+import type { ClosureManifest } from "./registry-tarballs.js";
 
-describe("workflow-closure embed", () => {
-  test("the install() closure path does not import node:fs", async () => {
+/**
+ * A synthetic closure manifest built from real `packTarballFiles` output
+ * (the same packer `scripts/closure-pack.ts` uses), so these tests exercise
+ * the real extraction/re-keying path `renderLifecycleSource` drives at
+ * deploy time without needing the full vendor tree built.
+ */
+async function fakeClosure(): Promise<{ manifest: ClosureManifest; fetchTarball: ClosureTarballFetcher }> {
+  const packages: { name: string; version: string; files: Record<string, string> }[] = [
+    {
+      name: "@intx/workflow",
+      version: "0.0.0",
+      files: {
+        "package.json": '{"name":"@intx/workflow","version":"0.0.0","type":"module"}\n',
+        "dist/index.js": "export const workflow = true;\n",
+      },
+    },
+    {
+      name: "@solutions-builder/app",
+      version: "0.1.0",
+      files: {
+        "package.json": '{"name":"@solutions-builder/app","version":"0.1.0","type":"module"}\n',
+        "src/deck.ts": "export function deck() {}\n",
+        "src/admit.ts": "export function admitGate() {}\n",
+      },
+    },
+    {
+      name: "@solutions-builder/tools-deck",
+      version: "0.1.0",
+      files: {
+        "package.json": '{"name":"@solutions-builder/tools-deck","version":"0.1.0","type":"module"}\n',
+        "src/sidecar-bundle.ts": "export const bundle = true;\n",
+      },
+    },
+    {
+      name: "@solutions-builder/tools-delivery",
+      version: "0.1.0",
+      files: {
+        "package.json": '{"name":"@solutions-builder/tools-delivery","version":"0.1.0","type":"module"}\n',
+        "src/sidecar-bundle.ts": "export const bundle = true;\n",
+      },
+    },
+  ];
+
+  const byFilename = new Map<string, Uint8Array>();
+  const encoder = new TextEncoder();
+  const manifestPackages = [];
+  for (const pkg of packages) {
+    const encoded: Record<string, Uint8Array> = {};
+    for (const [path, content] of Object.entries(pkg.files)) encoded[path] = encoder.encode(content);
+    const bytes = await packTarballFiles(encoded);
+    const filename = tarballFilename(pkg.name, pkg.version);
+    byFilename.set(filename, bytes);
+    manifestPackages.push({ name: pkg.name, version: pkg.version, filename, sha256: "" });
+  }
+
+  const manifest: ClosureManifest = {
+    digest: "test",
+    packages: manifestPackages,
+    catalog: { arktype: "^2.0.0" },
+  };
+  const fetchTarball: ClosureTarballFetcher = async (filename) => {
+    const bytes = byFilename.get(filename);
+    if (bytes === undefined) throw new Error(`no packed entry for ${filename}`);
+    return bytes;
+  };
+  return { manifest, fetchTarball };
+}
+
+describe("workflow-closure", () => {
+  test("this module does not import node:fs", async () => {
     const source = await Bun.file(new URL("./workflow-closure.ts", import.meta.url)).text();
     expect(source).not.toMatch(/from ["']node:fs["']/);
     expect(source).not.toMatch(/from ["']node:fs\/promises["']/);
-    expect(source).toContain("workflow-closure-embed");
   });
 
-  test("closureFiles ships vendored workflow members from the embed", () => {
-    const files = closureFiles("workflow");
-    expect(files["packages/intx-workflow/package.json"]).toContain('"name": "@intx/workflow"');
-    expect(Object.keys(files).some((path) => path.startsWith("packages/intx-workflow/dist/"))).toBe(true);
+  test("vendoredMemberFiles extracts every @intx/* tarball the manifest carries", async () => {
+    const { manifest, fetchTarball } = await fakeClosure();
+    const files = await vendoredMemberFiles(manifest, fetchTarball);
+    const dir = memberDir("workflow");
+    expect(files[`${dir}/package.json`]).toContain('"name":"@intx/workflow"');
+    expect(files[`${dir}/dist/index.js`]).toContain("export const workflow");
     expect(treeDigest(files).length).toBe(64);
   });
 
-  test("deck and tools members match the live source files", async () => {
-    const deck = await Bun.file(new URL("../../solutions-builder/src/deck.ts", import.meta.url)).text();
-    const delivery = await Bun.file(new URL("../../solutions-builder/src/delivery.ts", import.meta.url)).text();
-    const members = deckAppMemberFiles();
-    expect(members["packages/solutions-builder-app/src/deck.ts"]).toBe(deck);
-    expect(members["packages/solutions-builder-app/src/delivery.ts"]).toBe(delivery);
-    expect(members["packages/solutions-builder-app/src/admit.ts"]).toContain("admitGate");
-    expect(members["packages/solutions-builder-app/src/guard.ts"]).toContain("export function evaluate");
-    expect(members["packages/solutions-builder-app/src/project-state.ts"]).toContain("export function projectState");
-    expect(Object.keys(toolsDeckMemberFiles()).some((path) => path.endsWith("src/sidecar-bundle.ts"))).toBe(true);
-    expect(Object.keys(toolsDeliveryMemberFiles()).some((path) => path.endsWith("src/sidecar-bundle.ts"))).toBe(true);
-    expect(Object.keys(workspaceCatalog()).length).toBeGreaterThan(0);
+  test("app and tools members extract from their own tarballs", async () => {
+    const { manifest, fetchTarball } = await fakeClosure();
+    const app = await appMemberFiles(manifest, fetchTarball);
+    expect(app["packages/solutions-builder-app/src/deck.ts"]).toContain("export function deck");
+    expect(app["packages/solutions-builder-app/src/admit.ts"]).toContain("admitGate");
+
+    const deck = await toolsDeckMemberFiles(manifest, fetchTarball);
+    expect(deck["packages/tools-deck/src/sidecar-bundle.ts"]).toContain("bundle");
+
+    const delivery = await toolsDeliveryMemberFiles(manifest, fetchTarball);
+    expect(delivery["packages/tools-delivery/src/sidecar-bundle.ts"]).toContain("bundle");
   });
 });

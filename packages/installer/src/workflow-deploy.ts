@@ -4,11 +4,14 @@
  * The lifecycle is rendered to a workspace the hub's `workflow` asset kind
  * accepts: a lifecycle member whose entry builds the definition with
  * `@intx/workflow`, and the vendored `@intx` packages as sibling members so
- * the closure resolves to the vendored revision. It is committed to a workflow
- * asset and deployed through the hub's own route. The hub probes the
- * source in a sidecar, freezes a `workflow_definition`, and creates the
- * anchor `workflow_run`. That row is what stage gates will park on once the
- * host's own in-process executor retires; until then both exist.
+ * the closure resolves to the vendored revision. It is pushed with a real
+ * `git push` into the workflow asset's own repo -- a short-lived push token,
+ * isomorphic-git in the browser, the token revoked once the push lands --
+ * and deployed through the hub's own route at that commit (CL-8334; the same
+ * stock-routes path `corbitsdev/workbench` PR #861 took for Myra). The hub
+ * probes the source in a sidecar, freezes a `workflow_definition`, and
+ * creates the anchor `workflow_run`. That row is what stage gates will park
+ * on once the host's own in-process executor retires; until then both exist.
  */
 import type { Transport } from "@intx/hub-client";
 import {
@@ -27,20 +30,21 @@ import {
 import {
   assetsFor,
   catalogFor,
+  gitTokensFor,
   readWorkflowSourceBlob,
   workflowsFor,
-  writeWorkflowSourceTree,
   type HubDeployment,
 } from "./hub.js";
 import { readProject } from "./project-tenant.js";
 import { readDesignerSettings } from "./designer-settings.js";
+import type { ClosureManifest } from "./registry-tarballs.js";
 import {
-  closureFiles,
-  deckAppMemberFiles,
-  toolsDeckMemberFiles,
-  toolsDeliveryMemberFiles,
+  appMemberFiles,
+  toolsDeckMemberFiles as toolsDeckClosureFiles,
+  toolsDeliveryMemberFiles as toolsDeliveryClosureFiles,
   treeDigest,
-  workspaceCatalog,
+  vendoredMemberFiles,
+  type ClosureTarballFetcher,
 } from "./workflow-closure.js";
 
 /**
@@ -166,6 +170,14 @@ export function lifecycleAssetName(projectId?: string): string {
   return projectId ? `${LIFECYCLE_ASSET_NAME}-${projectId.toLowerCase().replace(/[^a-z0-9]+/g, "-")}` : LIFECYCLE_ASSET_NAME;
 }
 
+/** The closure bytes `renderLifecycleSource` needs, fetched from the static
+ *  tarballs `scripts/pack-closure-static.ts` writes under
+ *  `apps/web/public/closure/` -- this package has no `node:fs` to read them
+ *  itself. Supplied by the caller, the same way `SidecarCapability` and
+ *  `RegistryTarballUploader` are: apps/web fetches same-origin static files,
+ *  apps/hub never renders the lifecycle at all (`apps/hub/src/lifecycle-deploy.ts`). */
+export type ClosureSource = { manifest: ClosureManifest; fetchTarball: ClosureTarballFetcher };
+
 /**
  * The asset the sidecar evaluates: a workspace whose members are the lifecycle
  * package (a code entry that builds the definition with `@intx/workflow`, and
@@ -173,13 +185,14 @@ export function lifecycleAssetName(projectId?: string): string {
  * closure resolves to the vendored revision rather than npm. A digest of every
  * file sits at the root so a changed byte anywhere is a new deployment.
  */
-export function renderLifecycleSource(
+export async function renderLifecycleSource(
+  closure: ClosureSource,
   projectId?: string,
   source?: InferenceSourcePin,
   audiences?: readonly { name: string; role: string }[],
   audienceQuorum?: number,
   designerMaxTokens?: number,
-): LifecycleSource {
+): Promise<LifecycleSource> {
   const name = lifecycleAssetName(projectId);
   const root = {
     name: `${name}-workspace`,
@@ -187,7 +200,7 @@ export function renderLifecycleSource(
     private: true,
     type: "module",
     workspaces: ["packages/*"],
-    catalog: workspaceCatalog(),
+    catalog: closure.manifest.catalog,
   };
   const member = {
     name,
@@ -212,16 +225,16 @@ export function renderLifecycleSource(
     ),
     [`${LIFECYCLE_DIR}/${LOOPS_PATH}`]: loopsModule(),
     [`${LIFECYCLE_DIR}/${ACTIONS_PATH}`]: actionsModule(),
-    // The build agent's tools ride beside the workflow runtime; the two
-    // closures overlap on @intx/agent and @intx/types, which is fine.
-    ...closureFiles("workflow"),
-    ...closureFiles("tools-posix"),
+    // The build agent's tools ride beside the workflow runtime, as the
+    // manifest's full `@intx/*` set (workflow's and tools-posix's closures
+    // overlap on @intx/agent and @intx/types, which is fine).
+    ...(await vendoredMemberFiles(closure.manifest, closure.fetchTarball)),
     // Stage 5's deck tool and stage 9's delivery-status tool, plus the
     // app's deck/delivery modules they call, so the sidecar resolves both
     // from the asset rather than a registry that does not carry them.
-    ...deckAppMemberFiles(),
-    ...toolsDeckMemberFiles(),
-    ...toolsDeliveryMemberFiles(),
+    ...(await appMemberFiles(closure.manifest, closure.fetchTarball)),
+    ...(await toolsDeckClosureFiles(closure.manifest, closure.fetchTarball)),
+    ...(await toolsDeliveryClosureFiles(closure.manifest, closure.fetchTarball)),
   };
   files[DIGEST_PATH] = `${treeDigest(files)}\n`;
   return files;
@@ -290,14 +303,35 @@ const queued = new Map<string | undefined, Promise<unknown>>();
  */
 export type SidecarCapability = { canPlaceSidecars: boolean; sidecarFingerprint: string };
 
+/**
+ * Pushes `tree` onto `main` of the tenant's `<assetKind>/<assetName>` asset
+ * repo over the hub's stock git smart-HTTP route and returns the new commit
+ * sha. The push itself carries raw pkt-lines and a binary packfile, so it
+ * cannot ride `Transport` (which always JSON-encodes) -- this is supplied by
+ * the caller the same way `RegistryTarballUploader` is, implemented over the
+ * browser's own `fetch` (`apps/web/src/client.ts`) or, for a local smoke,
+ * the embedded host's direct dispatch.
+ */
+export type WorkflowGitPush = (args: {
+  scope: string;
+  assetKind: string;
+  assetName: string;
+  token: string;
+  tree: Record<string, string>;
+  message: string;
+}) => Promise<string>;
+
 export function ensureLifecycleDeployment(
   transport: Transport,
   sidecar: SidecarCapability,
+  closure: ClosureSource,
+  gitPush: WorkflowGitPush,
   tenantId: string,
   projectId?: string,
   options: { replace?: boolean } = {},
 ): Promise<LifecycleDeployment> {
-  const deploy = () => ensureLifecycleDeploymentUncached(transport, sidecar, tenantId, projectId, options);
+  const deploy = () =>
+    ensureLifecycleDeploymentUncached(transport, sidecar, closure, gitPush, tenantId, projectId, options);
   // Both arms are `deploy`, so this call starts once the one ahead has
   // settled, whether it succeeded or failed. The queue only orders; the
   // promise handed back is the real one, so a failure reaches its own caller
@@ -319,9 +353,15 @@ export function ensureLifecycleDeployment(
  * the project and lives in the workspace tenant, where the catalog offerings
  * are; a project tenant holds none of its own.
  */
+/** A push token's lifetime: long enough for one push, short enough that a
+ *  leaked token is worthless within minutes. */
+const PUSH_TOKEN_LIFETIME_MS = 10 * 60 * 1000;
+
 async function ensureLifecycleDeploymentUncached(
   transport: Transport,
   sidecar: SidecarCapability,
+  closure: ClosureSource,
+  gitPush: WorkflowGitPush,
   tenantId: string,
   projectId?: string,
   options: {
@@ -349,7 +389,8 @@ async function ensureLifecycleDeploymentUncached(
   // Stage 4's own output cap, from the workspace tenant's designer settings
   // asset — the same one the settings page reads and writes.
   const designerMaxTokens = (await readDesignerSettings(transport, tenantId)).maxTokens;
-  const rendered = renderLifecycleSource(
+  const rendered = await renderLifecycleSource(
+    closure,
     projectId,
     await sourceFor(transport, tenantId, offerings[0]!),
     audiences,
@@ -381,11 +422,22 @@ async function ensureLifecycleDeploymentUncached(
     };
   }
 
-  const { commitSha } = await writeWorkflowSourceTree(transport, tenantId, {
-    assetId,
-    files: { ...rendered },
-    message: "Project lifecycle generated from the transition ledger",
-  });
+  const assetName = lifecycleAssetName(projectId);
+  const gitTokens = gitTokensFor(transport, tenantId);
+  const minted = await gitTokens.mint(assetId, `${assetName}-deploy`, PUSH_TOKEN_LIFETIME_MS);
+  let commitSha: string;
+  try {
+    commitSha = await gitPush({
+      scope: tenantId,
+      assetKind: "workflow",
+      assetName,
+      token: minted.secret,
+      tree: { ...rendered },
+      message: "Project lifecycle generated from the transition ledger",
+    });
+  } finally {
+    await gitTokens.revoke(minted.id);
+  }
   commitsByAsset.set(assetId, commitSha);
 
   const ids = offerings.map((offering) => offering.id);

@@ -18,16 +18,81 @@
  * and returns bytes.
  */
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 
 import { packTarballFiles, tarballFilename, type TarballFiles } from "./lib/tarball.js";
-import { distFiles, readManifest, vendoredClosure } from "../packages/installer/src/workflow-closure.js";
 import { WORKFLOW_PACKAGE_DEPENDENCIES } from "@solutions-builder/app/workflows/lifecycle-source";
 
 export const ROOT_DIR = join(import.meta.dir, "..");
 export const VENDOR_PACKAGES_DIR = join(ROOT_DIR, "vendor", "interchange", "packages");
 export const APP_PACKAGE_DIR = join(ROOT_DIR, "packages", "solutions-builder");
+
+/**
+ * `readManifest`/`distFiles`/`vendoredClosure`/`workspaceCatalog` used to
+ * live on `packages/installer/src/workflow-closure.ts` and read a generated
+ * embed (`WORKFLOW_CLOSURE_EMBED`) so that browser-bundled module never
+ * touched `node:fs`. This script already has real filesystem access -- it
+ * is what *produces* the closure's shipped bytes now (CL-8334) -- so it
+ * reads `vendor/` directly instead; the browser side reads back the
+ * tarballs this script writes rather than a build-time snapshot.
+ */
+
+/** A vendored `@intx/<shortName>` package's own `package.json`, parsed. */
+export function readManifest(shortName: string): PackageManifest {
+  const path = join(VENDOR_PACKAGES_DIR, shortName, "package.json");
+  return JSON.parse(readFileSync(path, "utf8")) as PackageManifest;
+}
+
+/** The transitive `workspace:*` closure of `@intx/<root>`, root first. */
+export function vendoredClosure(root: string): string[] {
+  const order: string[] = [];
+  const seen = new Set<string>();
+  const queue = [root];
+  while (queue.length > 0) {
+    const shortName = queue.shift()!;
+    if (seen.has(shortName)) continue;
+    seen.add(shortName);
+    order.push(shortName);
+    const manifest = readManifest(shortName);
+    for (const [name, spec] of Object.entries(manifest.dependencies ?? {})) {
+      if (spec === "workspace:*" && name.startsWith("@intx/")) queue.push(name.slice("@intx/".length));
+    }
+  }
+  return order;
+}
+
+/**
+ * A vendored package's runtime `dist/` files, keyed by their path relative
+ * to `dist/` (POSIX separators). Declarations, source maps, tests and the
+ * build's own `.emitted` marker are left out; the sidecar evaluates, it does
+ * not type-check.
+ */
+export function distFiles(shortName: string): Record<string, string> {
+  const distDir = join(VENDOR_PACKAGES_DIR, shortName, "dist");
+  if (!statSync(distDir, { throwIfNoEntry: false })?.isDirectory()) {
+    throw new Error(`@intx/${shortName} has no dist/; run \`bun run vendor:build\` before packing the workflow closure`);
+  }
+  const paths: string[] = [];
+  walk(distDir, paths);
+  const files: Record<string, string> = {};
+  for (const full of paths) {
+    const rel = relative(distDir, full).split("\\").join("/");
+    if (/\.d\.ts$/.test(rel) || /\.map$/.test(rel) || /\.test\.js$/.test(rel) || rel === ".emitted") continue;
+    files[rel] = readFileSync(full, "utf8");
+  }
+  if (Object.keys(files).length === 0) {
+    throw new Error(`@intx/${shortName} dist/ has no runtime files to pack`);
+  }
+  return files;
+}
+
+/** The root `catalog` a member's `catalog:` specifier expands against,
+ *  shipped in the closure manifest so the browser side needs no copy. */
+export function workspaceCatalog(): Record<string, string> {
+  const root = JSON.parse(readFileSync(join(ROOT_DIR, "package.json"), "utf8")) as { catalog?: Record<string, string> };
+  return root.catalog ?? {};
+}
 
 export type PackedEntry = {
   readonly name: string;
@@ -182,12 +247,21 @@ function discoverExternalClosure(): ExternalPackage[] {
 
   while (queue.length > 0) {
     const { name, fromDirs } = queue.shift()!;
-    if (found.has(name)) continue;
+    if (found.has(name) || name.startsWith("@intx/")) continue;
     const dir = resolveExternalPackageDir(name, fromDirs);
     const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as PackageManifest;
     found.set(name, { name: manifest.name, version: manifest.version, dir });
     for (const depName of Object.keys(manifest.dependencies ?? {})) {
-      if (found.has(depName)) continue;
+      // A vendored package's own real `package.json` (unlike the trimmed
+      // member this same closure ships) still declares its `@intx/*`
+      // dependencies untouched. Without this check they re-enter the BFS as
+      // "external", get resolved from node_modules, and get packed a
+      // second time via `externalTarballFiles`'s raw whole-directory copy
+      // (dist, src, tests and all) alongside the correct, curated
+      // `vendoredTarballFiles` entry `vendoredShortNames()` already packed
+      // -- two tarballs sharing one filename, the raw one overwriting the
+      // curated one on disk.
+      if (found.has(depName) || depName.startsWith("@intx/")) continue;
       queue.push({ name: depName, fromDirs: [dir, ROOT_DIR] });
     }
   }
@@ -247,6 +321,9 @@ export type ClosureManifest = {
   readonly generatedBy: string;
   readonly digest: string;
   readonly packages: readonly ClosureManifestEntry[];
+  /** The workspace root's `catalog` field, so the browser side can expand a
+   *  member's `catalog:` specifier without its own copy or `node:fs`. */
+  readonly catalog: Record<string, string>;
 };
 
 function sha256Hex(bytes: Uint8Array): string {
@@ -271,5 +348,5 @@ export function buildManifest(generatedBy: string, entries: readonly PackedEntry
     hash.update(pkg.sha256);
     hash.update("\0");
   }
-  return { generatedBy, digest: hash.digest("hex"), packages };
+  return { generatedBy, digest: hash.digest("hex"), packages, catalog: workspaceCatalog() };
 }

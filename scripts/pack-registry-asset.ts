@@ -66,7 +66,9 @@
  * Usage: `bun run assets:pack-registry`
  */
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
+import fs, { existsSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
@@ -76,7 +78,13 @@ import {
 } from "@intx/tool-packaging";
 import { getToolPackageSourceContentIdentity } from "@intx/types/tool-packages";
 
-import { install as installerInstall } from "@solutions-builder/installer";
+import {
+  install as installerInstall,
+  pushSourceTree,
+  type ClosureSource,
+  type FetchLike,
+  type WorkflowGitPush,
+} from "@solutions-builder/installer";
 import { openDatabase } from "../apps/hub/src/db.js";
 import { prepareDatabase } from "../apps/hub/src/migrate.js";
 import { rerankCatalogProviders } from "../apps/hub/src/catalog.js";
@@ -88,11 +96,47 @@ import {
   signInEmail,
   signUpEmail,
 } from "../apps/hub/src/hub-client.js";
-import { canPlaceSidecars, hub } from "../apps/hub/src/hub-mount.js";
+import { canPlaceSidecars, embeddedHubOrigin, hub } from "../apps/hub/src/hub-mount.js";
 import { databaseDirectory } from "../apps/hub/src/paths.js";
 import { tarballIntegrity } from "./lib/tarball.js";
-import { buildPackedEntries, VENDOR_PACKAGES_DIR, type PackedEntry } from "./closure-pack.js";
+import { buildManifest, buildPackedEntries, VENDOR_PACKAGES_DIR, type PackedEntry } from "./closure-pack.js";
 
+/**
+ * The closure/git-push capabilities `installerInstall` needs (CL-8334): this
+ * script drives the same lifecycle deploy a browser client does, but from
+ * Node against the embedded (in-process) hub, so both differ from the
+ * browser's own `apps/web/src/client.ts` wiring. The manifest is built
+ * in-memory from the same packer this script already uses for the registry
+ * asset, rather than reading the static `apps/web/public/closure/` files --
+ * this script's whole point is running before those exist. The push rides
+ * `hub().app.fetch` directly (there is no listening socket to dial in
+ * embedded mode) and a real `node:fs`-backed temp directory instead of a
+ * browser lightning-fs.
+ */
+async function scriptClosureAndPush(): Promise<{ closure: ClosureSource; gitPush: WorkflowGitPush }> {
+  const entries = await buildPackedEntries();
+  const manifest = buildManifest("scripts/pack-registry-asset.ts", entries);
+  const byFilename = new Map(entries.map((entry) => [entry.filename, entry.bytes]));
+  const closure: ClosureSource = {
+    manifest,
+    fetchTarball: async (filename) => {
+      const bytes = byFilename.get(filename);
+      if (bytes === undefined) throw new Error(`no packed entry for ${filename}`);
+      return bytes;
+    },
+  };
+  const fetchImpl: FetchLike = async (input, init) => hub().app.fetch(new Request(input, init));
+  const gitPush: WorkflowGitPush = async ({ scope, assetKind, assetName, token, tree, message }) => {
+    const dir = await mkdtemp(join(tmpdir(), "solutions-builder-push-"));
+    try {
+      const url = `${embeddedHubOrigin()}/api/tenants/${encodeURIComponent(scope)}/assets/${assetKind}/${assetName}.git`;
+      return await pushSourceTree({ url, token, tree, message, fsBackend: { fs, dir }, fetchImpl });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  };
+  return { closure, gitPush };
+}
 /** Signs in (or up) a script account and drives the installer through the
  *  hub's own transport, the same way `host-install.ts` did for smokes before
  *  it was deleted (CL-8344) — this asset-packing script still needs an
@@ -105,9 +149,12 @@ async function install(): Promise<void> {
   if (!(await signInEmail(SCRIPT_EMAIL, SCRIPT_PASSWORD))) {
     await signUpEmail({ email: SCRIPT_EMAIL, password: SCRIPT_PASSWORD, name: SCRIPT_NAME });
   }
+  const { closure, gitPush } = await scriptClosureAndPush();
   await installerInstall(
     hubTransport(),
     { canPlaceSidecars: canPlaceSidecars(), sidecarFingerprint: hub().sidecarBindingFingerprint },
+    closure,
+    gitPush,
     { afterSkillAssets: async () => { await rerankCatalogProviders(); } },
   );
   hubClientForgetWorkspace();
