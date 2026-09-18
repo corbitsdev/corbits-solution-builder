@@ -335,6 +335,7 @@ export interface RouteOutput {
   readonly stage: number;
   readonly command: string;
   readonly message?: string;
+  readonly quotes?: readonly { readonly quote: string }[];
   readonly audiences?: readonly string[];
   readonly documents?: readonly string[];
   readonly feedback?: string;
@@ -350,6 +351,7 @@ export async function routeMessage(input: unknown): Promise<RouteOutput> {
     stage: round.stage,
     command: round.command,
     ...(round.message !== undefined ? { message: round.message } : {}),
+    ...(round.quotes !== undefined ? { quotes: round.quotes } : {}),
     ...(round.audiences !== undefined ? { audiences: round.audiences } : {}),
     ...(round.documents !== undefined ? { documents: round.documents } : {}),
     ...(round.feedback !== undefined ? { feedback: round.feedback } : {}),
