@@ -289,6 +289,94 @@ declare module "@intx/types/runtime" {
 declare module "@intx/types" {
   export function hexDecode(value: string): Uint8Array;
   export function hexEncode(value: Uint8Array): string;
+  // arktype `type()` schemas: the stub only needs `.infer` for the shapes
+  // `packages/installer/src/hub.ts` types its catalog-write calls against.
+  export const CreateProvider: {
+    infer: {
+      name: string;
+      plugin: string;
+      apiBaseUrl?: string;
+      authorizationUrl?: string;
+      tokenUrl?: string;
+      userInfoUrl?: string;
+      scopes?: string[];
+      metadata?: Record<string, unknown>;
+    };
+  };
+  export const UpdateProvider: {
+    infer: {
+      name?: string;
+      plugin?: string;
+      apiBaseUrl?: string | null;
+      authorizationUrl?: string | null;
+      tokenUrl?: string | null;
+      userInfoUrl?: string | null;
+      scopes?: string[] | null;
+      metadata?: Record<string, unknown> | null;
+    };
+  };
+  export const CreateCredential: {
+    infer: {
+      providerId: string;
+      name: string;
+      type: "api_key" | "oauth_token" | "certificate" | "other";
+      principalId?: string;
+      oauthClientId?: string;
+      description?: string;
+      secret: string;
+      refreshSecret?: string;
+      scopes?: string[];
+      expiresAt?: string;
+      metadata?: Record<string, unknown>;
+    };
+  };
+  export const UpdateCredential: {
+    infer: {
+      name?: string;
+      description?: string;
+      secret?: string;
+      refreshSecret?: string | null;
+      scopes?: string[] | null;
+      expiresAt?: string | null;
+      status?: "active" | "expired" | "revoked" | "error";
+      metadata?: Record<string, unknown>;
+    };
+  };
+  export const CreateModelProvider: {
+    infer: {
+      name: string;
+      plugin: "anthropic" | "openai" | "openai-compatible" | "google-genai";
+      baseURL: string;
+      credentialId?: string | null;
+      walletId?: string | null;
+    };
+  };
+  export const UpdateModelProvider: {
+    infer: {
+      name?: string;
+      baseURL?: string;
+      disabled?: boolean;
+    };
+  };
+  export const CreateModelOffering: {
+    infer: {
+      modelId: string;
+      providerId: string;
+      priority?: number;
+      deploymentTags?: string[];
+      capabilities?: string[];
+      quirks?: Record<string, unknown>;
+    };
+  };
+  export const UpdateModelOffering: {
+    infer: {
+      priority?: number;
+      deploymentTags?: string[];
+      capabilities?: string[];
+      quirks?: Record<string, unknown> | null;
+      disabled?: boolean;
+    };
+  };
   /** Splits a `<runId>@<domain>` agent address, or `null` when malformed. */
   export function parseRunAddress(address: string): { runId: string; domain: string } | null;
   export type SidecarCapabilityRule = Record<string, unknown>;

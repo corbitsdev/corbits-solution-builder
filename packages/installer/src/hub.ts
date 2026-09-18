@@ -19,6 +19,16 @@ import {
   type WorkflowDeployment,
 } from "@intx/hub-client";
 import { SOLUTIONS_BUILDER_APP, assertMayMintGrant } from "@solutions-builder/app/grant-namespaces";
+import type {
+  CreateCredential,
+  CreateModelOffering,
+  CreateModelProvider,
+  CreateProvider,
+  UpdateCredential,
+  UpdateModelOffering,
+  UpdateModelProvider,
+  UpdateProvider,
+} from "@intx/types";
 
 export { ApiError };
 export type HubDeployment = WorkflowDeployment;
@@ -315,15 +325,53 @@ export type HubProvider = {
 
 export function catalogFor(transport: Transport, scope: string) {
   return {
-    credentials: () => list<HubCredential>(transport, tenantPathFor(scope, "/credentials")),
+    // --- Vendor providers (the `provider` table a credential authenticates against) ---
     providers: () => list<HubProvider>(transport, tenantPathFor(scope, "/providers")),
+    createProvider: (input: typeof CreateProvider.infer) =>
+      transport.fetch<HubProvider>("POST", tenantPathFor(scope, "/providers"), input),
+    patchProvider: (id: string, input: typeof UpdateProvider.infer) =>
+      transport.fetch<HubProvider>("PATCH", tenantPathFor(scope, `/providers/${id}`), input),
+
+    // --- Credentials ---
+    credentials: () => list<HubCredential>(transport, tenantPathFor(scope, "/credentials")),
+    resolveCredential: async (name: string): Promise<HubCredential | null> => {
+      try {
+        return await transport.fetch<HubCredential>(
+          "GET",
+          tenantPathFor(scope, `/credentials/resolve/${encodeURIComponent(name)}`),
+        );
+      } catch (cause) {
+        if (cause instanceof ApiError && cause.status === 404) return null;
+        throw cause;
+      }
+    },
+    createCredential: (input: typeof CreateCredential.infer) =>
+      transport.fetch<HubCredential>("POST", tenantPathFor(scope, "/credentials"), input),
+    patchCredential: (id: string, input: typeof UpdateCredential.infer) =>
+      transport.fetch<HubCredential>("PATCH", tenantPathFor(scope, `/credentials/${id}`), input),
+    deleteCredential: (id: string) => transport.fetch<void>("DELETE", tenantPathFor(scope, `/credentials/${id}`)),
+
+    // --- Model providers (the inference endpoint bound to a credential) ---
     modelProviders: () => list<HubModelProvider>(transport, tenantPathFor(scope, "/catalog/providers")),
+    createModelProvider: (input: typeof CreateModelProvider.infer) =>
+      transport.fetch<HubModelProvider>("POST", tenantPathFor(scope, "/catalog/providers"), input),
+    patchModelProvider: (id: string, input: typeof UpdateModelProvider.infer) =>
+      transport.fetch<HubModelProvider>("PATCH", tenantPathFor(scope, `/catalog/providers/${id}`), input),
+    deleteModelProvider: (id: string) =>
+      transport.fetch<void>("DELETE", tenantPathFor(scope, `/catalog/providers/${id}`)),
+
+    // --- Models ---
     models: () => list<HubModel>(transport, tenantPathFor(scope, "/catalog/models")),
+    createModel: (input: { canonicalName: string; displayName?: string | null }) =>
+      transport.fetch<HubModel>("POST", tenantPathFor(scope, "/catalog/models"), input),
+
+    // --- Model offerings (a model x provider pairing) ---
     offerings: () => list<HubOffering>(transport, tenantPathFor(scope, "/catalog/offerings")),
-    patchOffering: (
-      id: string,
-      input: { priority?: number; disabled?: boolean; capabilities?: string[]; quirks?: Record<string, unknown> | null },
-    ) => transport.fetch<HubOffering>("PATCH", tenantPathFor(scope, `/catalog/offerings/${id}`), input),
+    createOffering: (input: typeof CreateModelOffering.infer) =>
+      transport.fetch<HubOffering>("POST", tenantPathFor(scope, "/catalog/offerings"), input),
+    patchOffering: (id: string, input: typeof UpdateModelOffering.infer) =>
+      transport.fetch<HubOffering>("PATCH", tenantPathFor(scope, `/catalog/offerings/${id}`), input),
+    deleteOffering: (id: string) => transport.fetch<void>("DELETE", tenantPathFor(scope, `/catalog/offerings/${id}`)),
   };
 }
 

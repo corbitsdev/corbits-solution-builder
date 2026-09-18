@@ -29,8 +29,12 @@ import { createHubTransport } from "./hub.ts";
 import {
   API_KEY_CONNECT_OPTIONS,
   OAUTH_CONNECT_OPTIONS,
+  connectApiKeyProvider,
+  disconnectProvider,
   listConnectedProviders,
   rerankCatalogViaHub,
+  reorderProviders,
+  selectProviderModel,
 } from "./provider-catalog.ts";
 
 export { createHubTransport } from "./hub.ts";
@@ -544,6 +548,34 @@ export const api = {
         apiKeyProviders: [...API_KEY_CONNECT_OPTIONS],
         oauthCandidates: [...OAUTH_CONNECT_OPTIONS],
       };
+    } catch (cause) {
+      installerFailure(cause);
+    }
+  },
+  connectProvider: async (input: { providerId: string; label: string; baseUrl?: string; apiKey: string }): Promise<Provider> => {
+    try {
+      return await connectApiKeyProvider(createHubTransport(), input);
+    } catch (cause) {
+      installerFailure(cause);
+    }
+  },
+  disconnectProvider: async (providerId: string): Promise<void> => {
+    try {
+      await disconnectProvider(createHubTransport(), providerId);
+    } catch (cause) {
+      installerFailure(cause);
+    }
+  },
+  reorderProviders: async (orderedProviderIds: string[]): Promise<void> => {
+    try {
+      await reorderProviders(createHubTransport(), orderedProviderIds);
+    } catch (cause) {
+      installerFailure(cause);
+    }
+  },
+  selectProviderModel: async (providerId: string, canonicalName: string | null): Promise<void> => {
+    try {
+      await selectProviderModel(createHubTransport(), providerId, canonicalName);
     } catch (cause) {
       installerFailure(cause);
     }
