@@ -321,18 +321,6 @@ export type ProjectDetail = {
   carriedTurns: { stage: number; turn: StageTurn }[];
 };
 
-/** Orientation from the Product guide, or the deterministic checklist. */
-export type Guidance = {
-  summary: string;
-  readiness: "ready" | "not_ready" | "blocked";
-  missing: string[];
-  options: { label: string; detail: string }[];
-  recommended: string;
-  questions: string[];
-  sourceVersionIds: string[];
-  origin: "agent" | "deterministic";
-};
-
 export type { Quote, StageTurn };
 
 /** The stage-1 brief evaluator's verdict. Advisory only — nothing gates on it. */
@@ -741,9 +729,6 @@ export const api = {
   },
   project: (projectId: string) => request<ProjectDetail>(`/projects/${projectId}`),
   projectInfo: (projectId: string) => request<ProjectInfo>(`/projects/${projectId}/info`),
-  /** Writes the project's export beside the person's downloads and says where. */
-  exportProject: (projectId: string) =>
-    post<{ path: string; bytes: number; nodes: number; commands: number }>(`/projects/${projectId}/export`, {}),
   /** Hands files over with the problem; each becomes a version the specialists read. */
   attachMaterial: (projectId: string, files: File[]) => {
     const form = new FormData();
@@ -753,9 +738,6 @@ export const api = {
       form,
     );
   },
-  /** Brings an exported project in as a new project here. */
-  importProject: (bundle: unknown) =>
-    post<{ projectId: string; nodes: number; commands: number }>("/projects/import", bundle),
   /** The stakeholders stage 5 writes for, and the roles one may hold — read off the hub tenant directly. */
   stakeholders: (projectId: string) =>
     asWorkspaceOwner(async (transport) => {
@@ -826,8 +808,6 @@ export const api = {
     saveDesignerSettings(createHubTransport(), { [key]: value } as Partial<DesignerSettings>).catch((cause) => {
       installerFailure(cause);
     }),
-  guidance: (projectId: string) =>
-    request<{ guidance: Guidance }>(`/projects/${projectId}/guidance`),
   graph: (projectId: string) =>
     request<{
       nodes: ArtifactNode[];

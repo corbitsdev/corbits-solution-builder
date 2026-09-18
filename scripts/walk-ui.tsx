@@ -88,10 +88,7 @@ function Shell({
               {artifacts ? null : <Button variant="ghost">Artifacts (1)</Button>}
               <GuideDock
                 step={step}
-                guidance={null}
-                explaining={false}
                 at={artifacts ? "artifacts" : "stage"}
-                onExplain={() => {}}
                 onGo={() => {}}
               />
             </div>

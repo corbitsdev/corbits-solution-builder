@@ -94,34 +94,6 @@ export function Projects({
     const next = [...files].filter((file) => !material.some((held) => held.name === file.name && held.size === file.size));
     if (next.length > 0) setMaterial([...material, ...next]);
   };
-  // Where an export landed, or what an import brought in: said once, here.
-  const [notice, setNotice] = useState<string | null>(null);
-  const importInput = useRef<HTMLInputElement>(null);
-
-  /** Reads the chosen export and brings it in as a new project. */
-  const importFile = async (file: File) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const bundle: unknown = JSON.parse(await file.text());
-      const brought = await api.importProject(bundle);
-      setNotice(`Imported ${file.name}: ${brought.nodes} document version${brought.nodes === 1 ? "" : "s"} and ${brought.commands} recorded command${brought.commands === 1 ? "" : "s"}.`);
-      onChanged();
-      onOpen(brought.projectId);
-    } catch (cause) {
-      setError(
-        cause instanceof ApiFailure
-          ? cause.detail.message
-          : cause instanceof SyntaxError
-            ? `${file.name} is not a JSON file.`
-            : String(cause),
-      );
-    } finally {
-      setBusy(false);
-      if (importInput.current) importInput.current.value = "";
-    }
-  };
-
   // Whatever waits on the person first, then the furthest along. Archived ones
   // fold away.
   const openQuestions = useOpenQuestions(projects);
@@ -188,9 +160,6 @@ export function Projects({
           drag it here.
         </p>
         {error ? <Banner tone="error" title={error} /> : null}
-        {notice ? (
-          <Banner tone="okay" title={notice} action={{ label: "Dismiss", onClick: () => setNotice(null) }} />
-        ) : null}
         <Dictated value={problem} onValueChange={setProblem} disabled={busy}>
           <ChatInput
             className="start-input"
@@ -248,25 +217,6 @@ export function Projects({
             Word files and images are kept with the project and named to them.
           </p>
         </div>
-        {/* A project from another instance of this app. The file is one of
-            its own exports; the input is hidden because the file picker is the
-            whole interaction and a bare input reads as a form. */}
-        <p className="start-import">
-          <input
-            ref={importInput}
-            type="file"
-            accept="application/json,.json"
-            hidden
-            aria-label="Choose a project export to import"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) void importFile(file);
-            }}
-          />
-          <Button variant="link" disabled={busy} onClick={() => importInput.current?.click()}>
-            Import a project exported from another copy of this app…
-          </Button>
-        </p>
       </section>
 
       <section className="project-grid-section" aria-labelledby="projects-title">
@@ -290,7 +240,6 @@ export function Projects({
                 onOpen={() => onOpen(project.id)}
                 onChanged={onChanged}
                 onError={failed}
-                onNotice={setNotice}
               />
             ))}
           </div>
@@ -311,7 +260,6 @@ export function Projects({
                 onOpen={() => onOpen(project.id)}
                 onChanged={onChanged}
                 onError={failed}
-                onNotice={setNotice}
               />
             ))}
           </div>
@@ -327,14 +275,12 @@ function ProjectCard({
   onOpen,
   onChanged,
   onError,
-  onNotice,
 }: {
   project: ProjectSummary;
   index: number;
   onOpen: () => void;
   onChanged: () => void;
   onError: (cause: unknown) => void;
-  onNotice: (message: string) => void;
 }) {
   const stage = project.stage ?? 0;
   const waiting =
@@ -411,16 +357,6 @@ function ProjectCard({
           <MenuContent align="end">
             <MenuItem onSelect={() => setInfoOpen(true)}>Project info…</MenuItem>
             <MenuItem onSelect={() => setRenaming(true)}>Rename</MenuItem>
-            <MenuItem
-              onSelect={() =>
-                void act(async () => {
-                  const saved = await api.exportProject(project.id);
-                  onNotice(`Exported ${project.title} to ${saved.path}: ${saved.nodes} document version${saved.nodes === 1 ? "" : "s"} and ${saved.commands} recorded command${saved.commands === 1 ? "" : "s"}.`);
-                })
-              }
-            >
-              Export…
-            </MenuItem>
             <MenuItem
               onSelect={() =>
                 void act(() => api.updateProject(project.id, { archived: !project.archivedAt }))

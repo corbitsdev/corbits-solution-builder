@@ -14,7 +14,6 @@ import {
   type ProjectSummary,
   type Provider,
   type Wait,
-  type Guidance,
   type ArtifactNode,
 } from "./client.js";
 import { CircleCheck, FolderKanban, PanelRight, PanelRightClose, Settings as SettingsIcon } from "lucide-react";
@@ -316,8 +315,6 @@ export function App() {
     return () => query.removeEventListener("change", update);
   }, []);
 
-  const [guidance, setGuidance] = useState<Guidance | null>(null);
-  const [explaining, setExplaining] = useState(false);
   const [draftOpen, setDraftOpen] = useState(true);
 
   const [status, setStatus] = useState<HostStatus | null>(null);
@@ -338,11 +335,6 @@ export function App() {
   const [tenantId, setTenantId] = useState<string | null>(null);
   // The artifact the Artifacts panel opens on, when the rail sent us there.
   const [openedArtifact, setOpenedArtifact] = useState<string | null>(null);
-  // Guidance describes one project at one moment. Showing yesterday's
-  // orientation against today's state is worse than showing none.
-  useEffect(() => {
-    setGuidance(null);
-  }, [selected, detail?.current?.state, detail?.nodes.length]);
   const [graph, setGraph] = useState<{
     nodes: import("./client.js").ArtifactNode[];
     edges: { childNodeId: string; sourceNodeId: string }[];
@@ -745,17 +737,7 @@ export function App() {
                     }
                   : {}),
               })}
-              guidance={guidance}
-              explaining={explaining}
               at={projectTab === "artifacts" ? "artifacts" : "stage"}
-              onExplain={() => {
-                setExplaining(true);
-                void api
-                  .guidance(detail.project.id)
-                  .then((result) => setGuidance(result.guidance))
-                  .catch(() => setGuidance(null))
-                  .finally(() => setExplaining(false));
-              }}
               onGo={(where) => {
                 if (where === "settings") setView("settings");
                 else if (where === "decisions") setView("decisions");

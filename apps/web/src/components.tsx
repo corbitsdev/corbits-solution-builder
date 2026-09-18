@@ -257,17 +257,11 @@ export function Mark({ size = 26 }: { size?: number }) {
 export function GuideDock({
   step,
   onGo,
-  onExplain,
-  guidance,
-  explaining,
   at,
   stage,
 }: {
   step: import("@solutions-builder/app/next-step").NextStep;
   onGo: (where: import("@solutions-builder/app/next-step").NextStep["where"]) => void;
-  onExplain: () => void;
-  guidance: import("./client.js").Guidance | null;
-  explaining: boolean;
   at?: import("@solutions-builder/app/next-step").NextStep["where"];
   /** Which of the nine this project is on, for the ring. */
   stage?: number;
@@ -332,27 +326,6 @@ export function GuideDock({
           </div>
           <p className="guide-detail">{step.detail}</p>
 
-          {guidance ? (
-            <div className="guide-guidance">
-              <p>{guidance.summary}</p>
-              {guidance.missing.length > 0 ? (
-                <>
-                  <h4>Still missing</h4>
-                  <ul>
-                    {guidance.missing.map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
-                </>
-              ) : null}
-              <p className="inline-note">
-                {guidance.origin === "agent"
-                  ? `Read from ${guidance.sourceVersionIds.length} version${guidance.sourceVersionIds.length === 1 ? "" : "s"}. The guide recommends a route; it never takes one.`
-                  : "No specialist was reachable, so this is the deterministic checklist."}
-              </p>
-            </div>
-          ) : null}
-
           <div className="guide-actions">
             {step.ending || step.where === at ? null : (
               <Button variant="primary" onClick={() => onGo(step.where)}>
@@ -363,11 +336,6 @@ export function GuideDock({
                     : step.where === "settings"
                       ? "Open settings"
                       : "Take me there"}
-              </Button>
-            )}
-            {guidance ? null : (
-              <Button loading={explaining} onClick={onExplain}>
-                Where does this stand?
               </Button>
             )}
           </div>

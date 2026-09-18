@@ -9,21 +9,10 @@ import {
   projectDetail,
   readArtifactNode,
 } from "./projects.js";
-import { runGuidance } from "./guide.js";
 import { notFound } from "./errors.js";
-import { type RunState } from "@solutions-builder/app/ledger";
 import { parsed } from "./api.js";
 import { localActor } from "./hub-client.js";
-import {
-  exportDirectory,
-  exportProject,
-  fileNameFor,
-  importProject,
-  parseBundle,
-  saveBundle,
-  saveFile,
-  bundleFileName,
-} from "./project-transfer.js";
+import { exportDirectory, fileNameFor, saveFile } from "./project-transfer.js";
 import { bytesOf } from "./source-material.js";
 import { readProject } from "./project-records.js";
 import { attachMaterial, MATERIAL_KIND, type IncomingFile } from "./source-material.js";
@@ -60,30 +49,6 @@ export function registerProjectRoutes(api: Hono) {
   );
 
   /**
-   * A project carried out of this instance: everything it records, as one
-   * JSON file. The `.json` route hands the bundle back for a browser or a
-   * script; the other writes it beside the person's other downloads and says
-   * where, which is what the desktop shell needs, since its webview saves
-   * nothing on its own.
-   */
-  api.get("/projects/:projectId/export.json", async (context) => {
-    const bundle = await exportProject(context.req.param("projectId"));
-    return new Response(JSON.stringify(bundle, null, 2), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-        "content-disposition": `attachment; filename="${bundleFileName(bundle.project.title)}"`,
-        "cache-control": "no-store",
-      },
-    });
-  });
-
-  api.post("/projects/:projectId/export", async (context) => {
-    const bundle = await exportProject(context.req.param("projectId"));
-    const saved = await saveBundle(bundle, exportDirectory());
-    return context.json({ ...saved, nodes: bundle.artifacts.nodes.length, commands: bundle.ledger.length });
-  });
-
-  /**
    * Files the person hands over with the problem, as multipart `files`. Each
    * becomes a `source_material` version the specialists read at every stage.
    */
@@ -101,12 +66,6 @@ export function registerProjectRoutes(api: Hono) {
       .reduce((sum, node) => sum + node.sizeBytes, 0);
     const attached = await attachMaterial({ projectId, actor: localActor(), files, alreadyHeldBytes: held });
     return context.json({ attached });
-  });
-
-  /** A project carried in: the bundle as the body, a new project here as the answer. */
-  api.post("/projects/import", async (context) => {
-    const bundle = parseBundle(await context.req.json().catch(() => null));
-    return context.json(await importProject(bundle, localActor()));
   });
 
   /**
@@ -159,52 +118,4 @@ export function registerProjectRoutes(api: Hono) {
     const saved = await saveFile(fileNameFor(node.title, stored.mime ?? node.mediaType), stored.bytes, exportDirectory());
     return context.json(saved);
   });
-
-  /**
-   * Orientation from the Product guide — read-only, and never a transition.
-   *
-   * Falls back to the deterministic checklist rather than failing: "what do I
-   * do now" has to be answerable even when no provider will answer it.
-   */
-  api.get("/projects/:projectId/guidance", async (context) => {
-    const projectId = context.req.param("projectId");
-    const detail = await projectDetail(projectId, localActor().principalId);
-    const live = detail.nodes.filter((node) => node.supersededByNodeId === null);
-    const versions = await Promise.all(
-      live.map(async (node) => ({
-        id: node.id,
-        title: node.title,
-        stage: node.stage,
-        content: (await readArtifactNode(node.id).catch(() => ({ content: "" }))).content,
-      })),
-    );
-    const policy = detail.project.policy as { audienceQuorum?: number };
-    const decisions = detail.approvals.filter(
-      (approval) => approval.command === "audience.decide",
-    );
-    return context.json({
-      guidance: await runGuidance({
-        projectId,
-        projectTitle: detail.project.title,
-        stage: detail.current?.stage ?? 1,
-        state: (detail.current?.state ?? null) as RunState | null,
-        versions,
-        approvals: detail.approvals.map((approval) => ({
-          stage: approval.stage,
-          command: approval.command,
-          decision: approval.decision,
-        })),
-        ...(detail.current?.stage === 5
-          ? {
-              quorum: {
-                recorded: decisions.length,
-                needed: policy.audienceQuorum ?? 0,
-                blocked: decisions.filter((approval) => approval.decision !== "proceed").length,
-              },
-            }
-          : {}),
-      }),
-    });
-  });
-
 }

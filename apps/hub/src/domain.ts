@@ -58,38 +58,3 @@ export const ArtifactDraft = type({
   },
 });
 export type ArtifactDraft = typeof ArtifactDraft.infer;
-
-/**
- * What the Product guide returns — BUILD_PLAN_V3 section 8.
- *
- * Orientation, never authority. The guide reads the project and says where it
- * stands, what is missing and what the human could do next; it recommends a
- * route and takes none. Every claim cites the approved versions it was read
- * from, so guidance can be checked against the record rather than trusted.
- */
-export const GuidanceRecord = type({
-  /** Where the project stands, in a sentence or two. */
-  summary: type("string > 0").to("string <= 1200"),
-  /** Whether this stage looks ready for its gate. */
-  readiness: "'ready' | 'not_ready' | 'blocked'",
-  /** Evidence the gate needs that is not there yet. */
-  missing: type("string <= 400").array().to("Array <= 10"),
-  /** What the human could do, each a real option at this moment. */
-  options: type({
-    label: type("string > 0").to("string <= 120"),
-    detail: type("string <= 400"),
-  }).array().to("Array <= 5"),
-  /** The recommended one. Always one of `options`, never acted on. */
-  recommended: type("string > 0").to("string <= 120"),
-  /** Questions worth answering before the next draft. */
-  questions: type("string <= 400").array().to("Array <= 8"),
-  /** Exact artifact version ids this guidance was read from. */
-  sourceVersionIds: id.array().to("Array <= 50"),
-  /**
-   * Whether a specialist produced this or it is the deterministic checklist.
-   * Section 8 requires the fallback; a person is told which one they are
-   * reading rather than being left to assume.
-   */
-  origin: "'agent' | 'deterministic'",
-});
-export type GuidanceRecord = typeof GuidanceRecord.infer;
