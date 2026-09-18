@@ -638,6 +638,18 @@ declare module "@intx/hub-sessions" {
   };
   export function pushCredentialReconcile(...args: unknown[]): void;
   export const WORKSPACE_BUILTINS_REGISTRY: string;
+  export type RoutableEndpoint = {
+    id: string;
+    tenantId: string;
+    address: string;
+    publicKey: string;
+    status: string;
+    sessionId: string | null;
+  };
+  export function resolveRoutableAddress(
+    db: unknown,
+    address: string,
+  ): Promise<RoutableEndpoint | undefined>;
   export type SidecarLookups = Record<string, unknown>;
   export type SidecarProvisioner = Record<string, unknown>;
   export type SidecarProvisionerChooser = unknown;

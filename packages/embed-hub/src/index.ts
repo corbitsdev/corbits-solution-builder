@@ -65,6 +65,7 @@ import {
 } from "@corbits/process-provisioner";
 import {
   createInMemoryMailboxEventBus,
+  createMailboxPersist,
   deliverInboxItems,
   mountMailbox,
   runMailboxMigrations,
@@ -76,9 +77,19 @@ import { drizzle } from "drizzle-orm/pglite";
 import * as intxSchema from "@intx/db/schema";
 import { withPostgresJsResultShape } from "./pg-compat.js";
 import { mountProviderOAuth } from "./oauth-mount.js";
+import { createHubMailboxAuthorizeSender } from "./mailbox-persist.js";
+import { captureMailboxRequest, createMailboxDeliver } from "./mailbox-send.js";
 
 /** The path a sidecar's WebSocket connects to; part of `@intx/hub-api`'s own contract. */
 export const SIDECAR_WS_PATH = "/api/sidecars/ws";
+
+/** Shape of `SidecarLookups.persistMail`, narrowed from `unknown` since the
+ * lookups map is otherwise untyped. */
+type PersistMailFn = (args: {
+  senderAddress: string;
+  recipients: string[];
+  raw: Uint8Array;
+}) => Promise<unknown>;
 
 /** The text of a mailbox frame this package built: flat, so everything after the header section is the body. */
 function frameBody(raw: Uint8Array): string {
@@ -249,6 +260,12 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
     reservedPackageRegistryNames: new Set(httpRegistries.keys()),
   });
 
+  // @corbits/mailbox: created here, ahead of `lookups`, so an agent's
+  // outbound mail can be wrapped into a durable inbox row below before the
+  // sidecar router captures `lookups` by reference.
+  const mailboxDb = db.db as unknown as Parameters<typeof mountMailbox>[1]["db"];
+  const mailboxBus = createInMemoryMailboxEventBus();
+
   const lookups: SidecarLookups = {
     ...createHubSessionLookups({ db: db.db, agentRepoStore }),
     materializeMailTriggeredRunGrants: createMailTriggeredRunGrantsMaterializer({
@@ -266,6 +283,16 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
     resolveSenderKeyStrict: async (address: string) =>
       (await resolveSenderKeyStrict(db.db, principalKeyStore, address))?.publicKey ?? null,
   };
+  // Ported from workbench's server.ts: "The sidecar router captured
+  // `lookups` before this wrapper existed" — wrap `persistMail` here, before
+  // `createSidecarRouter` below closes over `lookups`, so an agent's
+  // outbound mail also lands a durable row in every recipient's inbox.
+  const wrappedPersistMail = createMailboxPersist(mailboxDb, {
+    upstream: lookups.persistMail as PersistMailFn,
+    authorizeSender: createHubMailboxAuthorizeSender(db.db),
+    bus: mailboxBus,
+  });
+  lookups.persistMail = wrappedPersistMail;
 
   const sidecarCredentials = createSidecarCredentialResolver({ db: db.db });
   const sidecarRouter = createSidecarRouter({
@@ -421,12 +448,12 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
   // notifications bell. Reached over `/api/me/inbox*`; the mounted routes
   // resolve their own caller session, so nothing about the ledger's
   // decisions lives on this mount besides the resolver and address below.
-  // The mount's own `MailboxDb` type names `postgres-js`'s driver, but reads
-  // nothing but plain drizzle query-builder calls; this pglite handle (already
-  // wearing the postgres.js result shape every other store here expects)
-  // satisfies it at runtime the same way it does theirs.
-  const mailboxDb = db.db as unknown as Parameters<typeof mountMailbox>[1]["db"];
-  const mailboxBus = createInMemoryMailboxEventBus();
+  // `mailboxDb`/`mailboxBus` are the same handle and bus `lookups.persistMail`
+  // was wrapped onto above. The mount's own `MailboxDb` type names
+  // `postgres-js`'s driver, but reads nothing but plain drizzle
+  // query-builder calls; this pglite handle (already wearing the
+  // postgres.js result shape every other store here expects) satisfies it
+  // at runtime the same way it does theirs.
   async function principalAddress(principal: { tenantId: string; principalId: string }): Promise<string> {
     const [tenantRow] = (await db.db.execute(
       sql`SELECT "domain" FROM "public"."tenant" WHERE "id" = ${principal.tenantId} LIMIT 1`,
@@ -614,6 +641,26 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
     },
   });
   app.route("/api/tenants/:tenantId", artifactsApi);
+
+  // A second @corbits/mailbox mount, tenant-scoped, alongside the
+  // single-workspace `/api/me/inbox*` one above: mail addressed to a run
+  // address (`<runId>@<tenant.domain>`) must reach that run's trigger route,
+  // which needs the `tenantId` path param the single-workspace mount has no
+  // reason to carry. Ported from workbench's server.ts 586-620.
+  const runMailboxApp = new Hono<TenantEnv>();
+  // Registered before the route: Hono runs handlers in registration order.
+  runMailboxApp.use("/me/inbox/send", captureMailboxRequest());
+  mountMailbox(runMailboxApp, {
+    db: mailboxDb,
+    bus: mailboxBus,
+    resolvePrincipal: (ctx) => {
+      const c = ctx as { get(key: "tenant" | "principal"): { id: string } };
+      return { tenantId: c.get("tenant").id, principalId: c.get("principal").id };
+    },
+    senderAddressFor: principalAddress,
+    deliver: createMailboxDeliver({ app, persistMail: wrappedPersistMail }),
+  });
+  app.route("/api/tenants/:tenantId/mailbox", runMailboxApp);
 
   return {
     app,

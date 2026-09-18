@@ -37,9 +37,44 @@ declare module "@corbits/mailbox" {
     heartbeatIntervalMs?: number;
   };
 
-  export function mountMailbox(app: Hono, opts: MountMailboxOpts): void;
+  export function mountMailbox<E extends Record<string, unknown> = Record<string, never>>(
+    app: Hono<E>,
+    opts: MountMailboxOpts,
+  ): void;
 
   export function runMailboxMigrations(db: MailboxDb): Promise<void>;
+
+  export type MailboxPersistArgs = {
+    senderAddress: string;
+    recipients: string[];
+    raw: Uint8Array;
+  };
+
+  export type SenderAuthorization = { tenantId: string; domain: string };
+
+  export type AuthorizeMailboxSender = (
+    senderAddress: string,
+  ) => Promise<SenderAuthorization | null> | SenderAuthorization | null;
+
+  export type PersistedMailboxRow = {
+    id: string;
+    tenantId: string;
+    principalId: string;
+    recipientAddress: string;
+    senderAddress: string;
+  };
+
+  export type CreateMailboxPersistOpts<R> = {
+    upstream: (args: MailboxPersistArgs) => Promise<R>;
+    authorizeSender: AuthorizeMailboxSender;
+    bus?: MailboxEventBus;
+    onRow?: (row: PersistedMailboxRow) => void;
+  };
+
+  export function createMailboxPersist<R>(
+    db: MailboxDb,
+    opts: CreateMailboxPersistOpts<R>,
+  ): (args: MailboxPersistArgs) => Promise<R>;
 
   export type InboxItem = {
     tenantId: string;
