@@ -82,6 +82,40 @@ function stepCompleted(events: readonly RunEvent[], stepId: string): RunEvent | 
   return events.find((event) => event.type === "StepCompleted" && event.body["stepId"] === stepId);
 }
 
+/** A `RunFailed` (the whole run died) or a `StepFailed` for the polled step. */
+function stepOrRunFailed(events: readonly RunEvent[], stepId: string): RunEvent | undefined {
+  return events.find(
+    (event) => event.type === "RunFailed" || (event.type === "StepFailed" && event.body["stepId"] === stepId),
+  );
+}
+
+type PollStepResult =
+  | { readonly kind: "completed"; readonly event: RunEvent }
+  | { readonly kind: "failed"; readonly event: RunEvent }
+  | { readonly kind: "timeout" };
+
+/**
+ * Polls `fetchEvents` for `stepId`'s completion, but stops the instant the
+ * run (or that step) fails instead of waiting out the full timeout.
+ */
+async function pollStep(
+  timeoutMs: number,
+  intervalMs: number,
+  stepId: string,
+  fetchEvents: () => Promise<RunEvent[]>,
+): Promise<PollStepResult> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const events = await fetchEvents();
+    const failed = stepOrRunFailed(events, stepId);
+    if (failed) return { kind: "failed", event: failed };
+    const completed = stepCompleted(events, stepId);
+    if (completed) return { kind: "completed", event: completed };
+    if (Date.now() >= deadline) return { kind: "timeout" };
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+
 /**
  * Resolves a step output ref the same way `apps/web/src/stage-thread.ts`'s
  * `readRefOver` does: `inline:<json>` parsed directly, `blob:<sha>` fetched
@@ -127,8 +161,21 @@ function check(name: string, ok: boolean, detail = ""): boolean {
   return ok;
 }
 
-/** For each event: `seq type stepId status/error`, reading whichever of those the event carries. */
+/** Event types worth their whole body: failures and signal state, not just stepId/status. */
+const FULL_BODY_EVENT_TYPES = new Set(["StepFailed", "RunFailed", "SignalReceived", "SignalAwaited"]);
+const FULL_BODY_LIMIT = 600;
+
+/**
+ * For each event: `seq type stepId status/error`, reading whichever of those
+ * the event carries -- except `StepFailed`/`RunFailed`/`SignalReceived`/
+ * `SignalAwaited`, which print their full `JSON.stringify(body)` (truncated
+ * to ~600 chars) since a bare stepId hides what actually went wrong.
+ */
 function eventLine(event: RunEvent): string {
+  if (FULL_BODY_EVENT_TYPES.has(event.type)) {
+    const body = JSON.stringify(event.body);
+    return `${event.seq} ${event.type} ${body.length > FULL_BODY_LIMIT ? `${body.slice(0, FULL_BODY_LIMIT)}...` : body}`;
+  }
   const stepId = event.body["stepId"];
   const statusOrError = event.body["status"] ?? event.body["error"] ?? event.body["reason"] ?? event.body["message"];
   return [
@@ -601,18 +648,25 @@ async function main(): Promise<void> {
       if (runId !== anchorRunId) dumpRunEvents(`anchor ${anchorRunId}`, await readAnchorEvents());
     };
 
-    /** Polls a chat occurrence's own run until `stepId` completes, then resolves its output ref. */
+    /**
+     * Polls a chat occurrence's own run until `stepId` completes, then
+     * resolves its output ref. Stops immediately (no waiting out the
+     * timeout) the instant the run or that step fails.
+     */
     const pollDraft = async (chatRunId: string, stepId: string, timeoutMs = 180_000): Promise<unknown> => {
       if (!workspace || !anchorRunId) throw new Error("no anchor/workspace to poll a draft under");
-      const completed = await pollUntil(timeoutMs, 3_000, async () => {
+      const result = await pollStep(timeoutMs, 3_000, stepId, async () => {
         const { events } = await readWorkflowRunEvents(transport, workspace.tenantId, anchorRunId, chatRunId);
-        return stepCompleted(events as RunEvent[], stepId) ?? null;
+        return events as RunEvent[];
       });
-      if (!completed) {
+      if (result.kind === "failed") {
+        throw new Error(`${stepId} in ${chatRunId} failed: ${JSON.stringify(result.event.body).slice(0, FULL_BODY_LIMIT)}`);
+      }
+      if (result.kind === "timeout") {
         await dumpTimeoutEvents(stepId, chatRunId);
         throw new Error(`${stepId} in ${chatRunId} never completed within ${String(timeoutMs)}ms`);
       }
-      const ref = (completed.body["output"] as { ref?: string } | undefined)?.ref;
+      const ref = (result.event.body["output"] as { ref?: string } | undefined)?.ref;
       if (typeof ref !== "string") throw new Error(`${stepId}'s StepCompleted carried no output ref`);
       return resolveStepOutputRef(transport, workspace.tenantId, anchorRunId, chatRunId, ref);
     };
@@ -717,15 +771,16 @@ async function main(): Promise<void> {
         { command: "stage.approve", runId: anchorRunId },
         transport,
       );
-      const events = await pollUntil(60_000, 2_000, async () => {
-        const current = await readAnchorEvents();
-        return stepCompleted(current, gateStepId(1)) ?? null;
-      });
-      if (!events && anchorRunId) await dumpTimeoutEvents(gateStepId(1), anchorRunId);
+      const result = await pollStep(60_000, 2_000, gateStepId(1), readAnchorEvents);
+      if (result.kind === "timeout" && anchorRunId) await dumpTimeoutEvents(gateStepId(1), anchorRunId);
       check(
         "8. approve stage 1 (deliverGate) and poll gate-1 completed",
-        events !== null,
-        events ? `${approveSignal(1)} -> gate-1 completed` : "gate-1 never completed",
+        result.kind === "completed",
+        result.kind === "completed"
+          ? `${approveSignal(1)} -> gate-1 completed`
+          : result.kind === "failed"
+            ? `gate-1 failed: ${JSON.stringify(result.event.body).slice(0, FULL_BODY_LIMIT)}`
+            : "gate-1 never completed",
       );
     });
 
