@@ -246,9 +246,8 @@ const HUB_DONE_STATE_ALLOWLIST = [
   "sidecar-processes",
   "lifecycle",
   "host-secrets",
-  // Test files that exercise `hub-client.ts` under a name of their own
-  // scenario rather than the module's.
-  "hub-principal",
+  // Test file that exercises grant-namespace assertions under its own name
+  // rather than the module's.
   "grant-namespaces",
 ];
 

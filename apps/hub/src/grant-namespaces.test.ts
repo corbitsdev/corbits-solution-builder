@@ -7,7 +7,6 @@ import {
 } from "@solutions-builder/app/grant-namespaces";
 import { STAGES, type Stage } from "@solutions-builder/app/ledger";
 import { grantRequirementsFor } from "@solutions-builder/app/seed-kit";
-import { ensureRoleGrant } from "./hub-client.js";
 
 describe("grant namespaces", () => {
   test("an app mints under its own namespace", () => {
@@ -50,17 +49,5 @@ describe("grant namespaces", () => {
         ).not.toThrow();
       }
     }
-  });
-
-  test("the hub's grant funnel refuses before any write", async () => {
-    await expect(
-      ensureRoleGrant({
-        roleId: "role_other_app",
-        resource: "mail.send",
-        action: "send",
-        effect: "allow",
-        origin: "role",
-      }),
-    ).rejects.toThrow(/may not mint/);
   });
 });

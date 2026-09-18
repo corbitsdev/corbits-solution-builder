@@ -1,5 +1,7 @@
 /**
- * Secure storage used only by the hub's two at-rest encryption keys.
+ * Secure storage primitives shared by the hub's two at-rest encryption keys
+ * and the host's own bootstrap secrets (owner password, hub token,
+ * repo-signing seed — see `apps/hub/src/host-secrets.ts`).
  *
  * Secrets go to the OS keychain through `security(1)` on macOS. Where no
  * OS-backed store is available this falls back to a file with 0600
@@ -8,9 +10,7 @@
  * what it is.
  *
  * Account names and the service id match the host's historical store so a
- * key minted before this package existed still reads. Owner passwords,
- * hub tokens, and the repo-signing seed stay in `apps/hub` — this module
- * is not their home.
+ * key minted before this package existed still reads.
  */
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -68,6 +68,10 @@ async function detectBackend(): Promise<CredentialBackend> {
     backend = "file";
   }
   return backend;
+}
+
+export async function credentialBackend(): Promise<CredentialBackend> {
+  return detectBackend();
 }
 
 export async function secretReference(account: string): Promise<string> {
