@@ -21,11 +21,10 @@ import {
   MenuItem,
   MenuSeparator,
   MenuTrigger,
-  SortableTable,
 } from "@corbits/react-ui";
 import { ArrowRight, Ellipsis } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { api, ApiFailure, type ProjectInfo, type ProjectSummary, type SpendRow, type SpendTotals, type WorkspaceSpend } from "../client.js";
+import { api, ApiFailure, type ProjectInfo, type ProjectSummary } from "../client.js";
 import { Button, Banner, StageRing, StateLabel, stageName } from "../components.jsx";
 import { DEFAULT_POLICY } from "./onboarding.jsx";
 import { Dictated } from "../dictation.jsx";
@@ -224,8 +223,6 @@ export function Projects({
           </Button>
         </p>
       </section>
-
-      <SpendBox key={projects.length} />
 
       <section className="project-grid-section" aria-labelledby="projects-title">
         <h3 id="projects-title" className="project-grid-title">
@@ -444,75 +441,10 @@ function ProjectCard({
   );
 }
 
-/* ------------------------------------------------------------------- spend */
-
-const formatTokens = (count: number): string =>
-  count >= 1_000_000 ? `${(count / 1_000_000).toFixed(2)}M` : count >= 1_000 ? `${(count / 1_000).toFixed(1)}k` : String(count);
-const totalTokens = (tokens: SpendTotals["tokens"]): number =>
-  tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite + tokens.thinking;
-const formatMoney = (amount: number, currency: string): string =>
-  new Intl.NumberFormat(undefined, { style: "currency", currency, maximumFractionDigits: amount < 1 ? 4 : 2 }).format(amount);
 const formatBytes = (bytes: number): string =>
   bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 
-/**
- * What the workspace has spent on inference, across every project: money
- * where the platform has a price for the model, tokens everywhere, and a
- * plain count of calls that reported no tokens at all. An unknown is shown
- * as one rather than as zero.
- */
-function SpendBox() {
-  const [spend, setSpend] = useState<WorkspaceSpend | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    void api
-      .spend()
-      .then((result) => {
-        if (!cancelled) setSpend(result);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  if (!spend) return null;
-  const { totals } = spend;
-  const priced = spend.byProvider.some((entry) => entry.cost !== null);
-  const nothing = totals.calls === 0;
-  return (
-    <section className="spend-box" aria-label="Inference spend across projects">
-      <div className="spend-headline">
-        <span className="spend-figure">
-          {nothing
-            ? formatMoney(0, totals.currency)
-            : priced
-              ? formatMoney(totals.cost, totals.currency)
-              : `${formatTokens(totalTokens(totals.tokens))} tokens`}
-        </span>
-        <span className="spend-caption">
-          {nothing
-            ? "spent on inference across every project. Nothing is recorded yet; every round, host call, illustration and build from now on is counted."
-            : priced
-              ? "spent on inference across every project"
-              : "of inference across every project, unpriced: no connected provider has a price on file yet"}
-          {spend.unpriced > 0 && priced ? ` · ${spend.unpriced} model${spend.unpriced === 1 ? "" : "s"} without a price, not in the total` : ""}
-          {totals.uncounted > 0 ? ` · ${totals.uncounted} call${totals.uncounted === 1 ? "" : "s"} reported no token counts` : ""}
-        </span>
-      </div>
-      <ul className="spend-providers">
-        {spend.byProvider.map((entry) => (
-          <li key={entry.provider}>
-            <strong>{entry.provider}</strong> · {formatTokens(totalTokens(entry.tokens))} tokens
-            {entry.images > 0 ? ` · ${entry.images} image${entry.images === 1 ? "" : "s"}` : ""}
-            {entry.cost !== null ? ` · ${formatMoney(entry.cost, totals.currency)}` : " · unpriced"}
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-/** One project, described: when it began, where it stands, what it holds, and what it has spent with whom. */
+/** One project, described: when it began, where it stands, and what it holds. */
 function ProjectInfoDialog({ project, onClose }: { project: ProjectSummary; onClose: () => void }) {
   const [info, setInfo] = useState<ProjectInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -530,28 +462,6 @@ function ProjectInfoDialog({ project, onClose }: { project: ProjectSummary; onCl
       cancelled = true;
     };
   }, [project.id]);
-  const currency = info?.spend.totals.currency ?? "USD";
-  const columns = [
-    { key: "provider", header: "Provider", cell: (row: SpendRow) => row.provider, sortValue: (row: SpendRow) => row.provider },
-    { key: "model", header: "Model", cell: (row: SpendRow) => row.model, sortValue: (row: SpendRow) => row.model },
-    { key: "calls", header: "Calls", align: "right" as const, cell: (row: SpendRow) => String(row.calls), sortValue: (row: SpendRow) => row.calls },
-    {
-      key: "tokens",
-      header: "Tokens",
-      align: "right" as const,
-      cell: (row: SpendRow) =>
-        totalTokens(row.tokens) > 0 ? formatTokens(totalTokens(row.tokens)) : row.uncounted > 0 ? "not reported" : "—",
-      sortValue: (row: SpendRow) => totalTokens(row.tokens),
-    },
-    { key: "images", header: "Images", align: "right" as const, cell: (row: SpendRow) => (row.images > 0 ? String(row.images) : "—"), sortValue: (row: SpendRow) => row.images },
-    {
-      key: "cost",
-      header: "Cost",
-      align: "right" as const,
-      cell: (row: SpendRow) => (row.cost === null ? "unpriced" : formatMoney(row.cost, row.currency ?? currency)),
-      sortValue: (row: SpendRow) => row.cost ?? -1,
-    },
-  ];
   return (
     <Dialog open onOpenChange={(open) => (open ? undefined : onClose())}>
       <DialogContent className="project-info">
@@ -594,31 +504,6 @@ function ProjectInfoDialog({ project, onClose }: { project: ProjectSummary; onCl
                   </dd>
                 </div>
               </dl>
-              <h3 className="project-info-heading">Inference spend</h3>
-              {info.spend.rows.length === 0 ? (
-                <p className="inline-note">No inference recorded for this project yet. Rounds run from now on are counted as they happen.</p>
-              ) : (
-                <>
-                  <SortableTable
-                    caption="Inference spend by provider and model"
-                    rows={info.spend.rows}
-                    columns={columns}
-                    rowKey={(row) => `${row.provider} ${row.model}`}
-                    initialSort={{ key: "cost", direction: "desc" }}
-                    className="project-info-spend"
-                  />
-                  <p className="project-info-total">
-                    <strong>Total:</strong>{" "}
-                    {info.spend.rows.some((row) => row.cost !== null)
-                      ? `${formatMoney(info.spend.totals.cost, currency)}${info.spend.unpriced > 0 ? ` over the priced models; ${info.spend.unpriced} without a price` : ""}`
-                      : "no model here has a price yet"}
-                    {" · "}
-                    {formatTokens(totalTokens(info.spend.totals.tokens))} tokens, {info.spend.totals.calls} call{info.spend.totals.calls === 1 ? "" : "s"}
-                    {info.spend.totals.images > 0 ? `, ${info.spend.totals.images} image${info.spend.totals.images === 1 ? "" : "s"}` : ""}
-                    {info.spend.totals.uncounted > 0 ? `, ${info.spend.totals.uncounted} call${info.spend.totals.uncounted === 1 ? "" : "s"} reported no token counts` : ""}
-                  </p>
-                </>
-              )}
             </>
           ) : null}
         </DialogBody>

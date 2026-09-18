@@ -40,7 +40,6 @@ import { bytesOf } from "./source-material.js";
 import { deckBytesOf, deckForPackage } from "./deck.js";
 import { readProject } from "./project-records.js";
 import { delegateMore, delegationAudit, liveDelegationStore } from "./project-delegation.js";
-import { projectSpend, workspaceSpend } from "./spend.js";
 import { attachMaterial, MATERIAL_KIND, materialText, type IncomingFile } from "./source-material.js";
 import { STAKEHOLDER_ROLES } from "./stakeholders.js";
 /** A title as a file-name segment: lower case, hyphens, nothing a shell minds. */
@@ -220,12 +219,8 @@ export function registerProjectRoutes(api: Hono) {
     return context.json(await importProject(bundle, localActor()));
   });
 
-  /** What the workspace has spent on inference, by project and by provider. */
-  api.get("/spend", async (context) => context.json(await workspaceSpend()));
-
   /**
-   * One project, described: when it began, where it stands, what it holds,
-   * and what it has spent on inference with each provider.
+   * One project, described: when it began, where it stands, and what it holds.
    */
   api.get("/projects/:projectId/info", async (context) => {
     const projectId = context.req.param("projectId");
@@ -257,7 +252,6 @@ export function registerProjectRoutes(api: Hono) {
       runs: { total: detail.runs.length, builds: detail.runs.filter((run) => run.kind === "build").length },
       approvals: detail.approvals.length,
       lastActivityAt: stamps.sort().at(-1) ?? project.createdAt.toISOString(),
-      spend: await projectSpend(projectId),
     });
   });
 

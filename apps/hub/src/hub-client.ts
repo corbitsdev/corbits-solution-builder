@@ -34,7 +34,6 @@ import {
 import { hub, hubIsMounted, mountHub, embeddedHubOrigin } from "./hub-mount.js";
 import { remoteHubHeaders } from "./hub-proxy.js";
 import { currentSession, rememberSession, sessionPairFromSetCookieHeaders } from "./hub-session.js";
-import { pushTarball } from "./tarball.js";
 import { readSecretResult, secretReference, storeSecret } from "./host-secrets.js";
 import { HostError } from "./errors.js";
 import { SOLUTIONS_BUILDER_APP, assertMayMintGrant } from "@solutions-builder/app/grant-namespaces";
@@ -725,29 +724,6 @@ export const assets = {
   list: (kind: string) => hubGet<HubAsset[]>(tenantPath(`/assets?kind=${kind}`)),
   create: (input: { kind: string; name: string; displayName?: string }) =>
     hubPost<HubAsset>(tenantPath("/assets"), input),
-  /**
-   * Pushes a client-packed tarball into a package-registry asset as a deploy
-   * source. The hub stores the bytes verbatim and pins them by integrity, so
-   * a pushed tarball resolves exactly like a registry-published one; the hub
-   * adds nothing to the content. Rejects when the hub's reported integrity
-   * differs from the bytes sent.
-   */
-  pushTarball: (assetId: string, filename: string, bytes: Uint8Array) =>
-    pushTarball(
-      {
-        putBytes: (path, sent) => {
-          // RequestInit's body wants an ArrayBuffer; a copy also freezes
-          // the bytes the integrity check below compares against.
-          const bytes = new Uint8Array(sent);
-          return hubApi(tenantPath(path), {
-            method: "PUT",
-            headers: { "content-type": "application/gzip" },
-            body: bytes.buffer as ArrayBuffer,
-          }).then((response) => body<{ commit: string; integrity: string }>(response, path));
-        },
-      },
-      { assetId, filename, bytes },
-    ),
   /** Commits a tree of repo-relative files onto an asset's ref in one commit. */
   writeTree: (assetId: string, input: { files: Record<string, string>; message: string; ref?: string }) =>
     hubPost<{ commitSha: string }>(tenantPath(`/assets/${assetId}/tree`), input),

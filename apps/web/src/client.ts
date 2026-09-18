@@ -204,31 +204,6 @@ export type ProjectSummary = {
   question?: { ordinal: number; remaining: number };
 };
 
-export type TokenCounts = { input: number; output: number; cacheRead: number; cacheWrite: number; thinking: number };
-
-/** One provider and model's use on a project, as recorded; cost only where the model has a price. */
-export type SpendRow = {
-  provider: string;
-  model: string;
-  calls: number;
-  images: number;
-  tokens: TokenCounts;
-  uncounted: number;
-  cost: number | null;
-  currency: string | null;
-};
-
-export type SpendTotals = { calls: number; images: number; tokens: TokenCounts; uncounted: number; cost: number; currency: string };
-
-export type SpendSummary = { rows: SpendRow[]; totals: SpendTotals; unpriced: number };
-
-export type WorkspaceSpend = {
-  totals: SpendTotals;
-  unpriced: number;
-  byProvider: { provider: string; calls: number; images: number; tokens: TokenCounts; cost: number | null }[];
-  projects: { id: string; title: string; archivedAt: string | null; totals: SpendTotals; unpriced: number }[];
-};
-
 export type ProjectInfo = {
   project: { id: string; title: string; createdAt: string; archivedAt: string | null };
   stage: { stage: number; state: string } | null;
@@ -236,7 +211,6 @@ export type ProjectInfo = {
   runs: { total: number; builds: number };
   approvals: number;
   lastActivityAt: string;
-  spend: SpendSummary;
 };
 
 export type ArtifactNode = {
@@ -634,7 +608,6 @@ export const api = {
   },
   project: (projectId: string) => request<ProjectDetail>(`/projects/${projectId}`),
   projectInfo: (projectId: string) => request<ProjectInfo>(`/projects/${projectId}/info`),
-  spend: () => request<WorkspaceSpend>("/spend"),
   /** Writes the project's export beside the person's downloads and says where. */
   exportProject: (projectId: string) =>
     post<{ path: string; bytes: number; nodes: number; commands: number }>(`/projects/${projectId}/export`, {}),

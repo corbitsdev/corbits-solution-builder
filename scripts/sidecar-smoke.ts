@@ -158,8 +158,6 @@ setHostPort(port);
 const host = await openDatabase(join(dataDir, "pglite"));
 await prepareDatabase(host);
 await mountHub();
-const { attachRoundSpend } = await import("../apps/hub/src/round-spend.js");
-attachRoundSpend();
 
 const server = Bun.serve({
   hostname: "127.0.0.1",

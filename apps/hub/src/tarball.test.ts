@@ -7,10 +7,8 @@ import ssri from "ssri";
 import {
   packDirectory,
   packTarballFiles,
-  pushTarball,
   tarballFilename,
   tarballIntegrity,
-  tarballPushPath,
   type TarballFiles,
 } from "./tarball.js";
 
@@ -100,37 +98,5 @@ describe("tarballIntegrity", () => {
   test("speaks the hub's integrity language over the packed bytes", async () => {
     const bytes = await packTarballFiles(PKG);
     expect(tarballIntegrity(bytes)).toBe(ssri.fromData(bytes, { algorithms: ["sha512"] }).toString());
-  });
-});
-
-describe("pushTarball", () => {
-  const bytes = new TextEncoder().encode("tarball bytes");
-
-  test("PUTs the bytes at the hub's tarball route and returns its answer", async () => {
-    const seen: { path: string; bytes: Uint8Array }[] = [];
-    const result = await pushTarball(
-      {
-        putBytes: (path, sent) => {
-          seen.push({ path, bytes: sent });
-          return Promise.resolve({ commit: "abc", integrity: tarballIntegrity(sent) });
-        },
-      },
-      { assetId: "asset-1", filename: "widget-1.2.3.tgz", bytes },
-    );
-    expect(result).toEqual({ commit: "abc", integrity: tarballIntegrity(bytes) });
-    expect(seen.map((call) => call.path)).toEqual([
-      tarballPushPath("asset-1", "widget-1.2.3.tgz"),
-    ]);
-    expect(seen[0]!.path).toBe("/assets/asset-1/tarballs/widget-1.2.3.tgz");
-    expect(Buffer.from(seen[0]!.bytes).equals(Buffer.from(bytes))).toBe(true);
-  });
-
-  test("rejects when the hub reports anything but the bytes sent", async () => {
-    await expect(
-      pushTarball(
-        { putBytes: () => Promise.resolve({ commit: "abc", integrity: "sha512-otherwise" }) },
-        { assetId: "asset-1", filename: "widget-1.2.3.tgz", bytes },
-      ),
-    ).rejects.toThrow("different bytes");
   });
 });

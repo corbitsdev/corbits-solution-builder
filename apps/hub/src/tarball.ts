@@ -128,34 +128,3 @@ export async function packDirectory(dir: string): Promise<Uint8Array> {
   await walk("");
   return packTarballFiles(files);
 }
-
-/**
- * The wire half of the push: PUTs already-packed bytes at the hub's tarball
- * route and checks the hub stored exactly what was sent. The hub computes
- * integrity from the request bytes and stores those bytes verbatim, so a
- * matching value means the bytes a later deploy resolves are these bytes.
- * The transport is injected so tests can prove the contract without a hub;
- * `hub-client.ts` binds the real one.
- */
-export type TarballPushTransport = {
-  putBytes(path: string, bytes: Uint8Array): Promise<{ commit: string; integrity: string }>;
-};
-
-export function tarballPushPath(assetId: string, filename: string): string {
-  return `/assets/${assetId}/tarballs/${filename}`;
-}
-
-export async function pushTarball(
-  transport: TarballPushTransport,
-  args: { assetId: string; filename: string; bytes: Uint8Array },
-): Promise<{ commit: string; integrity: string }> {
-  const sent = tarballIntegrity(args.bytes);
-  const result = await transport.putBytes(tarballPushPath(args.assetId, args.filename), args.bytes);
-  if (result.integrity !== sent) {
-    throw new Error(
-      `the hub stored different bytes than were pushed for ${args.filename}: ` +
-        `sent ${sent}, the hub reports ${result.integrity}`,
-    );
-  }
-  return result;
-}

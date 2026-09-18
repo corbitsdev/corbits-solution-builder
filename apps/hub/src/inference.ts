@@ -25,12 +25,11 @@ import {
 import { describeInferenceFailure } from "./failure.js";
 import { OAUTH_PROVIDERS, type OAuthProviderId } from "./oauth.js";
 import { callResponses } from "./responses.js";
-import { recordHostUsage } from "./spend.js";
 
 export type CompletionRequest = {
   readonly system: string;
   readonly prompt: string;
-  /** Whose spend this call is, and what for; a call without it is not recorded. */
+  /** Whose call this is, and what for; carried for callers' own bookkeeping. */
   readonly usage?: { readonly projectId: string; readonly purpose: string };
   readonly maxTokens?: number;
   readonly temperature?: number;
@@ -131,23 +130,6 @@ export function aggregateRefusal(refusals: readonly { reason: string }[]): strin
 }
 
 export async function complete(request: CompletionRequest): Promise<CompletionResult> {
-  const result = await completeUnrecorded(request);
-  if (request.usage) {
-    await recordHostUsage({
-      projectId: request.usage.projectId,
-      purpose: request.usage.purpose,
-      provider: result.providerId,
-      model: result.model,
-      tokens:
-        result.inputTokens !== null && result.outputTokens !== null
-          ? { input: result.inputTokens, output: result.outputTokens, cacheRead: 0, cacheWrite: 0, thinking: 0 }
-          : null,
-    }).catch((cause: unknown) => console.error("[spend] a host call's usage could not be recorded", cause));
-  }
-  return result;
-}
-
-async function completeUnrecorded(request: CompletionRequest): Promise<CompletionResult> {
   // Providers are tried in the operator's order. Moving down the list happens
   // only when the one above refuses, and the result records which provider
   // actually answered — a switch shows up in the artifact's provenance rather

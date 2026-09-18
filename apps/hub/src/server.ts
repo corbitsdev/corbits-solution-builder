@@ -21,9 +21,8 @@ import { prepareDatabase } from "./migrate.js";
 import { databaseDirectory, dataDirectory, portFile } from "./paths.js";
 import { stopSpawnedSidecars } from "./sidecar-processes.js";
 import { ensureHub, hubFetch, resolveWorkspace } from "./hub-client.js";
-import { hub, hubIsMounted, hubWebSocket, setHostPort, SIDECAR_WS_PATH } from "./hub-mount.js";
+import { hub, hubWebSocket, setHostPort, SIDECAR_WS_PATH } from "./hub-mount.js";
 import { hubMountPath, hubProxyHeaders } from "./hub-proxy.js";
-import { attachRoundSpend } from "./round-spend.js";
 import { rerankCatalogProviders } from "./catalog.js";
 import { currentSession, rememberSession, sessionPairFromCookieHeader, sessionPairFromSetCookieHeaders } from "./hub-session.js";
 import { adoptLegacyWorkspaceOnce } from "./workspace-boot.js";
@@ -97,13 +96,6 @@ if (migrated.builder.length > 0) {
 
 const hubEndpoint = await ensureHub();
 console.log(`Interchange hub: ${hubEndpoint.detail}`);
-
-// First launch signs up or in, then the client creates the workspace tenant
-// as that session. Do not mint an owner or create the tenant here; listen
-// without one.
-if (hubIsMounted()) {
-  attachRoundSpend();
-}
 
 // If a previous session's workspace is already resolvable (scripts that
 // signed in before serving), name it; otherwise the client installs one.
