@@ -10,19 +10,6 @@ import { ARTIFACT_KINDS } from "@solutions-builder/app/artifacts";
 
 const id = type("string > 0");
 
-/**
- * Approvals name exact versions. This type exists so no route can accept an
- * approval that merely names an artifact — the whole point of the gate is that
- * the approver and the record agree on which bytes were reviewed.
- */
-export const ExactVersionRef = type({
-  artifactId: id,
-  versionId: id,
-  /** SHA-256 of the reviewed bytes; the guard compares it to the stored row. */
-  contentHash: "string == 64",
-});
-export type ExactVersionRef = typeof ExactVersionRef.infer;
-
 export const ProjectOpenPayload = type({
   /**
    * What they typed when they opened the project. Recorded on the

@@ -436,6 +436,12 @@ export function stageEnds(stage: Stage): string[] {
 
 /** The stage a top-level step belongs to, or null for a step that is not a stage's. */
 export function stageOfStepId(stepId: string): Stage | null {
+  // The freeze and evidence parks are a person's decision too — cost_approved
+  // (waiting on build.freeze) and the build's evidence hand-off (waiting on
+  // build.accept_evidence/build.fail) — but they carry fixed step ids rather
+  // than a stage-numbered one, so they resolve here by identity.
+  if (stepId === FREEZE_STEP_ID) return FREEZE_STAGE;
+  if (stepId === EVIDENCE_STEP_ID) return BUILD_STAGE;
   const match = /^(?:revise|gate|exhausted)(?:-cap)?-(\d+)/.exec(stepId);
   return match ? (Number(match[1]) as Stage) : null;
 }

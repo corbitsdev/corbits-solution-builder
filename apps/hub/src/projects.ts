@@ -15,16 +15,10 @@ import { origin } from "@solutions-builder/app/guard";
 import { ARTIFACT_STAGE, type ArtifactDraft } from "./domain.js";
 import { packageOutlineProblem } from "@solutions-builder/app/deck";
 import { soloApprovalFor } from "./command-dispatch.js";
-import {
-  allCarriedTurns,
-  ledgerCommands,
-  recordCommand,
-  projectApprovals,
-  projectFlags,
-  projectQuestions,
-} from "./command-ledger.js";
+import { allCarriedTurns, ledgerCommands, recordCommand } from "./command-ledger.js";
 import type { Stage } from "@solutions-builder/app/ledger";
-import { openDecisionFor } from "./decisions.js";
+import { projectApprovals, projectFlags, projectQuestions } from "@solutions-builder/app/project-state";
+import { foldedRunsFor, openDecisionFor } from "./decisions.js";
 import { currentAnchor } from "./lifecycle-run.js";
 import { activeRun, runsForProject } from "./runs.js";
 import { artifacts, tenantId } from "./hub-client.js";
@@ -419,7 +413,7 @@ export async function listProjects() {
   return Promise.all(
     projects.map(async (row) => {
       const current = await activeRun(row.id);
-      const decision = await openDecisionFor(row.id, current);
+      const decision = await openDecisionFor(row.id);
       const waits = decision ? [decision] : [];
       // Whose move it is on the current stage. "In progress" alone cannot tell
       // a list apart: a draft waiting to be approved is not the same as an
@@ -468,13 +462,39 @@ export async function projectDetail(projectId: string, actorPrincipalId: string)
     .from(table.artifactNode)
     .where(eq(table.artifactNode.projectId, projectId))
     .orderBy(asc(table.artifactNode.createdAt));
-  const approvals = await projectApprovals(projectId);
-  const flags = await projectFlags(projectId);
-  const questions = await projectQuestions(projectId);
+  // Approvals, flags and questions are folded straight off the run's own
+  // committed `/hub` events (PR #347's `foldRun`) rather than read back off
+  // the ledger's own mail turns — the same fold the client applies.
+  const foldedRuns = await foldedRunsFor(projectId);
+  const approvals = projectApprovals(foldedRuns).map((approval, index) => ({
+    id: `${approval.runId}:${index}`,
+    runId: approval.runId,
+    stage: approval.stage,
+    command: approval.command,
+    decision: approval.decision,
+    audienceName: approval.audienceName,
+    rationale: approval.rationale,
+    createdAt: approval.at ?? "",
+    versions: approval.versions,
+  }));
+  const flags = projectFlags(foldedRuns).map((flag) => ({
+    id: flag.id,
+    trigger: flag.trigger,
+    classification: flag.classification,
+    evidence: flag.evidence,
+    chosenRoute: flag.chosenRoute,
+    createdAt: flag.at ?? "",
+  }));
+  const questions = projectQuestions(foldedRuns).map((question) => ({
+    id: question.id,
+    prompt: question.prompt,
+    answeredAt: question.answer?.at ?? null,
+    answer: question.answer?.answer ?? null,
+  }));
   const manifests = await deliveryManifests(projectId, nodes);
 
   const current = runs.filter((run) => run.endedAt === null).at(-1) ?? runs.at(-1) ?? null;
-  const decision = await openDecisionFor(projectId, current);
+  const decision = await openDecisionFor(projectId, foldedRuns);
   const waits = decision ? [decision] : [];
   const soloApproval = current ? await soloApprovalFor(projectId, current.stage, actorPrincipalId) : false;
 

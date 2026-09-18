@@ -1,22 +1,24 @@
 /**
  * The open decision on a project, derived rather than stored.
  *
- * A run parked at a gate is the record that someone's decision is awaited;
- * what the decision is called, what it freezes and who may take it all follow
- * from the ledger given the run's state and stage. The `human_wait` table that
- * used to copy this out at each gate is gone: a row that restates a
- * derivation is one more thing to keep in step.
+ * A run parked at a gate is the record that someone's decision is awaited:
+ * folded straight from the run's own committed `/hub` events
+ * (`@solutions-builder/app/project-state`), the same fold the client applies,
+ * rather than from the ledger's own `RunRecord`. What the decision is called
+ * and what it freezes follow from the stage the parked step names.
  */
 import { and, desc, eq, isNull } from "drizzle-orm";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { STAGE_TITLES } from "@solutions-builder/app/ledger";
 import { CONSEQUENCE, STATE_CONSEQUENCE } from "@solutions-builder/app/decision-copy";
-import { approveSignal, evidenceSignal } from "@solutions-builder/app/workflows/stage-loop";
+import { EVIDENCE_STEP_ID, FREEZE_STEP_ID, approveSignal, evidenceSignal, exhaustedStepId, gateStepId } from "@solutions-builder/app/workflows/stage-loop";
+import { foldRun, openQuestion, parkedSteps, type FoldedRun } from "@solutions-builder/app/project-state";
 import { database } from "./db.js";
 import * as table from "./schema.js";
 import { requiredAuthorityFor } from "./command-approvals.js";
 import { listProjectRecords } from "./project-records.js";
-import { activeRun, type RunRecord } from "./runs.js";
+import { currentAnchor } from "./lifecycle-run.js";
+import { deploymentRuns } from "./hub-client.js";
 import { hub, hubIsMounted } from "./hub-mount.js";
 import { tenantId } from "./hub-client.js";
 
@@ -37,16 +39,31 @@ export type Decision = {
   createdAt: string;
 };
 
-/** Run states in which the next move is a person's. */
-const DECIDING_STATES = new Set(["waiting_approval", "cost_approved", "waiting_human", "delivery_review"]);
+/** One run parked on a person's decision, and which kind of park it is. */
+type ParkedDecision = { runId: string; stage: Stage; kind: "gate" | "freeze" | "evidence" | "question" };
 
-export function decisionIdFor(run: Pick<RunRecord, "id" | "state">): string {
-  return `${run.id}:${run.state}`;
+/** The run parked on a person's move, if any — a gate, a freeze, an evidence hand-off, or an unanswered question. */
+function parkedDecision(runs: readonly FoldedRun[]): ParkedDecision | null {
+  for (const parked of parkedSteps(runs)) {
+    if (parked.stepId === gateStepId(parked.stage) || parked.stepId === exhaustedStepId(parked.stage)) {
+      return { runId: parked.runId, stage: parked.stage, kind: "gate" };
+    }
+    if (parked.stepId === FREEZE_STEP_ID) return { runId: parked.runId, stage: parked.stage, kind: "freeze" };
+    if (parked.stepId === EVIDENCE_STEP_ID) return { runId: parked.runId, stage: parked.stage, kind: "evidence" };
+  }
+  for (const run of runs) {
+    if (openQuestion(runs, run.runId)) return { runId: run.runId, stage: 8, kind: "question" };
+  }
+  return null;
 }
 
-/** The `signal:<name>` gate a decision in this state parks on. */
-function gateSignalFor(run: Pick<RunRecord, "stage" | "state">): string {
-  return run.state === "waiting_human" ? evidenceSignal(run.stage) : approveSignal(run.stage);
+export function decisionIdFor(park: ParkedDecision): string {
+  return `${park.runId}:${park.stage}:${park.kind}`;
+}
+
+/** The `signal:<name>` gate a decision of this kind parks on. */
+function gateSignalFor(park: ParkedDecision): string {
+  return park.kind === "evidence" || park.kind === "question" ? evidenceSignal(park.stage) : approveSignal(park.stage);
 }
 
 /**
@@ -56,13 +73,13 @@ function gateSignalFor(run: Pick<RunRecord, "stage" | "state">): string {
  * (every poll finds it still open) delivers nothing new. Best-effort — a
  * mailbox failure never blocks the decision queue from rendering.
  */
-async function notifyDecisionOpen(run: Pick<RunRecord, "stage" | "state">, decision: Decision): Promise<void> {
+async function notifyDecisionOpen(park: ParkedDecision, decision: Decision): Promise<void> {
   if (!hubIsMounted()) return;
   try {
     await hub().notifyGrantHolders({
       tenantId: tenantId(),
       resource: "workflow-run:*",
-      action: `signal:${gateSignalFor(run)}`,
+      action: `signal:${gateSignalFor(park)}`,
       source: "solutions-builder.decision",
       externalId: decision.id,
       subject: decision.title,
@@ -73,13 +90,31 @@ async function notifyDecisionOpen(run: Pick<RunRecord, "stage" | "state">, decis
   }
 }
 
+/** The consequence copy for a parked decision: the state-keyed one when there is one, else the stage's. */
+function consequenceFor(park: ParkedDecision): string {
+  const fallback = CONSEQUENCE[park.stage] ?? "A human decision is required to continue.";
+  if (park.kind === "freeze") return STATE_CONSEQUENCE.cost_approved ?? fallback;
+  if (park.kind === "question") return STATE_CONSEQUENCE.waiting_human ?? fallback;
+  return fallback;
+}
+
+/** Every run under the project's deployment, folded from its committed `/hub` events. */
+export async function foldedRunsFor(projectId: string): Promise<FoldedRun[]> {
+  const anchor = await currentAnchor(projectId);
+  if (!anchor) return [];
+  const runIds = await deploymentRuns.list(anchor);
+  const folded: FoldedRun[] = [];
+  for (const runId of runIds) {
+    folded.push(foldRun(runId, await deploymentRuns.events(anchor, runId)));
+  }
+  return folded;
+}
+
 /** The decision waiting on this project, or null when the next move is not a person's. */
-export async function openDecisionFor(
-  projectId: string,
-  current?: RunRecord | null,
-): Promise<Decision | null> {
-  const run = current ?? (await activeRun(projectId));
-  if (!run || !DECIDING_STATES.has(run.state)) return null;
+export async function openDecisionFor(projectId: string, runs?: readonly FoldedRun[]): Promise<Decision | null> {
+  const folded = runs ?? (await foldedRunsFor(projectId));
+  const park = parkedDecision(folded);
+  if (!park) return null;
 
   const { db } = database();
   const nodes = await db
@@ -93,14 +128,14 @@ export async function openDecisionFor(
     .where(
       and(
         eq(table.artifactNode.projectId, projectId),
-        eq(table.artifactNode.stage, run.stage),
+        eq(table.artifactNode.stage, park.stage),
         isNull(table.artifactNode.supersededByNodeId),
       ),
     )
     .orderBy(desc(table.artifactNode.createdAt));
 
-  const id = decisionIdFor(run);
-  const since = nodes[0]?.createdAt ?? run.createdAt;
+  const id = decisionIdFor(park);
+  const since = nodes[0]?.createdAt ?? new Date();
   // Delivery verification (what blocks a stage 9 accept) is the
   // tools-delivery workflow step's job now, not the host's — see CL-8340.
   const blockers = null;
@@ -108,12 +143,11 @@ export async function openDecisionFor(
     blockers,
     id,
     projectId,
-    runId: run.id,
-    stage: run.stage,
-    title: `${STAGE_TITLES[run.stage]} awaits a decision`,
-    consequence:
-      blockers ?? STATE_CONSEQUENCE[run.state] ?? CONSEQUENCE[run.stage] ?? "A human decision is required to continue.",
-    requiredAuthority: requiredAuthorityFor(run.stage),
+    runId: park.runId,
+    stage: park.stage,
+    title: `${STAGE_TITLES[park.stage]} awaits a decision`,
+    consequence: blockers ?? consequenceFor(park),
+    requiredAuthority: requiredAuthorityFor(park.stage),
     versions: nodes.map((node) => ({
       artifactId: node.artifactId,
       versionId: node.id,
@@ -121,7 +155,7 @@ export async function openDecisionFor(
     })),
     createdAt: since.toISOString(),
   };
-  void notifyDecisionOpen(run, decision);
+  void notifyDecisionOpen(park, decision);
   return decision;
 }
 
