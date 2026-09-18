@@ -32,6 +32,7 @@ import { ApiError, listWorkflowDeployments, readWorkflowRunEvents, type Transpor
 import {
   createArtifact,
   createProject as installerCreateProject,
+  ensureSpecialistDeployment,
   install as installerInstall,
   listArtifacts,
   pushSourceTree,
@@ -47,37 +48,29 @@ import {
 import { ARTIFACT_STAGE, type ArtifactKind } from "@solutions-builder/app/artifacts";
 import { buildManifest, buildPackedEntries } from "./closure-pack.ts";
 import { listProjectSummaries } from "../apps/web/src/project-list.ts";
+import { readStageThread, sendStageMail } from "../apps/web/src/stage-mail.ts";
 
 /**
- * `ensureSpecialistDeployment(transport, sidecar, closure, gitPush,
- * workspaceTenantId, projectId, stage) -> {deploymentId, address}` is being
- * added concurrently in `packages/installer/src/specialist-deploy.ts` (CL-8598
- * contract, workbench shape) and is not yet present at this commit. Imported
- * dynamically, through a non-literal specifier so tsc never tries to resolve
- * the module at typecheck time, with a typed local shim standing in for its
- * signature and a fallback that fails loudly (not silently) if the export
- * still is not there when this actually runs.
+ * `apps/web/src/stage-mail.ts`'s `readStageThread`/`sendStageMail` are built
+ * on that module's own `createHubTransport()` (browser same-origin cookies,
+ * relative `/api/...` paths -- see `apps/web/src/hub-origin.ts`), not this
+ * script's bearer-token `Transport` against a spawned host. Rather than
+ * hand-roll a second mailbox client, this shim makes THEIR transport work
+ * here too: relative paths are rewritten onto the spawned host's origin,
+ * with the same bearer/cookie headers `createTransport` above already
+ * carries, before Node's `fetch` (which has no notion of "same-origin") ever
+ * sees them. Absolute-URL calls elsewhere in this script (the provider
+ * endpoint, the git push, etc.) pass through untouched.
  */
-type SpecialistDeployment = { deploymentId: string; address: string };
-type EnsureSpecialistDeployment = (
-  transport: Transport,
-  sidecar: SidecarCapability,
-  closure: ClosureSource,
-  gitPush: WorkflowGitPush,
-  workspaceTenantId: string,
-  projectId: string,
-  stage: number,
-) => Promise<SpecialistDeployment>;
-const SPECIALIST_DEPLOY_SPECIFIER = "@solutions-builder/installer/specialist-deploy";
-async function loadEnsureSpecialistDeployment(): Promise<EnsureSpecialistDeployment> {
-  const specifier: string = SPECIALIST_DEPLOY_SPECIFIER;
-  const mod = (await import(specifier).catch(() => null)) as
-    | { ensureSpecialistDeployment?: EnsureSpecialistDeployment }
-    | null;
-  if (!mod?.ensureSpecialistDeployment) {
-    throw new Error(`ensureSpecialistDeployment is not exported from ${SPECIALIST_DEPLOY_SPECIFIER} yet (CL-8598 concurrent lane)`);
-  }
-  return mod.ensureSpecialistDeployment;
+function installHubFetchShim(origin: string, hostToken: string, cookieJar: { value: string }): void {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (typeof input !== "string" || !input.startsWith("/")) return original(input, init);
+    const headers = new Headers(init?.headers);
+    headers.set("authorization", `Bearer ${hostToken}`);
+    if (cookieJar.value) headers.set("cookie", cookieJar.value);
+    return original(`${origin}${input}`, { ...init, headers });
+  }) as typeof fetch;
 }
 
 /** The kind stage 1's specialist writes its brief as (`ARTIFACT_STAGE`'s stage-1 producer kind, not the human-upload `source_material` kind). */
@@ -438,6 +431,7 @@ async function main(): Promise<void> {
     currentHost = host;
     const origin = `http://127.0.0.1:${host.port}`;
     const { transport, cookieJar } = createTransport(origin, host.token);
+    installHubFetchShim(origin, host.token, cookieJar);
 
     // (1) Sign up / session.
     const email = `owner+${Date.now()}@e2e-client-proof.invalid`;
@@ -555,11 +549,6 @@ async function main(): Promise<void> {
       );
     });
 
-    const ensureSpecialistDeployment = await step(
-      "5. load ensureSpecialistDeployment (installer)",
-      loadEnsureSpecialistDeployment,
-    );
-
     /** Dumps a specialist deployment's own agent run events on a poll timeout, per CL-8598's report contract. */
     const dumpDeploymentEvents = async (label: string, tenantId: string, deploymentId: string): Promise<void> => {
       const { events } = await readWorkflowRunEvents(transport, tenantId, deploymentId, deploymentId);
@@ -582,65 +571,27 @@ async function main(): Promise<void> {
       return found !== null;
     };
 
-    /** One `GET .../mailbox/me/inbox` page, as `@corbits/mailbox`'s native store shapes it. */
-    type MailboxListItem = { uid: number; envelope: { from: string; subject?: string; date: string }; raw: string };
-
     /**
-     * First `text/plain` leaf of a MIME entity, descending nested multiparts
-     * (an agent reply is `multipart/signed` around `multipart/mixed`) --
-     * same algorithm as `apps/web/src/stage-mail.ts`'s `textPart`,
-     * reimplemented here since that module's exports are bound to
-     * `createHubTransport()` (browser cookies/relative paths), not this
-     * script's bearer-token transport against a spawned host.
+     * Polls `readStageThread` (over `installHubFetchShim`'s rewritten
+     * fetch) for the agent's `agentReplyCount + 1`th reply -- the specialist's
+     * thread has no other participant, so every `author === "agent"` message
+     * is one of its replies, oldest first.
      */
-    function textPart(entity: string): string | undefined {
-      const split = entity.indexOf("\n\n");
-      if (split < 0) return undefined;
-      const headers = entity.slice(0, split);
-      const body = entity.slice(split + 2);
-      const boundary = /boundary="?([^";\n]+)"?/i.exec(headers)?.[1];
-      if (boundary === undefined) {
-        return /content-type:\s*text\/plain/i.test(headers) || !/content-type:/i.test(headers) ? body.trim() : undefined;
-      }
-      for (const part of body.split(`--${boundary}`).slice(1)) {
-        if (part.startsWith("--")) break;
-        const found = textPart(part.replace(/^\n/, ""));
-        if (found !== undefined) return found;
-      }
-      return undefined;
-    }
-
-    /** The readable text of a base64-raw RFC 5322 mailbox message. */
-    function mailboxRawBody(rawBase64: string): string {
-      const decoded = Buffer.from(rawBase64, "base64").toString("utf8").replace(/\r\n/g, "\n");
-      return textPart(decoded) ?? "";
-    }
-
-    /** `POST /api/tenants/:t/mailbox/me/inbox/send` -- mail from the caller's own mailbox, to a specialist's run address. */
-    const sendMail = async (tenantId: string, to: string, subject: string, body: string): Promise<void> => {
-      await transport.fetch("POST", `/api/tenants/${tenantId}/mailbox/me/inbox/send`, { to: [to], subject, body });
-    };
-
-    /** Polls `GET /api/tenants/:t/mailbox/me/inbox` for a message FROM `fromAddress` past `afterUid`. */
-    const pollReplyFrom = async (
+    const pollAgentReply = async (
       tenantId: string,
-      fromAddress: string,
-      afterUid: number,
+      address: string,
+      agentReplyCount: number,
       timeoutMs = 180_000,
-    ): Promise<MailboxListItem | null> =>
+    ) =>
       pollUntil(timeoutMs, 3_000, async () => {
-        const { messages } = await transport.fetch<{ messages: MailboxListItem[] }>(
-          "GET",
-          `/api/tenants/${tenantId}/mailbox/me/inbox`,
-        );
-        return messages.find((message) => message.envelope.from === fromAddress && message.uid > afterUid) ?? null;
+        const thread = await readStageThread(tenantId, [address]);
+        const agentMessages = thread.filter((message) => message.author === "agent");
+        return agentMessages.length > agentReplyCount ? agentMessages[agentMessages.length - 1]! : null;
       });
 
     // (5) Deploy the stage-1 specialist and wait for it to come up.
     const stage1 = await step("5. ensureSpecialistDeployment for stage 1", async () => {
-      if (!workspace || !project || !sidecar || !ensureSpecialistDeployment) {
-        throw new Error("no workspace/project/sidecar/ensureSpecialistDeployment to deploy against");
-      }
+      if (!workspace || !project || !sidecar) throw new Error("no workspace/project/sidecar to deploy against");
       const deployed = await ensureSpecialistDeployment(transport, sidecar, closure, gitPush, workspace.tenantId, project.id, 1);
       check("5. ensureSpecialistDeployment for stage 1", true, JSON.stringify(deployed));
       return deployed;
@@ -656,48 +607,36 @@ async function main(): Promise<void> {
     // (6) Mail the opening problem statement to the stage-1 specialist, then
     // poll the caller's own inbox for its reply.
     const OPENING_PROBLEM_STATEMENT = "Build a small internal tool that tracks team OKRs.";
-    let lastSeenUid = 0;
     const firstReply = await step("6. mail the opening problem statement and poll for a reply", async () => {
       if (!workspace || !stage1) throw new Error("no workspace/stage-1 deployment to mail");
-      await sendMail(workspace.tenantId, stage1.address, "New project", OPENING_PROBLEM_STATEMENT);
-      const reply = await pollReplyFrom(workspace.tenantId, stage1.address, lastSeenUid);
+      await sendStageMail(workspace.tenantId, stage1.address, { body: OPENING_PROBLEM_STATEMENT, subject: "New project" });
+      const reply = await pollAgentReply(workspace.tenantId, stage1.address, 0);
       if (!reply) await dumpDeploymentEvents(`deployment ${stage1.deploymentId}`, workspace.tenantId, stage1.deploymentId);
-      check(
-        "6. mail the opening problem statement and poll for a reply",
-        reply !== null,
-        reply ? `uid ${reply.uid}` : "no reply within 180s",
-      );
+      check("6. mail the opening problem statement and poll for a reply", reply !== null, reply ? reply.id : "no reply within 180s");
       if (!reply) throw new Error(`no reply from ${stage1.address} within 180s`);
-      lastSeenUid = reply.uid;
       return reply;
     });
 
     await step("6. the reply carries a non-empty body", async () => {
       if (!firstReply) throw new Error("no first reply to read");
-      const body = mailboxRawBody(firstReply.raw);
-      check("6. the reply carries a non-empty body", body.trim().length > 0, body.slice(0, 200));
+      check("6. the reply carries a non-empty body", firstReply.body.trim().length > 0, firstReply.body.slice(0, 200));
     });
 
     // (7) Tighten the brief: a second round, same address, second reply.
     const secondReply = await step("7. mail a tightening round and poll for a second reply", async () => {
       if (!workspace || !stage1) throw new Error("no workspace/stage-1 deployment to mail");
-      await sendMail(workspace.tenantId, stage1.address, "Re: New project", "Tighten the brief to one paragraph.");
-      const reply = await pollReplyFrom(workspace.tenantId, stage1.address, lastSeenUid);
+      await sendStageMail(workspace.tenantId, stage1.address, { body: "Tighten the brief to one paragraph.", subject: "Re: New project" });
+      const reply = await pollAgentReply(workspace.tenantId, stage1.address, 1);
       if (!reply) await dumpDeploymentEvents(`deployment ${stage1.deploymentId}`, workspace.tenantId, stage1.deploymentId);
-      check(
-        "7. mail a tightening round and poll for a second reply",
-        reply !== null,
-        reply ? `uid ${reply.uid}` : "no second reply within 180s",
-      );
+      check("7. mail a tightening round and poll for a second reply", reply !== null, reply ? reply.id : "no second reply within 180s");
       if (!reply) throw new Error(`no second reply from ${stage1.address} within 180s`);
-      lastSeenUid = reply.uid;
       return reply;
     });
 
     let approvedBrief = "";
     await step("7. the second reply carries a non-empty body", async () => {
       if (!secondReply) throw new Error("no second reply to read");
-      approvedBrief = mailboxRawBody(secondReply.raw);
+      approvedBrief = secondReply.body;
       check("7. the second reply carries a non-empty body", approvedBrief.trim().length > 0, approvedBrief.slice(0, 200));
     });
 
@@ -725,9 +664,7 @@ async function main(): Promise<void> {
 
     // (9) Deploy the stage-2 specialist, mail it the approved brief, poll for its reply.
     const stage2 = await step("9. ensureSpecialistDeployment for stage 2", async () => {
-      if (!workspace || !project || !sidecar || !ensureSpecialistDeployment) {
-        throw new Error("no workspace/project/sidecar/ensureSpecialistDeployment to deploy against");
-      }
+      if (!workspace || !project || !sidecar) throw new Error("no workspace/project/sidecar to deploy against");
       const deployed = await ensureSpecialistDeployment(transport, sidecar, closure, gitPush, workspace.tenantId, project.id, 2);
       check("9. ensureSpecialistDeployment for stage 2", true, JSON.stringify(deployed));
       return deployed;
@@ -742,14 +679,13 @@ async function main(): Promise<void> {
 
     await step("9. mail the approved brief to stage 2 and poll for a reply", async () => {
       if (!workspace || !stage2) throw new Error("no workspace/stage-2 deployment to mail");
-      await sendMail(workspace.tenantId, stage2.address, "Approved brief", approvedBrief);
-      const reply = await pollReplyFrom(workspace.tenantId, stage2.address, 0);
+      await sendStageMail(workspace.tenantId, stage2.address, { body: approvedBrief, subject: "Approved brief" });
+      const reply = await pollAgentReply(workspace.tenantId, stage2.address, 0);
       if (!reply) await dumpDeploymentEvents(`deployment ${stage2.deploymentId}`, workspace.tenantId, stage2.deploymentId);
-      const body = reply ? mailboxRawBody(reply.raw) : "";
       check(
         "9. mail the approved brief to stage 2 and poll for a reply",
-        reply !== null && body.trim().length > 0,
-        reply ? `uid ${reply.uid}` : "no reply within 180s",
+        reply !== null && reply.body.trim().length > 0,
+        reply ? reply.id : "no reply within 180s",
       );
     });
 
