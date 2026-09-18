@@ -1,17 +1,18 @@
 import { eq, and } from "drizzle-orm";
 import { Hono } from "hono";
-import { describeRoute, resolver, validator } from "hono-openapi";
+import { describeRoute, validator } from "hono-openapi";
 
 import { federationTrust, tenant } from "@intx/db/schema";
 import type { DB } from "@intx/db";
 import {
   FederationTrust,
-  CreateFederationTrust,
   ErrorResponse,
+  CreateFederationTrust,
   paginatedSchema,
 } from "@intx/types";
 
 import type { TenantEnv } from "../context";
+import { errorResponse } from "../error-response";
 import { ts } from "../format";
 import { generateId } from "@intx/hub-common";
 import {
@@ -21,6 +22,7 @@ import {
   paginatedResponse,
   pageParameters,
 } from "../pagination";
+import { jsonResponse } from "../openapi";
 
 export type CreateTenantFederationRoutesDeps = {
   db: DB["db"];
@@ -38,14 +40,10 @@ export function createTenantFederationRoutes({
       summary: "List federation trust relationships",
       parameters: [...pageParameters],
       responses: {
-        200: {
-          description: "Federation trusts",
-          content: {
-            "application/json": {
-              schema: resolver(paginatedSchema(FederationTrust)),
-            },
-          },
-        },
+        200: jsonResponse(
+          "Federation trusts",
+          paginatedSchema(FederationTrust),
+        ),
       },
     }),
     async (c) => {
@@ -104,18 +102,8 @@ export function createTenantFederationRoutes({
       description:
         "Creates a trust relationship with another tenant for cross-tenant agent discovery and interaction.",
       responses: {
-        201: {
-          description: "Trust established",
-          content: {
-            "application/json": { schema: resolver(FederationTrust) },
-          },
-        },
-        400: {
-          description: "Validation error",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        201: jsonResponse("Trust established", FederationTrust),
+        400: jsonResponse("Validation error", ErrorResponse),
       },
     }),
     validator("json", CreateFederationTrust),
@@ -127,15 +115,7 @@ export function createTenantFederationRoutes({
         where: eq(tenant.id, body.targetTenantId),
       });
       if (!target) {
-        return c.json(
-          {
-            error: {
-              code: "not_found",
-              message: "Target tenant not found",
-            },
-          },
-          404,
-        );
+        return errorResponse(c, "not_found", "Target tenant not found");
       }
 
       const existing = await db.query.federationTrust.findFirst({
@@ -145,14 +125,10 @@ export function createTenantFederationRoutes({
         ),
       });
       if (existing) {
-        return c.json(
-          {
-            error: {
-              code: "conflict",
-              message: "Trust relationship already exists",
-            },
-          },
-          409,
+        return errorResponse(
+          c,
+          "conflict",
+          "Trust relationship already exists",
         );
       }
 
@@ -186,12 +162,7 @@ export function createTenantFederationRoutes({
         204: {
           description: "Trust revoked",
         },
-        404: {
-          description: "Trust not found",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        404: jsonResponse("Trust not found", ErrorResponse),
       },
     }),
     async (c) => {
@@ -209,12 +180,7 @@ export function createTenantFederationRoutes({
         .returning();
 
       if (deleted.length === 0) {
-        return c.json(
-          {
-            error: { code: "not_found", message: "Trust not found" },
-          },
-          404,
-        );
+        return errorResponse(c, "not_found", "Trust not found");
       }
 
       return c.body(null, 204);

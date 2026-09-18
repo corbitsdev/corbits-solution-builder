@@ -11,6 +11,7 @@ import type { HubTransport } from "@intx/mail-memory";
 import { type } from "arktype";
 import {
   HubFrame,
+  MAX_MAIL_OUTBOUND_BODY_BYTES,
   type SidecarFrame,
   type RegisterFrame,
   type ReconnectFrame,
@@ -26,6 +27,8 @@ import {
   RepoId,
   type SignalDeliverFrame,
   type RunGrantsFrame,
+  type SenderKeyRefreshFrame,
+  type SenderKeyEvictFrame,
   type SignalCorrelationRegisterFrame,
   type SignalCorrelationRegisterAckFrame,
   type DrainDeliverFrame,
@@ -42,8 +45,17 @@ import {
   DEFAULT_REGISTER_ACK_MAX_ATTEMPTS,
   DEFAULT_REGISTER_ACK_TIMEOUT_MS,
 } from "./register-acker";
+import {
+  verifyInboundSignature,
+  outcomeForVerdict,
+  type ResolvedInboundMailPolicy,
+} from "./inbound-signature";
 import { base64Decode, base64Encode } from "@intx/types";
-import type { ApprovalSnapshot, InferenceEvent } from "@intx/types/runtime";
+import type {
+  ApprovalSnapshot,
+  CryptoProvider,
+  InferenceEvent,
+} from "@intx/types/runtime";
 
 import type { AgentKeyStore } from "../agent-key-store";
 import type { SessionManager } from "../session-manager";
@@ -497,6 +509,46 @@ export type HubLinkConfig = {
    */
   keyStore: AgentKeyStore;
   /**
+   * Resolves a sender address to the crypto whose public key verifies that
+   * sender's inbound mail, or `undefined` when no key is known. The inbound
+   * signature verify uses it to check each frame's signature against the key a
+   * local cache holds, beside the check against the key the hub stamped on the
+   * frame. Source-opaque by design: the link never learns whether the key came
+   * from a local cache or a relayed foreign key.
+   */
+  resolveSenderCrypto: (address: string) => CryptoProvider | undefined;
+  /**
+   * Resolves a recipient deployment address to the TOTAL inbound-mail
+   * admission policy the `mail.inbound` seam enforces for it. The host builds
+   * this over the sidecar's per-address policy registry: a hydrated deployment
+   * registers its resolved policy, and an address the registry does not hold
+   * resolves to a fully-closed policy that rejects every outcome. The seam
+   * indexes the returned map directly by the message's admission outcome, so
+   * this lookup owns the unknown-address default and the seam adds no fallback.
+   */
+  lookupInboundMailPolicy: (address: string) => ResolvedInboundMailPolicy;
+  /**
+   * Persists the hub-vouched public key for a sender address, overwriting any
+   * previously cached key. The link calls it on an inbound `sender.key.refresh`
+   * frame, passing the frame's hex-encoded key through unchanged. Source-opaque,
+   * the write peer of `resolveSenderCrypto`: the host builds it over the
+   * sidecar's sender-key cache (decode the hex, `put` the bytes) so the link
+   * never touches key material or decoding. Required, not optional, because its
+   * read peer is required and every composition that runs the link already holds
+   * the same cache.
+   */
+  cacheSenderKey: (address: string, publicKey: string) => Promise<void>;
+  /**
+   * Durably removes the cached key for a sender address. The link calls it on
+   * an inbound `sender.key.evict` frame, when the hub has re-resolved a reported
+   * cached sender to no durable key (a deleted principal). The evicting peer of
+   * `cacheSenderKey`: the host builds it over the sidecar's sender-key cache
+   * (`evict` the address) so the link never touches the cache directly. Required
+   * for the same reason as `cacheSenderKey` -- every composition that can cache
+   * a key must be able to evict one, and both share the one cache.
+   */
+  evictSenderKey: (address: string) => Promise<void>;
+  /**
    * Routes every inbound `agent.deploy` frame. Production wiring
    * supplies a router that stages each deploy through the workflow-run
    * substrate: a provision-step frame primes a per-step repo, and a
@@ -590,6 +642,19 @@ export type HubLinkConfig = {
    * substrate).
    */
   getWorkflowAddresses?: () => string[];
+  /**
+   * Returns the rotatable (non-run) sender addresses this sidecar holds cached
+   * keys for. Read at each (re)connect and reported on the register/reconnect
+   * frame so the Hub re-resolves and re-pushes each key, catching a rotation
+   * that landed while the sidecar was disconnected.
+   *
+   * Optional with an empty default, UNLIKE the required `cacheSenderKey`: this
+   * is a report-path reader whose empty result is a legitimate steady state (no
+   * cached senders, or a host with no sender substrate), the same shape as
+   * `getWorkflowAddresses`. `cacheSenderKey` sits on the receive path a sidecar
+   * must always be able to serve, so it is required; this one is not.
+   */
+  getCachedSenderAddresses?: () => string[];
   /**
    * Invoked after the allocation-authenticated reconnect frame is written.
    * The Hub serializes that frame ahead of later pack frames on the same
@@ -688,6 +753,10 @@ export function createHubLink(config: HubLinkConfig): HubLink {
     transport,
     sessions,
     keyStore,
+    resolveSenderCrypto,
+    lookupInboundMailPolicy,
+    cacheSenderKey,
+    evictSenderKey,
     deployRouter,
     mailInboundRouter,
     signalInboundRouter,
@@ -698,6 +767,7 @@ export function createHubLink(config: HubLinkConfig): HubLink {
     applyWorkflowRunPack,
     workflowProbeExecutor = defaultWorkflowProbeExecutor,
     getWorkflowAddresses = () => [],
+    getCachedSenderAddresses = () => [],
     onWorkflowAddressesRoutable,
     onWorkflowAddressesUnroutable,
     pingIntervalMs = DEFAULT_PING_INTERVAL_MS,
@@ -822,6 +892,22 @@ export function createHubLink(config: HubLinkConfig): HubLink {
   // check so the hub can bind the claim to this authenticated connection.
   transport.setRemoteSendHandler(
     async (rawMessage, recipients, senderAddress) => {
+      // Derive the base64 payload length arithmetically (4 output characters
+      // per 3 input bytes, padded up) rather than materializing the encoding:
+      // an over-cap send is rejected before the encode allocates the ~59MB
+      // base64 string a 44MB body would produce, and the throw below stays
+      // byte-for-byte identical to the encoded-length check it replaces.
+      const bodyBytes = Math.ceil(rawMessage.byteLength / 3) * 4;
+      // Fail loud at the source: this send is awaited through the transport, so
+      // a throw surfaces to the producing agent as a real error rather than the
+      // silent hub-side drop it would otherwise get. The hub re-enforces the cap
+      // on receive -- that is the authoritative DoS backstop; this is the
+      // producer-facing error.
+      if (bodyBytes > MAX_MAIL_OUTBOUND_BODY_BYTES) {
+        throw new Error(
+          `refusing to send mail.outbound from ${senderAddress}: rawMessage of ${String(bodyBytes)} bytes exceeds the ${String(MAX_MAIL_OUTBOUND_BODY_BYTES)}-byte cap`,
+        );
+      }
       const encoded = base64Encode(rawMessage);
       send({
         type: "mail.outbound",
@@ -837,6 +923,19 @@ export function createHubLink(config: HubLinkConfig): HubLink {
   // Remote sends are marked delivered: true as well — routing was already
   // handled by the RemoteSendHandler above.
   transport.addMessageSentHandler(async (ctx) => {
+    // Same arithmetic pre-check as the remote-send handler above: the audit
+    // forward skips an over-cap frame before the encode allocates the ~59MB
+    // base64 string, keeping the logged byte count identical.
+    const bodyBytes = Math.ceil(ctx.rawMessage.byteLength / 3) * 4;
+    // This is the post-delivery audit/projection forward; the mail already went
+    // out locally, so there is nothing left to fail. A throw here is swallowed
+    // (the transport runs message-sent handlers under Promise.allSettled), so
+    // an over-cap frame is logged loudly and skipped rather than thrown -- the
+    // hub would drop it on receive regardless.
+    if (bodyBytes > MAX_MAIL_OUTBOUND_BODY_BYTES) {
+      logger.error`Skipping delivered mail.outbound audit frame from ${ctx.senderAddress}: rawMessage of ${String(bodyBytes)} bytes exceeds the ${String(MAX_MAIL_OUTBOUND_BODY_BYTES)}-byte cap`;
+      return;
+    }
     const encoded = base64Encode(ctx.rawMessage);
     const sessionId = sessions.getSessionId(ctx.senderAddress);
     send({
@@ -1208,6 +1307,51 @@ export function createHubLink(config: HubLinkConfig): HubLink {
     }
   }
 
+  async function handleSenderKeyRefresh(
+    frame: SenderKeyRefreshFrame,
+  ): Promise<void> {
+    // Address-keyed and cross-run: it caches one sender's current key and
+    // touches no run, so unlike `run.grants` a fault here has no run to poison.
+    // Swallow it after logging at ERROR -- there is no reply channel and the
+    // link must never wedge. A malformed key (bad hex, wrong length) is simply
+    // dropped. A transient cache-write fault is louder than it looks: the
+    // sidecar keeps the STALE key and verifies this sender's mail against it
+    // until the next reconnect re-pushes, so this push is best-effort, not
+    // delivery-guaranteed.
+    //
+    // Awaited inline on the message chain, NOT detached the way the
+    // `mail.inbound` durable write is: the co-resident `run.grants` handler also
+    // caches sender keys on this same chain, so serializing the refresh write
+    // keeps last-write-wins deterministic against a concurrent grants write for
+    // the same address. The fan-out is bounded (one frame per rotatable cached
+    // sender, once per reconnect), so the head-of-line cost stays far short of
+    // the heartbeat window; a detached write would trade that determinism for
+    // latency this low-volume path does not need.
+    try {
+      await cacheSenderKey(frame.address, frame.publicKey);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error`sender.key.refresh cache write failed for ${frame.address}: ${msg}`;
+    }
+  }
+
+  async function handleSenderKeyEvict(
+    frame: SenderKeyEvictFrame,
+  ): Promise<void> {
+    // Mirror of `handleSenderKeyRefresh` for the evict direction: address-keyed,
+    // cross-run, no reply channel, awaited inline on the message chain so it
+    // serializes deterministically against a concurrent refresh/grants write for
+    // the same address. A fault swallowed after logging at ERROR keeps the STALE
+    // key cached until the next reconnect re-evicts -- the evict is best-effort,
+    // not delivery-guaranteed, exactly like the refresh it complements.
+    try {
+      await evictSenderKey(frame.address);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error`sender.key.evict cache removal failed for ${frame.address}: ${msg}`;
+    }
+  }
+
   async function handleSourcesUpdate(frame: SourcesUpdateFrame): Promise<void> {
     // `sources.update` is request/ack (the hub awaits a reply within its
     // request timeout), so every path answers `session.ack` or
@@ -1423,6 +1567,56 @@ export function createHubLink(config: HubLinkConfig): HubLink {
     switch (frame.type) {
       case "mail.inbound": {
         const rawBytes = base64Decode(frame.rawMessage);
+        // This ingress is the one place raw inbound bytes meet the hub-verified
+        // sender identity (`authenticatedSender` + its resolved key), and every
+        // producer -- relay, trigger, durable dispatch -- converges here, so the
+        // inbound-signature verify gates delivery here. Await it INLINE on the
+        // messageQueue chain: the verdict decides admission, so delivery must
+        // not race ahead of it. The verify is CPU-bound -- a synchronous cache
+        // read, an Ed25519 verify, and a MIME re-parse, with no I/O and no lock
+        // -- so it cannot hang and needs no timeout race around it. It never
+        // throws: a fault degrades to an `error` verdict. The in-process
+        // mail-memory transport (the standalone harness path) does not deliver
+        // through this seam and carries no hub-verified sender, so it is outside
+        // this path.
+        const verdict = await verifyInboundSignature(
+          {
+            raw: rawBytes,
+            authenticatedSender: frame.authenticatedSender,
+            messageId: frame.messageId,
+            agentAddress: frame.agentAddress,
+          },
+          resolveSenderCrypto,
+        );
+        const outcome = outcomeForVerdict(verdict);
+        // The recipient deployment's resolved admission policy. `frame.
+        // agentAddress` is the mail-router registration key, so an address
+        // with no registered deployment resolves to the fully-closed policy
+        // and rejects every outcome. The map is total, so index it directly.
+        // The seam admits ONLY an explicitly-admitted outcome and drops
+        // everything else: the fail direction is closed by construction, so a
+        // non-`admit` value (today only `reject`, but any future non-admit
+        // verdict too) drops rather than leaks through.
+        const policy = lookupInboundMailPolicy(frame.agentAddress);
+        if (policy[outcome] !== "admit") {
+          logger.warn(
+            "Rejecting inbound mail for {agentAddress}: outcome {outcome} is not admitted (authenticatedSender {authenticatedSender}, messageId {messageId})",
+            {
+              agentAddress: frame.agentAddress,
+              outcome,
+              authenticatedSender: frame.authenticatedSender,
+              messageId: frame.messageId ?? null,
+            },
+          );
+          // A rejected mail is simply not delivered -- the same drop as the
+          // no-handler path below: no ack, no reply frame, no dispatch-fail.
+          // The hub's redelivery and expiry machinery handles the rest.
+          break;
+        }
+        // Admitted: deliver exactly as an admitted frame always has, keeping
+        // the detached durable settlement and detached ack below off the
+        // messageQueue chain -- only the verify above is awaited inline.
+        //
         // Supervised deployments register the deployment-level mail
         // address on `mailInboundRouter` once their supervisor spawns;
         // that handler delivers the bytes to the supervisor's mail-bus
@@ -1504,6 +1698,12 @@ export function createHubLink(config: HubLinkConfig): HubLink {
       case "run.grants":
         await handleRunGrants(frame);
         break;
+      case "sender.key.refresh":
+        await handleSenderKeyRefresh(frame);
+        break;
+      case "sender.key.evict":
+        await handleSenderKeyEvict(frame);
+        break;
       case "drain.deliver":
         await handleDrainDeliver(frame);
         break;
@@ -1577,12 +1777,21 @@ export function createHubLink(config: HubLinkConfig): HubLink {
       // reconnect would expose a false empty inventory and let allocation
       // reconciliation restore Hub state over the live workflow.
       const restoredAddresses = getWorkflowAddresses();
+      // Report the sidecar's cached rotatable senders on both frames: the
+      // register-vs-reconnect choice turns on workflow-address presence, so a
+      // sidecar with cached senders but no restored workflow substrate still
+      // announces them on a register frame. Omit the field when empty to honor
+      // its additive-optional wire shape.
+      const cachedSenderAddresses = getCachedSenderAddresses();
+      const senderReport =
+        cachedSenderAddresses.length > 0 ? { cachedSenderAddresses } : {};
       if (restoredAddresses.length === 0) {
         completeHandshake(connection, {
           type: "register",
           sidecarId,
           token,
           agentAddresses: [],
+          ...senderReport,
         });
       } else {
         completeHandshake(connection, {
@@ -1590,6 +1799,7 @@ export function createHubLink(config: HubLinkConfig): HubLink {
           sidecarId,
           token,
           agentAddresses: restoredAddresses,
+          ...senderReport,
         });
       }
     });

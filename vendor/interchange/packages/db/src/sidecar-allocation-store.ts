@@ -1,5 +1,16 @@
 import { type } from "arktype";
-import { and, asc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  lte,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm";
 
 import {
   sidecarAllocationStatuses,
@@ -77,6 +88,7 @@ export type CreateAdoptedSidecarAllocationArgs =
   };
 
 export type ClaimSidecarAllocationArgs = {
+  readonly excludedAllocationIds?: readonly string[];
   readonly leaseId: string;
   readonly leaseDurationMs: number;
 };
@@ -204,6 +216,11 @@ export type FailSidecarAllocationArgs = {
   readonly now?: Date;
 };
 
+export type MarkSidecarDestroyFailedArgs = Omit<
+  FailSidecarAllocationArgs,
+  "expectedStatus"
+>;
+
 function parseSidecarAllocationRow(
   row: SidecarAllocationRow,
 ): SidecarAllocation {
@@ -251,7 +268,13 @@ function databaseTimestamp(override?: Date) {
 function leaseCondition(expectedLeaseId?: string) {
   return expectedLeaseId === undefined
     ? []
-    : [eq(sidecarAllocation.reconciliationLeaseId, expectedLeaseId)];
+    : [
+        eq(sidecarAllocation.reconciliationLeaseId, expectedLeaseId),
+        gt(
+          sidecarAllocation.reconciliationLeaseExpiresAt,
+          sql`clock_timestamp()`,
+        ),
+      ];
 }
 
 export function createSidecarAllocationStore(db: DBHandle) {
@@ -451,7 +474,12 @@ export function createSidecarAllocationStore(db: DBHandle) {
         const [allocation] = await tx
           .select()
           .from(sidecarAllocation)
-          .where(eq(sidecarAllocation.id, args.allocationId))
+          .where(
+            and(
+              eq(sidecarAllocation.id, args.allocationId),
+              ...leaseCondition(args.expectedLeaseId),
+            ),
+          )
           .limit(1)
           .for("update");
         if (
@@ -508,7 +536,12 @@ export function createSidecarAllocationStore(db: DBHandle) {
         const [allocation] = await tx
           .select()
           .from(sidecarAllocation)
-          .where(eq(sidecarAllocation.id, args.allocationId))
+          .where(
+            and(
+              eq(sidecarAllocation.id, args.allocationId),
+              ...leaseCondition(args.expectedLeaseId),
+            ),
+          )
           .limit(1)
           .for("update");
         if (
@@ -717,6 +750,47 @@ export function createSidecarAllocationStore(db: DBHandle) {
       return updated === undefined ? null : parseSidecarAllocationRow(updated);
     },
 
+    async markDestroyFailed(
+      args: MarkSidecarDestroyFailedArgs,
+    ): Promise<SidecarAllocation | null> {
+      const now = databaseTimestamp(args.now);
+      return db.transaction(async (tx) => {
+        const [updated] = await tx
+          .update(sidecarAllocation)
+          .set({
+            status: "destroy_failed",
+            failureCode: args.code,
+            failureMessage: args.message,
+            nextAttemptAt: null,
+            reconciliationLeaseId: null,
+            reconciliationLeaseExpiresAt: null,
+            connectDeadline: null,
+            destroyAttempts: sql`${sidecarAllocation.destroyAttempts} + 1`,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(sidecarAllocation.id, args.allocationId),
+              inArray(sidecarAllocation.status, ["replacing", "releasing"]),
+              eq(sidecarAllocation.generation, args.expectedGeneration),
+              ...leaseCondition(args.expectedLeaseId),
+            ),
+          )
+          .returning();
+        if (updated === undefined) return null;
+
+        await failRunningRuns(tx, updated.anchorRunId, now);
+        await workflowRunDispatchStore.failUnsettled(
+          updated.anchorRunId,
+          args.code,
+          args.message,
+          now,
+          tx,
+        );
+        return parseSidecarAllocationRow(updated);
+      });
+    },
+
     async failWithoutInfrastructure(
       args: FailSidecarAllocationArgs,
       tx?: DBExecutor,
@@ -788,6 +862,14 @@ export function createSidecarAllocationStore(db: DBHandle) {
             and(
               inArray(sidecarAllocation.status, activeStatuses),
               lte(sidecarAllocation.nextAttemptAt, sql`now()`),
+              ...(args.excludedAllocationIds !== undefined &&
+              args.excludedAllocationIds.length > 0
+                ? [
+                    notInArray(sidecarAllocation.id, [
+                      ...args.excludedAllocationIds,
+                    ]),
+                  ]
+                : []),
               or(
                 isNull(sidecarAllocation.reconciliationLeaseExpiresAt),
                 lte(sidecarAllocation.reconciliationLeaseExpiresAt, sql`now()`),
@@ -823,16 +905,35 @@ export function createSidecarAllocationStore(db: DBHandle) {
       const [updated] = await db
         .update(sidecarAllocation)
         .set({
-          reconciliationLeaseExpiresAt: sql`now() + (${leaseDurationMs} * interval '1 millisecond')`,
+          reconciliationLeaseExpiresAt: sql`clock_timestamp() + (${leaseDurationMs} * interval '1 millisecond')`,
         })
         .where(
           and(
             eq(sidecarAllocation.id, allocationId),
-            eq(sidecarAllocation.reconciliationLeaseId, leaseId),
+            ...leaseCondition(leaseId),
           ),
         )
         .returning({ id: sidecarAllocation.id });
       return updated !== undefined;
+    },
+
+    async isReconciliationLeaseCurrent(
+      allocationId: string,
+      generation: number,
+      leaseId: string,
+    ): Promise<boolean> {
+      const [allocation] = await db
+        .select({ id: sidecarAllocation.id })
+        .from(sidecarAllocation)
+        .where(
+          and(
+            eq(sidecarAllocation.id, allocationId),
+            eq(sidecarAllocation.generation, generation),
+            ...leaseCondition(leaseId),
+          ),
+        )
+        .limit(1);
+      return allocation !== undefined;
     },
 
     async markConnectionReady(
@@ -942,7 +1043,7 @@ export function createSidecarAllocationStore(db: DBHandle) {
         .where(
           and(
             eq(sidecarAllocation.id, allocationId),
-            eq(sidecarAllocation.reconciliationLeaseId, leaseId),
+            ...leaseCondition(leaseId),
           ),
         )
         .returning({ id: sidecarAllocation.id });
@@ -955,7 +1056,9 @@ export function createSidecarAllocationStore(db: DBHandle) {
     ): Promise<boolean> {
       const [updated] = await db
         .update(sidecarAllocation)
-        .set({ nextAttemptAt: sql`now()` })
+        .set({
+          nextAttemptAt: sql`now()`,
+        })
         .where(
           and(
             eq(sidecarAllocation.id, allocationId),

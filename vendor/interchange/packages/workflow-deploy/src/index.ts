@@ -11,7 +11,9 @@
 //     (`deriveRunAddress`, `deriveStepAddress`, `resolveStepAddress`, ...)
 //     and per-step inference-source resolution against the operator-
 //     approved grant set (`pickStepInferenceSource`, `pinInertStepSources`,
-//     `buildInertProjectionStepSources`).
+//     `buildInertProjectionStepSources`, `buildInertBodyStepSources`), plus
+//     `collectAgentBearingStepIds` for consumers that must tell a step which
+//     can invoke inference from one merely carrying a placeholder pin.
 
 export {
   walkCapabilities,
@@ -20,8 +22,12 @@ export {
   type PluginToolDefinitions,
 } from "./capability-walk";
 export {
+  approvalItemsFromSet,
+  approvalSetFromItems,
+  createApprovalSet,
   createApprovalSetGate,
   createApprovalSourceGate,
+  isApprovedGrantRequirement,
   type ApprovalDecision,
   type ApprovalSet,
   type ApprovalSource,
@@ -30,14 +36,18 @@ export {
 export { extractFoldedBody, type FoldedBody } from "./fold-synthesis";
 export {
   enumerateInertBodies,
+  inertFlatNamespaceStepIds,
   inertLoopBody,
+  inertNestedBodies,
   type EnumeratedInertBody,
   type InertBodyStepPreference,
 } from "./inert-ontrigger-bodies";
 export {
   pickStepInferenceSource,
   pinInertStepSources,
+  collectAgentBearingStepIds,
   buildInertProjectionStepSources,
+  buildInertBodyStepSources,
   buildSingleStepAgentDefinition,
   deriveRunAddress,
   deriveRunAgentId,

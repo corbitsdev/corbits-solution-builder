@@ -65,3 +65,27 @@ export const CreateWorkflowDefinitionResponse = type({
   id: "string",
   created: "boolean",
 });
+
+export const WorkflowDeploymentStatus = type.enumerated(
+  "deployed",
+  "pending",
+  "recovering",
+  "releasing",
+  "released",
+  "failed",
+  "destroy_failed",
+);
+export type WorkflowDeploymentStatus = typeof WorkflowDeploymentStatus.infer;
+
+export const WorkflowDeploymentResponse = type({
+  id: "string",
+  tenantId: "string",
+  definitionAssetId: "string",
+  status: WorkflowDeploymentStatus.describe(
+    "Deployment lifecycle status. `failed` is a terminal failure with no infrastructure. `destroy_failed` is a permanent cleanup failure where infrastructure may remain and require operator cleanup.",
+  ),
+  createdAt: "string",
+  "provisionerBindingFingerprint?": "string | null",
+});
+export type WorkflowDeploymentResponse =
+  typeof WorkflowDeploymentResponse.infer;

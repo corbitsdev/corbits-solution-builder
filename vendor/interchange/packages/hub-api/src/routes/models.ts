@@ -1,16 +1,16 @@
 import { eq, and, inArray } from "drizzle-orm";
 import { Hono } from "hono";
-import { describeRoute, resolver, validator } from "hono-openapi";
+import { describeRoute, validator } from "hono-openapi";
 
 import { model, modelPricing } from "@intx/db/schema";
 import { listVisibleOfferings, resolveActivePrice } from "@intx/db";
 import type { DB, ModelPricingRow, ResolvedOffering } from "@intx/db";
 import {
   CreateModel,
+  ErrorResponse,
   UpdateModel,
   ModelResponse,
   ModelInfo,
-  ErrorResponse,
   paginatedSchema,
 } from "@intx/types";
 import {
@@ -20,6 +20,7 @@ import {
 import type { CredentialCipher } from "@intx/types";
 
 import type { TenantEnv } from "../context";
+import { errorResponse } from "../error-response";
 import { first, ts } from "../format";
 import { generateId } from "@intx/hub-common";
 import { idResource } from "../middleware/grant";
@@ -32,6 +33,7 @@ import {
   pageParameters,
 } from "../pagination";
 import { formatPricingRow } from "./model-offerings";
+import { jsonResponse } from "../openapi";
 
 export function formatModel(row: typeof model.$inferSelect) {
   return {
@@ -71,14 +73,7 @@ export function createModelCatalogRoutes({
         "Lists the models created directly on this tenant. Models inherited from ancestor tenants are not included; use the model discovery endpoint to see the resolved catalog.",
       parameters: [...pageParameters],
       responses: {
-        200: {
-          description: "List of models",
-          content: {
-            "application/json": {
-              schema: resolver(paginatedSchema(ModelResponse)),
-            },
-          },
-        },
+        200: jsonResponse("List of models", paginatedSchema(ModelResponse)),
       },
     }),
     async (c) => {
@@ -111,18 +106,11 @@ export function createModelCatalogRoutes({
       description:
         "Creates a tenant-local model. Reusing the canonical name of an inherited model shadows that model for this tenant and its descendants.",
       responses: {
-        201: {
-          description: "Model created",
-          content: {
-            "application/json": { schema: resolver(ModelResponse) },
-          },
-        },
-        409: {
-          description: "A model with this canonical name already exists",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        201: jsonResponse("Model created", ModelResponse),
+        409: jsonResponse(
+          "A model with this canonical name already exists",
+          ErrorResponse,
+        ),
       },
     }),
     validator("json", CreateModel),
@@ -137,14 +125,10 @@ export function createModelCatalogRoutes({
         ),
       });
       if (existing) {
-        return c.json(
-          {
-            error: {
-              code: "conflict",
-              message: "A model with this canonical name already exists",
-            },
-          },
-          409,
+        return errorResponse(
+          c,
+          "conflict",
+          "A model with this canonical name already exists",
         );
       }
 
@@ -181,18 +165,8 @@ export function createModelCatalogRoutes({
       tags: ["Catalog"],
       summary: "Get a model",
       responses: {
-        200: {
-          description: "Model details",
-          content: {
-            "application/json": { schema: resolver(ModelResponse) },
-          },
-        },
-        404: {
-          description: "Model not found",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        200: jsonResponse("Model details", ModelResponse),
+        404: jsonResponse("Model not found", ErrorResponse),
       },
     }),
     async (c) => {
@@ -202,10 +176,7 @@ export function createModelCatalogRoutes({
         where: and(eq(model.id, modelId), eq(model.tenantId, tenantCtx.id)),
       });
       if (!row) {
-        return c.json(
-          { error: { code: "not_found", message: "Model not found" } },
-          404,
-        );
+        return errorResponse(c, "not_found", "Model not found");
       }
       return c.json(formatModel(row));
     },
@@ -218,18 +189,8 @@ export function createModelCatalogRoutes({
       tags: ["Catalog"],
       summary: "Update a model",
       responses: {
-        200: {
-          description: "Model updated",
-          content: {
-            "application/json": { schema: resolver(ModelResponse) },
-          },
-        },
-        404: {
-          description: "Model not found",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        200: jsonResponse("Model updated", ModelResponse),
+        404: jsonResponse("Model not found", ErrorResponse),
       },
     }),
     validator("json", UpdateModel),
@@ -252,10 +213,7 @@ export function createModelCatalogRoutes({
         .returning();
 
       if (!updated) {
-        return c.json(
-          { error: { code: "not_found", message: "Model not found" } },
-          404,
-        );
+        return errorResponse(c, "not_found", "Model not found");
       }
 
       void pushSourceUpdatesSubtree(
@@ -278,12 +236,7 @@ export function createModelCatalogRoutes({
         "Removes the model and cascades to the offerings that reference it. Running instances resolved through those offerings fail over to the next eligible source.",
       responses: {
         204: { description: "Model removed" },
-        404: {
-          description: "Model not found",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        404: jsonResponse("Model not found", ErrorResponse),
       },
     }),
     async (c) => {
@@ -294,10 +247,7 @@ export function createModelCatalogRoutes({
         .where(and(eq(model.id, modelId), eq(model.tenantId, tenantCtx.id)))
         .returning();
       if (deleted.length === 0) {
-        return c.json(
-          { error: { code: "not_found", message: "Model not found" } },
-          404,
-        );
+        return errorResponse(c, "not_found", "Model not found");
       }
       void pushSourceUpdatesSubtree(
         db,
@@ -405,12 +355,7 @@ export function createModelDiscoveryRoutes({
       description:
         "Returns the tenant's resolved catalog: every model visible after applying inheritance, shadowing, and disable suppression, broken down by the providers that offer it with each offering's active price per currency.",
       responses: {
-        200: {
-          description: "Resolved models",
-          content: {
-            "application/json": { schema: resolver(ModelInfo.array()) },
-          },
-        },
+        200: jsonResponse("Resolved models", ModelInfo.array()),
       },
     }),
     async (c) => {

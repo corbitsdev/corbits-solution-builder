@@ -3,6 +3,8 @@ import { type } from "arktype";
 import type { SidecarCapabilityDeclaration } from "@intx/types";
 
 export type EnsureSidecarRequest = {
+  /** Cancellation is best effort; a cancelled ensure has an uncertain outcome. */
+  readonly signal?: AbortSignal;
   readonly allocationId: string;
   readonly generation: number;
   readonly tenantId: string;
@@ -13,6 +15,8 @@ export type EnsureSidecarRequest = {
 };
 
 export type DestroySidecarRequest = {
+  /** Cancellation never confirms destruction; the Hub may retry cleanup. */
+  readonly signal?: AbortSignal;
   readonly allocationId: string;
   readonly generation: number;
   readonly sidecarId: string;
@@ -37,8 +41,9 @@ export type SidecarOperationFailure = typeof SidecarOperationFailure.infer;
 
 /**
  * Acceptance means the requested infrastructure exists, not that it is ready.
- * Rejection means no infrastructure exists for this generation; a provisioner
- * must throw when it cannot determine whether the request took effect.
+ * Rejection means no infrastructure exists for this generation (ensure-only;
+ * destroy rejections below carry no such guarantee); a provisioner must throw
+ * when it cannot determine whether the request took effect.
  */
 export const EnsureSidecarResult = type({
   kind: "'accepted'",
@@ -46,6 +51,10 @@ export const EnsureSidecarResult = type({
 }).or(SidecarOperationFailure);
 export type EnsureSidecarResult = typeof EnsureSidecarResult.infer;
 
+/**
+ * Destruction confirms the capacity is gone and older ensure calls are fenced.
+ * A non-retryable rejection stops automatic cleanup; capacity may still exist.
+ */
 export const DestroySidecarResult = type({
   kind: "'destroyed'",
 }).or(SidecarOperationFailure);
@@ -60,6 +69,8 @@ export interface SidecarProvisioner {
   /**
    * Converges infrastructure for this generation. Implementations must be
    * idempotent and reject generations older than one they have observed.
+   * Honour the request signal where possible. A late completion must still
+   * respect a concurrent destroy's fence, even if cancellation was ignored.
    */
   ensure(request: EnsureSidecarRequest): Promise<EnsureSidecarResult>;
   /**

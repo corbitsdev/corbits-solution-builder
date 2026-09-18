@@ -2,7 +2,7 @@ import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { describeRoute, resolver, validator } from "hono-openapi";
+import { describeRoute, validator } from "hono-openapi";
 import { type } from "arktype";
 
 import {
@@ -21,11 +21,13 @@ import {
 import type { ConditionRegistry, GrantStore } from "@intx/types/authz";
 import {
   correlationIdFromSignalName,
-  deriveWorkflowRunId,
   ErrorResponse,
+  deriveWorkflowRunId,
   isSidecarAllocationDispatchable,
   SendMessage,
+  WorkflowDeploymentResponse,
   type SidecarAllocationStatus,
+  type WorkflowDeploymentStatus,
 } from "@intx/types";
 import { WorkflowDefinitionSource } from "@intx/types/workflow-sources";
 import {
@@ -43,6 +45,7 @@ import {
 } from "@intx/workflow-deploy";
 
 import type { TenantEnv } from "../context";
+import { errorResponse } from "../error-response";
 import { idResource, type RequireGrant } from "../middleware/grant";
 import {
   lockDispatchableAllocation,
@@ -60,6 +63,7 @@ import {
   MAX_MAIL_BODY_BYTES,
   WorkflowRunTriggerResponse,
 } from "../workflow-run-trigger";
+import { jsonResponse } from "../openapi";
 
 // Request body for the general workflow deploy. The definition is CODE-SOURCED:
 // `source` names where its bytes come from and `entry` the `interchange.workflow`
@@ -104,15 +108,6 @@ const DeliverSignal = type({
   "principalId?": "string",
 });
 
-const WorkflowDeploymentResponse = type({
-  id: "string",
-  tenantId: "string",
-  definitionAssetId: "string",
-  status: "string",
-  createdAt: "string",
-  "provisionerBindingFingerprint?": "string | null",
-});
-
 const WorkflowRunListResponse = type({
   runIds: "string[]",
 });
@@ -135,8 +130,8 @@ function formatDeployment(
     allocationNextAttemptAt?: Date | null;
     provisionerBindingFingerprint?: string | null;
   },
-  statusOverride?: string,
-) {
+  statusOverride?: WorkflowDeploymentStatus,
+): WorkflowDeploymentResponse {
   if (row.definitionAssetId === null) {
     throw new Error(
       `deployment ${row.id}: anchor run's definition has no asset`,
@@ -155,7 +150,7 @@ function formatDeployment(
 function formatAllocationStatus(row: {
   allocationStatus?: SidecarAllocationStatus | null;
   allocationNextAttemptAt?: Date | null;
-}): string {
+}): WorkflowDeploymentStatus {
   switch (row.allocationStatus) {
     case undefined:
     case null:
@@ -168,6 +163,7 @@ function formatAllocationStatus(row: {
     case "replacing":
       return "recovering";
     case "releasing":
+    case "destroy_failed":
     case "released":
     case "failed":
       return row.allocationStatus;
@@ -306,31 +302,20 @@ export function createWorkflowRoutes({
       description:
         "Installs, probes, gates, and freezes a code-sourced workflow definition from its `source`/`entry`, then creates a pending provisioned deployment. Provisioning continues asynchronously; the response returns the deployment record.",
       responses: {
-        201: {
-          description: "Workflow deployment accepted for provisioning",
-          content: {
-            "application/json": {
-              schema: resolver(WorkflowDeploymentResponse),
-            },
-          },
-        },
-        404: {
-          description: "Workflow asset not found",
-          content: { "application/json": { schema: resolver(ErrorResponse) } },
-        },
-        409: {
-          description:
-            "Workflow definition or source offering chain invalid, workflow provisioning unavailable, or provisioner selection failed",
-          content: { "application/json": { schema: resolver(ErrorResponse) } },
-        },
-        500: {
-          description: "Deployment projection row missing after preparation",
-          content: { "application/json": { schema: resolver(ErrorResponse) } },
-        },
-        502: {
-          description: "Sidecar unavailable",
-          content: { "application/json": { schema: resolver(ErrorResponse) } },
-        },
+        201: jsonResponse(
+          "Workflow deployment accepted for provisioning",
+          WorkflowDeploymentResponse,
+        ),
+        404: jsonResponse("Workflow asset not found", ErrorResponse),
+        409: jsonResponse(
+          "Workflow definition or source offering chain invalid, workflow provisioning unavailable, or provisioner selection failed",
+          ErrorResponse,
+        ),
+        500: jsonResponse(
+          "Deployment projection row missing after preparation",
+          ErrorResponse,
+        ),
+        502: jsonResponse("Sidecar unavailable", ErrorResponse),
       },
     }),
     validator("json", DeployWorkflow),
@@ -344,15 +329,10 @@ export function createWorkflowRoutes({
       // backing asset for the definition, so this route (which anchors every
       // deployment to a workflow asset) does not support it yet.
       if (body.source.kind !== "asset") {
-        return c.json(
-          {
-            error: {
-              code: "unsupported_source",
-              message:
-                "Registry-sourced workflow deploys are not yet supported on this route",
-            },
-          },
-          400,
+        return errorResponse(
+          c,
+          "unsupported_source",
+          "Registry-sourced workflow deploys are not yet supported on this route",
         );
       }
       const definitionAssetId = body.source.assetId;
@@ -365,23 +345,14 @@ export function createWorkflowRoutes({
         ),
       });
       if (!assetRow) {
-        return c.json(
-          {
-            error: { code: "not_found", message: "Workflow asset not found" },
-          },
-          404,
-        );
+        return errorResponse(c, "not_found", "Workflow asset not found");
       }
 
       if (workflowAllocationService === undefined) {
-        return c.json(
-          {
-            error: {
-              code: "workflow_provisioning_unavailable",
-              message: "Workflow provisioning is not configured on this Hub",
-            },
-          },
-          409,
+        return errorResponse(
+          c,
+          "workflow_provisioning_unavailable",
+          "Workflow provisioning is not configured on this Hub",
         );
       }
 
@@ -389,7 +360,7 @@ export function createWorkflowRoutes({
       const sessionId = generateId("session");
 
       let deployedId: string;
-      let deploymentStatus: string;
+      let deploymentStatus: WorkflowDeploymentStatus;
       try {
         const prepared =
           await workflowAllocationService.prepareProvisionedDeployment({
@@ -412,10 +383,7 @@ export function createWorkflowRoutes({
         // An install/gate rejection or an unapproved/mis-ordered source chain
         // is a client/definition error, not a sidecar-reachability failure.
         if (err instanceof WorkflowDefinitionInvalidError) {
-          return c.json(
-            { error: { code: "invalid_workflow", message: err.message } },
-            409,
-          );
+          return errorResponse(c, "invalid_workflow", err.message);
         }
         if (err instanceof WorkflowProvisioningError) {
           return c.json(
@@ -423,17 +391,10 @@ export function createWorkflowRoutes({
             409,
           );
         }
-        return c.json(
-          {
-            error: {
-              code: "sidecar_unavailable",
-              message:
-                err instanceof Error
-                  ? err.message
-                  : "Failed to deploy workflow",
-            },
-          },
-          502,
+        return errorResponse(
+          c,
+          "sidecar_unavailable",
+          err instanceof Error ? err.message : "Failed to deploy workflow",
         );
       }
 
@@ -458,14 +419,10 @@ export function createWorkflowRoutes({
         .where(eq(workflowRun.id, deployedId))
         .limit(1);
       if (!row) {
-        return c.json(
-          {
-            error: {
-              code: "anchor_run_missing",
-              message: `anchor workflow_run ${deployedId} missing after deployment preparation`,
-            },
-          },
-          500,
+        return errorResponse(
+          c,
+          "anchor_run_missing",
+          `anchor workflow_run ${deployedId} missing after deployment preparation`,
         );
       }
       return c.json(formatDeployment(row, deploymentStatus), 201);
@@ -481,14 +438,10 @@ export function createWorkflowRoutes({
       description:
         "Lists the workflow deployments for the tenant, most recent first.",
       responses: {
-        200: {
-          description: "List of workflow deployments",
-          content: {
-            "application/json": {
-              schema: resolver(WorkflowDeploymentResponse.array()),
-            },
-          },
-        },
+        200: jsonResponse(
+          "List of workflow deployments",
+          WorkflowDeploymentResponse.array(),
+        ),
       },
     }),
     async (c) => {
@@ -545,33 +498,24 @@ export function createWorkflowRoutes({
         202: {
           description: "Signal accepted for delivery",
         },
-        400: {
-          description:
-            "Reserved signal name or a runId that is not the deployment's addressable run",
-          content: { "application/json": { schema: resolver(ErrorResponse) } },
-        },
-        403: {
-          description:
-            "Caller lacks workflow-run manage and the named signal:<signalName> grant",
-          content: { "application/json": { schema: resolver(ErrorResponse) } },
-        },
-        404: {
-          description: "Workflow deployment not found",
-          content: { "application/json": { schema: resolver(ErrorResponse) } },
-        },
-        409: {
-          description:
-            "Workflow run has not started, is terminal, its deployment allocation is no longer active, or the signalId conflicts with a previously accepted payload",
-          content: { "application/json": { schema: resolver(ErrorResponse) } },
-        },
-        502: {
-          description: "Sidecar unavailable",
-          content: { "application/json": { schema: resolver(ErrorResponse) } },
-        },
-        503: {
-          description: "Durable workflow dispatch unavailable",
-          content: { "application/json": { schema: resolver(ErrorResponse) } },
-        },
+        400: jsonResponse(
+          "Reserved signal name or a runId that is not the deployment's addressable run",
+          ErrorResponse,
+        ),
+        403: jsonResponse(
+          "Caller lacks workflow-run manage and the named signal:<signalName> grant",
+          ErrorResponse,
+        ),
+        404: jsonResponse("Workflow deployment not found", ErrorResponse),
+        409: jsonResponse(
+          "Workflow run has not started, is terminal, its deployment allocation is no longer active, or the signalId conflicts with a previously accepted payload",
+          ErrorResponse,
+        ),
+        502: jsonResponse("Sidecar unavailable", ErrorResponse),
+        503: jsonResponse(
+          "Durable workflow dispatch unavailable",
+          ErrorResponse,
+        ),
       },
     }),
     validator("json", DeliverSignal),
@@ -628,15 +572,7 @@ export function createWorkflowRoutes({
         )
         .limit(1);
       if (deployment === undefined) {
-        return c.json(
-          {
-            error: {
-              code: "not_found",
-              message: "Workflow deployment not found",
-            },
-          },
-          404,
-        );
+        return errorResponse(c, "not_found", "Workflow deployment not found");
       }
 
       // A reserved control-plane channel name (`signalName(correlationId)`) is
@@ -645,15 +581,10 @@ export function createWorkflowRoutes({
       // approval co-write and its authorization -- so reject it. Author signals
       // to a workflow use free-form names.
       if (correlationIdFromSignalName(body.signalName) !== undefined) {
-        return c.json(
-          {
-            error: {
-              code: "reserved_signal_name",
-              message:
-                "signalName names a reserved control-plane channel; deliver author-named signals only",
-            },
-          },
-          400,
+        return errorResponse(
+          c,
+          "reserved_signal_name",
+          "signalName names a reserved control-plane channel; deliver author-named signals only",
         );
       }
 
@@ -662,14 +593,10 @@ export function createWorkflowRoutes({
       // signal for a section body is delivered to the parent deployment run and
       // relayed down by the runtime, never addressed to the child directly.
       if (body.runId !== runId) {
-        return c.json(
-          {
-            error: {
-              code: "unaddressable_run",
-              message: "runId is not the addressable run of this deployment",
-            },
-          },
-          400,
+        return errorResponse(
+          c,
+          "unaddressable_run",
+          "runId is not the addressable run of this deployment",
         );
       }
 
@@ -685,23 +612,18 @@ export function createWorkflowRoutes({
         !isLiveWorkflowRunStatus(deployment.runStatus) ||
         durableLifecycle !== "live"
       ) {
-        return c.json(
-          {
-            error: {
-              code: "workflow_run_not_running",
-              message:
-                durableLifecycle !== "live"
-                  ? durableLifecycle === "terminal"
-                    ? "Workflow run is terminal"
-                    : "Workflow run has not started"
-                  : !isLiveWorkflowRunStatus(deployment.anchorStatus)
-                    ? `Workflow deployment is ${deployment.anchorStatus}`
-                    : deployment.runStatus === null
-                      ? "Workflow run has not started"
-                      : `Workflow run is ${deployment.runStatus}`,
-            },
-          },
-          409,
+        return errorResponse(
+          c,
+          "workflow_run_not_running",
+          durableLifecycle !== "live"
+            ? durableLifecycle === "terminal"
+              ? "Workflow run is terminal"
+              : "Workflow run has not started"
+            : !isLiveWorkflowRunStatus(deployment.anchorStatus)
+              ? `Workflow deployment is ${deployment.anchorStatus}`
+              : deployment.runStatus === null
+                ? "Workflow run has not started"
+                : `Workflow run is ${deployment.runStatus}`,
         );
       }
 
@@ -709,29 +631,20 @@ export function createWorkflowRoutes({
         deployment.allocationStatus !== null &&
         !isSidecarAllocationDispatchable(deployment.allocationStatus)
       ) {
-        return c.json(
-          {
-            error: {
-              code: "deployment_unreachable",
-              message: `Workflow deployment allocation is ${deployment.allocationStatus}`,
-            },
-          },
-          409,
+        return errorResponse(
+          c,
+          "deployment_unreachable",
+          `Workflow deployment allocation is ${deployment.allocationStatus}`,
         );
       }
 
       const allocationId = deployment.allocationId;
       if (allocationId !== null) {
         if (workflowDispatchService === undefined) {
-          return c.json(
-            {
-              error: {
-                code: "workflow_dispatch_unavailable",
-                message:
-                  "Durable workflow dispatch is unavailable for this provisioned deployment",
-              },
-            },
-            503,
+          return errorResponse(
+            c,
+            "workflow_dispatch_unavailable",
+            "Durable workflow dispatch is unavailable for this provisioned deployment",
           );
         }
         try {
@@ -794,15 +707,10 @@ export function createWorkflowRoutes({
           return c.body(null, 202);
         } catch (error) {
           if (error instanceof WorkflowRunDispatchPayloadConflictError) {
-            return c.json(
-              {
-                error: {
-                  code: "signal_id_conflict",
-                  message:
-                    "signalId has already been used with a different signal payload",
-                },
-              },
-              409,
+            return errorResponse(
+              c,
+              "signal_id_conflict",
+              "signalId has already been used with a different signal payload",
             );
           }
           throw error;
@@ -818,17 +726,12 @@ export function createWorkflowRoutes({
           payload,
         });
       } catch (err) {
-        return c.json(
-          {
-            error: {
-              code: "sidecar_unavailable",
-              message:
-                err instanceof Error
-                  ? err.message
-                  : "Failed to deliver signal to sidecar",
-            },
-          },
-          502,
+        return errorResponse(
+          c,
+          "sidecar_unavailable",
+          err instanceof Error
+            ? err.message
+            : "Failed to deliver signal to sidecar",
         );
       }
 
@@ -845,49 +748,36 @@ export function createWorkflowRoutes({
       description:
         "Delivers a fresh signed conversation message to the deployment's stable top-level run. The first accepted message fires that run; while it remains live, later messages may resume its onTrigger input. A terminal deployment run cannot be fired again. The returned messageId identifies this trigger occurrence.",
       responses: {
-        202: {
-          description: "Trigger accepted for delivery",
-          content: {
-            "application/json": {
-              schema: resolver(WorkflowRunTriggerResponse),
-            },
-          },
-        },
-        400: {
-          description:
-            "Attachment validation error. Each variant carries a structured code (oversize_attachment, disallowed_mime_type, malformed_base64, oversize_total) with the offending index and limits. A malformed request body that fails SendMessage validation returns the generic error shape instead.",
-          content: { "application/json": { schema: resolver(ErrorResponse) } },
-        },
-        404: {
-          description: "Workflow deployment not found",
-          content: { "application/json": { schema: resolver(ErrorResponse) } },
-        },
-        409: {
-          description:
-            "Deployment address is not routable, its allocation is no longer active, or its top-level run is terminal",
-          content: { "application/json": { schema: resolver(ErrorResponse) } },
-        },
-        413: {
-          description: "Request body exceeds the maximum allowed size",
-          content: { "application/json": { schema: resolver(ErrorResponse) } },
-        },
-        503: {
-          description: "Durable workflow dispatch unavailable",
-          content: { "application/json": { schema: resolver(ErrorResponse) } },
-        },
+        202: jsonResponse(
+          "Trigger accepted for delivery",
+          WorkflowRunTriggerResponse,
+        ),
+        400: jsonResponse(
+          "Attachment validation error. Each variant carries a structured code (oversize_attachment, disallowed_mime_type, malformed_base64, oversize_total) with the offending index and limits. A malformed request body that fails SendMessage validation returns the generic error shape instead.",
+          ErrorResponse,
+        ),
+        404: jsonResponse("Workflow deployment not found", ErrorResponse),
+        409: jsonResponse(
+          "Deployment address is not routable, its allocation is no longer active, or its top-level run is terminal",
+          ErrorResponse,
+        ),
+        413: jsonResponse(
+          "Request body exceeds the maximum allowed size",
+          ErrorResponse,
+        ),
+        503: jsonResponse(
+          "Durable workflow dispatch unavailable",
+          ErrorResponse,
+        ),
       },
     }),
     bodyLimit({
       maxSize: MAX_MAIL_BODY_BYTES,
       onError: (c) =>
-        c.json(
-          {
-            error: {
-              code: "payload_too_large",
-              message: "Request body exceeds the maximum allowed size",
-            },
-          },
-          413,
+        errorResponse(
+          c,
+          "payload_too_large",
+          "Request body exceeds the maximum allowed size",
         ),
     }),
     validator("json", SendMessage),
@@ -912,18 +802,8 @@ export function createWorkflowRoutes({
       description:
         "Lists the run ids present in the deployment's workflow-run event log. Returns an empty list when no run has committed events yet.",
       responses: {
-        200: {
-          description: "List of run ids",
-          content: {
-            "application/json": {
-              schema: resolver(WorkflowRunListResponse),
-            },
-          },
-        },
-        404: {
-          description: "Workflow deployment not found",
-          content: { "application/json": { schema: resolver(ErrorResponse) } },
-        },
+        200: jsonResponse("List of run ids", WorkflowRunListResponse),
+        404: jsonResponse("Workflow deployment not found", ErrorResponse),
       },
     }),
     async (c) => {
@@ -931,15 +811,7 @@ export function createWorkflowRoutes({
       const anchorRunId = c.req.param("runId");
 
       if (!(await deploymentAnchorRunExists(db, anchorRunId, tenant.id))) {
-        return c.json(
-          {
-            error: {
-              code: "not_found",
-              message: "Workflow deployment not found",
-            },
-          },
-          404,
-        );
+        return errorResponse(c, "not_found", "Workflow deployment not found");
       }
 
       const runIds = await runReader.listRunIds(
@@ -959,18 +831,8 @@ export function createWorkflowRoutes({
       description:
         "Returns the seq-ordered event projection (RunStarted, StepStarted, StepCompleted, SignalAwaited, RunCompleted, etc.) for a single run. The full event log is returned in ascending seq order; an unknown run returns an empty list.",
       responses: {
-        200: {
-          description: "Seq-ordered run events",
-          content: {
-            "application/json": {
-              schema: resolver(WorkflowRunEventsResponse),
-            },
-          },
-        },
-        404: {
-          description: "Workflow deployment not found",
-          content: { "application/json": { schema: resolver(ErrorResponse) } },
-        },
+        200: jsonResponse("Seq-ordered run events", WorkflowRunEventsResponse),
+        404: jsonResponse("Workflow deployment not found", ErrorResponse),
       },
     }),
     async (c) => {
@@ -979,15 +841,7 @@ export function createWorkflowRoutes({
       const runId = c.req.param("eventRunId");
 
       if (!(await deploymentAnchorRunExists(db, anchorRunId, tenant.id))) {
-        return c.json(
-          {
-            error: {
-              code: "not_found",
-              message: "Workflow deployment not found",
-            },
-          },
-          404,
-        );
+        return errorResponse(c, "not_found", "Workflow deployment not found");
       }
 
       // The inner :eventRunId is not independently tenant-checked, and does
@@ -1017,14 +871,11 @@ export function createWorkflowRoutes({
           description: "Blob bytes",
           content: { "application/octet-stream": {} },
         },
-        400: {
-          description: "Malformed sha",
-          content: { "application/json": { schema: resolver(ErrorResponse) } },
-        },
-        404: {
-          description: "Workflow deployment, run, or blob not found",
-          content: { "application/json": { schema: resolver(ErrorResponse) } },
-        },
+        400: jsonResponse("Malformed sha", ErrorResponse),
+        404: jsonResponse(
+          "Workflow deployment, run, or blob not found",
+          ErrorResponse,
+        ),
       },
     }),
     async (c) => {

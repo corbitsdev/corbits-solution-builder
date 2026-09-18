@@ -13,7 +13,9 @@ Multi-entry exports:
 
 - `@intx/workflow/definition` — `WorkflowDefinition`, `defineWorkflow`,
   `hashDefinition`, the `stepId` shape rule. The on-disk form a
-  workflow lives in.
+  workflow lives in. It also carries the canonical step walk
+  (`walkStepTree`, `walkWorkflowSteps`, `executableStepIds`); see
+  "Walking a definition's steps" below.
 - `@intx/workflow/state-machine` — the event union, the transition
   function, the `RunState` projection. Pure functions over the
   workflow-run log.
@@ -29,9 +31,74 @@ Multi-entry exports:
 For a production host (workflow-run repo backing, scheduler that
 honors wall-clock fire times, signal channel that observes commits,
 DI seams for mail bus / signing key / subprocess spawner), see
-`@intx/workflow-host`. For deploy-time validation, capability walk,
-and the agent-deploy-trivial-workflow dichotomy, see
+`@intx/workflow-host`. For the deploy-time capability walk, the
+operator-approval gate that consumes it, and the address derivation
+and per-step inference-source pinning a deploy needs, see
 `@intx/workflow-deploy`.
+
+## Tools are available wherever inference runs
+
+Every agent step can call tools, no matter which primitive encloses
+it. A step at the top level, a step inside a `loop` body, a step
+inside an inline `onTrigger` section body, and a step inside a
+`childWorkflow` child all get the same tool-bearing execution
+environment. There is no nesting depth and no primitive at which an
+agent runs at reduced capability.
+
+This is an invariant of the system, not a property of the primitives
+that happen to exist today. A new body-bearing primitive inherits it:
+if the primitive runs inference, its steps get tools.
+
+A toolless execution path is not an acceptable shortcut, and the
+reason is that it is silent. The deploy-time capability walk descends
+into every inline body, so an agent's `tool:<name>` reaches the
+frozen surface and the operator is required to approve it before the
+deploy is accepted. A runtime that then builds that agent without its
+tools does not fail: the provider receives an empty tool list, the
+step completes, and nothing is logged at any level. The operator made
+a security decision that had no effect, and the only evidence is the
+work the agent did not do. Two layers answering the same question
+differently is the defect, whichever layer is more permissive.
+
+The corollary for the authorization layer: a tool reaching the
+provider is not authority to invoke it. The run's grants still gate
+every call, and a spawned body's grants are capped to what the body's
+own definition declares. Tools being present is what makes that gate
+meaningful — a gate over an empty toolset decides nothing.
+
+## Walking a definition's steps
+
+`stepOrder` lists the steps of ONE definition record. A workflow's
+executable surface is larger: a `loop` carries an inline body, and an
+inline `onTrigger` section or `childWorkflow` carries a full nested
+definition. A consumer that answers "which steps run here" off
+`stepOrder` alone under-counts every nested body.
+
+`walkStepTree` is the one traversal every such consumer goes through. It
+visits steps in pre-order (a step before the bodies it carries, and a
+body's steps before the next sibling), throws on a `stepOrder` entry with
+no matching step, and takes the descent as an explicit argument rather
+than an implicit house rule. Two named descents cover the cases in use:
+
+- `EXECUTABLE_STEP_DESCENT` — loop bodies, inline onTrigger bodies, and
+  inline childWorkflow bodies. This is the setting that yields every step
+  id the deployment can execute. `executableStepIds(definition)` is the
+  deduplicated id list under it, and the deploy-time capability walk
+  descends with it so an operator approves everything a step can run.
+- `LOOP_BODY_DESCENT` — loop bodies only. This is the setting that stays
+  inside one flat step-id namespace: a loop body resolves against the
+  enclosing definition's map, while an inline section or child body is
+  lifted to its own definition keyed under its own ref. The deploy's
+  per-step inference-source pin descends with it.
+
+`walkWorkflowSteps` and `walkNestedWorkflowSteps` are the live
+`WorkflowDefinition` entry points; they read each primitive's nested
+bodies through `nestedWorkflowBodies`, whose switch is exhaustive so a
+newly-added primitive kind fails at compile time rather than silently
+reading as a leaf. `walkStepTree` itself is generic over the step and
+tree types, so the inert wire projection — whose step values are
+`unknown` and are validated as the caller descends — rides the same
+traversal.
 
 ## Consuming a real agent step's structured output
 

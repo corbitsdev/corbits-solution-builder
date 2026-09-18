@@ -1,4 +1,9 @@
-export { createDB, type DB, type DBExecutor } from "./client";
+export {
+  createDB,
+  type AnyPgDatabase,
+  type DB,
+  type DBExecutor,
+} from "./client";
 export {
   pgErrorCode,
   PG_UNIQUE_VIOLATION,
@@ -24,6 +29,7 @@ export {
 export { lookupLocalPrincipalSigner } from "./signer-identity";
 export {
   resolveSenderKey,
+  resolveFrameSenderKey,
   auditSenderKeys,
   type SenderKeyResolution,
   type SenderKeyAuditReport,
@@ -69,6 +75,7 @@ export {
   type MarkSidecarAllocatedArgs,
   type MarkSidecarConnectionLostArgs,
   type MarkSidecarConnectionReadyArgs,
+  type MarkSidecarDestroyFailedArgs,
   type MarkSidecarReleasedArgs,
   type ParkSidecarReconciliationPolicy,
   type ScheduleSidecarAllocationRetryArgs,

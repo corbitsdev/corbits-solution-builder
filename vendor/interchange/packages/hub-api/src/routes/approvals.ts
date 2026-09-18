@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import type { Context } from "hono";
-import { describeRoute, resolver, validator } from "hono-openapi";
+import { describeRoute, validator } from "hono-openapi";
 
 import { authorize } from "@intx/authz";
 import type { DB, ApprovalStore, SignalCorrelationStore } from "@intx/db";
@@ -16,10 +16,10 @@ import type {
 } from "@intx/hub-sessions";
 import {
   ApprovalResponse,
+  ErrorResponse,
   ApprovalDecision,
   ApproveAction,
   RejectAction,
-  ErrorResponse,
   isSidecarAllocationDispatchable,
   paginatedSchema,
   signalName,
@@ -28,6 +28,7 @@ import {
 import { getLogger } from "@intx/log";
 
 import type { TenantEnv } from "../context";
+import { errorResponse } from "../error-response";
 import { ts } from "../format";
 import {
   approvalToolName,
@@ -42,6 +43,7 @@ import {
   paginatedResponse,
   parsePageParams,
 } from "../pagination";
+import { jsonResponse } from "../openapi";
 
 type ParsedApproval = ReturnType<typeof parseApprovalRow>;
 
@@ -74,10 +76,14 @@ async function propagateRunGrantsToSidecar(
     );
     // A run with no committed per-run grants has nothing to push.
     if (committed === null) return;
+    // A standing-grant refresh carries no inbound sender, so there is no sender
+    // key to co-deliver on this barrier; the sender's key rides the run.grants
+    // frame that its triggering mail pushed.
     const delivered = deps.sidecarRouter.sendRunGrants(
       approval.agentAddress,
       approval.runId,
       committed.stepGrants,
+      undefined,
     );
     if (!delivered) {
       log.warn`standing grant for run ${approval.runId} not pushed: deployment ${approval.agentAddress} is not routable; the next dispatch re-establishes it`;
@@ -403,20 +409,14 @@ export function createApprovalRoutes(
         "Returns pending approval requests within this tenant, newest first.",
       parameters: [...pageParameters],
       responses: {
-        200: {
-          description: "List of pending approvals",
-          content: {
-            "application/json": {
-              schema: resolver(paginatedSchema(ApprovalResponse)),
-            },
-          },
-        },
-        403: {
-          description: "Caller lacks the tenant-wide approval grant",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        200: jsonResponse(
+          "List of pending approvals",
+          paginatedSchema(ApprovalResponse),
+        ),
+        403: jsonResponse(
+          "Caller lacks the tenant-wide approval grant",
+          ErrorResponse,
+        ),
       },
     }),
     async (c) => {
@@ -438,14 +438,10 @@ export function createApprovalRoutes(
         deps.conditionRegistry,
       );
       if (authz.effect !== "allow") {
-        return c.json(
-          {
-            error: {
-              code: "forbidden",
-              message: "You do not have permission to list approvals",
-            },
-          },
-          403,
+        return errorResponse(
+          c,
+          "forbidden",
+          "You do not have permission to list approvals",
         );
       }
 
@@ -485,24 +481,9 @@ export function createApprovalRoutes(
       description:
         "Returns the approver-facing tool snapshot, status, and originating deployment for one approval.",
       responses: {
-        200: {
-          description: "Approval details",
-          content: {
-            "application/json": { schema: resolver(ApprovalResponse) },
-          },
-        },
-        403: {
-          description: "Caller lacks the approval grant",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
-        404: {
-          description: "Approval not found",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        200: jsonResponse("Approval details", ApprovalResponse),
+        403: jsonResponse("Caller lacks the approval grant", ErrorResponse),
+        404: jsonResponse("Approval not found", ErrorResponse),
       },
     }),
     async (c) => {
@@ -515,10 +496,7 @@ export function createApprovalRoutes(
       // learn that an approval id exists in another. Checked before authz so
       // the 403 below never leaks a foreign id.
       if (row === null || row.tenantId !== tenant.id) {
-        return c.json(
-          { error: { code: "not_found", message: "Approval not found" } },
-          404,
-        );
+        return errorResponse(c, "not_found", "Approval not found");
       }
 
       // Same grant the approve/reject routes require: whoever can resolve this
@@ -533,14 +511,10 @@ export function createApprovalRoutes(
         deps.conditionRegistry,
       );
       if (authz.effect !== "allow") {
-        return c.json(
-          {
-            error: {
-              code: "forbidden",
-              message: "You do not have permission to read this approval",
-            },
-          },
-          403,
+        return errorResponse(
+          c,
+          "forbidden",
+          "You do not have permission to read this approval",
         );
       }
 
@@ -556,37 +530,20 @@ export function createApprovalRoutes(
       description:
         "Approves the pending action. Scope 'once' authorizes only this suspended call. Scope 'always' additionally records a standing approval, so the same tool is not asked again for the rest of this run.",
       responses: {
-        200: {
-          description: "Action approved",
-          content: {
-            "application/json": { schema: resolver(ApprovalResponse) },
-          },
-        },
-        404: {
-          description: "Approval not found",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
-        403: {
-          description: "Approver lacks the approval resolve grant",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
-        409: {
-          description:
-            "Approval already resolved (takes precedence on retries), workflow run no longer running, or workflow deployment unavailable",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
-        503: {
-          description: "Durable workflow dispatch unavailable",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        200: jsonResponse("Action approved", ApprovalResponse),
+        404: jsonResponse("Approval not found", ErrorResponse),
+        403: jsonResponse(
+          "Approver lacks the approval resolve grant",
+          ErrorResponse,
+        ),
+        409: jsonResponse(
+          "Approval already resolved (takes precedence on retries), workflow run no longer running, or workflow deployment unavailable",
+          ErrorResponse,
+        ),
+        503: jsonResponse(
+          "Durable workflow dispatch unavailable",
+          ErrorResponse,
+        ),
       },
     }),
     validator("json", ApproveAction),
@@ -617,37 +574,20 @@ export function createApprovalRoutes(
       description:
         "Rejects the pending action. An optional message provides feedback to the agent. Scope 'once' (the default) rejects only this call; scope 'always' additionally records a standing rejection, setting the tool to a standing deny so it is blocked without asking again for the rest of this run.",
       responses: {
-        200: {
-          description: "Action rejected",
-          content: {
-            "application/json": { schema: resolver(ApprovalResponse) },
-          },
-        },
-        404: {
-          description: "Approval not found",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
-        403: {
-          description: "Approver lacks the approval resolve grant",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
-        409: {
-          description:
-            "Approval already resolved (takes precedence on retries), workflow run no longer running, or workflow deployment unavailable",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
-        503: {
-          description: "Durable workflow dispatch unavailable",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        200: jsonResponse("Action rejected", ApprovalResponse),
+        404: jsonResponse("Approval not found", ErrorResponse),
+        403: jsonResponse(
+          "Approver lacks the approval resolve grant",
+          ErrorResponse,
+        ),
+        409: jsonResponse(
+          "Approval already resolved (takes precedence on retries), workflow run no longer running, or workflow deployment unavailable",
+          ErrorResponse,
+        ),
+        503: jsonResponse(
+          "Durable workflow dispatch unavailable",
+          ErrorResponse,
+        ),
       },
     }),
     validator("json", RejectAction),
@@ -681,60 +621,36 @@ function respond(c: Context<TenantEnv>, result: ResolveApprovalOutcome) {
     case "resolved":
       return c.json(formatApproval(result.approval), 200);
     case "not_found":
-      return c.json(
-        { error: { code: "not_found", message: "Approval not found" } },
-        404,
-      );
+      return errorResponse(c, "not_found", "Approval not found");
     case "forbidden":
-      return c.json(
-        {
-          error: {
-            code: "forbidden",
-            message: "You do not have permission to resolve this approval",
-          },
-        },
-        403,
+      return errorResponse(
+        c,
+        "forbidden",
+        "You do not have permission to resolve this approval",
       );
     case "already_resolved":
-      return c.json(
-        {
-          error: {
-            code: "already_resolved",
-            message: "Approval has already been resolved",
-          },
-        },
-        409,
+      return errorResponse(
+        c,
+        "already_resolved",
+        "Approval has already been resolved",
       );
     case "deployment_unavailable":
-      return c.json(
-        {
-          error: {
-            code: "deployment_unreachable",
-            message: "Workflow deployment allocation is no longer active",
-          },
-        },
-        409,
+      return errorResponse(
+        c,
+        "deployment_unreachable",
+        "Workflow deployment allocation is no longer active",
       );
     case "run_not_running":
-      return c.json(
-        {
-          error: {
-            code: "workflow_run_not_running",
-            message: "Workflow run is no longer running",
-          },
-        },
-        409,
+      return errorResponse(
+        c,
+        "workflow_run_not_running",
+        "Workflow run is no longer running",
       );
     case "dispatch_unavailable":
-      return c.json(
-        {
-          error: {
-            code: "workflow_dispatch_unavailable",
-            message:
-              "Durable workflow dispatch is unavailable for this provisioned deployment",
-          },
-        },
-        503,
+      return errorResponse(
+        c,
+        "workflow_dispatch_unavailable",
+        "Durable workflow dispatch is unavailable for this provisioned deployment",
       );
   }
 }

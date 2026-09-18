@@ -89,6 +89,5 @@ export {
   createInMemoryScheduler,
   createInMemorySignalChannel,
   createInMemoryBlobSubstrate,
-  type ActionHandler,
   type RunLocalOptions,
 } from "./runlocal/index";

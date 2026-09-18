@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
-import { describeRoute, resolver, validator } from "hono-openapi";
+import { describeRoute, validator } from "hono-openapi";
 import { type } from "arktype";
 
 import { sha256 } from "@intx/crypto";
@@ -17,9 +17,10 @@ import {
 } from "@intx/hub-common";
 import { getLogger } from "@intx/log";
 import type { RepoAction } from "@intx/types/sidecar";
-import { base64urlEncode, ErrorResponse, paginatedSchema } from "@intx/types";
+import { base64urlEncode, paginatedSchema, ErrorResponse } from "@intx/types";
 
-import type { AppEnv, TenantEnv } from "../context";
+import { unauthorizedResponse, type AppEnv, type TenantEnv } from "../context";
+import { errorResponse } from "../error-response";
 import { ts } from "../format";
 import type { RequireGrant } from "../middleware/grant";
 import {
@@ -29,6 +30,7 @@ import {
   paginatedResponse,
   parsePageParams,
 } from "../pagination";
+import { jsonResponse } from "../openapi";
 
 const log = getLogger(["hub", "git-token"]);
 
@@ -336,14 +338,10 @@ export function createTenantGitTokenRoutes({
         'Lists service tokens (`kind: "svc"`) bound to this tenant. Secrets are never returned; the plaintext is shown only at mint time.',
       parameters: [...pageParameters],
       responses: {
-        200: {
-          description: "List of git tokens",
-          content: {
-            "application/json": {
-              schema: resolver(paginatedSchema(GitTokenSummary)),
-            },
-          },
-        },
+        200: jsonResponse(
+          "List of git tokens",
+          paginatedSchema(GitTokenSummary),
+        ),
       },
     }),
     async (c) => {
@@ -386,18 +384,8 @@ export function createTenantGitTokenRoutes({
       description:
         'Mints a service token (`kind: "svc"`) bound to the requesting tenant. The plaintext secret is returned exactly once in the response and is never persisted in plaintext.',
       responses: {
-        201: {
-          description: "Token minted",
-          content: {
-            "application/json": { schema: resolver(GitTokenMintResponse) },
-          },
-        },
-        400: {
-          description: "Validation error",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        201: jsonResponse("Token minted", GitTokenMintResponse),
+        400: jsonResponse("Validation error", ErrorResponse),
       },
     }),
     validator("json", CreateTenantGitToken),
@@ -406,12 +394,7 @@ export function createTenantGitTokenRoutes({
       const principalCtx = c.get("principal");
       const user = c.get("user");
       if (!user) {
-        return c.json(
-          {
-            error: { code: "unauthorized", message: "Authentication required" },
-          },
-          401,
-        );
+        return unauthorizedResponse(c);
       }
       const body = c.req.valid("json");
 
@@ -468,12 +451,7 @@ export function createTenantGitTokenRoutes({
         "Soft-revokes a tenant-bound git token by setting `revokedAt`. The row is retained for audit.",
       responses: {
         204: { description: "Token revoked" },
-        404: {
-          description: "Token not found",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        404: jsonResponse("Token not found", ErrorResponse),
       },
     }),
     async (c) => {
@@ -491,10 +469,7 @@ export function createTenantGitTokenRoutes({
           tenantId: tenantCtx.id,
           tokenId,
         });
-        return c.json(
-          { error: { code: "not_found", message: "Token not found" } },
-          404,
-        );
+        return errorResponse(c, "not_found", "Token not found");
       }
 
       if (existing.revokedAt === null) {
@@ -534,31 +509,17 @@ export function createMeGitTokenRoutes({
         'Lists the authenticated user\'s personal access tokens (`kind: "pat"`). Secrets are never returned; the plaintext is shown only at mint time.',
       parameters: [...pageParameters],
       responses: {
-        200: {
-          description: "List of git tokens",
-          content: {
-            "application/json": {
-              schema: resolver(paginatedSchema(GitTokenSummary)),
-            },
-          },
-        },
-        401: {
-          description: "Not authenticated",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        200: jsonResponse(
+          "List of git tokens",
+          paginatedSchema(GitTokenSummary),
+        ),
+        401: jsonResponse("Not authenticated", ErrorResponse),
       },
     }),
     async (c) => {
       const user = c.get("user");
       if (!user) {
-        return c.json(
-          {
-            error: { code: "unauthorized", message: "Authentication required" },
-          },
-          401,
-        );
+        return unauthorizedResponse(c);
       }
       const { limit, cursor } = parsePageParams({
         cursor: c.req.query("cursor"),
@@ -600,36 +561,16 @@ export function createMeGitTokenRoutes({
       description:
         'Mints a personal access token (`kind: "pat"`) for the authenticated user. The plaintext secret is returned exactly once in the response. An optional `tenantId` restricts the token to a single tenant.',
       responses: {
-        201: {
-          description: "Token minted",
-          content: {
-            "application/json": { schema: resolver(GitTokenMintResponse) },
-          },
-        },
-        400: {
-          description: "Validation error",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
-        401: {
-          description: "Not authenticated",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        201: jsonResponse("Token minted", GitTokenMintResponse),
+        400: jsonResponse("Validation error", ErrorResponse),
+        401: jsonResponse("Not authenticated", ErrorResponse),
       },
     }),
     validator("json", CreateMeGitToken),
     async (c) => {
       const user = c.get("user");
       if (!user) {
-        return c.json(
-          {
-            error: { code: "unauthorized", message: "Authentication required" },
-          },
-          401,
-        );
+        return unauthorizedResponse(c);
       }
       const body = c.req.valid("json");
 
@@ -677,29 +618,17 @@ export function createMeGitTokenRoutes({
         "Soft-revokes a personal access token by setting `revokedAt`. Only the owning user may revoke their own tokens.",
       responses: {
         204: { description: "Token revoked" },
-        401: {
-          description: "Not authenticated",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
-        404: {
-          description: "Token not found or not owned by the authenticated user",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        401: jsonResponse("Not authenticated", ErrorResponse),
+        404: jsonResponse(
+          "Token not found or not owned by the authenticated user",
+          ErrorResponse,
+        ),
       },
     }),
     async (c) => {
       const user = c.get("user");
       if (!user) {
-        return c.json(
-          {
-            error: { code: "unauthorized", message: "Authentication required" },
-          },
-          401,
-        );
+        return unauthorizedResponse(c);
       }
       const tokenId = c.req.param("tokenId");
 
@@ -720,10 +649,7 @@ export function createMeGitTokenRoutes({
             tokenId,
           },
         );
-        return c.json(
-          { error: { code: "not_found", message: "Token not found" } },
-          404,
-        );
+        return errorResponse(c, "not_found", "Token not found");
       }
 
       if (existing.revokedAt === null) {

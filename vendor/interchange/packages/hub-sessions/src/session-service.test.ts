@@ -16,7 +16,7 @@ import type { ToolPackageManifest } from "@intx/types/tool-packages";
 import { sessionAsset as sessionAssetTable } from "@intx/db/schema";
 import type { DB } from "@intx/db";
 import { generateId } from "@intx/hub-common";
-import { deriveRunAddress } from "@intx/workflow-deploy";
+import { createApprovalSet, deriveRunAddress } from "@intx/workflow-deploy";
 import { createNoopCredentialCipher } from "@intx/crypto";
 import type { AgentRepoStore, DeployContent } from "./agent-repo";
 import type { AssetService } from "./asset-service";
@@ -30,6 +30,28 @@ import type {
 import { createSidecarEmitter } from "./ws/sidecar-events";
 
 type Call = { method: string; args: unknown[] };
+
+/**
+ * A grant-walk snapshot whose records match a projection's top-level steps.
+ *
+ * The capability walk emits one record per top-level step and folds every
+ * nested body's grants into the record of the step that carries the body, so a
+ * probe answer whose snapshot omits a top-level step describes a deployment
+ * that would run steps nobody approved anything for. The probe gate refuses
+ * that, which is why these fixtures cannot hand it an empty snapshot. They are
+ * about the deploy hand-off rather than about grant content, so the records
+ * carry the step ids the gate must account for and no grants.
+ */
+function snapshotForProjection(projection: WorkflowProjectionDefinition) {
+  return {
+    perStep: projection.stepOrder.map((stepId) => ({
+      stepId,
+      grants: [] as string[],
+      grantEffects: {},
+    })),
+    grantRequirements: [],
+  };
+}
 
 type TestSidecarRouter = SidecarRouter & {
   sendAgentDeploy(
@@ -88,6 +110,21 @@ function createMockRouter(): TestSidecarRouter & {
       });
       return mock.routeMailResult;
     }) as SidecarRouter["sendRunGrants"],
+    noteSenderDeployStarted: ((address: string): void => {
+      calls.push({
+        method: "noteSenderDeployStarted",
+        args: [address],
+      });
+    }) as SidecarRouter["noteSenderDeployStarted"],
+    noteSenderDeploySettled: ((
+      address: string,
+      outcome: Parameters<SidecarRouter["noteSenderDeploySettled"]>[1],
+    ): void => {
+      calls.push({
+        method: "noteSenderDeploySettled",
+        args: [address, outcome],
+      });
+    }) as SidecarRouter["noteSenderDeploySettled"],
     sendAgentDeploy: ((
       agentAddress: string,
       config: HarnessConfig,
@@ -1212,10 +1249,10 @@ describe("deployCodeSourcedWorkflow", () => {
       probeResult: {
         projection,
         grants,
-        grantWalkSnapshot: { perStep: [], grantRequirements: [] },
+        grantWalkSnapshot: snapshotForProjection(projection),
         wireHash,
       },
-      approvals: new Set(grants),
+      approvals: createApprovalSet(grants),
       persist: async () => ({ definitionId: "def-composed" }),
     });
     const closure: ToolPackageManifest = {
@@ -1352,12 +1389,126 @@ describe("deployCodeSourcedWorkflow", () => {
         approved: { approval, projection, closure },
         config: CONFIG,
         allocationTarget: { allocationId: "alloc-test", generation: 1 },
+        reconciliation: {
+          leaseId: "lease-test",
+          signal: new AbortController().signal,
+        },
         credentialCipher: createNoopCredentialCipher(),
       })
       .catch((error: unknown) => error);
   }
 
   describe("deployPreparedCodeSourcedWorkflow", () => {
+    test("does not restore, deploy, or publish after cancellation while building a restore pack", async () => {
+      const controller = new AbortController();
+      const cancelled = new Error("Initialization cancelled");
+      const allocationRouter = createMockAllocationRouter();
+      const preparedRepoStore = createMockRepoStore();
+      preparedRepoStore.repoStore.resolveRef = async () => "a".repeat(40);
+      preparedRepoStore.repoStore.createPack = async () => {
+        controller.abort(cancelled);
+        return {
+          pack: new Uint8Array([1, 2, 3]),
+          ref: "refs/heads/main",
+          commitSha: "a".repeat(40),
+        };
+      };
+      const service = createSessionService({
+        sidecarRouter: createMockRouter(),
+        sidecarAllocationRouter: allocationRouter,
+        agentRepoStore: preparedRepoStore,
+        db: CAPTURING_DB,
+      });
+      const { approval, projection, closure } = await makeApproveOutput([
+        "inference.source:anthropic:mock-model",
+      ]);
+      capturedAnchorUpdate = undefined;
+
+      const error = await service
+        .deployPreparedCodeSourcedWorkflow({
+          tenantId: TENANT,
+          anchorRunId: ANCHOR_RUN_ID,
+          deploymentDomain: DEPLOYMENT_DOMAIN,
+          agentAddress: DEPLOY_ADDRESS,
+          source: SOURCE,
+          approved: { approval, projection, closure },
+          config: CONFIG,
+          allocationTarget: { allocationId: "alloc-test", generation: 1 },
+          reconciliation: {
+            leaseId: "lease-test",
+            signal: controller.signal,
+          },
+          credentialCipher: createNoopCredentialCipher(),
+        })
+        .catch((cause: unknown) => cause);
+
+      expect(error).toBe(cancelled);
+      expect(allocationRouter.calls).toEqual([]);
+      expect(capturedAnchorUpdate).toBeUndefined();
+    });
+
+    test("a cancelled deploy cannot publish its late key or settle a newer attempt", async () => {
+      const controller = new AbortController();
+      const cancelled = new Error("Initialization cancelled");
+      const allocationRouter = createMockAllocationRouter();
+      const sidecarRouter = createMockRouter();
+      allocationRouter.sendAgentDeployToAllocation = async (
+        _target,
+        _address,
+        _config,
+        _workflow,
+        signal,
+      ) => {
+        expect(signal).toBe(controller.signal);
+        controller.abort(cancelled);
+        sidecarRouter.noteSenderDeployStarted(DEPLOY_ADDRESS);
+        return { publicKey: "late-public-key" };
+      };
+      const preparedRepoStore = createMockRepoStore();
+      preparedRepoStore.repoStore.resolveRef = async () => null;
+      const service = createSessionService({
+        sidecarRouter,
+        sidecarAllocationRouter: allocationRouter,
+        agentRepoStore: preparedRepoStore,
+        db: CAPTURING_DB,
+      });
+      const { approval, projection, closure } = await makeApproveOutput([
+        "inference.source:anthropic:mock-model",
+      ]);
+      capturedAnchorUpdate = undefined;
+
+      const error = await service
+        .deployPreparedCodeSourcedWorkflow({
+          tenantId: TENANT,
+          anchorRunId: ANCHOR_RUN_ID,
+          deploymentDomain: DEPLOYMENT_DOMAIN,
+          agentAddress: DEPLOY_ADDRESS,
+          source: SOURCE,
+          approved: { approval, projection, closure },
+          config: CONFIG,
+          allocationTarget: { allocationId: "alloc-test", generation: 1 },
+          reconciliation: {
+            leaseId: "lease-test",
+            signal: controller.signal,
+          },
+          credentialCipher: createNoopCredentialCipher(),
+        })
+        .catch((cause: unknown) => cause);
+
+      expect(error).toBeInstanceOf(SessionLaunchError);
+      if (!(error instanceof SessionLaunchError)) {
+        throw new Error("expected SessionLaunchError");
+      }
+      expect(error.leakedAgent).toBe(true);
+      expect(error.cause).toBe(cancelled);
+      expect(capturedAnchorUpdate).toBeUndefined();
+      expect(sidecarRouter.calls.map((call) => call.method)).toEqual([
+        "noteSenderDeployStarted",
+        "noteSenderDeploySettled",
+        "noteSenderDeployStarted",
+      ]);
+    });
+
     for (const frameSent of [false, true]) {
       test(`preserves frameSent=${String(frameSent)} for allocation recovery`, async () => {
         const failure = Object.assign(new Error("deploy failed"), {
@@ -1448,6 +1599,360 @@ describe("deployCodeSourcedWorkflow", () => {
     expect(capturedAnchorUpdate).toEqual({
       publicKey: "ed25519-supervisor-pubkey",
     });
+  });
+
+  test("delivers no credential for a top-level step that cannot invoke inference", async () => {
+    // Every step carries a pinned source because the wire shape demands one,
+    // but only an agent step can issue a request through it. Delivering the
+    // placeholder's credential would decrypt a tenant secret for a step that
+    // provably never uses it, seal it to the sidecar, and re-deliver it on
+    // every reconnect.
+    //
+    // The two steps pin DIFFERENT credentials on purpose. Sharing one would
+    // make the exclusion unobservable and this test would pass on a tree that
+    // still over-delivers.
+    const { defineWorkflow, action, step } = await import(
+      "@intx/workflow/definition"
+    );
+    const { defineAgent } = await import("@intx/agent");
+    const { gateAndFreezeProbeResult } = await import("./workflow-probe-gate");
+
+    const definition = defineWorkflow({
+      id: "wf_mixed_credentials",
+      trigger: { type: "manual" },
+      steps: {
+        only: step({
+          agent: defineAgent({
+            id: "stub",
+            systemPrompt: "you stub",
+            tools: [],
+            capabilities: [],
+            inference: {
+              sources: [{ provider: "anthropic", model: "mock-model" }],
+            },
+          }),
+        }),
+        gather: action({ handler: "gather", after: ["only"] }),
+      },
+    });
+    const roundTripped: unknown = JSON.parse(
+      JSON.stringify(projectLiveToInert(definition)),
+    );
+    const projection = WorkflowProjectionDefinition(roundTripped);
+    if (projection instanceof type.errors) {
+      throw new Error(`projection invalid: ${projection.summary}`);
+    }
+    // Both sources are approved, so the deterministic step still clears the
+    // picker's gate and the deploy succeeds. What changes is whether its
+    // credential is delivered.
+    const grants = [
+      "inference.source:anthropic:mock-model",
+      "inference.source:openai:placeholder-model",
+    ];
+    const approval = await gateAndFreezeProbeResult({
+      assetId: "asset-mixed",
+      probeResult: {
+        projection,
+        grants,
+        grantWalkSnapshot: snapshotForProjection(projection),
+        wireHash: await computeWireDefinitionHash(projection),
+      },
+      approvals: createApprovalSet(grants),
+      persist: async () => ({ definitionId: "def-composed" }),
+    });
+    if (!approval.ok) throw new Error("expected approval");
+
+    const closure: ToolPackageManifest = {
+      schemaVersion: "1",
+      topLevel: [],
+      entries: [],
+    };
+
+    const AGENT_SOURCE = {
+      id: "src-agent",
+      provider: "anthropic",
+      baseURL: "https://api.example/anthropic",
+      credentialId: "secret-agent",
+      model: "mock-model",
+    };
+    const PLACEHOLDER_SOURCE = {
+      id: "src-placeholder",
+      provider: "openai",
+      baseURL: "https://api.example/openai",
+      credentialId: "secret-placeholder",
+      model: "placeholder-model",
+    };
+
+    // Counts how many distinct credentials the deploy asked the DB to resolve,
+    // which is exactly the size of the inference credential union: the
+    // resolution loop queries once per distinct id.
+    //
+    // The stub cannot see which id it was asked for, so it answers the first
+    // lookup and refuses every later one. A union that still carried the
+    // action step's placeholder would therefore fail the deploy outright
+    // rather than quietly resolving the same row twice, which would leave the
+    // delivered-material assertions below unable to tell the two trees apart.
+    let credentialLookups = 0;
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- test stub: only the definition guard, the credential/tenant/provider resolution, and the anchor writes are exercised
+    const COUNTING_DB = {
+      query: {
+        workflowDefinition: {
+          findFirst: () => Promise.resolve({ id: "def-composed" }),
+        },
+        credential: {
+          findFirst: () => {
+            credentialLookups += 1;
+            if (credentialLookups > 1) return Promise.resolve(undefined);
+            return Promise.resolve({
+              id: "secret-agent",
+              tenantId: TENANT,
+              principalId: null,
+              providerId: "prov-test",
+              secret: "secret-agent-plaintext",
+            });
+          },
+        },
+        tenant: { findFirst: () => Promise.resolve({ parentId: null }) },
+        provider: {
+          findFirst: () =>
+            Promise.resolve({
+              id: "prov-test",
+              name: "prov-test",
+              plugin: "anthropic",
+              apiBaseUrl: "https://api.example/anthropic",
+            }),
+        },
+      },
+      insert: () => ({ values: () => Promise.resolve() }),
+      update: () => ({
+        set: () => ({
+          where: () => ({
+            returning: () => Promise.resolve([{ id: ANCHOR_RUN_ID }]),
+          }),
+        }),
+      }),
+    } as unknown as DB["db"];
+
+    const mockRouter = createMockRouter();
+    const sentWorkflows: Parameters<TestSidecarRouter["sendAgentDeploy"]>[2][] =
+      [];
+    mockRouter.sendAgentDeploy = ((
+      _agentAddress: string,
+      _config: HarnessConfig,
+      workflow?: Parameters<TestSidecarRouter["sendAgentDeploy"]>[2],
+    ) => {
+      sentWorkflows.push(workflow);
+      return Promise.resolve({ publicKey: "ed25519-supervisor-pubkey" });
+    }) as TestSidecarRouter["sendAgentDeploy"];
+
+    const { deployCodeSourcedWorkflow } = await import("./session-service");
+    await deployCodeSourcedWorkflow({
+      sidecarAllocationRouter: createMockAllocationRouter(mockRouter),
+      allocationTarget: { allocationId: "alloc-test", generation: 1 },
+      agentAddress: DEPLOY_ADDRESS,
+      config: {
+        ...CONFIG,
+        sources: [AGENT_SOURCE, PLACEHOLDER_SOURCE],
+        defaultSource: PLACEHOLDER_SOURCE.id,
+      },
+      sources: { only: [AGENT_SOURCE], gather: [PLACEHOLDER_SOURCE] },
+      approved: { approval, projection, closure },
+      source: SOURCE,
+      db: COUNTING_DB,
+      tenantId: TENANT,
+      anchorRunId: ANCHOR_RUN_ID,
+      deploymentDomain: DEPLOYMENT_DOMAIN,
+      credentialCipher: createNoopCredentialCipher(),
+    });
+
+    // One lookup, not two: the action step's placeholder credential never
+    // entered the union. A second lookup would have been refused by the stub
+    // and failed the deploy before this line.
+    expect(credentialLookups).toBe(1);
+    const sent = sentWorkflows[0];
+    if (sent === undefined) throw new Error("missing workflow projection");
+    expect(sent.credentials?.materials).toHaveLength(1);
+    expect(sent.credentials?.materials?.[0]?.credentialId).toBe("secret-agent");
+    // The pin itself is untouched: every step still carries its source, which
+    // the wire shape requires.
+    expect(sent.sources?.["gather"]).toEqual([PLACEHOLDER_SOURCE]);
+  });
+
+  test("delivers no credential for an inline body step that cannot invoke inference", async () => {
+    // The body rail, which over-delivers on its own today: a lifted onTrigger
+    // body's non-agent step already takes the default placeholder, so its
+    // credential already reaches the sidecar for a step that never calls.
+    //
+    // Three steps pin here -- the onTrigger container, the body's agent, and
+    // the body's action -- across both rails. Only the agent is entitled to
+    // material.
+    const { defineWorkflow, action, step, onTrigger } = await import(
+      "@intx/workflow/definition"
+    );
+    const { defineAgent } = await import("@intx/agent");
+    const { gateAndFreezeProbeResult } = await import("./workflow-probe-gate");
+
+    const definition = defineWorkflow({
+      id: "wf_body_mixed_credentials",
+      trigger: { type: "mail", to: DEPLOY_ADDRESS },
+      steps: {
+        section: onTrigger({
+          on: { type: "mail", to: DEPLOY_ADDRESS },
+          body: defineWorkflow({
+            id: "authored-body",
+            trigger: { type: "manual" },
+            steps: {
+              work: step({
+                agent: defineAgent({
+                  id: "body-agent",
+                  systemPrompt: "body",
+                  tools: [],
+                  capabilities: [],
+                  inference: {
+                    sources: [{ provider: "anthropic", model: "mock-model" }],
+                  },
+                }),
+              }),
+              tidy: action({ handler: "tidy", after: ["work"] }),
+            },
+          }),
+        }),
+      },
+    });
+    const roundTripped: unknown = JSON.parse(
+      JSON.stringify(projectLiveToInert(definition)),
+    );
+    const projection = WorkflowProjectionDefinition(roundTripped);
+    if (projection instanceof type.errors) {
+      throw new Error(`projection invalid: ${projection.summary}`);
+    }
+    // The default is approved too, so the onTrigger container still clears the
+    // top-level picker at this commit. What changes is the delivery.
+    const grants = [
+      "inference.source:anthropic:mock-model",
+      "inference.source:openai:placeholder-model",
+    ];
+    const approval = await gateAndFreezeProbeResult({
+      assetId: "asset-body-mixed",
+      probeResult: {
+        projection,
+        grants,
+        grantWalkSnapshot: snapshotForProjection(projection),
+        wireHash: await computeWireDefinitionHash(projection),
+      },
+      approvals: createApprovalSet(grants),
+      persist: async () => ({ definitionId: "def-composed-body" }),
+    });
+    if (!approval.ok) throw new Error("expected approval");
+
+    const closure: ToolPackageManifest = {
+      schemaVersion: "1",
+      topLevel: [],
+      entries: [],
+    };
+    const AGENT_SOURCE = {
+      id: "src-agent",
+      provider: "anthropic",
+      baseURL: "https://api.example/anthropic",
+      credentialId: "secret-agent",
+      model: "mock-model",
+    };
+    const PLACEHOLDER_SOURCE = {
+      id: "src-placeholder",
+      provider: "openai",
+      baseURL: "https://api.example/openai",
+      credentialId: "secret-placeholder",
+      model: "placeholder-model",
+    };
+
+    // Answers the first lookup and refuses every later one, so a union still
+    // carrying a placeholder fails the deploy rather than resolving the same
+    // row twice.
+    let credentialLookups = 0;
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- test stub: only the definition guard, credential/tenant/provider resolution, and the anchor writes are exercised
+    const COUNTING_DB = {
+      query: {
+        workflowDefinition: {
+          findFirst: () => Promise.resolve({ id: "def-composed-body" }),
+        },
+        credential: {
+          findFirst: () => {
+            credentialLookups += 1;
+            if (credentialLookups > 1) return Promise.resolve(undefined);
+            return Promise.resolve({
+              id: "secret-agent",
+              tenantId: TENANT,
+              principalId: null,
+              providerId: "prov-test",
+              secret: "secret-agent-plaintext",
+            });
+          },
+        },
+        tenant: { findFirst: () => Promise.resolve({ parentId: null }) },
+        provider: {
+          findFirst: () =>
+            Promise.resolve({
+              id: "prov-test",
+              name: "prov-test",
+              plugin: "anthropic",
+              apiBaseUrl: "https://api.example/anthropic",
+            }),
+        },
+      },
+      insert: () => ({ values: () => Promise.resolve() }),
+      update: () => ({
+        set: () => ({
+          where: () => ({
+            returning: () => Promise.resolve([{ id: ANCHOR_RUN_ID }]),
+          }),
+        }),
+      }),
+    } as unknown as DB["db"];
+
+    const mockRouter = createMockRouter();
+    const sentWorkflows: Parameters<TestSidecarRouter["sendAgentDeploy"]>[2][] =
+      [];
+    mockRouter.sendAgentDeploy = ((
+      _agentAddress: string,
+      _config: HarnessConfig,
+      workflow?: Parameters<TestSidecarRouter["sendAgentDeploy"]>[2],
+    ) => {
+      sentWorkflows.push(workflow);
+      return Promise.resolve({ publicKey: "ed25519-supervisor-pubkey" });
+    }) as TestSidecarRouter["sendAgentDeploy"];
+
+    const { deployCodeSourcedWorkflow } = await import("./session-service");
+    await deployCodeSourcedWorkflow({
+      sidecarAllocationRouter: createMockAllocationRouter(mockRouter),
+      allocationTarget: { allocationId: "alloc-test", generation: 1 },
+      agentAddress: DEPLOY_ADDRESS,
+      config: {
+        ...CONFIG,
+        sources: [AGENT_SOURCE, PLACEHOLDER_SOURCE],
+        defaultSource: PLACEHOLDER_SOURCE.id,
+      },
+      sources: { section: [PLACEHOLDER_SOURCE] },
+      approved: { approval, projection, closure },
+      source: SOURCE,
+      db: COUNTING_DB,
+      tenantId: TENANT,
+      anchorRunId: ANCHOR_RUN_ID,
+      deploymentDomain: DEPLOYMENT_DOMAIN,
+      credentialCipher: createNoopCredentialCipher(),
+    });
+
+    // Only the body agent's credential. The onTrigger container's and the body
+    // action's placeholder never entered the union, on either rail.
+    expect(credentialLookups).toBe(1);
+    const sent = sentWorkflows[0];
+    if (sent === undefined) throw new Error("missing workflow projection");
+    expect(sent.credentials?.materials).toHaveLength(1);
+    expect(sent.credentials?.materials?.[0]?.credentialId).toBe("secret-agent");
+    // The body's pins are untouched: both steps still carry a source.
+    const body = sent.referencedDefinitions?.[0];
+    if (body === undefined) throw new Error("missing referenced body");
+    expect(body.sources["work"]).toEqual([AGENT_SOURCE]);
+    expect(body.sources["tidy"]).toEqual([PLACEHOLDER_SOURCE]);
   });
 
   test("refuses to deploy when the gate did not approve", async () => {
@@ -1581,10 +2086,10 @@ describe("deployCodeSourcedWorkflow", () => {
       probeResult: {
         projection,
         grants,
-        grantWalkSnapshot: { perStep: [], grantRequirements: [] },
+        grantWalkSnapshot: snapshotForProjection(projection),
         wireHash,
       },
-      approvals: new Set(grants),
+      approvals: createApprovalSet(grants),
       persist: async () => ({ definitionId: "def-composed-body" }),
     });
     const closure: ToolPackageManifest = {
@@ -1654,10 +2159,10 @@ describe("deployCodeSourcedWorkflow", () => {
       probeResult: {
         projection,
         grants,
-        grantWalkSnapshot: { perStep: [], grantRequirements: [] },
+        grantWalkSnapshot: snapshotForProjection(projection),
         wireHash,
       },
-      approvals: new Set(grants),
+      approvals: createApprovalSet(grants),
       persist: async () => ({ definitionId: "def-composed-loop-body" }),
     });
     const closure: ToolPackageManifest = {
@@ -1714,10 +2219,10 @@ describe("deployCodeSourcedWorkflow", () => {
       probeResult: {
         projection,
         grants,
-        grantWalkSnapshot: { perStep: [], grantRequirements: [] },
+        grantWalkSnapshot: snapshotForProjection(projection),
         wireHash,
       },
-      approvals: new Set(grants),
+      approvals: createApprovalSet(grants),
       persist: async () => ({ definitionId: "def-composed-empty-body" }),
     });
     const closure: ToolPackageManifest = {

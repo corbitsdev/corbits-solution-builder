@@ -22,11 +22,14 @@ import {
   type RepoStore,
   type WorkflowRunSupervisorPrincipal,
 } from "@intx/hub-sessions";
-import type {
-  AgentKeyStore,
-  DeployRouter,
-  DeployRouterResult,
-  SessionManager,
+import {
+  resolveInboundMailPolicy,
+  type AgentKeyStore,
+  type DeployRouter,
+  type DeployRouterResult,
+  type InboundMailPolicyRegistry,
+  type SenderKeyCache,
+  type SessionManager,
 } from "@intx/hub-agent";
 import {
   createWorkflowSupervisor,
@@ -49,7 +52,12 @@ import {
   type SuspensionRegistration,
   type WorkflowSupervisor,
 } from "@intx/workflow-host";
-import { hexEncode, type CredentialCipher, type SignalKind } from "@intx/types";
+import {
+  hexDecode,
+  hexEncode,
+  type CredentialCipher,
+  type SignalKind,
+} from "@intx/types";
 import {
   parseInferenceEvent,
   type ApprovalSnapshot,
@@ -65,7 +73,10 @@ import {
   type SourceRefPin,
 } from "@intx/types/sidecar";
 import { STEP_ID_PATTERN, projectLiveToInert } from "@intx/workflow";
-import { deriveWorkflowRunRepoId } from "@intx/workflow-deploy";
+import {
+  deriveWorkflowRunRepoId,
+  inertFlatNamespaceStepIds,
+} from "@intx/workflow-deploy";
 
 import {
   applyFrozenWorkflowClosure,
@@ -95,6 +106,9 @@ import {
 import { readRunGrants, runGrantsPath } from "./run-grants";
 
 const logger = getLogger(["interchange", "sidecar", "workflow-host-wiring"]);
+
+// A raw Ed25519 public key is 32 bytes.
+const ED25519_PUBLIC_KEY_BYTES = 32;
 
 /**
  * Project an run address into the substrate-safe id of its
@@ -357,10 +371,13 @@ function createStepStrategy(args: {
  *   - `runId` absent (deploy time): write every step's grants into its
  *     own `agent-state` repo at `STEP_GRANTS_PATH`, keyed by the same
  *     `deriveStepRepoId` the supervisor reads with, so read and write
- *     address the same repo. The write is on the spawn critical path: a
- *     failure rejects the deploy (the caller's `finally` unwinds the
- *     partial state) rather than spawning a child that would fail every
- *     authorize closed against an empty grant set.
+ *     address the same repo. `stepOrder` here is the deployment's whole
+ *     flat step-id namespace, not the bare top-level order, because the
+ *     supervisor assembles a snapshot entry for every loop-body step too.
+ *     The write is on the spawn critical path: a failure rejects the
+ *     deploy (the caller's `finally` unwinds the partial state) rather
+ *     than spawning a child that would fail every authorize closed
+ *     against an empty grant set.
  *
  *   - `runId` present (per-run delivery): write a single
  *     `runs/<runId>/grants.json` into the deployment's `workflow-run`
@@ -424,7 +441,11 @@ export type AssembleRunCredentialsSnapshotOpts = {
   anchorRunId: string;
   /** Run whose per-run grants file is read. */
   runId: string;
-  /** Step ids in `stepOrder`; the per-run grants apply uniformly across them. */
+  /**
+   * Every step id the snapshot must cover -- the deployment's flat step-id
+   * namespace, loop-body step ids included. The per-run grants apply
+   * uniformly across them.
+   */
   stepOrder: readonly string[];
   /** Per-step mail-address derivation. */
   deriveStepAddress: DeriveStepAddress;
@@ -682,10 +703,12 @@ export type CreateSidecarWorkflowSupervisorOpts = {
    */
   stepCount: number;
   /**
-   * Step ids in the deployed `WorkflowDefinition`'s `stepOrder`. The
+   * Every step id in the deployment's flat step-id namespace: its
+   * `stepOrder` plus the step ids of every `loop` body it carries. The
    * `onRunStart` grants sink walks these to assemble the per-run
-   * credentialsSnapshot from each step's `agent-state` repo, so the sink
-   * needs the ordered ids rather than the bare count.
+   * credentialsSnapshot, so the sink needs the ids rather than the bare
+   * count -- and it needs the loop-body ids too, because a loop iteration
+   * inherits the parent run's env and authorizes against this same snapshot.
    */
   stepOrder: readonly string[];
   /** Deployment's mail address. */
@@ -1010,6 +1033,13 @@ export interface SidecarDeployRouter extends DeployRouter {
 export function createSidecarDeployRouter(deps: {
   sessions: SessionManager;
   keyStore: AgentKeyStore;
+  /**
+   * Cache of hub-vouched sender public keys. The grants handler writes each
+   * co-delivered `senderIdentities` entry here before the run's grants land,
+   * so a durable grant is never missing the key its recipient needs to verify
+   * the sender's inbound mail.
+   */
+  senderKeyCache: SenderKeyCache;
   transport: HubTransport;
   repoStore: RepoStore;
   signingKeySeed: Uint8Array;
@@ -1151,6 +1181,21 @@ export function createSidecarDeployRouter(deps: {
    * hub-link until the wiring is plumbed.
    */
   multistepMailRouter?: MultistepMailRouter;
+  /**
+   * Per-recipient-address registry of resolved inbound-mail admission
+   * policies the sidecar hub-link's `mail.inbound` seam enforces. The
+   * multi-step branch resolves this deployment's authored
+   * `inboundMailPolicy` into the registry once `supervisor.spawn`
+   * succeeds -- beside the mail-router registration -- and removes the
+   * entry in the same teardown, so a reused address never inherits a
+   * stale policy.
+   *
+   * Optional so tests that exercise the multi-step branch without the
+   * hub-link seam can omit it; an absent registry means an inbound frame
+   * for the address resolves to the fully-closed default and is rejected
+   * until the wiring is plumbed.
+   */
+  inboundMailPolicyRegistry?: InboundMailPolicyRegistry;
   /**
    * Per-deployment-address signal handler registry the sidecar
    * hub-link's `signal.deliver` path consults. The multi-step branch
@@ -1424,6 +1469,7 @@ export function createSidecarDeployRouter(deps: {
     // Drop racing frames at the router boundary first, then unwind the
     // underlying registrations -- the same ordering the undeploy hook uses.
     deps.multistepMailRouter?.unregister(args.agentAddress);
+    deps.inboundMailPolicyRegistry?.unregister(args.agentAddress);
     deps.multistepSignalRouter?.unregister(args.agentAddress);
     deps.multistepDrainRouter?.unregister(args.agentAddress);
     deps.multistepGrantsRouter?.unregister(args.agentAddress);
@@ -1676,6 +1722,19 @@ export function createSidecarDeployRouter(deps: {
       multistepDeriveStepAddress,
     });
 
+    // Every step id the deployment's credentials snapshot must cover. This is
+    // NOT `stepOrder`: a `loop` body runs in-process as a child run inheriting
+    // the parent's env, so a body step authorizes against the SAME snapshot the
+    // top-level steps do, keyed by its own plain step id. A snapshot built from
+    // `stepOrder` alone carries no entry for it and the child's authorize
+    // throws on the body's first tool call. The address/repo strategy above
+    // stays on `stepOrder`, because the head/step collapse is a property of the
+    // deployment's own step count, not of what a body can run.
+    const credentialStepIds = inertFlatNamespaceStepIds({
+      definition: spec.definition,
+      context: "sidecar deploy router credentials snapshot: ",
+    });
+
     // Unwind every piece of spawn state if any step in this block throws,
     // so a failed spawn leaks no freshly-spawned workflow-process child,
     // `activeSupervisors` entry, transport registration, or multistep
@@ -1767,7 +1826,7 @@ export function createSidecarDeployRouter(deps: {
         workflowRunRef: "refs/heads/main",
         runId,
         stepCount: spec.definition.stepOrder.length,
-        stepOrder: spec.definition.stepOrder,
+        stepOrder: credentialStepIds,
         deploymentMailAddress: spec.agentAddress,
         ...(credentialDelivery !== undefined ? { credentialDelivery } : {}),
         deriveStepAddress: stepStrategy.deriveStepAddress,
@@ -1860,14 +1919,13 @@ export function createSidecarDeployRouter(deps: {
         hubKeyRecorded = true;
       }
 
-      const stepOrder = [...spec.definition.stepOrder];
       // Warm-keep is the single-step launched-agent deploy: the sole step
       // IS the long-lived agent, so the child warm-keeps it across
       // messages. A multi-step deploy keeps instantiate-send-teardown per
       // step. The signal is carried explicitly down through the spawn env.
       const warmKeep = spec.definition.stepOrder.length === 1;
       const spawnOpts: SpawnOpts = {
-        stepOrder,
+        stepOrder: [...credentialStepIds],
         definitionHash,
         warmKeep,
         onInferenceEvent: (event) => {
@@ -1919,6 +1977,14 @@ export function createSidecarDeployRouter(deps: {
       deps.multistepMailRouter?.register(spec.agentAddress, (message) =>
         wired.routeInbound(message),
       );
+      // Resolve this deployment's authored inbound-mail policy into a total
+      // decision map ONCE and store it beside the mail-router registration, so
+      // the hub-link seam has the recipient's policy before any inbound frame
+      // for this address can route.
+      deps.inboundMailPolicyRegistry?.register(
+        spec.agentAddress,
+        resolveInboundMailPolicy(spec.definition.inboundMailPolicy),
+      );
       // Register the signal-delivery handler so a hub `signal.deliver` frame
       // dispatches through the supervisor's `deliverSignal`.
       deps.multistepSignalRouter?.register(spec.agentAddress, async (args) => {
@@ -1941,6 +2007,31 @@ export function createSidecarDeployRouter(deps: {
       // machinery still takes them.
       deps.multistepGrantsRouter?.register(spec.agentAddress, async (args) => {
         try {
+          // Cache the co-delivered sender keys BEFORE the grants file lands, so
+          // "grant durable" implies "key durable": a cache-write fault falls
+          // into the catch below and poisons the run rather than starting it
+          // with a grant whose sender the recipient cannot verify. A malformed
+          // key is a hub-side defect that is keyless from here, so skip it and
+          // cache the valid ones (no weaker than the hub having omitted it)
+          // rather than wedge the run on every replay -- but log it at ERROR,
+          // naming the address and reason, so the hub bug surfaces loudly
+          // instead of being silently dropped.
+          for (const identity of args.senderIdentities ?? []) {
+            let publicKey: Uint8Array;
+            try {
+              publicKey = hexDecode(identity.publicKey);
+            } catch (cause) {
+              const message =
+                cause instanceof Error ? cause.message : String(cause);
+              logger.error`Skipping unparseable sender key for ${identity.address} on run ${args.runId}: ${message}`;
+              continue;
+            }
+            if (publicKey.length !== ED25519_PUBLIC_KEY_BYTES) {
+              logger.error`Skipping wrong-length sender key for ${identity.address} on run ${args.runId}: got ${String(publicKey.length)} bytes`;
+              continue;
+            }
+            await deps.senderKeyCache.put(identity.address, publicKey);
+          }
           await writeStepGrants({
             repoStore: deps.repoStore,
             anchorRunId: runId,
@@ -1950,9 +2041,9 @@ export function createSidecarDeployRouter(deps: {
             runId: args.runId,
           });
         } catch (cause) {
-          // The per-run grants file did not land. Poison the runId so the
-          // grants barrier fails the run instead of starting it under the
-          // deploy-time grant set, then re-throw so the hub-link logs the
+          // A sender-key or per-run grants write did not land. Poison the runId
+          // so the grants barrier fails the run instead of starting it under
+          // the deploy-time grant set, then re-throw so the hub-link logs the
           // durable-write failure loudly.
           poisonedRunIds.add(args.runId);
           throw cause;
@@ -2070,6 +2161,7 @@ export function createSidecarDeployRouter(deps: {
         // the success path confirmed; ordering matches the `undeploy` hook.
         if (routersRegistered) {
           deps.multistepMailRouter?.unregister(spec.agentAddress);
+          deps.inboundMailPolicyRegistry?.unregister(spec.agentAddress);
           deps.multistepSignalRouter?.unregister(spec.agentAddress);
           deps.multistepDrainRouter?.unregister(spec.agentAddress);
           deps.multistepGrantsRouter?.unregister(spec.agentAddress);
@@ -2342,10 +2434,19 @@ export function createSidecarDeployRouter(deps: {
       // credentialsSnapshot. Write the operator-approved
       // `frame.config.grants` to the same repo the supervisor reads via
       // `deriveStepRepoId`, before the spawn core, so the read sees them.
+      //
+      // The write covers the deployment's whole flat step-id namespace, loop
+      // body steps included: the supervisor assembles a snapshot entry for each
+      // of them, and an entry read out of a repo that was never written carries
+      // an empty grant set, which denies the body every resource the deploy
+      // approved.
       await writeStepGrants({
         repoStore: deps.repoStore,
         anchorRunId: runId,
-        stepOrder: effectiveDefinition.stepOrder,
+        stepOrder: inertFlatNamespaceStepIds({
+          definition: effectiveDefinition,
+          context: "sidecar deploy router grants bridge: ",
+        }),
         deriveStepRepoId: stepStrategy.deriveStepRepoId,
         grants: frame.config.grants,
       });
@@ -2409,6 +2510,7 @@ export function createSidecarDeployRouter(deps: {
       // racing frames first, then unwind the underlying resource.
       const runId = deriveDeploymentId(frame.agentAddress);
       deps.multistepMailRouter?.unregister(frame.agentAddress);
+      deps.inboundMailPolicyRegistry?.unregister(frame.agentAddress);
       deps.multistepSignalRouter?.unregister(frame.agentAddress);
       deps.multistepDrainRouter?.unregister(frame.agentAddress);
       deps.multistepGrantsRouter?.unregister(frame.agentAddress);

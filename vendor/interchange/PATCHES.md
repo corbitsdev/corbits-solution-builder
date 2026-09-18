@@ -6,6 +6,26 @@ Vendored from `faremeter/interchange` `origin/main` at the revision in
 Every local change is listed here. Keep this file honest: an unlisted change is
 a change nobody can find when the vendor is refreshed.
 
+**2026-09-18 refresh (`e2fa7e81` → `79adc433`).** Three local patches dropped
+because upstream now provides the same fix natively:
+
+- `packages/hub-agent/package.json` — the stray `@intx/test-harness`
+  devDependency is gone from upstream's own `package.json`.
+- `packages/workflow-deploy/src/orchestrator.ts` — Brian Fox's
+  `pin-non-agent-top-level-steps-as-placeholders` landed: a non-agent leaf
+  step now pins `config.defaultSource` as an inert placeholder with no
+  approval check, superseding both this patch and the grant-set patch below.
+- `packages/hub-sessions/src/hub-session-lookups.ts` — upstream's own
+  INTR-548 fix landed (an unconditional `createIfAbsent` mint ahead of the
+  ownership guard), a different shape than ours but the same behavior. The
+  regression test `hub-session-lookups.terminal-guard.test.ts` is kept; it
+  exercises the real guard and still passes against upstream's version.
+
+The `workflow-allocation-service.ts` "deploy's default source is approved"
+patch is also dropped: it existed only to cover the gap the orchestrator fix
+above now closes at the pin itself, so the grant-set workaround is now dead
+weight.
+
 ## `packages/db/src/client.ts` — inject a database handle
 
 **Why.** Upstream's `createDB` opens its own postgres.js socket, which requires
@@ -25,19 +45,6 @@ change, and it makes the package testable without a live server. Worth a PR.
 `*.test.ts` files and nested `node_modules`, to keep the vendored tree small.
 No source behaviour depends on them.
 
-## `packages/hub-agent/package.json` — drop a devDependency that does not exist
-
-**Why.** At `e2fa7e81` the package declares `"@intx/test-harness": "workspace:*"`
-as a devDependency, and no package by that name exists in the tree — the
-workspace is called `@intx/harness`. `bun install` cannot resolve it, so the
-whole workspace fails to install.
-
-**What changed.** That one line is removed. It is a devDependency of a package
-whose tests we do not run; nothing at runtime references it.
-
-**Upstream.** Worth reporting: either the dependency should name `@intx/harness`
-or the package is missing from the published tree.
-
 ## `apps/sidecar` — vendored alongside the packages
 
 **Why.** Interchange ships no sidecar binary in a package; `apps/sidecar` is
@@ -46,47 +53,6 @@ hub spawns it through a local-process provisioner, so it is vendored at the
 same revision as the packages (`VENDORED_REVISION`), unmodified, minus build
 artefacts. It runs from source, which is why the provisioner's runtime is
 `apps/hub/bin/sidecar-runtime` (adds `--conditions intx-src`).
-
-## `packages/hub-sessions/src/workflow-allocation-service.ts` — the deploy's default source is approved
-
-**Why.** `pinInertStepSources` approval-gates every step, agent or not, and a
-non-agent step falls back to the deploy's `defaultSource`. The approval set is
-whatever the capability walk collected from agent declarations, so a workflow
-with no agent step — pure orchestration of gates, signals and child workflows,
-which is what a project lifecycle is — could never deploy: its default source
-was never "approved" by anyone. The deploy request names the default source
-explicitly and `resolveSourcesByOfferingIds` has just checked the deploying
-authority against it, so treating it as an operator approval is the honest
-reading.
-
-**What changed.** `prepareProvisionedDeployment` adds
-`inference.source:<provider>:<model>` for the default source to the approved
-grant set it pins steps with and freezes into the bundle.
-
-**Upstream-able.** Yes; it is an addition to the approval set with a stated
-rationale, and it touches no other path. Superseded in spirit by the
-placeholder pin below; kept until that lands so a refresh cannot undeploy
-orchestration-only workflows.
-
-## `packages/workflow-deploy/src/orchestrator.ts` — non-agent top-level steps pin as placeholders
-
-**Why.** The same gap as above, at the pin rather than the grant set. Nested
-onTrigger bodies already pin a non-agent step to the deploy default with no
-approval check (`buildReferencedWorkflowSourcePins`). Top-level leaves still
-went through `pickStepInferenceSource`, which requires an `inference.source:`
-grant agents never advertised. Brian Fox's unmerged branch
-`origin/pin-non-agent-top-level-steps-as-placeholders` (`2ee2af74`) gives the
-top-level pin the same rule.
-
-**What changed.** `buildInertProjectionStepSources` skips the picker for
-`!isAgent` leaves and pins `config.defaultSource` as an inert placeholder.
-Agent steps keep the resolver and the operator-approval gate. Fail closed when
-the config carries no default source. This is Brian's hunk only; the rest of
-the vendored tree is untouched.
-
-**Upstream-able.** Yes — it is his commit, waiting on `faremeter/interchange`
-main. Drop this patch (and the grant-set one above) when that lands and the
-vendored revision is refreshed.
 
 ## `apps/sidecar/bin/workflow-child`, `apps/sidecar/bin/workflow-probe-child` — no `intx-src` on the shebang
 
@@ -203,34 +169,6 @@ to the reducer, so what lands is what would have landed.
 **Upstream-able.** The retry is defensive and local; the two writers are the
 real question for upstream — which of the awaiter and the relay should own the
 record when both see the same delivery.
-
-## `packages/hub-sessions/src/hub-session-lookups.ts` — missing terminal-event run rows are minted, not misread as foreign
-
-**Why.** Upstream INTR-548: loop-iteration terminal events
-(`<anchor>__revise-N__M`) were ERROR-ignored as "does not belong to source
-deployment". The creation side is correct — the composite id is stamped at
-`step-scope.ts` `loopBodyRunId` — but no `workflow_run` row ever exists for
-these children: `onPark` fires only for reserved-channel suspends, never a
-plain author-named `awaitSignal` gate (pinned by `park-notify.test.ts`), so
-the correlation-register path that lazily mints internal rows never runs.
-The lookup guard (`ownedRun?.anchorRunId !== anchor.id`) then conflated a
-missing row (`undefined`) with a row anchored to another deployment, and
-returned before the graceful missing-row handling ten lines below.
-
-**What changed.** The guard is split: a missing row is `createIfAbsent`-minted
-as an internal run (`anchorRunId` of the deployment, the deployment's
-`definitionId`/`tenantId`, `principalId: null`, `running` — the same row the
-register path would have written) so the terminal flip below has somewhere to
-land; only a row that exists with a genuinely different `anchorRunId` keeps
-the loud ERROR ignore. The anchor lookup now also selects `tenantId` and
-`definitionId` to populate the minted row. Regression tests in
-`hub-session-lookups.terminal-guard.test.ts` drive the real
-`receiveWorkflowRunPack` with a scripted executor: missing → one mint insert
-plus the terminal flip; foreign → no insert, no flip.
-
-**Upstream-able.** Yes, as-is: the missing case keeps the register path's row
-shape, the foreign case is byte-for-byte the old behaviour, and the test file
-is written to land beside the guard.
 
 ## `packages/workflow-deploy/src/capability-walk.ts` — per-step grants for leaf steps inside loop bodies
 

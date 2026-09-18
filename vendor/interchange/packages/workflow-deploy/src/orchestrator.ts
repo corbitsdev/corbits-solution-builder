@@ -11,10 +11,13 @@
 // from the host-sourced step count alone.
 //
 // The source-pinning utilities (`pickStepInferenceSource`,
-// `buildInertProjectionStepSources`, `isSourceApproved`) resolve each step's
-// inference source against the operator-approved grant set, so an unapproved
+// `buildInertProjectionStepSources`, `buildInertBodyStepSources`,
+// `isSourceApproved`) resolve each step's inference source. An agent-bearing
+// step resolves against the operator-approved grant set, so an unapproved
 // source fails the deploy closed rather than slipping past the capability-walk
-// gate.
+// gate. A step that cannot invoke inference takes the deploy's default source
+// as an inert placeholder: the wire shape requires a source for every step,
+// but that step never issues a request through it.
 
 import type {
   AgentDefinition,
@@ -29,7 +32,7 @@ import { formatRunAddress } from "@intx/types";
 
 import { type ApprovalSet } from "./capability-approval";
 import {
-  inertLoopBody,
+  forEachInertLoopBodyStep,
   readInertStepInference,
   type InertBodyStepPreference,
 } from "./inert-ontrigger-bodies";
@@ -74,7 +77,7 @@ export function isSourceApproved(
   source: InferenceSource,
   operatorApprovals: ApprovalSet,
 ): boolean {
-  return operatorApprovals.has(
+  return operatorApprovals.grants.has(
     `inference.source:${source.provider}:${source.model}`,
   );
 }
@@ -142,10 +145,10 @@ export function pickStepInferenceSource(args: {
 
 /**
  * Walk a frozen inert definition's steps and pin each to a single inference
- * source, recursing into `loop` bodies. This owns the traversal -- the step
- * walk, the flat-map collision rule, and the loop-body recursion. The per-step
- * LEAF policy (which source a given step resolves to, and how a step that
- * declares no source is pinned) is supplied by the caller through
+ * source, recursing into `loop` bodies. This owns the flat-map collision rule;
+ * the traversal is the canonical step walk (see `forEachInertStep`). The
+ * per-step LEAF policy (which source a given step resolves to, and how a step
+ * that declares no source is pinned) is supplied by the caller through
  * `resolveLeafSource`, so the walk can be reused by callers that pin steps
  * under different rules.
  *
@@ -173,46 +176,95 @@ export function pinInertStepSources(args: {
   }) => InferenceSource;
 }): Record<string, InferenceSource[]> {
   const sources: Record<string, InferenceSource[]> = {};
-  const pin = (def: WorkflowProjectionDefinition): void => {
-    for (const stepId of def.stepOrder) {
-      const stepValue = def.steps[stepId];
-      const { isAgent, preference } = readInertStepInference(
-        stepValue,
-        args.context,
-        stepId,
-      );
-      const resolved = args.resolveLeafSource({ stepId, isAgent, preference });
-      const existing = sources[stepId]?.[0];
-      if (existing !== undefined) {
-        if (!sameInferenceSource(existing, resolved)) {
-          throw new WorkflowDefinitionInvalidError(
-            args.workflowId,
-            `step id ${stepId} resolves to two different inference sources across nested loop bodies; a loop-body step id that collides with another step must resolve to the same source`,
-          );
-        }
-      } else {
-        sources[stepId] = [resolved];
+  forEachInertStep(args, ({ stepId, isAgent, preference }) => {
+    const resolved = args.resolveLeafSource({ stepId, isAgent, preference });
+    const existing = sources[stepId]?.[0];
+    if (existing !== undefined) {
+      if (!sameInferenceSource(existing, resolved)) {
+        throw new WorkflowDefinitionInvalidError(
+          args.workflowId,
+          `step id ${stepId} resolves to two different inference sources across nested loop bodies; a loop-body step id that collides with another step must resolve to the same source`,
+        );
       }
-      const loopBody = inertLoopBody(stepValue);
-      if (loopBody !== null) pin(loopBody);
+      return;
     }
-  };
-  pin(args.definition);
+    sources[stepId] = [resolved];
+  });
   return sources;
 }
 
 /**
- * Pin every step of a frozen inert projection to a single inference
- * source, producing the `sources` map the source-ref deploy frame carries. The
- * hub holds no live definition, so each step's declared `(provider, model)`
- * preference is read off the inert projection's `modelSources`. Agent steps
- * resolve through `pickStepInferenceSource` and the operator-approval gate.
- * A non-agent primitive never invokes inference, so its pin is an inert
- * placeholder: the deploy's default source, with no approval check — the
- * body pin already treats nested non-agent steps this way. A step whose
- * preferred source the operator never approved (or that resolves to no
- * approved source at all) throws, failing the whole deploy closed before any
- * frame is sent.
+ * Walk a frozen inert definition's steps in `stepOrder`, recursing into `loop`
+ * bodies, and hand each leaf its `(isAgent, preference)` classification. Owns
+ * the classification so every consumer reads a step the same way.
+ *
+ * The traversal itself is `forEachInertLoopBodyStep` -- the canonical
+ * `walkStepTree` under the descent that stays inside ONE flat step-id
+ * namespace, which is what the pinned `sources` map is keyed by. An onTrigger
+ * section or childWorkflow body is lifted to its own definition with its own
+ * sources map, so that walk stops at the boundary. This wrapper adds only the
+ * per-step inference classification.
+ */
+function forEachInertStep(
+  args: { definition: WorkflowProjectionDefinition; context: string },
+  visit: (leaf: {
+    stepId: string;
+    isAgent: boolean;
+    preference: InertBodyStepPreference | null;
+  }) => void,
+): void {
+  forEachInertLoopBodyStep(args, ({ stepId, step }) => {
+    const { isAgent, preference } = readInertStepInference(
+      step,
+      args.context,
+      stepId,
+    );
+    visit({ stepId, isAgent, preference });
+  });
+}
+
+/**
+ * Collect the ids of the steps in a frozen inert definition that can invoke
+ * inference: an `agent` step or a `map` over one. Every other primitive --
+ * `action`, `gate`, `awaitSignal`, `sleep`, `escalation`, and the `loop`,
+ * `onTrigger` and `childWorkflow` containers -- is pinned a source to satisfy
+ * the wire requirement that every step carry one, and never issues a request
+ * through it.
+ *
+ * A container's own id is excluded while its contents are not: a `loop` body's
+ * steps are classified on their own visit into the same flat namespace, and an
+ * `onTrigger` or `childWorkflow` body is lifted to its own definition and
+ * classified there.
+ *
+ * Derived from the definition rather than from a pinned sources map, so a
+ * consumer deciding what a step is entitled to reads the hash-covered
+ * projection instead of trusting a map it was handed.
+ */
+export function collectAgentBearingStepIds(args: {
+  definition: WorkflowProjectionDefinition;
+  context: string;
+}): Set<string> {
+  const agentStepIds = new Set<string>();
+  forEachInertStep(args, ({ stepId, isAgent }) => {
+    if (isAgent) agentStepIds.add(stepId);
+  });
+  return agentStepIds;
+}
+
+/**
+ * Pin every step of a frozen inert projection to a single inference source,
+ * producing the `sources` map the source-ref deploy frame carries. The hub
+ * holds no live definition, so an agent-bearing step's declared
+ * `(provider, model)` preference is read off the inert projection's
+ * `modelSources` and resolved through the `pickStepInferenceSource` resolver
+ * and its operator-approval gate. A preference the operator never approved --
+ * or that resolves to no approved source at all -- throws, failing the whole
+ * deploy closed before any frame is sent.
+ *
+ * A step that cannot invoke inference takes the inert placeholder instead and
+ * is not approval-gated. Its pin exists because the wire shape requires a
+ * source for every step, not because it names a route the step will take, and
+ * the hub delivers no credential against it.
  *
  * The walk recurses into `loop` bodies via `pinInertStepSources`. onTrigger
  * bodies are NOT walked here -- they are lifted to `referencedDefinitions` with
@@ -228,38 +280,87 @@ export function buildInertProjectionStepSources(args: {
     definition: args.projection,
     workflowId: args.projection.id,
     context: "buildInertProjectionStepSources: ",
-    resolveLeafSource: ({ stepId, isAgent, preference }) => {
-      // A non-agent primitive (action, gate, awaitSignal, sleep, loop,
-      // escalation, onTrigger, childWorkflow) never invokes inference, so
-      // its pinned source is an inert placeholder: the deploy's default
-      // source, exactly as `buildReferencedWorkflowSourcePins` pins a
-      // non-agent BODY step. Routing it through `pickStepInferenceSource`
-      // gated it on an `inference.source:` approval the capability walk
-      // only ever emits for agent definitions, which made a definition
-      // with no agent step -- an all-action workflow -- undeployable
-      // under `approve-probed`. Agent steps keep the full resolver and
-      // the operator-approval gate.
-      //
-      // XXX - Temporary until faremeter/interchange lands
-      // origin/pin-non-agent-top-level-steps-as-placeholders (2ee2af74).
-      if (!isAgent) {
-        const placeholder = args.config.sources.find(
-          (source) => source.id === args.config.defaultSource,
-        );
-        if (placeholder !== undefined) return placeholder;
-        throw new WorkflowDefinitionInvalidError(
-          args.projection.id,
-          `non-agent step ${stepId} needs an inert placeholder source, but the deploy config carries no defaultSource entry to pin`,
-        );
-      }
-      return pickStepInferenceSource({
-        preferred: preference,
-        stepId,
-        workflowId: args.projection.id,
-        config: args.config,
-        operatorApprovals: args.operatorApprovals,
-      });
-    },
+    resolveLeafSource: ({ stepId, isAgent, preference }) =>
+      isAgent
+        ? pickStepInferenceSource({
+            preferred: preference,
+            stepId,
+            workflowId: args.projection.id,
+            config: args.config,
+            operatorApprovals: args.operatorApprovals,
+          })
+        : inertPlaceholderSource({
+            stepId,
+            workflowId: args.projection.id,
+            config: args.config,
+          }),
+  });
+}
+
+/**
+ * Resolve the inert placeholder source that a step which cannot invoke
+ * inference is pinned to: the deploy's default source. Such a step never
+ * issues a request, so the pin exists only to fill the per-step coverage slot
+ * the deploy frame requires, and carries no approval decision.
+ *
+ * The lookup runs per leaf rather than once per walk on purpose. A definition
+ * whose steps all resolve a source of their own must not fail merely because
+ * `defaultSource` dangles; only a step that actually needs the placeholder
+ * does.
+ */
+function inertPlaceholderSource(args: {
+  stepId: string;
+  workflowId: string;
+  config: HarnessConfig;
+}): InferenceSource {
+  const placeholder = args.config.sources.find(
+    (source) => source.id === args.config.defaultSource,
+  );
+  if (placeholder === undefined) {
+    throw new WorkflowDefinitionInvalidError(
+      args.workflowId,
+      `step ${args.stepId} needs an inert placeholder source, but defaultSource ${JSON.stringify(args.config.defaultSource)} names no entry in HarnessConfig.sources`,
+    );
+  }
+  return placeholder;
+}
+
+/**
+ * Pin every step of a lifted onTrigger body to a single inference source,
+ * producing the `sources` map the body's `referencedDefinitions` entry carries.
+ *
+ * An agent-bearing body step resolves through `pickStepInferenceSource` and its
+ * operator-approval gate. A body step that is not agent-bearing cannot invoke
+ * inference, so it takes the inert placeholder and no approval applies to it.
+ *
+ * The branch keys on whether the step is agent-bearing, never on whether it
+ * declared a preference: an agent that declares no `modelSources` also arrives
+ * without one, and must keep its gate.
+ */
+export function buildInertBodyStepSources(args: {
+  definition: WorkflowProjectionDefinition;
+  workflowId: string;
+  config: HarnessConfig;
+  operatorApprovals: ApprovalSet;
+}): Record<string, InferenceSource[]> {
+  return pinInertStepSources({
+    definition: args.definition,
+    workflowId: args.workflowId,
+    context: `buildInertBodyStepSources ${args.workflowId}: `,
+    resolveLeafSource: ({ stepId, isAgent, preference }) =>
+      isAgent
+        ? pickStepInferenceSource({
+            preferred: preference,
+            stepId,
+            workflowId: args.workflowId,
+            config: args.config,
+            operatorApprovals: args.operatorApprovals,
+          })
+        : inertPlaceholderSource({
+            stepId,
+            workflowId: args.workflowId,
+            config: args.config,
+          }),
   });
 }
 

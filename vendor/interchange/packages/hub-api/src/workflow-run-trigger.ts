@@ -23,7 +23,7 @@ import {
   workflowRun,
 } from "@intx/db/schema";
 import type { DB, PrincipalKeyStore } from "@intx/db";
-import { loadFrozenGrantSnapshot } from "@intx/db";
+import { loadFrozenGrantSnapshot, resolveFrameSenderKey } from "@intx/db";
 import type { GrantStore } from "@intx/types/authz";
 import {
   assembleSignedContent,
@@ -544,6 +544,25 @@ export function createWorkflowRunTrigger(deps: TriggerWorkflowRunDeps) {
     }
     stepGrants = reserved;
 
+    // Stamp the hub-verified principal address (fromAddr, the address the
+    // message is signed and addressed under) as the authenticated sender --
+    // never the message's own MIME From. Resolve its hub-held key so the
+    // recipient can verify the signature locally against the key the hub
+    // vouches for, and co-deliver it on the run's grants barrier below so the
+    // sender's key rides the same push as the grant. Best-effort: a resolution
+    // fault degrades to a null key (logged) rather than blocking the trigger.
+    // A null key is omitted from the co-delivery, so the recipient resolves the
+    // sender to `unknown`, which its admission policy rejects by default.
+    const authenticatedSenderPublicKey = await resolveFrameSenderKey(
+      db,
+      principalKeyStore,
+      fromAddr,
+    );
+    const senderIdentities =
+      authenticatedSenderPublicKey !== null
+        ? [{ address: fromAddr, publicKey: authenticatedSenderPublicKey }]
+        : undefined;
+
     // Send the run's grants BEFORE the trigger mail. Both frames route
     // through the same per-address channel, so same-websocket FIFO
     // ordering guarantees the grants land at the sidecar before the mail
@@ -555,6 +574,7 @@ export function createWorkflowRunTrigger(deps: TriggerWorkflowRunDeps) {
       address,
       runId,
       stepGrants,
+      senderIdentities,
     );
     if (!grantsDelivered) {
       return {
@@ -569,9 +589,6 @@ export function createWorkflowRunTrigger(deps: TriggerWorkflowRunDeps) {
       };
     }
 
-    // Stamp the hub-verified principal address (fromAddr, the address the
-    // message is signed and addressed under) as the authenticated sender --
-    // never the message's own MIME From.
     const delivered = sidecarRouter.routeMail(
       address,
       base64,

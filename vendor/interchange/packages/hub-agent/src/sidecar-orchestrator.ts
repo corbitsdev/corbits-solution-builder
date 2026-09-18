@@ -16,6 +16,7 @@ import type { HubTransport } from "@intx/mail-memory";
 import type { SignalKind } from "@intx/types";
 import type {
   ApprovalSnapshot,
+  CryptoProvider,
   InferenceEvent,
   KeyPair,
 } from "@intx/types/runtime";
@@ -37,6 +38,7 @@ import {
   type WorkflowProbeExecutor,
   type ReconnectScheduler,
 } from "./ws/hub-link";
+import type { ResolvedInboundMailPolicy } from "./ws/inbound-signature";
 
 const log = getLogger(["interchange", "hub-agent", "orchestrator"]);
 
@@ -100,6 +102,34 @@ export type SidecarOrchestratorConfig = {
   dataDir: string;
   transport: HubTransport;
   cryptoOps: SidecarCryptoOps;
+  /**
+   * Resolves a sender address to the crypto that verifies its inbound mail.
+   * The host builds this over the sidecar's sender-key cache and the
+   * orchestrator forwards it unchanged to `createHubLink`, where the inbound
+   * signature verify uses it.
+   */
+  resolveSenderCrypto: (address: string) => CryptoProvider | undefined;
+  /**
+   * Resolves a recipient deployment address to its total inbound-mail
+   * admission policy. The host builds this over the sidecar's per-address
+   * policy registry and the orchestrator forwards it unchanged to
+   * `createHubLink`, where the `mail.inbound` seam enforces it.
+   */
+  lookupInboundMailPolicy: (address: string) => ResolvedInboundMailPolicy;
+  /**
+   * Persists the hub-vouched public key for a sender address. The host builds
+   * it over the same sender-key cache as `resolveSenderCrypto` and the
+   * orchestrator forwards it unchanged to `createHubLink`, where an inbound
+   * `sender.key.refresh` frame drives it.
+   */
+  cacheSenderKey: (address: string, publicKey: string) => Promise<void>;
+  /**
+   * Durably removes a sender's cached key. The host builds it over the same
+   * sender-key cache as `cacheSenderKey` and the orchestrator forwards it
+   * unchanged to `createHubLink`, where an inbound `sender.key.evict` frame
+   * drives it.
+   */
+  evictSenderKey: (address: string) => Promise<void>;
   /**
    * Host-injected `DeployRouter` factory. The orchestrator calls it
    * once after `sessions` and `keyStore` are constructed; the
@@ -177,6 +207,14 @@ export type SidecarOrchestratorConfig = {
    */
   getWorkflowAddresses?: () => string[];
   /**
+   * Returns the rotatable (non-run) sender addresses this sidecar holds cached
+   * keys for. Forwarded to the hub link, which reports them on every
+   * (re)connect so the hub re-resolves and re-pushes each key. Production wires
+   * this to the sender-key cache's rotatable view; omitted, the link reports
+   * none.
+   */
+  getCachedSenderAddresses?: () => string[];
+  /**
    * Invoked with the workflow-substrate addresses the link just announced in
    * an authenticated reconnect. Forwarded to the hub link so the workflow-run
    * pack pusher can re-drive a push a disconnect cancelled -- gated on the
@@ -220,6 +258,10 @@ export function createSidecarOrchestrator(
     dataDir,
     transport,
     cryptoOps,
+    resolveSenderCrypto,
+    lookupInboundMailPolicy,
+    cacheSenderKey,
+    evictSenderKey,
     createDeployRouter,
     mailInboundRouter,
     signalInboundRouter,
@@ -230,6 +272,7 @@ export function createSidecarOrchestrator(
     applyWorkflowRunPack,
     workflowProbeExecutor,
     getWorkflowAddresses,
+    getCachedSenderAddresses,
     onWorkflowAddressesRoutable,
     onWorkflowAddressesUnroutable,
     pingIntervalMs,
@@ -310,6 +353,10 @@ export function createSidecarOrchestrator(
     transport,
     sessions,
     keyStore,
+    resolveSenderCrypto,
+    lookupInboundMailPolicy,
+    cacheSenderKey,
+    evictSenderKey,
     deployRouter,
     applyWorkflowRunPack,
     ...(mailInboundRouter !== undefined ? { mailInboundRouter } : {}),
@@ -322,6 +369,9 @@ export function createSidecarOrchestrator(
       : {}),
     ...(workflowProbeExecutor !== undefined ? { workflowProbeExecutor } : {}),
     ...(getWorkflowAddresses !== undefined ? { getWorkflowAddresses } : {}),
+    ...(getCachedSenderAddresses !== undefined
+      ? { getCachedSenderAddresses }
+      : {}),
     ...(onWorkflowAddressesRoutable !== undefined
       ? { onWorkflowAddressesRoutable }
       : {}),

@@ -24,6 +24,7 @@ export {
   step,
   stepTriggerBudget,
   validateRetryTriggerCombination,
+  type ActionHandler,
   type ActionOpts,
   type ActionPrimitive,
   type AwaitSignalOpts,
@@ -54,6 +55,22 @@ export {
   type StepOpts,
   type StepPrimitive,
 } from "./primitives";
+
+export {
+  executableStepIds,
+  nestedWorkflowBodies,
+  walkNestedWorkflowSteps,
+  walkStepTree,
+  walkWorkflowSteps,
+  EXECUTABLE_STEP_DESCENT,
+  LOOP_BODY_DESCENT,
+  type StepTree,
+  type StepWalkArgs,
+  type StepWalkDescent,
+  type StepWalkEntry,
+  type StepWalkPath,
+  type WorkflowStepWalkArgs,
+} from "./step-walk";
 
 export type {
   ManualTrigger,

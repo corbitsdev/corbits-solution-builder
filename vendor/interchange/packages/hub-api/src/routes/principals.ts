@@ -1,19 +1,20 @@
 import { eq, ne, and } from "drizzle-orm";
 import { Hono } from "hono";
-import { describeRoute, resolver, validator } from "hono-openapi";
+import { describeRoute, validator } from "hono-openapi";
 
 import { principal, principalRole, role, user } from "@intx/db/schema";
 import { createPrincipalStore, parsePrincipalRow } from "@intx/db";
 import type { DB, PrincipalKeyStore } from "@intx/db";
 import {
   PrincipalResponse,
+  ErrorResponse,
   UpdatePrincipal,
   InviteMember,
-  ErrorResponse,
   paginatedSchema,
 } from "@intx/types";
 
 import type { TenantEnv } from "../context";
+import { errorResponse } from "../error-response";
 import { ts } from "../format";
 import { generateId } from "@intx/hub-common";
 import { idResource } from "../middleware/grant";
@@ -26,6 +27,7 @@ import {
   paginatedResponse,
   pageParameters,
 } from "../pagination";
+import { jsonResponse } from "../openapi";
 
 type ResolvedIdentity = { displayName: string; email?: string };
 
@@ -130,14 +132,10 @@ export function createPrincipalRoutes({
         ...pageParameters,
       ],
       responses: {
-        200: {
-          description: "List of principals",
-          content: {
-            "application/json": {
-              schema: resolver(paginatedSchema(PrincipalResponse)),
-            },
-          },
-        },
+        200: jsonResponse(
+          "List of principals",
+          paginatedSchema(PrincipalResponse),
+        ),
       },
     }),
     async (c) => {
@@ -231,18 +229,8 @@ export function createPrincipalRoutes({
       description:
         "Returns principal details including kind, status, assigned roles, and effective grants.",
       responses: {
-        200: {
-          description: "Principal details",
-          content: {
-            "application/json": { schema: resolver(PrincipalResponse) },
-          },
-        },
-        404: {
-          description: "Principal not found",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        200: jsonResponse("Principal details", PrincipalResponse),
+        404: jsonResponse("Principal not found", ErrorResponse),
       },
     }),
     async (c) => {
@@ -257,10 +245,7 @@ export function createPrincipalRoutes({
       });
 
       if (!row) {
-        return c.json(
-          { error: { code: "not_found", message: "Principal not found" } },
-          404,
-        );
+        return errorResponse(c, "not_found", "Principal not found");
       }
 
       const roles = await loadRolesForPrincipal(db, principalId);
@@ -277,18 +262,8 @@ export function createPrincipalRoutes({
       summary: "Update principal status",
       description: "Activate, suspend, or deactivate a principal.",
       responses: {
-        200: {
-          description: "Principal updated",
-          content: {
-            "application/json": { schema: resolver(PrincipalResponse) },
-          },
-        },
-        403: {
-          description: "Insufficient grants",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        200: jsonResponse("Principal updated", PrincipalResponse),
+        403: jsonResponse("Insufficient grants", ErrorResponse),
       },
     }),
     validator("json", UpdatePrincipal),
@@ -309,10 +284,7 @@ export function createPrincipalRoutes({
         .returning();
 
       if (!updated) {
-        return c.json(
-          { error: { code: "not_found", message: "Principal not found" } },
-          404,
-        );
+        return errorResponse(c, "not_found", "Principal not found");
       }
 
       const roles = await loadRolesForPrincipal(db, principalId);
@@ -334,12 +306,7 @@ export function createPrincipalRoutes({
         204: {
           description: "Principal removed",
         },
-        403: {
-          description: "Insufficient grants",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        403: jsonResponse("Insufficient grants", ErrorResponse),
       },
     }),
     async (c) => {
@@ -357,10 +324,7 @@ export function createPrincipalRoutes({
         .returning();
 
       if (deleted.length === 0) {
-        return c.json(
-          { error: { code: "not_found", message: "Principal not found" } },
-          404,
-        );
+        return errorResponse(c, "not_found", "Principal not found");
       }
 
       return c.body(null, 204);
@@ -394,18 +358,8 @@ export function createInviteRoutes({
       description:
         "Invites a user by email. Creates a principal with invited status and optionally assigns a role.",
       responses: {
-        201: {
-          description: "Invitation sent",
-          content: {
-            "application/json": { schema: resolver(PrincipalResponse) },
-          },
-        },
-        400: {
-          description: "Validation error",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        201: jsonResponse("Invitation sent", PrincipalResponse),
+        400: jsonResponse("Validation error", ErrorResponse),
       },
     }),
     validator("json", InviteMember),
@@ -418,15 +372,7 @@ export function createInviteRoutes({
       });
 
       if (!invitedUser) {
-        return c.json(
-          {
-            error: {
-              code: "not_found",
-              message: "No user found with that email",
-            },
-          },
-          404,
-        );
+        return errorResponse(c, "not_found", "No user found with that email");
       }
 
       const existing = await db.query.principal.findFirst({
@@ -438,14 +384,10 @@ export function createInviteRoutes({
       });
 
       if (existing) {
-        return c.json(
-          {
-            error: {
-              code: "conflict",
-              message: "User is already a member of this tenant",
-            },
-          },
-          409,
+        return errorResponse(
+          c,
+          "conflict",
+          "User is already a member of this tenant",
         );
       }
 

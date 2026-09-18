@@ -8,8 +8,15 @@ import {
   generateKeyPair,
   verifySSHSignature,
 } from "@intx/crypto";
-import { createSidecarOrchestrator, type HubLink } from "@intx/hub-agent";
-import { hexEncode } from "@intx/types";
+import {
+  createSenderKeyCache,
+  createSenderCryptoResolver,
+  createInboundMailPolicyRegistry,
+  createInboundMailPolicyLookup,
+  createSidecarOrchestrator,
+  type HubLink,
+} from "@intx/hub-agent";
+import { hexDecode, hexEncode } from "@intx/types";
 import { createAgentRepoStore } from "@intx/hub-sessions";
 import { createTarballCache } from "@intx/tool-packaging";
 
@@ -49,6 +56,10 @@ import { createWorkflowClosureMaterializer } from "./workflow-closure-materializ
 import { MAX_INLINE_ASSET_PAYLOAD_BYTES } from "./source-asset-delivery";
 import { createWorkflowProbeExecutor } from "./workflow-probe-handler";
 import { loadOrMintSidecarKeypair } from "./signing-keypair";
+import {
+  removeFileAtomicDurable,
+  writeFileAtomicDurable,
+} from "./atomic-write";
 
 await setup();
 
@@ -196,6 +207,25 @@ if (readyTimeoutRaw !== undefined && readyTimeoutRaw.trim() !== "") {
   readyTimeoutMs = parsed;
 }
 
+// Hub-link reconnect backoff (ms). Resolved here at the boot edge -- the
+// single layer that owns operator config -- and forwarded to the
+// orchestrator's hub link. Absent or empty => the link's 3s
+// `DEFAULT_RECONNECT_DELAY_MS`. Production never sets this; the deploy-flow
+// test harness sets a short value so reconnect-survival tests that do not
+// assert the delay itself (they assert the reconnect's recovery semantics,
+// not the backoff duration) do not burn 3s of wall clock per dropped link.
+const reconnectDelayRaw = process.env["SIDECAR_RECONNECT_DELAY_MS"];
+let reconnectDelayMs: number | undefined;
+if (reconnectDelayRaw !== undefined && reconnectDelayRaw.trim() !== "") {
+  const parsed = Number.parseInt(reconnectDelayRaw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(
+      `SIDECAR_RECONNECT_DELAY_MS must be a positive integer (milliseconds), got ${reconnectDelayRaw}`,
+    );
+  }
+  reconnectDelayMs = parsed;
+}
+
 // Sweep any tmp staging directories left behind by a `put` or
 // `extractTarball` that crashed between staging and the final rename
 // on a previous boot. Running here, before the orchestrator starts
@@ -226,6 +256,37 @@ const agentRepoStore = createAgentRepoStore({
   dataDir,
   signingKey: sidecarSigningKey,
 });
+
+// Cache of the hub-vouched public keys of senders this sidecar's deployments
+// are authorized to receive mail from. The grants handler writes each key the
+// hub co-delivers on a `run.grants` frame; the recipient's inbound-mail verify
+// reads it back. The keyring is loaded here at boot so a restart keeps every
+// previously-cached key. The durable-write primitive is injected so the cache
+// write is atomic and fsynced -- at least as durable as the run-grants write it
+// gates -- while the cache itself stays in @intx/hub-agent.
+const senderKeyCache = await createSenderKeyCache({
+  dataDir,
+  writeFileDurable: (filePath, contents) =>
+    writeFileAtomicDurable(filePath, contents, { mode: 0o600 }),
+  removeFileDurable: (filePath) => removeFileAtomicDurable(filePath),
+});
+
+// The read side of the same cache: the inbound signature verify resolves a
+// sender address to the crypto that verifies its mail. Built here at the edge
+// so the hub link stays source-opaque -- it resolves address -> crypto without
+// holding the cache or knowing where the key came from.
+const resolveSenderCrypto = createSenderCryptoResolver(senderKeyCache);
+
+// Per-recipient-address registry of resolved inbound-mail admission policies.
+// The workflow-host wiring resolves each hydrated deployment's authored
+// `inboundMailPolicy` into this registry beside its mail-router registration
+// and removes it on teardown; the read side below hands the hub-link's
+// `mail.inbound` seam a total policy for every address. Built here at the edge
+// so the hub link stays policy-source-opaque, mirroring `resolveSenderCrypto`.
+const inboundMailPolicyRegistry = createInboundMailPolicyRegistry();
+const lookupInboundMailPolicy = createInboundMailPolicyLookup(
+  inboundMailPolicyRegistry,
+);
 
 // The deploy router records `(runId -> agentAddress)` here on
 // every inbound `agent.deploy`; the facade resolves the mapping when
@@ -423,6 +484,18 @@ const orchestrator = createSidecarOrchestrator({
     generateKeyPair,
     verifySSHSig: verifySSHSignature,
   },
+  resolveSenderCrypto,
+  lookupInboundMailPolicy,
+  // Write peer of `resolveSenderCrypto`: an inbound `sender.key.refresh` frame
+  // re-pushes a rotated sender key here. Decode the hex and persist through the
+  // same cache the read side serves from; `put` owns the 32-byte length check
+  // and `hexDecode` owns hex validity, so both faults surface to the link's
+  // handler rather than being masked here.
+  cacheSenderKey: (address, publicKey) =>
+    senderKeyCache.put(address, hexDecode(publicKey)),
+  // Evicting peer of `cacheSenderKey`: an inbound `sender.key.evict` frame
+  // durably removes a revoked sender's cached key through the same cache.
+  evictSenderKey: (address) => senderKeyCache.evict(address),
   mailInboundRouter: multistepMailRouter,
   signalInboundRouter: multistepSignalRouter,
   drainInboundRouter: multistepDrainRouter,
@@ -431,6 +504,9 @@ const orchestrator = createSidecarOrchestrator({
   credentialsInboundRouter: multistepCredentialsRouter,
   applyWorkflowRunPack: restoreWorkflowRunPack,
   workflowProbeExecutor,
+  // Test-only override of the hub-link reconnect backoff; unset in
+  // production, where the link applies its 3s default.
+  ...(reconnectDelayMs !== undefined ? { reconnectDelayMs } : {}),
   // The hub link calls this on every (re)connect to announce the workflow
   // deployments this sidecar hosts so the hub re-registers their routes.
   // `createDeployRouter` runs synchronously during construction (below), so
@@ -445,6 +521,13 @@ const orchestrator = createSidecarOrchestrator({
     }
     return sidecarDeployRouter.activeAddresses();
   },
+  // Report the sidecar's cached rotatable senders on every (re)connect so the
+  // hub re-resolves each current key and re-pushes it, catching a rotation that
+  // landed while the sidecar was disconnected. The cache owns the "only user
+  // senders rotate" filter (a run sender's key is the immutable
+  // workflow_run.public_key); the link stays source-opaque and reports whatever
+  // this returns.
+  getCachedSenderAddresses: () => senderKeyCache.rotatableAddresses(),
   // When the hub-link re-announces a deployment address in an authenticated
   // reconnect, re-drive any workflow-run pack the disconnect cancelled. The
   // link fires this AFTER sending the reconnect frame, so the hub routes the
@@ -505,6 +588,7 @@ const orchestrator = createSidecarOrchestrator({
     const router = createSidecarDeployRouter({
       sessions,
       keyStore,
+      senderKeyCache,
       transport,
       repoStore: wrappedRepoStore,
       signingKeySeed: sidecarSigningKey.privateKey,
@@ -518,6 +602,7 @@ const orchestrator = createSidecarOrchestrator({
         deploymentAddressRegistry.unregister(runId);
       },
       multistepMailRouter,
+      inboundMailPolicyRegistry,
       multistepSignalRouter,
       multistepDrainRouter,
       multistepGrantsRouter,

@@ -30,10 +30,43 @@
 // validated through an arktype. A step that claims to be an agent-bearing
 // primitive (`step`/`map`) but carries no well-formed `agent.modelSources` is a
 // malformed projection and throws, rather than silently pinning a fallback.
+//
+// Reading a nested body off an inert step is also the one part of the canonical
+// step walk the inert representation has to supply itself, so it lives here as
+// `inertNestedBodies` -- the counterpart of the live `nestedWorkflowBodies`.
+// It owns the descent for the consumers that walk a whole frozen projection,
+// so the malformed-container throws below apply on those paths.
+// `enumerateInertBodiesAtDepth` in this same module is NOT one of them: it
+// hand-rolls a depth-limited descent with its own probes, so a malformed
+// container reads as a leaf there rather than throwing. Nothing reaches it
+// with an unvalidated step today -- the wire narrow validates every top-level
+// step, descent validates each nested body, and the probe gate's totality walk
+// runs first -- so the divergence is latent, not exploitable. Whoever adds the
+// next container kind has to add it in both places.
+//
+// Both readers are EXHAUSTIVE OVER THE SAME KIND SET, and that is what the
+// reader's shape here buys. The live reader switches over the typed `Primitive`
+// union and ends in a `never` assignment; an inert step is `unknown` on the
+// wire, so no switch over it can be typed that way. Exhaustiveness over a kind
+// set is a property of a TABLE'S KEYS though, independent of how its values are
+// typed -- so this reader is a `Record<Primitive["kind"], ...>` whose arms still
+// take `unknown` and still probe with arktype. Keying it on the same union the
+// live `never` guards makes the two readers fail together: a body-bearing
+// primitive added to the live reader and forgotten here is a compile error
+// rather than a container the deploy-time totality check reads as a leaf.
 
 import { type } from "arktype";
-import { WorkflowProjectionDefinition } from "@intx/types/sidecar";
+import {
+  WorkflowProjectionDefinition,
+  WorkflowStep,
+} from "@intx/types/sidecar";
 import { inlineBodyRef } from "@intx/workflow";
+import {
+  LOOP_BODY_DESCENT,
+  walkStepTree,
+  type Primitive,
+  type StepWalkDescent,
+} from "@intx/workflow/definition";
 
 /**
  * A body step's declared preferred inference-source identity -- the `(provider,
@@ -92,12 +125,28 @@ const InlineOnTriggerStep = type({
   body: { inline: "unknown" },
 });
 
+// An onTrigger step whose body is a `{ ref }` to a separately-deployed asset.
+// Paired with `InlineOnTriggerStep` so a reader can tell that form -- nothing to
+// descend into -- apart from an onTrigger step carrying no recognizable body
+// slot at all, which is a malformed projection. `OnTriggerBody`'s ref arm types
+// the ref as a plain `string`, so this matches it exactly rather than narrowing.
+const RefOnTriggerStep = type({
+  kind: "'onTrigger'",
+  body: { ref: "string" },
+});
+
 // A childWorkflow step carrying an inline child definition. Mirrors
 // `InlineOnTriggerStep`: an already-ref child (`definition: { ref }`) is skipped,
 // but a frozen source-ref projection keeps its children inline.
 const InlineChildWorkflowStep = type({
   kind: "'childWorkflow'",
   definition: { inline: "unknown" },
+});
+
+// A childWorkflow step whose child is a `{ ref }`. Mirrors `RefOnTriggerStep`.
+const RefChildWorkflowStep = type({
+  kind: "'childWorkflow'",
+  definition: { ref: "string" },
 });
 
 // The agent surface the resolver reads. Undeclared keys pass through, so this
@@ -133,6 +182,24 @@ function firstPreference(
 const InertLoopStep = type({ kind: "'loop'", body: "unknown" });
 
 /**
+ * Validate one inline body value as a workflow projection. `where` names the
+ * reader and the body it was reached through, so a malformed frozen projection
+ * is traceable to the exact position that carried it.
+ */
+function validateInertBodyProjection(
+  inlineBody: unknown,
+  where: string,
+): WorkflowProjectionDefinition {
+  const validated = WorkflowProjectionDefinition(inlineBody);
+  if (validated instanceof type.errors) {
+    throw new Error(
+      `${where} is not a valid workflow projection: ${validated.summary}`,
+    );
+  }
+  return validated;
+}
+
+/**
  * If an inert projection step is a `loop`, return its body projection (a nested
  * inert workflow definition); otherwise null. A loop body runs in-process as a
  * child run sharing the parent's env, so its agent steps resolve their pinned
@@ -142,16 +209,189 @@ const InertLoopStep = type({ kind: "'loop'", body: "unknown" });
  */
 export function inertLoopBody(
   stepValue: unknown,
-): typeof WorkflowProjectionDefinition.infer | null {
+): WorkflowProjectionDefinition | null {
   const asLoop = InertLoopStep(stepValue);
   if (asLoop instanceof type.errors) return null;
-  const body = WorkflowProjectionDefinition(asLoop.body);
-  if (body instanceof type.errors) {
+  return validateInertBodyProjection(
+    asLoop.body,
+    "inertLoopBody: loop step body",
+  );
+}
+
+/**
+ * Read the nested inert body projections one step of a single primitive kind
+ * carries, filtered by `descent`. The step arrives as `unknown` -- the wire
+ * projection types its steps that way -- so each arm validates what it reads.
+ */
+type InertNestedBodyReader = (
+  stepValue: unknown,
+  descent: StepWalkDescent,
+) => readonly WorkflowProjectionDefinition[];
+
+/** A leaf primitive: no nested body to descend into under any descent. */
+const NO_NESTED_BODY: InertNestedBodyReader = () => [];
+
+/**
+ * The per-kind inert body readers, keyed by the LIVE `Primitive["kind"]` union
+ * -- the same union the live `nestedWorkflowBodies` switch guards with its
+ * `never` assignment. The keys are what make this reader exhaustive: a primitive
+ * kind added to that union leaves a missing property here and fails to compile,
+ * so the live reader and this one fail together rather than the inert half
+ * silently reading a new container as a leaf.
+ *
+ * Each arm separates the three non-defect outcomes a container has -- an inline
+ * body the descent wants, an inline body the descent excludes, and a `{ ref }`
+ * body whose asset is deployed and walked on its own -- from the one outcome
+ * that is a defect: a step that announces a container kind but carries no
+ * recognizable body slot. That is a malformed frozen projection and throws,
+ * because reading it as a leaf would silently shrink whatever surface the caller
+ * is walking.
+ *
+ * The `{ ref }` check lives inside its own kind's arm, mirroring the live
+ * switch's `"inline" in primitive.body`, so the two readers are structurally
+ * parallel rather than accidentally in agreement.
+ */
+const inertNestedBodyReaders: Record<Primitive["kind"], InertNestedBodyReader> =
+  {
+    loop: (stepValue, descent) => {
+      // A loop body is always inline -- `LoopPrimitive.body` has no `{ ref }`
+      // form -- so a loop step with no body projection is malformed, not a leaf.
+      const body = inertLoopBody(stepValue);
+      if (body === null) {
+        throw new Error(
+          "inertNestedBodies: loop step carries no body; a loop body is always inline",
+        );
+      }
+      return descent.loopBodies ? [body] : [];
+    },
+    onTrigger: (stepValue, descent) => {
+      const asInline = InlineOnTriggerStep(stepValue);
+      if (!(asInline instanceof type.errors)) {
+        return descent.inlineOnTriggerBodies
+          ? [
+              validateInertBodyProjection(
+                asInline.body.inline,
+                "inertNestedBodies: inline onTrigger body",
+              ),
+            ]
+          : [];
+      }
+      if (RefOnTriggerStep(stepValue) instanceof type.errors) {
+        throw new Error(
+          "inertNestedBodies: onTrigger step carries neither an inline body nor a { ref } body",
+        );
+      }
+      return [];
+    },
+    childWorkflow: (stepValue, descent) => {
+      const asInline = InlineChildWorkflowStep(stepValue);
+      if (!(asInline instanceof type.errors)) {
+        return descent.inlineChildWorkflowBodies
+          ? [
+              validateInertBodyProjection(
+                asInline.definition.inline,
+                "inertNestedBodies: inline childWorkflow body",
+              ),
+            ]
+          : [];
+      }
+      if (RefChildWorkflowStep(stepValue) instanceof type.errors) {
+        throw new Error(
+          "inertNestedBodies: childWorkflow step carries neither an inline definition nor a { ref } definition",
+        );
+      }
+      return [];
+    },
+    step: NO_NESTED_BODY,
+    map: NO_NESTED_BODY,
+    action: NO_NESTED_BODY,
+    gate: NO_NESTED_BODY,
+    escalation: NO_NESTED_BODY,
+    awaitSignal: NO_NESTED_BODY,
+    sleep: NO_NESTED_BODY,
+  };
+
+/**
+ * The nested inert body projections one frozen-projection step carries,
+ * filtered by `descent`. This is the inert analogue of the live
+ * `nestedWorkflowBodies`, and it exists so the inert representation states the
+ * descent rule in ONE place the way the live one does.
+ *
+ * The step's kind is validated against the closed wire enum before dispatch, so
+ * an unrecognized kind throws instead of reading as a leaf. Every production
+ * caller hands over a step that already passed that same enum through
+ * `WorkflowSteps`' narrow, so the throw marks a projection assembled outside the
+ * validated path rather than an input the wire admits.
+ *
+ * Indexing the `Primitive["kind"]`-keyed table with a wire-validated kind is
+ * also what ties the two hand-written enumerations of the primitive set
+ * together at compile time: a kind the wire admits but the live union lacks
+ * fails this dispatch.
+ */
+export function inertNestedBodies(
+  stepValue: unknown,
+  descent: StepWalkDescent,
+): readonly WorkflowProjectionDefinition[] {
+  const parsed = WorkflowStep(stepValue);
+  if (parsed instanceof type.errors) {
     throw new Error(
-      `inertLoopBody: loop step body is not a valid workflow projection: ${body.summary}`,
+      `inertNestedBodies: step is not a known workflow primitive: ${parsed.summary}`,
     );
   }
-  return body;
+  return inertNestedBodyReaders[parsed.kind](stepValue, descent);
+}
+
+/**
+ * Visit every step of a frozen inert projection in `stepOrder`, recursing into
+ * `loop` bodies. This is the walk that stays inside ONE FLAT STEP-ID NAMESPACE:
+ * a loop body runs in-process as a child run sharing the parent's env, so its
+ * steps resolve against the enclosing definition's per-step tables, while an
+ * onTrigger section or childWorkflow body is lifted to its own definition with
+ * tables of its own and the walk stops at that boundary.
+ *
+ * The traversal itself is the canonical `walkStepTree`. Only the per-rung body
+ * read is supplied here, because the inert projection types its steps as
+ * `unknown` and `inertLoopBody` is what validates one.
+ *
+ * `context` is the caller label the walk's throw is prefixed with, so a
+ * malformed projection is traceable to whoever walked it.
+ */
+export function forEachInertLoopBodyStep(
+  args: { definition: WorkflowProjectionDefinition; context: string },
+  visit: (entry: { stepId: string; step: unknown }) => void,
+): void {
+  walkStepTree<unknown, WorkflowProjectionDefinition>({
+    tree: args.definition,
+    context: args.context,
+    nestedTrees: (stepValue) => inertNestedBodies(stepValue, LOOP_BODY_DESCENT),
+    visit: ({ stepId, step }) => {
+      visit({ stepId, step });
+    },
+  });
+}
+
+/**
+ * Every step id in a frozen inert projection's FLAT STEP-ID NAMESPACE: its own
+ * `stepOrder` plus the step ids of every `loop` body it carries, transitively,
+ * deduplicated in first-reach order.
+ *
+ * This is the domain of every per-deployment table keyed by plain step id --
+ * the credentials snapshot above all. A loop iteration inherits the parent
+ * run's env, so a body step authorizes against the SAME snapshot the enclosing
+ * definition's steps do; a snapshot built from `stepOrder` alone therefore has
+ * no entry for it and the child's authorize throws on the body's first tool
+ * call. Deduplication is exact here: the ids share one namespace, so a repeated
+ * id IS the same id.
+ */
+export function inertFlatNamespaceStepIds(args: {
+  definition: WorkflowProjectionDefinition;
+  context: string;
+}): readonly string[] {
+  const ids = new Set<string>();
+  forEachInertLoopBodyStep(args, ({ stepId }) => {
+    ids.add(stepId);
+  });
+  return [...ids];
 }
 
 /**
@@ -214,12 +454,10 @@ function liftInertBody(
   kind: "onTrigger" | "childWorkflow",
 ): EnumeratedInertBody {
   const ref = inlineBodyRef(enclosingId, stepId);
-  const validatedBody = WorkflowProjectionDefinition(inlineBody);
-  if (validatedBody instanceof type.errors) {
-    throw new Error(
-      `enumerateInertBodies: inline ${kind} body at step ${stepId} is not a valid workflow projection: ${validatedBody.summary}`,
-    );
-  }
+  const validatedBody = validateInertBodyProjection(
+    inlineBody,
+    `enumerateInertBodies: inline ${kind} body at step ${stepId}`,
+  );
   const definition = { ...validatedBody, id: ref };
   return { ref, definition };
 }

@@ -14,6 +14,7 @@ import type {
   GrantRequirement,
   SidecarCapabilityPolicy,
 } from "@intx/types";
+import type { InboundMailPolicy } from "@intx/types/runtime";
 
 import { normalizeSingularShorthand } from "./shorthand";
 import {
@@ -60,6 +61,15 @@ export interface WorkflowDefinition {
    */
   credentialBindings?: readonly CredentialBinding[];
   sidecarPlacement?: SidecarCapabilityPolicy;
+  /**
+   * The author-declared inbound-mail admission policy. Present only when the
+   * workflow declares a mail trigger; a policy that can never take effect is
+   * rejected at definition time. Sparse: an absent outcome key is not defaulted
+   * here. Nothing in this package consumes it yet -- it is carried through the
+   * projection and content hash so a later resolution step can key delivery
+   * decisions on it.
+   */
+  inboundMailPolicy?: InboundMailPolicy;
 }
 
 export interface WorkflowConfig {
@@ -71,6 +81,7 @@ export interface WorkflowConfig {
   grantRequirements?: readonly GrantRequirement[];
   credentialBindings?: readonly CredentialBinding[];
   sidecarPlacement?: SidecarCapabilityPolicy;
+  inboundMailPolicy?: InboundMailPolicy;
 }
 
 export interface SingularWorkflowConfig<EnvReq extends BaseEnv> {
@@ -82,6 +93,7 @@ export interface SingularWorkflowConfig<EnvReq extends BaseEnv> {
   grantRequirements?: readonly GrantRequirement[];
   credentialBindings?: readonly CredentialBinding[];
   sidecarPlacement?: SidecarCapabilityPolicy;
+  inboundMailPolicy?: InboundMailPolicy;
 }
 
 /**
@@ -134,45 +146,12 @@ function normalize(config: WorkflowConfig): WorkflowDefinition {
   if (stepEntries.length === 0) {
     throw new Error("defineWorkflow requires at least one step");
   }
-  const seen = new Set<string>();
   const steps: Record<string, Primitive> = {};
   const stepOrder: string[] = [];
   for (const [stepId, primitive] of stepEntries) {
-    if (seen.has(stepId)) {
-      throw new Error(`duplicate step id ${stepId}`);
-    }
-    seen.add(stepId);
-    if (stepId === "") {
-      throw new Error("step ids cannot be empty");
-    }
-    // The workflow-deploy orchestrator derives per-step mail addresses
-    // of the form `<runId>-<stepId>@<deploymentDomain>` for
-    // multi-step deployments. Constraining `stepId` to
-    // `[a-zA-Z0-9_-]+` at definition time means the derived local-part
-    // never needs escaping and the address parser at the substrate
-    // boundary never sees a step-id-shaped local-part it cannot
-    // round-trip.
-    if (!STEP_ID_PATTERN.test(stepId)) {
-      throw new Error(
-        `step id ${JSON.stringify(stepId)} must match ${STEP_ID_PATTERN.source}`,
-      );
-    }
-    // `__` is the delimiter that joins a step id into the ids the runtime
-    // derives from it: an inline-body ref (`<workflowId>__<stepId>`, and under
-    // nesting `<parentRef>__<stepId>`), a loop iteration body run id
-    // (`<runId>__<loopId>__<index>`), and an onTrigger section body run id
-    // (`<sectionId>__<index>`, which is parsed back). A `__` inside a step id
-    // would make one of those ids ambiguous with a different chain -- and they
-    // key the durable store, so the collision is silent shared-state
-    // corruption. Reject it in EVERY step id here, at the boundary that owns
-    // the id grammar, so every ref/run-id segment stays atomic. A nested body
-    // is its own normalized definition, so this covers every nesting level.
-    if (stepId.includes("__")) {
-      throw new Error(
-        `step id ${JSON.stringify(stepId)} must not contain "__"; ` +
-          `it becomes a segment of a runtime id joined by "__"`,
-      );
-    }
+    // The one id rule `validateStepIds` cannot carry: it must read the
+    // author's embedded `id` BEFORE the record key is assigned over it, so it
+    // belongs here rather than in a pass that sees the assembled record.
     if (primitive.id !== "" && primitive.id !== stepId) {
       throw new Error(
         `step ${stepId} carries a conflicting embedded id ${primitive.id}; ` +
@@ -185,12 +164,47 @@ function normalize(config: WorkflowConfig): WorkflowDefinition {
     stepOrder.push(stepId);
   }
 
-  validateSteps(steps);
+  validateSteps(steps, true);
 
   // An onTrigger section's `on` is the first-class binding between a
   // trigger and the section it drives, so each section contributes its
   // trigger to the workflow's subscription set.
   const triggers = resolveTriggers(config, collectSectionTriggers(steps));
+
+  // `schedule` is a reserved trigger type with no implementation behind it:
+  // nothing in the system parses a cron expression or fires a tick. A workflow
+  // that declared one would hash, deploy, and never run -- the only signal is
+  // the absence of runs. Reject it at the authoring boundary so the author
+  // learns immediately. This runs after resolveTriggers so a schedule trigger
+  // contributed by an onTrigger section's `on` is caught too, not only a
+  // top-level `trigger`/`triggers`.
+  for (const trigger of triggers) {
+    if (trigger.type === "schedule") {
+      throw new Error(
+        `defineWorkflow ${config.id} declares a schedule trigger, which is ` +
+          `reserved but not implemented; no scheduler fires it, so the ` +
+          `workflow would deploy and never run`,
+      );
+    }
+  }
+
+  // An inbound-mail admission policy governs how mail delivered to this
+  // workflow is admitted, so it is meaningless without a mail trigger to
+  // deliver that mail. A policy on a workflow that no mail can ever reach is a
+  // silent authoring error -- the author believes they constrained admission,
+  // but the constraint can never take effect. Reject it here, at the authoring
+  // boundary, rather than let it ride through the projection as a dead field.
+  // The check runs after resolveTriggers so a mail trigger contributed by an
+  // onTrigger section's `on` counts, not only a top-level `trigger`/`triggers`.
+  if (config.inboundMailPolicy !== undefined) {
+    const hasMailTrigger = triggers.some((trigger) => trigger.type === "mail");
+    if (!hasMailTrigger) {
+      throw new Error(
+        `defineWorkflow ${config.id} declares an inboundMailPolicy but no mail ` +
+          `trigger; the policy can never take effect`,
+      );
+    }
+  }
 
   const definition: WorkflowDefinition = {
     id: config.id,
@@ -206,6 +220,9 @@ function normalize(config: WorkflowConfig): WorkflowDefinition {
       : {}),
     ...(config.sidecarPlacement !== undefined
       ? { sidecarPlacement: config.sidecarPlacement }
+      : {}),
+    ...(config.inboundMailPolicy !== undefined
+      ? { inboundMailPolicy: config.inboundMailPolicy }
       : {}),
   };
   return definition;
@@ -321,13 +338,38 @@ function applyDefaultInputStep(
 
 /**
  * Run every step-record validation pass in the order their dependencies
- * require. `validateChildWorkflowBody` re-enters this same suite on an
- * inline child body, so factoring the passes here keeps the top-level and
- * embedded-child validations identical -- a malformed child (dangling
- * `after`, cycle, forbidden loop body, nested section) fails at the parent's
- * authoring time exactly as it would at its own.
+ * require. `validateLoopBody`, `validateChildWorkflowBody` and
+ * `validateOnTriggerBody` re-enter this same suite on an embedded body, so
+ * factoring the passes here keeps the top-level and embedded-body validations
+ * identical -- a malformed body (ill-formed step id, dangling `after`, cycle,
+ * forbidden loop body, misplaced onFailure) fails at the parent's authoring
+ * time exactly as it would at its own. All three body kinds carry identical
+ * trust: each is a plain `WorkflowDefinition` field, structurally forgeable and
+ * swappable after normalization, so none of them may rest on having come from
+ * `defineWorkflow`.
+ *
+ * `isTopLevel` distinguishes the definition's own step record from a body a
+ * spawned run executes. The only pass that reads it is the onTrigger placement
+ * rule: the runtime lifts sections once, at the top level, so a section inside
+ * a spawned body is unreachable. Every recursion site passes `false`.
+ *
+ * `loopDepth` is the loop-body nesting level this record sits at; it is what
+ * `validateLoopBody` counts against `MAX_LOOP_NESTING_DEPTH`. It is threaded
+ * through rather than recomputed so the loop recursion runs exactly once per
+ * body and the count survives the re-entry. A `childWorkflow` or `onTrigger`
+ * body starts a fresh count: the ceiling exists to bound the recursive readers
+ * that descend loop-in-loop chains (`projectForHash`, `runLoop`'s frames), and
+ * neither of those descends through a child or section body.
  */
-function validateSteps(steps: Record<string, Primitive>): void {
+function validateSteps(
+  steps: Record<string, Primitive>,
+  isTopLevel: boolean,
+  loopDepth = 0,
+): void {
+  // Runs first so a record whose ids are not even well-formed is rejected on
+  // that ground, rather than on whatever a later pass happens to notice about
+  // the same step.
+  validateStepIds(steps);
   validateAfterRefs(steps);
   // Runs after validateAfterRefs so every after/then/else endpoint is
   // already known to name a real step; this pass only rejects cycles.
@@ -339,9 +381,73 @@ function validateSteps(steps: Record<string, Primitive>): void {
   // acyclic graph, and after validateAfterRefs so every onFailure handler is
   // known to exist and to `after`-depend on its unit.
   validateOnFailureStraddlers(steps);
-  validateLoopBody(steps);
-  validateOnTriggerBody(steps);
+  validateLoopBody(steps, loopDepth);
+  validateOnTriggerBody(steps, isTopLevel);
   validateChildWorkflowBody(steps);
+}
+
+/**
+ * Enforce the step-id grammar over one step record. Every rule here constrains
+ * the record's KEYS alone, so it reads identically at a workflow root and in a
+ * nested body -- and a nested body needs it just as much: a `loop` body, a
+ * `childWorkflow` inline body, and an `onTrigger` inline body are plain
+ * `WorkflowDefinition` fields the parent embeds, structurally forgeable and
+ * never proven to have come from `defineWorkflow`. Owning the grammar in one
+ * pass of the `validateSteps` suite is what makes every id-bearing record
+ * answer to it: the root through `normalize`, each body through the suite's
+ * re-entry, at every nesting level.
+ *
+ * `normalize` keeps the one id rule this pass cannot carry -- the comparison of
+ * a primitive's embedded `id` against its record key, which must happen before
+ * the key is assigned over it.
+ */
+function validateStepIds(steps: Record<string, Primitive>): void {
+  for (const [stepId, primitive] of Object.entries(steps)) {
+    // The record key is the id every id-derived table is built on -- the
+    // credentials snapshot, the deploy-time grants write, and the staged body
+    // ref -- while the runtime authorizes under the primitive's own `id`. At
+    // the root those cannot disagree, because `normalize` assigns the key over
+    // the embedded id before this pass runs. A nested body never passes
+    // through that assignment, so a hand-assembled one can key a step under
+    // one name and carry another, pointing the two halves at different steps.
+    if (primitive.id !== "" && primitive.id !== stepId) {
+      throw new Error(
+        `step ${stepId} carries a conflicting embedded id ${primitive.id}; ` +
+          `the record key is what every id-derived table is built on, so the ` +
+          `two must name the same step`,
+      );
+    }
+    if (stepId === "") {
+      throw new Error("step ids cannot be empty");
+    }
+    // The workflow-deploy orchestrator derives per-step mail addresses
+    // of the form `<runId>-<stepId>@<deploymentDomain>` for
+    // multi-step deployments. Constraining `stepId` to
+    // `[a-zA-Z0-9_-]+` at definition time means the derived local-part
+    // never needs escaping and the address parser at the substrate
+    // boundary never sees a step-id-shaped local-part it cannot
+    // round-trip.
+    if (!STEP_ID_PATTERN.test(stepId)) {
+      throw new Error(
+        `step id ${JSON.stringify(stepId)} must match ${STEP_ID_PATTERN.source}`,
+      );
+    }
+    // `__` is the delimiter that joins a step id into the ids the runtime
+    // derives from it: an inline-body ref (`<workflowId>__<stepId>`, and under
+    // nesting `<parentRef>__<stepId>`), a loop iteration body run id
+    // (`<runId>__<loopId>__<index>`), and an onTrigger section body run id
+    // (`<sectionId>__<index>`, which is parsed back). A `__` inside a step id
+    // would make one of those ids ambiguous with a different chain -- and they
+    // key the durable store, so the collision is silent shared-state
+    // corruption. A body step id feeds those same joins, which is why this pass
+    // has to reach a body rather than trust it to have normalized itself.
+    if (stepId.includes("__")) {
+      throw new Error(
+        `step id ${JSON.stringify(stepId)} must not contain "__"; ` +
+          `it becomes a segment of a runtime id joined by "__"`,
+      );
+    }
+  }
 }
 
 /**
@@ -644,14 +750,26 @@ const LOOP_BODY_FORBIDDEN = new Set<Primitive["kind"]>(["sleep", "onTrigger"]);
 const MAX_LOOP_NESTING_DEPTH = 8;
 
 /**
- * Reject a loop whose body contains a forbidden primitive, at every nesting
- * level, and reject nesting deeper than `MAX_LOOP_NESTING_DEPTH`. Recurses into
- * each loop body -- like `validateChildWorkflowBody` -- so the ban does not
- * depend on the (type-unenforced) invariant that every loop body came from its
- * own `defineWorkflow`; a hand-built body is checked here too. The walk
+ * Reject a loop whose body contains a forbidden primitive or routes on failure,
+ * at every nesting level, and reject nesting deeper than
+ * `MAX_LOOP_NESTING_DEPTH`. Those two rules are what a loop body ADDS over a
+ * workflow root; everything else a body must satisfy it shares with one, so the
+ * pass then re-enters `validateSteps` on the body -- like
+ * `validateChildWorkflowBody` and `validateOnTriggerBody`. The re-entry is what
+ * makes the whole suite independent of the (type-unenforced) invariant that
+ * every loop body came from its own `defineWorkflow`; a hand-built or
+ * spread-swapped body is checked here exactly as a root is.
+ *
+ * The re-entry IS the recursion into nested loop bodies: `validateSteps` calls
+ * this pass back with `bodyDepth`, so the count keeps descending and each body
+ * is walked once. Recursing separately as well would double the traversals per
+ * level and let the re-entered walk restart the count at zero. The walk
  * short-circuits at the depth limit, so a pathological input cannot overflow it.
  */
-function validateLoopBody(steps: Record<string, Primitive>, depth = 0): void {
+function validateLoopBody(
+  steps: Record<string, Primitive>,
+  depth: number,
+): void {
   for (const [stepId, primitive] of Object.entries(steps)) {
     if (primitive.kind !== "loop") continue;
     const bodyDepth = depth + 1;
@@ -677,53 +795,63 @@ function validateLoopBody(steps: Record<string, Primitive>, depth = 0): void {
       // step, including a map's inner step reached through this walk.
       assertNoRoutableFailure(bodyStepId, bodyPrimitive);
     }
-    validateLoopBody(primitive.body.steps, bodyDepth);
+    // The body-only bans above run first so their message wins over a generic
+    // root-level complaint about the same step. `isTopLevel` is false: a loop
+    // body is a spawned run, so the onTrigger placement rule applies to it, and
+    // a section reached below the body's own kind ban is rejected there.
+    validateSteps(primitive.body.steps, false, bodyDepth);
   }
 }
 
 /**
- * Validate an onTrigger section body as a full workflow root, and reject a
- * body that nests another onTrigger. The body runs as its own child run per
- * occurrence, so -- like a childWorkflow body -- it must be as valid as a
- * top-level definition; this pass re-enters `validateSteps` on the inline
- * body, so a malformed section body (dangling after, cycle, forbidden loop
- * body, misplaced onFailure) is rejected at the parent's authoring time. The
- * one restriction ADDED over a top-level root is the subscription-layer ban:
- * a section may not contain a section. Unlike a loop body, a section body may
- * sleep and spawn child workflows -- an onTrigger section IS the sanctioned
- * long-lived input loop.
+ * Validate an onTrigger section body as a full workflow root, and reject any
+ * section that does not sit at the top level. The body runs as its own child
+ * run per occurrence, so -- like a childWorkflow body -- it must be as valid as
+ * a top-level definition; this pass re-enters `validateSteps` on the inline
+ * body, so a malformed section body (ill-formed step id, dangling after, cycle,
+ * forbidden loop body, misplaced onFailure) is rejected at the parent's
+ * authoring time. The one restriction ADDED over a top-level root is the
+ * subscription-layer ban:
+ * only the top-level step record may declare a section. Unlike a loop body, a
+ * section body may sleep and spawn child workflows -- an onTrigger section IS
+ * the sanctioned long-lived input loop.
  *
- * PENDING INTR-310: a body agent `step` is accepted here but is not yet
- * EXECUTABLE -- per-step agent invocation inside a body is stubbed, so a body
- * runs only non-inference primitives (awaitSignal, sleep, childWorkflow) at
- * runtime today. INTR-310 wires the body invoker + per-body sources, after
- * which "run agent steps" becomes true at runtime as well.
+ * The placement rule mirrors the deploy-side inert-body enumeration in
+ * `@intx/workflow-deploy`, which lifts sections only at the top level and
+ * throws on one found below it. Keeping the two in step is what stops an
+ * author from getting a clean definition and a clean local run followed by a
+ * deploy rejection.
+ *
+ * A body agent `step` is accepted here and executes: a section body runs
+ * inference and calls tools like any other step, under its own grant record.
+ * An author reading this validator to decide whether an agent belongs in a
+ * body should read it as yes.
  *
  * A separate pass from `validateAcyclic`, which does not recurse into the
  * body's own (already-normalized) `WorkflowDefinition`.
  */
-function validateOnTriggerBody(steps: Record<string, Primitive>): void {
+function validateOnTriggerBody(
+  steps: Record<string, Primitive>,
+  isTopLevel: boolean,
+): void {
   for (const [stepId, primitive] of Object.entries(steps)) {
     if (primitive.kind !== "onTrigger") continue;
+    if (!isTopLevel) {
+      throw new Error(
+        `onTrigger section at step ${stepId} is nested inside a spawned body; ` +
+          `the runtime lifts onTrigger sections only at the top level, so a ` +
+          `nested section is never subscribed. Move it to the top-level ` +
+          `workflow`,
+      );
+    }
     // Only an inline (authored) body carries steps to constrain here; a
     // deployed `{ ref }` body was validated at its own deploy.
     if (!("inline" in primitive.body)) continue;
-    for (const [bodyStepId, bodyPrimitive] of Object.entries(
-      primitive.body.inline.steps,
-    )) {
-      if (bodyPrimitive.kind === "onTrigger") {
-        throw new Error(
-          `onTrigger ${stepId} body step ${bodyStepId} is itself an ` +
-            `onTrigger; an onTrigger body may not nest another section`,
-        );
-      }
-    }
     // The section body runs as its own child run, so validate it as a full
     // root (mirroring validateChildWorkflowBody). This reaches every
     // placement check -- including assertNoRoutableFailure -- so a misplaced
-    // onFailure in a hand-assembled section body is rejected here too. The
-    // nested-section ban above runs first so its specific message wins.
-    validateSteps(primitive.body.inline.steps);
+    // onFailure in a hand-assembled section body is rejected here too.
+    validateSteps(primitive.body.inline.steps, false);
   }
 }
 
@@ -742,7 +870,7 @@ function validateChildWorkflowBody(steps: Record<string, Primitive>): void {
   for (const primitive of Object.values(steps)) {
     if (primitive.kind !== "childWorkflow") continue;
     if (!("inline" in primitive.definition)) continue;
-    validateSteps(primitive.definition.inline.steps);
+    validateSteps(primitive.definition.inline.steps, false);
   }
 }
 
@@ -1026,6 +1154,14 @@ function projectForHash(definition: WorkflowDefinition): unknown {
       : {}),
     ...(definition.sidecarPlacement !== undefined
       ? { sidecarPlacement: definition.sidecarPlacement }
+      : {}),
+    // The admission policy changes how inbound mail is admitted, so two
+    // definitions differing only in their policy must hash differently --
+    // include it exactly as credentialBindings is included. Absent, the
+    // spread contributes nothing, so a definition without a policy hashes
+    // identically to one authored before the field existed.
+    ...(definition.inboundMailPolicy !== undefined
+      ? { inboundMailPolicy: definition.inboundMailPolicy }
       : {}),
     steps: Object.fromEntries(
       Object.entries(definition.steps).map(([id, primitive]) => [

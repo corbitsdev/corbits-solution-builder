@@ -1,18 +1,19 @@
 import { eq, and } from "drizzle-orm";
 import { Hono } from "hono";
-import { describeRoute, resolver, validator } from "hono-openapi";
+import { describeRoute, validator } from "hono-openapi";
 
 import { role, principalRole, principal } from "@intx/db/schema";
 import type { DB } from "@intx/db";
 import {
   CreateRole,
+  ErrorResponse,
   UpdateRole,
   RoleResponse,
-  ErrorResponse,
   paginatedSchema,
 } from "@intx/types";
 
 import type { TenantEnv } from "../context";
+import { errorResponse } from "../error-response";
 import { first, ts } from "../format";
 import { generateId } from "@intx/hub-common";
 import { idResource } from "../middleware/grant";
@@ -24,6 +25,7 @@ import {
   paginatedResponse,
   pageParameters,
 } from "../pagination";
+import { jsonResponse } from "../openapi";
 
 function formatRole(row: typeof role.$inferSelect) {
   return {
@@ -58,14 +60,7 @@ export function createRoleRoutes({
         "Lists both system roles (owner, admin, member) and custom roles.",
       parameters: [...pageParameters],
       responses: {
-        200: {
-          description: "List of roles",
-          content: {
-            "application/json": {
-              schema: resolver(paginatedSchema(RoleResponse)),
-            },
-          },
-        },
+        200: jsonResponse("List of roles", paginatedSchema(RoleResponse)),
       },
     }),
     async (c) => {
@@ -97,18 +92,8 @@ export function createRoleRoutes({
       tags: ["Roles"],
       summary: "Create a custom role",
       responses: {
-        201: {
-          description: "Role created",
-          content: {
-            "application/json": { schema: resolver(RoleResponse) },
-          },
-        },
-        400: {
-          description: "Validation error",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        201: jsonResponse("Role created", RoleResponse),
+        400: jsonResponse("Validation error", ErrorResponse),
       },
     }),
     validator("json", CreateRole),
@@ -144,18 +129,8 @@ export function createRoleRoutes({
       summary: "Get role details",
       description: "Returns role details including attached grants.",
       responses: {
-        200: {
-          description: "Role details",
-          content: {
-            "application/json": { schema: resolver(RoleResponse) },
-          },
-        },
-        404: {
-          description: "Role not found",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        200: jsonResponse("Role details", RoleResponse),
+        404: jsonResponse("Role not found", ErrorResponse),
       },
     }),
     async (c) => {
@@ -167,10 +142,7 @@ export function createRoleRoutes({
       });
 
       if (!row) {
-        return c.json(
-          { error: { code: "not_found", message: "Role not found" } },
-          404,
-        );
+        return errorResponse(c, "not_found", "Role not found");
       }
 
       return c.json(formatRole(row));
@@ -186,18 +158,8 @@ export function createRoleRoutes({
       description:
         "Update name or description. System roles cannot be modified.",
       responses: {
-        200: {
-          description: "Role updated",
-          content: {
-            "application/json": { schema: resolver(RoleResponse) },
-          },
-        },
-        403: {
-          description: "Cannot modify system role",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        200: jsonResponse("Role updated", RoleResponse),
+        403: jsonResponse("Cannot modify system role", ErrorResponse),
       },
     }),
     validator("json", UpdateRole),
@@ -211,22 +173,11 @@ export function createRoleRoutes({
       });
 
       if (!existing) {
-        return c.json(
-          { error: { code: "not_found", message: "Role not found" } },
-          404,
-        );
+        return errorResponse(c, "not_found", "Role not found");
       }
 
       if (existing.isSystem) {
-        return c.json(
-          {
-            error: {
-              code: "forbidden",
-              message: "Cannot modify system roles",
-            },
-          },
-          403,
-        );
+        return errorResponse(c, "forbidden", "Cannot modify system roles");
       }
 
       const updates: Record<string, unknown> = { updatedAt: new Date() };
@@ -258,18 +209,8 @@ export function createRoleRoutes({
         204: {
           description: "Role deleted",
         },
-        400: {
-          description: "Role still assigned to principals",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
-        403: {
-          description: "Cannot delete system role",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        400: jsonResponse("Role still assigned to principals", ErrorResponse),
+        403: jsonResponse("Cannot delete system role", ErrorResponse),
       },
     }),
     async (c) => {
@@ -281,22 +222,11 @@ export function createRoleRoutes({
       });
 
       if (!existing) {
-        return c.json(
-          { error: { code: "not_found", message: "Role not found" } },
-          404,
-        );
+        return errorResponse(c, "not_found", "Role not found");
       }
 
       if (existing.isSystem) {
-        return c.json(
-          {
-            error: {
-              code: "forbidden",
-              message: "Cannot delete system roles",
-            },
-          },
-          403,
-        );
+        return errorResponse(c, "forbidden", "Cannot delete system roles");
       }
 
       const assignments = await db.query.principalRole.findMany({
@@ -304,14 +234,10 @@ export function createRoleRoutes({
       });
 
       if (assignments.length > 0) {
-        return c.json(
-          {
-            error: {
-              code: "bad_request",
-              message: `Role is still assigned to ${assignments.length} principal(s)`,
-            },
-          },
-          400,
+        return errorResponse(
+          c,
+          "bad_request",
+          `Role is still assigned to ${assignments.length} principal(s)`,
         );
       }
 
@@ -348,12 +274,7 @@ export function createRoleAssignRoutes({
         204: {
           description: "Role assigned",
         },
-        404: {
-          description: "Principal or role not found",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        404: jsonResponse("Principal or role not found", ErrorResponse),
       },
     }),
     async (c) => {
@@ -368,20 +289,14 @@ export function createRoleAssignRoutes({
         ),
       });
       if (!principalRow) {
-        return c.json(
-          { error: { code: "not_found", message: "Principal not found" } },
-          404,
-        );
+        return errorResponse(c, "not_found", "Principal not found");
       }
 
       const roleRow = await db.query.role.findFirst({
         where: and(eq(role.id, roleId), eq(role.tenantId, tenantCtx.id)),
       });
       if (!roleRow) {
-        return c.json(
-          { error: { code: "not_found", message: "Role not found" } },
-          404,
-        );
+        return errorResponse(c, "not_found", "Role not found");
       }
 
       const existing = await db.query.principalRole.findFirst({
@@ -413,12 +328,7 @@ export function createRoleAssignRoutes({
         204: {
           description: "Role removed",
         },
-        404: {
-          description: "Assignment not found",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        404: jsonResponse("Assignment not found", ErrorResponse),
       },
     }),
     async (c) => {
@@ -437,20 +347,14 @@ export function createRoleAssignRoutes({
         ),
       });
       if (!principalRow) {
-        return c.json(
-          { error: { code: "not_found", message: "Principal not found" } },
-          404,
-        );
+        return errorResponse(c, "not_found", "Principal not found");
       }
 
       const roleRow = await db.query.role.findFirst({
         where: and(eq(role.id, roleId), eq(role.tenantId, tenantCtx.id)),
       });
       if (!roleRow) {
-        return c.json(
-          { error: { code: "not_found", message: "Role not found" } },
-          404,
-        );
+        return errorResponse(c, "not_found", "Role not found");
       }
 
       const deleted = await db
@@ -464,12 +368,7 @@ export function createRoleAssignRoutes({
         .returning();
 
       if (deleted.length === 0) {
-        return c.json(
-          {
-            error: { code: "not_found", message: "Assignment not found" },
-          },
-          404,
-        );
+        return errorResponse(c, "not_found", "Assignment not found");
       }
 
       return c.body(null, 204);

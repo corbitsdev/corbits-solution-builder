@@ -6,6 +6,7 @@ import {
   type AgentDefinition,
   type BaseEnv,
 } from "@intx/agent";
+import type { InboundMailPolicy } from "@intx/types/runtime";
 
 import {
   action,
@@ -175,7 +176,7 @@ describe("onTrigger primitive", () => {
         id: "wf",
         steps: { section: onTrigger({ on: { type: "manual" }, body: inner }) },
       }),
-    ).toThrow(/may not nest another section/);
+    ).toThrow(/nested inside a spawned body/);
   });
 
   test("rejects a loop body that contains an onTrigger section", () => {
@@ -463,6 +464,98 @@ describe("defineWorkflow", () => {
       steps: { a: step({ agent: a }) },
     });
     expect(def.triggers).toEqual([{ type: "manual" }]);
+  });
+
+  test("rejects a declared schedule trigger", () => {
+    const a = makeAgent("a");
+    expect(() =>
+      defineWorkflow({
+        id: "w",
+        trigger: { type: "schedule", cron: "0 9 * * *" },
+        steps: { a: step({ agent: a }) },
+      }),
+    ).toThrow(/schedule trigger/);
+  });
+
+  test("rejects a schedule trigger listed among several triggers", () => {
+    const a = makeAgent("a");
+    expect(() =>
+      defineWorkflow({
+        id: "w",
+        triggers: [
+          { type: "mail", to: "s@x.example" },
+          { type: "schedule", cron: "*/5 * * * *" },
+        ],
+        steps: { a: step({ agent: a }) },
+      }),
+    ).toThrow(/schedule trigger/);
+  });
+
+  test("rejects a schedule trigger contributed by an onTrigger section", () => {
+    expect(() =>
+      defineWorkflow({
+        id: "w",
+        steps: {
+          section: onTrigger({
+            on: { type: "schedule", cron: "0 * * * *" },
+            body: simpleBody(),
+          }),
+        },
+      }),
+    ).toThrow(/schedule trigger/);
+  });
+});
+
+describe("inboundMailPolicy", () => {
+  test("carries a sparse policy through when a mail trigger is declared", () => {
+    const def = defineWorkflow({
+      id: "w",
+      trigger: { type: "mail", to: "s@x.example" },
+      steps: { a: step({ agent: makeAgent("a") }) },
+      inboundMailPolicy: { untrustedFrom: "admit", missing: "reject" },
+    });
+    expect(def.inboundMailPolicy).toEqual({
+      untrustedFrom: "admit",
+      missing: "reject",
+    });
+    // The two unset outcomes stay unset rather than defaulted -- the field is
+    // sparse and no key is populated for an outcome the author omitted.
+    expect(def.inboundMailPolicy).not.toHaveProperty("invalid");
+    expect(def.inboundMailPolicy).not.toHaveProperty("unknown");
+  });
+
+  test("accepts a policy when a mail trigger comes from an onTrigger section", () => {
+    const def = defineWorkflow({
+      id: "w",
+      steps: {
+        section: onTrigger({
+          on: { type: "mail", to: "s@x.example" },
+          body: simpleBody(),
+        }),
+      },
+      inboundMailPolicy: { invalid: "reject" },
+    });
+    expect(def.inboundMailPolicy).toEqual({ invalid: "reject" });
+  });
+
+  test("rejects a policy when no mail trigger is declared", () => {
+    expect(() =>
+      defineWorkflow({
+        id: "w",
+        trigger: { type: "manual" },
+        steps: { a: step({ agent: makeAgent("a") }) },
+        inboundMailPolicy: { missing: "reject" },
+      }),
+    ).toThrow(/no mail trigger/);
+  });
+
+  test("omits the field entirely when no policy is declared", () => {
+    const def = defineWorkflow({
+      id: "w",
+      trigger: { type: "mail", to: "s@x.example" },
+      steps: { a: step({ agent: makeAgent("a") }) },
+    });
+    expect(def).not.toHaveProperty("inboundMailPolicy");
   });
 });
 
@@ -1050,6 +1143,56 @@ describe("childWorkflow inline authoring", () => {
         steps: { sub: childWorkflow({ definition: childWithBadLoop }) },
       }),
     ).toThrow(/a loop body may not contain/);
+  });
+
+  test("rejects an onTrigger section inside an inline child body", () => {
+    // The runtime lifts onTrigger sections only at the top level, so a section
+    // inside a spawned body reaches the runtime inline and fails. The deploy
+    // enumeration already rejects it; authoring must agree, or the author gets
+    // a clean definition and a clean local run followed by a deploy rejection.
+    const child = defineWorkflow({
+      id: "child",
+      steps: {
+        section: onTrigger({ on: { type: "manual" }, body: simpleBody() }),
+      },
+    });
+    expect(() =>
+      defineWorkflow({
+        id: "parent",
+        trigger: { type: "manual" },
+        steps: { sub: childWorkflow({ definition: child }) },
+      }),
+    ).toThrow(/nested inside a spawned body/);
+  });
+
+  test("rejects an onTrigger section nested two bodies deep", () => {
+    // Hand-assembled, because every intermediate defineWorkflow would reject
+    // the nesting itself; the parent's authoring is the first check that runs.
+    const grandchild = simpleBody();
+    const grandchildWithSection: WorkflowDefinition = {
+      ...grandchild,
+      steps: {
+        ...grandchild.steps,
+        section: onTrigger({ on: { type: "manual" }, body: simpleBody() }),
+      },
+      stepOrder: [...grandchild.stepOrder, "section"],
+    };
+    const child = simpleBody();
+    const childWithGrandchild: WorkflowDefinition = {
+      ...child,
+      steps: {
+        ...child.steps,
+        sub: childWorkflow({ definition: grandchildWithSection }),
+      },
+      stepOrder: [...child.stepOrder, "sub"],
+    };
+    expect(() =>
+      defineWorkflow({
+        id: "parent",
+        trigger: { type: "manual" },
+        steps: { sub: childWorkflow({ definition: childWithGrandchild }) },
+      }),
+    ).toThrow(/nested inside a spawned body/);
   });
 });
 
@@ -1746,6 +1889,49 @@ describe("hashDefinition", () => {
     });
 
     expect(hashDefinition(withRequirements)).not.toEqual(hashDefinition(base));
+  });
+
+  test("a declared inbound mail policy changes the content hash", () => {
+    const a = makeAgent("a");
+    const base = defineWorkflow({
+      id: "w",
+      trigger: { type: "mail", to: "s@x.example" },
+      steps: { a: step({ agent: a }) },
+    });
+    const withPolicy = defineWorkflow({
+      id: "w",
+      trigger: { type: "mail", to: "s@x.example" },
+      steps: { a: step({ agent: a }) },
+      inboundMailPolicy: { untrustedFrom: "admit" },
+    });
+    expect(hashDefinition(withPolicy)).not.toEqual(hashDefinition(base));
+  });
+
+  test("an absent inbound mail policy is hash-invariant against a mail-triggered baseline", () => {
+    // A definition that omits the policy must hash identically whether or not
+    // the field ever entered the construction -- the absent field contributes
+    // nothing to the canonical form, so a deployment authored before the field
+    // existed keeps its content handle. Construct one baseline through a
+    // conditional spread that resolves to no key (the sparse-optional contract:
+    // an omitted policy is never populated), and assert it matches the plain
+    // baseline.
+    const a = makeAgent("a");
+    const plain = defineWorkflow({
+      id: "w",
+      trigger: { type: "mail", to: "s@x.example" },
+      steps: { a: step({ agent: a }) },
+    });
+    const declaredPolicy: InboundMailPolicy | undefined = undefined;
+    const omitted = defineWorkflow({
+      id: "w",
+      trigger: { type: "mail", to: "s@x.example" },
+      steps: { a: step({ agent: a }) },
+      ...(declaredPolicy !== undefined
+        ? { inboundMailPolicy: declaredPolicy }
+        : {}),
+    });
+    expect(omitted).not.toHaveProperty("inboundMailPolicy");
+    expect(hashDefinition(omitted)).toEqual(hashDefinition(plain));
   });
 });
 

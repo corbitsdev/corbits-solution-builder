@@ -33,6 +33,7 @@ import {
   canonicalJsonStringify,
   computeWireDefinitionHash,
 } from "@intx/types/wire-definition-hash";
+import type { InboundMailPolicy } from "@intx/types/runtime";
 
 import {
   computeLiveDefinitionHash,
@@ -784,6 +785,56 @@ describe("closed step schema accepts every real Primitive variant", () => {
 });
 
 // ---------------------------------------------------------------------------
+// The primitive kind set is enumerated twice, and nothing in the type system
+// reconciles the two: `Primitive["kind"]` is a TypeScript union in this
+// package, while the wire `WorkflowStep.kind` is an arktype string-literal
+// union in `@intx/types`, which sits below this package in the dependency
+// graph and so cannot name the live union. This test IS the reconciliation.
+//
+// What it defends: every kind the wire admits has a live primitive behind it,
+// and every live primitive can cross the wire. Readers on both sides rely on
+// that. `@intx/workflow-deploy`'s inert body reader is the sharpest case -- it
+// validates a step's kind against the WIRE enum and dispatches it into a table
+// whose compiler-forced keys are the LIVE union, so its exhaustiveness is
+// exhaustiveness over what the wire admits only while the two sets agree.
+//
+// The corpus assertion above also touches the kind set, but incidentally: it
+// checks that the fixtures exercise all ten kinds, not that the two
+// enumerations agree. A kind added to one side and forgotten on the other
+// would leave that assertion passing.
+// ---------------------------------------------------------------------------
+
+describe("live and wire primitive kind enumerations", () => {
+  // The annotation forces an entry for every live kind and rejects a key that
+  // is not one, so the compiler -- not this literal -- decides what the live
+  // set contains, and `Object.keys` reads it back at runtime.
+  const liveKinds: Record<Primitive["kind"], true> = {
+    action: true,
+    awaitSignal: true,
+    childWorkflow: true,
+    escalation: true,
+    gate: true,
+    loop: true,
+    map: true,
+    onTrigger: true,
+    sleep: true,
+    step: true,
+  };
+
+  test("name the same set", () => {
+    // arktype's introspection renders a string-literal union as one `unit`
+    // node per member. Validating that shape keeps the test honest if the
+    // introspection form ever changes: it fails on the shape rather than
+    // silently comparing against an empty set.
+    const UnitNodes = type({ unit: "string" }).array();
+    const kindNodes = UnitNodes.assert(WorkflowStep.get("kind").json);
+    const wireKinds = kindNodes.map((node) => node.unit).sort();
+
+    expect(wireKinds).toEqual(Object.keys(liveKinds).sort());
+  });
+});
+
+// ---------------------------------------------------------------------------
 // onTrigger onBodyFailure: projection carries the policy through the hash, and
 // an absent policy leaves the projection (and hash) unchanged so existing
 // deployments never face forced re-approval.
@@ -1049,5 +1100,105 @@ describe("sidecar capability projection", () => {
     expect(await computeLiveDefinitionHash(required)).not.toBe(
       await computeLiveDefinitionHash(base),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Wire boundary preserves inboundMailPolicy (the `"+": "delete"` guard)
+// ---------------------------------------------------------------------------
+
+describe("wire validator preserves inboundMailPolicy", () => {
+  function policyWorkflow(
+    inboundMailPolicy: InboundMailPolicy,
+  ): WorkflowDefinition {
+    return defineWorkflow({
+      id: "wf_main",
+      trigger: { type: "mail", to: "wf@acme.test" },
+      steps: {
+        main: step({
+          agent: mkAgent([alphaTool], baseCapabilities, [OPENAI]),
+        }),
+      },
+      inboundMailPolicy,
+    });
+  }
+
+  test("a projected policy survives WorkflowProjectionDefinition validation with its sparse shape intact", () => {
+    // `WorkflowProjectionDefinition` carries `"+": "delete"`, so any key it does
+    // not declare is stripped at the wire boundary. If the projector emitted
+    // `inboundMailPolicy` but the schema omitted it, the policy would vanish
+    // between the hub-resolved projection and the one the sidecar validates --
+    // silently, with no error. Round-trip a projected definition through the
+    // schema and assert the policy survives with only the declared keys.
+    const projection = projectLiveToInert(
+      policyWorkflow({ untrustedFrom: "admit", missing: "reject" }),
+    );
+    expect(projection.inboundMailPolicy).toEqual({
+      untrustedFrom: "admit",
+      missing: "reject",
+    });
+    const validated = WorkflowProjectionDefinition(projection);
+    if (validated instanceof type.errors) {
+      throw new Error(
+        `projection failed the wire schema: ${validated.summary}`,
+      );
+    }
+    expect(validated.inboundMailPolicy).toEqual({
+      untrustedFrom: "admit",
+      missing: "reject",
+    });
+    // An outcome the author left unset stays absent through the wire boundary
+    // rather than being materialized to a default.
+    expect(validated.inboundMailPolicy).not.toHaveProperty("invalid");
+    expect(validated.inboundMailPolicy).not.toHaveProperty("unknown");
+  });
+
+  test("a malformed policy is rejected, not silently stripped, at the wire boundary", () => {
+    // `WorkflowProjectionDefinition` carries `"+": "delete"`, which strips
+    // undeclared TOP-LEVEL keys. This pins the distinct tamper-evidence
+    // property: a malformed `inboundMailPolicy` is REJECTED, because the nested
+    // `onUndeclaredKey("reject")` on `InboundMailPolicy` must win over the
+    // parent's `"+": "delete"`. Build a valid projection the same way the
+    // valid-policy test does, then inject the malformed policy and assert the
+    // schema returns an arktype error rather than a stripped-but-valid result.
+    const projection = projectLiveToInert(
+      policyWorkflow({ untrustedFrom: "admit" }),
+    );
+
+    // (a) An unknown outcome key such as `clean` is not one of the declared
+    // AuthorControllableOutcome keys, so the nested reject rejects it.
+    const unknownKey = WorkflowProjectionDefinition({
+      ...projection,
+      inboundMailPolicy: { clean: "admit" },
+    });
+    expect(unknownKey instanceof type.errors).toBe(true);
+
+    // (b) A value outside `reject | admit` on a declared key such as `missing`
+    // is out of the union, so the policy schema rejects it.
+    const outOfUnion = WorkflowProjectionDefinition({
+      ...projection,
+      inboundMailPolicy: { missing: "quarantine" },
+    });
+    expect(outOfUnion instanceof type.errors).toBe(true);
+  });
+
+  test("the projection omits the field when no policy is declared", () => {
+    const projection = projectLiveToInert(baseWorkflow());
+    expect(projection).not.toHaveProperty("inboundMailPolicy");
+  });
+
+  test("an absent policy leaves no key in the canonical form", () => {
+    // The canonical form omits an absent field, so a definition that declares
+    // no policy hashes identically to one built before the field existed -- a
+    // deployment's content handle does not move for a field it never declared.
+    const projection = projectLiveToInert(baseWorkflow());
+    const canonical = canonicalJsonStringify(projection);
+    expect(canonical.includes("inboundMailPolicy")).toBe(false);
+  });
+
+  test("a declared policy moves the wire hash", async () => {
+    expect(
+      await computeLiveDefinitionHash(policyWorkflow({ invalid: "reject" })),
+    ).not.toBe(await computeLiveDefinitionHash(baseWorkflow()));
   });
 });

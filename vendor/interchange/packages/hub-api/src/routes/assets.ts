@@ -26,12 +26,11 @@
 
 import { and, eq } from "drizzle-orm";
 import { Hono, type Context } from "hono";
-import { describeRoute, resolver, validator } from "hono-openapi";
+import { describeRoute, validator } from "hono-openapi";
 import { type } from "arktype";
 
 import ssri from "ssri";
 
-import { authorize } from "@intx/authz";
 import { asset as assetTable } from "@intx/db/schema";
 import {
   listAssetsForTenant,
@@ -39,7 +38,6 @@ import {
   type AssetWithOrigin,
   type DB,
 } from "@intx/db";
-import { repoActionToGrantVerb } from "@intx/hub-common";
 import { getLogger } from "@intx/log";
 import {
   AssetServiceError,
@@ -49,7 +47,6 @@ import {
   asTarballEntry,
   type AssetService,
   type Principal,
-  type RefEntry,
   type RepoId,
   type RepoStore,
   type UserPrincipal,
@@ -58,11 +55,12 @@ import type { RepoAction, RepoKind } from "@intx/types/sidecar";
 import type { ConditionRegistry, GrantStore } from "@intx/types/authz";
 import {
   AssetResponse,
-  AssetWithOriginResponse,
   ErrorResponse,
+  AssetWithOriginResponse,
 } from "@intx/types";
 
 import type { TenantEnv } from "../context";
+import { errorResponse } from "../error-response";
 import { ts } from "../format";
 import type {
   GitTokenClaims,
@@ -72,13 +70,16 @@ import { idResource, type RequireGrant } from "../middleware/grant";
 import {
   advertiseReceivePack,
   advertiseUploadPack,
-  type RefSource,
 } from "../git-http/advertise-refs";
-import {
-  handleUploadPack,
-  type UploadPackRepoStore,
-} from "../git-http/upload-pack";
+import { handleUploadPack } from "../git-http/upload-pack";
 import { handleReceivePack } from "../git-http/receive-pack";
+import {
+  buildUserPrincipal,
+  makeRefSource,
+  makeUploadPackStore,
+  resolveAuthzVerdict,
+} from "./git-user-principal";
+import { jsonResponse } from "../openapi";
 
 const log = getLogger(["hub", "assets"]);
 
@@ -158,7 +159,8 @@ function stripGitSuffix(raw: string): string | null {
   return raw.slice(0, -".git".length);
 }
 
-// Pre-resolved authz + UserPrincipal construction ------------------
+// User-principal construction helpers shared with the agent-state
+// smart-HTTP group live in ./git-user-principal.
 
 type AssetLookup = {
   id: string;
@@ -166,85 +168,6 @@ type AssetLookup = {
   kind: RepoKind;
   name: string;
 };
-
-function dateToNumber(d: Date): number {
-  return d.getTime();
-}
-
-async function resolveAuthzVerdict(args: {
-  grantStore: GrantStore;
-  conditionRegistry: ConditionRegistry;
-  principalId: string;
-  tenantId: string;
-  assetId: string;
-  action: RepoAction;
-}): Promise<UserPrincipal["authz"]> {
-  const resource = `asset:${args.assetId}`;
-  const grantVerb = repoActionToGrantVerb(args.action);
-  const verdict = await authorize(
-    args.grantStore,
-    args.principalId,
-    args.tenantId,
-    resource,
-    grantVerb,
-    args.conditionRegistry,
-  );
-  return {
-    effect: verdict.effect === "allow" ? "allow" : "deny",
-    resource,
-    grantVerb,
-  };
-}
-
-function buildUserPrincipal(args: {
-  principalId: string;
-  tenantId: string;
-  authz: UserPrincipal["authz"];
-  claims: GitTokenClaims;
-}): UserPrincipal {
-  return {
-    kind: "user",
-    principalId: args.principalId,
-    tenantId: args.tenantId,
-    authz: args.authz,
-    tokenClaims: {
-      refPattern: args.claims.refPattern,
-      actions: args.claims.actions,
-      expiresAt: dateToNumber(args.claims.expiresAt),
-    },
-  };
-}
-
-// Substrate adapters: bridge the substrate's RepoStore to the narrow
-// per-handler contracts that advertise-refs and upload-pack expose.
-
-function makeRefSource(
-  repoStore: RepoStore,
-  principal: UserPrincipal,
-): RefSource {
-  return {
-    async listRefs(_p, repoId): Promise<RefEntry[]> {
-      return repoStore.listRefs(principal, repoId);
-    },
-    async resolveHead(_p, repoId) {
-      return repoStore.resolveHead(principal, repoId);
-    },
-  };
-}
-
-function makeUploadPackStore(
-  repoStore: RepoStore,
-  principal: UserPrincipal,
-): UploadPackRepoStore {
-  return {
-    async listRefs(_p, repoId): Promise<RefEntry[]> {
-      return repoStore.listRefs(principal, repoId);
-    },
-    async getRepoDir(_p, repoId): Promise<string> {
-      return repoStore.getRepoDir(repoId);
-    },
-  };
-}
 
 // Routes ------------------------------------------------------------
 
@@ -373,14 +296,7 @@ export function createAssetRoutes({
         },
       ],
       responses: {
-        200: {
-          description: "List of assets",
-          content: {
-            "application/json": {
-              schema: resolver(AssetWithOriginResponse.array()),
-            },
-          },
-        },
+        200: jsonResponse("List of assets", AssetWithOriginResponse.array()),
       },
     }),
     async (c) => {
@@ -393,14 +309,10 @@ export function createAssetRoutes({
       } else if (inheritedRaw === "false") {
         inherited = false;
       } else {
-        return c.json(
-          {
-            error: {
-              code: "bad_request",
-              message: `inherited must be "true" or "false", got ${JSON.stringify(inheritedRaw)}`,
-            },
-          },
-          400,
+        return errorResponse(
+          c,
+          "bad_request",
+          `inherited must be "true" or "false", got ${JSON.stringify(inheritedRaw)}`,
         );
       }
 
@@ -438,18 +350,8 @@ export function createAssetRoutes({
       description:
         "Returns asset metadata. Resolves through the tenant hierarchy: assets declared on the tenant or any ancestor are visible. Sibling-tenant assets return 404 so callers cannot probe for cross-tenant existence.",
       responses: {
-        200: {
-          description: "Asset metadata",
-          content: {
-            "application/json": { schema: resolver(AssetResponse) },
-          },
-        },
-        404: {
-          description: "Asset not found",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        200: jsonResponse("Asset metadata", AssetResponse),
+        404: jsonResponse("Asset not found", ErrorResponse),
       },
     }),
     async (c) => {
@@ -458,10 +360,7 @@ export function createAssetRoutes({
 
       const row = await resolveAssetById(db, tenantCtx.id, assetId);
       if (row === null) {
-        return c.json(
-          { error: { code: "not_found", message: "Asset not found" } },
-          404,
-        );
+        return errorResponse(c, "not_found", "Asset not found");
       }
 
       return c.json(formatAsset(row));
@@ -477,24 +376,9 @@ export function createAssetRoutes({
       description:
         "Inserts an asset row and initializes the backing git repository with a hub-signed genesis commit and the asset-route .gitignore body.",
       responses: {
-        201: {
-          description: "Asset created",
-          content: {
-            "application/json": { schema: resolver(AssetResponseSchema) },
-          },
-        },
-        400: {
-          description: "Validation error",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
-        409: {
-          description: "Asset already exists",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        201: jsonResponse("Asset created", AssetResponseSchema),
+        400: jsonResponse("Validation error", ErrorResponse),
+        409: jsonResponse("Asset already exists", ErrorResponse),
       },
     }),
     validator("json", CreateAsset),
@@ -650,24 +534,12 @@ export function createAssetRoutes({
       description:
         "Commits raw tarball bytes at tarballs/<filename> in the package-registry asset's git tree. Overwrites permitted. The kind handler validates the tarball's package.json before the commit is accepted.",
       responses: {
-        200: {
-          description: "Tarball stored",
-          content: {
-            "application/json": { schema: resolver(TarballPutResponse) },
-          },
-        },
-        400: {
-          description: "Invalid filename or rejected content",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
-        404: {
-          description: "Asset not found",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        200: jsonResponse("Tarball stored", TarballPutResponse),
+        400: jsonResponse(
+          "Invalid filename or rejected content",
+          ErrorResponse,
+        ),
+        404: jsonResponse("Asset not found", ErrorResponse),
       },
     }),
     async (c) => {
@@ -676,10 +548,7 @@ export function createAssetRoutes({
       const filename = c.req.param("filename");
       const filenameErr = validateTarballFilename(filename);
       if (filenameErr !== null) {
-        return c.json(
-          { error: { code: "bad_request", message: filenameErr } },
-          400,
-        );
+        return errorResponse(c, "bad_request", filenameErr);
       }
 
       const lookup = await resolveRegistryAsset(tenantCtx.id, assetId);
@@ -706,14 +575,10 @@ export function createAssetRoutes({
         // value (`1e308`). Insist on the digit-only shape so the
         // header is exactly what RFC 9110 says it is.
         if (!/^\d+$/.test(declaredLengthRaw)) {
-          return c.json(
-            {
-              error: {
-                code: "bad_request",
-                message: "Content-Length must be a non-negative integer",
-              },
-            },
-            400,
+          return errorResponse(
+            c,
+            "bad_request",
+            "Content-Length must be a non-negative integer",
           );
         }
         const declaredLength = Number(declaredLengthRaw);
@@ -721,28 +586,20 @@ export function createAssetRoutes({
           !Number.isFinite(declaredLength) ||
           declaredLength > maxTarballBytes
         ) {
-          return c.json(
-            {
-              error: {
-                code: "payload_too_large",
-                message: `tarball exceeds maximum size of ${String(maxTarballBytes)} bytes`,
-              },
-            },
-            413,
+          return errorResponse(
+            c,
+            "payload_too_large",
+            `tarball exceeds maximum size of ${String(maxTarballBytes)} bytes`,
           );
         }
       }
 
       const bytes = await readBodyWithLimit(c.req.raw, maxTarballBytes);
       if (bytes === null) {
-        return c.json(
-          {
-            error: {
-              code: "payload_too_large",
-              message: `tarball exceeds maximum size of ${String(maxTarballBytes)} bytes`,
-            },
-          },
-          413,
+        return errorResponse(
+          c,
+          "payload_too_large",
+          `tarball exceeds maximum size of ${String(maxTarballBytes)} bytes`,
         );
       }
       // Integrity is computed from the request bytes. The substrate
@@ -790,10 +647,7 @@ export function createAssetRoutes({
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.startsWith("path_violation:")) {
-          return c.json(
-            { error: { code: "path_violation", message: msg } },
-            400,
-          );
+          return errorResponse(c, "path_violation", msg);
         }
         throw err;
       }
@@ -809,18 +663,8 @@ export function createAssetRoutes({
       description:
         "Returns the current set of tarballs under tarballs/ for the package-registry asset, with size and SRI integrity for each entry.",
       responses: {
-        200: {
-          description: "Tarball list",
-          content: {
-            "application/json": { schema: resolver(TarballListResponse) },
-          },
-        },
-        404: {
-          description: "Asset not found",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        200: jsonResponse("Tarball list", TarballListResponse),
+        404: jsonResponse("Asset not found", ErrorResponse),
       },
     }),
     async (c) => {
@@ -871,24 +715,9 @@ export function createAssetRoutes({
       description:
         "Removes the named tarball from the package-registry asset and commits the resulting tree. Returns 404 if the asset or filename does not exist.",
       responses: {
-        200: {
-          description: "Tarball removed",
-          content: {
-            "application/json": { schema: resolver(TarballDeleteResponse) },
-          },
-        },
-        400: {
-          description: "Invalid filename",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
-        404: {
-          description: "Asset or filename not found",
-          content: {
-            "application/json": { schema: resolver(ErrorResponse) },
-          },
-        },
+        200: jsonResponse("Tarball removed", TarballDeleteResponse),
+        400: jsonResponse("Invalid filename", ErrorResponse),
+        404: jsonResponse("Asset or filename not found", ErrorResponse),
       },
     }),
     async (c) => {
@@ -897,10 +726,7 @@ export function createAssetRoutes({
       const filename = c.req.param("filename");
       const filenameErr = validateTarballFilename(filename);
       if (filenameErr !== null) {
-        return c.json(
-          { error: { code: "bad_request", message: filenameErr } },
-          400,
-        );
+        return errorResponse(c, "bad_request", filenameErr);
       }
 
       const lookup = await resolveRegistryAsset(tenantCtx.id, assetId);
@@ -947,14 +773,10 @@ export function createAssetRoutes({
         return c.json({ commit: commitSha });
       } catch (err) {
         if (err instanceof TarballNotFoundError) {
-          return c.json(
-            {
-              error: {
-                code: "not_found",
-                message: `tarball ${err.filename} not found in asset ${err.assetId}`,
-              },
-            },
-            404,
+          return errorResponse(
+            c,
+            "not_found",
+            `tarball ${err.filename} not found in asset ${err.assetId}`,
           );
         }
         throw err;
@@ -985,20 +807,9 @@ export function createAssetRoutes({
       description:
         "Commits the given repo-relative files onto the asset's ref in one commit. The kind handler's validatePush runs before the ref advances, so an invalid codebase (e.g. a workflow asset missing package.json) is rejected. Gated by the session's own write grant on the asset -- the caller need not carry a git bearer token, matching the tarball PUT route.",
       responses: {
-        200: {
-          description: "Tree written",
-          content: {
-            "application/json": { schema: resolver(WriteAssetTreeResponse) },
-          },
-        },
-        400: {
-          description: "Rejected by the kind handler",
-          content: { "application/json": { schema: resolver(ErrorResponse) } },
-        },
-        404: {
-          description: "Asset not found",
-          content: { "application/json": { schema: resolver(ErrorResponse) } },
-        },
+        200: jsonResponse("Tree written", WriteAssetTreeResponse),
+        400: jsonResponse("Rejected by the kind handler", ErrorResponse),
+        404: jsonResponse("Asset not found", ErrorResponse),
       },
     }),
     validator("json", WriteAssetTree),
@@ -1037,20 +848,9 @@ export function createAssetRoutes({
       description:
         "Returns the base64-encoded bytes at ?path= on the asset's ref (default refs/heads/main), as JSON so a Transport-only caller (no raw-body access) can read it too. 404 when the asset, ref or path is absent.",
       responses: {
-        200: {
-          description: "Blob bytes, base64-encoded",
-          content: {
-            "application/json": { schema: resolver(ReadAssetBlobResponse) },
-          },
-        },
-        400: {
-          description: "Missing path",
-          content: { "application/json": { schema: resolver(ErrorResponse) } },
-        },
-        404: {
-          description: "Asset, ref or path not found",
-          content: { "application/json": { schema: resolver(ErrorResponse) } },
-        },
+        200: jsonResponse("Blob bytes, base64-encoded", ReadAssetBlobResponse),
+        400: jsonResponse("Missing path", ErrorResponse),
+        404: jsonResponse("Asset, ref or path not found", ErrorResponse),
       },
     }),
     async (c) => {
@@ -1242,7 +1042,7 @@ export function createAssetRoutes({
       conditionRegistry,
       principalId: principalRow.id,
       tenantId,
-      assetId: resolvedAsset.asset.id,
+      resource: `asset:${resolvedAsset.asset.id}`,
       action,
     });
     if (authz.effect !== "allow") {
@@ -1279,15 +1079,10 @@ export function createAssetRoutes({
   smartHttp.get("/:kind/:nameDotGit/info/refs", async (c) => {
     const service = c.req.query("service");
     if (service !== "git-upload-pack" && service !== "git-receive-pack") {
-      return c.json(
-        {
-          error: {
-            code: "bad_request",
-            message:
-              "info/refs requires service=git-upload-pack or git-receive-pack",
-          },
-        },
-        400,
+      return errorResponse(
+        c,
+        "bad_request",
+        "info/refs requires service=git-upload-pack or git-receive-pack",
       );
     }
     // info/refs maps to the `resolveRef` RepoAction for the bearer

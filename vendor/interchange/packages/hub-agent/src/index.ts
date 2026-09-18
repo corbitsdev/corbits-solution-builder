@@ -8,6 +8,25 @@ export {
   type AgentKeyStore,
   type AgentKeyStoreDeps,
 } from "./agent-key-store";
+export {
+  createSenderKeyCache,
+  type SenderKeyCache,
+  type SenderKeyCacheDeps,
+} from "./sender-key-cache";
+export {
+  createPublicKeyCrypto,
+  createSenderCryptoResolver,
+} from "./sender-crypto";
+export {
+  resolveInboundMailPolicy,
+  type ResolvedInboundMailPolicy,
+} from "./ws/inbound-signature";
+export {
+  createInboundMailPolicyRegistry,
+  createInboundMailPolicyLookup,
+  FULLY_CLOSED_INBOUND_MAIL_POLICY,
+  type InboundMailPolicyRegistry,
+} from "./ws/inbound-mail-policy-registry";
 export type { HarnessBuilder } from "./harness-builder";
 export {
   createSessionManager,

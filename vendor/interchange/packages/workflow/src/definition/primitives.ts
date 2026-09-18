@@ -21,6 +21,11 @@
 import type { AgentDefinition, BaseEnv } from "@intx/agent";
 import type { Type } from "arktype";
 
+// Type-only import: an action handler's `ctx` parameter is the runtime's
+// EffectContext. This is a type-level cycle (runtime/env.ts imports
+// Primitive from here), erased at runtime by `import type`, so there is
+// no runtime import cycle.
+import type { EffectContext } from "../runtime/env";
 import type { Selector } from "./selectors";
 // Type-only import: a loop or onTrigger body is a full WorkflowDefinition.
 // This is a type-level cycle (workflow.ts imports Primitive from here),
@@ -227,6 +232,28 @@ export interface ActionPrimitive extends PrimitiveBase {
 }
 
 /**
+ * An action handler: deterministic host TypeScript that performs its
+ * external effects through the capability- and ledger-checked
+ * `EffectContext`. This is the signature an author's handler must satisfy;
+ * the host's `invokeAction` resolves an {@link ActionPrimitive.handler} ref
+ * to one of these.
+ *
+ * A deployed handler is a BARE MODULE EXPORT of the module named by the
+ * package's `interchange.actions` field, resolved by export name. It
+ * receives exactly these three parameters and nothing else: no injected
+ * services, and no opportunity to close over host configuration, because
+ * nothing in the deployment constructs it. `ctx` carries one method,
+ * `perform`. Per-deployment configuration must therefore arrive through
+ * `input`, which in practice means the author selects it out of the
+ * trigger payload via the action's {@link ActionPrimitive.input} selector.
+ */
+export type ActionHandler = (
+  input: unknown,
+  ctx: EffectContext,
+  signal: AbortSignal,
+) => Promise<unknown>;
+
+/**
  * Bounded rework loop. Each iteration is a separate child run of `body`
  * (own run id `<runId>__<loopId>__<index>`, own event log in a shared
  * store). `runLoop` spawns iteration 0, evaluates `while` on its output,
@@ -242,6 +269,33 @@ export interface ActionPrimitive extends PrimitiveBase {
  * `awaitSignal` and resume, may spawn a `childWorkflow` grandchild, and
  * may contain a nested `loop` (bounded depth), but may not contain a
  * `sleep` or `onTrigger` (all enforced at definition time).
+ *
+ * The loop step's own output -- what `steps.<loopId>.output` selects -- is
+ * `{ outcome, iterations, carry, final }`:
+ *
+ * - `outcome` is `"converged"` or `"exhausted"`, the arm the loop routed to.
+ * - `iterations` is how many iterations ran.
+ * - `carry` is the LAST iteration's INPUT. The loop settles the instant
+ *   `while` goes false, before `carry` runs on that iteration, so this is
+ *   the state the converging iteration worked from, not a state derived
+ *   from its result.
+ * - `final` is the LAST iteration's OUTPUT -- the body's per-step output
+ *   record, keyed by step id, exactly as `while` received it. This is where
+ *   a `while` that judges the iteration output leaves its answer; the
+ *   scoped iteration step ids are not selector paths.
+ *
+ * That record is persisted on the loop's `StepCompleted`, and a run that
+ * crashes after the loop settles replays the persisted value rather than
+ * recomputing it. Keys may therefore be ADDED to it but never renamed or
+ * removed: a resumed run whose log predates a rename fails on the missing
+ * key.
+ *
+ * `final` embeds the last iteration's whole per-step output tree, so the
+ * loop's own output is no longer a small fixed record and can cross the blob
+ * substrate's spill threshold -- it rides inline below it and spills above,
+ * where a loop container's output previously never would. A body whose steps
+ * return large values pays that cost once per loop, on top of the scoped
+ * per-iteration events that already carry the same data.
  */
 export interface LoopPrimitive extends PrimitiveBase {
   kind: "loop";
