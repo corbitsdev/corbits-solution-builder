@@ -73,7 +73,6 @@ import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
 import * as intxSchema from "@intx/db/schema";
 import { withPostgresJsResultShape } from "./pg-compat.js";
-import { retireDeadSidecars } from "./retire-dead-sidecars.js";
 import { mountProviderOAuth } from "./oauth-mount.js";
 
 /** The path a sidecar's WebSocket connects to; part of `@intx/hub-api`'s own contract. */
@@ -351,7 +350,6 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
   });
   await workflowAllocationService.initialize?.();
   await sidecarAllocationReconciler.initialize();
-  await retireDeadSidecars(sidecarAllocationStore, bindingFingerprint);
   type Allocated = Record<string, unknown> | undefined;
   sidecarRouter.events.on("sidecar.disconnect", ({ allocated }: { allocated: Allocated }) => {
     if (allocated === undefined) return;

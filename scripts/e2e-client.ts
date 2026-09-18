@@ -296,7 +296,7 @@ async function main(): Promise<void> {
       const ok = response.ok && body.canPlaceSidecars === true && typeof body.sidecarFingerprint === "string";
       check("boot: sidecar placement facts from GET /api/status", ok, JSON.stringify(body).slice(0, 200));
       if (!ok) throw new Error("no sidecar capability to deploy against");
-      return { canPlaceSidecars: true, sidecarFingerprint: body.sidecarFingerprint! } satisfies SidecarCapability;
+      return { canPlaceSidecars: true } satisfies SidecarCapability;
     });
 
     const { closure, gitPush } = await closureAndPush(origin);

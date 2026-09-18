@@ -85,7 +85,6 @@ export const WorkflowDeploymentResponse = type({
     "Deployment lifecycle status. `failed` is a terminal failure with no infrastructure. `destroy_failed` is a permanent cleanup failure where infrastructure may remain and require operator cleanup.",
   ),
   createdAt: "string",
-  "provisionerBindingFingerprint?": "string | null",
 });
 export type WorkflowDeploymentResponse =
   typeof WorkflowDeploymentResponse.infer;

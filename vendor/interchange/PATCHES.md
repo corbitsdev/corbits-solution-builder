@@ -277,26 +277,6 @@ path the tarball routes only gave `package-registry`.
 **Kill date.** 2026-10-16. Tracked as
 [INTR-571](https://linear.app/abklabs/issue/INTR-571).
 
-## `packages/hub-api/src/routes/workflows.ts`, `packages/hub-client/src/workflows.ts` — the deployment listing carries its provisioner binding
-
-**Why.** CL-8075: `GET /workflows/deployments` projected an allocation's
-status but not the provisioner binding it is pinned to, so a deployment
-bound to another hub address could not be told apart from a reachable one
-without a direct `sidecar_allocation` read (`allocationBinding` in
-`hub-gaps.ts`).
-
-**What changed.** The deployment list query also selects
-`sidecar_allocation.provisioner_binding_fingerprint`, and
-`WorkflowDeploymentResponse` (both the route's and `@intx/hub-client`'s) gains
-an optional `provisionerBindingFingerprint`. `apps/hub/src/workflow-deploy.ts`
-now reads it off the deployment it already fetched rather than making a
-second call.
-
-**Upstream-able.** Yes; it is one more field on an existing projection.
-
-**Kill date.** 2026-10-16. Tracked as
-[INTR-572](https://linear.app/abklabs/issue/INTR-572).
-
 ## `packages/hub-api/src/routes/workflows.ts`, `packages/hub-api/src/app.ts` — `POST /:runId/signals` named-signal grant and principal stamp
 
 **Why.** CL-8089: the route required `workflow-run:<id>/manage` for every signal, so a

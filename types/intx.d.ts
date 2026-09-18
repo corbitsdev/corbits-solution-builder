@@ -460,7 +460,6 @@ declare module "@intx/hub-client" {
     definitionAssetId: string;
     status: string;
     createdAt: string;
-    provisionerBindingFingerprint?: string | null;
   }
   export interface WorkflowRunTrigger {
     runId: string;

@@ -11,7 +11,6 @@ export const WorkflowDeployment = type({
   definitionAssetId: "string",
   status: "string",
   createdAt: "string",
-  "provisionerBindingFingerprint?": "string | null",
 });
 export type WorkflowDeployment = typeof WorkflowDeployment.infer;
 

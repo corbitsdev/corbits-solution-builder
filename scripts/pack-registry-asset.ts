@@ -152,7 +152,7 @@ async function install(): Promise<void> {
   const { closure, gitPush } = await scriptClosureAndPush();
   await installerInstall(
     hubTransport(),
-    { canPlaceSidecars: canPlaceSidecars(), sidecarFingerprint: hub().sidecarBindingFingerprint },
+    { canPlaceSidecars: canPlaceSidecars() },
     closure,
     gitPush,
     { afterSkillAssets: async () => { await rerankCatalogViaHub(hubTransport()); } },

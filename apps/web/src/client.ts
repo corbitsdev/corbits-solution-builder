@@ -365,14 +365,8 @@ export async function rerankCatalogAfterSkillAssets(): Promise<void> {
   }
 }
 
-export function sidecarCapabilityOf(
-  status: Pick<HostStatus, "canPlaceSidecars" | "sidecarFingerprint">,
-): SidecarCapability {
-  const fingerprint = status.sidecarFingerprint;
-  if (!status.canPlaceSidecars || fingerprint === null || fingerprint.length === 0) {
-    return { canPlaceSidecars: false, sidecarFingerprint: "" };
-  }
-  return { canPlaceSidecars: true, sidecarFingerprint: fingerprint };
+export function sidecarCapabilityOf(status: Pick<HostStatus, "canPlaceSidecars">): SidecarCapability {
+  return { canPlaceSidecars: status.canPlaceSidecars };
 }
 
 /**

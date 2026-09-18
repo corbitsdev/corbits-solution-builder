@@ -67,22 +67,6 @@ export async function deploymentIsLive(transport: Transport, tenantId: string, d
   return isLive((await workflows.deployments()).find((entry: HubDeployment) => entry.id === deploymentId));
 }
 
-/**
- * Whether this host can reach the deployment's sidecar. The platform pins an
- * allocation to the hub address the sidecar dials, and leaves one pinned to
- * any other address alone forever: a host that came back on a different
- * port sees such a deployment as live, while nothing sent to it is ever
- * delivered. (A deployment with no allocation yet is reachable: the
- * allocation it gets will be this host's.) The binding fingerprint travels
- * on the deployment listing itself now (`vendor/interchange/PATCHES.md`),
- * so no separate read is needed -- the caller's own fingerprint is the one
- * fact only the host process knows, so it is a plain argument, not a gap.
- */
-function reachable(deployment: HubDeployment, sidecarFingerprint: string): boolean {
-  const binding = deployment.provisionerBindingFingerprint ?? null;
-  return binding === null || binding === sidecarFingerprint;
-}
-
 export const LIFECYCLE_ASSET_NAME = "solutions-builder-project-lifecycle";
 const ENTRY_PATH = LIFECYCLE_ENTRY_PATH;
 const ENTRY = `./${ENTRY_PATH}`;
@@ -296,12 +280,10 @@ const commitsByAsset = new Map<string, string>();
 const queued = new Map<string | undefined, Promise<unknown>>();
 
 /**
- * The two facts about sidecar placement that only the host process knows --
- * whether it is serving at all, and its own binding fingerprint -- passed in
- * rather than reached for, since this package never imports the hub's
- * embedding files.
+ * Whether this host is serving sidecars at all -- passed in rather than
+ * reached for, since this package never imports the hub's embedding files.
  */
-export type SidecarCapability = { canPlaceSidecars: boolean; sidecarFingerprint: string };
+export type SidecarCapability = { canPlaceSidecars: boolean };
 
 /**
  * Pushes `tree` onto `main` of the tenant's `<assetKind>/<assetName>` asset
@@ -408,11 +390,7 @@ async function ensureLifecycleDeploymentUncached(
   const latest = (await workflows.deployments()).find(
     (deployment: HubDeployment) => deployment.definitionAssetId === assetId && isLive(deployment),
   );
-  if (latest && !reachable(latest, sidecar.sidecarFingerprint)) {
-    console.error(
-      `[deploy] ${projectId ?? "workspace"}: deployment ${latest.id} is bound to a hub address this host no longer serves; deploying the lifecycle again.`,
-    );
-  } else if (head === rendered[DIGEST_PATH] && latest && !options.replace) {
+  if (head === rendered[DIGEST_PATH] && latest && !options.replace) {
     return {
       status: "current",
       assetId,
