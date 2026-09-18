@@ -30,6 +30,7 @@
     "check:ledger": "bun --conditions intx-src scripts/check-ledger.ts",
     "check:boundaries": "bun --conditions intx-src scripts/check-boundaries.ts",
     "smoke:hub": "bun --conditions intx-src scripts/hub-topology-smoke.ts",
+    "smoke:e2e": "bun --conditions intx-src scripts/e2e-client.ts",
     "check:slop": "bun scripts/check-slop.ts",
     "smoke:launch": "bun scripts/launch-smoke.ts",
     "smoke:db-lock": "bun --conditions intx-src scripts/db-lock-smoke.ts",
