@@ -871,37 +871,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   animation-delay: calc(var(--i, 0) * 50ms);
 }
 
-/* The odometer: old digit up and out, new digit up and in. */
-.roll {
-  display: inline-grid;
-  height: 1.3em;
-  line-height: 1.3em;
-  overflow: hidden;
-  vertical-align: bottom;
-}
-
-.roll > span {
-  grid-area: 1 / 1;
-}
-
-.roll-out {
-  animation: roll-out 350ms cubic-bezier(0.4, 0, 0.2, 1) both;
-}
-
-.roll-in {
-  animation: roll-in 350ms cubic-bezier(0.4, 0, 0.2, 1) both;
-}
-
-@keyframes roll-out {
-  from { transform: translateY(0); }
-  to { transform: translateY(-100%); }
-}
-
-@keyframes roll-in {
-  from { transform: translateY(100%); }
-  to { transform: translateY(0); }
-}
-
 @keyframes label-shine {
   0%, 18% { background-position: 100% 0; }
   82%, 100% { background-position: 0% 0; }
@@ -915,8 +884,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   .stage-gate-dot,
   .guide-live,
   .stagger,
-  .roll-out,
-  .roll-in,
   .composer[data-working] > form::after,
   .newer-version,
   .turn-note,

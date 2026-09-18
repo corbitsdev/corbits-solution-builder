@@ -459,33 +459,6 @@ export function versionDigest(node: { version: number; createdAt: string; sizeBy
   return `Version ${node.version} · written ${new Date(node.createdAt).toLocaleString()} · ${length}`;
 }
 
-/**
- * A number that rolls to its next value like an odometer wheel: the old digit
- * slides up and out as the new one rises in. A count that changes by simply
- * being a different number is easy to miss.
- */
-export function RollingNumber({ value }: { value: number }) {
-  const previous = useRef(value);
-  const [from, setFrom] = useState<number | null>(null);
-  useEffect(() => {
-    if (previous.current === value) return;
-    setFrom(previous.current);
-    previous.current = value;
-  }, [value]);
-  return (
-    <span className="roll" aria-label={String(value)}>
-      {from !== null && from !== value ? (
-        <span key={`out-${from}`} className="roll-out" aria-hidden="true" onAnimationEnd={() => setFrom(null)}>
-          {from}
-        </span>
-      ) : null}
-      <span key={`in-${value}`} className={from !== null && from !== value ? "roll-in" : undefined} aria-hidden="true">
-        {value}
-      </span>
-    </span>
-  );
-}
-
 export function documentName(kind: string): string {
   return DOCUMENT_NAMES[kind] ?? kind.replace(/_/g, " ");
 }

@@ -1,6 +1,7 @@
+import { AnimatedNumber } from "@corbits/react-ui";
 import { useEffect, useState } from "react";
 import type { StageTurn } from "../../client.js";
-import { RollingNumber, stageName } from "../../components.jsx";
+import { stageName } from "../../components.jsx";
 import { Elapsed } from "./elapsed.jsx";
 import { STAGE_GOAL } from "./gate.jsx";
 
@@ -71,7 +72,7 @@ export function Preparing({
     <section className="preparing" aria-live="polite">
       <header className="preparing-head">
         <p className="preparing-kicker">
-          Stage <RollingNumber value={stage} /> of 9
+          Stage <AnimatedNumber value={stage} /> of 9
         </p>
         <h2>{stageName(stage)}</h2>
         <p className="preparing-goal">{STAGE_GOAL[stage]}</p>

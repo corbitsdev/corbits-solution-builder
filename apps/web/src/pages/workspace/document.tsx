@@ -19,7 +19,8 @@ import { approachName, sectionsIn } from "@solutions-builder/app/document";
 import { agentFor } from "@solutions-builder/app/kit";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { markChanges } from "../../revisions.js";
-import { AddMaterial, Button, documentName, RollingNumber } from "../../components.jsx";
+import { AnimatedNumber } from "@corbits/react-ui";
+import { AddMaterial, Button, documentName } from "../../components.jsx";
 import { PrintButton } from "../../print.jsx";
 import { SpecialistTurn, WorkingLabel, type TurnNote } from "./thread.jsx";
 
@@ -267,8 +268,8 @@ export function StageDocument({
           <span className="thread-progress">
             {openQuestion ? (
               <>
-                Question <RollingNumber value={openQuestion.ordinal + 1} /> of{" "}
-                <RollingNumber value={openQuestion.ordinal + 1 + openQuestion.remaining} />
+                Question <AnimatedNumber value={openQuestion.ordinal + 1} /> of{" "}
+                <AnimatedNumber value={openQuestion.ordinal + 1 + openQuestion.remaining} />
               </>
             ) : (
               ""
