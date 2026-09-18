@@ -818,14 +818,9 @@ function BuildPanel({
   const running = state === "running";
   const terminal = state === "failed" || state === "cancelled" || state === "interrupted";
 
-  const loadEvents = useCallback(
-    () =>
-      api
-        .buildEvents(detail.project.id)
-        .then((result) => result.events)
-        .catch(() => [] as BuildEvent[]),
-    [detail.project.id],
-  );
+  // No host route serves build events, and the run fold does not carry
+  // bridge events yet -- filed as a follow-up. Always empty until it lands.
+  const loadEvents = useCallback(() => Promise.resolve([] as BuildEvent[]), []);
 
   useEffect(() => {
     let cancelled = false;

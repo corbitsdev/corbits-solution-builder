@@ -215,27 +215,3 @@ function catalogBody(href: string): unknown {
   if (href.startsWith("/hub/api/tenants/t_ws/catalog/offerings/")) return { ok: true };
   return {};
 }
-
-describe("host mutation routes", () => {
-  const original = globalThis.fetch;
-  afterEach(() => {
-    globalThis.fetch = original;
-  });
-
-  test("a host effect posts to the host /api; there is no submit or decide client", async () => {
-    const urls: string[] = [];
-    globalThis.fetch = (async (url: string | URL | Request) => {
-      urls.push(String(url));
-      return new Response(JSON.stringify({ ok: true }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
-    }) as typeof fetch;
-
-    await api.command("p1", "build.freeze", { runId: "r1" });
-
-    expect(urls).toEqual(["/api/projects/p1/commands/build.freeze"]);
-    expect("submit" in api).toBe(false);
-    expect("decide" in api).toBe(false);
-  });
-});

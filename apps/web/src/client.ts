@@ -341,15 +341,6 @@ export type DesignFeedback = {
   }[];
 };
 
-export type CommandOutcome = {
-  runId: string;
-  stage: number;
-  state: string;
-  transitionId: string;
-  replayed: boolean;
-  waitId?: string;
-};
-
 /** Orientation from the Product guide, or the deterministic checklist. */
 export type Guidance = {
   summary: string;
@@ -818,14 +809,6 @@ export const api = {
     }),
   guidance: (projectId: string) =>
     request<{ guidance: Guidance }>(`/projects/${projectId}/guidance`),
-  /**
-   * A host effect (a frozen packet, a build attempt, a route selection). A
-   * gate decision is not one: it is a named signal on the run (`run-signal.ts`).
-   */
-  command: (projectId: string, command: string, payload: unknown) =>
-    post<CommandOutcome>(`/projects/${projectId}/commands/${command}`, payload),
-  buildEvents: (projectId: string) =>
-    request<{ events: BuildEvent[] }>(`/projects/${projectId}/build/events`),
   design: (projectId: string) =>
     request<{
       designs: ArtifactNode[];
