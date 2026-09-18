@@ -62,7 +62,7 @@ export async function ensureSkillAssets(transport: Transport, tenantId: string):
     const found = existing.find((asset) => asset.name === skill.key);
     const assetId = found ? found.id : (await assets.create({ kind: "skill", name: skill.key, displayName: skill.key })).id;
     const files = skillFiles(skill);
-    const digest = treeDigest(files);
+    const digest = await treeDigest(files);
     const head = await readWorkflowSourceBlob(transport, tenantId, assetId, DIGEST_PATH);
     if (head === `${digest}\n`) continue;
     await writeWorkflowSourceTree(transport, tenantId, {

@@ -236,7 +236,7 @@ export async function renderLifecycleSource(
     ...(await toolsDeckClosureFiles(closure.manifest, closure.fetchTarball)),
     ...(await toolsDeliveryClosureFiles(closure.manifest, closure.fetchTarball)),
   };
-  files[DIGEST_PATH] = `${treeDigest(files)}\n`;
+  files[DIGEST_PATH] = `${await treeDigest(files)}\n`;
   return files;
 }
 

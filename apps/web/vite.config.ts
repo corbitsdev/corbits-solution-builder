@@ -42,7 +42,6 @@ function stubNodeBuiltins(): Plugin {
     name: "stub-node-builtins",
     enforce: "pre",
     resolveId(id) {
-      if (id === "node:crypto" || id === "crypto") return join(import.meta.dirname, "node-crypto.ts");
       if (id === "node:path" || id === "path") return join(import.meta.dirname, "node-path.ts");
       if (id.startsWith("node:")) return `\0stub:${id}`;
     },

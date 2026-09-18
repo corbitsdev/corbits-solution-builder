@@ -86,7 +86,7 @@ describe("workflow-closure", () => {
     const dir = memberDir("workflow");
     expect(files[`${dir}/package.json`]).toContain('"name":"@intx/workflow"');
     expect(files[`${dir}/dist/index.js`]).toContain("export const workflow");
-    expect(treeDigest(files).length).toBe(64);
+    expect((await treeDigest(files)).length).toBe(64);
   });
 
   test("app and tools members extract from their own tarballs", async () => {

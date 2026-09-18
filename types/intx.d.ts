@@ -130,6 +130,8 @@ declare module "@intx/authz" {
 }
 
 declare module "@intx/crypto" {
+  /** SHA-256 digest of a UTF-8 string, over WebCrypto (Node and browser). */
+  export function sha256(input: string): Promise<Uint8Array>;
   export function derivePublicKeyBytes(seed: Uint8Array): Promise<Uint8Array>;
   export function createEnvKeyCredentialCipher(key: Uint8Array): unknown;
   export function generateKeyPair(): Promise<{ publicKey: Uint8Array; privateKey: Uint8Array }>;

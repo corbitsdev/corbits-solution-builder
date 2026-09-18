@@ -20,7 +20,7 @@
  * (same-origin static files) and hands the bytes in; this module only
  * extracts and reshapes them into asset-tree paths.
  */
-import { createHash } from "node:crypto";
+import { sha256 } from "@intx/crypto";
 import type { ClosureManifest, ClosureManifestEntry } from "./registry-tarballs.js";
 import { extractTarballFiles } from "./tarball-extract.js";
 
@@ -106,14 +106,15 @@ export async function toolsDeliveryMemberFiles(
   return memberTree(manifest, "@solutions-builder/tools-delivery", "packages/tools-delivery", fetchTarball);
 }
 
+function hex(bytes: Uint8Array): string {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 /** One hash over every file, so a changed byte anywhere re-deploys. */
-export function treeDigest(files: Record<string, string>): string {
-  const hash = createHash("sha256");
+export async function treeDigest(files: Record<string, string>): Promise<string> {
+  let input = "";
   for (const path of Object.keys(files).sort()) {
-    hash.update(path);
-    hash.update("\0");
-    hash.update(files[path]!);
-    hash.update("\0");
+    input += `${path}\0${files[path]!}\0`;
   }
-  return hash.digest("hex");
+  return hex(await sha256(input));
 }
