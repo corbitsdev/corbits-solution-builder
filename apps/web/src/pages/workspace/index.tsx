@@ -418,20 +418,13 @@ export function StageWorkspace({
           title={`Routed back to stage ${current?.stage}`}
           description="The earlier decision and its artifacts are retained, superseded rather than deleted."
         >
-          <Button
-            variant="primary"
-            loading={busy === "route"}
-            onClick={() =>
-              run("route", () =>
-                api.command(detail.project.id, "stage.select_route", {
-                  expectedRevision: detail.project.revision,
-                  runId: current!.id,
-                }),
-              )
-            }
-          >
+          <Button variant="primary" disabled>
             Resume at stage {current?.stage}
           </Button>
+          <p className="inline-note">
+            Resuming this stage automatically is blocked on CL-8461 (the workflow cannot yet re-enter a
+            stage's loop after moving past it).
+          </p>
         </Screen>
       ) : null}
 

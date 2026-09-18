@@ -12,10 +12,11 @@ describe("GET /projects/:id standing", () => {
     expect(detail).toContain("await projectExecutionStatus(projectId)");
   });
 
-  test("the host has no submit or decide route; /commands is for host effects", async () => {
-    const source = await Bun.file(new URL("./api-decisions.ts", import.meta.url)).text();
-    expect(source).toContain('api.post("/projects/:projectId/commands/:command"');
+  test("the host has no submit, decide or commands route; the last host effects moved off it too", async () => {
+    const source = await Bun.file(new URL("./api.ts", import.meta.url)).text();
     expect(source).not.toContain('"/projects/:projectId/submit"');
     expect(source).not.toContain('"/projects/:projectId/decide"');
+    expect(source).not.toContain('"/projects/:projectId/commands');
+    expect(source).not.toContain("api-decisions");
   });
 });

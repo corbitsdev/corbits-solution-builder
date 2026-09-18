@@ -16,15 +16,12 @@
  */
 import { Hono } from "hono";
 import { type } from "arktype";
-import { execute } from "./command-dispatch.js";
-import { localActor, resolveWorkspace } from "./hub-client.js";
+import { resolveWorkspace } from "./hub-client.js";
 import { currentSession } from "./hub-session.js";
 import { HostError } from "./errors.js";
 import { newId } from "./ids.js";
-import { type Command } from "@solutions-builder/app/ledger";
 import { registerHostRoutes, API_VERSION as HOST_API_VERSION } from "./api-host.js";
 import { registerProjectRoutes } from "./api-projects.js";
-import { registerDecisionRoutes } from "./api-decisions.js";
 
 export const API_VERSION = HOST_API_VERSION;
 
@@ -34,26 +31,6 @@ export function parsed<T>(result: T | type.errors): T {
     throw new HostError("validation_failed", result.summary);
   }
   return result;
-}
-
-export async function commandFrom(
-  type_: Command,
-  projectId: string,
-  payload: Record<string, unknown>,
-) {
-  return execute({
-    type: type_,
-    actor: localActor(),
-    projectId,
-    idempotencyKey: newId.command(),
-    correlationId: newId.correlation(),
-    // §6: a caller that has read the project says which revision it read, and
-    // an effect applied against a stale one is refused rather than applied.
-    ...(typeof payload.expectedRevision === "number"
-      ? { expectedRevision: payload.expectedRevision }
-      : {}),
-    payload,
-  });
 }
 
 export function createApi() {
@@ -66,7 +43,6 @@ export function createApi() {
 
   registerHostRoutes(api);
   registerProjectRoutes(api);
-  registerDecisionRoutes(api);
 
   api.onError((cause, context) => {
     const correlationId = newId.correlation();

@@ -276,11 +276,14 @@ export function AudiencePackages({
   const everyoneHasOne = audiences.length > 0 && missing.length === 0;
 
   /**
-   * Reopens the review: routes the stage back to itself and resumes it, which
-   * starts a new run at stage 5 with the packages open for drafting again.
+   * Reopens the review: routes the stage back so the packages can be revised.
    * The decisions recorded on this review stay recorded, as history; the new
    * review starts clean, so a stakeholder who asked for a revision decides
    * again on the revised package.
+   *
+   * Resuming the stage after this — re-entering its loop rather than merely
+   * marking it backtracked — is CL-8461: the workspace screen shows the
+   * disabled "Resume" action and the note once this lands.
    */
   const reopen = async () => {
     if (!detail.current) return;
@@ -296,13 +299,6 @@ export function AudiencePackages({
         reason: "Reopened to revise the packages.",
         targetStage: 5,
       });
-      const routed = await api.project(detail.project.id);
-      if (routed.current) {
-        await api.command(detail.project.id, "stage.select_route", {
-          expectedRevision: routed.project.revision,
-          runId: routed.current.id,
-        });
-      }
       onChanged();
     } catch (cause) {
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
