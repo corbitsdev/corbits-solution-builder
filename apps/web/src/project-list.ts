@@ -67,6 +67,8 @@ export async function listProjectSummaries(transport: Transport = createHubTrans
         needsDecision: status?.parked ?? false,
         waits: [],
         turn,
+        tenantId: record.id,
+        anchorRunId: deployment?.id ?? null,
       };
     }),
   );
