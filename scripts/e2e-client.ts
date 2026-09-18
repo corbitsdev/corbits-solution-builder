@@ -39,6 +39,7 @@ import {
   resolveWorkspace,
   upsertApiKeyProvider,
   type ClosureSource,
+  type FetchLike,
   type ProjectPolicy,
   type SidecarCapability,
   type WorkflowGitPush,
@@ -229,8 +230,21 @@ const PROJECT_POLICY: ProjectPolicy = {
  * smart-HTTP route -- unlike that script, this one talks to a real listening
  * socket, so the push rides the plain global `fetch` `pushSourceTree`
  * defaults to, no `app.fetch` adapter needed.
+ *
+ * `apps/hub/src/server.ts`'s outer door gates every `/api/*` request on
+ * either an `Authorization: Bearer <hostToken>` matching the host's own
+ * launch token, or the `solutions_builder_session` cookie a browser tab
+ * gets (and then carries automatically) from visiting the handshake URL --
+ * that cookie's value is the same host token, verbatim. The git push's own
+ * `Authorization` header already carries the *minted git token* the
+ * vendored smart-HTTP route expects, which collides with the outer door's
+ * bearer scheme on the same header, so the outer door can only be
+ * satisfied here the way a browser satisfies it: by attaching that session
+ * cookie. A plain Node `fetch` does not carry cookies the way a browser tab
+ * does, and this script never loads the handshake page, so it is set
+ * explicitly from the host token this script already holds.
  */
-async function closureAndPush(origin: string): Promise<{ closure: ClosureSource; gitPush: WorkflowGitPush }> {
+async function closureAndPush(origin: string, hostToken: string): Promise<{ closure: ClosureSource; gitPush: WorkflowGitPush }> {
   const entries = await buildPackedEntries();
   const manifest = buildManifest("scripts/e2e-client.ts", entries);
   const byFilename = new Map(entries.map((entry) => [entry.filename, entry.bytes]));
@@ -242,11 +256,16 @@ async function closureAndPush(origin: string): Promise<{ closure: ClosureSource;
       return bytes;
     },
   };
+  const fetchImpl: FetchLike = (input, init) =>
+    fetch(input, {
+      ...init,
+      headers: { ...(init?.headers as Record<string, string> | undefined), cookie: `solutions_builder_session=${hostToken}` },
+    });
   const gitPush: WorkflowGitPush = async ({ scope, assetKind, assetName, token, tree, message }) => {
     const dir = await mkdtemp(join(tmpdir(), "e2e-client-push-"));
     try {
       const url = `${origin}/api/tenants/${encodeURIComponent(scope)}/assets/${assetKind}/${assetName}.git`;
-      return await pushSourceTree({ url, token, tree, message, fsBackend: { fs, dir } });
+      return await pushSourceTree({ url, token, tree, message, fsBackend: { fs, dir }, fetchImpl });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -299,7 +318,7 @@ async function main(): Promise<void> {
       return { canPlaceSidecars: true } satisfies SidecarCapability;
     });
 
-    const { closure, gitPush } = await closureAndPush(origin);
+    const { closure, gitPush } = await closureAndPush(origin, host.token);
 
     // (2) Workspace tenant install.
     const workspace = await step("2. workspace tenant install (installer install path)", async () => {

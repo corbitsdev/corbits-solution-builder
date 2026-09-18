@@ -47,7 +47,8 @@ async function advertisedMainSha(url: string, token: string, fetchImpl: FetchLik
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!response.ok) {
-    throw new GitPushError(`ref advertisement failed: HTTP ${String(response.status)}`);
+    const body = await response.text().catch(() => "");
+    throw new GitPushError(`ref advertisement failed: HTTP ${String(response.status)} ${body}`);
   }
   const lines = readPktLines(new Uint8Array(await response.arrayBuffer()));
   for (const line of lines) {
