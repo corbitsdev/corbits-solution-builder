@@ -97,6 +97,17 @@ const startsWithAny = (name: string, prefixes: readonly string[]) =>
  *
  * The platform's own inference runtime is deliberately NOT on this list: using
  * it is the goal, and forbidding it is what produced a second one.
+ *
+ * Two narrow exceptions, both below rather than here:
+ *   - `packages/embed-hub` mounts `@corbits/oauth-core`'s loopback OAuth flow
+ *     for exactly the providers it configures (#336) -- the same embedding
+ *     role `apps/hub`'s own OAuth mount would play, so it is exempted the
+ *     same way `area === "hub"` is.
+ *   - `apps/web` takes `@corbits/codex-provider` / `@corbits/xai-provider`'s
+ *     exported constants (base URL, default models) to configure OAuth
+ *     connect without a round trip (#340) -- never `@corbits/oauth-core`
+ *     itself (no loopback server in the browser) and never a runtime like
+ *     `@corbits/code` or an API-calling SDK.
  */
 const PROVIDER_PACKAGES = [
   "openai",
@@ -107,6 +118,9 @@ const PROVIDER_PACKAGES = [
   "@corbits/xai-provider",
   "@corbits/oauth-core",
 ];
+
+/** `apps/web`'s narrow OAuth-config exception to `PROVIDER_PACKAGES`, see above. */
+const WEB_PROVIDER_ALLOWED = ["@corbits/codex-provider", "@corbits/xai-provider"];
 
 /**
  * The Interchange platform's internals: the hub, its database and its
@@ -336,8 +350,16 @@ for (const file of files) {
   }
 
   if (area === "installer") {
+    // `tarball-pack.test.ts` proves the packer's bytes round-trip through the
+    // real vendored closure resolver (`@intx/tool-packaging`), the same one
+    // `resolveWorkflowClosure` uses -- an oracle, not a runtime dependency of
+    // the installed package, so it is allowed for test files only.
+    const isTest = /\.test\.tsx?$/.test(path);
     const outside = external.filter(
-      (name) => !startsWithAny(name, INSTALLER_ALLOWED) && !name.startsWith("node:"),
+      (name) =>
+        !startsWithAny(name, INSTALLER_ALLOWED) &&
+        !name.startsWith("node:") &&
+        !(isTest && name === "@intx/tool-packaging"),
     );
     if (outside.length > 0) {
       violations.push({
@@ -369,8 +391,10 @@ for (const file of files) {
     }
   }
 
-  if (area !== "hub") {
-    const provider = external.filter((name) => startsWithAny(name, PROVIDER_PACKAGES));
+  if (area !== "hub" && area !== "hub-embed") {
+    const provider = external.filter(
+      (name) => startsWithAny(name, PROVIDER_PACKAGES) && !(area === "web" && startsWithAny(name, WEB_PROVIDER_ALLOWED)),
+    );
     if (provider.length > 0) {
       violations.push({
         file: path,
