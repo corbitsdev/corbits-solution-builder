@@ -49,7 +49,7 @@ import { openDecisionFor } from "../apps/web/src/decisions-fold.ts";
 import { notifyDecisionOpen } from "../apps/web/src/decision-notify.ts";
 import { listProjectSummaries } from "../apps/web/src/project-list.ts";
 import { foldProject } from "../apps/web/src/run-fold.ts";
-import { deliverDraft, submitThen } from "../apps/web/src/run-signal.ts";
+import { sendStageMail, submitThen } from "../apps/web/src/run-signal.ts";
 
 const checks: { name: string; ok: boolean; detail: string }[] = [];
 function check(name: string, ok: boolean, detail = ""): boolean {
@@ -440,15 +440,13 @@ async function main(): Promise<void> {
       const deadline = Date.now() + 30_000;
       for (;;) {
         try {
-          await deliverDraft(
+          await sendStageMail(
             { tenantId: workspace.tenantId, anchorRunId },
-            1,
             {
+              stage: 1,
               command: "stage.draft",
               runId: anchorRunId,
               message: "Build a small internal tool that tracks team OKRs.",
-              mode: "final",
-              draft: true,
               inference: { maxTokens: 32_000 },
             },
             transport,

@@ -36,7 +36,7 @@ import { StageDocument } from "./document.jsx";
 import { SELECTABLE_TARGETS } from "@solutions-builder/app/targets";
 import { EVALUATED_STAGE } from "@solutions-builder/app/workflows/stage-loop";
 import { foldProjectRuns, projectFeedback, type FoldedFeedback, type StageStatus } from "../../run-fold.ts";
-import { approvalCommand, deliverDraft, deliverGate, deliverRound, DRAFT_MAX_TOKENS_DEFAULT, submitThen } from "../../run-signal.ts";
+import { approvalCommand, deliverGate, DRAFT_MAX_TOKENS_DEFAULT, sendStageMail, submitThen } from "../../run-signal.ts";
 import { foldEvaluation, foldStageThread, nextOpenQuestion } from "../../stage-thread.ts";
 import type { Stage } from "@solutions-builder/app/ledger";
 
@@ -243,6 +243,20 @@ export function StageWorkspace({
   // What the person has already said on this stage, before any draft exists.
   const said = turns.filter((turn) => turn.role === "human");
 
+  /**
+   * Turns the mail-chat's latest specialist reply into the stage's own
+   * document, right before the approval signal: the workflow itself never
+   * writes a stage artifact any more (CL-8599), so approving is what makes
+   * the reply a real version, with the versions a gate names built straight
+   * from what was just written rather than a stale `detail.nodes` read.
+   */
+  const persistApprovedDraft = async () => {
+    const reply = turns.filter((turn) => turn.role === "specialist").at(-1)?.body;
+    if (!reply) return null;
+    const materials = detail.nodes.filter((node) => node.kind === "source_material").map((node) => node.id);
+    return api.persistStageDraft(detail.project.id, stage, reply, materials);
+  };
+
   // The specialist starts as soon as it has something to work from. Asking
   // "anything to add?" before it has said a word is the app asking the person
   // to do its job: the whole premise is that it interviews them, and somebody
@@ -258,12 +272,10 @@ export function StageWorkspace({
     if (startedRef.current === key) return;
     startedRef.current = key;
     void run("draft", () =>
-      deliverDraft(detail, stage as Stage, {
+      sendStageMail(detail, {
+        stage,
         command: "stage.draft",
         runId: current!.id,
-        message: "",
-        mode: "final",
-        draft: true,
         inference: { maxTokens: DRAFT_MAX_TOKENS_DEFAULT },
       }),
     );
@@ -315,13 +327,14 @@ export function StageWorkspace({
               : null
           }
           onApprove={() =>
-            run("submit", () =>
-              deliverGate(detail, stage as Stage, standing, {
+            run("submit", async () => {
+              const persisted = await persistApprovedDraft();
+              return deliverGate(detail, stage as Stage, standing, {
                 command: approvalCommand(stage as Stage),
                 runId: current!.id,
-                versions: approvedVersions(active),
-              }),
-            )
+                versions: persisted ? [persisted] : approvedVersions(active),
+              });
+            })
           }
           onOpenDecisions={onOpenDecisions}
         />
@@ -353,12 +366,11 @@ export function StageWorkspace({
                 loading={busy === "draft"}
                 onClick={() =>
                   run("draft", async () => {
-                    await deliverDraft(detail, stage as Stage, {
+                    await sendStageMail(detail, {
+                      stage,
                       command: "stage.draft",
                       runId: current!.id,
                       message: input,
-                      mode: "final",
-                      draft: true,
                       inference: { maxTokens: DRAFT_MAX_TOKENS_DEFAULT },
                     });
                     setInput("");
@@ -446,12 +458,10 @@ export function StageWorkspace({
             drafting={busy === "draft"}
             onDraftPackages={(audiences) =>
               run("draft", async () => {
-                await deliverDraft(detail, stage as Stage, {
+                await sendStageMail(detail, {
+                  stage,
                   command: "stage.draft",
                   runId: current!.id,
-                  message: "",
-                  mode: "final",
-                  draft: true,
                   inference: { maxTokens: DRAFT_MAX_TOKENS_DEFAULT },
                   audiences,
                 });
@@ -490,12 +500,10 @@ export function StageWorkspace({
               // of the requirements writes the plan again too. The rewrite
               // itself lands through the workflow's own persist, and the pane
               // refetches.
-              await deliverDraft(detail, stage as Stage, {
+              await sendStageMail(detail, {
+                stage,
                 command: "stage.draft",
                 runId: current!.id,
-                message: "",
-                mode: "final",
-                draft: true,
                 inference: { maxTokens: DRAFT_MAX_TOKENS_DEFAULT },
                 documents: ["requirements", "plan"],
               });
@@ -524,10 +532,10 @@ export function StageWorkspace({
           turns={turns}
           openQuestion={openQuestion}
           evaluation={evaluation}
-          onRevise={(message: string, quotes: Quote[], revise?: boolean) => {
+          onRevise={(message: string, quotes: Quote[]) => {
             // Shown before the round trip. A message that leaves the box and
             // appears nowhere reads as lost, and the person writes it again.
-            // `loadThread` replaces this with the recorded turn.
+            // `loadThread` replaces this with the recorded mailbox turn.
             if (message.trim().length > 0 || quotes.length > 0) {
               setTurns((current) => [
                 ...current,
@@ -542,28 +550,22 @@ export function StageWorkspace({
                 },
               ]);
             }
-            // Interview-vs-final is the client's call: the thread's own
-            // open-question state already says whether one is outstanding.
-            const mode: "interview" | "final" =
-              !revise && openQuestion !== null && message.trim().length > 0 && openQuestion.remaining > 0
-                ? "interview"
-                : "final";
             void run("draft", () =>
-              deliverDraft(detail, stage as Stage, {
+              sendStageMail(detail, {
+                stage,
                 command: "stage.draft",
                 runId: current!.id,
                 message,
                 ...(quotes.length > 0 ? { quotes } : {}),
-                mode,
-                draft: true,
                 inference: { maxTokens: DRAFT_MAX_TOKENS_DEFAULT },
               }),
             );
           }}
           soloApproval={detail.soloApproval}
           onSubmit={() =>
-            run("submit", () => {
-              const submit = { runId: current!.id, versions: approvedVersions(active) };
+            run("submit", async () => {
+              const persisted = await persistApprovedDraft();
+              const submit = { runId: current!.id, versions: persisted ? [persisted] : approvedVersions(active) };
               // One decision when nobody else can take it: submitting a thing
               // to yourself and then approving it is two clicks for one act.
               return detail.soloApproval
@@ -664,12 +666,11 @@ function DesignPanel({
           },
         }}
         revise={(feedback, prompt) =>
-          deliverDraft(detail, 4, {
+          sendStageMail(detail, {
+            stage: 4,
             command: "stage.draft",
             runId: detail.current!.id,
             message: prompt,
-            mode: "final",
-            draft: true,
             inference: { maxTokens: DRAFT_MAX_TOKENS_DEFAULT },
             feedback,
           })
@@ -758,7 +759,8 @@ function PacketSummary({
             // The freeze admission between stage 7's gate and stage 8's
             // round: the cost-approved version travels in the intent, since
             // this gate has no other way to read it.
-            await deliverRound(detail, 7, {
+            await sendStageMail(detail, {
+              stage: 7,
               command: "build.freeze",
               runId: current.id,
               versions: detail.nodes
@@ -913,7 +915,7 @@ function BuildPanel({
     }
   };
   const start = (runId: string) =>
-    deliverRound(detail, 8, { command: "build.start_attempt", runId });
+    sendStageMail(detail, { stage: 8, command: "build.start_attempt", runId });
   // A worker ran here, so there is work to continue from; a worker that could
   // not run left nothing.
   const hasWork = final !== undefined && !unavailable;
@@ -944,12 +946,13 @@ function BuildPanel({
       // Two rounds, same as the ledger's two rows: `build.start_attempt` from
       // the terminal run queues a fresh attempt (the guard's own carried
       // state moves queued), then the same command again starts it running.
-      await deliverRound(detail, 8, {
+      await sendStageMail(detail, {
+        stage: 8,
         command: "build.start_attempt",
         runId: from,
         ...(continuing ? { continueFromRunId: current.id } : {}),
       });
-      await deliverRound(detail, 8, { command: "build.start_attempt", runId: from });
+      await sendStageMail(detail, { stage: 8, command: "build.start_attempt", runId: from });
     });
   const tryAgainButtons = hasWork ? (
     <>

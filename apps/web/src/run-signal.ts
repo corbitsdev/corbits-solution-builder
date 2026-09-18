@@ -15,7 +15,9 @@ import {
   findAwaitingSignal,
   listWorkflowRuns,
   readWorkflowRunEvents,
+  triggerWorkflowRun,
   type Transport,
+  type WorkflowRunTrigger,
 } from "@intx/hub-client";
 import type { Command, Stage } from "@solutions-builder/app/ledger";
 import { positionOfSignal, stageSignal } from "@solutions-builder/app/workflows/stage-loop";
@@ -134,39 +136,6 @@ export async function deliverGate(
   return { signalName, signalId };
 }
 
-/** What a person did inside a stage's round — a build decision, or the freeze that leaves stage 7. */
-export type RoundIntent = {
-  readonly command: Command;
-  readonly runId: string;
-  readonly [key: string]: unknown;
-};
-
-/**
- * Delivers a round-scoped command directly to the signal it lands on:
- * `stage.<n>.round` for a build decision (start, answer, resume, cancel,
- * interrupt, wait), `stage.7.freeze` for `build.freeze`. Unlike a gate, a
- * round has no exhaustion twin to disambiguate, so the signal name follows
- * straight from the ledger's own `stageSignal`.
- */
-export async function deliverRound(
-  project: Anchored,
-  stage: Stage,
-  intent: RoundIntent,
-  transport: Transport = createHubTransport(),
-): Promise<Delivered> {
-  if (project.anchorRunId === null) {
-    throw new Error("This project's lifecycle is not placed on a run yet, so there is no round to signal.");
-  }
-  const signalName = stageSignal(stage, intent.command).name;
-  const signalId = await signalIdFor(project.anchorRunId, signalName, intent);
-  await awaitSignalArmed(project.tenantId, project.anchorRunId, signalName, transport);
-  await signalRun(
-    { tenantId: project.tenantId, anchorRunId: project.anchorRunId, signalName, signalId, payload: intent },
-    transport,
-  );
-  return { signalName, signalId };
-}
-
 /**
  * The output cap a round carries when nothing more specific applies. Matches
  * the designer settings' own default (`DESIGNER_TOKENS_DEFAULT` in
@@ -176,21 +145,22 @@ export async function deliverRound(
 export const DRAFT_MAX_TOKENS_DEFAULT = 32_000;
 
 /**
- * A stage's own draft or reply: the same round a specialist drafts against,
- * delivered straight to the run instead of through a host route. `stage.draft`
- * is the one ledger command that carries both a fresh draft and an interview
- * reply — `mode` tells the workflow which; the client decides it from the
- * thread's own `open` question state, the same state it already fetched to
- * show the conversation.
+ * A person's turn inside a stage — a draft/interview reply, a stage 5
+ * audience pick, a stage 6 document pick, stage 4 design feedback, or a
+ * stage 8 build command: a signed conversation message to the project's run,
+ * not a signal. The body is this intent, JSON-encoded, the same convention
+ * `createProject`'s own trigger uses (`client.ts`). The run's specialist for
+ * the stage consumes it as its next turn and replies by mail; see
+ * `apps/web/src/stage-thread.ts` for how both are read back out of the
+ * person's own mailbox.
  */
-export type DraftIntent = {
-  readonly command: "stage.draft";
+export type StageMailIntent = {
+  readonly stage: number;
+  readonly command: Command;
   readonly runId: string;
-  readonly message: string;
+  readonly message?: string;
   readonly quotes?: readonly { readonly quote: string }[];
-  readonly mode: "interview" | "final";
-  readonly draft: true;
-  readonly inference: { readonly maxTokens: number };
+  readonly inference?: { readonly maxTokens: number };
   /** Stage 5: write these stakeholders' packages only, by name. */
   readonly audiences?: readonly string[];
   /** Stage 6: write the requirements, the plan, or both. */
@@ -198,8 +168,7 @@ export type DraftIntent = {
   /**
    * Stage 4: the design feedback this round's prompt was built from. Carried
    * alongside the deterministic prompt so the feedback thread can be folded
-   * back from the run's own events (`feedbackForDesign` in
-   * `@solutions-builder/app/project-state`) instead of a host record.
+   * back out of the mailbox.
    */
   readonly feedback?: {
     readonly designNodeId: string;
@@ -207,33 +176,33 @@ export type DraftIntent = {
     readonly overallNote: string;
     readonly comments: readonly { readonly anchor: Anchor; readonly body: string }[];
   };
+  readonly [key: string]: unknown;
 };
 
 /**
- * Delivers a stage's draft/reply round to its run, the same way a gate
- * decision is delivered: a thin, client-trusted intent, deduped by a digest
- * of itself. Whether the intent is admitted — a named stage 5 audience, a
- * named stage 6 document — is the workflow's own round admit's call
- * (`admitDraft` in `packages/solutions-builder/src/admit.ts`), not this
- * function's or the hub's.
+ * Sends a person's turn to a stage's run as conversation mail. The trigger
+ * route only signs and delivers to the run; it files no Sent copy (unlike
+ * `@corbits/mailbox`'s own `/me/inbox/send`, which always files one
+ * regardless of delivery). Mirror one here so the person's own turns are
+ * readable back out of the SAME thread the specialist's reply lands in
+ * (`apps/web/src/stage-thread.ts`'s mailbox fold). Best-effort: the run was
+ * already messaged above, so a mirror failure must not look like the message
+ * itself failed.
  */
-export async function deliverDraft(
+export async function sendStageMail(
   project: Anchored,
-  stage: Stage,
-  intent: DraftIntent,
+  intent: StageMailIntent,
   transport: Transport = createHubTransport(),
-): Promise<Delivered> {
+): Promise<WorkflowRunTrigger> {
   if (project.anchorRunId === null) {
-    throw new Error("This project's lifecycle is not placed on a run yet, so there is no round to draft.");
+    throw new Error("This project's lifecycle is not placed on a run yet, so there is no specialist to message.");
   }
-  const signalName = stageSignal(stage, intent.command).name;
-  const signalId = await signalIdFor(project.anchorRunId, signalName, intent);
-  await awaitSignalArmed(project.tenantId, project.anchorRunId, signalName, transport);
-  await signalRun(
-    { tenantId: project.tenantId, anchorRunId: project.anchorRunId, signalName, signalId, payload: intent },
-    transport,
-  );
-  return { signalName, signalId };
+  const content = JSON.stringify(intent);
+  const trigger = await triggerWorkflowRun(transport, project.tenantId, project.anchorRunId, { content });
+  await transport
+    .fetch("POST", "/api/me/inbox/send", { to: [trigger.address], subject: intent.command, body: content })
+    .catch(() => {});
+  return trigger;
 }
 
 /** The approval that leaves a stage's gate: stage 7 approves a cost, everything before it approves the draft. */

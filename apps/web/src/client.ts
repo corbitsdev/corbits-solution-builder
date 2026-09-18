@@ -35,6 +35,25 @@ import {
   type WorkflowGitPush,
 } from "@solutions-builder/installer";
 import { MATERIAL_KIND } from "@solutions-builder/app/artifacts";
+
+/**
+ * The document kind a stage's own approved draft is recorded under, once a
+ * person approves it. The workflow itself never writes a stage artifact
+ * (only `attachMaterial` writes one, for a person's own upload): the
+ * mail-chat specialist's reply is the draft, held only in the mailbox, until
+ * approval turns it into the stage's document of record.
+ */
+const STAGE_DRAFT_KIND: Readonly<Record<number, string>> = {
+  1: "problem_brief",
+  2: "solution_constraints",
+  3: "chosen_approach",
+  4: "design_artifact",
+  5: "audience_package",
+  6: "build_plan",
+  7: "cost_approval",
+  8: "build_evidence",
+  9: "delivery_manifest",
+};
 import { artifactGraphFor } from "./artifact-graph.ts";
 import { openCreatedProject } from "./create-project-open.ts";
 import { createHubTransport } from "./hub.ts";
@@ -797,6 +816,46 @@ export const api = {
         }),
       );
       return { attached };
+    }),
+  /**
+   * Persists the mail-chat specialist's approved reply as the stage's own
+   * document, written the same way `attachMaterial` writes straight to the
+   * mounted `@corbits/artifacts` module. Called once, right before the
+   * approval signal, so the run's own gate always names a real version.
+   */
+  persistStageDraft: (projectId: string, stage: number, content: string, sourceVersionIds: string[] = []) =>
+    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      const kind = STAGE_DRAFT_KIND[stage];
+      if (!kind) {
+        throw new ApiFailure({
+          code: "validation_failed",
+          message: `Stage ${stage} has no draft document to approve.`,
+          correlationId: "-",
+          retryable: false,
+        });
+      }
+      const artifact = await installerCreateArtifact(transport, workspaceTenantId, {
+        title: `Stage ${stage} draft`,
+        content,
+        metadata: {
+          sb: {
+            projectId,
+            kind,
+            stage,
+            mediaType: "text/markdown",
+            sourceVersionIds,
+            provenance: { producer: "agent" as const },
+          },
+        },
+      });
+      // Same convention `toArtifactNode` (`project-view.ts`) reads back: the
+      // module revises an artifact in place, so its own id doubles as the
+      // version id, and `<id>@<version>` stands in for a content hash.
+      return {
+        artifactId: artifact.id,
+        versionId: artifact.id,
+        contentHash: `${artifact.id}@${String(artifact.version)}`,
+      };
     }),
   /** The stakeholders stage 5 writes for, and the roles one may hold — read off the hub tenant directly. */
   stakeholders: (projectId: string) =>

@@ -5,10 +5,9 @@ import { createHubTransport } from "./hub.ts";
 import type { StageStatus } from "./run-fold.ts";
 import {
   approvalCommand,
-  deliverDraft,
   deliverGate,
-  DRAFT_MAX_TOKENS_DEFAULT,
   gateSignalName,
+  sendStageMail,
   signalIdFor,
   signalRun,
   submitThen,
@@ -151,63 +150,43 @@ describe("AC1: cancel is a signal on the run", () => {
   });
 });
 
-describe("deliverDraft", () => {
-  test("delivers a stage.draft round to the stage's own round signal, not the gate's", async () => {
-    const { calls, transport } = recording();
-    await deliverDraft(
-      PROJECT,
-      6,
-      {
-        command: "stage.draft",
-        runId: "run_1",
-        message: "write it up",
-        mode: "final",
-        draft: true,
-        inference: { maxTokens: DRAFT_MAX_TOKENS_DEFAULT },
-        documents: ["plan"],
+describe("sendStageMail", () => {
+  test("sends the stage intent as JSON conversation mail to the run, and mirrors it to Sent", async () => {
+    const calls: Call[] = [];
+    const transport: Transport = {
+      fetch: async <T>(method: string, path: string, body?: unknown): Promise<T> => {
+        calls.push({ method, path, ...(body !== undefined ? { body } : {}) });
+        return (path.endsWith("/mail") ? { runId: "dep_1", address: "dep_1@tenant.local", messageId: "msg_1" } : undefined) as T;
       },
+      subscribe: () => () => undefined,
+    };
+    const trigger = await sendStageMail(
+      PROJECT,
+      { stage: 6, command: "stage.draft", runId: "run_1", message: "write it up", documents: ["plan"] },
       transport,
     );
-    expect(calls).toHaveLength(1);
-    expect(calls[0]!.path).toBe("/api/tenants/tnt_ws/workflows/dep_1/signals");
-    const body = calls[0]!.body as { signalName: string; payload: Record<string, unknown> };
-    expect(body.signalName).toBe(roundSignal(6));
-    expect(body.payload).toEqual({
-      command: "stage.draft",
-      runId: "run_1",
-      message: "write it up",
-      mode: "final",
-      draft: true,
-      inference: { maxTokens: DRAFT_MAX_TOKENS_DEFAULT },
-      documents: ["plan"],
+    expect(trigger.address).toBe("dep_1@tenant.local");
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toEqual({
+      method: "POST",
+      path: "/api/tenants/tnt_ws/workflows/dep_1/mail",
+      body: { content: JSON.stringify({ stage: 6, command: "stage.draft", runId: "run_1", message: "write it up", documents: ["plan"] }) },
+    });
+    expect(calls[1]).toEqual({
+      method: "POST",
+      path: "/api/me/inbox/send",
+      body: {
+        to: ["dep_1@tenant.local"],
+        subject: "stage.draft",
+        body: JSON.stringify({ stage: 6, command: "stage.draft", runId: "run_1", message: "write it up", documents: ["plan"] }),
+      },
     });
   });
 
-  test("the same intent sent twice is the same signalId: a retry dedups on the runtime", async () => {
-    const { calls, transport } = recording();
-    const intent = {
-      command: "stage.draft" as const,
-      runId: "run_1",
-      message: "",
-      mode: "final" as const,
-      draft: true as const,
-      inference: { maxTokens: DRAFT_MAX_TOKENS_DEFAULT },
-    };
-    const first = await deliverDraft(PROJECT, 1, intent, transport);
-    const second = await deliverDraft(PROJECT, 1, intent, transport);
-    expect(first.signalId).toBe(second.signalId);
-    expect(calls[0]!.body).toEqual(calls[1]!.body);
-  });
-
-  test("a project without a placed run has no round to draft", async () => {
+  test("a project without a placed run has no specialist to message", async () => {
     const { transport } = recording();
     await expect(
-      deliverDraft(
-        { tenantId: "tnt_ws", anchorRunId: null },
-        1,
-        { command: "stage.draft", runId: "r", message: "", mode: "final", draft: true, inference: { maxTokens: DRAFT_MAX_TOKENS_DEFAULT } },
-        transport,
-      ),
+      sendStageMail({ tenantId: "tnt_ws", anchorRunId: null }, { stage: 1, command: "stage.draft", runId: "r", message: "" }, transport),
     ).rejects.toThrow(/not placed/);
   });
 });
