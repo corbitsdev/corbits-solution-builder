@@ -7,7 +7,7 @@
     "type": "git",
     "url": "git+https://github.com/corbitsdev/solutions-builder-alpha.git"
   },
-  "description": "Solutions Builder \u2014 turns a half-formed problem into shipped software through nine human-gated stages.",
+  "description": "Solutions Builder — turns a half-formed problem into shipped software through nine human-gated stages.",
   "type": "module",
   "scripts": {
     "dev": "bun run vendor:build && bun scripts/dev.ts",
@@ -45,7 +45,7 @@
     "vendor:build": "bun scripts/vendor-build.ts",
     "assets:pack-registry": "bun --conditions intx-src scripts/pack-registry-asset.ts",
     "assets:pack-closure": "bun --conditions intx-src scripts/pack-closure-static.ts",
-    "postinstall": "bun run vendor:build",
+    "postinstall": "bun run vendor:build && bun scripts/fix-mailbox-dist.ts",
     "check:vendored-migrations": "bun --conditions intx-src scripts/check-vendored-migrations.ts",
     "test": "bun test apps/hub/src packages/embed-hub/src packages/installer/src packages/keychain/src packages/solutions-builder/src packages/tools-delivery/src apps/web/src scripts/desktop-launch-mode.test.ts scripts/closure-pack.test.ts",
     "test:vendored": "bun test vendor/interchange/packages/hub-api/src/routes/tenants.test.ts vendor/interchange/packages/hub-api/src/routes/sessions.test.ts vendor/interchange/packages/hub-api/src/routes/assets.test.ts vendor/interchange/packages/hub-api/src/routes/workflow-definitions.test.ts vendor/interchange/packages/hub-api/src/routes/workflows.test.ts vendor/interchange/packages/db/src/model-source-resolution.test.ts"
@@ -53,6 +53,7 @@
   "dependencies": {
     "@corbits/artifacts": "github:corbitsdev/corbits-artifacts",
     "@corbits/codex-provider": "github:corbitsdev/corbits-codex-provider",
+    "@corbits/mailbox": "github:corbitsdev/corbits-mailbox",
     "@corbits/oauth-core": "github:corbitsdev/corbits-oauth-core",
     "@corbits/openai-responses": "github:corbitsdev/corbits-openai-responses",
     "@corbits/process-provisioner": "workspace:*",
@@ -143,6 +144,7 @@
     "tar": "^7.5.1"
   },
   "trustedDependencies": [
-    "@corbits/react-ui"
+    "@corbits/react-ui",
+    "@corbits/mailbox"
   ]
 }

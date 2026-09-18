@@ -61,6 +61,7 @@ import {
   readProcessProvisionerConfig,
   type ProcessProvisionerRole,
 } from "@corbits/process-provisioner";
+import { createInMemoryMailboxEventBus, deliverInboxItems, mountMailbox, type InboxItem } from "@corbits/mailbox";
 import { upgradeWebSocket } from "hono/bun";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
@@ -71,6 +72,13 @@ import { mountProviderOAuth } from "./oauth-mount.js";
 
 /** The path a sidecar's WebSocket connects to; part of `@intx/hub-api`'s own contract. */
 export const SIDECAR_WS_PATH = "/api/sidecars/ws";
+
+/** The text of a mailbox frame this package built: flat, so everything after the header section is the body. */
+function frameBody(raw: Uint8Array): string {
+  const text = new TextDecoder().decode(raw);
+  const split = text.indexOf("\r\n\r\n");
+  return split < 0 ? "" : text.slice(split + 4).trimEnd();
+}
 
 /**
  * The hub's Ed25519 deploy signing keypair. Must be stable across restarts: a
@@ -169,6 +177,23 @@ export type MountedHub = {
    * ticking against a closed handle for as long as the process stays up.
    */
   readonly stopReconcile: () => void;
+  /**
+   * Delivers one @corbits/mailbox inbox item to every principal directly
+   * granted `action` on `resource` (or on `workflow-run:*`) in `tenantId` —
+   * the shape a signal grant is minted in (see `grant-namespaces.ts`).
+   * `externalId` is the dedup key: calling this again for the same gate
+   * (a poll, a retry) delivers nothing new once every holder already has one.
+   * Returns the number of principals it delivered to.
+   */
+  notifyGrantHolders(input: {
+    readonly tenantId: string;
+    readonly resource: string;
+    readonly action: string;
+    readonly source: string;
+    readonly externalId: string;
+    readonly subject: string;
+    readonly body: string;
+  }): Promise<number>;
 };
 
 /**
@@ -377,6 +402,118 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
   };
   setTimeout(() => void reconcile(), 0).unref();
 
+  // @corbits/mailbox: an open decision's inbox item, and the desktop's
+  // notifications bell. Reached over `/api/me/inbox*`; the mounted routes
+  // resolve their own caller session, so nothing about the ledger's
+  // decisions lives on this mount besides the resolver and address below.
+  // The mount's own `MailboxDb` type names `postgres-js`'s driver, but reads
+  // nothing but plain drizzle query-builder calls; this pglite handle (already
+  // wearing the postgres.js result shape every other store here expects)
+  // satisfies it at runtime the same way it does theirs.
+  const mailboxDb = db.db as unknown as Parameters<typeof mountMailbox>[1]["db"];
+  const mailboxBus = createInMemoryMailboxEventBus();
+  async function principalAddress(principal: { tenantId: string; principalId: string }): Promise<string> {
+    const [tenantRow] = (await db.db.execute(
+      sql`SELECT "domain" FROM "public"."tenant" WHERE "id" = ${principal.tenantId} LIMIT 1`,
+    )) as unknown as { domain: string }[];
+    if (tenantRow === undefined) {
+      throw new Error(`no tenant "${principal.tenantId}" to address a mailbox sender from`);
+    }
+    const [principalRow] = (await db.db.execute(
+      sql`SELECT "ref_id" AS "refId" FROM "public"."principal" WHERE "id" = ${principal.principalId} LIMIT 1`,
+    )) as unknown as { refId: string }[];
+    if (principalRow === undefined) {
+      throw new Error(`no principal "${principal.principalId}" to address a mailbox sender as`);
+    }
+    return `${principalRow.refId}@${tenantRow.domain}`;
+  }
+  const mailboxApp = new Hono();
+  mountMailbox(mailboxApp, {
+    db: mailboxDb,
+    bus: mailboxBus,
+    resolvePrincipal: async (ctx: unknown) => {
+      const request = (ctx as { req: { raw: Request } }).req.raw;
+      const result = (await auth.api.getSession({ headers: request.headers })) as { user?: { id: string } } | null;
+      if (!result?.user) return null;
+      const [row] = (await db.db.execute(
+        sql`SELECT "id", "tenant_id" AS "tenantId" FROM "public"."principal" WHERE "kind" = 'user' AND "ref_id" = ${result.user.id} AND "status" = 'active' LIMIT 1`,
+      )) as unknown as { id: string; tenantId: string }[];
+      return row ? { tenantId: row.tenantId, principalId: row.id } : null;
+    },
+    senderAddressFor: principalAddress,
+    // Single-workspace host: a person's own sent mail is addressed to
+    // another principal in the same workspace, so "delivery" is just
+    // filing it into that principal's own inbox.
+    deliver: async (message) => {
+      for (const to of message.to) {
+        const [refId, domain] = to.split("@");
+        if (!refId || !domain) continue;
+        const [tenantRow] = (await db.db.execute(
+          sql`SELECT "id" FROM "public"."tenant" WHERE "domain" = ${domain} LIMIT 1`,
+        )) as unknown as { id: string }[];
+        if (!tenantRow) continue;
+        const [recipient] = (await db.db.execute(
+          sql`SELECT "id" FROM "public"."principal" WHERE "tenant_id" = ${tenantRow.id} AND "kind" = 'user' AND "ref_id" = ${refId} LIMIT 1`,
+        )) as unknown as { id: string }[];
+        if (!recipient) continue;
+        await deliverInboxItems(
+          mailboxDb,
+          [
+            {
+              tenantId: tenantRow.id,
+              principalId: recipient.id,
+              address: to,
+              fromAddress: message.from,
+              subject: "",
+              body: frameBody(message.raw),
+              source: "mailbox-send",
+              externalId: message.messageId,
+            },
+          ],
+          { bus: mailboxBus },
+        );
+      }
+    },
+  });
+
+  async function notifyGrantHolders(input: {
+    readonly tenantId: string;
+    readonly resource: string;
+    readonly action: string;
+    readonly source: string;
+    readonly externalId: string;
+    readonly subject: string;
+    readonly body: string;
+  }): Promise<number> {
+    const holders = (await db.db.execute(
+      sql`SELECT DISTINCT "principal_id" AS "principalId" FROM "public"."grant"
+          WHERE "tenant_id" = ${input.tenantId}
+            AND "action" = ${input.action}
+            AND "effect" = 'allow'
+            AND "role_id" IS NULL
+            AND "principal_id" IS NOT NULL
+            AND ("resource" = ${input.resource} OR "resource" = 'workflow-run:*')`,
+    )) as unknown as { principalId: string | null }[];
+    const principalIds = [...new Set(holders.map((row) => row.principalId).filter((id): id is string => id !== null))];
+    if (principalIds.length === 0) return 0;
+    const items: InboxItem[] = [];
+    for (const principalId of principalIds) {
+      const address = await principalAddress({ tenantId: input.tenantId, principalId });
+      items.push({
+        tenantId: input.tenantId,
+        principalId,
+        address,
+        fromAddress: `solutions-builder@${input.tenantId}.local`,
+        subject: input.subject,
+        body: input.body,
+        source: input.source,
+        externalId: input.externalId,
+      });
+    }
+    const delivered = await deliverInboxItems(mailboxDb, items, { bus: mailboxBus });
+    return delivered.length;
+  }
+
   const app = createApp({
     getSession: async (headers: Headers) => {
       const result = (await auth.api.getSession({ headers })) as {
@@ -420,6 +557,7 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
       };
     }),
   });
+  app.route("/api", mailboxApp);
 
   // Provider sign-in (ChatGPT/Codex, xAI/Grok): PKCE + loopback OAuth login
   // through `@corbits/oauth-core`, not something vendor Interchange's own
@@ -464,6 +602,7 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
   return {
     app,
     db,
+    notifyGrantHolders,
     publicKeyHex: hexEncode(signingKey.publicKey),
     principalKeyStore,
     principalStore: createPrincipalStore(db.db, principalKeyStore),

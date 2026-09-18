@@ -11,11 +11,14 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { STAGE_TITLES } from "@solutions-builder/app/ledger";
 import { CONSEQUENCE, STATE_CONSEQUENCE } from "@solutions-builder/app/decision-copy";
+import { approveSignal, evidenceSignal } from "@solutions-builder/app/workflows/stage-loop";
 import { database } from "./db.js";
 import * as table from "./schema.js";
 import { requiredAuthorityFor } from "./command-approvals.js";
 import { listProjectRecords } from "./project-records.js";
 import { activeRun, type RunRecord } from "./runs.js";
+import { hub, hubIsMounted } from "./hub-mount.js";
+import { tenantId } from "./hub-client.js";
 
 export type Decision = {
   /** Stable for as long as this run sits in this state. */
@@ -31,31 +34,43 @@ export type Decision = {
   requiredAuthority: string;
   /** The exact versions the decision would freeze. */
   versions: { artifactId: string; versionId: string; contentHash: string }[];
-  notifiedAt: string | null;
-  notifyError: string | null;
   createdAt: string;
 };
 
 /** Run states in which the next move is a person's. */
 const DECIDING_STATES = new Set(["waiting_approval", "cost_approved", "waiting_human", "delivery_review"]);
 
-/**
- * Whether a decision has been announced, per process. Notifying is a ping, not
- * a record; after a restart an outstanding decision is still in the queue and
- * may be announced again, which is the honest behaviour.
- */
-const announced = new Map<string, { at: Date | null; error: string | null }>();
-
-export function recordAnnouncement(decisionId: string, outcome: { at: Date | null; error: string | null }) {
-  announced.set(decisionId, outcome);
-}
-
-export function announcementFor(decisionId: string) {
-  return announced.get(decisionId);
-}
-
 export function decisionIdFor(run: Pick<RunRecord, "id" | "state">): string {
   return `${run.id}:${run.state}`;
+}
+
+/** The `signal:<name>` gate a decision in this state parks on. */
+function gateSignalFor(run: Pick<RunRecord, "stage" | "state">): string {
+  return run.state === "waiting_human" ? evidenceSignal(run.stage) : approveSignal(run.stage);
+}
+
+/**
+ * Files one @corbits/mailbox inbox item per principal holding the gate's
+ * `signal:<name>` grant. Idempotent: `deliverInboxItems` dedupes on
+ * `(source, externalId)`, so calling this again for the same parked decision
+ * (every poll finds it still open) delivers nothing new. Best-effort — a
+ * mailbox failure never blocks the decision queue from rendering.
+ */
+async function notifyDecisionOpen(run: Pick<RunRecord, "stage" | "state">, decision: Decision): Promise<void> {
+  if (!hubIsMounted()) return;
+  try {
+    await hub().notifyGrantHolders({
+      tenantId: tenantId(),
+      resource: "workflow-run:*",
+      action: `signal:${gateSignalFor(run)}`,
+      source: "solutions-builder.decision",
+      externalId: decision.id,
+      subject: decision.title,
+      body: decision.consequence,
+    });
+  } catch (cause) {
+    console.error(`decision notify failed for ${decision.id}: ${cause instanceof Error ? cause.message : String(cause)}`);
+  }
 }
 
 /** The decision waiting on this project, or null when the next move is not a person's. */
@@ -85,12 +100,11 @@ export async function openDecisionFor(
     .orderBy(desc(table.artifactNode.createdAt));
 
   const id = decisionIdFor(run);
-  const said = announced.get(id);
   const since = nodes[0]?.createdAt ?? run.createdAt;
   // Delivery verification (what blocks a stage 9 accept) is the
   // tools-delivery workflow step's job now, not the host's — see CL-8340.
   const blockers = null;
-  return {
+  const decision: Decision = {
     blockers,
     id,
     projectId,
@@ -105,10 +119,10 @@ export async function openDecisionFor(
       versionId: node.id,
       contentHash: node.contentHash,
     })),
-    notifiedAt: said?.at?.toISOString() ?? null,
-    notifyError: said?.error ?? null,
     createdAt: since.toISOString(),
   };
+  void notifyDecisionOpen(run, decision);
+  return decision;
 }
 
 /** Every open decision across projects, oldest first — the queue. */

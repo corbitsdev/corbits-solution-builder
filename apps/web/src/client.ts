@@ -198,8 +198,6 @@ export type Wait = {
   consequence: string;
   blockers: string | null;
   requiredAuthority: string;
-  notifiedAt: string | null;
-  notifyError: string | null;
 };
 
 export type ProjectSummary = {

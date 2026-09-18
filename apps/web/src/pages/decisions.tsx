@@ -165,22 +165,6 @@ export function DecisionQueue({
               <dt>Approver</dt>
               <dd>{current?.requiredAuthority.replace(/_/g, " ")}</dd>
             </div>
-            <div>
-              <dt>Notification</dt>
-              <dd>
-                {current?.notifyError ? (
-                  <StateLabel tone="warning">
-                    Delivery failed. The request was kept
-                  </StateLabel>
-                ) : current?.notifiedAt ? (
-                  <StateLabel tone="info">
-                    Sent {new Date(current.notifiedAt).toLocaleTimeString()}
-                  </StateLabel>
-                ) : (
-                  <StateLabel tone="disabled">Not sent</StateLabel>
-                )}
-              </dd>
-            </div>
           </dl>
 
           <div className="field">
