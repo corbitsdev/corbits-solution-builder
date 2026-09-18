@@ -134,7 +134,15 @@ const PLATFORM_PACKAGES = [
   "@solutions-builder/embed-hub",
 ];
 
-/** The runtime surface the hub's product code may use without being a platform file. */
+/**
+ * The runtime surface the hub's product code may use without being a
+ * platform file. `@solutions-builder/embed-hub/pg-compat` belongs here, not
+ * the package's main entry: it is a leaf result-shape adapter with no
+ * `@intx/*` imports of its own, so importing it from a non-embedding hub
+ * file cannot reach `MountedHub`'s `db`/`auth`/`assetService` the way
+ * importing the wrapper's composition (`.`) could — the concern the
+ * `PLATFORM_PACKAGES` comment above raises stays enforced for that entry.
+ */
 const RUNTIME_PACKAGES = [
   "@intx/inference",
   "@intx/inference-catalog",
@@ -142,6 +150,7 @@ const RUNTIME_PACKAGES = [
   "@intx/types",
   "@intx/workflow",
   "@intx/hub-client",
+  "@solutions-builder/embed-hub/pg-compat",
 ];
 
 /**
