@@ -2,9 +2,6 @@ import { access, rm, writeFile } from "node:fs/promises";
 import type { Hono } from "hono";
 import { startAtLoginMarker } from "./paths.js";
 import { designerSettings, saveDesignerSettings, type DesignerSettings } from "./designer-settings.js";
-import { deckSettings, saveDeckDesign, type DeckDesign } from "./deck-settings.js";
-import { removeTemplate, storeTemplate } from "./deck-template.js";
-import { HostError } from "./errors.js";
 import { COMMANDS, LEDGER, STAGE_TITLES } from "@solutions-builder/app/ledger";
 import { AGENT_KIT } from "@solutions-builder/app/kit";
 import { listProviders } from "./providers.js";
@@ -109,33 +106,7 @@ export function registerHostRoutes(api: Hono) {
     const designer = Object.fromEntries(
       Object.entries(await designerSettings()).map(([key, value]) => [`designer.${key}`, value]),
     );
-    const decks = Object.fromEntries(
-      Object.entries(await deckSettings()).flatMap(([role, design]) =>
-        Object.entries(design).map(([key, value]) => [`deck.${role}.${key}`, value]),
-      ),
-    );
-    return context.json({ preferences: { "host.startAtLogin": startAtLogin, ...designer, ...decks } });
-  });
-
-  /**
-   * A role's style guide: a PowerPoint whose theme — colours, typefaces,
-   * slide size — the role's decks are drawn with. Sent as multipart `file`.
-   */
-  api.post("/deck-settings/:role/template", async (context) => {
-    const role = context.req.param("role");
-    const form = await context.req.formData().catch(() => null);
-    const file = form?.get("file");
-    if (!(file instanceof File)) throw new HostError("validation_failed", "Send the PowerPoint as multipart form data under `file`.");
-    const theme = await storeTemplate(role, { name: file.name, type: file.type, bytes: new Uint8Array(await file.arrayBuffer()) });
-    const design = await saveDeckDesign(role, { template: file.name });
-    return context.json({ role, design, theme });
-  });
-
-  api.delete("/deck-settings/:role/template", async (context) => {
-    const role = context.req.param("role");
-    await removeTemplate(role);
-    const design = await saveDeckDesign(role, { template: null });
-    return context.json({ role, design });
+    return context.json({ preferences: { "host.startAtLogin": startAtLogin, ...designer } });
   });
 
   api.put("/preferences/:key", async (context) => {
@@ -149,11 +120,6 @@ export function registerHostRoutes(api: Hono) {
     } else if (key.startsWith("designer.")) {
       const field = key.slice("designer.".length) as keyof DesignerSettings;
       const saved = await saveDesignerSettings({ [field]: value } as Partial<DesignerSettings>);
-      return context.json({ key, value: saved[field] });
-    } else if (key.startsWith("deck.")) {
-      // `deck.<role>.<field>`: one role's design, one field at a time.
-      const [role, field] = key.slice("deck.".length).split(".") as [string, keyof DeckDesign];
-      const saved = await saveDeckDesign(role, { [field]: value } as Partial<DeckDesign>);
       return context.json({ key, value: saved[field] });
     }
     return context.json({ key, value });

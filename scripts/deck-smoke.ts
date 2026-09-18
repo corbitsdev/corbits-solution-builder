@@ -260,14 +260,9 @@ await rm(dir3, { recursive: true, force: true });
   await rm(dir4, { recursive: true, force: true });
 }
 
-// Six roles' settings changed at once — what six selects on one screen do
-// while the host is busy — must all land; each save rewrites the whole file.
+// Two settings changed at once — what two selects on one screen do while the
+// host is busy — must both land; each save rewrites the whole file.
 {
-  const { DECK_ROLES, deckSettings, saveDeckDesign } = await import("../apps/hub/src/deck-settings.js");
-  await Promise.all(DECK_ROLES.map((role) => saveDeckDesign(role, { images: "some" })));
-  const settings = await deckSettings();
-  const landed = DECK_ROLES.filter((role) => settings[role].images === "some");
-  check("settings saved for every role at once all land", landed.length === DECK_ROLES.length, `${landed.length} of ${DECK_ROLES.length}`);
   const { saveDesignerSettings, designerSettings } = await import("../apps/hub/src/designer-settings.js");
   await Promise.all([saveDesignerSettings({ surface: "dark" }), saveDesignerSettings({ language: "Inter, one accent." })]);
   const designer = await designerSettings();

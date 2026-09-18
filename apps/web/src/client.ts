@@ -730,14 +730,6 @@ export const api = {
     request<{ node: ArtifactNode; content: string }>(`/artifacts/${nodeId}`),
   /** Exactly what the specialists are handed for an attached file. */
   materialReading: (nodeId: string) => request<{ text: string }>(`/artifacts/${nodeId}/reading`),
-  /** Keeps a PowerPoint as a stakeholder role's style guide; its theme is read back. */
-  uploadDeckTemplate: (role: string, file: File) => {
-    const form = new FormData();
-    form.append("file", file, file.name);
-    return requestForm<{ role: string; theme: Record<string, string | number> }>(`/deck-settings/${role}/template`, form);
-  },
-  removeDeckTemplate: (role: string) =>
-    request<{ role: string }>(`/deck-settings/${role}/template`, { method: "DELETE" }),
   /** Saves a package's already-recorded slides into the Downloads folder; says where. The host does not build them. */
   saveSlidesFor: (packageNodeId: string) =>
     post<{ path: string; bytes: number; nodeId: string }>(`/artifacts/${packageNodeId}/slides/save`, {}),

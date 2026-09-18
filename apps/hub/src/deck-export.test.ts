@@ -14,14 +14,15 @@ describe("@solutions-builder/app/deck", () => {
 });
 
 describe("host deck persistence", () => {
-  test("the host deck module gets PowerPoint bytes from tools-deck render_deck, not pptxgenjs", async () => {
+  test("the host deck module only reads recorded slides — the sidecar renders them", async () => {
     const src = await readFile(join(here, "deck.ts"), "utf8");
-    expect(src).toContain("@solutions-builder/tools-deck/sidecar-bundle");
-    expect(src).toContain('name: "render_deck"');
     expect(src).not.toContain("renderDeckOnTemplate");
     expect(src).not.toContain("@solutions-builder/app/deck-on-template");
+    expect(src).not.toContain("@solutions-builder/tools-deck/sidecar-bundle");
     expect(src).not.toMatch(/from ["']pptxgenjs["']/);
     expect(src).not.toContain("from \"./deck-images.js\"");
+    expect(src).not.toContain("from \"./deck-settings.js\"");
+    expect(src).not.toContain("from \"./deck-template.js\"");
   });
 
   test("the slides save route does not build a deck", async () => {
