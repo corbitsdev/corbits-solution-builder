@@ -29,12 +29,18 @@ import {
   EVIDENCE_STEP_ID,
   GATE_WAIT_STEP_ID,
   ADMIT_STEP_ID,
+  FREEZE_CAP_STEP_ID,
+  FREEZE_STEP_ID,
   MAX_REVISIONS,
   NO_DRAFT_STEP_ID,
   REQUIREMENTS_STEP_ID,
+  ROUND_ADMIT_STEP_ID,
+  ROUND_DECIDE_STEP_ID,
+  ROUND_REFUSED_STEP_ID,
   ROUND_STEP_ID,
   STAGE_WORKFLOW_ID,
   agentStepIds,
+  freezeSignal,
   gatedStepCount,
 } from "./stage-loop.js";
 import { agentById, agentFor, panelPrincipals, type AgentRole } from "../kit.js";
@@ -233,6 +239,30 @@ const buildAgent = defineAgent({
 });
 `
     : "";
+  // The round is admitted, not merely awaited: the ledger guard runs against
+  // the run's own carried build state before anything else this iteration
+  // does. Unconditional — even the gates-only, no-offering skeleton admits a
+  // round command, since a refusal is what sends the loop back to wait again.
+  const roundAdmit = `
+      ${JSON.stringify(ROUND_ADMIT_STEP_ID)}: action({
+        handler: "admitGate",
+        input: roundAdmitInput(ROUND),
+        drainBehavior: "wait",
+        after: [ROUND],
+      }),`;
+  // The branch a real build agent needs to skip on a refused round: nothing
+  // to build this iteration, so the loop's own carried state (the admit's
+  // verdict) is all that changes.
+  const roundDecide = source
+    ? `
+      ${JSON.stringify(ROUND_DECIDE_STEP_ID)}: gate({
+        when: { from: "steps." + ROUND_ADMIT + ".output.refused" },
+        then: ${JSON.stringify(ROUND_REFUSED_STEP_ID)},
+        else: ${JSON.stringify(BUILD_STEP_ID)},
+        after: [ROUND_ADMIT],
+      }),
+      ${JSON.stringify(ROUND_REFUSED_STEP_ID)}: escalation({ to: ${JSON.stringify(ROUND_REFUSED_STEP_ID)}, after: [ROUND_DECIDE] }),`
+    : "";
   const buildStep = source
     ? `
       ${JSON.stringify(BUILD_STEP_ID)}: step({
@@ -241,7 +271,7 @@ const buildAgent = defineAgent({
         timeout: ${BUILD_STEP_TIMEOUT_MS},
         triggers: 1,
         drainBehavior: "wait",
-        after: [ROUND],
+        after: [ROUND_DECIDE],
       }),`
     : "";
   // Accept and fail park here, after the build agent, not on gate-8 while the
@@ -319,8 +349,13 @@ const STAGES = ${JSON.stringify([...STAGES])};
 const STAGE_ID = ${JSON.stringify(STAGE_WORKFLOW_ID)};
 const MAX_REVISIONS = ${MAX_REVISIONS};
 const ROUND = ${JSON.stringify(ROUND_STEP_ID)};
+const ROUND_ADMIT = ${JSON.stringify(ROUND_ADMIT_STEP_ID)};
+const ROUND_DECIDE = ${JSON.stringify(ROUND_DECIDE_STEP_ID)};
 const WAIT = ${JSON.stringify(GATE_WAIT_STEP_ID)};
 const ADMIT = ${JSON.stringify(ADMIT_STEP_ID)};
+const FREEZE = ${JSON.stringify(FREEZE_STEP_ID)};
+const FREEZE_CAP = ${JSON.stringify(FREEZE_CAP_STEP_ID)};
+const FREEZE_SIGNAL = ${JSON.stringify(freezeSignal())};
 const ADMIT_DRAFT = ${JSON.stringify(ADMIT_DRAFT_STEP_ID)};
 const DECIDE = ${JSON.stringify(DECIDE_STEP_ID)};
 const NO_DRAFT = ${JSON.stringify(NO_DRAFT_STEP_ID)};
@@ -350,6 +385,18 @@ function admitInput(waitStepId, literal) {
     ],
   };
 }
+// Same shape, keyed on the build state the round carried forward instead of
+// an audience tally: the build stage's round has no quorum, and every other
+// stage's round has no run state of its own to carry.
+function roundAdmitInput(waitStepId) {
+  return {
+    merge: [
+      { project: { from: "trigger.payload" }, fields: ["buildState"] },
+      { from: "steps." + waitStepId + ".output" },
+      { literal: { stage: BUILD_STAGE, gate: "round" } },
+    ],
+  };
+}
 ${source ? `const SOURCE = ${JSON.stringify(source)};` : ""}
 ${buildAgent}${namerAgent}${agentsBlock}${agentStepSpecs}
 // One iteration: the workflow waits to hear what the person did. A gate right
@@ -364,7 +411,7 @@ function iteration(stage) {
     [ROUND]: awaitSignal({ name: STAGE_ID + "." + stage + ".round", drainBehavior: "wait" }),
   };
   if (stage === BUILD_STAGE) {
-    Object.assign(steps, {${buildStep}${evidenceSteps}
+    Object.assign(steps, {${roundAdmit}${roundDecide}${buildStep}${evidenceSteps}
     });
   } else if (typeof AGENT_STEP_SPECS !== "undefined") {
     const specs = AGENT_STEP_SPECS[stage] || [];
@@ -465,6 +512,44 @@ function gateIteration(stage, gate) {
   });
 }
 
+// The freeze between stage 7's gate and stage 8's round: its own admission,
+// sharing the gate loop's WAIT/ADMIT step ids since it lives in its own
+// child workflow scope and reuses the same gateRefused/carryGate loop refs.
+function freezeIteration() {
+  return defineWorkflow({
+    id: STAGE_ID + ".admit.freeze",
+    triggers: [{ type: "manual" }],
+    steps: {
+      [WAIT]: awaitSignal({ name: FREEZE_SIGNAL, drainBehavior: "wait" }),
+      [ADMIT]: action({
+        handler: "admitGate",
+        input: admitInput(WAIT, { stage: 7, gate: "freeze" }),
+        drainBehavior: "wait",
+        after: [WAIT],
+      }),
+    },
+  });
+}
+
+function freezeSteps(after) {
+  return {
+    [FREEZE]: loop({
+      body: freezeIteration(),
+      while: "gateRefused",
+      carry: "carryGate",
+      maxIterations: MAX_REVISIONS,
+      onExhausted: FREEZE_CAP,
+      drainBehavior: "wait",
+      after,
+    }),
+    [FREEZE_CAP]: awaitSignal({
+      name: STAGE_ID + ".7.freeze-cap",
+      drainBehavior: "wait",
+      after: [FREEZE],
+    }),
+  };
+}
+
 function stageSteps(stage, after) {
   return {
     ["revise-" + stage]: loop({
@@ -512,6 +597,10 @@ let previousEnds = null;
 for (const stage of STAGES) {
   steps = { ...steps, ...stageSteps(stage, previousEnds) };
   previousEnds = ["gate-" + stage, "exhausted-" + stage];
+  if (stage === 7) {
+    steps = { ...steps, ...freezeSteps(previousEnds) };
+    previousEnds = [FREEZE, FREEZE_CAP];
+  }
 }
 ${nameStepAssignment}
 export default defineWorkflow({

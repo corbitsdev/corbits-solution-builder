@@ -813,21 +813,6 @@ export const api = {
    */
   command: (projectId: string, command: string, payload: unknown) =>
     post<CommandOutcome>(`/projects/${projectId}/commands/${command}`, payload),
-  /**
-   * Answers once the run is running. The worker's outcome arrives later, as a
-   * `bridge.final` event and the run's state.
-   */
-  startBuild: (
-    projectId: string,
-    runId: string,
-    options: { expectedRevision?: number; continueFromRunId?: string } = {},
-  ) => post<{ run: CommandOutcome }>(`/projects/${projectId}/build/start`, { runId, ...options }),
-  /** Accepts an ended attempt's work as evidence: packaged, recorded, and on to delivery review. */
-  acceptBuild: (projectId: string, runId: string, expectedRevision?: number) =>
-    post<{ run: CommandOutcome; artifact: { nodeId: string; title: string; name: string; sizeBytes: number } }>(
-      `/projects/${projectId}/build/accept`,
-      { runId, expectedRevision },
-    ),
   buildEvents: (projectId: string) =>
     request<{ events: BuildEvent[] }>(`/projects/${projectId}/build/events`),
   design: (projectId: string) =>

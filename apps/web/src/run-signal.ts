@@ -93,6 +93,38 @@ export async function deliverGate(
   return { signalName, signalId };
 }
 
+/** What a person did inside a stage's round — a build decision, or the freeze that leaves stage 7. */
+export type RoundIntent = {
+  readonly command: Command;
+  readonly runId: string;
+  readonly [key: string]: unknown;
+};
+
+/**
+ * Delivers a round-scoped command directly to the signal it lands on:
+ * `stage.<n>.round` for a build decision (start, answer, resume, cancel,
+ * interrupt, wait), `stage.7.freeze` for `build.freeze`. Unlike a gate, a
+ * round has no exhaustion twin to disambiguate, so the signal name follows
+ * straight from the ledger's own `stageSignal`.
+ */
+export async function deliverRound(
+  project: Anchored,
+  stage: Stage,
+  intent: RoundIntent,
+  transport: Transport = createHubTransport(),
+): Promise<Delivered> {
+  if (project.anchorRunId === null) {
+    throw new Error("This project's lifecycle is not placed on a run yet, so there is no round to signal.");
+  }
+  const signalName = stageSignal(stage, intent.command).name;
+  const signalId = await signalIdFor(project.anchorRunId, signalName, intent);
+  await signalRun(
+    { tenantId: project.tenantId, anchorRunId: project.anchorRunId, signalName, signalId, payload: intent },
+    transport,
+  );
+  return { signalName, signalId };
+}
+
 /**
  * The output cap a round carries when nothing more specific applies. Matches
  * the designer settings' own default (`DESIGNER_TOKENS_DEFAULT` in

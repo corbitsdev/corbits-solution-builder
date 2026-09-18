@@ -10,7 +10,7 @@
  * mail write uses the shared single-writer connection and must not run while
  * a transaction is still open on it.
  */
-import { LEDGER, type Command, type Stage } from "@solutions-builder/app/ledger";
+import { LEDGER, type Command, type Stage, type Transition } from "@solutions-builder/app/ledger";
 import { PROJECT_LIFECYCLE_ID } from "@solutions-builder/app/workflows/project-lifecycle";
 import { stageOfSignal } from "@solutions-builder/app/workflows/stage-loop";
 import {
@@ -28,6 +28,7 @@ import { sha256 } from "./ids.js";
 import type { CommandOutcome } from "./command-dispatch.js";
 import { HOST_PRINCIPAL } from "./command-dispatch.js";
 import type { RunMutation } from "./runs.js";
+import type { ArtifactDraft } from "./domain.js";
 
 /** The `agent_session` id for a project's ledger, deterministic in the project id. */
 export function ledgerSessionIdFor(projectId: string): Promise<string> {
@@ -133,15 +134,48 @@ function summarize(entry: LedgerEntry): string {
 }
 
 /**
+ * The run's own last recorded state, read from the ledger this project has
+ * already committed — the same source `runsForProject` folds from. Only
+ * consulted when a command's ledger rows are ambiguous by name alone (see
+ * `landing` below); a client's thin intent never carries this, so it has to
+ * come from what this project already knows about the run.
+ */
+async function priorState(projectId: string, runId: string): Promise<string | null> {
+  const commands = await ledgerCommands(projectId);
+  for (let index = commands.length - 1; index >= 0; index -= 1) {
+    const after = commands[index]!.after as { runId?: unknown; state?: unknown } | null;
+    if (after && typeof after === "object" && after.runId === runId && typeof after.state === "string") {
+      return after.state;
+    }
+  }
+  return null;
+}
+
+/**
  * Where the ledger says a command leaves a run: the row's `to` state, and the
  * stage the row moves to — forward for an approval, back to the named target
  * for a route, into the build for a freeze, into delivery for accepted
  * evidence. The same table `admitGate` reads, so the ledger can never say a
  * gate went somewhere the run did not.
+ *
+ * A command can name more than one row (`build.start_attempt`'s queued→running
+ * and its three retry variants, one per terminal build state it restarts
+ * from): the row is picked by the run's own last recorded state, not by
+ * taking the first match — a queued retry recorded as if it started from
+ * `queued` would misreport every later fold of the run. Single-row commands
+ * never need the run's history at all.
  */
-function landing(command: Command, stage: Stage, payload: Record<string, unknown>): { state: string; stage: Stage; transition: string } | null {
-  const row = LEDGER.find((entry) => entry.command === command && entry.from !== null);
-  if (!row) return null;
+async function landing(
+  projectId: string,
+  runId: string,
+  command: Command,
+  stage: Stage,
+  payload: Record<string, unknown>,
+): Promise<{ row: Transition; state: string; stage: Stage; transition: string } | null> {
+  const candidates = LEDGER.filter((entry) => entry.command === command && entry.from !== null);
+  if (candidates.length === 0) return null;
+  const known = candidates.length > 1 ? await priorState(projectId, runId) : null;
+  const row = (known !== null ? candidates.find((entry) => entry.from?.state === known) : undefined) ?? candidates[0]!;
   const target = typeof payload.targetStage === "number" ? (payload.targetStage as Stage) : stage;
   const toStage: Stage =
     command === "stage.approve"
@@ -153,7 +187,7 @@ function landing(command: Command, stage: Stage, payload: Record<string, unknown
           : row.to?.state === "backtracked"
             ? target
             : stage;
-  return { state: row.to?.state ?? row.from!.state, stage: toStage, transition: row.id };
+  return { row, state: row.to?.state ?? row.from!.state, stage: toStage, transition: row.id };
 }
 
 /**
@@ -164,19 +198,19 @@ function landing(command: Command, stage: Stage, payload: Record<string, unknown
  * from the `signalId` the runtime deduplicated on. Null when the signal is
  * not a stage's or names no run.
  */
-export function ledgerEntryFromGateSignal(args: {
+export async function ledgerEntryFromGateSignal(args: {
   readonly projectId: string;
   readonly command: Command;
   readonly payload: Record<string, unknown>;
   readonly signalId: string;
   readonly signalName: string;
-}): LedgerEntry | null {
+}): Promise<LedgerEntry | null> {
   const runId = typeof args.payload.runId === "string" && args.payload.runId.length > 0 ? args.payload.runId : null;
   const stage = stageOfSignal(args.signalName);
   if (!runId || stage === null) return null;
-  const to = landing(args.command, stage, args.payload);
+  const to = await landing(args.projectId, runId, args.command, stage, args.payload);
   if (!to) return null;
-  const from = LEDGER.find((entry) => entry.command === args.command && entry.from !== null)!.from!;
+  const from = to.row.from!;
   const result: CommandOutcome = {
     runId,
     stage: to.stage,
@@ -208,11 +242,58 @@ export function ledgerEntryFromGateSignal(args: {
   };
 }
 
-/** Records a gate the run committed as ledger mail; a receipt under the same signal id makes this a no-op. */
+/**
+ * The frozen packet a `build.freeze` signal writes, through the same
+ * artifact path `writeArtifact` gives every other version — the immutable
+ * BuildPacket the ledger row promises, not merely a ledger mail entry. A
+ * dynamic import: `./projects.js` already imports this module, so a static
+ * one here would cycle.
+ */
+async function writeFreezePacket(entry: LedgerEntry, payload: Record<string, unknown>): Promise<void> {
+  const { writeArtifact } = await import("./projects.js");
+  const versions = Array.isArray(payload.versions) ? payload.versions : [];
+  const targets = Array.isArray(payload.targets) ? payload.targets.map(String) : [];
+  const costApprovalVersionId =
+    typeof payload.costApprovalVersionId === "string" && payload.costApprovalVersionId.length > 0
+      ? payload.costApprovalVersionId
+      : null;
+  const draft: ArtifactDraft = {
+    projectId: entry.projectId,
+    kind: "build_packet",
+    title: "Build packet",
+    content: JSON.stringify(
+      {
+        versions,
+        placement: typeof payload.placement === "string" ? payload.placement : "local",
+        targets,
+        costApproval: { versionId: costApprovalVersionId },
+      },
+      null,
+      2,
+    ),
+    mediaType: "application/json",
+    sourceVersionIds: versions
+      .map((version) => (version && typeof version === "object" ? (version as { versionId?: unknown }).versionId : undefined))
+      .filter((id): id is string => typeof id === "string"),
+    provenance: { producer: "human", runId: entry.runId ?? "" },
+  };
+  await writeArtifact(draft, { principalId: entry.actorPrincipalId });
+}
+
+/**
+ * Records a gate the run committed as ledger mail; a receipt under the same
+ * signal id makes this a no-op. `build.freeze` also writes the packet — once,
+ * on the same idempotency boundary as the ledger write, since a replayed
+ * signal must never freeze a second version.
+ */
 export async function recordGateFromSignal(args: Parameters<typeof ledgerEntryFromGateSignal>[0]): Promise<void> {
-  const entry = ledgerEntryFromGateSignal(args);
+  const entry = await ledgerEntryFromGateSignal(args);
   if (!entry) return;
+  if (await receiptFor(entry.projectId, entry.idempotencyKey)) return;
   await recordCommand(entry);
+  if (entry.command === "build.freeze") {
+    await writeFreezePacket(entry, args.payload);
+  }
 }
 
 /**
@@ -257,6 +338,17 @@ const GATE_SIGNAL_COMMANDS: ReadonlySet<string> = new Set([
   "build.fail",
   "build.cancel",
   "build.interrupt",
+  // Admitted through the round's own admitGate step (stage-loop.ts), not a
+  // host route: the guard's origin/checkpoint preconditions run against the
+  // round's carried build state before the signal is ever counted here.
+  "build.start_attempt",
+  "build.answer",
+  "build.resume",
+  // Admitted through the freeze's own admitGate step (stage-loop.ts), between
+  // stage 7's gate and stage 8's round: the missing-cost-approval and
+  // already-frozen preconditions run against the delivered intent before the
+  // signal is ever counted here.
+  "build.freeze",
 ]);
 
 /** One run's committed signal traffic plus the signal names it still awaits. */

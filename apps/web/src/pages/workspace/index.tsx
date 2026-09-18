@@ -37,7 +37,7 @@ import { StageDocument } from "./document.jsx";
 import { SELECTABLE_TARGETS } from "@solutions-builder/app/targets";
 import { EVALUATED_STAGE } from "@solutions-builder/app/workflows/stage-loop";
 import type { StageStatus } from "../../run-fold.ts";
-import { approvalCommand, deliverDraft, deliverGate, DRAFT_MAX_TOKENS_DEFAULT, submitThen } from "../../run-signal.ts";
+import { approvalCommand, deliverDraft, deliverGate, deliverRound, DRAFT_MAX_TOKENS_DEFAULT, submitThen } from "../../run-signal.ts";
 import { foldEvaluation, foldStageThread, nextOpenQuestion } from "../../stage-thread.ts";
 import type { Stage } from "@solutions-builder/app/ledger";
 
@@ -749,8 +749,11 @@ function PacketSummary({
           setBusy(true);
           setError(null);
           try {
-            await api.command(detail.project.id, "build.freeze", {
-              expectedRevision: detail.project.revision,
+            // The freeze admission between stage 7's gate and stage 8's
+            // round: the cost-approved version travels in the intent, since
+            // this gate has no other way to read it.
+            await deliverRound(detail, 7, {
+              command: "build.freeze",
               runId: current.id,
               versions: detail.nodes
                 .filter((node) => node.supersededByNodeId === null)
@@ -761,6 +764,7 @@ function PacketSummary({
                 })),
               placement: "local",
               targets: [...chosen],
+              costApprovalVersionId: costNode.id,
             });
             onChanged();
           } catch (cause) {
@@ -908,7 +912,7 @@ function BuildPanel({
     }
   };
   const start = (runId: string) =>
-    api.startBuild(detail.project.id, runId, { expectedRevision: detail.project.revision });
+    deliverRound(detail, 8, { command: "build.start_attempt", runId });
   // A worker ran here, so there is work to continue from; a worker that could
   // not run left nothing.
   const hasWork = final !== undefined && !unavailable;
@@ -936,11 +940,15 @@ function BuildPanel({
           reason: "Failed to try the build again from the build supervision screen.",
         });
       }
-      const queued = await api.command(detail.project.id, "build.start_attempt", {
-        ...(ended ? {} : { expectedRevision: detail.project.revision }),
+      // Two rounds, same as the ledger's two rows: `build.start_attempt` from
+      // the terminal run queues a fresh attempt (the guard's own carried
+      // state moves queued), then the same command again starts it running.
+      await deliverRound(detail, 8, {
+        command: "build.start_attempt",
         runId: from,
+        ...(continuing ? { continueFromRunId: current.id } : {}),
       });
-      await api.startBuild(detail.project.id, queued.runId, continuing ? { continueFromRunId: current.id } : {});
+      await deliverRound(detail, 8, { command: "build.start_attempt", runId: from });
     });
   const tryAgainButtons = hasWork ? (
     <>
@@ -1046,7 +1054,13 @@ function BuildPanel({
                 loading={busy === "accept"}
                 onClick={() =>
                   act("accept", async () => {
-                    await api.acceptBuild(detail.project.id, current.id, detail.project.revision);
+                    // The evidence park's own admit: the worker's reported
+                    // verdict travels as the intent, same as any other gate.
+                    await deliverGate(detail, 8, null, {
+                      command: "build.accept_evidence",
+                      runId: current.id,
+                      ...(final ? (final.payload as Record<string, unknown>) : {}),
+                    });
                   })
                 }
               >

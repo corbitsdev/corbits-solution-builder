@@ -18,7 +18,7 @@
  * of it: a gate in the product is a gate in the workflow.
  */
 import { defineWorkflow, type WorkflowDefinition } from "@intx/workflow";
-import { gateStepId, stageEnds, stageSteps } from "./stage-loop.js";
+import { freezeEnds, freezeSteps, gateStepId, stageEnds, stageSteps } from "./stage-loop.js";
 import {
   LEDGER,
   STAGES,
@@ -74,6 +74,13 @@ export function projectLifecycleDefinition(): WorkflowDefinition {
     // a person before the next.
     steps = { ...steps, ...stageSteps(stage, previousEnds) };
     previousEnds = stageEnds(stage);
+    // Stage 7 leaves its gate through cost.approve with no stage advance; the
+    // freeze that actually moves the run into stage 8 is its own admission,
+    // wired here rather than folded into stage 7's gate or stage 8's round.
+    if (stage === 7) {
+      steps = { ...steps, ...freezeSteps(previousEnds) };
+      previousEnds = freezeEnds();
+    }
   }
 
   return defineWorkflow({

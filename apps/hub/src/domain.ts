@@ -55,21 +55,6 @@ export const ProjectOpenPayload = type({
 });
 export type ProjectOpenPayload = typeof ProjectOpenPayload.infer;
 
-export const BuildFreezePayload = type({
-  runId: id,
-  /** Every input the packet freezes, by exact version. */
-  versions: ExactVersionRef.array().atLeastLength(1),
-  placement: "'local' | 'container' | 'target_native'",
-  targets: type("string > 0").array(),
-});
-
-export const BuildAnswerPayload = type({
-  runId: id,
-  questionId: id,
-  answer: type("string > 0").to("string <= 8000"),
-  "grantedCapabilities?": type("string > 0").array(),
-});
-
 export { ARTIFACT_KINDS, ARTIFACT_STAGE, type ArtifactKind } from "@solutions-builder/app/artifacts";
 export const ArtifactKindT = type.enumerated(...ARTIFACT_KINDS);
 

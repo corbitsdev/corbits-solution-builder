@@ -279,8 +279,9 @@ for (const terminal of TERMINAL_STATES) {
       }
     }
   }
-  // revise, gate loop, exhausted loop, gate-cap, exhausted-cap
-  if (definition.stepOrder.length !== STAGES.length * 5) {
+  // revise, gate loop, exhausted loop, gate-cap, exhausted-cap, plus the
+  // freeze loop and its cap between stage 7 and stage 8.
+  if (definition.stepOrder.length !== STAGES.length * 5 + 2) {
     problems.push(
       `The native workflow has ${definition.stepOrder.length} steps for ${STAGES.length} stages`,
     );
@@ -314,6 +315,9 @@ for (const terminal of TERMINAL_STATES) {
       EVIDENCE_ADMIT_STEP_ID,
       EVIDENCE_STEP_ID,
       REQUIREMENTS_STEP_ID,
+      ROUND_ADMIT_STEP_ID,
+      ROUND_DECIDE_STEP_ID,
+      ROUND_REFUSED_STEP_ID,
       panelStepId,
       audienceStepId,
       reviseStepId: revise,
@@ -442,11 +446,32 @@ for (const terminal of TERMINAL_STATES) {
       // agent: a real step under the sidecar, with the kit's stage 8 prompt,
       // the posix tools, and the offering as its declared source.
       const buildBody = withSourceSteps[revise(BUILD_STAGE as never)]?.body?.steps ?? {};
+
+      // The round is admitted before anything builds: guard.ts runs against
+      // the run's own carried build state, and a refused command skips the
+      // build agent entirely rather than running it anyway.
+      const roundAdmit = buildBody[ROUND_ADMIT_STEP_ID];
+      const roundDecide = buildBody[ROUND_DECIDE_STEP_ID];
+      const roundRefused = buildBody[ROUND_REFUSED_STEP_ID];
+      if (!roundAdmit || roundAdmit.kind !== "action" || roundAdmit.handler !== "admitGate") {
+        problems.push("The build stage's round does not admit through admitGate");
+      } else if (!roundAdmit.after?.includes(ROUND_STEP_ID)) {
+        problems.push("The round admit does not follow the round awaiter");
+      }
+      if (!roundDecide || roundDecide.kind !== "gate" || roundDecide.when?.from !== `steps.${ROUND_ADMIT_STEP_ID}.output.refused`) {
+        problems.push("The round's decide gate does not read the round admit's refusal");
+      } else if (roundDecide.then !== ROUND_REFUSED_STEP_ID || roundDecide.else !== BUILD_STEP_ID) {
+        problems.push("The round's decide gate does not branch to refused/build");
+      }
+      if (!roundRefused) problems.push("The build stage's iteration has no refused branch for the round");
+
       const buildStep = buildBody[BUILD_STEP_ID];
       if (!buildStep || buildStep.kind !== "step" || buildStep.agent?.id !== agentFor(BUILD_STAGE as never).id) {
         problems.push("The build stage's iteration has no agent step for the kit's stage 8 specialist");
       } else {
-        if (!buildStep.after?.includes(ROUND_STEP_ID)) problems.push("The build agent does not run after the round gate");
+        if (!buildStep.after?.includes(ROUND_DECIDE_STEP_ID)) {
+          problems.push("The build agent does not run after the round's decide gate");
+        }
         if (!buildStep.agent?.toolFactories?.some((tool) => tool.id === "@intx/tools-posix/sidecar-bundle")) {
           problems.push("The build agent carries no posix tools");
         }
@@ -474,10 +499,11 @@ for (const terminal of TERMINAL_STATES) {
       const buildOrder = withSourceSteps[revise(BUILD_STAGE as never)]?.body?.stepOrder ?? [];
       if (
         !buildOrder.includes(ROUND_STEP_ID) ||
+        !buildOrder.includes(ROUND_ADMIT_STEP_ID) ||
         !buildOrder.includes(BUILD_STEP_ID) ||
         !buildOrder.includes(EVIDENCE_STEP_ID)
       ) {
-        problems.push("Stage 8 with a source is not round, build, evidence");
+        problems.push("Stage 8 with a source is not round, round-admit, build, evidence");
       }
 
       // The naming step: top level, the kit's namer, reads the run's opening

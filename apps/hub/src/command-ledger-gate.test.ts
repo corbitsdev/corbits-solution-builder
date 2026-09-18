@@ -5,8 +5,8 @@ const APPROVE_3 = "solutions-builder.stage.3.approve";
 const ROUND_8 = "solutions-builder.stage.8.round";
 
 describe("ledgerEntryFromGateSignal", () => {
-  test("a thin intent lands where the ledger row says, at the stage the signal names", () => {
-    const entry = ledgerEntryFromGateSignal({
+  test("a thin intent lands where the ledger row says, at the stage the signal names", async () => {
+    const entry = await ledgerEntryFromGateSignal({
       projectId: "tnt_1",
       command: "stage.approve",
       payload: { command: "stage.approve", runId: "run_1", versions: [{ versionId: "v1" }], principalId: "p_person" },
@@ -24,8 +24,8 @@ describe("ledgerEntryFromGateSignal", () => {
     expect(entry?.result).toMatchObject({ stage: 4, state: "in_progress", transitionId: "stage.approve", delivery: "delivered" });
   });
 
-  test("AC6: the actor is the principal the hub stamped, never one the body claims", () => {
-    const entry = ledgerEntryFromGateSignal({
+  test("AC6: the actor is the principal the hub stamped, never one the body claims", async () => {
+    const entry = await ledgerEntryFromGateSignal({
       projectId: "tnt_1",
       command: "stage.submit",
       payload: { runId: "run_1", principalId: "p_hub_says", actorPrincipalId: "p_body_says", actor: { principalId: "p_also_body" } },
@@ -35,7 +35,7 @@ describe("ledgerEntryFromGateSignal", () => {
     expect(entry?.actorPrincipalId).toBe("p_hub_says");
   });
 
-  test("AC2: idempotency is the signalId — a body idempotencyKey is not read", () => {
+  test("AC2: idempotency is the signalId — a body idempotencyKey is not read", async () => {
     const args = {
       projectId: "tnt_1",
       command: "stage.approve" as const,
@@ -43,12 +43,13 @@ describe("ledgerEntryFromGateSignal", () => {
       signalId: "sig_approve",
       signalName: APPROVE_3,
     };
-    expect(ledgerEntryFromGateSignal(args)?.idempotencyKey).toBe("sig_approve");
-    expect(ledgerEntryFromGateSignal(args)?.correlationId).toBe("sig_approve");
+    const entry = await ledgerEntryFromGateSignal(args);
+    expect(entry?.idempotencyKey).toBe("sig_approve");
+    expect(entry?.correlationId).toBe("sig_approve");
   });
 
-  test("a route back lands on the target the person named", () => {
-    const entry = ledgerEntryFromGateSignal({
+  test("a route back lands on the target the person named", async () => {
+    const entry = await ledgerEntryFromGateSignal({
       projectId: "tnt_1",
       command: "stage.revise",
       payload: { runId: "run_1", targetStage: 2, reason: "again" },
@@ -58,8 +59,8 @@ describe("ledgerEntryFromGateSignal", () => {
     expect(entry?.after).toEqual({ runId: "run_1", stage: 2, state: "backtracked" });
   });
 
-  test("build.cancel on the stage-8 round is a recorded build decision", () => {
-    const entry = ledgerEntryFromGateSignal({
+  test("build.cancel on the stage-8 round is a recorded build decision", async () => {
+    const entry = await ledgerEntryFromGateSignal({
       projectId: "tnt_1",
       command: "build.cancel",
       payload: { runId: "run_8", reason: "stop" },
@@ -69,12 +70,12 @@ describe("ledgerEntryFromGateSignal", () => {
     expect(entry?.after).toEqual({ runId: "run_8", stage: 8, state: "cancelled" });
   });
 
-  test("a signal that names no run or is not a stage's is skipped", () => {
+  test("a signal that names no run or is not a stage's is skipped", async () => {
     expect(
-      ledgerEntryFromGateSignal({ projectId: "tnt_1", command: "stage.submit", payload: { command: "stage.submit" }, signalId: "s", signalName: APPROVE_3 }),
+      await ledgerEntryFromGateSignal({ projectId: "tnt_1", command: "stage.submit", payload: { command: "stage.submit" }, signalId: "s", signalName: APPROVE_3 }),
     ).toBeNull();
     expect(
-      ledgerEntryFromGateSignal({ projectId: "tnt_1", command: "stage.submit", payload: { runId: "run_1" }, signalId: "s", signalName: "other.signal" }),
+      await ledgerEntryFromGateSignal({ projectId: "tnt_1", command: "stage.submit", payload: { runId: "run_1" }, signalId: "s", signalName: "other.signal" }),
     ).toBeNull();
   });
 });

@@ -17,7 +17,13 @@ import {
   WORKFLOW_PACKAGE_DEPENDENCIES,
   type InferenceSourcePin,
 } from "@solutions-builder/app/workflows/lifecycle-source";
-import { continuingCommands, ADMIT_STEP_ID, EVIDENCE_STEP_ID, ROUND_STEP_ID } from "@solutions-builder/app/workflows/stage-loop";
+import {
+  continuingCommands,
+  ADMIT_STEP_ID,
+  EVIDENCE_STEP_ID,
+  ROUND_ADMIT_STEP_ID,
+  ROUND_STEP_ID,
+} from "@solutions-builder/app/workflows/stage-loop";
 import {
   assetsFor,
   catalogFor,
@@ -104,11 +110,24 @@ function roundCommand(childOutput) {
   const round = childOutput && typeof childOutput === "object" ? childOutput[${JSON.stringify(ROUND_STEP_ID)}] : null;
   return round && typeof round === "object" && typeof round.command === "string" ? round.command : null;
 }
+// The build stage's round is admitted before it is counted: a refused command
+// (the wrong ledger row for the run's own state, a stale question, an
+// unverified checkpoint) never reaches CONTINUES at all — the loop goes
+// straight back to waiting on the same signal, with the round's carried
+// build state unchanged.
+function roundAdmitOutput(childOutput) {
+  const admit = childOutput && typeof childOutput === "object" ? childOutput[${JSON.stringify(ROUND_ADMIT_STEP_ID)}] : null;
+  return admit && typeof admit === "object" ? admit : null;
+}
 export function stillOpen(childOutput) {
+  const admit = roundAdmitOutput(childOutput);
+  if (admit && admit.refused === true) return true;
   const command = roundCommand(childOutput);
   return command !== null && CONTINUES.has(command);
 }
 export function carryRound(childOutput, carry) {
+  const admit = roundAdmitOutput(childOutput);
+  if (admit) return admit;
   const evidence = childOutput && typeof childOutput === "object" ? childOutput[${JSON.stringify(EVIDENCE_STEP_ID)}] : null;
   if (evidence) return evidence;
   const round = childOutput && typeof childOutput === "object" ? childOutput[${JSON.stringify(ROUND_STEP_ID)}] : null;

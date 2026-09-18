@@ -20,7 +20,7 @@
  * A refusal is the step's output, not a run mutation: the gate loop runs
  * again and waits.
  */
-import { LEDGER, type Command, type Stage, type Transition } from "./ledger.js";
+import { LEDGER, type Command, type RunState, type Stage, type Transition } from "./ledger.js";
 import {
   authoritiesFor,
   evaluate,
@@ -30,8 +30,35 @@ import {
   type RunView,
 } from "./guard.js";
 
-/** Which awaiter the admit follows: a stage gate, its exhaustion twin, or the build's evidence park. */
-export type GateKind = "gate" | "exhausted" | "evidence";
+/**
+ * Which awaiter the admit follows: a stage gate, its exhaustion twin, the
+ * build's evidence park, the build stage's own round, or the freeze between
+ * stage 7's gate and stage 8's round. A round is not a fixed-state gate: the
+ * run it stands on moves every time a round command is admitted (queued,
+ * running, waiting on a person, interrupted), so it carries its own state
+ * forward across iterations instead of reading it from a literal. A freeze is
+ * a fixed-state gate (`cost_approved`), but the one fact the guard needs about
+ * it — which version was cost-approved — is not a literal the workflow can
+ * write ahead of time, so it comes from the delivered intent the same way a
+ * route's `targetStage` already does.
+ */
+export type GateKind = "gate" | "exhausted" | "evidence" | "round" | "freeze";
+
+/**
+ * What a build stage's round carries from one admitted command to the next:
+ * the state the run actually stands in, the origin a worker question was
+ * raised from (so `build.answer` cannot resume a different attempt's
+ * question), and the checkpoint a worker advertised on interrupt (so
+ * `build.resume` cannot invent one). Never read from the client: only ever
+ * written by a prior admission on this same round.
+ */
+export type BuildStateCarry = {
+  readonly state: RunState;
+  readonly waitingRequestOriginId: string | null;
+  readonly checkpointRef: string | null;
+};
+
+const INITIAL_BUILD_STATE: BuildStateCarry = { state: "queued", waitingRequestOriginId: null, checkpointRef: null };
 
 /** Stage 5's recorded audience decisions, carried across gate iterations. */
 export type AudienceTally = {
@@ -42,8 +69,20 @@ export type AudienceTally = {
 };
 
 export type AdmitVerdict =
-  | { readonly refused: false; readonly transition: Transition; readonly toStage: Stage; readonly audience?: AudienceTally }
-  | { readonly refused: true; readonly code: RefusalCode; readonly message: string; readonly audience?: AudienceTally };
+  | {
+      readonly refused: false;
+      readonly transition: Transition;
+      readonly toStage: Stage;
+      readonly audience?: AudienceTally;
+      readonly buildState?: BuildStateCarry;
+    }
+  | {
+      readonly refused: true;
+      readonly code: RefusalCode;
+      readonly message: string;
+      readonly audience?: AudienceTally;
+      readonly buildState?: BuildStateCarry;
+    };
 
 /** The ledger state a gate stands at: stage 9 decides on delivered bytes, every other gate on a submitted draft. */
 export function gateState(stage: Stage, gate: GateKind): RunView["state"] {
@@ -70,7 +109,9 @@ function asStage(value: unknown): Stage | null {
 }
 
 function asGate(value: unknown): GateKind | null {
-  return value === "gate" || value === "exhausted" || value === "evidence" ? value : null;
+  return value === "gate" || value === "exhausted" || value === "evidence" || value === "round" || value === "freeze"
+    ? value
+    : null;
 }
 
 function asTally(value: unknown, required: number): AudienceTally {
@@ -83,8 +124,52 @@ function asTally(value: unknown, required: number): AudienceTally {
   };
 }
 
-function refused(code: RefusalCode, message: string, audience?: AudienceTally): AdmitVerdict {
-  return { refused: true, code, message, ...(audience ? { audience } : {}) };
+function asOptionalString(value: unknown): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+/** The build stage's carried state, read back off the loop's own last verdict — never the client body. */
+function asBuildState(value: unknown): BuildStateCarry {
+  if (!value || typeof value !== "object") return INITIAL_BUILD_STATE;
+  const rec = value as Record<string, unknown>;
+  return {
+    state: typeof rec.state === "string" ? (rec.state as RunState) : INITIAL_BUILD_STATE.state,
+    waitingRequestOriginId: asOptionalString(rec.waitingRequestOriginId),
+    checkpointRef: asOptionalString(rec.checkpointRef),
+  };
+}
+
+/**
+ * The build state the round carries into its next iteration once a command is
+ * admitted. `build.wait_for_human` opens a question against this run's own
+ * origin; `build.answer` and `build.resume` consume it — the origin check and
+ * the checkpoint check are exactly what a stale or foreign resume would fail
+ * on the next admission. `build.interrupt` records whatever checkpoint the
+ * worker advertised, if any; every other admitted round command starts the
+ * next iteration with neither.
+ */
+function nextBuildState(
+  command: Command,
+  runId: string,
+  prior: BuildStateCarry,
+  transition: Transition,
+  checkpointRef: unknown,
+): BuildStateCarry {
+  const state = (transition.to?.state ?? prior.state) as RunState;
+  if (command === "build.wait_for_human") {
+    return { state, waitingRequestOriginId: runId, checkpointRef: prior.checkpointRef };
+  }
+  if (command === "build.interrupt") {
+    return { state, waitingRequestOriginId: null, checkpointRef: asOptionalString(checkpointRef) };
+  }
+  if (command === "build.start_attempt" || command === "build.resume") {
+    return { state, waitingRequestOriginId: null, checkpointRef: null };
+  }
+  return { state, waitingRequestOriginId: null, checkpointRef: prior.checkpointRef };
+}
+
+function refused(code: RefusalCode, message: string, audience?: AudienceTally, buildState?: BuildStateCarry): AdmitVerdict {
+  return { refused: true, code, message, ...(audience ? { audience } : {}), ...(buildState ? { buildState } : {}) };
 }
 
 export type AdmitInput = {
@@ -97,6 +182,12 @@ export type AdmitInput = {
   readonly targetStage?: unknown;
   readonly audienceName?: unknown;
   readonly decision?: unknown;
+  /** The build stage's round only: the state carried from the last admitted round command. */
+  readonly buildState?: unknown;
+  /** The build stage's round only: a checkpoint a worker advertised on `build.interrupt`. */
+  readonly checkpointRef?: unknown;
+  /** The freeze only: the exact version `cost.approve` recorded, named by the delivered intent. */
+  readonly costApprovalVersionId?: unknown;
 };
 
 /**
@@ -105,6 +196,61 @@ export type AdmitInput = {
  * runtime replay it.
  */
 export function admit(input: AdmitInput): AdmitVerdict {
+  // The freeze between stage 7's gate and stage 8's round: a fixed-state
+  // gate (cost_approved, kind stage), but the cost-approval version is the
+  // one fact about the run this gate cannot get from a literal, so it is
+  // read from the delivered intent, the same trust boundary `targetStage`
+  // already crosses for a route. `frozenPacketExists` is never set: this
+  // step exists once in the deployed lifecycle and cannot be re-entered
+  // after it admits, so a second freeze of the same run is not a case the
+  // workflow can reach, unlike the host-effect path it replaces.
+  if (input.gate === "freeze") {
+    const run: RunView = {
+      id: input.runId,
+      kind: "stage",
+      stage: input.stage,
+      state: "cost_approved",
+      originId: input.runId,
+      routeTargetStage: null,
+      costApprovalVersionId: asOptionalString(input.costApprovalVersionId),
+      checkpointRef: null,
+    };
+    const context: GuardContext = { actorAuthorities: authoritiesFor(input.command) };
+    const verdict = evaluate(input.command, run, context);
+    if (!verdict.ok) return refused(verdict.code, verdict.message);
+    return { refused: false, transition: verdict.transition, toStage: verdict.toStage };
+  }
+
+  // The build stage's round is not a fixed-state gate: the run it stands on
+  // moves with every admitted command, so its state comes from what the loop
+  // itself carried forward, never from a literal or the client body.
+  if (input.gate === "round") {
+    const prior = asBuildState(input.buildState);
+    const run: RunView = {
+      id: input.runId,
+      kind: "build",
+      stage: input.stage,
+      state: prior.state,
+      originId: input.runId,
+      routeTargetStage: null,
+      costApprovalVersionId: null,
+      checkpointRef: prior.checkpointRef,
+    };
+    const context: GuardContext = {
+      actorAuthorities: authoritiesFor(input.command),
+      ...(prior.waitingRequestOriginId !== null ? { waitingRequestOriginId: prior.waitingRequestOriginId } : {}),
+      checkpointResumeVerified: prior.checkpointRef !== null,
+    };
+    const verdict = evaluate(input.command, run, context);
+    if (!verdict.ok) return refused(verdict.code, verdict.message, undefined, prior);
+    return {
+      refused: false,
+      transition: verdict.transition,
+      toStage: verdict.toStage,
+      buildState: nextBuildState(input.command, input.runId, prior, verdict.transition, input.checkpointRef),
+    };
+  }
+
   const run = gateRunView(input.runId, input.stage, input.gate);
   const tally = input.stage === 5 ? asTally(input.audience, input.quorum ?? 0) : undefined;
   const targetStage = asStage(input.targetStage);
@@ -166,6 +312,9 @@ export async function admitGate(input: unknown): Promise<AdmitVerdict> {
     targetStage: rec.targetStage,
     audienceName: rec.audienceName,
     decision: rec.decision,
+    buildState: rec.buildState,
+    checkpointRef: rec.checkpointRef,
+    costApprovalVersionId: rec.costApprovalVersionId,
   });
 }
 

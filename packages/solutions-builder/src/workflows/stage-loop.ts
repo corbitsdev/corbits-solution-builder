@@ -69,6 +69,16 @@ export const GATE_WAIT_STEP_ID = "wait";
 /** The action inside a gate loop: the ledger guard admits or refuses. */
 export const ADMIT_STEP_ID = "admit";
 /**
+ * The action that follows the build stage's round awaiter: the ledger guard
+ * admits or refuses the round command against the run's own carried build
+ * state, before the build agent (or a retry, an answer, a resume) ever runs.
+ */
+export const ROUND_ADMIT_STEP_ID = "round-admit";
+/** The empty branch a refused round takes: nothing to run, the loop waits again. */
+export const ROUND_REFUSED_STEP_ID = "round-refused";
+/** The gate reading whether the round-admit refused this round's command. */
+export const ROUND_DECIDE_STEP_ID = "round-decide";
+/**
  * The action right after the round, on a stage that drafts: the ledger guard
  * admits or refuses the round's own intent (a stage 5 audience name, a
  * stage 6 document name) before any specialist runs. A client delivers
@@ -84,13 +94,30 @@ export const ADMIT_DRAFT_STEP_ID = "admit-draft";
  */
 export function admitInput(
   waitStepId: string,
-  literal: { readonly stage: Stage; readonly gate: "gate" | "exhausted" | "evidence"; readonly quorum?: number },
+  literal: { readonly stage: Stage; readonly gate: "gate" | "exhausted" | "evidence" | "freeze"; readonly quorum?: number },
 ): Record<string, unknown> {
   return {
     merge: [
       { project: { from: "trigger.payload" }, fields: ["audience"] },
       { from: `steps.${waitStepId}.output` },
       { literal },
+    ],
+  };
+}
+
+/**
+ * What the build stage's round-admit reads: the build state the loop carried
+ * from the last admitted round command, the delivered intent, then the
+ * round's own literal last. Same shape as `admitInput`, keyed on `buildState`
+ * instead of `audience` — the build stage's round has no audience quorum, and
+ * a stage gate never carries a build's run state.
+ */
+export function roundAdmitInput(waitStepId: string): Record<string, unknown> {
+  return {
+    merge: [
+      { project: { from: "trigger.payload" }, fields: ["buildState"] },
+      { from: `steps.${waitStepId}.output` },
+      { literal: { stage: BUILD_STAGE, gate: "round" } },
     ],
   };
 }
@@ -264,13 +291,16 @@ export function stageSignal(
   command: Command,
   gate: "gate" | "exhausted" = "gate",
 ): StageSignal {
-  const name = isEvidenceCommand(command)
-    ? evidenceSignal(stage)
-    : isRoundCommand(command)
-      ? roundSignal(stage)
-      : gate === "gate"
-        ? approveSignal(stage)
-        : exhaustedSignal(stage);
+  const name =
+    command === "build.freeze"
+      ? freezeSignal()
+      : isEvidenceCommand(command)
+        ? evidenceSignal(stage)
+        : isRoundCommand(command)
+          ? roundSignal(stage)
+          : gate === "gate"
+            ? approveSignal(stage)
+            : exhaustedSignal(stage);
   return { name, payload: { command, draft: command === "stage.draft" } };
 }
 
@@ -293,6 +323,65 @@ export function evidenceGate(after: readonly string[]): Record<string, unknown> 
       after: [EVIDENCE_STEP_ID],
     }),
   };
+}
+
+/** The stage whose gate a freeze follows: cost is approved at 7, the packet freezes a run into stage 8. */
+const FREEZE_STAGE: Stage = 7;
+/** The top-level loop step for the freeze between stage 7's gate and stage 8's round. */
+export const FREEZE_STEP_ID = "freeze";
+/** Dead-end park if the freeze loop hits its refusal cap. */
+export const FREEZE_CAP_STEP_ID = "freeze-cap";
+/** The signal `build.freeze` arrives on. Stage-scoped so `stageOfSignal` still resolves it. */
+export function freezeSignal(): string {
+  return `${STAGE_WORKFLOW_ID}.${FREEZE_STAGE}.freeze`;
+}
+
+/**
+ * One freeze admission: wait for the signal, then admit. Shares the gate
+ * loop's own step ids (`GATE_WAIT_STEP_ID`, `ADMIT_STEP_ID`) because it lives
+ * in its own child workflow scope and reuses the same `gateRefused`/
+ * `carryGate` loop refs a plain gate iteration does — a refusal here waits
+ * again, exactly like any other gate.
+ */
+export function freezeIteration(): WorkflowDefinition {
+  return defineWorkflow({
+    id: `${STAGE_WORKFLOW_ID}.admit.freeze`,
+    triggers: [{ type: "manual" }],
+    steps: {
+      [GATE_WAIT_STEP_ID]: awaitSignal({ name: freezeSignal(), drainBehavior: "wait" }),
+      [ADMIT_STEP_ID]: action({
+        handler: "admitGate",
+        input: admitInput(GATE_WAIT_STEP_ID, { stage: FREEZE_STAGE, gate: "freeze" }),
+        drainBehavior: "wait",
+        after: [GATE_WAIT_STEP_ID],
+      }),
+    } as never,
+  });
+}
+
+/** The top-level steps the freeze contributes, wired between stage 7's gates and stage 8's revise loop. */
+export function freezeSteps(after: readonly string[]): Record<string, unknown> {
+  return {
+    [FREEZE_STEP_ID]: loop({
+      body: freezeIteration(),
+      while: "gateRefused",
+      carry: "carryGate",
+      maxIterations: MAX_REVISIONS,
+      onExhausted: FREEZE_CAP_STEP_ID,
+      drainBehavior: "wait",
+      after: [...after],
+    }),
+    [FREEZE_CAP_STEP_ID]: awaitSignal({
+      name: `${STAGE_WORKFLOW_ID}.${FREEZE_STAGE}.freeze-cap`,
+      drainBehavior: "wait",
+      after: [FREEZE_STEP_ID],
+    }),
+  };
+}
+
+/** The steps stage 8's revise loop follows once the freeze has admitted. */
+export function freezeEnds(): string[] {
+  return [FREEZE_STEP_ID, FREEZE_CAP_STEP_ID];
 }
 
 // --- Following the ledger --------------------------------------------------
@@ -357,17 +446,36 @@ export function stageOfStepId(stepId: string): Stage | null {
  * the round; which command it was decides whether the loop goes on.
  */
 export function iteration(stage: Stage): WorkflowDefinition {
+  const steps: Record<string, unknown> = {
+    [ROUND_STEP_ID]: awaitSignal({
+      name: roundSignal(stage),
+      // No timeout. A stage waits as long as the person takes; a timer here
+      // would be an automatic advancement, which §7 forbids.
+      drainBehavior: "wait",
+    }),
+  };
+  // The build stage's round is admitted, not merely awaited: a queued attempt,
+  // a worker's question and its answer, and a resume from a checkpoint all
+  // land here, and each has a real precondition guard.ts enforces (the right
+  // ledger row for the run's own state, the same-origin question a
+  // build.answer resumes, the verified checkpoint a build.resume requires).
+  // A refused command carries the round's state forward unchanged and the
+  // loop waits again on the same signal; nothing after this step runs this
+  // iteration.
+  if (stage === BUILD_STAGE) {
+    Object.assign(steps, {
+      [ROUND_ADMIT_STEP_ID]: action({
+        handler: "admitGate",
+        input: roundAdmitInput(ROUND_STEP_ID),
+        drainBehavior: "wait",
+        after: [ROUND_STEP_ID],
+      }),
+    });
+  }
   return defineWorkflow({
     id: `${STAGE_WORKFLOW_ID}.iteration.${stage}`,
     triggers: [{ type: "manual" }],
-    steps: {
-      [ROUND_STEP_ID]: awaitSignal({
-        name: roundSignal(stage),
-        // No timeout. A stage waits as long as the person takes; a timer here
-        // would be an automatic advancement, which §7 forbids.
-        drainBehavior: "wait",
-      }),
-    } as never,
+    steps: steps as never,
     state: {
       schema: { projectId: "string", runId: "string" } as never,
     },
