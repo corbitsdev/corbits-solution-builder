@@ -75,10 +75,34 @@ function isPage(node: ArtifactNode): boolean {
   return node.mediaType === "text/html" || node.kind === "design_artifact";
 }
 
+/**
+ * A design is one HTML document of its own: it prints from a hidden frame
+ * of its own, not the app's print layer. The frame carries no `allow-scripts`
+ * — nothing in an agent-authored design runs — only `allow-same-origin` (so
+ * the parent can reach `contentWindow.print()`) and `allow-modals` (so the
+ * print dialog itself is allowed).
+ */
+async function printPage(node: ArtifactNode, tenantId: string, content: string | null): Promise<void> {
+  const html = content ?? (await api.artifactContent(tenantId, node.id)).content;
+  const iframe = document.createElement("iframe");
+  iframe.setAttribute("sandbox", "allow-same-origin allow-modals");
+  iframe.style.position = "fixed";
+  iframe.style.top = "-10000px";
+  iframe.srcdoc = html;
+  const remove = () => iframe.remove();
+  iframe.addEventListener("load", () => {
+    const frameWindow = iframe.contentWindow;
+    frameWindow?.addEventListener("afterprint", remove);
+    frameWindow?.print();
+    setTimeout(remove, 60_000);
+  });
+  document.body.appendChild(iframe);
+}
+
 /** Opens the document for printing. `content` may be null; it is fetched then. */
 export function printArtifact(node: ArtifactNode, tenantId: string, content: string | null = null): void {
   if (isPage(node)) {
-    window.location.assign(api.printPage(node.id));
+    void printPage(node, tenantId, content);
     return;
   }
   set({ node, content, tenantId });

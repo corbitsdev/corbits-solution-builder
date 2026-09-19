@@ -950,11 +950,6 @@ export const api = {
     });
     return { decisions };
   },
-  /** Saves a package's already-recorded slides into the Downloads folder; says where. The host does not build them. */
-  saveSlidesFor: (packageNodeId: string) =>
-    post<{ path: string; bytes: number; nodeId: string }>(`/artifacts/${packageNodeId}/slides/save`, {}),
-  /** Where a design is served as a page of its own, for printing. A path, not a request. */
-  printPage: (nodeId: string) => `/api/artifacts/${nodeId}/print`,
   preferences: () => request<{ preferences: Record<string, unknown> }>("/preferences"),
   setPreference: (key: string, value: unknown) =>
     request<{ key: string }>(`/preferences/${key}`, {

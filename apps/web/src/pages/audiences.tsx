@@ -13,10 +13,11 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ApiFailure, type AudienceDecision, type ProjectDetail } from "../client.js";
 import type { ChatMessage } from "../stage-mail.ts";
-import { Banner, Button, Field, Screen, StateLabel } from "../components.jsx";
+import { Banner, Button, downloadArtifact, Field, Screen, StateLabel } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
 import { Tabs, Input, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@corbits/react-ui";
 import { Markdown } from "../markdown.jsx";
+import { buildPackageDeck } from "../deck-save.ts";
 
 const POLL_INTERVAL_MS = 3_000;
 const POLL_TIMEOUT_MS = 10 * 60 * 1_000;
@@ -365,20 +366,41 @@ export function AudiencePackages({
   const [error, setError] = useState<string | null>(null);
   // Slides are asked for one audience at a time, and a person moves on to
   // the next while the first is still being saved. So each package keeps
-  // its own state — being saved, or where its slides went — rather than one
-  // slot for whichever tab happens to be open.
+  // its own state — being saved, or saved — rather than one slot for
+  // whichever tab happens to be open.
   const [saving, setSaving] = useState<ReadonlySet<string>>(new Set());
-  const [savedPaths, setSavedPaths] = useState<ReadonlyMap<string, string>>(new Map());
-  // The slides for a package are the PowerPoint stage 5 already recorded
-  // beside it. Saving writes those bytes; the host does not build a deck.
+  const [savedNodes, setSavedNodes] = useState<ReadonlySet<string>>(new Set());
+  // The slides for a package are its recorded PowerPoint deck, when one
+  // exists beside it in the artifact graph (same kind/variant relationship
+  // `graph.tsx` groups on); otherwise they are built here from the
+  // package's own "Deck outline" section. Either way the browser downloads
+  // the bytes itself — there is no host route to save them to.
   const saveSlides = async (packageNodeId: string) => {
+    const pkg = packages.find((node) => node.id === packageNodeId);
+    const name = pkg?.variant ?? "this stakeholder";
     setSaving((before) => new Set(before).add(packageNodeId));
     setError(null);
     try {
-      const result = await api.saveSlidesFor(packageNodeId);
-      setSavedPaths((before) => new Map(before).set(packageNodeId, result.path));
+      if (!pkg) throw new Error("That stakeholder's package could not be found.");
+      const deck = detail.nodes
+        .filter((node) => node.kind === "audience_deck" && node.variant === pkg.variant && node.supersededByNodeId === null)
+        .sort((a, b) => b.version - a.version)[0];
+      if (deck) {
+        const result = await api.artifactContent(tenantId, deck.id);
+        downloadArtifact(result.content, `${deck.title}.pptx`);
+      } else {
+        const packageContent = await api.artifactContent(tenantId, packageNodeId);
+        const role = audiences.find((audience) => audience.name === pkg.variant)?.role ?? "";
+        const built = await buildPackageDeck({
+          projectTitle: detail.project.title,
+          audience: name,
+          role,
+          markdown: packageContent.content,
+        });
+        downloadArtifact(built.dataUrl, built.filename);
+      }
+      setSavedNodes((before) => new Set(before).add(packageNodeId));
     } catch (cause) {
-      const name = packages.find((node) => node.id === packageNodeId)?.variant ?? "this stakeholder";
       setError(`Slides for ${name}: ${cause instanceof ApiFailure ? cause.detail.message : String(cause)}`);
     } finally {
       setSaving((before) => {
@@ -389,7 +411,7 @@ export function AudiencePackages({
     }
   };
   const slidesState = (nodeId: string): "saving" | "saved" | null =>
-    saving.has(nodeId) ? "saving" : savedPaths.has(nodeId) ? "saved" : null;
+    saving.has(nodeId) ? "saving" : savedNodes.has(nodeId) ? "saved" : null;
 
   const selected = packages.find((node) => node.variant === active) ?? packages[0] ?? null;
   // A stakeholder whose package was never written, or failed to be: the
@@ -632,15 +654,15 @@ export function AudiencePackages({
                     )}
                   </div>
                 </details>
-                {savedPaths.has(selected.id) ? (
+                {savedNodes.has(selected.id) ? (
                   <Banner
                     tone="okay"
-                    title={`Saved to ${savedPaths.get(selected.id)}`}
+                    title="Slides saved"
                     action={{
                       label: "Dismiss",
                       onClick: () =>
-                        setSavedPaths((before) => {
-                          const next = new Map(before);
+                        setSavedNodes((before) => {
+                          const next = new Set(before);
                           next.delete(selected.id);
                           return next;
                         }),
