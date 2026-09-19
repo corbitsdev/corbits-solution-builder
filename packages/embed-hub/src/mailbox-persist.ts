@@ -6,7 +6,7 @@
  */
 import { sql } from "drizzle-orm";
 import type { DB } from "@intx/db";
-import type { AuthorizeMailboxSender, MailboxPersistArgs } from "@corbits/mailbox";
+import { resolveMailboxRecipients, type AuthorizeMailboxSender, type MailboxPersistArgs } from "@corbits/mailbox";
 import { resolveRoutableAddress } from "@intx/hub-sessions";
 
 /** The `create`/`has` slice of `EventCollectorRegistry` `ensureRunSession`
@@ -118,14 +118,56 @@ export function createHubPersistMailWithSessionEnsure(
   };
 }
 
+/**
+ * A person addressing another principal in their own tenant (decision
+ * notifications, any other person-to-person mail) is not a `workflow_run`
+ * and never resolves through `resolveRoutableAddress`. `senderAddressFor` in
+ * index.ts mints that address from the principal's raw `ref_id`, which is
+ * not lower-cased the way an agent's own address of the same person is
+ * (`usr_<refId>@domain` vs. bare, and case can differ), so this is matched
+ * the same case-insensitive way `persist.ts` already matches recipients:
+ * `resolveMailboxRecipients` strips the `usr_` prefix / legacy bare form and
+ * lower-cases the local part, then the row lookup accepts either the raw
+ * `id` or a case-insensitive `ref_id` match.
+ */
+async function authorizeTenantPrincipalSender(
+  db: DB["db"],
+  senderAddress: string,
+): Promise<{ tenantId: string; domain: string } | null> {
+  const at = senderAddress.lastIndexOf("@");
+  if (at < 0) return null;
+  const domain = senderAddress.slice(at + 1).trim().toLowerCase();
+  if (domain.length === 0) return null;
+
+  const [tenantRow] = (await db.execute(
+    sql`SELECT "id" FROM "public"."tenant" WHERE lower("domain") = ${domain} LIMIT 1`,
+  )) as unknown as { id: string }[];
+  if (tenantRow === undefined) return null;
+
+  const [resolved] = resolveMailboxRecipients([senderAddress], domain);
+  if (resolved === undefined) return null;
+
+  const [principalRow] = (await db.execute(
+    sql`SELECT "id" FROM "public"."principal"
+        WHERE "tenant_id" = ${tenantRow.id}
+          AND ("id" = ${resolved.principalId} OR lower("ref_id") = ${resolved.principalId})
+        LIMIT 1`,
+  )) as unknown as { id: string }[];
+  if (principalRow === undefined) return null;
+
+  return { tenantId: tenantRow.id, domain };
+}
+
 export function createHubMailboxAuthorizeSender(db: DB["db"]): AuthorizeMailboxSender {
   return async (senderAddress: string) => {
     const sender = await resolveRoutableAddress(db, senderAddress);
-    if (sender === undefined) return null;
-    const [row] = (await db.execute(
-      sql`SELECT "domain" FROM "public"."tenant" WHERE "id" = ${sender.tenantId} LIMIT 1`,
-    )) as unknown as { domain: string }[];
-    if (row === undefined) return null;
-    return { tenantId: sender.tenantId, domain: row.domain };
+    if (sender !== undefined) {
+      const [row] = (await db.execute(
+        sql`SELECT "domain" FROM "public"."tenant" WHERE "id" = ${sender.tenantId} LIMIT 1`,
+      )) as unknown as { domain: string }[];
+      if (row === undefined) return null;
+      return { tenantId: sender.tenantId, domain: row.domain };
+    }
+    return authorizeTenantPrincipalSender(db, senderAddress);
   };
 }

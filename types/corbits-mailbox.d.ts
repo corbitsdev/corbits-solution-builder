@@ -115,4 +115,8 @@ declare module "@corbits/mailbox" {
     args: WriteMailboxMessageArgs,
     bus: MailboxEventBus,
   ): Promise<{ messageId: string; uid: number }>;
+
+  export type ResolvedRecipient = { address: string; principalId: string };
+
+  export function resolveMailboxRecipients(addresses: string[], domain: string): ResolvedRecipient[];
 }
