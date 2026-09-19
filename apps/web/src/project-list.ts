@@ -4,72 +4,46 @@
  *
  * Name and created date come off the project's own tenant row
  * (`listProjectRecords`, folded from the caller's own memberships over
- * `GET /api/me/principals`, the same as workbench).
- * Where each stands comes off the run fold the rest of the client already
- * uses (`./run-fold.ts`), against the project tenant's own lifecycle
- * deployment. This is a coarser read than the host's `/projects` route: it
- * has no ledger-titled wait to show, so `needsDecision` is just "parked at a
- * gate" and `waits` stays empty. Project detail (`/projects/:id`) still
- * comes from the host for now.
+ * `GET /api/me/principals`, the same as workbench). Where each stands comes
+ * off the same artifact-graph cursor `./project-view.ts` derives for a
+ * single project (CL-8612 contract v6): no lifecycle run, so `needsDecision`
+ * is "a stock hub approval is pending on this project" and `turn` stays
+ * `"idle"` — telling whether the specialist is mid-draft would mean polling
+ * every project's mailbox on every list refresh, which this list does not do.
  */
 import type { Transport } from "@intx/hub-client";
-import {
-  listProjectRecords,
-  resolveWorkspace,
-  updateProject,
-  workflowsFor,
-  type HubDeployment,
-} from "@solutions-builder/installer";
+import { listProjectRecords, resolveWorkspace } from "@solutions-builder/installer";
 import type { ProjectSummary } from "./client.ts";
 import { createHubTransport } from "./hub.ts";
-import { foldProjectStanding } from "./run-fold.ts";
+import { artifactGraphFor } from "./artifact-graph.ts";
+import { toArtifactNode, currentStageFromArtifacts } from "./project-view.ts";
+import { DELIVER_TOOL_NAME, pendingApprovals } from "./pending-approvals.ts";
 
-const ENDED_DEPLOYMENT_STATUSES = new Set(["releasing", "released", "failed"]);
-
-/** The deployment a project's run is folded against: the live one, or the newest if none is live. */
-export function currentDeployment(deployments: readonly HubDeployment[]): HubDeployment | null {
-  if (deployments.length === 0) return null;
-  const live = deployments.filter((deployment) => !ENDED_DEPLOYMENT_STATUSES.has(deployment.status));
-  const pool = live.length > 0 ? live : deployments;
-  return [...pool].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0]!;
-}
-
-/** Every project tenant under the workspace, folded from its own lifecycle deployment. */
+/** Every project tenant under the workspace, folded from its own artifact graph. */
 export async function listProjectSummaries(transport: Transport = createHubTransport()): Promise<ProjectSummary[]> {
   const workspace = await resolveWorkspace(transport);
   if (!workspace) return [];
   const records = await listProjectRecords(transport, workspace.tenantId);
   return Promise.all(
     records.map(async (record): Promise<ProjectSummary> => {
-      const deployments = await workflowsFor(transport, record.id).deployments();
-      const deployment = currentDeployment(deployments);
-      const { status, title } = deployment
-        ? await foldProjectStanding(record.id, deployment.id, transport)
-        : { status: null, title: null };
-      // The namer's folded title is the project's real name; the tenant
-      // carries the opening fallback until the step completes. Rename it
-      // once, best-effort -- a project the caller cannot yet write to keeps
-      // showing the folded title this request, and every request after.
-      if (title !== null && title !== record.title) {
-        updateProject(transport, record.id, { title }).catch(() => {});
-      }
-      // Every parked position is the stage's approve-chain gate now — there
-      // is no separate round step to distinguish a question from an
-      // approval wait (see `packages/solutions-builder/src/workflows/stage-loop.ts`).
-      const turn: ProjectSummary["turn"] = status === null ? "idle" : !status.parked ? "writing" : "approve";
+      const [graph, approvals] = await Promise.all([
+        artifactGraphFor(transport, workspace.tenantId, record.id).catch(() => ({ nodes: [], edges: [] })),
+        pendingApprovals(record.id, transport).catch(() => []),
+      ]);
+      const nodes = graph.nodes.map(toArtifactNode);
+      const stage = currentStageFromArtifacts(nodes);
+      const needsDecision = approvals.some(
+        (approval) => approval.status === "pending" && approval.toolDefinition?.name === DELIVER_TOOL_NAME,
+      );
       return {
         id: record.id,
         revision: record.revision,
-        title: title ?? record.title,
-        stage: status?.stage ?? null,
-        state: status ? (status.parked ? "waiting" : "running") : null,
-        runId: deployment?.id ?? null,
+        title: record.title,
+        stage,
         archivedAt: record.archivedAt ? record.archivedAt.toISOString() : null,
-        needsDecision: status?.parked ?? false,
+        needsDecision,
         waits: [],
-        turn,
-        tenantId: record.id,
-        anchorRunId: deployment?.id ?? null,
+        turn: "idle",
       };
     }),
   );

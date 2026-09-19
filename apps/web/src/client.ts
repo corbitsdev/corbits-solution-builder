@@ -6,22 +6,18 @@
  * Clients read and command; they never write persistence.
  */
 import { APP_VERSION } from "@solutions-builder/app/manifest";
-import { triggerWorkflowRun } from "@intx/hub-client";
 import { AUTHORITIES, type Authority, type Stage } from "@solutions-builder/app/ledger";
 import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
 import {
   ApiError as HubApiError,
-  assetsFor,
   createArtifact as installerCreateArtifact,
   createProject as installerCreateProject,
-  ensureLifecycleDeployment as installerEnsureLifecycleDeployment,
   ensureSpecialistDeployment,
   getArtifact as installerGetArtifact,
   install as installerInstall,
   installState as installerInstallState,
   installProjectAuthority,
   InstallerError,
-  lifecycleAssetName,
   liveDelegationStore,
   ensureRegistryTarballs,
   pushSourceTree,
@@ -29,7 +25,6 @@ import {
   resolveWorkspace,
   revokeAllDelegations,
   updateProject as installerUpdateProject,
-  workflowsFor,
   type ClosureManifest,
   type ClosureSource,
   type InstallState as PackageInstallState,
@@ -47,6 +42,15 @@ import { MATERIAL_KIND } from "@solutions-builder/app/artifacts";
  * mail-chat specialist's reply is the draft, held only in the mailbox, until
  * approval turns it into the stage's document of record.
  */
+/**
+ * The `source_material` variant a project's own opening problem statement is
+ * stamped under, at create time — the mail-agent contract (CL-8612) has no
+ * lifecycle run whose `RunStarted` trigger payload could carry it, so it is
+ * written the same way any other attached material is, and `projectOpening`
+ * reads it back by this marker.
+ */
+const OPENING_VARIANT = "__opening__";
+
 export const STAGE_DRAFT_KIND: Readonly<Record<number, string>> = {
   1: "problem_brief",
   2: "solution_constraints",
@@ -67,10 +71,9 @@ import {
   type ChatMessage,
 } from "./stage-mail.ts";
 import { hubCredentials, hubOrigin } from "./hub-origin.ts";
-import { currentDeployment, listProjectSummaries } from "./project-list.ts";
+import { listProjectSummaries } from "./project-list.ts";
 import { openDecisions } from "./decisions-fold.ts";
 import { loadProjectView, toArtifactNode } from "./project-view.ts";
-import { foldOpening } from "./run-fold.ts";
 import { designerSettings as loadDesignerSettings, saveDesignerSettings, type DesignerSettings } from "./designer-settings.ts";
 import {
   API_KEY_CONNECT_OPTIONS,
@@ -228,31 +231,20 @@ export type ProjectSummary = {
   id: string;
   revision: number;
   title: string;
+  /** 1 + the highest stage with a live, approved draft artifact — the same cursor `pages/workspace/index.tsx` derives per-project. */
   stage: number | null;
-  state: string | null;
-  runId: string | null;
   archivedAt: string | null;
+  /** A stock hub approval (stage 9's delivery) is pending on this project. */
   needsDecision: boolean;
   waits: Wait[];
-  /**
-   * Whose move it is on the current stage. Host-computed as `"approve"` or
-   * `"idle"` only — the open-question case is folded client-side, from
-   * `tenantId`/`anchorRunId`, the same way the workspace's own thread is.
-   */
-  turn: "writing" | "question" | "approve" | "idle";
-  question?: { ordinal: number; remaining: number };
-  /** Workspace tenant the lifecycle is deployed in — for the client's open-question fold. */
-  tenantId: string;
-  /** Deployment id of the project's lifecycle run, or null when none is placed. */
-  anchorRunId: string | null;
+  /** Whether the specialist is drafting or the person's move — no gate, no signal, just "is there an unapproved reply." */
+  turn: "writing" | "idle";
 };
 
 export type ProjectInfo = {
   project: { id: string; title: string; createdAt: string; archivedAt: string | null };
-  stage: { stage: number; state: string } | null;
+  stage: number | null;
   artifacts: { versions: number; live: number; bytes: number; byKind: { kind: string; count: number; bytes: number }[] };
-  runs: { total: number; builds: number };
-  approvals: number;
   lastActivityAt: string;
 };
 
@@ -274,54 +266,27 @@ export type ArtifactNode = {
   provenance: { producer: string; agentRole?: string; providerId?: string; model?: string; stepRef?: string };
 };
 
-export type Run = {
-  id: string;
-  kind: string;
-  stage: number;
-  /**
-   * Coarsened from the host's own ledger-run states: `loadProjectView`
-   * (`./project-view.ts`) folds only what the stage workspace actually
-   * branches on — `"in_progress"`, `"waiting_approval"`, and stage 7's
-   * `"cost_approved"` hand-off to the freeze — from the run fold's own
-   * parked/running signal. See that file's header for what this drops.
-   */
-  state: string;
-  createdAt: string;
-  endedAt: string | null;
-  terminalReason: string | null;
-  packetId: string | null;
-};
-
-/** One worker event on a build run, as the host recorded it. */
-export type BuildEvent = {
-  id: string;
-  runId: string;
-  type: string;
-  severity: string;
-  payload: Record<string, unknown>;
-  occurredAt: string;
-};
-
 export type ProjectDetail = {
   project: {
     id: string;
     title: string;
     policy: unknown;
     archivedAt: string | null;
-    /** Workspace tenant the lifecycle is deployed in — for the hub fold and signal. */
-    tenantId: string;
-    /** Deployment id of the project's lifecycle run, or null when none is placed. */
-    anchorRunId: string | null;
   };
-  /** Same as `project.tenantId`; the workspace the run is folded in. */
+  /** The workspace tenant artifacts are recorded under. */
   tenantId: string;
-  /** Same as `project.anchorRunId`. */
-  anchorRunId: string | null;
-  runs: Run[];
-  current: Run | null;
+  /** 1 + the highest stage with a live, approved draft artifact — no lifecycle run to fold a position from any more (CL-8612). */
+  stage: number;
   /** True when no principal other than the local actor holds this stage's approval authority. */
   soloApproval: boolean;
   nodes: ArtifactNode[];
+  /**
+   * Always empty now: recorded approvals rode the lifecycle run's own event
+   * fold (`./run-fold.ts`'s `projectApprovals`, deleted with the run —
+   * CL-8612 contract v6). `ApprovalsRecord` (`pages/workspace/gate.tsx`)
+   * renders nothing on an empty list, so the historical-record surface just
+   * has nothing to show until a mail-agent-shaped decision log replaces it.
+   */
   approvals: {
     id: string;
     runId: string;
@@ -333,19 +298,6 @@ export type ProjectDetail = {
     createdAt: string;
     versions: { versionId: string; contentHash: string }[];
   }[];
-  /**
-   * The stage-1 opening problem statement, read off the anchor run's own
-   * `RunStarted` trigger event (`./run-fold.ts`'s `foldOpening`) now, not the
-   * ledger's `project.create` command.
-   */
-  opening: { body: string; createdAt: string } | null;
-  /**
-   * Turns carried in from another project instance on import. Always empty
-   * now — `GET /projects/:id` read this off `command-ledger.ts`, which has
-   * no run-event fold; project-transfer needs its own client fold to bring
-   * this back.
-   */
-  carriedTurns: { stage: number; turn: StageTurn }[];
 };
 
 export type { Quote, StageTurn };
@@ -718,7 +670,6 @@ export const api = {
         });
       }
       const transport = createHubTransport();
-      const status = await request<HostStatus>("/status");
       const { project } = await installerCreateProject(transport, workspace.tenantId, {
         title,
         slug: projectSlug(),
@@ -727,34 +678,33 @@ export const api = {
           ? { delegatedCredentialIds: payload.delegatedCredentialIds }
           : {}),
       });
-      const deployment = await installerEnsureLifecycleDeployment(
-        transport,
-        sidecarCapabilityOf(status),
-        await lifecycleClosureSource(),
-        lifecycleGitPush,
-        workspace.tenantId,
-        project.id,
-      );
-      // Fires the deployment's top-level run once: the host no longer
-      // launches the lifecycle (`apps/hub/src/lifecycle-run.ts`'s
-      // `launchProjectLifecycle` is gone), so a freshly-created project's
-      // anchor run is the client's to start. The trigger's own payload is
-      // now the project's stage-1 opening statement too (`run-fold.ts`'s
-      // `foldOpening` reads it back off the run's `RunStarted` event) — the
-      // ledger's separate `project.create`/`POST /projects/:id/open` write
-      // is gone (CL-8510); a retried trigger on the same deployment is the
-      // workflow runtime's own at-most-once `RunStarted`, so retrying here
-      // is safe.
+      // No lifecycle run to deploy or trigger any more (CL-8612 contract
+      // v6): a stage's specialist deploys lazily the first time its panel
+      // opens (`ensureStageAgent`). The opening problem statement is
+      // written straight to the workspace tenant's own artifact store, the
+      // same way `attachMaterial` writes any other material, so
+      // `projectOpening` can read it back with no run to fold.
       return await openCreatedProject({
         projectId: project.id,
         open: async () => {
-          if (deployment.status !== "current" && deployment.status !== "deployed") {
-            return { projectId: project.id, runId: "" };
+          if (problem) {
+            await installerCreateArtifact(transport, workspace.tenantId, {
+              title: "Opening problem statement",
+              content: problem,
+              metadata: {
+                sb: {
+                  projectId: project.id,
+                  kind: MATERIAL_KIND,
+                  stage: 1,
+                  variant: OPENING_VARIANT,
+                  sourceVersionIds: [],
+                  provenance: { producer: "human" as const },
+                  mediaType: "text/plain",
+                },
+              },
+            });
           }
-          await triggerWorkflowRun(transport, workspace.tenantId, deployment.deploymentId, {
-            content: JSON.stringify({ projectId: project.id, ...(problem ? { problemStatement: problem } : {}) }),
-          });
-          return { projectId: project.id, runId: deployment.deploymentId };
+          return { projectId: project.id, runId: "" };
         },
         conceal: async (projectId) => {
           await installerUpdateProject(transport, projectId, { deletedAt: new Date() });
@@ -775,7 +725,7 @@ export const api = {
         loadProjectView(projectId, transport),
       ]);
       const live = detail.nodes.filter((node) => node.supersededByNodeId === null);
-      const stamps = [...detail.nodes.map((node) => node.createdAt), ...detail.approvals.map((approval) => approval.createdAt)];
+      const stamps = detail.nodes.map((node) => node.createdAt);
       return {
         project: {
           id: project.id,
@@ -783,12 +733,10 @@ export const api = {
           createdAt: project.createdAt.toISOString(),
           archivedAt: project.archivedAt?.toISOString() ?? null,
         },
-        stage: detail.current ? { stage: detail.current.stage, state: detail.current.state } : null,
+        stage: detail.stage,
         // No per-version byte count rides the mounted artifacts module's list
         // metadata (CL-8500 decision 3), so this no longer totals bytes.
         artifacts: { versions: detail.nodes.length, live: live.length, bytes: 0, byKind: [] },
-        runs: { total: detail.runs.length, builds: 0 },
-        approvals: detail.approvals.length,
         lastActivityAt: stamps.sort().at(-1) ?? project.createdAt.toISOString(),
       };
     }),
@@ -987,27 +935,18 @@ export const api = {
       );
     }),
   /**
-   * The project's opening problem statement, read off its lifecycle
-   * deployment's own `RunStarted` trigger event. Scoped to the *workspace*
-   * tenant the deployment actually lives in — the same tenant
-   * `createProject`'s own `ensureLifecycleDeployment` call deploys it into
-   * (`workspaceTenantId`, not the project's own child tenant) — rather than
-   * `loadProjectView`'s `detail.opening`, which reads `workflowsFor` and
-   * `foldOpening` scoped to `projectId` and so never finds this deployment.
-   * Answers null once there is nothing to open on: no lifecycle asset was
-   * ever deployed for this project, or it never ran.
+   * The project's opening problem statement, read off the `source_material`
+   * artifact `createProject` wrote for it — no lifecycle run to fold it from
+   * any more (CL-8612 contract v6). Answers null once there is nothing to
+   * open on: the project was created with no problem statement.
    */
   projectOpening: (projectId: string): Promise<{ body: string; createdAt: string } | null> =>
     asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const assetName = lifecycleAssetName(projectId);
-      const [assets, deployments] = await Promise.all([
-        assetsFor(transport, workspaceTenantId).list("workflow"),
-        workflowsFor(transport, workspaceTenantId).deployments(),
-      ]);
-      const asset = assets.find((entry) => entry.name === assetName);
-      if (!asset) return null;
-      const deployment = currentDeployment(deployments.filter((entry) => entry.definitionAssetId === asset.id));
-      if (!deployment) return null;
-      return foldOpening(workspaceTenantId, deployment.id, transport);
+      const graph = await artifactGraphFor(transport, workspaceTenantId, projectId);
+      const node = graph.nodes.find((entry) => entry.kind === MATERIAL_KIND && entry.variant === OPENING_VARIANT);
+      if (!node) return null;
+      const artifact = await installerGetArtifact(transport, workspaceTenantId, node.id);
+      if (!artifact) return null;
+      return { body: artifact.content, createdAt: node.createdAt };
     }),
 };

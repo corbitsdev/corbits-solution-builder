@@ -26,7 +26,6 @@ import { Settings } from "./pages/settings.jsx";
 import { ArtifactGraph } from "./pages/graph.jsx";
 import { nextStep } from "@solutions-builder/app/next-step";
 import { StageTour } from "./tour.jsx";
-import type { RunState } from "@solutions-builder/app/ledger";
 import { GuideDock } from "./components.jsx";
 import {
   Sidebar,
@@ -43,10 +42,7 @@ import { subscribeInbox, type InboxState } from "./inbox.ts";
 import { Onboarding } from "./pages/onboarding.jsx";
 import { Auth } from "./pages/auth.jsx";
 import { StageWorkspace } from "./pages/workspace.jsx";
-import { standingForProject, type StageStatus } from "./run-fold.ts";
-import { deliverGate, type GateIntent } from "./run-signal.ts";
 import { approveDelivery, rejectDelivery } from "./pending-approvals.ts";
-import type { Stage } from "@solutions-builder/app/ledger";
 import { firstRunScreen, type HubAuthState } from "./first-run.ts";
 import { getHubSession } from "./hub-auth.ts";
 
@@ -330,7 +326,6 @@ export function App() {
   >([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<ProjectDetail | null>(null);
-  const [standing, setStanding] = useState<StageStatus | null>(null);
   // Resolved once and threaded down as a prop: every artifact read goes
   // through `@corbits/artifacts` over `/hub`, which is tenant-scoped.
   const [tenantId, setTenantId] = useState<string | null>(null);
@@ -445,18 +440,13 @@ export function App() {
   useEffect(() => {
     if (!selected) {
       setDetail(null);
-      setStanding(null);
       return;
     }
     let cancelled = false;
     void api
       .projectView(selected)
-      .then(async (result) => {
-        const nextStanding = await standingForProject(result).catch(() => null);
-        if (!cancelled) {
-          setDetail(result);
-          setStanding(nextStanding);
-        }
+      .then((result) => {
+        if (!cancelled) setDetail(result);
       })
       .catch(() => undefined);
     return () => {
@@ -479,10 +469,7 @@ export function App() {
       refresh(),
       selected ? api.projectView(selected).catch(() => null) : Promise.resolve(null),
     ]);
-    if (selected) {
-      setDetail(next);
-      setStanding(next ? await standingForProject(next).catch(() => null) : null);
-    }
+    if (selected) setDetail(next);
   }, [refresh, selected]);
 
   const openProject = (projectId: string) => {
@@ -492,70 +479,24 @@ export function App() {
     setView("project");
   };
 
-  const decide = async (
-    wait: Wait,
-    decision: "approve" | "reject" | "revise",
-    reason: string,
-    /** The stage a send-back returns to: any up to this one, as the ledger allows. */
-    target: number = wait.stage - 1,
-  ) => {
+  /**
+   * The only decision left under CL-8612 contract v6 is stage 9's delivery:
+   * a stock hub approval on the specialist's own `deliver` tool call
+   * (CL-8566), never a ledger command on a workflow signal. Approving
+   * resolves the parked call and the run is delivered; rejecting carries the
+   * reason back to the specialist as the tool's own refusal message, which
+   * it sees in the same turn — "revise" has no separate meaning here.
+   */
+  const decide = async (wait: Wait, decision: "approve" | "reject" | "revise", reason: string) => {
+    if (!wait.approvalId) return;
     setBusy(decision);
     setError(null);
     try {
-      // Stage 9's delivery gate is a stock hub approval on the specialist's
-      // own deliver tool call (CL-8566), not a ledger command on a workflow
-      // signal: approving resolves the parked call and the run is delivered;
-      // rejecting carries the reason back to the specialist as the tool's
-      // own refusal message, which it sees in the same turn. "revise" has no
-      // separate meaning here — a rejection is already the "revise" case.
-      if (wait.approvalId) {
-        if (decision === "approve") {
-          await approveDelivery(wait.projectId, wait.approvalId);
-        } else {
-          await rejectDelivery(wait.projectId, wait.approvalId, reason);
-        }
-        setSelected(wait.projectId);
-        await reloadDetail();
-        return;
+      if (decision === "approve") {
+        await approveDelivery(wait.projectId, wait.approvalId);
+      } else {
+        await rejectDelivery(wait.projectId, wait.approvalId, reason);
       }
-
-      const project = await api.projectView(wait.projectId);
-      const versions = project.nodes
-        .filter((node) => node.stage === wait.stage && node.supersededByNodeId === null)
-        .map((node) => ({
-          artifactId: node.artifactId,
-          versionId: node.id,
-          contentHash: node.contentHash,
-        }));
-
-      // The command depends on the stage, because the ledger says so: stage 7
-      // approves a cost, everything else approves. Stage 9 never reaches
-      // here — the branch above returns for it, since its decision is a
-      // stock hub approval, not a ledger command on a workflow signal.
-      const command =
-        decision === "approve"
-          ? wait.stage === 7
-            ? "cost.approve"
-            : "stage.approve"
-          : decision === "reject"
-            ? "stage.reject"
-            : "stage.revise";
-
-      const intent: GateIntent = {
-        command,
-        runId: wait.runId,
-        versions,
-        rationale: reason,
-        ...(decision !== "approve"
-          ? {
-              reason: reason || "Routed back without a stated reason.",
-              targetStage: Math.min(wait.stage, Math.max(1, Math.round(target))),
-            }
-          : {}),
-      };
-
-      // The decision is a signal on the run, by this person, at this gate.
-      await deliverGate(project, wait.stage as Stage, await standingForProject(project).catch(() => null), intent);
       setSelected(wait.projectId);
       await reloadDetail();
     } catch (cause) {
@@ -632,7 +573,7 @@ export function App() {
         }}
         stage={
           view === "project" && detail
-            ? { number: detail.current?.stage ?? 1, artifacts: stageArtifacts(detail.current?.stage ?? 1, graph.nodes) }
+            ? { number: detail.stage, artifacts: stageArtifacts(detail.stage, graph.nodes) }
             : null
         }
         onOpenArtifact={(nodeId) => {
@@ -656,7 +597,7 @@ export function App() {
                 {/* The panel, named: which stage this is, and Artifacts when that is the panel open. */}
                 <span className="head-panel">
                   {" "}
-                  ({stageName(detail.current?.stage ?? 1)}
+                  ({stageName(detail.stage)}
                   {projectTab === "artifacts" ? " / Artifacts" : ""})
                 </span>
               </h1>
@@ -723,33 +664,20 @@ export function App() {
               sentence. */}
           {view === "project" && detail ? (
             <GuideDock
-              stage={detail.current?.stage ?? 1}
+              stage={detail.stage}
               step={nextStep({
-                state: (detail.current?.state ?? null) as RunState | null,
-                stage: detail.current?.stage ?? 1,
+                // No lifecycle run to read a state off any more (CL-8612
+                // contract v6): a selected project is always "in progress"
+                // from the guide's point of view — there is no
+                // waiting_approval/cost_approved distinction left to draw.
+                state: "in_progress",
+                stage: detail.stage,
                 // So the guide and the composer name the same act. Two words
                 // for one decision is how a person stops trusting either.
                 soloApproval: detail.soloApproval,
                 hasDraft: detail.nodes.some(
-                  (node) => node.stage === (detail.current?.stage ?? 1),
+                  (node) => node.stage === (detail.stage),
                 ),
-                ...(detail.current?.stage === 5
-                  ? {
-                      quorum: {
-                        recorded: detail.approvals.filter(
-                          (approval) => approval.command === "audience.decide",
-                        ).length,
-                        needed:
-                          (detail.project.policy as { audienceQuorum?: number })
-                            .audienceQuorum ?? 0,
-                        blocked: detail.approvals.filter(
-                          (approval) =>
-                            approval.command === "audience.decide" &&
-                            approval.decision !== "proceed",
-                        ).length,
-                      },
-                    }
-                  : {}),
               })}
               at={projectTab === "artifacts" ? "artifacts" : "stage"}
               onGo={(where) => {
@@ -799,10 +727,9 @@ export function App() {
                   {/* Imported and never rendered, so the walkthrough simply
                       did not exist. It runs once, on the surface it describes,
                       and remembers that it has. */}
-                  <StageTour enabled={detail.current !== null} stage={detail.current?.stage ?? 1} />
+                  <StageTour enabled={true} stage={detail.stage} />
                   <StageWorkspace
                     detail={detail}
-                    standing={standing}
                     draftOpen={draftOpen}
                     tenantId={tenantId ?? ""}
                     onChanged={reloadDetail}

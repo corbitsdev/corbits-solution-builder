@@ -28,50 +28,6 @@ import { api, ApiFailure, type ProjectInfo, type ProjectSummary } from "../clien
 import { Button, Banner, StageRing, StateLabel, stageName } from "../components.jsx";
 import { DEFAULT_POLICY } from "./onboarding.jsx";
 import { Dictated } from "../dictation.jsx";
-import { foldStageThread, nextOpenQuestion } from "../stage-thread.ts";
-import type { Stage } from "@solutions-builder/app/ledger";
-
-/**
- * The open-question badge, folded client-side from `/hub` events: the host
- * only says whether there is a draft to approve (`projects.ts`'s `turn`), so
- * a project idle on that count is checked here, one fold per idle row.
- */
-function useOpenQuestions(projects: ProjectSummary[]): Map<string, { ordinal: number; remaining: number }> {
-  const [open, setOpen] = useState(new Map<string, { ordinal: number; remaining: number }>());
-  const pending = projects.filter((project) => !project.archivedAt && project.turn === "idle" && project.stage);
-  const key = pending.map((project) => `${project.id}:${project.anchorRunId ?? ""}`).join(",");
-  useEffect(() => {
-    let cancelled = false;
-    void Promise.all(
-      pending.map(async (project) => {
-        const turns = await foldStageThread({
-          tenantId: project.tenantId,
-          anchorRunId: project.anchorRunId,
-          stage: project.stage as unknown as Stage,
-          nodes: [],
-          opening: null,
-          carried: [],
-        }).catch(() => []);
-        const found = nextOpenQuestion(turns);
-        return [project.id, found ? { ordinal: found.ordinal, remaining: found.remaining } : null] as const;
-      }),
-    ).then((entries) => {
-      if (cancelled) return;
-      setOpen(new Map(entries.filter((entry): entry is [string, { ordinal: number; remaining: number }] => entry[1] !== null)));
-    });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
-  return open;
-}
-
-/** A project row with its host-computed `turn`/`question` overridden by the client fold, when one is open. */
-function withOpenQuestion(project: ProjectSummary, open: Map<string, { ordinal: number; remaining: number }>): ProjectSummary {
-  const question = open.get(project.id);
-  return question ? { ...project, turn: "question", question } : project;
-}
 
 export function Projects({
   projects,
@@ -96,11 +52,9 @@ export function Projects({
   };
   // Whatever waits on the person first, then the furthest along. Archived ones
   // fold away.
-  const openQuestions = useOpenQuestions(projects);
-  const live = projects.filter((project) => !project.archivedAt).map((project) => withOpenQuestion(project, openQuestions));
+  const live = projects.filter((project) => !project.archivedAt);
   const archived = projects.filter((project) => project.archivedAt);
-  const yourMove = (project: ProjectSummary) =>
-    project.needsDecision || project.turn === "question" || project.turn === "approve";
+  const yourMove = (project: ProjectSummary) => project.needsDecision;
   const ordered = [...live].sort((left, right) => {
     if (yourMove(left) !== yourMove(right)) return yourMove(left) ? -1 : 1;
     return (right.stage ?? 0) - (left.stage ?? 0);
@@ -283,8 +237,7 @@ function ProjectCard({
   onError: (cause: unknown) => void;
 }) {
   const stage = project.stage ?? 0;
-  const waiting =
-    project.needsDecision || project.turn === "question" || project.turn === "approve";
+  const waiting = project.needsDecision;
   const [renaming, setRenaming] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
   const [title, setTitle] = useState(project.title);
@@ -319,21 +272,8 @@ function ProjectCard({
     <StateLabel tone="disabled">Archived</StateLabel>
   ) : project.needsDecision ? (
     <StateLabel tone="warning">{project.waits[0]?.title ?? "Needs your decision"}</StateLabel>
-  ) : project.state === "delivered" ? (
-    <StateLabel tone="success">Delivered</StateLabel>
-  ) : project.state === "backtracked" ? (
-    <StateLabel tone="error">Routed back</StateLabel>
-  ) : project.turn === "writing" ? (
-    <StateLabel tone="loading">Writing the draft</StateLabel>
-  ) : project.turn === "question" && project.question ? (
-    <StateLabel tone="warning">
-      Your turn · question {project.question.ordinal + 1} of{" "}
-      {project.question.ordinal + 1 + project.question.remaining}
-    </StateLabel>
-  ) : project.turn === "approve" ? (
-    <StateLabel tone="warning">Draft ready to approve</StateLabel>
   ) : project.stage ? (
-    <StateLabel tone="info">Waiting to start</StateLabel>
+    <StateLabel tone="info">In progress</StateLabel>
   ) : (
     <StateLabel tone="info">Not started</StateLabel>
   );
@@ -466,7 +406,7 @@ function ProjectInfoDialog({ project, onClose }: { project: ProjectSummary; onCl
                 <div>
                   <dt>Where it stands</dt>
                   <dd>
-                    {info.stage ? `Stage ${info.stage.stage} of 9 · ${stageName(info.stage.stage)} · ${info.stage.state.replace(/_/g, " ")}` : "No run"}
+                    {info.stage ? `Stage ${info.stage} of 9 · ${stageName(info.stage)}` : "Not started"}
                     {info.project.archivedAt ? " · archived" : ""}
                   </dd>
                 </div>
@@ -475,13 +415,6 @@ function ProjectInfoDialog({ project, onClose }: { project: ProjectSummary; onCl
                   <dd>
                     {info.artifacts.versions} version{info.artifacts.versions === 1 ? "" : "s"} across {info.artifacts.live} live artifact
                     {info.artifacts.live === 1 ? "" : "s"}, {formatBytes(info.artifacts.bytes)} stored
-                  </dd>
-                </div>
-                <div>
-                  <dt>Runs</dt>
-                  <dd>
-                    {info.runs.total} run{info.runs.total === 1 ? "" : "s"}, {info.runs.builds} build attempt{info.runs.builds === 1 ? "" : "s"}, {info.approvals} decision
-                    {info.approvals === 1 ? "" : "s"} recorded
                   </dd>
                 </div>
               </dl>

@@ -1,36 +1,25 @@
 /**
  * `loadProjectView`: the project detail read, folded in the browser from the
- * project's own tenant record, its run fold, and its artifact fold — what
- * `GET /projects/:id` and `GET /projects/:id/graph` used to answer (CL-8510,
- * step C of CL-8072; design fixed by CL-8500 steps A/#363 and B/#370).
+ * project's own tenant record and its artifact fold — what `GET /projects/:id`
+ * and `GET /projects/:id/graph` used to answer (CL-8510, step C of CL-8072;
+ * design fixed by CL-8500 steps A/#363 and B/#370).
  *
- * `current`/`runs`/`soloApproval` coarsen the host's own ledger-run model
- * (`apps/hub/src/runs.ts`), which folds host-committed ledger-command
- * mutations no client fold reconstructs — that table is `command-ledger.ts`'s
- * to keep or drop in a later step (CL-8492), not this one's. `current.state`
- * here distinguishes only what the stage workspace actually branches on —
- * drafting / waiting on a gate / stage 7's cost-approved hand-off to the
- * freeze — from the run fold's own parked/running signal. Build-attempt
- * sub-states (`queued`/`running`/`failed`/`cancelled`/`interrupted`) and
- * `backtracked` are not reconstructable from run events alone; `BuildPanel`'s
- * own event feed is already a stub with no host route (see its `loadEvents`),
- * so this is a narrower, not a new, gap. `terminalReason` is dropped for the
- * same reason. Filed as CL-8511 for a follow-up once the ledger read itself
- * moves off `apps/hub/src/runs.ts`.
- *
- * `carriedTurns` (turns carried in from another project instance on import)
- * rode `GET /projects/:id` off `command-ledger.ts` too, and has no run-event
- * equivalent; it reads empty here until project-transfer gets its own fold.
+ * CL-8612 contract v6 drops the lifecycle run entirely: a project's stage,
+ * its approvals, and its opening statement are all read off the artifact
+ * graph and the workspace tenant's own material now, not a folded run — see
+ * `pages/workspace/index.tsx`'s `currentStageFromArtifacts` for the same
+ * cursor rule this file duplicates for `soloApprovalFor` and `projectInfo`.
  */
 import type { Transport } from "@intx/hub-client";
-import { requireProject as installerRequireProject, resolveWorkspace, workflowsFor } from "@solutions-builder/installer";
-import { currentDeployment } from "./project-list.ts";
+import { requireProject as installerRequireProject, resolveWorkspace } from "@solutions-builder/installer";
 import { requiredAuthorityFor } from "@solutions-builder/app/decision-copy";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { createHubTransport } from "./hub.ts";
 import { artifactGraphFor } from "./artifact-graph.ts";
-import { foldOpening, foldProjectRuns, positionFromRuns, projectApprovals, type StageStatus } from "./run-fold.ts";
-import type { ArtifactNode, ProjectDetail, Run } from "./client.ts";
+import { STAGE_DRAFT_KIND } from "./client.ts";
+import type { ArtifactNode, ProjectDetail } from "./client.ts";
+
+const LAST_STAGE = 9;
 
 type Page<T> = { data: T[]; nextCursor: string | null };
 
@@ -52,6 +41,19 @@ async function hubList<T>(transport: Transport, path: string): Promise<T[]> {
 type HubPrincipal = { id: string; tenantId: string; kind: string; refId: string; status: string; roles: { id: string; name: string }[] };
 type Membership = { principalId: string; tenantId: string; kind: string; status: string };
 
+/** 1 + the highest stage with a live, approved draft artifact. Same rule as `pages/workspace/index.tsx`'s `currentStageFromArtifacts`. */
+export function currentStageFromArtifacts(nodes: readonly ArtifactNode[]): number {
+  let stage = 1;
+  for (let candidate = 1; candidate <= LAST_STAGE; candidate += 1) {
+    const approved = nodes.some(
+      (node) => node.stage === candidate && node.kind === STAGE_DRAFT_KIND[candidate] && node.supersededByNodeId === null,
+    );
+    if (!approved) break;
+    stage = Math.min(candidate + 1, LAST_STAGE);
+  }
+  return stage;
+}
+
 /**
  * Whether the signed-in actor is the only person in this project tenant who
  * could approve this stage — the same rule as the deleted host route's
@@ -69,26 +71,6 @@ async function soloApprovalFor(transport: Transport, projectId: string, stage: S
   return !members.some(
     (row) => row.id !== actor && row.kind === "user" && row.status === "active" && row.roles.some((role) => role.name === required),
   );
-}
-
-/** The command-state string the stage workspace actually branches on, folded from `standing`. */
-function currentStateFrom(standing: StageStatus | null): string {
-  if (standing === null || !standing.parked) return "in_progress";
-  return standing.stage === 7 ? "cost_approved" : "waiting_approval";
-}
-
-function currentRunFrom(anchorRunId: string | null, standing: StageStatus | null): Run | null {
-  if (anchorRunId === null) return null;
-  return {
-    id: anchorRunId,
-    kind: "stage",
-    stage: standing?.stage ?? 1,
-    state: currentStateFrom(standing),
-    createdAt: new Date(0).toISOString(),
-    endedAt: null,
-    terminalReason: null,
-    packetId: null,
-  };
 }
 
 /** Maps an `ArtifactGraphNode` fold onto the `ArtifactNode` shape the pages already consume. */
@@ -120,33 +102,13 @@ export function toArtifactNode(node: Awaited<ReturnType<typeof artifactGraphFor>
 export async function loadProjectView(projectId: string, transport: Transport = createHubTransport()): Promise<ProjectDetail> {
   const workspace = await resolveWorkspace(transport);
   if (!workspace) throw new Error("The workspace is not installed yet.");
-  const [project, graph, deployments] = await Promise.all([
+  const [project, graph] = await Promise.all([
     installerRequireProject(transport, projectId),
     artifactGraphFor(transport, workspace.tenantId, projectId),
-    workflowsFor(transport, projectId).deployments(),
   ]);
-  const anchorRunId = currentDeployment(deployments)?.id ?? null;
   const nodes = graph.nodes.map(toArtifactNode);
-
-  const runs = anchorRunId ? await foldProjectRuns(projectId, anchorRunId, transport) : [];
-  const standing = anchorRunId ? positionFromRuns(runs, anchorRunId) : null;
-  const current = currentRunFrom(anchorRunId, standing);
-
-  const [opening, soloApproval] = await Promise.all([
-    anchorRunId ? foldOpening(projectId, anchorRunId, transport) : Promise.resolve(null),
-    current ? soloApprovalFor(transport, projectId, current.stage as Stage).catch(() => true) : Promise.resolve(true),
-  ]);
-  const approvals = projectApprovals(runs).map((approval, index) => ({
-    id: `${approval.runId}:${index}`,
-    runId: approval.runId,
-    stage: approval.stage,
-    command: approval.command,
-    decision: approval.decision,
-    audienceName: approval.audienceName,
-    rationale: approval.rationale,
-    createdAt: approval.at ?? "",
-    versions: approval.versions,
-  }));
+  const stage = currentStageFromArtifacts(nodes);
+  const soloApproval = await soloApprovalFor(transport, projectId, stage as Stage).catch(() => true);
 
   return {
     project: {
@@ -154,17 +116,11 @@ export async function loadProjectView(projectId: string, transport: Transport = 
       title: project.title,
       policy: project.policy,
       archivedAt: project.archivedAt ? project.archivedAt.toISOString() : null,
-      tenantId: workspace.tenantId,
-      anchorRunId,
     },
     tenantId: workspace.tenantId,
-    anchorRunId,
-    runs: current ? [current] : [],
-    current,
+    stage,
     soloApproval,
     nodes,
-    approvals,
-    opening,
-    carriedTurns: [],
+    approvals: [],
   };
 }

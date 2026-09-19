@@ -1,28 +1,19 @@
 /**
- * Stage 5 — one package per named audience, and one recorded decision each.
+ * Stage 5 — one package per named audience.
  *
- * The quorum rule is the point of this surface: `audience.decide` records a
- * decision and never transitions the stage, and `stage.approve` only becomes
- * available once the configured quorum of proceeds is recorded with no reject
- * or revise. The buttons reflect that rather than working around it.
+ * The per-stakeholder quorum decision (`audience.decide`, recorded against a
+ * parked ledger run) has no mail-agent-shaped replacement yet — CL-8612
+ * contract v6 has no lifecycle run to park a decision on. This surface is
+ * pared down to writing and reviewing packages; advancing past the stage is
+ * the same "Approve and continue" the other stages use
+ * (`pages/workspace/index.tsx`). Recording each stakeholder's own decision
+ * is filed as a follow-up (CL-8625).
  */
 import { useEffect, useState } from "react";
 import { api, ApiFailure, type ProjectDetail } from "../client.js";
-import { deliverGate, submitThen } from "../run-signal.ts";
-import { standingForProject } from "../run-fold.ts";
 import { Banner, Button, Field, Screen, StateLabel, versionDigest } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
-import {
-  Textarea,
-  Tabs,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-  Input,
-} from "@corbits/react-ui";
+import { Tabs, Input } from "@corbits/react-ui";
 import { Markdown } from "../markdown.jsx";
 
 type Policy = { audiences?: { name: string; role: string }[]; audienceQuorum?: number };
@@ -203,8 +194,6 @@ export function AudiencePackages({
   // first stakeholder the moment the rewrite landed.
   const [active, setActive] = useState<string | null>(packages[0]?.variant ?? null);
   const [content, setContent] = useState("");
-  const [rationale, setRationale] = useState("");
-  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Slides are asked for one audience at a time, and a person moves on to
   // the next while the first is still being saved. So each package keeps
@@ -254,102 +243,6 @@ export function AudiencePackages({
     };
   }, [selected?.id, tenantId]);
 
-  // A decision belongs to the review it was recorded on. Reopening the stage
-  // starts a new run and a clean review; what was decided before is history,
-  // shown as such beside the stakeholder.
-  const decisions = detail.approvals.filter(
-    (approval) => approval.command === "audience.decide" && approval.runId === detail.current?.id,
-  );
-  const decisionFor = (name: string) =>
-    decisions.find((approval) => approval.audienceName === name);
-  const earlierDecisionFor = (name: string) =>
-    [...detail.approvals]
-      .reverse()
-      .find((approval) => approval.command === "audience.decide" && approval.runId !== detail.current?.id && approval.audienceName === name);
-  const proceeded = decisions.filter((approval) => approval.decision === "proceed").length;
-  const blocked = decisions.filter((approval) => approval.decision !== "proceed").length;
-  const quorumMet = blocked === 0 && proceeded >= quorum;
-
-  // The ledger records a stakeholder's decision only once the packages have
-  // been sent for review (stage 5 in waiting_approval). Nothing on this
-  // screen sends them as a step of its own: the first decision does, with
-  // every current package as what is under review, and then records itself.
-  const inProgress = detail.current?.state === "in_progress";
-  const sent = detail.current?.state === "waiting_approval";
-  const everyoneHasOne = audiences.length > 0 && missing.length === 0;
-
-  /**
-   * Reopens the review: routes the stage back so the packages can be revised.
-   * The decisions recorded on this review stay recorded, as history; the new
-   * review starts clean, so a stakeholder who asked for a revision decides
-   * again on the revised package.
-   *
-   * Resuming the stage after this — re-entering its loop rather than merely
-   * marking it backtracked — is CL-8461: the workspace screen shows the
-   * disabled "Resume" action and the note once this lands.
-   */
-  const reopen = async () => {
-    if (!detail.current) return;
-    setBusy("reopen");
-    setError(null);
-    try {
-      const versions = packages.map((entry) => ({ artifactId: entry.artifactId, versionId: entry.id, contentHash: entry.contentHash }));
-      await deliverGate(detail, 5, await standingForProject(detail).catch(() => null), {
-        command: "stage.revise",
-        runId: detail.current.id,
-        versions,
-        rationale: "Reopened to revise the packages.",
-        reason: "Reopened to revise the packages.",
-        targetStage: 5,
-      });
-      onChanged();
-    } catch (cause) {
-      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const decide = async (audienceName: string, decision: "proceed" | "reject" | "revise") => {
-    const node = packages.find((entry) => entry.variant === audienceName) ?? selected;
-    if (!node || !detail.current) return;
-    setBusy(audienceName);
-    setError(null);
-    try {
-      const standing = await standingForProject(detail).catch(() => null);
-      const intent = {
-        command: "audience.decide" as const,
-        runId: detail.current.id,
-        audienceName,
-        decision,
-        versions: [{ artifactId: node.artifactId, versionId: node.id, contentHash: node.contentHash }],
-        rationale,
-      };
-      // The first stakeholder to decide sends the packages for review; the
-      // run parks at the gate and the decision lands there.
-      if (inProgress) {
-        await submitThen(
-          detail,
-          5,
-          standing,
-          {
-            runId: detail.current.id,
-            versions: packages.map((entry) => ({ artifactId: entry.artifactId, versionId: entry.id, contentHash: entry.contentHash })),
-          },
-          intent,
-        );
-      } else {
-        await deliverGate(detail, 5, standing, intent);
-      }
-      setRationale("");
-      onChanged();
-    } catch (cause) {
-      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-    } finally {
-      setBusy(null);
-    }
-  };
-
   return (
     <>
       <Stakeholders projectId={detail.project.id} audiences={audiences} quorum={quorum} onChanged={onChanged} />
@@ -358,14 +251,10 @@ export function AudiencePackages({
         title="Stakeholder packages"
         description="Rough cost, not the firm estimate."
         status={
-          quorumMet ? (
-            <StateLabel tone="success">Quorum met — {proceeded}/{quorum}</StateLabel>
-          ) : blocked > 0 ? (
-            <StateLabel tone="error">{blocked} blocking decision</StateLabel>
+          missing.length === 0 && packages.length > 0 ? (
+            <StateLabel tone="success">Every stakeholder has a package</StateLabel>
           ) : (
-            <StateLabel tone="warning">
-              {proceeded}/{quorum} recorded
-            </StateLabel>
+            <StateLabel tone="warning">{missing.length} still missing</StateLabel>
           )
         }
       >
@@ -390,15 +279,13 @@ export function AudiencePackages({
                   <span>
                     <strong>{audience.name}</strong> · {roleLabel(audience.role)}
                   </span>
-                  {inProgress ? (
-                    <Button loading={drafting} onClick={() => onDraftPackages([audience.name])}>
-                      Write it
-                    </Button>
-                  ) : null}
+                  <Button loading={drafting} onClick={() => onDraftPackages([audience.name])}>
+                    Write it
+                  </Button>
                 </li>
               ))}
             </ul>
-            {missing.length > 1 && inProgress ? (
+            {missing.length > 1 ? (
               <Button
                 variant="primary"
                 loading={drafting}
@@ -476,7 +363,7 @@ export function AudiencePackages({
                   <Button variant="primary" loading={saving.has(selected.id)} onClick={() => saveSlides(selected.id)}>
                     {saving.has(selected.id) ? "Saving slides…" : "Save slides (.pptx)"}
                   </Button>
-                  {selected.variant && inProgress && !decisionFor(selected.variant) ? (
+                  {selected.variant ? (
                     <Button loading={drafting} onClick={() => onDraftPackages([selected.variant!])}>
                       Write this package again
                     </Button>
@@ -488,113 +375,6 @@ export function AudiencePackages({
         )}
       </Screen>
       </div>
-
-      {audiences.length > 0 ? (
-        <div data-tour="audience-decisions">
-        <Screen
-          title="Per-stakeholder decisions"
-          tight
-        >
-          {inProgress && everyoneHasOne ? (
-            <Banner title="The first decision sends every package for review, then records itself." />
-          ) : inProgress ? (
-            <Banner tone="warning" title="Decisions wait until every stakeholder has a package." />
-          ) : sent && blocked > 0 ? (
-            <Banner
-              tone="warning"
-              title="A revise or reject blocks approval. Reopen the review to revise the packages; everyone then decides again on the new versions."
-              action={{ label: busy === "reopen" ? "Reopening…" : "Reopen for revision", onClick: () => void reopen() }}
-            />
-          ) : sent ? (
-            <Banner
-              tone="okay"
-              title="The packages are under review. Decisions are recorded against these versions; reopen the review to change a package."
-              action={{ label: busy === "reopen" ? "Reopening…" : "Reopen for revision", onClick: () => void reopen() }}
-            />
-          ) : null}
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Stakeholder</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Decision</TableHead>
-                <TableHead>Record</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {audiences.map((audience) => {
-                const recorded = decisionFor(audience.name);
-                return (
-                  <TableRow key={audience.name}>
-                    <TableCell>{audience.name}</TableCell>
-                    <TableCell>{audience.role.replace(/_/g, " ")}</TableCell>
-                    <TableCell>
-                      {recorded ? (
-                        <StateLabel
-                          tone={recorded.decision === "proceed" ? "success" : "error"}
-                        >
-                          {recorded.decision}
-                        </StateLabel>
-                      ) : (
-                        <StateLabel tone="warning">Awaiting</StateLabel>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {recorded ? (
-                        <span className="inline-note">
-                          Recorded {new Date(recorded.createdAt).toLocaleString()}. Decisions are
-                          immutable.
-                        </span>
-                      ) : (
-                        <div className="button-row">
-                          {/* What they said on an earlier review is history beside
-                              the buttons, never in place of them. */}
-                          {earlierDecisionFor(audience.name) ? (
-                            <span className="inline-note">
-                              Said {earlierDecisionFor(audience.name)!.decision} on an earlier review; decides again here.
-                            </span>
-                          ) : null}
-                          <Button
-                            loading={busy === audience.name}
-                            disabled={!(sent || everyoneHasOne)}
-                            onClick={() => decide(audience.name, "proceed")}
-                          >
-                            Proceed
-                          </Button>
-                          <Button disabled={!(sent || everyoneHasOne)} onClick={() => decide(audience.name, "revise")}>
-                            Revise
-                          </Button>
-                          <Button
-                            variant="destructive"
-                            disabled={!(sent || everyoneHasOne)}
-                            onClick={() => decide(audience.name, "reject")}
-                          >
-                            Reject
-                          </Button>
-                        </div>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-
-          <div className="screen-body">
-            <Field label="Rationale">
-              <Dictated value={rationale} onValueChange={setRationale} align="start">
-                <Textarea value={rationale} onChange={(event) => setRationale(event.target.value)} />
-              </Dictated>
-            </Field>
-            {blocked > 0 ? (
-              <Banner tone="error" title="A reject or revise blocks approval" />
-            ) : quorumMet ? (
-              <Banner tone="okay" title="Quorum met. Stage 5 can be approved" />
-            ) : null}
-          </div>
-        </Screen>
-        </div>
-      ) : null}
     </>
   );
 }

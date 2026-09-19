@@ -28,7 +28,7 @@ import { Banner, Button, Field, Screen, StateLabel } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
 import { PrintButton } from "../print.jsx";
 import { Elapsed } from "./workspace/elapsed.jsx";
-import type { FoldedFeedback } from "../run-fold.ts";
+import type { FoldedFeedback } from "@solutions-builder/app/project-state";
 
 type PendingComment = { anchor: Anchor; body: string };
 

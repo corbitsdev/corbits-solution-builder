@@ -28,7 +28,7 @@ import { Tabs } from "@corbits/react-ui";
 import { Banner, Button, Screen, StateLabel, stageName, versionDigest } from "../../components.jsx";
 import { STAGE_GOAL } from "./gate.jsx";
 import { StageConversation } from "./thread.jsx";
-import type { FoldedFeedback, StageStatus } from "../../run-fold.ts";
+import type { FoldedFeedback } from "@solutions-builder/app/project-state";
 
 export { StageDocument, DocumentBody } from "./document.jsx";
 export { ApprovalsRecord, STAGE_GOAL } from "./gate.jsx";
@@ -66,7 +66,7 @@ export function StageWorkspace({
    * run to fold a position from, no draft/versions split, and stage 9's
    * decisions live entirely in the existing approvals UI, not this page.
    */
-  standing?: StageStatus | null;
+  standing?: unknown;
   draftOpen?: boolean;
   /** The workspace tenant artifacts are recorded under. */
   tenantId: string;
