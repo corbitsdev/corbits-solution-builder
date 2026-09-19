@@ -21,6 +21,7 @@ import {
   installProjectAuthority,
   InstallerError,
   liveDelegationStore,
+  listArtifacts,
   ensureRegistryTarballs,
   pushSourceTree,
   requireProject as installerRequireProject,
@@ -40,7 +41,18 @@ import {
 } from "@solutions-builder/installer";
 import { MATERIAL_KIND } from "@solutions-builder/app/artifacts";
 import type { DesignFeedbackDisposition, DesignFeedbackEntry as DesignFeedbackGraphEntry } from "@solutions-builder/app/artifact-graph";
+import type { TemplateTheme } from "@solutions-builder/app/deck";
 import { withDisposition } from "./design-disposition.ts";
+import {
+  DECK_SETTINGS_KIND,
+  DECK_SETTINGS_TITLE,
+  DECK_TEMPLATE_KIND,
+  deckSettingsContent,
+  parseDeckSettings,
+  readTemplateTheme,
+  withRoleTemplate,
+  type DeckSettings,
+} from "./deck-templates.ts";
 
 /**
  * The document kind a stage's own approved draft is recorded under, once a
@@ -550,9 +562,8 @@ async function uploadArtifactFile(tenantId: string, file: File): Promise<{ id: s
   return { id: artifact.id, ...(typeof size === "number" ? { size } : {}) };
 }
 
-/** Fetches a blob-backed artifact's bytes through the package's own download
- *  route and re-wraps them as a `data:` URL. */
-async function downloadUploadedArtifact(tenantId: string, artifactId: string): Promise<string> {
+/** The blob-backed artifact's raw bytes, over the package's own download route. */
+async function downloadArtifactBytes(tenantId: string, artifactId: string): Promise<{ bytes: Uint8Array; mimeType: string }> {
   const response = await fetch(
     `${hubOrigin()}/api/tenants/${encodeURIComponent(tenantId)}/artifacts/${encodeURIComponent(artifactId)}/download`,
     { credentials: hubCredentials() },
@@ -565,6 +576,13 @@ async function downloadUploadedArtifact(tenantId: string, artifactId: string): P
   }
   const mimeType = response.headers.get("content-type") ?? "application/octet-stream";
   const bytes = new Uint8Array(await response.arrayBuffer());
+  return { bytes, mimeType };
+}
+
+/** Fetches a blob-backed artifact's bytes through the package's own download
+ *  route and re-wraps them as a `data:` URL. */
+async function downloadUploadedArtifact(tenantId: string, artifactId: string): Promise<string> {
+  const { bytes, mimeType } = await downloadArtifactBytes(tenantId, artifactId);
   return `data:${mimeType};base64,${toBase64(bytes)}`;
 }
 
@@ -600,8 +618,25 @@ function readAudienceDecisions(metadata: Record<string, unknown> | null): Audien
   return Array.isArray(decisions) ? (decisions as AudienceDecision[]) : [];
 }
 
-const STAKEHOLDER_ROLES: readonly Authority[] = AUTHORITIES.filter((role) => role !== "system");
+export const STAKEHOLDER_ROLES: readonly Authority[] = AUTHORITIES.filter((role) => role !== "system");
 const MAX_STAKEHOLDER_NAME = 80;
+
+const EMPTY_DECK_SETTINGS: DeckSettings = { roles: {} };
+
+/** The one workspace-scoped `deck_settings` artifact, newest live one if more than one exists. */
+async function deckSettingsArtifact(
+  transport: ReturnType<typeof createHubTransport>,
+  workspaceTenantId: string,
+): Promise<{ id: string; content: string } | null> {
+  const artifacts = await listArtifacts(transport, workspaceTenantId);
+  const candidates = artifacts.filter(
+    (artifact) => artifact.archivedAt === null && (artifact.metadata as { sb?: Record<string, unknown> } | null)?.sb?.kind === DECK_SETTINGS_KIND,
+  );
+  const latest = candidates.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+  if (!latest) return null;
+  const artifact = await installerGetArtifact(transport, workspaceTenantId, latest.id);
+  return artifact ? { id: artifact.id, content: artifact.content } : null;
+}
 
 function stakeholdersPolicy(
   current: ProjectPolicy,
@@ -903,6 +938,90 @@ export const api = {
         }),
       );
       return { attached };
+    }),
+  /**
+   * Uploads a role's style-guide PowerPoint the same way `attachMaterial`
+   * uploads any other file — through the multipart route, then a
+   * metadata-only revise stamps `sb`. Workspace-scoped: no `projectId`, since
+   * a style guide belongs to the role across every project.
+   */
+  uploadDeckTemplate: (file: File) =>
+    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      const mediaType = file.type || "application/octet-stream";
+      const uploaded = await uploadArtifactFile(workspaceTenantId, file);
+      const sb = { kind: DECK_TEMPLATE_KIND, variant: file.name, mediaType, provenance: { producer: "human" as const } };
+      try {
+        await installerReviseArtifact(transport, workspaceTenantId, uploaded.id, { metadata: { sb } });
+      } catch (cause) {
+        await installerArchiveArtifact(transport, workspaceTenantId, uploaded.id).catch(() => {});
+        throw cause;
+      }
+      return { id: uploaded.id, name: file.name, mediaType };
+    }),
+  /** Every style-guide PowerPoint kept in the workspace, newest first. */
+  listDeckTemplates: () =>
+    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      const artifacts = await listArtifacts(transport, workspaceTenantId);
+      const templates = artifacts
+        .filter((artifact) => artifact.archivedAt === null && (artifact.metadata as { sb?: Record<string, unknown> } | null)?.sb?.kind === DECK_TEMPLATE_KIND)
+        .map((artifact) => {
+          const sb = (artifact.metadata as { sb?: Record<string, unknown> }).sb!;
+          return {
+            id: artifact.id,
+            name: typeof sb.variant === "string" ? sb.variant : artifact.title,
+            mediaType: typeof sb.mediaType === "string" ? sb.mediaType : "application/octet-stream",
+            createdAt: artifact.createdAt,
+          };
+        });
+      return { templates };
+    }),
+  /** Archives a style-guide PowerPoint, and unmaps it from any role that had it. */
+  removeDeckTemplate: (templateArtifactId: string) =>
+    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      await installerArchiveArtifact(transport, workspaceTenantId, templateArtifactId);
+      const artifact = await deckSettingsArtifact(transport, workspaceTenantId);
+      if (!artifact) return { settings: EMPTY_DECK_SETTINGS };
+      const current = parseDeckSettings(artifact.content);
+      let next = current;
+      for (const [role, mapped] of Object.entries(current.roles)) {
+        if (mapped === templateArtifactId) next = withRoleTemplate(next, role, null);
+      }
+      if (next !== current) {
+        await installerReviseArtifact(transport, workspaceTenantId, artifact.id, { content: deckSettingsContent(next) });
+      }
+      return { settings: next };
+    }),
+  /** The workspace's role→template map, or an empty one when nothing is saved yet. */
+  deckSettings: () =>
+    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      const artifact = await deckSettingsArtifact(transport, workspaceTenantId);
+      return { settings: artifact ? parseDeckSettings(artifact.content) : EMPTY_DECK_SETTINGS };
+    }),
+  /** Maps (or unmaps, when `templateArtifactId` is null) a role's style guide. */
+  setDeckTemplateForRole: (role: string, templateArtifactId: string | null) =>
+    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      const artifact = await deckSettingsArtifact(transport, workspaceTenantId);
+      const current = artifact ? parseDeckSettings(artifact.content) : EMPTY_DECK_SETTINGS;
+      const next = withRoleTemplate(current, role, templateArtifactId);
+      if (artifact) {
+        await installerReviseArtifact(transport, workspaceTenantId, artifact.id, { content: deckSettingsContent(next) });
+      } else {
+        await installerCreateArtifact(transport, workspaceTenantId, {
+          title: DECK_SETTINGS_TITLE,
+          content: deckSettingsContent(next),
+          metadata: { sb: { kind: DECK_SETTINGS_KIND, provenance: { producer: "human" as const } } },
+        });
+      }
+      return { settings: next };
+    }),
+  /** The role's style guide theme, read fresh from its `.pptx`, or `null` when none is mapped. */
+  deckTemplateThemeForRole: (role: string) =>
+    asWorkspaceOwner(async (transport, workspaceTenantId): Promise<TemplateTheme | null> => {
+      const artifact = await deckSettingsArtifact(transport, workspaceTenantId);
+      const templateArtifactId = artifact ? parseDeckSettings(artifact.content).roles[role] : undefined;
+      if (!templateArtifactId) return null;
+      const { bytes } = await downloadArtifactBytes(workspaceTenantId, templateArtifactId);
+      return await readTemplateTheme(bytes);
     }),
   /**
    * Persists the mail-chat specialist's approved reply as the stage's own

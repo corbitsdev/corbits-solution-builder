@@ -5,7 +5,7 @@
  * `downloadArtifact` — the same shape an already-recorded deck's content
  * comes back as.
  */
-import { deckFileName, deckFrom, packageOutlineProblem, renderDeck, DECK_MEDIA_TYPE } from "@solutions-builder/app/deck";
+import { deckFileName, deckFrom, packageOutlineProblem, renderDeck, DECK_MEDIA_TYPE, type TemplateTheme } from "@solutions-builder/app/deck";
 import { toBase64 } from "./base64.ts";
 
 export async function buildPackageDeck(args: {
@@ -13,6 +13,8 @@ export async function buildPackageDeck(args: {
   audience: string;
   role: string;
   markdown: string;
+  /** The role's style guide theme, when one is mapped and readable. */
+  theme?: TemplateTheme;
 }): Promise<{ dataUrl: string; filename: string }> {
   const problem = packageOutlineProblem(args.markdown);
   if (problem) {

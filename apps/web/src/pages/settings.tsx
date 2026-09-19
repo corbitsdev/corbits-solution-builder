@@ -14,7 +14,7 @@
  */
 import { Input, Switch, Textarea } from "@corbits/react-ui";
 import { useEffect, useState } from "react";
-import { api, ApiFailure, type DesignerSettings, type HostStatus, type Provider } from "../client.js";
+import { api, ApiFailure, STAKEHOLDER_ROLES, type DesignerSettings, type HostStatus, type Provider } from "../client.js";
 import { Banner, Button, StateLabel } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
 import { ProviderList, type ApiKeyProvider, type OAuthCandidate } from "./providers.jsx";
@@ -41,6 +41,7 @@ export function Settings({
         onChanged={onChanged}
       />
       <Designer />
+      <DeckTemplates />
       <BuildWorker status={status} onChanged={onChanged} />
       <ThisComputer status={status} />
       <Diagnostics status={status} />
@@ -247,6 +248,144 @@ function Designer() {
           <option value="reduce">Produce a lower-resolution design and tell me</option>
         </select>
       </div>
+    </Section>
+  );
+}
+
+/* --------------------------------------------------------- deck templates */
+
+type DeckTemplate = { id: string; name: string; mediaType: string; createdAt: string };
+
+function roleLabel(role: string): string {
+  return role.replace(/_/g, " ");
+}
+
+/**
+ * Each stakeholder role's style guide: a PowerPoint whose theme its slides
+ * follow — its accent and text colours, its title and body typefaces, and
+ * its slide size. Templates are a shared library, uploaded once; a role
+ * either points at one of them or keeps the plain default look.
+ */
+function DeckTemplates() {
+  const [templates, setTemplates] = useState<DeckTemplate[] | null>(null);
+  const [roles, setRoles] = useState<Record<string, string> | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [busyRole, setBusyRole] = useState<string | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = () =>
+    Promise.all([api.listDeckTemplates(), api.deckSettings()]).then(([templatesResult, settingsResult]) => {
+      setTemplates(templatesResult.templates);
+      setRoles({ ...settingsResult.settings.roles });
+    });
+
+  useEffect(() => {
+    let cancelled = false;
+    load().catch((cause) => {
+      if (!cancelled) setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const upload = async (file: File) => {
+    setUploading(true);
+    setError(null);
+    try {
+      await api.uploadDeckTemplate(file);
+      await load();
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const remove = async (templateId: string) => {
+    setRemovingId(templateId);
+    setError(null);
+    try {
+      await api.removeDeckTemplate(templateId);
+      await load();
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    } finally {
+      setRemovingId(null);
+    }
+  };
+
+  const mapRole = async (role: string, templateId: string | null) => {
+    if (!roles) return;
+    setBusyRole(role);
+    setError(null);
+    const before = roles;
+    setRoles(
+      templateId
+        ? { ...roles, [role]: templateId }
+        : Object.fromEntries(Object.entries(roles).filter(([key]) => key !== role)),
+    );
+    try {
+      await api.setDeckTemplateForRole(role, templateId);
+    } catch (cause) {
+      setRoles(before);
+      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    } finally {
+      setBusyRole(null);
+    }
+  };
+
+  return (
+    <Section
+      title="Stakeholder deck templates"
+      lead="A PowerPoint whose theme a role's slides follow: its accent and text colours, its title and body typefaces, and its slide size. Nothing else is copied from it. Upload one below, then point a role at it."
+    >
+      {error ? <Banner tone="error" title={error} /> : null}
+      <div className="deck-template-library">
+        {(templates ?? []).map((template) => (
+          <div key={template.id} className="deck-template-row">
+            <span className="deck-template-name">{template.name}</span>
+            <Button loading={removingId === template.id} onClick={() => void remove(template.id)}>
+              Remove
+            </Button>
+          </div>
+        ))}
+        <label className="deck-template-pick">
+          <Input
+            type="file"
+            accept=".pptx,.potx,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            disabled={uploading}
+            onChange={(event) => {
+              const file = event.target.files?.[0] ?? null;
+              event.target.value = "";
+              if (file) void upload(file);
+            }}
+          />
+          <span>{uploading ? "Uploading…" : "Choose a PowerPoint…"}</span>
+        </label>
+      </div>
+      {STAKEHOLDER_ROLES.map((role) => (
+        <div key={role} className="setting-row">
+          <div>
+            <strong>{roleLabel(role)}</strong>
+          </div>
+          <select
+            className="setting-select"
+            aria-label={`Style guide for ${roleLabel(role)}`}
+            value={roles?.[role] ?? ""}
+            disabled={!roles || !templates || busyRole === role}
+            onChange={(event) => void mapRole(role, event.target.value || null)}
+          >
+            <option value="">Default look</option>
+            {(templates ?? []).map((template) => (
+              <option key={template.id} value={template.id}>
+                {template.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      ))}
     </Section>
   );
 }

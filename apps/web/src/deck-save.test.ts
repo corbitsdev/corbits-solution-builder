@@ -37,4 +37,11 @@ describe("buildPackageDeck", () => {
       }),
     ).rejects.toThrow(/no "### Deck outline" section/);
   });
+
+  test("a themed deck's bytes differ from the default deck's", async () => {
+    const args = { projectTitle: "Acme Rebuild", audience: "Finance", role: "Approver", markdown: OUTLINE };
+    const plain = await buildPackageDeck(args);
+    const themed = await buildPackageDeck({ ...args, theme: { accent: "112233", titleFace: "Georgia" } });
+    expect(themed.dataUrl).not.toBe(plain.dataUrl);
+  });
 });

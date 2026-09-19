@@ -18,6 +18,7 @@ import { Dictated } from "../dictation.jsx";
 import { Tabs, Input, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@corbits/react-ui";
 import { Markdown } from "../markdown.jsx";
 import { buildPackageDeck } from "../deck-save.ts";
+import { slidesSource } from "../deck-templates.ts";
 
 const POLL_INTERVAL_MS = 3_000;
 const POLL_TIMEOUT_MS = 10 * 60 * 1_000;
@@ -385,20 +386,31 @@ export function AudiencePackages({
       const deck = detail.nodes
         .filter((node) => node.kind === "audience_deck" && node.variant === pkg.variant && node.supersededByNodeId === null)
         .sort((a, b) => b.version - a.version)[0];
-      if (deck) {
+      const role = audiences.find((audience) => audience.name === pkg.variant)?.role ?? "";
+      let theme = null;
+      let themeNotice: string | null = null;
+      if (role) {
+        try {
+          theme = await api.deckTemplateThemeForRole(role);
+        } catch (cause) {
+          themeNotice = `its style guide could not be read (${cause instanceof ApiFailure ? cause.detail.message : String(cause)}); using the default look`;
+        }
+      }
+      if (slidesSource({ hasRecordedDeck: Boolean(deck), theme }) === "recorded" && deck) {
         const result = await api.artifactContent(tenantId, deck.id);
         downloadArtifact(result.content, `${deck.title}.pptx`);
       } else {
         const packageContent = await api.artifactContent(tenantId, packageNodeId);
-        const role = audiences.find((audience) => audience.name === pkg.variant)?.role ?? "";
         const built = await buildPackageDeck({
           projectTitle: detail.project.title,
           audience: name,
           role,
           markdown: packageContent.content,
+          ...(theme ? { theme } : {}),
         });
         downloadArtifact(built.dataUrl, built.filename);
       }
+      if (themeNotice) setError(`Slides for ${name}: ${themeNotice}.`);
       setSavedNodes((before) => new Set(before).add(packageNodeId));
     } catch (cause) {
       setError(`Slides for ${name}: ${cause instanceof ApiFailure ? cause.detail.message : String(cause)}`);

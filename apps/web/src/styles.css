@@ -2062,6 +2062,44 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   overflow-wrap: anywhere;
 }
 
+/* The uploaded style-guide library: one row per template, a picker to add one. */
+.deck-template-library {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
+}
+
+.deck-template-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.deck-template-name {
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+.deck-template-pick {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--radius-control);
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.deck-template-pick input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
 .project-card:hover .project-card-open,
 .project-card:focus-visible .project-card-open {
   opacity: 1;
