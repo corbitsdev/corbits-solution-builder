@@ -103,7 +103,10 @@ export function toArtifactNode(node: Awaited<ReturnType<typeof artifactGraphFor>
     // stand-in: unique to this exact version, which is all a gate signal or a
     // decisions-queue display actually needs it for.
     contentHash: node.versionId,
-    sizeBytes: 0,
+    // An uploaded file's real size, carried through the fold from
+    // `source.upload.size`; unknown rather than a misleading 0 for plain
+    // text/data-URL artifacts, whose length the list route cannot see.
+    ...(node.sizeBytes !== undefined ? { sizeBytes: node.sizeBytes } : {}),
     ...(node.mediaType !== undefined ? { mediaType: node.mediaType } : {}),
     createdAt: node.createdAt,
     supersededByNodeId: node.supersededByNodeId,
@@ -119,7 +122,7 @@ export async function loadProjectView(projectId: string, transport: Transport = 
     installerRequireProject(transport, projectId),
     artifactGraphFor(transport, workspace.tenantId, projectId),
   ]);
-  const nodes = graph.nodes.map(toArtifactNode);
+  const nodes = graph.nodes.map((node) => toArtifactNode(node));
   const stage = currentStageFromArtifacts(nodes);
   const soloApproval = await soloApprovalFor(transport, projectId, stage as Stage).catch(() => true);
 

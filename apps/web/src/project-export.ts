@@ -48,7 +48,7 @@ function pickNode(node: ArtifactNode): ArtifactNode {
     version: node.version,
     artifactId: node.artifactId,
     contentHash: node.contentHash,
-    sizeBytes: node.sizeBytes,
+    ...(node.sizeBytes !== undefined ? { sizeBytes: node.sizeBytes } : {}),
     ...(node.mediaType !== undefined ? { mediaType: node.mediaType } : {}),
     createdAt: node.createdAt,
     supersededByNodeId: node.supersededByNodeId,

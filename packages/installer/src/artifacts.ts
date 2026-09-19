@@ -108,3 +108,12 @@ export async function reviseArtifact(
     input,
   );
 }
+
+/** Soft-hides an artifact (sets `archivedAt`). Requires `archive` on `artifact:<id>`. */
+export async function archiveArtifact(
+  transport: Transport,
+  tenantId: string,
+  artifactId: string,
+): Promise<void> {
+  await transport.fetch("POST", tenantPathFor(tenantId, `/artifacts/${artifactId}/archive`));
+}

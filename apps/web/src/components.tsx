@@ -421,10 +421,12 @@ const DOCUMENT_NAMES: Record<string, string> = {
   delivery_verification: "Delivery verification",
 };
 
-/** What a folded document says for itself: its version, when it was written, and how long it is. */
-export function versionDigest(node: { version: number; createdAt: string; sizeBytes: number }): string {
+/** What a folded document says for itself: its version, when it was written, and, when known, how long it is. */
+export function versionDigest(node: { version: number; createdAt: string; sizeBytes?: number }): string {
+  const stamp = `Version ${node.version} · written ${new Date(node.createdAt).toLocaleString()}`;
+  if (node.sizeBytes === undefined) return stamp;
   const length = node.sizeBytes < 1024 ? `${node.sizeBytes} B` : `${(node.sizeBytes / 1024).toFixed(1)} kB`;
-  return `Version ${node.version} · written ${new Date(node.createdAt).toLocaleString()} · ${length}`;
+  return `${stamp} · ${length}`;
 }
 
 export function documentName(kind: string): string {

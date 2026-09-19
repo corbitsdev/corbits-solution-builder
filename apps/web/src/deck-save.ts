@@ -6,15 +6,7 @@
  * comes back as.
  */
 import { deckFileName, deckFrom, packageOutlineProblem, renderDeck, DECK_MEDIA_TYPE } from "@solutions-builder/app/deck";
-
-function toBase64(bytes: Uint8Array): string {
-  let binary = "";
-  const chunk = 0x8000;
-  for (let offset = 0; offset < bytes.length; offset += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunk));
-  }
-  return btoa(binary);
-}
+import { toBase64 } from "./base64.ts";
 
 export async function buildPackageDeck(args: {
   projectTitle: string;

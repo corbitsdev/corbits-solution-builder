@@ -14,6 +14,13 @@ import { PrintButton } from "../print.jsx";
 
 type ArtifactEdge = { childNodeId: string; sourceNodeId: string };
 
+/** `sizeBytes` is unknown for a plain text/data-URL artifact (CL-8709) — say so rather than showing a false 0. */
+function formatSize(sizeBytes: number | undefined): string {
+  if (sizeBytes === undefined) return "unknown size";
+  if (sizeBytes >= 1024 * 1024) return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(sizeBytes / 1024))} KB`;
+}
+
 /** Kind plus variant: stage-5 parallel artifacts must not collapse into one row. */
 function documentIdentity(node: ArtifactNode): string {
   return `${node.kind}\0${node.variant ?? ""}`;
@@ -365,7 +372,7 @@ function ArtifactReader({
 /** A stakeholder's slides: bytes, not a page, so what is offered is a save. */
 function DeckFile({ node, tenantId }: { node: ArtifactNode; tenantId: string }) {
   const [state, setState] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
-  const size = `${Math.max(1, Math.round(node.sizeBytes / 1024))} KB`;
+  const size = formatSize(node.sizeBytes);
   return (
     <div className="deck-file">
       <p className="inline-note">
@@ -402,7 +409,7 @@ function DeckFile({ node, tenantId }: { node: ArtifactNode; tenantId: string }) 
  */
 export function BuildFile({ node, tenantId }: { node: ArtifactNode; tenantId: string }) {
   const [state, setState] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
-  const size = node.sizeBytes >= 1024 * 1024 ? `${(node.sizeBytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(node.sizeBytes / 1024))} KB`;
+  const size = formatSize(node.sizeBytes);
   return (
     <div className="deck-file">
       <p className="inline-note">
@@ -435,7 +442,7 @@ export function BuildFile({ node, tenantId }: { node: ArtifactNode; tenantId: st
 
 function Material({ node, content }: { node: ArtifactNode; content: string }) {
   const mediaType = node.mediaType ?? "";
-  const size = `${Math.max(1, Math.round(node.sizeBytes / 1024))} KB`;
+  const size = formatSize(node.sizeBytes);
   const shown = mediaType.startsWith("image/") ? (
     <figure className="material-figure">
       <img src={content} alt={node.title} />

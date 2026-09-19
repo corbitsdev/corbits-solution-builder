@@ -10,6 +10,7 @@ import { AUTHORITIES, type Authority, type Stage } from "@solutions-builder/app/
 import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
 import {
   ApiError as HubApiError,
+  archiveArtifact as installerArchiveArtifact,
   createArtifact as installerCreateArtifact,
   createProject as installerCreateProject,
   ensureSpecialistDeployment,
@@ -69,6 +70,7 @@ export const STAGE_DRAFT_KIND: Readonly<Record<number, string>> = {
   9: "delivery_manifest",
 };
 import { artifactGraphFor } from "./artifact-graph.ts";
+import { toBase64 } from "./base64.ts";
 import { openCreatedProject } from "./create-project-open.ts";
 import { createHubTransport } from "./hub.ts";
 import {
@@ -272,7 +274,8 @@ export type ArtifactNode = {
   version: number;
   artifactId: string;
   contentHash: string;
-  sizeBytes: number;
+  /** Unknown unless the version is a package upload record; never a misleading 0. */
+  sizeBytes?: number;
   /** `text/markdown` for a written document, `text/html` for a design. */
   mediaType?: string;
   createdAt: string;
@@ -499,6 +502,70 @@ function installerFailure(cause: unknown): never {
     correlationId: "-",
     retryable: false,
   });
+}
+
+/**
+ * Multipart upload straight to the mounted `@corbits/artifacts` module's
+ * `POST /artifacts/upload` — the one entry point `Transport.fetch` (JSON-body
+ * only) cannot drive. Refusals (415 unsupported type, 413 too large) come
+ * back with the package's own message, surfaced verbatim as `ApiFailure.message`.
+ */
+async function uploadArtifactFile(tenantId: string, file: File): Promise<{ id: string; size?: number }> {
+  const body = new FormData();
+  body.append("file", file, file.name);
+  let response: Response;
+  try {
+    response = await fetch(`${hubOrigin()}/api/tenants/${encodeURIComponent(tenantId)}/artifacts/upload`, {
+      method: "POST",
+      credentials: hubCredentials(),
+      body,
+    });
+  } catch {
+    throw new ApiFailure({
+      code: "host_unreachable",
+      message: "That request did not reach the host. Try again, or reopen the window.",
+      correlationId: "-",
+      retryable: true,
+    });
+  }
+  const text = await response.text();
+  let parsed: unknown;
+  try {
+    parsed = text.length === 0 ? undefined : JSON.parse(text);
+  } catch {
+    parsed = undefined;
+  }
+  if (!response.ok) {
+    const message = (parsed as { error?: string } | undefined)?.error ?? `The host answered ${response.status}.`;
+    throw new ApiFailure(
+      { code: response.status === 415 ? "unsupported_type" : response.status === 413 ? "too_large" : "internal_error", message, correlationId: "-", retryable: false },
+      response.status,
+    );
+  }
+  const artifact = (parsed as { artifacts?: { id: string; source?: { upload?: { size?: unknown } } }[] } | undefined)?.artifacts?.[0];
+  if (!artifact) {
+    throw new ApiFailure({ code: "internal_error", message: "Upload returned no artifact.", correlationId: "-", retryable: false });
+  }
+  const size = artifact.source?.upload?.size;
+  return { id: artifact.id, ...(typeof size === "number" ? { size } : {}) };
+}
+
+/** Fetches a blob-backed artifact's bytes through the package's own download
+ *  route and re-wraps them as a `data:` URL. */
+async function downloadUploadedArtifact(tenantId: string, artifactId: string): Promise<string> {
+  const response = await fetch(
+    `${hubOrigin()}/api/tenants/${encodeURIComponent(tenantId)}/artifacts/${encodeURIComponent(artifactId)}/download`,
+    { credentials: hubCredentials() },
+  );
+  if (!response.ok) {
+    throw new ApiFailure(
+      { code: "internal_error", message: `The host answered ${response.status}.`, correlationId: "-", retryable: false },
+      response.status,
+    );
+  }
+  const mimeType = response.headers.get("content-type") ?? "application/octet-stream";
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  return `data:${mimeType};base64,${toBase64(bytes)}`;
 }
 
 /** In-flight/resolved `ensureStageAgent` calls, keyed `${projectId}:${stage}` --
@@ -790,35 +857,49 @@ export const api = {
     }),
   /**
    * Hands files over with the problem; each becomes a `source_material`
-   * artifact version the specialists read, written straight to the mounted
-   * `@corbits/artifacts` module — no host route left (CL-8510). Unlike the
-   * deleted host route, a same-named re-upload always starts a fresh
-   * artifact rather than a new version of the same one.
+   * artifact version the specialists read. Text/JSON stays on the plain
+   * `POST /artifacts` path; anything else (pdf, xlsx, docx, pptx, images)
+   * goes through the package's multipart `POST /artifacts/upload`, which
+   * mints the artifact itself, then a metadata-only revise stamps `sb` on
+   * it — `upload` carries no metadata field of its own. Unlike the deleted
+   * host route, a same-named re-upload always starts a fresh artifact
+   * rather than a new version of the same one.
    */
   attachMaterial: (projectId: string, files: File[]) =>
     asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const attached = await Promise.all(
         files.map(async (file) => {
           const mediaType = file.type || "application/octet-stream";
-          const content = mediaType.startsWith("text/") || mediaType === "application/json"
-            ? await file.text()
-            : `data:${mediaType};base64,${btoa(String.fromCharCode(...new Uint8Array(await file.arrayBuffer())))}`;
-          const artifact = await installerCreateArtifact(transport, workspaceTenantId, {
-            title: file.name,
-            content,
-            metadata: {
-              sb: {
-                projectId,
-                kind: MATERIAL_KIND,
-                stage: 1,
-                variant: file.name,
-                sourceVersionIds: [],
-                provenance: { producer: "human" as const },
-                mediaType,
-              },
-            },
-          });
-          return { nodeId: artifact.id, name: file.name, mediaType, sizeBytes: file.size };
+          const sb = {
+            projectId,
+            kind: MATERIAL_KIND,
+            stage: 1,
+            variant: file.name,
+            sourceVersionIds: [],
+            provenance: { producer: "human" as const },
+            mediaType,
+          };
+          if (mediaType.startsWith("text/") || mediaType === "application/json") {
+            const content = await file.text();
+            const artifact = await installerCreateArtifact(transport, workspaceTenantId, {
+              title: file.name,
+              content,
+              metadata: { sb },
+            });
+            return { nodeId: artifact.id, name: file.name, mediaType, sizeBytes: file.size };
+          }
+          const uploaded = await uploadArtifactFile(workspaceTenantId, file);
+          try {
+            await installerReviseArtifact(transport, workspaceTenantId, uploaded.id, { metadata: { sb } });
+          } catch (cause) {
+            // Unstamped, the upload is invisible to the project forever (no
+            // `sb.projectId` for the fold to match) — archive it rather than
+            // leaving an orphan artifact behind, then surface the original
+            // failure.
+            await installerArchiveArtifact(transport, workspaceTenantId, uploaded.id).catch(() => {});
+            throw cause;
+          }
+          return { nodeId: uploaded.id, name: file.name, mediaType, sizeBytes: uploaded.size ?? file.size };
         }),
       );
       return { attached };
@@ -922,10 +1003,21 @@ export const api = {
     }),
   /** The workspace tenant artifacts are recorded under; resolved once and threaded down as a prop. */
   workspaceTenantId: () => resolveWorkspace(createHubTransport()).then((workspace) => workspace?.tenantId ?? null),
-  /** An artifact's current content, over the mounted `@corbits/artifacts` module — no host route left. */
+  /**
+   * An artifact's current content, over the mounted `@corbits/artifacts`
+   * module — no host route left. A file uploaded through `/artifacts/upload`
+   * keeps its bytes in the module's own blob store, not `content`, so those
+   * are fetched through the package's own `GET /artifacts/:id/download` and
+   * re-wrapped as the same `data:` URL convention data-URL-backed artifacts
+   * already return, so every reader downstream (inline preview, download)
+   * stays on one code path.
+   */
   artifactContent: async (tenantId: string, nodeId: string): Promise<{ content: string }> => {
     const artifact = await installerGetArtifact(createHubTransport(), tenantId, nodeId);
-    return { content: artifact?.content ?? "" };
+    if (!artifact) return { content: "" };
+    const uploadId = (artifact.source as { upload?: { id?: unknown } }).upload?.id;
+    if (typeof uploadId !== "string") return { content: artifact.content };
+    return { content: await downloadUploadedArtifact(tenantId, nodeId) };
   },
   /** The decisions already recorded on a stage-5 package artifact's `sb.decisions`, oldest first. */
   audienceDecisions: async (tenantId: string, packageNodeId: string): Promise<{ decisions: AudienceDecision[] }> => {

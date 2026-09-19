@@ -64,6 +64,10 @@ export type ArtifactListEntry = {
   title: string;
   createdAt: string;
   metadata: Record<string, unknown> | null;
+  /** Opaque; read here only for `source.upload.size` (CL-8709) — an uploaded
+   *  file's real byte count, which the list route otherwise has no place to
+   *  carry since `content` is omitted from it. */
+  source?: Record<string, unknown> & { origin: string };
 };
 
 export type ArtifactGraphNode = {
@@ -79,6 +83,8 @@ export type ArtifactGraphNode = {
   createdAt: string;
   /** `sb.approvedAt`, or null when this version has never been explicitly approved. */
   approvedAt: string | null;
+  /** `source.upload.size`, when this version is a package upload record; unset otherwise (CL-8709). */
+  sizeBytes?: number;
 };
 
 export type ArtifactGraphEdge = {
@@ -134,6 +140,11 @@ function readSb(entry: ArtifactListEntry): ArtifactGraphMetadata | null {
   return sb && typeof sb === "object" ? sb : null;
 }
 
+function readUploadSize(entry: ArtifactListEntry): number | undefined {
+  const size = (entry.source as { upload?: { size?: unknown } } | undefined)?.upload?.size;
+  return typeof size === "number" ? size : undefined;
+}
+
 /**
  * Folds one project's node/edge graph from a tenant's full artifact list.
  * Artifacts outside `projectId` (or with no `sb` metadata yet) are dropped.
@@ -148,19 +159,23 @@ export function foldArtifactGraph(artifacts: ArtifactListEntry[], projectId: str
     if (sb.supersedes) supersededBy.set(sb.supersedes, entry.id);
   }
 
-  const nodes: ArtifactGraphNode[] = scoped.map(({ entry, sb }) => ({
-    id: entry.id,
-    versionId: versionIdFor(entry.id, entry.version),
-    kind: sb.kind,
-    stage: sb.stage,
-    variant: sb.variant ?? null,
-    title: entry.title,
-    mediaType: sb.mediaType,
-    supersededByNodeId: supersededBy.get(entry.id) ?? null,
-    provenance: sb.provenance,
-    createdAt: entry.createdAt,
-    approvedAt: sb.approvedAt ?? null,
-  }));
+  const nodes: ArtifactGraphNode[] = scoped.map(({ entry, sb }) => {
+    const sizeBytes = readUploadSize(entry);
+    return {
+      id: entry.id,
+      versionId: versionIdFor(entry.id, entry.version),
+      kind: sb.kind,
+      stage: sb.stage,
+      variant: sb.variant ?? null,
+      title: entry.title,
+      mediaType: sb.mediaType,
+      supersededByNodeId: supersededBy.get(entry.id) ?? null,
+      provenance: sb.provenance,
+      createdAt: entry.createdAt,
+      approvedAt: sb.approvedAt ?? null,
+      ...(sizeBytes !== undefined ? { sizeBytes } : {}),
+    };
+  });
 
   const edges: ArtifactGraphEdge[] = scoped.flatMap(({ entry, sb }) =>
     sb.sourceVersionIds.map((sourceVersionId) => ({
