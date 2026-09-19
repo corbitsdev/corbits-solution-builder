@@ -38,6 +38,8 @@ import {
   type WorkflowGitPush,
 } from "@solutions-builder/installer";
 import { MATERIAL_KIND } from "@solutions-builder/app/artifacts";
+import type { DesignFeedbackDisposition, DesignFeedbackEntry as DesignFeedbackGraphEntry } from "@solutions-builder/app/artifact-graph";
+import { withDisposition } from "./design-disposition.ts";
 
 /**
  * The document kind a stage's own approved draft is recorded under, once a
@@ -285,9 +287,10 @@ export type ArtifactNode = {
  * A stage-4 note recorded against a design node, folded from the node's own
  * artifact metadata (`metadata.sb.feedback`) — CL-8620. There is no lifecycle
  * run to fold this from any more (CL-8612 contract v6): the artifact record
- * is the whole history.
+ * is the whole history. Shape owned by `artifact-graph.ts`'s metadata
+ * contract; re-exported here since it is what `designFeedback` answers.
  */
-export type DesignFeedbackEntry = { nodeId: string; text: string; at: string };
+export type DesignFeedbackEntry = DesignFeedbackGraphEntry;
 
 export type ProjectDetail = {
   project: {
@@ -1155,15 +1158,24 @@ export const api = {
     }),
   /**
    * Attaches feedback to a design node: mails the stage 4 specialist so it
-   * lands in its next turn, and records it on the node's own artifact
-   * metadata (`sb.feedback`) via `reviseArtifact` so it survives to fold back
-   * into `feedbackByNode` on reload — CL-8620. The specialist's mail address
-   * comes from `ensureStageAgent`, deployed lazily the same way the
-   * workspace's own composer resolves it. The node's project id rides its
-   * own `sb.projectId` (every stage draft is written with one), so this
-   * needs nothing beyond the node itself.
+   * lands in its next turn, and records each anchored comment — plus, when
+   * an overall note exists, one un-anchored entry for it — on the node's own
+   * artifact metadata (`sb.feedback`) via `reviseArtifact` so it survives to
+   * fold back into `feedbackByNode` on reload — CL-8620, extended with a
+   * per-comment `disposition` (CL-8699). `mailBody` is exactly what the
+   * specialist is mailed: the caller builds it (typically the overall note
+   * plus the deterministic revision prompt, so the mail still names every
+   * anchor), which is why it is not derived from `comments` here. The
+   * specialist's mail address comes from `ensureStageAgent`, deployed lazily
+   * the same way the workspace's own composer resolves it. The node's
+   * project id rides its own `sb.projectId` (every stage draft is written
+   * with one), so this needs nothing beyond the node itself.
    */
-  submitDesignFeedback: (tenantId: string, node: { id: string; title: string }, text: string) =>
+  submitDesignFeedback: (
+    tenantId: string,
+    node: { id: string; title: string },
+    args: { mailBody: string; comments: readonly { anchor?: DesignFeedbackEntry["anchor"]; text: string }[] },
+  ) =>
     asWorkspaceOwner(async (transport) => {
       const artifact = await installerGetArtifact(transport, tenantId, node.id).catch(() => null);
       const sb = (artifact?.metadata as { sb?: Record<string, unknown> } | null)?.sb ?? {};
@@ -1177,13 +1189,42 @@ export const api = {
         });
       }
       const existing = Array.isArray(sb.feedback) ? (sb.feedback as DesignFeedbackEntry[]) : [];
-      const entry: DesignFeedbackEntry = { nodeId: node.id, text, at: new Date().toISOString() };
+      const at = new Date().toISOString();
+      const entries: DesignFeedbackEntry[] = args.comments.map((comment, index) => ({
+        id: `${node.id}:${existing.length + index}`,
+        nodeId: node.id,
+        ...(comment.anchor ? { anchor: comment.anchor } : {}),
+        text: comment.text,
+        at,
+        disposition: "open",
+      }));
       const deployment = await api.ensureStageAgent(projectId, 4);
       await Promise.all([
-        api.sendStageMail(tenantId, deployment.address, { body: `Feedback on ${node.title}: ${text}` }),
+        api.sendStageMail(tenantId, deployment.address, { body: `Feedback on ${node.title}: ${args.mailBody}` }),
         installerReviseArtifact(transport, tenantId, node.id, {
-          metadata: { sb: { ...sb, feedback: [...existing, entry] } },
+          metadata: { sb: { ...sb, feedback: [...existing, ...entries] } },
         }),
       ]);
+    }),
+  /**
+   * Records a person's disposition on one already-recorded feedback comment,
+   * by id — the only way `sb.feedback[].disposition` changes; a new design
+   * version never touches it (CL-8699). Same metadata-revise path as
+   * `submitDesignFeedback`, and never stamps `approvedAt`.
+   */
+  setDesignFeedbackDisposition: (
+    tenantId: string,
+    node: { id: string },
+    entryId: string,
+    disposition: DesignFeedbackDisposition,
+  ) =>
+    asWorkspaceOwner(async (transport) => {
+      const artifact = await installerGetArtifact(transport, tenantId, node.id).catch(() => null);
+      const sb = (artifact?.metadata as { sb?: Record<string, unknown> } | null)?.sb ?? {};
+      const existing = Array.isArray(sb.feedback) ? (sb.feedback as DesignFeedbackEntry[]) : [];
+      const updated = withDisposition(existing, entryId, disposition, new Date().toISOString());
+      await installerReviseArtifact(transport, tenantId, node.id, {
+        metadata: { sb: { ...sb, feedback: updated } },
+      });
     }),
 };

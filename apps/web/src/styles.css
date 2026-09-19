@@ -3013,6 +3013,14 @@ button[aria-disabled="true"] {
   flex-wrap: wrap;
 }
 
+/* One feedback comment's disposition select, plus a stale-anchor note. */
+.feedback-disposition {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
 @media print {
   @page {
     margin: 18mm;

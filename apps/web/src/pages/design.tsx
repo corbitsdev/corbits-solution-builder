@@ -29,6 +29,7 @@ import { Dictated } from "../dictation.jsx";
 import { PrintButton } from "../print.jsx";
 import { Elapsed } from "./workspace/elapsed.jsx";
 import type { FoldedFeedback } from "@solutions-builder/app/project-state";
+import { anchorResolves, shortPromptHash, withFallbackIds, type Disposition } from "../design-disposition.js";
 
 type PendingComment = { anchor: Anchor; body: string };
 
@@ -76,8 +77,27 @@ export type DesignApproval = {
   onApprove: (design: ArtifactNode) => Promise<unknown>;
 };
 
+/**
+ * One anchored comment as the submitted-state table renders it, with its
+ * disposition (CL-8699). `addressable` is false for a row carried over from
+ * before ids existed — `id` is then a positional fallback for rendering
+ * only, and the disposition control is disabled since there is no real id to
+ * write against.
+ */
+type SubmittedComment = {
+  anchor: Anchor;
+  body: string;
+  id: string;
+  addressable: boolean;
+  disposition: Disposition;
+  dispositionAt?: string;
+};
+
+/** `FoldedFeedback` widened with per-comment disposition — this view's own read of `sb.feedback`, not the (deleted) run fold. */
+type SubmittedFeedback = Omit<FoldedFeedback, "comments"> & { comments: readonly SubmittedComment[] };
+
 /** Wraps the recorded notes for one node into the shape the submitted-state panel already renders. */
-function foldNodeFeedback(nodeId: string, entries: readonly DesignFeedbackEntry[]): FoldedFeedback | undefined {
+function foldNodeFeedback(nodeId: string, entries: readonly DesignFeedbackEntry[]): SubmittedFeedback | undefined {
   const last = entries.at(-1);
   if (!last) return undefined;
   return {
@@ -85,7 +105,14 @@ function foldNodeFeedback(nodeId: string, entries: readonly DesignFeedbackEntry[
     designNodeId: nodeId,
     direction: "revise",
     overallNote: last.text,
-    comments: [],
+    comments: withFallbackIds(entries, nodeId).map((entry) => ({
+      anchor: entry.anchor ?? {},
+      body: entry.text,
+      id: entry.id,
+      addressable: entry.addressable,
+      disposition: entry.disposition ?? "open",
+      ...(entry.dispositionAt ? { dispositionAt: entry.dispositionAt } : {}),
+    })),
     prompt: entries.map((entry) => entry.text).join("\n\n"),
     at: last.at,
   };
@@ -140,7 +167,7 @@ export function DesignFeedbackView({
   // Feedback on each node lives on that node's own artifact metadata
   // (`sb.feedback`), not the deleted lifecycle run — read straight off it
   // rather than the caller's (always empty) prop, CL-8620.
-  const [feedbackByNode, setFeedbackByNode] = useState(new Map<string, FoldedFeedback>());
+  const [feedbackByNode, setFeedbackByNode] = useState(new Map<string, SubmittedFeedback>());
   const loadFeedback = useCallback(async () => {
     const persistedIds = designs.map((entry) => entry.id).filter((id) => !id.startsWith("reply:"));
     const entries = await Promise.all(
@@ -449,12 +476,36 @@ export function DesignFeedbackView({
                 // Recorded on the node's own artifact metadata and mailed to
                 // the specialist directly (CL-8620) — independent of, and in
                 // addition to, `revise` below, which still carries the
-                // deterministic prompt into the next-version request.
-                const feedbackText = overallNote.trim() || prompt;
+                // deterministic prompt into the next-version request. One
+                // entry per anchored comment so its disposition can be set
+                // later against that specific comment (CL-8699), plus one
+                // un-anchored entry for the overall note when there is one;
+                // with neither, the prompt itself stands in. The mail always
+                // carries the prompt too, so the designer still sees which
+                // element every comment refers to.
+                const overallNoteTrimmed = overallNote.trim();
+                const anchoredComments = pending.map((comment) => ({ anchor: comment.anchor, text: comment.body }));
+                const persistedComments = [
+                  ...anchoredComments,
+                  ...(overallNoteTrimmed
+                    ? [{ text: overallNoteTrimmed }]
+                    : anchoredComments.length === 0
+                      ? [{ text: prompt }]
+                      : []),
+                ];
+                const mailBody =
+                  anchoredComments.length > 0
+                    ? overallNoteTrimmed
+                      ? `${overallNoteTrimmed}\n\n${prompt}`
+                      : prompt
+                    : overallNoteTrimmed || prompt;
                 const attach = design!.id.startsWith("reply:")
                   ? Promise.resolve()
                   : api
-                      .submitDesignFeedback(tenantId, { id: design!.id, title: design!.title }, feedbackText)
+                      .submitDesignFeedback(tenantId, { id: design!.id, title: design!.title }, {
+                        mailBody,
+                        comments: persistedComments,
+                      })
                       .catch(() => {
                         // Feedback on a not-yet-persisted design is best
                         // effort: the mail and prompt below still go out.
@@ -476,7 +527,12 @@ export function DesignFeedbackView({
         <Screen
           title={`Feedback: ${submitted.direction}`}
           description={submitted.overallNote || "No overall note was recorded."}
-          status={<StateLabel tone="success">Feedback submitted</StateLabel>}
+          status={
+            <>
+              <StateLabel tone="success">Feedback submitted</StateLabel>{" "}
+              <StateLabel tone="selected">prompt {shortPromptHash(submitted.prompt)}</StateLabel>
+            </>
+          }
           tight
         >
           <Table>
@@ -484,13 +540,40 @@ export function DesignFeedbackView({
               <TableRow>
                 <TableHead>Anchor</TableHead>
                 <TableHead>Comment</TableHead>
+                <TableHead>Disposition</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {submitted.comments.map((comment, index) => (
-                <TableRow key={`${anchorLabel(comment.anchor)}-${index}`}>
+                <TableRow key={`${comment.id}-${index}`}>
                   <TableCell className="hash">{anchorLabel(comment.anchor)}</TableCell>
                   <TableCell>{comment.body}</TableCell>
+                  <TableCell>
+                    <div className="feedback-disposition">
+                      <select
+                        value={comment.disposition}
+                        disabled={busy !== null || !comment.addressable}
+                        title={comment.addressable ? undefined : "Recorded before dispositions existed"}
+                        onChange={(event) =>
+                          run(`disposition-${comment.id}`, () =>
+                            api.setDesignFeedbackDisposition(
+                              tenantId,
+                              { id: design!.id },
+                              comment.id,
+                              event.target.value as Disposition,
+                            ),
+                          )
+                        }
+                      >
+                        <option value="open">Open</option>
+                        <option value="addressed">Addressed</option>
+                        <option value="declined">Declined</option>
+                      </select>
+                      {!anchorResolves(comment.anchor, content) ? (
+                        <StateLabel tone="warning">anchor no longer resolves</StateLabel>
+                      ) : null}
+                    </div>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>

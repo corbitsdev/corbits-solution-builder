@@ -91,6 +91,29 @@ export type ArtifactGraph = {
   edges: ArtifactGraphEdge[];
 };
 
+export const DESIGN_FEEDBACK_DISPOSITIONS = ["open", "addressed", "declined"] as const;
+export type DesignFeedbackDisposition = (typeof DESIGN_FEEDBACK_DISPOSITIONS)[number];
+
+/**
+ * One anchored (or whole-design) comment recorded on a design node's own
+ * `sb.feedback` array (CL-8620) — not folded into `ArtifactGraphNode` since it
+ * lives beside the graph fields, keyed to one node rather than the project.
+ * `disposition` defaults to "open" when absent, and is set only by an
+ * explicit person action against a comment's `id` — never by a new design
+ * version arriving, which never touches this array (CL-8699). `id` is
+ * optional because a row written before CL-8699 has none; such a row cannot
+ * be addressed by id and gets a rendering-only fallback (CL-8699 follow-up).
+ */
+export type DesignFeedbackEntry = {
+  id?: string;
+  nodeId: string;
+  anchor?: { testId?: string; domPath?: string; role?: string; textFingerprint?: string };
+  text: string;
+  at: string;
+  disposition?: DesignFeedbackDisposition;
+  dispositionAt?: string;
+};
+
 /**
  * A version id derived purely from list data — `@corbits/artifacts` has no
  * separate version-row id on its list route, only `(id, version)`. Writers
