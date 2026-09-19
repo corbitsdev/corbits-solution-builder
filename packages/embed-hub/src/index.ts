@@ -77,7 +77,11 @@ import { drizzle } from "drizzle-orm/pglite";
 import * as intxSchema from "@intx/db/schema";
 import { withPostgresJsResultShape } from "./pg-compat.js";
 import { mountProviderOAuth } from "./oauth-mount.js";
-import { createHubMailboxAuthorizeSender } from "./mailbox-persist.js";
+import {
+  createHubMailboxAuthorizeSender,
+  createHubPersistMailWithSessionEnsure,
+  type EventCollectorPort,
+} from "./mailbox-persist.js";
 import { captureMailboxRequest, createMailboxDeliver } from "./mailbox-send.js";
 
 /** The path a sidecar's WebSocket connects to; part of `@intx/hub-api`'s own contract. */
@@ -266,6 +270,16 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
   const mailboxDb = db.db as unknown as Parameters<typeof mountMailbox>[1]["db"];
   const mailboxBus = createInMemoryMailboxEventBus();
 
+  // The registry's `onUsage` sink is not wired: in this Interchange revision
+  // nothing creates a collector, so `dispatch` drops every frame and the sink
+  // never fires. A round's spend is read from the `agent.event` stream itself;
+  // a sink here as well would count a call twice once a revision does create
+  // collectors.
+  //
+  // Created ahead of `lookups` (moved up from below `createSidecarRouter`) so
+  // the persistMail session-ensure wrapper below can use it.
+  const eventCollectors = createEventCollectorRegistry({ db: db.db });
+
   const lookups: SidecarLookups = {
     ...createHubSessionLookups({ db: db.db, agentRepoStore }),
     materializeMailTriggeredRunGrants: createMailTriggeredRunGrantsMaterializer({
@@ -287,8 +301,19 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
   // `lookups` before this wrapper existed" — wrap `persistMail` here, before
   // `createSidecarRouter` below closes over `lookups`, so an agent's
   // outbound mail also lands a durable row in every recipient's inbox.
+  //
+  // The vendored `persistMail` throws `Endpoint … has no session for
+  // address …` on a run's first outbound reply, since its `agent_session`
+  // doesn't exist until something ensures it. `createHubPersistMailWithSessionEnsure`
+  // (ported from workbench's mailbox-persist.ts) sits between it and the
+  // mailbox dual-write so that throw is swallowed instead of surfacing as a
+  // logged error on every reply.
   const wrappedPersistMail = createMailboxPersist(mailboxDb, {
-    upstream: lookups.persistMail as PersistMailFn,
+    upstream: createHubPersistMailWithSessionEnsure(
+      db.db,
+      eventCollectors as unknown as EventCollectorPort,
+      lookups.persistMail as PersistMailFn,
+    ),
     authorizeSender: createHubMailboxAuthorizeSender(db.db),
     bus: mailboxBus,
   });
@@ -302,13 +327,6 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
     validateSidecarIdentity: sidecarCredentials.isCurrent,
     lookups,
   });
-
-  // The registry's `onUsage` sink is not wired: in this Interchange revision
-  // nothing creates a collector, so `dispatch` drops every frame and the sink
-  // never fires. A round's spend is read from the `agent.event` stream itself;
-  // a sink here as well would count a call twice once a revision does create
-  // collectors.
-  const eventCollectors = createEventCollectorRegistry({ db: db.db });
 
   createHubSessionOrchestrator({
     events: sidecarRouter.events,
