@@ -32,6 +32,7 @@ import {
   type ProjectPolicy,
   type RegistryTarballUploader,
   type SidecarCapability,
+  type SpecialistDeployment,
   type WorkflowGitPush,
 } from "@solutions-builder/installer";
 import { MATERIAL_KIND } from "@solutions-builder/app/artifacts";
@@ -485,6 +486,10 @@ function installerFailure(cause: unknown): never {
     retryable: false,
   });
 }
+
+/** In-flight/resolved `ensureStageAgent` calls, keyed `${projectId}:${stage}` --
+ *  see that method's doc comment. */
+const ensureStageAgentCalls = new Map<string, Promise<SpecialistDeployment>>();
 
 async function asWorkspaceOwner<T>(
   work: (transport: ReturnType<typeof createHubTransport>, workspaceTenantId: string) => Promise<T>,
@@ -988,9 +993,18 @@ export const api = {
    * lifecycle deployment above, and hands back its mail address. Deploys
    * lazily, once per stage per project (`ensureSpecialistDeployment` itself
    * is idempotent against a live deployment on the same asset).
+   *
+   * Memoised per `projectId:stage`: React can mount this call from two
+   * places at once (header + panel, an effect double-run), and each would
+   * otherwise see no deployment yet and race to create one. Callers share
+   * the one in-flight promise instead; a rejection clears the entry so a
+   * retry can try again.
    */
-  ensureStageAgent: (projectId: string, stage: number) =>
-    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+  ensureStageAgent: (projectId: string, stage: number) => {
+    const key = `${projectId}:${stage}`;
+    const pending = ensureStageAgentCalls.get(key);
+    if (pending) return pending;
+    const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const status = await request<HostStatus>("/status");
       return ensureSpecialistDeployment(
         transport,
@@ -1001,7 +1015,11 @@ export const api = {
         projectId,
         stage as Stage,
       );
-    }),
+    });
+    call.catch(() => ensureStageAgentCalls.delete(key));
+    ensureStageAgentCalls.set(key, call);
+    return call;
+  },
   /**
    * The project's opening problem statement, read off the `source_material`
    * artifact `createProject` wrote for it — no lifecycle run to fold it from

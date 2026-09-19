@@ -19,7 +19,7 @@ import {
   specialistEntrySource,
   type InferenceSourcePin,
 } from "@solutions-builder/app/specialist-source";
-import { assetsFor, catalogFor, getTenant, workflowsFor } from "./hub.js";
+import { assetsFor, catalogFor, getTenant, workflowsFor, type HubDeployment } from "./hub.js";
 import { readProject } from "./project-tenant.js";
 import {
   appMemberFiles,
@@ -53,6 +53,25 @@ function specialistAssetName(projectId: string, stage: Stage): string {
 }
 
 const SPECIALIST_ASSET_STAGE = /-stage-(\d+)$/;
+
+const ENDED_DEPLOYMENT_STATUSES = new Set(["releasing", "released", "failed"]);
+
+/**
+ * Picks one deployment out of several matching the same asset -- concurrent
+ * `ensureSpecialistDeployment` callers can each see no deployment and each
+ * deploy one, so every caller must resolve the same winner afterward: a live
+ * (non-ended) deployment over an ended one, then the oldest `createdAt` --
+ * the first one ever deployed for this asset, so a later duplicate never
+ * displaces the address callers already have.
+ */
+function pickDeployment(deployments: readonly HubDeployment[]): HubDeployment | undefined {
+  return [...deployments].sort((a, b) => {
+    const aLive = !ENDED_DEPLOYMENT_STATUSES.has(a.status);
+    const bLive = !ENDED_DEPLOYMENT_STATUSES.has(b.status);
+    if (aLive !== bLive) return aLive ? -1 : 1;
+    return a.createdAt.localeCompare(b.createdAt);
+  })[0];
+}
 
 export type SpecialistDeploymentRef = { readonly stage: Stage; readonly deploymentId: string };
 
@@ -176,7 +195,9 @@ export async function ensureSpecialistDeployment(
   const assetId = await ensureWorkflowAsset(transport, workspaceTenantId, assetName, `Stage ${stage} specialist`);
 
   const workflows = workflowsFor(transport, workspaceTenantId);
-  const existing = (await workflows.deployments()).find((deployment) => deployment.definitionAssetId === assetId);
+  const matching = (deployments: readonly HubDeployment[]) =>
+    deployments.filter((deployment) => deployment.definitionAssetId === assetId);
+  const existing = pickDeployment(matching(await workflows.deployments()));
   if (existing && (await deploymentIsLive(transport, workspaceTenantId, existing.id))) {
     return { deploymentId: existing.id, address: `${existing.id}@${tenant.domain}` };
   }
@@ -217,5 +238,9 @@ export async function ensureSpecialistDeployment(
     defaultSourceOfferingId: offeringIds[0]!,
   });
 
-  return { deploymentId: deployment.id, address: `${deployment.id}@${tenant.domain}` };
+  // A concurrent caller may have deployed onto this asset in the meantime;
+  // re-resolve so every caller lands on the same, deterministically-chosen
+  // deployment rather than each keeping the one it happened to create.
+  const winner = pickDeployment(matching(await workflows.deployments())) ?? deployment;
+  return { deploymentId: winner.id, address: `${winner.id}@${tenant.domain}` };
 }
