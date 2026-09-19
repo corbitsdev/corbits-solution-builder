@@ -10,7 +10,7 @@
  * mailed to directly, and the person's approval is a client-side artifact
  * write, not a signal this deploy waits on.
  */
-import type { Transport } from "@intx/hub-client";
+import { ApiError, type Transport } from "@intx/hub-client";
 import type { Stage } from "@solutions-builder/app/ledger";
 import {
   PACKAGE_STAGE,
@@ -204,8 +204,16 @@ async function renderSpecialistSource(
  * (`sb-project-<projectId>-stage-<N>`), push the rendered source with the
  * same push-token flow `workflow-deploy.ts`'s `pushWorkflowSourceTree` uses,
  * and deploy it against the tenant's offerings.
+ *
+ * Two browsers opening the same project's stage within seconds race every
+ * step of this: `ensureWorkflowAsset` and the deploy re-checks already
+ * absorb their own 409s, but a conflict can still surface from a step this
+ * function does not itself retry (the git-push token mint, the deploy call).
+ * `ensureSpecialistDeployment` below retries the whole thing once when that
+ * happens, so the loser's request lands on the winner's result instead of
+ * the hub's conflict error reaching the workspace.
  */
-export async function ensureSpecialistDeployment(
+async function ensureSpecialistDeploymentOnce(
   transport: Transport,
   sidecar: SidecarCapability,
   closure: ClosureSource,
@@ -292,4 +300,23 @@ export async function ensureSpecialistDeployment(
   // deployment rather than each keeping the one it happened to create.
   const winner = pickDeployment(matching(await workflows.deployments())) ?? deployment;
   return { deploymentId: winner.id, address: `${winner.id}@${tenant.domain}` };
+}
+
+export async function ensureSpecialistDeployment(
+  transport: Transport,
+  sidecar: SidecarCapability,
+  closure: ClosureSource,
+  gitPush: WorkflowGitPush,
+  workspaceTenantId: string,
+  projectId: string,
+  stage: Stage,
+): Promise<SpecialistDeployment> {
+  const attempt = () =>
+    ensureSpecialistDeploymentOnce(transport, sidecar, closure, gitPush, workspaceTenantId, projectId, stage);
+  try {
+    return await attempt();
+  } catch (cause) {
+    if (cause instanceof ApiError && cause.status === 409) return await attempt();
+    throw cause;
+  }
 }

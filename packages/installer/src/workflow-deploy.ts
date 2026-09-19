@@ -130,7 +130,12 @@ async function mintPushToken(
 
 /**
  * Create-or-find a `workflow`-kind asset by name, so a workflow deploy (a
- * stage specialist's) has one to push its rendered source onto.
+ * stage specialist's) has one to push its rendered source onto. Two browsers
+ * opening the same project's stage within seconds both reach this
+ * list-then-create with no existing row, so the loser's create races the
+ * winner's and the hub answers 409 ("asset already exists"): that is
+ * success too, not a failure to surface, so it re-lists and returns the row
+ * the winner made.
  */
 export async function ensureWorkflowAsset(
   transport: Transport,
@@ -141,7 +146,15 @@ export async function ensureWorkflowAsset(
   const assets = assetsFor(transport, tenantId);
   const existing = (await assets.list("workflow")).find((asset) => asset.name === name);
   if (existing) return existing.id;
-  return (await assets.create({ kind: "workflow", name, displayName })).id;
+  try {
+    return (await assets.create({ kind: "workflow", name, displayName })).id;
+  } catch (cause) {
+    if (cause instanceof ApiError && cause.status === 409) {
+      const created = (await assets.list("workflow")).find((asset) => asset.name === name);
+      if (created) return created.id;
+    }
+    throw cause;
+  }
 }
 
 /**
