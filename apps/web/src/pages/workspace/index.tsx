@@ -354,7 +354,15 @@ export function StageWorkspace({
 
       {agentAddress && stage === 8 ? (
         <div className="stage-scroll">
-          <BuildPanel detail={detail} tenantId={tenantId} onChanged={onChanged} onOpenSettings={onOpenSettings} />
+          <BuildPanel
+            detail={detail}
+            tenantId={tenantId}
+            onChanged={onChanged}
+            onOpenSettings={onOpenSettings}
+            onApprove={approve}
+            approving={approving}
+            canApprove={latestSpecialistMessage !== null}
+          />
         </div>
       ) : null}
 
@@ -539,12 +547,18 @@ function BuildPanel({
   tenantId,
   onChanged,
   onOpenSettings,
+  onApprove,
+  approving,
+  canApprove,
 }: {
   detail: ProjectDetail;
   /** The workspace tenant artifacts are recorded under. */
   tenantId: string;
   onChanged: () => void;
   onOpenSettings: () => void;
+  onApprove: () => void;
+  approving: boolean;
+  canApprove: boolean;
 }) {
   const [address, setAddress] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -623,7 +637,11 @@ function BuildPanel({
           <Button variant="destructive" loading={busy === "fail"} disabled={!address} onClick={() => void send("fail", "Mark this build attempt failed.")}>
             Mark this attempt failed
           </Button>
+          <Button variant="primary" loading={approving} disabled={!canApprove || !address} onClick={onApprove}>
+            Approve and continue
+          </Button>
         </div>
+        <p className="inline-note">Approving records the latest build report as this stage's evidence and starts delivery.</p>
       </Screen>
       <StageConversation
         stage={8}
