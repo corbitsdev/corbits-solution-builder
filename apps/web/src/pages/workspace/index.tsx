@@ -28,6 +28,7 @@ import { Banner, Button, Screen, StateLabel, stageName, versionDigest } from "..
 import { STAGE_GOAL } from "./gate.jsx";
 import { DeliveryPanel } from "./delivery.jsx";
 import { StageConversation } from "./thread.jsx";
+import { BuildPanel } from "./build.jsx";
 import { TargetPicker, targetOpeningLine } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
 import { currentStageFromArtifacts } from "../../project-view.ts";
@@ -46,6 +47,7 @@ export function StageWorkspace({
   tenantId,
   onChanged,
   onOpenSettings,
+  onOpenDecisions,
 }: {
   detail: ProjectDetail;
   /**
@@ -453,6 +455,7 @@ export function StageWorkspace({
             onApprove={approve}
             approving={approving}
             canApprove={latestSpecialistMessage !== null}
+            {...(onOpenDecisions ? { onOpenDecisions } : {})}
           />
         </div>
       ) : null}
@@ -624,135 +627,6 @@ function DesignPanel({
           void load();
           onChanged();
         }}
-      />
-    </div>
-  );
-}
-
-/**
- * Stage 8: build supervision, talking to the stage's own mail agent.
- *
- * Contract v6 gives stage 8 a posix tool inside its own single-step run
- * rather than a separate host build-worker bridge with its own signal
- * chain: there is no lifecycle run to park a build attempt's state on
- * any more, so "start"/"cancel"/"accept"/"fail" are sent as plain mail, the
- * same way any other stage's specialist is talked to. The rich event
- * timeline the old bridge reported (live output, exit status, packaged
- * archive) has no replacement yet — CL-8072 follow-up.
- */
-function BuildPanel({
-  detail,
-  tenantId,
-  onChanged,
-  onOpenSettings,
-  onApprove,
-  approving,
-  canApprove,
-}: {
-  detail: ProjectDetail;
-  /** The workspace tenant artifacts are recorded under. */
-  tenantId: string;
-  onChanged: () => void;
-  onOpenSettings: () => void;
-  onApprove: () => void;
-  approving: boolean;
-  canApprove: boolean;
-}) {
-  const [address, setAddress] = useState<string | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [composer, setComposer] = useState("");
-
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .ensureStageAgent(detail.project.id, 8)
-      .then((deployment) => {
-        if (!cancelled) setAddress(deployment.address);
-      })
-      .catch((cause: unknown) => {
-        if (!cancelled) setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [detail.project.id]);
-
-  const load = useCallback(async () => {
-    if (!address) return;
-    try {
-      setMessages(await api.readStageThread(tenantId, [address]));
-    } catch (cause) {
-      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-    }
-  }, [address, tenantId]);
-
-  useEffect(() => {
-    if (!address) return;
-    void load();
-    const timer = setInterval(() => void load(), 3_000);
-    return () => clearInterval(timer);
-  }, [address, load]);
-
-  const send = async (label: string, body: string) => {
-    if (!address) return;
-    setBusy(label);
-    setError(null);
-    try {
-      await api.sendStageMail(tenantId, address, { body });
-      await load();
-      onChanged();
-    } catch (cause) {
-      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  return (
-    <div data-tour="build-panel">
-      <Screen
-        title="Build supervision"
-        status={address ? <StateLabel tone="selected">talking to the build specialist</StateLabel> : null}
-      >
-        {error ? (
-          <Banner tone="error" title="The build attempt could not be changed" action={{ label: "Open Settings", onClick: onOpenSettings }}>
-            {error}
-          </Banner>
-        ) : null}
-        {!address ? <p className="inline-note">Starting the build specialist…</p> : null}
-        <div className="button-row">
-          <Button variant="primary" loading={busy === "start"} disabled={!address} onClick={() => void send("start", "Start the build attempt.")}>
-            Start the build attempt
-          </Button>
-          <Button variant="destructive" loading={busy === "cancel"} disabled={!address} onClick={() => void send("cancel", "Cancel the build attempt.")}>
-            Cancel the build attempt
-          </Button>
-          <Button variant="primary" loading={busy === "accept"} disabled={!address} onClick={() => void send("accept", "Accept this build attempt's work as evidence.")}>
-            Accept as evidence
-          </Button>
-          <Button variant="destructive" loading={busy === "fail"} disabled={!address} onClick={() => void send("fail", "Mark this build attempt failed.")}>
-            Mark this attempt failed
-          </Button>
-          <Button variant="primary" loading={approving} disabled={!canApprove || !address} onClick={onApprove}>
-            Approve and continue
-          </Button>
-        </div>
-        <p className="inline-note">Approving records the latest build report as this stage's evidence and starts delivery.</p>
-      </Screen>
-      <StageConversation
-        stage={8}
-        messages={messages}
-        value={composer}
-        onValueChange={setComposer}
-        onSend={() => {
-          const body = composer;
-          setComposer("");
-          void send("message", body);
-        }}
-        working={busy !== null}
-        disabled={!address}
       />
     </div>
   );
