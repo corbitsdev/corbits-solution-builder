@@ -109,10 +109,17 @@ export function StageWorkspace({
   const agentAddress = agent?.stage === stage ? agent.address : null;
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // Tracks which address `messages` actually reflects, so the opening-send
+  // effect below never judges a fresh address's thread empty off stale data
+  // still held over from the previous address (CL-8656).
+  const [threadLoadedFor, setThreadLoadedFor] = useState<string | null>(null);
   const loadThread = useCallback(async () => {
     if (!agentAddress) return;
+    const loadedAddress = agentAddress;
     try {
-      setMessages(await api.readStageThread(tenantId, [agentAddress]));
+      const result = await api.readStageThread(tenantId, [agentAddress]);
+      setMessages(result);
+      setThreadLoadedFor(loadedAddress);
     } catch (cause) {
       setError(
         `The conversation for this stage could not be read: ${
@@ -121,6 +128,14 @@ export function StageWorkspace({
       );
     }
   }, [agentAddress, tenantId]);
+
+  // A new address (fresh run replacing a released one, CL-8654) starts with
+  // no known thread state: clear the previous address's messages rather than
+  // let them linger until the next poll resolves.
+  useEffect(() => {
+    setMessages([]);
+    setThreadLoadedFor(null);
+  }, [agentAddress]);
 
   // Polled every 3s while the agent's address is known: the specialist's own
   // replies land in the mailbox on its own time, with nothing to push a
@@ -219,8 +234,13 @@ export function StageWorkspace({
   }, [detail.nodes, stage]);
 
   useEffect(() => {
-    if (!agentAddress || agent?.stage !== stage || messages.length > 0) return;
-    const key = `${detail.project.id}:${stage}`;
+    if (!agentAddress || agent?.stage !== stage) return;
+    // Wait for the thread read to land for this exact address before judging
+    // it empty — otherwise a fresh run's still-stale `messages` from the
+    // previous address could either wrongly suppress or wrongly trigger the
+    // opening send (CL-8656).
+    if (threadLoadedFor !== agentAddress || messages.length > 0) return;
+    const key = `${detail.project.id}:${stage}:${agentAddress}`;
     if (openedRef.current === key) return;
 
     let cancelled = false;
@@ -257,6 +277,7 @@ export function StageWorkspace({
     agentAddress,
     agent,
     messages.length,
+    threadLoadedFor,
     stage,
     detail.project.id,
     opening,
