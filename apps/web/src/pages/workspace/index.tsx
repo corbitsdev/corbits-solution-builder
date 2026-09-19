@@ -132,6 +132,25 @@ export function StageWorkspace({
     return () => clearInterval(timer);
   }, [agentAddress, loadThread]);
 
+  // Same cadence, re-checking the agent itself rather than its thread: two
+  // sessions racing to open this stage can each deploy a specialist, the hub
+  // releases the loser, and a session that memoised the loser's address
+  // would otherwise mail into the void forever (CL-8654). When the live pick
+  // has moved to a different deployment, follow it.
+  useEffect(() => {
+    if (!agentAddress) return;
+    const recheck = () => {
+      void api
+        .stageAgentStatus(detail.project.id, stage)
+        .then((current) => {
+          if (current && current.address !== agentAddress) setAgent({ stage, address: current.address });
+        })
+        .catch(() => {});
+    };
+    const timer = setInterval(recheck, 3_000);
+    return () => clearInterval(timer);
+  }, [agentAddress, detail.project.id, stage]);
+
   const [composer, setComposer] = useState("");
   const [sending, setSending] = useState(false);
   const [approving, setApproving] = useState(false);

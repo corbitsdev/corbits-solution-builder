@@ -111,6 +111,37 @@ export type SpecialistDeployment = {
   readonly address: string;
 };
 
+export type SpecialistDeploymentStatus = SpecialistDeployment & { readonly status: string };
+
+/**
+ * Re-lists `projectId`'s stage-`stage` asset's deployments and picks the live
+ * one (`pickDeployment`), without deploying anything -- CL-8654: two sessions
+ * opening the same stage within milliseconds can each deploy, leaving one
+ * deployment `released` and the other live for the same asset. A caller
+ * holding an `ensureStageAgent` result from before that resolved uses this to
+ * notice its memoised deployment id is no longer the live pick. Null when the
+ * asset does not exist yet -- the specialist has never been deployed.
+ */
+export async function stageSpecialistStatus(
+  transport: Transport,
+  workspaceTenantId: string,
+  projectId: string,
+  stage: Stage,
+): Promise<SpecialistDeploymentStatus | null> {
+  const tenant = await getTenant(transport, workspaceTenantId);
+  if (!tenant?.domain) return null;
+  const assetName = specialistAssetName(projectId, stage);
+  const assets = await assetsFor(transport, workspaceTenantId).list("workflow");
+  const asset = assets.find((entry) => entry.name === assetName);
+  if (!asset) return null;
+  const deployments = (await workflowsFor(transport, workspaceTenantId).deployments()).filter(
+    (deployment) => deployment.definitionAssetId === asset.id,
+  );
+  const winner = pickDeployment(deployments);
+  if (!winner) return null;
+  return { deploymentId: winner.id, address: `${winner.id}@${tenant.domain}`, status: winner.status };
+}
+
 /**
  * The asset a stage specialist deploys into: the same package-tree shape
  * `workflow-deploy.ts`'s `renderLifecycleSource` builds for the lifecycle --
@@ -229,6 +260,15 @@ export async function ensureSpecialistDeployment(
     `Deploy stage ${stage} specialist`,
     gitPush,
   );
+
+  // Rendering and pushing the source above takes long enough for a
+  // concurrent caller to have deployed onto this asset meanwhile; re-check
+  // once more right before deploying so we don't create a second live
+  // deployment for the same asset.
+  const justDeployed = pickDeployment(matching(await workflows.deployments()));
+  if (justDeployed && (await deploymentIsLive(transport, workspaceTenantId, justDeployed.id))) {
+    return { deploymentId: justDeployed.id, address: `${justDeployed.id}@${tenant.domain}` };
+  }
 
   const offeringIds = offerings.map((offering) => offering.id);
   const deployment = await workflows.deploy({

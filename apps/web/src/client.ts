@@ -25,6 +25,7 @@ import {
   requireProject as installerRequireProject,
   resolveWorkspace,
   revokeAllDelegations,
+  stageSpecialistStatus,
   updateProject as installerUpdateProject,
   type ClosureManifest,
   type ClosureSource,
@@ -33,6 +34,7 @@ import {
   type RegistryTarballUploader,
   type SidecarCapability,
   type SpecialistDeployment,
+  type SpecialistDeploymentStatus,
   type WorkflowGitPush,
 } from "@solutions-builder/installer";
 import { MATERIAL_KIND } from "@solutions-builder/app/artifacts";
@@ -1007,11 +1009,27 @@ export const api = {
    * otherwise see no deployment yet and race to create one. Callers share
    * the one in-flight promise instead; a rejection clears the entry so a
    * retry can try again.
+   *
+   * A memoised deployment can still go stale (CL-8654): two sessions racing
+   * to open the same stage each deploy, the hub releases the loser, and a
+   * session that memoised the loser's address would mail into the void
+   * forever. Every resolution is re-checked against `stageAgentStatus`; when
+   * a different deployment is now the live pick, the memo is dropped and the
+   * fresh one deployed/returned instead.
    */
-  ensureStageAgent: (projectId: string, stage: number) => {
+  ensureStageAgent: (projectId: string, stage: number): Promise<SpecialistDeployment> => {
     const key = `${projectId}:${stage}`;
     const pending = ensureStageAgentCalls.get(key);
-    if (pending) return pending;
+    if (pending) {
+      return pending.then(async (deployment) => {
+        const fresh = await api.stageAgentStatus(projectId, stage).catch(() => null);
+        if (fresh && fresh.deploymentId !== deployment.deploymentId) {
+          ensureStageAgentCalls.delete(key);
+          return api.ensureStageAgent(projectId, stage);
+        }
+        return deployment;
+      });
+    }
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const status = await request<HostStatus>("/status");
       return ensureSpecialistDeployment(
@@ -1028,6 +1046,17 @@ export const api = {
     ensureStageAgentCalls.set(key, call);
     return call;
   },
+  /**
+   * Re-lists `projectId`'s stage-`stage` specialist deployment without
+   * deploying anything -- the live pick `ensureStageAgent` would resolve to
+   * right now. Used to detect a memoised `agentAddress` going stale (CL-8654)
+   * from outside `ensureStageAgent`'s own memo, e.g. a workspace already
+   * holding an address polling for whether it is still the live one.
+   */
+  stageAgentStatus: (projectId: string, stage: number): Promise<SpecialistDeploymentStatus | null> =>
+    asWorkspaceOwner((transport, workspaceTenantId) =>
+      stageSpecialistStatus(transport, workspaceTenantId, projectId, stage as Stage),
+    ),
   /**
    * The project's opening problem statement, read off the `source_material`
    * artifact `createProject` wrote for it — no lifecycle run to fold it from
