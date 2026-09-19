@@ -166,20 +166,68 @@ export function StageWorkspace({
   // advances — this only fires the very first message of a fresh thread.
   const openedRef = useRef<string | null>(null);
   const [pendingOpening, setPendingOpening] = useState<{ stage: number; body: string } | null>(null);
+
+  // Fallback source for a stage > 1 opening when `pendingOpening` was never
+  // set in this mounted component — a reload, a re-opened project, or the
+  // stage cursor advancing some other way (`approve()` only ever writes
+  // `pendingOpening` in memory, so it never survives any of those). The
+  // previous stage's own approved artifact is the same content `approve()`
+  // would have sent, recovered from the artifact graph instead.
+  const previousApproved = useMemo(() => {
+    if (stage <= 1) return null;
+    const candidates = detail.nodes.filter(
+      (node) => node.stage === stage - 1 && node.approvedAt !== null && node.supersededByNodeId === null,
+    );
+    if (candidates.length === 0) return null;
+    return candidates.reduce((latest, node) => (node.createdAt > latest.createdAt ? node : latest));
+  }, [detail.nodes, stage]);
+
   useEffect(() => {
     if (!agentAddress || messages.length > 0) return;
-    const body = stage === 1 ? (opening?.body ?? null) : pendingOpening?.stage === stage ? pendingOpening.body : null;
-    if (!body) return;
     const key = `${detail.project.id}:${stage}`;
     if (openedRef.current === key) return;
-    openedRef.current = key;
+
+    let cancelled = false;
+    const dispatchOpening = (body: string) => {
+      if (cancelled || openedRef.current === key) return;
+      openedRef.current = key;
+      void api
+        .sendStageMail(tenantId, agentAddress, { body })
+        .then(() => loadThread())
+        .catch((cause: unknown) => {
+          setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+        });
+    };
+
+    if (stage === 1) {
+      if (opening?.body) dispatchOpening(opening.body);
+      return;
+    }
+    if (pendingOpening?.stage === stage) {
+      dispatchOpening(pendingOpening.body);
+      return;
+    }
+    if (!previousApproved) return;
     void api
-      .sendStageMail(tenantId, agentAddress, { body })
-      .then(() => loadThread())
-      .catch((cause: unknown) => {
-        setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-      });
-  }, [agentAddress, messages.length, stage, detail.project.id, opening, pendingOpening, tenantId, loadThread]);
+      .artifactContent(tenantId, previousApproved.id)
+      .then((result) => {
+        if (result.content) dispatchOpening(result.content);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    agentAddress,
+    messages.length,
+    stage,
+    detail.project.id,
+    opening,
+    pendingOpening,
+    previousApproved,
+    tenantId,
+    loadThread,
+  ]);
 
   const send = async (body: string) => {
     if (!agentAddress || body.trim().length === 0) return;
