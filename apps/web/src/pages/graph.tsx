@@ -14,6 +14,9 @@ import { PrintButton } from "../print.jsx";
 
 type ArtifactEdge = { childNodeId: string; sourceNodeId: string };
 
+/** The extracted text of one attached file — a companion beside it, never an attachment of its own. */
+const MATERIAL_READING_KIND = "material_reading";
+
 /** `sizeBytes` is unknown for a plain text/data-URL artifact (CL-8709) — say so rather than showing a false 0. */
 function formatSize(sizeBytes: number | undefined): string {
   if (sizeBytes === undefined) return "unknown size";
@@ -160,8 +163,12 @@ export function ArtifactGraph({
       }}
     />
   ) : null;
+  // A file's companion reading is fetched from within its own row, never
+  // listed as an attachment in its own right.
+  const listedNodes = nodes.filter((node) => node.kind !== MATERIAL_READING_KIND);
+
   const [openedId, setOpenedId] = useState<string | null>(
-    () => openedIdProp ?? defaultOpenedId(nodes),
+    () => openedIdProp ?? defaultOpenedId(listedNodes),
   );
 
   useEffect(() => {
@@ -169,11 +176,11 @@ export function ArtifactGraph({
       setOpenedId(openedIdProp);
       return;
     }
-    if (openedId && nodes.some((node) => node.id === openedId)) return;
-    setOpenedId(defaultOpenedId(nodes));
-  }, [nodes, openedId, openedIdProp]);
+    if (openedId && listedNodes.some((node) => node.id === openedId)) return;
+    setOpenedId(defaultOpenedId(listedNodes));
+  }, [listedNodes, openedId, openedIdProp]);
 
-  if (nodes.length === 0) {
+  if (listedNodes.length === 0) {
     return (
       <div className="library-empty">
         <EmptyState
@@ -186,9 +193,9 @@ export function ArtifactGraph({
   }
 
   const opened =
-    nodes.find((node) => node.id === openedId) ??
-    nodes.find((node) => node.id === defaultOpenedId(nodes)) ??
-    nodes[0]!;
+    listedNodes.find((node) => node.id === openedId) ??
+    listedNodes.find((node) => node.id === defaultOpenedId(listedNodes)) ??
+    listedNodes[0]!;
   const selectedKey = documentIdentity(opened);
   const openNode = (id: string) => setOpenedId(id);
 
@@ -196,7 +203,7 @@ export function ArtifactGraph({
     <div className="library-layout">
       <aside className="library-list" aria-label="Documents">
         {addControl}
-        {groupedRows(nodes).map((group) => (
+        {groupedRows(listedNodes).map((group) => (
           <section key={group.stage}>
             <p className="queue-list-head">{stageName(group.stage)}</p>
             {group.documents.map((row) => (
@@ -297,7 +304,7 @@ function ArtifactReader({
           <p className="inline-note">Loading…</p>
         ) : content ? (
           node.kind === "source_material" ? (
-            <Material node={node} content={content} />
+            <Material node={node} content={content} nodes={nodes} tenantId={tenantId} />
           ) : node.kind === "audience_deck" ? (
             <DeckFile node={node} tenantId={tenantId} />
           ) : node.kind === "build_evidence" ? (
@@ -440,9 +447,21 @@ export function BuildFile({ node, tenantId }: { node: ArtifactNode; tenantId: st
   );
 }
 
-function Material({ node, content }: { node: ArtifactNode; content: string }) {
+function Material({
+  node,
+  content,
+  nodes,
+  tenantId,
+}: {
+  node: ArtifactNode;
+  content: string;
+  nodes: ArtifactNode[];
+  /** The workspace tenant artifacts are recorded under. */
+  tenantId: string;
+}) {
   const mediaType = node.mediaType ?? "";
   const size = formatSize(node.sizeBytes);
+  const isText = mediaType.startsWith("text/") || mediaType === "application/json";
   const shown = mediaType.startsWith("image/") ? (
     <figure className="material-figure">
       <img src={content} alt={node.title} />
@@ -450,7 +469,7 @@ function Material({ node, content }: { node: ArtifactNode; content: string }) {
         {node.title} · {mediaType} · {size}
       </figcaption>
     </figure>
-  ) : mediaType.startsWith("text/") || mediaType === "application/json" ? (
+  ) : isText ? (
     <div className="material-text">
       <p className="inline-note">
         {node.title} · {mediaType} · {size}
@@ -462,7 +481,58 @@ function Material({ node, content }: { node: ArtifactNode; content: string }) {
       {node.title} · {mediaType} · {size}. Kept with the project.
     </p>
   );
-  return shown;
+  // A text attachment's own content is already the reading — no companion to fold.
+  // A same-named re-upload leaves several material_reading versions sharing
+  // this variant; the newest one is the one that matches the file shown.
+  const readingCandidates = isText
+    ? []
+    : nodes.filter((candidate) => candidate.kind === MATERIAL_READING_KIND && candidate.variant === node.variant);
+  const live = readingCandidates.filter((candidate) => candidate.supersededByNodeId === null);
+  const reading = (live.length > 0 ? live : readingCandidates).reduce(
+    (newest, candidate) => (newest === null ? candidate : pickLatest(newest, candidate)),
+    null as ArtifactNode | null,
+  );
+  return (
+    <>
+      {shown}
+      {reading ? <Reading nodeId={reading.id} tenantId={tenantId} /> : null}
+    </>
+  );
+}
+
+/**
+ * What the specialists are handed for this file, word for word: a
+ * spreadsheet's values and structure, a PDF's text, or the note that nothing
+ * here reads it. Folded, and fetched when opened, because the file itself is
+ * what the person came to see; this is for checking that the part that
+ * matters made it through before a draft leans on it.
+ */
+function Reading({ nodeId, tenantId }: { nodeId: string; tenantId: string }) {
+  const [text, setText] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = () => {
+    if (text !== null || error !== null) return;
+    api
+      .artifactContent(tenantId, nodeId)
+      .then((result) => setText(result.content))
+      .catch((cause) => setError(cause instanceof ApiFailure ? cause.detail.message : String(cause)));
+  };
+  return (
+    <details className="document-fold material-reading" onToggle={(event) => event.currentTarget.open && load()}>
+      <summary className="document-fold-summary">
+        <span className="document-fold-title">What the specialists can read of this</span>
+      </summary>
+      {error ? (
+        <p className="inline-note">{error}</p>
+      ) : text === null ? (
+        <p className="inline-note">Loading…</p>
+      ) : (
+        <div className="artifact">
+          <pre>{text}</pre>
+        </div>
+      )}
+    </details>
+  );
 }
 
 /**

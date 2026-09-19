@@ -39,7 +39,8 @@ import {
   type SpecialistDeploymentStatus,
   type WorkflowGitPush,
 } from "@solutions-builder/installer";
-import { MATERIAL_KIND } from "@solutions-builder/app/artifacts";
+import { MATERIAL_KIND, MATERIAL_READING_KIND } from "@solutions-builder/app/artifacts";
+import { readMaterial } from "./material-reading.ts";
 import type { DesignFeedbackDisposition, DesignFeedbackEntry as DesignFeedbackGraphEntry } from "@solutions-builder/app/artifact-graph";
 import type { TemplateTheme } from "@solutions-builder/app/deck";
 import { withDisposition } from "./design-disposition.ts";
@@ -934,7 +935,40 @@ export const api = {
             await installerArchiveArtifact(transport, workspaceTenantId, uploaded.id).catch(() => {});
             throw cause;
           }
-          return { nodeId: uploaded.id, name: file.name, mediaType, sizeBytes: uploaded.size ?? file.size };
+          // A companion `material_reading` version alongside the file: what a
+          // specialist is actually handed for it. Extraction failing is not
+          // an attach failure — the companion just says so instead. Nor is
+          // the companion write itself: the file is already attached, so a
+          // failure here is reported on the result, not thrown — a throw
+          // here would tell the person the attach failed when it did not,
+          // and a retry would duplicate the file.
+          const readingText = await readMaterial({ name: file.name, mediaType, bytes: new Uint8Array(await file.arrayBuffer()) })
+            .then((result) => result.text)
+            .catch((cause) => `(Could not read ${file.name}: ${cause instanceof Error ? cause.message : String(cause)}.)`);
+          const readingFailed = await installerCreateArtifact(transport, workspaceTenantId, {
+            title: `${file.name} (reading)`,
+            content: readingText,
+            metadata: {
+              sb: {
+                projectId,
+                kind: MATERIAL_READING_KIND,
+                stage: 1,
+                variant: file.name,
+                sourceVersionIds: [uploaded.id],
+                provenance: { producer: "human" as const },
+                mediaType: "text/plain",
+              },
+            },
+          })
+            .then(() => false)
+            .catch(() => true);
+          return {
+            nodeId: uploaded.id,
+            name: file.name,
+            mediaType,
+            sizeBytes: uploaded.size ?? file.size,
+            ...(readingFailed ? { readingFailed: true as const } : {}),
+          };
         }),
       );
       return { attached };

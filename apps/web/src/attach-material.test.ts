@@ -48,14 +48,19 @@ describe("attachMaterial", () => {
     expect(body.metadata.sb.approvedAt).toBeUndefined();
   });
 
-  test("a binary file uploads through the package route, then stamps sb metadata with a metadata-only revise", async () => {
+  test("a binary file uploads through the package route, then stamps sb metadata with a metadata-only revise, and writes a companion reading", async () => {
     let revisedBody: unknown;
+    let readingBody: unknown;
     const calls = mockHub({
       "POST /api/tenants/tnt_ws/artifacts/upload": () =>
         json({ artifacts: [{ id: "art-2", source: { origin: "imported", upload: { id: "up-1", filename: "report.pdf", mimeType: "application/pdf", size: 4096 } } }] }, 201),
       "POST /api/tenants/tnt_ws/artifacts/art-2/versions": (init) => {
         revisedBody = JSON.parse(String(init?.body));
         return json({ artifactId: "art-2", version: 2, title: "report.pdf", metadata: (revisedBody as { metadata: unknown }).metadata });
+      },
+      "POST /api/tenants/tnt_ws/artifacts": (init) => {
+        readingBody = JSON.parse(String(init?.body));
+        return json({ artifact: { id: "art-2-reading" } }, 201);
       },
     });
     const file = new File([new Uint8Array(4096)], "report.pdf", { type: "application/pdf" });
@@ -66,6 +71,25 @@ describe("attachMaterial", () => {
     expect(revise.content).toBeUndefined();
     expect(revise.metadata.sb.approvedAt).toBeUndefined();
     expect(revise.metadata.sb.kind).toBe("source_material");
+    const reading = readingBody as { metadata: { sb: Record<string, unknown> } };
+    expect(reading.metadata.sb.kind).toBe("material_reading");
+    expect(reading.metadata.sb.variant).toBe("report.pdf");
+    expect(reading.metadata.sb.sourceVersionIds).toEqual(["art-2"]);
+    expect(reading.metadata.sb.approvedAt).toBeUndefined();
+  });
+
+  test("keeps the attachment when the companion reading write fails", async () => {
+    const calls = mockHub({
+      "POST /api/tenants/tnt_ws/artifacts/upload": () =>
+        json({ artifacts: [{ id: "art-4", source: { origin: "imported", upload: { id: "up-1", filename: "report.pdf", mimeType: "application/pdf", size: 4096 } } }] }, 201),
+      "POST /api/tenants/tnt_ws/artifacts/art-4/versions": (init) =>
+        json({ artifactId: "art-4", version: 2, title: "report.pdf", metadata: JSON.parse(String(init?.body)).metadata }),
+      "POST /api/tenants/tnt_ws/artifacts": () => json({ error: { code: "internal", message: "boom" } }, 500),
+    });
+    const file = new File([new Uint8Array(4096)], "report.pdf", { type: "application/pdf" });
+    const result = await api.attachMaterial("proj-1", [file]);
+    expect(result?.attached).toEqual([{ nodeId: "art-4", name: "report.pdf", mediaType: "application/pdf", sizeBytes: 4096, readingFailed: true }]);
+    expect(calls.some((call) => call.url === "/api/tenants/tnt_ws/artifacts/art-4/archive")).toBe(false);
   });
 
   test("archives the uploaded artifact and rethrows when the metadata revise fails", async () => {

@@ -6,6 +6,13 @@
  */
 export const MATERIAL_KIND = "source_material";
 
+/**
+ * The kind the extracted text of one attached file is recorded under — a
+ * companion artifact beside the file's own `source_material` version, never
+ * an attachment in its own right.
+ */
+export const MATERIAL_READING_KIND = "material_reading";
+
 /** The documents the nine stages produce, and which stage owns which. */
 export const ARTIFACT_KINDS = [
   "source_material",
