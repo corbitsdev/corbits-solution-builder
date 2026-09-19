@@ -57,7 +57,7 @@ async function openDecisionsFor(
   const decisions = approvals
     .filter((approval) => approval.status === "pending" && stageByRunId.has(approval.runId))
     .map((approval) => toDecision(approval, projectId, stageByRunId.get(approval.runId)!));
-  for (const decision of decisions) void notifyDecisionOpen(decision, transport);
+  for (const decision of decisions) void notifyDecisionOpen(workspaceTenantId, decision, transport);
   return decisions;
 }
 
