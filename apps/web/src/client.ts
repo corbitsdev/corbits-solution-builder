@@ -24,7 +24,6 @@ import {
   pushSourceTree,
   requireProject as installerRequireProject,
   resolveWorkspace,
-  reviseArtifact as installerReviseArtifact,
   revokeAllDelegations,
   updateProject as installerUpdateProject,
   type ClosureManifest,
