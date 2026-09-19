@@ -33,8 +33,7 @@ import {
   DESIGN_FEEDBACK_WORKFLOW_ID,
   PROVIDER_SWITCH_WORKFLOW_ID,
 } from "./workflows/concerns.js";
-import { PROJECT_LIFECYCLE_ID } from "./workflows/project-lifecycle.js";
-import { STAGE_WORKFLOW_ID } from "./workflows/stage-loop.js";
+import { PROJECT_LIFECYCLE_ID, STAGE_WORKFLOW_ID } from "./workflows/stage-ids.js";
 
 /** §8: "Default skills remain …" — the ten, verbatim. */
 const SKILLS: readonly { id: string; instructions: string; tools: readonly string[] }[] = [

@@ -5,7 +5,7 @@
  * workflow definitions the install must have produced. A tenant missing any of
  * them, or installed from an older version, is stale and gets installed again.
  */
-import { PROJECT_LIFECYCLE_ID } from "./workflows/project-lifecycle.js";
+import { PROJECT_LIFECYCLE_ID } from "./workflows/stage-ids.js";
 
 export const APP_ID = "solutions-builder";
 
@@ -14,9 +14,9 @@ export const APP_VERSION = "0.1.0";
 
 /**
  * Every workflow definition name an installed tenant carries: the lifecycle
- * anchor the command ledger's session keys on. Everything a run actually
- * does is deployed per project (`ensureLifecycleDeployment`), not registered
- * here.
+ * anchor id, kept for readers of old runs. Everything a run actually does is
+ * a per-project, per-stage specialist deployment (`ensureSpecialistDeployment`),
+ * not registered here.
  */
 export function expectedDefinitions(): string[] {
   return [PROJECT_LIFECYCLE_ID];

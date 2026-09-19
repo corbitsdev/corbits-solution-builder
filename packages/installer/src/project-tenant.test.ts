@@ -4,8 +4,8 @@ import type { ProjectPolicy } from "./project-tenant.js";
 import { updateProject } from "./project-tenant.js";
 
 /**
- * Follows `signal-grants.test.ts`: a fake `Transport` serves the tenant
- * endpoints, so no module mock can leak into the neighbouring suites.
+ * A fake `Transport` serves the tenant endpoints, so no module mock can leak
+ * into the neighbouring suites.
  */
 
 type Row = {

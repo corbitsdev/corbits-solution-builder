@@ -3,7 +3,7 @@
  *
  * A grant lands on a role or directly on a principal (`./hub.ts`'s
  * `HubGrant`); this resolves either into the principals actually holding it
- * — the same combination `signal-grants.ts`'s `ensureAuthorityGrants` mints
+ * — the same combination `authority-grants.ts`'s `ensureAuthorityGrants` mints
  * against — each addressed as `<refId>@<tenant.domain>`, the same address
  * `packages/embed-hub/src/index.ts`'s mailbox mount resolves a sender by.
  */

@@ -11,7 +11,7 @@
  *
  * This asset is the record, not the seam a role's prompt is built from: a
  * workflow step's agent is defined once at render time with a static
- * `systemPrompt` string (see `lifecycle-source.ts`'s `renderedPrompt`), which
+ * `systemPrompt` string (see `specialist-source.ts`'s `renderedPrompt`), which
  * already carries the skill's instructions. There is no per-turn session
  * mount that reads this asset back into an agent — inventing one would be a
  * second place the same text is read from, not a seam the platform has.

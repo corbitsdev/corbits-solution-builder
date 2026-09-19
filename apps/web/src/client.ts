@@ -333,10 +333,7 @@ export type InstallState = PackageInstallState;
 const HOSTED_INSTALL: InstallState = {
   installed: true,
   appVersion: APP_VERSION,
-  missing: [],
-  stale: [],
-  deployment: { status: "hosted", detail: "Managed by the hub." },
-  detail: "Hosted hub: definitions are managed there.",
+  detail: "Hosted hub: managed there.",
 };
 
 const TITLE_MAX = 60;
@@ -596,13 +593,7 @@ export const api = {
     const status = await request<HostStatus>("/status");
     if (status.hub.mode !== "embedded") return HOSTED_INSTALL;
     try {
-      const state = await installerInstall(
-        createHubTransport(),
-        sidecarCapabilityOf(status),
-        await lifecycleClosureSource(),
-        lifecycleGitPush,
-        { afterSkillAssets: rerankCatalogAfterSkillAssets },
-      );
+      const state = await installerInstall(createHubTransport(), { afterSkillAssets: rerankCatalogAfterSkillAssets });
       const workspace = await resolveWorkspace(createHubTransport());
       if (workspace) void ensureClosureRegistryAsset(workspace.tenantId);
       return state;

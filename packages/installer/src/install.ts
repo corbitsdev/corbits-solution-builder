@@ -3,46 +3,31 @@
  *
  * The hub boots vanilla: migrate, mount, serve. Everything that makes it
  * *Solutions Builder* — the owner as a hub user with a tenant, human roles
- * and grants, project authority, the one lifecycle definition row the command
- * ledger's session keys on, and the per-project lifecycle deployment — is
- * installed here, driven by a hub `Transport` already authenticated as the
- * signed-in principal. First run signs up or in against the hub, then this
- * call creates the workspace tenant as that session. First run and upgrade
- * are the same call, and it is idempotent, so the host can ask again whenever
- * a credential changes.
+ * and grants, and project authority — is installed here, driven by a hub
+ * `Transport` already authenticated as the signed-in principal. First run
+ * signs up or in against the hub, then this call creates the workspace
+ * tenant as that session. First run and upgrade are the same call, and it
+ * is idempotent, so the host can ask again whenever a credential changes.
  *
- * "Installed" is a comparison, not a marker: every definition the package
- * generates exists in the tenant at the hash it would deploy right now.
+ * There is no lifecycle workflow to seed or deploy any more: a stage
+ * specialist is a per-project, per-stage deployment made lazily the first
+ * time that stage is opened (`specialist-deploy.ts`'s
+ * `ensureSpecialistDeployment`), not something `install` provisions ahead of
+ * time.
  */
 import type { Transport } from "@intx/hub-client";
 import { APP_VERSION } from "@solutions-builder/app/manifest";
 import { AUTHORITIES } from "@solutions-builder/app/ledger";
-import { assignRole, createWorkspace, definitionIdFor, ensureRole, resolveWorkspace, type Workspace } from "./hub.js";
-import { expectedWorkflowDefinitions, seedWorkflows } from "./workflow-seed.js";
+import { assignRole, createWorkspace, ensureRole, resolveWorkspace, type Workspace } from "./hub.js";
 import { installProjectAuthority, listProjectRecords } from "./project-tenant.js";
-import { ensureAuthorityGrants } from "./signal-grants.js";
+import { ensureAuthorityGrants } from "./authority-grants.js";
 import { ensureSkillAssets } from "./skill-assets.js";
-import { ensureLifecycleDeployment, type ClosureSource, type SidecarCapability, type WorkflowGitPush } from "./workflow-deploy.js";
 
 export type InstallState = {
   readonly installed: boolean;
   readonly appVersion: string;
-  /** Definition names the tenant does not hold at all. */
-  readonly missing: string[];
-  /** Definition names the tenant holds at a different hash than the package generates. */
-  readonly stale: string[];
-  /**
-   * The lifecycle as a hub deployment: `deployed` or `current` once the hub
-   * holds it, `no_offering` until a provider is connected, `failed` with the
-   * host's reason otherwise. The host's own in-process executor still drives
-   * stages until stage gates move onto this deployment's run.
-   */
-  readonly deployment: { status: string; detail: string };
   readonly detail: string;
 };
-
-// The most recent deployment outcome; installState() is a read and must not deploy.
-let lastDeployment: { status: string; detail: string } = { status: "missing", detail: "Not installed yet." };
 
 // The resolved workspace, cached the same way the host's own tenant lookups
 // are: found again by slug, forgotten by whoever creates or adopts a tenant.
@@ -64,39 +49,12 @@ export function forgetWorkspace(): void {
 }
 
 export async function installState(transport: Transport): Promise<InstallState> {
-  const expected = await expectedWorkflowDefinitions();
   const found = workspace ?? (await resolveWorkspace(transport));
   if (!found) {
-    return {
-      installed: false,
-      appVersion: APP_VERSION,
-      missing: expected.map((entry) => entry.name),
-      stale: [],
-      deployment: { status: "missing", detail: "No workspace yet." },
-      detail: "No workspace yet.",
-    };
+    return { installed: false, appVersion: APP_VERSION, detail: "No workspace yet." };
   }
   workspace = found;
-  const missing: string[] = [];
-  const stale: string[] = [];
-  for (const entry of expected) {
-    const current = await definitionIdFor(transport, found.tenantId, entry.name);
-    if (current === null) missing.push(entry.name);
-    else if (current !== entry.id) stale.push(entry.name);
-  }
-  const installed = missing.length === 0 && stale.length === 0;
-  return {
-    installed,
-    appVersion: APP_VERSION,
-    missing,
-    stale,
-    deployment: lastDeployment,
-    detail: installed
-      ? `Installed ${APP_VERSION}.`
-      : missing.length > 0
-        ? `${missing.length} definitions missing.`
-        : `${stale.length} definitions out of date.`,
-  };
+  return { installed: true, appVersion: APP_VERSION, detail: `Installed ${APP_VERSION}.` };
 }
 
 /**
@@ -139,9 +97,6 @@ export async function ensureWorkspace(transport: Transport): Promise<Workspace> 
  */
 export async function install(
   transport: Transport,
-  sidecar: SidecarCapability,
-  closure: ClosureSource,
-  gitPush: WorkflowGitPush,
   hooks: {
     afterEnsureWorkspace?: (workspace: Workspace) => Promise<void>;
     afterSkillAssets?: () => Promise<void>;
@@ -149,7 +104,6 @@ export async function install(
 ): Promise<InstallState> {
   const ws = await ensureWorkspace(transport);
   await hooks.afterEnsureWorkspace?.(ws);
-  await seedWorkflows(transport, ws.tenantId);
 
   // Authority is the platform's: the ledger's authorities become roles, and
   // the owner holds every human one.
@@ -162,8 +116,6 @@ export async function install(
     if (name === "system") continue;
     // Role membership becomes a real platform grant `@intx/authz` can answer
     // for, not a "role name equals authority name" assumption in a reader.
-    // Named-signal grants ride along: a role without the ledger authority
-    // never receives `workflow-run:*` / `signal:<name>` for that command.
     await ensureAuthorityGrants(transport, ws.tenantId, roles.get(name)!, name);
     await assignRole(transport, ws.tenantId, ws.principalId, roles.get(name)!);
   }
@@ -179,53 +131,5 @@ export async function install(
   // may still lead with a model that cannot; its offerings are put in order.
   await hooks.afterSkillAssets?.();
 
-  // Model bindings are the catalog rows written when a provider connects, so
-  // there is nothing to rebind here; re-running after a credential change is
-  // what lets the lifecycle deploy once an offering exists to bind against.
-  // Each project has its own deployment; the workspace asset is the one
-  // installState reports.
-  void deployLifecycle(
-    transport,
-    sidecar,
-    closure,
-    gitPush,
-    ws.tenantId,
-    projects.map((project) => project.id),
-  );
   return installState(transport);
-}
-
-// The hub answers a deploy only after its probe sidecar has evaluated the
-// source, which takes as long as spawning a process. Install returns at once
-// and installState() reports "deploying" until the hub has answered.
-let deploying: Promise<void> | null = null;
-export function deployLifecycle(
-  transport: Transport,
-  sidecar: SidecarCapability,
-  closure: ClosureSource,
-  gitPush: WorkflowGitPush,
-  tenantId: string,
-  projectIds: readonly string[] = [],
-): Promise<void> {
-  if (deploying) return deploying;
-  lastDeployment = { status: "deploying", detail: "The hub is probing the lifecycle source." };
-  deploying = ensureLifecycleDeployment(transport, sidecar, closure, gitPush, tenantId)
-    .then(async (deployed) => {
-      lastDeployment =
-        deployed.status === "no_offering"
-          ? { status: "no_offering", detail: "Connect a provider to deploy the lifecycle." }
-          : deployed.status === "no_host"
-            ? { status: "no_host", detail: "The host is not serving, so no sidecar can dial in." }
-            : { status: deployed.status, detail: `${deployed.deploymentId} is ${deployed.deploymentStatus}.` };
-      for (const projectId of projectIds) {
-        await ensureLifecycleDeployment(transport, sidecar, closure, gitPush, tenantId, projectId);
-      }
-    })
-    .catch((cause: unknown) => {
-      lastDeployment = { status: "failed", detail: cause instanceof Error ? cause.message : String(cause) };
-    })
-    .finally(() => {
-      deploying = null;
-    });
-  return deploying;
 }

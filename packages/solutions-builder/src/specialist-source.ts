@@ -18,15 +18,45 @@
 import { agentById, agentFor, panelPrincipals, type AgentRole } from "./kit.js";
 import type { Stage } from "./ledger.js";
 import { skillTextFor } from "./seed-kit.js";
-import {
-  BUILD_STAGE,
-  DELIVERY_STAGE,
-  PACKAGE_STAGE,
-  WORKFLOW_PACKAGE_DEPENDENCIES,
-  type InferenceSourcePin,
-} from "./workflows/lifecycle-source.js";
 
-export { WORKFLOW_PACKAGE_DEPENDENCIES, PACKAGE_STAGE, type InferenceSourcePin };
+/**
+ * The (provider plugin, canonical model) pair a rendered agent step declares
+ * as its inference source, pinned against one of the tenant's offerings.
+ */
+export type InferenceSourcePin = { readonly provider: string; readonly model: string };
+
+/** The stage whose rounds run the build agent. */
+export const BUILD_STAGE = 8;
+
+/** The stage whose rounds write one package per stakeholder, each behind its own gate. */
+export const PACKAGE_STAGE = 5;
+
+/** The stage whose specialist checks a delivery manifest. */
+export const DELIVERY_STAGE = 9;
+
+/**
+ * What the deployed package depends on. `@intx/workflow` is a workspace member
+ * of the asset (the vendored revision, shipped beside the workflow by
+ * `packages/installer/src/workflow-closure.ts`); everything else comes from
+ * npm. `hono` is imported by nothing here: it satisfies the peer dependency
+ * `@logtape/hono` declares inside `@intx/log`, which the closure resolver
+ * refuses to leave unmet. `@solutions-builder/tools-deck` is the
+ * deck-rendering tool stage 5's specialist carries: it ships beside the
+ * workflow the same way `@intx/tools-posix` does, so a running workflow
+ * renders a stakeholder's slides itself instead of asking the hub to do it.
+ * `@solutions-builder/tools-delivery` is the same shape for stage 9's
+ * delivery-verifier: it summarizes a manifest's already-checked descriptors
+ * into a completeness report without a hub round trip.
+ */
+export const WORKFLOW_PACKAGE_DEPENDENCIES: Readonly<Record<string, string>> = {
+  "@intx/workflow": "workspace:*",
+  "@intx/agent": "workspace:*",
+  "@intx/tools-posix": "workspace:*",
+  "@solutions-builder/app": "workspace:*",
+  "@solutions-builder/tools-deck": "workspace:*",
+  "@solutions-builder/tools-delivery": "workspace:*",
+  hono: "^4.0.0",
+};
 
 /** The entry module path every specialist package ships, same convention as
  *  the lifecycle's `LIFECYCLE_ENTRY_PATH`. */
@@ -50,9 +80,9 @@ export type SpecialistSourceOptions = {
 };
 
 /**
- * Same as `lifecycle-source.ts`'s `renderedPrompt`: a role's kit prompt has
- * no runtime after render time to load a skill from — an agent step's
- * `systemPrompt` is a static string baked in here — so the skill text rides
+ * A role's kit prompt has no runtime after render time to load a skill
+ * from — an agent step's `systemPrompt` is a static string baked in here —
+ * so the skill text rides
  * along with it.
  */
 function renderedPrompt(role: AgentRole): string {

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { foldRun, projectTitle, type RunEvent } from "./project-state.js";
-import { NAME_STEP_ID } from "./workflows/project-lifecycle.js";
+import { NAME_STEP_ID } from "./workflows/stage-ids.js";
 
 const RUN_ID = "run-1";
 

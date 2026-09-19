@@ -5,9 +5,9 @@
  * The rest of this module's earlier contents — `projectStageThread` and its
  * supporting reads — folded a stage's *loop-era* iteration child runs (the
  * round step's `StepCompleted`/`SignalReceived`, the draft step's own
- * completion) into turns. Loops are gone (INTR-400/402/541; see
- * `./workflows/stage-loop.ts`): a stage's turns are now the chat section's
- * mail and its body's per-stage draft step outputs on the *anchor* run, not a
+ * completion) into turns. Loops are gone (INTR-400/402/541); the chat-section
+ * lifecycle that replaced them is gone too: a stage's turns are now the chat
+ * section's mail and its body's per-stage draft step outputs on the *anchor* run, not a
  * per-stage loop's iteration runs, so that fold no longer applies and is
  * deleted here rather than ported. Its replacement lives with whatever reads
  * the anchor run's events directly (see `apps/web/src/stage-thread.ts`).

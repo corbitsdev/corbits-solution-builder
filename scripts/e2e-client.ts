@@ -367,8 +367,8 @@ const PROJECT_POLICY: ProjectPolicy = {
 };
 
 /**
- * The closure/git-push capabilities `installerInstall`/`ensureSpecialistDeployment`
- * need (CL-8334), built the same way `scripts/pack-registry-asset.ts` builds
+ * The closure/git-push capabilities `ensureSpecialistDeployment` needs
+ * (CL-8334), built the same way `scripts/pack-registry-asset.ts` builds
  * them for its own embedded-hub install call: the manifest in-memory from
  * the packer, and the push over the spawned host's real hub-mounted git
  * smart-HTTP route -- unlike that script, this one talks to a real listening
@@ -469,12 +469,8 @@ async function main(): Promise<void> {
     // (2) Workspace tenant install.
     const workspace = await step("2. workspace tenant install (installer install path)", async () => {
       if (!sidecar) throw new Error("no sidecar capability from the boot step");
-      const state = await installerInstall(transport, sidecar, closure, gitPush);
-      check(
-        "2. workspace tenant install (installer install path)",
-        state.missing.length === 0 && state.stale.length === 0,
-        state.detail,
-      );
+      const state = await installerInstall(transport);
+      check("2. workspace tenant install (installer install path)", state.installed, state.detail);
       const resolved = await resolveWorkspace(transport);
       if (!resolved) throw new Error("the hub installed the workspace but does not resolve it back");
       check("2. the workspace resolves back through the hub", true, `tenant ${resolved.tenantId}`);

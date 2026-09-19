@@ -19,7 +19,7 @@ import {
   type HubTenant,
 } from "./hub.js";
 import { InstallerError } from "./errors.js";
-import { ensureAuthorityGrants } from "./signal-grants.js";
+import { ensureAuthorityGrants } from "./authority-grants.js";
 
 export type ProjectPolicy = {
   costTolerancePercent: number;

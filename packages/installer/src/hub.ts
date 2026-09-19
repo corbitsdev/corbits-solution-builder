@@ -12,9 +12,7 @@ import {
   ApiError,
   deployWorkflow,
   listWorkflowDeployments,
-  registerWorkflowDefinition,
   type DeployWorkflowInput,
-  type RegisterWorkflowDefinitionInput,
   type Transport,
   type WorkflowDeployment,
 } from "@intx/hub-client";
@@ -261,38 +259,6 @@ export async function deleteGrant(transport: Transport, scope: string, grantId: 
     if (cause instanceof ApiError && cause.status === 404) return;
     throw cause;
   }
-}
-
-// --- Workflow definitions (read side) --------------------------------------
-
-export type HubDefinition = { id: string; name: string; createdAt: string };
-
-export async function listDefinitions(transport: Transport, scope: string): Promise<HubDefinition[]> {
-  return list<HubDefinition>(transport, tenantPathFor(scope, "/workflows/definitions"));
-}
-
-/**
- * The current definition for a name in `scope`, or `null` if none is
- * installed. "Current" is the newest row, so a fresh session keys to it.
- */
-export async function definitionIdFor(transport: Transport, scope: string, name: string): Promise<string | null> {
-  const rows = (await listDefinitions(transport, scope)).filter((row) => row.name === name);
-  rows.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
-  return rows[0]?.id ?? null;
-}
-
-/**
- * Registers a definition row directly: for a caller (`workflow-seed.ts`) that
- * generated the wire projection itself rather than deploying through the
- * probe sidecar. Identity is keyed on (name, wireHash); an unchanged wireHash
- * under the same name is a no-op.
- */
-export async function registerDefinition(
-  transport: Transport,
-  scope: string,
-  input: RegisterWorkflowDefinitionInput,
-): Promise<{ id: string; created: boolean }> {
-  return registerWorkflowDefinition(transport, scope, input);
 }
 
 // --- The model catalog -----------------------------------------------------

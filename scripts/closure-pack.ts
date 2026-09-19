@@ -22,7 +22,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 
 import { packTarballFiles, tarballFilename, type TarballFiles } from "./lib/tarball.js";
-import { WORKFLOW_PACKAGE_DEPENDENCIES } from "@solutions-builder/app/workflows/lifecycle-source";
+import { WORKFLOW_PACKAGE_DEPENDENCIES } from "@solutions-builder/app/specialist-source";
 
 export const ROOT_DIR = join(import.meta.dir, "..");
 export const VENDOR_PACKAGES_DIR = join(ROOT_DIR, "vendor", "interchange", "packages");

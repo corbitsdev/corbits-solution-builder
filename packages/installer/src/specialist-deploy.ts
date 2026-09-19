@@ -110,13 +110,11 @@ async function renderSpecialistSource(
 /**
  * Makes sure `projectId`'s stage-`stage` specialist has a live deployment.
  * When one already exists on this asset and is still live, hands it back
- * unchanged -- a specialist deploys once per stage per project, lazily, not
- * on every reconcile the way the lifecycle redeploys on a changed digest.
+ * unchanged -- a specialist deploys once per stage per project, lazily.
  * Otherwise: create-or-find the `workflow`-kind asset
- * (`sb-project-<projectId>-stage-<N>`, exactly like `workflow-deploy.ts`'s
- * `lifecycleAsset`), push the rendered source with the same push-token flow,
- * and deploy it against the tenant's offerings the same way
- * `ensureLifecycleDeployment` resolves them.
+ * (`sb-project-<projectId>-stage-<N>`), push the rendered source with the
+ * same push-token flow `workflow-deploy.ts`'s `pushWorkflowSourceTree` uses,
+ * and deploy it against the tenant's offerings.
  */
 export async function ensureSpecialistDeployment(
   transport: Transport,

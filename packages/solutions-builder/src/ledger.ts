@@ -1,10 +1,9 @@
 /**
  * The sole transition ledger — BUILD_PLAN_V3 section 7.
  *
- * This file is the single machine-readable contract. Command guards, workflow
- * definitions, UI labels and transition tests all consume it. A second
- * handwritten state machine anywhere in the tree is a defect;
- * `scripts/check-ledger.ts` is what makes that claim checkable.
+ * This file is the single machine-readable contract. Command guards, UI
+ * labels and transition tests all consume it. A second handwritten state
+ * machine anywhere in the tree is a defect.
  */
 
 export const RUN_KINDS = ["stage", "build"] as const;

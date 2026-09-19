@@ -10,8 +10,7 @@
  * drifting apart.
  */
 import { applyEvent, emptyState, type RunState } from "@intx/workflow";
-import { stageOfSignal, stageOfStepId } from "./workflows/stage-loop.js";
-import { NAME_STEP_ID } from "./workflows/project-lifecycle.js";
+import { stageOfSignal, stageOfStepId, NAME_STEP_ID } from "./workflows/stage-ids.js";
 import type { Stage } from "./ledger.js";
 import type { Anchor, Direction } from "./design-prompt.js";
 
