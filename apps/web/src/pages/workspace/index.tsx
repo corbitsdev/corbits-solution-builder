@@ -28,6 +28,7 @@ import { Tabs } from "@corbits/react-ui";
 import { Banner, Button, Screen, StateLabel, stageName, versionDigest } from "../../components.jsx";
 import { STAGE_GOAL } from "./gate.jsx";
 import { StageConversation } from "./thread.jsx";
+import { TargetPicker, targetOpeningLine } from "./freeze.jsx";
 import type { FoldedFeedback } from "@solutions-builder/app/project-state";
 
 export { StageDocument, DocumentBody } from "./document.jsx";
@@ -144,6 +145,12 @@ export function StageWorkspace({
   const [composer, setComposer] = useState("");
   const [sending, setSending] = useState(false);
   const [approving, setApproving] = useState(false);
+  // Stage 7 only: the build target chosen at freeze time. Reset whenever the
+  // stage changes so an earlier project's choice never leaks into a new one.
+  const [chosenTarget, setChosenTarget] = useState<string | null>(null);
+  useEffect(() => {
+    setChosenTarget(null);
+  }, [stage]);
 
   // Stage 1's own opening problem statement, read straight off its
   // lifecycle deployment (`api.projectOpening`, scoped to the workspace
@@ -213,18 +220,34 @@ export function StageWorkspace({
    * that stage's opening mail — deploying its specialist lazily the same way
    * opening any stage does. No gate signal, no lifecycle run: the artifact
    * write and the client's own stage cursor are the whole approval.
+   *
+   * Stage 7 is also the freeze: the chosen target rides along in the same
+   * artifact write (`sb.target`) and is prefixed as one line onto stage 8's
+   * opening mail, so the build specialist knows what it is building without
+   * re-deriving it from the plan.
    */
   const approve = async () => {
     if (!latestSpecialistMessage || stage >= LAST_STAGE) return;
+    if (stage === 7 && !chosenTarget) return;
     setApproving(true);
     setError(null);
     setRemediation(undefined);
     try {
       const materials = detail.nodes.filter((node) => node.kind === "source_material").map((node) => node.id);
-      await api.persistStageDraft(detail.project.id, stage, latestSpecialistMessage.body, materials);
+      await api.persistStageDraft(
+        detail.project.id,
+        stage,
+        latestSpecialistMessage.body,
+        materials,
+        stage === 7 ? (chosenTarget ?? undefined) : undefined,
+      );
       const next = stage + 1;
+      const openingBody =
+        stage === 7 && chosenTarget
+          ? `${targetOpeningLine(chosenTarget)}\n\n${latestSpecialistMessage.body}`
+          : latestSpecialistMessage.body;
       setStageFloor(next);
-      setPendingOpening({ stage: next, body: latestSpecialistMessage.body });
+      setPendingOpening({ stage: next, body: openingBody });
       onChanged();
     } catch (cause) {
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
@@ -322,7 +345,12 @@ export function StageWorkspace({
             description={STAGE_GOAL[stage]}
             status={
               stage >= LAST_STAGE ? null : (
-                <Button variant="primary" loading={approving} disabled={!latestSpecialistMessage} onClick={() => void approve()}>
+                <Button
+                  variant="primary"
+                  loading={approving}
+                  disabled={!latestSpecialistMessage || (stage === 7 && !chosenTarget)}
+                  onClick={() => void approve()}
+                >
                   Approve and continue
                 </Button>
               )
@@ -338,6 +366,9 @@ export function StageWorkspace({
             ) : (
               <p className="inline-note">Say what you'd like below to start the conversation.</p>
             )}
+            {stage === 7 && latestSpecialistMessage ? (
+              <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} />
+            ) : null}
           </Screen>
           <StageConversation
             stage={stage}
@@ -456,7 +487,6 @@ function DesignPanel({
   );
 }
 
-/** Stage 7 → 8: cost approval, then the freeze interlock. */
 /**
  * Stage 8: build supervision, talking to the stage's own mail agent.
  *

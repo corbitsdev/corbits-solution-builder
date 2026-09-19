@@ -781,7 +781,14 @@ export const api = {
    * mounted `@corbits/artifacts` module. Called once, right before the
    * approval signal, so the run's own gate always names a real version.
    */
-  persistStageDraft: (projectId: string, stage: number, content: string, sourceVersionIds: string[] = []) =>
+  persistStageDraft: (
+    projectId: string,
+    stage: number,
+    content: string,
+    sourceVersionIds: string[] = [],
+    /** Stage 7 only: the target chosen at freeze time, recorded as `sb.target`. */
+    target?: string,
+  ) =>
     asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const kind = STAGE_DRAFT_KIND[stage];
       if (!kind) {
@@ -803,6 +810,7 @@ export const api = {
             mediaType: "text/markdown",
             sourceVersionIds,
             provenance: { producer: "agent" as const },
+            ...(target ? { target } : {}),
           },
         },
       });
