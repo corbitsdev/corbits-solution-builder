@@ -19,6 +19,7 @@ export type PendingApproval = {
   readonly toolDefinition: { readonly name?: string };
   readonly toolArguments: Record<string, unknown>;
   readonly createdAt: string;
+  readonly resolvedAt?: string | null;
 };
 
 type ApprovalsPage = { readonly data: readonly PendingApproval[] };
@@ -52,6 +53,15 @@ export function deliveryApprovalFor(
         approval.toolDefinition?.name === DELIVER_TOOL_NAME,
     ) ?? null
   );
+}
+
+/** One approval by id, pending or resolved — the detail route has no status filter, so a terminal approval (e.g. an accepted delivery) is still readable for its `resolvedAt`. */
+export async function approvalById(
+  tenantId: string,
+  approvalId: string,
+  transport: Transport = createHubTransport(),
+): Promise<PendingApproval> {
+  return transport.fetch<PendingApproval>("GET", `${approvalsPath(tenantId)}/${approvalId}`);
 }
 
 /** Approves the pending tool call: it resolves and the specialist's run continues. */

@@ -26,6 +26,7 @@ import { DesignFeedbackView } from "../design.jsx";
 import { Tabs } from "@corbits/react-ui";
 import { Banner, Button, Screen, StateLabel, stageName, versionDigest } from "../../components.jsx";
 import { STAGE_GOAL } from "./gate.jsx";
+import { DeliveryPanel } from "./delivery.jsx";
 import { StageConversation } from "./thread.jsx";
 import { TargetPicker, targetOpeningLine } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
@@ -469,6 +470,10 @@ export function StageWorkspace({
           ) : null}
           {panelReviews.length > 0 ? <PanelReviews reviews={panelReviews} tenantId={tenantId} /> : null}
         </div>
+      ) : null}
+
+      {agentAddress && stage === 9 ? (
+        <DeliveryPanel detail={detail} tenantId={tenantId} latestReply={latestSpecialistMessage} />
       ) : null}
 
       {agentAddress && stage !== 4 && stage !== 5 && stage !== 8 ? (

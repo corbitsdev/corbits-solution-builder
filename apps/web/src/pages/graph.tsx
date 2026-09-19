@@ -400,7 +400,7 @@ function DeckFile({ node, tenantId }: { node: ArtifactNode; tenantId: string }) 
  * attempt's workspace, named after the project. Saved, not shown — a
  * source tree is not a document.
  */
-function BuildFile({ node, tenantId }: { node: ArtifactNode; tenantId: string }) {
+export function BuildFile({ node, tenantId }: { node: ArtifactNode; tenantId: string }) {
   const [state, setState] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
   const size = node.sizeBytes >= 1024 * 1024 ? `${(node.sizeBytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(node.sizeBytes / 1024))} KB`;
   return (
