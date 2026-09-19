@@ -733,6 +733,7 @@ export function App() {
                       and remembers that it has. */}
                   <StageTour enabled={true} stage={detail.stage} />
                   <StageWorkspace
+                    key={detail.project.id}
                     detail={detail}
                     draftOpen={draftOpen}
                     tenantId={tenantId ?? ""}

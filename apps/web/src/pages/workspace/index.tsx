@@ -167,6 +167,18 @@ export function StageWorkspace({
   const openedRef = useRef<string | null>(null);
   const [pendingOpening, setPendingOpening] = useState<{ stage: number; body: string } | null>(null);
 
+  // Belt-and-braces: `key={detail.project.id}` on this component in App.tsx
+  // already remounts it per project, resetting all of the above. This makes
+  // sure the previous project's optimistic stage floor, pending send, and
+  // opened-thread marker never leak into a newly opened one even if that
+  // remount ever regresses.
+  useEffect(() => {
+    setStageFloor(derivedStage);
+    setPendingOpening(null);
+    openedRef.current = null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail.project.id]);
+
   // Fallback source for a stage > 1 opening when `pendingOpening` was never
   // set in this mounted component — a reload, a re-opened project, or the
   // stage cursor advancing some other way (`approve()` only ever writes
