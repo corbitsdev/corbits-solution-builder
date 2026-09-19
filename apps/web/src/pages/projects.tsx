@@ -25,7 +25,8 @@ import {
 import { ArrowRight, Ellipsis } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, ApiFailure, type ProjectInfo, type ProjectSummary } from "../client.js";
-import { Button, Banner, StageRing, StateLabel, stageName } from "../components.jsx";
+import { Button, Banner, downloadArtifact, StageRing, StateLabel, stageName } from "../components.jsx";
+import { assembleBundle, bundleFileName } from "../project-export.js";
 import { DEFAULT_POLICY } from "./onboarding.jsx";
 import { Dictated } from "../dictation.jsx";
 
@@ -244,6 +245,8 @@ function ProjectCard({
   // Deleting takes two clicks, both in the menu: the second item only exists
   // after the first, so a slip cannot remove a project.
   const [confirming, setConfirming] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportNotice, setExportNotice] = useState<string | null>(null);
   const field = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (renaming) field.current?.select();
@@ -255,6 +258,29 @@ function ProjectCard({
       onChanged();
     } catch (cause) {
       onError(cause);
+    }
+  };
+
+  const exportProject = async () => {
+    if (exporting) return;
+    setExporting(true);
+    setExportNotice(null);
+    try {
+      const bundle = await assembleBundle(project.id, {
+        projectView: api.projectView,
+        artifactContent: api.artifactContent,
+        stageAgentStatus: api.stageAgentStatus,
+        readStageThread: api.readStageThread,
+      });
+      downloadArtifact(JSON.stringify(bundle, null, 2), bundleFileName(project.title));
+      const messageCount = bundle.conversations.reduce((total, thread) => total + thread.messages.length, 0);
+      setExportNotice(
+        `Exported ${bundle.artifacts.length} artifact${bundle.artifacts.length === 1 ? "" : "s"} and ${messageCount} message${messageCount === 1 ? "" : "s"}.`,
+      );
+    } catch (cause) {
+      setExportNotice(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -304,6 +330,9 @@ function ProjectCard({
             >
               {project.archivedAt ? "Unarchive" : "Archive"}
             </MenuItem>
+            <MenuItem disabled={exporting} onSelect={() => void exportProject()}>
+              {exporting ? "Exporting…" : "Export…"}
+            </MenuItem>
             <MenuSeparator />
             {confirming ? (
               <MenuItem
@@ -351,6 +380,8 @@ function ProjectCard({
           <h4>{project.title}</h4>
         </button>
       )}
+
+      {exportNotice ? <p className="inline-note">{exportNotice}</p> : null}
 
       <div className="project-card-foot">
         {status}
