@@ -1,16 +1,17 @@
 /**
  * Stage 5 — one package per named audience.
  *
- * The per-stakeholder quorum decision (`audience.decide`, recorded against a
- * parked ledger run) has no mail-agent-shaped replacement yet — CL-8612
- * contract v6 has no lifecycle run to park a decision on. This surface is
- * pared down to writing and reviewing packages; advancing past the stage is
- * the same "Approve and continue" the other stages use
- * (`pages/workspace/index.tsx`). Recording each stakeholder's own decision
- * is filed as a follow-up (CL-8625).
+ * The per-stakeholder quorum decision (`audience.decide`, once recorded
+ * against a parked ledger run) is restored here in a mail-agent shape
+ * (CL-8625): each stakeholder's own proceed/revise/reject is appended to
+ * their own package artifact's `sb.decisions` through `reviseArtifact`, and
+ * the quorum banner is folded client-side from those decisions against the
+ * project policy's `audienceQuorum`. Advancing past the stage is still the
+ * same "Approve and continue" the other stages use
+ * (`pages/workspace/index.tsx`); this only restores the record, not a gate.
  */
 import { useEffect, useState } from "react";
-import { api, ApiFailure, type ProjectDetail } from "../client.js";
+import { api, ApiFailure, type AudienceDecision, type ProjectDetail } from "../client.js";
 import { Banner, Button, Field, Screen, StateLabel, versionDigest } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
 import { Tabs, Input } from "@corbits/react-ui";
@@ -27,6 +28,92 @@ function youFirst<T extends { name: string }>(list: readonly T[]): T[] {
 
 function roleLabel(role: string): string {
   return role.replace(/_/g, " ");
+}
+
+/** The most recent decision recorded, or null if none has been. */
+function latestDecision(decisions: readonly AudienceDecision[]): AudienceDecision | null {
+  return decisions.length > 0 ? decisions[decisions.length - 1]! : null;
+}
+
+const DECISION_LABEL: Record<AudienceDecision["decision"], string> = {
+  proceed: "Proceed",
+  revise: "Needs revision",
+  reject: "Reject",
+};
+
+const DECISION_TONE: Record<AudienceDecision["decision"], "success" | "warning" | "error"> = {
+  proceed: "success",
+  revise: "warning",
+  reject: "error",
+};
+
+/**
+ * One stakeholder's own record on their package: the decisions already
+ * appended to `sb.decisions`, and a way to add another.
+ */
+function DecisionPanel({
+  audience,
+  decisions,
+  onDecide,
+}: {
+  audience: string;
+  decisions: readonly AudienceDecision[];
+  onDecide: (decision: AudienceDecision["decision"], note: string) => Promise<void>;
+}) {
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState<AudienceDecision["decision"] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const current = latestDecision(decisions);
+
+  const decide = async (decision: AudienceDecision["decision"]) => {
+    setBusy(decision);
+    setError(null);
+    try {
+      await onDecide(decision, note);
+      setNote("");
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="screen-body decision-panel">
+      {error ? <Banner tone="error" title={error} /> : null}
+      {current ? (
+        <StateLabel tone={DECISION_TONE[current.decision]}>
+          {audience}: {DECISION_LABEL[current.decision]}
+        </StateLabel>
+      ) : (
+        <StateLabel tone="info">{audience} has not decided yet</StateLabel>
+      )}
+      {decisions.length > 0 ? (
+        <ul className="decision-history">
+          {decisions.map((entry, index) => (
+            <li key={index}>
+              {DECISION_LABEL[entry.decision]} · {new Date(entry.at).toLocaleString()}
+              {entry.note ? ` · ${entry.note}` : ""}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <Field label={`${audience}'s note (optional)`}>
+        <Input value={note} placeholder="Why this decision" onChange={(event) => setNote(event.target.value)} />
+      </Field>
+      <div className="button-row">
+        <Button variant="primary" loading={busy === "proceed"} disabled={busy !== null} onClick={() => void decide("proceed")}>
+          Proceed
+        </Button>
+        <Button loading={busy === "revise"} disabled={busy !== null} onClick={() => void decide("revise")}>
+          Needs revision
+        </Button>
+        <Button variant="ghost" loading={busy === "reject"} disabled={busy !== null} onClick={() => void decide("reject")}>
+          Reject
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -243,6 +330,40 @@ export function AudiencePackages({
     };
   }, [selected?.id, tenantId]);
 
+  // The quorum is read off the same project policy `api.stakeholders`
+  // already reads for the editor above, rather than off this component's
+  // own `Policy` cast, so the banner tracks the same source of truth a
+  // decision is checked against server-side one day.
+  const [decisionQuorum, setDecisionQuorum] = useState(quorum);
+  useEffect(() => {
+    void api.stakeholders(detail.project.id).then((result) => setDecisionQuorum(result.audienceQuorum ?? 0)).catch(() => {});
+  }, [detail.project.id]);
+
+  // Every package's own decision history, recorded on its `sb.decisions` —
+  // fetched for all packages at once so the quorum banner can total proceeds
+  // across stakeholders, not just the one open in the tab.
+  const [decisionsByNode, setDecisionsByNode] = useState<ReadonlyMap<string, AudienceDecision[]>>(new Map());
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all(
+      packages.map((node) => api.audienceDecisions(tenantId, node.id).then((result) => [node.id, result.decisions] as const)),
+    ).then((entries) => {
+      if (!cancelled) setDecisionsByNode(new Map(entries));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, packages.map((node) => node.id).join(",")]);
+
+  const proceeded = packages.filter((node) => latestDecision(decisionsByNode.get(node.id) ?? [])?.decision === "proceed").length;
+  const quorumMet = decisionQuorum > 0 && proceeded >= decisionQuorum;
+
+  const decide = async (node: (typeof packages)[number], decision: AudienceDecision["decision"], note: string) => {
+    if (!node.variant) return;
+    const result = await api.recordAudienceDecision(tenantId, node.id, { audience: node.variant, decision, note });
+    setDecisionsByNode((before) => new Map(before).set(node.id, result.decisions));
+  };
+
   return (
     <>
       <Stakeholders projectId={detail.project.id} audiences={audiences} quorum={quorum} onChanged={onChanged} />
@@ -262,6 +383,17 @@ export function AudiencePackages({
 
         {audiences.length === 0 ? (
           <Banner title="No stakeholders are named for this project" />
+        ) : null}
+
+        {packages.length > 0 && decisionQuorum > 0 ? (
+          <Banner
+            tone={quorumMet ? "okay" : "warning"}
+            title={
+              quorumMet
+                ? `Quorum met: ${proceeded} of ${decisionQuorum} required have proceeded`
+                : `${proceeded} of ${decisionQuorum} required have proceeded`
+            }
+          />
         ) : null}
 
         {missing.length > 0 ? (
@@ -354,6 +486,15 @@ export function AudiencePackages({
                           return next;
                         }),
                     }}
+                  />
+                ) : null}
+                {/* The named stakeholder's own record on this package —
+                    appended to its `sb.decisions`, not gated on anything. */}
+                {selected.variant ? (
+                  <DecisionPanel
+                    audience={selected.variant}
+                    decisions={decisionsByNode.get(selected.id) ?? []}
+                    onDecide={(decision, note) => decide(selected, decision, note)}
                   />
                 ) : null}
                 {/* The slides built from this package's deck outline, and,
