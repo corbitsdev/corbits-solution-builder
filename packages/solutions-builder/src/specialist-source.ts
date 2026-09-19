@@ -144,7 +144,7 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
     stage === PACKAGE_STAGE
       ? `import { deck } from ${JSON.stringify("@solutions-builder/tools-deck/sidecar-bundle")};\n`
       : stage === BUILD_STAGE
-        ? `import { posix } from ${JSON.stringify("@intx/tools-posix/sidecar-bundle")};\n`
+        ? `import { posix } from ${JSON.stringify("@intx/tools-posix/sidecar-bundle")};\nimport { publishWorkspace } from ${JSON.stringify("@solutions-builder/tools-delivery/publish-workspace")};\n`
         : stage === DELIVERY_STAGE
           ? `import { delivery, deliver } from ${JSON.stringify("@solutions-builder/tools-delivery/sidecar-bundle")};\n`
           : "";
@@ -152,7 +152,7 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
     stage === PACKAGE_STAGE
       ? "deck"
       : stage === BUILD_STAGE
-        ? "posix"
+        ? "posix, publishWorkspace"
         : stage === DELIVERY_STAGE
           ? "delivery, deliver"
           : "";

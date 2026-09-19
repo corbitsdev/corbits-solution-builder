@@ -306,6 +306,33 @@ export function StageWorkspace({
   const latestSpecialistMessage = [...messages].reverse().find((message) => message.author === "agent") ?? null;
 
   /**
+   * The stage 8 build specialist's `publish_workspace` tool result, when its
+   * reply carries one: `{fileName, mediaType, dataUri, sizeBytes}`, either as
+   * the whole message body or inside a fenced code block. Anything else
+   * (a plain status update) is not a published bundle, so approve() falls
+   * back to recording the text draft the way every other stage does.
+   */
+  const publishedBundle = useMemo(() => {
+    if (stage !== 8 || !latestSpecialistMessage) return null;
+    const body = latestSpecialistMessage.body;
+    const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(body)?.[1] ?? body;
+    try {
+      const parsed = JSON.parse(fenced.trim()) as Record<string, unknown>;
+      if (
+        typeof parsed["fileName"] === "string" &&
+        typeof parsed["mediaType"] === "string" &&
+        typeof parsed["dataUri"] === "string" &&
+        typeof parsed["sizeBytes"] === "number"
+      ) {
+        return parsed as { fileName: string; mediaType: string; dataUri: string; sizeBytes: number };
+      }
+    } catch {
+      // Not a bundle — an ordinary chat reply.
+    }
+    return null;
+  }, [stage, latestSpecialistMessage]);
+
+  /**
    * Persists the specialist's latest reply as this stage's approved draft,
    * advances the UI to the next stage, and sends the approved text on as
    * that stage's opening mail — deploying its specialist lazily the same way
@@ -325,13 +352,17 @@ export function StageWorkspace({
     setRemediation(undefined);
     try {
       const materials = detail.nodes.filter((node) => node.kind === "source_material").map((node) => node.id);
-      await api.persistStageDraft(
-        detail.project.id,
-        stage,
-        latestSpecialistMessage.body,
-        materials,
-        stage === 7 ? (chosenTarget ?? undefined) : undefined,
-      );
+      if (publishedBundle) {
+        await api.persistBuildEvidence(detail.project.id, publishedBundle, materials);
+      } else {
+        await api.persistStageDraft(
+          detail.project.id,
+          stage,
+          latestSpecialistMessage.body,
+          materials,
+          stage === 7 ? (chosenTarget ?? undefined) : undefined,
+        );
+      }
       const next = stage + 1;
       const openingBody =
         stage === 7 && chosenTarget

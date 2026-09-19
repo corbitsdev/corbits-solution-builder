@@ -1115,6 +1115,42 @@ export const api = {
       };
     }),
   /**
+   * Persists the stage 8 build specialist's `publish_workspace` tool result
+   * as the stage's real `build_evidence` artifact — bytes and media type,
+   * not the chat text `persistStageDraft` would otherwise write. Without
+   * this the workspace `publish_workspace` tars only ever lived in the tool
+   * result the specialist's own turn saw; the run's warm workspace is gone
+   * once the allocation is released, so this is the only copy that
+   * survives.
+   */
+  persistBuildEvidence: (
+    projectId: string,
+    bundle: { fileName: string; mediaType: string; dataUri: string; sizeBytes: number },
+    sourceVersionIds: string[] = [],
+  ) =>
+    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      const artifact = await installerCreateArtifact(transport, workspaceTenantId, {
+        title: bundle.fileName,
+        content: bundle.dataUri,
+        metadata: {
+          sb: {
+            projectId,
+            kind: STAGE_DRAFT_KIND[8]!,
+            stage: 8,
+            mediaType: bundle.mediaType,
+            sourceVersionIds,
+            provenance: { producer: "agent" as const },
+            approvedAt: new Date().toISOString(),
+          },
+        },
+      });
+      return {
+        artifactId: artifact.id,
+        versionId: artifact.id,
+        contentHash: `${artifact.id}@${String(artifact.version)}`,
+      };
+    }),
+  /**
    * Attaches feedback to a design node: mails the stage 4 specialist so it
    * lands in its next turn, and records it on the node's own artifact
    * metadata (`sb.feedback`) via `reviseArtifact` so it survives to fold back
