@@ -1,10 +1,12 @@
 /**
- * Stage 9's delivery decision, read from the stock hub approval it parks on
- * (CL-8566) — `GET /api/tenants/:t/approvals` and `POST .../approve|reject`,
- * not a workflow signal the way every other stage's gate is. Modeled on
- * workbench's `pending-approvals.ts`, trimmed to what this app needs: it has
- * no chat surface of its own, so there is no per-agent filtering here, only
- * "is stage 9's delivery waiting on this project's run."
+ * Any specialist's pending tool call, read from the stock hub approval it
+ * parks on (CL-8566) — `GET /api/tenants/:t/approvals` and
+ * `POST .../approve|reject`, not a workflow signal the way every other
+ * stage's gate is. Modeled on workbench's `pending-approvals.ts`, trimmed to
+ * what this app needs: it has no chat surface of its own, so there is no
+ * per-agent filtering here. Specialists (stage 9's `deliver` and any other
+ * stage's tool, e.g. stage 8's `run_shell`) deploy into the WORKSPACE
+ * tenant, so callers must pass that tenant's id, not a project's.
  */
 import type { Transport } from "@intx/hub-client";
 import { createHubTransport } from "./hub.ts";
@@ -52,8 +54,8 @@ export function deliveryApprovalFor(
   );
 }
 
-/** Approves the pending delivery: the tool call resolves, the specialist's step ends. Stage 9 is delivered. */
-export async function approveDelivery(
+/** Approves the pending tool call: it resolves and the specialist's run continues. */
+export async function approveTool(
   tenantId: string,
   approvalId: string,
   transport: Transport = createHubTransport(),
@@ -61,8 +63,8 @@ export async function approveDelivery(
   await transport.fetch("POST", `${approvalsPath(tenantId)}/${approvalId}/approve`, { scope: "once" });
 }
 
-/** Rejects the pending delivery, optionally with a message: the specialist sees it and calls deliver again. */
-export async function rejectDelivery(
+/** Rejects the pending tool call, optionally with a message: the specialist sees it and can retry. */
+export async function rejectTool(
   tenantId: string,
   approvalId: string,
   message: string,

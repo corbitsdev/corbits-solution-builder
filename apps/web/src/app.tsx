@@ -42,7 +42,7 @@ import { subscribeInbox, type InboxState } from "./inbox.ts";
 import { Onboarding } from "./pages/onboarding.jsx";
 import { Auth } from "./pages/auth.jsx";
 import { StageWorkspace } from "./pages/workspace.jsx";
-import { approveDelivery, rejectDelivery } from "./pending-approvals.ts";
+import { approveTool, rejectTool } from "./pending-approvals.ts";
 import { firstRunScreen, type HubAuthState } from "./first-run.ts";
 import { getHubSession } from "./hub-auth.ts";
 
@@ -485,17 +485,21 @@ export function App() {
    * (CL-8566), never a ledger command on a workflow signal. Approving
    * resolves the parked call and the run is delivered; rejecting carries the
    * reason back to the specialist as the tool's own refusal message, which
-   * it sees in the same turn — "revise" has no separate meaning here.
+   * it sees in the same turn — "revise" has no separate meaning here. Every
+   * stage specialist's tool call parks the same way (e.g. stage 8's
+   * `run_shell`), all under the WORKSPACE tenant, never the project's own.
    */
   const decide = async (wait: Wait, decision: "approve" | "reject" | "revise", reason: string) => {
     if (!wait.approvalId) return;
     setBusy(decision);
     setError(null);
     try {
+      const workspaceTenantId = await api.workspaceTenantId();
+      if (!workspaceTenantId) throw new Error("no workspace tenant to resolve this approval in");
       if (decision === "approve") {
-        await approveDelivery(wait.projectId, wait.approvalId);
+        await approveTool(workspaceTenantId, wait.approvalId);
       } else {
-        await rejectDelivery(wait.projectId, wait.approvalId, reason);
+        await rejectTool(workspaceTenantId, wait.approvalId, reason);
       }
       setSelected(wait.projectId);
       await reloadDetail();

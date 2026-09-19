@@ -19,7 +19,7 @@ import {
   specialistEntrySource,
   type InferenceSourcePin,
 } from "@solutions-builder/app/specialist-source";
-import { catalogFor, getTenant, workflowsFor } from "./hub.js";
+import { assetsFor, catalogFor, getTenant, workflowsFor } from "./hub.js";
 import { readProject } from "./project-tenant.js";
 import {
   appMemberFiles,
@@ -43,9 +43,47 @@ import {
 const SPECIALIST_DIR = "packages/specialist";
 const DIGEST_PATH = "closure.sha256";
 
+function normalizedProjectId(projectId: string): string {
+  return projectId.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+}
+
 /** `sb-project-<projectId>-stage-<N>`, normalized the same way `lifecycleAssetName` is. */
 function specialistAssetName(projectId: string, stage: Stage): string {
-  return `sb-project-${projectId.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-stage-${stage}`;
+  return `sb-project-${normalizedProjectId(projectId)}-stage-${stage}`;
+}
+
+const SPECIALIST_ASSET_STAGE = /-stage-(\d+)$/;
+
+export type SpecialistDeploymentRef = { readonly stage: Stage; readonly deploymentId: string };
+
+/**
+ * Every stage specialist deployed for `projectId`: workflow assets named
+ * `sb-project-<projectId>-stage-<N>` in the workspace tenant, paired with
+ * their live deployment by `definitionAssetId` -- the same pairing
+ * `ensureSpecialistDeployment` itself relies on. A pending approval's
+ * `runId` is the deployment id it was parked under (a specialist's mail
+ * address is `<deploymentId>@<domain>`), so this is what turns "an approval
+ * is pending" into "which project and stage asked."
+ */
+export async function listSpecialistDeployments(
+  transport: Transport,
+  workspaceTenantId: string,
+  projectId: string,
+): Promise<SpecialistDeploymentRef[]> {
+  const prefix = `sb-project-${normalizedProjectId(projectId)}-stage-`;
+  const assets = await assetsFor(transport, workspaceTenantId).list("workflow");
+  const stageByAssetId = new Map<string, number>();
+  for (const asset of assets) {
+    if (!asset.name.startsWith(prefix)) continue;
+    const match = SPECIALIST_ASSET_STAGE.exec(asset.name);
+    if (match) stageByAssetId.set(asset.id, Number(match[1]));
+  }
+  if (stageByAssetId.size === 0) return [];
+  const deployments = await workflowsFor(transport, workspaceTenantId).deployments();
+  return deployments.flatMap((deployment) => {
+    const stage = stageByAssetId.get(deployment.definitionAssetId);
+    return stage === undefined ? [] : [{ stage: stage as Stage, deploymentId: deployment.id }];
+  });
 }
 
 export type SpecialistDeployment = {
