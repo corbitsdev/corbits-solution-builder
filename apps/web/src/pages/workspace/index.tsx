@@ -16,7 +16,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
   ApiFailure,
-  STAGE_DRAFT_KIND,
   type ArtifactNode,
   type ProjectDetail,
 } from "../../client.js";
@@ -29,27 +28,13 @@ import { Banner, Button, Screen, StateLabel, stageName, versionDigest } from "..
 import { STAGE_GOAL } from "./gate.jsx";
 import { StageConversation } from "./thread.jsx";
 import { TargetPicker, targetOpeningLine } from "./freeze.jsx";
+import { currentStageFromArtifacts } from "../../project-view.ts";
 import type { FoldedFeedback } from "@solutions-builder/app/project-state";
 
 export { StageDocument, DocumentBody } from "./document.jsx";
 export { ApprovalsRecord, STAGE_GOAL } from "./gate.jsx";
 
 const LAST_STAGE = 9;
-
-/** 1 + the highest stage that has a live, approved draft artifact — the
- *  mail-chat contract's own stage cursor (CL-8612): no lifecycle run, no
- *  gate signal, just the artifact graph the person already approved into. */
-function currentStageFromArtifacts(nodes: readonly ArtifactNode[]): number {
-  let stage = 1;
-  for (let candidate = 1; candidate <= LAST_STAGE; candidate += 1) {
-    const approved = nodes.some(
-      (node) => node.stage === candidate && node.kind === STAGE_DRAFT_KIND[candidate] && node.supersededByNodeId === null,
-    );
-    if (!approved) break;
-    stage = Math.min(candidate + 1, LAST_STAGE);
-  }
-  return stage;
-}
 
 /** Stands in for a version that would not load, so it never reads as empty. */
 const UNREADABLE = "_This version could not be read. It is still on disk — try again._";
@@ -432,6 +417,7 @@ function DesignPanel({
         createdAt: latestReply.at,
         supersededByNodeId: null,
         provenance: { producer: "specialist" },
+        approvedAt: null,
       }
     : null;
   const designs = persisted.length > 0 ? persisted : draftNode ? [draftNode] : [];

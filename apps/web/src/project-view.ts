@@ -6,9 +6,9 @@
  *
  * CL-8612 contract v6 drops the lifecycle run entirely: a project's stage,
  * its approvals, and its opening statement are all read off the artifact
- * graph and the workspace tenant's own material now, not a folded run — see
- * `pages/workspace/index.tsx`'s `currentStageFromArtifacts` for the same
- * cursor rule this file duplicates for `soloApprovalFor` and `projectInfo`.
+ * graph and the workspace tenant's own material now, not a folded run.
+ * `currentStageFromArtifacts` below is the single stage cursor every page
+ * (`pages/workspace/index.tsx`, `project-list.ts`) shares (CL-8639).
  */
 import type { Transport } from "@intx/hub-client";
 import { requireProject as installerRequireProject, resolveWorkspace } from "@solutions-builder/installer";
@@ -41,12 +41,24 @@ async function hubList<T>(transport: Transport, path: string): Promise<T[]> {
 type HubPrincipal = { id: string; tenantId: string; kind: string; refId: string; status: string; roles: { id: string; name: string }[] };
 type Membership = { principalId: string; tenantId: string; kind: string; status: string };
 
-/** 1 + the highest stage with a live, approved draft artifact. Same rule as `pages/workspace/index.tsx`'s `currentStageFromArtifacts`. */
+/**
+ * 1 + the highest stage with a live, *explicitly approved* draft artifact —
+ * the single stage cursor every page shares (`pages/workspace/index.tsx`,
+ * `project-list.ts`). Approval is `sb.approvedAt`, stamped only by
+ * `persistStageDraft` (the Approve path); a stage's kind existing on an
+ * artifact is not enough — a package write, a design feedback revision, or a
+ * stakeholder decision never stamps it, so none of those can advance the
+ * stage on their own (CL-8639).
+ */
 export function currentStageFromArtifacts(nodes: readonly ArtifactNode[]): number {
   let stage = 1;
   for (let candidate = 1; candidate <= LAST_STAGE; candidate += 1) {
     const approved = nodes.some(
-      (node) => node.stage === candidate && node.kind === STAGE_DRAFT_KIND[candidate] && node.supersededByNodeId === null,
+      (node) =>
+        node.stage === candidate &&
+        node.kind === STAGE_DRAFT_KIND[candidate] &&
+        node.supersededByNodeId === null &&
+        node.approvedAt !== null,
     );
     if (!approved) break;
     stage = Math.min(candidate + 1, LAST_STAGE);
@@ -96,6 +108,7 @@ export function toArtifactNode(node: Awaited<ReturnType<typeof artifactGraphFor>
     createdAt: node.createdAt,
     supersededByNodeId: node.supersededByNodeId,
     provenance: node.provenance,
+    approvedAt: node.approvedAt,
   };
 }
 

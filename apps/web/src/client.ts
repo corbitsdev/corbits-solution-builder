@@ -265,6 +265,8 @@ export type ArtifactNode = {
   supersededByNodeId: string | null;
   /** `stepRef` is the stage-thread fold's lookup key: `${iterationRunId}/${stepId}` for the step that wrote this version. */
   provenance: { producer: string; agentRole?: string; providerId?: string; model?: string; stepRef?: string };
+  /** `sb.approvedAt`, stamped only by `persistStageDraft` (the Approve path) — null for any other write of this kind (CL-8639). */
+  approvedAt: string | null;
 };
 
 /**
@@ -830,6 +832,10 @@ export const api = {
             mediaType: "text/markdown",
             sourceVersionIds,
             provenance: { producer: "agent" as const },
+            // Only the explicit Approve path stamps this; the stage cursor
+            // (`currentStageFromArtifacts`) advances on it, never on a
+            // draft/package/decision write merely existing (CL-8639).
+            approvedAt: new Date().toISOString(),
             ...(target ? { target } : {}),
           },
         },
