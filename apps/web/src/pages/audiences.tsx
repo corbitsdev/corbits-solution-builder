@@ -13,7 +13,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ApiFailure, type AudienceDecision, type ProjectDetail } from "../client.js";
 import type { ChatMessage } from "../stage-mail.ts";
-import { Banner, Button, Field, Screen, StateLabel, versionDigest } from "../components.jsx";
+import { Banner, Button, Field, Screen, StateLabel } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
 import { Tabs, Input } from "@corbits/react-ui";
 import { Markdown } from "../markdown.jsx";
@@ -293,6 +293,9 @@ export function AudiencePackages({
   tenantId,
   agentAddress,
   onChanged,
+  onApprove,
+  approving,
+  canApprove,
 }: {
   detail: ProjectDetail;
   /** The workspace tenant artifacts are recorded under. */
@@ -300,6 +303,11 @@ export function AudiencePackages({
   /** The stage 5 specialist's mail address; null while it is still deploying. */
   agentAddress: string | null;
   onChanged: () => void;
+  /** Persists the specialist's latest reply as this stage's approved draft and advances. */
+  onApprove: () => void;
+  approving: boolean;
+  /** Whether there is a specialist reply to approve. */
+  canApprove: boolean;
 }) {
   // Which stakeholders' packages are being written right now: "Write it"
   // sends the mail, then polls the thread for the reply that follows it and
@@ -470,6 +478,20 @@ export function AudiencePackages({
           />
         ) : null}
 
+        {packages.length > 0 ? (
+          <div className="button-row">
+            <Button
+              variant="primary"
+              loading={approving}
+              disabled={!quorumMet || !canApprove || packages.length === 0}
+              onClick={onApprove}
+            >
+              Approve and continue
+            </Button>
+            {!quorumMet ? <p className="inline-note">Record the required decisions first.</p> : null}
+          </div>
+        ) : null}
+
         {missing.length > 0 ? (
           <div className="packages-missing" role="status">
             <p className="packages-missing-title">
@@ -546,7 +568,9 @@ export function AudiencePackages({
                 <details className="document-fold">
                   <summary className="document-fold-summary">
                     <span className="document-fold-title">{selected.title}</span>
-                    <span className="document-fold-digest">{versionDigest(selected)}</span>
+                    <span className="document-fold-digest">
+                      Version {selected.version} · written {new Date(selected.createdAt).toLocaleString()}
+                    </span>
                   </summary>
                   <div className="document-body document-fold-body">
                     {content ? (

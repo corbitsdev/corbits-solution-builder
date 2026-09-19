@@ -297,6 +297,9 @@ export function StageWorkspace({
             tenantId={tenantId}
             agentAddress={agentAddress}
             onChanged={onChanged}
+            onApprove={approve}
+            approving={approving}
+            canApprove={latestSpecialistMessage !== null}
           />
         </div>
       ) : null}
