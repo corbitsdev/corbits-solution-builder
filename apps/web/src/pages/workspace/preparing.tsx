@@ -5,6 +5,9 @@ import { stageName } from "../../components.jsx";
 import { Elapsed } from "./elapsed.jsx";
 import { STAGE_GOAL } from "./gate.jsx";
 
+/** Nothing back from the specialist for this long counts as a stall worth naming. */
+export const STALL_AFTER_MS = 25_000;
+
 export const STAGE_TIPS: Record<number, string[]> = {
   1: [
     "The specialist interviews the problem, not a solution. Answer with what hurts, not what to build.",
@@ -68,6 +71,17 @@ export function Preparing({
     return () => clearInterval(timer);
   }, [tips.length]);
 
+  // Nothing to name a stall against until the wait actually starts.
+  const [stalled, setStalled] = useState(false);
+  useEffect(() => {
+    setStalled(false);
+    if (!busy) return;
+    const started = since ? Date.parse(since) : Number.NaN;
+    const remaining = STALL_AFTER_MS - (Date.now() - (Number.isNaN(started) ? Date.now() : started));
+    const timer = setTimeout(() => setStalled(true), Math.max(0, remaining));
+    return () => clearTimeout(timer);
+  }, [busy, since]);
+
   return (
     <section className="preparing" aria-live="polite">
       <header className="preparing-head">
@@ -95,6 +109,12 @@ export function Preparing({
             </span>
           )}
           {busy ? <Elapsed stage={stage} since={since} /> : null}
+          {stalled ? (
+            <p className="preparing-stall">
+              Still waiting on the specialist: nothing has come back for a while. If this keeps
+              happening, try another provider in Settings.
+            </p>
+          ) : null}
         </div>
         <p key={tip} className="preparing-tip">
           {tips[tip]}

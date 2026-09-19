@@ -16,8 +16,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
   ApiFailure,
+  STAGE_DRAFT_KIND,
   type ArtifactNode,
   type ProjectDetail,
+  type StageTurn,
 } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { Markdown } from "../../markdown.jsx";
@@ -28,6 +30,8 @@ import { Banner, Button, Screen, StateLabel, stageName, versionDigest } from "..
 import { STAGE_GOAL } from "./gate.jsx";
 import { DeliveryPanel } from "./delivery.jsx";
 import { StageConversation } from "./thread.jsx";
+import { StageDocument } from "./document.jsx";
+import { Preparing } from "./preparing.jsx";
 import { BuildPanel } from "./build.jsx";
 import { TargetPicker, targetOpeningLine } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
@@ -38,6 +42,10 @@ export { StageDocument, DocumentBody } from "./document.jsx";
 export { ApprovalsRecord, STAGE_GOAL } from "./gate.jsx";
 
 const LAST_STAGE = 9;
+/** Stages whose draft is prose read in the two-pane document, rather than
+ * one of the specialised panels (design, audiences, build) or the final
+ * decisions stage. */
+const DOCUMENT_STAGES = new Set([1, 2, 3, 6, 7]);
 
 /** Stands in for a version that would not load, so it never reads as empty. */
 const UNREADABLE = "_This version could not be read. It is still on disk — try again._";
@@ -47,6 +55,7 @@ export function StageWorkspace({
   tenantId,
   onChanged,
   onOpenSettings,
+  draftOpen = true,
   onOpenDecisions,
 }: {
   detail: ProjectDetail;
@@ -309,6 +318,92 @@ export function StageWorkspace({
 
   const latestSpecialistMessage = [...messages].reverse().find((message) => message.author === "agent") ?? null;
 
+  // Mail turns as StageDocument's turn shape: it wants who spoke and what
+  // was said, nothing this contract tracks beyond that (no per-turn quotes
+  // or result-node bookkeeping under mail-chat).
+  const turns: StageTurn[] = useMemo(
+    () =>
+      messages.map((message) => ({
+        id: message.id,
+        role: message.author === "me" ? "human" : "specialist",
+        body: message.body,
+        quotes: [],
+        resultNodeId: null,
+        questions: null,
+        createdAt: message.at,
+      })),
+    [messages],
+  );
+
+  // This stage's approved versions, plus the specialist's latest unpersisted
+  // reply as the version being read right now — the same stand-in
+  // `DesignPanel` uses below for stage 4's not-yet-approved mockup, since
+  // nothing writes an artifact for a stage's draft before it is approved.
+  const draftKind = STAGE_DRAFT_KIND[stage] ?? null;
+  const approvedVersions = useMemo(
+    () =>
+      detail.nodes
+        .filter((node) => node.stage === stage && draftKind !== null && node.kind === draftKind)
+        .sort((left, right) => left.version - right.version),
+    [detail.nodes, stage, draftKind],
+  );
+  const draftDocNode: ArtifactNode | null = useMemo(() => {
+    if (!latestSpecialistMessage || draftKind === null) return null;
+    return {
+      id: `reply:${latestSpecialistMessage.id}`,
+      kind: draftKind,
+      variant: null,
+      stage,
+      title: stageName(stage),
+      version: (approvedVersions.at(-1)?.version ?? 0) + 1,
+      artifactId: `reply:${latestSpecialistMessage.id}`,
+      contentHash: "",
+      sizeBytes: latestSpecialistMessage.body.length,
+      mediaType: "text/markdown",
+      createdAt: latestSpecialistMessage.at,
+      supersededByNodeId: null,
+      provenance: { producer: "specialist" },
+      approvedAt: null,
+    };
+  }, [latestSpecialistMessage, draftKind, stage, approvedVersions]);
+  const documentVersions = useMemo(
+    () => (draftDocNode ? [...approvedVersions, draftDocNode] : approvedVersions),
+    [approvedVersions, draftDocNode],
+  );
+  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
+  useEffect(() => {
+    setSelectedVersionId(null);
+  }, [stage]);
+  const activeNode =
+    documentVersions.find((version) => version.id === selectedVersionId) ?? documentVersions.at(-1) ?? null;
+  const newerVersion =
+    activeNode ? documentVersions.find((version) => version.version > activeNode.version) ?? null : null;
+
+  const [activeContent, setActiveContent] = useState("");
+  useEffect(() => {
+    if (!activeNode) {
+      setActiveContent("");
+      return;
+    }
+    if (activeNode.id === draftDocNode?.id) {
+      setActiveContent(latestSpecialistMessage?.body ?? "");
+      return;
+    }
+    let cancelled = false;
+    void api
+      .artifactContent(tenantId, activeNode.id)
+      .then((result) => {
+        if (!cancelled) setActiveContent(result.content);
+      })
+      .catch(() => {
+        if (!cancelled) setActiveContent(UNREADABLE);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeNode?.id, tenantId]);
+
   /**
    * The stage 8 build specialist's `publish_workspace` tool result, when its
    * reply carries one: `{fileName, mediaType, dataUri, sizeBytes}`, either as
@@ -475,11 +570,59 @@ export function StageWorkspace({
         </div>
       ) : null}
 
+      {agentAddress && DOCUMENT_STAGES.has(stage) && !latestSpecialistMessage ? (
+        <Preparing
+          stage={stage}
+          said={turns}
+          busy={messages.length > 0}
+          since={[...messages].reverse().find((message) => message.author === "me")?.at ?? null}
+        />
+      ) : null}
+
+      {agentAddress && DOCUMENT_STAGES.has(stage) && latestSpecialistMessage && activeNode ? (
+        <>
+          {stage === 7 ? (
+            <EstimateView
+              body={latestSpecialistMessage.body}
+              detail={detail}
+              stage={stage}
+              chosenTarget={chosenTarget}
+            />
+          ) : null}
+          {stage === 7 ? <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} /> : null}
+          <StageDocument
+            node={activeNode}
+            versions={documentVersions}
+            content={activeContent}
+            tenantId={tenantId}
+            turns={turns}
+            openQuestion={null}
+            onSelectVersion={setSelectedVersionId}
+            onRevise={(message, quotes) => {
+              setSelectedVersionId(null);
+              const quoted = quotes.map((entry) => `> ${entry.quote}`).join("\n");
+              void send(quoted ? `${quoted}\n\n${message}` : message);
+            }}
+            onAddMaterial={async (files) => {
+              await api.attachMaterial(detail.project.id, files);
+              onChanged();
+            }}
+            onSubmit={() => void approve()}
+            soloApproval={detail.soloApproval}
+            canSubmit={latestSpecialistMessage !== null && stage < LAST_STAGE && !(stage === 7 && !chosenTarget)}
+            busy={sending ? "draft" : approving ? "submit" : null}
+            draftOpen={draftOpen}
+            newer={newerVersion}
+            live={null}
+          />
+        </>
+      ) : null}
+
       {agentAddress && stage === 9 ? (
         <DeliveryPanel detail={detail} tenantId={tenantId} latestReply={latestSpecialistMessage} />
       ) : null}
 
-      {agentAddress && stage !== 4 && stage !== 5 && stage !== 8 ? (
+      {agentAddress && stage !== 4 && stage !== 5 && stage !== 8 && !DOCUMENT_STAGES.has(stage) ? (
         <>
           <Screen
             title={`Stage ${stage} of 9 · ${stageName(stage)}`}
@@ -507,12 +650,6 @@ export function StageWorkspace({
             ) : (
               <p className="inline-note">Say what you'd like below to start the conversation.</p>
             )}
-            {stage === 7 && latestSpecialistMessage ? (
-              <EstimateView body={latestSpecialistMessage.body} detail={detail} stage={stage} chosenTarget={chosenTarget} />
-            ) : null}
-            {stage === 7 && latestSpecialistMessage ? (
-              <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} />
-            ) : null}
           </Screen>
           <StageConversation
             stage={stage}
