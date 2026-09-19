@@ -369,7 +369,15 @@ export function App() {
       setOauthCandidates(providersResult.oauthCandidates);
       setTenantId(tenantIdResult);
       setOffline(false);
-    } catch {
+    } catch (cause) {
+      // A 401/403 means the session cookie no longer holds (e.g. the host
+      // restarted): that is "not signed in", not "not answering". Only a
+      // dropped connection or a real server error is offline.
+      if (cause instanceof ApiFailure && (cause.httpStatus === 401 || cause.httpStatus === 403)) {
+        setAuth("signed-out");
+        setOffline(false);
+        return;
+      }
       // The host going away is a visible state, not a blank screen.
       setOffline(true);
     }

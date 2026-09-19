@@ -12,8 +12,11 @@ export function firstRunScreen(input: {
   auth: HubAuthState;
   installed: InstallProgress;
 }): FirstRunScreen {
-  if (input.status === null || input.auth === "unknown") return "boot";
+  // Signed-out is known independently of `status`: a 401 on the status probe
+  // itself is what reveals it (e.g. the host restarted and the session
+  // cookie no longer holds), so it must not wait on `status` to be non-null.
   if (input.auth === "signed-out") return "auth";
+  if (input.status === null || input.auth === "unknown") return "boot";
   if (input.installed !== "ready") return "install";
   return "ready";
 }

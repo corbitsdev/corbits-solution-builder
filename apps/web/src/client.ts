@@ -113,10 +113,13 @@ export type ApiError = {
 
 export class ApiFailure extends Error {
   readonly detail: ApiError;
-  constructor(detail: ApiError) {
+  /** The HTTP status the host answered with, when the failure came from a response (not a dropped connection). */
+  readonly httpStatus: number | undefined;
+  constructor(detail: ApiError, httpStatus?: number) {
     super(detail.message);
     this.name = "ApiFailure";
     this.detail = detail;
+    this.httpStatus = httpStatus;
   }
 }
 
@@ -146,6 +149,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const body: unknown = await response.json().catch(() => ({}));
   if (!response.ok) {
     const detail = (body as { error?: ApiError }).error;
+    // `response.status` rides along regardless of whether the host sent a
+    // structured error body: a 401 with no session cookie has nothing to
+    // parse, but the caller still needs to tell "not signed in" apart from
+    // "the host is unreachable".
     throw new ApiFailure(
       detail ?? {
         code: "internal_error",
@@ -153,6 +160,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
         correlationId: "-",
         retryable: false,
       },
+      response.status,
     );
   }
   return body as T;
