@@ -2185,6 +2185,40 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   flex: none;
 }
 
+/* The plain conversation stages (no fill panel of their own): the
+   specialist's current reply and the thread below it are two stacked
+   regions, and neither had a bounded height, so a long reply just grew past
+   the fold instead of scrolling — the outer `.canvas-body.is-fill` clips
+   rather than scrolls. Each region now takes its share of `.stage-view` and
+   scrolls itself, `ChatThread`'s own `flex-1 min-h-0 overflow-y-auto` only
+   takes effect once its parent is a bounded flex box. */
+.stage-view > [data-slot="card"] {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.stage-view > [data-slot="card"] > div:last-child {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.stage-conversation {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.stage-conversation > *:last-child {
+  flex: none;
+}
+
 /* Waiting on a decision: one line across the top, not a wall in front of the
    document — the document is still there to be read. */
 .stage-gate {
