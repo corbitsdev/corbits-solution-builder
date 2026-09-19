@@ -85,14 +85,18 @@ export function StageWorkspace({
   // off it directly rather than a separate readiness flag, so there is no
   // window where the address is known but something built on top of it is
   // still disabled.
-  const [agentAddress, setAgentAddress] = useState<string | null>(null);
+  // Carries the stage the address was resolved for, so a render where
+  // `stage` has already advanced but the previous stage's deployment is
+  // still in flight (or already resolved) never leaks that stale address
+  // into the opening-send effect below (CL-8649).
+  const [agent, setAgent] = useState<{ stage: number; address: string } | null>(null);
   useEffect(() => {
     let cancelled = false;
-    setAgentAddress(null);
+    const requestedStage = stage;
     api
-      .ensureStageAgent(detail.project.id, stage)
+      .ensureStageAgent(detail.project.id, requestedStage)
       .then((deployment) => {
-        if (!cancelled) setAgentAddress(deployment.address);
+        if (!cancelled) setAgent({ stage: requestedStage, address: deployment.address });
       })
       .catch((cause: unknown) => {
         if (cancelled) return;
@@ -102,6 +106,7 @@ export function StageWorkspace({
       cancelled = true;
     };
   }, [detail.project.id, stage]);
+  const agentAddress = agent?.stage === stage ? agent.address : null;
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const loadThread = useCallback(async () => {
@@ -195,7 +200,7 @@ export function StageWorkspace({
   }, [detail.nodes, stage]);
 
   useEffect(() => {
-    if (!agentAddress || messages.length > 0) return;
+    if (!agentAddress || agent?.stage !== stage || messages.length > 0) return;
     const key = `${detail.project.id}:${stage}`;
     if (openedRef.current === key) return;
 
@@ -231,6 +236,7 @@ export function StageWorkspace({
     };
   }, [
     agentAddress,
+    agent,
     messages.length,
     stage,
     detail.project.id,
