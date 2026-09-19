@@ -20,6 +20,9 @@ Interchange. Each lives at github.com/corbitsdev/<repo> and installs with
 - `@corbits/sandbox-sidecar` — the sidecar the provisioner runs (workbench).
 - `@corbits/error-sink` — where a provisioned process's errors land (workbench).
 
-Before writing a capability, check the catalog. Where it genuinely lacks
-the thing, say so and scope it — a substitute that pretends to be the
-primitive is worse than an admitted gap.
+When a brief genuinely needs an agentic capability — memory, mailbox, oauth,
+embeddings and the like — check the catalog before writing a new one. Where
+it genuinely lacks the thing, say so and scope it — a substitute that
+pretends to be the primitive is worse than an admitted gap. Ordinary product
+code (screens, routes, schema, business logic) is simply written; this
+catalog is not a checklist for it.
