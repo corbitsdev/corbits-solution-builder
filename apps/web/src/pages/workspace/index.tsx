@@ -28,6 +28,7 @@ import { Banner, Button, Screen, StateLabel, stageName, versionDigest } from "..
 import { STAGE_GOAL } from "./gate.jsx";
 import { StageConversation } from "./thread.jsx";
 import { TargetPicker, targetOpeningLine } from "./freeze.jsx";
+import { EstimateView } from "./estimate.jsx";
 import { currentStageFromArtifacts } from "../../project-view.ts";
 import type { FoldedFeedback } from "@solutions-builder/app/project-state";
 
@@ -498,6 +499,9 @@ export function StageWorkspace({
             ) : (
               <p className="inline-note">Say what you'd like below to start the conversation.</p>
             )}
+            {stage === 7 && latestSpecialistMessage ? (
+              <EstimateView body={latestSpecialistMessage.body} detail={detail} stage={stage} chosenTarget={chosenTarget} />
+            ) : null}
             {stage === 7 && latestSpecialistMessage ? (
               <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} />
             ) : null}

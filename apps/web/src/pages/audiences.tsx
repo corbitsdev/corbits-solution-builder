@@ -15,7 +15,7 @@ import { api, ApiFailure, type AudienceDecision, type ProjectDetail } from "../c
 import type { ChatMessage } from "../stage-mail.ts";
 import { Banner, Button, Field, Screen, StateLabel } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
-import { Tabs, Input } from "@corbits/react-ui";
+import { Tabs, Input, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@corbits/react-ui";
 import { Markdown } from "../markdown.jsx";
 
 const POLL_INTERVAL_MS = 3_000;
@@ -476,6 +476,58 @@ export function AudiencePackages({
                 : `${proceeded} of ${decisionQuorum} required have proceeded`
             }
           />
+        ) : null}
+
+        {packages.length > 0 ? (
+          <>
+            <StateLabel tone={quorumMet ? "success" : "warning"}>
+              {proceeded} proceeded · quorum {decisionQuorum}
+            </StateLabel>
+            {/* Every named stakeholder's latest decision, folded from each
+                package's own `sb.decisions` — the record a person checks
+                without opening every tab in turn. */}
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Stakeholder</TableHead>
+                  <TableHead>Role</TableHead>
+                  <TableHead>Decision</TableHead>
+                  <TableHead>Record</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {audiences.map((audience) => {
+                  const node = packages.find((candidate) => candidate.variant === audience.name);
+                  const decision = node ? latestDecision(decisionsByNode.get(node.id) ?? []) : null;
+                  return (
+                    <TableRow key={audience.name}>
+                      <TableCell>{audience.name}</TableCell>
+                      <TableCell>{roleLabel(audience.role)}</TableCell>
+                      <TableCell>
+                        {decision ? (
+                          <StateLabel tone={DECISION_TONE[decision.decision]}>
+                            {DECISION_LABEL[decision.decision]}
+                          </StateLabel>
+                        ) : (
+                          <StateLabel tone="warning">Awaiting</StateLabel>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {decision ? (
+                          <span className="inline-note">
+                            Recorded {new Date(decision.at).toLocaleString()}
+                            {decision.note ? ` · ${decision.note}` : ""}
+                          </span>
+                        ) : (
+                          <span className="inline-note">{node ? "No decision yet." : "No package yet."}</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </>
         ) : null}
 
         {packages.length > 0 ? (
