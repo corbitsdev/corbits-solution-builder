@@ -310,9 +310,8 @@ export function StageWorkspace({
           <AudiencePackages
             detail={detail}
             tenantId={tenantId}
+            agentAddress={agentAddress}
             onChanged={onChanged}
-            drafting={sending}
-            onDraftPackages={(audiences) => void send(`Write the packages again for: ${audiences.join(", ")}.`)}
           />
         </div>
       ) : null}

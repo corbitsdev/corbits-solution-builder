@@ -10,12 +10,53 @@
  * same "Approve and continue" the other stages use
  * (`pages/workspace/index.tsx`); this only restores the record, not a gate.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, ApiFailure, type AudienceDecision, type ProjectDetail } from "../client.js";
+import type { ChatMessage } from "../stage-mail.ts";
 import { Banner, Button, Field, Screen, StateLabel, versionDigest } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
 import { Tabs, Input } from "@corbits/react-ui";
 import { Markdown } from "../markdown.jsx";
+
+const POLL_INTERVAL_MS = 3_000;
+const POLL_TIMEOUT_MS = 10 * 60 * 1_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Waits for the agent's next reply after everything already in `seenIds` —
+ * the reply that follows the mail just sent, not one already on the thread.
+ * The live reply took ~4 minutes (CL-8636); this polls the thread rather
+ * than the round-trip `send()` elsewhere uses, which only reloads once.
+ */
+async function awaitAgentReply(
+  tenantId: string,
+  agentAddress: string,
+  seenIds: ReadonlySet<string>,
+  isCancelled: () => boolean,
+): Promise<ChatMessage> {
+  const deadline = Date.now() + POLL_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    if (isCancelled()) throw new ApiFailure({
+      code: "cancelled",
+      message: "Cancelled.",
+      correlationId: "-",
+      retryable: false,
+    });
+    const messages = await api.readStageThread(tenantId, [agentAddress]);
+    const reply = [...messages].reverse().find((message) => message.author === "agent" && !seenIds.has(message.id));
+    if (reply) return reply;
+    await sleep(POLL_INTERVAL_MS);
+  }
+  throw new ApiFailure({
+    code: "timeout",
+    message: "The specialist has not replied yet. Try again shortly.",
+    correlationId: "-",
+    retryable: true,
+  });
+}
 
 type Policy = { audiences?: { name: string; role: string }[]; audienceQuorum?: number };
 
@@ -250,19 +291,51 @@ function Stakeholders({
 export function AudiencePackages({
   detail,
   tenantId,
+  agentAddress,
   onChanged,
-  drafting,
-  onDraftPackages,
 }: {
   detail: ProjectDetail;
   /** The workspace tenant artifacts are recorded under. */
   tenantId: string;
+  /** The stage 5 specialist's mail address; null while it is still deploying. */
+  agentAddress: string | null;
   onChanged: () => void;
-  /** A round is under way: the rows say so instead of offering another. */
-  drafting: boolean;
-  /** Writes these stakeholders' packages, by name, leaving the others as they are. */
-  onDraftPackages: (audiences: string[]) => void;
 }) {
+  // Which stakeholders' packages are being written right now: "Write it"
+  // sends the mail, then polls the thread for the reply that follows it and
+  // persists that reply as each named audience's package artifact — nothing
+  // else turns the mail-agent's reply into what the packages list reads
+  // (CL-8636). One round at a time; the rows say "Writing…" instead of
+  // offering another.
+  const [writing, setWriting] = useState<ReadonlySet<string>>(new Set());
+  const [writeError, setWriteError] = useState<string | null>(null);
+  const cancelledRef = useRef(false);
+  useEffect(() => () => {
+    cancelledRef.current = true;
+  }, []);
+
+  const writePackages = async (names: string[]) => {
+    if (!agentAddress || names.length === 0 || writing.size > 0) return;
+    setWriteError(null);
+    setWriting(new Set(names));
+    try {
+      const before = await api.readStageThread(tenantId, [agentAddress]);
+      const seenIds = new Set(before.map((message) => message.id));
+      await api.sendStageMail(tenantId, agentAddress, {
+        body: `Write the ${names.length > 1 ? "packages" : "package"} for: ${names.join(", ")}.`,
+      });
+      const reply = await awaitAgentReply(tenantId, agentAddress, seenIds, () => cancelledRef.current);
+      if (cancelledRef.current) return;
+      await Promise.all(names.map((name) => api.persistAudiencePackage(detail.project.id, name, reply.body)));
+      if (!cancelledRef.current) onChanged();
+    } catch (cause) {
+      if (!cancelledRef.current) {
+        setWriteError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+      }
+    } finally {
+      if (!cancelledRef.current) setWriting(new Set());
+    }
+  };
   const policy = (detail.project.policy ?? {}) as Policy;
   const audiences = youFirst(policy.audiences ?? []);
   const quorum = policy.audienceQuorum ?? 0;
@@ -380,6 +453,7 @@ export function AudiencePackages({
         }
       >
         {error ? <Banner tone="error" title="That decision was refused">{error}</Banner> : null}
+        {writeError ? <Banner tone="error" title="That package could not be written">{writeError}</Banner> : null}
 
         {audiences.length === 0 ? (
           <Banner title="No stakeholders are named for this project" />
@@ -411,17 +485,26 @@ export function AudiencePackages({
                   <span>
                     <strong>{audience.name}</strong> · {roleLabel(audience.role)}
                   </span>
-                  <Button loading={drafting} onClick={() => onDraftPackages([audience.name])}>
-                    Write it
-                  </Button>
+                  {writing.has(audience.name) ? (
+                    <StateLabel tone="info">Writing…</StateLabel>
+                  ) : (
+                    <Button
+                      loading={false}
+                      disabled={!agentAddress || writing.size > 0}
+                      onClick={() => void writePackages([audience.name])}
+                    >
+                      Write it
+                    </Button>
+                  )}
                 </li>
               ))}
             </ul>
             {missing.length > 1 ? (
               <Button
                 variant="primary"
-                loading={drafting}
-                onClick={() => onDraftPackages(missing.map((audience) => audience.name))}
+                loading={writing.size > 1}
+                disabled={!agentAddress || writing.size > 0}
+                onClick={() => void writePackages(missing.map((audience) => audience.name))}
               >
                 Write all {missing.length}
               </Button>
@@ -505,8 +588,12 @@ export function AudiencePackages({
                     {saving.has(selected.id) ? "Saving slides…" : "Save slides (.pptx)"}
                   </Button>
                   {selected.variant ? (
-                    <Button loading={drafting} onClick={() => onDraftPackages([selected.variant!])}>
-                      Write this package again
+                    <Button
+                      loading={writing.has(selected.variant)}
+                      disabled={!agentAddress || writing.size > 0}
+                      onClick={() => void writePackages([selected.variant!])}
+                    >
+                      {writing.has(selected.variant) ? "Writing…" : "Write it again"}
                     </Button>
                   ) : null}
                 </div>

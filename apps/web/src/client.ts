@@ -1023,6 +1023,37 @@ export const api = {
     return Array.isArray(sb?.feedback) ? (sb.feedback as DesignFeedbackEntry[]) : [];
   },
   /**
+   * Persists a stage-5 specialist reply as one named audience's package
+   * artifact (CL-8636): "Write it" sends the mail, but nothing else turns
+   * the mail-agent's reply into the artifact the packages list reads, so it
+   * never left "No packages yet". Written the same way `persistStageDraft`
+   * writes a stage's own draft, stamped with `variant` so it is that
+   * audience's package rather than the stage's single document.
+   */
+  persistAudiencePackage: (projectId: string, audience: string, content: string) =>
+    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      const artifact = await installerCreateArtifact(transport, workspaceTenantId, {
+        title: `${audience}'s package`,
+        content,
+        metadata: {
+          sb: {
+            projectId,
+            kind: STAGE_DRAFT_KIND[5]!,
+            stage: 5,
+            variant: audience,
+            mediaType: "text/markdown",
+            sourceVersionIds: [],
+            provenance: { producer: "agent" as const },
+          },
+        },
+      });
+      return {
+        artifactId: artifact.id,
+        versionId: artifact.id,
+        contentHash: `${artifact.id}@${String(artifact.version)}`,
+      };
+    }),
+  /**
    * Attaches feedback to a design node: mails the stage 4 specialist so it
    * lands in its next turn, and records it on the node's own artifact
    * metadata (`sb.feedback`) via `reviseArtifact` so it survives to fold back
