@@ -14,6 +14,7 @@ import {
   createProject as installerCreateProject,
   ensureSpecialistDeployment,
   getArtifact as installerGetArtifact,
+  reviseArtifact as installerReviseArtifact,
   install as installerInstall,
   installState as installerInstallState,
   installProjectAuthority,
@@ -266,6 +267,14 @@ export type ArtifactNode = {
   /** `stepRef` is the stage-thread fold's lookup key: `${iterationRunId}/${stepId}` for the step that wrote this version. */
   provenance: { producer: string; agentRole?: string; providerId?: string; model?: string; stepRef?: string };
 };
+
+/**
+ * A stage-4 note recorded against a design node, folded from the node's own
+ * artifact metadata (`metadata.sb.feedback`) — CL-8620. There is no lifecycle
+ * run to fold this from any more (CL-8612 contract v6): the artifact record
+ * is the whole history.
+ */
+export type DesignFeedbackEntry = { nodeId: string; text: string; at: string };
 
 export type ProjectDetail = {
   project: {
@@ -1011,5 +1020,49 @@ export const api = {
       const artifact = await installerGetArtifact(transport, workspaceTenantId, node.id);
       if (!artifact) return null;
       return { body: artifact.content, createdAt: node.createdAt };
+    }),
+  /**
+   * The feedback recorded on one design node — read straight off its own
+   * artifact's `metadata.sb.feedback` (CL-8620), no lifecycle run to fold
+   * from any more. Empty for a node that has never had feedback recorded,
+   * or that is not a persisted artifact yet (a not-yet-approved reply).
+   */
+  designFeedback: async (tenantId: string, nodeId: string): Promise<DesignFeedbackEntry[]> => {
+    const artifact = await installerGetArtifact(createHubTransport(), tenantId, nodeId).catch(() => null);
+    const sb = (artifact?.metadata as { sb?: { feedback?: unknown } } | null)?.sb;
+    return Array.isArray(sb?.feedback) ? (sb.feedback as DesignFeedbackEntry[]) : [];
+  },
+  /**
+   * Attaches feedback to a design node: mails the stage 4 specialist so it
+   * lands in its next turn, and records it on the node's own artifact
+   * metadata (`sb.feedback`) via `reviseArtifact` so it survives to fold back
+   * into `feedbackByNode` on reload — CL-8620. The specialist's mail address
+   * comes from `ensureStageAgent`, deployed lazily the same way the
+   * workspace's own composer resolves it. The node's project id rides its
+   * own `sb.projectId` (every stage draft is written with one), so this
+   * needs nothing beyond the node itself.
+   */
+  submitDesignFeedback: (tenantId: string, node: { id: string; title: string }, text: string) =>
+    asWorkspaceOwner(async (transport) => {
+      const artifact = await installerGetArtifact(transport, tenantId, node.id).catch(() => null);
+      const sb = (artifact?.metadata as { sb?: Record<string, unknown> } | null)?.sb ?? {};
+      const projectId = typeof sb.projectId === "string" ? sb.projectId : null;
+      if (!projectId) {
+        throw new ApiFailure({
+          code: "validation_failed",
+          message: "This design has not been saved yet — approve a version before leaving feedback on it.",
+          correlationId: "-",
+          retryable: false,
+        });
+      }
+      const existing = Array.isArray(sb.feedback) ? (sb.feedback as DesignFeedbackEntry[]) : [];
+      const entry: DesignFeedbackEntry = { nodeId: node.id, text, at: new Date().toISOString() };
+      const deployment = await api.ensureStageAgent(projectId, 4);
+      await Promise.all([
+        api.sendStageMail(tenantId, deployment.address, { body: `Feedback on ${node.title}: ${text}` }),
+        installerReviseArtifact(transport, tenantId, node.id, {
+          metadata: { sb: { ...sb, feedback: [...existing, entry] } },
+        }),
+      ]);
     }),
 };

@@ -21,8 +21,8 @@ import {
  * Anchoring works because the parent reads the frame's document directly, which
  * a `srcdoc` frame permits without granting the frame anything.
  */
-import { useEffect, useRef, useState } from "react";
-import { ApiFailure, type ArtifactNode } from "../client.js";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api, ApiFailure, type ArtifactNode, type DesignFeedbackEntry } from "../client.js";
 import { revisionPrompt, type Anchor, type Direction } from "@solutions-builder/app/design-prompt";
 import { Banner, Button, Field, Screen, StateLabel } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
@@ -76,18 +76,39 @@ export type DesignApproval = {
   onApprove: (design: ArtifactNode) => Promise<unknown>;
 };
 
+/** Wraps the recorded notes for one node into the shape the submitted-state panel already renders. */
+function foldNodeFeedback(nodeId: string, entries: readonly DesignFeedbackEntry[]): FoldedFeedback | undefined {
+  const last = entries.at(-1);
+  if (!last) return undefined;
+  return {
+    runId: "",
+    designNodeId: nodeId,
+    direction: "revise",
+    overallNote: last.text,
+    comments: [],
+    prompt: entries.map((entry) => entry.text).join("\n\n"),
+    at: last.at,
+  };
+}
+
 export function DesignFeedbackView({
   designs,
-  feedbackByNode,
   contentByNode,
   tenantId,
   approval,
   onChanged,
   revise,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  feedbackByNode: _unusedFeedbackByNode,
 }: {
   designs: ArtifactNode[];
-  /** The feedback recorded against each design version, folded from the run's own events. */
-  feedbackByNode: Map<string, FoldedFeedback>;
+  /**
+   * Accepted for compatibility with the caller, which still folds an (always
+   * empty) map from the deleted lifecycle run — unused: this view now folds
+   * feedback itself from each node's own artifact metadata (`sb.feedback`,
+   * CL-8620), since that fold no longer has a run to read from.
+   */
+  feedbackByNode?: Map<string, FoldedFeedback>;
   contentByNode: Map<string, string>;
   /** The workspace tenant artifacts are recorded under. */
   tenantId: string;
@@ -115,6 +136,34 @@ export function DesignFeedbackView({
 
   const design = designs.find((entry) => entry.id === selectedId) ?? designs.at(-1) ?? null;
   const content = design ? (contentByNode.get(design.id) ?? "") : "";
+
+  // Feedback on each node lives on that node's own artifact metadata
+  // (`sb.feedback`), not the deleted lifecycle run — read straight off it
+  // rather than the caller's (always empty) prop, CL-8620.
+  const [feedbackByNode, setFeedbackByNode] = useState(new Map<string, FoldedFeedback>());
+  const loadFeedback = useCallback(async () => {
+    const persistedIds = designs.map((entry) => entry.id).filter((id) => !id.startsWith("reply:"));
+    const entries = await Promise.all(
+      persistedIds.map((id) =>
+        api
+          .designFeedback(tenantId, id)
+          .then((notes) => [id, notes] as const)
+          .catch(() => [id, []] as const),
+      ),
+    );
+    setFeedbackByNode(
+      new Map(
+        entries.flatMap(([id, notes]) => {
+          const folded = foldNodeFeedback(id, notes);
+          return folded ? [[id, folded] as const] : [];
+        }),
+      ),
+    );
+  }, [designs, tenantId]);
+  useEffect(() => {
+    void loadFeedback();
+  }, [loadFeedback]);
+
   const submitted = design ? feedbackByNode.get(design.id) : undefined;
 
   useEffect(() => {
@@ -183,6 +232,7 @@ export function DesignFeedbackView({
     setError(null);
     try {
       await work();
+      await loadFeedback();
       onChanged();
     } catch (cause) {
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
@@ -396,7 +446,23 @@ export function DesignFeedbackView({
                   comments,
                   acceptanceCriteria: [],
                 });
-                return revise({ designNodeId: design!.id, direction, overallNote, comments: pending }, prompt);
+                // Recorded on the node's own artifact metadata and mailed to
+                // the specialist directly (CL-8620) — independent of, and in
+                // addition to, `revise` below, which still carries the
+                // deterministic prompt into the next-version request.
+                const feedbackText = overallNote.trim() || prompt;
+                const attach = design!.id.startsWith("reply:")
+                  ? Promise.resolve()
+                  : api
+                      .submitDesignFeedback(tenantId, { id: design!.id, title: design!.title }, feedbackText)
+                      .catch(() => {
+                        // Feedback on a not-yet-persisted design is best
+                        // effort: the mail and prompt below still go out.
+                      });
+                return Promise.all([
+                  attach,
+                  revise({ designNodeId: design!.id, direction, overallNote, comments: pending }, prompt),
+                ]);
               })
             }
           >
