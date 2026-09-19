@@ -210,8 +210,8 @@ export function StageTour({ enabled, stage }: { enabled: boolean; stage: number 
           },
           tooltipTitle: { fontSize: "1rem", fontWeight: 500, margin: 0 },
           tooltipContent: { padding: "8px 0 0", fontSize: "0.875rem", lineHeight: 1.6 },
-          buttonPrimary: { borderRadius: "var(--radius-md)", padding: "10px 16px", fontSize: "0.875rem" },
-          buttonBack: { borderRadius: "var(--radius-md)", fontSize: "0.875rem" },
+          buttonPrimary: { borderRadius: "var(--radius)", padding: "10px 16px", fontSize: "0.875rem" },
+          buttonBack: { borderRadius: "var(--radius)", fontSize: "0.875rem" },
           buttonSkip: { fontSize: "0.875rem" },
               }}
     />

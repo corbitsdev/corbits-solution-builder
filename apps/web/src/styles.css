@@ -67,9 +67,12 @@
   --wb-destructive: var(--destructive);
   --wb-font-ui: var(--font-sans);
   --wb-font-mono: var(--font-mono);
-  --radius-panel: var(--radius-lg);
-  --radius-control: var(--radius-md);
-  --radius-tile: var(--radius-lg);
+  /* The one radius scale for the whole app: 8px on every control (buttons,
+     inputs, selects, chips, banners), 12px on every card/panel/dialog. Also
+     overrides @corbits/react-ui's own --radius so its buttons and inputs
+     land on the same 8px as ours. Nothing else defines a radius. */
+  --radius: 8px;
+  --radius-lg: 12px;
   /* A 4px scale. Nine neighbouring panels previously used nine different
      padding pairs — including 14 and 18, which sit on no grid at all — so no
      two of them ever quite lined up. */
@@ -291,7 +294,7 @@ form:has(> div > textarea) textarea:focus-visible {
   width: 32px;
   height: 32px;
   border: 0;
-  border-radius: var(--radius-control);
+  border-radius: var(--radius);
   background: none;
   color: var(--wb-muted-foreground);
 }
@@ -434,7 +437,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   padding: var(--space-3) var(--space-4);
   display: grid;
   gap: var(--space-1);
-  border-radius: var(--radius-panel);
+  border-radius: var(--radius-lg);
 }
 
 /* Severity reads from the words and the state label, not a coloured edge. */
@@ -477,7 +480,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   background: var(--wb-card);
   display: grid;
   gap: var(--space-1);
-  border-radius: var(--radius-panel);
+  border-radius: var(--radius-lg);
 }
 
 /* What the open stage creates, under the rows: each word is the artifact's
@@ -586,6 +589,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   padding: var(--space-4);
   border: 1px solid var(--wb-border);
   background: var(--wb-background);
+  border-radius: var(--radius-lg);
 }
 
 .decision-meta {
@@ -620,6 +624,8 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   display: grid;
   gap: 0;
   border: 1px solid var(--wb-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
   align-content: start;
   /* Does not stretch to the hero's height: an empty list should read as
      empty, not as a large blank panel. */
@@ -962,7 +968,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 .document {
   border: 1px solid var(--wb-border);
   background: var(--wb-card);
-  border-radius: var(--radius-panel);
+  border-radius: var(--radius-lg);
   /* Its own scroll. Without this the draft was merely clipped by the fill
      region, so it could not be scrolled at all — and once anything scrolled
      that hidden container (focusing the composer does, to reveal the input)
@@ -1044,7 +1050,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   height: 32px;
   padding: 0 var(--space-2);
   border: 1px solid var(--wb-border-strong);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius);
   background: var(--wb-background);
   font-size: 0.8125rem;
 }
@@ -1229,7 +1235,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   background: var(--wb-background);
   display: grid;
   gap: 0;
-  border-radius: var(--radius-panel);
+  border-radius: var(--radius-lg);
 }
 
 .onboarding-card h1 {
@@ -1278,7 +1284,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   margin: 0 0 var(--space-4);
   padding: 0;
   border: 1px solid var(--wb-border);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius);
 }
 
 .provider-row {
@@ -1342,7 +1348,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   max-width: 200px;
   padding: 0 var(--space-2);
   border: 1px solid var(--wb-border-strong);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius);
   background: var(--wb-background);
   font-size: 0.8125rem;
 }
@@ -1478,7 +1484,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   padding: var(--space-2) var(--space-3);
   border-left: 3px solid var(--wb-primary);
   background: var(--wb-muted);
-  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  border-radius: 0 var(--radius) var(--radius) 0;
   font-weight: 500;
   color: var(--wb-foreground);
 }
@@ -1488,7 +1494,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   padding: var(--space-2) var(--space-3);
   border-left: 3px solid var(--wb-destructive);
   background: var(--wb-muted);
-  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  border-radius: 0 var(--radius) var(--radius) 0;
 }
 
 .thread-progress {
@@ -1660,7 +1666,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-control);
+  border-radius: var(--radius);
   border: 1px solid var(--wb-border);
   background: var(--wb-card);
   color: var(--wb-foreground);
@@ -1748,7 +1754,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   align-content: start;
   padding: var(--space-4);
   border: 1px solid var(--wb-border);
-  border-radius: var(--radius-panel);
+  border-radius: var(--radius-lg);
   background: var(--wb-background);
   box-shadow: var(--wb-shadow);
   text-align: left;
@@ -1836,7 +1842,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   width: 28px;
   height: 28px;
   border: 0;
-  border-radius: var(--radius-control);
+  border-radius: var(--radius);
   background: none;
   color: var(--wb-muted-foreground);
   opacity: 0;
@@ -1897,7 +1903,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   gap: var(--space-4);
   padding: var(--space-5) var(--space-6);
   border: 1px solid var(--wb-border);
-  border-radius: var(--radius-panel);
+  border-radius: var(--radius-lg);
   background: var(--wb-background);
   box-shadow: var(--wb-shadow);
 }
@@ -1940,7 +1946,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   width: 32px;
   height: 32px;
   border: 0;
-  border-radius: var(--radius-control);
+  border-radius: var(--radius);
   background: none;
   color: var(--wb-muted-foreground);
 }
@@ -1989,7 +1995,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   min-height: 36px;
   padding: 0 var(--space-3);
   border: 1px solid var(--wb-border);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius);
   background: var(--wb-card);
   color: var(--wb-foreground);
   font: inherit;
@@ -2137,7 +2143,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   width: 100%;
   padding: var(--space-4) var(--space-5);
   border: 1px solid var(--wb-border);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius);
   background: var(--wb-card);
 }
 
@@ -2232,7 +2238,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 .approvals-record {
   margin-top: var(--space-2);
   border: 1px solid var(--wb-border);
-  border-radius: var(--radius-panel);
+  border-radius: var(--radius-lg);
   background: var(--wb-background);
 }
 
@@ -2370,7 +2376,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   z-index: 30;
   width: 380px;
   max-width: min(380px, calc(100vw - var(--space-8)));
-  border-radius: var(--radius-panel);
+  border-radius: var(--radius-lg);
   padding: var(--space-4);
   background: var(--wb-background);
   box-shadow:
@@ -2406,7 +2412,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   padding: 2px;
   color: var(--wb-muted-foreground);
   cursor: pointer;
-  border-radius: var(--radius-control);
+  border-radius: var(--radius);
 }
 
 .guide-close:hover {
@@ -2510,7 +2516,7 @@ button[aria-disabled="true"] {
   min-width: 0;
   padding: var(--space-4);
   border: 1px solid var(--wb-border);
-  border-radius: var(--radius-panel);
+  border-radius: var(--radius-lg);
 }
 
 .approach > .prose > h2:first-child,
@@ -2544,7 +2550,7 @@ button[aria-disabled="true"] {
   font-size: 0.8125rem;
   padding: var(--space-1) var(--space-3);
   border: 1px solid var(--wb-border);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius);
   background: var(--wb-card);
   color: var(--wb-foreground);
   cursor: pointer;
@@ -2632,7 +2638,7 @@ button[aria-disabled="true"] {
 .stage-view.is-dragging {
   outline: 2px dashed var(--wb-primary);
   outline-offset: var(--space-2);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius);
 }
 
 .start-material {
@@ -2655,7 +2661,7 @@ button[aria-disabled="true"] {
   gap: var(--space-2);
   padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
   border: 1px solid var(--wb-border);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius);
   font-size: 0.8125rem;
 }
 
@@ -2693,7 +2699,7 @@ button[aria-disabled="true"] {
   gap: var(--space-3);
   padding: var(--space-4);
   border: 1px solid var(--wb-border);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius);
   background: var(--wb-card);
 }
 
@@ -2723,7 +2729,7 @@ button[aria-disabled="true"] {
    reports and the stage 6 requirements share it. */
 .document-fold {
   border: 1px solid var(--wb-border);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius);
   background: var(--wb-card);
 }
 
@@ -2926,7 +2932,7 @@ button[aria-disabled="true"] {
   gap: var(--space-2);
   min-height: 44px;
   padding: 0 var(--space-4);
-  border-radius: var(--radius-control);
+  border-radius: var(--radius);
   border: 1px solid var(--wb-primary);
   background: var(--wb-primary);
   color: var(--primary-foreground);
