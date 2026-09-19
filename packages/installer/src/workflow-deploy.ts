@@ -9,7 +9,15 @@
  */
 import type { Transport } from "@intx/hub-client";
 import type { InferenceSourcePin } from "@solutions-builder/app/specialist-source";
-import { ApiError, assetsFor, catalogFor, gitTokensFor, workflowsFor, type HubDeployment } from "./hub.js";
+import {
+  ApiError,
+  assetsFor,
+  catalogFor,
+  gitTokensFor,
+  readWorkflowSourceBlob,
+  workflowsFor,
+  type HubDeployment,
+} from "./hub.js";
 import type { ClosureManifest } from "./registry-tarballs.js";
 import { type ClosureTarballFetcher } from "./workflow-closure.js";
 
@@ -155,5 +163,41 @@ export async function pushWorkflowSourceTree(
     return await gitPush({ scope: tenantId, assetKind: "workflow", assetName, token: minted.secret, tree, message });
   } finally {
     await gitTokens.revoke(minted.id);
+  }
+}
+
+/** How long `waitForPushVisible` polls before giving up. */
+const PUSH_VISIBILITY_TIMEOUT_MS = 5_000;
+const PUSH_VISIBILITY_POLL_MS = 250;
+
+/**
+ * Blocks until `path` on the asset's default ref reads back as `expected`
+ * (or the timeout elapses).
+ *
+ * The hub's own deploy path (`bindAssetAttachmentResolver` in
+ * `workflow-closure-resolution.ts`) resolves the asset's default ref fresh
+ * at closure-delivery time -- independently of the commit sha our push
+ * returned -- to build the git pack it hands the sidecar. When that ref
+ * read races the push's own ref update (most visible on a brand-new asset's
+ * first deploy, where there is no prior commit to fall back to), it can pack
+ * a state that pre-dates the commit we just pushed; the sidecar's pinned
+ * subtree read then fails with `git.materialization.failed` and the
+ * deployment is released. Polling the same asset-blob read route the hub's
+ * resolver uses, for a file we just wrote, waits out that visibility window
+ * instead of racing it.
+ */
+export async function waitForPushVisible(
+  transport: Transport,
+  tenantId: string,
+  assetId: string,
+  path: string,
+  expected: string,
+): Promise<void> {
+  const deadline = Date.now() + PUSH_VISIBILITY_TIMEOUT_MS;
+  for (;;) {
+    const content = await readWorkflowSourceBlob(transport, tenantId, assetId, path);
+    if (content === expected) return;
+    if (Date.now() >= deadline) return;
+    await new Promise((resolve) => setTimeout(resolve, PUSH_VISIBILITY_POLL_MS));
   }
 }

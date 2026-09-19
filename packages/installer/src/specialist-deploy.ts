@@ -33,6 +33,7 @@ import {
   ensureWorkflowAsset,
   pushWorkflowSourceTree,
   sourceFor,
+  waitForPushVisible,
   type ClosureSource,
   type SidecarCapability,
   type WorkflowGitPush,
@@ -260,6 +261,14 @@ export async function ensureSpecialistDeployment(
     `Deploy stage ${stage} specialist`,
     gitPush,
   );
+
+  // The hub's deploy path re-resolves this asset's default ref fresh at
+  // closure-delivery time rather than reusing `commitSha` above; on a race
+  // with the push's own ref update it can pack a pre-push state and the
+  // sidecar's pinned subtree read fails (`git.materialization.failed`).
+  // Wait for the pushed digest to read back through the hub's own blob
+  // route -- the same read path the deploy uses -- before deploying.
+  await waitForPushVisible(transport, workspaceTenantId, assetId, DIGEST_PATH, rendered[DIGEST_PATH]!);
 
   // Rendering and pushing the source above takes long enough for a
   // concurrent caller to have deployed onto this asset meanwhile; re-check
