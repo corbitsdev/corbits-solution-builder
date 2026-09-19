@@ -46,7 +46,7 @@ const SKILLS: readonly { id: string; instructions: string; tools: readonly strin
   { id: "requirements-authoring", instructions: "Gather what the approved stages agreed into one requirements document: every requirement traceable to an input, every acceptance criterion testable. Add nothing the inputs do not support.", tools: ["artifact-read", "artifact-draft"] },
   { id: "build-planning", instructions: "Turn an approved concept into a plan a code builder can execute, with owners and acceptance conditions.", tools: ["artifact-draft", "plan-validate"] },
   { id: "cost-estimation", instructions: "Produce a reproducible estimate from immutable inputs, with assumptions stated. Never spend.", tools: ["policy-cost", "artifact-draft"] },
-  { id: "worker-supervision", instructions: "Coordinate a build without writing its code. Humans decide permissions, material changes and evidence.", tools: ["packet-freeze", "mail", "events", "builder-signal-propose"] },
+  { id: "build-engineering", instructions: "Build the software yourself with the shell tool, in small verified steps: scaffold, install, implement, typecheck, run, fix, report. Every reply carries the real commands run and their real output. Humans decide permissions, material changes and evidence.", tools: ["packet-freeze", "mail", "events", "builder-signal-propose"] },
   {
     id: "interchange-platform",
     instructions: [
@@ -144,8 +144,8 @@ const DIRECTORS: readonly DirectorRecord[] = [
   },
   {
     key: "sb-supervisor",
-    title: "Supervisor",
-    agents: ["build-supervisor"],
+    title: "Builder",
+    agents: ["build-engineer"],
     workflows: [BUILD_SUPERVISION_WORKFLOW_ID],
   },
 ];
@@ -165,7 +165,7 @@ function skillsFor(role: AgentRole): string[] {
     "requirements-author": ["requirements-authoring", "interchange-platform"],
     architect: ["build-planning", "interchange-platform", ...platform],
     estimator: ["cost-estimation", "interchange-platform"],
-    "build-supervisor": ["worker-supervision", "interchange-platform", ...platform],
+    "build-engineer": ["build-engineering", "interchange-platform", ...platform],
     "delivery-verifier": ["delivery-verification", "interchange-platform"],
     "brief-evaluator": ["brief-evaluation"],
   };

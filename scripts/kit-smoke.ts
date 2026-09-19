@@ -101,7 +101,7 @@ check(
   const deciders = seed.agents.filter((agent) =>
     agent.toolKeys.some((key) => writeTools.has(key)),
   );
-  const allowed = new Set(["sb-agent-build-supervisor"]);
+  const allowed = new Set(["sb-agent-build-engineer"]);
   check(
     "only the supervisor holds a write tool",
     deciders.every((agent) => allowed.has(agent.key)),
@@ -248,7 +248,7 @@ check(
   const planners = [
     "requirements-author",
     "architect",
-    "build-supervisor",
+    "build-engineer",
     "senior-engineer-application",
     "experience-designer",
     "presentation-creator",

@@ -70,7 +70,7 @@ export function baseTemplate(): WorkflowTemplateVersion {
     "product-requirements": "requirements-author",
     "plan-and-review": "architect",
     "estimate-and-policy": "estimator",
-    "build-execution": "build-supervisor",
+    "build-execution": "build-engineer",
     "target-verification": "delivery-verifier",
     "delivery-manifest": "delivery-verifier",
   };
