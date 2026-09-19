@@ -136,7 +136,7 @@ export function DecisionQueue({
         <article className="span-8 decision-current" aria-labelledby="current-decision">
           <div className="decision-meta">
             <StateLabel tone="warning">Action required</StateLabel>
-            <span>Project: {current?.projectTitle ?? "—"}</span>
+            <span>Project: {current?.projectTitle || current?.projectId || "—"}</span>
             <span>
               Stage {current?.stage} — {stageName(current?.stage ?? null)}
             </span>
@@ -246,7 +246,7 @@ export function DecisionQueue({
                 {stageName(wait.stage)}
               </StateLabel>
               <strong>{ACTION[wait.stage] ?? wait.title}</strong>
-              <p>{wait.projectTitle}</p>
+              <p>{wait.projectTitle || wait.projectId}</p>
             </button>
           ))}
         </aside>

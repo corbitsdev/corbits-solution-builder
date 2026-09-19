@@ -80,7 +80,7 @@ export async function openDecisions(transport: Transport = createHubTransport())
   const decisions = await Promise.all(
     records.map(async (record) => {
       const found = await openDecisionsFor(workspace.tenantId, record.id, transport);
-      return found.map((decision) => ({ ...decision, projectTitle: record.title }));
+      return found.map((decision) => ({ ...decision, projectTitle: record.title || record.id }));
     }),
   );
   return decisions.flat();
