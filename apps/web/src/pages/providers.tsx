@@ -41,12 +41,14 @@ export function ProviderList({
   );
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const ordered = providers.map((entry) => entry.providerId);
 
   const withBusy = async (id: string, work: () => Promise<void>) => {
     setBusyId(id);
     setError(null);
+    setNotice(null);
     try {
       await work();
       await onChanged?.();
@@ -56,6 +58,16 @@ export function ProviderList({
       setBusyId(null);
     }
   };
+
+  const refresh = (provider: Provider) =>
+    withBusy(provider.id, async () => {
+      const { clearedModel } = await api.refreshProviderModels(provider.id);
+      setNotice(
+        clearedModel
+          ? `Models refreshed. ${clearedModel} is no longer offered, so its pick was cleared.`
+          : "Models refreshed.",
+      );
+    });
 
   const move = (index: number, delta: number) => {
     const next = [...providers];
@@ -68,6 +80,8 @@ export function ProviderList({
   return (
     <div className="provider-manager">
       {error ? <Banner tone="error" title="That did not go through">{error}</Banner> : null}
+      {notice ? <Banner tone="okay" title="Refreshed">{notice}</Banner> : null}
+      {manage ? <small className="provider-hint">Existing specialists keep the model they were deployed with.</small> : null}
       <ul className="provider-list">
         {providers.length === 0 ? (
           <li className="provider-row">
@@ -129,6 +143,14 @@ export function ProviderList({
                       onClick={() => void move(index, 1)}
                     >
                       Move down
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      loading={busy}
+                      disabled={busy}
+                      onClick={() => void refresh(provider)}
+                    >
+                      Refresh models
                     </Button>
                     <Button
                       variant="destructive"

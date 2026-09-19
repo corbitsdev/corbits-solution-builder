@@ -86,6 +86,7 @@ import {
   connectOAuthProvider,
   disconnectProvider,
   listConnectedProviders,
+  refreshProviderModels,
   rerankCatalogViaHub,
   reorderProviders,
   selectProviderModel,
@@ -646,6 +647,13 @@ export const api = {
   disconnectProvider: async (providerId: string): Promise<void> => {
     try {
       await disconnectProvider(createHubTransport(), providerId);
+    } catch (cause) {
+      installerFailure(cause);
+    }
+  },
+  refreshProviderModels: async (providerId: string): Promise<{ clearedModel: string | null }> => {
+    try {
+      return await refreshProviderModels(createHubTransport(), providerId);
     } catch (cause) {
       installerFailure(cause);
     }

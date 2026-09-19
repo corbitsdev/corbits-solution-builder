@@ -244,6 +244,16 @@ const DEFAULT_BASE_URL: Record<string, string> = {
   xai: "https://api.x.ai/v1",
 };
 
+/** A provider's `/models` response rejecting the request outright, HTTP status attached so callers can tell an auth failure from anything else. */
+export class ProviderRejectedError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 /**
  * Lists the models a live key can actually serve, by asking the provider
  * itself -- the one validation available, since the hub has no route that
@@ -271,7 +281,10 @@ async function discoverModels(plugin: string, baseUrl: string, apiKey: string): 
   }
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    throw new Error(`The provider rejected this key (HTTP ${response.status})${detail ? `: ${detail.slice(0, 200)}` : "."}`);
+    throw new ProviderRejectedError(
+      response.status,
+      `The provider rejected this key (HTTP ${response.status})${detail ? `: ${detail.slice(0, 200)}` : "."}`,
+    );
   }
   const body = (await response.json().catch(() => null)) as { data?: { id?: string }[] } | null;
   const ids = (body?.data ?? []).map((entry) => entry.id).filter((id): id is string => typeof id === "string");
@@ -280,6 +293,18 @@ async function discoverModels(plugin: string, baseUrl: string, apiKey: string): 
     throw new Error("This key works, but the provider did not list any model this product can use.");
   }
   return serving;
+}
+
+/** Whether a discovery failure means the credential is sealed (401/403) rather than something else (unreachable, bad response, ...). */
+export function isSealedCredentialFailure(cause: unknown): boolean {
+  return cause instanceof ProviderRejectedError && (cause.status === 401 || cause.status === 403);
+}
+
+/** Guards the destructive part of a refresh: an empty or partial discovery must never register or clear anything. */
+export function requireDiscoveredModels(canonicalNames: readonly string[]): void {
+  if (canonicalNames.length === 0) {
+    throw new Error("The provider returned no models; nothing was changed.");
+  }
 }
 
 /**
@@ -402,4 +427,49 @@ export async function selectProviderModel(
   const workspace = await resolveWorkspace(transport);
   if (!workspace) return;
   await selectModelViaHub(transport, workspace.tenantId, modelProviderId, canonicalName);
+}
+
+/** A pinned model the fresh discovery no longer serves -- `null` when nothing needs clearing. */
+export function droppedSelection(selected: string | null, discovered: readonly string[]): string | null {
+  if (selected === null) return null;
+  return discovered.includes(selected) ? null : selected;
+}
+
+/**
+ * Re-runs the same discovery `connectApiKeyProvider` does at connect time,
+ * for a provider that is already connected -- no credential is asked for
+ * again, since the hub never hands a sealed secret back to the client. If the
+ * pinned model dropped out of the fresh list, its pin is cleared so failover
+ * picks among what is actually served.
+ */
+export async function refreshProviderModels(
+  transport: Transport,
+  modelProviderId: string,
+): Promise<{ clearedModel: string | null }> {
+  const workspace = await resolveWorkspace(transport);
+  if (!workspace) throw new Error("The workspace is not installed yet.");
+  const catalog = catalogFor(transport, workspace.tenantId);
+  const providerRows = await catalog.modelProviders();
+  const row = providerRows.find((entry) => entry.id === modelProviderId);
+  if (!row) throw new Error("This provider is no longer connected.");
+
+  const connected = await listConnectedProviders(transport);
+  const selected = connected.find((entry) => entry.id === modelProviderId)?.selectedModel ?? null;
+
+  let canonicalNames: string[];
+  try {
+    canonicalNames = await discoverModels(row.plugin, row.baseURL, "");
+  } catch (cause) {
+    if (isSealedCredentialFailure(cause)) {
+      throw new Error("This provider's key is sealed in the hub, so its model list can only be refreshed by reconnecting it.");
+    }
+    throw cause;
+  }
+  requireDiscoveredModels(canonicalNames);
+
+  await registerProviderModels(transport, workspace.tenantId, { modelProviderId, canonicalNames });
+
+  const clearedModel = droppedSelection(selected, canonicalNames);
+  if (clearedModel) await selectModelViaHub(transport, workspace.tenantId, modelProviderId, null);
+  return { clearedModel };
 }
