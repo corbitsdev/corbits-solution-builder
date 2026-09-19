@@ -21,6 +21,7 @@ import { databaseDirectory, dataDirectory, portFile } from "./paths.js";
 import { stopSpawnedSidecars } from "./sidecar-processes.js";
 import { ensureHub, hubMode, remoteHubOrigin, resolveWorkspace } from "./hub-client.js";
 import { hub, hubWebSocket, setHostPort, SIDECAR_WS_PATH } from "./hub-mount.js";
+import { readSecretResult, secretReference, storeSecret } from "./host-secrets.js";
 import {
   clientConnected,
   markReady,
@@ -109,13 +110,43 @@ console.log(known ? `Workspace: tenant ${known.tenantId}` : "Workspace: not inst
 // user principal, workflow definitions, roles, specialist prompts — is
 // installed by the client through `@solutions-builder/installer` over `/hub`.
 
+const SESSION_TOKEN_ACCOUNT = "hub:session-token";
+
 /**
- * Held on `globalThis` so `bun --hot` keeps the same token across a reload;
- * re-minting it would invalidate the cookie the loaded webview already holds.
- * A packaged launch is a fresh process, so this is identical to per-run.
+ * Minting a fresh token on every launch invalidated every cookie a browser
+ * already held the moment the host restarted — the workspace and its data
+ * survive a restart, but the token proving a session's cookie was legitimate
+ * did not, so every request the client made looked unauthorised until it
+ * redid the handshake. Persisted the same way the repo-signing seed is
+ * (`hub-keys.ts`), so a restart against the same data reuses the same token
+ * and an already-open browser stays authorised.
+ */
+async function resolveSessionToken(): Promise<string> {
+  const stored = await readSecretResult(await secretReference(SESSION_TOKEN_ACCOUNT));
+  if (stored.status === "found" && stored.secret) return stored.secret;
+
+  // A store that cannot answer is not an empty store. Minting here would
+  // invalidate every cookie a running client already holds for no reason —
+  // the same caution `hub-keys.ts` takes with the signing seed.
+  if (stored.status === "unavailable") {
+    throw new Error(
+      `The keychain could not be read for ${SESSION_TOKEN_ACCOUNT}: ${stored.detail}. ` +
+        "Nothing has been changed. Unlock the keychain, or allow this app access, " +
+        "and start it again.",
+    );
+  }
+
+  const minted = crypto.randomUUID();
+  await storeSecret(SESSION_TOKEN_ACCOUNT, minted);
+  return minted;
+}
+
+/**
+ * Held on `globalThis` too, so `bun --hot` keeps the same token in memory
+ * across a reload without a round trip to the keychain on every edit.
  */
 const session = globalThis as typeof globalThis & { solutionsBuilderToken?: string };
-const token = (session.solutionsBuilderToken ??= crypto.randomUUID());
+const token = (session.solutionsBuilderToken ??= await resolveSessionToken());
 
 /**
  * Where the built interface lives, in the order the host should look:
