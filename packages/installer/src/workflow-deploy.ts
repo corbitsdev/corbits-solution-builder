@@ -9,7 +9,7 @@
  */
 import type { Transport } from "@intx/hub-client";
 import type { InferenceSourcePin } from "@solutions-builder/app/specialist-source";
-import { assetsFor, catalogFor, gitTokensFor, workflowsFor, type HubDeployment } from "./hub.js";
+import { ApiError, assetsFor, catalogFor, gitTokensFor, workflowsFor, type HubDeployment } from "./hub.js";
 import type { ClosureManifest } from "./registry-tarballs.js";
 import { type ClosureTarballFetcher } from "./workflow-closure.js";
 
@@ -91,6 +91,36 @@ export type WorkflowGitPush = (args: {
 const PUSH_TOKEN_LIFETIME_MS = 10 * 60 * 1000;
 
 /**
+ * A push token's name, suffixed with a short random tag so two overlapping
+ * deploys for the same asset never mint the same name and collide on the
+ * hub's per-user active-token uniqueness constraint.
+ */
+function pushTokenName(assetName: string): string {
+  return `${assetName}-deploy-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Mints a push token, retrying once with a fresh random-suffixed name if the
+ * hub rejects the mint because an overlapping deploy already holds an active
+ * token by that name (a race between two `ensureSpecialistDeployment` calls
+ * for the same project/stage).
+ */
+async function mintPushToken(
+  gitTokens: ReturnType<typeof gitTokensFor>,
+  assetId: string,
+  assetName: string,
+) {
+  try {
+    return await gitTokens.mint(assetId, pushTokenName(assetName), PUSH_TOKEN_LIFETIME_MS);
+  } catch (cause) {
+    if (cause instanceof ApiError && (cause.status === 409 || cause.status === 500)) {
+      return await gitTokens.mint(assetId, pushTokenName(assetName), PUSH_TOKEN_LIFETIME_MS);
+    }
+    throw cause;
+  }
+}
+
+/**
  * Create-or-find a `workflow`-kind asset by name, so a workflow deploy (a
  * stage specialist's) has one to push its rendered source onto.
  */
@@ -120,7 +150,7 @@ export async function pushWorkflowSourceTree(
   gitPush: WorkflowGitPush,
 ): Promise<string> {
   const gitTokens = gitTokensFor(transport, tenantId);
-  const minted = await gitTokens.mint(assetId, `${assetName}-deploy`, PUSH_TOKEN_LIFETIME_MS);
+  const minted = await mintPushToken(gitTokens, assetId, assetName);
   try {
     return await gitPush({ scope: tenantId, assetKind: "workflow", assetName, token: minted.secret, tree, message });
   } finally {
