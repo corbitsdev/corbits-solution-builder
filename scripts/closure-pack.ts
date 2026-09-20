@@ -22,7 +22,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 
 import { packTarballFiles, tarballFilename, type TarballFiles } from "./lib/tarball.js";
-import { WORKFLOW_PACKAGE_DEPENDENCIES } from "@solutions-builder/app/specialist-source";
+import { ARTIFACT_TOOL_DEPENDENCIES, WORKFLOW_PACKAGE_DEPENDENCIES } from "@solutions-builder/app/specialist-source";
 
 export const ROOT_DIR = join(import.meta.dir, "..");
 export const VENDOR_PACKAGES_DIR = join(ROOT_DIR, "vendor", "interchange", "packages");
@@ -242,7 +242,8 @@ function discoverExternalClosure(): ExternalPackage[] {
       queue.push({ name, fromDirs: [join(VENDOR_PACKAGES_DIR, shortName), ROOT_DIR] });
     }
   }
-  for (const name of Object.keys(WORKFLOW_PACKAGE_DEPENDENCIES)) {
+  // The opt-in artifact tools are packed too, so turning them on needs no rebuild.
+  for (const name of Object.keys({ ...WORKFLOW_PACKAGE_DEPENDENCIES, ...ARTIFACT_TOOL_DEPENDENCIES })) {
     if (name.startsWith("@intx/")) continue;
     queue.push({ name, fromDirs: [ROOT_DIR] });
   }

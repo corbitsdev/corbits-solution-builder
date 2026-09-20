@@ -13,6 +13,7 @@
 import { ApiError, type Transport } from "@intx/hub-client";
 import type { Stage } from "@solutions-builder/app/ledger";
 import {
+  ARTIFACT_TOOL_DEPENDENCIES,
   PACKAGE_STAGE,
   SPECIALIST_ENTRY_PATH,
   WORKFLOW_PACKAGE_DEPENDENCIES,
@@ -176,12 +177,8 @@ async function renderSpecialistSource(
   // tool -- with `artifactTools` off, dropping them keeps the deployed
   // package.json (and the closure below) the same shape it was pre-CL-8719.
   const dependencies = artifactTools
-    ? WORKFLOW_PACKAGE_DEPENDENCIES
-    : Object.fromEntries(
-        Object.entries(WORKFLOW_PACKAGE_DEPENDENCIES).filter(
-          ([dep]) => dep !== "@corbits/artifacts" && dep !== "@standard-schema/spec",
-        ),
-      );
+    ? { ...WORKFLOW_PACKAGE_DEPENDENCIES, ...ARTIFACT_TOOL_DEPENDENCIES }
+    : WORKFLOW_PACKAGE_DEPENDENCIES;
   const member = {
     name,
     version: "0.0.0",

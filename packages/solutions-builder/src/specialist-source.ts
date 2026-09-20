@@ -84,20 +84,21 @@ export const WORKFLOW_PACKAGE_DEPENDENCIES: Readonly<Record<string, string>> = {
   "@solutions-builder/app": "workspace:*",
   "@solutions-builder/tools-deck": "workspace:*",
   "@solutions-builder/tools-delivery": "workspace:*",
-  // CL-8719: every stage specialist's `artifacts` tool, shipped as a
-  // workspace member the same way `@solutions-builder/tools-deck` is
-  // (`installer/src/workflow-closure.ts`'s `artifactsMemberFiles`) -- not a
-  // real npm/git dependency. A deployed specialist's own `bun install` never
-  // reaches the network for a `workspace:*` member; it only does for a real
-  // registry spec (`hono` below), and `@corbits/artifacts` is not published
-  // to the npm registry.
-  "@corbits/artifacts": "workspace:*",
-  // `@hono/standard-validator` (a real dependency of `@corbits/artifacts`
-  // itself, resolved from the real npm registry the same way `hono` is)
-  // declares this as a peer; a deployed workspace's own dependency
-  // resolution needs it present at the top level to satisfy that peer.
-  "@standard-schema/spec": "^1.0.0",
   hono: "^4.0.0",
+};
+
+/**
+ * What a specialist additionally depends on when it carries the
+ * `@corbits/artifacts` tool bundle. Kept apart from the base set because the
+ * packed `@solutions-builder/app` member derives its own dependencies from
+ * that set: `@corbits/artifacts` is a workspace member only when the tools are
+ * on, and it is not on the npm registry, so naming it unconditionally makes
+ * every sidecar's install fail. `@standard-schema/spec` satisfies the peer of
+ * its `@hono/standard-validator` dependency.
+ */
+export const ARTIFACT_TOOL_DEPENDENCIES: Readonly<Record<string, string>> = {
+  "@corbits/artifacts": "workspace:*",
+  "@standard-schema/spec": "^1.0.0",
 };
 
 /** The entry module path every specialist package ships, same convention as
