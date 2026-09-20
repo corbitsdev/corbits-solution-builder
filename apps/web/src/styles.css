@@ -2330,6 +2330,10 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   padding: 0 var(--space-5) var(--space-4);
 }
 
+/* The stage's send-back, folded under the gate. */
+.send-back { margin: var(--space-2) var(--space-4) 0; }
+.send-back-body { display: grid; gap: var(--space-4); padding-top: var(--space-2); }
+
 /* Filling the window, a stage screen is the page, not a card on grey. */
 .canvas-body.is-fill > [data-slot="card"] {
   background: var(--wb-background);

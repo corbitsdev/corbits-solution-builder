@@ -22,6 +22,30 @@ import { artifactGraphFor } from "./artifact-graph.ts";
 import { toArtifactNode, currentStageFromArtifacts } from "./project-view.ts";
 import { pendingApprovals } from "./pending-approvals.ts";
 
+const workflowStageCache = new Map<string, { stage: number; at: number }>();
+const WORKFLOW_STAGE_CACHE_MS = 15_000;
+
+/**
+ * A project card's displayed stage (CL-8687): the project workflow's own
+ * `stage` when a view is already available for it (read-only -- never
+ * deploys the workflow just to show a card), else the artifact-graph
+ * fallback `listProjectSummaries` already computed. Cached per project for
+ * `WORKFLOW_STAGE_CACHE_MS` so a list of many cards costs at most one read
+ * per project per refresh window, not one per render.
+ */
+export async function displayStage(
+  projectId: string,
+  fallbackStage: number,
+  readView: (projectId: string) => Promise<{ stage: number } | null>,
+): Promise<number> {
+  const cached = workflowStageCache.get(projectId);
+  if (cached && Date.now() - cached.at < WORKFLOW_STAGE_CACHE_MS) return cached.stage;
+  const view = await readView(projectId).catch(() => null);
+  const stage = view?.stage ?? fallbackStage;
+  workflowStageCache.set(projectId, { stage, at: Date.now() });
+  return stage;
+}
+
 /** Every project tenant under the workspace, folded from its own artifact graph. */
 export async function listProjectSummaries(transport: Transport = createHubTransport()): Promise<ProjectSummary[]> {
   const workspace = await resolveWorkspace(transport);

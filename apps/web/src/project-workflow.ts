@@ -15,6 +15,7 @@ import type { DecisionRecord, ProjectState, ReviewState, StageNumber } from "@so
 
 const LOOP_STEP_ID = "rework";
 const APPLY_STEP_ID = "apply";
+const HOLD_STEP_ID = "hold";
 
 export type ProjectWorkflowView = {
   readonly stage: StageNumber;
@@ -52,33 +53,54 @@ function outputOf(events: readonly WorkflowRunEvent[], stepId: string): unknown 
   return decodeInlineOutput(output?.ref);
 }
 
-/** The newest loop-iteration run id keyed into `iterationEventsByRunId`,
- *  identified by the numeric suffix every iteration child run id carries
+/** Every loop-iteration run id keyed into `iterationEventsByRunId`, oldest
+ *  first, ordered by the numeric suffix every iteration child run id carries
  *  (`<runId>__rework__<n>`) -- the same convention
  *  `project-workflow-proof-deployed.ts`'s `iterationRunIds` sorts on. */
-function newestIterationEvents(iterationEventsByRunId: Readonly<Record<string, readonly WorkflowRunEvent[]>>): readonly WorkflowRunEvent[] | undefined {
+function orderedIterationIds(iterationEventsByRunId: Readonly<Record<string, readonly WorkflowRunEvent[]>>): readonly string[] {
   const ids = Object.keys(iterationEventsByRunId);
-  if (ids.length === 0) return undefined;
-  const withIndex = ids
+  return ids
     .map((id) => ({ id, index: Number(id.slice(id.lastIndexOf("__") + 2)) }))
     .filter((entry) => Number.isFinite(entry.index))
-    .sort((a, b) => a.index - b.index);
-  const newest = withIndex.at(-1)?.id ?? ids[0];
-  return iterationEventsByRunId[newest!];
+    .sort((a, b) => a.index - b.index)
+    .map((entry) => entry.id);
+}
+
+/**
+ * Whether the newest iteration's own event log carries a committed `hold`
+ * step output yet -- the signal `api.projectWorkflowView` uses to decide
+ * whether it needs to also fetch the previous iteration's events (a rare
+ * race: the newest iteration run exists but its `hold` step has not
+ * committed on the hub yet).
+ */
+export function newestIterationHasHoldOutput(events: readonly WorkflowRunEvent[] | undefined): boolean {
+  return events !== undefined && outputOf(events, HOLD_STEP_ID) !== undefined;
 }
 
 /** The carried `ProjectState` off `topEvents`/`iterationEventsByRunId`: the
  *  top-level `rework` loop container's own committed output once the run has
- *  converged, otherwise the newest iteration's `apply` step output. */
+ *  converged; otherwise the newest iteration's `apply` output once a
+ *  decision has landed this iteration, else its `hold` output (the state
+ *  carried into this iteration, unchanged so far); when the newest iteration
+ *  has neither yet, the previous iteration's `apply` output (present in
+ *  `iterationEventsByRunId` only for that rare race). */
 function projectStateOf(
   topEvents: readonly WorkflowRunEvent[],
   iterationEventsByRunId: Readonly<Record<string, readonly WorkflowRunEvent[]>>,
 ): ProjectState {
   const loopOutput = outputOf(topEvents, LOOP_STEP_ID) as { final?: { apply?: ProjectState } } | undefined;
   if (loopOutput?.final?.apply) return loopOutput.final.apply;
-  const newest = newestIterationEvents(iterationEventsByRunId);
-  const applied = newest ? (outputOf(newest, APPLY_STEP_ID) as ProjectState | undefined) : undefined;
-  return applied ?? EMPTY_STATE;
+
+  const ids = orderedIterationIds(iterationEventsByRunId);
+  const newestEvents = ids.at(-1) ? iterationEventsByRunId[ids.at(-1)!] : undefined;
+  const applied = newestEvents ? (outputOf(newestEvents, APPLY_STEP_ID) as ProjectState | undefined) : undefined;
+  if (applied) return applied;
+  const held = newestEvents ? (outputOf(newestEvents, HOLD_STEP_ID) as ProjectState | undefined) : undefined;
+  if (held) return held;
+
+  const previousEvents = ids.length >= 2 ? iterationEventsByRunId[ids.at(-2)!] : undefined;
+  const previousApplied = previousEvents ? (outputOf(previousEvents, APPLY_STEP_ID) as ProjectState | undefined) : undefined;
+  return previousApplied ?? EMPTY_STATE;
 }
 
 /**

@@ -47,6 +47,20 @@ function topLevelRunIds(runIds: readonly string[]): string[] {
   return runIds.filter((id) => !id.includes("__"));
 }
 
+/**
+ * The one top-level run every caller of `ensureProjectWorkflow` converges
+ * on when several already exist for this deployment (two browsers racing
+ * the first-ever trigger). Run ids are opaque, unordered-by-time tokens
+ * (`generateId`) -- `listWorkflowRuns` carries no `createdAt` -- so "oldest"
+ * is approximated by a stable, total order over the ids themselves: every
+ * caller sees the same set and sorts it the same way, so every caller lands
+ * on the same run regardless of which order the hub happened to list them
+ * in on that particular call.
+ */
+function pickTopLevelRun(runIds: readonly string[]): string | undefined {
+  return [...runIds].sort()[0];
+}
+
 /** The bytes a project workflow deploy needs: the compiled
  *  `workflow.js`/`actions.js`/`loops.js` `scripts/project-workflow-pack.ts`
  *  produces, fetched by the caller the same way `ClosureSource` fetches
@@ -159,12 +173,13 @@ async function ensureProjectWorkflowOnce(
   // concurrent callers: list, and if none exists yet, trigger once and
   // re-list so every caller settles on the same (earliest) run id.
   const existingRuns = topLevelRunIds(await workflows.runs(deployment.id));
-  if (existingRuns[0]) return { deploymentId: deployment.id, runId: existingRuns[0] };
+  const existingRun = pickTopLevelRun(existingRuns);
+  if (existingRun) return { deploymentId: deployment.id, runId: existingRun };
 
   const payload = { projectId, stages };
   const fired = await workflows.trigger(deployment.id, { content: JSON.stringify(payload) });
   const afterTrigger = topLevelRunIds(await workflows.runs(deployment.id));
-  return { deploymentId: deployment.id, runId: afterTrigger[0] ?? fired.runId };
+  return { deploymentId: deployment.id, runId: pickTopLevelRun(afterTrigger) ?? fired.runId };
 }
 
 /**

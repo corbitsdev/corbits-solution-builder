@@ -64,7 +64,18 @@ function extractHowToRun(body: string | null): string | null {
 }
 
 /** Stage 9's manifest, awaiting a decision. */
-function DeliveryDecision({ tenantId, projectId }: { tenantId: string; projectId: string }) {
+function DeliveryDecision({
+  tenantId,
+  projectId,
+  onRejectSendBack,
+}: {
+  tenantId: string;
+  projectId: string;
+  /** Rejecting delivery also routes the project workflow back to stage 8
+   *  (CL-8687), so the build specialist's next reply lands where the person
+   *  can review and re-approve it rather than leaving stage 9 stuck. */
+  onRejectSendBack: () => void;
+}) {
   const [pending, setPending] = useState<PendingApproval | null>(null);
   const [delivered, setDelivered] = useState<PendingApproval | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -143,6 +154,7 @@ function DeliveryDecision({ tenantId, projectId }: { tenantId: string; projectId
       } else {
         await rejectTool(tenantId, pending.id, feedback);
         setFeedback("");
+        onRejectSendBack();
       }
       await load();
     } catch (cause) {
@@ -237,10 +249,14 @@ export function DeliveryPanel({
   detail,
   tenantId,
   latestReply,
+  onRejectSendBack,
 }: {
   detail: ProjectDetail;
   tenantId: string;
   latestReply: ChatMessage | null;
+  /** Called once a delivery rejection has been recorded on the hub, so the
+   *  caller can route the project workflow back to stage 8. */
+  onRejectSendBack: () => void;
 }) {
   const buildEvidence = detail.nodes.filter(
     (node) => node.stage === 8 && node.kind === "build_evidence" && node.supersededByNodeId === null,
@@ -249,7 +265,7 @@ export function DeliveryPanel({
 
   return (
     <div className="stage-companions">
-      <DeliveryDecision tenantId={tenantId} projectId={detail.project.id} />
+      <DeliveryDecision tenantId={tenantId} projectId={detail.project.id} onRejectSendBack={onRejectSendBack} />
       {howToRun ? (
         <Screen title="How to run" tight>
           <Markdown source={howToRun} />

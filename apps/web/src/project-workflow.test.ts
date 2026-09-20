@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { WorkflowRunEvent } from "@intx/hub-client";
-import { foldProjectWorkflow } from "./project-workflow.ts";
+import { foldProjectWorkflow, newestIterationHasHoldOutput } from "./project-workflow.ts";
 
 // Fixtures modeled on the deployed proof's own recorded wire shape
 // (scripts/project-workflow-proof-deployed.ts's `finalStateFrom`/
@@ -83,6 +83,47 @@ describe("foldProjectWorkflow", () => {
     const view = foldProjectWorkflow([], { "run1__rework__1": [stepCompleted("apply", state)] });
     expect(view.lastRefusal).toMatchObject({ decisionId: "d2", accepted: false, reason: "hash_mismatch" });
     expect(view.allowed.approve).toBe(true);
+  });
+
+  test("reads the newest iteration's hold output when no decision has landed there yet", () => {
+    const held = {
+      projectId: "p1",
+      stage: 1,
+      done: false,
+      reviews: {},
+      decisions: [],
+      authorizedPrincipals: { 1: [OWNER] },
+      stageOrder: [1, 2],
+      reviewCounts: {},
+    };
+    const view = foldProjectWorkflow([], { "run1__rework__3": [stepCompleted("hold", held)] });
+    expect(view.stage).toBe(1);
+    expect(view.allowed.openReview).toBe(true);
+  });
+
+  test("falls back to the previous iteration's apply output when the newest has neither apply nor hold yet", () => {
+    const previousApplied = {
+      projectId: "p1",
+      stage: 2,
+      done: false,
+      reviews: {},
+      decisions: [],
+      authorizedPrincipals: { 2: [OWNER] },
+      stageOrder: [1, 2],
+      reviewCounts: {},
+    };
+    const iterationEventsByRunId = {
+      "run1__rework__1": [stepCompleted("apply", previousApplied)],
+      "run1__rework__2": [],
+    };
+    const view = foldProjectWorkflow([], iterationEventsByRunId);
+    expect(view.stage).toBe(2);
+  });
+
+  test("newestIterationHasHoldOutput reports whether the newest iteration's hold step has committed", () => {
+    expect(newestIterationHasHoldOutput(undefined)).toBe(false);
+    expect(newestIterationHasHoldOutput([])).toBe(false);
+    expect(newestIterationHasHoldOutput([stepCompleted("hold", { projectId: "p1" })])).toBe(true);
   });
 
   test("once the loop has converged, reads the top-level run's own final state and disallows further decisions", () => {

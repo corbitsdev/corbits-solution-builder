@@ -26,8 +26,10 @@ import { shouldFallbackRefetch, subscribeMailbox } from "../../mailbox-events.ts
 import { Markdown } from "../../markdown.jsx";
 import { AudiencePackages } from "../audiences.jsx";
 import { DesignFeedbackView } from "../design.jsx";
-import { Tabs } from "@corbits/react-ui";
+import { Tabs, Textarea } from "@corbits/react-ui";
 import { Banner, Button, Screen, StateLabel, stageName, versionDigest } from "../../components.jsx";
+import { Dictated } from "../../dictation.jsx";
+import { SendBackPicker, defaultTarget } from "../send-back.jsx";
 import { STAGE_GOAL } from "./gate.jsx";
 import { DeliveryPanel } from "./delivery.jsx";
 import { StageConversation } from "./thread.jsx";
@@ -45,6 +47,9 @@ import {
   WITHDRAWN_TURNS_KIND,
   type WithdrawnMark,
 } from "../../withdrawn-turns.ts";
+import type { ProjectWorkflowView } from "../../project-workflow.ts";
+import { approveStage, digestOf, sendBack as sendBackDecision } from "../../stage-approval.ts";
+import { adoptExistingProject } from "../../project-adoption.ts";
 import type { FoldedFeedback } from "@solutions-builder/app/project-state";
 
 export { StageDocument, DocumentBody } from "./document.jsx";
@@ -87,18 +92,58 @@ export function StageWorkspace({
     import("../../client.js").Remediation | undefined
   >(undefined);
 
-  // 1 + the highest stage with a live, approved draft artifact. No lifecycle
-  // run, no gate signal — just the artifact graph the person already
-  // approved into (CL-8612). `stageFloor` is bumped optimistically the
-  // instant an approval lands, ahead of `detail` catching up on refetch, so
-  // the UI advances the moment the person clicks rather than waiting on a
-  // round trip through `onChanged`.
-  const derivedStage = useMemo(() => currentStageFromArtifacts(detail.nodes), [detail.nodes]);
-  const [stageFloor, setStageFloor] = useState(derivedStage);
-  const stage = Math.max(derivedStage, stageFloor);
+  // The project workflow (CL-8721) is the process authority for a stage's
+  // current position (CL-8687): `workflowView.stage`. `currentStageFromArtifacts`
+  // survives ONLY as a display fallback for the brief window before the
+  // view has loaded for the first time — it never drives approval.
+  const fallbackStage = useMemo(() => currentStageFromArtifacts(detail.nodes), [detail.nodes]);
+  const [workflowView, setWorkflowView] = useState<ProjectWorkflowView | null>(null);
+  const stage = workflowView?.stage ?? fallbackStage;
+
+  const loadWorkflowView = useCallback(async () => {
+    const view = await api.projectWorkflowView(detail.project.id).catch(() => null);
+    if (view) setWorkflowView(view);
+    return view;
+  }, [detail.project.id]);
+
+  // Deployed/triggered once per project, then read on mount, adopted once
+  // (a pre-cutover project's legacy `approvedAt` history replayed into the
+  // workflow if it hasn't recorded anything of its own yet), and re-read.
   useEffect(() => {
-    if (derivedStage > stageFloor) setStageFloor(derivedStage);
-  }, [derivedStage, stageFloor]);
+    let cancelled = false;
+    void api
+      .ensureProjectWorkflow(detail.project.id)
+      .then(() => loadWorkflowView())
+      .then(async (view) => {
+        if (cancelled || !view) return;
+        await adoptExistingProject(
+          {
+            view: (projectId) => api.projectWorkflowView(projectId),
+            artifactContent: (nodeId) => api.artifactContent(tenantId, nodeId),
+            decide: (projectId, decision) => api.decide(projectId, decision),
+            now: () => new Date().toISOString(),
+          },
+          detail.project.id,
+          detail.nodes,
+          Array.from({ length: LAST_STAGE }, (_, index) => index + 1),
+        );
+        if (!cancelled) void loadWorkflowView();
+      })
+      .catch((cause: unknown) => {
+        if (!cancelled) setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail.project.id]);
+
+  // Same cadence the thread refreshes on: a 20s fallback poll, since the
+  // workflow's own decisions do not land on the tenant mailbox stream.
+  useEffect(() => {
+    const timer = setInterval(() => void loadWorkflowView(), 20_000);
+    return () => clearInterval(timer);
+  }, [loadWorkflowView]);
 
   // The specialist for this project's stage: deployed lazily the first time
   // the stage is opened (CL-8612 contract v6 — one mail agent per stage,
@@ -289,11 +334,11 @@ export function StageWorkspace({
 
   // Belt-and-braces: `key={detail.project.id}` on this component in App.tsx
   // already remounts it per project, resetting all of the above. This makes
-  // sure the previous project's optimistic stage floor, pending send, and
+  // sure the previous project's workflow view, pending send, and
   // opened-thread marker never leak into a newly opened one even if that
   // remount ever regresses.
   useEffect(() => {
-    setStageFloor(derivedStage);
+    setWorkflowView(null);
     setPendingOpening(null);
     openedRef.current = null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -508,12 +553,21 @@ export function StageWorkspace({
     return null;
   }, [stage, latestSpecialistMessage]);
 
+  const stageApprovalDeps = useMemo(
+    () => ({
+      view: (projectId: string) => api.projectWorkflowView(projectId),
+      decide: (projectId: string, decision: Record<string, unknown>) => api.decide(projectId, decision),
+      now: () => new Date().toISOString(),
+    }),
+    [],
+  );
+
   /**
-   * Persists the specialist's latest reply as this stage's approved draft,
-   * advances the UI to the next stage, and sends the approved text on as
-   * that stage's opening mail — deploying its specialist lazily the same way
-   * opening any stage does. No gate signal, no lifecycle run: the artifact
-   * write and the client's own stage cursor are the whole approval.
+   * Persists the specialist's latest reply as this stage's draft, names it to
+   * the project workflow, and waits for the workflow's own `approve` decision
+   * to land before treating the stage as advanced (CL-8687: the workflow is
+   * the process authority, not this write). On a refusal the error banner
+   * shows the reason and the next stage's opening mail is never sent.
    *
    * Stage 7 is also the freeze: the chosen target rides along in the same
    * artifact write (`sb.target`) and is prefixed as one line onto stage 8's
@@ -528,30 +582,73 @@ export function StageWorkspace({
     setRemediation(undefined);
     try {
       const materials = detail.nodes.filter((node) => node.kind === "source_material").map((node) => node.id);
-      if (publishedBundle) {
-        await api.persistBuildEvidence(detail.project.id, publishedBundle, materials);
-      } else {
-        await api.persistStageDraft(
-          detail.project.id,
-          stage,
-          reviewMessage.body,
-          materials,
-          stage === 7 ? (chosenTarget ?? undefined) : undefined,
-        );
+      const persisted = publishedBundle
+        ? await api.persistBuildEvidence(detail.project.id, publishedBundle, materials)
+        : await api.persistStageDraft(
+            detail.project.id,
+            stage,
+            reviewMessage.body,
+            materials,
+            stage === 7 ? (chosenTarget ?? undefined) : undefined,
+          );
+      const version = Number(persisted.contentHash.slice(persisted.contentHash.lastIndexOf("@") + 1));
+      const sha256 = await digestOf(reviewMessage.body);
+      const result = await approveStage(stageApprovalDeps, {
+        projectId: detail.project.id,
+        stage,
+        ref: { artifactId: persisted.artifactId, version, sha256 },
+      });
+      if (!result.ok) {
+        setError(`This stage's approval was refused: ${result.reason}`);
+        await loadWorkflowView();
+        return;
       }
-      const next = stage + 1;
+      setWorkflowView((current) => (current ? { ...current, stage: result.stage } : current));
+      await loadWorkflowView();
       const openingBody =
         stage === 7 && chosenTarget
           ? `${targetOpeningLine(chosenTarget)}\n\n${reviewMessage.body}`
           : reviewMessage.body;
-      setStageFloor(next);
-      setPendingOpening({ stage: next, body: openingBody });
+      setPendingOpening({ stage: result.stage, body: openingBody });
       onChanged();
     } catch (cause) {
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
       setRemediation(cause instanceof ApiFailure ? cause.detail.remediation : undefined);
     } finally {
       setApproving(false);
+    }
+  };
+
+  const [sendTarget, setSendTarget] = useState<number | null>(null);
+  const [sendReason, setSendReason] = useState("");
+  const [sendingBack, setSendingBack] = useState(false);
+
+  /** Sends this stage back to `target`, through the workflow's own
+   *  `send_back` decision — every review at `target` and above is marked
+   *  stale, nothing is deleted (`project-workflow/contracts.ts`). */
+  const sendBack = async (target: number) => {
+    setSendingBack(true);
+    setError(null);
+    try {
+      const result = await sendBackDecision(stageApprovalDeps, {
+        projectId: detail.project.id,
+        stage,
+        targetStage: target,
+        reason: sendReason.trim() || `Sent back from stage ${stage} to stage ${target}.`,
+      });
+      if (!result.ok) {
+        setError(`Send-back was refused: ${result.reason}`);
+        return;
+      }
+      setWorkflowView((current) => (current ? { ...current, stage: result.stage } : current));
+      await loadWorkflowView();
+      setSendReason("");
+      setSendTarget(null);
+      onChanged();
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    } finally {
+      setSendingBack(false);
     }
   };
 
@@ -584,6 +681,38 @@ export function StageWorkspace({
               }
             : {})}
         />
+      ) : null}
+
+      {/* Sending the stage back is offered wherever the person is working,
+          folded to a line so it never competes with the review itself. */}
+      {stage >= 2 && stage < LAST_STAGE ? (
+        <details className="approvals-record send-back">
+          <summary>Missed something earlier? Send this stage back…</summary>
+          <div className="send-back-body">
+            <SendBackPicker
+              id="workspace-send-back-target"
+              stage={stage}
+              target={sendTarget ?? defaultTarget(stage)}
+              onChange={setSendTarget}
+            />
+            <div className="field">
+              <label htmlFor="workspace-send-back-reason">What was missed, or what has to change</label>
+              <Dictated value={sendReason} onValueChange={setSendReason} align="start">
+                <Textarea
+                  id="workspace-send-back-reason"
+                  value={sendReason}
+                  onChange={(event) => setSendReason(event.target.value)}
+                  placeholder="Recorded with the send-back, and put in the box at the stage you return to, for the specialist."
+                />
+              </Dictated>
+            </div>
+            <div className="action-row">
+              <Button loading={sendingBack} onClick={() => void sendBack(sendTarget ?? defaultTarget(stage))}>
+                Send back to {stageName(sendTarget ?? defaultTarget(stage))}
+              </Button>
+            </div>
+          </div>
+        </details>
       ) : null}
 
       {!agentAddress ? (
@@ -732,7 +861,12 @@ export function StageWorkspace({
       ) : null}
 
       {agentAddress && stage === 9 ? (
-        <DeliveryPanel detail={detail} tenantId={tenantId} latestReply={latestSpecialistMessage} />
+        <DeliveryPanel
+          detail={detail}
+          tenantId={tenantId}
+          latestReply={latestSpecialistMessage}
+          onRejectSendBack={() => void sendBack(8)}
+        />
       ) : null}
 
       {agentAddress && stage !== 4 && stage !== 5 && stage !== 8 && !DOCUMENT_STAGES.has(stage) ? (

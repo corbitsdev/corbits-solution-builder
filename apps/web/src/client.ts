@@ -45,7 +45,7 @@ import {
   type WorkflowGitPush,
 } from "@solutions-builder/installer";
 import type { WorkflowRunEvent } from "@intx/hub-client";
-import { foldProjectWorkflow, type ProjectWorkflowView } from "./project-workflow.ts";
+import { foldProjectWorkflow, newestIterationHasHoldOutput, type ProjectWorkflowView } from "./project-workflow.ts";
 import { MATERIAL_KIND, MATERIAL_READING_KIND } from "@solutions-builder/app/artifacts";
 import { readMaterial } from "./material-reading.ts";
 import type { DesignFeedbackDisposition, DesignFeedbackEntry as DesignFeedbackGraphEntry } from "@solutions-builder/app/artifact-graph";
@@ -308,7 +308,12 @@ export type ArtifactNode = {
   supersededByNodeId: string | null;
   /** `stepRef` is the stage-thread fold's lookup key: `${iterationRunId}/${stepId}` for the step that wrote this version. */
   provenance: { producer: string; agentRole?: string; providerId?: string; model?: string; stepRef?: string };
-  /** `sb.approvedAt`, stamped only by `persistStageDraft` (the Approve path) — null for any other write of this kind (CL-8639). */
+  /**
+   * `sb.approvedAt`, a legacy stamp no writer sets any more (CL-8687: the
+   * project workflow's own decisions are the approval record now). Kept
+   * only so `adoptionPlan` can find a pre-cutover project's already-approved
+   * history and replay it into the workflow once.
+   */
   approvedAt: string | null;
 };
 
@@ -1126,10 +1131,6 @@ export const api = {
             mediaType: "text/markdown",
             sourceVersionIds,
             provenance: { producer: "agent" as const },
-            // Only the explicit Approve path stamps this; the stage cursor
-            // (`currentStageFromArtifacts`) advances on it, never on a
-            // draft/package/decision write merely existing (CL-8639).
-            approvedAt: new Date().toISOString(),
             ...(target ? { target } : {}),
           },
         },
@@ -1392,16 +1393,25 @@ export const api = {
       stageSpecialistStatus(transport, workspaceTenantId, projectId, stage as Stage),
     ),
   /**
-   * Makes sure `projectId`'s process authority (CL-8721) is deployed and its
-   * one manual run triggered, the same ensure-and-reuse discipline
+   * Makes sure `projectId`'s process authority (CL-8721/CL-8687) is deployed
+   * and its one manual run triggered, the same ensure-and-reuse discipline
    * `ensureStageAgent` uses for a stage specialist: memoised per project so
    * two callers mounting at once share the in-flight deploy instead of
-   * racing to create it twice.
+   * racing to create it twice. Every stage 1..`LAST_STAGE` is authorized for
+   * the signed-in workspace owner -- the only principal that can approve
+   * today; a future multi-principal policy is a later change to this one
+   * call site.
    */
-  ensureProjectWorkflow: (projectId: string, stages: ProjectWorkflowStageInput[]): Promise<ProjectWorkflowDeployment> => {
+  ensureProjectWorkflow: (projectId: string): Promise<ProjectWorkflowDeployment> => {
     const pending = ensureProjectWorkflowCalls.get(projectId);
     if (pending) return pending;
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      const workspace = await resolveWorkspace(transport);
+      if (!workspace) throw new Error("The workspace is not installed yet.");
+      const stages: ProjectWorkflowStageInput[] = Array.from({ length: 9 }, (_, index) => ({
+        stage: index + 1,
+        authorizedPrincipalIds: [workspace.principalId],
+      }));
       const status = await request<HostStatus>("/status");
       return ensureProjectWorkflow(
         transport,
@@ -1418,9 +1428,19 @@ export const api = {
     ensureProjectWorkflowCalls.set(projectId, call);
     return call;
   },
-  /** The project workflow's current view, folded from its run's own event
-   *  log -- see `foldProjectWorkflow`. Null when the workflow has not been
-   *  deployed/triggered yet. */
+  /**
+   * The project workflow's current view, folded from its run's own event
+   * log -- see `foldProjectWorkflow`. Null when the workflow has not been
+   * deployed/triggered yet.
+   *
+   * Reads the top-level run's events plus ONLY the newest loop-iteration
+   * run: its `hold` step output already carries the complete current state
+   * (the loop parks `trigger.payload` there before waiting on a decision),
+   * so nothing older needs to be fetched. The one exception is the rare race
+   * where the newest iteration run exists but its `hold` step has not
+   * committed yet -- then the previous iteration's own `apply` output (the
+   * same state) is fetched instead.
+   */
   projectWorkflowView: (projectId: string): Promise<ProjectWorkflowView | null> =>
     asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const deployed = ensureProjectWorkflowCalls.get(projectId);
@@ -1431,10 +1451,21 @@ export const api = {
         workflows.runEvents(ref.deploymentId, ref.runId),
         workflows.runs(ref.deploymentId),
       ]);
-      const iterationIds = runIds.filter((id) => id.startsWith(`${ref.runId}__`));
+      const iterationIds = runIds
+        .filter((id) => id.startsWith(`${ref.runId}__`))
+        .map((id) => ({ id, index: Number(id.slice(id.lastIndexOf("__") + 2)) }))
+        .filter((entry) => Number.isFinite(entry.index))
+        .sort((a, b) => a.index - b.index)
+        .map((entry) => entry.id);
+
       const iterationEventsByRunId: Record<string, WorkflowRunEvent[]> = {};
-      for (const id of iterationIds) {
-        iterationEventsByRunId[id] = (await workflows.runEvents(ref.deploymentId, id)).events;
+      const newestId = iterationIds.at(-1);
+      if (newestId) {
+        iterationEventsByRunId[newestId] = (await workflows.runEvents(ref.deploymentId, newestId)).events;
+        const previousId = iterationIds.length >= 2 ? iterationIds.at(-2) : undefined;
+        if (previousId && !newestIterationHasHoldOutput(iterationEventsByRunId[newestId])) {
+          iterationEventsByRunId[previousId] = (await workflows.runEvents(ref.deploymentId, previousId)).events;
+        }
       }
       return foldProjectWorkflow(topEvents.events, iterationEventsByRunId);
     }),
@@ -1546,7 +1577,6 @@ export const api = {
             mediaType: bundle.mediaType,
             sourceVersionIds,
             provenance: { producer: "agent" as const },
-            approvedAt: new Date().toISOString(),
           },
         },
       });

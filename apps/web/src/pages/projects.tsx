@@ -27,6 +27,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, ApiFailure, type ProjectInfo, type ProjectSummary } from "../client.js";
 import { Button, Banner, downloadArtifact, StageRing, StateLabel, stageName } from "../components.jsx";
 import { assembleBundle, bundleFileName } from "../project-export.js";
+import { displayStage } from "../project-list.js";
 import { DEFAULT_POLICY } from "./onboarding.jsx";
 import { Dictated } from "../dictation.jsx";
 
@@ -237,7 +238,20 @@ function ProjectCard({
   onChanged: () => void;
   onError: (cause: unknown) => void;
 }) {
-  const stage = project.stage ?? 0;
+  // The project workflow's own stage when a view is already available for
+  // it (CL-8687); the artifact-graph fallback (`project.stage`) otherwise --
+  // never triggers a deploy just to show a card.
+  const [stage, setStage] = useState(project.stage ?? 0);
+  useEffect(() => {
+    setStage(project.stage ?? 0);
+    let cancelled = false;
+    void displayStage(project.id, project.stage ?? 0, api.projectWorkflowView).then((resolved) => {
+      if (!cancelled) setStage(resolved);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [project.id, project.stage]);
   const waiting = project.needsDecision;
   const [renaming, setRenaming] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
@@ -298,7 +312,7 @@ function ProjectCard({
     <StateLabel tone="disabled">Archived</StateLabel>
   ) : project.needsDecision ? (
     <StateLabel tone="warning">{project.waits[0]?.title ?? "Needs your decision"}</StateLabel>
-  ) : project.stage ? (
+  ) : stage ? (
     <StateLabel tone="info">In progress</StateLabel>
   ) : (
     <StateLabel tone="info">Not started</StateLabel>
@@ -312,7 +326,7 @@ function ProjectCard({
       <div className="project-card-stage">
         <StageRing stage={stage} />
         <span>
-          Stage {stage || "—"} of 9 · {stageName(project.stage)}
+          Stage {stage || "—"} of 9 · {stageName(stage)}
         </span>
         <Menu onOpenChange={(open) => !open && setConfirming(false)}>
           <MenuTrigger asChild>
