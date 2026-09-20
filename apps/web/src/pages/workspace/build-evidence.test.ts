@@ -27,7 +27,6 @@ function archiveNode(overrides: Partial<ArtifactNode> = {}): ArtifactNode {
     createdAt: "2026-01-01T00:05:00.000Z",
     supersededByNodeId: null,
     provenance: { producer: "agent" },
-    approvedAt: null,
     ...overrides,
   };
 }

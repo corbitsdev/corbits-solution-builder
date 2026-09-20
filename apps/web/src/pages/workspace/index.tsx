@@ -44,7 +44,6 @@ import { deliveryOpeningLine, parseDeliveryManifest } from "./delivery-opening.t
 import { EstimateView } from "./estimate.jsx";
 import { workspaceGuidance } from "./guidance.js";
 import { describeFailure } from "./failure-message.ts";
-import { currentStageFromArtifacts } from "../../project-view.ts";
 import {
   applyWithdrawn,
   parseWithdrawnTurns,
@@ -55,8 +54,7 @@ import {
 import type { ProjectWorkflowView } from "../../project-workflow.ts";
 import { approveStage, digestOf, ensureReviewOpen, reviewableArtifact, sendBack as sendBackDecision } from "../../stage-approval.ts";
 import { frozenSummaryLine, stageEvidence, stageRefusalMessage } from "../../stage-evidence.ts";
-import type { Stage7Evidence } from "@solutions-builder/app/project-workflow/contracts";
-import { adoptExistingProject } from "../../project-adoption.ts";
+import type { ReviewState, Stage7Evidence } from "@solutions-builder/app/project-workflow/contracts";
 import type { FoldedFeedback } from "@solutions-builder/app/project-state";
 
 export { StageDocument, DocumentBody } from "./document.jsx";
@@ -71,29 +69,53 @@ const DOCUMENT_STAGES = new Set([1, 2, 3, 6, 7]);
 /** Stands in for a version that would not load, so it never reads as empty. */
 const UNREADABLE = "_This version could not be read. It is still on disk — try again._";
 
-/** The newest, live (not superseded) node of `kind` at `stage`, or null. */
-function findLatestNode(nodes: readonly ArtifactNode[], kind: string, stage: number): ArtifactNode | null {
-  const candidates = nodes.filter((node) => node.kind === kind && node.stage === stage && node.supersededByNodeId === null);
+/**
+ * Stage 8's approved build archive, read straight off the workflow's own
+ * recorded review (CL-8687/#496 follow-up) -- the review names the exact
+ * artifact/version that was approved, never the newest node of a kind.
+ */
+function approvedStage8Archive(nodes: readonly ArtifactNode[], review: ReviewState | undefined): ArtifactNode | null {
+  if (!review || review.status !== "approved") return null;
+  return nodes.find((node) => node.artifactId === review.artifactId && node.version === review.version) ?? null;
+}
+
+/**
+ * The delivery manifest `publish_workspace` uploaded alongside a build
+ * archive, resolved from the archive's OWN metadata -- they are written by
+ * the same call, sharing the same `variant` (`attempt-<n>`), rather than by
+ * scanning for the newest `delivery_manifest` node at stage 8 (which could
+ * belong to a different, unapproved attempt).
+ */
+function manifestCompanionOf(nodes: readonly ArtifactNode[], archive: ArtifactNode): ArtifactNode | null {
+  const candidates = nodes.filter(
+    (node) => node.kind === "delivery_manifest" && node.stage === 8 && node.variant === archive.variant && node.supersededByNodeId === null,
+  );
   if (candidates.length === 0) return null;
   return candidates.reduce((latest, node) => (node.createdAt > latest.createdAt ? node : latest));
 }
 
 /**
  * Stage 9's opening mail (defect 3, CL-8723 follow-up): the delivery
- * manifest `publish_workspace` uploaded alongside the build archive, read
- * back and rendered into the exact text the delivery-verifier's prompt
- * promises, plus the build-engineer's own latest status reply as "the
- * checks stage 8 declared". Self-contained (reads stage 8's own thread and
- * the manifest artifact itself) so it produces the identical opening
- * whether called right after `approve()` or rebuilt on a page reload.
+ * manifest `publish_workspace` uploaded alongside the approved build
+ * archive, read back and rendered into the exact text the
+ * delivery-verifier's prompt promises, plus the build-engineer's own latest
+ * status reply as "the checks stage 8 declared". Self-contained (reads
+ * stage 8's own thread and the manifest artifact itself) so it produces the
+ * identical opening whether called right after `approve()` or rebuilt on a
+ * page reload. `archiveRef` is stage 8's approved review -- the workflow's
+ * own record, never re-derived from the artifact graph.
  */
 async function composeStage9Opening(deps: {
   readonly tenantId: string;
   readonly projectId: string;
   readonly nodes: readonly ArtifactNode[];
+  readonly archiveRef: { readonly artifactId: string; readonly version: number } | null;
   readonly fallbackBuildStatusBody?: string;
 }): Promise<string> {
-  const manifestNode = findLatestNode(deps.nodes, "delivery_manifest", 8);
+  const archiveNode = deps.archiveRef
+    ? (deps.nodes.find((node) => node.artifactId === deps.archiveRef!.artifactId && node.version === deps.archiveRef!.version) ?? null)
+    : null;
+  const manifestNode = archiveNode ? manifestCompanionOf(deps.nodes, archiveNode) : null;
   let manifestRef: Parameters<typeof deliveryOpeningLine>[0] = null;
   if (manifestNode) {
     try {
@@ -167,21 +189,20 @@ export function StageWorkspace({
     };
   }, [detail.project.id]);
 
-  // The project workflow (CL-8721) is the process authority for a stage's
-  // current position (CL-8687): `workflowView.stage`. `currentStageFromArtifacts`
-  // is a FAILURE-ONLY fallback: while the view is still loading, `stage`
-  // stays unresolved (see `workflowResolved`) rather than guessing, so the
-  // person never sees a stage briefly flash to whatever the artifact graph
-  // happens to derive. It only stands in once the workflow has actually
-  // failed to start or load.
-  const fallbackStage = useMemo(() => currentStageFromArtifacts(detail.nodes), [detail.nodes]);
+  // The project workflow (CL-8721) is the ONLY authority for a stage's
+  // current position (CL-8687): `workflowView.stage`. There is no artifact-
+  // derived fallback -- while the view is still loading, `stage` stays
+  // unresolved (see `workflowResolved`) rather than guessing, so the person
+  // never sees a stage briefly flash to something the workflow never said.
+  // Once the workflow has failed to start or load, `openingFailed` drives
+  // the "could not be read" state below instead of a guessed stage.
   const [workflowView, setWorkflowView] = useState<ProjectWorkflowView | null>(null);
   const [workflowStartError, setWorkflowStartError] = useState<string | null>(null);
   const [workflowViewFailed, setWorkflowViewFailed] = useState(false);
   const [workflowAttempt, setWorkflowAttempt] = useState(0);
   const workflowResolved = workflowView !== null;
   const openingFailed = workflowStartError !== null || workflowViewFailed;
-  const stage = workflowView?.stage ?? fallbackStage;
+  const stage = workflowView?.stage ?? 1;
 
   const retryOpening = () => {
     setWorkflowStartError(null);
@@ -195,9 +216,7 @@ export function StageWorkspace({
     return view;
   }, [detail.project.id]);
 
-  // Deployed/triggered once per project, then read on mount, adopted once
-  // (a pre-cutover project's legacy `approvedAt` history replayed into the
-  // workflow if it hasn't recorded anything of its own yet), and re-read.
+  // Deployed/triggered once per project, then read on mount and re-read.
   // `ensureProjectWorkflow` and the first `projectWorkflowView` read are each
   // reported on their own terms, so a failure of either says specifically
   // what did not start rather than a generic error.
@@ -225,23 +244,6 @@ export function StageWorkspace({
       }
       if (cancelled) return;
       setWorkflowView(view);
-      try {
-        await adoptExistingProject(
-          {
-            view: (projectId) => api.projectWorkflowView(projectId),
-            artifactContent: (nodeId) => api.artifactContent(tenantId, nodeId),
-            decide: (projectId, decision) => api.decide(projectId, decision),
-            now: () => new Date().toISOString(),
-          },
-          detail.project.id,
-          detail.nodes,
-          Array.from({ length: LAST_STAGE }, (_, index) => index + 1),
-        );
-      } catch (cause) {
-        if (!cancelled) setError(describeFailure(cause));
-        return;
-      }
-      if (!cancelled) void loadWorkflowView();
     })();
     return () => {
       cancelled = true;
@@ -487,16 +489,16 @@ export function StageWorkspace({
   // set in this mounted component — a reload, a re-opened project, or the
   // stage cursor advancing some other way (`approve()` only ever writes
   // `pendingOpening` in memory, so it never survives any of those). The
-  // previous stage's own live draft is the same content `approve()` would
-  // have sent, recovered from the artifact graph instead. Matched by kind,
-  // not `approvedAt` — no writer stamps that any more (CL-8687), and stage
-  // N-1 can carry more than one kind at once (e.g. stage 6's plan sits
-  // beside its requirements and reviews).
+  // previous stage's approved review IS the input to this one (CL-8687): its
+  // exact `artifactId`/`version`, read straight off the workflow's own
+  // record — never re-derived by scanning nodes for a kind. No approved
+  // review at N-1 means there is no input yet.
   const previousApproved = useMemo(() => {
-    if (stage <= 1) return null;
-    const previousKind = STAGE_DRAFT_KIND[stage - 1];
-    return findLatestNode(detail.nodes, previousKind ?? "", stage - 1);
-  }, [detail.nodes, stage]);
+    if (stage <= 1 || !workflowView) return null;
+    const review = workflowView.reviews[stage - 1];
+    if (!review || review.status !== "approved") return null;
+    return { artifactId: review.artifactId, version: review.version };
+  }, [workflowView, stage]);
 
   useEffect(() => {
     if (!agentAddress || agent?.stage !== stage) return;
@@ -563,14 +565,16 @@ export function StageWorkspace({
     // archive itself): its opening is always composed from the manifest and
     // stage 8's own status reply (defect 3).
     if (stage === 9) {
-      void composeStage9Opening({ tenantId, projectId: detail.project.id, nodes: detail.nodes }).then(dispatchOpening);
+      const review = workflowView?.reviews[8];
+      const archiveRef = review?.status === "approved" ? { artifactId: review.artifactId, version: review.version } : null;
+      void composeStage9Opening({ tenantId, projectId: detail.project.id, nodes: detail.nodes, archiveRef }).then(dispatchOpening);
       return () => {
         cancelled = true;
       };
     }
     if (!previousApproved) return;
     void api
-      .artifactContent(tenantId, previousApproved.id)
+      .artifactContent(tenantId, previousApproved.artifactId)
       .then((result) => {
         if (!result.content) return;
         // Stage 8's opening also names the frozen target — lost on reload
@@ -702,7 +706,6 @@ export function StageWorkspace({
       createdAt: draftMessage.at,
       supersededByNodeId: null,
       provenance: { producer: "specialist" },
-      approvedAt: null,
     };
   }, [draftMessage, draftKind, stage, approvedVersions]);
   const documentVersions = useMemo(
@@ -909,6 +912,7 @@ export function StageWorkspace({
                 tenantId,
                 projectId: detail.project.id,
                 nodes: detail.nodes,
+                archiveRef: { artifactId: ref.artifactId, version: ref.version },
                 fallbackBuildStatusBody: reviewMessage.body,
               })
             : reviewMessage.body;
@@ -929,16 +933,18 @@ export function StageWorkspace({
    * workflow its stage 9 `approve` decision, so `contracts.ts`'s `done`
    * (set only when an `approve` lands on the last stage) never fired and the
    * project never finished. Called AFTER the tool approval succeeds
-   * (`delivery.jsx`'s own `decide("approve")`); the reference is the newest
-   * live `delivery_manifest` artifact `publish_workspace` uploaded at stage
-   * 8 — what stage 9 actually reviewed — falling back to the build archive
-   * itself if no manifest exists (e.g. the data-URI fallback path).
+   * (`delivery.jsx`'s own `decide("approve")`); the reference is the
+   * `delivery_manifest` companion of stage 8's approved review (the
+   * workflow's own record of what stage 9 actually reviewed) — falling back
+   * to the archive itself if no manifest companion exists (e.g. the
+   * data-URI fallback path).
    */
   const acceptDelivery = async () => {
     setApproving(true);
     setError(null);
     try {
-      const evidenceNode = findLatestNode(detail.nodes, "delivery_manifest", 8) ?? findLatestNode(detail.nodes, "build_evidence", 8);
+      const archiveNode = approvedStage8Archive(detail.nodes, workflowView?.reviews[8]);
+      const evidenceNode = archiveNode ? (manifestCompanionOf(detail.nodes, archiveNode) ?? archiveNode) : null;
       if (!evidenceNode) {
         setError("No build evidence is recorded for this project yet — delivery cannot be finished.");
         return;
@@ -1239,8 +1245,6 @@ export function StageWorkspace({
           {stage === 7 ? (
             <EstimateView
               body={draftMessage.body}
-              detail={detail}
-              stage={stage}
               chosenTarget={chosenTarget}
               freeze={workflowView?.freeze ?? null}
             />
@@ -1386,7 +1390,6 @@ function DesignPanel({
         createdAt: latestReply.at,
         supersededByNodeId: null,
         provenance: { producer: "specialist" },
-        approvedAt: null,
       }
     : null;
   const designs = persisted.length > 0 ? persisted : draftNode ? [draftNode] : [];

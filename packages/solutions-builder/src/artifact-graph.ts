@@ -37,13 +37,6 @@ export type ArtifactGraphMetadata = {
    * the fold reads it back here to fill `ArtifactGraphNode.mediaType` (CL-8501).
    */
   mediaType: string;
-  /**
-   * Stamped only by the explicit Approve path (`persistStageDraft`), never
-   * by a stage's own draft/package/decision writes — the stage cursor
-   * (`currentStageFromArtifacts`) advances only on this, not on an
-   * artifact's mere existence (CL-8639).
-   */
-  approvedAt?: string;
 };
 
 /** The metadata contract on an artifact version: everything Builder owns lives under `sb`. */
@@ -87,8 +80,6 @@ export type ArtifactGraphNode = {
   supersededByNodeId: string | null;
   provenance: ArtifactProvenance;
   createdAt: string;
-  /** `sb.approvedAt`, or null when this version has never been explicitly approved. */
-  approvedAt: string | null;
   /** `source.upload.size`, when this version is a package upload record; unset otherwise (CL-8709). */
   sizeBytes?: number;
   /** The current version's real content digest, when the mounted package
@@ -181,7 +172,6 @@ export function foldArtifactGraph(artifacts: ArtifactListEntry[], projectId: str
       supersededByNodeId: supersededBy.get(entry.id) ?? null,
       provenance: sb.provenance,
       createdAt: entry.createdAt,
-      approvedAt: sb.approvedAt ?? null,
       ...(sizeBytes !== undefined ? { sizeBytes } : {}),
       contentSha256: entry.contentSha256 ?? null,
     };

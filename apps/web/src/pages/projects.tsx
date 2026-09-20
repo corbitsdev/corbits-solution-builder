@@ -83,14 +83,15 @@ export function Projects({
     }
   };
 
-  // Whatever waits on the person first, then the furthest along. Archived ones
-  // fold away.
+  // Whatever waits on the person first. Archived ones fold away. Stage is
+  // read per card (CL-8687/CL-8721), not on the list itself, so it plays no
+  // part in this ordering.
   const live = projects.filter((project) => !project.archivedAt);
   const archived = projects.filter((project) => project.archivedAt);
   const yourMove = (project: ProjectSummary) => project.needsDecision;
   const ordered = [...live].sort((left, right) => {
     if (yourMove(left) !== yourMove(right)) return yourMove(left) ? -1 : 1;
-    return (right.stage ?? 0) - (left.stage ?? 0);
+    return 0;
   });
 
   const start = async () => {
@@ -289,32 +290,39 @@ function ProjectCard({
   onChanged: () => void;
   onError: (cause: unknown) => void;
 }) {
-  // The project workflow's own stage when a view is already available for
-  // it (CL-8687); the artifact-graph fallback (`project.stage`) otherwise --
-  // never triggers a deploy just to show a card.
-  const [stage, setStage] = useState(project.stage ?? 0);
+  // The project workflow's own stage (CL-8687/CL-8721) — read-only, never
+  // triggers a deploy just to show a card. `null` while unresolved or when
+  // the workflow could not be read at all; `stageFailed` distinguishes the
+  // latter so the card can offer a Retry rather than showing a stage number.
+  const [stage, setStage] = useState<number | null>(null);
+  const [stageFailed, setStageFailed] = useState(false);
+  const [stageAttempt, setStageAttempt] = useState(0);
   // Whether the project workflow's own `done` has landed (CL-8723): stage 9's
   // `approve` decision, not just having reached stage 9.
   const [done, setDone] = useState(false);
   useEffect(() => {
-    setStage(project.stage ?? 0);
+    setStage(null);
+    setStageFailed(false);
     setDone(false);
     let cancelled = false;
-    void displayStage(project.id, project.stage ?? 0, api.projectWorkflowView).then((resolved) => {
+    void displayStage(project.id, api.projectWorkflowView).then((resolved) => {
       if (cancelled) return;
+      if (resolved === null) {
+        setStageFailed(true);
+        return;
+      }
       setStage(resolved);
       setDone(displayDone(project.id));
     });
     return () => {
       cancelled = true;
     };
-  }, [project.id, project.stage]);
+  }, [project.id, stageAttempt]);
   // Whose turn it is, read off the current stage's mail thread alone
-  // (CL-8725) -- never for an archived project, and never for any stage but
-  // the current one `stage` just resolved.
+  // (CL-8725) -- never for an archived project or before the stage resolves.
   const [turn, setTurn] = useState<string | null>(null);
   useEffect(() => {
-    if (project.archivedAt) {
+    if (project.archivedAt || stage === null) {
       setTurn(null);
       return;
     }
@@ -388,6 +396,8 @@ function ProjectCard({
 
   const status = project.archivedAt ? (
     <StateLabel tone="disabled">Archived</StateLabel>
+  ) : stageFailed ? (
+    <StateLabel tone="error">Status unavailable</StateLabel>
   ) : done ? (
     <StateLabel tone="success">Delivered</StateLabel>
   ) : project.needsDecision ? (
@@ -406,8 +416,17 @@ function ProjectCard({
       style={{ "--i": index } as React.CSSProperties}
     >
       <div className="project-card-stage">
-        <StageRing stage={stage} />
-        <span>{done ? "Delivered · project finished" : `Stage ${stage || "—"} of 9 · ${stageName(stage)}`}</span>
+        <StageRing stage={stage ?? 0} />
+        {stageFailed ? (
+          <span>
+            Status unavailable{" "}
+            <button type="button" className="link-button" onClick={() => setStageAttempt((attempt) => attempt + 1)}>
+              Retry
+            </button>
+          </span>
+        ) : (
+          <span>{done ? "Delivered · project finished" : `Stage ${stage || "—"} of 9 · ${stageName(stage ?? 0)}`}</span>
+        )}
         <Menu onOpenChange={(open) => !open && setConfirming(false)}>
           <MenuTrigger asChild>
             <button type="button" className="project-card-menu" aria-label={`Options for ${project.title}`}>

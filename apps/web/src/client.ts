@@ -293,7 +293,7 @@ export type ProjectSummary = {
   id: string;
   revision: number;
   title: string;
-  /** 1 + the highest stage with a live, approved draft artifact — the same cursor `pages/workspace/index.tsx` derives per-project. */
+  /** Always null off `listProjectSummaries` -- `project-list.ts`'s `displayStage` reads the project workflow's own stage per card, or null when it could not be read. */
   stage: number | null;
   archivedAt: string | null;
   /** A stock hub approval (stage 9's delivery) is pending on this project. */
@@ -331,13 +331,6 @@ export type ArtifactNode = {
   supersededByNodeId: string | null;
   /** `stepRef` is the stage-thread fold's lookup key: `${iterationRunId}/${stepId}` for the step that wrote this version. */
   provenance: { producer: string; agentRole?: string; providerId?: string; model?: string; stepRef?: string };
-  /**
-   * `sb.approvedAt`, a legacy stamp no writer sets any more (CL-8687: the
-   * project workflow's own decisions are the approval record now). Kept
-   * only so `adoptionPlan` can find a pre-cutover project's already-approved
-   * history and replay it into the workflow once.
-   */
-  approvedAt: string | null;
   /** The current version's real content digest, when the mounted package
    *  recorded one (CL-8723) — a sha256 over the actual bytes, unlike
    *  `contentHash` (an `<id>@<version>` pair). Used as a stage approval's
@@ -365,16 +358,14 @@ export type ProjectDetail = {
   tenantId: string;
   /**
    * The project's current stage: the project workflow's own committed stage
-   * once one exists for this project (`project-view.ts`'s `resolveStage`),
-   * falling back to 1 + the highest stage with a live, approved draft
-   * artifact (`currentStageFromArtifacts`) only before a workflow has been
-   * ensured — a brand-new project, or one from before the CL-8721 cutover.
+   * (`project-view.ts`'s `loadProjectView`) — the workflow is the only
+   * authority on this. Stays at 1 only while the workflow has not been
+   * ensured yet for this project (a brand-new one, before its first stage
+   * lands).
    */
   stage: number;
-  /** Whether the project workflow has converged (stage 9 approved); always false under the artifact-fold fallback. */
+  /** Whether the project workflow has converged (stage 9 approved). */
   done: boolean;
-  /** Which rule produced `stage`/`done` above. */
-  stageSource: "workflow" | "artifacts";
   /** True when no principal other than the local actor holds this stage's approval authority. */
   soloApproval: boolean;
   nodes: ArtifactNode[];
@@ -1015,9 +1006,9 @@ export const api = {
    * (`project-export.ts`'s `assembleBundle`) as a NEW project — client-driven,
    * no host route. `parseBundle` gives a clear message for the wrong format,
    * version, or a missing key; `project-import.ts`'s `importPlan` re-keys
-   * every bundled artifact's `sb` metadata to the new project id and never
-   * writes `approvedAt`. The new project's own workflow starts fresh at
-   * stage 1 — no approval is forged from the bundle's history.
+   * every bundled artifact's `sb` metadata to the new project id. The new
+   * project's own workflow starts fresh at stage 1 — no approval is forged
+   * from the bundle's history.
    */
   importProject: (raw: unknown) =>
     asWorkspaceOwner(async (transport, workspaceTenantId) => {
@@ -1730,7 +1721,7 @@ export const api = {
    * Records a person's disposition on one already-recorded feedback comment,
    * by id — the only way `sb.feedback[].disposition` changes; a new design
    * version never touches it (CL-8699). Same metadata-revise path as
-   * `submitDesignFeedback`, and never stamps `approvedAt`.
+   * `submitDesignFeedback`.
    */
   setDesignFeedbackDisposition: (
     tenantId: string,

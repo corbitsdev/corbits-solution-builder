@@ -214,11 +214,11 @@ export async function ensureProjectWorkflow(
  * The same deployment/run `ensureProjectWorkflow` would reuse, without
  * deploying or triggering anything -- for a page that just needs to read the
  * project workflow's current stage (`project-view.ts`'s `loadProjectView`).
- * Null when the project has no workflow asset yet (a pre-cutover project, or
- * a brand-new one the workspace has not ensured yet), no live-or-ended
- * deployment on it, or no top-level run triggered against it -- any of which
- * means there is nothing here to fold, and the caller falls back to
- * `currentStageFromArtifacts`.
+ * Null when the project has no workflow asset yet (a brand-new project the
+ * workspace has not ensured yet), no live-or-ended deployment on it, or no
+ * top-level run triggered against it -- any of which means there is nothing
+ * here to fold yet; the caller treats the project as still at stage 1 until
+ * `StageWorkspace` ensures and triggers the workflow.
  */
 export async function findProjectWorkflow(
   transport: Transport,

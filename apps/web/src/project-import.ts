@@ -3,9 +3,7 @@
  * (CL-8725). The bundle's process history is never replayed: every artifact
  * and conversation is recreated fresh under a NEW project id, and that
  * project's own workflow starts at stage 1 like any other new project.
- * Approvals are for the person to make again -- this never writes
- * `approvedAt`, unlike `project-adoption.ts`'s `adoptExistingProject`, which
- * only ever replays a project's OWN prior history, never an imported one's.
+ * Approvals are for the person to make again.
  *
  * Mail history cannot be recreated (there is no mailbox to write into before
  * a stage specialist deploys), so each bundled conversation becomes one
@@ -40,10 +38,10 @@ function transcript(messages: ProjectBundle["conversations"][number]["messages"]
 /**
  * The pure write plan for one bundle under a freshly created project id: no
  * network, nothing minted here. Every artifact becomes its own fresh
- * version-1 write -- `sourceVersionIds` reset to none, `approvedAt` never
- * present -- with `kind`/`stage`/`variant`/`mediaType`/`provenance` carried
- * over from the bundled node, re-keyed to `newProjectId`. Content, including
- * a `data:` URL for a binary original, is kept exactly as bundled.
+ * version-1 write -- `sourceVersionIds` reset to none -- with
+ * `kind`/`stage`/`variant`/`mediaType`/`provenance` carried over from the
+ * bundled node, re-keyed to `newProjectId`. Content, including a `data:` URL
+ * for a binary original, is kept exactly as bundled.
  */
 export function importPlan(bundle: ProjectBundle, newProjectId: string): ImportPlan {
   const artifacts: ImportWrite[] = bundle.artifacts.map(({ node, content }) => ({

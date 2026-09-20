@@ -53,7 +53,6 @@ function pickNode(node: ArtifactNode): ArtifactNode {
     createdAt: node.createdAt,
     supersededByNodeId: node.supersededByNodeId,
     provenance: { ...node.provenance },
-    approvedAt: node.approvedAt,
   };
 }
 

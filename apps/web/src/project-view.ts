@@ -1,15 +1,17 @@
 /**
  * `loadProjectView`: the project detail read, folded in the browser from the
- * project's own tenant record, its artifact fold, and — when one exists —
- * its native project workflow (what `GET /projects/:id` and
- * `GET /projects/:id/graph` used to answer; CL-8510, step C of CL-8072;
- * design fixed by CL-8500 steps A/#363 and B/#370).
+ * project's own tenant record, its artifact fold, and its native project
+ * workflow (what `GET /projects/:id` and `GET /projects/:id/graph` used to
+ * answer; CL-8510, step C of CL-8072; design fixed by CL-8500 steps A/#363
+ * and B/#370).
  *
- * The project workflow (CL-8721) is now the process authority: once it
- * exists, its own committed stage is `detail.stage`, not the artifact fold.
- * `currentStageFromArtifacts` below only still applies before the workspace
- * has ensured a workflow for this project (a brand-new project, or one from
- * before the cutover) — see `resolveStage`.
+ * The project workflow (CL-8721) is the ONLY authority on a project's stage
+ * and `done`: `detail.stage`/`detail.done` are its own committed state, read
+ * straight off `loadProjectWorkflowView`, never derived from the artifact
+ * fold (CL-8639/CL-8687 cutover). Before the workspace has ensured a
+ * workflow for this project (a brand-new project, no stage has landed yet)
+ * `stage` stays at 1 and `done` at false; a workflow that exists but fails
+ * to read propagates as a rejected promise rather than a guessed stage.
  */
 import type { Transport } from "@intx/hub-client";
 import { requireProject as installerRequireProject, resolveWorkspace } from "@solutions-builder/installer";
@@ -17,10 +19,9 @@ import { requiredAuthorityFor } from "@solutions-builder/app/decision-copy";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { createHubTransport } from "./hub.ts";
 import { artifactGraphFor } from "./artifact-graph.ts";
-import { STAGE_DRAFT_KIND } from "./client.ts";
 import type { ArtifactNode, ProjectDetail } from "./client.ts";
 import { resolveProjectWorkflowRef } from "./project-workflow-ref.ts";
-import { loadProjectWorkflowView, type ProjectWorkflowView } from "./project-workflow.ts";
+import { loadProjectWorkflowView } from "./project-workflow.ts";
 
 const LAST_STAGE = 9;
 
@@ -45,31 +46,6 @@ type HubPrincipal = { id: string; tenantId: string; kind: string; refId: string;
 type Membership = { principalId: string; tenantId: string; kind: string; status: string };
 
 /**
- * 1 + the highest stage with a live, *explicitly approved* draft artifact —
- * the single stage cursor every page shares (`pages/workspace/index.tsx`,
- * `project-list.ts`). Approval is `sb.approvedAt`, stamped only by
- * `persistStageDraft` (the Approve path); a stage's kind existing on an
- * artifact is not enough — a package write, a design feedback revision, or a
- * stakeholder decision never stamps it, so none of those can advance the
- * stage on their own (CL-8639).
- */
-export function currentStageFromArtifacts(nodes: readonly ArtifactNode[]): number {
-  let stage = 1;
-  for (let candidate = 1; candidate <= LAST_STAGE; candidate += 1) {
-    const approved = nodes.some(
-      (node) =>
-        node.stage === candidate &&
-        node.kind === STAGE_DRAFT_KIND[candidate] &&
-        node.supersededByNodeId === null &&
-        node.approvedAt !== null,
-    );
-    if (!approved) break;
-    stage = Math.min(candidate + 1, LAST_STAGE);
-  }
-  return stage;
-}
-
-/**
  * Whether the signed-in actor is the only person in this project tenant who
  * could approve this stage — the same rule as the deleted host route's
  * `apps/hub/src/command-approvals.ts`'s `soloApprovalFor`, over the same
@@ -86,21 +62,6 @@ async function soloApprovalFor(transport: Transport, projectId: string, stage: S
   return !members.some(
     (row) => row.id !== actor && row.kind === "user" && row.status === "active" && row.roles.some((role) => role.name === required),
   );
-}
-
-/**
- * `detail.stage` and `detail.done`, resolved from `view` when the project
- * has a workflow, else the artifact-fold fallback — the single stage cursor
- * every page shares (`app.tsx`'s header/rail, `pages/workspace/index.tsx`,
- * `project-list.ts`). `stageSource` lets a caller tell which rule produced
- * it, mainly for tests and debugging; no page branches on it today.
- */
-export function resolveStage(
-  view: ProjectWorkflowView | null,
-  nodes: readonly ArtifactNode[],
-): { stage: number; done: boolean; stageSource: "workflow" | "artifacts" } {
-  if (!view) return { stage: currentStageFromArtifacts(nodes), done: false, stageSource: "artifacts" };
-  return { stage: view.done ? LAST_STAGE : view.stage, done: view.done, stageSource: "workflow" };
 }
 
 /** Maps an `ArtifactGraphNode` fold onto the `ArtifactNode` shape the pages already consume. */
@@ -129,11 +90,30 @@ export function toArtifactNode(node: Awaited<ReturnType<typeof artifactGraphFor>
     createdAt: node.createdAt,
     supersededByNodeId: node.supersededByNodeId,
     provenance: node.provenance,
-    approvedAt: node.approvedAt,
     // The real content digest `@corbits/artifacts` computed for this
     // version, when it recorded one (CL-8723) — real, unlike `contentHash`.
     contentSha256: node.contentSha256 ?? null,
   };
+}
+
+/**
+ * `detail.stage`/`detail.done`: the project workflow's own committed state
+ * when a workflow ref already exists for this project, read straight off
+ * `loadProjectWorkflowView` -- a read failure there propagates (the caller
+ * reports the status could not be read, never a guessed stage). No ref yet
+ * (the workflow has not been ensured for this project, e.g. a brand-new
+ * project the workspace has not opened yet) is not a failure: `stage` stays
+ * at 1 and `done` at false until `StageWorkspace` ensures and triggers it.
+ */
+async function workflowStage(
+  transport: Transport,
+  workspaceTenantId: string,
+  projectId: string,
+): Promise<{ stage: number; done: boolean }> {
+  const ref = await resolveProjectWorkflowRef(transport, workspaceTenantId, projectId).catch(() => null);
+  if (!ref) return { stage: 1, done: false };
+  const view = await loadProjectWorkflowView(transport, workspaceTenantId, ref);
+  return { stage: view.done ? LAST_STAGE : view.stage, done: view.done };
 }
 
 export async function loadProjectView(projectId: string, transport: Transport = createHubTransport()): Promise<ProjectDetail> {
@@ -145,9 +125,7 @@ export async function loadProjectView(projectId: string, transport: Transport = 
   ]);
   const nodes = graph.nodes.map((node) => toArtifactNode(node));
 
-  const ref = await resolveProjectWorkflowRef(transport, workspace.tenantId, projectId).catch(() => null);
-  const view = ref ? await loadProjectWorkflowView(transport, workspace.tenantId, ref).catch(() => null) : null;
-  const { stage, done, stageSource } = resolveStage(view, nodes);
+  const { stage, done } = await workflowStage(transport, workspace.tenantId, projectId);
 
   const soloApproval = await soloApprovalFor(transport, projectId, stage as Stage).catch(() => true);
 
@@ -161,7 +139,6 @@ export async function loadProjectView(projectId: string, transport: Transport = 
     tenantId: workspace.tenantId,
     stage,
     done,
-    stageSource,
     soloApproval,
     nodes,
     approvals: [],

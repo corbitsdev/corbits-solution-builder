@@ -34,9 +34,8 @@ export type ReviewableArtifact = { readonly status: "found"; readonly node: Arti
  * Every stage but 8 has no artifact a specialist writes directly the browser
  * can trust as the reviewable version: the fallback path persists the
  * latest substantial chat draft as a new version
- * (`pages/workspace/index.tsx`'s `approve()`, via `persistStageDraft`,
- * stamping no `approvedAt` any more -- CL-8687), and THAT reference is what
- * goes into `open_review`.
+ * (`pages/workspace/index.tsx`'s `approve()`, via `persistStageDraft` --
+ * CL-8687), and THAT reference is what goes into `open_review`.
  *
  * Stage 8 is different (CL-8723): `publish_workspace` uploads the build
  * archive itself through the run-scoped artifacts routes, stamping
