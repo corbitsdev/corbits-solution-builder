@@ -38,7 +38,7 @@ import { DeliveryPanel } from "./delivery.jsx";
 import { StageConversation } from "./thread.jsx";
 import { StageDocument } from "./document.jsx";
 import { Preparing } from "./preparing.jsx";
-import { BuildPanel, parsePublishedBundle } from "./build.jsx";
+import { BuildPanel, buildEvidenceState, parsePublishedBundle } from "./build.jsx";
 import { TargetPicker, targetOpeningLine } from "./freeze.jsx";
 import { deliveryOpeningLine, parseDeliveryManifest } from "./delivery-opening.ts";
 import { EstimateView } from "./estimate.jsx";
@@ -798,6 +798,20 @@ export function StageWorkspace({
     [stage, latestSpecialistMessage],
   );
 
+  /**
+   * Stage 8's own readiness rule (`build.tsx`'s `buildEvidenceState`,
+   * CL-8723): a review may only be opened once the CURRENT build attempt has
+   * published an archive (a `build_evidence` node no older than the last
+   * "Start"/"Continue" mail) or the specialist's latest reply carries the
+   * fallback bundle. Any other specialist reply at stage 8 -- a status
+   * update, "IDLE", a question -- is conversation, not a build archive, and
+   * must never be persisted or reviewed as one.
+   */
+  const stage8Evidence = useMemo(
+    () => (stage === 8 ? buildEvidenceState(foldedMessages, detail.nodes, publishedBundle !== null) : null),
+    [stage, foldedMessages, detail.nodes, publishedBundle],
+  );
+
   const stageApprovalDeps = useMemo(
     () => ({
       view: (projectId: string) => api.projectWorkflowView(projectId),
@@ -828,8 +842,10 @@ export function StageWorkspace({
    */
   const resolveReviewRef = useCallback(async (): Promise<{ artifactId: string; version: number; sha256: string } | null> => {
     if (!reviewMessage || draftKind === null) return null;
+    if (stage === 8 && !stage8Evidence?.ready) return null;
     const materials = detail.nodes.filter((node) => node.kind === "source_material").map((node) => node.id);
-    const reviewable = reviewableArtifact({ nodes: detail.nodes, stage, kind: draftKind, latestDraft: publishedBundle ?? reviewMessage });
+    const latestDraft = stage === 8 ? publishedBundle : reviewMessage;
+    const reviewable = reviewableArtifact({ nodes: detail.nodes, stage, kind: draftKind, latestDraft });
     if (reviewable.status === "found") {
       return {
         artifactId: reviewable.node.artifactId,
@@ -850,7 +866,7 @@ export function StageWorkspace({
     const version = Number(persisted.contentHash.slice(persisted.contentHash.lastIndexOf("@") + 1));
     const sha256 = await digestOf(reviewMessage.body);
     return { artifactId: persisted.artifactId, version, sha256 };
-  }, [reviewMessage, draftKind, detail.nodes, detail.project.id, stage, publishedBundle, chosenTarget]);
+  }, [reviewMessage, draftKind, detail.nodes, detail.project.id, stage, publishedBundle, chosenTarget, stage8Evidence]);
 
   // Opens the review the moment this stage's material is ready, rather than
   // at the instant of approval -- the project workflow (`allowed.approve`)
@@ -867,7 +883,9 @@ export function StageWorkspace({
     if (!workflowView || workflowView.done || stage >= LAST_STAGE) return;
     if (stage === 7 && !chosenTarget) return;
     if (!reviewMessage || draftKind === null) return;
-    const reviewable = reviewableArtifact({ nodes: detail.nodes, stage, kind: draftKind, latestDraft: publishedBundle ?? reviewMessage });
+    if (stage === 8 && !stage8Evidence?.ready) return;
+    const latestDraft = stage === 8 ? publishedBundle : reviewMessage;
+    const reviewable = reviewableArtifact({ nodes: detail.nodes, stage, kind: draftKind, latestDraft });
     if (reviewable.status === "none") return;
     const key =
       reviewable.status === "found"
@@ -892,7 +910,7 @@ export function StageWorkspace({
         ensuringReviewKeyRef.current = null;
       }
     })();
-  }, [workflowView, stage, chosenTarget, reviewMessage, draftKind, detail.nodes, detail.project.id, publishedBundle, resolveReviewRef, stageApprovalDeps, refreshWorkflow]);
+  }, [workflowView, stage, chosenTarget, reviewMessage, draftKind, detail.nodes, detail.project.id, publishedBundle, stage8Evidence, resolveReviewRef, stageApprovalDeps, refreshWorkflow]);
 
   /**
    * Sends the workflow's `approve` decision for this stage's already-open
