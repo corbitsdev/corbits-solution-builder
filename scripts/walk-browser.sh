@@ -277,6 +277,7 @@ walk_log create-project "create project" "opened at stage 1" $(( ($(date +%s)-T0
 
 # The app uses the first model the endpoint lists unless one is selected.
 # Stage 1 is already deployed; every later stage deploys with this choice.
+PROJECT_URL=$(ab get url 2>/dev/null | tail -1)
 snap
 SETTINGS=$(ref 'link "Settings"'); [ -z "$SETTINGS" ] && SETTINGS=$(ref 'button "Settings"')
 [ -n "$SETTINGS" ] && ab click "@$SETTINGS" >/dev/null
@@ -286,11 +287,10 @@ if wait_for 'combobox "Model for ' 30; then
 else
   shot "no-model-picker"; defect_log provider "a model picker in Settings" "not found" "shots/no-model-picker.png" "major"
 fi
-ab back >/dev/null 2>&1; sleep 2
-if ! wait_for "Stage 1 of 9" 30; then
-  snap; P=$(ref 'link "Projects[^"]*"'); [ -n "$P" ] && ab click "@$P" >/dev/null; sleep 2; snap
-  C=$(ref '(link|button) "[^"]*lunch[^"]*"'); [ -n "$C" ] && ab click "@$C" >/dev/null
-  wait_for "Stage 1 of 9" 60 || { shot "no-return-to-project"; defect_log provider "return to the project" "not found" "shots/no-return-to-project.png" "blocker"; exit 1; }
+ab open "$PROJECT_URL" >/dev/null 2>&1
+wait_for 'button "Open" \[ref=' 30 && ab click "@$(ref 'button "Open"')" >/dev/null
+if ! wait_for "Stage 1 of 9" 60; then
+  shot "no-return-to-project"; defect_log provider "return to the project" "not found" "shots/no-return-to-project.png" "blocker"; exit 1
 fi
 
 STAGES=$(seq $([ "$WALK_RESUME_STAGE" -gt 0 ] 2>/dev/null && echo "$WALK_RESUME_STAGE" || echo 1) "$WALK_END_STAGE")
