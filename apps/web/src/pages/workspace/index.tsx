@@ -39,6 +39,7 @@ import { BuildPanel, buildEvidenceState } from "./build.jsx";
 import { TargetPicker, targetOpeningLine } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
 import { workspaceGuidance } from "./guidance.js";
+import { describeFailure } from "./failure-message.ts";
 import { currentStageFromArtifacts } from "../../project-view.ts";
 import {
   applyWithdrawn,
@@ -94,11 +95,25 @@ export function StageWorkspace({
 
   // The project workflow (CL-8721) is the process authority for a stage's
   // current position (CL-8687): `workflowView.stage`. `currentStageFromArtifacts`
-  // survives ONLY as a display fallback for the brief window before the
-  // view has loaded for the first time — it never drives approval.
+  // is a FAILURE-ONLY fallback: while the view is still loading, `stage`
+  // stays unresolved (see `workflowResolved`) rather than guessing, so the
+  // person never sees a stage briefly flash to whatever the artifact graph
+  // happens to derive. It only stands in once the workflow has actually
+  // failed to start or load.
   const fallbackStage = useMemo(() => currentStageFromArtifacts(detail.nodes), [detail.nodes]);
   const [workflowView, setWorkflowView] = useState<ProjectWorkflowView | null>(null);
+  const [workflowStartError, setWorkflowStartError] = useState<string | null>(null);
+  const [workflowViewFailed, setWorkflowViewFailed] = useState(false);
+  const [workflowAttempt, setWorkflowAttempt] = useState(0);
+  const workflowResolved = workflowView !== null;
+  const openingFailed = workflowStartError !== null || workflowViewFailed;
   const stage = workflowView?.stage ?? fallbackStage;
+
+  const retryOpening = () => {
+    setWorkflowStartError(null);
+    setWorkflowViewFailed(false);
+    setWorkflowAttempt((attempt) => attempt + 1);
+  };
 
   const loadWorkflowView = useCallback(async () => {
     const view = await api.projectWorkflowView(detail.project.id).catch(() => null);
@@ -109,13 +124,28 @@ export function StageWorkspace({
   // Deployed/triggered once per project, then read on mount, adopted once
   // (a pre-cutover project's legacy `approvedAt` history replayed into the
   // workflow if it hasn't recorded anything of its own yet), and re-read.
+  // `ensureProjectWorkflow` and the first `projectWorkflowView` read are each
+  // reported on their own terms, so a failure of either says specifically
+  // what did not start rather than a generic error.
   useEffect(() => {
     let cancelled = false;
-    void api
-      .ensureProjectWorkflow(detail.project.id)
-      .then(() => loadWorkflowView())
-      .then(async (view) => {
-        if (cancelled || !view) return;
+    (async () => {
+      try {
+        await api.ensureProjectWorkflow(detail.project.id);
+      } catch (cause) {
+        if (!cancelled) setWorkflowStartError(describeFailure(cause));
+        return;
+      }
+      let view: ProjectWorkflowView | null;
+      try {
+        view = await api.projectWorkflowView(detail.project.id);
+      } catch {
+        if (!cancelled) setWorkflowViewFailed(true);
+        return;
+      }
+      if (cancelled) return;
+      setWorkflowView(view);
+      try {
         await adoptExistingProject(
           {
             view: (projectId) => api.projectWorkflowView(projectId),
@@ -127,16 +157,17 @@ export function StageWorkspace({
           detail.nodes,
           Array.from({ length: LAST_STAGE }, (_, index) => index + 1),
         );
-        if (!cancelled) void loadWorkflowView();
-      })
-      .catch((cause: unknown) => {
-        if (!cancelled) setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-      });
+      } catch (cause) {
+        if (!cancelled) setError(describeFailure(cause));
+        return;
+      }
+      if (!cancelled) void loadWorkflowView();
+    })();
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detail.project.id]);
+  }, [detail.project.id, workflowAttempt]);
 
   // Same cadence the thread refreshes on: a 20s fallback poll, since the
   // workflow's own decisions do not land on the tenant mailbox stream.
@@ -157,9 +188,19 @@ export function StageWorkspace({
   // still in flight (or already resolved) never leaks that stale address
   // into the opening-send effect below (CL-8649).
   const [agent, setAgent] = useState<{ stage: number; address: string } | null>(null);
+  // The hub's own message for a failed deployment, shown verbatim rather
+  // than left to the waiting UI to imply it's still in progress (CL-8612's
+  // 502 case: the workspace used to sit on "Starting…" forever).
+  const [agentError, setAgentError] = useState<string | null>(null);
+  const [agentAttempt, setAgentAttempt] = useState(0);
   useEffect(() => {
+    // The real stage has to be known before a specialist is deployed for it
+    // — never for the artifact-derived fallback while the workflow view is
+    // still loading (CL-8721).
+    if (!workflowResolved) return;
     let cancelled = false;
     const requestedStage = stage;
+    setAgentError(null);
     api
       .ensureStageAgent(detail.project.id, requestedStage)
       .then((deployment) => {
@@ -167,12 +208,12 @@ export function StageWorkspace({
       })
       .catch((cause: unknown) => {
         if (cancelled) return;
-        setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+        setAgentError(describeFailure(cause));
       });
     return () => {
       cancelled = true;
     };
-  }, [detail.project.id, stage]);
+  }, [detail.project.id, stage, workflowResolved, agentAttempt]);
   const agentAddress = agent?.stage === stage ? agent.address : null;
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -339,6 +380,8 @@ export function StageWorkspace({
   // remount ever regresses.
   useEffect(() => {
     setWorkflowView(null);
+    setWorkflowStartError(null);
+    setWorkflowViewFailed(false);
     setPendingOpening(null);
     openedRef.current = null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -659,8 +702,33 @@ export function StageWorkspace({
     detail.nodes.find((node) => node.stage === stage && node.kind === "product_requirements" && node.supersededByNodeId === null) ??
     null;
 
+  // Neutral until the workflow view says which stage this really is — never
+  // the artifact-derived fallback, which for a mid-way project is stage 1
+  // and would otherwise flash before the real stage takes over (CL-8721).
+  if (!workflowResolved && !openingFailed) {
+    return (
+      <div className="stage-view">
+        <Screen title="Opening the project…" description="Reading where this project's workflow stands." tight>
+          <p className="inline-note">This will only take a moment.</p>
+        </Screen>
+      </div>
+    );
+  }
+
   return (
     <div className="stage-view">
+      {openingFailed ? (
+        <Banner
+          tone="error"
+          title={
+            workflowStartError
+              ? `The project workflow could not be started: ${workflowStartError}`
+              : "The project workflow could not be read."
+          }
+          action={{ label: "Try again", onClick: retryOpening }}
+        />
+      ) : null}
+
       {error ? (
         <Banner
           tone="error"
@@ -715,14 +783,26 @@ export function StageWorkspace({
         </details>
       ) : null}
 
-      {!agentAddress ? (
+      {!agentAddress && agentError ? (
+        <Banner
+          tone="error"
+          title={`The ${stageName(stage).toLowerCase()} specialist could not be started`}
+          action={{ label: "Try again", onClick: () => setAgentAttempt((attempt) => attempt + 1) }}
+        >
+          {agentError}
+        </Banner>
+      ) : null}
+
+      {!agentAddress && !agentError ? (
         <Screen title={`Stage ${stage} of 9 · ${stageName(stage)}`} description={STAGE_GOAL[stage]} tight>
           <p className="inline-note">Starting the {stageName(stage).toLowerCase()} specialist…</p>
         </Screen>
       ) : null}
 
       {agentAddress ? (
-        <Screen title={guidance.title} description={guidance.detail} tight>
+        <div className="stage-guidance" aria-label={guidance.title}>
+          <p className="stage-guidance-title">{guidance.title}</p>
+          <p className="stage-guidance-detail">{guidance.detail}</p>
           {guidance.question && guidance.question.choices.length > 0 ? (
             <div className="button-row" aria-label="Recorded answer choices">
               {guidance.question.choices.map((choice) => (
@@ -732,7 +812,7 @@ export function StageWorkspace({
               ))}
             </div>
           ) : null}
-        </Screen>
+        </div>
       ) : null}
 
       {agentAddress && stage === 4 ? (

@@ -793,12 +793,21 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   border-radius: 0;
 }
 
-/* The conversation: transcript that grows upward, composer pinned beneath. */
+/* The conversation: transcript that grows upward, composer pinned beneath.
+   A flex column, not a grid: `.thread-head` and `.composer` already declare
+   `flex: none` (their fixed rows), and `.thread-turns` — the actual
+   scrolling element, from `@corbits/react-ui` — ships Tailwind's
+   `flex-1 min-h-0 overflow-y-auto`, which only takes effect under a flex
+   parent. Under `display: grid` those utilities were inert, so a short
+   viewport let the transcript's own min-content size push past its row
+   instead of shrinking and scrolling, overlapping the approve row beneath
+   it (CL-8721: guidance squeeze exposed it, but the layout was never
+   actually flex here). */
 .stage-thread {
-  display: grid;
-  /* Header, transcript, composer. The transcript is the part that gives. */
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   min-height: 0;
+  overflow: hidden;
   background: var(--wb-background);
   border-right: 1px solid var(--wb-border);
 }
@@ -2283,6 +2292,35 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   animation: gate-pulse 1.6s ease-in-out infinite;
 }
 
+/* The stage guidance: a compact banner sized to its content (title, one-line
+   detail, answer chips), not a `Card` — a `Screen` here stretched to fill
+   the flex row it shares with the two-pane layout below it, leaving a large
+   empty region above a squeezed conversation and draft. This sits flush
+   above that layout and never competes with it for height. */
+.stage-guidance {
+  flex: none;
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--wb-border);
+  background: var(--wb-card);
+}
+
+.stage-guidance-title {
+  margin: 0;
+  font-weight: 500;
+}
+
+.stage-guidance-detail {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--wb-muted-foreground);
+}
+
+.stage-guidance .button-row {
+  margin-top: var(--space-1);
+}
+
 /* The evaluator's verdict on the brief, advisory only: it colours the dot, it
    never changes what the gate does. */
 .stage-gate-dot.is-ready {
@@ -2661,11 +2699,17 @@ button[aria-disabled="true"] {
 
 /* --- Transcript scrolling (CL-7604) -------------------------------------
    ChatThread owns the scroll box; this wraps it so a way back down can sit
-   over its bottom edge without touching the composer. */
+   over its bottom edge without touching the composer. A flex column, so
+   `.thread-turns`'s own `flex-1 min-h-0 overflow-y-auto` (from
+   `@corbits/react-ui`) actually governs its height, rather than shrinking to
+   fit `.stage-thread`'s row only in theory. */
 .thread-scroll {
   position: relative;
-  display: grid;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
   min-height: 0;
+  overflow: hidden;
 }
 
 .jump-down {
