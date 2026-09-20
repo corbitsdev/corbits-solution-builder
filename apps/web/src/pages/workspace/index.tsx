@@ -22,6 +22,7 @@ import {
   type StageTurn,
 } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
+import { shouldFallbackRefetch, subscribeMailbox } from "../../mailbox-events.ts";
 import { Markdown } from "../../markdown.jsx";
 import { AudiencePackages } from "../audiences.jsx";
 import { DesignFeedbackView } from "../design.jsx";
@@ -127,6 +128,7 @@ export function StageWorkspace({
   // effect below never judges a fresh address's thread empty off stale data
   // still held over from the previous address (CL-8656).
   const [threadLoadedFor, setThreadLoadedFor] = useState<string | null>(null);
+  const lastLoadAt = useRef(0);
   const loadThread = useCallback(async () => {
     if (!agentAddress) return;
     const loadedAddress = agentAddress;
@@ -134,6 +136,7 @@ export function StageWorkspace({
       const result = await api.readStageThread(tenantId, [agentAddress]);
       setMessages(result);
       setThreadLoadedFor(loadedAddress);
+      lastLoadAt.current = Date.now();
     } catch (cause) {
       setError(
         `The conversation for this stage could not be read: ${
@@ -151,15 +154,24 @@ export function StageWorkspace({
     setThreadLoadedFor(null);
   }, [agentAddress]);
 
-  // Polled every 3s while the agent's address is known: the specialist's own
-  // replies land in the mailbox on its own time, with nothing to push a
-  // client-side event for them.
+  // Refetched on a nudge from the tenant mailbox stream (CL-8694) — the
+  // specialist's reply lands as a `create` event the moment it's sent. A 20s
+  // fallback poll covers the stream being down, so a dropped connection
+  // never strands the person waiting on a reply that already arrived.
   useEffect(() => {
     if (!agentAddress) return;
     void loadThread();
-    const timer = setInterval(() => void loadThread(), 3_000);
-    return () => clearInterval(timer);
-  }, [agentAddress, loadThread]);
+    const subscription = subscribeMailbox(tenantId, () => void loadThread());
+    const timer = setInterval(() => {
+      const open = subscription.isOpen();
+      const msSinceLastLoad = Date.now() - lastLoadAt.current;
+      if (shouldFallbackRefetch({ open, msSinceLastLoad })) void loadThread();
+    }, 20_000);
+    return () => {
+      clearInterval(timer);
+      subscription.unsubscribe();
+    };
+  }, [agentAddress, tenantId, loadThread]);
 
   // Same cadence, re-checking the agent itself rather than its thread: two
   // sessions racing to open this stage can each deploy a specialist, the hub
