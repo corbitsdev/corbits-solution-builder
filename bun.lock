@@ -140,6 +140,11 @@
     "packages/solutions-builder": {
       "name": "@solutions-builder/app",
       "version": "0.1.0",
+      "dependencies": {
+        "arktype": "catalog:",
+        "jszip": "3",
+        "pptxgenjs": "4",
+      },
     },
     "packages/tools-deck": {
       "name": "@solutions-builder/tools-deck",

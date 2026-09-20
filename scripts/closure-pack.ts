@@ -184,8 +184,8 @@ function vendoredTarballFiles(shortName: string): { manifest: PackageManifest; f
 
 /** `@solutions-builder/app`'s own files, packed as-is: its `src/` tree
  *  (there is no build step — the package is consumed as source), with a
- *  `dependencies` field derived from `WORKFLOW_PACKAGE_DEPENDENCIES` rather
- *  than the empty one the checked-in `package.json` carries today. */
+ *  `dependencies` field: its own declared externals plus
+ *  `WORKFLOW_PACKAGE_DEPENDENCIES`. */
 function appTarballFiles(): { manifest: PackageManifest; files: TarballFiles } {
   const manifest = JSON.parse(readFileSync(join(APP_PACKAGE_DIR, "package.json"), "utf8")) as PackageManifest;
   const trimmed: PackageManifest = {
@@ -193,9 +193,10 @@ function appTarballFiles(): { manifest: PackageManifest; files: TarballFiles } {
     version: manifest.version,
     type: manifest.type ?? "module",
     ...(manifest.exports !== undefined ? { exports: manifest.exports } : {}),
-    dependencies: rewriteDependencies(Object.fromEntries(
-      Object.entries(WORKFLOW_PACKAGE_DEPENDENCIES).filter(([name]) => name !== manifest.name),
-    )),
+    dependencies: rewriteDependencies({
+      ...manifest.dependencies,
+      ...Object.fromEntries(Object.entries(WORKFLOW_PACKAGE_DEPENDENCIES).filter(([name]) => name !== manifest.name)),
+    }),
   };
   const files: TarballFiles = { "package.json": encode(`${JSON.stringify(trimmed, null, 2)}\n`) };
   const srcDir = join(APP_PACKAGE_DIR, "src");
@@ -243,7 +244,8 @@ function discoverExternalClosure(): ExternalPackage[] {
     }
   }
   // The opt-in artifact tools are packed too, so turning them on needs no rebuild.
-  for (const name of Object.keys({ ...WORKFLOW_PACKAGE_DEPENDENCIES, ...ARTIFACT_TOOL_DEPENDENCIES })) {
+  const appManifest = JSON.parse(readFileSync(join(APP_PACKAGE_DIR, "package.json"), "utf8")) as PackageManifest;
+  for (const name of Object.keys({ ...appManifest.dependencies, ...WORKFLOW_PACKAGE_DEPENDENCIES, ...ARTIFACT_TOOL_DEPENDENCIES })) {
     if (name.startsWith("@intx/")) continue;
     queue.push({ name, fromDirs: [ROOT_DIR] });
   }

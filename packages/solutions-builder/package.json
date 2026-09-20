@@ -8,5 +8,10 @@
     ".": "./src/index.ts",
     "./deck": "./src/deck.ts",
     "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "arktype": "catalog:",
+    "jszip": "3",
+    "pptxgenjs": "4"
   }
 }
