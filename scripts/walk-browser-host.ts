@@ -28,6 +28,8 @@ const child = Bun.spawn(["bun", "--conditions", "intx-src", entry, "--port", "0"
   stderr: "pipe",
 });
 
+// WALK_HOST_LOG: where the host's own output goes; without it a failed deploy is invisible.
+const hostLog = process.env.WALK_HOST_LOG ? Bun.file(process.env.WALK_HOST_LOG).writer() : null;
 let shuttingDown = false;
 function shutdown() {
   if (shuttingDown) return;
@@ -63,8 +65,9 @@ if (!printed) {
 void (async () => {
   try {
     for (;;) {
-      const { done } = await reader.read();
+      const { done, value } = await reader.read();
       if (done) break;
+      if (hostLog && value) await hostLog.write(value);
     }
   } catch {
     // exiting
@@ -74,8 +77,9 @@ void (async () => {
   const stderrReader = child.stderr.getReader();
   try {
     for (;;) {
-      const { done } = await stderrReader.read();
+      const { done, value } = await stderrReader.read();
       if (done) break;
+      if (hostLog && value) await hostLog.write(value);
     }
   } catch {
     // exiting

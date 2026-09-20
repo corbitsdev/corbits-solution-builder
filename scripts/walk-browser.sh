@@ -97,6 +97,34 @@ send_message() {
 
 open_project() { ab click "text=$PROJECT_TITLE" >/dev/null 2>&1; sleep 2; }
 
+# Stage 3 is a choice before it is an approval: while the document still
+# offers approaches, pick the first one, wait for the specialist to rewrite it
+# with the choice on top, and only then is there an Approve to click.
+choose_approach() {
+  snap
+  grep -q 'Neither, redraft' "$SNAP" || return 0
+  local before=$(replies)
+  local pick=$(awk '/Which approach\?/{f=1} f && /- button "[^"]+" \[[^]]*ref=e[0-9]+/ && !/Neither, redraft/ && !/disabled/{match($0,/ref=e[0-9]+/); print substr($0,RSTART+4,RLENGTH-4); exit}' "$SNAP")
+  if [ -z "$pick" ]; then
+    shot "no-approach-choice"
+    defect_log 3 "an approach to choose" "the choice row offered no enabled approach" "shots/no-approach-choice.png" "blocker"
+    return 1
+  fi
+  ab click "@$pick" >/dev/null
+  walk_log 3 "choose approach" "picked the first offered approach" 0
+  if ! wait_reply "$before"; then
+    shot "no-rewrite-after-choice"
+    defect_log 3 "the document rewritten with the chosen approach" "no reply within ${WALK_STAGE_TIMEOUT_S}s" "shots/no-rewrite-after-choice.png" "blocker"
+    return 1
+  fi
+  if ! wait_for 'button "Approve and continue" \[ref=' 60; then
+    shot "still-choosing-stage-3"
+    defect_log 3 "an Approve row after the choice was written up" "the page still asks which approach" "shots/still-choosing-stage-3.png" "major"
+    return 1
+  fi
+  return 0
+}
+
 approve_stage() { # stage_number
   snap
   local a=$(awk -v s="Stage $1 of 9 ·" 'index($0,s){f=1} f && /button "Approve and continue" \[ref=/{match($0,/ref=e[0-9]+/); print substr($0,RSTART+4,RLENGTH-4); exit}' "$SNAP")
@@ -119,6 +147,9 @@ approve_stage() { # stage_number
 cleanup() {
   local exit_code=$?
   echo "cleaning up..."
+  # Failed requests are how a swallowed deploy error shows up; keep them with the run.
+  ab network requests --status 400-599 > "$WALK_OUT_DIR/failed-requests.txt" 2>&1
+  ab errors > "$WALK_OUT_DIR/page-errors.txt" 2>&1
   ab close >/dev/null 2>&1
   if [ -z "$WALK_KEEP_HOST" ]; then
     [ -n "$HOST_PID" ] && kill "$HOST_PID" >/dev/null 2>&1
@@ -138,6 +169,7 @@ T0=$(date +%s)
 HOST_DATA_DIR=$(mktemp -d /tmp/walk-browser-host-XXXXXX)
 export WALK_HOST_DATA_DIR="$HOST_DATA_DIR"
 HOST_LOG=$(mktemp /tmp/walk-browser-host-log-XXXXXX)
+export WALK_HOST_LOG="${WALK_HOST_LOG:-$WALK_OUT_DIR/host.log}"
 bun --conditions intx-src scripts/walk-browser-host.ts > "$HOST_LOG" 2>>"$HOST_LOG" &
 HOST_PID=$!
 HOST_URL=""
@@ -249,6 +281,7 @@ for STAGE in $(echo $STAGES); do
         send_message "Assume a small team, one approver, and keep the scope to a first version."
         wait_reply 1 || { defect_log 1 "a second specialist reply" "none within ${WALK_STAGE_TIMEOUT_S}s" "" "blocker"; exit 1; }
       fi
+      if [ "$STAGE" -eq 3 ]; then choose_approach || exit 1; fi
       approve_stage "$STAGE" || exit 1 ;;
     4)
       if ! wait_for 'button "Approve and continue" \[ref=' "$WALK_STAGE_TIMEOUT_S"; then
