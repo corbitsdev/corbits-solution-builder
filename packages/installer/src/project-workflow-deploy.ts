@@ -7,7 +7,7 @@
  * specialist.
  */
 import { ApiError, type Transport } from "@intx/hub-client";
-import { catalogFor, getTenant, workflowsFor, type HubDeployment } from "./hub.js";
+import { assetsFor, catalogFor, getTenant, workflowsFor, type HubDeployment } from "./hub.js";
 import {
   deploymentIsLive,
   ensureWorkflowAsset,
@@ -208,4 +208,32 @@ export async function ensureProjectWorkflow(
     if (cause instanceof ApiError && cause.status === 409) return await attempt();
     throw cause;
   }
+}
+
+/**
+ * The same deployment/run `ensureProjectWorkflow` would reuse, without
+ * deploying or triggering anything -- for a page that just needs to read the
+ * project workflow's current stage (`project-view.ts`'s `loadProjectView`).
+ * Null when the project has no workflow asset yet (a pre-cutover project, or
+ * a brand-new one the workspace has not ensured yet), no live-or-ended
+ * deployment on it, or no top-level run triggered against it -- any of which
+ * means there is nothing here to fold, and the caller falls back to
+ * `currentStageFromArtifacts`.
+ */
+export async function findProjectWorkflow(
+  transport: Transport,
+  workspaceTenantId: string,
+  projectId: string,
+): Promise<ProjectWorkflowDeployment | null> {
+  const assetName = projectWorkflowAssetName(projectId);
+  const asset = (await assetsFor(transport, workspaceTenantId).list("workflow")).find((entry) => entry.name === assetName);
+  if (!asset) return null;
+
+  const workflows = workflowsFor(transport, workspaceTenantId);
+  const deployment = pickDeployment((await workflows.deployments()).filter((entry) => entry.definitionAssetId === asset.id));
+  if (!deployment) return null;
+
+  const runId = pickTopLevelRun(topLevelRunIds(await workflows.runs(deployment.id)));
+  if (!runId) return null;
+  return { deploymentId: deployment.id, runId };
 }

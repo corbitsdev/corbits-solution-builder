@@ -1,14 +1,15 @@
 /**
  * `loadProjectView`: the project detail read, folded in the browser from the
- * project's own tenant record and its artifact fold — what `GET /projects/:id`
- * and `GET /projects/:id/graph` used to answer (CL-8510, step C of CL-8072;
+ * project's own tenant record, its artifact fold, and — when one exists —
+ * its native project workflow (what `GET /projects/:id` and
+ * `GET /projects/:id/graph` used to answer; CL-8510, step C of CL-8072;
  * design fixed by CL-8500 steps A/#363 and B/#370).
  *
- * CL-8612 contract v6 drops the lifecycle run entirely: a project's stage,
- * its approvals, and its opening statement are all read off the artifact
- * graph and the workspace tenant's own material now, not a folded run.
- * `currentStageFromArtifacts` below is the single stage cursor every page
- * (`pages/workspace/index.tsx`, `project-list.ts`) shares (CL-8639).
+ * The project workflow (CL-8721) is now the process authority: once it
+ * exists, its own committed stage is `detail.stage`, not the artifact fold.
+ * `currentStageFromArtifacts` below only still applies before the workspace
+ * has ensured a workflow for this project (a brand-new project, or one from
+ * before the cutover) — see `resolveStage`.
  */
 import type { Transport } from "@intx/hub-client";
 import { requireProject as installerRequireProject, resolveWorkspace } from "@solutions-builder/installer";
@@ -18,6 +19,8 @@ import { createHubTransport } from "./hub.ts";
 import { artifactGraphFor } from "./artifact-graph.ts";
 import { STAGE_DRAFT_KIND } from "./client.ts";
 import type { ArtifactNode, ProjectDetail } from "./client.ts";
+import { resolveProjectWorkflowRef } from "./project-workflow-ref.ts";
+import { loadProjectWorkflowView, type ProjectWorkflowView } from "./project-workflow.ts";
 
 const LAST_STAGE = 9;
 
@@ -85,6 +88,21 @@ async function soloApprovalFor(transport: Transport, projectId: string, stage: S
   );
 }
 
+/**
+ * `detail.stage` and `detail.done`, resolved from `view` when the project
+ * has a workflow, else the artifact-fold fallback — the single stage cursor
+ * every page shares (`app.tsx`'s header/rail, `pages/workspace/index.tsx`,
+ * `project-list.ts`). `stageSource` lets a caller tell which rule produced
+ * it, mainly for tests and debugging; no page branches on it today.
+ */
+export function resolveStage(
+  view: ProjectWorkflowView | null,
+  nodes: readonly ArtifactNode[],
+): { stage: number; done: boolean; stageSource: "workflow" | "artifacts" } {
+  if (!view) return { stage: currentStageFromArtifacts(nodes), done: false, stageSource: "artifacts" };
+  return { stage: view.done ? LAST_STAGE : view.stage, done: view.done, stageSource: "workflow" };
+}
+
 /** Maps an `ArtifactGraphNode` fold onto the `ArtifactNode` shape the pages already consume. */
 export function toArtifactNode(node: Awaited<ReturnType<typeof artifactGraphFor>>["nodes"][number]): ArtifactNode {
   const version = Number(node.versionId.slice(node.versionId.lastIndexOf("@") + 1));
@@ -123,7 +141,11 @@ export async function loadProjectView(projectId: string, transport: Transport = 
     artifactGraphFor(transport, workspace.tenantId, projectId),
   ]);
   const nodes = graph.nodes.map((node) => toArtifactNode(node));
-  const stage = currentStageFromArtifacts(nodes);
+
+  const ref = await resolveProjectWorkflowRef(transport, workspace.tenantId, projectId).catch(() => null);
+  const view = ref ? await loadProjectWorkflowView(transport, workspace.tenantId, ref).catch(() => null) : null;
+  const { stage, done, stageSource } = resolveStage(view, nodes);
+
   const soloApproval = await soloApprovalFor(transport, projectId, stage as Stage).catch(() => true);
 
   return {
@@ -135,6 +157,8 @@ export async function loadProjectView(projectId: string, transport: Transport = 
     },
     tenantId: workspace.tenantId,
     stage,
+    done,
+    stageSource,
     soloApproval,
     nodes,
     approvals: [],

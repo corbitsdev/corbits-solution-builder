@@ -10,7 +10,8 @@
  * and `scripts/project-workflow-proof-deployed.ts`'s `finalStateFrom`/
  * `applyStepOutputFrom`, which read the identical shapes.
  */
-import type { WorkflowRunEvent } from "@intx/hub-client";
+import type { Transport, WorkflowRunEvent } from "@intx/hub-client";
+import { workflowsFor, type ProjectWorkflowDeployment } from "@solutions-builder/installer";
 import type { DecisionRecord, ProjectState, ReviewState, StageNumber } from "@solutions-builder/app/project-workflow/contracts";
 
 const LOOP_STEP_ID = "rework";
@@ -129,4 +130,42 @@ export function foldProjectWorkflow(
       sendBack: !state.done,
     },
   };
+}
+
+/**
+ * Reads `ref`'s current view off the hub: the top-level run's own events
+ * plus ONLY the newest loop-iteration run (see the module doc comment on the
+ * one race that also needs the previous iteration), then folds them with
+ * `foldProjectWorkflow`. Shared by `client.ts`'s `api.projectWorkflowView`
+ * and `project-view.ts`'s `loadProjectView`, which both need this exact
+ * read -- one over an already-triggered ref, the other over a ref resolved
+ * read-only by `findProjectWorkflow`.
+ */
+export async function loadProjectWorkflowView(
+  transport: Transport,
+  workspaceTenantId: string,
+  ref: ProjectWorkflowDeployment,
+): Promise<ProjectWorkflowView> {
+  const workflows = workflowsFor(transport, workspaceTenantId);
+  const [topEvents, runIds] = await Promise.all([
+    workflows.runEvents(ref.deploymentId, ref.runId),
+    workflows.runs(ref.deploymentId),
+  ]);
+  const iterationIds = runIds
+    .filter((id) => id.startsWith(`${ref.runId}__`))
+    .map((id) => ({ id, index: Number(id.slice(id.lastIndexOf("__") + 2)) }))
+    .filter((entry) => Number.isFinite(entry.index))
+    .sort((a, b) => a.index - b.index)
+    .map((entry) => entry.id);
+
+  const iterationEventsByRunId: Record<string, WorkflowRunEvent[]> = {};
+  const newestId = iterationIds.at(-1);
+  if (newestId) {
+    iterationEventsByRunId[newestId] = (await workflows.runEvents(ref.deploymentId, newestId)).events;
+    const previousId = iterationIds.length >= 2 ? iterationIds.at(-2) : undefined;
+    if (previousId && !newestIterationHasHoldOutput(iterationEventsByRunId[newestId])) {
+      iterationEventsByRunId[previousId] = (await workflows.runEvents(ref.deploymentId, previousId)).events;
+    }
+  }
+  return foldProjectWorkflow(topEvents.events, iterationEventsByRunId);
 }

@@ -44,8 +44,8 @@ import {
   type SpecialistDeploymentStatus,
   type WorkflowGitPush,
 } from "@solutions-builder/installer";
-import type { WorkflowRunEvent } from "@intx/hub-client";
-import { foldProjectWorkflow, newestIterationHasHoldOutput, type ProjectWorkflowView } from "./project-workflow.ts";
+import { loadProjectWorkflowView, type ProjectWorkflowView } from "./project-workflow.ts";
+import { cacheProjectWorkflowRef, resolveProjectWorkflowRef } from "./project-workflow-ref.ts";
 import { MATERIAL_KIND, MATERIAL_READING_KIND } from "@solutions-builder/app/artifacts";
 import { readMaterial } from "./material-reading.ts";
 import type { DesignFeedbackDisposition, DesignFeedbackEntry as DesignFeedbackGraphEntry } from "@solutions-builder/app/artifact-graph";
@@ -337,8 +337,18 @@ export type ProjectDetail = {
   };
   /** The workspace tenant artifacts are recorded under. */
   tenantId: string;
-  /** 1 + the highest stage with a live, approved draft artifact — no lifecycle run to fold a position from any more (CL-8612). */
+  /**
+   * The project's current stage: the project workflow's own committed stage
+   * once one exists for this project (`project-view.ts`'s `resolveStage`),
+   * falling back to 1 + the highest stage with a live, approved draft
+   * artifact (`currentStageFromArtifacts`) only before a workflow has been
+   * ensured — a brand-new project, or one from before the CL-8721 cutover.
+   */
   stage: number;
+  /** Whether the project workflow has converged (stage 9 approved); always false under the artifact-fold fallback. */
+  done: boolean;
+  /** Which rule produced `stage`/`done` above. */
+  stageSource: "workflow" | "artifacts";
   /** True when no principal other than the local actor holds this stage's approval authority. */
   soloApproval: boolean;
   nodes: ArtifactNode[];
@@ -1415,7 +1425,7 @@ export const api = {
         authorizedPrincipalIds: [workspace.principalId],
       }));
       const status = await request<HostStatus>("/status");
-      return ensureProjectWorkflow(
+      const ref = await ensureProjectWorkflow(
         transport,
         sidecarCapabilityOf(status),
         await projectWorkflowSource(),
@@ -1425,6 +1435,8 @@ export const api = {
         stages,
         await vendoredMemberFiles(await fetchClosureManifestOrThrow(), fetchClosureTarball),
       );
+      cacheProjectWorkflowRef(projectId, ref);
+      return ref;
     });
     call.catch(() => ensureProjectWorkflowCalls.delete(projectId));
     ensureProjectWorkflowCalls.set(projectId, call);
@@ -1432,44 +1444,19 @@ export const api = {
   },
   /**
    * The project workflow's current view, folded from its run's own event
-   * log -- see `foldProjectWorkflow`. Null when the workflow has not been
-   * deployed/triggered yet.
+   * log -- see `foldProjectWorkflow`. Null when the project has no workflow
+   * yet.
    *
-   * Reads the top-level run's events plus ONLY the newest loop-iteration
-   * run: its `hold` step output already carries the complete current state
-   * (the loop parks `trigger.payload` there before waiting on a decision),
-   * so nothing older needs to be fetched. The one exception is the rare race
-   * where the newest iteration run exists but its `hold` step has not
-   * committed yet -- then the previous iteration's own `apply` output (the
-   * same state) is fetched instead.
+   * The ref is resolved read-only (`findProjectWorkflow`, cached briefly by
+   * `resolveProjectWorkflowRef`) rather than off `ensureProjectWorkflow`'s
+   * own in-session memo, so this answers correctly on a fresh page load too
+   * -- not only after this session's own `ensureProjectWorkflow` call.
    */
   projectWorkflowView: (projectId: string): Promise<ProjectWorkflowView | null> =>
     asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const deployed = ensureProjectWorkflowCalls.get(projectId);
-      const ref = deployed ? await deployed.catch(() => null) : null;
+      const ref = await resolveProjectWorkflowRef(transport, workspaceTenantId, projectId);
       if (!ref) return null;
-      const workflows = workflowsFor(transport, workspaceTenantId);
-      const [topEvents, runIds] = await Promise.all([
-        workflows.runEvents(ref.deploymentId, ref.runId),
-        workflows.runs(ref.deploymentId),
-      ]);
-      const iterationIds = runIds
-        .filter((id) => id.startsWith(`${ref.runId}__`))
-        .map((id) => ({ id, index: Number(id.slice(id.lastIndexOf("__") + 2)) }))
-        .filter((entry) => Number.isFinite(entry.index))
-        .sort((a, b) => a.index - b.index)
-        .map((entry) => entry.id);
-
-      const iterationEventsByRunId: Record<string, WorkflowRunEvent[]> = {};
-      const newestId = iterationIds.at(-1);
-      if (newestId) {
-        iterationEventsByRunId[newestId] = (await workflows.runEvents(ref.deploymentId, newestId)).events;
-        const previousId = iterationIds.length >= 2 ? iterationIds.at(-2) : undefined;
-        if (previousId && !newestIterationHasHoldOutput(iterationEventsByRunId[newestId])) {
-          iterationEventsByRunId[previousId] = (await workflows.runEvents(ref.deploymentId, previousId)).events;
-        }
-      }
-      return foldProjectWorkflow(topEvents.events, iterationEventsByRunId);
+      return loadProjectWorkflowView(transport, workspaceTenantId, ref);
     }),
   /**
    * Delivers one decision as the loop's `project.decision` signal,
