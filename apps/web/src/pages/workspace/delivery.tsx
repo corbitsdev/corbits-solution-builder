@@ -22,6 +22,7 @@ import {
   rejectTool,
   type PendingApproval,
 } from "../../pending-approvals.ts";
+import { parseDeliveryVerification, type DeliveryVerification } from "../../delivery-verification.ts";
 import { Banner, Button, Screen, shortHash, StateLabel } from "../../components.jsx";
 import { Markdown } from "../../markdown.jsx";
 import { BuildFile } from "../graph.jsx";
@@ -40,14 +41,69 @@ function extractHowToRun(body: string | null): string | null {
   return `${match[0]}\n${section}`.trim();
 }
 
+/** The node that carries stage 9's per-file check results, newest first: a
+ *  dedicated `delivery_verification` record, or the manifest's own embedded
+ *  `verification` field. */
+function findVerificationNode(nodes: ArtifactNode[]): ArtifactNode | null {
+  const active = nodes.filter((node) => node.stage === 9 && node.supersededByNodeId === null);
+  return (
+    active.find((node) => node.kind === "delivery_verification") ??
+    active.find((node) => node.kind === "delivery_manifest") ??
+    null
+  );
+}
+
+/** The compact per-file table above Accept/Reject, plus the warning line failures earn. */
+function VerificationTable({ verification }: { verification: DeliveryVerification }) {
+  const { rows, summary, problems } = verification;
+  if (rows.length === 0) {
+    return <p className="inline-note">{problems.length > 0 ? "Verification could not be read" : "Nothing was verified"}</p>;
+  }
+  return (
+    <>
+      {summary.failed > 0 ? (
+        <p className="warning-note">
+          {summary.failed} check{summary.failed === 1 ? "" : "s"} failed
+        </p>
+      ) : summary.passed === 0 ? (
+        <p className="inline-note">Nothing was verified</p>
+      ) : null}
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>File</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Note</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((row) => (
+            <TableRow key={row.path}>
+              <TableCell>{row.path}</TableCell>
+              <TableCell>
+                <StateLabel tone={row.status === "passed" ? "success" : row.status === "failed" ? "error" : "info"}>
+                  {row.status}
+                </StateLabel>
+              </TableCell>
+              <TableCell>{row.note ?? "—"}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </>
+  );
+}
+
 /** Stage 9's manifest, awaiting a decision. */
 function DeliveryDecision({
   tenantId,
   projectId,
+  nodes,
   onRejectSendBack,
 }: {
   tenantId: string;
   projectId: string;
+  nodes: ArtifactNode[];
   /** Rejecting delivery also routes the project workflow back to stage 8
    *  (CL-8687), so the build specialist's next reply lands where the person
    *  can review and re-approve it rather than leaving stage 9 stuck. */
@@ -104,6 +160,33 @@ function DeliveryDecision({
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenantId, projectId]);
+
+  const verificationNode = findVerificationNode(nodes);
+  const [verification, setVerification] = useState<DeliveryVerification | null>(null);
+
+  useEffect(() => {
+    if (!verificationNode) {
+      setVerification(parseDeliveryVerification(null));
+      return;
+    }
+    let cancelled = false;
+    void api
+      .artifactContent(tenantId, verificationNode.id)
+      .then((result) => {
+        if (cancelled) return;
+        try {
+          setVerification(parseDeliveryVerification(JSON.parse(result.content)));
+        } catch {
+          setVerification(parseDeliveryVerification(undefined));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setVerification(parseDeliveryVerification(undefined));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, verificationNode?.id]);
 
   if (!loaded) return null;
 
@@ -170,6 +253,7 @@ function DeliveryDecision({
           </TableBody>
         </Table>
       ) : null}
+      {verification ? <VerificationTable verification={verification} /> : null}
       <div className="field">
         <label htmlFor="delivery-feedback">Feedback (only sent on reject)</label>
         <Textarea
@@ -246,7 +330,7 @@ export function DeliveryPanel({
 
   return (
     <div className="stage-companions">
-      <DeliveryDecision tenantId={tenantId} projectId={detail.project.id} onRejectSendBack={onRejectSendBack} />
+      <DeliveryDecision tenantId={tenantId} projectId={detail.project.id} nodes={detail.nodes} onRejectSendBack={onRejectSendBack} />
       {howToRun ? (
         <Screen title="How to run" tight>
           <Markdown source={howToRun} />

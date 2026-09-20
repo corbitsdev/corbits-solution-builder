@@ -448,6 +448,9 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 
 .inline-note { font-size: 0.8125rem; color: var(--wb-muted-foreground); margin: 0; }
 
+/* Delivery's per-file verification: a failed check gets a plain warning line, not a colored table row. */
+.warning-note { font-size: 0.8125rem; font-weight: 500; color: var(--wb-destructive); margin: 0 0 0.5rem; }
+
 /* ---- Responsive: desktop multi-panel -> tablet master-detail -> phone queue ---- */
 
 /* The rail narrows to icons rather than stacking on top of the work. Stacking
