@@ -39,7 +39,13 @@ import { createHubTransport } from "./hub.ts";
 
 export type NotifiableDecision = Omit<Wait, "projectTitle">;
 
-type InboxMessage = { readonly envelope: { readonly subject: string } };
+/** What actually happened when this decision was (or wasn't) notified —
+ *  `pages/decisions.tsx`'s notification row (CL-8724). Neither field set
+ *  means "not sent yet", never "failed": failure is only reported when an
+ *  attempt was made and it did not land. */
+export type NotifyOutcome = { readonly notifiedAt?: string; readonly notifyError?: string };
+
+type InboxMessage = { readonly envelope: { readonly subject: string; readonly date: string } };
 type InboxPage = { readonly messages: readonly InboxMessage[] };
 
 const ADDRESS = /^[^\s@]+@[^\s@]+$/;
@@ -53,9 +59,9 @@ function mailboxPath(tenantId: string): string {
 }
 
 /**
- * Notifies every principal who may resolve `decision`. Best effort: a
- * mailbox failure never blocks the decision queue from rendering, so a
- * caller fires this without awaiting it in the render path.
+ * Notifies every principal who may resolve `decision`, and reports what
+ * happened. Best effort: a mailbox failure is returned as `notifyError`
+ * rather than thrown, so it never blocks the decision queue from rendering.
  *
  * `workspaceTenantId` is the workspace's own tenant (`resolveWorkspace`'s
  * `tenantId`, as `decisions-fold.ts` already resolves it) — the sender is
@@ -66,23 +72,28 @@ export async function notifyDecisionOpen(
   workspaceTenantId: string,
   decision: NotifiableDecision,
   transport: Transport = createHubTransport(),
-): Promise<void> {
+): Promise<NotifyOutcome> {
   try {
     const path = mailboxPath(workspaceTenantId);
     const marker = markerFor(decision.id);
     const sent = await transport.fetch<InboxPage>("GET", `${path}?folder=Sent&limit=200`);
-    if (sent.messages.some((message) => message.envelope.subject.includes(marker))) return;
+    const already = sent.messages.find((message) => message.envelope.subject.includes(marker));
+    if (already) return { notifiedAt: already.envelope.date };
 
     const holders = await grantHolders(transport, decision.projectId, APPROVAL_RESOURCE, "resolve");
     const to = holders.map((holder) => holder.address).filter((address) => ADDRESS.test(address));
-    if (to.length === 0) return;
+    if (to.length === 0) return {};
 
+    const notifiedAt = new Date().toISOString();
     await transport.fetch("POST", `${path}/send`, {
       to,
       subject: `${marker} ${decision.title}`,
       body: decision.consequence,
     });
+    return { notifiedAt };
   } catch (cause) {
-    console.error(`decision notify failed for ${decision.id}: ${cause instanceof Error ? cause.message : String(cause)}`);
+    const notifyError = cause instanceof Error ? cause.message : String(cause);
+    console.error(`decision notify failed for ${decision.id}: ${notifyError}`);
+    return { notifyError };
   }
 }

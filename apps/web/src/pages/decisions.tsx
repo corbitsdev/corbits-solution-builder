@@ -121,8 +121,12 @@ export function DecisionQueue({
     : [];
   // Stage 9's delivery is a stock hub approval on the specialist's own
   // deliver tool call (CL-8566): what is being approved is the pending
-  // approval itself, not an artifact version at this stage.
-  const canApprove = current?.approvalId ? true : versions.length > 0;
+  // approval itself, not an artifact version at this stage. A stage-approval
+  // wait (no `approvalId`) only approves directly when the workflow already
+  // has an open review naming the exact artifact (`reviewRef`) — otherwise
+  // the only move from here is to open the workspace and review it there
+  // (CL-8724).
+  const canApprove = current?.approvalId ? true : Boolean(current?.reviewRef);
 
   return (
     <Screen
@@ -174,6 +178,18 @@ export function DecisionQueue({
             <div>
               <dt>Approver</dt>
               <dd>{current?.requiredAuthority.replace(/_/g, " ")}</dd>
+            </div>
+            <div>
+              <dt>Notification</dt>
+              <dd>
+                {current?.notifyError ? (
+                  <StateLabel tone="warning">Delivery failed, the request was kept</StateLabel>
+                ) : current?.notifiedAt ? (
+                  <StateLabel tone="info">Sent {new Date(current.notifiedAt).toLocaleTimeString()}</StateLabel>
+                ) : (
+                  <StateLabel tone="disabled">Not sent yet</StateLabel>
+                )}
+              </dd>
             </div>
           </dl>
 

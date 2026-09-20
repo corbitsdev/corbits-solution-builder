@@ -5,7 +5,7 @@
  * then a refresh, so what the interface shows is what the host durably holds
  * rather than an optimistic guess.
  */
-import { useCallback, useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import {
   api,
   ApiFailure,
@@ -42,9 +42,11 @@ import { subscribeInbox, type InboxState } from "./inbox.ts";
 import { Onboarding } from "./pages/onboarding.jsx";
 import { Auth } from "./pages/auth.jsx";
 import { StageWorkspace } from "./pages/workspace.jsx";
+import { stageRefusalMessage } from "./stage-evidence.ts";
 import { approveTool, rejectTool } from "./pending-approvals.ts";
 import { firstRunScreen, type HubAuthState } from "./first-run.ts";
 import { getHubSession } from "./hub-auth.ts";
+import { approveStage, sendBack as sendBackStage } from "./stage-approval.ts";
 
 /**
  * Where you are. A project is not a separate destination from its stage: you
@@ -487,33 +489,72 @@ export function App() {
     setView("project");
   };
 
+  const stageApprovalDeps = useMemo(
+    () => ({
+      view: (projectId: string) => api.projectWorkflowView(projectId),
+      decide: (projectId: string, decisionPayload: Record<string, unknown>) => api.decide(projectId, decisionPayload),
+      now: () => new Date().toISOString(),
+    }),
+    [],
+  );
+
   /**
-   * The only decision left under CL-8612 contract v6 is stage 9's delivery:
-   * a stock hub approval on the specialist's own `deliver` tool call
-   * (CL-8566), never a ledger command on a workflow signal. Approving
-   * resolves the parked call and the run is delivered; rejecting carries the
-   * reason back to the specialist as the tool's own refusal message, which
-   * it sees in the same turn — "revise" has no separate meaning here. Every
-   * stage specialist's tool call parks the same way (e.g. stage 8's
-   * `run_shell`), all under the WORKSPACE tenant, never the project's own.
+   * Two kinds of wait, two kinds of decision (CL-8724). A wait with
+   * `approvalId` is a stock hub approval on a specialist's own tool call
+   * (CL-8566) — approving resolves the parked call, rejecting carries the
+   * reason back as the tool's own refusal message, which the specialist
+   * sees in the same turn; "revise" has no separate meaning there. A wait
+   * with no `approvalId` is the project workflow's own stage gate: approving
+   * calls `approveStage` against its already-open review (`reviewRef`, the
+   * only case the queue offers "Approve" at all — see `canApprove` in
+   * `pages/decisions.tsx`), and "revise" sends the stage back to `target`
+   * through `sendBack`, which needs a reason to route on.
    */
   const decide = async (
     wait: Wait,
     decision: "approve" | "reject" | "revise",
     reason: string,
-    _target: number,
+    target: number,
     scope: "once" | "always" = "once",
   ) => {
-    if (!wait.approvalId) return;
     setBusy(decision);
     setError(null);
     try {
-      const workspaceTenantId = await api.workspaceTenantId();
-      if (!workspaceTenantId) throw new Error("no workspace tenant to resolve this approval in");
-      if (decision === "approve") {
-        await approveTool(workspaceTenantId, wait.approvalId, scope);
+      if (wait.approvalId) {
+        const workspaceTenantId = await api.workspaceTenantId();
+        if (!workspaceTenantId) throw new Error("no workspace tenant to resolve this approval in");
+        if (decision === "approve") {
+          await approveTool(workspaceTenantId, wait.approvalId, scope);
+        } else {
+          await rejectTool(workspaceTenantId, wait.approvalId, reason);
+        }
+      } else if (decision === "approve") {
+        if (!wait.reviewRef) return;
+        const result = await approveStage(stageApprovalDeps, {
+          projectId: wait.projectId,
+          stage: wait.stage,
+          ref: wait.reviewRef,
+        });
+        if (!result.ok) {
+          setError(`This stage's approval was refused: ${stageRefusalMessage(result.reason)}`);
+          return;
+        }
       } else {
-        await rejectTool(workspaceTenantId, wait.approvalId, reason);
+        const trimmedReason = reason.trim();
+        if (!trimmedReason) {
+          setError("A reason is required to send this stage back.");
+          return;
+        }
+        const result = await sendBackStage(stageApprovalDeps, {
+          projectId: wait.projectId,
+          stage: wait.stage,
+          targetStage: target,
+          reason: trimmedReason,
+        });
+        if (!result.ok) {
+          setError(`Send-back was refused: ${stageRefusalMessage(result.reason)}`);
+          return;
+        }
       }
       setSelected(wait.projectId);
       await reloadDetail();
