@@ -178,7 +178,9 @@ const RUNTIME_PACKAGES = [
  * (`workflow-closure.ts`) resolved via its own npm entries instead of the
  * hub's local `node_modules`, this allowance moves with it.
  */
-const PACKAGE_ALLOWED = ["@intx/workflow", "@intx/types", "arktype", "pptxgenjs", "jszip"];
+// Native specialist definitions use defineAgent as well as defineWorkflow.
+// This permits the authoring entry, not hub/database/provider internals.
+const PACKAGE_ALLOWED = ["@intx/workflow", "@intx/agent", "@intx/types", "arktype", "pptxgenjs", "jszip"];
 
 /** What every `packages/tools-*` package may take from outside itself
  *  regardless of what it declares: the agent and workflow authoring

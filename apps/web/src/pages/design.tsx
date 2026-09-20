@@ -519,7 +519,7 @@ export function DesignFeedbackView({
           >
             Submit feedback and generate the next version
           </Button>
-          {busy === "submit" ? <Elapsed stage={4} /> : null}
+          {busy === "submit" ? <Elapsed /> : null}
           </Screen>
       ) : null}
 

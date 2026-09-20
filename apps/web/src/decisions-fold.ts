@@ -55,8 +55,8 @@ async function openDecisionsFor(
   ]);
   const stageByRunId = new Map(deployments.map((deployment) => [deployment.deploymentId, deployment.stage]));
   const decisions = approvals
-    .filter((approval) => approval.status === "pending" && stageByRunId.has(approval.runId))
-    .map((approval) => toDecision(approval, projectId, stageByRunId.get(approval.runId)!));
+    .filter((approval) => approval.status === "pending" && stageByRunId.has(approval.anchorRunId))
+    .map((approval) => toDecision(approval, projectId, stageByRunId.get(approval.anchorRunId)!));
   for (const decision of decisions) void notifyDecisionOpen(workspaceTenantId, decision, transport);
   return decisions;
 }

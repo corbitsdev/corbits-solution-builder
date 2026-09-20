@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { ChatInput, ChatThread, type ChatMessage as UiChatMessage } from "@corbits/react-ui";
 import { Markdown } from "../../markdown.jsx";
 import { stageName } from "../../components.jsx";
@@ -63,34 +63,10 @@ export function StageConversation({
   );
 }
 
-/**
- * What the specialist is doing while it writes, in its own stage's terms. One
- * word for every stage read as a spinner; these say what the wait is for.
- */
-export const STAGE_VERBS: Record<number, string[]> = {
-  1: ["Listening", "Sharpening the problem", "Finding the real pain", "Writing the brief"],
-  2: ["Drawing the boundaries", "Weighing constraints", "Naming the non-goals", "Writing"],
-  3: ["Weighing trade-offs", "Comparing approaches", "Testing each against your criteria", "Writing"],
-  4: ["Sketching", "Walking the flows", "Working out the states", "Writing"],
-  5: ["Writing for each audience", "Making the case", "Writing"],
-  6: ["Sequencing the work", "Sizing the steps", "Checking dependencies", "Writing"],
-  7: ["Counting", "Costing the plan", "Checking the numbers", "Writing"],
-};
-
-/** The shimmering "working" word, rotating through the stage's verbs. */
-export function WorkingLabel({ stage }: { stage: number }) {
-  const verbs = STAGE_VERBS[stage] ?? ["Writing"];
-  const [at, setAt] = useState(0);
-  useEffect(() => {
-    if (verbs.length < 2) return;
-    const timer = setInterval(() => setAt((current) => (current + 1) % verbs.length), 3_200);
-    return () => clearInterval(timer);
-  }, [verbs.length]);
-  return (
-    <span className="thinking" key={at}>
-      {verbs[at]}
-    </span>
-  );
+/** A pending local send is evidence only that the browser has submitted a
+ * message; it does not establish what the specialist is doing. */
+export function WorkingLabel() {
+  return <span className="thinking">Message sent; waiting for a reply.</span>;
 }
 
 /**

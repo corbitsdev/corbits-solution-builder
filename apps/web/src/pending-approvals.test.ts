@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { approvalsPath, deliveryApprovalFor, type PendingApproval } from "./pending-approvals.ts";
+import { actionableApprovals, approvalsPath, deliveryApprovalFor, type PendingApproval } from "./pending-approvals.ts";
 
 function approval(overrides: Partial<PendingApproval> = {}): PendingApproval {
   return {
@@ -36,5 +36,23 @@ describe("deliveryApprovalFor", () => {
 describe("approvalsPath", () => {
   test("is the stock hub route, not a host-specific one", () => {
     expect(approvalsPath("tnt_ws")).toBe("/api/tenants/tnt_ws/approvals");
+  });
+});
+
+describe("actionableApprovals", () => {
+  test("uses the anchor, including tool calls in nested runs", () => {
+    expect(actionableApprovals([approval({ runId: "child" })], [{ id: "dep_1", status: "deployed" }])).toHaveLength(1);
+  });
+  test("retains durable decisions through provisioning and recovery", () => {
+    for (const status of ["pending", "recovering"]) {
+      expect(actionableApprovals([approval()], [{ id: "dep_1", status }])).toHaveLength(1);
+    }
+  });
+  test("omits released, failed, unknown and resolved requests", () => {
+    for (const status of ["releasing", "released", "failed", "destroy_failed", "unknown"]) {
+      expect(actionableApprovals([approval()], [{ id: "dep_1", status }])).toEqual([]);
+    }
+    expect(actionableApprovals([approval()], [])).toEqual([]);
+    expect(actionableApprovals([approval({ status: "approved" })], [{ id: "dep_1", status: "deployed" }])).toEqual([]);
   });
 });

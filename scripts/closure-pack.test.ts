@@ -23,6 +23,20 @@ describe("manifestEntry", () => {
 });
 
 describe("buildManifest", () => {
+  test("rejects conflicting bytes at one package filename", () => {
+    expect(() => buildManifest("test", [
+      entry("app", "1.0.0", "app-1.0.0.tgz", "curated"),
+      entry("app", "1.0.0", "app-1.0.0.tgz", "raw"),
+    ])).toThrow("Duplicate closure");
+  });
+
+  test("rejects duplicate identities even under distinct filenames", () => {
+    expect(() => buildManifest("test", [
+      entry("app", "1.0.0", "a.tgz", "first"),
+      entry("app", "1.0.0", "b.tgz", "second"),
+    ])).toThrow("Duplicate closure");
+  });
+
   test("sorts packages by filename regardless of input order", () => {
     const manifest = buildManifest("test", [
       entry("b", "1.0.0", "b-1.0.0.tgz", "b"),

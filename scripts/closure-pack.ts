@@ -193,7 +193,9 @@ function appTarballFiles(): { manifest: PackageManifest; files: TarballFiles } {
     version: manifest.version,
     type: manifest.type ?? "module",
     ...(manifest.exports !== undefined ? { exports: manifest.exports } : {}),
-    dependencies: rewriteDependencies(WORKFLOW_PACKAGE_DEPENDENCIES),
+    dependencies: rewriteDependencies(Object.fromEntries(
+      Object.entries(WORKFLOW_PACKAGE_DEPENDENCIES).filter(([name]) => name !== manifest.name),
+    )),
   };
   const files: TarballFiles = { "package.json": encode(`${JSON.stringify(trimmed, null, 2)}\n`) };
   const srcDir = join(APP_PACKAGE_DIR, "src");
@@ -247,7 +249,10 @@ function discoverExternalClosure(): ExternalPackage[] {
 
   while (queue.length > 0) {
     const { name, fromDirs } = queue.shift()!;
-    if (found.has(name) || name.startsWith("@intx/")) continue;
+    // The curated app tarball is already packed above, including its source.
+    // Repacking its workspace symlink would overwrite the same filename with
+    // different bytes and invalidate the advertised integrity.
+    if (found.has(name) || name.startsWith("@intx/") || name === "@solutions-builder/app") continue;
     const dir = resolveExternalPackageDir(name, fromDirs);
     const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as PackageManifest;
     found.set(name, { name: manifest.name, version: manifest.version, dir });
@@ -340,6 +345,16 @@ export function manifestEntry(entry: PackedEntry): ClosureManifestEntry {
  *  byte anywhere changes the manifest's own digest too. Pure: takes already
  *  packed entries, touches no filesystem. */
 export function buildManifest(generatedBy: string, entries: readonly PackedEntry[]): ClosureManifest {
+  const filenames = new Set<string>();
+  const identities = new Set<string>();
+  for (const entry of entries) {
+    const identity = `${entry.name}@${entry.version}`;
+    if (filenames.has(entry.filename) || identities.has(identity)) {
+      throw new Error(`Duplicate closure package or filename: ${identity} (${entry.filename})`);
+    }
+    filenames.add(entry.filename);
+    identities.add(identity);
+  }
   const packages = entries.map(manifestEntry).sort((a, b) => a.filename.localeCompare(b.filename));
   const hash = createHash("sha256");
   for (const pkg of packages) {

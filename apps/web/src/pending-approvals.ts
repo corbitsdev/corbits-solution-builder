@@ -8,7 +8,7 @@
  * stage's tool, e.g. stage 8's `run_shell`) deploy into the WORKSPACE
  * tenant, so callers must pass that tenant's id, not a project's.
  */
-import type { Transport } from "@intx/hub-client";
+import { listWorkflowDeployments, type Transport } from "@intx/hub-client";
 import { createHubTransport } from "./hub.ts";
 
 export type PendingApproval = {
@@ -33,8 +33,25 @@ export async function pendingApprovals(
   tenantId: string,
   transport: Transport = createHubTransport(),
 ): Promise<readonly PendingApproval[]> {
-  const page = await transport.fetch<ApprovalsPage>("GET", approvalsPath(tenantId));
-  return page.data;
+  const [page, deployments] = await Promise.all([
+    transport.fetch<ApprovalsPage>("GET", approvalsPath(tenantId)),
+    listWorkflowDeployments(transport, tenantId),
+  ]);
+  return actionableApprovals(page.data, deployments);
+}
+
+/** Recovery/provisioning can still accept durable resolutions; release cannot.
+ * Match the anchor identity used by the native approval resolution handler,
+ * not a nested tool run's identity. Unknown deployments are not actionable.
+ */
+export function actionableApprovals(
+  approvals: readonly PendingApproval[],
+  deployments: readonly { readonly id: string; readonly status: string }[],
+): readonly PendingApproval[] {
+  const active = new Set(deployments
+    .filter((deployment) => ["deployed", "pending", "recovering"].includes(deployment.status))
+    .map((deployment) => deployment.id));
+  return approvals.filter((approval) => approval.status === "pending" && active.has(approval.anchorRunId));
 }
 
 /** The tool name the stage-9 specialist's delivery tool is declared under. */

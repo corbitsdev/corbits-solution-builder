@@ -207,7 +207,7 @@ function Conversation({ withDocument }: { withDocument?: boolean }) {
       content={brief}
       tenantId="demo"
       turns={turns}
-      openQuestion={{ remaining: 4, ordinal: 1 }}
+      openQuestion={{ text: "Which customer group should be the first priority?" }}
       // Renders the evaluator's ready cue on the approve control, so the
       // layout gate sees it rather than only the un-evaluated state.
       evaluation={{ ready: true, notes: [] }}

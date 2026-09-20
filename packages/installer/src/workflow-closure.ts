@@ -21,7 +21,6 @@
  * (same-origin static files) and hands the bytes in; this module only
  * extracts and reshapes them into asset-tree paths.
  */
-import { sha256 } from "@intx/crypto";
 import type { ClosureManifest, ClosureManifestEntry } from "./registry-tarballs.js";
 import { extractTarballFiles } from "./tarball-extract.js";
 
@@ -117,5 +116,5 @@ export async function treeDigest(files: Record<string, string>): Promise<string>
   for (const path of Object.keys(files).sort()) {
     input += `${path}\0${files[path]!}\0`;
   }
-  return hex(await sha256(input));
+  return hex(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input))));
 }

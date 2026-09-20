@@ -35,6 +35,7 @@ import { Preparing } from "./preparing.jsx";
 import { BuildPanel } from "./build.jsx";
 import { TargetPicker, targetOpeningLine } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
+import { workspaceGuidance } from "./guidance.js";
 import { currentStageFromArtifacts } from "../../project-view.ts";
 import type { FoldedFeedback } from "@solutions-builder/app/project-state";
 
@@ -317,6 +318,12 @@ export function StageWorkspace({
   };
 
   const latestSpecialistMessage = [...messages].reverse().find((message) => message.author === "agent") ?? null;
+  // Mail has no separate draft record before approval. Keep a substantial
+  // draft separate from the latest conversational turn so an acknowledgement
+  // or a follow-up question never replaces the document being reviewed.
+  const guidance = useMemo(() => workspaceGuidance(stage, messages), [stage, messages]);
+  const draftMessage = guidance.draft;
+  const reviewMessage = DOCUMENT_STAGES.has(stage) ? draftMessage : latestSpecialistMessage;
 
   // Mail turns as StageDocument's turn shape: it wants who spoke and what
   // was said, nothing this contract tracks beyond that (no per-turn quotes
@@ -348,24 +355,24 @@ export function StageWorkspace({
     [detail.nodes, stage, draftKind],
   );
   const draftDocNode: ArtifactNode | null = useMemo(() => {
-    if (!latestSpecialistMessage || draftKind === null) return null;
+    if (!draftMessage || draftKind === null) return null;
     return {
-      id: `reply:${latestSpecialistMessage.id}`,
+      id: `reply:${draftMessage.id}`,
       kind: draftKind,
       variant: null,
       stage,
       title: stageName(stage),
       version: (approvedVersions.at(-1)?.version ?? 0) + 1,
-      artifactId: `reply:${latestSpecialistMessage.id}`,
+      artifactId: `reply:${draftMessage.id}`,
       contentHash: "",
-      sizeBytes: latestSpecialistMessage.body.length,
+      sizeBytes: draftMessage.body.length,
       mediaType: "text/markdown",
-      createdAt: latestSpecialistMessage.at,
+      createdAt: draftMessage.at,
       supersededByNodeId: null,
       provenance: { producer: "specialist" },
       approvedAt: null,
     };
-  }, [latestSpecialistMessage, draftKind, stage, approvedVersions]);
+  }, [draftMessage, draftKind, stage, approvedVersions]);
   const documentVersions = useMemo(
     () => (draftDocNode ? [...approvedVersions, draftDocNode] : approvedVersions),
     [approvedVersions, draftDocNode],
@@ -386,7 +393,7 @@ export function StageWorkspace({
       return;
     }
     if (activeNode.id === draftDocNode?.id) {
-      setActiveContent(latestSpecialistMessage?.body ?? "");
+      setActiveContent(draftMessage?.body ?? "");
       return;
     }
     let cancelled = false;
@@ -444,7 +451,7 @@ export function StageWorkspace({
    * re-deriving it from the plan.
    */
   const approve = async () => {
-    if (!latestSpecialistMessage || stage >= LAST_STAGE) return;
+    if (!reviewMessage || stage >= LAST_STAGE) return;
     if (stage === 7 && !chosenTarget) return;
     setApproving(true);
     setError(null);
@@ -457,7 +464,7 @@ export function StageWorkspace({
         await api.persistStageDraft(
           detail.project.id,
           stage,
-          latestSpecialistMessage.body,
+          reviewMessage.body,
           materials,
           stage === 7 ? (chosenTarget ?? undefined) : undefined,
         );
@@ -465,8 +472,8 @@ export function StageWorkspace({
       const next = stage + 1;
       const openingBody =
         stage === 7 && chosenTarget
-          ? `${targetOpeningLine(chosenTarget)}\n\n${latestSpecialistMessage.body}`
-          : latestSpecialistMessage.body;
+          ? `${targetOpeningLine(chosenTarget)}\n\n${reviewMessage.body}`
+          : reviewMessage.body;
       setStageFloor(next);
       setPendingOpening({ stage: next, body: openingBody });
       onChanged();
@@ -512,6 +519,20 @@ export function StageWorkspace({
       {!agentAddress ? (
         <Screen title={`Stage ${stage} of 9 · ${stageName(stage)}`} description={STAGE_GOAL[stage]} tight>
           <p className="inline-note">Starting the {stageName(stage).toLowerCase()} specialist…</p>
+        </Screen>
+      ) : null}
+
+      {agentAddress ? (
+        <Screen title={guidance.title} description={guidance.detail} tight>
+          {guidance.question && guidance.question.choices.length > 0 ? (
+            <div className="button-row" aria-label="Recorded answer choices">
+              {guidance.question.choices.map((choice) => (
+                <Button key={choice} variant="ghost" disabled={sending} onClick={() => void send(choice)}>
+                  {choice}
+                </Button>
+              ))}
+            </div>
+          ) : null}
         </Screen>
       ) : null}
 
@@ -570,20 +591,35 @@ export function StageWorkspace({
         </div>
       ) : null}
 
-      {agentAddress && DOCUMENT_STAGES.has(stage) && !latestSpecialistMessage ? (
-        <Preparing
-          stage={stage}
-          said={turns}
-          busy={messages.length > 0}
-          since={[...messages].reverse().find((message) => message.author === "me")?.at ?? null}
-        />
+      {agentAddress && DOCUMENT_STAGES.has(stage) && !draftMessage ? (
+        <>
+          <Preparing
+            stage={stage}
+            busy={messages.length > 0}
+            since={[...messages].reverse().find((message) => message.author === "me")?.at ?? null}
+          />
+          <StageConversation
+            stage={stage}
+            messages={messages}
+            value={composer}
+            onValueChange={setComposer}
+            onSend={() => {
+              const body = composer;
+              setComposer("");
+              void send(body);
+            }}
+            working={sending}
+            disabled={!agentAddress}
+            placeholder={guidance.question ? "Your answer. Rough is fine." : "Add context or ask for the complete draft…"}
+          />
+        </>
       ) : null}
 
-      {agentAddress && DOCUMENT_STAGES.has(stage) && latestSpecialistMessage && activeNode ? (
+      {agentAddress && DOCUMENT_STAGES.has(stage) && draftMessage && activeNode ? (
         <>
           {stage === 7 ? (
             <EstimateView
-              body={latestSpecialistMessage.body}
+              body={draftMessage.body}
               detail={detail}
               stage={stage}
               chosenTarget={chosenTarget}
@@ -596,7 +632,7 @@ export function StageWorkspace({
             content={activeContent}
             tenantId={tenantId}
             turns={turns}
-            openQuestion={null}
+            openQuestion={guidance.question ? { text: guidance.question.text } : null}
             onSelectVersion={setSelectedVersionId}
             onRevise={(message, quotes) => {
               setSelectedVersionId(null);
@@ -609,7 +645,7 @@ export function StageWorkspace({
             }}
             onSubmit={() => void approve()}
             soloApproval={detail.soloApproval}
-            canSubmit={latestSpecialistMessage !== null && stage < LAST_STAGE && !(stage === 7 && !chosenTarget)}
+            canSubmit={draftMessage !== null && stage < LAST_STAGE && !(stage === 7 && !chosenTarget)}
             busy={sending ? "draft" : approving ? "submit" : null}
             draftOpen={draftOpen}
             newer={newerVersion}

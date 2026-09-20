@@ -39,7 +39,7 @@ export async function listProjectSummaries(transport: Transport = createHubTrans
       const nodes = graph.nodes.map(toArtifactNode);
       const stage = currentStageFromArtifacts(nodes);
       const deploymentIds = new Set(deployments.map((deployment) => deployment.deploymentId));
-      const needsDecision = pending.some((approval) => deploymentIds.has(approval.runId));
+      const needsDecision = pending.some((approval) => deploymentIds.has(approval.anchorRunId));
       return {
         id: record.id,
         revision: record.revision,

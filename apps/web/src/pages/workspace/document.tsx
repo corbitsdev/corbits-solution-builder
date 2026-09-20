@@ -19,7 +19,6 @@ import { approachName, sectionsIn } from "@solutions-builder/app/document";
 import { agentFor } from "@solutions-builder/app/kit";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { markChanges } from "../../revisions.js";
-import { AnimatedNumber } from "@corbits/react-ui";
 import { AddMaterial, Button, documentName } from "../../components.jsx";
 import { PrintButton } from "../../print.jsx";
 import { SpecialistTurn, WorkingLabel, type TurnNote } from "./thread.jsx";
@@ -63,8 +62,8 @@ export function StageDocument({
   /** The workspace tenant artifacts are recorded under. */
   tenantId: string;
   turns: StageTurn[];
-  /** Set while the specialist is still waiting on an answer. */
-  openQuestion: { remaining: number; ordinal: number } | null;
+  /** A question visibly recorded in the latest specialist mail. */
+  openQuestion: { text: string } | null;
   /** The stage-1 brief evaluator's verdict, advisory only. Null off stage 1. */
   evaluation?: Evaluation | null;
   onSelectVersion: (id: string) => void;
@@ -269,14 +268,7 @@ export function StageDocument({
           {/* The draft's own header carries the stage, so this says only what
               that does not. */}
           <span className="thread-progress">
-            {openQuestion ? (
-              <>
-                Question <AnimatedNumber value={openQuestion.ordinal + 1} /> of{" "}
-                <AnimatedNumber value={openQuestion.ordinal + 1 + openQuestion.remaining} />
-              </>
-            ) : (
-              ""
-            )}
+            {openQuestion ? "Question awaiting your answer" : ""}
           </span>
         </header>
 
@@ -289,7 +281,7 @@ export function StageDocument({
           // it is the point — it is what a reader takes in first.
           renderBody={(message) =>
             message.id === "pending" ? (
-              <WorkingLabel stage={node.stage} />
+              <WorkingLabel />
             ) : message.role === "agent" && failedTurns.has(message.id) ? (
               <div className="turn-failed" role="alert">
                 <Markdown source={(message.parts[0] as { text: string }).text} />
