@@ -861,6 +861,42 @@ declare module "@intx/workflow" {
 
   /** A loop iteration's body-child run id: `<runId>__<loopStepId>__<index>`. */
   export function loopBodyRunId(runId: string, loopId: string, index: number): string;
+
+  // --- Added for the project-workflow in-process proof (CL-8718) ---
+  // Faithful to vendor/interchange/packages/workflow/src/{definition/primitives,
+  // runtime/env,runlocal/run-local}.ts. `WorkflowAuthorizeFn` is narrowed to the
+  // structural subset this build calls with (zero-arg, `WorkflowAuthorizeResult`
+  // return): its real type is `AuthorizeFn<AuthorizeContext>` from `@intx/agent`,
+  // whose full parameter list is not pulled in here.
+
+  /** vendor .../definition/primitives.ts ActionHandler. */
+  export type ActionHandler = (
+    input: unknown,
+    ctx: EffectContext,
+    signal: AbortSignal,
+  ) => Promise<unknown>;
+
+  /** vendor .../runtime/env.ts EffectContext. */
+  export interface EffectContext {
+    perform(opts: { effectId: string; capability: string; run: () => Promise<unknown> }): Promise<unknown>;
+  }
+
+  /** vendor .../runtime/env.ts LoopFn / LoopFnRegistry. */
+  export type LoopFn = (childOutput: unknown, carryState: unknown) => unknown;
+  export type LoopFnRegistry = (ref: string) => LoopFn;
+
+  /** See the file-level note: narrowed to the zero-arg call shape this build uses. */
+  export type WorkflowAuthorizeFn = (...args: unknown[]) => Promise<WorkflowAuthorizeResult>;
+
+  /** vendor .../runlocal/run-local.ts RunLocalOptions, narrowed to the fields this build passes. */
+  export interface RunLocalOptions extends RuntimeRunOptions {
+    actionResolver?: (ref: string) => ActionHandler;
+    loopFns?: LoopFnRegistry;
+    authorize: WorkflowAuthorizeFn;
+  }
+
+  /** vendor .../runlocal/run-local.ts runLocal. */
+  export function runLocal(definition: WorkflowDefinition, options: RunLocalOptions): WorkflowRun;
 }
 
 declare module "@intx/agent" {
