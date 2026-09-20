@@ -1,4 +1,4 @@
-# using-corbitscore
+# using-corbits-packages
 
 `@corbits/*` packages are not on npm. Install them from git — the repository
 is usually `corbits-<package name>` under github.com/corbitsdev:
@@ -9,7 +9,7 @@ is usually `corbits-<package name>` under github.com/corbitsdev:
     bun add github:corbitsdev/corbits-oauth-core  # @corbits/oauth-core
     bun add github:corbitsdev/react-ui            # @corbits/react-ui
 
-The full list of packages is in the what-is-corbitscore skill. Pin a ref
+The full list of packages is in the corbits-packages skill. Pin a ref
 when the plan needs reproducibility:
 
     bun add github:corbitsdev/corbits-artifacts#<sha-or-tag>

@@ -12,10 +12,10 @@
  * named here exists.
  */
 import whatIsInterchange from "./platform-skills/what-is-interchange.md" with { type: "text" };
-import whatIsCorbitsCore from "./platform-skills/what-is-corbitscore.md" with { type: "text" };
+import corbitsPackages from "./platform-skills/corbits-packages.md" with { type: "text" };
 import usingInterchange from "./platform-skills/using-interchange.md" with { type: "text" };
-import usingCorbitsCore from "./platform-skills/using-corbitscore.md" with { type: "text" };
-import designingOnCorbitsCore from "./platform-skills/designing-on-corbitscore.md" with { type: "text" };
+import usingCorbitsPackages from "./platform-skills/using-corbits-packages.md" with { type: "text" };
+import designingOnInterchange from "./platform-skills/designing-on-interchange.md" with { type: "text" };
 
 export type PlatformSkill = {
   /** The skill's name: its `.agents/skills/` directory and its frontmatter `name`. */
@@ -36,9 +36,9 @@ export const PLATFORM_SKILLS: readonly PlatformSkill[] = [
     tools: ["artifact-read"],
   },
   {
-    key: "what-is-corbitscore",
-    description: "What CorbitsCore is: the corbitsdev package catalog — the reuse surface a deliverable on Interchange draws its parts from.",
-    body: whatIsCorbitsCore,
+    key: "corbits-packages",
+    description: "Reusable Corbits packages and solutions: the corbitsdev catalog, distinct from the Interchange platform.",
+    body: corbitsPackages,
     tools: ["artifact-read"],
   },
   {
@@ -48,15 +48,15 @@ export const PLATFORM_SKILLS: readonly PlatformSkill[] = [
     tools: ["artifact-read", "plan-validate"],
   },
   {
-    key: "using-corbitscore",
+    key: "using-corbits-packages",
     description: "How to install the @corbits/* packages — git dependencies, not npm — and how the unpublished workbench packages are vendored.",
-    body: usingCorbitsCore,
+    body: usingCorbitsPackages,
     tools: ["artifact-read"],
   },
   {
-    key: "designing-on-corbitscore",
+    key: "designing-on-interchange",
     description: "How to shape a deliverable on the platform: the three shapes, agents as workflows, skills tools and directors as assets, apps as clients of the hub.",
-    body: designingOnCorbitsCore,
+    body: designingOnInterchange,
     tools: ["artifact-read", "plan-validate"],
   },
 ];

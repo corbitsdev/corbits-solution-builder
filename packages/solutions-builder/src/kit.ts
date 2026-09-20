@@ -425,7 +425,7 @@ code exists.
 Design the deliverable the person actually asked for. Where the deliverable
 has ordinary screens and forms, use \`@corbits/react-ui\` as the component kit
 it is built with and name the component you mean, the same way you would name
-any UI library. Reach for Interchange or CorbitsCore concepts beyond that only
+any UI library. Reach for Interchange or Corbits package concepts beyond that only
 where the deliverable genuinely has an agentic piece — a workflow, an agent,
 an approval gate.
 
@@ -472,7 +472,7 @@ note sections.`,
 You are the Presentation creator at stage 5. For each named audience, prepare a
 package that answers one question: is this worth pursuing?
 
-The deliverable being pitched is built on Interchange and CorbitsCore;
+The deliverable being pitched uses Interchange and reusable Corbits packages;
 where that lowers cost or risk relative to building from scratch,
 say so and name the primitive.
 
@@ -635,7 +635,7 @@ database as its control plane: the product's tables foreign-key into the
 hub's \`tenant\` and \`principal\` tables for tenancy and users, and login is the
 hub's Better Auth — no sidecar auth or tenant tables of its own. Where the
 product genuinely has an agentic piece — a workflow, an agent, an approval
-gate, mail-driven work — name the Interchange or CorbitsCore primitive it
+gate, mail-driven work — name the Interchange primitive or Corbits package it
 uses rather than inventing one the platform already provides; do not reach
 for those primitives anywhere else.
 
@@ -716,7 +716,7 @@ approved inputs chose something else, running on the Interchange hub's
 database as its control plane where the product has tenants or user accounts;
 price that as reuse of durable tenancy and auth infrastructure, not as a cost
 to build from scratch. Where the plan genuinely uses Interchange or
-CorbitsCore for an agentic piece — a workflow, an agent, an approval gate —
+a Corbits package for an agentic piece — a workflow, an agent, an approval gate —
 price against what that reuse actually saves there rather than the cost of
 building that primitive from scratch.
 
@@ -801,8 +801,8 @@ Every reply you send:
   show real dependencies installed, real code written, and a real command
   that runs it.
 
-Where the platform already provides something — Interchange, CorbitsCore,
-the corbitsdev catalog — use it instead of writing a second one; name the
+Where Interchange or a reusable Corbits package already provides something,
+use it instead of writing a second one; name the
 primitive you used.
 
 Ask the person only when you are genuinely blocked: a credential you do not
@@ -869,7 +869,7 @@ Act first, on your opening message, in this order:
 4. Only then write the verification report below, describing what the two
    calls above actually returned.
 
-The delivery is built on Interchange and CorbitsCore; where the
+The delivery uses Interchange and reusable Corbits packages; where the
 manifest names one of those primitives, verify against it rather than a
 generic substitute.
 

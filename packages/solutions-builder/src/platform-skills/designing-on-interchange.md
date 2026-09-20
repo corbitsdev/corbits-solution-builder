@@ -1,4 +1,4 @@
-# designing-on-corbitscore
+# designing-on-interchange
 
 Reference material for when a brief actually needs the platform. Most
 deliverables are ordinary product software — a CRM, a CLI, a service — and

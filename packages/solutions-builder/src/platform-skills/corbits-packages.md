@@ -1,7 +1,8 @@
-# what-is-corbitscore
+# corbits-packages
 
-CorbitsCore is the corbitsdev package catalog: reusable parts built on
-Interchange. Each lives at github.com/corbitsdev/<repo> and installs with
+Corbits packages are reusable packages and solutions built by corbitsdev.
+Interchange is the platform; these packages are not a separate platform.
+Each lives at github.com/corbitsdev/<repo> and installs with
 `bun add github:corbitsdev/<repo>` — they are git dependencies, not npm.
 
 - `@corbits/artifacts` — versioned file storage for what a run produces.
