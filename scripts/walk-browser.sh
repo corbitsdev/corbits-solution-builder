@@ -104,7 +104,12 @@ choose_approach() {
   snap
   grep -q 'Neither, redraft' "$SNAP" || return 0
   local before=$(replies)
-  local pick=$(awk '/Which approach\?/{f=1} f && /- button "[^"]+" \[[^]]*ref=e[0-9]+/ && !/Neither, redraft/ && !/disabled/{match($0,/ref=e[0-9]+/); print substr($0,RSTART+4,RLENGTH-4); exit}' "$SNAP")
+  # The interactive snapshot lists controls only, so the "Which approach?"
+  # label is not in it: the approaches are the run of buttons directly above
+  # "Neither, redraft", and the first of that run is the one to pick.
+  local pick=$(awk '
+    /- button "/ && !/disabled/ { if (!run) start=$0; run=1; if (/Neither, redraft/) { print start; exit } ; next }
+    { run=0 }' "$SNAP" | grep -v 'Neither, redraft' | grep -oE 'ref=e[0-9]+' | sed 's/ref=//')
   if [ -z "$pick" ]; then
     shot "no-approach-choice"
     defect_log 3 "an approach to choose" "the choice row offered no enabled approach" "shots/no-approach-choice.png" "blocker"
