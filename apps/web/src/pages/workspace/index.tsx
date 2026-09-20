@@ -16,12 +16,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
   ApiFailure,
+  createHubTransport,
   STAGE_DRAFT_KIND,
+  type ActiveModel,
   type ArtifactNode,
   type ProjectDetail,
   type StageTurn,
 } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
+import { markerAlreadySent } from "../../decision-notify.ts";
 import { shouldFallbackRefetch, subscribeMailbox } from "../../mailbox-events.ts";
 import { Markdown } from "../../markdown.jsx";
 import { AudiencePackages } from "../audiences.jsx";
@@ -142,6 +145,27 @@ export function StageWorkspace({
   const [remediation, setRemediation] = useState<
     import("../../client.js").Remediation | undefined
   >(undefined);
+
+  // Which model the project's specialists are actually drafting with, read
+  // the same way `specialist-deploy.ts` resolves one to deploy against (the
+  // tenant's first non-disabled offering) so this never drifts from what a
+  // specialist is really running on. `undefined` while unresolved, `null`
+  // once resolved to nothing connected.
+  const [activeModel, setActiveModel] = useState<ActiveModel | null | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .activeModel()
+      .then((value) => {
+        if (!cancelled) setActiveModel(value ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setActiveModel(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detail.project.id]);
 
   // The project workflow (CL-8721) is the process authority for a stage's
   // current position (CL-8687): `workflowView.stage`. `currentStageFromArtifacts`
@@ -426,8 +450,21 @@ export function StageWorkspace({
   // stage's thread, sent once. A later stage's opening is instead the just-
   // approved draft, sent from `approve()` below the moment the stage
   // advances — this only fires the very first message of a fresh thread.
+  // Set only once the send is confirmed (either this tab's own send landed,
+  // or another tab's already had, per the marker check below) — never
+  // beforehand, so a send that throws is retried rather than treated as done.
   const openedRef = useRef<string | null>(null);
+  // Guards a single key against a second concurrent attempt from this same
+  // component (an unrelated dependency of the effect below changing while an
+  // attempt is still in flight) — a narrower, synchronous version of what the
+  // marker already guards across tabs and reloads.
+  const openingInFlightRef = useRef<string | null>(null);
+  // A key already auto-retried once, so a second failure surfaces instead of
+  // retrying forever.
+  const openingAutoRetriedRef = useRef<string | null>(null);
   const [pendingOpening, setPendingOpening] = useState<{ stage: number; body: string } | null>(null);
+  const [openingError, setOpeningError] = useState<string | null>(null);
+  const [openingRetryAttempt, setOpeningRetryAttempt] = useState(0);
 
   // Belt-and-braces: `key={detail.project.id}` on this component in App.tsx
   // already remounts it per project, resetting all of the above. This makes
@@ -439,7 +476,10 @@ export function StageWorkspace({
     setWorkflowStartError(null);
     setWorkflowViewFailed(false);
     setPendingOpening(null);
+    setOpeningError(null);
     openedRef.current = null;
+    openingInFlightRef.current = null;
+    openingAutoRetriedRef.current = null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail.project.id]);
 
@@ -466,17 +506,48 @@ export function StageWorkspace({
     // opening send (CL-8656).
     if (threadLoadedFor !== agentAddress || messages.length > 0) return;
     const key = `${detail.project.id}:${stage}:${agentAddress}`;
-    if (openedRef.current === key) return;
+    if (openedRef.current === key || openingInFlightRef.current === key) return;
 
     let cancelled = false;
+    // Server-visible dedup (defect: duplicate opening mail across two tabs)
+    // — the same `[marker]`-in-Sent-folder check `decision-notify.ts` uses,
+    // keyed to this project's stage rather than a decision id, so two tabs
+    // that both load an empty stage N+1 thread never both send its opening.
+    const marker = `[opening:${detail.project.id}:${stage}]`;
     const dispatchOpening = (body: string) => {
-      if (cancelled || openedRef.current === key) return;
-      openedRef.current = key;
-      void api
-        .sendStageMail(tenantId, agentAddress, { body })
-        .then(() => loadThread())
+      if (cancelled || openedRef.current === key || openingInFlightRef.current === key) return;
+      openingInFlightRef.current = key;
+      void markerAlreadySent(createHubTransport(), tenantId, marker)
+        .then((already) => {
+          if (cancelled) return undefined;
+          if (already) {
+            openedRef.current = key;
+            return loadThread();
+          }
+          return api
+            .sendStageMail(tenantId, agentAddress, { body, subject: `${marker} ${stageName(stage)}` })
+            .then(() => {
+              if (cancelled) return undefined;
+              // Marked as opened only now that the send is confirmed —
+              // a throw above skips this, so a failed send is retried
+              // rather than silently treated as sent.
+              openedRef.current = key;
+              setOpeningError(null);
+              return loadThread();
+            });
+        })
         .catch((cause: unknown) => {
-          setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+          if (cancelled) return;
+          setOpeningError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+          if (openingAutoRetriedRef.current !== key) {
+            openingAutoRetriedRef.current = key;
+            setTimeout(() => {
+              if (!cancelled) setOpeningRetryAttempt((attempt) => attempt + 1);
+            }, 3_000);
+          }
+        })
+        .finally(() => {
+          if (openingInFlightRef.current === key) openingInFlightRef.current = null;
         });
     };
 
@@ -533,6 +604,7 @@ export function StageWorkspace({
     tenantId,
     loadThread,
     workflowView,
+    openingRetryAttempt,
   ]);
 
   // Defect 5: a send-back into stage 8 lands on a thread that already has
@@ -953,6 +1025,15 @@ export function StageWorkspace({
 
   return (
     <div className="stage-view">
+      {activeModel ? (
+        <p className="inline-note stage-model-line">
+          Drafting with {activeModel.providerLabel} · {activeModel.canonicalName}{" "}
+          <button type="button" className="link-button" onClick={onOpenSettings}>
+            Settings
+          </button>
+        </p>
+      ) : null}
+
       {workflowView?.done ? (
         <Banner tone="okay" title="This project is delivered — stage 9's approval was recorded and the workflow has finished." />
       ) : null}
@@ -1037,6 +1118,16 @@ export function StageWorkspace({
         <Screen title={`Stage ${stage} of 9 · ${stageName(stage)}`} description={STAGE_GOAL[stage]} tight>
           <p className="inline-note">Starting the {stageName(stage).toLowerCase()} specialist…</p>
         </Screen>
+      ) : null}
+
+      {agentAddress && openingError ? (
+        <Banner
+          tone="error"
+          title="The opening message could not be sent"
+          action={{ label: "Try again", onClick: () => setOpeningRetryAttempt((attempt) => attempt + 1) }}
+        >
+          {openingError}
+        </Banner>
       ) : null}
 
       {agentAddress ? (

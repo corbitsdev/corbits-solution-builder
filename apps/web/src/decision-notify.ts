@@ -59,6 +59,22 @@ function mailboxPath(tenantId: string): string {
 }
 
 /**
+ * Whether a `marker`-tagged message already sits in `tenantId`'s own Sent
+ * folder, and when -- the query below runs for its own `[decision:<id>]`
+ * marker, generalized so another client-driven surface with the same
+ * two-tabs-racing shape (the stage workspace's opening mail) dedups against
+ * the hub instead of keeping its own, per-tab record.
+ */
+export async function markerAlreadySent(
+  transport: Transport,
+  tenantId: string,
+  marker: string,
+): Promise<string | undefined> {
+  const sent = await transport.fetch<InboxPage>("GET", `${mailboxPath(tenantId)}?folder=Sent&limit=200`);
+  return sent.messages.find((message) => message.envelope.subject.includes(marker))?.envelope.date;
+}
+
+/**
  * Notifies every principal who may resolve `decision`, and reports what
  * happened. Best effort: a mailbox failure is returned as `notifyError`
  * rather than thrown, so it never blocks the decision queue from rendering.
@@ -76,9 +92,8 @@ export async function notifyDecisionOpen(
   try {
     const path = mailboxPath(workspaceTenantId);
     const marker = markerFor(decision.id);
-    const sent = await transport.fetch<InboxPage>("GET", `${path}?folder=Sent&limit=200`);
-    const already = sent.messages.find((message) => message.envelope.subject.includes(marker));
-    if (already) return { notifiedAt: already.envelope.date };
+    const already = await markerAlreadySent(transport, workspaceTenantId, marker);
+    if (already) return { notifiedAt: already };
 
     const holders = await grantHolders(transport, decision.projectId, APPROVAL_RESOURCE, "resolve");
     const to = holders.map((holder) => holder.address).filter((address) => ADDRESS.test(address));

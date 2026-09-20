@@ -429,6 +429,38 @@ export async function selectProviderModel(
   await selectModelViaHub(transport, workspace.tenantId, modelProviderId, canonicalName);
 }
 
+export type ActiveModel = { canonicalName: string; providerLabel: string };
+
+/**
+ * The model specialists are actually drafting with, right now: the tenant's
+ * first non-disabled offering, resolved the same way `specialist-deploy.ts`'s
+ * `ensureSpecialistDeploymentOnce` picks one to deploy against
+ * (`offerings.filter(!disabled).sort(priority)[0]`). `null` when nothing is
+ * connected or every offering is disabled.
+ */
+export async function resolveActiveModel(transport: Transport): Promise<ActiveModel | null> {
+  const workspace = await resolveWorkspace(transport);
+  if (!workspace) return null;
+  const catalog = catalogFor(transport, workspace.tenantId);
+  const [offeringRows, modelRows, providerRows, vendorRows] = await Promise.all([
+    catalog.offerings(),
+    catalog.models(),
+    catalog.modelProviders(),
+    catalog.providers(),
+  ]);
+  const offering = offeringRows.filter((row) => !row.disabled).sort((a, b) => a.priority - b.priority)[0];
+  if (!offering) return null;
+  const model = modelRows.find((row) => row.id === offering.modelId);
+  if (!model) return null;
+  const provider = providerRows.find((row) => row.id === offering.providerId);
+  const vendorRow = provider ? vendorRows.find((row) => row.name === provider.name) : undefined;
+  const label = vendorRow?.metadata?.label;
+  return {
+    canonicalName: model.canonicalName,
+    providerLabel: typeof label === "string" ? label : (provider?.name ?? ""),
+  };
+}
+
 /** A pinned model the fresh discovery no longer serves -- `null` when nothing needs clearing. */
 export function droppedSelection(selected: string | null, discovered: readonly string[]): string | null {
   if (selected === null) return null;

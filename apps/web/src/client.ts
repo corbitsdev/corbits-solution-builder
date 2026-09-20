@@ -120,10 +120,14 @@ import {
   disconnectProvider,
   listConnectedProviders,
   refreshProviderModels,
+  resolveActiveModel,
   rerankCatalogViaHub,
   reorderProviders,
   selectProviderModel,
+  type ActiveModel,
 } from "./provider-catalog.ts";
+
+export type { ActiveModel } from "./provider-catalog.ts";
 
 export type { DesignerSettings } from "./designer-settings.ts";
 
@@ -774,6 +778,9 @@ function stakeholdersPolicy(
   return { ...current, audiences, audienceQuorum: quorum };
 }
 
+let activeModelCache: { value: ActiveModel | null; at: number } | null = null;
+const ACTIVE_MODEL_CACHE_MS = 60_000;
+
 export const api = {
   status: () => request<HostStatus>("/status"),
   installState: async (): Promise<InstallState> => {
@@ -811,7 +818,9 @@ export const api = {
   },
   connectProvider: async (input: { providerId: string; label: string; baseUrl?: string; apiKey: string }): Promise<Provider> => {
     try {
-      return await connectApiKeyProvider(createHubTransport(), input);
+      const row = await connectApiKeyProvider(createHubTransport(), input);
+      activeModelCache = null;
+      return row;
     } catch (cause) {
       installerFailure(cause);
     }
@@ -819,6 +828,7 @@ export const api = {
   connectOAuthProvider: async (input: { providerId: string; label: string }): Promise<void> => {
     try {
       await connectOAuthProvider(createHubTransport(), input);
+      activeModelCache = null;
     } catch (cause) {
       installerFailure(cause);
     }
@@ -826,13 +836,16 @@ export const api = {
   disconnectProvider: async (providerId: string): Promise<void> => {
     try {
       await disconnectProvider(createHubTransport(), providerId);
+      activeModelCache = null;
     } catch (cause) {
       installerFailure(cause);
     }
   },
   refreshProviderModels: async (providerId: string): Promise<{ clearedModel: string | null }> => {
     try {
-      return await refreshProviderModels(createHubTransport(), providerId);
+      const result = await refreshProviderModels(createHubTransport(), providerId);
+      activeModelCache = null;
+      return result;
     } catch (cause) {
       installerFailure(cause);
     }
@@ -840,6 +853,7 @@ export const api = {
   reorderProviders: async (orderedProviderIds: string[]): Promise<void> => {
     try {
       await reorderProviders(createHubTransport(), orderedProviderIds);
+      activeModelCache = null;
     } catch (cause) {
       installerFailure(cause);
     }
@@ -847,6 +861,25 @@ export const api = {
   selectProviderModel: async (providerId: string, canonicalName: string | null): Promise<void> => {
     try {
       await selectProviderModel(createHubTransport(), providerId, canonicalName);
+      activeModelCache = null;
+    } catch (cause) {
+      installerFailure(cause);
+    }
+  },
+  /**
+   * The model specialists are actually drafting with, for the workspace
+   * header. Cached briefly so switching between stages does not re-resolve
+   * the whole catalog on every render; a provider mutation elsewhere in
+   * `api` drops the cache so a change shows up on the next read.
+   */
+  activeModel: async (): Promise<ActiveModel | null> => {
+    if (activeModelCache && Date.now() - activeModelCache.at < ACTIVE_MODEL_CACHE_MS) {
+      return activeModelCache.value;
+    }
+    try {
+      const value = await resolveActiveModel(createHubTransport());
+      activeModelCache = { value, at: Date.now() };
+      return value;
     } catch (cause) {
       installerFailure(cause);
     }
