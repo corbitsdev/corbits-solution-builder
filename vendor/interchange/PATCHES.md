@@ -331,21 +331,3 @@ existing grant collection the credential walk already mirrors.
 
 **Kill date.** 2026-10-16. Tracked as
 [INTR-574](https://linear.app/abklabs/issue/INTR-574).
-
-
-## workflow-host: dispatch backstop raised from 5 to 30 minutes
-
-**File.** `packages/workflow-host/src/supervisor/supervisor.ts`,
-`TERMINAL_OR_PARK_BACKSTOP_MS` 300_000 -> 1_800_000.
-
-**Why.** After delivering a mail the dispatch loop waits for the run to park.
-A mail-triggered agent step only parks (`parkKind: "input"`) when its turn
-ends, so the wait spans the whole model turn, not "well under a second". A
-turn longer than five minutes (a slow local model on a large stage prompt)
-fired the backstop, failed the dispatch and left the mail reclaimable; the
-re-dispatch restarted the turn and the specialist never answered. Seen in
-real browser walks on 2026-09-20 (stage 3 once, stage 5 for good).
-
-**Upstream-able.** As a configurable value, yes. Not filed.
-
-**Kill date.** When the backstop is configurable or excludes in-flight turns.

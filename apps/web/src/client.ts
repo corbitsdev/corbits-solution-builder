@@ -1478,11 +1478,12 @@ export const api = {
         projectId,
         stage as Stage,
         hubOrigin(),
-        // CL-8723: only stage 8 carries the hub credential binding + the
-        // tools-delivery member -- it is the only stage that publishes a
-        // real artifact from inside the run (`publish_workspace`). Every
-        // other stage renders exactly as it did pre-CL-8719/8723.
-        stage === 8,
+        // The hub credential binding for `publish_workspace`'s real upload is
+        // off until a run has been seen to start with it: a stage 8 deployed
+        // with it never produced a run, while every unbound stage does.
+        // `publish_workspace` falls back to returning the archive inline and
+        // the client persists it on approval.
+false,
       );
       const ready = await waitForDeploymentDeployed(transport, workspaceTenantId, deployment.deploymentId);
       if (!ready) {
