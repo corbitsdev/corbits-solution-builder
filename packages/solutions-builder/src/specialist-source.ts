@@ -238,11 +238,22 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
     systemPrompt = `${systemPrompt}\n\n${audienceSection(audiences)}`;
   }
 
+  // `package` must match the consumer identity the sidecar's source-ref
+  // lineage keys credential capabilities against: a specialist deploys as
+  // `source` (not a pinned `tool-packages-manifest.json`), so
+  // `workflow-substrate-factory.ts`'s `sourceTools` arm sets
+  // `StepToolFactory.packageName` to the bundle's own `defineTool({ id })` --
+  // `SIDECAR_BUNDLE_ID` in `@corbits/artifacts/sidecar-bundle.ts` -- not the
+  // bare npm package name `reconcileDeclaredCredentials`/`toolConsumer` would
+  // expect from a pinned closure. Binding against the bare name here builds a
+  // `tool:@corbits/artifacts` consumer that never matches the bundle's own
+  // `tool:@corbits/artifacts/sidecar-bundle` consumer, so the capability is
+  // never assembled and the tool's `resolve("credentials")` fails closed.
   const credentialBindings = artifactTools
     ? `
   credentialBindings: [
     {
-      package: ${JSON.stringify("@corbits/artifacts")},
+      package: ${JSON.stringify("@corbits/artifacts/sidecar-bundle")},
       handle: "hub",
       provider: ${JSON.stringify(WORKFLOW_ARTIFACTS_PROVIDER_NAME)},
       name: ${JSON.stringify(credentialName)},
