@@ -28,10 +28,11 @@ import fs from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ApiError, listWorkflowDeployments, readWorkflowRunEvents, type Transport } from "@intx/hub-client";
+import { ApiError, listWorkflowDeployments, readWorkflowRunEvents, type Transport, type WorkflowRunEvent } from "@intx/hub-client";
 import {
   createArtifact,
   createProject as installerCreateProject,
+  ensureProjectWorkflow,
   ensureSpecialistDeployment,
   install as installerInstall,
   listArtifacts,
@@ -39,16 +40,23 @@ import {
   registerProviderModels,
   resolveWorkspace,
   upsertApiKeyProvider,
+  vendoredMemberFiles,
+  workflowsFor,
   type ClosureSource,
   type FetchLike,
   type ProjectPolicy,
+  type ProjectWorkflowDeployment,
+  type ProjectWorkflowStageInput,
   type SidecarCapability,
   type WorkflowGitPush,
 } from "@solutions-builder/installer";
 import { ARTIFACT_STAGE, type ArtifactKind } from "@solutions-builder/app/artifacts";
 import { buildManifest, buildPackedEntries } from "./closure-pack.ts";
+import { buildProjectWorkflowEntryFiles } from "./project-workflow-pack.ts";
 import { listProjectSummaries } from "../apps/web/src/project-list.ts";
 import { readStageThread, sendStageMail } from "../apps/web/src/stage-mail.ts";
+import { digestOf, approveStage, sendBack, type StageApprovalDeps } from "../apps/web/src/stage-approval.ts";
+import { foldProjectWorkflow, newestIterationHasHoldOutput, type ProjectWorkflowView } from "../apps/web/src/project-workflow.ts";
 
 /**
  * `apps/web/src/stage-mail.ts`'s `readStageThread`/`sendStageMail` are built
@@ -73,10 +81,19 @@ function installHubFetchShim(origin: string, hostToken: string, cookieJar: { val
   }) as typeof fetch;
 }
 
-/** The kind stage 1's specialist writes its brief as (`ARTIFACT_STAGE`'s stage-1 producer kind, not the human-upload `source_material` kind). */
+/**
+ * The stage-1/stage-2 draft kinds -- `apps/web/src/client.ts`'s
+ * `STAGE_DRAFT_KIND[1]`/`[2]`, duplicated as plain constants here rather
+ * than imported at runtime (that module is browser-oriented; every other
+ * caller in this script only imports its TYPES).
+ */
 const STAGE1_ARTIFACT_KIND: ArtifactKind = "problem_brief";
+const STAGE2_ARTIFACT_KIND: ArtifactKind = "solution_constraints";
 if (ARTIFACT_STAGE[STAGE1_ARTIFACT_KIND] !== 1) {
   throw new Error(`ARTIFACT_STAGE[${STAGE1_ARTIFACT_KIND}] is ${ARTIFACT_STAGE[STAGE1_ARTIFACT_KIND]}, not stage 1`);
+}
+if (ARTIFACT_STAGE[STAGE2_ARTIFACT_KIND] !== 2) {
+  throw new Error(`ARTIFACT_STAGE[${STAGE2_ARTIFACT_KIND}] is ${ARTIFACT_STAGE[STAGE2_ARTIFACT_KIND]}, not stage 2`);
 }
 
 type RunEvent = { readonly seq: number; readonly type: string; readonly body: Record<string, unknown> };
@@ -96,7 +113,18 @@ const checks: { name: string; ok: boolean; detail: string }[] = [];
 let currentHost: Host | undefined;
 let dumpedHostOnFirstFailure = false;
 
+/** Masks a session/API/git token, cookie, or password value that might
+ *  otherwise land in a PASS/FAIL line -- e.g. `better-auth`'s raw
+ *  `/get-session` response, which carries the session's own bearer token --
+ *  every `check()` call runs its detail through this before printing. Only
+ *  named secret-shaped JSON fields are redacted, so deployment/run/artifact
+ *  ids in other details print unchanged. */
+function redactSecrets(text: string): string {
+  return text.replace(/"(token|apiKey|api_key|sessionToken|password|secret)"\s*:\s*"[^"]*"/gi, '"$1":"***"');
+}
+
 function check(name: string, ok: boolean, detail = ""): boolean {
+  detail = redactSecrets(detail);
   checks.push({ name, ok, detail });
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${detail ? ` - ${detail}` : ""}`);
   if (!ok && !dumpedHostOnFirstFailure && currentHost) {
@@ -366,6 +394,60 @@ const PROJECT_POLICY: ProjectPolicy = {
   allowExternalProviders: false,
 };
 
+/** The loop's signal name -- `apps/web/src/client.ts`'s own
+ *  `PROJECT_DECISION_SIGNAL` constant, duplicated here since it is module-
+ *  private there. */
+const PROJECT_DECISION_SIGNAL = "project.decision";
+
+/**
+ * The project workflow's folded view, read the same way `apps/web/src/client.ts`'s
+ * `api.projectWorkflowView` reads it: the top-level run's own events plus
+ * only the newest loop-iteration run's events (falling back to the previous
+ * iteration only in the rare race the client handles the same way). The
+ * FOLD itself (`foldProjectWorkflow`) is imported, not reimplemented -- this
+ * is only the IO plumbing to fetch the events it folds.
+ */
+function projectWorkflowViewOf(transport: Transport, tenantId: string, ref: ProjectWorkflowDeployment) {
+  return async (): Promise<ProjectWorkflowView | null> => {
+    const workflows = workflowsFor(transport, tenantId);
+    const [topEvents, runIds] = await Promise.all([
+      workflows.runEvents(ref.deploymentId, ref.runId),
+      workflows.runs(ref.deploymentId),
+    ]);
+    const iterationIds = runIds
+      .filter((id) => id.startsWith(`${ref.runId}__`))
+      .map((id) => ({ id, index: Number(id.slice(id.lastIndexOf("__") + 2)) }))
+      .filter((entry) => Number.isFinite(entry.index))
+      .sort((a, b) => a.index - b.index)
+      .map((entry) => entry.id);
+
+    const iterationEventsByRunId: Record<string, WorkflowRunEvent[]> = {};
+    const newestId = iterationIds.at(-1);
+    if (newestId) {
+      iterationEventsByRunId[newestId] = (await workflows.runEvents(ref.deploymentId, newestId)).events;
+      const previousId = iterationIds.length >= 2 ? iterationIds.at(-2) : undefined;
+      if (previousId && !newestIterationHasHoldOutput(iterationEventsByRunId[newestId])) {
+        iterationEventsByRunId[previousId] = (await workflows.runEvents(ref.deploymentId, previousId)).events;
+      }
+    }
+    return foldProjectWorkflow(topEvents.events, iterationEventsByRunId);
+  };
+}
+
+/** Delivers one decision as the loop's `project.decision` signal, the same
+ *  way `apps/web/src/client.ts`'s `api.decide` does. */
+function decideVia(transport: Transport, tenantId: string, ref: ProjectWorkflowDeployment) {
+  return async (_projectId: string, decision: Record<string, unknown>): Promise<{ ok: true }> => {
+    await workflowsFor(transport, tenantId).signal(ref.deploymentId, {
+      runId: ref.runId,
+      signalName: PROJECT_DECISION_SIGNAL,
+      signalId: decision["decisionId"] as string,
+      payload: { decision },
+    });
+    return { ok: true as const };
+  };
+}
+
 /**
  * The closure/git-push capabilities `ensureSpecialistDeployment` needs
  * (CL-8334), built the same way `scripts/pack-registry-asset.ts` builds
@@ -522,30 +604,7 @@ async function main(): Promise<void> {
       });
     }
 
-    // (4) Create a project.
-    const project = await step("4. create a project (installer project-tenant)", async () => {
-      if (!workspace) throw new Error("no workspace to open a project under");
-      const { project: created } = await installerCreateProject(transport, workspace.tenantId, {
-        title: "E2E Client Proof Project",
-        slug: `e2e-client-proof-${Date.now()}`,
-        policy: PROJECT_POLICY,
-      });
-      check("4. create a project (installer project-tenant)", true, `project ${created.id}`);
-      return created;
-    });
-
-    // (5) List projects via apps/web/src/project-list.ts's helper.
-    await step("5. list projects via project-list.ts's listProjectSummaries", async () => {
-      const summaries = await listProjectSummaries(transport);
-      const found = project ? summaries.find((entry) => entry.id === project.id) : undefined;
-      check(
-        "5. list projects via project-list.ts's listProjectSummaries",
-        found !== undefined,
-        `${summaries.length} project(s); mine ${found ? "present" : "missing"}`,
-      );
-    });
-
-    /** Dumps a specialist deployment's own agent run events on a poll timeout, per CL-8598's report contract. */
+    /** Dumps a specialist/workflow deployment's own agent run events on a poll timeout, per CL-8598's report contract. */
     const dumpDeploymentEvents = async (label: string, tenantId: string, deploymentId: string): Promise<void> => {
       const { events } = await readWorkflowRunEvents(transport, tenantId, deploymentId, deploymentId);
       dumpRunEvents(label, events as RunEvent[]);
@@ -566,6 +625,94 @@ async function main(): Promise<void> {
       if (!found) await dumpDeploymentEvents(`deployment ${deploymentId}`, tenantId, deploymentId);
       return found !== null;
     };
+
+    // (4) Create a project.
+    const project = await step("4. create a project (installer project-tenant)", async () => {
+      if (!workspace) throw new Error("no workspace to open a project under");
+      const { project: created } = await installerCreateProject(transport, workspace.tenantId, {
+        title: "E2E Client Proof Project",
+        slug: `e2e-client-proof-${Date.now()}`,
+        policy: PROJECT_POLICY,
+      });
+      check("4. create a project (installer project-tenant)", true, `project ${created.id}`);
+      return created;
+    });
+
+    // (4b) Deploy the project workflow -- the process authority (CL-8721/
+    // CL-8687) -- the same one call `apps/web/src/client.ts`'s
+    // `api.ensureProjectWorkflow` makes: one loop-driven workflow per
+    // project, every stage 1..9 authorized to the workspace owner.
+    const projectWorkflow = await step("4b. ensureProjectWorkflow for the project", async () => {
+      if (!workspace || !project || !sidecar) throw new Error("no workspace/project/sidecar to deploy against");
+      const stages: ProjectWorkflowStageInput[] = Array.from({ length: 9 }, (_, index) => ({
+        stage: index + 1,
+        authorizedPrincipalIds: [workspace.principalId],
+      }));
+      const source = await buildProjectWorkflowEntryFiles();
+      const deployed = await ensureProjectWorkflow(
+        transport,
+        sidecar,
+        { files: source },
+        gitPush,
+        workspace.tenantId,
+        project.id,
+        stages,
+        await vendoredMemberFiles(closure.manifest, closure.fetchTarball),
+      );
+      check(
+        "4b. ensureProjectWorkflow for the project",
+        typeof deployed.deploymentId === "string" && deployed.deploymentId.length > 0 && typeof deployed.runId === "string" && deployed.runId.length > 0,
+        `deployment ${deployed.deploymentId} run ${deployed.runId}`,
+      );
+      return deployed;
+    });
+
+    const viewProjectWorkflow = workspace && projectWorkflow ? projectWorkflowViewOf(transport, workspace.tenantId, projectWorkflow) : null;
+    const decideProjectWorkflow = workspace && projectWorkflow ? decideVia(transport, workspace.tenantId, projectWorkflow) : null;
+    const stageApprovalDeps: StageApprovalDeps | null =
+      viewProjectWorkflow && decideProjectWorkflow
+        ? { view: viewProjectWorkflow, decide: decideProjectWorkflow, now: () => new Date().toISOString() }
+        : null;
+
+    await step("4c. the project workflow deployment reaches status deployed", async () => {
+      if (!workspace || !projectWorkflow) throw new Error("no project workflow deployment to poll");
+      const ok = await pollDeploymentStatus(workspace.tenantId, projectWorkflow.deploymentId, "deployed");
+      check(
+        "4c. the project workflow deployment reaches status deployed",
+        ok,
+        ok ? projectWorkflow.deploymentId : "timed out waiting for status deployed",
+      );
+      if (!ok) throw new Error("the project workflow deployment never reached status deployed");
+    });
+
+    await step("4d. the freshly-deployed workflow's folded view reports stage 1, not done", async () => {
+      if (!viewProjectWorkflow) throw new Error("no project workflow view to read");
+      // `foldProjectWorkflow` never returns null -- before the loop's first
+      // iteration has actually started, it folds to `EMPTY_STATE` (stage 0),
+      // a real value that is nonetheless not yet USABLE. Polls past that,
+      // not just past `null`.
+      const view = await pollUntil(120_000, 3_000, async () => {
+        const candidate = await viewProjectWorkflow();
+        return candidate && candidate.stage >= 1 ? candidate : null;
+      });
+      check(
+        "4d. the freshly-deployed workflow's folded view reports stage 1, not done",
+        view !== null && view.stage === 1 && view.done === false,
+        view ? `stage ${view.stage} done=${String(view.done)}` : "no view within 120s",
+      );
+      if (!view || view.stage !== 1 || view.done) throw new Error("the project workflow did not initialize at stage 1");
+    });
+
+    // (5) List projects via apps/web/src/project-list.ts's helper.
+    await step("5. list projects via project-list.ts's listProjectSummaries", async () => {
+      const summaries = await listProjectSummaries(transport);
+      const found = project ? summaries.find((entry) => entry.id === project.id) : undefined;
+      check(
+        "5. list projects via project-list.ts's listProjectSummaries",
+        found !== undefined,
+        `${summaries.length} project(s); mine ${found ? "present" : "missing"}`,
+      );
+    });
 
     /**
      * Polls `readStageThread` (over `installHubFetchShim`'s rewritten
@@ -636,13 +783,18 @@ async function main(): Promise<void> {
       check("7. the second reply carries a non-empty body", approvedBrief.trim().length > 0, approvedBrief.slice(0, 200));
     });
 
-    // (8) "Approve" stage 1: the client writes the reply as the stage-1
-    // artifact -- no gate signal, no admit chain (contract's "Deletions").
-    await step("8. approve stage 1 by writing the artifact (createArtifact)", async () => {
+    // (8) Persist the approved reply as the stage-1 artifact -- the SAME
+    // shape `apps/web/src/client.ts`'s `persistStageDraft` writes (no
+    // `approvedAt` stamp; CL-8687 the process authority moved off it) --
+    // then read back its id/version/digest, and run the real decision
+    // sequence the web client runs (`stage-approval.ts`'s `approveStage`,
+    // reused verbatim over `stageApprovalDeps`) rather than the pre-cutover
+    // "approve by writing the artifact" shortcut.
+    const stage1Artifact = await step("8. persist the stage-1 draft as its own artifact (no approvedAt)", async () => {
       if (!workspace || !project) throw new Error("no workspace/project to write an artifact under");
-      if (!approvedBrief.trim()) throw new Error("no approved brief text to write as the stage-1 artifact");
+      if (!approvedBrief.trim()) throw new Error("no approved brief text to persist as the stage-1 draft");
       const artifact = await createArtifact(transport, workspace.tenantId, {
-        title: "Problem brief",
+        title: `Stage 1 draft`,
         content: approvedBrief,
         metadata: {
           sb: {
@@ -651,11 +803,54 @@ async function main(): Promise<void> {
             stage: 1,
             mediaType: "text/markdown",
             sourceVersionIds: [],
-            provenance: { producer: "agent" },
+            provenance: { producer: "agent" as const },
           },
         },
       });
-      check("8. approve stage 1 by writing the artifact (createArtifact)", true, `artifact ${artifact.id}`);
+      check(
+        "8. persist the stage-1 draft as its own artifact (no approvedAt)",
+        (artifact.metadata?.["sb"] as { approvedAt?: unknown } | undefined)?.approvedAt === undefined,
+        `artifact ${artifact.id}@${String(artifact.version)}`,
+      );
+      return artifact;
+    });
+
+    const stage1Ref = await step("8b. read back the stage-1 artifact's id, version and digest", async () => {
+      if (!stage1Artifact) throw new Error("no stage-1 artifact to read back");
+      const sha256 = await digestOf(stage1Artifact.content, stage1Artifact.contentSha256);
+      check(
+        "8b. read back the stage-1 artifact's id, version and digest",
+        typeof stage1Artifact.id === "string" && stage1Artifact.version >= 1 && sha256.length > 0,
+        `${stage1Artifact.id}@${String(stage1Artifact.version)} sha256=${sha256.slice(0, 12)}...`,
+      );
+      return { artifactId: stage1Artifact.id, version: stage1Artifact.version, sha256 };
+    });
+
+    await step("8c. approveStage runs the real open_review/approve sequence and advances to stage 2", async () => {
+      if (!project || !stageApprovalDeps || !stage1Ref) throw new Error("missing deps to approve stage 1");
+      const result = await approveStage(stageApprovalDeps, { projectId: project.id, stage: 1, ref: stage1Ref });
+      check(
+        "8c. approveStage runs the real open_review/approve sequence and advances to stage 2",
+        result.ok === true && result.stage === 2,
+        JSON.stringify(result),
+      );
+    });
+
+    await step("8d. the folded view shows stage 2 with one approved review naming that artifact", async () => {
+      if (!viewProjectWorkflow || !stage1Ref) throw new Error("no project workflow view to read");
+      const view = await viewProjectWorkflow();
+      const review1 = view?.reviews[1];
+      const matches =
+        view?.stage === 2 &&
+        review1?.status === "approved" &&
+        review1.artifactId === stage1Ref.artifactId &&
+        review1.version === stage1Ref.version &&
+        review1.sha256 === stage1Ref.sha256;
+      check(
+        "8d. the folded view shows stage 2 with one approved review naming that artifact",
+        matches === true,
+        view ? `stage ${view.stage} review1=${JSON.stringify(review1)}` : "no view",
+      );
     });
 
     // (9) Deploy the stage-2 specialist, mail it the approved brief, poll for its reply.
@@ -673,6 +868,7 @@ async function main(): Promise<void> {
       if (!ok) throw new Error("stage-2 deployment never reached status deployed");
     });
 
+    let stage2ReplyBody = "";
     await step("9. mail the approved brief to stage 2 and poll for a reply", async () => {
       if (!workspace || !stage2) throw new Error("no workspace/stage-2 deployment to mail");
       await sendStageMail(workspace.tenantId, stage2.address, { body: approvedBrief, subject: "Approved brief" });
@@ -683,14 +879,147 @@ async function main(): Promise<void> {
         reply !== null && reply.body.trim().length > 0,
         reply ? reply.id : "no reply within 180s",
       );
+      if (reply) stage2ReplyBody = reply.body;
     });
 
-    // (10) List artifacts via the artifacts client.
-    await step("10. list artifacts via the artifacts client", async () => {
+    // (9b) Persist the stage-2 reply as its own draft artifact, the same way
+    // stage 1's draft was persisted, so the refusal coverage below has a
+    // real reference to open a review against.
+    const stage2Artifact = await step("9b. persist the stage-2 draft as its own artifact (no approvedAt)", async () => {
+      if (!workspace || !project) throw new Error("no workspace/project to write an artifact under");
+      if (!stage2ReplyBody.trim()) throw new Error("no stage-2 reply text to persist as the stage-2 draft");
+      const artifact = await createArtifact(transport, workspace.tenantId, {
+        title: `Stage 2 draft`,
+        content: stage2ReplyBody,
+        metadata: {
+          sb: {
+            projectId: project.id,
+            kind: STAGE2_ARTIFACT_KIND,
+            stage: 2,
+            mediaType: "text/markdown",
+            sourceVersionIds: [],
+            provenance: { producer: "agent" as const },
+          },
+        },
+      });
+      check("9b. persist the stage-2 draft as its own artifact (no approvedAt)", true, `artifact ${artifact.id}@${String(artifact.version)}`);
+      return artifact;
+    });
+
+    const stage2Ref = await step("9c. read back the stage-2 artifact's id, version and digest", async () => {
+      if (!stage2Artifact) throw new Error("no stage-2 artifact to read back");
+      const sha256 = await digestOf(stage2Artifact.content, stage2Artifact.contentSha256);
+      check("9c. read back the stage-2 artifact's id, version and digest", sha256.length > 0, `${stage2Artifact.id}@${String(stage2Artifact.version)}`);
+      return { artifactId: stage2Artifact.id, version: stage2Artifact.version, sha256 };
+    });
+
+    // (10) Refusal coverage: open a real stage-2 review, then an `approve`
+    // naming a wrong digest is refused `hash_mismatch` and the stage does
+    // not advance; re-sending that exact same decision (same id, same
+    // payload) records nothing new (hub-level signal-id idempotency, per
+    // `apps/web/src/client.ts`'s `api.decide` doc comment).
+    const stage2Review = await step("10. open a stage-2 review naming the persisted draft", async () => {
+      if (!project || !decideProjectWorkflow || !viewProjectWorkflow || !stage2Ref) throw new Error("missing deps to open the stage-2 review");
+      const decisionId = `refusal-open-${project.id}`;
+      await decideProjectWorkflow(project.id, {
+        kind: "open_review",
+        decisionId,
+        projectId: project.id,
+        stage: 2,
+        artifactId: stage2Ref.artifactId,
+        version: stage2Ref.version,
+        sha256: stage2Ref.sha256,
+        at: new Date().toISOString(),
+      });
+      const opened = await pollUntil(30_000, 1_000, async () => {
+        const view = await viewProjectWorkflow();
+        const review = view?.openReview;
+        return review && review.artifactId === stage2Ref.artifactId && review.version === stage2Ref.version && review.sha256 === stage2Ref.sha256
+          ? review
+          : null;
+      });
+      check("10. open a stage-2 review naming the persisted draft", opened !== null, opened ? opened.reviewId : "review never opened within 30s");
+      return opened;
+    });
+
+    let wrongDigestPayload: Record<string, unknown> | null = null;
+    await step("10b. approve stage 2 naming a wrong digest -> hash_mismatch", async () => {
+      if (!project || !decideProjectWorkflow || !viewProjectWorkflow || !stage2Ref || !stage2Review) throw new Error("missing deps for the hash-mismatch refusal");
+      wrongDigestPayload = {
+        kind: "approve",
+        decisionId: `refusal-approve-wrong-digest-${project.id}`,
+        projectId: project.id,
+        stage: 2,
+        reviewId: stage2Review.reviewId,
+        artifactId: stage2Ref.artifactId,
+        version: stage2Ref.version,
+        sha256: "0".repeat(64),
+        at: new Date().toISOString(),
+      };
+      await decideProjectWorkflow(project.id, wrongDigestPayload);
+      const refused = await pollUntil(30_000, 1_000, async () => {
+        const view = await viewProjectWorkflow();
+        return view?.decisions.find((d) => d.decisionId === (wrongDigestPayload as Record<string, unknown>)["decisionId"]) ?? null;
+      });
+      check(
+        "10b. approve stage 2 naming a wrong digest -> hash_mismatch",
+        refused !== null && refused.accepted === false && refused.reason === "hash_mismatch",
+        refused ? `accepted=${String(refused.accepted)} reason=${refused.reason ?? "-"}` : "no decision recorded within 30s",
+      );
+      const view = await viewProjectWorkflow();
+      check("10b. the view's stage is unchanged by the refused approve", view?.stage === 2, view ? `stage ${view.stage}` : "no view");
+    });
+
+    await step("10c. re-sending the same decision id and payload records nothing new", async () => {
+      if (!project || !decideProjectWorkflow || !viewProjectWorkflow || !wrongDigestPayload) throw new Error("missing deps for the duplicate-resend check");
+      const before = await viewProjectWorkflow();
+      const countBefore = before?.decisions.length ?? -1;
+      await decideProjectWorkflow(project.id, wrongDigestPayload);
+      await new Promise((resolve) => setTimeout(resolve, 5_000));
+      const after = await viewProjectWorkflow();
+      check(
+        "10c. re-sending the same decision id and payload records nothing new",
+        after !== null && after.decisions.length === countBefore,
+        `decisions before=${String(countBefore)} after=${String(after?.decisions.length)}`,
+      );
+    });
+
+    // (11) Send-back: stage 2 back to stage 1, which stales the stage-1
+    // review; re-approving stage 1 with the SAME artifact reference opens a
+    // fresh per-round review/approve pair and advances to stage 2 again.
+    await step("11. sendBack from stage 2 to stage 1", async () => {
+      if (!project || !stageApprovalDeps) throw new Error("missing deps for send-back");
+      const result = await sendBack(stageApprovalDeps, { projectId: project.id, stage: 2, targetStage: 1, reason: "Needs another pass on constraints." });
+      check("11. sendBack from stage 2 to stage 1", result.ok === true && result.stage === 1, JSON.stringify(result));
+    });
+
+    await step("11b. the stage-1 review reads stale after the send-back", async () => {
+      if (!viewProjectWorkflow) throw new Error("no project workflow view to read");
+      const view = await viewProjectWorkflow();
+      const review1 = view?.reviews[1];
+      check(
+        "11b. the stage-1 review reads stale after the send-back",
+        view?.stage === 1 && review1?.status === "stale",
+        view ? `stage ${view.stage} review1.status=${review1?.status ?? "none"}` : "no view",
+      );
+    });
+
+    await step("11c. approve stage 1 again with the same artifact reference -> stage 2 again", async () => {
+      if (!project || !stageApprovalDeps || !stage1Ref) throw new Error("missing deps to re-approve stage 1");
+      const result = await approveStage(stageApprovalDeps, { projectId: project.id, stage: 1, ref: stage1Ref });
+      check(
+        "11c. approve stage 1 again with the same artifact reference -> stage 2 again",
+        result.ok === true && result.stage === 2,
+        JSON.stringify(result),
+      );
+    });
+
+    // (12) List artifacts via the artifacts client.
+    await step("12. list artifacts via the artifacts client", async () => {
       if (!workspace || !project) throw new Error("no workspace/project to list artifacts under");
       const artifacts = await listArtifacts(transport, workspace.tenantId);
       const mine = artifacts.filter((entry) => (entry.metadata?.["sb"] as { projectId?: string } | undefined)?.projectId === project.id);
-      check("10. list artifacts via the artifacts client", mine.length > 0, `${mine.length} artifact(s) for this project`);
+      check("12. list artifacts via the artifacts client", mine.length > 0, `${mine.length} artifact(s) for this project`);
     });
 
   } finally {
