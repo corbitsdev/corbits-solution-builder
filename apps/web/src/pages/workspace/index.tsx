@@ -119,7 +119,7 @@ export function StageWorkspace({
 
   const loadWorkflowView = useCallback(async () => {
     const view = await api.projectWorkflowView(detail.project.id).catch(() => null);
-    if (view) setWorkflowView(view);
+    if (view && view.stage >= 1) setWorkflowView(view);
     return view;
   }, [detail.project.id]);
 
@@ -141,6 +141,12 @@ export function StageWorkspace({
       let view: ProjectWorkflowView | null;
       try {
         view = await api.projectWorkflowView(detail.project.id);
+        // A just-triggered run reports stage 0 until its first state lands.
+        for (let tries = 0; view && view.stage < 1 && tries < 120 && !cancelled; tries += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          view = await api.projectWorkflowView(detail.project.id);
+        }
+        if (view && view.stage < 1) throw new Error("the project workflow did not start");
       } catch {
         if (!cancelled) setWorkflowViewFailed(true);
         return;
