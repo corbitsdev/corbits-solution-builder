@@ -221,7 +221,7 @@ export const DEFAULT_PARKED_QUERY_WATCHDOG_MS = 30_000;
  * loudly and fails the dispatch (the mail is left reclaimable, never consumed
  * on the assumption the run made progress), not silently swallowed.
  */
-export const TERMINAL_OR_PARK_BACKSTOP_MS = 300_000;
+export const TERMINAL_OR_PARK_BACKSTOP_MS = 1_800_000;
 
 /**
  * Public surface returned by `createWorkflowSupervisor`. Each method
