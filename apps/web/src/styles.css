@@ -2074,6 +2074,72 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   overflow-wrap: anywhere;
 }
 
+/* A stakeholder role's deck design, disclosed on open. */
+.deck-role {
+  border-top: 1px solid var(--wb-border);
+}
+
+.deck-role-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-3);
+  padding-block: var(--space-3);
+  list-style: none;
+  cursor: pointer;
+}
+
+.deck-role-summary::-webkit-details-marker {
+  display: none;
+}
+
+.deck-role-summary::before {
+  content: "›";
+  display: inline-block;
+  width: 1em;
+  color: var(--wb-muted-foreground);
+  transition: transform 120ms ease;
+}
+
+.deck-role[open] > .deck-role-summary::before {
+  transform: rotate(90deg);
+}
+
+.deck-role-summary:hover .deck-role-digest {
+  color: var(--wb-foreground);
+}
+
+.deck-role-title {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.deck-role-digest {
+  font-size: 0.8125rem;
+  color: var(--wb-muted-foreground);
+}
+
+.deck-role-body {
+  display: grid;
+  gap: var(--space-3);
+  padding-block: 0 var(--space-4);
+}
+
+.deck-role-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.deck-role-control {
+  display: grid;
+  gap: var(--space-1);
+  font-size: 0.8125rem;
+  color: var(--wb-muted-foreground);
+}
+
 /* The uploaded style-guide library: one row per template, a picker to add one. */
 .deck-template-library {
   display: grid;

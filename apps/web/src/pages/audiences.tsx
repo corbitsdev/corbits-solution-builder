@@ -18,6 +18,7 @@ import { Dictated } from "../dictation.jsx";
 import { Tabs, Input, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@corbits/react-ui";
 import { Markdown } from "../markdown.jsx";
 import { buildPackageDeck } from "../deck-save.ts";
+import { deckDesignFor } from "../deck-design-settings.ts";
 import { slidesSource } from "../deck-templates.ts";
 import { audienceOutcome } from "../stage-evidence.ts";
 import { quorumState, type QuorumState, type Stage5Evidence } from "@solutions-builder/app/project-workflow/contracts";
@@ -415,11 +416,13 @@ export function AudiencePackages({
         downloadArtifact(result.content, `${deck.title}.pptx`);
       } else {
         const packageContent = await api.artifactContent(tenantId, packageNodeId);
+        const { preferences } = await api.preferences();
         const built = await buildPackageDeck({
           projectTitle: detail.project.title,
           audience: name,
           role,
           markdown: packageContent.content,
+          design: deckDesignFor(role, preferences),
           ...(theme ? { theme } : {}),
         });
         downloadArtifact(built.dataUrl, built.filename);
