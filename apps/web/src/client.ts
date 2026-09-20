@@ -15,6 +15,7 @@ import {
   createProject as installerCreateProject,
   ensureProjectWorkflow,
   ensureSpecialistDeployment,
+  waitForDeploymentDeployed,
   getArtifact as installerGetArtifact,
   reviseArtifact as installerReviseArtifact,
   install as installerInstall,
@@ -1465,7 +1466,10 @@ export const api = {
     }
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const status = await request<HostStatus>("/status");
-      return ensureSpecialistDeployment(
+      // Mailing a deployment whose sidecar is not placed yet loses the
+      // message: the run never starts and the stage waits on a reply that
+      // cannot come. Wait for the hub to call it deployed first.
+      const deployment = await ensureSpecialistDeployment(
         transport,
         sidecarCapabilityOf(status),
         await lifecycleClosureSource(),
@@ -1480,6 +1484,16 @@ export const api = {
         // other stage renders exactly as it did pre-CL-8719/8723.
         stage === 8,
       );
+      const ready = await waitForDeploymentDeployed(transport, workspaceTenantId, deployment.deploymentId);
+      if (!ready) {
+        throw new ApiFailure({
+          code: "unavailable",
+          message: `The stage ${stage} specialist did not finish starting up.`,
+          correlationId: "-",
+          retryable: true,
+        });
+      }
+      return deployment;
     });
     call.catch(() => ensureStageAgentCalls.delete(key));
     ensureStageAgentCalls.set(key, call);
@@ -1527,6 +1541,15 @@ export const api = {
         stages,
         await vendoredMemberFiles(await fetchClosureManifestOrThrow(), fetchClosureTarball),
       );
+      const ready = await waitForDeploymentDeployed(transport, workspaceTenantId, ref.deploymentId);
+      if (!ready) {
+        throw new ApiFailure({
+          code: "unavailable",
+          message: "This project's workflow did not finish starting up.",
+          correlationId: "-",
+          retryable: true,
+        });
+      }
       cacheProjectWorkflowRef(projectId, ref);
       return ref;
     });

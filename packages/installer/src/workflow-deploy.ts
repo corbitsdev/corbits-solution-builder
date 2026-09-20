@@ -41,6 +41,28 @@ export async function deploymentIsLive(transport: Transport, tenantId: string, d
   return isLive((await workflows.deployments()).find((entry: HubDeployment) => entry.id === deploymentId));
 }
 
+/**
+ * Resolves once the hub reports this deployment `deployed`, so a caller does
+ * not mail a run that has no placed sidecar yet. Returns false if it ends or
+ * the wait runs out; the caller decides how loudly to say so.
+ */
+export async function waitForDeploymentDeployed(
+  transport: Transport,
+  tenantId: string,
+  deploymentId: string,
+  timeoutMs = 120_000,
+): Promise<boolean> {
+  const workflows = workflowsFor(transport, tenantId);
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const found = (await workflows.deployments()).find((entry: HubDeployment) => entry.id === deploymentId);
+    if (found?.status === "deployed") return true;
+    if (!isLive(found)) return false;
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+  }
+}
+
 /** The closure bytes a workflow deploy needs, fetched from the static
  *  tarballs `scripts/pack-closure-static.ts` writes under
  *  `apps/web/public/closure/` -- this package has no `node:fs` to read them
