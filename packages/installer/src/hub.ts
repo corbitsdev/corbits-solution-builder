@@ -10,10 +10,16 @@
  */
 import {
   ApiError,
+  deliverWorkflowSignal,
   deployWorkflow,
   listWorkflowDeployments,
+  listWorkflowRuns,
+  readWorkflowRunEvents,
+  triggerWorkflowRun,
+  type DeliverSignalInput,
   type DeployWorkflowInput,
   type Transport,
+  type TriggerWorkflowRunInput,
   type WorkflowDeployment,
 } from "@intx/hub-client";
 import { SOLUTIONS_BUILDER_APP, assertMayMintGrant } from "@solutions-builder/app/grant-namespaces";
@@ -444,5 +450,14 @@ export function workflowsFor(transport: Transport, scope: string) {
   return {
     deployments: () => listWorkflowDeployments(transport, scope),
     deploy: (input: DeployWorkflowInput) => deployWorkflow(transport, scope, input),
+    /** Fires a manual trigger against `deploymentId`'s mail address; the
+     *  response's `runId` is the new top-level run's own id. */
+    trigger: (deploymentId: string, input: TriggerWorkflowRunInput) =>
+      triggerWorkflowRun(transport, scope, deploymentId, input),
+    signal: (deploymentId: string, input: DeliverSignalInput) => deliverWorkflowSignal(transport, scope, deploymentId, input),
+    /** Every run id present in `deploymentId`'s event log: top-level runs and
+     *  their loop-iteration children (`<runId>__<stepId>__<n>`). */
+    runs: (deploymentId: string) => listWorkflowRuns(transport, scope, deploymentId),
+    runEvents: (deploymentId: string, runId: string) => readWorkflowRunEvents(transport, scope, deploymentId, runId),
   };
 }

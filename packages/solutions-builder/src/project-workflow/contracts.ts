@@ -1,25 +1,28 @@
-import { createHash } from "node:crypto";
-
 export type StageNumber = number;
-export type DecisionOutcome = "approve" | "send_back";
+export type DecisionKind = "open_review" | "approve" | "send_back";
 export type ReviewStatus = "open" | "approved" | "stale";
 
 export interface ReviewState {
   readonly reviewId: string;
   readonly artifactId: string;
   readonly version: number;
-  readonly sha256: string | null;
+  readonly sha256: string;
   readonly status: ReviewStatus;
 }
 
 export interface DecisionRecord {
   readonly decisionId: string;
+  readonly kind: DecisionKind;
   readonly stage: StageNumber;
-  readonly outcome: DecisionOutcome;
   readonly accepted: boolean;
   readonly reason?: string;
   readonly principalId: string;
+  readonly at?: string;
   readonly targetStage?: StageNumber;
+  readonly reviewId?: string;
+  readonly artifactId?: string;
+  readonly version?: number;
+  readonly sha256?: string;
 }
 
 /**
@@ -28,104 +31,140 @@ export interface DecisionRecord {
  * every advance/send-back; they ride along on the same carry because a loop
  * body's `trigger.payload` is exactly what carry threads forward and there is
  * nowhere else to keep them replay-safe.
+ *
+ * The workflow never reads an artifact's content. A review names a reference
+ * (`artifactId`, `version`, `sha256`) the caller supplies; the reducer only
+ * ever compares references against each other, never recomputes a hash.
  */
 export interface ProjectState {
   readonly projectId: string;
   readonly stage: StageNumber;
   readonly done: boolean;
-  readonly reviews: Readonly<Record<StageNumber, ReviewState>>;
+  readonly reviews: Readonly<Record<StageNumber, ReviewState | undefined>>;
   readonly decisions: readonly DecisionRecord[];
   readonly authorizedPrincipals: Readonly<Record<StageNumber, readonly string[]>>;
   readonly stageOrder: readonly StageNumber[];
   readonly reviewCounts: Readonly<Record<StageNumber, number>>;
 }
 
-export interface DecisionPayload {
+interface DecisionCommon {
   readonly decisionId: string;
   readonly projectId: string;
   readonly stage: StageNumber;
+  readonly at: string;
+}
+
+export interface OpenReviewPayload extends DecisionCommon {
+  readonly kind: "open_review";
+  readonly artifactId: string;
+  readonly version: number;
+  readonly sha256: string;
+}
+
+export interface ApprovePayload extends DecisionCommon {
+  readonly kind: "approve";
   readonly reviewId: string;
   readonly artifactId: string;
   readonly version: number;
   readonly sha256: string;
-  readonly outcome: DecisionOutcome;
-  readonly targetStage?: StageNumber;
-  readonly reason?: string;
 }
 
+export interface SendBackPayload extends DecisionCommon {
+  readonly kind: "send_back";
+  readonly targetStage?: StageNumber;
+  readonly reason: string;
+}
+
+export type DecisionPayload = OpenReviewPayload | ApprovePayload | SendBackPayload;
+
 export type RefusalCode =
-  | "invalid_shape"
-  | "duplicate_decision"
+  | "duplicate"
   | "unauthorized"
   | "wrong_project"
   | "wrong_stage"
   | "stale_review"
   | "wrong_artifact"
   | "stale_version"
-  | "artifact_unreadable"
   | "hash_mismatch"
-  | "invalid_target_stage";
-
-export type ReadArtifact = (
-  artifactId: string,
-  version: number,
-) => Promise<{ content: string } | null>;
-
-export function contentSha256(content: string): string {
-  return createHash("sha256").update(content, "utf8").digest("hex");
-}
+  | "invalid_target_stage"
+  | "already_done";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function isStageNumber(value: unknown): value is StageNumber {
+  return typeof value === "number" && Number.isInteger(value);
+}
+
 /**
- * Structural validation only: types and presence, plus the outcome-specific
- * shape rule (`send_back` requires `reason` and an integer `targetStage`).
- * Extra/unknown fields (a nested `principalId`, e.g.) are never read and
- * never rejected -- ignoring them is how the top-level stamp stays the only
- * source of principal identity.
+ * Structural validation only: types, presence, and the kind-specific shape
+ * (`send_back` requires a non-empty `reason`; `targetStage`, when present,
+ * must be an integer). Extra/unknown fields (a nested `principalId`, e.g.)
+ * are never read and never rejected -- ignoring them is how the top-level
+ * stamp stays the only source of principal identity.
  */
 export function validateDecisionShape(value: unknown): DecisionPayload | null {
   if (!isRecord(value)) return null;
   if (
     typeof value.decisionId !== "string" ||
     typeof value.projectId !== "string" ||
-    typeof value.stage !== "number" ||
-    !Number.isInteger(value.stage) ||
-    typeof value.reviewId !== "string" ||
-    typeof value.artifactId !== "string" ||
-    typeof value.version !== "number" ||
-    !Number.isInteger(value.version) ||
-    typeof value.sha256 !== "string" ||
-    (value.outcome !== "approve" && value.outcome !== "send_back")
+    !isStageNumber(value.stage) ||
+    typeof value.at !== "string"
   ) {
     return null;
   }
-  if (value.outcome === "send_back") {
-    if (typeof value.reason !== "string" || value.reason.length === 0) return null;
-    if (typeof value.targetStage !== "number" || !Number.isInteger(value.targetStage)) return null;
-  }
-  const payload: DecisionPayload = {
+  const common: DecisionCommon = {
     decisionId: value.decisionId,
     projectId: value.projectId,
     stage: value.stage,
-    reviewId: value.reviewId,
-    artifactId: value.artifactId,
-    version: value.version,
-    sha256: value.sha256,
-    outcome: value.outcome,
-    ...(typeof value.targetStage === "number" ? { targetStage: value.targetStage } : {}),
-    ...(typeof value.reason === "string" ? { reason: value.reason } : {}),
+    at: value.at,
   };
-  return payload;
+
+  if (value.kind === "open_review") {
+    if (
+      typeof value.artifactId !== "string" ||
+      !isStageNumber(value.version) ||
+      typeof value.sha256 !== "string"
+    ) {
+      return null;
+    }
+    return { ...common, kind: "open_review", artifactId: value.artifactId, version: value.version, sha256: value.sha256 };
+  }
+
+  if (value.kind === "approve") {
+    if (
+      typeof value.reviewId !== "string" ||
+      typeof value.artifactId !== "string" ||
+      !isStageNumber(value.version) ||
+      typeof value.sha256 !== "string"
+    ) {
+      return null;
+    }
+    return {
+      ...common,
+      kind: "approve",
+      reviewId: value.reviewId,
+      artifactId: value.artifactId,
+      version: value.version,
+      sha256: value.sha256,
+    };
+  }
+
+  if (value.kind === "send_back") {
+    if (typeof value.reason !== "string" || value.reason.length === 0) return null;
+    if (value.targetStage !== undefined && !isStageNumber(value.targetStage)) return null;
+    return { ...common, kind: "send_back", reason: value.reason, ...(value.targetStage !== undefined ? { targetStage: value.targetStage } : {}) };
+  }
+
+  return null;
 }
 
 export interface ApplyDecisionInput {
   readonly projectId: string;
   readonly stage: StageNumber;
   readonly done: boolean;
-  readonly reviews: Readonly<Record<StageNumber, ReviewState>>;
+  readonly reviews: Readonly<Record<StageNumber, ReviewState | undefined>>;
   readonly decisions: readonly DecisionRecord[];
   readonly authorizedPrincipals: Readonly<Record<StageNumber, readonly string[]>>;
   readonly stageOrder: readonly StageNumber[];
@@ -133,6 +172,15 @@ export interface ApplyDecisionInput {
   readonly principalId: unknown;
   readonly decision: unknown;
 }
+
+/**
+ * Seam for stage-specific approval rules (stage 5 quorum, stage 7 cost
+ * freeze, ...), consulted after every structural/reference check on an
+ * `approve` decision passes and before the reducer commits the approval. No
+ * rules are registered yet.
+ */
+export type StageRule = (state: ProjectState, payload: ApprovePayload, principalId: string) => RefusalCode | null;
+export const stageRules: Readonly<Record<StageNumber, StageRule>> = {};
 
 function stateOf(input: ApplyDecisionInput): ProjectState {
   return {
@@ -147,20 +195,18 @@ function stateOf(input: ApplyDecisionInput): ProjectState {
   };
 }
 
-function refused(
-  state: ProjectState,
-  payload: DecisionPayload,
-  principalId: string,
-  code: RefusalCode,
-): ProjectState {
+function refused(state: ProjectState, payload: DecisionPayload, principalId: string, code: RefusalCode): ProjectState {
   const record: DecisionRecord = {
     decisionId: payload.decisionId,
+    kind: payload.kind,
     stage: payload.stage,
-    outcome: payload.outcome,
     accepted: false,
     reason: code,
     principalId,
-    ...(payload.targetStage !== undefined ? { targetStage: payload.targetStage } : {}),
+    at: payload.at,
+    ...(payload.kind === "approve" ? { reviewId: payload.reviewId } : {}),
+    ...(payload.kind !== "send_back" ? { artifactId: payload.artifactId, version: payload.version, sha256: payload.sha256 } : {}),
+    ...(payload.kind === "send_back" && payload.targetStage !== undefined ? { targetStage: payload.targetStage } : {}),
   };
   return { ...state, decisions: [...state.decisions, record] };
 }
@@ -169,19 +215,12 @@ function nextReviewId(stage: StageNumber, count: number): string {
   return `stage-${String(stage)}-review-${String(count)}`;
 }
 
-function nextArtifactId(projectId: string, stage: StageNumber): string {
-  return `${projectId}-stage-${String(stage)}-artifact`;
-}
-
 /**
- * Pure reducer over `ProjectState`. The only effect is `readArtifact`,
- * injected by the caller; no clock, no randomness. Always returns a state
+ * Pure reducer over `ProjectState`. No effects, no clock, no randomness:
+ * every timestamp arrives on the payload as data. Always returns a state
  * (never throws on a bad decision) -- refusal is a value, not an exception.
  */
-export async function applyDecision(
-  input: ApplyDecisionInput,
-  readArtifact: ReadArtifact,
-): Promise<ProjectState> {
+export function applyDecision(input: ApplyDecisionInput): ProjectState {
   const state = stateOf(input);
   const principalId = typeof input.principalId === "string" ? input.principalId : null;
   const payload = validateDecisionShape(input.decision);
@@ -191,7 +230,7 @@ export async function applyDecision(
     return state;
   }
   if (state.decisions.some((d) => d.decisionId === payload.decisionId)) {
-    return state;
+    return refused(state, payload, principalId, "duplicate");
   }
 
   const authorized = state.authorizedPrincipals[state.stage] ?? [];
@@ -201,110 +240,110 @@ export async function applyDecision(
   if (payload.projectId !== state.projectId) {
     return refused(state, payload, principalId, "wrong_project");
   }
+  if (state.done) {
+    return refused(state, payload, principalId, "already_done");
+  }
   if (payload.stage !== state.stage) {
     return refused(state, payload, principalId, "wrong_stage");
   }
-  const review = state.reviews[state.stage];
-  if (!review || payload.reviewId !== review.reviewId) {
-    return refused(state, payload, principalId, "stale_review");
-  }
-  if (payload.artifactId !== review.artifactId) {
-    return refused(state, payload, principalId, "wrong_artifact");
-  }
-  if (payload.version !== review.version) {
-    return refused(state, payload, principalId, "stale_version");
-  }
 
-  const artifact = await readArtifact(payload.artifactId, payload.version);
-  if (artifact === null) {
-    return refused(state, payload, principalId, "artifact_unreadable");
-  }
-  const actualSha256 = contentSha256(artifact.content);
-  if (actualSha256 !== payload.sha256) {
-    return refused(state, payload, principalId, "hash_mismatch");
-  }
-  if (review.sha256 !== null && actualSha256 !== review.sha256) {
-    return refused(state, payload, principalId, "hash_mismatch");
-  }
-
-  if (payload.outcome === "send_back") {
-    const targetStage = payload.targetStage as StageNumber;
-    if (targetStage > state.stage || !state.stageOrder.includes(targetStage)) {
-      return refused(state, payload, principalId, "invalid_target_stage");
-    }
-    const reviews: Record<StageNumber, ReviewState> = { ...state.reviews };
-    for (const [key, r] of Object.entries(reviews)) {
-      const stageKey = Number(key);
-      if (stageKey >= targetStage && r.status !== "stale") {
-        reviews[stageKey] = { ...r, status: "stale" };
-      }
-    }
-    const count = (state.reviewCounts[targetStage] ?? 0) + 1;
-    reviews[targetStage] = {
-      reviewId: nextReviewId(targetStage, count),
-      artifactId: nextArtifactId(state.projectId, targetStage),
-      version: count,
-      sha256: null,
+  if (payload.kind === "open_review") {
+    const reviews: Record<StageNumber, ReviewState | undefined> = { ...state.reviews };
+    const previous = reviews[state.stage];
+    if (previous && previous.status !== "stale") reviews[state.stage] = { ...previous, status: "stale" };
+    const count = (state.reviewCounts[state.stage] ?? 0) + 1;
+    reviews[state.stage] = {
+      reviewId: nextReviewId(state.stage, count),
+      artifactId: payload.artifactId,
+      version: payload.version,
+      sha256: payload.sha256,
       status: "open",
     };
     const record: DecisionRecord = {
       decisionId: payload.decisionId,
+      kind: "open_review",
       stage: payload.stage,
-      outcome: "send_back",
       accepted: true,
       principalId,
-      targetStage,
-      ...(payload.reason !== undefined ? { reason: payload.reason } : {}),
+      at: payload.at,
+      artifactId: payload.artifactId,
+      version: payload.version,
+      sha256: payload.sha256,
     };
     return {
       ...state,
-      stage: targetStage,
       reviews,
       decisions: [...state.decisions, record],
-      reviewCounts: { ...state.reviewCounts, [targetStage]: count },
+      reviewCounts: { ...state.reviewCounts, [state.stage]: count },
     };
   }
 
-  // approve
-  const approvedReviews: Record<StageNumber, ReviewState> = {
-    ...state.reviews,
-    [state.stage]: { ...review, sha256: actualSha256, status: "approved" },
-  };
+  if (payload.kind === "approve") {
+    const review = state.reviews[state.stage];
+    if (!review || review.status !== "open" || payload.reviewId !== review.reviewId) {
+      return refused(state, payload, principalId, "stale_review");
+    }
+    if (payload.artifactId !== review.artifactId) {
+      return refused(state, payload, principalId, "wrong_artifact");
+    }
+    if (payload.version !== review.version) {
+      return refused(state, payload, principalId, "stale_version");
+    }
+    if (payload.sha256 !== review.sha256) {
+      return refused(state, payload, principalId, "hash_mismatch");
+    }
+    const rule = stageRules[state.stage];
+    if (rule) {
+      const code = rule(state, payload, principalId);
+      if (code) return refused(state, payload, principalId, code);
+    }
+
+    const approvedReviews: Record<StageNumber, ReviewState | undefined> = {
+      ...state.reviews,
+      [state.stage]: { ...review, status: "approved" },
+    };
+    const record: DecisionRecord = {
+      decisionId: payload.decisionId,
+      kind: "approve",
+      stage: payload.stage,
+      accepted: true,
+      principalId,
+      at: payload.at,
+      reviewId: payload.reviewId,
+      artifactId: payload.artifactId,
+      version: payload.version,
+      sha256: payload.sha256,
+    };
+    const currentIndex = state.stageOrder.indexOf(state.stage);
+    const nextStage = state.stageOrder[currentIndex + 1];
+    if (nextStage === undefined) {
+      return { ...state, reviews: approvedReviews, decisions: [...state.decisions, record], done: true };
+    }
+    return { ...state, stage: nextStage, reviews: approvedReviews, decisions: [...state.decisions, record] };
+  }
+
+  // send_back
+  const targetStage = payload.targetStage ?? (state.stage === state.stageOrder[state.stageOrder.length - 1] ? state.stageOrder[state.stageOrder.length - 2] : undefined);
+  if (targetStage === undefined || targetStage > state.stage || !state.stageOrder.includes(targetStage)) {
+    return refused(state, payload, principalId, "invalid_target_stage");
+  }
+  const reviews: Record<StageNumber, ReviewState | undefined> = { ...state.reviews };
+  for (const [key, review] of Object.entries(reviews)) {
+    if (Number(key) >= targetStage && review && review.status !== "stale") {
+      reviews[Number(key)] = { ...review, status: "stale" };
+    }
+  }
   const record: DecisionRecord = {
     decisionId: payload.decisionId,
+    kind: "send_back",
     stage: payload.stage,
-    outcome: "approve",
     accepted: true,
     principalId,
+    at: payload.at,
+    targetStage,
+    reason: payload.reason,
   };
-  const currentIndex = state.stageOrder.indexOf(state.stage);
-  const nextStage = state.stageOrder[currentIndex + 1];
-  if (nextStage === undefined) {
-    return {
-      ...state,
-      reviews: approvedReviews,
-      decisions: [...state.decisions, record],
-      done: true,
-    };
-  }
-  const count = (state.reviewCounts[nextStage] ?? 0) + 1;
-  const reviews: Record<StageNumber, ReviewState> = {
-    ...approvedReviews,
-    [nextStage]: {
-      reviewId: nextReviewId(nextStage, count),
-      artifactId: nextArtifactId(state.projectId, nextStage),
-      version: count,
-      sha256: null,
-      status: "open",
-    },
-  };
-  return {
-    ...state,
-    stage: nextStage,
-    reviews,
-    decisions: [...state.decisions, record],
-    reviewCounts: { ...state.reviewCounts, [nextStage]: count },
-  };
+  return { ...state, stage: targetStage, reviews, decisions: [...state.decisions, record] };
 }
 
 export interface InitProjectStagePayload {
@@ -315,10 +354,10 @@ export interface InitProjectStagePayload {
 export interface InitProjectPayload {
   readonly projectId: string;
   readonly stages: readonly InitProjectStagePayload[];
-  readonly firstReview: { readonly reviewId: string; readonly artifactId: string; readonly version: number };
 }
 
-/** Builds the loop's initial carry from the workflow's trigger payload. */
+/** Builds the loop's initial carry from the workflow's trigger payload. No
+ *  review is open yet -- the first `open_review` decision opens stage 1's. */
 export function initProjectState(payload: InitProjectPayload): ProjectState {
   const firstStage = payload.stages[0];
   if (!firstStage) throw new Error("initProjectState requires at least one stage");
@@ -328,18 +367,10 @@ export function initProjectState(payload: InitProjectPayload): ProjectState {
     projectId: payload.projectId,
     stage: firstStage.stage,
     done: false,
-    reviews: {
-      [firstStage.stage]: {
-        reviewId: payload.firstReview.reviewId,
-        artifactId: payload.firstReview.artifactId,
-        version: payload.firstReview.version,
-        sha256: null,
-        status: "open",
-      },
-    },
+    reviews: {},
     decisions: [],
     authorizedPrincipals,
     stageOrder: payload.stages.map((s) => s.stage),
-    reviewCounts: { [firstStage.stage]: 1 },
+    reviewCounts: {},
   };
 }

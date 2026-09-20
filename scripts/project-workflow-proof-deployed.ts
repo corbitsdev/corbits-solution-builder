@@ -4,7 +4,6 @@ import fs from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createHash } from "node:crypto";
 import {
   ApiError,
   deliverWorkflowSignal,
@@ -28,6 +27,7 @@ import {
   type WorkflowGitPush,
 } from "@solutions-builder/installer";
 import { buildManifest, buildPackedEntries } from "./closure-pack.ts";
+import { buildProjectWorkflowEntryFiles } from "./project-workflow-pack.ts";
 import { assertNoReplay, assertParked, eventSummary, logSummary, runCompletedCount, stepExecutionCounts, type ProofEvent } from "./project-workflow-proof-evidence.ts";
 import {
   allocationIdentity,
@@ -44,7 +44,6 @@ import {
 } from "./project-workflow-proof-safety.ts";
 
 const root = join(import.meta.dir, "..");
-const deployedPackageDir = join(root, "packages/solutions-builder/src/project-workflow/deployed");
 const entry = join(import.meta.dir, "project-workflow-proof-host.ts");
 const workerEntry = join(root, "vendor/interchange/apps/sidecar/src/index.ts");
 const childEntries = ["workflow-child", "workflow-probe-child"].map((name) => join(root, "vendor/interchange/apps/sidecar/bin", name));
@@ -182,16 +181,15 @@ async function signUp(host: Host, cookie: { value: string }): Promise<void> {
 const PROJECT_ID = "deployed-proof-project";
 const SIGNAL_NAME = "project.decision";
 const LOOP_STEP_ID = "rework";
+const AT = "2026-09-19T00:00:00.000Z";
 
-function sha256(content: string): string {
-  return createHash("sha256").update(content, "utf8").digest("hex");
-}
-
-const FIXTURE = {
-  "deployed-proof-project-stage-1-artifact@1": "stage 1 content (synthetic fixture)",
-  "deployed-proof-project-stage-1-artifact@2": "stage 1 content, revised (synthetic fixture)",
-  "deployed-proof-project-stage-2-artifact@1": "stage 2 content (synthetic fixture)",
-} as const;
+// REAL-SHAPED references only: the workflow never reads an artifact's
+// content, only compares the reference (artifactId/version/sha256) a
+// decision names against the one an earlier decision opened, so these are
+// plain fixture strings, not real content hashes.
+const STAGE1_ARTIFACT = `${PROJECT_ID}-stage-1-artifact`;
+const STAGE2_ARTIFACT = `${PROJECT_ID}-stage-2-artifact`;
+const SHA = { stage1v1: "sha-fixture-stage-1-v1", stage1v2: "sha-fixture-stage-1-v2", stage2v1: "sha-fixture-stage-2-v1", stage2v2: "sha-fixture-stage-2-v2" };
 
 function initPayload(ownerPrincipalId: string) {
   return {
@@ -200,8 +198,17 @@ function initPayload(ownerPrincipalId: string) {
       { stage: 1, authorizedPrincipalIds: [ownerPrincipalId] },
       { stage: 2, authorizedPrincipalIds: [ownerPrincipalId] },
     ],
-    firstReview: { reviewId: "stage-1-review-1", artifactId: `${PROJECT_ID}-stage-1-artifact`, version: 1 },
   };
+}
+
+function openReview(decisionId: string, stage: number, artifactId: string, version: number, sha256: string) {
+  return { decisionId, kind: "open_review", projectId: PROJECT_ID, stage, artifactId, version, sha256, at: AT };
+}
+function approve(decisionId: string, stage: number, reviewId: string, artifactId: string, version: number, sha256: string, overrides: Record<string, unknown> = {}) {
+  return { decisionId, kind: "approve", projectId: PROJECT_ID, stage, reviewId, artifactId, version, sha256, at: AT, ...overrides };
+}
+function sendBack(decisionId: string, stage: number, targetStage: number, reason: string) {
+  return { decisionId, kind: "send_back", projectId: PROJECT_ID, stage, targetStage, reason, at: AT };
 }
 
 function decodeInlineOutput(ref: unknown): unknown {
@@ -228,17 +235,22 @@ async function deployProjectWorkflow(host: Host, cookie: { value: string }) {
   const packed = await bounded(buildPackedEntries(), scenario);
   const manifest = buildManifest("scripts/project-workflow-proof-deployed.ts", packed);
   const bytes = new Map(packed.map((item) => [item.filename, item.bytes]));
-  const pkgJson = await Bun.file(join(deployedPackageDir, "package.json")).text();
-  const workflowJs = await Bun.file(join(deployedPackageDir, "workflow.js")).text();
-  const actionsJs = await Bun.file(join(deployedPackageDir, "actions.js")).text();
-  const loopsJs = await Bun.file(join(deployedPackageDir, "loops.js")).text();
+  const entries = await bounded(buildProjectWorkflowEntryFiles(), scenario);
+  const memberPkgJson = {
+    name: "project-workflow-deployed-proof",
+    version: "0.0.0",
+    private: true,
+    type: "module",
+    dependencies: { "@intx/workflow": "workspace:*", hono: "^4.0.0" },
+    interchange: { workflow: "./workflow.js", actions: "./actions.js", loops: "./loops.js" },
+  };
   const files: Record<string, string> = {
     "package.json": `${JSON.stringify({ name: "project-workflow-proof-workspace", private: true, type: "module", workspaces: ["packages/*"], catalog: manifest.catalog }, null, 2)}\n`,
-    "packages/proof/package.json": pkgJson,
-    "packages/proof/workflow.js": workflowJs,
-    "packages/proof/actions.js": actionsJs,
-    "packages/proof/loops.js": loopsJs,
-    "proof.marker": "project-workflow-proof-v1\n",
+    "packages/proof/package.json": `${JSON.stringify(memberPkgJson, null, 2)}\n`,
+    "packages/proof/workflow.js": entries["workflow.js"],
+    "packages/proof/actions.js": entries["actions.js"],
+    "packages/proof/loops.js": entries["loops.js"],
+    "proof.marker": "project-workflow-proof-v2\n",
     ...(await vendoredMemberFiles(manifest, async (filename) => bytes.get(filename)!)),
   };
   const assetName = "project-workflow-deployed-proof";
@@ -251,7 +263,7 @@ async function deployProjectWorkflow(host: Host, cookie: { value: string }) {
   };
   phase = "push";
   const commitSha = await pushWorkflowSourceTree(transport, workspace.tenantId, assetId, assetName, files, "Deploy project workflow proof", gitPush);
-  await waitForPushVisible(transport, workspace.tenantId, assetId, "proof.marker", "project-workflow-proof-v1\n");
+  await waitForPushVisible(transport, workspace.tenantId, assetId, "proof.marker", "project-workflow-proof-v2\n");
   phase = "deploy";
   const deployed = await workflowsFor(transport, workspace.tenantId).deploy({
     source: { kind: "asset", assetId, package: { format: "source", commitSha, packageName: "project-workflow-deployed-proof" } },
@@ -431,10 +443,6 @@ async function runScenario(mode: "full" | "idempotency" | "host-restart" | "run-
       };
       finalCapture = () => capture("final");
 
-      const stage1Artifact = `${PROJECT_ID}-stage-1-artifact`;
-      const stage2Artifact = `${PROJECT_ID}-stage-2-artifact`;
-      const stage1Sha = sha256(FIXTURE[`${stage1Artifact}@1`]);
-      const stage2Sha = sha256(FIXTURE[`${stage2Artifact}@1`]);
       let signalCount = 0;
       const decisionSignal = (decision: Record<string, unknown>): Signal => {
         signalCount += 1;
@@ -443,17 +451,17 @@ async function runScenario(mode: "full" | "idempotency" | "host-restart" | "run-
 
       await pollUntilParked(transport, workspace.tenantId, deployed.id, activeRunId);
       phase = "signal-1";
-      const firstSignal = decisionSignal({
-        decisionId: "d1-approve-1", projectId: PROJECT_ID, stage: 1, reviewId: "stage-1-review-1",
-        artifactId: stage1Artifact, version: 1, sha256: stage1Sha, outcome: "approve",
-      });
+      // open_review never sets `done`, so it is the idempotency check's
+      // target too -- the run stays live for both idempotency checks below
+      // without needing a prior approve.
+      const firstSignal = decisionSignal(openReview("d1-open-1", 1, STAGE1_ARTIFACT, 1, SHA.stage1v1));
       await deliverWorkflowSignal(transport, workspace.tenantId, deployed.id, firstSignal);
 
       if (mode === "idempotency") {
-        // Test against decision-1 (approve stage 1): it advances but does not
-        // complete the run, so it stays live for both idempotency checks --
-        // the run must NOT be terminal yet, or a different-payload retry
-        // would surface "workflow_run_not_running" instead of the dedicated
+        // Test against decision-1 (open_review stage 1): it never sets
+        // `done`, so it stays live for both idempotency checks -- the run
+        // must NOT be terminal yet, or a different-payload retry would
+        // surface "workflow_run_not_running" instead of the dedicated
         // signal_id_conflict code this test targets.
         const before = await bounded((async () => {
           const events = await waitForIterationParked(transport, workspace.tenantId, deployed.id, activeRunId, signalCount + 1);
@@ -475,7 +483,7 @@ async function runScenario(mode: "full" | "idempotency" | "host-restart" | "run-
         let code: string | undefined;
         const differentPayload: Signal = {
           runId: activeRunId, signalName: SIGNAL_NAME, signalId: firstSignal.signalId,
-          payload: { principalId: workspace.principalId, decision: { decisionId: "d1-approve-1", projectId: PROJECT_ID, stage: 1, reviewId: "stage-1-review-1", artifactId: stage1Artifact, version: 1, sha256: stage1Sha, outcome: "send_back", targetStage: 1, reason: "different" } },
+          payload: { principalId: workspace.principalId, decision: sendBack("d1-open-1", 1, 1, "different") },
         };
         try {
           await deliverWorkflowSignal(transport, workspace.tenantId, deployed.id, differentPayload);
@@ -491,10 +499,9 @@ async function runScenario(mode: "full" | "idempotency" | "host-restart" | "run-
         if (iterationsAfterSame !== iterationsBefore) throw new ProofFailure("history");
 
         // Now actually finish the project so the scenario ends cleanly.
-        await deliverWorkflowSignal(transport, workspace.tenantId, deployed.id, decisionSignal({
-          decisionId: "d2-approve-2", projectId: PROJECT_ID, stage: 2, reviewId: "stage-2-review-1",
-          artifactId: stage2Artifact, version: 1, sha256: stage2Sha, outcome: "approve",
-        }));
+        await deliverWorkflowSignal(transport, workspace.tenantId, deployed.id, decisionSignal(approve("d2-approve-1", 1, "stage-1-review-1", STAGE1_ARTIFACT, 1, SHA.stage1v1)));
+        await deliverWorkflowSignal(transport, workspace.tenantId, deployed.id, decisionSignal(openReview("d3-open-2", 2, STAGE2_ARTIFACT, 1, SHA.stage2v1)));
+        await deliverWorkflowSignal(transport, workspace.tenantId, deployed.id, decisionSignal(approve("d4-approve-2", 2, "stage-2-review-1", STAGE2_ARTIFACT, 1, SHA.stage2v1)));
         const events = await pollUntilCompleted(transport, workspace.tenantId, deployed.id, activeRunId);
         await capture("final");
         result["runCompletedCount"] = runCompletedCount(events);
@@ -504,13 +511,15 @@ async function runScenario(mode: "full" | "idempotency" | "host-restart" | "run-
       }
 
       if (mode === "host-restart" || mode === "run-child-loss") {
-        // send_back 2 -> 1 while parked at stage 2, then fault while parked
-        // again at stage 1 (inside the resumed loop iteration).
+        // open_review(1)->approve(1)->open_review(2), then send_back 2 -> 1
+        // while parked at stage 2, then fault while parked again at stage 1
+        // (inside the resumed loop iteration).
         await waitForIterationParked(transport, workspace.tenantId, deployed.id, activeRunId, signalCount + 1);
-        await deliverWorkflowSignal(transport, workspace.tenantId, deployed.id, decisionSignal({
-          decisionId: "d2-send-back", projectId: PROJECT_ID, stage: 2, reviewId: "stage-2-review-1",
-          artifactId: stage2Artifact, version: 1, sha256: stage2Sha, outcome: "send_back", targetStage: 1, reason: "needs rework",
-        }));
+        await deliverWorkflowSignal(transport, workspace.tenantId, deployed.id, decisionSignal(approve("d2-approve-1", 1, "stage-1-review-1", STAGE1_ARTIFACT, 1, SHA.stage1v1)));
+        await waitForIterationParked(transport, workspace.tenantId, deployed.id, activeRunId, signalCount + 1);
+        await deliverWorkflowSignal(transport, workspace.tenantId, deployed.id, decisionSignal(openReview("d3-open-2", 2, STAGE2_ARTIFACT, 1, SHA.stage2v1)));
+        await waitForIterationParked(transport, workspace.tenantId, deployed.id, activeRunId, signalCount + 1);
+        await deliverWorkflowSignal(transport, workspace.tenantId, deployed.id, decisionSignal(sendBack("d4-send-back", 2, 1, "needs rework")));
         const before = await bounded((async () => {
           const events = await waitForIterationParked(transport, workspace.tenantId, deployed.id, activeRunId, signalCount + 1);
           return capture("before-fault").then(() => events);
@@ -519,8 +528,8 @@ async function runScenario(mode: "full" | "idempotency" | "host-restart" | "run-
         const iterationsBeforeFault = await iterationCount(transport, workspace.tenantId, deployed.id, activeRunId);
         const priorIterationRuns = iterationRunIds(await listWorkflowRuns(transport, workspace.tenantId, activeRunId), activeRunId);
         const priorApply = applyStepOutputFrom(await readTopEvents(transport, workspace.tenantId, deployed.id, priorIterationRuns[priorIterationRuns.length - 2]!));
-        if (priorApply?.stage !== 1 || priorApply.reviews["2"]?.status !== "stale") throw new ProofFailure("history");
-        result["sendBackApplied"] = { stage: priorApply.stage, stage2ReviewStatus: priorApply.reviews["2"]?.status };
+        if (priorApply?.stage !== 1 || priorApply.reviews["2"]?.status !== "stale" || priorApply.reviews["1"]?.status !== "stale") throw new ProofFailure("history");
+        result["sendBackApplied"] = { stage: priorApply.stage, stage1ReviewStatus: priorApply.reviews["1"]?.status, stage2ReviewStatus: priorApply.reviews["2"]?.status };
         if (process.env["PROOF_DEBUG"]) {
           console.error("iterations before fault:", iterationsBeforeFault);
           console.error("runs:", await listWorkflowRuns(transport, workspace.tenantId, activeRunId));
@@ -563,17 +572,16 @@ async function runScenario(mode: "full" | "idempotency" | "host-restart" | "run-
 
         phase = "recovery";
         await waitForIterationParked(transport, workspace.tenantId, deployed.id, activeRunId, signalCount + 1);
-        await deliverWorkflowSignal(transport, workspace.tenantId, deployed.id, decisionSignal({
-          decisionId: "d3-reapprove-1", projectId: PROJECT_ID, stage: 1, reviewId: "stage-1-review-2",
-          artifactId: `${PROJECT_ID}-stage-1-artifact`, version: 2, sha256: sha256(FIXTURE[`${PROJECT_ID}-stage-1-artifact@2`]), outcome: "approve",
-        }));
+        // Stage 1's review is stale after the send-back (even though it was
+        // already approved once) -- a fresh open_review is required before
+        // reapproving.
+        await deliverWorkflowSignal(transport, workspace.tenantId, deployed.id, decisionSignal(openReview("d5-open-1-again", 1, STAGE1_ARTIFACT, 2, SHA.stage1v2)));
         await waitForIterationParked(transport, workspace.tenantId, deployed.id, activeRunId, signalCount + 1);
-        await deliverWorkflowSignal(transport, workspace.tenantId, deployed.id, decisionSignal({
-          // The send-back reopened stage 2 as its second review, at version 2
-          // (same fixture content as @1, so the digest is unchanged).
-          decisionId: "d4-approve-2", projectId: PROJECT_ID, stage: 2, reviewId: "stage-2-review-2",
-          artifactId: stage2Artifact, version: 2, sha256: stage2Sha, outcome: "approve",
-        }));
+        await deliverWorkflowSignal(transport, workspace.tenantId, deployed.id, decisionSignal(approve("d6-reapprove-1", 1, "stage-1-review-2", STAGE1_ARTIFACT, 2, SHA.stage1v2)));
+        await waitForIterationParked(transport, workspace.tenantId, deployed.id, activeRunId, signalCount + 1);
+        await deliverWorkflowSignal(transport, workspace.tenantId, deployed.id, decisionSignal(openReview("d7-open-2-again", 2, STAGE2_ARTIFACT, 2, SHA.stage2v2)));
+        await waitForIterationParked(transport, workspace.tenantId, deployed.id, activeRunId, signalCount + 1);
+        await deliverWorkflowSignal(transport, workspace.tenantId, deployed.id, decisionSignal(approve("d8-approve-2", 2, "stage-2-review-2", STAGE2_ARTIFACT, 2, SHA.stage2v2)));
         if (process.env["PROOF_DEBUG"]) {
           console.error("iterations after recovery signals:", await iterationCount(transport, workspace.tenantId, deployed.id, activeRunId));
           console.error("runs after recovery:", await listWorkflowRuns(transport, workspace.tenantId, activeRunId));
@@ -608,32 +616,36 @@ async function runScenario(mode: "full" | "idempotency" | "host-restart" | "run-
       // proof (scripts/project-workflow-proof-local.ts), with a directly
       // controlled principalId; here we exercise every OTHER refusal reason
       // over the real deploy+signal route instead.
-      await pollUntilParked(transport, workspace.tenantId, deployed.id, activeRunId);
-      for (const [decisionId, decision] of [
-        ["d2-stale-review", { projectId: PROJECT_ID, stage: 2, reviewId: "stale-review-id", artifactId: stage2Artifact, version: 1, sha256: stage2Sha, outcome: "approve" }],
-        ["d3-stale-version", { projectId: PROJECT_ID, stage: 2, reviewId: "stage-2-review-1", artifactId: stage2Artifact, version: 99, sha256: stage2Sha, outcome: "approve" }],
-        ["d4-hash-mismatch", { projectId: PROJECT_ID, stage: 2, reviewId: "stage-2-review-1", artifactId: stage2Artifact, version: 1, sha256: "0".repeat(64), outcome: "approve" }],
-        ["d5-wrong-project", { projectId: "not-this-project", stage: 2, reviewId: "stage-2-review-1", artifactId: stage2Artifact, version: 1, sha256: stage2Sha, outcome: "approve" }],
-      ] as const) {
+      // approve(1), then open_review(2), then every refusal reason at stage 2.
+      await waitForIterationParked(transport, workspace.tenantId, deployed.id, activeRunId, signalCount + 1);
+      await deliverWorkflowSignal(transport, workspace.tenantId, deployed.id, decisionSignal(approve("d2-approve-1", 1, "stage-1-review-1", STAGE1_ARTIFACT, 1, SHA.stage1v1)));
+      await waitForIterationParked(transport, workspace.tenantId, deployed.id, activeRunId, signalCount + 1);
+      await deliverWorkflowSignal(transport, workspace.tenantId, deployed.id, decisionSignal(openReview("d3-open-2", 2, STAGE2_ARTIFACT, 1, SHA.stage2v1)));
+      await waitForIterationParked(transport, workspace.tenantId, deployed.id, activeRunId, signalCount + 1);
+
+      const refusals: Record<string, unknown>[] = [
+        approve("d4-stale-review", 2, "stale-review-id", STAGE2_ARTIFACT, 1, SHA.stage2v1),
+        approve("d5-stale-version", 2, "stage-2-review-1", STAGE2_ARTIFACT, 99, SHA.stage2v1),
+        approve("d6-hash-mismatch", 2, "stage-2-review-1", STAGE2_ARTIFACT, 1, "sha-fixture-wrong"),
+        approve("d7-wrong-project", 2, "stage-2-review-1", STAGE2_ARTIFACT, 1, SHA.stage2v1, { projectId: "not-this-project" }),
+      ];
+      for (const decision of refusals) {
         signalCount += 1;
         await deliverWorkflowSignal(transport, workspace.tenantId, deployed.id, {
           runId: activeRunId, signalName: SIGNAL_NAME, signalId: `decision-${signalCount}`,
-          payload: { principalId: workspace.principalId, decision: { decisionId, ...decision } },
+          payload: { principalId: workspace.principalId, decision },
         });
         await waitForIterationParked(transport, workspace.tenantId, deployed.id, activeRunId, signalCount + 1);
       }
-      // Duplicate decisionId (reuses "d1-approve-1"): must not re-iterate as a
+      // Duplicate decisionId (reuses "d1-open-1"): must not re-iterate as a
       // logical decision.
       signalCount += 1;
       await deliverWorkflowSignal(transport, workspace.tenantId, deployed.id, {
         runId: activeRunId, signalName: SIGNAL_NAME, signalId: `decision-${signalCount}`,
-        payload: { principalId: workspace.principalId, decision: { decisionId: "d1-approve-1", projectId: PROJECT_ID, stage: 2, reviewId: "stage-2-review-1", artifactId: stage2Artifact, version: 1, sha256: stage2Sha, outcome: "approve" } },
+        payload: { principalId: workspace.principalId, decision: approve("d1-open-1", 2, "stage-2-review-1", STAGE2_ARTIFACT, 1, SHA.stage2v1) },
       });
       await waitForIterationParked(transport, workspace.tenantId, deployed.id, activeRunId, signalCount + 1);
-      await deliverWorkflowSignal(transport, workspace.tenantId, deployed.id, decisionSignal({
-        decisionId: "d7-approve-2", projectId: PROJECT_ID, stage: 2, reviewId: "stage-2-review-1",
-        artifactId: stage2Artifact, version: 1, sha256: stage2Sha, outcome: "approve",
-      }));
+      await deliverWorkflowSignal(transport, workspace.tenantId, deployed.id, decisionSignal(approve("d9-approve-2", 2, "stage-2-review-1", STAGE2_ARTIFACT, 1, SHA.stage2v1)));
       const events = await pollUntilCompleted(transport, workspace.tenantId, deployed.id, activeRunId);
       await capture("final");
       const finalState = finalStateFrom(events);
@@ -646,12 +658,12 @@ async function runScenario(mode: "full" | "idempotency" | "host-restart" | "run-
       if (iterations !== signalCount) throw new ProofFailure("history");
       if (!finalState?.done) throw new ProofFailure("history");
       const decisions = finalState.decisions as { decisionId: string; accepted: boolean }[];
-      for (const id of ["d2-stale-review", "d3-stale-version", "d4-hash-mismatch", "d5-wrong-project"]) {
+      for (const id of ["d4-stale-review", "d5-stale-version", "d6-hash-mismatch", "d7-wrong-project"]) {
         const record = decisions.find((d) => d.decisionId === id);
         if (!record || record.accepted !== false) throw new ProofFailure("history");
       }
-      if (decisions.filter((d) => d.decisionId === "d1-approve-1").length !== 1) throw new ProofFailure("history");
-      result["refusalsVerified"] = ["d2-stale-review", "d3-stale-version", "d4-hash-mismatch", "d5-wrong-project", "duplicate-d1-approve-1"];
+      if (decisions.filter((d) => d.decisionId === "d1-open-1").length !== 2) throw new ProofFailure("history");
+      result["refusalsVerified"] = ["d4-stale-review", "d5-stale-version", "d6-hash-mismatch", "d7-wrong-project", "duplicate-d1-open-1"];
       console.log(`PASS ${mode}: exactly one RunCompleted; iterations (${String(iterations)}) == signals delivered (${String(signalCount)}); 4 refusals + duplicate collapsed verified`);
     })(), scenario);
   } finally {

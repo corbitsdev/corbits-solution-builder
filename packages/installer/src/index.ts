@@ -25,6 +25,7 @@ export * from "./workflow-closure.js";
 export * from "./workflow-deploy.js";
 export * from "./skill-assets.js";
 export * from "./specialist-deploy.js";
+export * from "./project-workflow-deploy.js";
 
 import type { Transport } from "@intx/hub-client";
 import {

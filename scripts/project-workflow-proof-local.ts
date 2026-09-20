@@ -1,48 +1,16 @@
 import "./smoke-env.ts";
 
 import { runLocal, type ActionHandler, type LoopFn } from "@intx/workflow";
-import {
-  createApplyDecisionAction,
-  holdState,
-  initProject,
-  recordExhausted,
-} from "../packages/solutions-builder/src/project-workflow/actions.ts";
-import { contentSha256, type ReadArtifact } from "../packages/solutions-builder/src/project-workflow/contracts.ts";
-import {
-  PROJECT_DECISION_SIGNAL,
-  projectWorkflow,
-  projectWorkflowLoopCarry,
-  projectWorkflowLoopWhile,
-} from "../packages/solutions-builder/src/project-workflow/workflow.ts";
+import { applyDecision, holdState, initProject, recordExhausted } from "../packages/solutions-builder/src/project-workflow/actions.ts";
+import { projectWorkflowLoopCarry, projectWorkflowLoopWhile } from "../packages/solutions-builder/src/project-workflow/loops.ts";
+import { PROJECT_DECISION_SIGNAL, projectWorkflow } from "../packages/solutions-builder/src/project-workflow/workflow.ts";
 
 const PROJECT_ID = "proof-project";
 const OWNER = "owner-principal";
+const AT = "2026-09-19T00:00:00.000Z";
 
-const artifactContent: Record<string, string> = {
-  "proof-project-stage-1-artifact@1": "stage 1 brief, version 1",
-  "stage-1-review-2-content": "stage 1 brief, revised",
-};
-
-// The real artifact for a given (artifactId, version). Stage-1's re-opened
-// review after send-back gets a fresh artifactId/version per the reducer's
-// deterministic naming; content is keyed the same way here.
-const readArtifact: ReadArtifact = async (artifactId, version) => {
-  const key = `${artifactId}@${String(version)}`;
-  const content = artifactContent[key];
-  return content === undefined ? null : { content };
-};
-
-const handlers: Record<string, ActionHandler> = {
-  initProject,
-  holdState,
-  applyDecision: createApplyDecisionAction(readArtifact),
-  recordExhausted,
-};
-
-const loopFns: Record<string, LoopFn> = {
-  projectWorkflowLoopWhile,
-  projectWorkflowLoopCarry,
-};
+const handlers: Record<string, ActionHandler> = { initProject, holdState, applyDecision, recordExhausted };
+const loopFns: Record<string, LoopFn> = { projectWorkflowLoopWhile, projectWorkflowLoopCarry };
 
 let signalCount = 0;
 function assert(condition: boolean, message: string): void {
@@ -61,7 +29,6 @@ const run = runLocal(projectWorkflow, {
       { stage: 1, authorizedPrincipalIds: [OWNER] },
       { stage: 2, authorizedPrincipalIds: [OWNER] },
     ],
-    firstReview: { reviewId: "stage-1-review-1", artifactId: `${PROJECT_ID}-stage-1-artifact`, version: 1 },
   },
   authorize: async () => ({ effect: "allow", matchingGrants: [], resolvedBy: null }),
   actionResolver: (ref) => {
@@ -78,159 +45,59 @@ const run = runLocal(projectWorkflow, {
 
 async function signal(decision: Record<string, unknown>, principalId: string = OWNER): Promise<void> {
   signalCount += 1;
-  await run.signal(
-    PROJECT_DECISION_SIGNAL,
-    { principalId, decision },
-    `sig-${String(signalCount)}`,
-  );
+  await run.signal(PROJECT_DECISION_SIGNAL, { principalId, decision }, `sig-${String(signalCount)}`);
 }
 
+// REAL-SHAPED references throughout: any artifact id/version/sha string --
+// the workflow never reads an artifact's content, only compares the
+// reference a decision names against the one an earlier decision opened.
 const stage1ArtifactId = `${PROJECT_ID}-stage-1-artifact`;
-const stage1Sha = contentSha256(artifactContent[`${stage1ArtifactId}@1`]!);
+const stage1Sha = "sha256:stage-1-v1";
 
-// 1. approve(1)
-await signal({
-  decisionId: "d1-approve-1",
-  projectId: PROJECT_ID,
-  stage: 1,
-  reviewId: "stage-1-review-1",
-  artifactId: stage1ArtifactId,
-  version: 1,
-  sha256: stage1Sha,
-  outcome: "approve",
-});
+// 1. open_review(1)
+await signal({ decisionId: "d1-open-1", kind: "open_review", projectId: PROJECT_ID, stage: 1, artifactId: stage1ArtifactId, version: 1, sha256: stage1Sha, at: AT });
+
+// 2. approve(1)
+await signal({ decisionId: "d2-approve-1", kind: "approve", projectId: PROJECT_ID, stage: 1, reviewId: "stage-1-review-1", artifactId: stage1ArtifactId, version: 1, sha256: stage1Sha, at: AT });
 
 const stage2ArtifactId = `${PROJECT_ID}-stage-2-artifact`;
-const stage2Content = "placeholder stage 2 content";
-artifactContent[`${stage2ArtifactId}@1`] = stage2Content;
-const stage2Sha = contentSha256(stage2Content);
+const stage2Sha = "sha256:stage-2-v1";
 
-// 2. unauthorized
+// 3. open_review(2)
+await signal({ decisionId: "d3-open-2", kind: "open_review", projectId: PROJECT_ID, stage: 2, artifactId: stage2ArtifactId, version: 1, sha256: stage2Sha, at: AT });
+
+// 4. unauthorized
 await signal(
-  {
-    decisionId: "d2-unauthorized",
-    projectId: PROJECT_ID,
-    stage: 2,
-    reviewId: "stage-2-review-1",
-    artifactId: stage2ArtifactId,
-    version: 1,
-    sha256: stage2Sha,
-    outcome: "approve",
-  },
+  { decisionId: "d4-unauthorized", kind: "approve", projectId: PROJECT_ID, stage: 2, reviewId: "stage-2-review-1", artifactId: stage2ArtifactId, version: 1, sha256: stage2Sha, at: AT },
   "intruder-principal",
 );
-// 3. stale reviewId
-await signal({
-  decisionId: "d3-stale-review",
-  projectId: PROJECT_ID,
-  stage: 2,
-  reviewId: "stage-2-review-0-stale",
-  artifactId: stage2ArtifactId,
-  version: 1,
-  sha256: stage2Sha,
-  outcome: "approve",
-});
-// 4. wrong version
-await signal({
-  decisionId: "d4-wrong-version",
-  projectId: PROJECT_ID,
-  stage: 2,
-  reviewId: "stage-2-review-1",
-  artifactId: stage2ArtifactId,
-  version: 99,
-  sha256: stage2Sha,
-  outcome: "approve",
-});
-// 5. wrong hash
-await signal({
-  decisionId: "d5-wrong-hash",
-  projectId: PROJECT_ID,
-  stage: 2,
-  reviewId: "stage-2-review-1",
-  artifactId: stage2ArtifactId,
-  version: 1,
-  sha256: "0".repeat(64),
-  outcome: "approve",
-});
-// 6. wrong project
-await signal({
-  decisionId: "d6-wrong-project",
-  projectId: "not-this-project",
-  stage: 2,
-  reviewId: "stage-2-review-1",
-  artifactId: stage2ArtifactId,
-  version: 1,
-  sha256: stage2Sha,
-  outcome: "approve",
-});
-// 7. duplicate id (reuses the first approval's decisionId)
-await signal({
-  decisionId: "d1-approve-1",
-  projectId: PROJECT_ID,
-  stage: 2,
-  reviewId: "stage-2-review-1",
-  artifactId: stage2ArtifactId,
-  version: 1,
-  sha256: stage2Sha,
-  outcome: "approve",
-});
+// 5. stale reviewId
+await signal({ decisionId: "d5-stale-review", kind: "approve", projectId: PROJECT_ID, stage: 2, reviewId: "stage-2-review-0-stale", artifactId: stage2ArtifactId, version: 1, sha256: stage2Sha, at: AT });
+// 6. wrong version
+await signal({ decisionId: "d6-wrong-version", kind: "approve", projectId: PROJECT_ID, stage: 2, reviewId: "stage-2-review-1", artifactId: stage2ArtifactId, version: 99, sha256: stage2Sha, at: AT });
+// 7. wrong hash
+await signal({ decisionId: "d7-wrong-hash", kind: "approve", projectId: PROJECT_ID, stage: 2, reviewId: "stage-2-review-1", artifactId: stage2ArtifactId, version: 1, sha256: "sha256:wrong", at: AT });
+// 8. wrong project
+await signal({ decisionId: "d8-wrong-project", kind: "approve", projectId: "not-this-project", stage: 2, reviewId: "stage-2-review-1", artifactId: stage2ArtifactId, version: 1, sha256: stage2Sha, at: AT });
+// 9. duplicate id (reuses the open_review's decisionId)
+await signal({ decisionId: "d3-open-2", kind: "approve", projectId: PROJECT_ID, stage: 2, reviewId: "stage-2-review-1", artifactId: stage2ArtifactId, version: 1, sha256: stage2Sha, at: AT });
 
-// 8. send_back 2 -> 1
-await signal({
-  decisionId: "d8-send-back",
-  projectId: PROJECT_ID,
-  stage: 2,
-  reviewId: "stage-2-review-1",
-  artifactId: stage2ArtifactId,
-  version: 1,
-  sha256: stage2Sha,
-  outcome: "send_back",
-  targetStage: 1,
-  reason: "needs another pass",
-});
+// 10. send_back 2 -> 1
+await signal({ decisionId: "d10-send-back", kind: "send_back", projectId: PROJECT_ID, stage: 2, targetStage: 1, reason: "needs another pass", at: AT });
 
-const stage1ReopenArtifactId = `${PROJECT_ID}-stage-1-artifact`;
-const stage1ReopenContent = "stage 1 brief, revised";
-artifactContent[`${stage1ReopenArtifactId}@2`] = stage1ReopenContent;
-const stage1ReopenSha = contentSha256(stage1ReopenContent);
+// the old stage-1 reviewId must now be refused (stale_review): no review is
+// open at stage 1 until a fresh open_review names one.
+await signal({ decisionId: "d11-old-review-refused", kind: "approve", projectId: PROJECT_ID, stage: 1, reviewId: "stage-1-review-1", artifactId: stage1ArtifactId, version: 1, sha256: stage1Sha, at: AT });
 
-// old stage-1 reviewId must now be refused (stale_review)
-await signal({
-  decisionId: "d9-old-review-refused",
-  projectId: PROJECT_ID,
-  stage: 1,
-  reviewId: "stage-1-review-1",
-  artifactId: stage1ArtifactId,
-  version: 1,
-  sha256: stage1Sha,
-  outcome: "approve",
-});
+const stage1ReopenSha = "sha256:stage-1-v2";
+// 12. open_review(1) again, then reapprove with the NEW review
+await signal({ decisionId: "d12-open-1-again", kind: "open_review", projectId: PROJECT_ID, stage: 1, artifactId: stage1ArtifactId, version: 2, sha256: stage1ReopenSha, at: AT });
+await signal({ decisionId: "d13-reapprove-1", kind: "approve", projectId: PROJECT_ID, stage: 1, reviewId: "stage-1-review-2", artifactId: stage1ArtifactId, version: 2, sha256: stage1ReopenSha, at: AT });
 
-// 10. approve(1) with the NEW reviewId
-await signal({
-  decisionId: "d10-reapprove-1",
-  projectId: PROJECT_ID,
-  stage: 1,
-  reviewId: "stage-1-review-2",
-  artifactId: stage1ReopenArtifactId,
-  version: 2,
-  sha256: stage1ReopenSha,
-  outcome: "approve",
-});
-
-// 11. approve(2) -- reopened by the reapproval's advance, so it is the
-// stage's second review (reviewCounts[2] was 1 from its first opening).
-artifactContent[`${stage2ArtifactId}@2`] = stage2Content;
-await signal({
-  decisionId: "d11-approve-2",
-  projectId: PROJECT_ID,
-  stage: 2,
-  reviewId: "stage-2-review-2",
-  artifactId: stage2ArtifactId,
-  version: 2,
-  sha256: stage2Sha,
-  outcome: "approve",
-});
+// 14. approve(2) -- stage 2's review was marked stale by the send-back, so it
+// must be reopened before it can be approved again.
+await signal({ decisionId: "d14-open-2-again", kind: "open_review", projectId: PROJECT_ID, stage: 2, artifactId: stage2ArtifactId, version: 2, sha256: stage2Sha, at: AT });
+await signal({ decisionId: "d15-approve-2", kind: "approve", projectId: PROJECT_ID, stage: 2, reviewId: "stage-2-review-2", artifactId: stage2ArtifactId, version: 2, sha256: stage2Sha, at: AT });
 
 const result = await run.complete;
 
@@ -251,13 +118,13 @@ console.log("final committed state:", JSON.stringify(finalOutput, null, 2));
 assert(finalOutput.done === true, "final approve set done");
 
 const decisions = finalOutput.decisions;
-const refusedIds = ["d2-unauthorized", "d3-stale-review", "d4-wrong-version", "d5-wrong-hash", "d6-wrong-project"];
+const refusedIds = ["d4-unauthorized", "d5-stale-review", "d6-wrong-version", "d7-wrong-hash", "d8-wrong-project"];
 for (const id of refusedIds) {
   const record = decisions.find((d) => d.decisionId === id);
   assert(!!record && record.accepted === false, `${id} was refused`);
 }
-assert(!decisions.some((d) => d.decisionId === "d9-old-review-refused" && d.accepted), "old stage-1 review refused after send-back");
-assert(decisions.filter((d) => d.decisionId === "d1-approve-1").length === 1, "duplicate decisionId did not append a second record");
-assert(!!decisions.find((d) => d.decisionId === "d11-approve-2" && d.accepted), "final approve(2) accepted");
+assert(!decisions.some((d) => d.decisionId === "d11-old-review-refused" && d.accepted), "old stage-1 review refused after send-back");
+assert(decisions.filter((d) => d.decisionId === "d3-open-2").length === 2, "duplicate decisionId appended one refusal record, not a second success");
+assert(!!decisions.find((d) => d.decisionId === "d15-approve-2" && d.accepted), "final approve(2) accepted");
 
-console.log("PASS project workflow proof: approve, refuse, send back, reapprove, complete once");
+console.log("PASS project workflow proof: open review, approve, refuse, send back, reopen, reapprove, complete once");

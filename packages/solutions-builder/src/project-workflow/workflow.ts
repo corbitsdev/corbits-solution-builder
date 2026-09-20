@@ -1,5 +1,7 @@
-import { action, awaitSignal, defineWorkflow, loop, type LoopFn } from "@intx/workflow";
-import type { ProjectState } from "./contracts.js";
+import { action, awaitSignal, defineWorkflow, loop } from "@intx/workflow";
+import { projectWorkflowLoopCarry, projectWorkflowLoopWhile } from "./loops.js";
+
+export { projectWorkflowLoopCarry, projectWorkflowLoopWhile };
 
 export const PROJECT_DECISION_SIGNAL = "project.decision";
 
@@ -11,17 +13,6 @@ export const PROJECT_DECISION_SIGNAL = "project.decision";
  * before exhaustion, well past any real review traffic.
  */
 export const MAX_ITERATIONS = 500;
-
-function stepOutput(childOutput: unknown, stepId: "apply"): ProjectState {
-  const out = (childOutput as Record<string, unknown> | null)?.[stepId];
-  if (!out || typeof out !== "object") {
-    throw new Error(`project workflow loop body missing ${stepId} output`);
-  }
-  return out as ProjectState;
-}
-
-export const projectWorkflowLoopWhile: LoopFn = (childOutput) => !stepOutput(childOutput, "apply").done;
-export const projectWorkflowLoopCarry: LoopFn = (childOutput) => stepOutput(childOutput, "apply");
 
 /**
  * ONE top-level loop. Body: awaitSignal -> action. `carry` is the whole

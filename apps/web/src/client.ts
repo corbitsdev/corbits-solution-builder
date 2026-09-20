@@ -13,6 +13,7 @@ import {
   archiveArtifact as installerArchiveArtifact,
   createArtifact as installerCreateArtifact,
   createProject as installerCreateProject,
+  ensureProjectWorkflow,
   ensureSpecialistDeployment,
   getArtifact as installerGetArtifact,
   reviseArtifact as installerReviseArtifact,
@@ -29,16 +30,22 @@ import {
   revokeAllDelegations,
   stageSpecialistStatus,
   updateProject as installerUpdateProject,
+  vendoredMemberFiles,
+  workflowsFor,
   type ClosureManifest,
   type ClosureSource,
   type InstallState as PackageInstallState,
   type ProjectPolicy,
+  type ProjectWorkflowDeployment,
+  type ProjectWorkflowStageInput,
   type RegistryTarballUploader,
   type SidecarCapability,
   type SpecialistDeployment,
   type SpecialistDeploymentStatus,
   type WorkflowGitPush,
 } from "@solutions-builder/installer";
+import type { WorkflowRunEvent } from "@intx/hub-client";
+import { foldProjectWorkflow, type ProjectWorkflowView } from "./project-workflow.ts";
 import { MATERIAL_KIND, MATERIAL_READING_KIND } from "@solutions-builder/app/artifacts";
 import { readMaterial } from "./material-reading.ts";
 import type { DesignFeedbackDisposition, DesignFeedbackEntry as DesignFeedbackGraphEntry } from "@solutions-builder/app/artifact-graph";
@@ -475,6 +482,22 @@ async function lifecycleClosureSource(): Promise<ClosureSource> {
   return { manifest: await fetchClosureManifestOrThrow(), fetchTarball: fetchClosureTarball };
 }
 
+const PROJECT_DECISION_SIGNAL = "project.decision";
+
+/** The three compiled entry modules `scripts/project-workflow-pack.ts` writes
+ *  to `apps/web/public/project-workflow/` (wired into `bun run ui:build`):
+ *  the browser cannot run `Bun.build` itself, so it fetches these
+ *  same-origin static files rather than compiling them client-side. */
+async function projectWorkflowSource(): Promise<{ files: Record<string, string> }> {
+  const files: Record<string, string> = {};
+  for (const name of ["workflow.js", "actions.js", "loops.js"]) {
+    const response = await fetch(`/project-workflow/${name}`, { credentials: "same-origin" });
+    if (!response.ok) throw new Error(`project workflow entry ${name} unavailable (HTTP ${String(response.status)})`);
+    files[name] = await response.text();
+  }
+  return { files };
+}
+
 /**
  * Pushes the lifecycle's rendered tree into its `workflow`-kind asset over
  * the hub's stock git smart-HTTP route, the same stock-routes path
@@ -590,6 +613,11 @@ async function downloadUploadedArtifact(tenantId: string, artifactId: string): P
 /** In-flight/resolved `ensureStageAgent` calls, keyed `${projectId}:${stage}` --
  *  see that method's doc comment. */
 const ensureStageAgentCalls = new Map<string, Promise<SpecialistDeployment>>();
+
+/** In-flight/resolved `ensureProjectWorkflow` calls, keyed by `projectId` --
+ *  see that method's doc comment. Also `projectWorkflowView`/`decide`'s only
+ *  way to find the deployment/run they read or signal. */
+const ensureProjectWorkflowCalls = new Map<string, Promise<ProjectWorkflowDeployment>>();
 
 async function asWorkspaceOwner<T>(
   work: (transport: ReturnType<typeof createHubTransport>, workspaceTenantId: string) => Promise<T>,
@@ -1308,6 +1336,78 @@ export const api = {
     asWorkspaceOwner((transport, workspaceTenantId) =>
       stageSpecialistStatus(transport, workspaceTenantId, projectId, stage as Stage),
     ),
+  /**
+   * Makes sure `projectId`'s process authority (CL-8721) is deployed and its
+   * one manual run triggered, the same ensure-and-reuse discipline
+   * `ensureStageAgent` uses for a stage specialist: memoised per project so
+   * two callers mounting at once share the in-flight deploy instead of
+   * racing to create it twice.
+   */
+  ensureProjectWorkflow: (projectId: string, stages: ProjectWorkflowStageInput[]): Promise<ProjectWorkflowDeployment> => {
+    const pending = ensureProjectWorkflowCalls.get(projectId);
+    if (pending) return pending;
+    const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      const status = await request<HostStatus>("/status");
+      return ensureProjectWorkflow(
+        transport,
+        sidecarCapabilityOf(status),
+        await projectWorkflowSource(),
+        lifecycleGitPush,
+        workspaceTenantId,
+        projectId,
+        stages,
+        await vendoredMemberFiles(await fetchClosureManifestOrThrow(), fetchClosureTarball),
+      );
+    });
+    call.catch(() => ensureProjectWorkflowCalls.delete(projectId));
+    ensureProjectWorkflowCalls.set(projectId, call);
+    return call;
+  },
+  /** The project workflow's current view, folded from its run's own event
+   *  log -- see `foldProjectWorkflow`. Null when the workflow has not been
+   *  deployed/triggered yet. */
+  projectWorkflowView: (projectId: string): Promise<ProjectWorkflowView | null> =>
+    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      const deployed = ensureProjectWorkflowCalls.get(projectId);
+      const ref = deployed ? await deployed.catch(() => null) : null;
+      if (!ref) return null;
+      const workflows = workflowsFor(transport, workspaceTenantId);
+      const [topEvents, runIds] = await Promise.all([
+        workflows.runEvents(ref.deploymentId, ref.runId),
+        workflows.runs(ref.deploymentId),
+      ]);
+      const iterationIds = runIds.filter((id) => id.startsWith(`${ref.runId}__`));
+      const iterationEventsByRunId: Record<string, WorkflowRunEvent[]> = {};
+      for (const id of iterationIds) {
+        iterationEventsByRunId[id] = (await workflows.runEvents(ref.deploymentId, id)).events;
+      }
+      return foldProjectWorkflow(topEvents.events, iterationEventsByRunId);
+    }),
+  /**
+   * Delivers one decision as the loop's `project.decision` signal,
+   * `signalId = decision.decisionId`. A repeat of the exact same decision is
+   * a no-op success (the reducer already dedups on `decisionId`, and the hub
+   * itself treats a byte-identical retry as accepted); a DIFFERENT payload
+   * under an already-used `decisionId` is the hub's `signal_id_conflict`
+   * (409), surfaced as a hard error rather than swallowed.
+   */
+  decide: (projectId: string, decision: Record<string, unknown>): Promise<{ ok: true }> =>
+    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      const ref = await ensureProjectWorkflowCalls.get(projectId);
+      if (!ref) throw new Error(`project workflow for ${projectId} has not been deployed yet`);
+      // A `signal_id_conflict` (409, a different payload under a reused
+      // decisionId) is a hard error, not swallowed here -- it propagates as
+      // an `ApiError` through `asWorkspaceOwner`'s normal failure path. A
+      // byte-identical retry is accepted by the hub as a no-op, so it never
+      // reaches this catch at all.
+      await workflowsFor(transport, workspaceTenantId).signal(ref.deploymentId, {
+        runId: ref.runId,
+        signalName: PROJECT_DECISION_SIGNAL,
+        signalId: decision["decisionId"] as string,
+        payload: { decision },
+      });
+      return { ok: true as const };
+    }),
   /**
    * The project's opening problem statement, read off the `source_material`
    * artifact `createProject` wrote for it — no lifecycle run to fold it from
