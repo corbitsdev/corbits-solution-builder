@@ -519,6 +519,9 @@ export function AudiencePackages({
     if (!node.variant) return;
     const result = await api.recordAudienceDecision(tenantId, node.id, { audience: node.variant, decision, note });
     setDecisionsByNode((before) => new Map(before).set(node.id, result.decisions));
+    // A stakeholder's decision changes the quorum, and so `allowed.approve` —
+    // the workspace must re-read the workflow view, not just this table.
+    onChanged();
   };
 
   return (

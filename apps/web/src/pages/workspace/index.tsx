@@ -216,6 +216,30 @@ export function StageWorkspace({
     return view;
   }, [detail.project.id]);
 
+  // True only while a workflow-view re-read was triggered by something the
+  // person just did or that just landed (`refreshWorkflow` below) — never by
+  // the routine backstop poll, which would otherwise flicker this on and off
+  // every few seconds regardless of activity. Lets the Approve button below
+  // tell "refreshing" apart from "not allowed": a stale, disabled button with
+  // no explanation is exactly what stranded the person at stage 5.
+  const [refreshingAfterAction, setRefreshingAfterAction] = useState(false);
+
+  // The ONE place anything that can change the workflow view's verdict goes
+  // through — every stage panel and every action in this file calls this
+  // instead of touching `loadWorkflowView`/`onChanged` separately, so there is
+  // exactly one refresh path to reason about. Re-reads the view and then
+  // tells the parent (`reloadDetail`) the project's artifacts may have
+  // changed too.
+  const refreshWorkflow = useCallback(async () => {
+    setRefreshingAfterAction(true);
+    try {
+      await loadWorkflowView();
+    } finally {
+      setRefreshingAfterAction(false);
+    }
+    onChanged();
+  }, [loadWorkflowView, onChanged]);
+
   // Deployed/triggered once per project, then read on mount and re-read.
   // `ensureProjectWorkflow` and the first `projectWorkflowView` read are each
   // reported on their own terms, so a failure of either says specifically
@@ -251,10 +275,14 @@ export function StageWorkspace({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail.project.id, workflowAttempt]);
 
-  // Same cadence the thread refreshes on: a 20s fallback poll, since the
-  // workflow's own decisions do not land on the tenant mailbox stream.
+  // Backstop poll, since the workflow's own decisions do not land on the
+  // tenant mailbox stream and so cannot rely on `subscribeMailbox`'s nudge
+  // alone. 5s — the same cadence `app.tsx`'s own `refresh()` polls the
+  // decision queue and project list at — so a missed nudge costs at most one
+  // poll tick, not a whole stage sitting stale (the live defect this fixes:
+  // a 20s window read as "a whole stage behind").
   useEffect(() => {
-    const timer = setInterval(() => void loadWorkflowView(), 20_000);
+    const timer = setInterval(() => void loadWorkflowView(), 5_000);
     return () => clearInterval(timer);
   }, [loadWorkflowView]);
 
@@ -369,17 +397,28 @@ export function StageWorkspace({
   useEffect(() => {
     if (!agentAddress) return;
     void loadThread();
-    const subscription = subscribeMailbox(tenantId, () => void loadThread());
+    // The workflow's own decisions (an approval landing, a send-back) land as
+    // run events on this same tenant mailbox stream — the nudge that already
+    // wakes the thread read is just as much a reason to re-read the workflow
+    // view, so both go on every nudge rather than leaving the view to the
+    // slower backstop poll alone.
+    const subscription = subscribeMailbox(tenantId, () => {
+      void loadThread();
+      void loadWorkflowView();
+    });
     const timer = setInterval(() => {
       const open = subscription.isOpen();
       const msSinceLastLoad = Date.now() - lastLoadAt.current;
-      if (shouldFallbackRefetch({ open, msSinceLastLoad })) void loadThread();
+      if (shouldFallbackRefetch({ open, msSinceLastLoad })) {
+        void loadThread();
+        void loadWorkflowView();
+      }
     }, 20_000);
     return () => {
       clearInterval(timer);
       subscription.unsubscribe();
     };
-  }, [agentAddress, tenantId, loadThread]);
+  }, [agentAddress, tenantId, loadThread, loadWorkflowView]);
 
   // Same cadence, re-checking the agent itself rather than its thread: two
   // sessions racing to open this stage can each deploy a specialist, the hub
@@ -847,14 +886,13 @@ export function StageWorkspace({
           workflowView.openReview.sha256 === ref.sha256;
         if (sameAsOpen) return;
         await ensureReviewOpen(stageApprovalDeps, { projectId: detail.project.id, stage, ref });
-        await loadWorkflowView();
-        onChanged();
+        await refreshWorkflow();
       } catch {
         // Left as the sentinel: a later render (a poll, a reply) retries.
         ensuringReviewKeyRef.current = null;
       }
     })();
-  }, [workflowView, stage, chosenTarget, reviewMessage, draftKind, detail.nodes, detail.project.id, publishedBundle, resolveReviewRef, stageApprovalDeps, loadWorkflowView, onChanged]);
+  }, [workflowView, stage, chosenTarget, reviewMessage, draftKind, detail.nodes, detail.project.id, publishedBundle, resolveReviewRef, stageApprovalDeps, refreshWorkflow]);
 
   /**
    * Sends the workflow's `approve` decision for this stage's already-open
@@ -899,11 +937,11 @@ export function StageWorkspace({
       });
       if (!result.ok) {
         setError(`This stage's approval was refused: ${stageRefusalMessage(result.reason)}`);
-        await loadWorkflowView();
+        await refreshWorkflow();
         return;
       }
       setWorkflowView((current) => (current ? { ...current, stage: result.stage } : current));
-      await loadWorkflowView();
+      await refreshWorkflow();
       const openingBody =
         stage === 7 && chosenTarget
           ? `${targetOpeningLine(chosenTarget)}\n\n${frozenSummaryLine(evidence as Stage7Evidence)}\n\n${reviewMessage.body}`
@@ -917,7 +955,6 @@ export function StageWorkspace({
               })
             : reviewMessage.body;
       setPendingOpening({ stage: result.stage, body: openingBody });
-      onChanged();
     } catch (cause) {
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
       setRemediation(cause instanceof ApiFailure ? cause.detail.remediation : undefined);
@@ -957,11 +994,10 @@ export function StageWorkspace({
       const result = await approveStage(stageApprovalDeps, { projectId: detail.project.id, stage: 9, ref });
       if (!result.ok) {
         setError(`Delivery was recorded, but the project workflow refused the final approval: ${stageRefusalMessage(result.reason)}`);
-        await loadWorkflowView();
+        await refreshWorkflow();
         return;
       }
-      await loadWorkflowView();
-      onChanged();
+      await refreshWorkflow();
     } catch (cause) {
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     } finally {
@@ -991,10 +1027,9 @@ export function StageWorkspace({
         return;
       }
       setWorkflowView((current) => (current ? { ...current, stage: result.stage } : current));
-      await loadWorkflowView();
+      await refreshWorkflow();
       setSendReason("");
       setSendTarget(null);
-      onChanged();
     } catch (cause) {
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     } finally {
@@ -1156,7 +1191,7 @@ export function StageWorkspace({
         <DesignPanel
           detail={detail}
           tenantId={tenantId}
-          onChanged={onChanged}
+          onChanged={() => void refreshWorkflow()}
           onApprove={approve}
           onRevise={(prompt) => send(prompt)}
           latestReply={latestSpecialistMessage}
@@ -1171,11 +1206,11 @@ export function StageWorkspace({
             tenantId={tenantId}
             agentAddress={agentAddress}
             onChanged={() => {
-              onChanged();
+              void refreshWorkflow();
               void loadThread();
             }}
             onApprove={approve}
-            approving={approving}
+            approving={approving || refreshingAfterAction}
             canApprove={approveAllowed}
             approveReason={workflowView?.allowed.approveReason ?? null}
             lastRefusal={workflowView?.lastRefusal ?? null}
@@ -1188,10 +1223,10 @@ export function StageWorkspace({
           <BuildPanel
             detail={detail}
             tenantId={tenantId}
-            onChanged={onChanged}
+            onChanged={() => void refreshWorkflow()}
             onOpenSettings={onOpenSettings}
             onApprove={approve}
-            approving={approving}
+            approving={approving || refreshingAfterAction}
             canApprove={approveAllowed}
             {...(onOpenDecisions ? { onOpenDecisions } : {})}
           />
@@ -1265,12 +1300,12 @@ export function StageWorkspace({
             }}
             onAddMaterial={async (files) => {
               await api.attachMaterial(detail.project.id, files);
-              onChanged();
+              void refreshWorkflow();
             }}
             onSubmit={() => void approve()}
             soloApproval={detail.soloApproval}
             canSubmit={approveAllowed}
-            busy={sending ? "draft" : approving ? "submit" : null}
+            busy={sending ? "draft" : approving || refreshingAfterAction ? "submit" : null}
             draftOpen={draftOpen}
             newer={newerVersion}
             live={null}
@@ -1301,7 +1336,7 @@ export function StageWorkspace({
               stage >= LAST_STAGE ? null : (
                 <Button
                   variant="primary"
-                  loading={approving}
+                  loading={approving || refreshingAfterAction}
                   disabled={!approveAllowed}
                   onClick={() => void approve()}
                 >

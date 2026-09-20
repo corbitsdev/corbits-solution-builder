@@ -23,7 +23,11 @@ import { workspaceGuidance } from "./pages/workspace/guidance.ts";
 import type { ChatMessage } from "./stage-mail.ts";
 
 const workflowStageCache = new Map<string, { stage: number; done: boolean; at: number }>();
-const WORKFLOW_STAGE_CACHE_MS = 15_000;
+// 5s — the same cadence `app.tsx`'s own `refresh()` polls the project list
+// at, so a card remounted (returning from the workspace after an approval)
+// never reads a cached stage that is already stale by the time the list
+// itself refreshes.
+const WORKFLOW_STAGE_CACHE_MS = 5_000;
 
 /**
  * A project card's displayed stage (CL-8687): the project workflow's own
@@ -57,7 +61,7 @@ export function displayDone(projectId: string): boolean {
 }
 
 const turnCache = new Map<string, { label: string | null; at: number }>();
-const TURN_CACHE_MS = 20_000;
+const TURN_CACHE_MS = 5_000;
 
 /**
  * Whose turn a project card is on, read off its current stage's mail thread
