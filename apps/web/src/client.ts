@@ -334,6 +334,11 @@ export type ArtifactNode = {
    * history and replay it into the workflow once.
    */
   approvedAt: string | null;
+  /** The current version's real content digest, when the mounted package
+   *  recorded one (CL-8723) — a sha256 over the actual bytes, unlike
+   *  `contentHash` (an `<id>@<version>` pair). Used as a stage approval's
+   *  `ref.sha256` for an artifact a specialist wrote directly. */
+  contentSha256?: string | null;
 };
 
 /**
@@ -1445,9 +1450,11 @@ export const api = {
         projectId,
         stage as Stage,
         hubOrigin(),
-        // CL-8719: off until a browser-driven deploy of a credential-bound
-        // specialist is proven.
-        false,
+        // CL-8723: only stage 8 carries the hub credential binding + the
+        // tools-delivery member -- it is the only stage that publishes a
+        // real artifact from inside the run (`publish_workspace`). Every
+        // other stage renders exactly as it did pre-CL-8719/8723.
+        stage === 8,
       );
     });
     call.catch(() => ensureStageAgentCalls.delete(key));

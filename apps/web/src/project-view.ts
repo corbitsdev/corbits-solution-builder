@@ -130,6 +130,9 @@ export function toArtifactNode(node: Awaited<ReturnType<typeof artifactGraphFor>
     supersededByNodeId: node.supersededByNodeId,
     provenance: node.provenance,
     approvedAt: node.approvedAt,
+    // The real content digest `@corbits/artifacts` computed for this
+    // version, when it recorded one (CL-8723) — real, unlike `contentHash`.
+    contentSha256: node.contentSha256 ?? null,
   };
 }
 

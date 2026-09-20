@@ -24,7 +24,7 @@ import { pendingApprovals } from "./pending-approvals.ts";
 import { workspaceGuidance } from "./pages/workspace/guidance.ts";
 import type { ChatMessage } from "./stage-mail.ts";
 
-const workflowStageCache = new Map<string, { stage: number; at: number }>();
+const workflowStageCache = new Map<string, { stage: number; done: boolean; at: number }>();
 const WORKFLOW_STAGE_CACHE_MS = 15_000;
 
 /**
@@ -33,19 +33,30 @@ const WORKFLOW_STAGE_CACHE_MS = 15_000;
  * deploys the workflow just to show a card), else the artifact-graph
  * fallback `listProjectSummaries` already computed. Cached per project for
  * `WORKFLOW_STAGE_CACHE_MS` so a list of many cards costs at most one read
- * per project per refresh window, not one per render.
+ * per project per refresh window, not one per render. `displayDone` reads
+ * the same cache entry, so a caller that calls this first gets `done` for
+ * free (CL-8723: stage 9's `approve` decision is what actually finishes a
+ * project — the card should say so, not just "Stage 9 of 9").
  */
 export async function displayStage(
   projectId: string,
   fallbackStage: number,
-  readView: (projectId: string) => Promise<{ stage: number } | null>,
+  readView: (projectId: string) => Promise<{ stage: number; done: boolean } | null>,
 ): Promise<number> {
   const cached = workflowStageCache.get(projectId);
   if (cached && Date.now() - cached.at < WORKFLOW_STAGE_CACHE_MS) return cached.stage;
   const view = await readView(projectId).catch(() => null);
   const stage = view?.stage ?? fallbackStage;
-  workflowStageCache.set(projectId, { stage, at: Date.now() });
+  const done = view?.done ?? false;
+  workflowStageCache.set(projectId, { stage, done, at: Date.now() });
   return stage;
+}
+
+/** Whether the project workflow has finished, per the last `displayStage`
+ *  read for this project — false until `displayStage` has run at least
+ *  once, which every caller does before this (`ProjectCard`'s own effect). */
+export function displayDone(projectId: string): boolean {
+  return workflowStageCache.get(projectId)?.done ?? false;
 }
 
 const turnCache = new Map<string, { label: string | null; at: number }>();

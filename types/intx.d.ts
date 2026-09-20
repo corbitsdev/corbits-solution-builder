@@ -311,6 +311,38 @@ declare module "@intx/types/runtime" {
   export type Compactor = ContextStrategy<ConversationTurn[], ConversationTurn[]>;
 }
 
+declare module "@intx/types/mediated-credential" {
+  /** An http-mediated credential: an authed `fetch` pinned to the
+   *  credential's provider origin. Only the `http` variant this repo's
+   *  tools consume is declared here; see `@corbits/artifacts`' own
+   *  `mediated-credential.ts` for the full union. */
+  export interface HttpMediatedCredential {
+    readonly kind: "http";
+    fetch(input: string | URL | Request, init?: RequestInit): Promise<Response>;
+    dispose(): void | Promise<void>;
+  }
+  export interface OtherMediatedCredential {
+    readonly kind: "other";
+    dispose(): void | Promise<void>;
+  }
+  export type MediatedCredential = HttpMediatedCredential | OtherMediatedCredential;
+  export interface CredentialCapability {
+    resolve(handle: string): Promise<MediatedCredential>;
+  }
+}
+
+declare module "@intx/types/runtime-capabilities" {
+  import type { CredentialCapability } from "@intx/types/mediated-credential";
+
+  export interface RuntimeCapabilityMap {
+    credentials: CredentialCapability;
+  }
+  export type RuntimeCapabilityKey = keyof RuntimeCapabilityMap;
+  export interface RuntimeCapabilities {
+    resolve<K extends RuntimeCapabilityKey>(key: K): RuntimeCapabilityMap[K];
+  }
+}
+
 declare module "@intx/types" {
   export function hexDecode(value: string): Uint8Array;
   export function hexEncode(value: Uint8Array): string;

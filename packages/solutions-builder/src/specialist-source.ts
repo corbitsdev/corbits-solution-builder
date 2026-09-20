@@ -198,40 +198,51 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
   const role = agentFor(stage);
   const kind = STAGE_ARTIFACT_KIND[stage];
 
+  // CL-8723: stage 8 publishes its own binary artifact through
+  // `publish_workspace` rather than the generic `artifact_create`/`write`
+  // text-document tools every other credential-bound stage carries — a
+  // `run_shell`-built archive is never a document draft. It still needs the
+  // `hub` credential binding (below), just not the generic bundle or the
+  // rule telling the model to call `artifact_create` for its stage document.
+  const isBuildStage = stage === BUILD_STAGE;
+
   const stageToolImports =
     stage === PACKAGE_STAGE
       ? `import { deck } from ${JSON.stringify("@solutions-builder/tools-deck/sidecar-bundle")};\n`
-      : stage === BUILD_STAGE
-        ? `import { posix } from ${JSON.stringify("@intx/tools-posix/sidecar-bundle")};\nimport { publishWorkspace } from ${JSON.stringify("@solutions-builder/tools-delivery/publish-workspace")};\n`
+      : isBuildStage
+        ? `import { posix } from ${JSON.stringify("@intx/tools-posix/sidecar-bundle")};\nimport { publishWorkspaceTool } from ${JSON.stringify("@solutions-builder/tools-delivery/publish-workspace")};\nconst publishWorkspace = publishWorkspaceTool(${JSON.stringify(projectId)});\n`
         : stage === DELIVERY_STAGE
           ? `import { delivery, deliver } from ${JSON.stringify("@solutions-builder/tools-delivery/sidecar-bundle")};\n`
           : "";
   const stageTools =
     stage === PACKAGE_STAGE
       ? "deck"
-      : stage === BUILD_STAGE
+      : isBuildStage
         ? "posix, publishWorkspace"
         : stage === DELIVERY_STAGE
           ? "delivery, deliver"
           : "";
 
-  // CL-8719: every stage specialist writes its draft as a real artifact
-  // through `@corbits/artifacts`' agent tool bundle, against the run-scoped
-  // mount `mountWorkflowArtifacts` puts on the hub (`embed-hub/src/index.ts`).
-  // `credentialBindings` names the `hub` handle it declares against a
-  // provider/credential the installer ensures at deploy time
-  // (`installer/src/artifacts-credential.ts`) before this asset's deployment
-  // id even exists, so both names are deterministic from `assetName` alone.
-  // Opt-in (`artifactTools`, default off): off until a browser-driven deploy
-  // of a credential-bound specialist is proven — see `SpecialistSourceOptions`.
-  const toolImports = artifactTools
+  // CL-8719: every other credential-bound stage specialist writes its draft
+  // as a real artifact through `@corbits/artifacts`' agent tool bundle,
+  // against the run-scoped mount `mountWorkflowArtifacts` puts on the hub
+  // (`embed-hub/src/index.ts`). `credentialBindings` names the `hub` handle
+  // it declares against a provider/credential the installer ensures at
+  // deploy time (`installer/src/artifacts-credential.ts`) before this
+  // asset's deployment id even exists, so both names are deterministic from
+  // `assetName` alone. Opt-in (`artifactTools`, default off) — see
+  // `SpecialistSourceOptions`; today only stage 8 turns it on, and
+  // `publish_workspace` resolves the same credential itself rather than
+  // through this generic bundle (see `genericArtifactTools` below).
+  const genericArtifactTools = artifactTools && !isBuildStage;
+  const toolImports = genericArtifactTools
     ? `import { artifacts } from ${JSON.stringify("@corbits/artifacts/sidecar-bundle")};\n${stageToolImports}`
     : stageToolImports;
-  const tools = artifactTools ? `artifacts${stageTools ? `, ${stageTools}` : ""}` : stageTools;
+  const tools = genericArtifactTools ? `artifacts${stageTools ? `, ${stageTools}` : ""}` : stageTools;
   const credentialName = workflowArtifactsCredentialName(assetName);
 
-  let systemPrompt = systemPromptForStage(stage, artifactTools);
-  if (artifactTools) {
+  let systemPrompt = systemPromptForStage(stage, genericArtifactTools);
+  if (genericArtifactTools) {
     systemPrompt = `${systemPrompt}\n\n## Artifact context\n\nprojectId: ${projectId}\nstage: ${stage}\nkind: ${kind}`;
   }
   if (stage === PACKAGE_STAGE && audiences && audiences.length > 0) {
@@ -243,17 +254,20 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
   // `source` (not a pinned `tool-packages-manifest.json`), so
   // `workflow-substrate-factory.ts`'s `sourceTools` arm sets
   // `StepToolFactory.packageName` to the bundle's own `defineTool({ id })` --
-  // `SIDECAR_BUNDLE_ID` in `@corbits/artifacts/sidecar-bundle.ts` -- not the
-  // bare npm package name `reconcileDeclaredCredentials`/`toolConsumer` would
-  // expect from a pinned closure. Binding against the bare name here builds a
-  // `tool:@corbits/artifacts` consumer that never matches the bundle's own
-  // `tool:@corbits/artifacts/sidecar-bundle` consumer, so the capability is
-  // never assembled and the tool's `resolve("credentials")` fails closed.
+  // `SIDECAR_BUNDLE_ID` in `@corbits/artifacts/sidecar-bundle.ts`, or (stage
+  // 8) `publishWorkspaceTool`'s own `defineTool({ id })` in
+  // `tools-delivery/publish-workspace.ts` -- not the bare npm package name
+  // `reconcileDeclaredCredentials`/`toolConsumer` would expect from a pinned
+  // closure. Binding against the bare name here builds a
+  // `tool:@corbits/artifacts` (or `tool:@solutions-builder/tools-delivery`)
+  // consumer that never matches the bundle's own consumer identity, so the
+  // capability is never assembled and the tool's `resolve("credentials")`
+  // fails closed.
   const credentialBindings = artifactTools
     ? `
   credentialBindings: [
     {
-      package: ${JSON.stringify("@corbits/artifacts/sidecar-bundle")},
+      package: ${JSON.stringify(isBuildStage ? "@solutions-builder/tools-delivery/publish-workspace" : "@corbits/artifacts/sidecar-bundle")},
       handle: "hub",
       provider: ${JSON.stringify(WORKFLOW_ARTIFACTS_PROVIDER_NAME)},
       name: ${JSON.stringify(credentialName)},

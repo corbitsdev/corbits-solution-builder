@@ -35,8 +35,9 @@ import { DeliveryPanel } from "./delivery.jsx";
 import { StageConversation } from "./thread.jsx";
 import { StageDocument } from "./document.jsx";
 import { Preparing } from "./preparing.jsx";
-import { BuildPanel, buildEvidenceState } from "./build.jsx";
+import { BuildPanel, buildEvidenceState, parsePublishedBundle } from "./build.jsx";
 import { TargetPicker, targetOpeningLine } from "./freeze.jsx";
+import { deliveryOpeningLine, parseDeliveryManifest } from "./delivery-opening.ts";
 import { EstimateView } from "./estimate.jsx";
 import { workspaceGuidance } from "./guidance.js";
 import { describeFailure } from "./failure-message.ts";
@@ -49,7 +50,7 @@ import {
   type WithdrawnMark,
 } from "../../withdrawn-turns.ts";
 import type { ProjectWorkflowView } from "../../project-workflow.ts";
-import { approveStage, digestOf, sendBack as sendBackDecision } from "../../stage-approval.ts";
+import { approveStage, digestOf, reviewableArtifact, sendBack as sendBackDecision } from "../../stage-approval.ts";
 import { frozenSummaryLine, stageEvidence, stageRefusalMessage } from "../../stage-evidence.ts";
 import type { Stage7Evidence } from "@solutions-builder/app/project-workflow/contracts";
 import { adoptExistingProject } from "../../project-adoption.ts";
@@ -66,6 +67,53 @@ const DOCUMENT_STAGES = new Set([1, 2, 3, 6, 7]);
 
 /** Stands in for a version that would not load, so it never reads as empty. */
 const UNREADABLE = "_This version could not be read. It is still on disk — try again._";
+
+/** The newest, live (not superseded) node of `kind` at `stage`, or null. */
+function findLatestNode(nodes: readonly ArtifactNode[], kind: string, stage: number): ArtifactNode | null {
+  const candidates = nodes.filter((node) => node.kind === kind && node.stage === stage && node.supersededByNodeId === null);
+  if (candidates.length === 0) return null;
+  return candidates.reduce((latest, node) => (node.createdAt > latest.createdAt ? node : latest));
+}
+
+/**
+ * Stage 9's opening mail (defect 3, CL-8723 follow-up): the delivery
+ * manifest `publish_workspace` uploaded alongside the build archive, read
+ * back and rendered into the exact text the delivery-verifier's prompt
+ * promises, plus the build-engineer's own latest status reply as "the
+ * checks stage 8 declared". Self-contained (reads stage 8's own thread and
+ * the manifest artifact itself) so it produces the identical opening
+ * whether called right after `approve()` or rebuilt on a page reload.
+ */
+async function composeStage9Opening(deps: {
+  readonly tenantId: string;
+  readonly projectId: string;
+  readonly nodes: readonly ArtifactNode[];
+  readonly fallbackBuildStatusBody?: string;
+}): Promise<string> {
+  const manifestNode = findLatestNode(deps.nodes, "delivery_manifest", 8);
+  let manifestRef: Parameters<typeof deliveryOpeningLine>[0] = null;
+  if (manifestNode) {
+    try {
+      const result = await api.artifactContent(deps.tenantId, manifestNode.id);
+      const parsed = parseDeliveryManifest(result.content);
+      if (parsed) manifestRef = { artifactId: manifestNode.artifactId, version: manifestNode.version, content: parsed };
+    } catch {
+      // No manifest could be read — deliveryOpeningLine's null branch says so.
+    }
+  }
+  let buildStatusBody = deps.fallbackBuildStatusBody ?? "";
+  try {
+    const stage8 = await api.stageAgentStatus(deps.projectId, 8);
+    if (stage8) {
+      const messages = await api.readStageThread(deps.tenantId, [stage8.address]);
+      const lastAgent = [...messages].reverse().find((message) => message.author === "agent");
+      if (lastAgent) buildStatusBody = lastAgent.body;
+    }
+  } catch {
+    // Keep the fallback (or empty) body — deliveryOpeningLine still sends something.
+  }
+  return deliveryOpeningLine(manifestRef, buildStatusBody || "No build status text was found.");
+}
 
 export function StageWorkspace({
   detail,
@@ -399,15 +447,15 @@ export function StageWorkspace({
   // set in this mounted component — a reload, a re-opened project, or the
   // stage cursor advancing some other way (`approve()` only ever writes
   // `pendingOpening` in memory, so it never survives any of those). The
-  // previous stage's own approved artifact is the same content `approve()`
-  // would have sent, recovered from the artifact graph instead.
+  // previous stage's own live draft is the same content `approve()` would
+  // have sent, recovered from the artifact graph instead. Matched by kind,
+  // not `approvedAt` — no writer stamps that any more (CL-8687), and stage
+  // N-1 can carry more than one kind at once (e.g. stage 6's plan sits
+  // beside its requirements and reviews).
   const previousApproved = useMemo(() => {
     if (stage <= 1) return null;
-    const candidates = detail.nodes.filter(
-      (node) => node.stage === stage - 1 && node.approvedAt !== null && node.supersededByNodeId === null,
-    );
-    if (candidates.length === 0) return null;
-    return candidates.reduce((latest, node) => (node.createdAt > latest.createdAt ? node : latest));
+    const previousKind = STAGE_DRAFT_KIND[stage - 1];
+    return findLatestNode(detail.nodes, previousKind ?? "", stage - 1);
   }, [detail.nodes, stage]);
 
   useEffect(() => {
@@ -440,11 +488,32 @@ export function StageWorkspace({
       dispatchOpening(pendingOpening.body);
       return;
     }
+    // Stage 9 never reads the raw stage-8 artifact (it may be the binary
+    // archive itself): its opening is always composed from the manifest and
+    // stage 8's own status reply (defect 3).
+    if (stage === 9) {
+      void composeStage9Opening({ tenantId, projectId: detail.project.id, nodes: detail.nodes }).then(dispatchOpening);
+      return () => {
+        cancelled = true;
+      };
+    }
     if (!previousApproved) return;
     void api
       .artifactContent(tenantId, previousApproved.id)
       .then((result) => {
-        if (result.content) dispatchOpening(result.content);
+        if (!result.content) return;
+        // Stage 8's opening also names the frozen target — lost on reload
+        // since `pendingOpening` never survives one (defect 4). Rebuilt from
+        // the workflow view's own `freeze`, set the moment stage 7 is
+        // approved and cleared only by a send-back to stage <= 7.
+        const body =
+          stage === 8 && workflowView?.freeze
+            ? `${targetOpeningLine(workflowView.freeze.target)}\n\n${frozenSummaryLine({
+                target: workflowView.freeze.target,
+                frozen: workflowView.freeze.frozen,
+              })}\n\n${result.content}`
+            : result.content;
+        dispatchOpening(body);
       })
       .catch(() => {});
     return () => {
@@ -457,12 +526,37 @@ export function StageWorkspace({
     threadLoadedFor,
     stage,
     detail.project.id,
+    detail.nodes,
     opening,
     pendingOpening,
     previousApproved,
     tenantId,
     loadThread,
+    workflowView,
   ]);
+
+  // Defect 5: a send-back into stage 8 lands on a thread that already has
+  // history, so the opening-send effect above (gated on an EMPTY thread)
+  // never fires — the build specialist sees nothing telling it the stage
+  // came back. Sends one resume cue instead, keyed on the workflow's own
+  // send-back decision id (embedded in the message body) so a reload never
+  // repeats it.
+  useEffect(() => {
+    if (stage !== 8 || !agentAddress || agent?.stage !== 8) return;
+    if (threadLoadedFor !== agentAddress || messages.length === 0) return;
+    const lastSendBack = [...(workflowView?.decisions ?? [])]
+      .reverse()
+      .find((decision) => decision.kind === "send_back" && decision.accepted && decision.targetStage === 8);
+    if (!lastSendBack) return;
+    const marker = lastSendBack.decisionId;
+    if (messages.some((message) => message.body.includes(marker))) return;
+    const reason = lastSendBack.reason ?? "revise and resubmit.";
+    const body = `This stage was sent back: ${reason} Continue in a new attempts/<n+1>/ directory — the next empty one — rather than reusing the last attempt. [ref:${marker}]`;
+    void api
+      .sendStageMail(tenantId, agentAddress, { body })
+      .then(() => loadThread())
+      .catch(() => {});
+  }, [stage, agentAddress, agent, threadLoadedFor, messages, workflowView, tenantId, loadThread]);
 
   const send = async (body: string) => {
     if (!agentAddress || body.trim().length === 0) return;
@@ -578,31 +672,17 @@ export function StageWorkspace({
   }, [activeNode?.id, tenantId]);
 
   /**
-   * The stage 8 build specialist's `publish_workspace` tool result, when its
-   * reply carries one: `{fileName, mediaType, dataUri, sizeBytes}`, either as
-   * the whole message body or inside a fenced code block. Anything else
-   * (a plain status update) is not a published bundle, so approve() falls
-   * back to recording the text draft the way every other stage does.
+   * The stage 8 build specialist's `publish_workspace` fallback result, when
+   * its reply carries one: `{fileName, mediaType, dataUri, sizeBytes}`,
+   * either as the whole message body or inside a fenced code block.
+   * Anything else (a plain status update, or the real-upload result shape)
+   * is not a fallback bundle, so approve() records the real artifact
+   * `publish_workspace` already uploaded instead of persisting anything.
    */
-  const publishedBundle = useMemo(() => {
-    if (stage !== 8 || !latestSpecialistMessage) return null;
-    const body = latestSpecialistMessage.body;
-    const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(body)?.[1] ?? body;
-    try {
-      const parsed = JSON.parse(fenced.trim()) as Record<string, unknown>;
-      if (
-        typeof parsed["fileName"] === "string" &&
-        typeof parsed["mediaType"] === "string" &&
-        typeof parsed["dataUri"] === "string" &&
-        typeof parsed["sizeBytes"] === "number"
-      ) {
-        return parsed as { fileName: string; mediaType: string; dataUri: string; sizeBytes: number };
-      }
-    } catch {
-      // Not a bundle — an ordinary chat reply.
-    }
-    return null;
-  }, [stage, latestSpecialistMessage]);
+  const publishedBundle = useMemo(
+    () => (stage === 8 ? parsePublishedBundle(latestSpecialistMessage?.body) : null),
+    [stage, latestSpecialistMessage],
+  );
 
   const stageApprovalDeps = useMemo(
     () => ({
@@ -614,11 +694,18 @@ export function StageWorkspace({
   );
 
   /**
-   * Persists the specialist's latest reply as this stage's draft, names it to
-   * the project workflow, and waits for the workflow's own `approve` decision
-   * to land before treating the stage as advanced (CL-8687: the workflow is
-   * the process authority, not this write). On a refusal the error banner
-   * shows the reason and the next stage's opening mail is never sent.
+   * Names this stage's reviewable version to the project workflow, and waits
+   * for the workflow's own `approve` decision to land before treating the
+   * stage as advanced (CL-8687: the workflow is the process authority, not
+   * this write). On a refusal the error banner shows the reason and the next
+   * stage's opening mail is never sent.
+   *
+   * Stage 8 is different (CL-8723): `publish_workspace` already uploaded the
+   * build archive as a real artifact, so `reviewableArtifact` finds it
+   * directly and no browser write happens at all — the reference is the
+   * artifact's own id/version/`contentSha256`, not a hash of chat prose.
+   * Every other stage (and stage 8 before the tool has run) still persists
+   * the specialist's latest reply as its draft.
    *
    * Stage 7 is also the freeze: the chosen target rides along in the same
    * artifact write (`sb.target`) and is prefixed as one line onto stage 8's
@@ -633,17 +720,30 @@ export function StageWorkspace({
     setRemediation(undefined);
     try {
       const materials = detail.nodes.filter((node) => node.kind === "source_material").map((node) => node.id);
-      const persisted = publishedBundle
-        ? await api.persistBuildEvidence(detail.project.id, publishedBundle, materials)
-        : await api.persistStageDraft(
-            detail.project.id,
-            stage,
-            reviewMessage.body,
-            materials,
-            stage === 7 ? (chosenTarget ?? undefined) : undefined,
-          );
-      const version = Number(persisted.contentHash.slice(persisted.contentHash.lastIndexOf("@") + 1));
-      const sha256 = await digestOf(reviewMessage.body);
+      const reviewable = draftKind
+        ? reviewableArtifact({ nodes: detail.nodes, stage, kind: draftKind, latestDraft: publishedBundle ?? reviewMessage })
+        : ({ status: "none" } as const);
+      let ref: { artifactId: string; version: number; sha256: string };
+      if (reviewable.status === "found") {
+        ref = {
+          artifactId: reviewable.node.artifactId,
+          version: reviewable.node.version,
+          sha256: reviewable.node.contentSha256 ?? (await digestOf(reviewMessage.body)),
+        };
+      } else {
+        const persisted = publishedBundle
+          ? await api.persistBuildEvidence(detail.project.id, publishedBundle, materials)
+          : await api.persistStageDraft(
+              detail.project.id,
+              stage,
+              reviewMessage.body,
+              materials,
+              stage === 7 ? (chosenTarget ?? undefined) : undefined,
+            );
+        const version = Number(persisted.contentHash.slice(persisted.contentHash.lastIndexOf("@") + 1));
+        const sha256 = await digestOf(reviewMessage.body);
+        ref = { artifactId: persisted.artifactId, version, sha256 };
+      }
       const evidence = await stageEvidence(stage, {
         projectId: detail.project.id,
         tenantId,
@@ -656,7 +756,7 @@ export function StageWorkspace({
       const result = await approveStage(stageApprovalDeps, {
         projectId: detail.project.id,
         stage,
-        ref: { artifactId: persisted.artifactId, version, sha256 },
+        ref,
         evidence,
       });
       if (!result.ok) {
@@ -669,12 +769,60 @@ export function StageWorkspace({
       const openingBody =
         stage === 7 && chosenTarget
           ? `${targetOpeningLine(chosenTarget)}\n\n${frozenSummaryLine(evidence as Stage7Evidence)}\n\n${reviewMessage.body}`
-          : reviewMessage.body;
+          : stage === 8
+            ? await composeStage9Opening({
+                tenantId,
+                projectId: detail.project.id,
+                nodes: detail.nodes,
+                fallbackBuildStatusBody: reviewMessage.body,
+              })
+            : reviewMessage.body;
       setPendingOpening({ stage: result.stage, body: openingBody });
       onChanged();
     } catch (cause) {
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
       setRemediation(cause instanceof ApiFailure ? cause.detail.remediation : undefined);
+    } finally {
+      setApproving(false);
+    }
+  };
+
+  /**
+   * Stage 9's Accept (defect 2): `DeliveryPanel`'s Accept button only ever
+   * resolved the hub's `deliver` tool approval — a stock tool-call approval
+   * (CL-8566), not the project workflow's own stage gate. Nothing sent the
+   * workflow its stage 9 `approve` decision, so `contracts.ts`'s `done`
+   * (set only when an `approve` lands on the last stage) never fired and the
+   * project never finished. Called AFTER the tool approval succeeds
+   * (`delivery.jsx`'s own `decide("approve")`); the reference is the newest
+   * live `delivery_manifest` artifact `publish_workspace` uploaded at stage
+   * 8 — what stage 9 actually reviewed — falling back to the build archive
+   * itself if no manifest exists (e.g. the data-URI fallback path).
+   */
+  const acceptDelivery = async () => {
+    setApproving(true);
+    setError(null);
+    try {
+      const evidenceNode = findLatestNode(detail.nodes, "delivery_manifest", 8) ?? findLatestNode(detail.nodes, "build_evidence", 8);
+      if (!evidenceNode) {
+        setError("No build evidence is recorded for this project yet — delivery cannot be finished.");
+        return;
+      }
+      const ref = {
+        artifactId: evidenceNode.artifactId,
+        version: evidenceNode.version,
+        sha256: evidenceNode.contentSha256 ?? (await digestOf(evidenceNode.id)),
+      };
+      const result = await approveStage(stageApprovalDeps, { projectId: detail.project.id, stage: 9, ref });
+      if (!result.ok) {
+        setError(`Delivery was recorded, but the project workflow refused the final approval: ${stageRefusalMessage(result.reason)}`);
+        await loadWorkflowView();
+        return;
+      }
+      await loadWorkflowView();
+      onChanged();
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     } finally {
       setApproving(false);
     }
@@ -735,6 +883,10 @@ export function StageWorkspace({
 
   return (
     <div className="stage-view">
+      {workflowView?.done ? (
+        <Banner tone="okay" title="This project is delivered — stage 9's approval was recorded and the workflow has finished." />
+      ) : null}
+
       {openingFailed ? (
         <Banner
           tone="error"
@@ -870,7 +1022,9 @@ export function StageWorkspace({
             onOpenSettings={onOpenSettings}
             onApprove={approve}
             approving={approving}
-            canApprove={latestSpecialistMessage !== null && buildEvidenceState(messages, detail.nodes).ready}
+            canApprove={
+              latestSpecialistMessage !== null && buildEvidenceState(messages, detail.nodes, publishedBundle !== null).ready
+            }
             {...(onOpenDecisions ? { onOpenDecisions } : {})}
           />
         </div>
@@ -967,6 +1121,7 @@ export function StageWorkspace({
           detail={detail}
           tenantId={tenantId}
           latestReply={latestSpecialistMessage}
+          onAccept={acceptDelivery}
           onRejectSendBack={() => void sendBack(8)}
         />
       ) : null}

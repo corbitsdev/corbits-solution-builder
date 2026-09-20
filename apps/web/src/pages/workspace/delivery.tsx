@@ -99,11 +99,20 @@ function DeliveryDecision({
   tenantId,
   projectId,
   nodes,
+  onAccept,
   onRejectSendBack,
 }: {
   tenantId: string;
   projectId: string;
   nodes: ArtifactNode[];
+  /**
+   * Called after the hub's `deliver` tool approval succeeds, to also send
+   * the project workflow its stage 9 `approve` decision — the tool approval
+   * alone never advanced the workflow, so the project never finished
+   * (CL-8723 follow-up). Throwing (or the returned promise rejecting) is
+   * surfaced the same way a `decide` failure elsewhere in this panel is.
+   */
+  onAccept: () => Promise<void>;
   /** Rejecting delivery also routes the project workflow back to stage 8
    *  (CL-8687), so the build specialist's next reply lands where the person
    *  can review and re-approve it rather than leaving stage 9 stuck. */
@@ -215,6 +224,15 @@ function DeliveryDecision({
     try {
       if (decision === "approve") {
         await approveTool(tenantId, pending.id);
+        try {
+          await onAccept();
+        } catch (cause) {
+          setError(
+            `The delivery was accepted, but the project could not be marked finished: ${
+              cause instanceof ApiFailure ? cause.detail.message : String(cause)
+            }`,
+          );
+        }
       } else {
         await rejectTool(tenantId, pending.id, feedback);
         setFeedback("");
@@ -314,11 +332,15 @@ export function DeliveryPanel({
   detail,
   tenantId,
   latestReply,
+  onAccept,
   onRejectSendBack,
 }: {
   detail: ProjectDetail;
   tenantId: string;
   latestReply: ChatMessage | null;
+  /** Called once the hub's `deliver` tool approval succeeds, to also send
+   *  the project workflow its stage 9 `approve` decision. */
+  onAccept: () => Promise<void>;
   /** Called once a delivery rejection has been recorded on the hub, so the
    *  caller can route the project workflow back to stage 8. */
   onRejectSendBack: () => void;
@@ -330,7 +352,13 @@ export function DeliveryPanel({
 
   return (
     <div className="stage-companions">
-      <DeliveryDecision tenantId={tenantId} projectId={detail.project.id} nodes={detail.nodes} onRejectSendBack={onRejectSendBack} />
+      <DeliveryDecision
+        tenantId={tenantId}
+        projectId={detail.project.id}
+        nodes={detail.nodes}
+        onAccept={onAccept}
+        onRejectSendBack={onRejectSendBack}
+      />
       {howToRun ? (
         <Screen title="How to run" tight>
           <Markdown source={howToRun} />

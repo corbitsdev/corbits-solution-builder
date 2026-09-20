@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@intx/agent": "workspace:*",
+    "@intx/types": "workspace:*",
     "@solutions-builder/app": "workspace:*"
   }
 }

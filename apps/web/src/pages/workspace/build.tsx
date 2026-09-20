@@ -13,7 +13,7 @@
  * (CL-8566), the run's own committed event log, and the mail thread's
  * replies -- CL-8621 follow-up.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiFailure, type ArtifactNode, type ProjectDetail } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { Banner, Button, Screen, StateLabel } from "../../components.jsx";
@@ -27,6 +27,14 @@ import { approveTool, pendingApprovals, rejectTool, type PendingApproval } from 
  *  turns into a timeline row is parked on a tool call by this name. */
 const RUN_SHELL_TOOL_NAME = "run_shell";
 
+/** `publish_workspace`'s own declared name (`packages/tools-delivery/src/
+ *  publish-workspace.ts`'s `TOOL_NAME`) — duplicated as a literal rather
+ *  than imported: that package's `node:child_process`/`node:fs` runtime
+ *  code must never reach the web bundle. Its calls are `approval: "ask"`
+ *  too, so they need the same in-panel decision `run_shell` calls get. */
+const PUBLISH_WORKSPACE_TOOL_NAME = "publish_workspace";
+const BUILD_APPROVAL_TOOL_NAMES = new Set([RUN_SHELL_TOOL_NAME, PUBLISH_WORKSPACE_TOOL_NAME]);
+
 /** The mail bodies that start a fresh or continued build attempt — see the
  *  build-engineer's prompt (`kit.ts`) for the `attempts/<n>/` convention
  *  these correspond to. */
@@ -34,28 +42,64 @@ const START_ATTEMPT_BODY = "Start the build attempt.";
 const CONTINUE_ATTEMPT_BODY = "Continue the build.";
 
 /**
- * Whether the current build attempt has produced published evidence to
- * approve against: a `build_evidence` artifact (the `publish_workspace`
- * archive) written no earlier than the last "Start"/"Continue" mail sent to
- * the specialist. Approving without this would freeze a stage-8 reply that
- * never actually built anything — the bug this stage shipped with.
+ * The stage 8 build specialist's `publish_workspace` fallback result, when
+ * its latest reply carries one: `{fileName, mediaType, dataUri, sizeBytes}`,
+ * either as the whole message body or inside a fenced code block. Anything
+ * else (a plain status update, or the real-upload result shape which has no
+ * `dataUri`) is not a fallback bundle.
+ */
+export function parsePublishedBundle(
+  body: string | undefined,
+): { fileName: string; mediaType: string; dataUri: string; sizeBytes: number } | null {
+  if (!body) return null;
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(body)?.[1] ?? body;
+  try {
+    const parsed = JSON.parse(fenced.trim()) as Record<string, unknown>;
+    if (
+      typeof parsed["fileName"] === "string" &&
+      typeof parsed["mediaType"] === "string" &&
+      typeof parsed["dataUri"] === "string" &&
+      typeof parsed["sizeBytes"] === "number"
+    ) {
+      return parsed as { fileName: string; mediaType: string; dataUri: string; sizeBytes: number };
+    }
+  } catch {
+    // Not a bundle — an ordinary chat reply.
+  }
+  return null;
+}
+
+/**
+ * Whether the current build attempt has produced evidence to approve
+ * against: EITHER a `build_evidence` artifact (`publish_workspace`'s real
+ * upload) written no earlier than the last "Start"/"Continue" mail sent to
+ * the specialist, OR — on the fallback path, where no artifact exists until
+ * `approve()` persists it — the specialist's latest reply already carrying
+ * a fallback bundle. Approving with neither would freeze a stage-8 reply
+ * that never actually built anything — the bug this stage shipped with, and
+ * the reason Approve could never enable at all once the real-upload path
+ * shipped (the artifact only ever appeared AFTER approval, behind the
+ * disabled button — CL-8723).
  */
 export function buildEvidenceState(
   messages: readonly ChatMessage[],
   nodes: readonly ArtifactNode[],
+  hasPublishedBundle = false,
 ): { ready: boolean; reason: string | null } {
-  const archive = nodes.find((node) => node.kind === "build_evidence" && !(node.mediaType ?? "").startsWith("text/"));
-  if (!archive) {
-    return { ready: false, reason: "No published build archive yet — the build has not run publish_workspace." };
-  }
+  const archive = nodes
+    .filter((node) => node.kind === "build_evidence" && node.mediaType === "application/gzip" && node.supersededByNodeId === null)
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
   const lastAttemptStartedAt = [...messages]
     .filter((message) => message.author === "me" && [START_ATTEMPT_BODY, CONTINUE_ATTEMPT_BODY].includes(message.body.trim()))
     .map((message) => Date.parse(message.at))
     .sort((a, b) => b - a)[0];
-  if (lastAttemptStartedAt !== undefined && Date.parse(archive.createdAt) < lastAttemptStartedAt) {
-    return { ready: false, reason: "The current attempt has not published a build archive yet." };
+  const archiveIsCurrent =
+    archive !== undefined && (lastAttemptStartedAt === undefined || Date.parse(archive.createdAt) >= lastAttemptStartedAt);
+  if (archiveIsCurrent || hasPublishedBundle) return { ready: true, reason: null };
+  if (!archive) {
+    return { ready: false, reason: "No published build archive yet — the build has not run publish_workspace." };
   }
-  return { ready: true, reason: null };
+  return { ready: false, reason: "The current attempt has not published a build archive yet." };
 }
 
 type RunEvent = { readonly seq: number; readonly type: string; readonly body: Record<string, unknown> };
@@ -83,8 +127,9 @@ type TimelineRow = {
 
 function approvalRows(approvals: readonly PendingApproval[]): TimelineRow[] {
   return approvals
-    .filter((approval) => approval.toolDefinition?.name === RUN_SHELL_TOOL_NAME)
+    .filter((approval) => BUILD_APPROVAL_TOOL_NAMES.has(approval.toolDefinition?.name ?? ""))
     .map((approval) => {
+      const isPublish = approval.toolDefinition?.name === PUBLISH_WORKSPACE_TOOL_NAME;
       const command = approval.toolArguments["command"];
       const resolvedAt = approval.resolvedAt ?? null;
       const tone =
@@ -92,8 +137,13 @@ function approvalRows(approvals: readonly PendingApproval[]): TimelineRow[] {
       return {
         id: `approval:${approval.id}`,
         at: resolvedAt ?? approval.createdAt,
-        label:
-          approval.status === "pending"
+        label: isPublish
+          ? approval.status === "pending"
+            ? "asks to publish the build archive"
+            : approval.status === "approved"
+              ? "published the build archive"
+              : `publish ${approval.status}`
+          : approval.status === "pending"
             ? "asks to run a command"
             : approval.status === "approved"
               ? "ran a command"
@@ -152,7 +202,7 @@ function currentState(
   messages: readonly ChatMessage[],
 ): { label: string; tone: "warning" | "selected" | "success" | "info" } {
   const pending = approvals.find(
-    (approval) => approval.status === "pending" && approval.toolDefinition?.name === RUN_SHELL_TOOL_NAME,
+    (approval) => approval.status === "pending" && BUILD_APPROVAL_TOOL_NAMES.has(approval.toolDefinition?.name ?? ""),
   );
   if (pending) return { label: "waiting for your approval", tone: "warning" };
 
@@ -258,6 +308,16 @@ export function BuildPanel({
     return () => clearInterval(timer);
   }, [address, load]);
 
+  // Refreshes the project detail (and so `detail.nodes`) whenever this
+  // stage's thread grows — the only signal this panel has that
+  // `publish_workspace` may have just uploaded a real `build_evidence`
+  // artifact, which nothing else here polls for (CL-8723).
+  const lastMessageCount = useRef(0);
+  useEffect(() => {
+    if (messages.length > lastMessageCount.current) onChanged();
+    lastMessageCount.current = messages.length;
+  }, [messages, onChanged]);
+
   // The timeline: hub approvals and the run's own event log, folded
   // together every 5s -- the same cadence the old bridge's event log
   // polled at.
@@ -305,14 +365,24 @@ export function BuildPanel({
   const buildStartedAt = useMemo(() => startedAt(events), [events]);
 
   const build = useMemo(
-    () => detail.nodes.find((node) => node.kind === "build_evidence" && !(node.mediaType ?? "").startsWith("text/")),
+    () =>
+      detail.nodes
+        .filter((node) => node.kind === "build_evidence" && node.mediaType === "application/gzip" && node.supersededByNodeId === null)
+        .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0],
     [detail.nodes],
   ) as ArtifactNode | undefined;
 
-  const evidence = useMemo(() => buildEvidenceState(messages, detail.nodes), [messages, detail.nodes]);
+  const publishedBundle = useMemo(
+    () => parsePublishedBundle([...messages].reverse().find((message) => message.author === "agent")?.body),
+    [messages],
+  );
+  const evidence = useMemo(
+    () => buildEvidenceState(messages, detail.nodes, publishedBundle !== null),
+    [messages, detail.nodes, publishedBundle],
+  );
 
   const pendingRunShell = approvals.filter(
-    (approval) => approval.status === "pending" && approval.toolDefinition?.name === RUN_SHELL_TOOL_NAME,
+    (approval) => approval.status === "pending" && BUILD_APPROVAL_TOOL_NAMES.has(approval.toolDefinition?.name ?? ""),
   );
   const [decidingId, setDecidingId] = useState<string | null>(null);
 

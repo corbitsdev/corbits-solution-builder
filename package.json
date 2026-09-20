@@ -53,7 +53,7 @@
     "test:vendored": "bun test vendor/interchange/packages/hub-api/src/routes/assets.test.ts vendor/interchange/packages/hub-api/src/routes/workflow-definitions.test.ts vendor/interchange/packages/hub-api/src/routes/workflows.test.ts vendor/interchange/packages/db/src/model-source-resolution.test.ts"
   },
   "dependencies": {
-    "@corbits/artifacts": "github:corbitsdev/corbits-artifacts#0190e6c",
+    "@corbits/artifacts": "github:corbitsdev/corbits-artifacts#031fc9e",
     "@standard-schema/spec": "^1.0.0",
     "@corbits/codex-provider": "github:corbitsdev/corbits-codex-provider",
     "@corbits/mailbox": "github:corbitsdev/corbits-mailbox",

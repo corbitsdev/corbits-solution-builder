@@ -68,6 +68,12 @@ export type ArtifactListEntry = {
    *  file's real byte count, which the list route otherwise has no place to
    *  carry since `content` is omitted from it. */
   source?: Record<string, unknown> & { origin: string };
+  /** The current version's real content digest — `@corbits/artifacts`
+   *  computes this for every artifact, text or binary (CL-8723). Unlike
+   *  `versionId`, this is a sha256 over the actual bytes, so it is what a
+   *  stage approval's `ref.sha256` should carry for an artifact a specialist
+   *  wrote directly, rather than a hash of unrelated chat prose. */
+  contentSha256?: string | null;
 };
 
 export type ArtifactGraphNode = {
@@ -85,6 +91,9 @@ export type ArtifactGraphNode = {
   approvedAt: string | null;
   /** `source.upload.size`, when this version is a package upload record; unset otherwise (CL-8709). */
   sizeBytes?: number;
+  /** The current version's real content digest, when the mounted package
+   *  recorded one (CL-8723) — a real hash over the bytes, unlike `versionId`. */
+  contentSha256?: string | null;
 };
 
 export type ArtifactGraphEdge = {
@@ -174,6 +183,7 @@ export function foldArtifactGraph(artifacts: ArtifactListEntry[], projectId: str
       createdAt: entry.createdAt,
       approvedAt: sb.approvedAt ?? null,
       ...(sizeBytes !== undefined ? { sizeBytes } : {}),
+      contentSha256: entry.contentSha256 ?? null,
     };
   });
 

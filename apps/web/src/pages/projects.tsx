@@ -27,7 +27,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, ApiFailure, type ProjectInfo, type ProjectSummary } from "../client.js";
 import { Button, Banner, downloadArtifact, StageRing, StateLabel, stageName } from "../components.jsx";
 import { assembleBundle, bundleFileName } from "../project-export.js";
-import { displayStage, displayTurn } from "../project-list.js";
+import { displayDone, displayStage, displayTurn } from "../project-list.js";
 import { DEFAULT_POLICY } from "./onboarding.jsx";
 import { Dictated } from "../dictation.jsx";
 
@@ -293,11 +293,17 @@ function ProjectCard({
   // it (CL-8687); the artifact-graph fallback (`project.stage`) otherwise --
   // never triggers a deploy just to show a card.
   const [stage, setStage] = useState(project.stage ?? 0);
+  // Whether the project workflow's own `done` has landed (CL-8723): stage 9's
+  // `approve` decision, not just having reached stage 9.
+  const [done, setDone] = useState(false);
   useEffect(() => {
     setStage(project.stage ?? 0);
+    setDone(false);
     let cancelled = false;
     void displayStage(project.id, project.stage ?? 0, api.projectWorkflowView).then((resolved) => {
-      if (!cancelled) setStage(resolved);
+      if (cancelled) return;
+      setStage(resolved);
+      setDone(displayDone(project.id));
     });
     return () => {
       cancelled = true;
@@ -382,6 +388,8 @@ function ProjectCard({
 
   const status = project.archivedAt ? (
     <StateLabel tone="disabled">Archived</StateLabel>
+  ) : done ? (
+    <StateLabel tone="success">Delivered</StateLabel>
   ) : project.needsDecision ? (
     <StateLabel tone="warning">{project.waits[0]?.title ?? "Needs your decision"}</StateLabel>
   ) : turn ? (
@@ -399,9 +407,7 @@ function ProjectCard({
     >
       <div className="project-card-stage">
         <StageRing stage={stage} />
-        <span>
-          Stage {stage || "—"} of 9 · {stageName(stage)}
-        </span>
+        <span>{done ? "Delivered · project finished" : `Stage ${stage || "—"} of 9 · ${stageName(stage)}`}</span>
         <Menu onOpenChange={(open) => !open && setConfirming(false)}>
           <MenuTrigger asChild>
             <button type="button" className="project-card-menu" aria-label={`Options for ${project.title}`}>

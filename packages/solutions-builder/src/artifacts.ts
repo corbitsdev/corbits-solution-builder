@@ -13,6 +13,18 @@ export const MATERIAL_KIND = "source_material";
  */
 export const MATERIAL_READING_KIND = "material_reading";
 
+/** The kind stage 8's build archive is recorded under — named so
+ *  `publish_workspace` (which cannot depend on `apps/web` or
+ *  `specialist-source.ts`) spells it once, same as `MATERIAL_KIND` above. */
+export const BUILD_EVIDENCE_KIND = "build_evidence";
+
+/** The kind stage 8's `publish_workspace` records its companion delivery
+ *  manifest under — the per-file path/sha256/size list stage 9's opening
+ *  mail is built from (CL-8723 follow-up). Distinct from stage 9's own
+ *  `delivery_manifest` draft kind by `sb.stage` (8, not 9): this is evidence
+ *  stage 8 produced, not stage 9's own document. */
+export const DELIVERY_MANIFEST_KIND = "delivery_manifest";
+
 /** The documents the nine stages produce, and which stage owns which. */
 export const ARTIFACT_KINDS = [
   "source_material",

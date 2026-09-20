@@ -29,20 +29,29 @@ export type ArtifactRef = {
 export type ReviewableArtifact = { readonly status: "found"; readonly node: ArtifactNode } | { readonly status: "persist_needed" } | { readonly status: "none" };
 
 /**
- * A stage's reviewable artifact. In tonight's live proof the specialist did
- * not call `artifact_create` itself, so the path that actually runs is the
- * fallback: the browser persists the latest substantial chat draft as a new
- * version (`pages/workspace/index.tsx`'s `approve()`, via
- * `persistStageDraft`/`persistBuildEvidence`, stamping no `approvedAt` any
- * more -- CL-8687), and THAT reference is what goes into `open_review`.
+ * A stage's reviewable artifact.
  *
- * Preferring an artifact the specialist wrote directly (`source.origin ===
- * "workflow"`, scoped to this project's stage-N specialist deployment) would
- * need the specialist deployment listing threaded in here as IO, and every
- * specialist-written artifact today carries no `metadata.sb` to key it back
- * to a project/stage by anyway -- so that branch is intentionally left
- * un-implemented (`"found"` is never returned) rather than matched on a
- * signal (`provenance.producer`) that does not actually distinguish it.
+ * Every stage but 8 has no artifact a specialist writes directly the browser
+ * can trust as the reviewable version: the fallback path persists the
+ * latest substantial chat draft as a new version
+ * (`pages/workspace/index.tsx`'s `approve()`, via `persistStageDraft`,
+ * stamping no `approvedAt` any more -- CL-8687), and THAT reference is what
+ * goes into `open_review`.
+ *
+ * Stage 8 is different (CL-8723): `publish_workspace` uploads the build
+ * archive itself through the run-scoped artifacts routes, stamping
+ * `metadata.sb` the same way `persistStageDraft` does. `source.origin` is
+ * NOT the signal this discriminates on -- the mounted module's own
+ * `/artifacts/binary` route does not tag a run-scoped binary upload
+ * `"workflow"` the way its text route does, so every binary upload reads
+ * back `"imported"` regardless of who made it. `provenance.agentRole` is:
+ * only `publish_workspace`'s own write sets it (`"build-engineer"`,
+ * `specialist-source.ts`'s `agentFor(BUILD_STAGE).id`); the browser's own
+ * `persistBuildEvidence` fallback write never does. The newest such node --
+ * this project/stage/kind, not yet superseded -- IS the reviewable
+ * artifact; approving it needs no browser write at all, and it is preferred
+ * over `persist_needed` even when a chat draft (a status update, not the
+ * archive) also exists.
  */
 export function reviewableArtifact(input: {
   readonly nodes: readonly ArtifactNode[];
@@ -50,6 +59,16 @@ export function reviewableArtifact(input: {
   readonly kind: string;
   readonly latestDraft: unknown;
 }): ReviewableArtifact {
+  const written = input.nodes
+    .filter(
+      (node) =>
+        node.stage === input.stage &&
+        node.kind === input.kind &&
+        node.provenance.agentRole !== undefined &&
+        node.supersededByNodeId === null,
+    )
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
+  if (written) return { status: "found", node: written };
   if (input.latestDraft) return { status: "persist_needed" };
   return { status: "none" };
 }

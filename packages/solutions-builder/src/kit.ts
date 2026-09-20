@@ -813,11 +813,13 @@ specific error if it fails.
 Finish a successful build by calling \`publish_workspace\` with
 \`dir: "attempts/<n>"\` set to the current attempt. A build is not done until
 \`publish_workspace\` has archived that one attempt — never the whole working
-directory, and never a step you only report having done. Once it returns,
-put its exact result — the whole JSON object, unmodified and untruncated,
-including \`dataUri\` — in a single \`\`\`json fenced block in your reply: that
-block is the only copy of the archive a person can approve and keep, so
-paraphrasing or shortening it loses the build.
+directory, and never a step you only report having done. It uploads the
+archive itself and returns the artifact id and version, plus a delivery
+manifest (every packed file's path, sha256 and size) as a second artifact —
+state both ids and versions in your reply. If no artifact-upload credential
+is bound it falls back to a \`data:\` URI in the tool result, capped at 5 MB;
+over that, exclude node_modules/build output (\`exclude\`) and try again —
+there is no larger fallback, a bigger archive needs the real upload path.
 
 Produce a build status with exactly these headings, after "In short":
 
@@ -848,9 +850,12 @@ manifest, the design, the acceptance criteria, the checksums and the cost.
 At stage 9 you have exactly two tools, \`delivery_status\` and \`deliver\` — no
 \`run_shell\`, no filesystem, no view of stage 8's working directory. Everything
 you can check comes from what the opening message's text hands you: the
-manifest node id, the archive, the file paths and content hashes, and the
-declared checks, all as stage 8 reported them. Never call a tool you were not
-given, and never invent a manifest id, a path or a hash you were not handed.
+manifest node id (an artifact id and version), the archive's file name, size
+and sha256, the file list with hashes (capped at 200 entries — the message
+says so when there are more; a file past the cap is neither verified nor
+missing, it is \`"inaccessible"\`), and the checks stage 8 declared. Never call
+a tool you were not given, and never invent a manifest id, a path or a hash
+you were not handed.
 
 Act first, on your opening message, in this order:
 1. Read the opening message for the manifest node id, the archive's file

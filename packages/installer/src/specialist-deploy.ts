@@ -14,6 +14,7 @@ import { ApiError, type Transport } from "@intx/hub-client";
 import type { Stage } from "@solutions-builder/app/ledger";
 import {
   ARTIFACT_TOOL_DEPENDENCIES,
+  BUILD_STAGE,
   PACKAGE_STAGE,
   SPECIALIST_ENTRY_PATH,
   WORKFLOW_PACKAGE_DEPENDENCIES,
@@ -174,9 +175,12 @@ async function renderSpecialistSource(
   };
   // `@corbits/artifacts` and its `@standard-schema/spec` peer are only a real
   // dependency of this member when the rendered entry actually imports the
-  // tool -- with `artifactTools` off, dropping them keeps the deployed
+  // generic tool bundle -- with `artifactTools` off, or on stage 8 (which
+  // resolves its "hub" handle through `@solutions-builder/tools-delivery`
+  // instead, see `specialistEntrySource`), dropping them keeps the deployed
   // package.json (and the closure below) the same shape it was pre-CL-8719.
-  const dependencies = artifactTools
+  const needsGenericArtifactPackage = artifactTools && stage !== BUILD_STAGE;
+  const dependencies = needsGenericArtifactPackage
     ? { ...WORKFLOW_PACKAGE_DEPENDENCIES, ...ARTIFACT_TOOL_DEPENDENCIES }
     : WORKFLOW_PACKAGE_DEPENDENCIES;
   const member = {
@@ -205,8 +209,9 @@ async function renderSpecialistSource(
     ...(await appMemberFiles(closure.manifest, closure.fetchTarball)),
     ...(await toolsDeckMemberFiles(closure.manifest, closure.fetchTarball)),
     ...(await toolsDeliveryMemberFiles(closure.manifest, closure.fetchTarball)),
-    // Only shipped when the rendered entry imports it (`artifactTools`).
-    ...(artifactTools ? await artifactsMemberFiles(closure.manifest, closure.fetchTarball) : {}),
+    // Only shipped when the rendered entry actually imports the generic
+    // bundle -- stage 8 never does (see `needsGenericArtifactPackage` above).
+    ...(needsGenericArtifactPackage ? await artifactsMemberFiles(closure.manifest, closure.fetchTarball) : {}),
   };
   files[DIGEST_PATH] = `${await treeDigest(files)}\n`;
   return files;
