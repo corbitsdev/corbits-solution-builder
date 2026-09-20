@@ -38,6 +38,13 @@ import { TargetPicker, targetOpeningLine } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
 import { workspaceGuidance } from "./guidance.js";
 import { currentStageFromArtifacts } from "../../project-view.ts";
+import {
+  applyWithdrawn,
+  parseWithdrawnTurns,
+  pendingTurn,
+  WITHDRAWN_TURNS_KIND,
+  type WithdrawnMark,
+} from "../../withdrawn-turns.ts";
 import type { FoldedFeedback } from "@solutions-builder/app/project-state";
 
 export { StageDocument, DocumentBody } from "./document.jsx";
@@ -154,6 +161,39 @@ export function StageWorkspace({
     setThreadLoadedFor(null);
   }, [agentAddress]);
 
+  // Stop's durable marker: one per-project artifact, read with the rest of
+  // this project's artifacts so a withdrawn turn stays withdrawn across a
+  // refresh or a second browser (CL-8695).
+  const withdrawnNode = useMemo(
+    () => detail.nodes.find((node) => node.kind === WITHDRAWN_TURNS_KIND) ?? null,
+    [detail.nodes],
+  );
+  const [withdrawnMarks, setWithdrawnMarks] = useState<WithdrawnMark[]>([]);
+  useEffect(() => {
+    if (!withdrawnNode) {
+      setWithdrawnMarks([]);
+      return;
+    }
+    let cancelled = false;
+    void api
+      .artifactContent(tenantId, withdrawnNode.id)
+      .then((result) => {
+        if (!cancelled) setWithdrawnMarks(parseWithdrawnTurns(result.content));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [withdrawnNode?.id, tenantId]);
+  const withdrawnIds = useMemo(
+    () => new Set(withdrawnMarks.filter((mark) => mark.stage === stage).map((mark) => mark.messageId)),
+    [withdrawnMarks, stage],
+  );
+  // The fold runs before guidance ever sees the thread, so a reply Stop hid
+  // can never be read back as the current draft or the open question.
+  const foldedMessages = useMemo(() => applyWithdrawn(messages, withdrawnIds), [messages, withdrawnIds]);
+  const pending = useMemo(() => pendingTurn(foldedMessages, withdrawnIds), [foldedMessages, withdrawnIds]);
+
   // Refetched on a nudge from the tenant mailbox stream (CL-8694) — the
   // specialist's reply lands as a `create` event the moment it's sent. A 20s
   // fallback poll covers the stream being down, so a dropped connection
@@ -195,6 +235,21 @@ export function StageWorkspace({
   const [composer, setComposer] = useState("");
   const [sending, setSending] = useState(false);
   const [approving, setApproving] = useState(false);
+  // What Stop put back into the box: the composer above for a plain-chat
+  // stage, and this seed for the document composer's own local state.
+  const [stopSeed, setStopSeed] = useState<{ text: string; at: number } | null>(null);
+  const stopTurn = async () => {
+    if (!pending) return;
+    const withdrawn = pending;
+    setComposer(withdrawn.body);
+    setStopSeed({ text: withdrawn.body, at: Date.now() });
+    try {
+      await api.withdrawTurn(detail.project.id, tenantId, { messageId: withdrawn.id, stage });
+      setWithdrawnMarks((marks) => [...marks, { messageId: withdrawn.id, stage, at: new Date().toISOString() }]);
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    }
+  };
   // Stage 7 only: the build target chosen at freeze time. Reset whenever the
   // stage changes so an earlier project's choice never leaks into a new one.
   const [chosenTarget, setChosenTarget] = useState<string | null>(null);
@@ -329,11 +384,14 @@ export function StageWorkspace({
     }
   };
 
-  const latestSpecialistMessage = [...messages].reverse().find((message) => message.author === "agent") ?? null;
+  // Withdrawn turns are folded out before anything below reads the thread,
+  // so a reply Stop hid can never surface as the latest turn, the draft, or
+  // the open question (CL-8695).
+  const latestSpecialistMessage = [...foldedMessages].reverse().find((message) => message.author === "agent") ?? null;
   // Mail has no separate draft record before approval. Keep a substantial
   // draft separate from the latest conversational turn so an acknowledgement
   // or a follow-up question never replaces the document being reviewed.
-  const guidance = useMemo(() => workspaceGuidance(stage, messages), [stage, messages]);
+  const guidance = useMemo(() => workspaceGuidance(stage, foldedMessages), [stage, foldedMessages]);
   const draftMessage = guidance.draft;
   const reviewMessage = DOCUMENT_STAGES.has(stage) ? draftMessage : latestSpecialistMessage;
 
@@ -342,7 +400,7 @@ export function StageWorkspace({
   // or result-node bookkeeping under mail-chat).
   const turns: StageTurn[] = useMemo(
     () =>
-      messages.map((message) => ({
+      foldedMessages.map((message) => ({
         id: message.id,
         role: message.author === "me" ? "human" : "specialist",
         body: message.body,
@@ -351,7 +409,7 @@ export function StageWorkspace({
         questions: null,
         createdAt: message.at,
       })),
-    [messages],
+    [foldedMessages],
   );
 
   // This stage's approved versions, plus the specialist's latest unpersisted
@@ -612,7 +670,7 @@ export function StageWorkspace({
           />
           <StageConversation
             stage={stage}
-            messages={messages}
+            messages={foldedMessages}
             value={composer}
             onValueChange={setComposer}
             onSend={() => {
@@ -623,6 +681,9 @@ export function StageWorkspace({
             working={sending}
             disabled={!agentAddress}
             placeholder={guidance.question ? "Your answer. Rough is fine." : "Add context or ask for the complete draft…"}
+            withdrawnIds={withdrawnIds}
+            pending={pending !== null}
+            onStop={() => void stopTurn()}
           />
         </>
       ) : null}
@@ -662,6 +723,10 @@ export function StageWorkspace({
             draftOpen={draftOpen}
             newer={newerVersion}
             live={null}
+            seed={stopSeed}
+            withdrawnIds={withdrawnIds}
+            pending={pending !== null}
+            onStop={() => void stopTurn()}
           />
         </>
       ) : null}
@@ -693,7 +758,7 @@ export function StageWorkspace({
               <div className="document-body">
                 <Markdown source={latestSpecialistMessage.body} />
               </div>
-            ) : messages.length > 0 ? (
+            ) : foldedMessages.length > 0 ? (
               <p className="inline-note">Waiting on the specialist's first reply…</p>
             ) : (
               <p className="inline-note">Say what you'd like below to start the conversation.</p>
@@ -701,7 +766,7 @@ export function StageWorkspace({
           </Screen>
           <StageConversation
             stage={stage}
-            messages={messages}
+            messages={foldedMessages}
             value={composer}
             onValueChange={setComposer}
             onSend={() => {
@@ -711,6 +776,9 @@ export function StageWorkspace({
             }}
             working={sending}
             disabled={!agentAddress}
+            withdrawnIds={withdrawnIds}
+            pending={pending !== null}
+            onStop={() => void stopTurn()}
           />
         </>
       ) : null}

@@ -31,6 +31,9 @@ export function StageConversation({
   working = false,
   disabled = false,
   placeholder = "Say what should change…",
+  withdrawnIds = EMPTY_WITHDRAWN,
+  pending = false,
+  onStop,
 }: {
   stage: number;
   messages: readonly ChatMessage[];
@@ -41,6 +44,12 @@ export function StageConversation({
   working?: boolean;
   disabled?: boolean;
   placeholder?: string;
+  /** Ids of person turns Stop withdrew, rendered dimmed with no reply. */
+  withdrawnIds?: ReadonlySet<string>;
+  /** The last turn is a person message nothing has answered yet. */
+  pending?: boolean;
+  /** Restores that turn to the composer and records the withdrawal. */
+  onStop?: () => void;
 }) {
   const uiMessages = useMemo(() => toUiMessages(messages), [messages]);
   return (
@@ -48,20 +57,34 @@ export function StageConversation({
       <ChatThread
         messages={uiMessages}
         identity={{ name: stageName(stage) }}
-        renderBody={(message) => <Markdown source={message.parts.map((part) => (part.type === "text" ? part.text : "")).join("")} />}
+        renderBody={(message) => {
+          const text = message.parts.map((part) => (part.type === "text" ? part.text : "")).join("");
+          if (message.role === "user" && withdrawnIds.has(message.id)) {
+            return (
+              <div className="turn-withdrawn">
+                <Markdown source={text} />
+                <span className="turn-withdrawn-note">Stopped before it was answered.</span>
+              </div>
+            );
+          }
+          return <Markdown source={text} />;
+        }}
         empty={<p className="inline-note">No messages yet.</p>}
       />
       <ChatInput
         value={value}
         onValueChange={onValueChange}
         onSend={onSend}
-        working={working}
+        working={working || pending}
+        {...(pending && onStop ? { onStop } : {})}
         disabled={disabled}
         placeholder={placeholder}
       />
     </div>
   );
 }
+
+const EMPTY_WITHDRAWN: ReadonlySet<string> = new Set();
 
 /** A pending local send is evidence only that the browser has submitted a
  * message; it does not establish what the specialist is doing. */

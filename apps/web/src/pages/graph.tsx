@@ -11,6 +11,7 @@ import { api, ApiFailure, type ArtifactNode } from "../client.js";
 import { Markdown } from "../markdown.jsx";
 import { AddMaterial, Banner, Button, documentName, downloadArtifact, stageName } from "../components.jsx";
 import { PrintButton } from "../print.jsx";
+import { WITHDRAWN_TURNS_KIND } from "../withdrawn-turns.ts";
 
 type ArtifactEdge = { childNodeId: string; sourceNodeId: string };
 
@@ -165,7 +166,7 @@ export function ArtifactGraph({
   ) : null;
   // A file's companion reading is fetched from within its own row, never
   // listed as an attachment in its own right.
-  const listedNodes = nodes.filter((node) => node.kind !== MATERIAL_READING_KIND);
+  const listedNodes = nodes.filter((node) => node.kind !== MATERIAL_READING_KIND && node.kind !== WITHDRAWN_TURNS_KIND);
 
   const [openedId, setOpenedId] = useState<string | null>(
     () => openedIdProp ?? defaultOpenedId(listedNodes),

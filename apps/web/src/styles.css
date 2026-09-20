@@ -3098,3 +3098,15 @@ button[aria-disabled="true"] {
 .project-info-facts {
   margin-bottom: var(--space-4);
 }
+
+/* A message the person stopped before it was answered: still what they said,
+   dimmed, with the reason no reply follows it (CL-8695). */
+.turn-withdrawn {
+  opacity: 0.72;
+}
+.turn-withdrawn-note {
+  display: block;
+  margin-top: var(--space-1);
+  font-size: 0.75rem;
+  color: var(--wb-muted-foreground);
+}

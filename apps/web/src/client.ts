@@ -98,6 +98,12 @@ import {
   sendStageMail as sendStageMailViaHub,
   type ChatMessage,
 } from "./stage-mail.ts";
+import {
+  parseWithdrawnTurns,
+  withdrawnTurnsContent,
+  WITHDRAWN_TURNS_KIND,
+  type WithdrawnMark,
+} from "./withdrawn-turns.ts";
 import { hubCredentials, hubOrigin } from "./hub-origin.ts";
 import { listProjectSummaries } from "./project-list.ts";
 import { openDecisions } from "./decisions-fold.ts";
@@ -1272,6 +1278,51 @@ export const api = {
   readStageThread: async (tenantId: string, agentAddresses: string[]): Promise<ChatMessage[]> => {
     try {
       return await readStageThreadViaHub(tenantId, agentAddresses);
+    } catch (cause) {
+      installerFailure(cause);
+    }
+  },
+  /**
+   * Records a Stop: the mail agent's late reply is never cancelled — mail
+   * has no such thing — so this marker is what keeps it from being read
+   * back as the answer to the withdrawn turn. One `withdrawn_turns` artifact
+   * per project, created on first use and revised (read-modify-write) after;
+   * `@corbits/artifacts` exposes no version-conflict signal to retry against,
+   * so a race between two writers is last-write-wins.
+   */
+  withdrawTurn: async (
+    projectId: string,
+    tenantId: string,
+    entry: { messageId: string; stage: number },
+  ): Promise<void> => {
+    try {
+      const transport = createHubTransport();
+      const artifacts = await listArtifacts(transport, tenantId, { kind: WITHDRAWN_TURNS_KIND });
+      const existing = artifacts.find(
+        (artifact) =>
+          artifact.archivedAt === null &&
+          (artifact.metadata as { sb?: Record<string, unknown> } | null)?.sb?.["projectId"] === projectId,
+      );
+      const mark: WithdrawnMark = { messageId: entry.messageId, stage: entry.stage, at: new Date().toISOString() };
+      if (existing) {
+        const artifact = await installerGetArtifact(transport, tenantId, existing.id);
+        const marks = [...parseWithdrawnTurns(artifact?.content ?? null), mark];
+        await installerReviseArtifact(transport, tenantId, existing.id, { content: withdrawnTurnsContent(marks) });
+        return;
+      }
+      await installerCreateArtifact(transport, tenantId, {
+        title: "Withdrawn turns",
+        content: withdrawnTurnsContent([mark]),
+        metadata: {
+          sb: {
+            projectId,
+            kind: WITHDRAWN_TURNS_KIND,
+            stage: 0,
+            mediaType: "application/json",
+            provenance: { producer: "human" as const },
+          },
+        },
+      });
     } catch (cause) {
       installerFailure(cause);
     }

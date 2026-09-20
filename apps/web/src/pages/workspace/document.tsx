@@ -55,6 +55,10 @@ export function StageDocument({
   draftOpen = true,
   newer = null,
   live = null,
+  seed = null,
+  withdrawnIds = EMPTY_WITHDRAWN,
+  pending = false,
+  onStop,
 }: {
   node: ArtifactNode;
   versions: ArtifactNode[];
@@ -80,9 +84,20 @@ export function StageDocument({
   newer?: ArtifactNode | null;
   /** The next version, as far as the model has written it. */
   live?: string | null;
+  /** A message Stop put back, quotes already folded into its text. */
+  seed?: { text: string; at: number } | null;
+  /** Ids of person turns Stop withdrew, rendered dimmed with no reply. */
+  withdrawnIds?: ReadonlySet<string>;
+  /** The last turn is a person message nothing has answered yet. */
+  pending?: boolean;
+  /** Restores that turn to the composer and records the withdrawal. */
+  onStop?: () => void;
 }) {
   const [message, setMessage] = useState("");
   const [attached, setAttached] = useState<Quote[]>([]);
+  useEffect(() => {
+    if (seed && seed.text.trim()) setMessage(seed.text);
+  }, [seed?.at]);
   // Stage 3 is a choice, not an approval: the gate names the approaches.
   const sections = useMemo(() => sectionsIn(content), [content]);
   const approaches = node.kind === "chosen_approach"
@@ -286,6 +301,11 @@ export function StageDocument({
               <div className="turn-failed" role="alert">
                 <Markdown source={(message.parts[0] as { text: string }).text} />
               </div>
+            ) : message.role === "user" && withdrawnIds.has(message.id) ? (
+              <div className="turn-withdrawn">
+                <Markdown source={message.parts.map((part) => (part as { text: string }).text).join("\n\n")} />
+                <span className="turn-withdrawn-note">Stopped before it was answered.</span>
+              </div>
             ) : message.role === "agent" ? (
               <SpecialistTurn
                 text={(message.parts[0] as { text: string }).text}
@@ -389,7 +409,8 @@ export function StageDocument({
             value={message}
             onValueChange={setMessage}
             onSend={send}
-            working={busy === "draft"}
+            {...(pending && onStop ? { onStop } : {})}
+            working={busy === "draft" || pending}
             placeholder={
               busy === "draft"
                 ? "The specialist is writing. Say more meanwhile; it goes when the draft lands."
@@ -516,3 +537,5 @@ export function DocumentBody({ source, sideBySide }: { source: string; sideBySid
     </>
   );
 }
+
+const EMPTY_WITHDRAWN: ReadonlySet<string> = new Set();
