@@ -23,7 +23,7 @@ describe("foldProjectWorkflow", () => {
     expect(view.done).toBe(false);
     expect(view.openReview).toBeNull();
     expect(view.lastRefusal).toBeNull();
-    expect(view.allowed).toEqual({ openReview: true, approve: false, sendBack: true });
+    expect(view.allowed).toEqual({ openReview: true, approve: false, sendBack: true, approveReason: "no_open_review" });
   });
 
   test("reads the newest iteration's apply output when the run has not converged", () => {
@@ -43,7 +43,7 @@ describe("foldProjectWorkflow", () => {
     const view = foldProjectWorkflow([], iterationEventsByRunId);
     expect(view.stage).toBe(1);
     expect(view.openReview).toMatchObject({ reviewId: "stage-1-review-1", status: "open" });
-    expect(view.allowed).toEqual({ openReview: true, approve: true, sendBack: true });
+    expect(view.allowed).toEqual({ openReview: true, approve: true, sendBack: true, approveReason: null });
   });
 
   test("picks the numerically newest iteration, not the lexicographically last one", () => {
@@ -141,6 +141,6 @@ describe("foldProjectWorkflow", () => {
     const view = foldProjectWorkflow(topEvents, { "run1__rework__5": [stepCompleted("apply", { ...finalState, done: false })] });
     expect(view.done).toBe(true);
     expect(view.stage).toBe(2);
-    expect(view.allowed).toEqual({ openReview: false, approve: false, sendBack: false });
+    expect(view.allowed).toEqual({ openReview: false, approve: false, sendBack: false, approveReason: "already_done" });
   });
 });

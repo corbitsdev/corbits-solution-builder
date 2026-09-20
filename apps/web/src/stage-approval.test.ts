@@ -29,7 +29,7 @@ function view(overrides: Partial<ProjectWorkflowView> = {}): ProjectWorkflowView
     reviews: {},
     decisions: [],
     lastRefusal: null,
-    allowed: { openReview: true, approve: false, sendBack: true },
+    allowed: { openReview: true, approve: false, sendBack: true, approveReason: "no_open_review" },
     freeze: null,
     ...overrides,
   };

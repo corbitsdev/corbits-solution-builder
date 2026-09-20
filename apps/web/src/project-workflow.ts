@@ -12,7 +12,7 @@
  */
 import type { Transport, WorkflowRunEvent } from "@intx/hub-client";
 import { workflowsFor, type ProjectWorkflowDeployment } from "@solutions-builder/installer";
-import type { DecisionRecord, Freeze, ProjectState, ReviewState, StageNumber } from "@solutions-builder/app/project-workflow/contracts";
+import { approveReason, type ApproveReason, type DecisionRecord, type Freeze, type ProjectState, type ReviewState, type StageNumber } from "@solutions-builder/app/project-workflow/contracts";
 
 const LOOP_STEP_ID = "rework";
 const APPLY_STEP_ID = "apply";
@@ -25,7 +25,15 @@ export type ProjectWorkflowView = {
   readonly reviews: Readonly<Record<StageNumber, ReviewState | undefined>>;
   readonly decisions: readonly DecisionRecord[];
   readonly lastRefusal: DecisionRecord | null;
-  readonly allowed: { readonly openReview: boolean; readonly approve: boolean; readonly sendBack: boolean };
+  readonly allowed: {
+    readonly openReview: boolean;
+    readonly approve: boolean;
+    readonly sendBack: boolean;
+    /** Why `approve` is false, or null once it is true -- the workflow's own
+     *  verdict (`project-workflow/contracts.ts`'s `approveReason`), never
+     *  re-derived from chat or artifacts. */
+    readonly approveReason: ApproveReason | null;
+  };
   /** Stage 7's freeze, once approved; null before then or after a send-back
    *  to stage <= 7 clears it. */
   readonly freeze: Freeze | null;
@@ -132,6 +140,7 @@ export function foldProjectWorkflow(
       openReview: !state.done,
       approve: !state.done && openReview !== null,
       sendBack: !state.done,
+      approveReason: approveReason(state),
     },
     freeze: state.freeze,
   };

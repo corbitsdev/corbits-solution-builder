@@ -35,7 +35,7 @@ import { DeliveryPanel } from "./delivery.jsx";
 import { StageConversation } from "./thread.jsx";
 import { StageDocument } from "./document.jsx";
 import { Preparing } from "./preparing.jsx";
-import { BuildPanel, buildEvidenceState, parsePublishedBundle } from "./build.jsx";
+import { BuildPanel, parsePublishedBundle } from "./build.jsx";
 import { TargetPicker, targetOpeningLine } from "./freeze.jsx";
 import { deliveryOpeningLine, parseDeliveryManifest } from "./delivery-opening.ts";
 import { EstimateView } from "./estimate.jsx";
@@ -50,7 +50,7 @@ import {
   type WithdrawnMark,
 } from "../../withdrawn-turns.ts";
 import type { ProjectWorkflowView } from "../../project-workflow.ts";
-import { approveStage, digestOf, reviewableArtifact, sendBack as sendBackDecision } from "../../stage-approval.ts";
+import { approveStage, digestOf, ensureReviewOpen, reviewableArtifact, sendBack as sendBackDecision } from "../../stage-approval.ts";
 import { frozenSummaryLine, stageEvidence, stageRefusalMessage } from "../../stage-evidence.ts";
 import type { Stage7Evidence } from "@solutions-builder/app/project-workflow/contracts";
 import { adoptExistingProject } from "../../project-adoption.ts";
@@ -694,11 +694,12 @@ export function StageWorkspace({
   );
 
   /**
-   * Names this stage's reviewable version to the project workflow, and waits
-   * for the workflow's own `approve` decision to land before treating the
-   * stage as advanced (CL-8687: the workflow is the process authority, not
-   * this write). On a refusal the error banner shows the reason and the next
-   * stage's opening mail is never sent.
+   * This stage's reviewable version, as `{artifactId, version, sha256}` --
+   * the browser's one legitimate job (it is the only party that may read an
+   * artifact): find or persist the material, never judge whether it is
+   * "ready". Persists a chat draft as a new version when nothing else wrote
+   * one yet (`persistStageDraft`/`persistBuildEvidence`); returns null when
+   * there is nothing reviewable yet.
    *
    * Stage 8 is different (CL-8723): `publish_workspace` already uploaded the
    * build archive as a real artifact, so `reviewableArtifact` finds it
@@ -708,9 +709,85 @@ export function StageWorkspace({
    * the specialist's latest reply as its draft.
    *
    * Stage 7 is also the freeze: the chosen target rides along in the same
-   * artifact write (`sb.target`) and is prefixed as one line onto stage 8's
-   * opening mail, so the build specialist knows what it is building without
-   * re-deriving it from the plan.
+   * artifact write (`sb.target`), so `approve()`'s opening mail can quote it
+   * without re-deriving it from the plan.
+   */
+  const resolveReviewRef = useCallback(async (): Promise<{ artifactId: string; version: number; sha256: string } | null> => {
+    if (!reviewMessage || draftKind === null) return null;
+    const materials = detail.nodes.filter((node) => node.kind === "source_material").map((node) => node.id);
+    const reviewable = reviewableArtifact({ nodes: detail.nodes, stage, kind: draftKind, latestDraft: publishedBundle ?? reviewMessage });
+    if (reviewable.status === "found") {
+      return {
+        artifactId: reviewable.node.artifactId,
+        version: reviewable.node.version,
+        sha256: reviewable.node.contentSha256 ?? (await digestOf(reviewMessage.body)),
+      };
+    }
+    if (reviewable.status !== "persist_needed") return null;
+    const persisted = publishedBundle
+      ? await api.persistBuildEvidence(detail.project.id, publishedBundle, materials)
+      : await api.persistStageDraft(
+          detail.project.id,
+          stage,
+          reviewMessage.body,
+          materials,
+          stage === 7 ? (chosenTarget ?? undefined) : undefined,
+        );
+    const version = Number(persisted.contentHash.slice(persisted.contentHash.lastIndexOf("@") + 1));
+    const sha256 = await digestOf(reviewMessage.body);
+    return { artifactId: persisted.artifactId, version, sha256 };
+  }, [reviewMessage, draftKind, detail.nodes, detail.project.id, stage, publishedBundle, chosenTarget]);
+
+  // Opens the review the moment this stage's material is ready, rather than
+  // at the instant of approval -- the project workflow (`allowed.approve`)
+  // is the only gate on the Approve button, and a review that only opens
+  // inside `approve()` would leave `allowed.approve` false right up until
+  // approval, making it useless as a button gate (CL-8687 follow-up). Skips
+  // stage 7 until a target is chosen -- there is nothing reviewable to name
+  // yet -- and keys on the resolved material's id/version so a fresh draft
+  // (a revision) opens its own review rather than being silently skipped as
+  // "already tried". Idempotent under reload/two tabs: `ensureReviewOpen`
+  // itself no-ops once the view already shows the same ref open.
+  const ensuringReviewKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!workflowView || workflowView.done || stage >= LAST_STAGE) return;
+    if (stage === 7 && !chosenTarget) return;
+    if (!reviewMessage || draftKind === null) return;
+    const reviewable = reviewableArtifact({ nodes: detail.nodes, stage, kind: draftKind, latestDraft: publishedBundle ?? reviewMessage });
+    if (reviewable.status === "none") return;
+    const key =
+      reviewable.status === "found"
+        ? `${String(stage)}:${reviewable.node.artifactId}@${String(reviewable.node.version)}`
+        : `${String(stage)}:draft:${reviewMessage.id}`;
+    if (ensuringReviewKeyRef.current === key) return;
+    ensuringReviewKeyRef.current = key;
+    void (async () => {
+      try {
+        const ref = await resolveReviewRef();
+        if (!ref) return;
+        const sameAsOpen =
+          workflowView.openReview !== null &&
+          workflowView.openReview.artifactId === ref.artifactId &&
+          workflowView.openReview.version === ref.version &&
+          workflowView.openReview.sha256 === ref.sha256;
+        if (sameAsOpen) return;
+        await ensureReviewOpen(stageApprovalDeps, { projectId: detail.project.id, stage, ref });
+        await loadWorkflowView();
+        onChanged();
+      } catch {
+        // Left as the sentinel: a later render (a poll, a reply) retries.
+        ensuringReviewKeyRef.current = null;
+      }
+    })();
+  }, [workflowView, stage, chosenTarget, reviewMessage, draftKind, detail.nodes, detail.project.id, publishedBundle, resolveReviewRef, stageApprovalDeps, loadWorkflowView, onChanged]);
+
+  /**
+   * Sends the workflow's `approve` decision for this stage's already-open
+   * review (`approveStage` opens one itself, belt-and-braces, if somehow
+   * none is), and waits for it to land before treating the stage as
+   * advanced (CL-8687: the workflow is the process authority, not this
+   * write). On a refusal the error banner shows the reason and the next
+   * stage's opening mail is never sent.
    */
   const approve = async () => {
     if (!reviewMessage || stage >= LAST_STAGE) return;
@@ -719,31 +796,17 @@ export function StageWorkspace({
     setError(null);
     setRemediation(undefined);
     try {
-      const materials = detail.nodes.filter((node) => node.kind === "source_material").map((node) => node.id);
-      const reviewable = draftKind
-        ? reviewableArtifact({ nodes: detail.nodes, stage, kind: draftKind, latestDraft: publishedBundle ?? reviewMessage })
-        : ({ status: "none" } as const);
-      let ref: { artifactId: string; version: number; sha256: string };
-      if (reviewable.status === "found") {
-        ref = {
-          artifactId: reviewable.node.artifactId,
-          version: reviewable.node.version,
-          sha256: reviewable.node.contentSha256 ?? (await digestOf(reviewMessage.body)),
-        };
-      } else {
-        const persisted = publishedBundle
-          ? await api.persistBuildEvidence(detail.project.id, publishedBundle, materials)
-          : await api.persistStageDraft(
-              detail.project.id,
-              stage,
-              reviewMessage.body,
-              materials,
-              stage === 7 ? (chosenTarget ?? undefined) : undefined,
-            );
-        const version = Number(persisted.contentHash.slice(persisted.contentHash.lastIndexOf("@") + 1));
-        const sha256 = await digestOf(reviewMessage.body);
-        ref = { artifactId: persisted.artifactId, version, sha256 };
-      }
+      // The normal path: a review is already open (the auto-open effect put
+      // it there the moment this stage's material appeared), so its ref is
+      // read straight off the view rather than resolved/persisted again --
+      // resolving it a second time here would persist a second, redundant
+      // draft version every approval. `resolveReviewRef` is the fallback for
+      // the rare case nothing is open yet (`approveStage` also falls back to
+      // opening one itself, belt-and-braces).
+      const ref = workflowView?.openReview
+        ? { artifactId: workflowView.openReview.artifactId, version: workflowView.openReview.version, sha256: workflowView.openReview.sha256 }
+        : await resolveReviewRef();
+      if (!ref) return;
       const evidence = await stageEvidence(stage, {
         projectId: detail.project.id,
         tenantId,
@@ -860,6 +923,13 @@ export function StageWorkspace({
       setSendingBack(false);
     }
   };
+
+  // The Approve button's ONE gate, for every stage panel: the project
+  // workflow's own verdict. Never re-derived from chat messages or artifact
+  // presence (CL-8687 follow-up) — those only decide what to name to
+  // `open_review` (the auto-open effect above), never whether Approve is
+  // clickable.
+  const approveAllowed = workflowView?.allowed.approve ?? false;
 
   const panelReviews = detail.nodes.filter(
     (node) => node.stage === stage && node.kind === "engineering_review",
@@ -993,6 +1063,7 @@ export function StageWorkspace({
           onApprove={approve}
           onRevise={(prompt) => send(prompt)}
           latestReply={latestSpecialistMessage}
+          canApprove={approveAllowed}
         />
       ) : null}
 
@@ -1008,7 +1079,9 @@ export function StageWorkspace({
             }}
             onApprove={approve}
             approving={approving}
-            canApprove={latestSpecialistMessage !== null}
+            canApprove={approveAllowed}
+            approveReason={workflowView?.allowed.approveReason ?? null}
+            lastRefusal={workflowView?.lastRefusal ?? null}
           />
         </div>
       ) : null}
@@ -1022,9 +1095,7 @@ export function StageWorkspace({
             onOpenSettings={onOpenSettings}
             onApprove={approve}
             approving={approving}
-            canApprove={
-              latestSpecialistMessage !== null && buildEvidenceState(messages, detail.nodes, publishedBundle !== null).ready
-            }
+            canApprove={approveAllowed}
             {...(onOpenDecisions ? { onOpenDecisions } : {})}
           />
         </div>
@@ -1103,7 +1174,7 @@ export function StageWorkspace({
             }}
             onSubmit={() => void approve()}
             soloApproval={detail.soloApproval}
-            canSubmit={draftMessage !== null && stage < LAST_STAGE && !(stage === 7 && !chosenTarget)}
+            canSubmit={approveAllowed}
             busy={sending ? "draft" : approving ? "submit" : null}
             draftOpen={draftOpen}
             newer={newerVersion}
@@ -1136,7 +1207,7 @@ export function StageWorkspace({
                 <Button
                   variant="primary"
                   loading={approving}
-                  disabled={!latestSpecialistMessage || (stage === 7 && !chosenTarget)}
+                  disabled={!approveAllowed}
                   onClick={() => void approve()}
                 >
                   Approve and continue
@@ -1185,6 +1256,7 @@ function DesignPanel({
   onApprove,
   onRevise,
   latestReply,
+  canApprove,
 }: {
   detail: ProjectDetail;
   /** The workspace tenant artifacts are recorded under. */
@@ -1196,6 +1268,8 @@ function DesignPanel({
   onRevise: (prompt: string) => Promise<unknown>;
   /** The specialist's latest unpersisted reply — the mockup, before approval. */
   latestReply: ChatMessage | null;
+  /** The project workflow's own verdict — the only gate on the Approve button. */
+  canApprove: boolean;
 }) {
   // The design history is just this project's `design_artifact` nodes —
   // already on `detail`, so no route of its own is needed to read it. Under
@@ -1263,7 +1337,7 @@ function DesignPanel({
         tenantId={tenantId}
         approval={{
           soloApproval: detail.soloApproval,
-          canApprove: latestReply !== null,
+          canApprove,
           onApprove: () => onApprove(),
         }}
         revise={(_feedback, prompt) => onRevise(prompt)}

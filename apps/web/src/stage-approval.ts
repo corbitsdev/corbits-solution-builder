@@ -198,6 +198,59 @@ function findOurRefusal(decisions: readonly DecisionRecord[], ourDecisionIds: Re
   return decisions.find((d) => !d.accepted && ourDecisionIds.has(d.decisionId)) ?? null;
 }
 
+export type EnsureReviewOpenInput = {
+  readonly projectId: string;
+  readonly stage: number;
+  readonly ref: ArtifactRef;
+  readonly attempt?: number;
+};
+
+export type EnsureReviewOpenResult =
+  | { readonly ok: true; readonly review: ReviewState }
+  | { readonly ok: false; readonly reason: string };
+
+/**
+ * Names `ref` as this stage's reviewable material unless a review is
+ * already open under exactly that reference, and polls until the view
+ * actually shows it open (a `decide` success only means the signal was
+ * accepted, not applied yet). Idempotent under reload and two tabs:
+ * `open_review` decision ids are deterministic from `(projectId, stage,
+ * artifactId, version, epoch, attempt)`, so a second caller naming the same
+ * ref against the same committed state re-derives the identical id and
+ * either lands the same decision or gets back a normal `duplicate` refusal
+ * -- never a second open review. Called both by `pages/workspace/index.tsx`
+ * as soon as a stage's material appears (CL-8687 follow-up: the workflow,
+ * not chat or artifact presence, is the only gate on approval) and by
+ * `approveStage` below as a belt-and-braces fallback.
+ */
+export async function ensureReviewOpen(deps: StageApprovalDeps, input: EnsureReviewOpenInput): Promise<EnsureReviewOpenResult> {
+  const attempt = input.attempt ?? 0;
+  const view = await deps.view(input.projectId);
+  if (!view) return { ok: false, reason: "workflow_unavailable" };
+  if (view.stage !== input.stage) return { ok: false, reason: "wrong_stage" };
+  const epoch = view.decisions.length;
+
+  const sameRef = view.openReview !== null && view.openReview.artifactId === input.ref.artifactId && view.openReview.version === input.ref.version && view.openReview.sha256 === input.ref.sha256;
+  if (sameRef) return { ok: true, review: view.openReview! };
+
+  const ourDecisionIds = new Set<string>();
+  const openId = await decisionId(input.projectId, input.stage, input.ref.artifactId, input.ref.version, "open_review", epoch, attempt);
+  ourDecisionIds.add(openId);
+  const sent = await safeDecide(deps, input.projectId, {
+    kind: "open_review",
+    decisionId: openId,
+    projectId: input.projectId,
+    stage: input.stage,
+    artifactId: input.ref.artifactId,
+    version: input.ref.version,
+    sha256: input.ref.sha256,
+    at: deps.now(),
+  });
+  if (!sent.ok) return sent;
+
+  return pollForOpenReview(input.projectId, deps, input.ref, ourDecisionIds);
+}
+
 export type ApproveStageInput = {
   readonly projectId: string;
   readonly stage: number;
@@ -209,11 +262,11 @@ export type ApproveStageInput = {
 };
 
 /**
- * Reads the current view; opens a review naming `ref` unless one is already
- * open under exactly that reference, and polls until the view actually
- * shows it open (a `decide` success only means the signal was accepted, not
- * applied); approves it; polls (bounded) until the stage advances/the
- * project is done, or one of THIS call's decisions comes back refused.
+ * Ensures a review is open naming `ref` (belt and braces -- the normal path
+ * is that `pages/workspace/index.tsx` already opened it the moment the
+ * material appeared, so this is a no-op refusal-free call), approves it,
+ * then polls (bounded) until the stage advances/the project is done, or one
+ * of THIS call's decisions comes back refused.
  */
 export async function approveStage(deps: StageApprovalDeps, input: ApproveStageInput): Promise<StageApprovalResult> {
   const attempt = input.attempt ?? 0;
@@ -222,32 +275,11 @@ export async function approveStage(deps: StageApprovalDeps, input: ApproveStageI
   if (view.stage !== input.stage) return { ok: false, reason: "wrong_stage" };
   const epoch = view.decisions.length;
 
+  const opened = await ensureReviewOpen(deps, { projectId: input.projectId, stage: input.stage, ref: input.ref, attempt });
+  if (!opened.ok) return opened;
+  const review = opened.review;
+
   const ourDecisionIds = new Set<string>();
-  const sameRef = view.openReview !== null && view.openReview.artifactId === input.ref.artifactId && view.openReview.version === input.ref.version && view.openReview.sha256 === input.ref.sha256;
-
-  let review: ReviewState;
-  if (sameRef) {
-    review = view.openReview!;
-  } else {
-    const openId = await decisionId(input.projectId, input.stage, input.ref.artifactId, input.ref.version, "open_review", epoch, attempt);
-    ourDecisionIds.add(openId);
-    const sent = await safeDecide(deps, input.projectId, {
-      kind: "open_review",
-      decisionId: openId,
-      projectId: input.projectId,
-      stage: input.stage,
-      artifactId: input.ref.artifactId,
-      version: input.ref.version,
-      sha256: input.ref.sha256,
-      at: deps.now(),
-    });
-    if (!sent.ok) return sent;
-
-    const opened = await pollForOpenReview(input.projectId, deps, input.ref, ourDecisionIds);
-    if (!opened.ok) return opened;
-    review = opened.review;
-  }
-
   const approveId = await decisionId(input.projectId, input.stage, input.ref.artifactId, input.ref.version, "approve", epoch, attempt);
   ourDecisionIds.add(approveId);
   const sentApprove = await safeDecide(deps, input.projectId, {

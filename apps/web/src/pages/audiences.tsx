@@ -21,7 +21,13 @@ import { buildPackageDeck } from "../deck-save.ts";
 import { deckDesignFor } from "../deck-design-settings.ts";
 import { slidesSource } from "../deck-templates.ts";
 import { audienceOutcome } from "../stage-evidence.ts";
-import { quorumState, type QuorumState, type Stage5Evidence } from "@solutions-builder/app/project-workflow/contracts";
+import {
+  approveReasonText,
+  quorumState,
+  type ApproveReason,
+  type DecisionRecord,
+  type Stage5Evidence,
+} from "@solutions-builder/app/project-workflow/contracts";
 
 const POLL_INTERVAL_MS = 3_000;
 const POLL_TIMEOUT_MS = 10 * 60 * 1_000;
@@ -79,18 +85,6 @@ function roleLabel(role: string): string {
 /** The most recent decision recorded, or null if none has been. */
 function latestDecision(decisions: readonly AudienceDecision[]): AudienceDecision | null {
   return decisions.length > 0 ? decisions[decisions.length - 1]! : null;
-}
-
-/** Why approval is disabled, in the exact terms the stage 5 rule checks --
- *  null once the quorum is met. Mirrors `stageRules[5]`'s own reading of the
- *  identical `quorumState` (`project-workflow/contracts.ts`). */
-function quorumReason(state: QuorumState): string | null {
-  if (state.met) return null;
-  if (state.blocked.length > 0) {
-    return `${state.blocked.join(" and ")} ${state.blocked.length === 1 ? "has" : "have"} blocked this`;
-  }
-  if (state.proceeded === 0) return "No decisions recorded yet";
-  return `${state.proceeded} of ${state.required} stakeholders have said proceed`;
 }
 
 const DECISION_LABEL: Record<AudienceDecision["decision"], string> = {
@@ -313,6 +307,8 @@ export function AudiencePackages({
   onApprove,
   approving,
   canApprove,
+  approveReason,
+  lastRefusal,
 }: {
   detail: ProjectDetail;
   /** The workspace tenant artifacts are recorded under. */
@@ -323,8 +319,12 @@ export function AudiencePackages({
   /** Persists the specialist's latest reply as this stage's approved draft and advances. */
   onApprove: () => void;
   approving: boolean;
-  /** Whether there is a specialist reply to approve. */
+  /** The project workflow's own verdict — the only gate on the Approve button. */
   canApprove: boolean;
+  /** Why `canApprove` is false, or null once it is true (`ProjectWorkflowView.allowed.approveReason`). */
+  approveReason: ApproveReason | null;
+  /** `ProjectWorkflowView.lastRefusal` — carries the quorum breakdown when `approveReason` is `quorum_not_met`. */
+  lastRefusal: DecisionRecord | null;
 }) {
   // Which stakeholders' packages are being written right now: "Write it"
   // sends the mail, then polls the thread for the reply that follows it and
@@ -488,8 +488,12 @@ export function AudiencePackages({
   }, [tenantId, packages.map((node) => node.id).join(",")]);
 
   // The same evidence an `approve` decision would carry, folded through the
-  // identical `quorumState` the stage 5 rule checks -- so this banner and
-  // the reducer's own refusal never disagree about what "met" means.
+  // identical `quorumState` the stage 5 rule checks -- purely informational
+  // (the live tally the table above already shows one row at a time,
+  // totalled here), never the Approve button's gate: that reads
+  // `canApprove`/`approveReason` off the project workflow itself, since only
+  // an actual approve attempt tells the workflow whether quorum was met
+  // (CL-8687 follow-up).
   const evidence: Stage5Evidence = {
     quorum: decisionQuorum,
     stakeholders: audiences.map((audience) => audience.name),
@@ -507,7 +511,9 @@ export function AudiencePackages({
   const quorumOutcome = quorumState(evidence);
   const proceeded = quorumOutcome.proceeded;
   const quorumMet = quorumOutcome.met;
-  const reason = quorumReason(quorumOutcome);
+  // The workflow's own verdict -- never recomputed here (`approveReasonText`
+  // is the one place that translates `approveReason` to copy).
+  const reason = approveReason ? approveReasonText(approveReason, lastRefusal) : null;
 
   const decide = async (node: (typeof packages)[number], decision: AudienceDecision["decision"], note: string) => {
     if (!node.variant) return;
@@ -605,12 +611,12 @@ export function AudiencePackages({
             <Button
               variant="primary"
               loading={approving}
-              disabled={!quorumMet || !canApprove || packages.length === 0}
+              disabled={!canApprove || packages.length === 0}
               onClick={onApprove}
             >
               Approve and continue
             </Button>
-            {reason ? <p className="inline-note">{reason}.</p> : null}
+            {reason ? <p className="inline-note">{reason}</p> : null}
           </div>
         ) : null}
 

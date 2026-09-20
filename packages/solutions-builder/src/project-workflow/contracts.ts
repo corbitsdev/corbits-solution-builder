@@ -330,6 +330,60 @@ const stage7Rule: StageRule = (state, payload) => {
 export type StageRule = (state: ProjectState, payload: ApprovePayload, principalId: string) => RefusalCode | null;
 export const stageRules: Readonly<Record<StageNumber, StageRule>> = { 5: stage5Rule, 7: stage7Rule };
 
+/** Why `allowed.approve` is false, or null once it is true. `no_open_review`
+ *  is the ordinary state before the client has named anything reviewable; a
+ *  stage rule's own verdict (`quorum_not_met`, `target_missing`, ...)
+ *  surfaces only once an approve attempt against the CURRENTLY open review
+ *  has actually been refused for it -- the workflow never sees a rule's
+ *  evidence before an attempt is made, so it cannot predict the verdict any
+ *  earlier than that (CL-8687: it never reads an artifact or a project's
+ *  policy). The single place this is derived; `foldProjectWorkflow`
+ *  (`apps/web/src/project-workflow.ts`) surfaces it on `allowed`. */
+export type ApproveReason = RefusalCode | "no_open_review";
+
+export function approveReason(state: ProjectState): ApproveReason | null {
+  if (state.done) return "already_done";
+  const openReview = state.reviews[state.stage]?.status === "open" ? state.reviews[state.stage] : undefined;
+  if (!openReview) return "no_open_review";
+  const refusal = [...state.decisions]
+    .reverse()
+    .find((d) => !d.accepted && d.kind === "approve" && d.stage === state.stage && d.reviewId === openReview.reviewId);
+  return (refusal?.reason as ApproveReason | undefined) ?? null;
+}
+
+const APPROVE_REASON_TEXT: Readonly<Record<ApproveReason, string>> = {
+  no_open_review: "Nothing is ready to review yet.",
+  duplicate: "That decision was already recorded.",
+  unauthorized: "You are not authorized to decide this stage.",
+  wrong_project: "That decision was for a different project.",
+  wrong_stage: "The project has moved to a different stage.",
+  stale_review: "The reviewed material has changed since this review opened.",
+  wrong_artifact: "The reviewed material has changed since this review opened.",
+  stale_version: "A newer version is under review.",
+  hash_mismatch: "The reviewed material has changed since this review opened.",
+  invalid_target_stage: "That target stage is not valid.",
+  already_done: "This project is already finished.",
+  evidence_missing: "The recorded decisions don't match what this approval expects.",
+  quorum_not_met: "The stakeholder quorum has not been met yet.",
+  target_missing: "Choose a target before approving.",
+  frozen_already: "This build is already frozen.",
+};
+
+/** `approveReason`'s code, in plain language -- the one place stage 5's
+ *  quorum breakdown and any other UI copy reads it from, rather than
+ *  recomputing `quorumState` itself. `refusal` is `ProjectWorkflowView`'s
+ *  own `lastRefusal` when it matches this reason; its `quorum` field (set by
+ *  `refusalExtra`) names which stakeholders blocked it. */
+export function approveReasonText(reason: ApproveReason, refusal: DecisionRecord | null): string {
+  if (reason === "quorum_not_met" && refusal?.quorum) {
+    const { blocked, proceeded, required } = refusal.quorum;
+    if (blocked.length > 0) return `${blocked.join(" and ")} ${blocked.length === 1 ? "has" : "have"} blocked this.`;
+    if (proceeded === 0) return "No decisions recorded yet.";
+    return `${proceeded} of ${required} stakeholders have said proceed.`;
+  }
+  return APPROVE_REASON_TEXT[reason] ?? reason;
+}
+
 function stateOf(input: ApplyDecisionInput): ProjectState {
   return {
     projectId: input.projectId,
@@ -344,7 +398,13 @@ function stateOf(input: ApplyDecisionInput): ProjectState {
   };
 }
 
-function refused(state: ProjectState, payload: DecisionPayload, principalId: string, code: RefusalCode): ProjectState {
+function refused(
+  state: ProjectState,
+  payload: DecisionPayload,
+  principalId: string,
+  code: RefusalCode,
+  extra: Partial<Pick<DecisionRecord, "quorum" | "target">> = {},
+): ProjectState {
   const record: DecisionRecord = {
     decisionId: payload.decisionId,
     kind: payload.kind,
@@ -356,8 +416,24 @@ function refused(state: ProjectState, payload: DecisionPayload, principalId: str
     ...(payload.kind === "approve" ? { reviewId: payload.reviewId } : {}),
     ...(payload.kind !== "send_back" ? { artifactId: payload.artifactId, version: payload.version, sha256: payload.sha256 } : {}),
     ...(payload.kind === "send_back" && payload.targetStage !== undefined ? { targetStage: payload.targetStage } : {}),
+    ...extra,
   };
   return { ...state, decisions: [...state.decisions, record] };
+}
+
+/** A stage-rule refusal's own evidence breakdown, attached to the refusal
+ *  record so `allowed.approveReason`'s UI copy can explain WHY (which
+ *  stakeholders block quorum, what target was missing) without re-deriving
+ *  it from the evidence itself -- the workflow already computed it once. */
+function refusalExtra(stage: StageNumber, code: RefusalCode, evidence: unknown): Partial<Pick<DecisionRecord, "quorum" | "target">> {
+  if (code === "quorum_not_met" && stage === 5 && isStage5Evidence(evidence)) {
+    const q = quorumState(evidence);
+    return { quorum: { proceeded: q.proceeded, required: q.required, blocked: q.blocked } };
+  }
+  if (code === "target_missing" && isRecord(evidence) && typeof evidence.target === "string" && evidence.target.length > 0) {
+    return { target: evidence.target };
+  }
+  return {};
 }
 
 function nextReviewId(stage: StageNumber, count: number): string {
@@ -444,7 +520,7 @@ export function applyDecision(input: ApplyDecisionInput): ProjectState {
     const rule = stageRules[state.stage];
     if (rule) {
       const code = rule(state, payload, principalId);
-      if (code) return refused(state, payload, principalId, code);
+      if (code) return refused(state, payload, principalId, code, refusalExtra(state.stage, code, payload.evidence));
     }
 
     const approvedReviews: Record<StageNumber, ReviewState | undefined> = {
