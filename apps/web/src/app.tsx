@@ -497,7 +497,13 @@ export function App() {
    * stage specialist's tool call parks the same way (e.g. stage 8's
    * `run_shell`), all under the WORKSPACE tenant, never the project's own.
    */
-  const decide = async (wait: Wait, decision: "approve" | "reject" | "revise", reason: string) => {
+  const decide = async (
+    wait: Wait,
+    decision: "approve" | "reject" | "revise",
+    reason: string,
+    _target: number,
+    scope: "once" | "always" = "once",
+  ) => {
     if (!wait.approvalId) return;
     setBusy(decision);
     setError(null);
@@ -505,7 +511,7 @@ export function App() {
       const workspaceTenantId = await api.workspaceTenantId();
       if (!workspaceTenantId) throw new Error("no workspace tenant to resolve this approval in");
       if (decision === "approve") {
-        await approveTool(workspaceTenantId, wait.approvalId);
+        await approveTool(workspaceTenantId, wait.approvalId, scope);
       } else {
         await rejectTool(workspaceTenantId, wait.approvalId, reason);
       }

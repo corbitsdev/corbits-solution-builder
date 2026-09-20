@@ -62,6 +62,41 @@ describe("publish_workspace", () => {
     expect(listing).not.toContain("node_modules");
   });
 
+  test("archives only the named attempt directory", async () => {
+    const cwd = await workspaceWith({
+      "attempts/1/src/old.ts": "export const old = 1;\n",
+      "attempts/2/src/new.ts": "export const next = 2;\n",
+    });
+    const bundle = publishWorkspace({ toolCwd: cwd } as never);
+    const result = await bundle.run(
+      { id: "3", name: TOOL_NAME, arguments: { dir: "attempts/2" } },
+      controller.signal,
+    );
+    const parsed = JSON.parse(result.content as string) as { dataUri: string };
+    const base64 = parsed.dataUri.slice(parsed.dataUri.indexOf(",") + 1);
+    const archivePath = join(await workspaceWith({}), "out.tar.gz");
+    await writeFile(archivePath, Buffer.from(base64, "base64"));
+    const listing = await new Promise<string>((resolve, reject) => {
+      const child = spawn("tar", ["-tzf", archivePath]);
+      let out = "";
+      child.stdout.on("data", (chunk: Buffer) => (out += chunk.toString()));
+      child.on("close", (code) => (code === 0 ? resolve(out) : reject(new Error(`tar -tzf exited ${String(code)}`))));
+    });
+    expect(listing).toContain("src/new.ts");
+    expect(listing).not.toContain("old.ts");
+  });
+
+  test("refuses a dir that escapes the working directory", async () => {
+    const cwd = await workspaceWith({ "src/index.ts": "export const x = 1;\n" });
+    const bundle = publishWorkspace({ toolCwd: cwd } as never);
+    const result = await bundle.run(
+      { id: "4", name: TOOL_NAME, arguments: { dir: "../elsewhere" } },
+      controller.signal,
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("inside the working directory");
+  });
+
   test("the tool's own id is namespaced under @solutions-builder/tools-delivery", () => {
     expect(publishWorkspace.id).toBe("@solutions-builder/tools-delivery/publish-workspace");
   });

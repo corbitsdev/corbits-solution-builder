@@ -21,11 +21,42 @@ import { StageConversation } from "./thread.jsx";
 import { clock } from "./elapsed.jsx";
 import { BuildFile } from "../graph.jsx";
 import { createHubTransport } from "../../hub.ts";
-import { pendingApprovals, type PendingApproval } from "../../pending-approvals.ts";
+import { approveTool, pendingApprovals, rejectTool, type PendingApproval } from "../../pending-approvals.ts";
 
 /** The run_shell tool's declared name — every stage-8 approval this panel
  *  turns into a timeline row is parked on a tool call by this name. */
 const RUN_SHELL_TOOL_NAME = "run_shell";
+
+/** The mail bodies that start a fresh or continued build attempt — see the
+ *  build-engineer's prompt (`kit.ts`) for the `attempts/<n>/` convention
+ *  these correspond to. */
+const START_ATTEMPT_BODY = "Start the build attempt.";
+const CONTINUE_ATTEMPT_BODY = "Continue the build.";
+
+/**
+ * Whether the current build attempt has produced published evidence to
+ * approve against: a `build_evidence` artifact (the `publish_workspace`
+ * archive) written no earlier than the last "Start"/"Continue" mail sent to
+ * the specialist. Approving without this would freeze a stage-8 reply that
+ * never actually built anything — the bug this stage shipped with.
+ */
+export function buildEvidenceState(
+  messages: readonly ChatMessage[],
+  nodes: readonly ArtifactNode[],
+): { ready: boolean; reason: string | null } {
+  const archive = nodes.find((node) => node.kind === "build_evidence" && !(node.mediaType ?? "").startsWith("text/"));
+  if (!archive) {
+    return { ready: false, reason: "No published build archive yet — the build has not run publish_workspace." };
+  }
+  const lastAttemptStartedAt = [...messages]
+    .filter((message) => message.author === "me" && [START_ATTEMPT_BODY, CONTINUE_ATTEMPT_BODY].includes(message.body.trim()))
+    .map((message) => Date.parse(message.at))
+    .sort((a, b) => b - a)[0];
+  if (lastAttemptStartedAt !== undefined && Date.parse(archive.createdAt) < lastAttemptStartedAt) {
+    return { ready: false, reason: "The current attempt has not published a build archive yet." };
+  }
+  return { ready: true, reason: null };
+}
 
 type RunEvent = { readonly seq: number; readonly type: string; readonly body: Record<string, unknown> };
 
@@ -278,6 +309,30 @@ export function BuildPanel({
     [detail.nodes],
   ) as ArtifactNode | undefined;
 
+  const evidence = useMemo(() => buildEvidenceState(messages, detail.nodes), [messages, detail.nodes]);
+
+  const pendingRunShell = approvals.filter(
+    (approval) => approval.status === "pending" && approval.toolDefinition?.name === RUN_SHELL_TOOL_NAME,
+  );
+  const [decidingId, setDecidingId] = useState<string | null>(null);
+
+  const decideRunShell = async (approvalId: string, decision: "once" | "always" | "reject") => {
+    setDecidingId(approvalId);
+    setError(null);
+    try {
+      if (decision === "reject") {
+        await rejectTool(tenantId, approvalId, "Rejected from the build panel.");
+      } else {
+        await approveTool(tenantId, approvalId, decision);
+      }
+      await loadTimeline();
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    } finally {
+      setDecidingId(null);
+    }
+  };
+
   return (
     <div data-tour="build-panel">
       <Screen
@@ -304,8 +359,11 @@ export function BuildPanel({
         {!address ? <p className="inline-note">Starting the build specialist…</p> : null}
         <BuildClock since={buildStartedAt} />
         <div className="button-row">
-          <Button variant="primary" loading={busy === "start"} disabled={!address} onClick={() => void send("start", "Start the build attempt.")}>
+          <Button variant="primary" loading={busy === "start"} disabled={!address} onClick={() => void send("start", START_ATTEMPT_BODY)}>
             Start the build attempt
+          </Button>
+          <Button variant="primary" loading={busy === "continue"} disabled={!address} onClick={() => void send("continue", CONTINUE_ATTEMPT_BODY)}>
+            Continue from the last attempt
           </Button>
           <Button variant="destructive" loading={busy === "cancel"} disabled={!address} onClick={() => void send("cancel", "Cancel the build attempt.")}>
             Cancel the build attempt
@@ -320,7 +378,36 @@ export function BuildPanel({
             Approve and continue
           </Button>
         </div>
-        <p className="inline-note">Approving records the latest build report as this stage's evidence and starts delivery.</p>
+        <p className="inline-note">
+          {canApprove ? "Approving records the published build archive as this stage's evidence and starts delivery." : evidence.reason}
+        </p>
+
+        {pendingRunShell.length > 0 ? (
+          <div className="stage-companions" aria-label="Pending build approvals">
+            {pendingRunShell.map((approval) => (
+              <div key={approval.id} className="field">
+                <p>
+                  Asks to run: <code className="hash">{typeof approval.toolArguments["command"] === "string" ? (approval.toolArguments["command"] as string) : JSON.stringify(approval.toolArguments)}</code>
+                </p>
+                <p className="inline-note">
+                  "Allow for this build" trusts every future <code>run_shell</code> call on this build attempt,
+                  without asking again — not another tool, another attempt, or another project.
+                </p>
+                <div className="button-row">
+                  <Button variant="primary" loading={decidingId === approval.id} onClick={() => void decideRunShell(approval.id, "once")}>
+                    Allow once
+                  </Button>
+                  <Button loading={decidingId === approval.id} onClick={() => void decideRunShell(approval.id, "always")}>
+                    Allow for this build
+                  </Button>
+                  <Button variant="destructive" loading={decidingId === approval.id} onClick={() => void decideRunShell(approval.id, "reject")}>
+                    Reject…
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
 
         {build ? <BuildFile node={build} tenantId={tenantId} /> : null}
 

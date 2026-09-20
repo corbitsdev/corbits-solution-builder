@@ -39,6 +39,7 @@ function toDecision(approval: PendingApproval, projectId: string, stage: number)
     blockers: null,
     requiredAuthority: requiredAuthorityFor(stage),
     approvalId: approval.id,
+    ...(approval.toolDefinition?.name ? { toolName: approval.toolDefinition.name } : {}),
   };
 }
 

@@ -81,13 +81,22 @@ export async function approvalById(
   return transport.fetch<PendingApproval>("GET", `${approvalsPath(tenantId)}/${approvalId}`);
 }
 
-/** Approves the pending tool call: it resolves and the specialist's run continues. */
+/**
+ * Approves the pending tool call: it resolves and the specialist's run
+ * continues. `scope: "once"` (the default) resolves only this call.
+ * `scope: "always"` durably sets this run's grant for this exact tool name to
+ * "allow" (`vendor/interchange/packages/hub-api/src/routes/approvals.ts`,
+ * `resolveApproval`'s standing-resolution branch) — every future call to that
+ * tool name on this same run resolves without asking again; it does not
+ * reach another run, another tool, or another project.
+ */
 export async function approveTool(
   tenantId: string,
   approvalId: string,
+  scope: "once" | "always" = "once",
   transport: Transport = createHubTransport(),
 ): Promise<void> {
-  await transport.fetch("POST", `${approvalsPath(tenantId)}/${approvalId}/approve`, { scope: "once" });
+  await transport.fetch("POST", `${approvalsPath(tenantId)}/${approvalId}/approve`, { scope });
 }
 
 /** Rejects the pending tool call, optionally with a message: the specialist sees it and can retry. */

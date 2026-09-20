@@ -35,7 +35,7 @@ import { DeliveryPanel } from "./delivery.jsx";
 import { StageConversation } from "./thread.jsx";
 import { StageDocument } from "./document.jsx";
 import { Preparing } from "./preparing.jsx";
-import { BuildPanel } from "./build.jsx";
+import { BuildPanel, buildEvidenceState } from "./build.jsx";
 import { TargetPicker, targetOpeningLine } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
 import { workspaceGuidance } from "./guidance.js";
@@ -769,7 +769,7 @@ export function StageWorkspace({
             onOpenSettings={onOpenSettings}
             onApprove={approve}
             approving={approving}
-            canApprove={latestSpecialistMessage !== null}
+            canApprove={latestSpecialistMessage !== null && buildEvidenceState(messages, detail.nodes).ready}
             {...(onOpenDecisions ? { onOpenDecisions } : {})}
           />
         </div>

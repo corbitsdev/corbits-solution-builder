@@ -268,6 +268,8 @@ export type Wait = {
    * approval routes instead of `deliverGate`.
    */
   approvalId?: string;
+  /** The tool name `approvalId` was raised for, e.g. "run_shell" or "deliver" — lets the queue offer "Allow for this build" only where a standing grant makes sense. */
+  toolName?: string;
 };
 
 export type ProjectSummary = {

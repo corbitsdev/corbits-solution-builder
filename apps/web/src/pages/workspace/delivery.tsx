@@ -26,29 +26,6 @@ import { Banner, Button, Screen, shortHash, StateLabel } from "../../components.
 import { Markdown } from "../../markdown.jsx";
 import { BuildFile } from "../graph.jsx";
 
-const CACHE_PREFIX = "sb.delivery-approval:";
-
-function cacheKey(projectId: string): string {
-  return `${CACHE_PREFIX}${projectId}`;
-}
-
-/** Best-effort convenience only: losing this never blocks the decision, it just loses the "Delivered" banner across a reload. */
-function readCachedApprovalId(projectId: string): string | null {
-  try {
-    return localStorage.getItem(cacheKey(projectId));
-  } catch {
-    return null;
-  }
-}
-
-function writeCachedApprovalId(projectId: string, approvalId: string): void {
-  try {
-    localStorage.setItem(cacheKey(projectId), approvalId);
-  } catch {
-    // ignored — see readCachedApprovalId
-  }
-}
-
 /** The heading the delivery specialist writes for its run instructions, wherever it lands in the reply. */
 const HOW_TO_RUN_HEADING = /^#{1,3}\s*(repo(?:\s+and)?\s+how\s+to\s+run\s+it|how\s+to\s+run(?:\s+it)?)\s*$/im;
 
@@ -82,6 +59,11 @@ function DeliveryDecision({
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
   const [feedback, setFeedback] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // The last pending approval id seen this session, so a resolved delivery
+  // can still be looked up by id once it drops off the pending list. Held in
+  // memory only — a reload before this fires just loses the "Delivered"
+  // banner until the next delivery, never the delivery itself.
+  const [lastSeenApprovalId, setLastSeenApprovalId] = useState<string | null>(null);
 
   const load = async () => {
     const transport = createHubTransport();
@@ -100,16 +82,15 @@ function DeliveryDecision({
           )
         : undefined;
       if (found) {
-        writeCachedApprovalId(projectId, found.id);
+        setLastSeenApprovalId(found.id);
         setPending(found);
         setDelivered(null);
         setLoaded(true);
         return;
       }
       setPending(null);
-      const cachedId = readCachedApprovalId(projectId);
-      if (cachedId) {
-        const resolved = await approvalById(tenantId, cachedId, transport).catch(() => null);
+      if (lastSeenApprovalId) {
+        const resolved = await approvalById(tenantId, lastSeenApprovalId, transport).catch(() => null);
         setDelivered(resolved && resolved.status === "approved" ? resolved : null);
       }
     } catch (cause) {

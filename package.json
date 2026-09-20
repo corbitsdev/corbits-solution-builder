@@ -37,6 +37,7 @@
     "smoke:responsive": "bun scripts/responsive-smoke.ts",
     "check:markdown": "bun --conditions intx-src scripts/check-markdown.ts",
     "walk": "bun run ui:build && bun --conditions intx-src scripts/walk-ui.tsx",
+    "walk:browser": "bun run ui:build && scripts/walk-browser.sh",
     "check:tokens": "bun scripts/check-tokens.ts",
     "smoke:kit": "bun --conditions intx-src scripts/kit-smoke.ts",
     "check:ui": "bun run check:slop && bun run check:tokens && bun run check:layout && bun run check:markdown",

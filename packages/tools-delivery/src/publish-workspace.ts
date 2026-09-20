@@ -17,13 +17,24 @@
  */
 import { defineTool, type BaseEnv } from "@intx/agent";
 import { spawn } from "node:child_process";
+import { resolve, relative, isAbsolute } from "node:path";
 
 export const TOOL_NAME = "publish_workspace";
 
 export const BUNDLE_MEDIA_TYPE = "application/gzip";
 
-/** Directories never worth shipping: reproducible, huge, or not part of the deliverable. */
-const DEFAULT_EXCLUDES = ["node_modules", ".git", ".venv", "__pycache__"];
+/** Directories never worth shipping: reproducible, huge, generated, or not part of the deliverable. */
+const DEFAULT_EXCLUDES = [
+  "node_modules",
+  ".git",
+  ".venv",
+  "__pycache__",
+  "dist",
+  ".cache",
+  ".turbo",
+  ".next",
+  "coverage",
+];
 
 /** Sidecar env this tool needs: the workspace directory the run's shell
  *  commands operate on, same key `@intx/tools-posix` declares. */
@@ -34,14 +45,32 @@ export interface PublishWorkspaceEnv extends BaseEnv {
 type PublishWorkspaceArgs = {
   fileName: string;
   exclude: string[];
+  dir: string;
 };
+
+/** Resolves `dir` (e.g. "attempts/3") against `cwd`, refusing anything that
+ *  escapes it — the tool archives one attempt, never a sibling or a parent. */
+function resolveDir(cwd: string, dirRaw: unknown): string {
+  const dir = typeof dirRaw === "string" && dirRaw.length > 0 ? dirRaw : ".";
+  if (isAbsolute(dir)) {
+    throw new Error(`publish_workspace: "dir" must be relative to the working directory, got "${dir}"`);
+  }
+  const resolved = resolve(cwd, dir);
+  const rel = relative(cwd, resolved);
+  if (rel === ".." || rel.startsWith(`..${"/"}`)) {
+    throw new Error(`publish_workspace: "dir" must stay inside the working directory, got "${dir}"`);
+  }
+  return resolved;
+}
 
 function parseArgs(args: Record<string, unknown>): PublishWorkspaceArgs {
   const fileNameRaw = args["fileName"];
   const fileName = typeof fileNameRaw === "string" && fileNameRaw.length > 0 ? fileNameRaw : "build.tar.gz";
   const excludeRaw = args["exclude"];
   const extra = Array.isArray(excludeRaw) ? excludeRaw.filter((entry): entry is string => typeof entry === "string") : [];
-  return { fileName, exclude: [...new Set([...DEFAULT_EXCLUDES, ...extra])] };
+  const dirRaw = args["dir"];
+  const dir = typeof dirRaw === "string" && dirRaw.length > 0 ? dirRaw : ".";
+  return { fileName, exclude: [...new Set([...DEFAULT_EXCLUDES, ...extra])], dir };
 }
 
 /** Runs `tar` over the workspace directory and resolves with the gzip bytes.
@@ -68,7 +97,8 @@ function tarDirectory(cwd: string, exclude: string[]): Promise<Buffer> {
 
 async function publishWorkspaceContent(cwd: string, rawArgs: Record<string, unknown>): Promise<string> {
   const args = parseArgs(rawArgs);
-  const bytes = await tarDirectory(cwd, args.exclude);
+  const targetDir = resolveDir(cwd, args.dir);
+  const bytes = await tarDirectory(targetDir, args.exclude);
   if (bytes.byteLength === 0) {
     throw new Error("publish_workspace: the tar produced no bytes — is the workspace empty?");
   }
@@ -86,15 +116,19 @@ export const publishWorkspace = defineTool<PublishWorkspaceEnv>({
       {
         name: TOOL_NAME,
         description:
-          "Archives the run's build workspace (excluding node_modules/.git) as a gzip tarball and returns it as a data: URI in the tool result, so the person can save it as a downloadable artifact when they approve this stage. Does not touch the hub itself — the client persists the artifact.",
+          "Archives one directory of the run's build workspace (excluding node_modules/.git/dist/build caches) as a gzip tarball and returns it as a data: URI in the tool result, so the person can save it as a downloadable artifact when they approve this stage. Does not touch the hub itself — the client persists the artifact.",
         inputSchema: {
           type: "object",
           properties: {
+            dir: {
+              type: "string",
+              description: 'The attempt directory to archive, relative to the working directory, e.g. "attempts/3". Defaults to the working directory itself.',
+            },
             fileName: { type: "string", description: 'Archive file name, e.g. "my-project.tar.gz". Defaults to "build.tar.gz".' },
             exclude: {
               type: "array",
               items: { type: "string" },
-              description: "Additional path patterns to exclude, beyond node_modules/.git/.venv/__pycache__.",
+              description: "Additional path patterns to exclude, beyond node_modules/.git/.venv/__pycache__/dist/.cache/.turbo/.next/coverage.",
             },
           },
         },

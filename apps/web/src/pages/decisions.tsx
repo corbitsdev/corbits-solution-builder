@@ -16,6 +16,7 @@ import { useEffect, useState } from "react";
 import type { ProjectDetail, Wait } from "../client.js";
 import { Button, Screen, StateLabel, shortHash, stageName } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
+import { DELIVER_TOOL_NAME } from "../pending-approvals.ts";
 import { ApprovalsRecord } from "./workspace.jsx";
 
 /** What each stage's gate is called, in the approver's language. */
@@ -71,7 +72,13 @@ export function DecisionQueue({
   /** Starting something is the other thing this page is for. */
   onStart: () => void;
   /** `target` is the stage a send-back returns to; ignored for an approve. */
-  onDecide: (wait: Wait, decision: "approve" | "reject" | "revise", reason: string, target: number) => void;
+  onDecide: (
+    wait: Wait,
+    decision: "approve" | "reject" | "revise",
+    reason: string,
+    target: number,
+    scope?: "once" | "always",
+  ) => void;
 }) {
   const [reason, setReason] = useState("");
   const current =
@@ -208,15 +215,31 @@ export function DecisionQueue({
             </div>
           )}
 
+          {current?.approvalId && current.toolName !== DELIVER_TOOL_NAME ? (
+            <p className="inline-note">
+              "Allow for this build" trusts every future <code>{current.toolName ?? "tool"}</code> call
+              on this same build attempt — not another tool, another build, or another project.
+            </p>
+          ) : null}
+
           <div className="action-row">
             <Button
               variant="primary"
               loading={busy === "approve"}
               disabled={!canApprove}
-              onClick={() => current && onDecide(current, "approve", reason, target)}
+              onClick={() => current && onDecide(current, "approve", reason, target, "once")}
             >
-              {ACTION[current?.stage ?? 1] ?? "Approve"}
+              {current?.approvalId && current.toolName !== DELIVER_TOOL_NAME ? "Allow once" : (ACTION[current?.stage ?? 1] ?? "Approve")}
             </Button>
+            {current?.approvalId && current.toolName !== DELIVER_TOOL_NAME ? (
+              <Button
+                loading={busy === "approve"}
+                disabled={!canApprove}
+                onClick={() => current && onDecide(current, "approve", reason, target, "always")}
+              >
+                Allow for this build
+              </Button>
+            ) : null}
             {/* Stage 9's delivery gate has no "send back to an earlier stage"
                 move: rejecting hands the specialist the reason as feedback
                 and it revises and resubmits in the same turn (CL-8566). */}
@@ -224,7 +247,7 @@ export function DecisionQueue({
               loading={busy === "revise" || busy === "reject"}
               onClick={() => current && onDecide(current, current.approvalId ? "reject" : "revise", reason, target)}
             >
-              {current?.approvalId ? "Reject with feedback" : `Send back to ${stageName(target)}`}
+              {current?.approvalId ? "Reject…" : `Send back to ${stageName(target)}`}
             </Button>
             <Button onClick={() => current && onInspect(current)}>Inspect evidence</Button>
           </div>
