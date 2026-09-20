@@ -15,6 +15,7 @@ import type { ProjectDetail } from "../../client.js";
 import { StateLabel } from "../../components.jsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@corbits/react-ui";
 import { SELECTABLE_TARGETS } from "@solutions-builder/app/targets";
+import type { Freeze } from "@solutions-builder/app/project-workflow/contracts";
 
 type CostRow = { label: string; amount: string; basis: string };
 
@@ -98,16 +99,21 @@ export function EstimateView({
   detail,
   stage,
   chosenTarget,
+  freeze = null,
 }: {
   body: string;
   detail: ProjectDetail;
   stage: number;
   chosenTarget: string | null;
+  /** The project workflow's own freeze, once stage 7 is approved
+   *  (`ProjectWorkflowView.freeze`) -- the process authority, not a guess
+   *  from artifact metadata. */
+  freeze?: Freeze | null;
 }) {
   const { costRows, scopeItems } = useMemo(() => parseEstimate(body), [body]);
-  const frozen = detail.nodes.some(
-    (node) => node.stage === stage && node.supersededByNodeId === null && node.approvedAt !== null,
-  );
+  const frozen =
+    freeze !== null ||
+    detail.nodes.some((node) => node.stage === stage && node.supersededByNodeId === null && node.approvedAt !== null);
   const targetLabel = chosenTarget
     ? (SELECTABLE_TARGETS.find((option) => option.target === chosenTarget)?.label ?? chosenTarget)
     : null;
@@ -121,6 +127,15 @@ export function EstimateView({
           {targetLabel ? <StateLabel tone="info">Target chosen: {targetLabel}</StateLabel> : null}
           {frozen ? <StateLabel tone="success">Approved · frozen</StateLabel> : null}
         </div>
+      ) : null}
+      {freeze ? (
+        <ul className="scope-checklist">
+          {freeze.frozen.map((ref) => (
+            <li key={ref.stage}>
+              Stage {ref.stage} frozen at version {ref.version}
+            </li>
+          ))}
+        </ul>
       ) : null}
       {costRows.length > 0 ? (
         <Table>

@@ -30,6 +30,7 @@ function untouchedView(): ProjectWorkflowView {
     decisions: [],
     lastRefusal: null,
     allowed: { openReview: true, approve: false, sendBack: true },
+    freeze: null,
   };
 }
 

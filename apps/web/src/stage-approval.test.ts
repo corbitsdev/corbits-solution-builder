@@ -30,6 +30,7 @@ function view(overrides: Partial<ProjectWorkflowView> = {}): ProjectWorkflowView
     decisions: [],
     lastRefusal: null,
     allowed: { openReview: true, approve: false, sendBack: true },
+    freeze: null,
     ...overrides,
   };
 }

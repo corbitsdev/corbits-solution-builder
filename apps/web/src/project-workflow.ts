@@ -12,7 +12,7 @@
  */
 import type { Transport, WorkflowRunEvent } from "@intx/hub-client";
 import { workflowsFor, type ProjectWorkflowDeployment } from "@solutions-builder/installer";
-import type { DecisionRecord, ProjectState, ReviewState, StageNumber } from "@solutions-builder/app/project-workflow/contracts";
+import type { DecisionRecord, Freeze, ProjectState, ReviewState, StageNumber } from "@solutions-builder/app/project-workflow/contracts";
 
 const LOOP_STEP_ID = "rework";
 const APPLY_STEP_ID = "apply";
@@ -26,6 +26,9 @@ export type ProjectWorkflowView = {
   readonly decisions: readonly DecisionRecord[];
   readonly lastRefusal: DecisionRecord | null;
   readonly allowed: { readonly openReview: boolean; readonly approve: boolean; readonly sendBack: boolean };
+  /** Stage 7's freeze, once approved; null before then or after a send-back
+   *  to stage <= 7 clears it. */
+  readonly freeze: Freeze | null;
 };
 
 const EMPTY_STATE: ProjectState = {
@@ -37,6 +40,7 @@ const EMPTY_STATE: ProjectState = {
   authorizedPrincipals: {},
   stageOrder: [],
   reviewCounts: {},
+  freeze: null,
 };
 
 function decodeInlineOutput(ref: unknown): unknown {
@@ -129,6 +133,7 @@ export function foldProjectWorkflow(
       approve: !state.done && openReview !== null,
       sendBack: !state.done,
     },
+    freeze: state.freeze,
   };
 }
 

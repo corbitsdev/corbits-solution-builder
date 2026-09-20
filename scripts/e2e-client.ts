@@ -1022,6 +1022,173 @@ async function main(): Promise<void> {
       check("12. list artifacts via the artifacts client", mine.length > 0, `${mine.length} artifact(s) for this project`);
     });
 
+    // (13) CL-8690/CL-8691: a SECOND project, purpose-built to prove stage
+    // 5's quorum rule and stage 7's freeze rule against the real deployed
+    // workflow, without driving all nine stages through a specialist. The
+    // workflow never reads an artifact's content (only reference shape), so
+    // stages 1-4 are advanced with synthetic references -- no artifact is
+    // ever written for them.
+    const project2 = await step("13. create a second project for the stage 5/7 proof", async () => {
+      if (!workspace) throw new Error("no workspace to open a project under");
+      const { project: created } = await installerCreateProject(transport, workspace.tenantId, {
+        title: "E2E Stage 5/7 Proof Project",
+        slug: `e2e-quorum-freeze-proof-${Date.now()}`,
+        policy: {
+          ...PROJECT_POLICY,
+          audiences: [
+            { name: "Ada", role: "audience_member" },
+            { name: "Dana", role: "audience_member" },
+          ],
+          audienceQuorum: 2,
+        },
+      });
+      check("13. create a second project for the stage 5/7 proof", true, `project ${created.id}`);
+      return created;
+    });
+
+    const projectWorkflow2 = await step("13b. ensureProjectWorkflow for the second project", async () => {
+      if (!workspace || !project2 || !sidecar) throw new Error("no workspace/project2/sidecar to deploy against");
+      const stages: ProjectWorkflowStageInput[] = Array.from({ length: 9 }, (_, index) => ({
+        stage: index + 1,
+        authorizedPrincipalIds: [workspace.principalId],
+      }));
+      const source = await buildProjectWorkflowEntryFiles();
+      const deployed = await ensureProjectWorkflow(
+        transport,
+        sidecar,
+        { files: source },
+        gitPush,
+        workspace.tenantId,
+        project2.id,
+        stages,
+        await vendoredMemberFiles(closure.manifest, closure.fetchTarball),
+      );
+      check(
+        "13b. ensureProjectWorkflow for the second project",
+        typeof deployed.deploymentId === "string" && deployed.deploymentId.length > 0,
+        `deployment ${deployed.deploymentId} run ${deployed.runId}`,
+      );
+      return deployed;
+    });
+
+    const viewProjectWorkflow2 = workspace && projectWorkflow2 ? projectWorkflowViewOf(transport, workspace.tenantId, projectWorkflow2) : null;
+    const decideProjectWorkflow2 = workspace && projectWorkflow2 ? decideVia(transport, workspace.tenantId, projectWorkflow2) : null;
+    const stageApprovalDeps2: StageApprovalDeps | null =
+      viewProjectWorkflow2 && decideProjectWorkflow2
+        ? { view: viewProjectWorkflow2, decide: decideProjectWorkflow2, now: () => new Date().toISOString() }
+        : null;
+
+    await step("13c. the second workflow deployment reaches status deployed and reports stage 1", async () => {
+      if (!workspace || !projectWorkflow2 || !viewProjectWorkflow2) throw new Error("no second project workflow to poll");
+      const ok = await pollDeploymentStatus(workspace.tenantId, projectWorkflow2.deploymentId, "deployed");
+      if (!ok) throw new Error("the second project workflow deployment never reached status deployed");
+      const view = await pollUntil(120_000, 3_000, async () => {
+        const candidate = await viewProjectWorkflow2();
+        return candidate && candidate.stage >= 1 ? candidate : null;
+      });
+      check(
+        "13c. the second workflow deployment reaches status deployed and reports stage 1",
+        view !== null && view.stage === 1 && view.done === false,
+        view ? `stage ${view.stage} done=${String(view.done)}` : "no view within 120s",
+      );
+      if (!view || view.stage !== 1) throw new Error("the second project workflow did not initialize at stage 1");
+    });
+
+    await step("13d. advance stages 1-4 with synthetic references (the workflow never reads artifact content)", async () => {
+      if (!project2 || !stageApprovalDeps2) throw new Error("missing deps to advance stages 1-4");
+      for (let stage = 1; stage <= 4; stage++) {
+        const ref = { artifactId: `synthetic-stage-${String(stage)}-artifact`, version: 1, sha256: `sha-synthetic-stage-${String(stage)}` };
+        const result = await approveStage(stageApprovalDeps2, { projectId: project2.id, stage, ref });
+        if (!result.ok || result.stage !== stage + 1) throw new Error(`stage ${String(stage)} advance failed: ${JSON.stringify(result)}`);
+      }
+      const view = await viewProjectWorkflow2!();
+      check(
+        "13d. advance stages 1-4 with synthetic references (the workflow never reads artifact content)",
+        view?.stage === 5,
+        view ? `stage ${view.stage}` : "no view",
+      );
+    });
+
+    const stage5Ref = { artifactId: "stage-5-artifact", version: 1, sha256: "sha-stage-5" };
+
+    await step("13e. approve stage 5 without evidence -> evidence_missing", async () => {
+      if (!project2 || !stageApprovalDeps2) throw new Error("missing deps to approve stage 5");
+      const result = await approveStage(stageApprovalDeps2, { projectId: project2.id, stage: 5, ref: stage5Ref });
+      check("13e. approve stage 5 without evidence -> evidence_missing", result.ok === false && result.reason === "evidence_missing", JSON.stringify(result));
+    });
+
+    await step("13f. approve stage 5 with a blocker -> quorum_not_met", async () => {
+      if (!project2 || !stageApprovalDeps2) throw new Error("missing deps to approve stage 5");
+      const evidence = {
+        quorum: 2,
+        stakeholders: ["Ada", "Dana"],
+        decisions: [
+          { by: "Ada", outcome: "proceed", packageArtifactId: "pkg-ada", packageVersion: 1 },
+          { by: "Dana", outcome: "block", packageArtifactId: "pkg-dana", packageVersion: 1 },
+        ],
+      };
+      const result = await approveStage(stageApprovalDeps2, { projectId: project2.id, stage: 5, ref: stage5Ref, evidence });
+      check("13f. approve stage 5 with a blocker -> quorum_not_met", result.ok === false && result.reason === "quorum_not_met", JSON.stringify(result));
+    });
+
+    await step("13g. approve stage 5 with quorum met -> advances to stage 6", async () => {
+      if (!project2 || !stageApprovalDeps2) throw new Error("missing deps to approve stage 5");
+      const evidence = {
+        quorum: 2,
+        stakeholders: ["Ada", "Dana"],
+        decisions: [
+          { by: "Ada", outcome: "proceed", packageArtifactId: "pkg-ada", packageVersion: 1 },
+          { by: "Dana", outcome: "proceed", packageArtifactId: "pkg-dana", packageVersion: 1 },
+        ],
+      };
+      const result = await approveStage(stageApprovalDeps2, { projectId: project2.id, stage: 5, ref: stage5Ref, evidence });
+      check("13g. approve stage 5 with quorum met -> advances to stage 6", result.ok === true && result.stage === 6, JSON.stringify(result));
+    });
+
+    await step("13h. advance stage 6 with a synthetic reference -> stage 7", async () => {
+      if (!project2 || !stageApprovalDeps2) throw new Error("missing deps to advance stage 6");
+      const ref = { artifactId: "synthetic-stage-6-artifact", version: 1, sha256: "sha-synthetic-stage-6" };
+      const result = await approveStage(stageApprovalDeps2, { projectId: project2.id, stage: 6, ref });
+      check("13h. advance stage 6 with a synthetic reference -> stage 7", result.ok === true && result.stage === 7, JSON.stringify(result));
+    });
+
+    const stage7Ref = { artifactId: "stage-7-artifact", version: 1, sha256: "sha-stage-7" };
+
+    await step("13i. approve stage 7 without a target -> target_missing", async () => {
+      if (!project2 || !stageApprovalDeps2) throw new Error("missing deps to approve stage 7");
+      const result = await approveStage(stageApprovalDeps2, { projectId: project2.id, stage: 7, ref: stage7Ref });
+      check("13i. approve stage 7 without a target -> target_missing", result.ok === false && result.reason === "target_missing", JSON.stringify(result));
+    });
+
+    await step("13j. approve stage 7 with a correct freeze -> advances to stage 8 and the view shows the freeze", async () => {
+      if (!project2 || !stageApprovalDeps2 || !viewProjectWorkflow2) throw new Error("missing deps to approve stage 7");
+      const before = await viewProjectWorkflow2();
+      const frozen = [1, 2, 3, 4, 5, 6].map((stage) => {
+        const review = before?.reviews[stage];
+        if (!review) throw new Error(`no approved review at stage ${String(stage)} to freeze`);
+        return { stage, artifactId: review.artifactId, version: review.version, sha256: review.sha256 };
+      });
+      const evidence = { target: "download", frozen };
+      const result = await approveStage(stageApprovalDeps2, { projectId: project2.id, stage: 7, ref: stage7Ref, evidence });
+      const after = await viewProjectWorkflow2();
+      check(
+        "13j. approve stage 7 with a correct freeze -> advances to stage 8 and the view shows the freeze",
+        result.ok === true && result.stage === 8 && after?.freeze?.target === "download" && after.freeze.frozen.length === 6,
+        JSON.stringify({ result, freeze: after?.freeze }),
+      );
+    });
+
+    await step("13k. send stage 8 back to stage 6 -> the freeze clears", async () => {
+      if (!project2 || !stageApprovalDeps2 || !viewProjectWorkflow2) throw new Error("missing deps for send-back");
+      const result = await sendBack(stageApprovalDeps2, { projectId: project2.id, stage: 8, targetStage: 6, reason: "Reopen the plan before freezing again." });
+      const after = await viewProjectWorkflow2();
+      check(
+        "13k. send stage 8 back to stage 6 -> the freeze clears",
+        result.ok === true && result.stage === 6 && after?.freeze === null,
+        JSON.stringify({ result, freeze: after?.freeze }),
+      );
+    });
+
   } finally {
     host?.process.kill();
     await rm(dataDir, { recursive: true, force: true });

@@ -23,6 +23,66 @@ export interface DecisionRecord {
   readonly artifactId?: string;
   readonly version?: number;
   readonly sha256?: string;
+  /** Stage 5 approvals only: the quorum the approve decision was checked
+   *  against, so the trail shows why it passed without replaying `evidence`. */
+  readonly quorum?: { readonly proceeded: number; readonly required: number; readonly blocked: readonly string[] };
+  /** Stage 7 approvals only: the target the freeze was made for. */
+  readonly target?: string;
+}
+
+/** One stakeholder's own outcome on a stage-5 package, as carried in an
+ *  `approve` decision's `evidence.decisions`. */
+export interface QuorumDecisionEvidence {
+  readonly by: string;
+  readonly outcome: "proceed" | "block" | "revise";
+  readonly packageArtifactId: string;
+  readonly packageVersion: number;
+}
+
+/** Stage 5 approve evidence: the quorum policy plus every stakeholder
+ *  decision recorded so far (oldest first -- only the latest per stakeholder
+ *  counts). */
+export interface Stage5Evidence {
+  readonly quorum: number;
+  readonly stakeholders: readonly string[];
+  readonly decisions: readonly QuorumDecisionEvidence[];
+}
+
+/** A reference to a stage's approved review, as frozen into stage 7's
+ *  `evidence.frozen`. */
+export interface FrozenReference {
+  readonly stage: StageNumber;
+  readonly artifactId: string;
+  readonly version: number;
+  readonly sha256: string;
+}
+
+/** Stage 7 approve evidence: the chosen build target plus a frozen reference
+ *  to every earlier stage's approved review. */
+export interface Stage7Evidence {
+  readonly target: string;
+  readonly frozen: readonly FrozenReference[];
+}
+
+/** The freeze recorded on `ProjectState` once stage 7 is approved: the
+ *  chosen target and the frozen references, plus the decision that made
+ *  them binding. Cleared by a send-back to stage <= 7. */
+export interface Freeze {
+  readonly target: string;
+  readonly frozen: readonly FrozenReference[];
+  readonly decisionId: string;
+}
+
+/** `evidence`'s outcome as `quorumState` reports it: pure, no lookups --
+ *  the reducer and the UI (`apps/web/src/pages/audiences.tsx`) both import
+ *  this from `@solutions-builder/app/project-workflow/contracts` so the
+ *  banner text and the refusal agree on what "met" means. */
+export interface QuorumState {
+  readonly met: boolean;
+  readonly proceeded: number;
+  readonly required: number;
+  readonly blocked: readonly string[];
+  readonly missing: readonly string[];
 }
 
 /**
@@ -45,6 +105,8 @@ export interface ProjectState {
   readonly authorizedPrincipals: Readonly<Record<StageNumber, readonly string[]>>;
   readonly stageOrder: readonly StageNumber[];
   readonly reviewCounts: Readonly<Record<StageNumber, number>>;
+  /** Stage 7's freeze, once approved; cleared by a send-back to stage <= 7. */
+  readonly freeze: Freeze | null;
 }
 
 interface DecisionCommon {
@@ -67,6 +129,9 @@ export interface ApprovePayload extends DecisionCommon {
   readonly artifactId: string;
   readonly version: number;
   readonly sha256: string;
+  /** Stage-rule input (`Stage5Evidence`/`Stage7Evidence`), never read by the
+   *  reducer's own structural/reference checks -- only by `stageRules`. */
+  readonly evidence?: unknown;
 }
 
 export interface SendBackPayload extends DecisionCommon {
@@ -87,7 +152,11 @@ export type RefusalCode =
   | "stale_version"
   | "hash_mismatch"
   | "invalid_target_stage"
-  | "already_done";
+  | "already_done"
+  | "evidence_missing"
+  | "quorum_not_met"
+  | "target_missing"
+  | "frozen_already";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -148,6 +217,7 @@ export function validateDecisionShape(value: unknown): DecisionPayload | null {
       artifactId: value.artifactId,
       version: value.version,
       sha256: value.sha256,
+      ...(value.evidence !== undefined ? { evidence: value.evidence } : {}),
     };
   }
 
@@ -171,16 +241,94 @@ export interface ApplyDecisionInput {
   readonly reviewCounts: Readonly<Record<StageNumber, number>>;
   readonly principalId: unknown;
   readonly decision: unknown;
+  readonly freeze: Freeze | null;
+}
+
+function isQuorumOutcome(value: unknown): value is QuorumDecisionEvidence["outcome"] {
+  return value === "proceed" || value === "block" || value === "revise";
+}
+
+/** Structural check for `ApprovePayload["evidence"]` at stage 5. */
+export function isStage5Evidence(value: unknown): value is Stage5Evidence {
+  if (!isRecord(value)) return false;
+  if (typeof value.quorum !== "number" || !Number.isInteger(value.quorum) || value.quorum < 0) return false;
+  if (!Array.isArray(value.stakeholders) || !value.stakeholders.every((s) => typeof s === "string")) return false;
+  if (!Array.isArray(value.decisions)) return false;
+  return value.decisions.every(
+    (d) =>
+      isRecord(d) &&
+      typeof d.by === "string" &&
+      isQuorumOutcome(d.outcome) &&
+      typeof d.packageArtifactId === "string" &&
+      typeof d.packageVersion === "number",
+  );
 }
 
 /**
- * Seam for stage-specific approval rules (stage 5 quorum, stage 7 cost
- * freeze, ...), consulted after every structural/reference check on an
- * `approve` decision passes and before the reducer commits the approval. No
- * rules are registered yet.
+ * Pure fold of stage 5 evidence into the quorum outcome. Only the LATEST
+ * decision per stakeholder counts (`decisions` is oldest-first); a decision
+ * by someone not in `stakeholders` is ignored. Quorum 0 with no blockers is
+ * met (solo policy) -- exported so both the reducer's stage rule and
+ * `apps/web/src/pages/audiences.tsx`'s banner read the identical outcome.
+ */
+export function quorumState(evidence: Stage5Evidence): QuorumState {
+  const latestByStakeholder = new Map<string, QuorumDecisionEvidence>();
+  for (const decision of evidence.decisions) {
+    if (!evidence.stakeholders.includes(decision.by)) continue;
+    latestByStakeholder.set(decision.by, decision);
+  }
+  const blocked = evidence.stakeholders.filter((who) => {
+    const decision = latestByStakeholder.get(who);
+    return decision !== undefined && decision.outcome !== "proceed";
+  });
+  const missing = evidence.stakeholders.filter((who) => !latestByStakeholder.has(who));
+  const proceeded = evidence.stakeholders.filter((who) => latestByStakeholder.get(who)?.outcome === "proceed").length;
+  return { met: blocked.length === 0 && proceeded >= evidence.quorum, proceeded, required: evidence.quorum, blocked, missing };
+}
+
+const stage5Rule: StageRule = (_state, payload) => {
+  if (!isStage5Evidence(payload.evidence)) return "evidence_missing";
+  return quorumState(payload.evidence).met ? null : "quorum_not_met";
+};
+
+/** Structural check for `ApprovePayload["evidence"]` at stage 7. */
+export function isStage7Evidence(value: unknown): value is Stage7Evidence {
+  if (!isRecord(value)) return false;
+  if (typeof value.target !== "string" || value.target.length === 0) return false;
+  if (!Array.isArray(value.frozen)) return false;
+  return value.frozen.every(
+    (f) => isRecord(f) && isStageNumber(f.stage) && typeof f.artifactId === "string" && typeof f.version === "number" && typeof f.sha256 === "string",
+  );
+}
+
+const EARLIER_STAGES = [1, 2, 3, 4, 5, 6] as const;
+
+const stage7Rule: StageRule = (state, payload) => {
+  const evidence = payload.evidence;
+  const target = isRecord(evidence) && typeof evidence.target === "string" ? evidence.target : "";
+  if (target.length === 0) return "target_missing";
+  if (state.freeze) return "frozen_already";
+  if (!isStage7Evidence(evidence)) return "evidence_missing";
+  const approvedStages = EARLIER_STAGES.filter((s) => state.reviews[s]?.status === "approved");
+  if (evidence.frozen.length !== approvedStages.length) return "evidence_missing";
+  for (const stage of approvedStages) {
+    const review = state.reviews[stage]!;
+    const entry = evidence.frozen.find((f) => f.stage === stage);
+    if (!entry || entry.artifactId !== review.artifactId || entry.version !== review.version || entry.sha256 !== review.sha256) {
+      return "evidence_missing";
+    }
+  }
+  return null;
+};
+
+/**
+ * Seam for stage-specific approval rules, consulted after every
+ * structural/reference check on an `approve` decision passes and before the
+ * reducer commits the approval: stage 5's stakeholder quorum and stage 7's
+ * cost/target freeze (CL-8690/CL-8691).
  */
 export type StageRule = (state: ProjectState, payload: ApprovePayload, principalId: string) => RefusalCode | null;
-export const stageRules: Readonly<Record<StageNumber, StageRule>> = {};
+export const stageRules: Readonly<Record<StageNumber, StageRule>> = { 5: stage5Rule, 7: stage7Rule };
 
 function stateOf(input: ApplyDecisionInput): ProjectState {
   return {
@@ -192,6 +340,7 @@ function stateOf(input: ApplyDecisionInput): ProjectState {
     authorizedPrincipals: input.authorizedPrincipals,
     stageOrder: input.stageOrder,
     reviewCounts: input.reviewCounts,
+    freeze: input.freeze,
   };
 }
 
@@ -302,6 +451,11 @@ export function applyDecision(input: ApplyDecisionInput): ProjectState {
       ...state.reviews,
       [state.stage]: { ...review, status: "approved" },
     };
+    const quorum = state.stage === 5 && isStage5Evidence(payload.evidence) ? quorumState(payload.evidence) : null;
+    const freeze: Freeze | null =
+      state.stage === 7 && isStage7Evidence(payload.evidence)
+        ? { target: payload.evidence.target, frozen: payload.evidence.frozen, decisionId: payload.decisionId }
+        : state.freeze;
     const record: DecisionRecord = {
       decisionId: payload.decisionId,
       kind: "approve",
@@ -313,13 +467,15 @@ export function applyDecision(input: ApplyDecisionInput): ProjectState {
       artifactId: payload.artifactId,
       version: payload.version,
       sha256: payload.sha256,
+      ...(quorum ? { quorum: { proceeded: quorum.proceeded, required: quorum.required, blocked: quorum.blocked } } : {}),
+      ...(freeze && freeze !== state.freeze ? { target: freeze.target } : {}),
     };
     const currentIndex = state.stageOrder.indexOf(state.stage);
     const nextStage = state.stageOrder[currentIndex + 1];
     if (nextStage === undefined) {
-      return { ...state, reviews: approvedReviews, decisions: [...state.decisions, record], done: true };
+      return { ...state, reviews: approvedReviews, decisions: [...state.decisions, record], done: true, freeze };
     }
-    return { ...state, stage: nextStage, reviews: approvedReviews, decisions: [...state.decisions, record] };
+    return { ...state, stage: nextStage, reviews: approvedReviews, decisions: [...state.decisions, record], freeze };
   }
 
   // send_back
@@ -343,7 +499,8 @@ export function applyDecision(input: ApplyDecisionInput): ProjectState {
     targetStage,
     reason: payload.reason,
   };
-  return { ...state, stage: targetStage, reviews, decisions: [...state.decisions, record] };
+  const freeze = targetStage <= 7 ? null : state.freeze;
+  return { ...state, stage: targetStage, reviews, decisions: [...state.decisions, record], freeze };
 }
 
 export interface InitProjectStagePayload {
@@ -372,5 +529,6 @@ export function initProjectState(payload: InitProjectPayload): ProjectState {
     authorizedPrincipals,
     stageOrder: payload.stages.map((s) => s.stage),
     reviewCounts: {},
+    freeze: null,
   };
 }

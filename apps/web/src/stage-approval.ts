@@ -184,6 +184,9 @@ export type ApproveStageInput = {
   readonly stage: number;
   readonly ref: ArtifactRef;
   readonly attempt?: number;
+  /** Stage-rule input (stage 5 quorum, stage 7 freeze); never read here,
+   *  only forwarded on the `approve` decision. Does not affect id derivation. */
+  readonly evidence?: unknown;
 };
 
 /**
@@ -238,6 +241,7 @@ export async function approveStage(deps: StageApprovalDeps, input: ApproveStageI
     version: input.ref.version,
     sha256: input.ref.sha256,
     at: deps.now(),
+    ...(input.evidence !== undefined ? { evidence: input.evidence } : {}),
   });
   if (!sentApprove.ok) return sentApprove;
 

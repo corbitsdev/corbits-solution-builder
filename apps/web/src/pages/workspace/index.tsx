@@ -50,6 +50,8 @@ import {
 } from "../../withdrawn-turns.ts";
 import type { ProjectWorkflowView } from "../../project-workflow.ts";
 import { approveStage, digestOf, sendBack as sendBackDecision } from "../../stage-approval.ts";
+import { frozenSummaryLine, stageEvidence, stageRefusalMessage } from "../../stage-evidence.ts";
+import type { Stage7Evidence } from "@solutions-builder/app/project-workflow/contracts";
 import { adoptExistingProject } from "../../project-adoption.ts";
 import type { FoldedFeedback } from "@solutions-builder/app/project-state";
 
@@ -636,13 +638,23 @@ export function StageWorkspace({
           );
       const version = Number(persisted.contentHash.slice(persisted.contentHash.lastIndexOf("@") + 1));
       const sha256 = await digestOf(reviewMessage.body);
+      const evidence = await stageEvidence(stage, {
+        projectId: detail.project.id,
+        tenantId,
+        nodes: detail.nodes,
+        chosenTarget,
+        workflowView,
+        stakeholders: api.stakeholders,
+        audienceDecisions: (tid, nodeId) => api.audienceDecisions(tid, nodeId),
+      });
       const result = await approveStage(stageApprovalDeps, {
         projectId: detail.project.id,
         stage,
         ref: { artifactId: persisted.artifactId, version, sha256 },
+        evidence,
       });
       if (!result.ok) {
-        setError(`This stage's approval was refused: ${result.reason}`);
+        setError(`This stage's approval was refused: ${stageRefusalMessage(result.reason)}`);
         await loadWorkflowView();
         return;
       }
@@ -650,7 +662,7 @@ export function StageWorkspace({
       await loadWorkflowView();
       const openingBody =
         stage === 7 && chosenTarget
-          ? `${targetOpeningLine(chosenTarget)}\n\n${reviewMessage.body}`
+          ? `${targetOpeningLine(chosenTarget)}\n\n${frozenSummaryLine(evidence as Stage7Evidence)}\n\n${reviewMessage.body}`
           : reviewMessage.body;
       setPendingOpening({ stage: result.stage, body: openingBody });
       onChanged();
@@ -905,6 +917,7 @@ export function StageWorkspace({
               detail={detail}
               stage={stage}
               chosenTarget={chosenTarget}
+              freeze={workflowView?.freeze ?? null}
             />
           ) : null}
           {stage === 7 ? <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} /> : null}

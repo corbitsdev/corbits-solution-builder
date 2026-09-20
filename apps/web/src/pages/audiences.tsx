@@ -19,6 +19,8 @@ import { Tabs, Input, Table, TableBody, TableCell, TableHead, TableHeader, Table
 import { Markdown } from "../markdown.jsx";
 import { buildPackageDeck } from "../deck-save.ts";
 import { slidesSource } from "../deck-templates.ts";
+import { audienceOutcome } from "../stage-evidence.ts";
+import { quorumState, type QuorumState, type Stage5Evidence } from "@solutions-builder/app/project-workflow/contracts";
 
 const POLL_INTERVAL_MS = 3_000;
 const POLL_TIMEOUT_MS = 10 * 60 * 1_000;
@@ -76,6 +78,18 @@ function roleLabel(role: string): string {
 /** The most recent decision recorded, or null if none has been. */
 function latestDecision(decisions: readonly AudienceDecision[]): AudienceDecision | null {
   return decisions.length > 0 ? decisions[decisions.length - 1]! : null;
+}
+
+/** Why approval is disabled, in the exact terms the stage 5 rule checks --
+ *  null once the quorum is met. Mirrors `stageRules[5]`'s own reading of the
+ *  identical `quorumState` (`project-workflow/contracts.ts`). */
+function quorumReason(state: QuorumState): string | null {
+  if (state.met) return null;
+  if (state.blocked.length > 0) {
+    return `${state.blocked.join(" and ")} ${state.blocked.length === 1 ? "has" : "have"} blocked this`;
+  }
+  if (state.proceeded === 0) return "No decisions recorded yet";
+  return `${state.proceeded} of ${state.required} stakeholders have said proceed`;
 }
 
 const DECISION_LABEL: Record<AudienceDecision["decision"], string> = {
@@ -470,8 +484,27 @@ export function AudiencePackages({
     };
   }, [tenantId, packages.map((node) => node.id).join(",")]);
 
-  const proceeded = packages.filter((node) => latestDecision(decisionsByNode.get(node.id) ?? [])?.decision === "proceed").length;
-  const quorumMet = decisionQuorum > 0 && proceeded >= decisionQuorum;
+  // The same evidence an `approve` decision would carry, folded through the
+  // identical `quorumState` the stage 5 rule checks -- so this banner and
+  // the reducer's own refusal never disagree about what "met" means.
+  const evidence: Stage5Evidence = {
+    quorum: decisionQuorum,
+    stakeholders: audiences.map((audience) => audience.name),
+    decisions: packages.flatMap((node) =>
+      node.variant
+        ? (decisionsByNode.get(node.id) ?? []).map((decision) => ({
+            by: node.variant!,
+            outcome: audienceOutcome(decision.decision),
+            packageArtifactId: node.artifactId,
+            packageVersion: node.version,
+          }))
+        : [],
+    ),
+  };
+  const quorumOutcome = quorumState(evidence);
+  const proceeded = quorumOutcome.proceeded;
+  const quorumMet = quorumOutcome.met;
+  const reason = quorumReason(quorumOutcome);
 
   const decide = async (node: (typeof packages)[number], decision: AudienceDecision["decision"], note: string) => {
     if (!node.variant) return;
@@ -574,7 +607,7 @@ export function AudiencePackages({
             >
               Approve and continue
             </Button>
-            {!quorumMet ? <p className="inline-note">Record the required decisions first.</p> : null}
+            {reason ? <p className="inline-note">{reason}.</p> : null}
           </div>
         ) : null}
 

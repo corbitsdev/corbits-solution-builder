@@ -49,6 +49,7 @@ function workflowView(overrides: Partial<ProjectWorkflowView> = {}): ProjectWork
     decisions: [],
     lastRefusal: null,
     allowed: { openReview: true, approve: false, sendBack: true },
+    freeze: null,
     ...overrides,
   };
 }
