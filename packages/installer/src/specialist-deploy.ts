@@ -159,6 +159,7 @@ async function renderSpecialistSource(
   projectId: string,
   stage: Stage,
   source: InferenceSourcePin,
+  artifactTools: boolean,
   audiences?: readonly { readonly name: string; readonly role: string }[],
 ): Promise<Record<string, string>> {
   const name = specialistAssetName(projectId, stage);
@@ -170,12 +171,23 @@ async function renderSpecialistSource(
     workspaces: ["packages/*"],
     catalog: closure.manifest.catalog,
   };
+  // `@corbits/artifacts` and its `@standard-schema/spec` peer are only a real
+  // dependency of this member when the rendered entry actually imports the
+  // tool -- with `artifactTools` off, dropping them keeps the deployed
+  // package.json (and the closure below) the same shape it was pre-CL-8719.
+  const dependencies = artifactTools
+    ? WORKFLOW_PACKAGE_DEPENDENCIES
+    : Object.fromEntries(
+        Object.entries(WORKFLOW_PACKAGE_DEPENDENCIES).filter(
+          ([dep]) => dep !== "@corbits/artifacts" && dep !== "@standard-schema/spec",
+        ),
+      );
   const member = {
     name,
     version: "0.0.0",
     private: true,
     type: "module",
-    dependencies: WORKFLOW_PACKAGE_DEPENDENCIES,
+    dependencies,
     interchange: { workflow: `./${SPECIALIST_ENTRY_PATH}` },
   };
   const files: Record<string, string> = {
@@ -186,6 +198,7 @@ async function renderSpecialistSource(
       source,
       projectId,
       assetName: name,
+      artifactTools,
       ...(audiences ? { audiences } : {}),
     }),
     // The full closure, the same set the lifecycle ships: whichever tool a
@@ -195,7 +208,8 @@ async function renderSpecialistSource(
     ...(await appMemberFiles(closure.manifest, closure.fetchTarball)),
     ...(await toolsDeckMemberFiles(closure.manifest, closure.fetchTarball)),
     ...(await toolsDeliveryMemberFiles(closure.manifest, closure.fetchTarball)),
-    ...(await artifactsMemberFiles(closure.manifest, closure.fetchTarball)),
+    // Only shipped when the rendered entry imports it (`artifactTools`).
+    ...(artifactTools ? await artifactsMemberFiles(closure.manifest, closure.fetchTarball) : {}),
   };
   files[DIGEST_PATH] = `${await treeDigest(files)}\n`;
   return files;
@@ -227,6 +241,7 @@ async function ensureSpecialistDeploymentOnce(
   projectId: string,
   stage: Stage,
   hubOrigin: string,
+  artifactTools: boolean,
 ): Promise<SpecialistDeployment> {
   if (!sidecar.canPlaceSidecars) {
     throw new Error("no host is placing sidecars; cannot deploy a stage specialist");
@@ -265,7 +280,7 @@ async function ensureSpecialistDeploymentOnce(
   const project = stage === PACKAGE_STAGE ? await readProject(transport, projectId) : null;
   const audiences = project?.policy.audiences;
 
-  const rendered = await renderSpecialistSource(closure, projectId, stage, source, audiences);
+  const rendered = await renderSpecialistSource(closure, projectId, stage, source, artifactTools, audiences);
   const commitSha = await pushWorkflowSourceTree(
     transport,
     workspaceTenantId,
@@ -311,7 +326,11 @@ async function ensureSpecialistDeploymentOnce(
   // its first mail trigger launches it. Only reached on an actual (re)deploy,
   // never the early "already live" returns above: rotating the secret here
   // would break an in-flight tool call against a still-live prior deployment.
-  await ensureWorkflowArtifactsCredential(transport, workspaceTenantId, hubOrigin, assetName, winner.id);
+  // Skipped entirely when `artifactTools` is off -- the rendered source
+  // carries no `credentialBindings` to satisfy, so minting one is dead work.
+  if (artifactTools) {
+    await ensureWorkflowArtifactsCredential(transport, workspaceTenantId, hubOrigin, assetName, winner.id);
+  }
 
   return { deploymentId: winner.id, address: `${winner.id}@${tenant.domain}` };
 }
@@ -325,9 +344,22 @@ export async function ensureSpecialistDeployment(
   projectId: string,
   stage: Stage,
   hubOrigin: string,
+  /** CL-8719: opt-in, default off -- see `specialist-source.ts`'s
+   *  `SpecialistSourceOptions.artifactTools`. */
+  artifactTools = false,
 ): Promise<SpecialistDeployment> {
   const attempt = () =>
-    ensureSpecialistDeploymentOnce(transport, sidecar, closure, gitPush, workspaceTenantId, projectId, stage, hubOrigin);
+    ensureSpecialistDeploymentOnce(
+      transport,
+      sidecar,
+      closure,
+      gitPush,
+      workspaceTenantId,
+      projectId,
+      stage,
+      hubOrigin,
+      artifactTools,
+    );
   try {
     return await attempt();
   } catch (cause) {

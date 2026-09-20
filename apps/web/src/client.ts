@@ -1371,6 +1371,9 @@ export const api = {
         projectId,
         stage as Stage,
         hubOrigin(),
+        // CL-8719: off until a browser-driven deploy of a credential-bound
+        // specialist is proven.
+        false,
       );
     });
     call.catch(() => ensureStageAgentCalls.delete(key));

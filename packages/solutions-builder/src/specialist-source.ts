@@ -16,7 +16,7 @@
  * a client-side artifact write, not a signal this workflow waits on.
  */
 import type { ArtifactKind } from "./artifacts.js";
-import { agentById, agentFor, panelPrincipals, type AgentRole } from "./kit.js";
+import { ARTIFACT_WRITE_RULE, agentById, agentFor, panelPrincipals, type AgentRole } from "./kit.js";
 import type { Stage } from "./ledger.js";
 import { skillTextFor } from "./seed-kit.js";
 
@@ -124,16 +124,25 @@ export type SpecialistSourceOptions = {
    *  each package is for. Stage 5's fan-out itself stays client-side: each
    *  round is its own mail turn, not a step this workflow branches on. */
   readonly audiences?: readonly { readonly name: string; readonly role: string }[];
+  /** CL-8719: carry the `@corbits/artifacts` sidecar tool bundle, its
+   *  `credentialBindings` entry and the matching grant requirement, and tell
+   *  the model to call `artifact_create`/`artifact_write`. Default false —
+   *  with it false the rendered source is byte-for-byte what it was before
+   *  #466. Off until a browser-driven deploy of a credential-bound
+   *  specialist is proven; see `ensureStageAgent` in `apps/web/src/client.ts`. */
+  readonly artifactTools?: boolean;
 };
 
 /**
  * A role's kit prompt has no runtime after render time to load a skill
  * from — an agent step's `systemPrompt` is a static string baked in here —
- * so the skill text rides
- * along with it.
+ * so the skill text rides along with it. `artifactTools` appends the rule
+ * telling the model to call `artifact_create`/`artifact_write` — only when
+ * it actually carries those tools.
  */
-function renderedPrompt(role: AgentRole): string {
-  return `${role.system}\n\n${skillTextFor(role)}`;
+function renderedPrompt(role: AgentRole, artifactTools: boolean): string {
+  const prompt = `${role.system}\n\n${skillTextFor(role)}`;
+  return artifactTools ? `${prompt}\n\n${ARTIFACT_WRITE_RULE}` : prompt;
 }
 
 /**
@@ -145,8 +154,8 @@ function renderedPrompt(role: AgentRole): string {
  * author and the four panel principals (no separate requirements/plan/review
  * chain either).
  */
-function systemPromptForStage(stage: Stage): string {
-  const prompt = renderedPrompt(agentFor(stage));
+function systemPromptForStage(stage: Stage, artifactTools: boolean): string {
+  const prompt = renderedPrompt(agentFor(stage), artifactTools);
   if (stage === 1) {
     const evaluator = agentById("brief-evaluator");
     if (!evaluator) throw new Error("brief-evaluator role missing from the kit");
@@ -182,7 +191,7 @@ function audienceSection(audiences: readonly { readonly name: string; readonly r
  * carries none.
  */
 export function specialistEntrySource(options: SpecialistSourceOptions): string {
-  const { stage, source, audiences, projectId, assetName } = options;
+  const { stage, source, audiences, projectId, assetName, artifactTools = false } = options;
   const workflowId = specialistWorkflowId(stage);
   const triggerAddress = `${workflowId}@solutions-builder.local`;
   const role = agentFor(stage);
@@ -198,11 +207,11 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
           : "";
   const stageTools =
     stage === PACKAGE_STAGE
-      ? "deck, "
+      ? "deck"
       : stage === BUILD_STAGE
-        ? "posix, publishWorkspace, "
+        ? "posix, publishWorkspace"
         : stage === DELIVERY_STAGE
-          ? "delivery, deliver, "
+          ? "delivery, deliver"
           : "";
 
   // CL-8719: every stage specialist writes its draft as a real artifact
@@ -212,15 +221,34 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
   // provider/credential the installer ensures at deploy time
   // (`installer/src/artifacts-credential.ts`) before this asset's deployment
   // id even exists, so both names are deterministic from `assetName` alone.
-  const toolImports = `import { artifacts } from ${JSON.stringify("@corbits/artifacts/sidecar-bundle")};\n${stageToolImports}`;
-  const tools = `artifacts, ${stageTools}`;
+  // Opt-in (`artifactTools`, default off): off until a browser-driven deploy
+  // of a credential-bound specialist is proven — see `SpecialistSourceOptions`.
+  const toolImports = artifactTools
+    ? `import { artifacts } from ${JSON.stringify("@corbits/artifacts/sidecar-bundle")};\n${stageToolImports}`
+    : stageToolImports;
+  const tools = artifactTools ? `artifacts${stageTools ? `, ${stageTools}` : ""}` : stageTools;
   const credentialName = workflowArtifactsCredentialName(assetName);
 
-  let systemPrompt = systemPromptForStage(stage);
-  systemPrompt = `${systemPrompt}\n\n## Artifact context\n\nprojectId: ${projectId}\nstage: ${stage}\nkind: ${kind}`;
+  let systemPrompt = systemPromptForStage(stage, artifactTools);
+  if (artifactTools) {
+    systemPrompt = `${systemPrompt}\n\n## Artifact context\n\nprojectId: ${projectId}\nstage: ${stage}\nkind: ${kind}`;
+  }
   if (stage === PACKAGE_STAGE && audiences && audiences.length > 0) {
     systemPrompt = `${systemPrompt}\n\n${audienceSection(audiences)}`;
   }
+
+  const credentialBindings = artifactTools
+    ? `
+  credentialBindings: [
+    {
+      package: ${JSON.stringify("@corbits/artifacts")},
+      handle: "hub",
+      provider: ${JSON.stringify(WORKFLOW_ARTIFACTS_PROVIDER_NAME)},
+      name: ${JSON.stringify(credentialName)},
+      locator: "tenant",
+    },
+  ],`
+    : "";
 
   return `import { defineWorkflow, step } from "@intx/workflow/definition";
 import { defineAgent } from "@intx/agent";
@@ -237,16 +265,7 @@ const AGENT = defineAgent({
 
 export default defineWorkflow({
   id: ${JSON.stringify(workflowId)},
-  triggers: [{ type: "mail", to: ${JSON.stringify(triggerAddress)} }],
-  credentialBindings: [
-    {
-      package: ${JSON.stringify("@corbits/artifacts")},
-      handle: "hub",
-      provider: ${JSON.stringify(WORKFLOW_ARTIFACTS_PROVIDER_NAME)},
-      name: ${JSON.stringify(credentialName)},
-      locator: "tenant",
-    },
-  ],
+  triggers: [{ type: "mail", to: ${JSON.stringify(triggerAddress)} }],${credentialBindings}
   steps: {
     run: step({
       agent: AGENT,

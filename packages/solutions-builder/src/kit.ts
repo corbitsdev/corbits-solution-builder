@@ -106,7 +106,13 @@ of your conclusions, not a description of the document's structure. Never write
 
 Write Markdown. Use the exact section headings the task asks for, in order,
 after "In short". No preamble, no sign-off, no restating these rules.
+`.trim();
 
+/** CL-8719: only appended to a specialist's prompt when it actually carries
+ *  the `@corbits/artifacts` tool bundle (`specialist-source.ts`'s
+ *  `artifactTools` option) — telling a model to call a tool it was not given
+ *  just makes it hallucinate the call. */
+export const ARTIFACT_WRITE_RULE = `
 Your prompt's "Artifact context" section names your projectId, stage, and
 kind. The first time you write your stage document, call artifact_create
 with that kind, a short title, and the full document as content. Revising it

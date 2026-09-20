@@ -419,7 +419,19 @@ async function main(): Promise<void> {
 
     const stage1 = await step("5. ensureSpecialistDeployment for stage 1 (mints the workflow-artifacts credential)", async () => {
       if (!workspace || !project || !sidecar) throw new Error("no workspace/project/sidecar to deploy against");
-      const deployed = await ensureSpecialistDeployment(transport, sidecar, closure, gitPush, workspace.tenantId, project.id, 1, origin);
+      // CL-8719: this proof exercises the artifact-tools path deliberately,
+      // so it opts in explicitly rather than relying on the (off) default.
+      const deployed = await ensureSpecialistDeployment(
+        transport,
+        sidecar,
+        closure,
+        gitPush,
+        workspace.tenantId,
+        project.id,
+        1,
+        origin,
+        true,
+      );
       check("5. ensureSpecialistDeployment for stage 1", true, JSON.stringify(deployed));
       return deployed;
     });
