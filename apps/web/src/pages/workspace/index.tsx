@@ -844,7 +844,10 @@ export function StageWorkspace({
             detail={detail}
             tenantId={tenantId}
             agentAddress={agentAddress}
-            onChanged={onChanged}
+            onChanged={() => {
+              onChanged();
+              void loadThread();
+            }}
             onApprove={approve}
             approving={approving}
             canApprove={latestSpecialistMessage !== null}

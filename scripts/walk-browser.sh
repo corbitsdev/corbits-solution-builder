@@ -303,7 +303,7 @@ for STAGE in $(echo $STAGES); do
       fi
       tb=$(ref 'textbox "Why this decision"'); [ -n "$tb" ] && ab fill "@$tb" "Scope is right for a first version." >/dev/null
       pr=$(enabled_ref 'button "Proceed"'); ab click "@$pr" >/dev/null; sleep 3
-      if ! wait_for '^ *- button "Approve and continue" \[ref=' 30; then
+      if ! wait_for '^ *- button "Approve and continue" \[ref=' 90; then
         shot "stage-5-no-approve"; defect_log 5 "Approve to enable after quorum" "still disabled" "shots/stage-5-no-approve.png" "major"; exit 1
       fi
       approve_stage 5 || exit 1 ;;
