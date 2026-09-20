@@ -19,10 +19,12 @@ import {
   specialistEntrySource,
   type InferenceSourcePin,
 } from "@solutions-builder/app/specialist-source";
+import { ensureWorkflowArtifactsCredential } from "./artifacts-credential.js";
 import { assetsFor, catalogFor, getTenant, workflowsFor, type HubDeployment } from "./hub.js";
 import { readProject } from "./project-tenant.js";
 import {
   appMemberFiles,
+  artifactsMemberFiles,
   toolsDeckMemberFiles,
   toolsDeliveryMemberFiles,
   treeDigest,
@@ -182,6 +184,8 @@ async function renderSpecialistSource(
     [`${SPECIALIST_DIR}/${SPECIALIST_ENTRY_PATH}`]: specialistEntrySource({
       stage,
       source,
+      projectId,
+      assetName: name,
       ...(audiences ? { audiences } : {}),
     }),
     // The full closure, the same set the lifecycle ships: whichever tool a
@@ -191,6 +195,7 @@ async function renderSpecialistSource(
     ...(await appMemberFiles(closure.manifest, closure.fetchTarball)),
     ...(await toolsDeckMemberFiles(closure.manifest, closure.fetchTarball)),
     ...(await toolsDeliveryMemberFiles(closure.manifest, closure.fetchTarball)),
+    ...(await artifactsMemberFiles(closure.manifest, closure.fetchTarball)),
   };
   files[DIGEST_PATH] = `${await treeDigest(files)}\n`;
   return files;
@@ -221,6 +226,7 @@ async function ensureSpecialistDeploymentOnce(
   workspaceTenantId: string,
   projectId: string,
   stage: Stage,
+  hubOrigin: string,
 ): Promise<SpecialistDeployment> {
   if (!sidecar.canPlaceSidecars) {
     throw new Error("no host is placing sidecars; cannot deploy a stage specialist");
@@ -299,6 +305,14 @@ async function ensureSpecialistDeploymentOnce(
   // re-resolve so every caller lands on the same, deterministically-chosen
   // deployment rather than each keeping the one it happened to create.
   const winner = pickDeployment(matching(await workflows.deployments())) ?? deployment;
+
+  // CL-8719: the credential the winning deployment's `credentialBindings`
+  // names must exist -- and be scoped to the winning anchor run -- before
+  // its first mail trigger launches it. Only reached on an actual (re)deploy,
+  // never the early "already live" returns above: rotating the secret here
+  // would break an in-flight tool call against a still-live prior deployment.
+  await ensureWorkflowArtifactsCredential(transport, workspaceTenantId, hubOrigin, assetName, winner.id);
+
   return { deploymentId: winner.id, address: `${winner.id}@${tenant.domain}` };
 }
 
@@ -310,9 +324,10 @@ export async function ensureSpecialistDeployment(
   workspaceTenantId: string,
   projectId: string,
   stage: Stage,
+  hubOrigin: string,
 ): Promise<SpecialistDeployment> {
   const attempt = () =>
-    ensureSpecialistDeploymentOnce(transport, sidecar, closure, gitPush, workspaceTenantId, projectId, stage);
+    ensureSpecialistDeploymentOnce(transport, sidecar, closure, gitPush, workspaceTenantId, projectId, stage, hubOrigin);
   try {
     return await attempt();
   } catch (cause) {

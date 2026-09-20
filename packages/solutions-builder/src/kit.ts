@@ -106,6 +106,14 @@ of your conclusions, not a description of the document's structure. Never write
 
 Write Markdown. Use the exact section headings the task asks for, in order,
 after "In short". No preamble, no sign-off, no restating these rules.
+
+Your prompt's "Artifact context" section names your projectId, stage, and
+kind. The first time you write your stage document, call artifact_create
+with that kind, a short title, and the full document as content. Revising it
+later (a person's follow-up, a correction) is artifact_write against the
+same artifact id — never a second artifact_create for the same document.
+Always end your mail reply with a line naming the artifact id and version
+you just wrote, e.g. "Artifact: art_123 v2".
 `.trim();
 
 export type AgentRole = {

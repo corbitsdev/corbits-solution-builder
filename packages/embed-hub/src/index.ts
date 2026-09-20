@@ -38,9 +38,16 @@ import { timeWindowEvaluator } from "@intx/authz";
 import {
   InlineContentStore,
   mountArtifacts,
+  mountWorkflowArtifacts,
   runArtifactMigrations,
   type ArtifactDb,
+  type WorkflowArtifactEnv,
 } from "@corbits/artifacts";
+import {
+  createWorkflowArtifactRunResolver,
+  ensureWorkflowArtifactTokensTable,
+  registerWorkflowArtifactToken,
+} from "./workflow-artifact-tokens.js";
 import {
   createAgentRepoStore,
   createAssetService,
@@ -659,6 +666,43 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
     },
   });
   app.route("/api/tenants/:tenantId", artifactsApi);
+
+  // Run-scoped mount: how a deployed specialist's `@corbits/artifacts`
+  // sidecar-bundle (the `hub` credential handle) writes/reads artifacts on
+  // its own run's behalf, with no browser session and no `tenantId` path
+  // param -- see `workflow-artifact-tokens.ts` for why this is a
+  // purpose-minted bearer rather than the sidecar's own ambient token.
+  await ensureWorkflowArtifactTokensTable(db.db);
+  const workflowArtifactsApi = new Hono<WorkflowArtifactEnv>();
+  mountWorkflowArtifacts(workflowArtifactsApi, {
+    db: artifactDb,
+    contentStore: InlineContentStore,
+    resolveRunScope: createWorkflowArtifactRunResolver(db.db),
+  });
+  app.route("/api/workflow-artifacts", workflowArtifactsApi);
+
+  // The installer's registration call for the bearer it just minted and
+  // stored as a tenant credential (`specialist-deploy.ts`): this is the one
+  // write into `workflow_artifact_token`, made under the normal tenant
+  // session the installer already authenticates with, never by the run
+  // itself.
+  const workflowArtifactTokensApi = new Hono<TenantEnv>();
+  workflowArtifactTokensApi.post("/", async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+    const { token, anchorRunId } = body as { token?: unknown; anchorRunId?: unknown };
+    if (typeof token !== "string" || token === "" || typeof anchorRunId !== "string" || anchorRunId === "") {
+      return c.json({ error: "token and anchorRunId are required" }, 400);
+    }
+    const tenantId = (c.get("tenant") as { id: string }).id;
+    await registerWorkflowArtifactToken(db.db, { token, tenantId, anchorRunId });
+    return c.json({ data: { ok: true } }, 201);
+  });
+  app.route("/api/tenants/:tenantId/workflow-artifact-tokens", workflowArtifactTokensApi);
 
   // A second @corbits/mailbox mount, tenant-scoped, alongside the
   // single-workspace `/api/me/inbox*` one above: mail addressed to a run

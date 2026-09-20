@@ -22,6 +22,8 @@ export type Artifact = {
   version: number;
   ownerPrincipalId: string | null;
   metadata: Record<string, unknown> | null;
+  /** The current version's content digest (CL-8719, `@corbits/artifacts` 0190e6c). Null only for a version predating that migration's backfill. */
+  contentSha256: string | null;
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;

@@ -106,6 +106,75 @@ export async function toolsDeliveryMemberFiles(
   return memberTree(manifest, "@solutions-builder/tools-delivery", "packages/tools-delivery", fetchTarball);
 }
 
+/**
+ * CL-8719: every stage specialist's `artifacts` tool, as a workspace member
+ * the same way `toolsDeckMemberFiles` ships `tools-deck`. `@corbits/artifacts`
+ * is not published to the npm registry, so it cannot resolve as a real
+ * dependency the way `hono` does -- `scripts/closure-pack.ts`'s
+ * `discoverExternalClosure` still packs its real installed directory (from
+ * this repo's own `node_modules`, whatever its own install spec), and this
+ * ships that same tarball as a `workspace:*` member instead.
+ */
+/**
+ * `@corbits/artifacts` declares every package its sidecar-side code (`sidecar-
+ * bundle.ts` -> `tools.ts` -> `artifacts.ts`/`schema.ts`/`db.ts`) actually
+ * imports at runtime as `peerDependencies`, never `dependencies` -- reasonably,
+ * since its OWN test/mount usage always installs it beside a host that already
+ * provides them. The workflow probe materializer that resolves a deployed
+ * specialist's dependency closure is a strict per-package store (not a
+ * hoisted `node_modules`): it only resolves what a package's OWN
+ * `package.json` lists under `dependencies`. This re-declares the ones the
+ * sidecar-side code path actually reaches (`@intx/hub-api` and `hono`/
+ * `hono-openapi` are peer-only host-side needs of `mount.ts`/`workflow-mount.ts`,
+ * never imported here, so they stay peers), in the shipped copy only --
+ * `@corbits/artifacts`'s own repository and our installed `node_modules` copy
+ * are untouched.
+ */
+const ARTIFACTS_MISSING_RUNTIME_DEPENDENCIES: Readonly<Record<string, string>> = {
+  "@intx/agent": "workspace:*",
+  "@intx/types": "workspace:*",
+  // `"*"`, not a hardcoded range: `scripts/closure-pack.ts`'s
+  // `rewriteDependencies` already rewrites every vendored `@intx/*` member's
+  // own `catalog:`-pinned "arktype"/"drizzle-orm"/"postgres" to `"*"` in the
+  // packed set (a `workspace:*`/`catalog:` spec is not a real npm range, and
+  // the packed set carries exactly one version regardless). The closure
+  // resolver rejects two members pinning the same external name at
+  // conflicting ranges, so this matches that convention rather than
+  // reintroducing a real range here.
+  arktype: "*",
+  "drizzle-orm": "*",
+  postgres: "*",
+};
+
+function withPatchedDependencies(packageJson: string, added: Readonly<Record<string, string>>): string {
+  const parsed = JSON.parse(packageJson) as {
+    dependencies?: Record<string, string>;
+    peerDependencies?: Record<string, string>;
+  };
+  // Moved, not merely added: the closure resolver's cross-member range check
+  // reads `peerDependencies` too, so leaving the original peer entry in place
+  // (e.g. arktype's real "^2.1.29") conflicts with the "catalog:" range this
+  // adds under `dependencies`.
+  for (const name of Object.keys(added)) delete parsed.peerDependencies?.[name];
+  parsed.dependencies = { ...parsed.dependencies, ...added };
+  return `${JSON.stringify(parsed, null, 2)}\n`;
+}
+
+export async function artifactsMemberFiles(
+  manifest: ClosureManifest,
+  fetchTarball: ClosureTarballFetcher,
+): Promise<Record<string, string>> {
+  const dir = "packages/corbits-artifacts";
+  const files = await memberTree(manifest, "@corbits/artifacts", dir, fetchTarball);
+  const packageJsonPath = `${dir}/package.json`;
+  const packageJson = files[packageJsonPath];
+  if (packageJson === undefined) {
+    throw new Error(`${packageJsonPath} is missing from the packed @corbits/artifacts tarball`);
+  }
+  files[packageJsonPath] = withPatchedDependencies(packageJson, ARTIFACTS_MISSING_RUNTIME_DEPENDENCIES);
+  return files;
+}
+
 function hex(bytes: Uint8Array): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }

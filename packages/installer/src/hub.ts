@@ -361,6 +361,22 @@ export function catalogFor(transport: Transport, scope: string) {
   };
 }
 
+// --- Workflow artifact tokens (CL-8719) ---------------------------------------
+
+/**
+ * Registers a bearer the installer just minted for one specialist deployment
+ * with the hub's `workflow_artifact_token` table — the hub-side half of
+ * `ensureWorkflowArtifactsCredential`'s `http` credential, which carries the
+ * SAME token as its secret. See `packages/embed-hub/src/workflow-artifact-tokens.ts`.
+ */
+export function registerWorkflowArtifactToken(
+  transport: Transport,
+  scope: string,
+  input: { token: string; anchorRunId: string },
+): Promise<void> {
+  return transport.fetch<void>("POST", tenantPathFor(scope, "/workflow-artifact-tokens"), input);
+}
+
 // --- Assets ------------------------------------------------------------------
 
 export type HubAsset = { id: string; tenantId: string; kind: string; name: string };

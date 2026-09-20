@@ -114,4 +114,34 @@ declare module "@corbits/artifacts" {
   /** Mounts the module's artifact/version/upload routes onto a `Hono<TenantEnv>` app. */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   export function mountArtifacts(app: Hono<any>, opts: MountArtifactsOpts): Hono<any>;
+
+  /** CL-8719: the run-scoped variant, added upstream at 0190e6c. */
+  export type ResolvedWorkflowRunScope = {
+    tenantId: string;
+    principalId: string;
+    runId: string;
+  };
+
+  export type WorkflowArtifactEnv = {
+    Variables: { workflowRunScope: ResolvedWorkflowRunScope };
+  };
+
+  export type WorkflowRunResolver = (
+    bearerToken: string,
+    runAddress: string,
+  ) => Promise<ResolvedWorkflowRunScope | null> | ResolvedWorkflowRunScope | null;
+
+  export type MountWorkflowArtifactsOpts = {
+    db: ArtifactDb;
+    contentStore: ContentStore;
+    resolveRunScope: WorkflowRunResolver;
+    uploadPolicy?: Record<string, unknown>;
+    maxBinaryBytes?: number;
+    maxContentChars?: number;
+  };
+
+  /** Mounts the bearer-token-authenticated run-scoped routes the
+   * `@corbits/artifacts/sidecar-bundle` agent tool bundle calls. */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  export function mountWorkflowArtifacts(app: Hono<any>, opts: MountWorkflowArtifactsOpts): Hono<any>;
 }

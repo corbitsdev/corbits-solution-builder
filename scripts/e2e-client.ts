@@ -588,7 +588,7 @@ async function main(): Promise<void> {
     // (5) Deploy the stage-1 specialist and wait for it to come up.
     const stage1 = await step("5. ensureSpecialistDeployment for stage 1", async () => {
       if (!workspace || !project || !sidecar) throw new Error("no workspace/project/sidecar to deploy against");
-      const deployed = await ensureSpecialistDeployment(transport, sidecar, closure, gitPush, workspace.tenantId, project.id, 1);
+      const deployed = await ensureSpecialistDeployment(transport, sidecar, closure, gitPush, workspace.tenantId, project.id, 1, origin);
       check("5. ensureSpecialistDeployment for stage 1", true, JSON.stringify(deployed));
       return deployed;
     });
@@ -661,7 +661,7 @@ async function main(): Promise<void> {
     // (9) Deploy the stage-2 specialist, mail it the approved brief, poll for its reply.
     const stage2 = await step("9. ensureSpecialistDeployment for stage 2", async () => {
       if (!workspace || !project || !sidecar) throw new Error("no workspace/project/sidecar to deploy against");
-      const deployed = await ensureSpecialistDeployment(transport, sidecar, closure, gitPush, workspace.tenantId, project.id, 2);
+      const deployed = await ensureSpecialistDeployment(transport, sidecar, closure, gitPush, workspace.tenantId, project.id, 2, origin);
       check("9. ensureSpecialistDeployment for stage 2", true, JSON.stringify(deployed));
       return deployed;
     });

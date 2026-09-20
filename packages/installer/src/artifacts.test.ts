@@ -23,6 +23,7 @@ function fakeTransport(): Transport {
           version: 1,
           ownerPrincipalId: "p_test",
           metadata: null,
+          contentSha256: null,
           archivedAt: null,
           createdAt: new Date(0).toISOString(),
           updatedAt: new Date(0).toISOString(),

@@ -1370,6 +1370,7 @@ export const api = {
         workspaceTenantId,
         projectId,
         stage as Stage,
+        hubOrigin(),
       );
     });
     call.catch(() => ensureStageAgentCalls.delete(key));

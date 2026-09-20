@@ -15,9 +15,38 @@
  * ever answers the mail addressed to its own run, and a stage's approval is
  * a client-side artifact write, not a signal this workflow waits on.
  */
+import type { ArtifactKind } from "./artifacts.js";
 import { agentById, agentFor, panelPrincipals, type AgentRole } from "./kit.js";
 import type { Stage } from "./ledger.js";
 import { skillTextFor } from "./seed-kit.js";
+
+/** CL-8719: the `http` provider every specialist's `@corbits/artifacts/sidecar-bundle`
+ *  resolves its `hub` credential handle against; one row per workspace, its
+ *  `apiBaseUrl` the hub's own origin (see `installer/src/artifacts-credential.ts`). */
+export const WORKFLOW_ARTIFACTS_PROVIDER_NAME = "sb-workflow-artifacts";
+
+/** The credential name a specialist asset's `credentialBindings` names — known
+ *  before the asset is even deployed, since it derives only from the asset's
+ *  own (deterministic) name, never its deployment id. */
+export function workflowArtifactsCredentialName(assetName: string): string {
+  return `workflow-artifacts:${assetName}`;
+}
+
+/** Mirrors `apps/web/src/client.ts`'s `STAGE_DRAFT_KIND` — the artifact kind a
+ *  stage's specialist writes its draft under. Kept here too (rather than
+ *  imported from `apps/web`, the wrong dependency direction) because it is
+ *  also what a specialist's own prompt is told to pass to `artifact_create`. */
+export const STAGE_ARTIFACT_KIND: Readonly<Record<Stage, ArtifactKind>> = {
+  1: "problem_brief",
+  2: "solution_constraints",
+  3: "chosen_approach",
+  4: "design_artifact",
+  5: "audience_package",
+  6: "build_plan",
+  7: "cost_approval",
+  8: "build_evidence",
+  9: "delivery_manifest",
+};
 
 /**
  * The (provider plugin, canonical model) pair a rendered agent step declares
@@ -55,6 +84,19 @@ export const WORKFLOW_PACKAGE_DEPENDENCIES: Readonly<Record<string, string>> = {
   "@solutions-builder/app": "workspace:*",
   "@solutions-builder/tools-deck": "workspace:*",
   "@solutions-builder/tools-delivery": "workspace:*",
+  // CL-8719: every stage specialist's `artifacts` tool, shipped as a
+  // workspace member the same way `@solutions-builder/tools-deck` is
+  // (`installer/src/workflow-closure.ts`'s `artifactsMemberFiles`) -- not a
+  // real npm/git dependency. A deployed specialist's own `bun install` never
+  // reaches the network for a `workspace:*` member; it only does for a real
+  // registry spec (`hono` below), and `@corbits/artifacts` is not published
+  // to the npm registry.
+  "@corbits/artifacts": "workspace:*",
+  // `@hono/standard-validator` (a real dependency of `@corbits/artifacts`
+  // itself, resolved from the real npm registry the same way `hono` is)
+  // declares this as a peer; a deployed workspace's own dependency
+  // resolution needs it present at the top level to satisfy that peer.
+  "@standard-schema/spec": "^1.0.0",
   hono: "^4.0.0",
 };
 
@@ -72,6 +114,11 @@ export function specialistWorkflowId(stage: Stage): string {
 export type SpecialistSourceOptions = {
   readonly stage: Stage;
   readonly source: InferenceSourcePin;
+  readonly projectId: string;
+  /** This asset's deterministic name (`sb-project-<projectId>-stage-<N>`),
+   *  passed in rather than recomputed here since `specialist-deploy.ts`
+   *  already owns that naming — used only to name the credential binding. */
+  readonly assetName: string;
   /** The project's audience packages, in stage 5 fan-out order — folded into
    *  a stage-5 specialist's prompt as a reference section so it knows who
    *  each package is for. Stage 5's fan-out itself stays client-side: each
@@ -135,12 +182,13 @@ function audienceSection(audiences: readonly { readonly name: string; readonly r
  * carries none.
  */
 export function specialistEntrySource(options: SpecialistSourceOptions): string {
-  const { stage, source, audiences } = options;
+  const { stage, source, audiences, projectId, assetName } = options;
   const workflowId = specialistWorkflowId(stage);
   const triggerAddress = `${workflowId}@solutions-builder.local`;
   const role = agentFor(stage);
+  const kind = STAGE_ARTIFACT_KIND[stage];
 
-  const toolImports =
+  const stageToolImports =
     stage === PACKAGE_STAGE
       ? `import { deck } from ${JSON.stringify("@solutions-builder/tools-deck/sidecar-bundle")};\n`
       : stage === BUILD_STAGE
@@ -148,16 +196,28 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
         : stage === DELIVERY_STAGE
           ? `import { delivery, deliver } from ${JSON.stringify("@solutions-builder/tools-delivery/sidecar-bundle")};\n`
           : "";
-  const tools =
+  const stageTools =
     stage === PACKAGE_STAGE
-      ? "deck"
+      ? "deck, "
       : stage === BUILD_STAGE
-        ? "posix, publishWorkspace"
+        ? "posix, publishWorkspace, "
         : stage === DELIVERY_STAGE
-          ? "delivery, deliver"
+          ? "delivery, deliver, "
           : "";
 
+  // CL-8719: every stage specialist writes its draft as a real artifact
+  // through `@corbits/artifacts`' agent tool bundle, against the run-scoped
+  // mount `mountWorkflowArtifacts` puts on the hub (`embed-hub/src/index.ts`).
+  // `credentialBindings` names the `hub` handle it declares against a
+  // provider/credential the installer ensures at deploy time
+  // (`installer/src/artifacts-credential.ts`) before this asset's deployment
+  // id even exists, so both names are deterministic from `assetName` alone.
+  const toolImports = `import { artifacts } from ${JSON.stringify("@corbits/artifacts/sidecar-bundle")};\n${stageToolImports}`;
+  const tools = `artifacts, ${stageTools}`;
+  const credentialName = workflowArtifactsCredentialName(assetName);
+
   let systemPrompt = systemPromptForStage(stage);
+  systemPrompt = `${systemPrompt}\n\n## Artifact context\n\nprojectId: ${projectId}\nstage: ${stage}\nkind: ${kind}`;
   if (stage === PACKAGE_STAGE && audiences && audiences.length > 0) {
     systemPrompt = `${systemPrompt}\n\n${audienceSection(audiences)}`;
   }
@@ -178,6 +238,15 @@ const AGENT = defineAgent({
 export default defineWorkflow({
   id: ${JSON.stringify(workflowId)},
   triggers: [{ type: "mail", to: ${JSON.stringify(triggerAddress)} }],
+  credentialBindings: [
+    {
+      package: ${JSON.stringify("@corbits/artifacts")},
+      handle: "hub",
+      provider: ${JSON.stringify(WORKFLOW_ARTIFACTS_PROVIDER_NAME)},
+      name: ${JSON.stringify(credentialName)},
+      locator: "tenant",
+    },
+  ],
   steps: {
     run: step({
       agent: AGENT,
