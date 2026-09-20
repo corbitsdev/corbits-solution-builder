@@ -27,7 +27,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, ApiFailure, type ProjectInfo, type ProjectSummary } from "../client.js";
 import { Button, Banner, downloadArtifact, StageRing, StateLabel, stageName } from "../components.jsx";
 import { assembleBundle, bundleFileName } from "../project-export.js";
-import { displayStage } from "../project-list.js";
+import { displayStage, displayTurn } from "../project-list.js";
 import { DEFAULT_POLICY } from "./onboarding.jsx";
 import { Dictated } from "../dictation.jsx";
 
@@ -52,6 +52,37 @@ export function Projects({
     const next = [...files].filter((file) => !material.some((held) => held.name === file.name && held.size === file.size));
     if (next.length > 0) setMaterial([...material, ...next]);
   };
+  // Where an import landed: said once, here, next to the input it came from.
+  const [importNotice, setImportNotice] = useState<string | null>(null);
+  const importInput = useRef<HTMLInputElement>(null);
+
+  /** Reads the chosen export and brings it in as a new project — no host route, every write goes straight through the client. */
+  const importFile = async (file: File) => {
+    setBusy(true);
+    setError(null);
+    setImportNotice(null);
+    try {
+      const raw: unknown = JSON.parse(await file.text());
+      const brought = await api.importProject(raw);
+      setImportNotice(
+        `Imported ${brought.artifacts} artifact${brought.artifacts === 1 ? "" : "s"} and ${brought.conversations} conversation${brought.conversations === 1 ? "" : "s"}.`,
+      );
+      onChanged();
+      onOpen(brought.projectId);
+    } catch (cause) {
+      setError(
+        cause instanceof ApiFailure
+          ? cause.detail.message
+          : cause instanceof SyntaxError
+            ? `${file.name} is not a JSON file.`
+            : String(cause),
+      );
+    } finally {
+      setBusy(false);
+      if (importInput.current) importInput.current.value = "";
+    }
+  };
+
   // Whatever waits on the person first, then the furthest along. Archived ones
   // fold away.
   const live = projects.filter((project) => !project.archivedAt);
@@ -173,6 +204,26 @@ export function Projects({
             Word files and images are kept with the project and named to them.
           </p>
         </div>
+        {/* A project exported from another copy of this app. The file is one
+            of its own exports; the input is hidden because the picker is the
+            whole interaction. */}
+        <p className="start-import">
+          <input
+            ref={importInput}
+            type="file"
+            accept="application/json,.json"
+            hidden
+            aria-label="Choose a project export to import"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void importFile(file);
+            }}
+          />
+          <Button variant="link" disabled={busy} onClick={() => importInput.current?.click()}>
+            Import a project exported from another copy of this app…
+          </Button>
+        </p>
+        {importNotice ? <p className="inline-note">{importNotice}</p> : null}
       </section>
 
       <section className="project-grid-section" aria-labelledby="projects-title">
@@ -252,6 +303,27 @@ function ProjectCard({
       cancelled = true;
     };
   }, [project.id, project.stage]);
+  // Whose turn it is, read off the current stage's mail thread alone
+  // (CL-8725) -- never for an archived project, and never for any stage but
+  // the current one `stage` just resolved.
+  const [turn, setTurn] = useState<string | null>(null);
+  useEffect(() => {
+    if (project.archivedAt) {
+      setTurn(null);
+      return;
+    }
+    let cancelled = false;
+    void displayTurn(project.id, stage, project.needsDecision, {
+      workspaceTenantId: api.workspaceTenantId,
+      stageAgentStatus: api.stageAgentStatus,
+      readStageThread: api.readStageThread,
+    }).then((resolved) => {
+      if (!cancelled) setTurn(resolved);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [project.id, project.archivedAt, project.needsDecision, stage]);
   const waiting = project.needsDecision;
   const [renaming, setRenaming] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
@@ -312,6 +384,8 @@ function ProjectCard({
     <StateLabel tone="disabled">Archived</StateLabel>
   ) : project.needsDecision ? (
     <StateLabel tone="warning">{project.waits[0]?.title ?? "Needs your decision"}</StateLabel>
+  ) : turn ? (
+    <StateLabel tone={turn === "Specialist working" ? "loading" : "warning"}>{turn}</StateLabel>
   ) : stage ? (
     <StateLabel tone="info">In progress</StateLabel>
   ) : (
@@ -460,6 +534,18 @@ function ProjectInfoDialog({ project, onClose }: { project: ProjectSummary; onCl
                   <dd>
                     {info.artifacts.versions} version{info.artifacts.versions === 1 ? "" : "s"} across {info.artifacts.live} live artifact
                     {info.artifacts.live === 1 ? "" : "s"}, {formatBytes(info.artifacts.bytes)} stored
+                  </dd>
+                </div>
+                <div>
+                  <dt>Runs</dt>
+                  <dd>
+                    {info.runs.total} specialist run{info.runs.total === 1 ? "" : "s"}, {info.runs.builds} build{info.runs.builds === 1 ? "" : "s"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Decisions</dt>
+                  <dd>
+                    {info.decisions.approved} approved, {info.decisions.sentBack} sent back, {info.decisions.refused} refused
                   </dd>
                 </div>
               </dl>

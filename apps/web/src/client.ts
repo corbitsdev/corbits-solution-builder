@@ -23,6 +23,7 @@ import {
   InstallerError,
   liveDelegationStore,
   listArtifacts,
+  listSpecialistDeployments,
   ensureRegistryTarballs,
   pushSourceTree,
   requireProject as installerRequireProject,
@@ -46,6 +47,8 @@ import {
 } from "@solutions-builder/installer";
 import { loadProjectWorkflowView, type ProjectWorkflowView } from "./project-workflow.ts";
 import { cacheProjectWorkflowRef, resolveProjectWorkflowRef } from "./project-workflow-ref.ts";
+import { parseBundle } from "./project-export.ts";
+import { importProject as importProjectBundle } from "./project-import.ts";
 import { MATERIAL_KIND, MATERIAL_READING_KIND } from "@solutions-builder/app/artifacts";
 import { readMaterial } from "./material-reading.ts";
 import type { DesignFeedbackDisposition, DesignFeedbackEntry as DesignFeedbackGraphEntry } from "@solutions-builder/app/artifact-graph";
@@ -290,6 +293,10 @@ export type ProjectInfo = {
   project: { id: string; title: string; createdAt: string; archivedAt: string | null };
   stage: number | null;
   artifacts: { versions: number; live: number; bytes: number; byKind: { kind: string; count: number; bytes: number }[] };
+  /** Specialist deployments for this project: every stage that has ever deployed, and how many of those are stage 8 (build/execution). */
+  runs: { total: number; builds: number };
+  /** Decisions committed in the project workflow view -- no spend, no lifecycle run to fold from any more. */
+  decisions: { approved: number; refused: number; sentBack: number };
   lastActivityAt: string;
 };
 
@@ -921,11 +928,15 @@ export const api = {
   projectView: (projectId: string) => loadProjectView(projectId, createHubTransport()).catch((cause: unknown) => { installerFailure(cause); }),
   /** One project, described — folded from the same tenant record and run/artifact folds as `projectView`. */
   projectInfo: (projectId: string): Promise<ProjectInfo> =>
-    asWorkspaceOwner(async (transport) => {
-      const [project, detail] = await Promise.all([
+    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      const [project, detail, deployments, ref] = await Promise.all([
         installerRequireProject(transport, projectId),
         loadProjectView(projectId, transport),
+        listSpecialistDeployments(transport, workspaceTenantId, projectId),
+        resolveProjectWorkflowRef(transport, workspaceTenantId, projectId).catch(() => null),
       ]);
+      const view = ref ? await loadProjectWorkflowView(transport, workspaceTenantId, ref).catch(() => null) : null;
+      const decisions = view?.decisions ?? [];
       const live = detail.nodes.filter((node) => node.supersededByNodeId === null);
       const stamps = detail.nodes.map((node) => node.createdAt);
       return {
@@ -939,8 +950,48 @@ export const api = {
         // No per-version byte count rides the mounted artifacts module's list
         // metadata (CL-8500 decision 3), so this no longer totals bytes.
         artifacts: { versions: detail.nodes.length, live: live.length, bytes: 0, byKind: [] },
+        runs: {
+          total: deployments.length,
+          builds: deployments.filter((deployment) => deployment.stage === 8).length,
+        },
+        decisions: {
+          approved: decisions.filter((decision) => decision.kind === "approve" && decision.accepted).length,
+          refused: decisions.filter((decision) => !decision.accepted).length,
+          sentBack: decisions.filter((decision) => decision.kind === "send_back" && decision.accepted).length,
+        },
         lastActivityAt: stamps.sort().at(-1) ?? project.createdAt.toISOString(),
       };
+    }),
+  /**
+   * Imports a project bundle another copy of this app exported
+   * (`project-export.ts`'s `assembleBundle`) as a NEW project — client-driven,
+   * no host route. `parseBundle` gives a clear message for the wrong format,
+   * version, or a missing key; `project-import.ts`'s `importPlan` re-keys
+   * every bundled artifact's `sb` metadata to the new project id and never
+   * writes `approvedAt`. The new project's own workflow starts fresh at
+   * stage 1 — no approval is forged from the bundle's history.
+   */
+  importProject: (raw: unknown) =>
+    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      const bundle = parseBundle(raw);
+      return importProjectBundle(bundle, {
+        createProject: async ({ title, policy }) => {
+          const { project } = await installerCreateProject(transport, workspaceTenantId, {
+            title,
+            slug: projectSlug(),
+            policy: policy as ProjectPolicy,
+          });
+          return { projectId: project.id };
+        },
+        createArtifact: async ({ title, content, sb }) => {
+          const artifact = await installerCreateArtifact(transport, workspaceTenantId, {
+            title,
+            content,
+            metadata: { sb },
+          });
+          return { id: artifact.id };
+        },
+      });
     }),
   /**
    * Hands files over with the problem; each becomes a `source_material`
