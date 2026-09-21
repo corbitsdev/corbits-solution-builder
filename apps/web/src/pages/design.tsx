@@ -343,6 +343,9 @@ export function DesignFeedbackView({
               Reviewing {design.title}, version {design.version}.
             </span>
             <PrintButton node={design} tenantId={tenantId} content={content || null} />
+            {/* Converge bend (CL-8770): main passes content={null} with no
+                tenantId; the lane PrintButton requires tenantId and reuses the
+                already-loaded content — kept, typecheck-is-law. */}
           </p>
         ) : null}
 
