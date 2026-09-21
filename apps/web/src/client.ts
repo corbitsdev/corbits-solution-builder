@@ -112,6 +112,7 @@ import { hubCredentials, hubOrigin } from "./hub-origin.ts";
 import { listProjectSummaries } from "./project-list.ts";
 import { openDecisions } from "./decisions-fold.ts";
 import { loadProjectView, toArtifactNode } from "./project-view.ts";
+import { projectUsage, type ProjectUsage } from "./project-usage.ts";
 import { designerSettings as loadDesignerSettings, saveDesignerSettings, type DesignerSettings } from "./designer-settings.ts";
 import {
   API_KEY_CONNECT_OPTIONS,
@@ -302,6 +303,8 @@ export type ProjectSummary = {
   waits: Wait[];
   /** Whether the specialist is drafting or the person's move — no gate, no signal, just "is there an unapproved reply." */
   turn: "writing" | "idle";
+  /** Specialist deployments for this project so far -- see `ProjectInfo.runs`; already fetched per card, so this rides along at no extra cost. */
+  runs: number;
 };
 
 export type ProjectInfo = {
@@ -310,6 +313,8 @@ export type ProjectInfo = {
   artifacts: { versions: number; live: number; bytes: number; byKind: { kind: string; count: number; bytes: number }[] };
   /** Specialist deployments for this project: every stage that has ever deployed, and how many of those are stage 8 (build/execution). */
   runs: { total: number; builds: number };
+  /** Agent-authored artifact versions -- see `./project-usage.ts` for what a browser can and cannot know about a turn's cost. */
+  usage: ProjectUsage;
   /** Decisions committed in the project workflow view -- no spend, no lifecycle run to fold from any more. */
   decisions: { approved: number; refused: number; sentBack: number };
   lastActivityAt: string;
@@ -994,6 +999,7 @@ export const api = {
           total: deployments.length,
           builds: deployments.filter((deployment) => deployment.stage === 8).length,
         },
+        usage: projectUsage(detail.nodes),
         decisions: {
           approved: decisions.filter((decision) => decision.kind === "approve" && decision.accepted).length,
           refused: decisions.filter((decision) => !decision.accepted).length,

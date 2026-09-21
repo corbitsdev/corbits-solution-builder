@@ -27,6 +27,7 @@ import type { ChatMessage } from "../../stage-mail.ts";
 import { markerAlreadySent } from "../../decision-notify.ts";
 import { shouldFallbackRefetch, subscribeMailbox } from "../../mailbox-events.ts";
 import { Markdown } from "../../markdown.jsx";
+import { formatUsage, projectUsage } from "../../project-usage.ts";
 import { AudiencePackages } from "../audiences.jsx";
 import { DesignFeedbackView } from "../design.jsx";
 import { Tabs, Textarea } from "@corbits/react-ui";
@@ -1132,6 +1133,13 @@ export function StageWorkspace({
           </button>
         </p>
       ) : null}
+
+      <p className="inline-note stage-usage-line">
+        {formatUsage(
+          projectUsage(detail.nodes),
+          activeModel ? `${activeModel.providerLabel} · ${activeModel.canonicalName}` : null,
+        )}
+      </p>
 
       {workflowView?.done ? (
         <Banner tone="okay" title="This project is delivered — stage 9's approval was recorded and the workflow has finished." />

@@ -24,10 +24,11 @@ import {
 } from "@corbits/react-ui";
 import { ArrowRight, Ellipsis } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { api, ApiFailure, type ProjectInfo, type ProjectSummary } from "../client.js";
+import { api, ApiFailure, type ActiveModel, type ProjectInfo, type ProjectSummary } from "../client.js";
 import { Button, Banner, downloadArtifact, StageRing, StateLabel, stageName } from "../components.jsx";
 import { assembleBundle, bundleFileName } from "../project-export.js";
 import { displayDone, displayStage, displayTurn } from "../project-list.js";
+import { formatUsage } from "../project-usage.js";
 import { DEFAULT_POLICY } from "./onboarding.jsx";
 import { Dictated } from "../dictation.jsx";
 
@@ -427,6 +428,9 @@ function ProjectCard({
         ) : (
           <span>{done ? "Delivered · project finished" : `Stage ${stage || "—"} of 9 · ${stageName(stage ?? 0)}`}</span>
         )}
+        <span className="project-card-usage inline-note">
+          {project.runs} stage run{project.runs === 1 ? "" : "s"} · not priced
+        </span>
         <Menu onOpenChange={(open) => !open && setConfirming(false)}>
           <MenuTrigger asChild>
             <button type="button" className="project-card-menu" aria-label={`Options for ${project.title}`}>
@@ -513,6 +517,7 @@ const formatBytes = (bytes: number): string =>
 function ProjectInfoDialog({ project, onClose }: { project: ProjectSummary; onClose: () => void }) {
   const [info, setInfo] = useState<ProjectInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [activeModel, setActiveModel] = useState<ActiveModel | null>(null);
   useEffect(() => {
     let cancelled = false;
     void api
@@ -523,6 +528,9 @@ function ProjectInfoDialog({ project, onClose }: { project: ProjectSummary; onCl
       .catch((cause) => {
         if (!cancelled) setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
       });
+    void api.activeModel().then((model) => {
+      if (!cancelled) setActiveModel(model);
+    });
     return () => {
       cancelled = true;
     };
@@ -566,6 +574,10 @@ function ProjectInfoDialog({ project, onClose }: { project: ProjectSummary; onCl
                   <dd>
                     {info.runs.total} specialist run{info.runs.total === 1 ? "" : "s"}, {info.runs.builds} build{info.runs.builds === 1 ? "" : "s"}
                   </dd>
+                </div>
+                <div>
+                  <dt>Usage</dt>
+                  <dd>{formatUsage(info.usage, activeModel ? `${activeModel.providerLabel} · ${activeModel.canonicalName}` : null)}</dd>
                 </div>
                 <div>
                   <dt>Decisions</dt>
