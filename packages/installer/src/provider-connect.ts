@@ -27,6 +27,9 @@ export type UpsertApiKeyProviderInput = {
   plugin: ModelProviderPlugin;
   baseURL: string;
   apiKey: string;
+  /** A local endpoint needs no account and no key -- the credential holds a
+   * placeholder secret and is marked so the catalog renders it as one. */
+  keyless?: boolean;
 };
 
 export type UpsertApiKeyProviderResult = {
@@ -58,14 +61,21 @@ async function ensureApiKeyCredential(
   vendorProviderId: string,
   name: string,
   secret: string,
+  metadata?: Record<string, unknown>,
 ): Promise<HubCredential> {
   try {
-    return await catalog.createCredential({ providerId: vendorProviderId, name, type: "api_key", secret });
+    return await catalog.createCredential({
+      providerId: vendorProviderId,
+      name,
+      type: "api_key",
+      secret,
+      ...(metadata ? { metadata } : {}),
+    });
   } catch (cause) {
     if (!(cause instanceof ApiError && cause.status === 409)) throw cause;
     const existing = await catalog.resolveCredential(name);
     if (!existing) throw cause;
-    return catalog.patchCredential(existing.id, { secret, status: "active" });
+    return catalog.patchCredential(existing.id, { secret, status: "active", ...(metadata ? { metadata } : {}) });
   }
 }
 
@@ -108,7 +118,8 @@ export async function upsertApiKeyProvider(
     catalog,
     vendorProvider.id,
     credentialNameFor(input.providerId),
-    input.apiKey,
+    input.apiKey || "local-endpoint",
+    input.keyless ? { keyless: true } : undefined,
   );
   const modelProvider = await ensureModelProvider(catalog, input, credential.id);
   return { vendorProviderId: vendorProvider.id, credentialId: credential.id, modelProviderId: modelProvider.id };

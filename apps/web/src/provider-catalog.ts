@@ -59,6 +59,10 @@ export const API_KEY_CONNECT_OPTIONS: ReadonlyArray<{ providerId: string; label:
   { providerId: "compatible", label: "OpenAI-compatible endpoint", needsBaseUrl: true },
 ];
 
+/** The one provider that needs no account and no key: a local OpenAI-compatible server. */
+export const LOCAL_PROVIDER_ID = "local";
+export const LOCAL_DEFAULT_BASE_URL = "http://localhost:11434/v1";
+
 export const OAUTH_CONNECT_OPTIONS: ReadonlyArray<{ providerId: string; label: string; redirectUri: string }> = [
   { providerId: "codex-oauth", label: "ChatGPT (Codex)", redirectUri: "" },
   { providerId: "xai-oauth", label: "xAI (Grok)", redirectUri: "" },
@@ -274,7 +278,9 @@ async function discoverModels(plugin: string, baseUrl: string, apiKey: string): 
               "anthropic-version": "2023-06-01",
               [ANTHROPIC_BROWSER_HEADER]: "true",
             }
-          : { Authorization: `Bearer ${apiKey}` },
+          : apiKey
+            ? { Authorization: `Bearer ${apiKey}` }
+            : {},
     });
   } catch (cause) {
     throw new Error(`Could not reach ${url}: ${cause instanceof Error ? cause.message : String(cause)}`);
@@ -342,6 +348,34 @@ export async function connectApiKeyProvider(
   return row;
 }
 
+/**
+ * Connects a local OpenAI-compatible server (Ollama and friends): the same
+ * discovery/write path as `connectApiKeyProvider`, but with no key required
+ * and the credential marked keyless so the catalog renders it as a local
+ * endpoint (`toListedProvider`'s `credentialRow?.metadata?.keyless` check).
+ */
+export async function connectLocalProvider(transport: Transport, input: { baseUrl?: string }): Promise<ListedProvider> {
+  const baseURL = input.baseUrl?.trim() || LOCAL_DEFAULT_BASE_URL;
+  const canonicalNames = await discoverModels("openai-compatible", baseURL, "");
+
+  const workspace = await resolveWorkspace(transport);
+  if (!workspace) throw new Error("The workspace is not installed yet.");
+  const { modelProviderId } = await upsertApiKeyProvider(transport, workspace.tenantId, {
+    providerId: LOCAL_PROVIDER_ID,
+    label: "Ollama",
+    plugin: "openai-compatible",
+    baseURL,
+    apiKey: "",
+    keyless: true,
+  });
+  await registerProviderModels(transport, workspace.tenantId, { modelProviderId, canonicalNames });
+
+  const connected = await listConnectedProviders(transport);
+  const row = connected.find((entry) => entry.id === modelProviderId);
+  if (!row) throw new Error("The provider connected, but did not come back in the catalog listing.");
+  return row;
+}
+
 type OAuthLoginStatus =
   | { status: "idle" }
   | { status: "pending" }
@@ -383,16 +417,22 @@ async function waitForOAuthTokens(
  * OAuth-connected provider has no discovered model listing -- its adapter's
  * servable models are fixed, not probed -- so the models registered are
  * `OAUTH_ADAPTER_OF`'s static list rather than anything this call fetches.
+ *
+ * `onAuthorizeUrl`, when given, is called with the URL the start call
+ * returns, before the (potentially long) wait for the loopback callback --
+ * so a caller can show it as a fallback if the browser did not open.
  */
 export async function connectOAuthProvider(
   transport: Transport,
   input: { providerId: string; label: string },
+  onAuthorizeUrl?: (url: string) => void,
 ): Promise<void> {
   const adapter = OAUTH_ADAPTER_OF[input.providerId];
   if (!adapter) throw new Error(`${input.label} has no registered inference adapter.`);
   const workspace = await resolveWorkspace(transport);
   if (!workspace) throw new Error("The workspace is not installed yet.");
-  await transport.fetch<{ authorizeUrl: string }>("POST", `/oauth/${input.providerId}/start`);
+  const { authorizeUrl } = await transport.fetch<{ authorizeUrl: string }>("POST", `/oauth/${input.providerId}/start`);
+  onAuthorizeUrl?.(authorizeUrl);
   const tokens = await waitForOAuthTokens(transport, input.providerId);
   await upsertOAuthProvider(transport, workspace.tenantId, {
     providerId: input.providerId,

@@ -1,26 +1,35 @@
 /**
  * The provider list, shared by onboarding and Settings so the two cannot
- * drift.
+ * drift. One row per way in. A row that is not connected offers exactly one
+ * action, named after how it connects; a row that is connected shows what it
+ * serves and lets it be reordered, refreshed or disconnected in place.
  *
- * Connecting, reordering, choosing a model and disconnecting used to be host
- * routes (`POST /providers`, the OAuth loopback, `PUT /providers/order`,
- * `PUT /providers/:id/model`, `DELETE /providers/:id`). The host no longer
- * owns provider mutation (PR #313); this now drives the hub's own catalog
- * routes directly (`client.ts` -> `provider-catalog.ts` -> `@solutions-builder/installer`).
- * An API-key provider gets the full flow: connect, reorder, pick a model,
- * disconnect. An OAuth provider (ChatGPT via Codex, xAI via Grok sign-in)
- * signs in through the loopback the embedded hub itself mounts on
- * `@corbits/oauth-core` (`packages/embed-hub/src/oauth-mount.ts`) -- the hub
- * runs on the same machine as the operator, so it can bind the local
- * callback port a browser client cannot.
+ * Keys are asked for on the row that was clicked and cleared the moment they
+ * are handed over. Nothing here ever renders a secret back.
+ *
+ * Connecting, reordering, choosing a model and disconnecting drive the hub's
+ * own catalog routes directly (`client.ts` -> `provider-catalog.ts` ->
+ * `@solutions-builder/installer`); an OAuth provider signs in through the
+ * loopback the embedded hub mounts on `@corbits/oauth-core`
+ * (`packages/embed-hub/src/oauth-mount.ts`).
  */
-import { useState } from "react";
-import type { Provider } from "../client.js";
-import { api, ApiFailure } from "../client.js";
-import { Banner, Button, Field, StateLabel } from "../components.jsx";
+import { useRef, useState } from "react";
+import { api, ApiFailure, type Provider } from "../client.js";
+import { LOCAL_DEFAULT_BASE_URL, LOCAL_PROVIDER_ID } from "../provider-catalog.js";
+import { Banner, Button, StateLabel } from "../components.jsx";
+import { Dictated } from "../dictation.jsx";
 
 export type ApiKeyProvider = { providerId: string; label: string; needsBaseUrl: boolean };
 export type OAuthCandidate = { providerId: string; label: string; redirectUri: string };
+
+type Row = {
+  id: string;
+  name: string;
+  how: string;
+  kind: "oauth" | "api_key" | "local_endpoint";
+  action: "Log in with subscription" | "Connect API key" | "Connect locally";
+  needsBaseUrl: boolean;
+};
 
 export function ProviderList({
   providers,
@@ -32,284 +41,293 @@ export function ProviderList({
   providers: Provider[];
   apiKeyProviders: ApiKeyProvider[];
   oauthCandidates: OAuthCandidate[];
-  /** Called after any successful change, so the caller can refetch. */
-  onChanged?: () => Promise<void> | void;
+  /** Called after any successful change; the parent refetches. */
+  onChanged: () => Promise<void> | void;
+  /** Settings shows order, model choice and disconnect; onboarding does not. */
   manage?: boolean;
 }) {
-  const candidateLabels = new Map(
-    [...oauthCandidates, ...apiKeyProviders].map((entry) => [entry.providerId, entry.label]),
-  );
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [chosen, setChosen] = useState<string | null>(null);
+  const [secret, setSecret] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [authorizeUrl, setAuthorizeUrl] = useState<string | null>(null);
+  const cancelledRef = useRef<Set<string>>(new Set());
 
-  const ordered = providers.map((entry) => entry.providerId);
+  const rows: Row[] = [
+    ...oauthCandidates.map((entry) => ({
+      id: entry.providerId,
+      name: entry.label,
+      how: "Use a subscription you already pay for.",
+      kind: "oauth" as const,
+      action: "Log in with subscription" as const,
+      needsBaseUrl: false,
+    })),
+    ...apiKeyProviders.map((entry) => ({
+      id: entry.providerId,
+      name: entry.label,
+      how: "Kept in the keychain. Never shown again.",
+      kind: "api_key" as const,
+      action: "Connect API key" as const,
+      needsBaseUrl: entry.needsBaseUrl,
+    })),
+    // Last: the option that needs no account and no key.
+    {
+      id: LOCAL_PROVIDER_ID,
+      name: "Ollama",
+      how: "Runs on this machine. No account, no key.",
+      kind: "local_endpoint" as const,
+      action: "Connect locally" as const,
+      needsBaseUrl: true,
+    },
+  ];
 
-  const withBusy = async (id: string, work: () => Promise<void>) => {
-    setBusyId(id);
+  const connectedFor = (row: Row) => providers.find((provider) => provider.providerId === row.id);
+
+  const act = async (id: string, work: () => Promise<unknown>, done?: string) => {
+    setBusy(id);
     setError(null);
     setNotice(null);
+    cancelledRef.current.delete(id);
     try {
       await work();
-      await onChanged?.();
+      if (cancelledRef.current.has(id)) return;
+      if (done) setNotice(done);
+      await onChanged();
     } catch (cause) {
+      if (cancelledRef.current.has(id)) return;
       setError(cause instanceof ApiFailure ? cause.detail.message : cause instanceof Error ? cause.message : String(cause));
     } finally {
-      setBusyId(null);
+      if (!cancelledRef.current.has(id)) setBusy(null);
     }
   };
 
-  const refresh = (provider: Provider) =>
-    withBusy(provider.id, async () => {
-      const { clearedModel } = await api.refreshProviderModels(provider.id);
-      setNotice(
-        clearedModel
-          ? `Models refreshed. ${clearedModel} is no longer offered, so its pick was cleared.`
-          : "Models refreshed.",
-      );
+  const connect = (row: Row) =>
+    act(row.id, async () => {
+      if (row.kind === "oauth") {
+        await api.connectOAuthProvider({ providerId: row.id, label: row.name }, (url) => {
+          if (!cancelledRef.current.has(row.id)) setAuthorizeUrl(url);
+        });
+      } else if (row.kind === "local_endpoint") {
+        await api.connectLocalProvider({ baseUrl: baseUrl.trim() || LOCAL_DEFAULT_BASE_URL });
+      } else {
+        await api.connectProvider({
+          providerId: row.id,
+          label: row.name,
+          apiKey: secret,
+          ...(row.needsBaseUrl ? { baseUrl } : {}),
+        });
+      }
+      setSecret("");
+      setBaseUrl("");
+      setAuthorizeUrl(null);
+      setChosen(null);
     });
 
-  const move = (index: number, delta: number) => {
-    const next = [...providers];
-    const at = index + delta;
-    if (at < 0 || at >= next.length) return;
-    [next[index], next[at]] = [next[at]!, next[index]!];
-    return withBusy("order", () => api.reorderProviders(next.map((entry) => entry.id)));
+  const cancelSignIn = (id: string) => {
+    cancelledRef.current.add(id);
+    setBusy(null);
+    setAuthorizeUrl(null);
+    setError(null);
+    setNotice(null);
+  };
+
+  const canSave = (row: Row) => {
+    if (busy !== null) return false;
+    if (row.kind === "local_endpoint") return baseUrl.trim().length > 0;
+    return secret.trim().length > 0 && (!row.needsBaseUrl || baseUrl.trim().length > 0);
+  };
+
+  const closeAsk = () => {
+    setChosen(null);
+    setSecret("");
+    setBaseUrl("");
+  };
+
+  const ordered = providers.map((entry) => entry.providerId);
+  const move = (providerId: string, by: -1 | 1) => {
+    const index = ordered.indexOf(providerId);
+    const order = [...ordered];
+    const [moved] = order.splice(index, 1);
+    order.splice(index + by, 0, moved!);
+    return act(providerId, () => api.reorderProviders(order));
   };
 
   return (
-    <div className="provider-manager">
-      {error ? <Banner tone="error" title="That did not go through">{error}</Banner> : null}
-      {notice ? <Banner tone="okay" title="Refreshed">{notice}</Banner> : null}
-      {manage ? <small className="provider-hint">Existing specialists keep the model they were deployed with.</small> : null}
+    <>
+      {authorizeUrl ? (
+        <Banner title="Finish signing in, in your browser">
+          <span className="hash">{authorizeUrl}</span>
+        </Banner>
+      ) : null}
+
       <ul className="provider-list">
-        {providers.length === 0 ? (
-          <li className="provider-row">
-            <span className="provider-identity">
-              <small>No provider is connected yet.</small>
-            </span>
-          </li>
-        ) : (
-          providers.map((provider, index) => {
-            const ready = provider.status === "ready";
-            const position = ordered.indexOf(provider.providerId);
-            const busy = busyId === provider.id;
-            return (
-              <li key={provider.providerId} className="provider-row">
-                <span className="provider-identity">
-                  <strong>{candidateLabels.get(provider.providerId) ?? provider.label}</strong>
-                  <small>
-                    {ready
-                      ? describeConnected(provider, manage ? position : -1)
-                      : (provider.statusDetail ?? provider.status)}
-                  </small>
-                </span>
-                <span className="provider-state">
-                  <StateLabel tone={ready ? "success" : "warning"}>
-                    {ready ? "Connected" : "Needs attention"}
-                  </StateLabel>
-                </span>
-                {manage ? (
-                  <span className="provider-actions">
-                    {provider.models.length > 1 ? (
-                      <select
-                        className="setting-select"
-                        aria-label={`Model for ${provider.label}`}
-                        value={provider.selectedModel ?? ""}
-                        disabled={busy}
-                        onChange={(event) => {
-                          const value = event.target.value || null;
-                          void withBusy(provider.id, () => api.selectProviderModel(provider.id, value));
+        {rows.map((row) => {
+          const connected = connectedFor(row);
+          const ready = connected?.status === "ready";
+          const asking = chosen === row.id;
+          const waiting = busy === row.id && row.kind === "oauth";
+          const position = connected ? ordered.indexOf(connected.providerId) : -1;
+          return (
+            <li key={row.id} className={`provider-row${asking ? " is-active" : ""}`}>
+              <span className="provider-identity">
+                <strong>{row.name}</strong>
+                <small>
+                  {connected
+                    ? ready
+                      ? describeConnected(connected, manage ? position : -1)
+                      : (connected.statusDetail ?? connected.status)
+                    : row.how}
+                </small>
+              </span>
+
+              {asking ? (
+                <form
+                  className="provider-ask"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    if (canSave(row)) void connect(row);
+                  }}
+                >
+                  {row.needsBaseUrl ? (
+                    <Dictated value={baseUrl} onValueChange={setBaseUrl} align="center">
+                      <input
+                        className="provider-input"
+                        type="text"
+                        autoFocus={row.kind === "local_endpoint"}
+                        placeholder={row.kind === "local_endpoint" ? LOCAL_DEFAULT_BASE_URL : "https://example.com/v1"}
+                        aria-label="Endpoint"
+                        autoComplete="off"
+                        spellCheck={false}
+                        value={baseUrl}
+                        onChange={(event) => setBaseUrl(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Escape") {
+                            event.stopPropagation();
+                            closeAsk();
+                          }
                         }}
+                      />
+                    </Dictated>
+                  ) : null}
+                  {row.kind === "api_key" ? (
+                    <input
+                      className="provider-input"
+                      type="password"
+                      autoFocus={!row.needsBaseUrl}
+                      value={secret}
+                      onChange={(event) => setSecret(event.target.value)}
+                      placeholder={`${row.name} API key`}
+                      aria-label={`${row.name} API key`}
+                      autoComplete="off"
+                      spellCheck={false}
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") {
+                          event.stopPropagation();
+                          closeAsk();
+                        }
+                      }}
+                    />
+                  ) : null}
+                  <Button type="submit" variant="primary" loading={busy === row.id} disabled={!canSave(row)}>
+                    Save
+                  </Button>
+                  <Button type="button" variant="ghost" onClick={closeAsk}>
+                    Cancel
+                  </Button>
+                </form>
+              ) : (
+                <span className="provider-state">
+                  {connected ? (
+                    <StateLabel tone={ready ? "success" : "warning"}>
+                      {ready ? "Connected" : "Needs attention"}
+                    </StateLabel>
+                  ) : waiting ? (
+                    <StateLabel tone="loading">Waiting for the browser</StateLabel>
+                  ) : null}
+                </span>
+              )}
+
+              {asking ? null : (
+                <span className="provider-actions">
+                  {manage && connected && ready ? (
+                    <>
+                      <ModelPick provider={connected} onPick={(model) => act(row.id, () => api.selectProviderModel(connected.providerId, model || null))} />
+                      <Button
+                        variant="ghost"
+                        disabled={busy !== null || position <= 0}
+                        onClick={() => void move(connected.providerId, -1)}
                       >
-                        <option value="">Let it fail over</option>
-                        {provider.models.map((model) => (
-                          <option key={model} value={model}>
-                            {model}
-                          </option>
-                        ))}
-                      </select>
-                    ) : null}
-                    <Button
-                      variant="ghost"
-                      disabled={busy || index === 0}
-                      onClick={() => void move(index, -1)}
-                    >
-                      Move up
+                        Move up
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        disabled={busy !== null || position < 0 || position === ordered.length - 1}
+                        onClick={() => void move(connected.providerId, 1)}
+                      >
+                        Move down
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        disabled={busy !== null}
+                        loading={busy === row.id}
+                        onClick={() =>
+                          void act(row.id, () => api.refreshProviderModels(connected.providerId), `${row.name} models refreshed.`)
+                        }
+                      >
+                        Refresh models
+                      </Button>
+                    </>
+                  ) : null}
+                  {waiting ? (
+                    <Button variant="ghost" onClick={() => cancelSignIn(row.id)}>
+                      Cancel
                     </Button>
-                    <Button
-                      variant="ghost"
-                      disabled={busy || index === providers.length - 1}
-                      onClick={() => void move(index, 1)}
-                    >
-                      Move down
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      loading={busy}
-                      disabled={busy}
-                      onClick={() => void refresh(provider)}
-                    >
-                      Refresh models
-                    </Button>
+                  ) : connected && manage ? (
                     <Button
                       variant="destructive"
-                      loading={busy}
-                      onClick={() => void withBusy(provider.id, () => api.disconnectProvider(provider.id))}
+                      disabled={busy !== null}
+                      loading={busy === row.id}
+                      onClick={() => void act(row.id, () => api.disconnectProvider(connected.providerId), `${row.name} disconnected.`)}
                     >
                       Disconnect
                     </Button>
-                  </span>
-                ) : null}
-              </li>
-            );
-          })
-        )}
+                  ) : (
+                    <Button
+                      variant={connected ? "ghost" : "primary"}
+                      loading={busy === row.id}
+                      disabled={busy !== null}
+                      onClick={() => {
+                        if (row.kind === "oauth") void connect(row);
+                        else {
+                          setChosen(row.id);
+                          setSecret("");
+                          setBaseUrl(row.kind === "local_endpoint" ? LOCAL_DEFAULT_BASE_URL : "");
+                        }
+                      }}
+                    >
+                      {connected ? "Reconnect" : row.action}
+                    </Button>
+                  )}
+                </span>
+              )}
+            </li>
+          );
+        })}
       </ul>
 
-      <ConnectApiKeyProvider
-        candidates={apiKeyProviders.filter((entry) => !ordered.includes(entry.providerId))}
-        onConnected={async () => {
-          await onChanged?.();
-        }}
-      />
+      {/* Below the list, always. An error above it would move the thing the
+          person was about to click. */}
+      {error ? <Banner tone="error" title={error} /> : null}
+      {notice ? <Banner tone="okay" title={notice} /> : null}
 
-      <ConnectOAuthProvider
-        candidates={oauthCandidates.filter((entry) => !ordered.includes(entry.providerId))}
-        onConnected={async () => {
-          await onChanged?.();
-        }}
-      />
-    </div>
-  );
-}
-
-/** One "Sign in" button per unconnected OAuth candidate (ChatGPT via Codex, xAI via Grok). */
-function ConnectOAuthProvider({
-  candidates,
-  onConnected,
-}: {
-  candidates: OAuthCandidate[];
-  onConnected: () => Promise<void>;
-}) {
-  const [signingInId, setSigningInId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  if (candidates.length === 0) return null;
-
-  const signIn = async (candidate: OAuthCandidate) => {
-    setSigningInId(candidate.providerId);
-    setError(null);
-    try {
-      await api.connectOAuthProvider({ providerId: candidate.providerId, label: candidate.label });
-      await onConnected();
-    } catch (cause) {
-      setError(cause instanceof ApiFailure ? cause.detail.message : cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setSigningInId(null);
-    }
-  };
-
-  return (
-    <div className="provider-connect">
-      {error ? <Banner tone="error" title="Sign-in did not go through">{error}</Banner> : null}
-      {candidates.map((candidate) => (
-        <Button
-          key={candidate.providerId}
-          variant="ghost"
-          loading={signingInId === candidate.providerId}
-          disabled={signingInId !== null && signingInId !== candidate.providerId}
-          onClick={() => void signIn(candidate)}
-        >
-          Sign in to {candidate.label}
-        </Button>
-      ))}
-    </div>
-  );
-}
-
-/** The connect form: pick a candidate, paste a key, and (for a compatible endpoint) its base URL. */
-function ConnectApiKeyProvider({
-  candidates,
-  onConnected,
-}: {
-  candidates: ApiKeyProvider[];
-  onConnected: () => Promise<void>;
-}) {
-  const [providerId, setProviderId] = useState(candidates[0]?.providerId ?? "");
-  const [apiKey, setApiKey] = useState("");
-  const [baseUrl, setBaseUrl] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  if (candidates.length === 0) return null;
-  const chosen = candidates.find((entry) => entry.providerId === providerId) ?? candidates[0]!;
-
-  const connect = async () => {
-    if (!apiKey.trim()) {
-      setError("Paste a key first.");
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      await api.connectProvider({
-        providerId: chosen.providerId,
-        label: chosen.label,
-        apiKey: apiKey.trim(),
-        ...(chosen.needsBaseUrl ? { baseUrl: baseUrl.trim() } : {}),
-      });
-      setApiKey("");
-      setBaseUrl("");
-      await onConnected();
-    } catch (cause) {
-      setError(cause instanceof ApiFailure ? cause.detail.message : cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="provider-connect">
-      {error ? <Banner tone="error" title="Could not connect">{error}</Banner> : null}
-      <Field label="Provider">
-        <select
-          className="setting-select"
-          aria-label="Provider to connect"
-          value={chosen.providerId}
-          onChange={(event) => setProviderId(event.target.value)}
-        >
-          {candidates.map((entry) => (
-            <option key={entry.providerId} value={entry.providerId}>
-              {entry.label}
-            </option>
-          ))}
-        </select>
-      </Field>
-      {chosen.needsBaseUrl ? (
-        <Field label="Base URL">
-          <input
-            className="provider-input"
-            type="text"
-            placeholder="https://example.com/v1"
-            value={baseUrl}
-            onChange={(event) => setBaseUrl(event.target.value)}
-          />
-        </Field>
+      {rows.find((row) => row.id === chosen)?.kind === "local_endpoint" ? (
+        <p className="inline-note">
+          Ollama's default. Change it for LM Studio, vLLM or another OpenAI-compatible server.
+        </p>
       ) : null}
-      <Field label="API key">
-        <input
-          className="provider-input"
-          type="password"
-          autoComplete="off"
-          value={apiKey}
-          onChange={(event) => setApiKey(event.target.value)}
-        />
-      </Field>
-      <Button loading={busy} onClick={() => void connect()}>
-        Connect {chosen.label}
-      </Button>
-    </div>
+    </>
   );
 }
 
@@ -330,4 +348,25 @@ function ago(iso: string): string {
   const hours = Math.round(minutes / 60);
   if (hours < 48) return `${hours}h ago`;
   return `${Math.round(hours / 24)}d ago`;
+}
+
+function ModelPick({ provider, onPick }: { provider: Provider; onPick: (model: string) => void }) {
+  if (provider.models.length <= 1) return null;
+  return (
+    <label className="provider-model">
+      <span className="sr-only">Model for {provider.label}</span>
+      <select
+        className="setting-select"
+        value={provider.selectedModel ?? ""}
+        onChange={(event) => onPick(event.target.value)}
+      >
+        <option value="">Let it fail over</option>
+        {provider.models.map((model) => (
+          <option key={model} value={model}>
+            {model}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
 }

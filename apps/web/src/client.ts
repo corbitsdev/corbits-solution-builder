@@ -119,6 +119,7 @@ import {
   API_KEY_CONNECT_OPTIONS,
   OAUTH_CONNECT_OPTIONS,
   connectApiKeyProvider,
+  connectLocalProvider,
   connectOAuthProvider,
   disconnectProvider,
   listConnectedProviders,
@@ -873,9 +874,21 @@ export const api = {
       installerFailure(cause);
     }
   },
-  connectOAuthProvider: async (input: { providerId: string; label: string }): Promise<void> => {
+  connectLocalProvider: async (input: { baseUrl?: string }): Promise<Provider> => {
     try {
-      await connectOAuthProvider(createHubTransport(), input);
+      const row = await connectLocalProvider(createHubTransport(), input);
+      activeModelCache = null;
+      return row;
+    } catch (cause) {
+      installerFailure(cause);
+    }
+  },
+  connectOAuthProvider: async (
+    input: { providerId: string; label: string },
+    onAuthorizeUrl?: (url: string) => void,
+  ): Promise<void> => {
+    try {
+      await connectOAuthProvider(createHubTransport(), input, onAuthorizeUrl);
       activeModelCache = null;
     } catch (cause) {
       installerFailure(cause);
