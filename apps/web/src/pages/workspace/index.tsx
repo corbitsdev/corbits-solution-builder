@@ -1411,8 +1411,8 @@ export function StageWorkspace({
         <div className="product-guide-body">
           <p className="product-guide-source">
             {productGuide.origin === "guide"
-              ? "The guide's own words — enrichment, not a verdict."
-              : "The deterministic checklist — always available, never wrong."}
+              ? "The guide's own words — advisory only, never a verdict."
+              : "The checklist, computed from what is already recorded."}
           </p>
           <p>{productGuide.summary}</p>
           {productGuide.missing.length > 0 ? (
@@ -1422,7 +1422,7 @@ export function StageWorkspace({
               ))}
             </ul>
           ) : null}
-          <p className="product-guide-recommended">Recommended: {productGuide.recommended}</p>
+          <p className="product-guide-recommended">Recommended next step: {productGuide.recommended}</p>
           <Button variant="ghost" loading={guideAsking} onClick={() => void askGuide()}>
             Ask the guide
           </Button>

@@ -44,7 +44,7 @@ export function deterministicGuidance(
   if (!hasDraft) missing.push("This stage has no version yet.");
   const reviews: Readonly<Record<number, unknown>> = view?.reviews ?? {};
   if (view && !view.done && reviews[stage] === undefined) {
-    missing.push("No human decision has been recorded for this stage.");
+    missing.push("No decision has been recorded for this stage yet.");
   }
 
   return {
