@@ -53,12 +53,27 @@ export type ListedProvider = {
   selectedModel: string | null;
 };
 
-export const API_KEY_CONNECT_OPTIONS: ReadonlyArray<{ providerId: string; label: string; needsBaseUrl: boolean }> = [
-  { providerId: "anthropic", label: "Anthropic", needsBaseUrl: false },
-  { providerId: "openai", label: "OpenAI", needsBaseUrl: false },
-  { providerId: "openrouter", label: "OpenRouter", needsBaseUrl: false },
-  { providerId: "xai", label: "xAI (API key)", needsBaseUrl: false },
-  { providerId: "compatible", label: "OpenAI-compatible endpoint", needsBaseUrl: true },
+export const API_KEY_CONNECT_OPTIONS: ReadonlyArray<{
+  providerId: string;
+  label: string;
+  needsBaseUrl: boolean;
+  /** The adapter the runtime dispatches this option to. */
+  plugin: ModelProviderPlugin;
+  /** The endpoint this option connects when the catalog seeds no row for it
+   * (OpenRouter and custom endpoints are never seeded -- see `resolveConnectEndpoint`). */
+  defaultBaseUrl?: string;
+}> = [
+  { providerId: "anthropic", label: "Anthropic", needsBaseUrl: false, plugin: "anthropic" },
+  { providerId: "openai", label: "OpenAI", needsBaseUrl: false, plugin: "openai" },
+  {
+    providerId: "openrouter",
+    label: "OpenRouter",
+    needsBaseUrl: false,
+    plugin: "openai-compatible",
+    defaultBaseUrl: "https://openrouter.ai/api/v1",
+  },
+  { providerId: "xai", label: "xAI (API key)", needsBaseUrl: false, plugin: "openai-compatible" },
+  { providerId: "compatible", label: "OpenAI-compatible endpoint", needsBaseUrl: true, plugin: "openai-compatible" },
 ];
 
 /** The one provider that needs no account and no key: a local OpenAI-compatible server. */
@@ -229,27 +244,38 @@ export async function rerankCatalogViaHub(transport: Transport): Promise<void> {
 
 // --- Connect, order, select, disconnect (API-key providers) ----------------
 
-/** A candidate's known plugin and default base URL; `compatible` supplies its own. */
-const PLUGIN_OF: Record<string, ModelProviderPlugin> = {
-  anthropic: "anthropic",
-  openai: "openai",
-  openrouter: "openai-compatible",
-  xai: "openai-compatible",
-  compatible: "openai-compatible",
-};
+/**
+ * Where an API-key connect option dials, resolved in order: an explicit base
+ * URL the caller passes, the workspace catalog's seeded vendor row (install
+ * seeds plugin and base URL from the pinned catalog, so first-party providers
+ * never hardcode an endpoint here), and finally the option's own default --
+ * which only the never-seeded options (OpenRouter, custom endpoints) carry.
+ * `seeded` reports whether the vendor row carries the install-time offering
+ * snapshot the attach materializes; without one the connect falls back to
+ * recording the live listing (the custom-endpoint exception).
+ */
+async function resolveConnectEndpoint(
+  transport: Transport,
+  workspaceTenantId: string,
+  providerId: string,
+  baseUrlOverride: string | undefined,
+): Promise<{ plugin: ModelProviderPlugin; baseURL: string | undefined; seeded: boolean }> {
+  const option = API_KEY_CONNECT_OPTIONS.find((entry) => entry.providerId === providerId);
+  const vendors = await catalogFor(transport, workspaceTenantId).providers();
+  const row = vendors.find((vendor) => vendor.name === providerId);
+  const baseURL = baseUrlOverride?.trim() || row?.apiBaseUrl || option?.defaultBaseUrl;
+  return {
+    plugin: (row?.plugin ?? option?.plugin ?? "openai-compatible") as ModelProviderPlugin,
+    baseURL,
+    seeded: Array.isArray((row?.metadata ?? {})["offeringSpecs"]),
+  };
+}
 
 // Anthropic's API rejects a browser-origin request outright (CORS) unless
 // this opt-in header is present -- without it, every real key fails in
 // `discoverModels` below with a network error before the response is ever
 // read. Named as a constant so the literal header key appears once.
 const ANTHROPIC_BROWSER_HEADER = "anthropic-" + "dangerous-direct-browser-access";
-
-const DEFAULT_BASE_URL: Record<string, string> = {
-  anthropic: "https://api.anthropic.com",
-  openai: "https://api.openai.com/v1",
-  openrouter: "https://openrouter.ai/api/v1",
-  xai: "https://api.x.ai/v1",
-};
 
 /** A provider's `/models` response rejecting the request outright, HTTP status attached so callers can tell an auth failure from anything else. */
 export class ProviderRejectedError extends Error {
@@ -320,31 +346,37 @@ export function requireDiscoveredModels(canonicalNames: readonly string[]): void
 /**
  * Connects (or reconnects) an API-key provider on the workspace tenant: the
  * key is validated by listing the provider's own models before anything is
- * written, then the provider, credential and discovered offerings are
- * recorded through the hub's catalog routes. Returns the connected row as the
+ * written, then the provider and credential are recorded through the hub's
+ * catalog routes. The listing is validation only -- it writes nothing. For a
+ * seeded vendor the attach materializes the install-time offering snapshot
+ * (restricted to the models the key actually serves); for a vendor with no
+ * snapshot (OpenRouter, custom endpoints) the live listing is recorded
+ * instead, the custom-endpoint exception. Returns the connected row as the
  * list already renders it.
  */
 export async function connectApiKeyProvider(
   transport: Transport,
   input: { providerId: string; label: string; baseUrl?: string; apiKey: string },
 ): Promise<ListedProvider> {
-  const plugin = PLUGIN_OF[input.providerId] ?? "openai-compatible";
-  const baseURL = input.baseUrl?.trim() || DEFAULT_BASE_URL[input.providerId];
-  if (!baseURL) {
-    throw new Error(`${input.label} needs a base URL.`);
-  }
-  const canonicalNames = await discoverModels(plugin, baseURL, input.apiKey);
-
   const workspace = await resolveWorkspace(transport);
   if (!workspace) throw new Error("The workspace is not installed yet.");
+  const endpoint = await resolveConnectEndpoint(transport, workspace.tenantId, input.providerId, input.baseUrl);
+  if (!endpoint.baseURL) {
+    throw new Error(`${input.label} needs a base URL.`);
+  }
+  const canonicalNames = await discoverModels(endpoint.plugin, endpoint.baseURL, input.apiKey);
+
   const { modelProviderId } = await upsertApiKeyProvider(transport, workspace.tenantId, {
     providerId: input.providerId,
     label: input.label,
-    plugin,
-    baseURL,
+    plugin: endpoint.plugin,
+    baseURL: endpoint.baseURL,
     apiKey: input.apiKey,
+    ...(endpoint.seeded ? { canonicalNames } : {}),
   });
-  await registerProviderModels(transport, workspace.tenantId, { modelProviderId, canonicalNames });
+  if (!endpoint.seeded) {
+    await registerProviderModels(transport, workspace.tenantId, { modelProviderId, canonicalNames });
+  }
 
   const connected = await listConnectedProviders(transport);
   const row = connected.find((entry) => entry.id === modelProviderId);
@@ -353,10 +385,12 @@ export async function connectApiKeyProvider(
 }
 
 /**
- * Connects a local OpenAI-compatible server (Ollama and friends): the same
- * discovery/write path as `connectApiKeyProvider`, but with no key required
- * and the credential marked keyless so the catalog renders it as a local
- * endpoint (`toListedProvider`'s `credentialRow?.metadata?.keyless` check).
+ * Connects a local OpenAI-compatible server (Ollama and friends): the live
+ * listing both validates reachability and supplies the offerings, since a
+ * local endpoint has no seed snapshot -- the custom-endpoint exception to
+ * attach-only connects. No key is required, and the credential is marked
+ * keyless so the catalog renders it as a local endpoint
+ * (`toListedProvider`'s `credentialRow?.metadata?.keyless` check).
  */
 export async function connectLocalProvider(transport: Transport, input: { baseUrl?: string }): Promise<ListedProvider> {
   const baseURL = input.baseUrl?.trim() || LOCAL_DEFAULT_BASE_URL;

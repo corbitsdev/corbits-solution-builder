@@ -30,6 +30,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ApiError, listWorkflowDeployments, readWorkflowRunEvents, type Transport, type WorkflowRunEvent } from "@intx/hub-client";
 import {
+  catalogFor,
   createArtifact,
   createProject as installerCreateProject,
   ensureProjectWorkflow,
@@ -362,10 +363,6 @@ async function authFetch(
   return { response, parsed };
 }
 
-const DEFAULT_BASE_URL: Record<string, string> = {
-  anthropic: "https://api.anthropic.com",
-};
-
 const DEFAULT_SMOKE_PROVIDER_BASE_URL = "https://thegreataxios-home-studio.tail87f5aa.ts.net/v1";
 
 /**
@@ -568,18 +565,19 @@ async function main(): Promise<void> {
     if (workspace) {
       await step("3. connect an API-key provider", async () => {
         if (anthropicKey) {
+          // The install step already seeded the anthropic vendor row from the
+          // pinned catalog, so its base URL resolves from there and the attach
+          // materializes the seeded offerings -- no live discovery writes.
+          const vendor = (await catalogFor(transport, workspace.tenantId).providers()).find(
+            (row) => row.name === "anthropic",
+          );
+          if (!vendor?.apiBaseUrl) throw new Error("install did not seed the anthropic vendor row");
           const { modelProviderId } = await upsertApiKeyProvider(transport, workspace.tenantId, {
             providerId: "anthropic",
             label: "Anthropic",
             plugin: "anthropic",
-            baseURL: DEFAULT_BASE_URL.anthropic!,
+            baseURL: vendor.apiBaseUrl,
             apiKey: anthropicKey,
-          });
-          // Model discovery calls the vendor's own API (the "inference step");
-          // this smoke skips it and records the canonical name it already knows.
-          await registerProviderModels(transport, workspace.tenantId, {
-            modelProviderId,
-            canonicalNames: ["claude-3-5-sonnet-20241022"],
           });
           check("3. connect an API-key provider", true, `model provider ${modelProviderId} (anthropic)`);
           return;
@@ -588,6 +586,8 @@ async function main(): Promise<void> {
         const baseURL = (process.env.SMOKE_PROVIDER_BASE_URL ?? DEFAULT_SMOKE_PROVIDER_BASE_URL).replace(/\/+$/, "");
         const apiKey = process.env.SMOKE_PROVIDER_API_KEY ?? "ollama";
         const canonicalNames = await discoverModels(baseURL, apiKey);
+        // A custom endpoint has no seed snapshot, so the live listing is
+        // recorded -- the custom-endpoint exception to attach-only connects.
         const { modelProviderId } = await upsertApiKeyProvider(transport, workspace.tenantId, {
           providerId: "smoke-openai-compatible",
           label: "Smoke OpenAI-compatible",
