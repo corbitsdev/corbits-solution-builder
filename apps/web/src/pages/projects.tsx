@@ -28,6 +28,7 @@ import { api, ApiFailure, type ActiveModel, type ProjectInfo, type ProjectSummar
 import { Button, Banner, downloadArtifact, StageRing, StateLabel, stageName } from "../components.jsx";
 import { assembleBundle, bundleFileName } from "../project-export.js";
 import { displayDone, displayStage, displayTurn } from "../project-list.js";
+import { formatMoney, formatSpendHeadline, formatTokens, type WorkspaceSpend } from "../project-usage.js";
 import { formatUsage } from "../project-usage.js";
 import { DEFAULT_POLICY } from "./onboarding.jsx";
 import { Dictated } from "../dictation.jsx";
@@ -227,6 +228,8 @@ export function Projects({
         </p>
         {importNotice ? <p className="inline-note">{importNotice}</p> : null}
       </section>
+
+      <SpendBox />
 
       <section className="project-grid-section" aria-labelledby="projects-title">
         <h3 id="projects-title" className="project-grid-title">
@@ -577,7 +580,13 @@ function ProjectInfoDialog({ project, onClose }: { project: ProjectSummary; onCl
                 </div>
                 <div>
                   <dt>Usage</dt>
-                  <dd>{formatUsage(info.usage, activeModel ? `${activeModel.providerLabel} · ${activeModel.canonicalName}` : null)}</dd>
+                  <dd>
+                    {formatUsage(info.usage, activeModel ? `${activeModel.providerLabel} · ${activeModel.canonicalName}` : null)}
+                    <br />
+                    <span className="inline-note">
+                      Inference cost is tracked for the workspace as a whole, above the project list; there is no per-project breakdown yet.
+                    </span>
+                  </dd>
                 </div>
                 <div>
                   <dt>Decisions</dt>
@@ -591,5 +600,50 @@ function ProjectInfoDialog({ project, onClose }: { project: ProjectSummary; onCl
         </DialogBody>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * What the workspace has spent on inference: a headline total where every
+ * observed model has a price (tokens otherwise), and a per-provider
+ * breakdown. `api.spend()` reads `packages/embed-hub/src/spend.ts`'s mount,
+ * fed by real per-turn token counts (`onUsage`) -- but it is process memory
+ * since the hub last started, not a durable ledger, so the caption says so.
+ * Renders nothing before the first read resolves, and nothing on failure --
+ * this is context, not something a project depends on.
+ */
+function SpendBox() {
+  const [spend, setSpend] = useState<WorkspaceSpend | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .spend()
+      .then((result) => {
+        if (!cancelled) setSpend(result);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  if (!spend) return null;
+  const { figure, caption } = formatSpendHeadline(spend);
+  return (
+    <section className="spend-box" aria-label="Inference spend across the workspace">
+      <div className="spend-headline">
+        <span className="spend-figure">{figure}</span>
+        <span className="spend-caption">{caption}</span>
+      </div>
+      {spend.rows.length > 0 ? (
+        <ul className="spend-providers">
+          {spend.rows.map((row) => (
+            <li key={`${row.provider} ${row.model}`}>
+              <strong>{row.provider}</strong> · {row.model} · {formatTokens(row.tokens.input + row.tokens.output + row.tokens.cacheRead + row.tokens.cacheWrite + row.tokens.thinking)} tokens
+              {row.cost !== null ? ` · ${formatMoney(row.cost, spend.totals.currency)}` : " · unpriced"}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
   );
 }

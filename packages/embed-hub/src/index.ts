@@ -84,6 +84,7 @@ import { drizzle } from "drizzle-orm/pglite";
 import * as intxSchema from "@intx/db/schema";
 import { withPostgresJsResultShape } from "./pg-compat.js";
 import { mountProviderOAuth } from "./oauth-mount.js";
+import { createSpendApi, createSpendStore, type TurnUsage } from "./spend.js";
 import {
   createHubMailboxAuthorizeSender,
   createHubPersistMailWithSessionEnsure,
@@ -277,15 +278,20 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
   const mailboxDb = db.db as unknown as Parameters<typeof mountMailbox>[1]["db"];
   const mailboxBus = createInMemoryMailboxEventBus();
 
-  // The registry's `onUsage` sink is not wired: in this Interchange revision
-  // nothing creates a collector, so `dispatch` drops every frame and the sink
-  // never fires. A round's spend is read from the `agent.event` stream itself;
-  // a sink here as well would count a call twice once a revision does create
-  // collectors.
+  // `onUsage` fires once per finished inference turn with the provider,
+  // model and token counts the sidecar reported -- the one place a round's
+  // spend is actually observable (see `spend.ts`). The store it feeds is
+  // process memory, not a ledger row: nothing else in this revision of
+  // Interchange persists a call's tokens, so a restart starts the count over
+  // (the mounted route says so rather than implying continuity).
   //
   // Created ahead of `lookups` (moved up from below `createSidecarRouter`) so
   // the persistMail session-ensure wrapper below can use it.
-  const eventCollectors = createEventCollectorRegistry({ db: db.db });
+  const spendStore = createSpendStore();
+  const eventCollectors = createEventCollectorRegistry({
+    db: db.db,
+    onUsage: (_agentAddress: string, usage: TurnUsage) => spendStore.record(usage),
+  });
 
   const lookups: SidecarLookups = {
     ...createHubSessionLookups({ db: db.db, agentRepoStore }),
@@ -703,6 +709,10 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
     return c.json({ data: { ok: true } }, 201);
   });
   app.route("/api/tenants/:tenantId/workflow-artifact-tokens", workflowArtifactTokensApi);
+
+  // Read-only workspace inference spend, folded from `onUsage` above --
+  // see `spend.ts` for what it can and cannot answer.
+  app.route("/api/tenants/:tenantId/spend", createSpendApi(db.db, spendStore));
 
   // A second @corbits/mailbox mount, tenant-scoped, alongside the
   // single-workspace `/api/me/inbox*` one above: mail addressed to a run

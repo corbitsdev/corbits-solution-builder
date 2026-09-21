@@ -113,7 +113,7 @@ import { hubCredentials, hubOrigin } from "./hub-origin.ts";
 import { listProjectSummaries } from "./project-list.ts";
 import { openDecisions } from "./decisions-fold.ts";
 import { loadProjectView, toArtifactNode } from "./project-view.ts";
-import { projectUsage, type ProjectUsage } from "./project-usage.ts";
+import { projectUsage, type ProjectUsage, type WorkspaceSpend } from "./project-usage.ts";
 import { designerSettings as loadDesignerSettings, saveDesignerSettings, type DesignerSettings } from "./designer-settings.ts";
 import {
   API_KEY_CONNECT_OPTIONS,
@@ -958,6 +958,29 @@ export const api = {
       return { decisions: await openDecisions(createHubTransport()) };
     } catch (cause) {
       installerFailure(cause);
+    }
+  },
+  /**
+   * What the workspace has spent on inference since the hub process last
+   * started -- `packages/embed-hub/src/spend.ts`'s `GET /spend`, mounted on
+   * the hub itself. Workspace-wide only: this revision has no mapping from a
+   * workflow run to the project id the browser knows, so there is no honest
+   * per-project breakdown to ask for yet (`../project-usage.js` says so in
+   * the UI rather than omitting the fact). Nice-to-have, not core: a failure
+   * here returns null rather than surfacing an error banner.
+   */
+  spend: async (): Promise<WorkspaceSpend | null> => {
+    try {
+      const transport = createHubTransport();
+      const workspace = await resolveWorkspace(transport);
+      if (!workspace) return null;
+      const response = await transport.fetch<{ data: WorkspaceSpend }>(
+        "GET",
+        `/api/tenants/${workspace.tenantId}/spend`,
+      );
+      return response.data;
+    } catch {
+      return null;
     }
   },
   /** Project tenants under the workspace, read straight off the hub -- see `./project-list.ts`. */
