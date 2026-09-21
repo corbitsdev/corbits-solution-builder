@@ -50,7 +50,11 @@ const SPECIALIST_DIR = "packages/specialist";
 const DIGEST_PATH = "closure.sha256";
 /** The offering this asset was last deployed against -- written alongside the
  *  rendered source so `stageSpecialistSource` can report what a specialist is
- *  actually running on, rather than the tenant's current catalog order. */
+ *  actually running on, rather than the tenant's current catalog order.
+ *  CL-8783 verdict: this pin is a reporting artifact only, NOT the deploy
+ *  path -- the hub resolves the inference chain at deploy time from
+ *  `sourceOfferingIds` (`resolveSourcesByOfferingIds`, the workflow-deploy
+ *  path), never from this file. Removing it is deferred to the full slice. */
 const SOURCE_PIN_PATH = `${SPECIALIST_DIR}/source.json`;
 
 function normalizedProjectId(projectId: string): string {
@@ -177,6 +181,11 @@ export async function stageSpecialistStatus(
  * read back off the asset's own tree rather than recomputed from the
  * tenant's current catalog order (which can have moved since). Null when the
  * asset does not exist yet, or predates this pin file.
+ *
+ * CL-8783 verdict: read-only reporting. The hub never reads this file when
+ * deploying -- the inference chain comes from the deploy's `sourceOfferingIds`
+ * via `resolveSourcesByOfferingIds` -- so this stays until the full slice
+ * replaces pin reporting with declared `modelRequirements`.
  */
 export async function stageSpecialistSourcePin(
   transport: Transport,
@@ -266,6 +275,11 @@ async function renderSpecialistSource(
       artifactTools,
       ...(audiences ? { audiences } : {}),
     }),
+    // CL-8783 verdict: the pin rides along as a reporting artifact only. The
+    // deployed entry resolves its model from the hub-resolved inference chain
+    // (`sourceOfferingIds` -> `resolveSourcesByOfferingIds`), never by reading
+    // this file back -- so a future slice can declare `modelRequirements` and
+    // drop this pin without changing what the specialist runs on.
     [SOURCE_PIN_PATH]: `${JSON.stringify(source, null, 2)}\n`,
     // The full closure, the same set the lifecycle ships: whichever tool a
     // given stage's specialist imports (deck, posix, delivery/deliver -- see
@@ -332,6 +346,14 @@ async function ensureSpecialistDeploymentOnce(
     return { deploymentId: existing.id, address: `${existing.id}@${tenant.domain}` };
   }
 
+  // CL-8783 verdict: `offerings[0]` picks only the installer's local render
+  // pin (what `SOURCE_PIN_PATH` reports). The deploy below hands the FULL
+  // ordered chain as `sourceOfferingIds`, and the hub re-resolves that chain
+  // itself (`resolveSourcesByOfferingIds` in `workflow-allocation-service.ts`)
+  // at provision and recovery time -- so a rotated credential (or visibility /
+  // delegation re-check) is picked up without redeploying, and the pin here
+  // never constrains what the specialist runs. A post-deploy priority reorder
+  // still needs a redeploy (stored id order).
   const catalog = catalogFor(transport, workspaceTenantId);
   const offerings = (await catalog.offerings())
     .filter((offering) => !offering.disabled)
@@ -377,6 +399,14 @@ async function ensureSpecialistDeploymentOnce(
     return { deploymentId: justDeployed.id, address: `${justDeployed.id}@${tenant.domain}` };
   }
 
+  // CL-8783 verdict: specialists deploy via the allocation path, NOT
+  // `resolveModelSources` (which only the instance-launch route reaches, via
+  // `run-source-resolution.ts`). The definition carries no `modelRequirements`
+  // manifest (`ensureWorkflowDefinitionForAsset` projects the row over the
+  // asset with no model manifest, so this deploys as a workflow rather than
+  // launching as an instance); `DeployWorkflow` (`routes/workflows.ts`) has no
+  // `modelRequirements` field, so `sourceOfferingIds` is the whole inference
+  // story. Declaring per-specialist model needs is deferred to the full slice.
   const offeringIds = offerings.map((offering) => offering.id);
   const deployment = await workflows.deploy({
     source: { kind: "asset", assetId, package: { format: "source", commitSha, packageName: assetName } },
@@ -397,6 +427,10 @@ async function ensureSpecialistDeploymentOnce(
   // would break an in-flight tool call against a still-live prior deployment.
   // Skipped entirely when `artifactTools` is off -- the rendered source
   // carries no `credentialBindings` to satisfy, so minting one is dead work.
+  // CL-8783: untouched by the model-needs verdict -- the hub's credential-push
+  // (`pushSourceUpdatesToTenants`) already excludes deployment-anchor runs
+  // (`anchorRunId IS NULL`), so this per-deployment bearer stays the only
+  // credential story for specialists. See `docs/specialist-model-requirements.md`.
   if (artifactTools) {
     await ensureWorkflowArtifactsCredential(transport, workspaceTenantId, hubOrigin, assetName, winner.id);
   }
