@@ -670,6 +670,16 @@ if (!STAGE_5_PACKAGE_ROLE) {
   throw new Error("kit role \"presentation-creator\" is missing");
 }
 
+const ensureStage1EvaluatorCalls = new Map<string, Promise<SpecialistDeployment>>();
+const BRIEF_EVALUATOR_ROLE_KEY = "brief-evaluator";
+
+/** Stage 1's brief-evaluator role -- named explicitly so a rename of the kit
+ *  role fails loudly here rather than silently deploying the wrong prompt. */
+const BRIEF_EVALUATOR_ROLE = agentById(BRIEF_EVALUATOR_ROLE_KEY);
+if (!BRIEF_EVALUATOR_ROLE) {
+  throw new Error(`kit role "${BRIEF_EVALUATOR_ROLE_KEY}" is missing`);
+}
+
 /** In-flight/resolved `ensureProjectWorkflow` calls, keyed by `projectId` --
  *  see that method's doc comment. Also `projectWorkflowView`/`decide`'s only
  *  way to find the deployment/run they read or signal. */
@@ -1514,6 +1524,48 @@ false,
     });
     call.catch(() => ensureStageAgentCalls.delete(key));
     ensureStageAgentCalls.set(key, call);
+    return call;
+  },
+  /**
+   * Stage 1's brief evaluator (CL-8736): its own deployed agent, running
+   * `BRIEF_EVALUATOR_ROLE` (`agentById("brief-evaluator")`), mailed a copy of
+   * the current draft and read back for an advisory verdict. Deploys lazily
+   * — only when a caller actually has a draft worth judging, never on
+   * project creation — onto its own asset (`ensureSpecialistDeployment`'s
+   * `roleKey`, distinct from the stage's primary drafter). Memoised per
+   * project the same way `ensureStageAgent` memoises per project/stage.
+   */
+  ensureStage1EvaluatorAgent: (projectId: string): Promise<SpecialistDeployment> => {
+    const pending = ensureStage1EvaluatorCalls.get(projectId);
+    if (pending) return pending;
+    const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      const status = await request<HostStatus>("/status");
+      const deployment = await ensureSpecialistDeployment(
+        transport,
+        sidecarCapabilityOf(status),
+        await lifecycleClosureSource(),
+        lifecycleGitPush,
+        workspaceTenantId,
+        projectId,
+        1 as Stage,
+        hubOrigin(),
+        false,
+        BRIEF_EVALUATOR_ROLE_KEY,
+        BRIEF_EVALUATOR_ROLE,
+      );
+      const ready = await waitForDeploymentDeployed(transport, workspaceTenantId, deployment.deploymentId);
+      if (!ready) {
+        throw new ApiFailure({
+          code: "unavailable",
+          message: "The stage 1 brief evaluator did not finish starting up.",
+          correlationId: "-",
+          retryable: true,
+        });
+      }
+      return deployment;
+    });
+    call.catch(() => ensureStage1EvaluatorCalls.delete(projectId));
+    ensureStage1EvaluatorCalls.set(projectId, call);
     return call;
   },
   /**

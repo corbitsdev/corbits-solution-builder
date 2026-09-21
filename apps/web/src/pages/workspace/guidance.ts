@@ -100,6 +100,29 @@ export function latestSubstantialDraft(messages: readonly ChatMessage[]): ChatMe
   return [...messages].reverse().find((message) => message.author === "agent" && isSubstantialDraft(message.body)) ?? null;
 }
 
+export type EvaluatorVerdict = {
+  readonly ready: boolean;
+  readonly notes: readonly string[];
+};
+
+/**
+ * Stage 1's brief evaluator replies with a fixed "Verdict: ready" or
+ * "Verdict: not yet" line, then up to five bullets. Advisory only — this
+ * never feeds the approve gate, which reads `workflowView.allowed.approve`.
+ */
+export function evaluatorVerdict(messages: readonly ChatMessage[]): EvaluatorVerdict | null {
+  const latest = latestAgent(messages);
+  if (!latest) return null;
+  const match = /^Verdict:\s*(ready|not yet)\s*$/im.exec(latest.body);
+  if (!match) return null;
+  const notes = latest.body
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^[-*]\s+\S/.test(line))
+    .map((line) => line.replace(/^[-*]\s+/, ""));
+  return { ready: match[1]!.toLowerCase() === "ready", notes };
+}
+
 /**
  * A read-only projection from the mail thread. It intentionally never infers
  * whether a stage is approved, progressing, or complete.

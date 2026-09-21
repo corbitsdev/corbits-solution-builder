@@ -43,7 +43,7 @@ import { BuildPanel, buildEvidenceState, currentPublishedBundle } from "./build.
 import { TargetPicker, targetOpeningLine } from "./freeze.jsx";
 import { deliveryOpeningLine, parseDeliveryManifest } from "./delivery-opening.ts";
 import { EstimateView } from "./estimate.jsx";
-import { interviewProgress, workspaceGuidance } from "./guidance.js";
+import { evaluatorVerdict as guidanceEvaluatorVerdict, interviewProgress, workspaceGuidance } from "./guidance.js";
 import { describeFailure } from "./failure-message.ts";
 import {
   applyWithdrawn,
@@ -702,6 +702,64 @@ export function StageWorkspace({
   const reviewMessage = DOCUMENT_STAGES.has(stage) ? draftMessage : latestSpecialistMessage;
   const progress = useMemo(() => interviewProgress(foldedMessages), [foldedMessages]);
 
+  // Stage 1's brief evaluator (CL-8736): a second, deployed-on-demand agent
+  // mailed a copy of the current draft, its reply read back and shown as an
+  // advisory verdict. Never an artifact write, never a decision, and never
+  // wired to the approve gate (`workflowView.allowed.approve`) -- a failure
+  // or missing reply here is silent, the stage works without it either way.
+  const [evaluatorAddress, setEvaluatorAddress] = useState<string | null>(null);
+  const [evaluatorSentFor, setEvaluatorSentFor] = useState<string | null>(null);
+  const [evaluatorMessages, setEvaluatorMessages] = useState<ChatMessage[]>([]);
+  useEffect(() => {
+    setEvaluatorAddress(null);
+    setEvaluatorSentFor(null);
+    setEvaluatorMessages([]);
+  }, [detail.project.id]);
+  useEffect(() => {
+    if (stage !== 1 || !draftMessage || draftMessage.id === evaluatorSentFor) return;
+    let cancelled = false;
+    const draftId = draftMessage.id;
+    const draftBody = draftMessage.body;
+    void api
+      .ensureStage1EvaluatorAgent(detail.project.id)
+      .then((deployment) => {
+        if (cancelled) return null;
+        setEvaluatorAddress(deployment.address);
+        return api.sendStageMail(tenantId, deployment.address, {
+          body: draftBody,
+          subject: "Stage 1 draft for review",
+        });
+      })
+      .then(() => {
+        if (!cancelled) setEvaluatorSentFor(draftId);
+      })
+      .catch(() => {
+        // Silent: the evaluator is advisory, the stage works without it.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [stage, draftMessage, evaluatorSentFor, detail.project.id, tenantId]);
+  useEffect(() => {
+    if (!evaluatorAddress) return;
+    let cancelled = false;
+    const poll = () => {
+      void api
+        .readStageThread(tenantId, [evaluatorAddress])
+        .then((result) => {
+          if (!cancelled) setEvaluatorMessages(result);
+        })
+        .catch(() => {});
+    };
+    poll();
+    const timer = setInterval(poll, 5_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [evaluatorAddress, tenantId]);
+  const evaluatorVerdict = useMemo(() => guidanceEvaluatorVerdict(evaluatorMessages), [evaluatorMessages]);
+
   // What the person last said, and whether a visible specialist reply has
   // landed since — a reply with an empty body counts as none, since that is
   // exactly the weak-model case nothing else would otherwise report.
@@ -1250,6 +1308,21 @@ export function StageWorkspace({
                 </Button>
               ))}
             </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {stage === 1 && evaluatorVerdict ? (
+        <div className="stage-guidance stage-guidance-evaluator" aria-label="Brief evaluator verdict">
+          <p className="stage-guidance-title">
+            Brief evaluator (advisory): {evaluatorVerdict.ready ? "ready" : "not yet"}
+          </p>
+          {evaluatorVerdict.notes.length > 0 ? (
+            <ul>
+              {evaluatorVerdict.notes.map((note, index) => (
+                <li key={index}>{note}</li>
+              ))}
+            </ul>
           ) : null}
         </div>
       ) : null}
