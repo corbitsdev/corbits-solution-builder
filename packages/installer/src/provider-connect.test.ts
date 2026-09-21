@@ -595,3 +595,105 @@ describe("upsertApiKeyProvider seeded-snapshot materialization", () => {
     expect(calls.some((c) => c.path.includes("/catalog/models") || c.path.includes("/catalog/offerings"))).toBe(false);
   });
 });
+
+describe("upsertApiKeyProvider opus-5 default follow-up (CL-8781)", () => {
+  const seedVendor: HubProvider = {
+    id: "provider_seed",
+    name: "anthropic",
+    plugin: "anthropic",
+    apiBaseUrl: "https://api.anthropic.com",
+    metadata: {
+      label: "Anthropic",
+      catalogSeeded: true,
+      offeringSpecs: [
+        { model: "claude-sonnet-5", displayName: "Claude Sonnet 5", priority: 0, capabilities: ["tools"], quirks: {} },
+        { model: "claude-opus-5", displayName: "Claude Opus 5", priority: 5, capabilities: ["tools"], quirks: {} },
+      ],
+    },
+  };
+  const seedModels: HubModel[] = [
+    { id: "model_sonnet", canonicalName: "claude-sonnet-5", displayName: "Claude Sonnet 5" },
+    { id: "model_opus", canonicalName: "claude-opus-5", displayName: "Claude Opus 5" },
+  ];
+  const connectInput = {
+    providerId: "anthropic",
+    label: "Anthropic",
+    plugin: "anthropic" as const,
+    baseURL: "https://api.anthropic.com",
+    apiKey: "sk-ant-test",
+  };
+
+  function statefulCatalog(initialOfferings: HubOffering[] = []) {
+    const offerings = [...initialOfferings];
+    const modelProviders: HubModelProvider[] = [];
+    let counter = 0;
+    const { transport, calls } = createMockTransport((call) => {
+      if (call.method === "GET" && call.path.includes("/tenants/ten_workspace/providers?limit=100")) return page([seedVendor]);
+      if (call.method === "POST" && call.path.endsWith("/credentials")) {
+        return { id: "credential_1", type: "api_key", status: "active", updatedAt: "now", principalId: null, metadata: null, ...(call.body as object) } as HubCredential;
+      }
+      if (call.method === "GET" && call.path.endsWith("/catalog/providers?limit=100")) return page(modelProviders);
+      if (call.method === "POST" && call.path.endsWith("/catalog/providers")) {
+        const row = { id: "modelProvider_1", disabled: false, ...(call.body as object) } as HubModelProvider;
+        modelProviders.push(row);
+        return row;
+      }
+      if (call.method === "GET" && call.path.endsWith("/catalog/models?limit=100")) return page(seedModels);
+      if (call.method === "GET" && call.path.endsWith("/catalog/offerings?limit=100")) return page(offerings);
+      if (call.method === "POST" && call.path.endsWith("/catalog/offerings")) {
+        counter += 1;
+        const row = {
+          id: `offering_${counter}`,
+          modelId: "",
+          providerId: "",
+          priority: 0,
+          disabled: false,
+          capabilities: [],
+          quirks: null,
+          ...(call.body as object),
+        } as HubOffering;
+        offerings.push(row);
+        return row;
+      }
+      if (call.method === "PATCH" && call.path.includes("/catalog/offerings/")) {
+        const id = call.path.split("/catalog/offerings/")[1]!.split("?")[0]!;
+        const row = offerings.find((o) => o.id === id);
+        if (!row) throw new Error(`unknown offering ${id}`);
+        Object.assign(row, call.body as object);
+        return row;
+      }
+      throw new Error(`unexpected call: ${call.method} ${call.path}`);
+    });
+    return { transport, calls, offerings };
+  }
+
+  test("a fresh seed connect moves the default from sonnet-5 to opus-5", async () => {
+    const { transport, calls, offerings } = statefulCatalog();
+
+    await upsertApiKeyProvider(transport, SCOPE, connectInput);
+
+    const patches = calls.filter((c) => c.method === "PATCH" && c.path.includes("/catalog/offerings/"));
+    expect(patches).toHaveLength(2);
+    // Priority-only payloads: the follow-up can never flip a disabled flag.
+    for (const patch of patches) {
+      expect(Object.keys(patch.body as object).sort()).toEqual(["priority"]);
+    }
+    const byModel = new Map(offerings.map((o) => [o.modelId, o.priority]));
+    expect(byModel.get("model_opus")).toBe(0);
+    expect(byModel.get("model_sonnet")).toBe(5);
+  });
+
+  test("a customized default is never clobbered on connect", async () => {
+    const customized: HubOffering[] = [
+      { id: "offering_opus", modelId: "model_opus", providerId: "modelProvider_1", priority: 0, capabilities: ["tools"], quirks: null, disabled: false },
+      { id: "offering_sonnet", modelId: "model_sonnet", providerId: "modelProvider_1", priority: 5, capabilities: ["tools"], quirks: null, disabled: false },
+    ];
+    const { transport, calls } = statefulCatalog(customized);
+
+    await upsertApiKeyProvider(transport, SCOPE, connectInput);
+
+    // The seed entries are already attached, so nothing is posted — and no
+    // priority PATCH may move the user's opus-first order.
+    expect(calls.some((c) => c.method === "PATCH" && c.path.includes("/catalog/offerings/"))).toBe(false);
+  });
+});

@@ -17,6 +17,7 @@ import { ApiError } from "@intx/hub-client";
 import type { Transport } from "@intx/hub-client";
 import { catalogFor, type HubCredential, type HubModelProvider, type HubProvider } from "./hub.js";
 import { seededVendorSpec, type SeedOfferingSpec } from "./catalog-seed.js";
+import { ensureOpusDefault } from "./model-default.js";
 
 /** Mirrors `@intx/types`' `modelProviderPlugins`: the inference adapters the runtime dispatches to. */
 export type ModelProviderPlugin = "anthropic" | "openai" | "openai-compatible" | "google-genai";
@@ -94,11 +95,11 @@ async function materializeSeededOfferings(
   vendor: HubProvider,
   modelProvider: HubModelProvider,
   canonicalNames: string[],
-): Promise<void> {
+): Promise<boolean> {
   const wanted = seedSnapshotOfferings(vendor).filter((offering) =>
     canonicalNames.length === 0 ? true : canonicalNames.includes(offering.model),
   );
-  if (wanted.length === 0) return;
+  if (wanted.length === 0) return false;
   const [modelRows, offeringRows] = await Promise.all([catalog.models(), catalog.offerings()]);
   const attached = new Set(
     offeringRows.filter((row) => row.providerId === modelProvider.id).map((row) => row.modelId),
@@ -115,6 +116,7 @@ async function materializeSeededOfferings(
       ...(Object.keys(offering.quirks).length > 0 ? { quirks: offering.quirks } : {}),
     });
   }
+  return true;
 }
 
 async function ensureApiKeyCredential(
@@ -185,7 +187,14 @@ export async function upsertApiKeyProvider(
     input.keyless ? { keyless: true } : undefined,
   );
   const modelProvider = await ensureModelProvider(catalog, input, credential.id);
-  await materializeSeededOfferings(catalog, vendorProvider, modelProvider, input.canonicalNames ?? []);
+  const seeded = await materializeSeededOfferings(catalog, vendorProvider, modelProvider, input.canonicalNames ?? []);
+  // CL-8781: the seed snapshot still leads with sonnet-5, so a fresh
+  // connection would draft with it — move the default to opus-5. Post-seed
+  // only (snapshot-less vendors attach with no catalog reads at all), and
+  // guarded: workspaces with a customized default are left alone.
+  if (seeded) {
+    await ensureOpusDefault(transport, scope);
+  }
   return { vendorProviderId: vendorProvider.id, credentialId: credential.id, modelProviderId: modelProvider.id };
 }
 
@@ -346,9 +355,11 @@ export async function setProviderOrder(
 }
 
 /**
- * Pins a provider to exactly one model (disabling its other offerings), or
- * clears the pin (`canonicalName: null`, enabling every offering again) so
- * failover picks among all of them.
+ * Restricts a provider to exactly one model (disabling its other offerings),
+ * or clears the restriction (`canonicalName: null`, enabling every offering
+ * again) so specialists fail over across all of them in priority order. User
+ * choice only — the workspace default never writes here (CL-8781); it is
+ * derived from offering priority at read time.
  */
 export async function selectModel(
   transport: Transport,

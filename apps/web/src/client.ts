@@ -941,7 +941,8 @@ export const api = {
    * The model specialists are actually drafting with, for the workspace
    * header. `projectId`/`stage` name the stage panel asking, so a specialist
    * already deployed there reports its own pinned offering rather than the
-   * tenant's current catalog order (see `resolveActiveModel`'s doc). Cached
+   * tenant's current catalog default (the lowest-priority offering, CL-8781;
+   * see `resolveActiveModel`'s doc). Cached
    * briefly per project/stage so switching between stages does not re-resolve
    * the whole catalog on every render; a provider mutation elsewhere in `api`
    * drops the whole cache so a change shows up on the next read.

@@ -31,45 +31,6 @@ type Row = {
   needsBaseUrl: boolean;
 };
 
-/**
- * The model a fresh connection should pin: the first served, when nothing
- * is chosen yet. Null means there is nothing to pin — either a choice
- * already exists (an explicit override persists) or no models are served.
- */
-export function autoPickModel(provider: { selectedModel: string | null; models: readonly string[] }): string | null {
-  if (provider.selectedModel !== null) return null;
-  const [first] = provider.models;
-  return first ?? null;
-}
-
-/**
- * Pin the first served model when nothing is chosen yet; explicit choices
- * persist. `deps` is the `api` singleton in production and a mock in tests —
- * the component delegates with the default, so the call sites below read
- * unchanged.
- */
-export async function autoPickProvider(
-  provider: Provider,
-  deps: Pick<typeof api, "selectProviderModel"> = api,
-): Promise<void> {
-  const pin = autoPickModel(provider);
-  if (pin !== null) await deps.selectProviderModel(provider.id, pin);
-}
-
-/**
- * The OAuth handshake returns no provider, and refresh only returns what was
- * cleared — so look the fresh row up before pinning. `deps` defaults to `api`
- * the same way.
- */
-export async function autoPick(
-  providerId: string,
-  deps: Pick<typeof api, "providers" | "selectProviderModel"> = api,
-): Promise<void> {
-  const fresh = await deps.providers();
-  const provider = fresh.providers.find((entry) => entry.providerId === providerId);
-  if (provider) await autoPickProvider(provider, deps);
-}
-
 export function ProviderList({
   providers,
   apiKeyProviders,
@@ -148,18 +109,17 @@ export function ProviderList({
         await api.connectOAuthProvider({ providerId: row.id, label: row.name }, (url) => {
           if (!cancelledRef.current.has(row.id)) setAuthorizeUrl(url);
         });
-        await autoPick(row.id);
+        // No pin: the workspace default is the priority-first enabled model
+        // (CL-8781), derived at read time — nothing to write at connect time.
       } else if (row.kind === "local_endpoint") {
-        await autoPickProvider(await api.connectLocalProvider({ baseUrl: baseUrl.trim() || LOCAL_DEFAULT_BASE_URL }));
+        await api.connectLocalProvider({ baseUrl: baseUrl.trim() || LOCAL_DEFAULT_BASE_URL });
       } else {
-        await autoPickProvider(
-          await api.connectProvider({
-            providerId: row.id,
-            label: row.name,
-            apiKey: secret,
-            ...(row.needsBaseUrl ? { baseUrl } : {}),
-          }),
-        );
+        await api.connectProvider({
+          providerId: row.id,
+          label: row.name,
+          apiKey: secret,
+          ...(row.needsBaseUrl ? { baseUrl } : {}),
+        });
       }
       setSecret("");
       setBaseUrl("");
@@ -338,7 +298,6 @@ export function ProviderList({
                                 row.id,
                                 async () => {
                                   await api.refreshProviderModels(connected.id);
-                                  await autoPick(connected.providerId);
                                 },
                                 `${row.name} models refreshed.`,
                               )
