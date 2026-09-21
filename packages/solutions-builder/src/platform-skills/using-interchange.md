@@ -1,16 +1,17 @@
 # using-interchange
 
-`@intx/*` is on npm — `bun add @intx/workflow`, latest tag 0.3.0. Upstream
-main runs ahead of the tag; when the plan needs what only main has, vendor
-the source instead:
+`@intx/*` is on npm — latest tag 0.4.0. A generated app installs the
+versioned packages from the registry, never vendors source:
 
-    git clone https://github.com/faremeter/interchange vendor/interchange
-    git -C vendor/interchange rev-parse HEAD > vendor/interchange/VENDORED_REVISION
-    bun install
+    bun add @intx/workflow@0.4.0
+    bun add @intx/agent@0.4.0
 
-`vendor/interchange/packages/*` is already in this workspace's `workspaces`,
-so the vendored packages resolve as `@intx/*` the moment the tree lands.
-The revision file is the pin.
+Vendoring upstream main (`git clone
+https://github.com/faremeter/interchange vendor/interchange`, pin in
+`vendor/interchange/VENDORED_REVISION`, `vendor/interchange/packages/*`
+in `workspaces`) is this repository's own flow for tracking main between
+tags. It applies to Builder's own workspace, not to a workspace being
+built.
 
 A workflow is a definition built from steps — `defineWorkflow` from
 `@intx/workflow`:
