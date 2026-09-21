@@ -302,7 +302,6 @@ function Stakeholders({
 export function AudiencePackages({
   detail,
   tenantId,
-  agentAddress,
   onChanged,
   onApprove,
   approving,
@@ -313,8 +312,6 @@ export function AudiencePackages({
   detail: ProjectDetail;
   /** The workspace tenant artifacts are recorded under. */
   tenantId: string;
-  /** The stage 5 specialist's mail address; null while it is still deploying. */
-  agentAddress: string | null;
   onChanged: () => void;
   /** Persists the specialist's latest reply as this stage's approved draft and advances. */
   onApprove: () => void;
@@ -339,19 +336,41 @@ export function AudiencePackages({
     cancelledRef.current = true;
   }, []);
 
+  const policy = (detail.project.policy ?? {}) as Policy;
+  const audiences = youFirst(policy.audiences ?? []);
+  const quorum = policy.audienceQuorum ?? 0;
+
+  /** Each audience's index into the stakeholder list `setStakeholders` saved
+   *  -- the same order the specialists deploy against (`policy.audiences`
+   *  order, not the "you first" display order), so a package's own agent is
+   *  the one it was written by regardless of tab ordering. */
+  const audienceIndex = (name: string) => (policy.audiences ?? []).findIndex((audience) => audience.name === name);
+
+  /**
+   * Writes one named stakeholder's package: mails that stakeholder's own
+   * specialist (`ensureStage5PackageAgent`, deployed lazily on first use)
+   * and reads its reply back off its own thread, so one audience's package
+   * can never carry another's content the way a single shared agent's
+   * combined reply could (CL-8738).
+   */
+  const writeOnePackage = async (name: string) => {
+    const index = audienceIndex(name);
+    if (index === -1) return;
+    const deployment = await api.ensureStage5PackageAgent(detail.project.id, index);
+    const before = await api.readStageThread(tenantId, [deployment.address]);
+    const seenIds = new Set(before.map((message) => message.id));
+    await api.sendStageMail(tenantId, deployment.address, { body: `Write the package for: ${name}.` });
+    const reply = await awaitAgentReply(tenantId, deployment.address, seenIds, () => cancelledRef.current);
+    if (cancelledRef.current) return;
+    await api.persistAudiencePackage(detail.project.id, name, reply.body);
+  };
+
   const writePackages = async (names: string[]) => {
-    if (!agentAddress || names.length === 0 || writing.size > 0) return;
+    if (names.length === 0 || writing.size > 0) return;
     setWriteError(null);
     setWriting(new Set(names));
     try {
-      const before = await api.readStageThread(tenantId, [agentAddress]);
-      const seenIds = new Set(before.map((message) => message.id));
-      await api.sendStageMail(tenantId, agentAddress, {
-        body: `Write the ${names.length > 1 ? "packages" : "package"} for: ${names.join(", ")}.`,
-      });
-      const reply = await awaitAgentReply(tenantId, agentAddress, seenIds, () => cancelledRef.current);
-      if (cancelledRef.current) return;
-      await Promise.all(names.map((name) => api.persistAudiencePackage(detail.project.id, name, reply.body)));
+      await Promise.all(names.map((name) => writeOnePackage(name)));
       if (!cancelledRef.current) onChanged();
     } catch (cause) {
       if (!cancelledRef.current) {
@@ -361,9 +380,6 @@ export function AudiencePackages({
       if (!cancelledRef.current) setWriting(new Set());
     }
   };
-  const policy = (detail.project.policy ?? {}) as Policy;
-  const audiences = youFirst(policy.audiences ?? []);
-  const quorum = policy.audienceQuorum ?? 0;
 
   // Packages in the stakeholders' order, so the tabs and the decisions
   // table read the same way, with the person's own first.
@@ -643,7 +659,7 @@ export function AudiencePackages({
                   ) : (
                     <Button
                       loading={false}
-                      disabled={!agentAddress || writing.size > 0}
+                      disabled={writing.size > 0}
                       onClick={() => void writePackages([audience.name])}
                     >
                       Write it
@@ -656,7 +672,7 @@ export function AudiencePackages({
               <Button
                 variant="primary"
                 loading={writing.size > 1}
-                disabled={!agentAddress || writing.size > 0}
+                disabled={writing.size > 0}
                 onClick={() => void writePackages(missing.map((audience) => audience.name))}
               >
                 Write all {missing.length}
@@ -745,7 +761,7 @@ export function AudiencePackages({
                   {selected.variant ? (
                     <Button
                       loading={writing.has(selected.variant)}
-                      disabled={!agentAddress || writing.size > 0}
+                      disabled={writing.size > 0}
                       onClick={() => void writePackages([selected.variant!])}
                     >
                       {writing.has(selected.variant) ? "Writing…" : "Write it again"}

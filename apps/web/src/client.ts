@@ -7,6 +7,7 @@
  */
 import { APP_VERSION } from "@solutions-builder/app/manifest";
 import { AUTHORITIES, type Authority, type Stage } from "@solutions-builder/app/ledger";
+import { agentById } from "@solutions-builder/app/kit";
 import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
 import {
   ApiError as HubApiError,
@@ -659,6 +660,15 @@ async function downloadUploadedArtifact(tenantId: string, artifactId: string): P
 /** In-flight/resolved `ensureStageAgent` calls, keyed `${projectId}:${stage}` --
  *  see that method's doc comment. */
 const ensureStageAgentCalls = new Map<string, Promise<SpecialistDeployment>>();
+const ensureStage5PackageAgentCalls = new Map<string, Promise<SpecialistDeployment>>();
+
+/** Stage 5's specialist role -- every `package-<n>` deployment runs this,
+ *  named explicitly so a rename of the kit role fails loudly here rather
+ *  than silently deploying the wrong prompt. */
+const STAGE_5_PACKAGE_ROLE = agentById("presentation-creator");
+if (!STAGE_5_PACKAGE_ROLE) {
+  throw new Error("kit role \"presentation-creator\" is missing");
+}
 
 /** In-flight/resolved `ensureProjectWorkflow` calls, keyed by `projectId` --
  *  see that method's doc comment. Also `projectWorkflowView`/`decide`'s only
@@ -1517,6 +1527,56 @@ false,
     asWorkspaceOwner((transport, workspaceTenantId) =>
       stageSpecialistStatus(transport, workspaceTenantId, projectId, stage as Stage),
     ),
+  /**
+   * Makes sure `projectId`'s `audienceIndex`-th stakeholder has its own
+   * stage-5 package specialist deployed, and hands back its mail address --
+   * `ensureStageAgent`'s ensure-and-reuse discipline, but keyed by audience
+   * rather than stage: a project's audience count is dynamic, so this
+   * deploys one `package-<audienceIndex>`-rolekeyed specialist lazily, only
+   * the first time that stakeholder's package is actually requested,
+   * running `STAGE_5_PACKAGE_ROLE` (`ensureSpecialistDeployment` still
+   * resolves stage 5's role internally via `agentFor(5)`, which is the same
+   * role).
+   *
+   * Memoised per `projectId:audienceIndex` for the same reason
+   * `ensureStageAgent` memoises per `projectId:stage`: two mounts racing to
+   * deploy the same audience's agent share the one in-flight promise
+   * instead of each creating a deployment.
+   */
+  ensureStage5PackageAgent: (projectId: string, audienceIndex: number): Promise<SpecialistDeployment> => {
+    const key = `${projectId}:${audienceIndex}`;
+    const pending = ensureStage5PackageAgentCalls.get(key);
+    if (pending) return pending;
+    const roleKey = `package-${audienceIndex}`;
+    const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      const status = await request<HostStatus>("/status");
+      const deployment = await ensureSpecialistDeployment(
+        transport,
+        sidecarCapabilityOf(status),
+        await lifecycleClosureSource(),
+        lifecycleGitPush,
+        workspaceTenantId,
+        projectId,
+        5 as Stage,
+        hubOrigin(),
+        false,
+        roleKey,
+      );
+      const ready = await waitForDeploymentDeployed(transport, workspaceTenantId, deployment.deploymentId);
+      if (!ready) {
+        throw new ApiFailure({
+          code: "unavailable",
+          message: "That stakeholder's package specialist did not finish starting up.",
+          correlationId: "-",
+          retryable: true,
+        });
+      }
+      return deployment;
+    });
+    call.catch(() => ensureStage5PackageAgentCalls.delete(key));
+    ensureStage5PackageAgentCalls.set(key, call);
+    return call;
+  },
   /**
    * Makes sure `projectId`'s process authority (CL-8721/CL-8687) is deployed
    * and its one manual run triggered, the same ensure-and-reuse discipline

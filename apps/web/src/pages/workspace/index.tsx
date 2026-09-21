@@ -1271,7 +1271,6 @@ export function StageWorkspace({
           <AudiencePackages
             detail={detail}
             tenantId={tenantId}
-            agentAddress={agentAddress}
             onChanged={() => {
               void refreshWorkflow();
               void loadThread();
