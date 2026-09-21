@@ -22,6 +22,7 @@ const MAX_SHEET_FORMULAS = 500;
 const MAX_FORMAT_CELLS = 200;
 
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const XLS_MIME = "application/vnd.ms-excel";
 const PDF_MIME = "application/pdf";
 
 function isText(mediaType: string): boolean {
@@ -30,6 +31,21 @@ function isText(mediaType: string): boolean {
 
 function isXlsx(name: string, mediaType: string): boolean {
   return mediaType === XLSX_MIME || name.toLowerCase().endsWith(".xlsx");
+}
+
+function isLegacyXls(name: string, mediaType: string): boolean {
+  return mediaType === XLS_MIME || name.toLowerCase().endsWith(".xls");
+}
+
+/**
+ * The older binary workbook, converted to the modern format so the same
+ * renderer serves both. Ported from `apps/hub`'s deleted
+ * `source-material.ts` (main), `legacyWorkbookToXlsx`.
+ */
+async function legacyWorkbookToXlsx(bytes: Uint8Array): Promise<Uint8Array> {
+  const XLSX = await import("xlsx");
+  const workbook = XLSX.read(bytes, { type: "buffer", cellFormula: true, cellNF: true, cellStyles: true });
+  return new Uint8Array(XLSX.write(workbook, { bookType: "xlsx", type: "buffer", cellStyles: true }) as ArrayBuffer);
 }
 
 function isPdf(name: string, mediaType: string): boolean {
@@ -156,10 +172,11 @@ async function pdfText(bytes: Uint8Array): Promise<string> {
 
 /**
  * What can be read of one attached file: text of any kind as it is; a
- * modern spreadsheet as one block per sheet; a PDF as its text, page by
- * page; an image, a Word file, a PowerPoint file, or anything else nothing
- * here reads yet, by name, type and size only — a prompt that claims to have
- * read something it has not is worse than one that says so.
+ * spreadsheet, modern or the older binary kind, as one block per sheet; a
+ * PDF as its text, page by page; an image, a Word file, a PowerPoint file,
+ * or anything else nothing here reads yet, by name, type and size only — a
+ * prompt that claims to have read something it has not is worse than one
+ * that says so.
  */
 export async function readMaterial(input: MaterialInput): Promise<{ text: string }> {
   const { name, mediaType, bytes } = input;
@@ -168,6 +185,9 @@ export async function readMaterial(input: MaterialInput): Promise<{ text: string
   }
   if (isXlsx(name, mediaType)) {
     return { text: cap(await spreadsheetText(bytes)) };
+  }
+  if (isLegacyXls(name, mediaType)) {
+    return { text: cap(await spreadsheetText(await legacyWorkbookToXlsx(bytes))) };
   }
   if (isPdf(name, mediaType)) {
     return { text: cap(await pdfText(bytes)) };

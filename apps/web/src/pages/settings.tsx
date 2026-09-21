@@ -18,6 +18,7 @@ import { DECK_DENSITY, DECK_THEMES, DECK_TYPEFACES, DEFAULT_DECK_DESIGN, type De
 import { api, ApiFailure, STAKEHOLDER_ROLES, type DesignerSettings, type HostStatus, type Provider } from "../client.js";
 import { Banner, Button, StateLabel } from "../components.jsx";
 import { deckDesignFor, guidanceFor } from "../deck-design-settings.ts";
+import { findImageProvider } from "../deck-images.ts";
 import { Dictated } from "../dictation.jsx";
 import { ProviderList, type ApiKeyProvider, type OAuthCandidate } from "./providers.jsx";
 
@@ -43,7 +44,7 @@ export function Settings({
         onChanged={onChanged}
       />
       <Designer />
-      <StakeholderDecks />
+      <StakeholderDecks providers={providers} />
       <DeckTemplates />
       <BuildWorker status={status} onChanged={onChanged} />
       <ThisComputer status={status} />
@@ -271,7 +272,8 @@ function roleLabel(role: string): string {
  * when the field is left, since it is typed. A mapped style guide (below)
  * takes precedence over the colour and typeface chosen here.
  */
-function StakeholderDecks() {
+function StakeholderDecks({ providers }: { providers: Provider[] }) {
+  const imageProvider = findImageProvider(providers);
   const [designs, setDesigns] = useState<Record<string, DeckDesign> | null>(null);
   const [guidance, setGuidance] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
@@ -320,7 +322,11 @@ function StakeholderDecks() {
   return (
     <Section
       title="Stakeholder decks"
-      lead="How each stakeholder role's slides look, and what their deck outline should emphasise. Images are not yet drawn on this build: there is no image model path here, so that control is disabled."
+      lead={
+        imageProvider
+          ? `How each stakeholder role's slides look, and what their deck outline should emphasise. ${imageProvider.label} is connected with an image model (${imageProvider.model}), so a role's Images choice draws pictures for its slides.`
+          : "How each stakeholder role's slides look, and what their deck outline should emphasise. No connected provider lists an image model yet, so decks build without pictures whatever a role's Images choice is; connect one under Inference to draw them."
+      }
     >
       {error ? <Banner tone="error" title={error} /> : null}
       {STAKEHOLDER_ROLES.map((role) => {
@@ -383,8 +389,17 @@ function StakeholderDecks() {
                 </label>
                 <label className="deck-role-control">
                   <span>Images</span>
-                  <select className="setting-select" value="none" disabled title="No image model is connected on this build yet.">
-                    <option value="none">None (no image model yet)</option>
+                  <select
+                    className="setting-select"
+                    value={design.images}
+                    disabled={!designs}
+                    title={imageProvider ? undefined : "No image model is connected yet; decks build without pictures until one is."}
+                    onChange={(event) => void save(role, "images", event.target.value as DeckDesign["images"])}
+                  >
+                    <option value="none">None</option>
+                    <option value="cover">Cover only</option>
+                    <option value="some">Some slides</option>
+                    <option value="all">Every slide</option>
                   </select>
                 </label>
               </div>
