@@ -4,14 +4,31 @@
  * Contract v6 gives stage 8 a posix tool inside its own single-step run
  * rather than a separate host build-worker bridge with its own signal
  * chain, so there is no lifecycle run to park a build attempt's state on
- * any more -- "start"/"cancel"/"accept"/"fail" are sent as plain mail, the
- * same way any other stage's specialist is talked to (see index.tsx's own
- * account of the cutover). The rich timeline the old bridge reported (a
- * state label, exit status, packaged archive, live output, an elapsed
- * clock, an event log) is rebuilt here from what the stage's own run
- * already exposes: the hub approval each `run_shell` call parks on
+ * any more -- "start"/"cancel"/"fail" are sent as plain mail, the same way
+ * any other stage's specialist is talked to (see index.tsx's own account of
+ * the cutover). The rich timeline the old bridge reported (a state label,
+ * exit status, packaged archive, live output, an elapsed clock, an event
+ * log) is rebuilt here from what the stage's own run already exposes: the
+ * hub approval each `run_shell`/`publish_workspace` call parks on
  * (CL-8566), the run's own committed event log, and the mail thread's
  * replies -- CL-8621 follow-up.
+ *
+ * "Accept as evidence" is different (CL-8739): it never sends mail. Every
+ * observed live failure at this stage was the model failing to call
+ * `publish_workspace` at all -- malformed tool-call JSON, invented argument
+ * names, a stalled turn after the tool did run once -- and there is no way
+ * to invoke that tool without a prior model turn producing its `tool_use`
+ * (stage 8 is wired as `step({ agent })`, the ordinary agent+model loop --
+ * `specialist-source.ts`'s `specialistEntrySource` -- never the model-free
+ * `action()` primitive `vendor/interchange/packages/workflow/src/
+ * definition/primitives.ts`'s `ActionPrimitive` offers; and a resolved
+ * approval carries no result, only status --
+ * `vendor/interchange/packages/hub-api/src/routes/approvals.ts`'s
+ * `formatApproval`). Once the model HAS called it, though, packaging and
+ * recording it as evidence needs no further model turn: Accept calls
+ * `index.tsx`'s `openReviewNow` directly, which persists (via
+ * `api.persistBuildEvidence`, the fallback path) or reads (the real-upload
+ * path) the archive and opens its review, client-side.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiFailure, type ArtifactNode, type ProjectDetail } from "../../client.js";
@@ -41,11 +58,22 @@ const BUILD_APPROVAL_TOOL_NAMES = new Set([RUN_SHELL_TOOL_NAME, PUBLISH_WORKSPAC
 const START_ATTEMPT_BODY = "Start the build attempt.";
 const CONTINUE_ATTEMPT_BODY = "Continue the build.";
 
+/** When the current build attempt began: the latest "Start"/"Continue" mail
+ *  sent to the specialist, or undefined before either has been sent. Shared
+ *  by evidence-staleness and the attempt timeout below so both agree on what
+ *  "the current attempt" means. */
+function lastAttemptStartedAt(messages: readonly ChatMessage[]): number | undefined {
+  return [...messages]
+    .filter((message) => message.author === "me" && [START_ATTEMPT_BODY, CONTINUE_ATTEMPT_BODY].includes(message.body.trim()))
+    .map((message) => Date.parse(message.at))
+    .sort((a, b) => b - a)[0];
+}
+
 /**
  * The stage 8 build specialist's `publish_workspace` fallback result, when
- * its latest reply carries one: `{fileName, mediaType, dataUri, sizeBytes}`,
- * either as the whole message body or inside a fenced code block. Anything
- * else (a plain status update, or the real-upload result shape which has no
+ * a reply carries one: `{fileName, mediaType, dataUri, sizeBytes}`, either as
+ * the whole message body or inside a fenced code block. Anything else (a
+ * plain status update, or the real-upload result shape which has no
  * `dataUri`) is not a fallback bundle.
  */
 export function parsePublishedBundle(
@@ -70,16 +98,40 @@ export function parsePublishedBundle(
 }
 
 /**
+ * The current attempt's `publish_workspace` fallback bundle, searched from
+ * the newest agent reply backwards through every reply sent no earlier than
+ * the last "Start"/"Continue" mail — not only the very latest reply. A
+ * specialist that calls the tool and then keeps talking (CL-8739: "a stalled
+ * turn after the tool did run once") would otherwise lose a bundle a prior
+ * reply already carried, since nothing else ever surfaces it: there is no
+ * tool-result channel outside the agent's own mail replies (approvals record
+ * only arguments and status, never a call's result — see the module doc).
+ */
+export function currentPublishedBundle(
+  messages: readonly ChatMessage[],
+): ReturnType<typeof parsePublishedBundle> {
+  const since = lastAttemptStartedAt(messages);
+  const replies = [...messages]
+    .filter((message) => message.author === "agent" && (since === undefined || Date.parse(message.at) >= since))
+    .reverse();
+  for (const message of replies) {
+    const bundle = parsePublishedBundle(message.body);
+    if (bundle) return bundle;
+  }
+  return null;
+}
+
+/**
  * Whether the current build attempt has produced evidence to approve
  * against: EITHER a `build_evidence` artifact (`publish_workspace`'s real
  * upload) written no earlier than the last "Start"/"Continue" mail sent to
  * the specialist, OR — on the fallback path, where no artifact exists until
- * `approve()` persists it — the specialist's latest reply already carrying
- * a fallback bundle. Approving with neither would freeze a stage-8 reply
- * that never actually built anything — the bug this stage shipped with, and
- * the reason Approve could never enable at all once the real-upload path
- * shipped (the artifact only ever appeared AFTER approval, behind the
- * disabled button — CL-8723).
+ * `approve()` persists it — some reply since then already carries a fallback
+ * bundle. Approving with neither would freeze a stage-8 reply that never
+ * actually built anything — the bug this stage shipped with, and the reason
+ * Approve could never enable at all once the real-upload path shipped (the
+ * artifact only ever appeared AFTER approval, behind the disabled button —
+ * CL-8723).
  */
 export function buildEvidenceState(
   messages: readonly ChatMessage[],
@@ -89,17 +141,40 @@ export function buildEvidenceState(
   const archive = nodes
     .filter((node) => node.kind === "build_evidence" && node.mediaType === "application/gzip" && node.supersededByNodeId === null)
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
-  const lastAttemptStartedAt = [...messages]
-    .filter((message) => message.author === "me" && [START_ATTEMPT_BODY, CONTINUE_ATTEMPT_BODY].includes(message.body.trim()))
-    .map((message) => Date.parse(message.at))
-    .sort((a, b) => b - a)[0];
-  const archiveIsCurrent =
-    archive !== undefined && (lastAttemptStartedAt === undefined || Date.parse(archive.createdAt) >= lastAttemptStartedAt);
+  const startedAt = lastAttemptStartedAt(messages);
+  const archiveIsCurrent = archive !== undefined && (startedAt === undefined || Date.parse(archive.createdAt) >= startedAt);
   if (archiveIsCurrent || hasPublishedBundle) return { ready: true, reason: null };
   if (!archive) {
     return { ready: false, reason: "No published build archive yet — the build has not run publish_workspace." };
   }
   return { ready: false, reason: "The current attempt has not published a build archive yet." };
+}
+
+/** Matches `BUILD_STEP_TIMEOUT_MS` on `main`'s (now-removed) stage-loop: the
+ *  bound a build attempt gets before the panel calls it stalled rather than
+ *  leaving it silently "working" forever on the dispatch backstop. Enforced
+ *  here, client-side, rather than as a workflow `step.timeout` — that field
+ *  bounds the specialist's whole unbounded step (every attempt across its
+ *  entire deployed lifetime, `vendor/interchange/packages/workflow/src/
+ *  runtime/run.ts`'s `runStep`), not one build attempt, so it would tear
+ *  down the specialist between attempts rather than fail just the stalled
+ *  one. */
+export const BUILD_ATTEMPT_TIMEOUT_MS = 30 * 60 * 1000;
+
+/** Whether the current attempt has run past its bound with nothing to show
+ *  for it: no published evidence, no pending approval left to act on either
+ *  (a person still has a decision in front of them, not a stall). */
+export function attemptTimedOut(
+  messages: readonly ChatMessage[],
+  evidenceReady: boolean,
+  hasPendingApproval: boolean,
+  now: number = Date.now(),
+  timeoutMs: number = BUILD_ATTEMPT_TIMEOUT_MS,
+): boolean {
+  if (evidenceReady || hasPendingApproval) return false;
+  const startedAt = lastAttemptStartedAt(messages);
+  if (startedAt === undefined) return false;
+  return now - startedAt >= timeoutMs;
 }
 
 type RunEvent = { readonly seq: number; readonly type: string; readonly body: Record<string, unknown> };
@@ -193,18 +268,20 @@ function replyRows(messages: readonly ChatMessage[]): TimelineRow[] {
 
 /**
  * The current state, in the same vocabulary the old bridge's `StateLabel`
- * used: waiting on a decision beats everything else, then whether the run's
- * last milestone is still open, then idle.
+ * used: waiting on a decision beats everything else, then a timed-out
+ * attempt, then whether the run's last milestone is still open, then idle.
  */
 function currentState(
   approvals: readonly PendingApproval[],
   events: readonly RunEvent[],
   messages: readonly ChatMessage[],
-): { label: string; tone: "warning" | "selected" | "success" | "info" } {
+  timedOut: boolean,
+): { label: string; tone: "warning" | "selected" | "success" | "info" | "error" } {
   const pending = approvals.find(
     (approval) => approval.status === "pending" && BUILD_APPROVAL_TOOL_NAMES.has(approval.toolDefinition?.name ?? ""),
   );
   if (pending) return { label: "waiting for your approval", tone: "warning" };
+  if (timedOut) return { label: "the build attempt timed out", tone: "error" };
 
   const lastReplyAt = messages.filter((message) => message.author === "agent").at(-1)?.at;
   const lastEvent = [...events].reverse().find((event) => ["StepStarted", "SignalReceived"].includes(event.type));
@@ -254,6 +331,7 @@ export function BuildPanel({
   approving,
   canApprove,
   onOpenDecisions,
+  onAcceptEvidence,
 }: {
   detail: ProjectDetail;
   /** The workspace tenant artifacts are recorded under. */
@@ -265,6 +343,14 @@ export function BuildPanel({
   canApprove: boolean;
   /** Where "waiting for your approval" sends the person. */
   onOpenDecisions?: () => void;
+  /**
+   * "Accept as evidence": packages and records this attempt's archive as
+   * the stage's `build_evidence` artifact and opens its review, entirely
+   * client-side — no mail to the specialist, so accepting never depends on
+   * the model taking another turn. Fails honestly (`ok: false`, a reason)
+   * when the attempt has not published anything to accept yet.
+   */
+  onAcceptEvidence: () => Promise<{ readonly ok: true } | { readonly ok: false; readonly reason: string }>;
 }) {
   const [address, setAddress] = useState<string | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
@@ -274,6 +360,7 @@ export function BuildPanel({
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [composer, setComposer] = useState("");
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     let cancelled = false;
@@ -339,6 +426,15 @@ export function BuildPanel({
     return () => clearInterval(timer);
   }, [runId, loadTimeline]);
 
+  // Drives `attemptTimedOut` below across time even when nothing else about
+  // the attempt has changed — a stalled turn produces no new message, no new
+  // event, and no new approval, so without its own tick the timeout would
+  // never actually fire.
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+
   const send = async (label: string, body: string) => {
     if (!address) return;
     setBusy(label);
@@ -361,7 +457,6 @@ export function BuildPanel({
         .sort((a, b) => Date.parse(a.at) - Date.parse(b.at)),
     [approvals, events, messages],
   );
-  const state = useMemo(() => currentState(approvals, events, messages), [approvals, events, messages]);
   const buildStartedAt = useMemo(() => startedAt(events), [events]);
 
   const build = useMemo(
@@ -372,10 +467,7 @@ export function BuildPanel({
     [detail.nodes],
   ) as ArtifactNode | undefined;
 
-  const publishedBundle = useMemo(
-    () => parsePublishedBundle([...messages].reverse().find((message) => message.author === "agent")?.body),
-    [messages],
-  );
+  const publishedBundle = useMemo(() => currentPublishedBundle(messages), [messages]);
   const evidence = useMemo(
     () => buildEvidenceState(messages, detail.nodes, publishedBundle !== null),
     [messages, detail.nodes, publishedBundle],
@@ -384,6 +476,11 @@ export function BuildPanel({
   const pendingRunShell = approvals.filter(
     (approval) => approval.status === "pending" && BUILD_APPROVAL_TOOL_NAMES.has(approval.toolDefinition?.name ?? ""),
   );
+  const timedOut = useMemo(
+    () => attemptTimedOut(messages, evidence.ready, pendingRunShell.length > 0, now),
+    [messages, evidence.ready, pendingRunShell.length, now],
+  );
+  const state = useMemo(() => currentState(approvals, events, messages, timedOut), [approvals, events, messages, timedOut]);
   const [decidingId, setDecidingId] = useState<string | null>(null);
 
   const decideRunShell = async (approvalId: string, decision: "once" | "always" | "reject") => {
@@ -400,6 +497,28 @@ export function BuildPanel({
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     } finally {
       setDecidingId(null);
+    }
+  };
+
+  // Packages and records the attempt's archive directly — no mail to the
+  // specialist, so accepting never waits on another model turn. Refuses
+  // honestly when there is nothing published yet, the same reason already
+  // shown inline (`evidence.reason`).
+  const accept = async () => {
+    setBusy("accept");
+    setError(null);
+    try {
+      const result = await onAcceptEvidence();
+      if (!result.ok) {
+        setError(result.reason);
+        return;
+      }
+      await Promise.all([load(), loadTimeline()]);
+      onChanged();
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -438,7 +557,7 @@ export function BuildPanel({
           <Button variant="destructive" loading={busy === "cancel"} disabled={!address} onClick={() => void send("cancel", "Cancel the build attempt.")}>
             Cancel the build attempt
           </Button>
-          <Button variant="primary" loading={busy === "accept"} disabled={!address} onClick={() => void send("accept", "Accept this build attempt's work as evidence.")}>
+          <Button variant="primary" loading={busy === "accept"} disabled={!address} onClick={() => void accept()}>
             Accept as evidence
           </Button>
           <Button variant="destructive" loading={busy === "fail"} disabled={!address} onClick={() => void send("fail", "Mark this build attempt failed.")}>
@@ -449,7 +568,11 @@ export function BuildPanel({
           </Button>
         </div>
         <p className="inline-note">
-          {canApprove ? "Approving records the published build archive as this stage's evidence and starts delivery." : evidence.reason}
+          {canApprove
+            ? "Approving records the published build archive as this stage's evidence and starts delivery."
+            : timedOut
+              ? "The build attempt timed out with no published archive — cancel it and start again, or continue if the specialist is still working."
+              : evidence.reason}
         </p>
 
         {pendingRunShell.length > 0 ? (

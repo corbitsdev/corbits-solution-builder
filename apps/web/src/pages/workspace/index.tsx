@@ -38,7 +38,7 @@ import { DeliveryPanel } from "./delivery.jsx";
 import { StageConversation } from "./thread.jsx";
 import { StageDocument } from "./document.jsx";
 import { Preparing } from "./preparing.jsx";
-import { BuildPanel, buildEvidenceState, parsePublishedBundle } from "./build.jsx";
+import { BuildPanel, buildEvidenceState, currentPublishedBundle } from "./build.jsx";
 import { TargetPicker, targetOpeningLine } from "./freeze.jsx";
 import { deliveryOpeningLine, parseDeliveryManifest } from "./delivery-opening.ts";
 import { EstimateView } from "./estimate.jsx";
@@ -800,16 +800,18 @@ export function StageWorkspace({
   }, [activeNode?.id, tenantId]);
 
   /**
-   * The stage 8 build specialist's `publish_workspace` fallback result, when
-   * its reply carries one: `{fileName, mediaType, dataUri, sizeBytes}`,
-   * either as the whole message body or inside a fenced code block.
-   * Anything else (a plain status update, or the real-upload result shape)
-   * is not a fallback bundle, so approve() records the real artifact
-   * `publish_workspace` already uploaded instead of persisting anything.
+   * The current attempt's `publish_workspace` fallback result, when some
+   * reply since the last "Start"/"Continue" mail carries one — not only the
+   * latest reply (`build.tsx`'s `currentPublishedBundle`, CL-8739): a
+   * specialist that ran the tool and then kept talking must not lose the
+   * bundle a prior reply already carried. Anything else (a plain status
+   * update, or the real-upload result shape) is not a fallback bundle, so
+   * approve() records the real artifact `publish_workspace` already
+   * uploaded instead of persisting anything.
    */
   const publishedBundle = useMemo(
-    () => (stage === 8 ? parsePublishedBundle(latestSpecialistMessage?.body) : null),
-    [stage, latestSpecialistMessage],
+    () => (stage === 8 ? currentPublishedBundle(foldedMessages) : null),
+    [stage, foldedMessages],
   );
 
   /**
@@ -882,6 +884,43 @@ export function StageWorkspace({
     return { artifactId: persisted.artifactId, version, sha256 };
   }, [reviewMessage, draftKind, detail.nodes, detail.project.id, stage, publishedBundle, chosenTarget, stage8Evidence]);
 
+  /**
+   * Persists (if needed) and opens a review for this stage's current
+   * material, right now rather than waiting on the auto-open effect below to
+   * poll into it. `BuildPanel`'s "Accept as evidence" calls this directly
+   * (CL-8739): accepting a build packages and records it deterministically,
+   * client-side, with no mail sent to the specialist. Shares every check and
+   * step with the auto-open effect so there is exactly one path that decides
+   * a stage's material is ready to review.
+   */
+  const openReviewNow = useCallback(async (): Promise<{ readonly ok: true } | { readonly ok: false; readonly reason: string }> => {
+    if (!workflowView || workflowView.done || stage >= LAST_STAGE) return { ok: false, reason: "There is nothing to review yet." };
+    if (stage === 7 && !chosenTarget) return { ok: false, reason: "No delivery target has been chosen yet." };
+    if (!reviewMessage || draftKind === null) return { ok: false, reason: "There is nothing to review yet." };
+    if (stage === 8 && !stage8Evidence?.ready) {
+      return { ok: false, reason: stage8Evidence?.reason ?? "The build has not published an archive yet." };
+    }
+    const latestDraft = stage === 8 ? publishedBundle : reviewMessage;
+    const reviewable = reviewableArtifact({ nodes: detail.nodes, stage, kind: draftKind, latestDraft });
+    if (reviewable.status === "none") return { ok: false, reason: "There is nothing to review yet." };
+    try {
+      const ref = await resolveReviewRef();
+      if (!ref) return { ok: false, reason: "There is nothing to review yet." };
+      const sameAsOpen =
+        workflowView.openReview !== null &&
+        workflowView.openReview.artifactId === ref.artifactId &&
+        workflowView.openReview.version === ref.version &&
+        workflowView.openReview.sha256 === ref.sha256;
+      if (!sameAsOpen) {
+        await ensureReviewOpen(stageApprovalDeps, { projectId: detail.project.id, stage, ref });
+      }
+      await refreshWorkflow();
+      return { ok: true };
+    } catch (cause) {
+      return { ok: false, reason: cause instanceof ApiFailure ? cause.detail.message : String(cause) };
+    }
+  }, [workflowView, stage, chosenTarget, reviewMessage, draftKind, stage8Evidence, publishedBundle, detail.nodes, detail.project.id, resolveReviewRef, stageApprovalDeps, refreshWorkflow]);
+
   // Opens the review the moment this stage's material is ready, rather than
   // at the instant of approval -- the project workflow (`allowed.approve`)
   // is the only gate on the Approve button, and a review that only opens
@@ -907,24 +946,11 @@ export function StageWorkspace({
         : `${String(stage)}:draft:${reviewMessage.id}`;
     if (ensuringReviewKeyRef.current === key) return;
     ensuringReviewKeyRef.current = key;
-    void (async () => {
-      try {
-        const ref = await resolveReviewRef();
-        if (!ref) return;
-        const sameAsOpen =
-          workflowView.openReview !== null &&
-          workflowView.openReview.artifactId === ref.artifactId &&
-          workflowView.openReview.version === ref.version &&
-          workflowView.openReview.sha256 === ref.sha256;
-        if (sameAsOpen) return;
-        await ensureReviewOpen(stageApprovalDeps, { projectId: detail.project.id, stage, ref });
-        await refreshWorkflow();
-      } catch {
-        // Left as the sentinel: a later render (a poll, a reply) retries.
-        ensuringReviewKeyRef.current = null;
-      }
-    })();
-  }, [workflowView, stage, chosenTarget, reviewMessage, draftKind, detail.nodes, detail.project.id, publishedBundle, stage8Evidence, resolveReviewRef, stageApprovalDeps, refreshWorkflow]);
+    void openReviewNow().then((result) => {
+      // Left as the sentinel on refusal: a later render (a poll, a reply) retries.
+      if (!result.ok) ensuringReviewKeyRef.current = null;
+    });
+  }, [workflowView, stage, chosenTarget, reviewMessage, draftKind, detail.nodes, publishedBundle, stage8Evidence, openReviewNow]);
 
   /**
    * Sends the workflow's `approve` decision for this stage's already-open
@@ -1261,6 +1287,7 @@ export function StageWorkspace({
             onApprove={approve}
             approving={approving || refreshingAfterAction}
             canApprove={approveAllowed}
+            onAcceptEvidence={openReviewNow}
             {...(onOpenDecisions ? { onOpenDecisions } : {})}
           />
         </div>
