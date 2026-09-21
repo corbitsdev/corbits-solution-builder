@@ -14,6 +14,7 @@
 import type { Hono } from "hono";
 import {
   buildAuthorizeUrl,
+  openInBrowser,
   startCallbackServer,
   startOAuthLogin,
   type BaseTokens,
@@ -58,7 +59,7 @@ function callbackConfigFor(redirectUri: string): { host: string; port: number; p
  * (tests) can inject a no-op so starting a login never spawns a real
  * browser process.
  */
-export function mountProviderOAuth(app: Hono, openInBrowser?: (url: string) => void): void {
+export function mountProviderOAuth(app: Hono, open: (url: string) => void = openInBrowser): void {
   const logins = new Map<MountableOAuthProviderId, LoginState>();
 
   app.post("/api/oauth/:providerId/start", async (c) => {
@@ -91,7 +92,7 @@ export function mountProviderOAuth(app: Hono, openInBrowser?: (url: string) => v
           saveProfile: async ({ tokens }) => {
             logins.set(id, { status: "done", tokens });
           },
-          ...(openInBrowser ? { openInBrowser } : {}),
+          openInBrowser: open,
         },
       );
       authorizeUrl = handle.authorizeUrl;

@@ -11,6 +11,11 @@
  * repository's code. Verified against the pinned revisions in `bun.lock`.
  */
 declare module "@corbits/oauth-core" {
+  /** Best-effort: opens a URL in the person's default browser, never throws.
+   *  The package's own opener — a caller that omits it leaves the person to
+   *  copy the authorize link by hand. */
+  export function openInBrowser(url: string): void;
+
   export type BaseTokens = { access: string; refresh: string; expiresAt?: number };
   export type AuthProfile<T> = { name: string; tokens: T; createdAt: number };
   export type Pkce = { verifier: string; challenge: string; method: "S256" };
