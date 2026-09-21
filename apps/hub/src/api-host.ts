@@ -5,7 +5,7 @@ import { COMMANDS, LEDGER, STAGE_TITLES } from "@solutions-builder/app/ledger";
 import { AGENT_KIT } from "@solutions-builder/app/kit";
 import { credentialBackend } from "./host-secrets.js";
 import { hostStatus, requestHostStop } from "./lifecycle.js";
-import { ensureHub, hubFetch } from "./hub-client.js";
+import { ensureHub, hubFetch, mintOwnerSetCookie } from "./hub-client.js";
 import { sidecarFacts } from "./hub-mount.js";
 
 export const API_VERSION = "1";
@@ -76,6 +76,21 @@ export function registerHostRoutes(api: Hono) {
       })),
     }),
   );
+
+  /**
+   * Mints the embedded workspace owner and signs the browser in as them, by
+   * setting Better Auth's own session cookie on this response. First-run for
+   * a local desktop: no sign-up form, one local account, its password only
+   * ever in the keychain (`hub-client.ts`'s `mintOwnerSetCookie`). Refuses
+   * for a remote hub — that account flow is the browser's own
+   * `/api/auth/*` calls against the real hub.
+   */
+  api.post("/owner/session", async (context) => {
+    for (const cookie of await mintOwnerSetCookie()) {
+      context.header("set-cookie", cookie, { append: true });
+    }
+    return context.json({ ok: true });
+  });
 
   api.post("/host/stop", async (context) => {
     // An explicit host stop, distinct from closing a window.

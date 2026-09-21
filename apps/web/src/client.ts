@@ -825,6 +825,12 @@ const ACTIVE_MODEL_CACHE_MS = 60_000;
 
 export const api = {
   status: () => request<HostStatus>("/status"),
+  /**
+   * Mints the embedded owner and signs this browser in as them, via a
+   * `Set-Cookie` the host attaches to this response (`apps/hub/src/api-host.ts`'s
+   * `/owner/session`). Embedded-only; a remote hub answers with a refusal.
+   */
+  mintOwner: () => post<{ ok: true }>("/owner/session"),
   installState: async (): Promise<InstallState> => {
     const status = await request<HostStatus>("/status");
     if (status.hub.mode !== "embedded") return HOSTED_INSTALL;

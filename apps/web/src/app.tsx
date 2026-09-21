@@ -343,6 +343,10 @@ export function App() {
   const [skippedSetup, setSkippedSetup] = useState(false);
   // Signup/login first: the workspace tenant is created as that session.
   const [auth, setAuth] = useState<HubAuthState>("unknown");
+  // Set only for an embedded (local desktop) hub whose owner could not be
+  // minted automatically — a keychain the host cannot read, or a hub that
+  // refused the minted account. `null` until a mint attempt fails.
+  const [mintError, setMintError] = useState<string | null>(null);
   // The client is the installer. Once the host answers and a hub session
   // exists, the tenant is checked against the app the client ships with;
   // missing or stale, it is installed before any screen that depends on it
@@ -419,6 +423,32 @@ export function App() {
       .then((session) => setAuth(session ? "signed-in" : "signed-out"))
       .catch(() => setAuth("signed-out"));
   }, [status === null]);
+
+  // A local desktop (the hub embedded in this same host process) has one
+  // owner and no sign-up screen: the owner's password lives only in the
+  // keychain, minted here on first run and signed in on the browser's
+  // behalf. A remote hub is never a single-user desktop, so it keeps the
+  // real account flow (`pages/auth.tsx`) instead of attempting this.
+  const mintAttempted = useRef(false);
+  const mintOwner = useCallback(async () => {
+    setMintError(null);
+    try {
+      await api.mintOwner();
+      const session = await getHubSession();
+      if (session) {
+        setAuth("signed-in");
+      } else {
+        setMintError("The hub accepted the workspace owner but did not sign them in.");
+      }
+    } catch (cause) {
+      setMintError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    }
+  }, []);
+  useEffect(() => {
+    if (status?.hub.mode !== "embedded" || auth !== "signed-out" || mintAttempted.current) return;
+    mintAttempted.current = true;
+    void mintOwner();
+  }, [status?.hub.mode, auth, mintOwner]);
 
   useEffect(() => {
     void refresh();
@@ -577,6 +607,36 @@ export function App() {
     return <Booting offline={offline} />;
   }
   if (screen === "auth") {
+    // Embedded: no sign-up screen. The owner mints automatically; while that
+    // is in flight this looks like any other boot screen, and only an
+    // actual failure (keychain unreadable, hub refused the account) shows
+    // anything, explicit and with a retry — never a credentials form for a
+    // desktop app with nobody else to sign in as.
+    if (status?.hub.mode === "embedded") {
+      if (mintError) {
+        return (
+          <Auth
+            onSignedIn={() => setAuth("signed-in")}
+            mintFailure={{
+              reason: mintError,
+              onRetry: () => {
+                mintAttempted.current = false;
+                void mintOwner();
+              },
+            }}
+          />
+        );
+      }
+      return (
+        <BootScreen
+          message="Setting up your local workspace…"
+          brand={<Mark size={26} />}
+          footer={<span>Powered by Corbits</span>}
+        />
+      );
+    }
+    // Remote: a hosted hub is never a single-user desktop, so this is the
+    // real account flow — sign up or sign in against it.
     return <Auth onSignedIn={() => setAuth("signed-in")} />;
   }
   if (screen === "install") {

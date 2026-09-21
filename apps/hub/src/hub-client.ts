@@ -12,7 +12,14 @@
  *     request and `scripts/pack-registry-asset.ts` drives directly, in
  *     process, against the embedded hub with no browser involved;
  *   - `signInEmail`/`signUpEmail`/`hubTransport`/the asset registry helpers
- *     that same script uses to install and push the package-registry asset.
+ *     that same script uses to install and push the package-registry asset;
+ *   - `mintOwnerSetCookie`, which `api-host.ts`'s `/owner/session` route uses
+ *     to give an embedded, single-user desktop a real hub account without a
+ *     sign-up screen: a fixed local identity, a password generated once into
+ *     the keychain, and a session minted on the browser's own behalf. A
+ *     remote hub is never a single-user desktop, so this refuses outside
+ *     `hubMode() === "embedded"` — the browser's own `/api/auth/*` calls are
+ *     the real account flow there (`apps/web/src/pages/auth.tsx`).
  *
  * `packages/installer/src/hub.ts` is the hub client for the product; nothing
  * here should grow back into that role.
@@ -22,6 +29,7 @@
 import { ApiError, type Transport } from "@intx/hub-client";
 import { hub, hubIsMounted, mountHub, embeddedHubOrigin } from "./hub-mount.js";
 import { HostError } from "./errors.js";
+import { readSecretResult, secretReference, storeSecret } from "./host-secrets.js";
 
 /** The Better Auth session pair from an inbound `Cookie` header, if any. */
 function sessionPairFromCookieHeader(header: string | null | undefined): string | null {
@@ -196,6 +204,81 @@ export async function signUpEmail(input: { email: string; password: string; name
   await auth.api.signUpEmail({ body: input });
   if (await signInEmail(input.email, input.password)) return;
   throw new HostError("internal_error", "The hub accepted the account but would not sign them in.");
+}
+
+// --- The embedded owner's minted session -----------------------------------
+
+/** The embedded workspace owner's identity. One person, one local account. */
+const OWNER_EMAIL = "owner@solutions-builder.local";
+const OWNER_PASSWORD_ACCOUNT = "hub:owner-password";
+
+/**
+ * The owner's password, held in the keychain beside the provider keys and
+ * generated once. Never shown, never typed: an embedded desktop is a
+ * single-user machine, so the hub can still have a real user without the
+ * app growing a sign-up screen for it.
+ */
+async function ownerPassword(mintIfMissing: boolean): Promise<string | null> {
+  const stored = await readSecretResult(await secretReference(OWNER_PASSWORD_ACCOUNT));
+  if (stored.status === "found") return stored.secret;
+  if (stored.status === "unavailable") {
+    throw new HostError(
+      "provider_unavailable",
+      `The keychain could not be read for the workspace owner: ${stored.detail}. ` +
+        "Unlock it, or allow this app access, and try again.",
+      {},
+      true,
+    );
+  }
+  if (!mintIfMissing) return null;
+  const minted = Array.from(crypto.getRandomValues(new Uint8Array(24)))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  await storeSecret(OWNER_PASSWORD_ACCOUNT, minted);
+  return minted;
+}
+
+/** Every raw `Set-Cookie` header on a response, attributes included. */
+function rawSetCookieHeaders(headers: Headers): string[] {
+  const listed = typeof headers.getSetCookie === "function" ? headers.getSetCookie() : [];
+  if (listed.length > 0) return listed;
+  const single = headers.get("set-cookie");
+  return single ? [single] : [];
+}
+
+/**
+ * Signs the embedded owner up if the hub has never seen them, then in, and
+ * hands back the raw `Set-Cookie` headers Better Auth minted — for
+ * `api-host.ts`'s `/owner/session` route to set on the browser's own
+ * response, so the browser's cookie jar ends up holding the same session a
+ * sign-up form would have left it with. Only ever called embedded: a remote
+ * hub is not this process's to invent an identity on.
+ */
+export async function mintOwnerSetCookie(): Promise<string[]> {
+  if (hubMode() !== "embedded") {
+    throw new HostError(
+      "provider_unavailable",
+      "The workspace owner only mints for an embedded hub; a remote hub uses its own account flow.",
+    );
+  }
+  if (!hubIsMounted()) await mountHub();
+  const password = (await ownerPassword(true))!;
+  const auth = hub().auth as unknown as AuthApi;
+
+  let response = await auth.api.signInEmail({ body: { email: OWNER_EMAIL, password }, asResponse: true });
+  if (!response.ok) {
+    await auth.api.signUpEmail({ body: { email: OWNER_EMAIL, password, name: FALLBACK_DISPLAY_NAME } });
+    response = await auth.api.signInEmail({ body: { email: OWNER_EMAIL, password }, asResponse: true });
+  }
+
+  const cookies = rawSetCookieHeaders(response.headers);
+  if (!response.ok || cookies.length === 0) {
+    throw new HostError(
+      "internal_error",
+      "The hub accepted the workspace owner but would not sign them in.",
+    );
+  }
+  return cookies;
 }
 
 // --- The authenticated API -----------------------------------------------

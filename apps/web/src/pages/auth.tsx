@@ -1,8 +1,16 @@
 /**
- * First-run hub auth: sign up or sign in against the mounted hub.
+ * Hub auth for a *hosted* hub: sign up or sign in against it directly.
  *
- * The session cookie is what later `/hub` calls — including workspace install —
- * carry. There is no minted owner.
+ * A local desktop never reaches this form — its owner mints automatically
+ * (`apps/web/src/app.tsx`'s `mintOwner`, `apps/hub/src/hub-client.ts`'s
+ * `mintOwnerSetCookie`), because it is a single-user machine with a keychain
+ * to hold the password in. A hosted hub has neither: there is no one local
+ * owner and no user keychain to mint into, so a real account is the honest
+ * thing to ask for. If minting failed instead of a hosted hub existing —
+ * the keychain could not be read, or the hub refused the minted account —
+ * `mintFailure` is set and this shows that reason plainly, with a retry,
+ * never a credentials form: there is nothing else to type on a desktop with
+ * one owner.
  */
 import { Input } from "@corbits/react-ui";
 import { ApiError } from "@intx/hub-client";
@@ -14,7 +22,45 @@ type Mode = "signup" | "login";
 
 const PASSWORD_MIN = 8;
 
-export function Auth({ onSignedIn }: { onSignedIn: () => void }) {
+export type MintFailure = { reason: string; onRetry: () => void };
+
+export function Auth({
+  onSignedIn,
+  mintFailure,
+}: {
+  onSignedIn: () => void;
+  mintFailure?: MintFailure;
+}) {
+  if (mintFailure) return <MintFailureCard failure={mintFailure} />;
+  return <HostedAuth onSignedIn={onSignedIn} />;
+}
+
+function MintFailureCard({ failure }: { failure: MintFailure }) {
+  return (
+    <div className="onboarding">
+      <div className="onboarding-brand">
+        <Mark size={26} />
+        <strong>Solutions Builder</strong>
+      </div>
+
+      <div className="onboarding-card">
+        <h1>Couldn't sign you in.</h1>
+        <p className="lede">This workspace is local to your machine, so there is no account to type.</p>
+        <Banner tone="error" title={failure.reason} />
+        <Button variant="primary" block onClick={failure.onRetry}>
+          Try again
+        </Button>
+      </div>
+
+      <p className="onboarding-foot">
+        <Mark size={14} />
+        <span>Powered by Corbits</span>
+      </p>
+    </div>
+  );
+}
+
+function HostedAuth({ onSignedIn }: { onSignedIn: () => void }) {
   const [mode, setMode] = useState<Mode>("signup");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
