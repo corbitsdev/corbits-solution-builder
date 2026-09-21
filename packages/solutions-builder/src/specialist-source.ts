@@ -16,7 +16,7 @@
  * a client-side artifact write, not a signal this workflow waits on.
  */
 import type { ArtifactKind } from "./artifacts.js";
-import { ARTIFACT_WRITE_RULE, agentFor, type AgentRole } from "./kit.js";
+import { ARTIFACT_WRITE_RULE, type AgentRole } from "./kit.js";
 import type { Stage } from "./ledger.js";
 import { skillTextFor } from "./seed-kit.js";
 
@@ -164,8 +164,8 @@ function renderedPrompt(role: AgentRole, artifactTools: boolean): string {
  * own `role`/`roleKey`, so folding their prompts in here too would run them
  * twice.
  */
-function systemPromptForStage(stage: Stage, artifactTools: boolean): string {
-  return renderedPrompt(agentFor(stage), artifactTools);
+function systemPromptForRole(role: AgentRole, artifactTools: boolean): string {
+  return renderedPrompt(role, artifactTools);
 }
 
 /** The audience packages, folded into a stage-5 specialist's prompt as a
@@ -234,7 +234,7 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
   const tools = genericArtifactTools ? `artifacts${stageTools ? `, ${stageTools}` : ""}` : stageTools;
   const credentialName = workflowArtifactsCredentialName(assetName);
 
-  let systemPrompt = systemPromptForStage(stage, genericArtifactTools);
+  let systemPrompt = systemPromptForRole(role, genericArtifactTools);
   if (genericArtifactTools) {
     systemPrompt = `${systemPrompt}\n\n## Artifact context\n\nprojectId: ${projectId}\nstage: ${stage}\nkind: ${kind}`;
   }
