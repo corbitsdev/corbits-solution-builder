@@ -42,6 +42,34 @@ export function autoPickModel(provider: { selectedModel: string | null; models: 
   return first ?? null;
 }
 
+/**
+ * Pin the first served model when nothing is chosen yet; explicit choices
+ * persist. `deps` is the `api` singleton in production and a mock in tests —
+ * the component delegates with the default, so the call sites below read
+ * unchanged.
+ */
+export async function autoPickProvider(
+  provider: Provider,
+  deps: Pick<typeof api, "selectProviderModel"> = api,
+): Promise<void> {
+  const pin = autoPickModel(provider);
+  if (pin !== null) await deps.selectProviderModel(provider.providerId, pin);
+}
+
+/**
+ * The OAuth handshake returns no provider, and refresh only returns what was
+ * cleared — so look the fresh row up before pinning. `deps` defaults to `api`
+ * the same way.
+ */
+export async function autoPick(
+  providerId: string,
+  deps: Pick<typeof api, "providers" | "selectProviderModel"> = api,
+): Promise<void> {
+  const fresh = await deps.providers();
+  const provider = fresh.providers.find((entry) => entry.providerId === providerId);
+  if (provider) await autoPickProvider(provider, deps);
+}
+
 export function ProviderList({
   providers,
   apiKeyProviders,
@@ -138,19 +166,6 @@ export function ProviderList({
       setAuthorizeUrl(null);
       setChosen(null);
     });
-
-  /** Pin the first served model when nothing is chosen yet; explicit choices persist. */
-  const autoPickProvider = async (provider: Provider) => {
-    const pin = autoPickModel(provider);
-    if (pin !== null) await api.selectProviderModel(provider.providerId, pin);
-  };
-
-  /** The OAuth handshake returns no provider; look the fresh row up before pinning. */
-  const autoPick = async (providerId: string) => {
-    const fresh = await api.providers();
-    const provider = fresh.providers.find((entry) => entry.providerId === providerId);
-    if (provider) await autoPickProvider(provider);
-  };
 
   const cancelSignIn = (id: string) => {
     cancelledRef.current.add(id);
