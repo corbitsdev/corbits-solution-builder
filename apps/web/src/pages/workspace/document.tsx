@@ -202,8 +202,6 @@ export function StageDocument({
   // interview or opens a new one after a full re-read. The turn itself only
   // says the question, so without this an answer looks unheard.
   const versionOf = new Map(versions.map((entry) => [entry.id, entry.version]));
-  const turnById = useMemo(() => new Map(turns.map((turn) => [turn.id, turn])), [turns]);
-  const specialistTitle = agentFor(node.stage as Stage).title;
   const noun = documentName(node.kind).toLowerCase();
   const notes = new Map<string, TurnNote>();
   turns.forEach((turn, index) => {
@@ -320,59 +318,35 @@ export function StageDocument({
           identity={{ name: "Specialist", initials: "SB" }}
           // A specialist's turn is its digest of the draft, and the bolding in
           // it is the point — it is what a reader takes in first.
-          renderBody={(message) => {
-            if (message.id === "pending") return <WorkingLabel since={message.createdAt} />;
-            const turn = turnById.get(message.id);
-            // Who answered, and when — read from the recorded turn, so it
-            // reads the same after a reload rather than from client state.
-            const attribution = turn ? (
-              <p className="turn-attribution">
-                {turn.role === "human" ? "You" : specialistTitle} answered {formatWhen(turn.createdAt)}
-              </p>
-            ) : null;
-            if (message.role === "agent" && failedTurns.has(message.id)) {
-              return (
-                <div className="turn-failed" role="alert">
-                  <Markdown source={(message.parts[0] as { text: string }).text} />
-                </div>
-              );
-            }
-            if (message.role === "user" && withdrawnIds.has(message.id)) {
-              return (
-                <div className="turn-withdrawn">
-                  <Markdown source={message.parts.map((part) => (part as { text: string }).text).join("\n\n")} />
-                  <span className="turn-withdrawn-note">Stopped before it was answered.</span>
-                </div>
-              );
-            }
-            if (message.role === "agent") {
-              return (
-                <>
-                  {attribution}
-                  <SpecialistTurn
-                    text={(message.parts[0] as { text: string }).text}
-                    note={notes.get(message.id) ?? null}
-                    onOpenVersion={onSelectVersion}
-                    // Tapping a choice sends it, exactly as typing it would.
-                    // That holds outside the interview too: a brainstormer
-                    // proposing options is asking for a choice, whether or
-                    // not a question is queued.
-                    onAnswer={
-                      busy === null && message.id === messages.at(-1)?.id
-                        ? (answer) => onRevise(answer, [])
-                        : undefined
-                    }
-                  />
-                </>
-              );
-            }
-            return (
-              <>
-                {attribution}
-                {message.parts.map((part) => (part as { text: string }).text).join("\n\n")}
-              </>
-            );
-          }}
+          renderBody={(message) =>
+            message.id === "pending" ? (
+              <WorkingLabel since={message.createdAt} />
+            ) : message.role === "agent" && failedTurns.has(message.id) ? (
+              <div className="turn-failed" role="alert">
+                <Markdown source={(message.parts[0] as { text: string }).text} />
+              </div>
+            ) : message.role === "user" && withdrawnIds.has(message.id) ? (
+              <div className="turn-withdrawn">
+                <Markdown source={message.parts.map((part) => (part as { text: string }).text).join("\n\n")} />
+                <span className="turn-withdrawn-note">Stopped before it was answered.</span>
+              </div>
+            ) : message.role === "agent" ? (
+              <SpecialistTurn
+                text={(message.parts[0] as { text: string }).text}
+                note={notes.get(message.id) ?? null}
+                onOpenVersion={onSelectVersion}
+                // Tapping a choice sends it, exactly as typing it would. That
+                // holds outside the interview too: a brainstormer proposing
+                // options is asking for a choice, whether or not a question
+                // is queued.
+                onAnswer={
+                  busy === null && message.id === messages.at(-1)?.id
+                    ? (answer) => onRevise(answer, [])
+                    : undefined
+                }
+              />
+            ) : undefined
+          }
           empty={
             <div className="thread-empty">
               {/* The document is beside this, so what is missing is the
@@ -497,7 +471,7 @@ export function StageDocument({
             </p>
           ) : null}
           {onAddMaterial ? (
-            <p className="composer-cue">
+            <p className="composer-cue composer-material">
               <AddMaterial className="material-add-inline" onAdd={onAddMaterial} />{" "}
               or drop files anywhere here. The specialists read them with their next draft.
             </p>
@@ -598,17 +572,3 @@ export function DocumentBody({ source, sideBySide }: { source: string; sideBySid
 }
 
 const EMPTY_WITHDRAWN: ReadonlySet<string> = new Set();
-
-/** Who answered, and when — read straight from the thread's own `createdAt`
- * (the mail's From and date), so it survives a reload rather than living in
- * client state. */
-function formatWhen(iso: string): string {
-  const parsed = new Date(iso);
-  if (Number.isNaN(parsed.getTime())) return "";
-  return parsed.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
