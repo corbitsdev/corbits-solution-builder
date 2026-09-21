@@ -1241,8 +1241,8 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 
 /* ============================================================
    Onboarding — full screen, one decision at a time, no rail.
-   The shape is AgentFlight's: a centred card on a tinted ground
-   with a step track, an eyebrow and one large question.
+   A centred card on a tinted ground with a step track, an
+   eyebrow and one large question.
    Navigation is not offered until setup is done, so there is
    nothing to get lost in.
    ============================================================ */
