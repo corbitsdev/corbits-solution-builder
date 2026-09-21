@@ -1379,7 +1379,7 @@ export function StageWorkspace({
           <p className="stage-guidance-title">{guidance.title}</p>
           <p className="stage-guidance-detail">{guidance.detail}</p>
           {guidance.readyNote ? <p className="stage-guidance-ready">{guidance.readyNote}</p> : null}
-          {guidance.question && guidance.question.choices.length > 0 ? (
+          {guidance.question && guidance.question.choices.length > 0 && !(DOCUMENT_STAGES.has(stage) && !draftMessage) ? (
             <div className="button-row" aria-label="Recorded answer choices">
               {guidance.question.choices.map((choice) => (
                 <Button key={choice} variant="ghost" disabled={sending} onClick={() => void send(choice)}>
@@ -1531,14 +1531,14 @@ export function StageWorkspace({
           <p className="inline-note">
             Stage {stage} of 9 · {stageName(stage)} — {STAGE_GOAL[stage]}
           </p>
-          <p className="inline-note" role="status">
+          <div className="inline-note" role="status">
             {messages.length > 0 ? (
               <span className="thinking">Your message is recorded; no specialist reply is visible yet.</span>
             ) : (
               "No message from you is recorded yet."
             )}{" "}
             {messages.length > 0 ? <Elapsed since={lastPersonMessage?.at ?? null} /> : null}
-          </p>
+          </div>
           <p className="inline-note">{STAGE_TIPS[stage]?.[0] ?? STAGE_TIPS[1]?.[0] ?? "Rough answers are fine."}</p>
           {guidance.question && guidance.question.choices.length > 0 ? (
             <div className="button-row" aria-label="Recorded answer choices">
