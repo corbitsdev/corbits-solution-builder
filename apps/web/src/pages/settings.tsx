@@ -18,7 +18,6 @@ import { DECK_DENSITY, DECK_THEMES, DECK_TYPEFACES, DEFAULT_DECK_DESIGN, type De
 import { api, ApiFailure, STAKEHOLDER_ROLES, type DesignerSettings, type HostStatus, type Provider } from "../client.js";
 import { Banner, Button, StateLabel } from "../components.jsx";
 import { deckDesignFor, guidanceFor } from "../deck-design-settings.ts";
-import { findImageProvider } from "../deck-images.ts";
 import { Dictated } from "../dictation.jsx";
 import { ProviderList, type ApiKeyProvider, type OAuthCandidate } from "./providers.jsx";
 
@@ -44,11 +43,11 @@ export function Settings({
         onChanged={onChanged}
       />
       <Designer />
-      <StakeholderDecks providers={providers} />
-      <DeckTemplates />
       <BuildWorker status={status} onChanged={onChanged} />
       <ThisComputer status={status} />
       <Diagnostics status={status} />
+      <StakeholderDecks />
+      <DeckTemplates />
     </div>
   );
 }
@@ -265,15 +264,12 @@ function roleLabel(role: string): string {
 }
 
 /**
- * How each stakeholder role's slides look, and what their deck outline
- * should emphasise. A changed look rebuilds the slides the next time they
- * are saved; changed guidance shapes the next package written for that
- * role. Selects and the notes switch save as they change; guidance saves
- * when the field is left, since it is typed. A mapped style guide (below)
- * takes precedence over the colour and typeface chosen here.
+ * How each stakeholder role's deck is designed: its look, and what its
+ * outline should emphasise. A budget approver and a technical approver do
+ * not want the same slides. Selects save as they change; the guidance
+ * saves when the field is left, since it is typed.
  */
-function StakeholderDecks({ providers }: { providers: Provider[] }) {
-  const imageProvider = findImageProvider(providers);
+function StakeholderDecks() {
   const [designs, setDesigns] = useState<Record<string, DeckDesign> | null>(null);
   const [guidance, setGuidance] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
@@ -308,31 +304,23 @@ function StakeholderDecks({ providers }: { providers: Provider[] }) {
     }
   };
 
-  const saveGuidance = async (role: string) => {
-    if (!designs || guidance[role] === designs[role]?.guidance) return;
-    setError(null);
-    try {
-      await api.setPreference(`deck.${role}.guidance`, guidance[role] ?? "");
-      setDesigns({ ...designs, [role]: { ...designs[role]!, guidance: guidance[role] ?? "" } });
-    } catch (cause) {
-      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-    }
-  };
-
   return (
     <Section
       title="Stakeholder decks"
-      lead={
-        imageProvider
-          ? `How each stakeholder role's slides look, and what their deck outline should emphasise. ${imageProvider.label} is connected with an image model (${imageProvider.model}), so a role's Images choice draws pictures for its slides.`
-          : "How each stakeholder role's slides look, and what their deck outline should emphasise. No connected provider lists an image model yet, so decks build without pictures whatever a role's Images choice is; connect one under Inference to draw them."
-      }
+      lead="How each stakeholder role's slides look, and what their deck outline should emphasise. A changed look rebuilds the slides the next time they are saved; changed guidance shapes the next package written for that role. For images, a model reads the whole deck, decides which slides a picture would help and what each should show, and the first connected provider that lists an image model draws them when the slides are saved; each is kept so it is drawn once."
     >
       {error ? <Banner tone="error" title={error} /> : null}
       {STAKEHOLDER_ROLES.map((role) => {
         const design = designs?.[role] ?? DEFAULT_DECK_DESIGN;
-        const digest = [`${design.theme}, ${design.typeface}`, design.density, design.notes ? "notes" : "no notes"].join(" · ");
+        const digest = [
+          `${design.theme}, ${design.typeface}`,
+          design.density,
+          design.images === "none" ? "no images" : design.images === "cover" ? "cover image" : design.images === "some" ? "some images" : "images on every slide",
+          design.notes ? "notes" : "no notes",
+        ].join(" · ");
         return (
+          // One line per role until it is opened: the role and a digest of
+          // its design; the controls only when disclosed.
           <details key={role} className="deck-role">
             <summary className="deck-role-summary">
               <span className="deck-role-title">{roleLabel(role)}</span>
@@ -393,13 +381,12 @@ function StakeholderDecks({ providers }: { providers: Provider[] }) {
                     className="setting-select"
                     value={design.images}
                     disabled={!designs}
-                    title={imageProvider ? undefined : "No image model is connected yet; decks build without pictures until one is."}
                     onChange={(event) => void save(role, "images", event.target.value as DeckDesign["images"])}
                   >
                     <option value="none">None</option>
-                    <option value="cover">Cover only</option>
-                    <option value="some">Some slides</option>
-                    <option value="all">Every slide</option>
+                    <option value="cover">The cover</option>
+                    <option value="some">Some slides, chosen for the content</option>
+                    <option value="all">The cover and every slide</option>
                   </select>
                 </label>
               </div>
@@ -415,7 +402,9 @@ function StakeholderDecks({ providers }: { providers: Provider[] }) {
                     disabled={!designs}
                     placeholder="e.g. Lead with cost and timeline; one risk slide at most; no implementation detail."
                     onChange={(event) => setGuidance({ ...guidance, [role]: event.target.value })}
-                    onBlur={() => void saveGuidance(role)}
+                    onBlur={() => {
+                      if (designs && guidance[role] !== designs[role]?.guidance) void save(role, "guidance", guidance[role] ?? "");
+                    }}
                   />
                 </Dictated>
               </div>
@@ -509,50 +498,53 @@ function DeckTemplates() {
       lead="A PowerPoint whose theme a role's slides follow: its accent and text colours, its title and body typefaces, and its slide size. Nothing else is copied from it. Upload one below, then point a role at it."
     >
       {error ? <Banner tone="error" title={error} /> : null}
-      <div className="deck-template-library">
-        {(templates ?? []).map((template) => (
-          <div key={template.id} className="deck-template-row">
-            <span className="deck-template-name">{template.name}</span>
-            <Button loading={removingId === template.id} onClick={() => void remove(template.id)}>
-              Remove
-            </Button>
+      <details>
+        <summary>Manage templates</summary>
+        <div className="deck-template-library">
+          {(templates ?? []).map((template) => (
+            <div key={template.id} className="deck-template-row">
+              <span className="deck-template-name">{template.name}</span>
+              <Button loading={removingId === template.id} onClick={() => void remove(template.id)}>
+                Remove
+              </Button>
+            </div>
+          ))}
+          <label className="deck-template-pick">
+            <Input
+              type="file"
+              accept=".pptx,.potx,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+              disabled={uploading}
+              onChange={(event) => {
+                const file = event.target.files?.[0] ?? null;
+                event.target.value = "";
+                if (file) void upload(file);
+              }}
+            />
+            <span>{uploading ? "Uploading…" : "Choose a PowerPoint…"}</span>
+          </label>
+        </div>
+        {STAKEHOLDER_ROLES.map((role) => (
+          <div key={role} className="setting-row">
+            <div>
+              <strong>{roleLabel(role)}</strong>
+            </div>
+            <select
+              className="setting-select"
+              aria-label={`Style guide for ${roleLabel(role)}`}
+              value={roles?.[role] ?? ""}
+              disabled={!roles || !templates || busyRole === role}
+              onChange={(event) => void mapRole(role, event.target.value || null)}
+            >
+              <option value="">Default look</option>
+              {(templates ?? []).map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.name}
+                </option>
+              ))}
+            </select>
           </div>
         ))}
-        <label className="deck-template-pick">
-          <Input
-            type="file"
-            accept=".pptx,.potx,application/vnd.openxmlformats-officedocument.presentationml.presentation"
-            disabled={uploading}
-            onChange={(event) => {
-              const file = event.target.files?.[0] ?? null;
-              event.target.value = "";
-              if (file) void upload(file);
-            }}
-          />
-          <span>{uploading ? "Uploading…" : "Choose a PowerPoint…"}</span>
-        </label>
-      </div>
-      {STAKEHOLDER_ROLES.map((role) => (
-        <div key={role} className="setting-row">
-          <div>
-            <strong>{roleLabel(role)}</strong>
-          </div>
-          <select
-            className="setting-select"
-            aria-label={`Style guide for ${roleLabel(role)}`}
-            value={roles?.[role] ?? ""}
-            disabled={!roles || !templates || busyRole === role}
-            onChange={(event) => void mapRole(role, event.target.value || null)}
-          >
-            <option value="">Default look</option>
-            {(templates ?? []).map((template) => (
-              <option key={template.id} value={template.id}>
-                {template.name}
-              </option>
-            ))}
-          </select>
-        </div>
-      ))}
+      </details>
     </Section>
   );
 }

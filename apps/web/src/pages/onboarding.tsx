@@ -19,6 +19,17 @@ import { ProviderList, type ApiKeyProvider, type OAuthCandidate } from "./provid
 
 type Step = "provider" | "model" | "project";
 
+/**
+ * Whether the model step is needed for a provider: ready, serving a real
+ * choice of models, with nothing pinned yet. The provider list auto-picks
+ * the first served model at connect/refresh time, so a fresh connection
+ * never lands here — the step stays only as a fallback (a pin the hub
+ * dropped, or a choice predating auto-pick).
+ */
+export function needsModelChoice(provider: { status: string; selectedModel: string | null; models: readonly string[] }): boolean {
+  return provider.status === "ready" && provider.models.length > 1 && provider.selectedModel === null;
+}
+
 export function Onboarding({
   providers,
   apiKeyProviders,
@@ -43,9 +54,7 @@ export function Onboarding({
   useEffect(() => {
     if (!awaitingChoice) return;
     setAwaitingChoice(false);
-    const pending = providers.find(
-      (provider) => provider.status === "ready" && provider.models.length > 1 && provider.selectedModel === null,
-    );
+    const pending = providers.find(needsModelChoice);
     if (pending) {
       setModelProviderId(pending.id);
       setStep("model");
