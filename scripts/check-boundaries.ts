@@ -202,6 +202,11 @@ const INSTALLER_ALLOWED = [
   "@solutions-builder/app",
   "@intx/hub-client",
   "@intx/types",
+  // The install-time catalog seed's declarative data leaf (`catalog-seed.ts`):
+  // the pinned providers/models it copies into vendor and model rows. Already
+  // in RUNTIME_PACKAGES, not a platform internal -- and `apps/web` must still
+  // resolve plugin/base URL from the seeded rows, never import this itself.
+  "@intx/inference-catalog",
   // The one seeded definition's type, the same reason the app package allows
   // it: the shape it generates is an Interchange workflow.
   "@intx/workflow",

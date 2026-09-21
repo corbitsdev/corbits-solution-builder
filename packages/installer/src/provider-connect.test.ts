@@ -72,6 +72,11 @@ describe("upsertApiKeyProvider", () => {
         credentials.push(row);
         return row;
       }
+      // A fresh "anthropic" vendor is created with the pin's snapshot (see
+      // ensureVendorProvider), so the attach lists models/offerings -- with no
+      // model rows present every snapshot entry is skipped and nothing is written.
+      if (call.method === "GET" && call.path.endsWith("/catalog/models?limit=100")) return page([]);
+      if (call.method === "GET" && call.path.endsWith("/catalog/offerings?limit=100")) return page([]);
       throw new Error(`unexpected call: ${call.method} ${call.path}`);
     });
 
@@ -88,6 +93,8 @@ describe("upsertApiKeyProvider", () => {
       credentialId: "credential_1",
       modelProviderId: "modelProvider_1",
     });
+    expect(calls.some((c) => c.method === "POST" && c.path.endsWith("/catalog/models"))).toBe(false);
+    expect(calls.some((c) => c.method === "POST" && c.path.endsWith("/catalog/offerings"))).toBe(false);
     expect(calls.some((c) => c.method === "POST" && c.path.endsWith("/credentials"))).toBe(true);
     expect(
       calls.some(
@@ -423,5 +430,168 @@ describe("upsertOAuthProvider", () => {
     });
 
     expect(result).toEqual({ vendorProviderId: "provider_1", credentialId: "credential_1", modelProviderId: "modelProvider_1" });
+  });
+});
+
+describe("upsertApiKeyProvider seeded-snapshot materialization", () => {
+  const snapshotVendor: HubProvider = {
+    id: "provider_seed",
+    name: "anthropic",
+    plugin: "anthropic",
+    apiBaseUrl: "https://api.anthropic.com",
+    metadata: {
+      label: "Anthropic",
+      catalogSeeded: true,
+      offeringSpecs: [
+        { model: "claude-a", displayName: "Claude A", priority: 10, capabilities: ["tools"], quirks: {} },
+        { model: "claude-b", displayName: "Claude B", priority: 20, capabilities: [], quirks: { beta: true } },
+      ],
+    },
+  };
+  const seedModels: HubModel[] = [
+    { id: "model_a", canonicalName: "claude-a", displayName: "Claude A" },
+    { id: "model_b", canonicalName: "claude-b", displayName: "Claude B" },
+  ];
+  const connectInput = {
+    providerId: "anthropic",
+    label: "Anthropic",
+    plugin: "anthropic" as const,
+    baseURL: "https://api.anthropic.com",
+    apiKey: "sk-ant-test",
+  };
+
+  function offeringPost(body: unknown) {
+    return {
+      id: "offering_new",
+      modelId: "",
+      providerId: "",
+      priority: 0,
+      disabled: false,
+      capabilities: [],
+      quirks: null,
+      ...(body as object),
+    } as HubOffering;
+  }
+
+  test("materializes the snapshot into offerings without writing model rows", async () => {
+    const modelProviders: HubModelProvider[] = [];
+    const { transport, calls } = createMockTransport((call) => {
+      if (call.method === "GET" && call.path.includes("/tenants/ten_workspace/providers?limit=100")) return page([snapshotVendor]);
+      if (call.method === "POST" && call.path.endsWith("/credentials")) {
+        return { id: "credential_1", type: "api_key", status: "active", updatedAt: "now", principalId: null, metadata: null, ...(call.body as object) } as HubCredential;
+      }
+      if (call.method === "GET" && call.path.endsWith("/catalog/providers?limit=100")) return page(modelProviders);
+      if (call.method === "POST" && call.path.endsWith("/catalog/providers")) {
+        const row = { id: "modelProvider_1", disabled: false, ...(call.body as object) } as HubModelProvider;
+        modelProviders.push(row);
+        return row;
+      }
+      if (call.method === "GET" && call.path.endsWith("/catalog/models?limit=100")) return page(seedModels);
+      if (call.method === "GET" && call.path.endsWith("/catalog/offerings?limit=100")) return page([]);
+      if (call.method === "POST" && call.path.endsWith("/catalog/offerings")) return offeringPost(call.body);
+      throw new Error(`unexpected call: ${call.method} ${call.path}`);
+    });
+
+    await upsertApiKeyProvider(transport, SCOPE, connectInput);
+
+    expect(calls.some((c) => c.method === "POST" && c.path.endsWith("/catalog/models"))).toBe(false);
+    const offeringPosts = calls.filter((c) => c.method === "POST" && c.path.endsWith("/catalog/offerings"));
+    expect(offeringPosts).toHaveLength(2);
+    expect(offeringPosts.find((c) => (c.body as { modelId: string }).modelId === "model_a")?.body).toMatchObject({
+      providerId: "modelProvider_1",
+      priority: 10,
+      capabilities: ["tools"],
+    });
+    expect(offeringPosts.find((c) => (c.body as { modelId: string }).modelId === "model_b")?.body).toMatchObject({
+      providerId: "modelProvider_1",
+      priority: 20,
+      quirks: { beta: true },
+    });
+  });
+
+  test("a reconnect leaves already-attached offerings untouched: no duplicate, no rewrite", async () => {
+    const existingModelProvider: HubModelProvider = {
+      id: "modelProvider_1",
+      name: "anthropic",
+      plugin: "anthropic",
+      baseURL: "https://api.anthropic.com",
+      credentialId: "credential_1",
+      disabled: false,
+    };
+    const attached: HubOffering[] = [
+      { id: "offering_a", modelId: "model_a", providerId: "modelProvider_1", priority: 10, capabilities: ["tools"], quirks: null, disabled: false },
+    ];
+    const { transport, calls } = createMockTransport((call) => {
+      if (call.method === "GET" && call.path.includes("/tenants/ten_workspace/providers?limit=100")) return page([snapshotVendor]);
+      if (call.method === "POST" && call.path.endsWith("/credentials")) {
+        return { id: "credential_1", type: "api_key", status: "active", updatedAt: "now", principalId: null, metadata: null, ...(call.body as object) } as HubCredential;
+      }
+      if (call.method === "GET" && call.path.endsWith("/catalog/providers?limit=100")) return page([existingModelProvider]);
+      if (call.method === "GET" && call.path.endsWith("/catalog/models?limit=100")) return page(seedModels);
+      if (call.method === "GET" && call.path.endsWith("/catalog/offerings?limit=100")) return page(attached);
+      if (call.method === "POST" && call.path.endsWith("/catalog/offerings")) {
+        const row = offeringPost(call.body);
+        attached.push(row);
+        return row;
+      }
+      throw new Error(`unexpected call: ${call.method} ${call.path}`);
+    });
+
+    await upsertApiKeyProvider(transport, SCOPE, connectInput);
+
+    const offeringPosts = calls.filter((c) => c.method === "POST" && c.path.endsWith("/catalog/offerings"));
+    expect(offeringPosts).toHaveLength(1);
+    expect((offeringPosts[0]!.body as { modelId: string }).modelId).toBe("model_b");
+    expect(calls.some((c) => c.method === "PATCH" && c.path.includes("/catalog/offerings/"))).toBe(false);
+  });
+
+  test("a snapshot entry with no model row is skipped, never created at connect", async () => {
+    const modelProviders: HubModelProvider[] = [];
+    const { transport, calls } = createMockTransport((call) => {
+      if (call.method === "GET" && call.path.includes("/tenants/ten_workspace/providers?limit=100")) return page([snapshotVendor]);
+      if (call.method === "POST" && call.path.endsWith("/credentials")) {
+        return { id: "credential_1", type: "api_key", status: "active", updatedAt: "now", principalId: null, metadata: null, ...(call.body as object) } as HubCredential;
+      }
+      if (call.method === "GET" && call.path.endsWith("/catalog/providers?limit=100")) return page(modelProviders);
+      if (call.method === "POST" && call.path.endsWith("/catalog/providers")) {
+        const row = { id: "modelProvider_1", disabled: false, ...(call.body as object) } as HubModelProvider;
+        modelProviders.push(row);
+        return row;
+      }
+      // Only claude-a has a model row; claude-b's snapshot entry must be skipped.
+      if (call.method === "GET" && call.path.endsWith("/catalog/models?limit=100")) return page([seedModels[0]!]);
+      if (call.method === "GET" && call.path.endsWith("/catalog/offerings?limit=100")) return page([]);
+      if (call.method === "POST" && call.path.endsWith("/catalog/offerings")) return offeringPost(call.body);
+      throw new Error(`unexpected call: ${call.method} ${call.path}`);
+    });
+
+    await upsertApiKeyProvider(transport, SCOPE, connectInput);
+
+    expect(calls.some((c) => c.method === "POST" && c.path.endsWith("/catalog/models"))).toBe(false);
+    const offeringPosts = calls.filter((c) => c.method === "POST" && c.path.endsWith("/catalog/offerings"));
+    expect(offeringPosts).toHaveLength(1);
+    expect((offeringPosts[0]!.body as { modelId: string }).modelId).toBe("model_a");
+  });
+
+  test("a vendor with no snapshot attaches with no model or offering reads at all", async () => {
+    const fallbackVendor: HubProvider = { ...snapshotVendor, id: "provider_fallback", metadata: null };
+    const modelProviders: HubModelProvider[] = [];
+    const { transport, calls } = createMockTransport((call) => {
+      if (call.method === "GET" && call.path.includes("/tenants/ten_workspace/providers?limit=100")) return page([fallbackVendor]);
+      if (call.method === "POST" && call.path.endsWith("/credentials")) {
+        return { id: "credential_1", type: "api_key", status: "active", updatedAt: "now", principalId: null, metadata: null, ...(call.body as object) } as HubCredential;
+      }
+      if (call.method === "GET" && call.path.endsWith("/catalog/providers?limit=100")) return page(modelProviders);
+      if (call.method === "POST" && call.path.endsWith("/catalog/providers")) {
+        const row = { id: "modelProvider_1", disabled: false, ...(call.body as object) } as HubModelProvider;
+        modelProviders.push(row);
+        return row;
+      }
+      throw new Error(`unexpected call: ${call.method} ${call.path}`);
+    });
+
+    await upsertApiKeyProvider(transport, SCOPE, connectInput);
+
+    expect(calls.some((c) => c.path.includes("/catalog/models") || c.path.includes("/catalog/offerings"))).toBe(false);
   });
 });

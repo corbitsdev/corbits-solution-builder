@@ -12,6 +12,7 @@
     "@solutions-builder/app": "workspace:*",
     "@intx/crypto": "workspace:*",
     "@intx/hub-client": "workspace:*",
+    "@intx/inference-catalog": "workspace:*",
     "@intx/types": "workspace:*",
     "@isomorphic-git/lightning-fs": "^4.7.0",
     "buffer": "^6.0.3",

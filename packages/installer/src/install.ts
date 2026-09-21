@@ -19,6 +19,7 @@ import type { Transport } from "@intx/hub-client";
 import { APP_VERSION } from "@solutions-builder/app/manifest";
 import { AUTHORITIES } from "@solutions-builder/app/ledger";
 import { assignRole, createWorkspace, ensureRole, resolveWorkspace, type Workspace } from "./hub.js";
+import { seedCatalog } from "./catalog-seed.js";
 import { installProjectAuthority, listProjectRecords } from "./project-tenant.js";
 import { ensureAuthorityGrants } from "./authority-grants.js";
 import { ensureSkillAssets } from "./skill-assets.js";
@@ -104,6 +105,12 @@ export async function install(
 ): Promise<InstallState> {
   const ws = await ensureWorkspace(transport);
   await hooks.afterEnsureWorkspace?.(ws);
+
+  // The model catalog comes from the pinned `@intx/inference-catalog`: vendor
+  // rows and model rows land here, on the workspace tenant, while a project
+  // inherits them through tenant ancestry. Idempotent and adopting, so
+  // upgrades re-run it without touching tenant edits.
+  await seedCatalog(transport, ws.tenantId);
 
   // Authority is the platform's: the ledger's authorities become roles, and
   // the owner holds every human one.

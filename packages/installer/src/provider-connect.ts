@@ -16,6 +16,7 @@
 import { ApiError } from "@intx/hub-client";
 import type { Transport } from "@intx/hub-client";
 import { catalogFor, type HubCredential, type HubModelProvider, type HubProvider } from "./hub.js";
+import { seededVendorSpec, type SeedOfferingSpec } from "./catalog-seed.js";
 
 /** Mirrors `@intx/types`' `modelProviderPlugins`: the inference adapters the runtime dispatches to. */
 export type ModelProviderPlugin = "anthropic" | "openai" | "openai-compatible" | "google-genai";
@@ -30,6 +31,10 @@ export type UpsertApiKeyProviderInput = {
   /** A local endpoint needs no account and no key -- the credential holds a
    * placeholder secret and is marked so the catalog renders it as one. */
   keyless?: boolean;
+  /** Restricts which seeded models materialize offerings on the new row. Empty
+   * (the default) materializes the whole snapshot; provider adapters may pass
+   * the subset their endpoint actually serves. */
+  canonicalNames?: string[];
 };
 
 export type UpsertApiKeyProviderResult = {
@@ -48,12 +53,68 @@ async function ensureVendorProvider(
 ): Promise<HubProvider> {
   const existing = (await catalog.providers()).find((row) => row.name === input.providerId);
   if (existing) return existing;
+  const seed = seededVendorSpec(input.providerId);
   return catalog.createProvider({
     name: input.providerId,
     plugin: input.plugin,
     apiBaseUrl: input.baseURL,
-    metadata: { label: input.label },
+    metadata: seed
+      ? { label: seed.label, catalogSeeded: true, offeringSpecs: seed.offerings }
+      : { label: input.label, fallbackVendor: true },
   });
+}
+
+/**
+ * Reads the offering snapshot a seed (install-time, or the create above) left
+ * in the vendor row's metadata. Returns an empty list for fallback rows with
+ * no snapshot: those connect through the custom-endpoint or OAuth paths, whose
+ * provider lists or live discovery supply the models.
+ */
+function seedSnapshotOfferings(vendor: HubProvider): SeedOfferingSpec[] {
+  const snapshot = (vendor.metadata ?? {})["offeringSpecs"];
+  if (!Array.isArray(snapshot)) return [];
+  return snapshot.filter(
+    (entry): entry is SeedOfferingSpec =>
+      typeof entry === "object" && entry !== null && typeof (entry as { model?: unknown }).model === "string",
+  );
+}
+
+/**
+ * Materializes the vendor row's seeded offering snapshot onto the connected
+ * model provider: one created offering per spec, carrying the catalog's model
+ * priorities, capabilities and quirks. Strictly additive -- an offering that
+ * already exists is left untouched, so a reconnect never clobbers the tenant's
+ * provider order or model pins -- and attach-scoped: the `model_provider` and
+ * offering rows are the only catalog rows connect may write; vendor and model
+ * rows come from the install-time seed, and a snapshot entry with no model
+ * row is skipped, never created here.
+ */
+async function materializeSeededOfferings(
+  catalog: ReturnType<typeof catalogFor>,
+  vendor: HubProvider,
+  modelProvider: HubModelProvider,
+  canonicalNames: string[],
+): Promise<void> {
+  const wanted = seedSnapshotOfferings(vendor).filter((offering) =>
+    canonicalNames.length === 0 ? true : canonicalNames.includes(offering.model),
+  );
+  if (wanted.length === 0) return;
+  const [modelRows, offeringRows] = await Promise.all([catalog.models(), catalog.offerings()]);
+  const attached = new Set(
+    offeringRows.filter((row) => row.providerId === modelProvider.id).map((row) => row.modelId),
+  );
+  for (const offering of wanted) {
+    const modelRow = modelRows.find((row) => row.canonicalName === offering.model);
+    if (!modelRow || attached.has(modelRow.id)) continue;
+    attached.add(modelRow.id);
+    await catalog.createOffering({
+      modelId: modelRow.id,
+      providerId: modelProvider.id,
+      priority: offering.priority,
+      capabilities: offering.capabilities,
+      ...(Object.keys(offering.quirks).length > 0 ? { quirks: offering.quirks } : {}),
+    });
+  }
 }
 
 async function ensureApiKeyCredential(
@@ -101,7 +162,9 @@ async function ensureModelProvider(
 
 /**
  * Connects (or reconnects) an API-key provider: the vendor `provider` row,
- * its sealed credential, and the model provider bound to it. Reconnecting
+ * its sealed credential, and the model provider bound to it. The attach writes
+ * only the `model_provider` row and materializes the seeded offerings from the
+ * vendor row's snapshot -- never vendor or model rows. Reconnecting
  * with a new key rotates the same credential row rather than minting a
  * second one -- a model provider's credential binding cannot be repointed
  * (only replaced by delete-and-recreate), so keeping the same credential id
@@ -122,6 +185,7 @@ export async function upsertApiKeyProvider(
     input.keyless ? { keyless: true } : undefined,
   );
   const modelProvider = await ensureModelProvider(catalog, input, credential.id);
+  await materializeSeededOfferings(catalog, vendorProvider, modelProvider, input.canonicalNames ?? []);
   return { vendorProviderId: vendorProvider.id, credentialId: credential.id, modelProviderId: modelProvider.id };
 }
 
@@ -217,6 +281,11 @@ export async function upsertOAuthProvider(
  * provider previously had that dropped out of this list disabled (never
  * deleted -- its price history and priority stay put if the model comes
  * back).
+ *
+ * This is the custom-endpoint path only: local servers, OpenRouter and other
+ * vendors with no install-time seed snapshot, where the live listing is the
+ * sole source of servable models. First-party connects never call this --
+ * their attach materializes the seeded snapshot instead.
  */
 export async function registerProviderModels(
   transport: Transport,
