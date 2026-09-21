@@ -11,6 +11,7 @@
  * write, not a signal this deploy waits on.
  */
 import { ApiError, type Transport } from "@intx/hub-client";
+import { agentFor } from "@solutions-builder/app/kit";
 import type { Stage } from "@solutions-builder/app/ledger";
 import {
   ARTIFACT_TOOL_DEPENDENCIES,
@@ -52,12 +53,27 @@ function normalizedProjectId(projectId: string): string {
   return projectId.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 }
 
-/** `sb-project-<projectId>-stage-<N>`, normalized the same way `lifecycleAssetName` is. */
-function specialistAssetName(projectId: string, stage: Stage): string {
-  return `sb-project-${normalizedProjectId(projectId)}-stage-${stage}`;
+/** The role key naming the primary per-stage agent -- the only one deployed
+ *  today. Keeping its asset name suffix-free is what keeps every already
+ *  deployed specialist's name byte-identical across this change. */
+const DEFAULT_ROLE_KEY = "primary";
+
+/** `sb-project-<projectId>-stage-<N>`, normalized the same way `lifecycleAssetName`
+ *  is, with `-<roleKey>` appended for any role other than the primary
+ *  per-stage agent (`DEFAULT_ROLE_KEY`) -- so a stage's other roles (a brief
+ *  evaluator, a requirements author, a panel principal) each get their own
+ *  asset without disturbing the primary agent's existing name. */
+function specialistAssetName(projectId: string, stage: Stage, roleKey: string = DEFAULT_ROLE_KEY): string {
+  const base = `sb-project-${normalizedProjectId(projectId)}-stage-${stage}`;
+  return roleKey === DEFAULT_ROLE_KEY ? base : `${base}-${roleKey}`;
 }
 
-const SPECIALIST_ASSET_STAGE = /-stage-(\d+)$/;
+/** Matches a role's asset name suffix -- `-stage-<N>` for the primary agent
+ *  (`DEFAULT_ROLE_KEY`), `-stage-<N>-<roleKey>` for any other role. */
+function specialistAssetStagePattern(roleKey: string): RegExp {
+  const suffix = roleKey === DEFAULT_ROLE_KEY ? "" : `-${roleKey}`;
+  return new RegExp(`-stage-(\\d+)${suffix}$`);
+}
 
 const ENDED_DEPLOYMENT_STATUSES = new Set(["releasing", "released", "failed"]);
 
@@ -93,13 +109,15 @@ export async function listSpecialistDeployments(
   transport: Transport,
   workspaceTenantId: string,
   projectId: string,
+  roleKey: string = DEFAULT_ROLE_KEY,
 ): Promise<SpecialistDeploymentRef[]> {
   const prefix = `sb-project-${normalizedProjectId(projectId)}-stage-`;
+  const stagePattern = specialistAssetStagePattern(roleKey);
   const assets = await assetsFor(transport, workspaceTenantId).list("workflow");
   const stageByAssetId = new Map<string, number>();
   for (const asset of assets) {
     if (!asset.name.startsWith(prefix)) continue;
-    const match = SPECIALIST_ASSET_STAGE.exec(asset.name);
+    const match = stagePattern.exec(asset.name);
     if (match) stageByAssetId.set(asset.id, Number(match[1]));
   }
   if (stageByAssetId.size === 0) return [];
@@ -132,10 +150,11 @@ export async function stageSpecialistStatus(
   workspaceTenantId: string,
   projectId: string,
   stage: Stage,
+  roleKey: string = DEFAULT_ROLE_KEY,
 ): Promise<SpecialistDeploymentStatus | null> {
   const tenant = await getTenant(transport, workspaceTenantId);
   if (!tenant?.domain) return null;
-  const assetName = specialistAssetName(projectId, stage);
+  const assetName = specialistAssetName(projectId, stage, roleKey);
   const assets = await assetsFor(transport, workspaceTenantId).list("workflow");
   const asset = assets.find((entry) => entry.name === assetName);
   if (!asset) return null;
@@ -162,9 +181,10 @@ async function renderSpecialistSource(
   stage: Stage,
   source: InferenceSourcePin,
   artifactTools: boolean,
+  roleKey: string,
   audiences?: readonly { readonly name: string; readonly role: string }[],
 ): Promise<Record<string, string>> {
-  const name = specialistAssetName(projectId, stage);
+  const name = specialistAssetName(projectId, stage, roleKey);
   const root = {
     name: `${name}-workspace`,
     version: "0.0.0",
@@ -199,6 +219,8 @@ async function renderSpecialistSource(
       source,
       projectId,
       assetName: name,
+      role: agentFor(stage),
+      roleKey,
       artifactTools,
       ...(audiences ? { audiences } : {}),
     }),
@@ -244,6 +266,7 @@ async function ensureSpecialistDeploymentOnce(
   stage: Stage,
   hubOrigin: string,
   artifactTools: boolean,
+  roleKey: string,
 ): Promise<SpecialistDeployment> {
   if (!sidecar.canPlaceSidecars) {
     throw new Error("no host is placing sidecars; cannot deploy a stage specialist");
@@ -254,7 +277,7 @@ async function ensureSpecialistDeploymentOnce(
     throw new Error("the workspace tenant has no domain to address a specialist at");
   }
 
-  const assetName = specialistAssetName(projectId, stage);
+  const assetName = specialistAssetName(projectId, stage, roleKey);
   const assetId = await ensureWorkflowAsset(transport, workspaceTenantId, assetName, `Stage ${stage} specialist`);
 
   const workflows = workflowsFor(transport, workspaceTenantId);
@@ -282,7 +305,7 @@ async function ensureSpecialistDeploymentOnce(
   const project = stage === PACKAGE_STAGE ? await readProject(transport, projectId) : null;
   const audiences = project?.policy.audiences;
 
-  const rendered = await renderSpecialistSource(closure, projectId, stage, source, artifactTools, audiences);
+  const rendered = await renderSpecialistSource(closure, projectId, stage, source, artifactTools, roleKey, audiences);
   const commitSha = await pushWorkflowSourceTree(
     transport,
     workspaceTenantId,
@@ -349,6 +372,10 @@ export async function ensureSpecialistDeployment(
   /** CL-8719: opt-in, default off -- see `specialist-source.ts`'s
    *  `SpecialistSourceOptions.artifactTools`. */
   artifactTools = false,
+  /** Which of the stage's roles to deploy -- default is the primary
+   *  per-stage agent, whose asset name this keeps byte-identical to before
+   *  roles existed (`DEFAULT_ROLE_KEY`, `specialistAssetName`). */
+  roleKey: string = DEFAULT_ROLE_KEY,
 ): Promise<SpecialistDeployment> {
   const attempt = () =>
     ensureSpecialistDeploymentOnce(
@@ -361,6 +388,7 @@ export async function ensureSpecialistDeployment(
       stage,
       hubOrigin,
       artifactTools,
+      roleKey,
     );
   try {
     return await attempt();

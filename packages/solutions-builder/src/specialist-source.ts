@@ -16,7 +16,7 @@
  * a client-side artifact write, not a signal this workflow waits on.
  */
 import type { ArtifactKind } from "./artifacts.js";
-import { ARTIFACT_WRITE_RULE, agentById, agentFor, panelPrincipals, type AgentRole } from "./kit.js";
+import { ARTIFACT_WRITE_RULE, agentFor, type AgentRole } from "./kit.js";
 import type { Stage } from "./ledger.js";
 import { skillTextFor } from "./seed-kit.js";
 
@@ -116,6 +116,16 @@ export type SpecialistSourceOptions = {
   readonly stage: Stage;
   readonly source: InferenceSourcePin;
   readonly projectId: string;
+  /** The agent this deployment runs. Passed in rather than derived from
+   *  `stage` here (`agentFor(stage)`) so a stage's other roles — the
+   *  brief evaluator, the requirements author, a panel principal — can each
+   *  render as their own deployment; `specialist-deploy.ts` still resolves
+   *  the primary per-stage role via `agentFor(stage)` today. */
+  readonly role: AgentRole;
+  /** A short, filesystem/asset-name-safe key identifying `role` within its
+   *  stage — folded into the deployed asset's name by `specialist-deploy.ts`
+   *  (`specialistAssetName`) so each role gets its own asset. */
+  readonly roleKey: string;
   /** This asset's deterministic name (`sb-project-<projectId>-stage-<N>`),
    *  passed in rather than recomputed here since `specialist-deploy.ts`
    *  already owns that naming — used only to name the credential binding. */
@@ -147,31 +157,15 @@ function renderedPrompt(role: AgentRole, artifactTools: boolean): string {
 }
 
 /**
- * A stage's specialist system prompt: its own kit role, plus whatever other
- * kit roles the lifecycle used to chain into that stage as separate steps.
- * There is only one step now, so those roles fold in as reference sections
- * instead: stage 1 folds in the brief evaluator's rubric (`EVALUATE_STEP_ID`
- * no longer exists as its own step), and stage 6 folds in the requirements
- * author and the four panel principals (no separate requirements/plan/review
- * chain either).
+ * The primary per-stage specialist's system prompt: its own kit role, and
+ * nothing else. The brief evaluator (stage 1) and the requirements author
+ * plus the four panel principals (stage 6) no longer fold in here as
+ * reference sections — each becomes its own deployment, rendered against its
+ * own `role`/`roleKey`, so folding their prompts in here too would run them
+ * twice.
  */
 function systemPromptForStage(stage: Stage, artifactTools: boolean): string {
-  const prompt = renderedPrompt(agentFor(stage), artifactTools);
-  if (stage === 1) {
-    const evaluator = agentById("brief-evaluator");
-    if (!evaluator) throw new Error("brief-evaluator role missing from the kit");
-    return `${prompt}\n\n## Brief evaluator rubric\n\n${evaluator.system}`;
-  }
-  if (stage === 6) {
-    const author = agentById("requirements-author");
-    if (!author) throw new Error("requirements-author role missing from the kit");
-    const sections = [`## Requirements author reference\n\n${author.system}`];
-    for (const principal of panelPrincipals()) {
-      sections.push(`## Panel: ${principal.title} review\n\n${principal.system}`);
-    }
-    return `${prompt}\n\n${sections.join("\n\n")}`;
-  }
-  return prompt;
+  return renderedPrompt(agentFor(stage), artifactTools);
 }
 
 /** The audience packages, folded into a stage-5 specialist's prompt as a
@@ -192,10 +186,9 @@ function audienceSection(audiences: readonly { readonly name: string; readonly r
  * carries none.
  */
 export function specialistEntrySource(options: SpecialistSourceOptions): string {
-  const { stage, source, audiences, projectId, assetName, artifactTools = false } = options;
+  const { stage, source, audiences, projectId, assetName, role, artifactTools = false } = options;
   const workflowId = specialistWorkflowId(stage);
   const triggerAddress = `${workflowId}@solutions-builder.local`;
-  const role = agentFor(stage);
   const kind = STAGE_ARTIFACT_KIND[stage];
 
   // CL-8723: stage 8 publishes its own binary artifact through
