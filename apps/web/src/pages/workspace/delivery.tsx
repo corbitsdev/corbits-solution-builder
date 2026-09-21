@@ -281,7 +281,7 @@ function DeliveryDecision({
           placeholder="What's missing or wrong, so the specialist can fix it and try again."
         />
       </div>
-      <div className="action-row">
+      <div className="button-row">
         <Button variant="primary" loading={busy === "approve"} onClick={() => void decide("approve")}>
           Accept the delivery
         </Button>
