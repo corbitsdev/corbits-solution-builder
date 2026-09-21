@@ -44,6 +44,7 @@ import { TargetPicker, targetOpeningLine } from "./freeze.jsx";
 import { deliveryOpeningLine, parseDeliveryManifest } from "./delivery-opening.ts";
 import { EstimateView } from "./estimate.jsx";
 import { evaluatorVerdict as guidanceEvaluatorVerdict, interviewProgress, workspaceGuidance } from "./guidance.js";
+import { deterministicGuidance, guidancePrompt, parseGuidanceReply, type Guidance } from "./product-guide.js";
 import { describeFailure } from "./failure-message.ts";
 import {
   applyWithdrawn,
@@ -773,6 +774,50 @@ export function StageWorkspace({
         Date.parse(message.at) > Date.parse(lastPersonMessage.at),
     );
 
+  // The Product guide: calm orientation across the nine stages, asked for
+  // rather than shown by default (CL-8737 restore). The checklist is
+  // computed straight from the workflow view and this project's artifact
+  // nodes -- always available, never wrong -- and is what `productGuide`
+  // starts as and falls back to. Asking deploys the guide's own agent
+  // (`api.ensureGuideAgent`, `agentById("product-guide")` under its own
+  // roleKey -- a distinct deployment and mail address, never the stage's own
+  // specialist) and mails it on its own thread; on a reply that reads as
+  // guidance, replaces the checklist with it. A failed or unrecognisable
+  // reply is retried once and otherwise leaves the checklist in place. It
+  // never writes an artifact and never touches the approve gate.
+  const [productGuide, setProductGuide] = useState<Guidance>(() => deterministicGuidance(workflowView, stage, detail.nodes));
+  const [guideAsking, setGuideAsking] = useState(false);
+  useEffect(() => {
+    setProductGuide(deterministicGuidance(workflowView, stage, detail.nodes));
+  }, [workflowView, stage, detail.nodes]);
+  const askGuide = useCallback(async () => {
+    if (guideAsking) return;
+    setGuideAsking(true);
+    const floor = deterministicGuidance(workflowView, stage, detail.nodes);
+    const prompt = guidancePrompt(workflowView, stage, detail.project.title);
+    const attempt = async (): Promise<Guidance | null> => {
+      try {
+        const guideDeployment = await api.ensureGuideAgent(detail.project.id);
+        const sentAt = Date.now();
+        await api.sendStageMail(tenantId, guideDeployment.address, { body: prompt, subject: "Guidance request" });
+        for (let tries = 0; tries < 8; tries += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+          const thread = await api.readStageThread(tenantId, [guideDeployment.address]);
+          const reply = [...thread]
+            .reverse()
+            .find((message) => message.author === "agent" && Date.parse(message.at) >= sentAt);
+          if (reply) return parseGuidanceReply(reply.body, floor);
+        }
+        return null;
+      } catch {
+        return null;
+      }
+    };
+    const result = (await attempt()) ?? (await attempt());
+    setProductGuide(result ?? floor);
+    setGuideAsking(false);
+  }, [guideAsking, workflowView, stage, detail.nodes, detail.project.id, detail.project.title, tenantId]);
+
   // Mail turns as StageDocument's turn shape: it wants who spoke and what
   // was said, nothing this contract tracks beyond that (no per-turn quotes
   // or result-node bookkeeping under mail-chat).
@@ -1326,6 +1371,29 @@ export function StageWorkspace({
           ) : null}
         </div>
       ) : null}
+
+      <details className="approvals-record product-guide">
+        <summary>{productGuide.origin === "guide" ? "Guide" : "Checklist"} · where this project stands</summary>
+        <div className="product-guide-body">
+          <p className="product-guide-source">
+            {productGuide.origin === "guide"
+              ? "The guide's own words — enrichment, not a verdict."
+              : "The deterministic checklist — always available, never wrong."}
+          </p>
+          <p>{productGuide.summary}</p>
+          {productGuide.missing.length > 0 ? (
+            <ul>
+              {productGuide.missing.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          ) : null}
+          <p className="product-guide-recommended">Recommended: {productGuide.recommended}</p>
+          <Button variant="ghost" loading={guideAsking} onClick={() => void askGuide()}>
+            Ask the guide
+          </Button>
+        </div>
+      </details>
 
       {agentAddress && stage === 4 ? (
         <DesignPanel

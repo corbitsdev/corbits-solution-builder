@@ -690,6 +690,17 @@ const BRIEF_EVALUATOR_ROLE = agentById(BRIEF_EVALUATOR_ROLE_KEY);
 if (!BRIEF_EVALUATOR_ROLE) {
   throw new Error(`kit role "${BRIEF_EVALUATOR_ROLE_KEY}" is missing`);
 }
+
+const ensureGuideAgentCalls = new Map<string, Promise<SpecialistDeployment>>();
+const PRODUCT_GUIDE_ROLE_KEY = "product-guide";
+
+/** The Product guide's role -- named explicitly so a rename of the kit role
+ *  fails loudly here rather than silently deploying the stage specialist's
+ *  prompt under the guide's name. */
+const PRODUCT_GUIDE_ROLE = agentById(PRODUCT_GUIDE_ROLE_KEY);
+if (!PRODUCT_GUIDE_ROLE) {
+  throw new Error(`kit role "${PRODUCT_GUIDE_ROLE_KEY}" is missing`);
+}
 /** In-flight/resolved `ensureStage6RoleAgent` calls, keyed `${projectId}:${roleKey}` --
  *  see that method's doc comment. */
 const ensureStage6RoleAgentCalls = new Map<string, Promise<SpecialistDeployment>>();
@@ -1580,6 +1591,49 @@ false,
     });
     call.catch(() => ensureStage1EvaluatorCalls.delete(projectId));
     ensureStage1EvaluatorCalls.set(projectId, call);
+    return call;
+  },
+  /**
+   * The Product guide (CL-8737 restore): calm orientation across all nine
+   * stages, running `PRODUCT_GUIDE_ROLE` (`agentById("product-guide")`) as
+   * its own deployment -- never the stage's own specialist -- on a fixed
+   * anchor stage (1, like the brief evaluator) so the guide never picks up a
+   * stage-tool import (`specialistEntrySource`'s deck/posix/delivery
+   * wiring keys off `stage`, not `role`) and stays project-wide, one
+   * deployment reused across the nine stages rather than redeployed on every
+   * stage change. Deploys lazily -- only when a person asks for guidance.
+   */
+  ensureGuideAgent: (projectId: string): Promise<SpecialistDeployment> => {
+    const pending = ensureGuideAgentCalls.get(projectId);
+    if (pending) return pending;
+    const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      const status = await request<HostStatus>("/status");
+      const deployment = await ensureSpecialistDeployment(
+        transport,
+        sidecarCapabilityOf(status),
+        await lifecycleClosureSource(),
+        lifecycleGitPush,
+        workspaceTenantId,
+        projectId,
+        1 as Stage,
+        hubOrigin(),
+        false,
+        PRODUCT_GUIDE_ROLE_KEY,
+        PRODUCT_GUIDE_ROLE,
+      );
+      const ready = await waitForDeploymentDeployed(transport, workspaceTenantId, deployment.deploymentId);
+      if (!ready) {
+        throw new ApiFailure({
+          code: "unavailable",
+          message: "The product guide did not finish starting up.",
+          correlationId: "-",
+          retryable: true,
+        });
+      }
+      return deployment;
+    });
+    call.catch(() => ensureGuideAgentCalls.delete(projectId));
+    ensureGuideAgentCalls.set(projectId, call);
     return call;
   },
   /**
