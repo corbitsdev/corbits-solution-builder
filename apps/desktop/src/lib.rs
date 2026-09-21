@@ -526,6 +526,14 @@ fn set_start_at_login(app: AppHandle, enabled: bool) -> Result<(), String> {
     result.map_err(|error| error.to_string())
 }
 
+/// Quits the app. The exit handler stops the host with the same grace the
+/// tray's Quit gives it — the page's stop button and the menu item are the
+/// same path.
+#[tauri::command]
+fn quit_app(app: AppHandle) {
+    app.exit(0);
+}
+
 pub fn run() {
     let app = tauri::Builder::default()
         // §3: start-at-login is optional and reversible. Registered here so
@@ -543,7 +551,8 @@ pub fn run() {
             dictation::dictation_stop,
             dictation::dictation_open_settings,
             start_at_login,
-            set_start_at_login
+            set_start_at_login,
+            quit_app
         ])
         .setup(|app| {
             // A failed start is a thing to read, not a thing to crash on.

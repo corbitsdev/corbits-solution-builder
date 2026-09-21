@@ -25,7 +25,6 @@ import {
   clientConnected,
   markReady,
   markStopped,
-  onHostStop,
   startHeartbeat,
 } from "./lifecycle.js";
 
@@ -408,10 +407,6 @@ async function stop(): Promise<void> {
   })();
   return stopping;
 }
-
-onHostStop(() => {
-  void stop().finally(() => process.exit(0));
-});
 
 // Development only: the desktop shell passes its own pid, and the host ends
 // when that process is gone. A rebuild kills the window outright, without a

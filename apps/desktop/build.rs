@@ -16,6 +16,7 @@ fn main() {
                 "dictation_open_settings",
                 "start_at_login",
                 "set_start_at_login",
+                "quit_app",
             ]),
         ),
     )

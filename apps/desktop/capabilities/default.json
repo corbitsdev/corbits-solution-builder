@@ -12,7 +12,8 @@
     "allow-dictation-stop",
     "allow-dictation-open-settings",
     "allow-start-at-login",
-    "allow-set-start-at-login"
+    "allow-set-start-at-login",
+    "allow-quit-app"
   ],
   "remote": {
     "urls": [

@@ -1,6 +1,6 @@
 import type { Hono } from "hono";
 import { credentialBackend } from "./host-secrets.js";
-import { hostStatus, requestHostStop } from "./lifecycle.js";
+import { hostStatus } from "./lifecycle.js";
 import { ensureHub, hubFetch, mintOwnerSetCookie } from "./hub-client.js";
 import { sidecarFacts } from "./hub-mount.js";
 
@@ -60,11 +60,5 @@ export function registerHostRoutes(api: Hono) {
       context.header("set-cookie", cookie, { append: true });
     }
     return context.json({ ok: true });
-  });
-
-  api.post("/host/stop", async (context) => {
-    // An explicit host stop, distinct from closing a window.
-    requestHostStop();
-    return context.json({ stopping: true });
   });
 }

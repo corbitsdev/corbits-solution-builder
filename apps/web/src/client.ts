@@ -1526,7 +1526,7 @@ export const api = {
       const graph = await artifactGraphFor(transport, workspaceTenantId, projectId);
       return { nodes: graph.nodes.map(toArtifactNode), edges: graph.edges };
     }),
-  stopHost: () => post<{ stopping: boolean }>("/host/stop"),
+
   sendStageMail: async (
     tenantId: string,
     agentAddress: string,

@@ -9,7 +9,7 @@
  * is inferred from a wall-clock gap in its own heartbeat, so the status can say
  * "the host was asleep between X and Y" rather than implying continuous work.
  */
-export type HostState = "starting" | "ready" | "stopping" | "stopped";
+export type HostState = "starting" | "ready" | "stopped";
 
 const HEARTBEAT_MS = 5_000;
 /** A gap larger than this means the process was not scheduled — sleep or suspend. */
@@ -35,7 +35,6 @@ const status: Status = {
 };
 
 let heartbeat: ReturnType<typeof setInterval> | null = null;
-let stopHandler: (() => void) | null = null;
 
 export function startHeartbeat(): void {
   let previous = Date.now();
@@ -66,16 +65,6 @@ export function clientConnected(): void {
 
 export function hostStatus(): Status & { windowlessWorkContinues: true } {
   return { ...status, windowlessWorkContinues: true };
-}
-
-export function onHostStop(handler: () => void): void {
-  stopHandler = handler;
-}
-
-export function requestHostStop(): void {
-  status.state = "stopping";
-  if (heartbeat) clearInterval(heartbeat);
-  stopHandler?.();
 }
 
 export function markStopped(): void {

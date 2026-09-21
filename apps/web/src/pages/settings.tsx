@@ -610,15 +610,17 @@ function ThisComputer({ status }: { status: HostStatus | null }) {
           onCheckedChange={(next) => void toggle(next)}
         />
       </div>
-      <div className="setting-row">
-        <div>
-          <strong>Stop the host</strong>
-          <p>Closing the window only disconnects it. This ends the host, and everything in progress pauses until it starts again.</p>
+      {inShell() && status?.hub.mode === "embedded" ? (
+        <div className="setting-row">
+          <div>
+            <strong>Stop the host</strong>
+            <p>Closing the window only disconnects it. This ends the host, and everything in progress pauses until it starts again.</p>
+          </div>
+          <Button variant="destructive" onClick={() => void invoke("quit_app")}>
+            Stop
+          </Button>
         </div>
-        <Button variant="destructive" onClick={() => void api.stopHost()}>
-          Stop
-        </Button>
-      </div>
+      ) : null}
       {status ? (
         <p className="settings-note">
           Keys are kept {status.credentialBackend === "keychain" ? "in the macOS keychain" : "in a private file on disk"}.
