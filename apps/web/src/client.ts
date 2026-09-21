@@ -7,7 +7,7 @@
  */
 import { APP_VERSION } from "@solutions-builder/app/manifest";
 import { AUTHORITIES, type Authority, type Stage } from "@solutions-builder/app/ledger";
-import { agentById } from "@solutions-builder/app/kit";
+import { agentById, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
 import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
 import {
   ApiError as HubApiError,
@@ -665,6 +665,17 @@ const ensureStage5PackageAgentCalls = new Map<string, Promise<SpecialistDeployme
 /** Stage 5's specialist role -- every `package-<n>` deployment runs this,
  *  named explicitly so a rename of the kit role fails loudly here rather
  *  than silently deploying the wrong prompt. */
+/** Stage 6's five roles, resolved once so a renamed kit role fails loudly here
+ *  rather than silently deploying the architect's prompt under another name. */
+function stage6RoleFor(roleKey: string): AgentRole {
+  const role =
+    roleKey === "requirements-author"
+      ? agentById("requirements-author")
+      : panelPrincipals().find((entry) => entry.id === `senior-engineer-${roleKey}`);
+  if (!role) throw new Error(`kit role for stage 6 key "${roleKey}" is missing`);
+  return role;
+}
+
 const STAGE_5_PACKAGE_ROLE = agentById("presentation-creator");
 if (!STAGE_5_PACKAGE_ROLE) {
   throw new Error("kit role \"presentation-creator\" is missing");
@@ -679,6 +690,9 @@ const BRIEF_EVALUATOR_ROLE = agentById(BRIEF_EVALUATOR_ROLE_KEY);
 if (!BRIEF_EVALUATOR_ROLE) {
   throw new Error(`kit role "${BRIEF_EVALUATOR_ROLE_KEY}" is missing`);
 }
+/** In-flight/resolved `ensureStage6RoleAgent` calls, keyed `${projectId}:${roleKey}` --
+ *  see that method's doc comment. */
+const ensureStage6RoleAgentCalls = new Map<string, Promise<SpecialistDeployment>>();
 
 /** In-flight/resolved `ensureProjectWorkflow` calls, keyed by `projectId` --
  *  see that method's doc comment. Also `projectWorkflowView`/`decide`'s only
@@ -1566,6 +1580,45 @@ false,
     });
     call.catch(() => ensureStage1EvaluatorCalls.delete(projectId));
     ensureStage1EvaluatorCalls.set(projectId, call);
+    return call;
+  },
+  /**
+   * Stage 6's requirements author and four panel principals (CL-8737): each
+   * is its own asset, deployed lazily the first time that role is needed --
+   * never all five up front -- and running its own kit role's prompt.
+   */
+  ensureStage6RoleAgent: (projectId: string, roleKey: string): Promise<SpecialistDeployment> => {
+    const key = `${projectId}:${roleKey}`;
+    const pending = ensureStage6RoleAgentCalls.get(key);
+    if (pending) return pending;
+    const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      const status = await request<HostStatus>("/status");
+      const deployment = await ensureSpecialistDeployment(
+        transport,
+        sidecarCapabilityOf(status),
+        await lifecycleClosureSource(),
+        lifecycleGitPush,
+        workspaceTenantId,
+        projectId,
+        6 as Stage,
+        hubOrigin(),
+        false,
+        roleKey,
+        stage6RoleFor(roleKey),
+      );
+      const ready = await waitForDeploymentDeployed(transport, workspaceTenantId, deployment.deploymentId);
+      if (!ready) {
+        throw new ApiFailure({
+          code: "unavailable",
+          message: `The ${roleKey} specialist did not finish starting up.`,
+          correlationId: "-",
+          retryable: true,
+        });
+      }
+      return deployment;
+    });
+    call.catch(() => ensureStage6RoleAgentCalls.delete(key));
+    ensureStage6RoleAgentCalls.set(key, call);
     return call;
   },
   /**

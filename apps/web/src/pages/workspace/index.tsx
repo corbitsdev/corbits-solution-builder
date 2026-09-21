@@ -1388,6 +1388,15 @@ export function StageWorkspace({
         </div>
       ) : null}
 
+      {agentAddress && stage === 6 ? (
+        <Stage6Panel
+          tenantId={tenantId}
+          projectId={detail.project.id}
+          requirementsInput={lastPersonMessage?.body ?? null}
+          reviewInput={draftMessage?.body ?? null}
+        />
+      ) : null}
+
       {agentAddress && DOCUMENT_STAGES.has(stage) && !draftMessage ? (
         <>
           <Preparing
@@ -1766,6 +1775,200 @@ function PanelReviews({ reviews, tenantId }: { reviews: ArtifactNode[]; tenantId
         </div>
       </details>
     </Screen>
+  );
+}
+
+/** One role's mail-based ask/reply against stage 6's five real agents
+ *  (CL-8737): requirements author or one panel principal, each its own
+ *  deployment, address and thread -- never an artifact, never a decision. */
+type Stage6RoleState = {
+  status: "idle" | "starting" | "waiting" | "done" | "error";
+  address: string | null;
+  reply: string | null;
+  error: string | null;
+  requestedAt: number;
+};
+
+const STAGE6_IDLE_ROLE: Stage6RoleState = { status: "idle", address: null, reply: null, error: null, requestedAt: 0 };
+
+const STAGE6_PANEL_ROLES: readonly { key: string; label: string }[] = [
+  { key: "application", label: "Application" },
+  { key: "quality", label: "Quality" },
+  { key: "platform", label: "Platform" },
+  { key: "security", label: "Security" },
+];
+
+const STAGE6_REQUIREMENTS_ROLE_KEY = "requirements-author";
+
+/**
+ * Stage 6's requirements author and four panel principals, each a real,
+ * lazily-deployed agent (CL-8737) -- distinct from `ProductRequirements`/
+ * `PanelReviews` above, which read a persisted artifact these agents never
+ * write. A reply here lives only in its own mail thread, read back with
+ * `readStageThread`, so a missing or failed reply never touches
+ * `workflowView.allowed.approve` or the plan itself.
+ *
+ * The requirements author is asked once per opening input (the material
+ * stage 6 opened with); the four reviewers are asked only on an explicit
+ * click, against the architect's current draft -- re-requesting one never
+ * disturbs the other three or the requirements reply.
+ */
+function Stage6Panel({
+  tenantId,
+  projectId,
+  requirementsInput,
+  reviewInput,
+}: {
+  tenantId: string;
+  projectId: string;
+  requirementsInput: string | null;
+  reviewInput: string | null;
+}) {
+  const [requirements, setRequirements] = useState<Stage6RoleState>(STAGE6_IDLE_ROLE);
+  const [reviews, setReviews] = useState<Record<string, Stage6RoleState>>({});
+  const requirementsRequestedFor = useRef<string | null>(null);
+
+  const runRole = useCallback(
+    (roleKey: string, body: string, onUpdate: (updater: (prev: Stage6RoleState) => Stage6RoleState) => void) => {
+      onUpdate((prev) => ({ ...prev, status: "starting", error: null }));
+      void (async () => {
+        try {
+          const deployment = await api.ensureStage6RoleAgent(projectId, roleKey);
+          const requestedAt = Date.now();
+          onUpdate((prev) => ({ ...prev, address: deployment.address, status: "waiting", requestedAt }));
+          await api.sendStageMail(tenantId, deployment.address, { body });
+        } catch (cause) {
+          onUpdate((prev) => ({
+            ...prev,
+            status: "error",
+            error: cause instanceof ApiFailure ? cause.detail.message : String(cause),
+          }));
+        }
+      })();
+    },
+    [projectId, tenantId],
+  );
+
+  // The requirements author runs first, once per opening input -- a fresh
+  // send-back or a new project resets `requirementsInput` and asks again.
+  useEffect(() => {
+    if (!requirementsInput) return;
+    if (requirementsRequestedFor.current === requirementsInput) return;
+    requirementsRequestedFor.current = requirementsInput;
+    runRole(STAGE6_REQUIREMENTS_ROLE_KEY, requirementsInput, setRequirements);
+  }, [requirementsInput, runRole]);
+
+  const requestReview = (roleKey: string) => {
+    if (!reviewInput) return;
+    runRole(roleKey, reviewInput, (updater) =>
+      setReviews((prev) => ({ ...prev, [roleKey]: updater(prev[roleKey] ?? STAGE6_IDLE_ROLE) })),
+    );
+  };
+
+  // Reads each waiting role's thread back -- a mailbox nudge wakes this
+  // immediately, same as the stage's own chat thread; a bounded interval
+  // backstops a missed nudge. Never resends a request: this only reads.
+  const waitingAddresses = [
+    ...(requirements.status === "waiting" && requirements.address ? [["requirements", requirements] as const] : []),
+    ...Object.entries(reviews).filter(([, state]) => state.status === "waiting" && state.address),
+  ];
+  const anyWaiting = waitingAddresses.length > 0;
+  useEffect(() => {
+    if (!anyWaiting) return;
+    const checkOne = async (
+      address: string,
+      requestedAt: number,
+      apply: (reply: string) => void,
+      onFail: (message: string) => void,
+    ) => {
+      const thread = await api.readStageThread(tenantId, [address]).catch((cause: unknown) => {
+        onFail(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+        return null;
+      });
+      if (!thread) return;
+      const reply = thread.find((message) => message.author === "agent" && Date.parse(message.at) >= requestedAt);
+      if (reply) apply(reply.body);
+    };
+    const checkAll = () => {
+      if (requirements.status === "waiting" && requirements.address) {
+        void checkOne(
+          requirements.address,
+          requirements.requestedAt,
+          (reply) => setRequirements((prev) => (prev.status === "waiting" ? { ...prev, status: "done", reply } : prev)),
+          (message) => setRequirements((prev) => (prev.status === "waiting" ? { ...prev, status: "error", error: message } : prev)),
+        );
+      }
+      for (const [roleKey, state] of Object.entries(reviews)) {
+        if (state.status !== "waiting" || !state.address) continue;
+        void checkOne(
+          state.address,
+          state.requestedAt,
+          (reply) =>
+            setReviews((prev) =>
+              prev[roleKey]?.status === "waiting" ? { ...prev, [roleKey]: { ...prev[roleKey]!, status: "done", reply } } : prev,
+            ),
+          (message) =>
+            setReviews((prev) =>
+              prev[roleKey]?.status === "waiting" ? { ...prev, [roleKey]: { ...prev[roleKey]!, status: "error", error: message } } : prev,
+            ),
+        );
+      }
+    };
+    checkAll();
+    const subscription = subscribeMailbox(tenantId, checkAll);
+    const timer = setInterval(checkAll, 8_000);
+    return () => {
+      clearInterval(timer);
+      subscription.unsubscribe();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anyWaiting, tenantId]);
+
+  return (
+    <div className="stage-companions stage6-panel">
+      <Screen title="Requirements author" description="Gathers stages 1 to 4 into the document the plan is written against." tight>
+        {requirements.status === "idle" ? <p className="inline-note">Waiting on this stage's opening material.</p> : null}
+        {requirements.status === "starting" || requirements.status === "waiting" ? (
+          <p className="inline-note">Drafting…</p>
+        ) : null}
+        {requirements.status === "error" ? (
+          <Banner tone="error" title="The requirements could not be drafted">
+            {requirements.error}
+          </Banner>
+        ) : null}
+        {requirements.status === "done" && requirements.reply ? <Markdown source={requirements.reply} /> : null}
+      </Screen>
+      <Screen
+        title="Independent engineering review"
+        description="Four principals, each its own agent. Re-requesting one never re-runs the others."
+        tight
+      >
+        {!reviewInput ? <p className="inline-note">A draft plan is needed before the panel can review it.</p> : null}
+        <div className="stage6-panel-cards">
+          {STAGE6_PANEL_ROLES.map((role) => {
+            const state = reviews[role.key] ?? STAGE6_IDLE_ROLE;
+            const busy = state.status === "starting" || state.status === "waiting";
+            return (
+              <div key={role.key} className="stage6-panel-card">
+                <div className="stage6-panel-card-header">
+                  <span className="stage6-panel-card-title">{role.label}</span>
+                  <Button variant="ghost" loading={busy} disabled={!reviewInput || busy} onClick={() => requestReview(role.key)}>
+                    {state.status === "done" ? "Request again" : "Request review"}
+                  </Button>
+                </div>
+                {state.status === "idle" ? <p className="inline-note">Not yet requested.</p> : null}
+                {state.status === "error" ? (
+                  <Banner tone="error" title="This review could not be completed">
+                    {state.error}
+                  </Banner>
+                ) : null}
+                {state.status === "done" && state.reply ? <Markdown source={state.reply} /> : null}
+              </div>
+            );
+          })}
+        </div>
+      </Screen>
+    </div>
   );
 }
 
