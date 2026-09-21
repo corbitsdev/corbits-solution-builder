@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-type-assertion -- Transport.fetch<T> is a generic interface method; mock implementations must use `as T` to satisfy the return type contract */
 import { describe, expect, test } from "bun:test";
 import type { Transport } from "@intx/hub-client";
+import { catalogProviders } from "@intx/inference-catalog";
 import { seedCatalog, seededVendorSpecs } from "./catalog-seed.js";
 import type { HubCredential, HubModel, HubModelProvider, HubOffering, HubProvider } from "./hub.js";
 import { upsertApiKeyProvider } from "./provider-connect.js";
@@ -205,6 +206,95 @@ describe("seedCatalog", () => {
       expect(call.path.includes(`/tenants/${SCOPE}/`)).toBe(true);
     }
     expect(calls.some((call) => /\/tenants\/(?!ten_workspace)[^/]+\//.test(call.path))).toBe(false);
+  });
+
+  test("every catalog provider is either seeded or a documented skip", () => {
+    // seededVendorSpecs throws unless each catalog provider is covered, so
+    // reaching here is the coverage gate; the assertions below pin the shape.
+    const specs = seededVendorSpecs();
+    const seededEndpoints = new Set(specs.map((spec) => `${spec.plugin} ${spec.baseURL}`));
+    const documentedSkips = new Set(["Gemini Direct", "Fireworks Kimi", "Moonshot Kimi", "OpenRouter Kimi"]);
+    const uncovered = catalogProviders.filter(
+      (provider) =>
+        !seededEndpoints.has(`${provider.plugin} ${provider.baseURL}`) && !documentedSkips.has(provider.name),
+    );
+    expect(uncovered.map((provider) => provider.name)).toEqual([]);
+  });
+
+  test("seeds both OpenCode Zen relays under their connect names", () => {
+    const specs = seededVendorSpecs();
+    const zen = specs.find((spec) => spec.name === "opencode-zen")!;
+    const zenGo = specs.find((spec) => spec.name === "opencode-zen-go")!;
+    expect(zen).toMatchObject({
+      label: "OpenCode Zen",
+      plugin: "openai-compatible",
+      baseURL: "https://opencode.ai/zen/v1",
+    });
+    expect(zenGo).toMatchObject({
+      label: "OpenCode Zen Go",
+      plugin: "openai-compatible",
+      baseURL: "https://opencode.ai/zen/go/v1",
+    });
+    expect(zen.offerings.length).toBeGreaterThan(0);
+    expect(zenGo.offerings.length).toBeGreaterThan(0);
+    // The relays serve distinct model sets: only v1 carries the kimi breadth,
+    // only Go carries the deepseek pair.
+    expect(zen.offerings.map((offering) => offering.model)).toContain("kimi-k2.7-code");
+    expect(zenGo.offerings.map((offering) => offering.model)).toContain("deepseek-v4-pro");
+  });
+
+  test("a zen connect attaches the snapshot and writes no model rows", async () => {
+    const store = emptyStore();
+    const seed = createStoreTransport(store);
+    await seedCatalog(seed.transport, SCOPE);
+
+    const spec = seededVendorSpecs().find((entry) => entry.name === "opencode-zen")!;
+    const { transport, calls } = createStoreTransport(store);
+    await upsertApiKeyProvider(transport, SCOPE, {
+      providerId: spec.name,
+      label: spec.label,
+      plugin: spec.plugin as "openai-compatible",
+      baseURL: spec.baseURL,
+      apiKey: "zen-test-key",
+    });
+
+    // The key seals under the provider:<id> convention on the adopted vendor.
+    const credentialPost = calls.find((call) => call.method === "POST" && call.path.endsWith("/credentials"));
+    expect((credentialPost?.body as { name?: string }).name).toBe("provider:opencode-zen");
+    const isVendorWrite = (call: FetchCall) =>
+      call.method === "POST" && call.path.endsWith("/providers") && !call.path.includes("/catalog/");
+    expect(calls.some(isVendorWrite)).toBe(false);
+    expect(calls.some((call) => call.method === "POST" && call.path.endsWith("/catalog/models"))).toBe(false);
+    const offeringPosts = calls.filter((call) => call.method === "POST" && call.path.endsWith("/catalog/offerings"));
+    expect(offeringPosts).toHaveLength(spec.offerings.length);
+    for (const wanted of spec.offerings) {
+      const modelRow = store.models.find((row) => row.canonicalName === wanted.model);
+      const post = offeringPosts.find((call) => (call.body as { modelId: string }).modelId === modelRow?.id);
+      expect(post).toBeDefined();
+      expect(post?.body).toMatchObject({ priority: wanted.priority, capabilities: wanted.capabilities });
+    }
+  });
+
+  test("a zen-go connect attaches its own snapshot and writes no model rows", async () => {
+    const store = emptyStore();
+    const seed = createStoreTransport(store);
+    await seedCatalog(seed.transport, SCOPE);
+
+    // A fresh store per attach: the mock mints ids per transport, so two
+    // attaches on one store would collide model-provider ids.
+    const goSpec = seededVendorSpecs().find((entry) => entry.name === "opencode-zen-go")!;
+    const { transport, calls } = createStoreTransport(store);
+    await upsertApiKeyProvider(transport, SCOPE, {
+      providerId: goSpec.name,
+      label: goSpec.label,
+      plugin: goSpec.plugin as "openai-compatible",
+      baseURL: goSpec.baseURL,
+      apiKey: "zen-test-key",
+    });
+    expect(calls.some((call) => call.method === "POST" && call.path.endsWith("/catalog/models"))).toBe(false);
+    expect(
+      calls.filter((call) => call.method === "POST" && call.path.endsWith("/catalog/offerings")),
+    ).toHaveLength(goSpec.offerings.length);
   });
 
   test("a connect after the seed materializes offerings from the snapshot and writes no model rows", async () => {

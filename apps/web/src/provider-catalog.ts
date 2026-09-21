@@ -73,6 +73,10 @@ export const API_KEY_CONNECT_OPTIONS: ReadonlyArray<{
     defaultBaseUrl: "https://openrouter.ai/api/v1",
   },
   { providerId: "xai", label: "xAI (API key)", needsBaseUrl: false, plugin: "openai-compatible" },
+  // Both Zen relays take the same Zen API key; each seeds its own vendor row
+  // (see the installer's CONNECT_OVERLAY), so each is its own option.
+  { providerId: "opencode-zen", label: "OpenCode Zen", needsBaseUrl: false, plugin: "openai-compatible" },
+  { providerId: "opencode-zen-go", label: "OpenCode Zen Go", needsBaseUrl: false, plugin: "openai-compatible" },
   { providerId: "compatible", label: "OpenAI-compatible endpoint", needsBaseUrl: true, plugin: "openai-compatible" },
 ];
 

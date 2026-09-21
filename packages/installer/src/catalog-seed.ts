@@ -50,6 +50,13 @@ const CONNECT_OVERLAY: Record<string, { name: string; label: string }> = {
   "Anthropic Direct": { name: "anthropic", label: "Anthropic" },
   "OpenAI Direct": { name: "openai", label: "OpenAI" },
   "xAI Direct": { name: "xai", label: "xAI (API key)" },
+  // Both Zen relays take the same Zen API key under the provider:<id>
+  // convention, but they are distinct endpoints serving distinct model sets:
+  // only v1 serves the kimi/qwen/mimo/glm/gpt/minimax families, only Go serves
+  // the deepseek pair, and the shared kimi models carry deliberate cross-relay
+  // priorities -- so each seeds its own connect-time vendor row.
+  "OpenCode Zen v1": { name: "opencode-zen", label: "OpenCode Zen" },
+  "OpenCode Zen Go v1": { name: "opencode-zen-go", label: "OpenCode Zen Go" },
 };
 
 /**
@@ -61,17 +68,17 @@ const CONNECT_OVERLAY: Record<string, { name: string; label: string }> = {
  *   "openrouter" row from it would misrepresent OpenRouter as a Kimi-only
  *   endpoint. OpenRouter as a general endpoint stays available through the
  *   compatible custom-endpoint path, which discovers its models live.
- * - The OpenCode Zen relays are the same shape: relay keys, no connect option.
  * - Gemini Direct serves the `google-genai` plugin, which no API-key connect
  *   option offers; seeding a row nobody can attach to would strand it.
+ * (The OpenCode Zen relays used to be skipped here for want of a connect
+ * option; they now seed like the big three because the Zen API-key connect
+ * options authenticate them.)
  */
 const SEED_SKIP_REASONS: Record<string, string> = {
   "Gemini Direct": "no connect path serves the google-genai plugin",
   "Fireworks Kimi": "relay endpoint needing a Fireworks key, not a first-party connect option",
   "Moonshot Kimi": "relay endpoint needing a Moonshot key, not a first-party connect option",
   "OpenRouter Kimi": "the pin's only OpenRouter presence is Kimi; OpenRouter generally connects via the compatible custom-endpoint path",
-  "OpenCode Zen v1": "relay endpoint needing an OpenCode Zen key, not a first-party connect option",
-  "OpenCode Zen Go v1": "relay endpoint needing an OpenCode Zen key, not a first-party connect option",
 };
 
 /** Every catalog provider accounted for: seeded under a connect name, or skipped with a documented reason. */
