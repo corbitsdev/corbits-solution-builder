@@ -1,8 +1,6 @@
 import { access, rm, writeFile } from "node:fs/promises";
 import type { Hono } from "hono";
 import { startAtLoginMarker } from "./paths.js";
-import { COMMANDS, LEDGER, STAGE_TITLES } from "@solutions-builder/app/ledger";
-import { AGENT_KIT } from "@solutions-builder/app/kit";
 import { credentialBackend } from "./host-secrets.js";
 import { hostStatus, requestHostStop } from "./lifecycle.js";
 import { ensureHub, hubFetch, mintOwnerSetCookie } from "./hub-client.js";
@@ -50,32 +48,6 @@ export function registerHostRoutes(api: Hono) {
       hub: await hubSummary(),
     });
   });
-
-  /** The ledger, served to clients so labels and available actions agree with it. */
-  api.get("/ledger", (context) =>
-    context.json({
-      commands: COMMANDS,
-      stages: Object.entries(STAGE_TITLES).map(([stage, title]) => ({
-        stage: Number(stage),
-        title,
-      })),
-      transitions: LEDGER,
-    }),
-  );
-
-  api.get("/agents", (context) =>
-    context.json({
-      agents: AGENT_KIT.map((agent) => ({
-        id: agent.id,
-        title: agent.title,
-        mission: agent.mission,
-        stages: agent.stages,
-        produces: agent.produces,
-        promptKey: agent.promptKey,
-        boundary: agent.boundary,
-      })),
-    }),
-  );
 
   /**
    * Mints the embedded workspace owner and signs the browser in as them, by
