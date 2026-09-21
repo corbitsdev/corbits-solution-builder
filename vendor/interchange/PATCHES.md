@@ -1,10 +1,23 @@
 # Vendored Interchange — local patches
 
 Vendored from `faremeter/interchange` `origin/main` at the revision in
-`VENDORED_REVISION`, which is ahead of the published 0.3.0 packages.
+`VENDORED_REVISION`, which is the v0.4.0 tag (`5453d0b`).
 
 Every local change is listed here. Keep this file honest: an unlisted change is
 a change nobody can find when the vendor is refreshed.
+
+**2026-09-21 refresh (`79adc433` → `5453d0b`, v0.4.0).** No local patch
+dropped. The range was checked file-by-file: `packages/db/src/client.ts`
+is untouched upstream, so no pglite-handle equivalent landed and the
+`{ handle, close? }` injection stays; the version bump (`5453d0b`
+"Update interchange version to v0.4.0", 0.3.0 → 0.4.0 across package
+manifests) touches no patched file. Three patched files did move
+upstream, all without hunk overlap — re-applied verbatim:
+`packages/workflow/src/definition/primitives.ts` (doc comments on
+`AwaitSignalPrimitive` / `ChildWorkflowPrimitive` / loop), `runtime/env.ts`
+(new required `hasUpstreamSignalResolver`), `runtime/run.ts`
+(`bridgeAbort` consolidation). New upstream migration
+`0093_sidecar_initialization.sql` is carried in `hub-migrations.ts`.
 
 **2026-09-18 refresh (`e2fa7e81` → `79adc433`).** Three local patches dropped
 because upstream now provides the same fix natively:

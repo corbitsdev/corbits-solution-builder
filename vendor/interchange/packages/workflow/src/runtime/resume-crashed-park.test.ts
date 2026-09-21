@@ -32,6 +32,7 @@ import {
   type WorkflowDefinition,
   type WorkflowRuntimeEnv,
 } from "@intx/workflow";
+import { waitForEvent } from "@intx/workflow/testing";
 
 const agent = defineAgent({
   id: "a",
@@ -75,6 +76,7 @@ function buildEnv(
     clock,
     newId: (prefix) => `${prefix}-${Math.random().toString(36).slice(2, 8)}`,
     drain: createNoopDrainController(def),
+    hasUpstreamSignalResolver: true,
     ...(opts.readParkedApprovalOps !== undefined
       ? { readParkedApprovalOps: opts.readParkedApprovalOps }
       : {}),
@@ -141,7 +143,17 @@ describe("resume classifier recovers a crash-mid-park approval step", () => {
     await seedCrashedPark(repoStore, runId);
 
     const handle = runtimeRun(oneStep, env, { runId });
-    await new Promise((r) => setTimeout(r, 50));
+    // The seed carries no SignalAwaited (that is the crash window), so the
+    // reconstructed one on the original correlation channel is a fresh commit,
+    // flushed durably before the step re-parks. The classifier consults
+    // `readParkedApprovalOps` to build it, so this also orders after that read.
+    await waitForEvent(
+      repoStore,
+      runId,
+      (e) =>
+        e.kind === "SignalAwaited" &&
+        correlationIdFromSignalName(e.signalName) === corr,
+    );
 
     // The classifier consulted the binding for exactly the crashed step-attempt.
     expect(readCalls).toEqual([{ runId, stepId: "s", attempt: 1 }]);

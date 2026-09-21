@@ -8,8 +8,9 @@ import {
 } from "bun:test";
 
 import { deriveWorkflowRunRepoId } from "@intx/workflow-deploy";
-import { configureSync, getConfig, resetSync } from "@intx/log";
+import { configureSync, getConfig } from "@intx/log";
 import { MAX_CACHED_SENDER_ADDRESSES_FRAME } from "@intx/types/sidecar";
+import { waitUntil } from "@intx/types/testing";
 
 import {
   createSidecarRouter,
@@ -17,6 +18,7 @@ import {
   type SidecarAuthIdentity,
   type WsHandle,
 } from "./sidecar-handler";
+import type { SidecarLookups } from "./sidecar-events";
 
 const identity: Extract<SidecarAuthIdentity, { kind: "allocated" }> = {
   kind: "allocated",
@@ -130,19 +132,19 @@ async function connect(
   return ws;
 }
 
+// Carries no attempt bound: a frame that never arrives is a hang for the lane
+// timeout to fail, not a race against a fixed number of event-loop turns.
 async function waitForFrame(
   ws: ReturnType<typeof createMockWs>,
   predicate: (frame: Record<string, unknown>) => boolean,
-  tries = 25,
 ): Promise<Record<string, unknown>> {
-  for (let attempt = 0; attempt < tries; attempt += 1) {
+  for (;;) {
     for (const raw of ws.sent) {
       const frame: Record<string, unknown> = JSON.parse(raw);
       if (predicate(frame)) return frame;
     }
     await tick();
   }
-  throw new Error("expected frame was never sent");
 }
 
 describe("SidecarRouter allocation routing", () => {
@@ -481,14 +483,6 @@ type CapturedLog = {
   message: readonly unknown[];
 };
 
-async function waitUntil(predicate: () => boolean, tries = 200): Promise<void> {
-  for (let attempt = 0; attempt < tries; attempt += 1) {
-    if (predicate()) return;
-    await tick();
-  }
-  throw new Error("condition was not met in time");
-}
-
 describe("SidecarRouter sender-key resync cap", () => {
   const capturedLogs: CapturedLog[] = [];
   let savedLogConfig: ReturnType<typeof getConfig>;
@@ -518,11 +512,17 @@ describe("SidecarRouter sender-key resync cap", () => {
   });
 
   afterAll(() => {
-    if (savedLogConfig) {
-      configureSync({ reset: true, ...savedLogConfig });
-    } else {
-      resetSync();
+    // A null capture means this file loaded without `@intx/log` having
+    // installed its default sink, which cannot happen -- importing the
+    // package runs the install. Resetting here instead would leave the
+    // worker with no logging configuration at all, and the install
+    // cannot re-fire to repair it.
+    if (!savedLogConfig) {
+      throw new Error(
+        "no logging configuration was captured before this suite replaced it",
+      );
     }
+    configureSync({ reset: true, ...savedLogConfig });
   });
 
   beforeEach(() => {
@@ -598,6 +598,11 @@ describe("SidecarRouter pre-ack sender-key interlock", () => {
   const RECIPIENT = "run_recipient@exclusive";
   const RAW_MESSAGE = "aGVsbG8=";
   const KEY = "ab".repeat(32);
+  const ATTEMPT = {
+    allocationId: "alloc-sender",
+    generation: 1,
+    leaseId: "sender-deploy",
+  };
 
   const raceIdentities: Record<
     string,
@@ -625,6 +630,9 @@ describe("SidecarRouter pre-ack sender-key interlock", () => {
 
   function createInterlockRouter(
     resolveSenderKey: (address: string) => Promise<string | null>,
+    materializeMailTriggeredRunGrants: NonNullable<
+      SidecarLookups["materializeMailTriggeredRunGrants"]
+    > = async () => ({ outcome: "materialized", stepGrants: [] }),
   ) {
     const router = createSidecarRouter({
       authenticateSidecar: async ({ sidecarId }) =>
@@ -638,10 +646,7 @@ describe("SidecarRouter pre-ack sender-key interlock", () => {
       disconnectQueueTTLMs: 60_000,
       lookups: {
         resolveSenderKey,
-        materializeMailTriggeredRunGrants: async () => ({
-          outcome: "materialized",
-          stepGrants: [],
-        }),
+        materializeMailTriggeredRunGrants,
       },
     });
     router.fenceAllocation("alloc-sender", 1);
@@ -672,6 +677,7 @@ describe("SidecarRouter pre-ack sender-key interlock", () => {
   function sendMail(
     router: ReturnType<typeof createSidecarRouter>,
     senderWs: ReturnType<typeof createMockWs>,
+    rawMessage = RAW_MESSAGE,
   ): void {
     router.handleMessage(
       senderWs,
@@ -679,7 +685,7 @@ describe("SidecarRouter pre-ack sender-key interlock", () => {
         type: "mail.outbound",
         senderAddress: SENDER,
         recipients: [RECIPIENT],
-        rawMessage: RAW_MESSAGE,
+        rawMessage,
         delivered: false,
       }),
     );
@@ -706,7 +712,7 @@ describe("SidecarRouter pre-ack sender-key interlock", () => {
       expect(address).toBe(SENDER);
       resolveCalls += 1;
       if (resolveCalls === 1) {
-        router.noteSenderDeploySettled(SENDER, { recorded: KEY });
+        router.noteSenderDeploySettled(ATTEMPT, { recorded: KEY });
         return null;
       }
       return KEY;
@@ -718,7 +724,7 @@ describe("SidecarRouter pre-ack sender-key interlock", () => {
     // Establish the in-flight-deploy precondition the narrowed park gate requires:
     // mark the allocated key-record mid-flight so a null resolve parks rather than
     // delivering keyless.
-    router.noteSenderDeployStarted(SENDER);
+    router.noteSenderDeployStarted(SENDER, ATTEMPT);
     sendMail(router, senderWs);
     const inbound = await waitForFrame(
       recipientWs,
@@ -760,13 +766,13 @@ describe("SidecarRouter pre-ack sender-key interlock", () => {
     // Establish the in-flight-deploy precondition the narrowed park gate requires:
     // mark the allocated key-record mid-flight so a null resolve parks rather than
     // delivering keyless.
-    router.noteSenderDeployStarted(SENDER);
+    router.noteSenderDeployStarted(SENDER, ATTEMPT);
     sendMail(router, senderWs);
     await tick();
     // The mail is parked, not delivered.
     expect(framesOfType(recipientWs, "mail.inbound")).toHaveLength(0);
 
-    router.noteSenderDeploySettled(SENDER, { failed: "deploy timed out" });
+    router.noteSenderDeploySettled(ATTEMPT, { failed: "deploy timed out" });
     await tick();
 
     // The parked mail is surfaced for external relay rather than hung forever,
@@ -775,6 +781,186 @@ describe("SidecarRouter pre-ack sender-key interlock", () => {
       { rawMessage: RAW_MESSAGE, recipients: [RECIPIENT] },
     ]);
     expect(framesOfType(recipientWs, "mail.inbound")).toHaveLength(0);
+  });
+
+  for (const generation of [1, 2]) {
+    test(`ignores old callbacks after recovery starts another attempt at generation ${String(generation)}`, async () => {
+      const router = createInterlockRouter(async () => null);
+      const senderWs = await connectAs(router, "sc-sender", SENDER);
+      const recipientWs = await connectAs(router, "sc-recipient", RECIPIENT);
+      const dropped: unknown[] = [];
+      router.events.on("mail.outbound.undelivered", (mail) => {
+        dropped.push(mail);
+      });
+      router.noteSenderDeployStarted(SENDER, ATTEMPT);
+      sendMail(router, senderWs);
+      await tick();
+      router.noteSenderDeploySettled(
+        { allocationId: ATTEMPT.allocationId, generation: ATTEMPT.generation },
+        { failed: "previous initialization did not commit" },
+      );
+      expect(dropped).toHaveLength(1);
+
+      const next = { ...ATTEMPT, generation, leaseId: "next-initializer" };
+      router.noteSenderDeployStarted(SENDER, next);
+      sendMail(router, senderWs);
+      await tick();
+      router.noteSenderDeploySettled(ATTEMPT, { recorded: KEY });
+      router.noteSenderDeploySettled(ATTEMPT, { failed: "late failure" });
+      router.noteSenderDeploySettled(SENDER, { recorded: KEY });
+      await tick();
+      expect(dropped).toHaveLength(1);
+      expect(framesOfType(recipientWs, "mail.inbound")).toHaveLength(0);
+
+      router.noteSenderDeploySettled(next, { recorded: KEY });
+      await tick();
+      expect(framesOfType(recipientWs, "mail.inbound")).toHaveLength(1);
+      expect(dropped).toHaveLength(1);
+    });
+  }
+
+  test("a newer attempt cannot capture a completed attempt's scheduled mail delivery", async () => {
+    const router = createInterlockRouter(async () => null);
+    const senderWs = await connectAs(router, "sc-sender", SENDER);
+    const recipientWs = await connectAs(router, "sc-recipient", RECIPIENT);
+    router.noteSenderDeployStarted(SENDER, ATTEMPT);
+    sendMail(router, senderWs);
+    await tick();
+
+    router.noteSenderDeploySettled(ATTEMPT, { recorded: KEY });
+    const next = { ...ATTEMPT, leaseId: "next-initializer" };
+    router.noteSenderDeployStarted(SENDER, next);
+    sendMail(router, senderWs);
+    await tick();
+    expect(framesOfType(recipientWs, "mail.inbound")).toHaveLength(1);
+    expect(
+      framesOfType(recipientWs, "run.grants")[0]?.senderIdentities,
+    ).toEqual([{ address: SENDER, publicKey: KEY }]);
+
+    const nextKey = "cd".repeat(32);
+    router.noteSenderDeploySettled(next, { recorded: nextKey });
+    await tick();
+    expect(framesOfType(recipientWs, "mail.inbound")).toHaveLength(2);
+    expect(
+      framesOfType(recipientWs, "run.grants")[1]?.senderIdentities,
+    ).toEqual([{ address: SENDER, publicKey: nextKey }]);
+  });
+
+  test("overlapping deferred replays keep each signing key adjacent to its mail", async () => {
+    const materialize = Promise.withResolvers<boolean>();
+    const bothMaterializing = Promise.withResolvers<boolean>();
+    let materializations = 0;
+    const router = createInterlockRouter(
+      async () => null,
+      async () => {
+        materializations += 1;
+        if (materializations === 2) bothMaterializing.resolve(true);
+        await materialize.promise;
+        return { outcome: "materialized", stepGrants: [] };
+      },
+    );
+    const senderWs = await connectAs(router, "sc-sender", SENDER);
+    const recipientWs = await connectAs(router, "sc-recipient", RECIPIENT);
+    const keys = [KEY, "cd".repeat(32)];
+    try {
+      for (const [index, key] of keys.entries()) {
+        const attempt = { ...ATTEMPT, leaseId: `initializer-${String(index)}` };
+        router.noteSenderDeployStarted(SENDER, attempt);
+        sendMail(
+          router,
+          senderWs,
+          btoa(`Message-ID: <message-${String(index)}>\r\n\r\nhello`),
+        );
+        await tick();
+        router.noteSenderDeploySettled(attempt, { recorded: key });
+      }
+      await bothMaterializing.promise;
+      materialize.resolve(true);
+      await tick();
+
+      const frames = recipientWs.sent
+        .map((raw): Record<string, unknown> => JSON.parse(raw))
+        .filter(
+          (frame) =>
+            frame.type === "run.grants" || frame.type === "mail.inbound",
+        );
+      expect(frames).toMatchObject([
+        {
+          type: "run.grants",
+          senderIdentities: [{ address: SENDER, publicKey: keys[0] }],
+        },
+        { type: "mail.inbound", messageId: "<message-0>" },
+        {
+          type: "run.grants",
+          senderIdentities: [{ address: SENDER, publicKey: keys[1] }],
+        },
+        { type: "mail.inbound", messageId: "<message-1>" },
+      ]);
+    } finally {
+      materialize.resolve(true);
+      await tick();
+      for (const frame of framesOfType(recipientWs, "mail.inbound")) {
+        router.handleMessage(
+          recipientWs,
+          JSON.stringify({
+            type: "mail.inbound.ack",
+            agentAddress: RECIPIENT,
+            messageId: frame.messageId,
+          }),
+        );
+      }
+      await tick();
+      router.handleClose(senderWs);
+      router.handleClose(recipientWs);
+    }
+  });
+
+  test("rebuilding an advanced fence settles an old attempt after a lost cleanup response", async () => {
+    const router = createInterlockRouter(async () => null);
+    const senderWs = await connectAs(router, "sc-sender", SENDER);
+    const dropped: unknown[] = [];
+    router.events.on("mail.outbound.undelivered", (mail) => {
+      dropped.push(mail);
+    });
+    router.noteSenderDeployStarted(SENDER, ATTEMPT);
+    sendMail(router, senderWs);
+    await tick();
+    router.fenceAllocation(ATTEMPT.allocationId, 2);
+    expect(dropped).toHaveLength(1);
+    expect(() =>
+      router.noteSenderDeployStarted(SENDER, {
+        ...ATTEMPT,
+        generation: 2,
+        leaseId: "replacement",
+      }),
+    ).not.toThrow();
+    router.noteSenderDeploySettled(
+      { ...ATTEMPT, generation: 2 },
+      { failed: "test cleanup" },
+    );
+  });
+
+  test("a failure notification can start a new attempt without the old settlement clearing it", async () => {
+    const router = createInterlockRouter(async () => null);
+    const senderWs = await connectAs(router, "sc-sender", SENDER);
+    const recipientWs = await connectAs(router, "sc-recipient", RECIPIENT);
+    const next = { ...ATTEMPT, leaseId: "next-initializer" };
+    router.events.on("mail.outbound.undelivered", () => {
+      router.noteSenderDeployStarted(SENDER, next);
+    });
+    router.noteSenderDeployStarted(SENDER, ATTEMPT);
+    sendMail(router, senderWs);
+    await tick();
+    router.noteSenderDeploySettled(
+      { allocationId: ATTEMPT.allocationId, generation: ATTEMPT.generation },
+      { failed: "previous initialization did not commit" },
+    );
+    sendMail(router, senderWs);
+    await tick();
+    expect(framesOfType(recipientWs, "mail.inbound")).toHaveLength(0);
+    router.noteSenderDeploySettled(next, { recorded: KEY });
+    await tick();
+    expect(framesOfType(recipientWs, "mail.inbound")).toHaveLength(1);
   });
 
   test("a settle only wakes mail parked under a byte-identical sender address", async () => {
@@ -796,7 +982,7 @@ describe("SidecarRouter pre-ack sender-key interlock", () => {
     // Establish the in-flight-deploy precondition the narrowed park gate requires:
     // mark the allocated key-record mid-flight so a null resolve parks rather than
     // delivering keyless.
-    router.noteSenderDeployStarted(SENDER);
+    router.noteSenderDeployStarted(SENDER, ATTEMPT);
     sendMail(router, senderWs);
     await tick();
 
@@ -809,7 +995,7 @@ describe("SidecarRouter pre-ack sender-key interlock", () => {
     expect(framesOfType(recipientWs, "mail.inbound")).toHaveLength(0);
 
     // The byte-identical settle wakes it and it delivers with the key.
-    router.noteSenderDeploySettled(SENDER, { recorded: KEY });
+    router.noteSenderDeploySettled(ATTEMPT, { recorded: KEY });
     const inbound = await waitForFrame(
       recipientWs,
       (f) => f.type === "mail.inbound" && f.authenticatedSender === SENDER,
@@ -878,7 +1064,7 @@ describe("SidecarRouter pre-ack sender-key interlock", () => {
 
     // A deploy IS in flight for the sender, so the run-sender park branch would
     // trigger if it were reached; the external-only recipient short-circuits it.
-    router.noteSenderDeployStarted(SENDER);
+    router.noteSenderDeployStarted(SENDER, ATTEMPT);
     router.handleMessage(
       senderWs,
       JSON.stringify({

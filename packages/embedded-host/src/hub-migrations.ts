@@ -109,6 +109,7 @@ import m0089_tense_selene from "../../../vendor/interchange/packages/db/migratio
 import m0090_tenant_domain_lower_unique from "../../../vendor/interchange/packages/db/migrations/0090_tenant_domain_lower_unique.sql" with { type: "text" };
 import m0091_workflow_run_dispatch_sender_address from "../../../vendor/interchange/packages/db/migrations/0091_workflow_run_dispatch_sender_address.sql" with { type: "text" };
 import m0092_sidecar_destroy_failed from "../../../vendor/interchange/packages/db/migrations/0092_sidecar_destroy_failed.sql" with { type: "text" };
+import m0093_sidecar_initialization from "../../../vendor/interchange/packages/db/migrations/0093_sidecar_initialization.sql" with { type: "text" };
 
 export const HUB_MIGRATIONS: readonly HubMigration[] = [
   { id: "0000_brown_wither.sql", sql: m0000_brown_wither },
@@ -203,4 +204,5 @@ export const HUB_MIGRATIONS: readonly HubMigration[] = [
   { id: "0090_tenant_domain_lower_unique.sql", sql: m0090_tenant_domain_lower_unique },
   { id: "0091_workflow_run_dispatch_sender_address.sql", sql: m0091_workflow_run_dispatch_sender_address },
   { id: "0092_sidecar_destroy_failed.sql", sql: m0092_sidecar_destroy_failed },
+  { id: "0093_sidecar_initialization.sql", sql: m0093_sidecar_initialization },
 ];

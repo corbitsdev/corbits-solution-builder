@@ -1,7 +1,7 @@
 {
   "name": "@intx/types",
   "description": "Runtime validators, API contract types, runtime interfaces, and sidecar wire frames for Interchange",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "license": "LGPL-2.1-only",
   "type": "module",
   "exports": {
@@ -64,6 +64,11 @@
       "intx-src": "./src/workflow-sources.ts",
       "types": "./dist/workflow-sources.d.ts",
       "default": "./dist/workflow-sources.js"
+    },
+    "./testing": {
+      "intx-src": "./src/testing/index.ts",
+      "types": "./dist/testing/index.d.ts",
+      "default": "./dist/testing/index.js"
     }
   },
   "dependencies": {

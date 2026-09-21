@@ -9,7 +9,42 @@ import {
   TEST_TARGET,
   tick,
 } from "./sidecar-handler.test-helpers";
-import { createSidecarRouter } from "./sidecar-handler";
+import {
+  createSidecarRouter,
+  SidecarIdentityValidationError,
+} from "./sidecar-handler";
+
+/**
+ * The router's timers, driven by the test. The intervals were already
+ * injectable; arming was not, so a test had to sleep past an interval to
+ * observe what it triggered.
+ */
+function createManualTimers(): {
+  scheduleTimeout: (handler: () => void, ms: number) => () => void;
+  armed: () => { ms: number; cancelled: boolean }[];
+  armedCount: () => number;
+  fireAll: () => void;
+} {
+  const entries: { ms: number; fire: () => void; cancelled: boolean }[] = [];
+  return {
+    scheduleTimeout(handler, ms) {
+      const entry = { ms, fire: handler, cancelled: false };
+      entries.push(entry);
+      return () => {
+        entry.cancelled = true;
+      };
+    },
+    armed: () => entries.map((e) => ({ ms: e.ms, cancelled: e.cancelled })),
+    armedCount: () => entries.filter((e) => !e.cancelled).length,
+    fireAll() {
+      for (const entry of entries) {
+        if (entry.cancelled) continue;
+        entry.cancelled = true;
+        entry.fire();
+      }
+    },
+  };
+}
 
 describe("SidecarRouter allocation connection lifecycle", () => {
   test("responds to ping with pong", async () => {
@@ -22,24 +57,48 @@ describe("SidecarRouter allocation connection lifecycle", () => {
   });
 
   test("ping resets the connection liveness deadline", async () => {
-    const router = createAllocatedRouter({ pingTimeoutMs: 30 });
+    // The subject is that the ping REPLACES the armed deadline, which is a
+    // claim about which timer exists, not about elapsed time. Sleeping part
+    // way into the window and asserting the socket is still open only holds
+    // while the pause lands inside the window: a loaded worker overshoots
+    // it, the deadline fires first, and the test fails on a ping that was
+    // merely late.
+    const timers = createManualTimers();
+    const router = createAllocatedRouter({
+      pingTimeoutMs: 30,
+      scheduleTimeout: timers.scheduleTimeout,
+    });
     const ws = await connectAllocated(router);
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(timers.armed()).toHaveLength(1);
 
     router.handleMessage(ws, JSON.stringify({ type: "ping" }));
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    // The connect-time deadline is cancelled and a fresh one armed in its
+    // place, so re-read rather than reusing the earlier snapshot. Firing the
+    // cancelled one must not close the socket.
+    const afterPing = timers.armed();
+    expect(afterPing).toHaveLength(2);
+    expect(afterPing[0]?.cancelled).toBe(true);
+    expect(afterPing[1]?.cancelled).toBe(false);
     expect(ws.closed).toBe(false);
 
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    // Only the replacement is live, so firing what remains armed is firing
+    // the deadline the ping installed -- and that is what closes the socket.
+    expect(timers.armedCount()).toBe(1);
+    timers.fireAll();
     expect(ws.closed).toBe(true);
   });
 
   test("closes a connection that misses its ping deadline", async () => {
-    const router = createAllocatedRouter({ pingTimeoutMs: 20 });
+    const timers = createManualTimers();
+    const router = createAllocatedRouter({
+      pingTimeoutMs: 20,
+      scheduleTimeout: timers.scheduleTimeout,
+    });
     const ws = await connectAllocated(router);
 
-    await new Promise((resolve) => setTimeout(resolve, 40));
-
+    // Firing the armed deadline is the missed ping; waiting out twice the
+    // interval was a slower way of arriving at the same fact.
+    timers.fireAll();
     expect(ws.closed).toBe(true);
   });
 
@@ -140,6 +199,28 @@ describe("SidecarRouter allocation connection lifecycle", () => {
     expect(() =>
       router.fenceAllocation(TEST_TARGET.allocationId, 1),
     ).not.toThrow();
+  });
+
+  test("reports a clean timeout when a later validation supersedes a transient failure", async () => {
+    let readinessCalls = 0;
+    const router = createAllocatedRouter({
+      validateSidecarIdentity: async (_identity, use) => {
+        if (use !== "readiness") return true;
+        readinessCalls += 1;
+        if (readinessCalls === 1) throw new Error("transient lookup failure");
+        return false;
+      },
+    });
+    const ws = await connectAllocated(router);
+    const waiting = router.waitForAllocatedSidecar(TEST_TARGET, 30);
+    const error = await waiting.catch((cause: unknown) => cause);
+
+    expect(readinessCalls).toBeGreaterThanOrEqual(2);
+    if (!(error instanceof Error)) throw new Error("expected an Error");
+    expect(error).not.toBeInstanceOf(SidecarIdentityValidationError);
+    expect(error.message).toMatch(/Timed out waiting/);
+
+    router.handleClose(ws);
   });
 
   test("tracks connector state only for an address owned by the allocation", async () => {
