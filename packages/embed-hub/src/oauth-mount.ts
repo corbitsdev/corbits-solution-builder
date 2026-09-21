@@ -22,18 +22,32 @@ import {
 } from "@corbits/oauth-core";
 import { codexOAuthConfig, exchangeCodexCode } from "@corbits/codex-provider";
 import { xaiOAuthConfig, exchangeXaiCode } from "@corbits/xai-provider";
+import {
+  authorizationDoneHtml,
+  callbackPageHtml,
+  type CallbackPageCopy,
+} from "./oauth-page.js";
 
 export const MOUNTABLE_OAUTH_PROVIDERS = ["codex-oauth", "xai-oauth"] as const;
 export type MountableOAuthProviderId = (typeof MOUNTABLE_OAUTH_PROVIDERS)[number];
 
 type ProviderDefinition = {
+  readonly label: string;
   readonly config: OAuthClientConfig;
   readonly exchange: (code: string, verifier: string, now: number) => Promise<BaseTokens>;
 };
 
+export const PAGE_COPY: CallbackPageCopy = {
+  productName: "Solutions Builder",
+  siteUrl: "https://corbits.dev",
+  siteLabel: "corbits.dev",
+  githubUrl: "https://github.com/corbitsdev/solutions-builder-alpha",
+  githubLabel: "github.com/corbitsdev/solutions-builder-alpha",
+};
+
 const PROVIDERS: Readonly<Record<MountableOAuthProviderId, ProviderDefinition>> = {
-  "codex-oauth": { config: codexOAuthConfig, exchange: exchangeCodexCode },
-  "xai-oauth": { config: xaiOAuthConfig, exchange: exchangeXaiCode },
+  "codex-oauth": { label: "ChatGPT (Codex)", config: codexOAuthConfig, exchange: exchangeCodexCode },
+  "xai-oauth": { label: "xAI (Grok)", config: xaiOAuthConfig, exchange: exchangeXaiCode },
 };
 
 type LoginState =
@@ -82,8 +96,12 @@ export function mountProviderOAuth(app: Hono, open: (url: string) => void = open
               host,
               port,
               path,
-              doneHtml: "<html><body>Signed in — you can close this tab.</body></html>",
-              failedHtml: (reason) => `<html><body>Sign-in failed: ${reason}</body></html>`,
+              // The callback page lands before the exchange and model discovery
+              // finish, so it reports the authorization received, not a completed
+              // connection — the app closes out the setup.
+              doneHtml: authorizationDoneHtml(definition.label, PAGE_COPY),
+              failedHtml: (reason) =>
+                callbackPageHtml({ subject: definition.label, error: reason }, PAGE_COPY),
             }),
           buildAuthorizeUrl: (pkce, state) => buildAuthorizeUrl(definition.config, pkce, state),
           exchangeCode: (code, verifier, now) => definition.exchange(code, verifier, now),
