@@ -37,8 +37,9 @@ import { SendBackPicker, defaultTarget } from "../send-back.jsx";
 import { STAGE_GOAL } from "./gate.jsx";
 import { DeliveryPanel } from "./delivery.jsx";
 import { StageConversation } from "./thread.jsx";
+import { Elapsed } from "./elapsed.jsx";
 import { StageDocument } from "./document.jsx";
-import { Preparing } from "./preparing.jsx";
+import { STAGE_TIPS } from "./preparing.jsx";
 import { BuildPanel, buildEvidenceState, currentPublishedBundle } from "./build.jsx";
 import { TargetPicker, targetOpeningLine } from "./freeze.jsx";
 import { deliveryOpeningLine, parseDeliveryManifest } from "./delivery-opening.ts";
@@ -1222,8 +1223,38 @@ export function StageWorkspace({
   if (!workflowResolved && !openingFailed) {
     return (
       <div className="stage-view">
-        <Screen title="Opening the project…" description="Reading where this project's workflow stands." tight>
-          <p className="inline-note">This will only take a moment.</p>
+        <Screen
+          title="Opening the project…"
+          description="Finding the project and reading where its workflow stands."
+          tight
+        >
+          <section aria-label="Opening progress">
+            <p className="inline-note">Finding the project → reading its stage → preparing the conversation.</p>
+            <div
+              role="progressbar"
+              aria-label="Opening the project"
+              aria-valuetext="Reading its stage"
+              style={{ height: 6, borderRadius: 4, overflow: "hidden", background: "var(--wb-border)", margin: "8px 0 16px" }}
+            >
+              <div style={{ height: "100%", width: "50%", borderRadius: 4, background: "var(--wb-primary)" }} />
+            </div>
+          </section>
+          <div aria-hidden="true">
+            <div
+              style={{
+                border: "1px solid var(--wb-border)",
+                borderRadius: 8,
+                padding: "12px 14px",
+                marginBottom: 8,
+              }}
+            >
+              <div style={{ height: 11, borderRadius: 6, width: "38%", background: "var(--wb-border)", margin: "6px 0" }} />
+              <div style={{ height: 11, borderRadius: 6, width: "92%", background: "var(--wb-border)", margin: "6px 0" }} />
+              <div style={{ height: 11, borderRadius: 6, width: "78%", background: "var(--wb-border)", margin: "6px 0" }} />
+            </div>
+            <p className="thinking">Getting the conversation ready…</p>
+          </div>
+          <p className="inline-note">What comes next: the conversation opens below.</p>
         </Screen>
       </div>
     );
@@ -1348,7 +1379,7 @@ export function StageWorkspace({
           <p className="stage-guidance-title">{guidance.title}</p>
           <p className="stage-guidance-detail">{guidance.detail}</p>
           {guidance.readyNote ? <p className="stage-guidance-ready">{guidance.readyNote}</p> : null}
-          {guidance.question && guidance.question.choices.length > 0 ? (
+          {guidance.question && guidance.question.choices.length > 0 && !(DOCUMENT_STAGES.has(stage) && !draftMessage) ? (
             <div className="button-row" aria-label="Recorded answer choices">
               {guidance.question.choices.map((choice) => (
                 <Button key={choice} variant="ghost" disabled={sending} onClick={() => void send(choice)}>
@@ -1469,16 +1500,74 @@ export function StageWorkspace({
       ) : null}
 
       {agentAddress && DOCUMENT_STAGES.has(stage) && !draftMessage ? (
-        <>
-          <Preparing
-            stage={stage}
-            busy={messages.length > 0}
-            since={lastPersonMessage?.at ?? null}
-            waiting={awaitingReply}
-            lastMessage={lastPersonMessage?.body ?? null}
-            onOpenSettings={onOpenSettings}
-            {...(lastPersonMessage ? { onSendAgain: () => void send(lastPersonMessage.body) } : {})}
-          />
+        <section
+          aria-label="What is happening now"
+          style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}
+        >
+          <div
+            role="progressbar"
+            aria-label={`Stage ${stage} of 9 · ${stageName(stage)}`}
+            aria-valuetext={
+              progress && progress.total !== null
+                ? `Question ${progress.ordinal} of ${progress.total}`
+                : progress
+                  ? `Question ${progress.ordinal} so far`
+                  : "Waiting for the specialist's reply"
+            }
+            style={{ height: 6, borderRadius: 4, overflow: "hidden", background: "var(--wb-border)", margin: "0 0 12px" }}
+          >
+            <div
+              style={{
+                height: "100%",
+                borderRadius: 4,
+                background: "var(--wb-primary)",
+                width:
+                  progress && progress.total !== null
+                    ? `${Math.min(100, Math.round((progress.ordinal / progress.total) * 100))}%`
+                    : "38%",
+              }}
+            />
+          </div>
+          <p className="inline-note">
+            Stage {stage} of 9 · {stageName(stage)} — {STAGE_GOAL[stage]}
+          </p>
+          <div className="inline-note" role="status">
+            {messages.length > 0 ? (
+              <span className="thinking">Your message is recorded; no specialist reply is visible yet.</span>
+            ) : (
+              "No message from you is recorded yet."
+            )}{" "}
+            {messages.length > 0 ? <Elapsed since={lastPersonMessage?.at ?? null} /> : null}
+          </div>
+          <p className="inline-note">{STAGE_TIPS[stage]?.[0] ?? STAGE_TIPS[1]?.[0] ?? "Rough answers are fine."}</p>
+          {guidance.question && guidance.question.choices.length > 0 ? (
+            <div className="button-row" aria-label="Recorded answer choices">
+              {guidance.question.choices.map((choice) => (
+                <Button key={choice} variant="ghost" disabled={sending} onClick={() => void send(choice)}>
+                  {choice}
+                </Button>
+              ))}
+            </div>
+          ) : null}
+          {((lastPersonMessage && awaitingReply) || pending !== null) && messages.length > 0 ? (
+            <div className="button-row" aria-label="Waiting actions">
+              {lastPersonMessage && awaitingReply ? (
+                <Button variant="outline" onClick={() => void send(lastPersonMessage.body)}>
+                  Send again
+                </Button>
+              ) : null}
+              {pending !== null ? (
+                <Button variant="ghost" onClick={() => void stopTurn()}>
+                  Stop
+                </Button>
+              ) : null}
+              {lastPersonMessage && awaitingReply ? (
+                <Button variant="ghost" onClick={onOpenSettings}>
+                  Open Settings to pick a different model
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
           <StageConversation
             stage={stage}
             messages={foldedMessages}
@@ -1496,7 +1585,7 @@ export function StageWorkspace({
             pending={pending !== null}
             onStop={() => void stopTurn()}
           />
-        </>
+        </section>
       ) : null}
 
       {agentAddress && DOCUMENT_STAGES.has(stage) && draftMessage && activeNode ? (
