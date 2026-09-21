@@ -18,6 +18,7 @@ import { Button, Screen, StateLabel, shortHash, stageName } from "../components.
 import { Dictated } from "../dictation.jsx";
 import { DELIVER_TOOL_NAME } from "../pending-approvals.ts";
 import { ApprovalsRecord } from "./workspace.jsx";
+import { SendBackPicker, defaultTarget } from "./send-back.jsx";
 
 /** What each stage's gate is called, in the approver's language. */
 const ACTION: Record<number, string> = {
@@ -32,26 +33,6 @@ const ACTION: Record<number, string> = {
   9: "Accept the delivery",
 };
 
-/**
- * What going back to each stage is for, in the person's terms: the reason
- * they would name it as the target rather than the stage before this one.
- */
-const RETURN_TO: Record<number, string> = {
-  1: "revise the problem brief",
-  2: "change the solution bounds",
-  3: "choose or rework the approach",
-  4: "revise the design",
-  5: "redo the packages",
-  6: "correct the plan",
-  7: "re-estimate the cost",
-  8: "build again",
-  9: "redo the delivery",
-};
-
-/** The stage a send-back returns to unless the person names another: the one before this. */
-function defaultTarget(stage: number): number {
-  return Math.max(1, stage - 1);
-}
 
 export function DecisionQueue({
   decisions,
@@ -91,7 +72,6 @@ export function DecisionQueue({
   useEffect(() => {
     setTarget(defaultTarget(current?.stage ?? 1));
   }, [current?.id, current?.stage]);
-  const stagesBack = current ? Array.from({ length: current.stage }, (_, index) => index + 1) : [];
 
   // An empty queue is not an empty screen. Nothing waiting means the next
   // thing a person does is start something, so that is what it offers.
@@ -147,7 +127,7 @@ export function DecisionQueue({
         <article className="span-8 decision-current" aria-labelledby="current-decision">
           <div className="decision-meta">
             <StateLabel tone="warning">Action required</StateLabel>
-            <span>Project: {current?.projectTitle || current?.projectId || "—"}</span>
+            <span>Project: {current?.projectTitle ?? "—"}</span>
             <span>
               Stage {current?.stage} — {stageName(current?.stage ?? null)}
             </span>
@@ -183,11 +163,15 @@ export function DecisionQueue({
               <dt>Notification</dt>
               <dd>
                 {current?.notifyError ? (
-                  <StateLabel tone="warning">Delivery failed, the request was kept</StateLabel>
+                  <StateLabel tone="warning">
+                    Delivery failed. The request was kept
+                  </StateLabel>
                 ) : current?.notifiedAt ? (
-                  <StateLabel tone="info">Sent {new Date(current.notifiedAt).toLocaleTimeString()}</StateLabel>
+                  <StateLabel tone="info">
+                    Sent {new Date(current.notifiedAt).toLocaleTimeString()}
+                  </StateLabel>
                 ) : (
-                  <StateLabel tone="disabled">Not sent yet</StateLabel>
+                  <StateLabel tone="disabled">Not sent</StateLabel>
                 )}
               </dd>
             </div>
@@ -208,27 +192,7 @@ export function DecisionQueue({
           </div>
 
           {current?.approvalId ? null : (
-            <div className="field">
-              <label htmlFor="decision-target">Send back to</label>
-              <select
-                id="decision-target"
-                className="setting-select decision-target"
-                value={target}
-                onChange={(event) => setTarget(Number(event.target.value))}
-              >
-                {stagesBack.map((stage) => (
-                  <option key={stage} value={stage}>
-                    Stage {stage} — {stageName(stage)}
-                    {stage === current?.stage ? " (this stage again)" : RETURN_TO[stage] ? `, to ${RETURN_TO[stage]}` : ""}
-                  </option>
-                ))}
-              </select>
-              <p className="inline-note">
-                {target === current?.stage
-                  ? "The work is redone at this stage. What was decided is kept as history."
-                  : `Stages ${target} to ${current?.stage} are walked again from there. Each specialist revises its current document against the change rather than starting over.`}
-              </p>
-            </div>
+            <SendBackPicker id="decision-target" stage={current?.stage ?? 1} target={target} onChange={setTarget} />
           )}
 
           {current?.approvalId && current.toolName !== DELIVER_TOOL_NAME ? (
@@ -285,7 +249,7 @@ export function DecisionQueue({
                 {stageName(wait.stage)}
               </StateLabel>
               <strong>{ACTION[wait.stage] ?? wait.title}</strong>
-              <p>{wait.projectTitle || wait.projectId}</p>
+              <p>{wait.projectTitle}</p>
             </button>
           ))}
         </aside>
