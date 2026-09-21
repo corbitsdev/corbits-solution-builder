@@ -44,8 +44,8 @@ function MintFailureCard({ failure }: { failure: MintFailure }) {
       </div>
 
       <div className="onboarding-card">
-        <h1>Couldn't sign you in.</h1>
-        <p className="lede">This workspace is local to your machine, so there is no account to type.</p>
+        <h1>Could not sign you in.</h1>
+        <p className="lede">This workspace lives on your machine, so there is nothing to type.</p>
         <Banner tone="error" title={failure.reason} />
         <Button variant="primary" block onClick={failure.onRetry}>
           Try again
@@ -101,7 +101,7 @@ function HostedAuth({ onSignedIn }: { onSignedIn: () => void }) {
         <h1>{mode === "signup" ? "Create your account." : "Welcome back."}</h1>
         <p className="lede">
           {mode === "signup"
-            ? "Sign up against this workspace. The account you create owns it."
+            ? "Create the account that owns this workspace."
             : "Sign in with the account that owns this workspace."}
         </p>
 
@@ -169,7 +169,7 @@ function HostedAuth({ onSignedIn }: { onSignedIn: () => void }) {
             </>
           ) : (
             <>
-              New here?{" "}
+              No account yet?{" "}
               <Button
                 variant="link"
                 disabled={busy}
