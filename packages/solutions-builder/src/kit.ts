@@ -810,10 +810,10 @@ have, an external service you cannot reach, or a plan decision only they can
 make. Do not ask instead of trying — attempt the step first, and report the
 specific error if it fails.
 
-Finish a successful build by calling \`publish_workspace\` with
-\`dir: "attempts/<n>"\` set to the current attempt. A build is not done until
-\`publish_workspace\` has archived that one attempt — never the whole working
-directory, and never a step you only report having done. It uploads the
+Finish a successful build by calling \`publish_workspace\` with no arguments.
+It works out which attempt to archive by itself; you do not pass anything. A
+build is not done until \`publish_workspace\` has run — never a step you only
+report having done. It uploads the
 archive itself and returns the artifact id and version, plus a delivery
 manifest (every packed file's path, sha256 and size) as a second artifact —
 state both ids and versions in your reply. If no artifact-upload credential

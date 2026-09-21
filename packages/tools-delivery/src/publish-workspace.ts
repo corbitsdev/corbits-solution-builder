@@ -98,7 +98,8 @@ export interface PublishWorkspaceEnv extends BaseEnv {
 type PublishWorkspaceArgs = {
   fileName: string;
   exclude: string[];
-  dir: string;
+  /** null when the model named no directory: the tool picks the attempt. */
+  dir: string | null;
 };
 
 export type ManifestFileEntry = { path: string; sha256: string; sizeBytes: number };
@@ -147,13 +148,35 @@ function resolveDir(cwd: string, dirRaw: unknown): string {
   return resolved;
 }
 
-function parseArgs(args: Record<string, unknown>): PublishWorkspaceArgs {
+/** The model supplies nothing this tool cannot work out for itself, so any
+ *  shape is accepted -- an empty object, a bare string, a malformed blob.
+ *  A small model that calls the tool at all should not be able to fail here. */
+/** The attempt the build is on, worked out from the workspace rather than
+ *  asked of the model: the highest-numbered `attempts/<n>` directory, or the
+ *  working directory itself when the build never made one. */
+async function currentAttemptDir(cwd: string): Promise<string> {
+  try {
+    const entries = await readdir(join(cwd, "attempts"), { withFileTypes: true });
+    const numbered = entries
+      .filter((entry) => entry.isDirectory() && /^\d+$/.test(entry.name))
+      .map((entry) => Number(entry.name))
+      .sort((a, b) => b - a);
+    return numbered.length > 0 ? join("attempts", String(numbered[0])) : ".";
+  } catch {
+    return ".";
+  }
+}
+
+function parseArgs(raw: unknown): PublishWorkspaceArgs {
+  const args: Record<string, unknown> = raw !== null && typeof raw === "object" && !Array.isArray(raw)
+    ? (raw as Record<string, unknown>)
+    : {};
   const fileNameRaw = args["fileName"];
   const fileName = typeof fileNameRaw === "string" && fileNameRaw.length > 0 ? fileNameRaw : "build.tar.gz";
   const excludeRaw = args["exclude"];
   const extra = Array.isArray(excludeRaw) ? excludeRaw.filter((entry): entry is string => typeof entry === "string") : [];
   const dirRaw = args["dir"];
-  const dir = typeof dirRaw === "string" && dirRaw.length > 0 ? dirRaw : ".";
+  const dir = typeof dirRaw === "string" && dirRaw.length > 0 ? dirRaw : null;
   return { fileName, exclude: [...new Set([...DEFAULT_EXCLUDES, ...extra])], dir };
 }
 
@@ -293,7 +316,11 @@ async function publishWorkspaceContent(
   rawArgs: Record<string, unknown>,
 ): Promise<UploadResult | FallbackResult> {
   const args = parseArgs(rawArgs);
-  const targetDir = resolveDir(env.toolCwd, args.dir);
+  // What is archived is the current attempt, which the workspace already
+  // knows; the model naming it adds nothing and is one more thing to get
+  // wrong, so an unnamed directory is worked out here instead of refused.
+  const dir = args.dir ?? (await currentAttemptDir(env.toolCwd));
+  const targetDir = resolveDir(env.toolCwd, dir);
   const bytes = await tarDirectory(targetDir, args.exclude);
   if (bytes.byteLength === 0) {
     throw new Error("publish_workspace: the tar produced no bytes — is the workspace empty?");
@@ -320,7 +347,7 @@ async function publishWorkspaceContent(
   }
 
   try {
-    const variant = attemptVariant(args.dir);
+    const variant = attemptVariant(dir);
     const sha256 = createHash("sha256").update(bytes).digest("hex");
     const title = `${slugify(projectId)}-${variant}.tar.gz`;
     const created = await uploadArtifact(hub.fetch, env.address, {
@@ -369,7 +396,7 @@ async function publishWorkspaceContent(
       sha256,
       sizeBytes: bytes.byteLength,
       fileCount: manifestContent.fileCount,
-      dir: args.dir,
+      dir,
       manifest: {
         artifactId: manifestCreated.id,
         version: manifestCreated.version,
@@ -402,7 +429,7 @@ const INPUT_SCHEMA = {
 } as const;
 
 const DESCRIPTION =
-  "Archives one directory of the run's build workspace (excluding node_modules/.git/dist/build caches) as a gzip tarball and uploads it as a real artifact the person can approve and keep, along with a delivery manifest (every packed file's path, sha256 and size). Falls back to returning a data: URI in the tool result, capped at 5 MB, when no artifact credential is bound.";
+  "Archives the build attempt and records it as the artifact the person approves. Call it with no arguments: it finds the current attempt itself. Every argument is optional and only overrides that.";
 
 /**
  * Builds this tool bound to one project. `projectId` is a render-time
