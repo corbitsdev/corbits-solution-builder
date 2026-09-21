@@ -35,6 +35,7 @@ import type {
 } from "@intx/types";
 
 export { ApiError };
+export type { Transport };
 export type HubDeployment = WorkflowDeployment;
 
 /** The tenant this app installs into; found again by slug on every launch. */

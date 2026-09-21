@@ -140,8 +140,8 @@ function ProviderStep({
 /**
  * Shown only when the provider just connected serves more than one model --
  * otherwise the specialists would silently draft with whichever the endpoint
- * happened to list first. Reuses `api.selectProviderModel`, the same call
- * Settings' provider manager makes.
+ * happened to list first. Reuses `api.selectProviderModel` to record the
+ * choice; the Settings catalog manages the default from then on.
  */
 function ModelStep({ provider, onChosen }: { provider: Provider; onChosen: () => void }) {
   const [busy, setBusy] = useState(false);

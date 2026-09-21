@@ -12,10 +12,15 @@
  * workspace tenant only -- never a per-project copy.
  *
  * The specs are derived from the live `catalogProviders` / `catalogModels`
- * exports on every call, never hand-copied: a pin refresh flows through
- * without a second edit here. Each catalog provider maps to at most one
- * connect-time vendor row (the overlay below); anything without a connect
- * path is skipped, with its reason recorded in `SEED_SKIP_REASONS`.
+ * exports on every call, never hand-copied. A pin refresh flows through
+ * without editing this file: a re-seed refreshes the offering snapshot
+ * (`metadata.offeringSpecs`) on seed-owned vendor rows (see `seedCatalog`).
+ * A re-attach never rewrites what is already connected -- tenant order wins
+ * (see `provider-connect.ts`'s attach path); snapshot drift is only logged,
+ * with the manual repair path (disconnect the provider and reconnect) in the
+ * message. Each catalog provider maps to at most one connect-time vendor row
+ * (the overlay below); anything without a connect path is skipped, with its
+ * reason recorded in `SEED_SKIP_REASONS`.
  */
 import { catalogModels, catalogProviders } from "@intx/inference-catalog";
 import type { Transport } from "@intx/hub-client";
@@ -81,15 +86,53 @@ const SEED_SKIP_REASONS: Record<string, string> = {
   "OpenRouter Kimi": "the pin's only OpenRouter presence is Kimi; OpenRouter generally connects via the compatible custom-endpoint path",
 };
 
+/**
+ * Coverage is fail-soft in production but strict under test. A pin addition
+ * the seed does not know yet must never brick an install: production skips
+ * the unlisted provider with a warning (the `seededVendorSpecs` loop below
+ * already skips anything without an overlay entry), while a strict run --
+ * `CATALOG_SEED_STRICT=1` or `NODE_ENV=test`, following the keychain's
+ * `isTestRun` convention -- throws so the missing overlay or skip reason is
+ * caught before it ships.
+ */
+export function unlistedCatalogProviders(
+  providerNames: readonly string[] = catalogProviders.map((spec) => spec.name),
+): string[] {
+  return providerNames.filter(
+    (name) => CONNECT_OVERLAY[name] === undefined && SEED_SKIP_REASONS[name] === undefined,
+  );
+}
+
+function isStrictCatalogCoverage(): boolean {
+  return process.env.CATALOG_SEED_STRICT === "1" || process.env.NODE_ENV === "test";
+}
+
+export type CatalogCoverageOptions = {
+  /** Defaults to `isStrictCatalogCoverage()` (env/test flag); set explicitly in tests. */
+  strict?: boolean;
+};
+
+/** Every catalog provider accounted for: seeded under a connect name, or skipped with a documented reason. */
+export function checkCatalogCoverage(
+  providerNames: readonly string[] = catalogProviders.map((spec) => spec.name),
+  options: CatalogCoverageOptions = {},
+): void {
+  const unlisted = unlistedCatalogProviders(providerNames);
+  if (unlisted.length === 0) return;
+  const quoted = unlisted.map((name) => `"${name}"`).join(", ");
+  if (options.strict ?? isStrictCatalogCoverage()) {
+    throw new Error(
+      `catalog-seed: catalog provider(s) ${quoted} neither seeded nor skipped -- add to CONNECT_OVERLAY or SEED_SKIP_REASONS`,
+    );
+  }
+  console.warn(
+    `catalog-seed: skipping unlisted catalog provider(s) ${quoted} -- add to CONNECT_OVERLAY or SEED_SKIP_REASONS to seed them`,
+  );
+}
+
 /** Every catalog provider accounted for: seeded under a connect name, or skipped with a documented reason. */
 function assertCatalogCoverage(): void {
-  for (const spec of catalogProviders) {
-    if (CONNECT_OVERLAY[spec.name] === undefined && SEED_SKIP_REASONS[spec.name] === undefined) {
-      throw new Error(
-        `catalog-seed: catalog provider "${spec.name}" is neither seeded nor skipped -- add it to CONNECT_OVERLAY or SEED_SKIP_REASONS`,
-      );
-    }
-  }
+  checkCatalogCoverage();
 }
 
 function displayNameFor(canonicalName: string): string {
@@ -136,12 +179,20 @@ export type SeedCatalogResult = {
  * Seeds the workspace tenant's catalog: one vendor `provider` row per seeded
  * spec (carrying the offering snapshot in `metadata.offeringSpecs` for the
  * attach path to materialize) plus one `model` row per offered model.
- * Idempotent and adopting: rows found by name (vendor) or canonical name
- * (model) are reused as-is, never rewritten -- a tenant-added row or a
- * hand-edited label survives a re-run. The one exception is a vendor row that
- * predates the seed and carries no snapshot: it is backfilled with the specs
- * (preserving its other metadata), so providers connected before the seed
- * existed still attach from the snapshot.
+ *
+ * Seeded-sync rule (contract a): a re-run refreshes the offering snapshot on
+ * seed-owned vendor rows -- rows whose metadata carries `catalogSeeded: true`,
+ * i.e. rows this seed created or backfilled -- when the pin moved, PATCHing
+ * only `metadata.offeringSpecs` and preserving every other metadata key
+ * (notably a tenant-renamed label). Tenant-owned rows are never touched: a
+ * vendor row with a custom snapshot but no `catalogSeeded` flag keeps its
+ * snapshot, and model rows are adopted by canonical name, never rewritten.
+ * Vendor plugin/baseURL are likewise seed-write-once: a re-run never
+ * rewrites them. The one exception is a vendor row that predates the seed
+ * and carries no snapshot at all: it is backfilled with the specs
+ * (preserving its other metadata and adopting it into seed ownership with
+ * `catalogSeeded: true`), so providers connected before the seed existed
+ * still attach from the snapshot.
  */
 export async function seedCatalog(transport: Transport, workspaceTenantId: string): Promise<SeedCatalogResult> {
   const catalog = catalogFor(transport, workspaceTenantId);
@@ -161,12 +212,18 @@ export async function seedCatalog(transport: Transport, workspaceTenantId: strin
           metadata: { label: spec.label, catalogSeeded: true, offeringSpecs: spec.offerings },
         }),
       );
-    } else if (!isSeedSnapshot((existing.metadata ?? null) as Record<string, unknown> | null)) {
-      const metadata = { ...(existing.metadata ?? {}) };
-      if (typeof metadata["label"] !== "string") metadata["label"] = spec.label;
-      metadata["catalogSeeded"] = true;
-      metadata["offeringSpecs"] = spec.offerings;
-      Object.assign(existing, await catalog.patchProvider(existing.id, { metadata }));
+    } else {
+      const metadata = (existing.metadata ?? null) as Record<string, unknown> | null;
+      if (!isSeedSnapshot(metadata)) {
+        const next = { ...(existing.metadata ?? {}) };
+        if (typeof next["label"] !== "string") next["label"] = spec.label;
+        next["catalogSeeded"] = true;
+        next["offeringSpecs"] = spec.offerings;
+        Object.assign(existing, await catalog.patchProvider(existing.id, { metadata: next }));
+      } else if (metadata?.["catalogSeeded"] === true && !sameSnapshot(metadata["offeringSpecs"], spec.offerings)) {
+        const next = { ...(existing.metadata ?? {}), offeringSpecs: spec.offerings };
+        Object.assign(existing, await catalog.patchProvider(existing.id, { metadata: next }));
+      }
     }
     providers.push(spec.name);
 
@@ -183,4 +240,9 @@ export async function seedCatalog(transport: Transport, workspaceTenantId: strin
 
 function isSeedSnapshot(metadata: Record<string, unknown> | null): boolean {
   return Array.isArray(metadata?.["offeringSpecs"]);
+}
+
+/** True when a stored snapshot still matches the live pin (key order is seed-written, so a JSON compare suffices). */
+function sameSnapshot(stored: unknown, specs: SeedOfferingSpec[]): boolean {
+  return JSON.stringify(stored) === JSON.stringify(specs);
 }

@@ -16,12 +16,17 @@
  */
 import {
   ApiError,
+  buildResolvedCatalogRows,
   catalogFor,
   disconnectProvider as disconnectProviderViaHub,
+  makeResolvedModelDefault,
+  moveResolvedModel as moveResolvedModelViaHub,
   registerProviderModels,
   resolveWorkspace,
   selectModel as selectModelViaHub,
   setProviderOrder as setProviderOrderViaHub,
+  setResolvedModelRestricted as setResolvedModelRestrictedViaHub,
+  setResolvedModelShadowed as setResolvedModelShadowedViaHub,
   stageSpecialistSourcePin,
   upsertApiKeyProvider,
   upsertOAuthProvider,
@@ -30,7 +35,9 @@ import {
   type HubModelProvider,
   type HubOffering,
   type HubProvider,
+  type ModelMoveDirection,
   type ModelProviderPlugin,
+  type ResolvedCatalogRow,
 } from "@solutions-builder/installer";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { CODEX_BASE_URL } from "@corbits/codex-provider";
@@ -544,6 +551,92 @@ export async function listWorkspaceResolvedModels(
   workspaceTenantId: string,
 ): Promise<ResolvedModel[]> {
   return transport.fetch<ResolvedModel[]>("GET", `/api/tenants/${workspaceTenantId}/models`);
+}
+
+/**
+ * The full `ModelInfo` row shape the Settings Inference panel reads: the
+ * `ResolvedModel` subset above plus the identity, display, and capability
+ * fields the resolved-catalog row builder merges with the raw tables.
+ */
+export type ResolvedCatalogEntry = {
+  id: string;
+  canonicalName: string;
+  displayName: string | null;
+  offerings: {
+    offeringId: string;
+    providerId: string;
+    providerName: string;
+    priority: number;
+    capabilities: string[];
+  }[];
+};
+
+export type { ModelMoveDirection, ResolvedCatalogRow } from "@solutions-builder/installer";
+
+/**
+ * The Settings Inference list (CL-8782): one row per model in fallback order
+ * from `GET /api/tenants/:id/models`, merged with the raw catalog tables so
+ * restricted rows stay visible and every row carries its PATCH targets.
+ * Unseeded tenants (no workspace) and hub 4xx read as an explicit empty list
+ * -- never simulated rows.
+ */
+export async function listResolvedCatalog(transport: Transport): Promise<ResolvedCatalogRow[]> {
+  const workspace = await resolveWorkspace(transport);
+  if (!workspace) return [];
+  const catalog = catalogFor(transport, workspace.tenantId);
+  try {
+    const [resolved, models, offerings, modelProviders, credentials] = await Promise.all([
+      transport.fetch<ResolvedCatalogEntry[]>("GET", `/api/tenants/${workspace.tenantId}/models`),
+      catalog.models(),
+      catalog.offerings(),
+      catalog.modelProviders(),
+      catalog.credentials(),
+    ]);
+    return buildResolvedCatalogRows({ resolved, models, offerings, modelProviders, credentials });
+  } catch (cause) {
+    if (cause instanceof ApiError && cause.status >= 400 && cause.status < 500) return [];
+    throw cause;
+  }
+}
+
+/** Make a model the chat default (PATCH offerings priority, CL-8781 computation). */
+export async function makeResolvedDefault(transport: Transport, targetModelId: string): Promise<void> {
+  const workspace = await resolveWorkspace(transport);
+  if (!workspace) return;
+  await makeResolvedModelDefault(transport, workspace.tenantId, targetModelId);
+}
+
+/** Move a visible model one step in fallback order (swaps head priorities). */
+export async function moveResolvedModel(
+  transport: Transport,
+  targetModelId: string,
+  direction: ModelMoveDirection,
+): Promise<boolean> {
+  const workspace = await resolveWorkspace(transport);
+  if (!workspace) return false;
+  return moveResolvedModelViaHub(transport, workspace.tenantId, targetModelId, direction);
+}
+
+/** Restrict a model (disable offerings) or lift the restriction. */
+export async function setResolvedRestricted(
+  transport: Transport,
+  targetModelId: string,
+  restricted: boolean,
+): Promise<void> {
+  const workspace = await resolveWorkspace(transport);
+  if (!workspace) return;
+  await setResolvedModelRestrictedViaHub(transport, workspace.tenantId, targetModelId, restricted);
+}
+
+/** Shadow (or unshadow) the providers serving a model (PATCH providers disabled-only). */
+export async function setResolvedShadowed(
+  transport: Transport,
+  providerRowIds: readonly string[],
+  shadowed: boolean,
+): Promise<void> {
+  const workspace = await resolveWorkspace(transport);
+  if (!workspace) return;
+  await setResolvedModelShadowedViaHub(transport, workspace.tenantId, providerRowIds, shadowed);
 }
 
 /**

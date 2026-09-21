@@ -1,8 +1,9 @@
 /* eslint-disable @typescript-eslint/no-unsafe-type-assertion -- Transport.fetch<T> is a generic interface method; mock implementations must use `as T` to satisfy the return type contract */
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type { Transport } from "@intx/hub-client";
 import { catalogProviders } from "@intx/inference-catalog";
-import { seedCatalog, seededVendorSpecs } from "./catalog-seed.js";
+import { checkCatalogCoverage, seedCatalog, seededVendorSpecs, unlistedCatalogProviders } from "./catalog-seed.js";
+import type { SeedOfferingSpec } from "./catalog-seed.js";
 import type { HubCredential, HubModel, HubModelProvider, HubOffering, HubProvider } from "./hub.js";
 import { upsertApiKeyProvider } from "./provider-connect.js";
 
@@ -342,5 +343,173 @@ describe("seedCatalog", () => {
       const best = store.offerings.filter((row) => !row.disabled).sort((a, b) => a.priority - b.priority)[0];
       expect(best?.modelId).toBe(opusRow.id);
     }
+  });
+
+  test("a reseed refreshes a stale snapshot on a seed-owned row, preserving its other metadata", async () => {
+    const store = emptyStore();
+    const first = createStoreTransport(store);
+    await seedCatalog(first.transport, SCOPE);
+
+    const spec = seededVendorSpecs()[0]!;
+    const row = store.vendors.find((entry) => entry.name === spec.name)!;
+    expect(row.metadata?.["catalogSeeded"]).toBe(true);
+    // Simulate a stale snapshot from an older pin plus a tenant-renamed label.
+    const staleSpecs = (row.metadata?.["offeringSpecs"] as SeedOfferingSpec[]).map((entry) => ({ ...entry }));
+    staleSpecs[0] = { ...staleSpecs[0]!, priority: 9999 };
+    row.metadata = {
+      ...(row.metadata as Record<string, unknown>),
+      label: "My Renamed Provider",
+      offeringSpecs: staleSpecs,
+    };
+
+    const second = createStoreTransport(store);
+    await seedCatalog(second.transport, SCOPE);
+
+    const patches = second.calls.filter((call) => call.method === "PATCH" && call.path.includes("/providers/"));
+    expect(patches).toHaveLength(1);
+    const body = patches[0]!.body as { metadata: Record<string, unknown> };
+    expect(body.metadata["label"]).toBe("My Renamed Provider");
+    expect(body.metadata["catalogSeeded"]).toBe(true);
+    expect(body.metadata["offeringSpecs"]).toEqual(spec.offerings);
+  });
+
+  test("a reconnect preserves tenant order on drift and logs the manual repair path", async () => {
+    const store = emptyStore();
+    const seed = createStoreTransport(store);
+    await seedCatalog(seed.transport, SCOPE);
+
+    const spec = seededVendorSpecs()[0]!;
+    const input = {
+      providerId: spec.name,
+      label: spec.label,
+      plugin: spec.plugin as "anthropic",
+      baseURL: spec.baseURL,
+      apiKey: "sk-test",
+    };
+    const connect = createStoreTransport(store);
+    await upsertApiKeyProvider(connect.transport, SCOPE, input);
+
+    const modelProvider = store.modelProviders.find((row) => row.name === spec.name)!;
+    // Drift targets stay clear of the 8781 default migration (opus/sonnet),
+    // so the opus-default guard stays quiet and the only drift warn below is
+    // the re-attach path's.
+    const driftedSpec = spec.offerings.find(
+      (offering) => offering.model !== "claude-opus-5" && offering.model !== "claude-sonnet-5",
+    )!;
+    const driftedModel = store.models.find((row) => row.canonicalName === driftedSpec.model)!;
+    const drifted = store.offerings.find(
+      (row) => row.providerId === modelProvider.id && row.modelId === driftedModel.id,
+    )!;
+    drifted.priority += 100;
+    drifted.capabilities = ["tenant-touched"];
+    const driftedBefore = { ...drifted, capabilities: [...drifted.capabilities] };
+
+    // Tenant-added: a custom model and offering on the same provider, outside
+    // the snapshot -- the re-attach must not see them.
+    const customModel: HubModel = { id: "model_custom", canonicalName: "custom-model", displayName: "Custom" };
+    store.models.push(customModel);
+    const customOffering: HubOffering = {
+      id: "offering_custom",
+      modelId: customModel.id,
+      providerId: modelProvider.id,
+      priority: 1,
+      capabilities: ["custom-cap"],
+      quirks: null,
+      disabled: false,
+    };
+    store.offerings.push(customOffering);
+    const customBefore = { ...customOffering };
+
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    const reconnect = createStoreTransport(store);
+    try {
+      await upsertApiKeyProvider(reconnect.transport, SCOPE, { ...input, apiKey: "sk-rotated" });
+      // Tenant order wins: the drifted seeded offering keeps its values and
+      // no priority PATCH moves it back to the snapshot.
+      expect(drifted.priority).toBe(driftedBefore.priority);
+      expect(drifted.capabilities).toEqual(driftedBefore.capabilities);
+      expect(
+        reconnect.calls.some((call) => call.method === "PATCH" && call.path.includes("/catalog/offerings/")),
+      ).toBe(false);
+
+      // The drift is visible instead of silently re-applied: a warn names
+      // the drifted model and the manual repair path. (The 8781 opus-default
+      // migration also leaves opus/sonnet away from the snapshot, so sibling
+      // warns may exist -- match on the drifted model.)
+      const messages = warn.mock.calls.map((call) => String(call[0]));
+      const driftedMessages = messages.filter((message) => message.includes(driftedSpec.model));
+      expect(driftedMessages).toHaveLength(1);
+      expect(driftedMessages[0]).toContain("disconnect");
+    } finally {
+      warn.mockRestore();
+    }
+
+    // The tenant-added offering is untouched, and no new offerings are
+    // created on reconnect (everything seeded is already attached).
+    expect(customOffering).toEqual(customBefore);
+    expect(
+      reconnect.calls.some(
+        (call) =>
+          (call.method === "PATCH" && call.path.endsWith(`/catalog/offerings/${customOffering.id}`)) ||
+          (call.method === "POST" &&
+            call.path.endsWith("/catalog/offerings") &&
+            (call.body as { modelId?: string }).modelId === customModel.id),
+      ),
+    ).toBe(false);
+    expect(reconnect.calls.some((call) => call.method === "POST" && call.path.endsWith("/catalog/offerings"))).toBe(
+      false,
+    );
+  });
+});
+
+describe("checkCatalogCoverage (M1 fail-soft)", () => {
+  test("unlistedCatalogProviders reports names with neither a seed overlay nor a skip reason", () => {
+    expect(unlistedCatalogProviders(["Anthropic Direct", "Gemini Direct"])).toEqual([]);
+    expect(unlistedCatalogProviders(["Anthropic Direct", "Brand New Provider"])).toEqual(["Brand New Provider"]);
+  });
+
+  test("strict mode throws on an unlisted provider instead of failing later at install", () => {
+    expect(() => checkCatalogCoverage(["Anthropic Direct", "Brand New Provider"], { strict: true })).toThrow(
+      /"Brand New Provider"/,
+    );
+  });
+
+  test("non-strict mode skips with a log instead of throwing", () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(() => checkCatalogCoverage(["Anthropic Direct", "Brand New Provider"], { strict: false })).not.toThrow();
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain("Brand New Provider");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("strictness follows the env/test flag when not set explicitly", () => {
+    const savedStrict = process.env.CATALOG_SEED_STRICT;
+    const savedNodeEnv = process.env.NODE_ENV;
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      delete process.env.CATALOG_SEED_STRICT;
+      process.env.NODE_ENV = "test";
+      expect(() => checkCatalogCoverage(["Brand New Provider"])).toThrow(/"Brand New Provider"/);
+      process.env.CATALOG_SEED_STRICT = "1";
+      process.env.NODE_ENV = "production";
+      expect(() => checkCatalogCoverage(["Brand New Provider"])).toThrow(/"Brand New Provider"/);
+      delete process.env.CATALOG_SEED_STRICT;
+      expect(() => checkCatalogCoverage(["Brand New Provider"])).not.toThrow();
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      if (savedStrict === undefined) delete process.env.CATALOG_SEED_STRICT;
+      else process.env.CATALOG_SEED_STRICT = savedStrict;
+      if (savedNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = savedNodeEnv;
+      warn.mockRestore();
+    }
+  });
+
+  test("the live pin stays fully covered, so the strict test path never fires on it", () => {
+    expect(unlistedCatalogProviders()).toEqual([]);
+    expect(() => seededVendorSpecs()).not.toThrow();
   });
 });
