@@ -147,7 +147,7 @@ export function buildEvidenceState(
   const archiveIsCurrent = archive !== undefined && (startedAt === undefined || Date.parse(archive.createdAt) >= startedAt);
   if (archiveIsCurrent || hasPublishedBundle) return { ready: true, reason: null };
   if (!archive) {
-    return { ready: false, reason: "No published build archive yet — the build has not run publish_workspace." };
+    return { ready: false, reason: "No published build archive yet — the build has not published one." };
   }
   return { ready: false, reason: "The current attempt has not published a build archive yet." };
 }
@@ -503,7 +503,7 @@ export function BuildPanel({
       if (decision === "reject") {
         const reason = (rejectReasons[approvalId] ?? "").trim();
         if (!reason) {
-          setError("A reason is required to reject this call.");
+          setError("A reason is required to reject.");
           return;
         }
         await rejectTool(tenantId, approvalId, reason);
@@ -601,8 +601,8 @@ export function BuildPanel({
                   Asks to run: <code className="hash">{typeof approval.toolArguments["command"] === "string" ? (approval.toolArguments["command"] as string) : JSON.stringify(approval.toolArguments)}</code>
                 </p>
                 <p className="inline-note">
-                  "Allow for this build" trusts every future <code>run_shell</code> call on this build attempt,
-                  without asking again — not another tool, another attempt, or another project.
+                  "Allow for this build" trusts every future command on this build attempt,
+                  without asking again — not another attempt, or another project.
                 </p>
                 <div className="field">
                   <label htmlFor={`reject-reason-${approval.id}`}>Rejection reason, sent to the specialist</label>
@@ -655,9 +655,8 @@ export function BuildPanel({
           <p className="inline-note">No build activity has reported yet.</p>
         )}
         <p className="inline-note">
-          A command's raw stdout/stderr is never recorded separately from the specialist's own
-          reply — the hub tracks a tool call's status, not its output, and the run's event log is
-          step-level only. When a command fails, what you see above is the specialist's own
+          A command's output is never recorded separately from the specialist's own
+          reply. When a command fails, what you see above is the specialist's own
           account of it, not a captured transcript.
         </p>
       </Screen>

@@ -27,7 +27,7 @@ export function TargetPicker({
   return (
     <div className="grid gap-2">
       <p className="text-sm font-medium">How will this be used?</p>
-      <p className="text-xs text-muted-foreground">
+      <p className="inline-note">
         Choose how the finished build will be used. Only a command-line check is actually run
         today — the others are honest about not being verified yet.
       </p>
