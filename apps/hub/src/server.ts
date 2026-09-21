@@ -2,8 +2,7 @@
  * The Solutions Builder host.
  *
  * A Bun process that binds a random loopback port, mints a session token, and
- * prints a launch URL for the Tauri host to open. The pattern is the proven one
- * from the AgentFlight Alpha spike; what differs is the lifetime rule:
+ * prints a launch URL for the Tauri host to open, under one lifetime rule:
  *
  *   Closing the window does not stop this process. Only an explicit stop does.
  *

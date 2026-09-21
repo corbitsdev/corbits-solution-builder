@@ -1,21 +1,20 @@
 //! The native desktop host.
 //!
 //! Local mode supervises the compiled Bun sidecar, waits for its loopback
-//! handshake, and opens a window on the URL the sidecar prints. The pattern is
-//! the proven one from the AgentFlight Alpha spike.
+//! handshake, and opens a window on the URL the sidecar prints.
 //!
 //! Remote mode (`SOLUTIONS_BUILDER_HUB_URL`) skips that sidecar entirely and
 //! opens the window on the named origin. There is no local hub process.
 //!
-//! One rule differs, and it is the point of this product's host model:
+//! One rule is the point of this product's host model:
 //!
 //!   **Closing the window does not stop the sidecar.**
 //!
-//! Alpha exits the app when its main window closes. Here the window is a
-//! client. Closing it hides the window and leaves already-authorised work
-//! running to its next human gate; the tray reflects that state and is the only
-//! place an explicit stop can be chosen. The sidecar is reaped on Quit, and on
-//! Quit alone. Remote mode has no sidecar to reap.
+//! The window is a client, not the app. Closing it hides the window and leaves
+//! already-authorised work running to its next human gate; the tray reflects
+//! that state and is the only place an explicit stop can be chosen. The
+//! sidecar is reaped on Quit, and on Quit alone. Remote mode has no sidecar to
+//! reap.
 
 pub mod dictation;
 

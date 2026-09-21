@@ -863,7 +863,6 @@ export const api = {
       installerFailure(cause);
     }
   },
-  agents: () => request<{ agents: { id: string; title: string; mission: string; stages: number[]; boundary: string }[] }>("/agents"),
   providers: async () => {
     try {
       return {
