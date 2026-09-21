@@ -118,11 +118,21 @@ function servableModels(models: readonly string[], plugin: string): string[] {
   return models.filter((canonicalName) => isServableModel(canonicalName, plugin));
 }
 
+/**
+ * The model a provider drafts with: the priority-first enabled offering.
+ * Provider-list order never selects it, and a sibling-disable pin no longer
+ * does either — a pin only *restricts* (the user's explicit choice via
+ * `selectModel`), while the default always comes from priority. The pin
+ * machinery itself is a legacy restriction mechanism slated for removal in
+ * CL-8783; nothing here writes one. Null when nothing is enabled.
+ */
 function selectedModelOf(
-  models: { canonicalName: string; disabled: boolean }[],
+  models: { canonicalName: string; priority: number; disabled: boolean }[],
 ): string | null {
-  const enabled = models.filter((entry) => !entry.disabled);
-  return enabled.length > 0 && enabled.length < models.length ? enabled[0]!.canonicalName : null;
+  const enabled = models
+    .filter((entry) => !entry.disabled)
+    .sort((a, b) => a.priority - b.priority);
+  return enabled[0]?.canonicalName ?? null;
 }
 
 function toListedProvider(
@@ -163,7 +173,7 @@ function toListedProvider(
     statusDetail: null,
     models: models.map((entry) => entry.canonicalName),
     active: true,
-    priority: models.length > 0 ? Math.floor(models[0]!.priority / 1000) : 0,
+    priority: models.length > 0 ? Math.floor(Math.min(...models.map((model) => model.priority)) / 1000) : 0,
     hasCredential: kind !== "local_endpoint",
     validatedAt: credentialRow?.updatedAt ?? null,
     selectedModel: selectedModelOf(models),
@@ -493,14 +503,14 @@ export async function disconnectProvider(transport: Transport, modelProviderId: 
   await disconnectProviderViaHub(transport, workspace.tenantId, modelProviderId);
 }
 
-/** Reorders connected providers, most preferred first. */
+/** Reorders connected providers, most preferred first. User order only — the workspace default comes from offering priority (CL-8781). */
 export async function reorderProviders(transport: Transport, orderedModelProviderIds: readonly string[]): Promise<void> {
   const workspace = await resolveWorkspace(transport);
   if (!workspace) return;
   await setProviderOrderViaHub(transport, workspace.tenantId, orderedModelProviderIds);
 }
 
-/** Pins a provider to one model, or clears the pin (`null`) so failover picks among all of them. */
+/** Restricts a provider to one model, or clears the restriction (`null`) so specialists fail over across all of them in priority order. User choice only — the workspace default never writes here (CL-8781). */
 export async function selectProviderModel(
   transport: Transport,
   modelProviderId: string,
@@ -514,31 +524,65 @@ export async function selectProviderModel(
 export type ActiveModel = { canonicalName: string; providerLabel: string };
 
 /**
- * The tenant's first non-disabled offering, resolved the same way
- * `specialist-deploy.ts`'s `ensureSpecialistDeploymentOnce` picks one for a
- * specialist that has never deployed yet
- * (`offerings.filter(!disabled).sort(priority)[0]`). This is only a forecast
- * of what the *next* deploy would pin, not what an already-deployed
- * specialist is running -- see `resolveActiveModel` below.
+ * One row of `GET /api/tenants/:id/models` — only the fields chat default
+ * derivation reads. The route returns full `ModelInfo` rows; the rest
+ * (pricing, capabilities, tags) is not this module's business.
+ */
+export type ResolvedModel = {
+  canonicalName: string;
+  offerings: { providerId: string; providerName: string; priority: number }[];
+};
+
+/**
+ * The tenant's resolved catalog (CL-8781): every visible model with its
+ * offerings in priority order, via `GET /api/tenants/:id/models` — the first
+ * client usage of the discovery route. Chat default and failover derive from
+ * this, never from provider-list order.
+ */
+export async function listWorkspaceResolvedModels(
+  transport: Transport,
+  workspaceTenantId: string,
+): Promise<ResolvedModel[]> {
+  return transport.fetch<ResolvedModel[]>("GET", `/api/tenants/${workspaceTenantId}/models`);
+}
+
+/**
+ * The workspace default model: the lowest-priority offering in the resolved
+ * catalog (CL-8781) — the same pick `specialist-deploy.ts`'s
+ * `ensureSpecialistDeploymentOnce` makes for a specialist that has never
+ * deployed yet. Provider-list order never selects it; the resolved reader
+ * already suppresses disabled offerings, so pins cannot either. This is only
+ * a forecast of what the *next* deploy would use, not what an
+ * already-deployed specialist is running — see `resolveActiveModel` below.
  */
 async function resolveCatalogDefaultModel(transport: Transport, workspaceTenantId: string): Promise<ActiveModel | null> {
-  const catalog = catalogFor(transport, workspaceTenantId);
-  const [offeringRows, modelRows, providerRows, vendorRows] = await Promise.all([
-    catalog.offerings(),
-    catalog.models(),
-    catalog.modelProviders(),
-    catalog.providers(),
+  const [resolved, providerRows, vendorRows] = await Promise.all([
+    listWorkspaceResolvedModels(transport, workspaceTenantId),
+    catalogFor(transport, workspaceTenantId).modelProviders(),
+    catalogFor(transport, workspaceTenantId).providers(),
   ]);
-  const offering = offeringRows.filter((row) => !row.disabled).sort((a, b) => a.priority - b.priority)[0];
-  if (!offering) return null;
-  const model = modelRows.find((row) => row.id === offering.modelId);
-  if (!model) return null;
-  const provider = providerRows.find((row) => row.id === offering.providerId);
+  // The resolved list groups by model in discovery order, so the default is
+  // the minimum across every offering — not the first model's first entry.
+  let best: { canonicalName: string; providerId: string; providerName: string; priority: number } | null = null;
+  for (const model of resolved) {
+    for (const offering of model.offerings) {
+      if (best === null || offering.priority < best.priority) {
+        best = {
+          canonicalName: model.canonicalName,
+          providerId: offering.providerId,
+          providerName: offering.providerName,
+          priority: offering.priority,
+        };
+      }
+    }
+  }
+  if (!best) return null;
+  const provider = providerRows.find((row) => row.id === best.providerId);
   const vendorRow = provider ? vendorRows.find((row) => row.name === provider.name) : undefined;
   const label = vendorRow?.metadata?.label;
   return {
-    canonicalName: model.canonicalName,
-    providerLabel: typeof label === "string" ? label : (provider?.name ?? ""),
+    canonicalName: best.canonicalName,
+    providerLabel: typeof label === "string" ? label : best.providerName,
   };
 }
 
@@ -552,7 +596,8 @@ async function resolveCatalogDefaultModel(transport: Transport, workspaceTenantI
  * project and stage whose specialist may already be deployed, this reads
  * that deployment's own pinned `(provider, model)` back off its asset tree
  * (`stageSpecialistSourcePin`) instead of recomputing from the tenant's
- * current catalog order, which can have moved on since. Falls back to the
+ * current catalog default (the lowest-priority offering), which can have
+ * moved on since. Falls back to the
  * catalog default -- what the *next* deploy would pin -- when no specialist
  * is deployed yet for that stage, or when `projectId`/`stage` are omitted
  * (the workspace-wide callers that predate a stage context).

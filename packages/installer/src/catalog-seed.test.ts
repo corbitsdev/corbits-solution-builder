@@ -89,6 +89,13 @@ function createStoreTransport(store: Store) {
       Object.assign(row, call.body as object);
       return row;
     }
+    if (call.method === "PATCH" && call.path.includes("/catalog/offerings/")) {
+      const rowId = call.path.split("/").pop();
+      const row = store.offerings.find((entry) => entry.id === rowId);
+      if (!row) throw new Error(`unknown offering ${rowId}`);
+      Object.assign(row, call.body as object);
+      return row;
+    }
     if (call.method === "POST" && call.path.endsWith("/credentials")) {
       const row = {
         id: id("credential"),
@@ -321,6 +328,19 @@ describe("seedCatalog", () => {
       const post = offeringPosts.find((call) => (call.body as { modelId: string }).modelId === modelRow?.id);
       expect(post).toBeDefined();
       expect(post?.body).toMatchObject({ priority: wanted.priority, capabilities: wanted.capabilities });
+    }
+
+    // CL-8781: the fresh connect moves the workspace default to opus-5 with
+    // priority-only PATCHes — no model rows, no disabled flags.
+    const offeringPatches = calls.filter((call) => call.method === "PATCH" && call.path.includes("/catalog/offerings/"));
+    for (const patch of offeringPatches) {
+      expect(Object.keys(patch.body as object).sort()).toEqual(["priority"]);
+    }
+    const opusRow = store.models.find((row) => row.canonicalName === "claude-opus-5");
+    if (opusRow) {
+      expect(offeringPatches.length).toBeGreaterThan(0);
+      const best = store.offerings.filter((row) => !row.disabled).sort((a, b) => a.priority - b.priority)[0];
+      expect(best?.modelId).toBe(opusRow.id);
     }
   });
 });

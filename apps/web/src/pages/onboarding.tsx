@@ -21,10 +21,11 @@ type Step = "provider" | "model" | "project";
 
 /**
  * Whether the model step is needed for a provider: ready, serving a real
- * choice of models, with nothing pinned yet. The provider list auto-picks
- * the first served model at connect/refresh time, so a fresh connection
- * never lands here — the step stays only as a fallback (a pin the hub
- * dropped, or a choice predating auto-pick).
+ * choice of models, with nothing selected yet. Nothing is pinned at
+ * connect/refresh time — the default is the priority-first enabled model
+ * (CL-8781), derived at read time — so a fresh connection never lands here;
+ * the step stays only as a fallback (every model restricted, or a choice
+ * predating priority defaults).
  */
 export function needsModelChoice(provider: { status: string; selectedModel: string | null; models: readonly string[] }): boolean {
   return provider.status === "ready" && provider.models.length > 1 && provider.selectedModel === null;

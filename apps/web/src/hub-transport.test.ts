@@ -116,7 +116,9 @@ describe("api.providers", () => {
         priority: 0,
         hasCredential: true,
         validatedAt: "2026-01-01T00:00:00.000Z",
-        selectedModel: null,
+        // CL-8781: the selected model is the priority-first enabled offering,
+        // not a pin — nothing was pinned, yet the default still resolves.
+        selectedModel: "gpt-4o",
       },
     ]);
     expect(listed.apiKeyProviders.map((entry) => entry.providerId)).toContain("openai");

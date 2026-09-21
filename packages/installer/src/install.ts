@@ -20,6 +20,7 @@ import { APP_VERSION } from "@solutions-builder/app/manifest";
 import { AUTHORITIES } from "@solutions-builder/app/ledger";
 import { assignRole, createWorkspace, ensureRole, resolveWorkspace, type Workspace } from "./hub.js";
 import { seedCatalog } from "./catalog-seed.js";
+import { ensureOpusDefault } from "./model-default.js";
 import { installProjectAuthority, listProjectRecords } from "./project-tenant.js";
 import { ensureAuthorityGrants } from "./authority-grants.js";
 import { ensureSkillAssets } from "./skill-assets.js";
@@ -111,6 +112,10 @@ export async function install(
   // inherits them through tenant ancestry. Idempotent and adopting, so
   // upgrades re-run it without touching tenant edits.
   await seedCatalog(transport, ws.tenantId);
+  // CL-8781 migration: workspaces connected before the opus-5 default still
+  // lead with the legacy seed default (sonnet-5) — move them. Guarded, so
+  // customized defaults and fresh installs (no offerings yet) are untouched.
+  await ensureOpusDefault(transport, ws.tenantId);
 
   // Authority is the platform's: the ledger's authorities become roles, and
   // the owner holds every human one.

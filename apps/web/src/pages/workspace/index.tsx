@@ -175,9 +175,10 @@ export function StageWorkspace({
   // its own deployment's pinned offering when one is already deployed for
   // this stage (an existing deployment keeps its pin across a later provider
   // change, `specialist-deploy.ts`'s `ensureSpecialistDeploymentOnce`), the
-  // tenant's current catalog default otherwise -- see `resolveActiveModel`'s
-  // doc. `undefined` while unresolved, `null` once resolved to nothing
-  // connected. Declared here; the effect reading it sits below `stage`.
+  // tenant's current catalog default (the lowest-priority offering, CL-8781)
+  // otherwise -- see `resolveActiveModel`'s doc. `undefined` while
+  // unresolved, `null` once resolved to nothing connected. Declared here;
+  // the effect reading it sits below `stage`.
   const [activeModel, setActiveModel] = useState<ActiveModel | null | undefined>(undefined);
 
   // The project workflow (CL-8721) is the ONLY authority for a stage's
