@@ -5,8 +5,9 @@
  * against a parked ledger run) is restored here in a mail-agent shape
  * (CL-8625): each stakeholder's own proceed/revise/reject is appended to
  * their own package artifact's `sb.decisions` through `reviseArtifact`, and
- * the quorum banner is folded client-side from those decisions against the
- * project policy's `audienceQuorum`. Advancing past the stage is still the
+ * the quorum count is folded client-side from those decisions against the
+ * project policy's `audienceQuorum` — a note beside the record, not a
+ * banner. Advancing past the stage is still the
  * same "Approve and continue" the other stages use
  * (`pages/workspace/index.tsx`); this only restores the record, not a gate.
  */
@@ -37,10 +38,10 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Waits for the agent's next reply after everything already in `seenIds` —
- * the reply that follows the mail just sent, not one already on the thread.
- * The live reply took ~4 minutes (CL-8636); this polls the thread rather
- * than the round-trip `send()` elsewhere uses, which only reloads once.
+ * Waits for the reply to the mail just sent — the agent's next turn after
+ * everything already in `seenIds`, not a turn already on the thread. This
+ * polls the thread itself, since the round-trip `send()` elsewhere uses
+ * only reloads once and the reply can take minutes.
  */
 async function awaitAgentReply(
   tenantId: string,
@@ -324,11 +325,10 @@ export function AudiencePackages({
   lastRefusal: DecisionRecord | null;
 }) {
   // Which stakeholders' packages are being written right now: "Write it"
-  // sends the mail, then polls the thread for the reply that follows it and
-  // persists that reply as each named audience's package artifact — nothing
-  // else turns the mail-agent's reply into what the packages list reads
-  // (CL-8636). One round at a time; the rows say "Writing…" instead of
-  // offering another.
+  // sends the mail, then waits for the reply that follows it and keeps
+  // that reply as each named audience's package artifact — nothing else
+  // turns the reply into what the packages list reads. One round at a
+  // time; the rows say "Writing…" instead of offering another.
   const [writing, setWriting] = useState<ReadonlySet<string>>(new Set());
   const [writeError, setWriteError] = useState<string | null>(null);
   const cancelledRef = useRef(false);
@@ -341,17 +341,17 @@ export function AudiencePackages({
   const quorum = policy.audienceQuorum ?? 0;
 
   /** Each audience's index into the stakeholder list `setStakeholders` saved
-   *  -- the same order the specialists deploy against (`policy.audiences`
-   *  order, not the "you first" display order), so a package's own agent is
-   *  the one it was written by regardless of tab ordering. */
+   *  — the order the specialists deploy in (`policy.audiences` order, not
+   *  the "you first" display order), so a package is written by its own
+   *  agent whatever the tab order on screen. */
   const audienceIndex = (name: string) => (policy.audiences ?? []).findIndex((audience) => audience.name === name);
 
   /**
-   * Writes one named stakeholder's package: mails that stakeholder's own
-   * specialist (`ensureStage5PackageAgent`, deployed lazily on first use)
-   * and reads its reply back off its own thread, so one audience's package
-   * can never carry another's content the way a single shared agent's
-   * combined reply could (CL-8738).
+   * Writes one named stakeholder's package with that stakeholder's own
+   * specialist (`ensureStage5PackageAgent`, deployed lazily on first use),
+   * reading its reply back off its own thread — so one audience's package
+   * never carries another's, the way a single shared agent's combined
+   * reply could.
    */
   const writeOnePackage = async (name: string) => {
     const index = audienceIndex(name);
@@ -526,7 +526,6 @@ export function AudiencePackages({
   };
   const quorumOutcome = quorumState(evidence);
   const proceeded = quorumOutcome.proceeded;
-  const quorumMet = quorumOutcome.met;
   // The workflow's own verdict -- never recomputed here (`approveReasonText`
   // is the one place that translates `approveReason` to copy).
   const reason = approveReason ? approveReasonText(approveReason, lastRefusal) : null;
@@ -562,22 +561,17 @@ export function AudiencePackages({
           <Banner title="No stakeholders are named for this project" />
         ) : null}
 
+        {/* The quorum count reads as a note beside the record, never as a
+            verdict of its own: the workflow's verdict below is the only
+            gate on Approve. */}
         {packages.length > 0 && decisionQuorum > 0 ? (
-          <Banner
-            tone={quorumMet ? "okay" : "warning"}
-            title={
-              quorumMet
-                ? `Quorum met: ${proceeded} of ${decisionQuorum} required have proceeded`
-                : `${proceeded} of ${decisionQuorum} required have proceeded`
-            }
-          />
+          <p className="inline-note">
+            {proceeded} of {decisionQuorum} required have proceeded.
+          </p>
         ) : null}
 
         {packages.length > 0 ? (
           <>
-            <StateLabel tone={quorumMet ? "success" : "warning"}>
-              {proceeded} proceeded · quorum {decisionQuorum}
-            </StateLabel>
             {/* Every named stakeholder's latest decision, folded from each
                 package's own `sb.decisions` — the record a person checks
                 without opening every tab in turn. */}
