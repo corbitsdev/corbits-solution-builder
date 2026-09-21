@@ -1,6 +1,4 @@
-import { access, rm, writeFile } from "node:fs/promises";
 import type { Hono } from "hono";
-import { startAtLoginMarker } from "./paths.js";
 import { credentialBackend } from "./host-secrets.js";
 import { hostStatus, requestHostStop } from "./lifecycle.js";
 import { ensureHub, hubFetch, mintOwnerSetCookie } from "./hub-client.js";
@@ -68,31 +66,5 @@ export function registerHostRoutes(api: Hono) {
     // An explicit host stop, distinct from closing a window.
     requestHostStop();
     return context.json({ stopping: true });
-  });
-
-  /**
-   * Start-at-login is the one host preference left: a marker file the
-   * desktop host reads before the database is open, its presence the opt-in.
-   * The designer's settings are a workspace-tenant asset the client reads
-   * and writes directly through the installer package; they are not host
-   * state.
-   */
-  api.get("/preferences", async (context) => {
-    const startAtLogin = await access(startAtLoginMarker())
-      .then(() => true)
-      .catch(() => false);
-    return context.json({ preferences: { "host.startAtLogin": startAtLogin } });
-  });
-
-  api.put("/preferences/:key", async (context) => {
-    const key = context.req.param("key");
-    const value = await context.req.json();
-
-    if (key === "host.startAtLogin") {
-      const marker = startAtLoginMarker();
-      if (value === true) await writeFile(marker, "1");
-      else await rm(marker, { force: true });
-    }
-    return context.json({ key, value });
   });
 }

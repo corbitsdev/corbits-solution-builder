@@ -508,42 +508,22 @@ fn urlencode(value: &str) -> String {
     out
 }
 
-/// Turns the login item on or off to match the stored choice.
-///
-/// Errors are logged and swallowed: failing to register a login item is a
-/// disappointment, not a reason to refuse to start the app the person is
-/// currently launching.
-fn reconcile_start_at_login(app: &tauri::AppHandle) {
+/// Whether the app is registered to start at login. The plugin's own
+/// registration is the stored choice — there is no marker file to keep in
+/// step.
+#[tauri::command]
+fn start_at_login(app: AppHandle) -> bool {
     use tauri_plugin_autostart::ManagerExt;
-
-    let wanted = start_at_login_marker().map(|path| path.exists()).unwrap_or(false);
-    let manager = app.autolaunch();
-    let enabled = manager.is_enabled().unwrap_or(false);
-    if wanted == enabled {
-        return;
-    }
-    let result = if wanted { manager.enable() } else { manager.disable() };
-    if let Err(error) = result {
-        eprintln!("solutions-builder: could not update the login item: {error}");
-    }
+    app.autolaunch().is_enabled().unwrap_or(false)
 }
 
-/// The same path `apps/hub/paths.ts` writes, resolved the same way.
-fn start_at_login_marker() -> Option<PathBuf> {
-    if let Ok(override_dir) = std::env::var("SOLUTIONS_BUILDER_DATA_DIR") {
-        let trimmed = override_dir.trim();
-        if !trimmed.is_empty() {
-            return Some(PathBuf::from(trimmed).join("start-at-login"));
-        }
-    }
-    let home = std::env::var_os("HOME")?;
-    Some(
-        PathBuf::from(home)
-            .join("Library")
-            .join("Application Support")
-            .join("SolutionsBuilder")
-            .join("start-at-login"),
-    )
+/// Registers or removes the login item, taking effect at the next login.
+#[tauri::command]
+fn set_start_at_login(app: AppHandle, enabled: bool) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let manager = app.autolaunch();
+    let result = if enabled { manager.enable() } else { manager.disable() };
+    result.map_err(|error| error.to_string())
 }
 
 pub fn run() {
@@ -561,15 +541,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             dictation::dictation_start,
             dictation::dictation_stop,
-            dictation::dictation_open_settings
+            dictation::dictation_open_settings,
+            start_at_login,
+            set_start_at_login
         ])
         .setup(|app| {
-            // §3: reconcile the OS registration with the choice the person
-            // made in the app. The marker is written by the host when the
-            // preference changes; there is no other way to switch this on, so
-            // an installation never opts anybody in.
-            reconcile_start_at_login(app.handle());
-
             // A failed start is a thing to read, not a thing to crash on.
             // Propagating this with `?` makes Tauri panic inside
             // `did_finish_launching`, which aborts without unwinding and prints

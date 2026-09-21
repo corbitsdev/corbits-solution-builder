@@ -14,6 +14,8 @@ fn main() {
                 "dictation_start",
                 "dictation_stop",
                 "dictation_open_settings",
+                "start_at_login",
+                "set_start_at_login",
             ]),
         ),
     )

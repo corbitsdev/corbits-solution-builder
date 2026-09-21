@@ -10,7 +10,9 @@
     "core:webview:allow-print",
     "allow-dictation-start",
     "allow-dictation-stop",
-    "allow-dictation-open-settings"
+    "allow-dictation-open-settings",
+    "allow-start-at-login",
+    "allow-set-start-at-login"
   ],
   "remote": {
     "urls": [

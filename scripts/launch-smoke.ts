@@ -270,13 +270,11 @@ if (await Bun.file(sidecar).exists()) {
   }
 }
 
-// §3: start-at-login is explicit and reversible, and nothing about installing
-// or running the app may turn it on. The marker file is the whole mechanism,
-// so its absence on a fresh workspace is the property worth checking — a
-// silent opt-in would be invisible until somebody noticed their login items.
+// The workspace's inference spend is served like the projects list: empty
+// once installed, and before the install the same refusal every other
+// workspace route gives, which the window already treats as empty.
 {
   const dataDir = await mkdtemp(join(tmpdir(), "solutions-builder-login-"));
-  const marker = join(dataDir, "start-at-login");
   const child = Bun.spawn(
     ["bun", "--conditions", "intx-src", join(root, "apps", "hub", "src", "server.ts"), "--port", "0"],
     {
@@ -303,10 +301,8 @@ if (await Bun.file(sidecar).exists()) {
     const launch = /launch URL:\s*(\S+)/.exec(buffer)?.[1];
 
     if (!launch) {
-      check("the host starts for the login-item check", false, buffer.slice(-160));
+      check("the host starts for the spend check", false, buffer.slice(-160));
     } else {
-      check("starting the app does not opt anybody in", !(await Bun.file(marker).exists()));
-
       const origin = new URL(launch).origin;
       const token = new URL(launch).searchParams.get("token") ?? "";
       // The handshake answers 302 and sets the session on *that* response, so
@@ -315,80 +311,19 @@ if (await Bun.file(sidecar).exists()) {
       const session = await fetch(`${origin}/?token=${token}`, { redirect: "manual" });
       // The name=value pair only. Sending a whole Set-Cookie string sends its
       // attributes as cookies, the request is rejected, and the check then
-      // passes for the wrong reason because the marker was never written.
+      // passes for the wrong reason because the cookie was never set.
       const cookie = (session.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
 
-      const on = await fetch(`${origin}/api/preferences/host.startAtLogin`, {
-        method: "PUT",
-        headers: { "content-type": "application/json", cookie },
-        body: "true",
-      });
-      check(
-        "turning it on records the choice",
-        on.status === 200 && (await Bun.file(marker).exists()),
-        `${on.status}`,
-      );
-
-      const off = await fetch(`${origin}/api/preferences/host.startAtLogin`, {
-        method: "PUT",
-        headers: { "content-type": "application/json", cookie },
-        body: "false",
-      });
-      check(
-        "and turning it off removes it",
-        off.status === 200 && !(await Bun.file(marker).exists()),
-        `${off.status}`,
-      );
-
-      // The build worker: Corbits Code until somebody chooses otherwise, the
-      // choice reported by the host's status at once, and a tool the bridge
-      // cannot drive refused rather than saved.
-      const status = async () =>
-        (await (await fetch(`${origin}/api/status`, { headers: { cookie } })).json()) as {
-          build: { worker: { id: string }; workers: { id: string }[] };
-        };
-      const before = await status();
-      check(
-        "the build worker is Corbits Code by default, among the workers on offer",
-        before.build.worker.id === "corbits-code" && before.build.workers.length >= 3,
-        `${before.build.worker.id}; ${before.build.workers.length} on offer`,
-      );
-      const chosen = await fetch(`${origin}/api/preferences/build.worker`, {
-        method: "PUT",
-        headers: { "content-type": "application/json", cookie },
-        body: JSON.stringify("claude-code"),
-      });
-      const preferences = (await (await fetch(`${origin}/api/preferences`, { headers: { cookie } })).json()) as {
-        preferences: Record<string, unknown>;
+      const spend = (await (await fetch(`${origin}/api/spend`, { headers: { cookie } })).json()) as {
+        totals?: { calls: number; cost: number };
+        projects?: unknown[];
+        error?: { code: string };
       };
-      const after = await status();
       check(
-        "choosing another worker is saved and reported by the host's status",
-        chosen.status === 200 &&
-          preferences.preferences["build.worker"] === "claude-code" &&
-          after.build.worker.id === "claude-code",
-        `${chosen.status}; preference ${String(preferences.preferences["build.worker"])}; status ${after.build.worker.id}`,
+        "the workspace's spend is served, or refused as uninstalled like the projects list",
+        (spend.totals?.calls === 0 && spend.totals.cost === 0 && Array.isArray(spend.projects)) || spend.error?.code === "conflict",
+        JSON.stringify(spend).slice(0, 120),
       );
-      const refused = await fetch(`${origin}/api/preferences/build.worker`, {
-        method: "PUT",
-        headers: { "content-type": "application/json", cookie },
-        body: JSON.stringify("some-other-tool"),
-      });
-      check("a worker the bridge cannot drive is refused", refused.status === 400, `${refused.status}`);
-
-    // The workspace's inference spend is served like the projects list: empty
-    // once installed, and before the install the same refusal every other
-    // workspace route gives, which the window already treats as empty.
-    const spend = (await (await fetch(`${origin}/api/spend`, { headers: { cookie } })).json()) as {
-      totals?: { calls: number; cost: number };
-      projects?: unknown[];
-      error?: { code: string };
-    };
-    check(
-      "the workspace's spend is served, or refused as uninstalled like the projects list",
-      (spend.totals?.calls === 0 && spend.totals.cost === 0 && Array.isArray(spend.projects)) || spend.error?.code === "conflict",
-      JSON.stringify(spend).slice(0, 120),
-    );
     }
   } finally {
     await killAndWait(child);

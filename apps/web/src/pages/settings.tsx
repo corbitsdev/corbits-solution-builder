@@ -14,10 +14,12 @@
 import { Input, Switch, Textarea } from "@corbits/react-ui";
 import { useEffect, useState } from "react";
 import { DECK_DENSITY, DECK_THEMES, DECK_TYPEFACES, DEFAULT_DECK_DESIGN, type DeckDensity, type DeckDesign, type DeckTheme, type DeckTypeface } from "@solutions-builder/app/deck";
+import { invoke } from "@tauri-apps/api/core";
 import { api, ApiFailure, STAKEHOLDER_ROLES, type DesignerSettings, type HostStatus, type Provider } from "../client.js";
 import { Banner, Button, StateLabel } from "../components.jsx";
 import { deckDesignFor, deckDesignKey, guidanceFor } from "../deck-design-settings.ts";
 import { Dictated } from "../dictation.jsx";
+import { inShell } from "../shell.ts";
 import { ProviderList, ResolvedCatalogList, type ApiKeyProvider, type OAuthCandidate } from "./providers.jsx";
 
 export function Settings({
@@ -560,18 +562,19 @@ function DeckTemplates() {
 /**
  * Start-at-login is off until somebody turns it on, the copy says what it does
  * and does not do, and it says when the change takes effect rather than
- * implying it is already true.
+ * implying it is already true. The desktop shell answers directly: outside it
+ * there is no login item to point the switch at, so it stays disabled.
  */
 function ThisComputer({ status }: { status: HostStatus | null }) {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!inShell()) return;
     let cancelled = false;
-    void api
-      .preferences()
-      .then((result) => {
-        if (!cancelled) setEnabled(result.preferences["host.startAtLogin"] === true);
+    void invoke<boolean>("start_at_login")
+      .then((value) => {
+        if (!cancelled) setEnabled(value);
       })
       .catch(() => {
         if (!cancelled) setEnabled(false);
@@ -585,10 +588,10 @@ function ThisComputer({ status }: { status: HostStatus | null }) {
     setError(null);
     setEnabled(next);
     try {
-      await api.setPreference("host.startAtLogin", next);
+      await invoke("set_start_at_login", { enabled: next });
     } catch (cause) {
       setEnabled(!next);
-      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+      setError(String(cause));
     }
   };
 

@@ -1504,12 +1504,6 @@ export const api = {
     });
     return { decisions };
   },
-  preferences: () => request<{ preferences: Record<string, unknown> }>("/preferences"),
-  setPreference: (key: string, value: unknown) =>
-    request<{ key: string }>(`/preferences/${key}`, {
-      method: "PUT",
-      body: JSON.stringify(value),
-    }),
   designerSettings: () => loadDesignerSettings(createHubTransport()),
   deckDesigns: () => loadDeckDesigns(createHubTransport()),
   saveDeckDesignPreference: (key: string, value: unknown) =>

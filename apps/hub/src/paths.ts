@@ -21,18 +21,6 @@ export function databaseDirectory(): string {
 }
 
 /**
- * The file that records the start-at-login choice.
- *
- * A file rather than a row, because the desktop host reads it before the
- * database is open — it is the first thing the Rust process needs and the last
- * thing that should require a query. Its presence is the choice; §3 requires
- * the opt-in to be explicit, so absent means off.
- */
-export function startAtLoginMarker(): string {
-  return join(dataDirectory(), "start-at-login");
-}
-
-/**
  * The loopback port the host served on last time. Sidecars are bound to the
  * hub's address, port included, so a host that comes back on a new port
  * strands every sidecar placed by the old one. The port is remembered here
@@ -40,14 +28,4 @@ export function startAtLoginMarker(): string {
  */
 export function portFile(): string {
   return join(dataDirectory(), "port");
-}
-
-/** How each stakeholder role's deck is designed, and what its outline emphasises. */
-export function deckSettingsFile(): string {
-  return join(dataDirectory(), "decks.json");
-}
-
-/** Which coding agent stage 8 runs, and where its executable is. */
-export function buildWorkerSettingsFile(): string {
-  return join(dataDirectory(), "build-worker.json");
 }

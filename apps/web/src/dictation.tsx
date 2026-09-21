@@ -28,6 +28,7 @@ import {
 import { Button } from "./components.jsx";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { inShell } from "./shell.ts";
 
 /** How many recent levels the waveform shows. */
 const WAVE_BARS = 24;
@@ -53,8 +54,6 @@ const REFUSALS: Record<string, string> = {
 };
 /** Ends that are not failures. */
 const QUIET_ENDS = new Set(["stopped", "silence", "final"]);
-
-const inShell = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 /**
  * The one session open anywhere on the page. A page has a microphone beside
