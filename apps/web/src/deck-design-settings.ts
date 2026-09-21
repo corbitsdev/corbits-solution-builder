@@ -1,6 +1,6 @@
 /**
  * A stakeholder role's deck design and outline guidance, as saved
- * preferences. Pure: given a role and the preferences map `api.preferences()`
+ * preferences. Pure: given a role and the preferences map `api.deckDesigns()`
  * returns, resolves the `DeckDesign` that role's slides are built with and
  * the free-text guidance its outline is drafted with.
  *
@@ -10,6 +10,13 @@
  * same way `lookOf` in `deck.ts` already lets a style guide's theme win.
  */
 import { DECK_DENSITY, DECK_THEMES, DEFAULT_DECK_DESIGN, type DeckDensity, type DeckDesign, type DeckTheme, type DeckTypeface } from "@solutions-builder/app/deck";
+import type { DeckDesignPreferences } from "@solutions-builder/app/deck-designs";
+import {
+  readDeckDesigns,
+  resolveWorkspace,
+  saveDeckDesignPreference as installerSaveDeckDesignPreference,
+} from "@solutions-builder/installer";
+import type { Transport } from "./hub.ts";
 
 const DECK_TYPEFACE_VALUES = ["Calibri", "Georgia", "Arial", "Helvetica"] as const satisfies readonly DeckTypeface[];
 const DECK_IMAGES_VALUES = ["none", "cover", "some", "all"] as const satisfies readonly DeckDesign["images"][];
@@ -68,4 +75,21 @@ export function deckDesignFor(role: string, preferences: Record<string, unknown>
 export function guidanceFor(role: string, preferences: Record<string, unknown>): string {
   const value = preferences[deckDesignKey(role, "guidance")];
   return typeof value === "string" ? value : DEFAULT_DECK_DESIGN.guidance;
+}
+
+/** The saved `deck.*` map on the workspace tenant, empty until the first save. */
+export async function deckDesigns(transport: Transport): Promise<DeckDesignPreferences> {
+  const workspace = await resolveWorkspace(transport);
+  if (!workspace) return {};
+  return readDeckDesigns(transport, workspace.tenantId);
+}
+
+export async function saveDeckDesignPreference(
+  transport: Transport,
+  key: string,
+  value: unknown,
+): Promise<DeckDesignPreferences> {
+  const workspace = await resolveWorkspace(transport);
+  if (!workspace) throw new Error("The workspace is not installed yet.");
+  return installerSaveDeckDesignPreference(transport, workspace.tenantId, key, value);
 }

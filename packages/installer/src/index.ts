@@ -9,6 +9,7 @@
 export * from "./artifacts.js";
 export * from "./authority-grants.js";
 export * from "./catalog-seed.js";
+export * from "./deck-designs.js";
 export * from "./designer-settings.js";
 export * from "./errors.js";
 export * from "./git-push.js";

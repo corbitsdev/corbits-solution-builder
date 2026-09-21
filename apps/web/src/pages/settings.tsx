@@ -4,9 +4,8 @@
  *   1. Inference — which providers answer, in what order, with which model.
  *   2. Designer — the surface and design language it draws to, how much it
  *      may write, and what happens when a design is cut short.
- *   3. Build worker — which coding agent stage 8 runs, and where it is.
- *   4. This computer — whether the host starts at login, and stopping it.
- *   5. Diagnostics — folded away; for when something is wrong.
+ *   3. This computer — whether the host starts at login, and stopping it.
+ *   4. Diagnostics — folded away; for when something is wrong.
  *
  * The secret rule shows up in the markup: a key field is cleared the moment it
  * is handed over, and nothing ever renders it back. What the UI sees is a
@@ -17,7 +16,7 @@ import { useEffect, useState } from "react";
 import { DECK_DENSITY, DECK_THEMES, DECK_TYPEFACES, DEFAULT_DECK_DESIGN, type DeckDensity, type DeckDesign, type DeckTheme, type DeckTypeface } from "@solutions-builder/app/deck";
 import { api, ApiFailure, STAKEHOLDER_ROLES, type DesignerSettings, type HostStatus, type Provider } from "../client.js";
 import { Banner, Button, StateLabel } from "../components.jsx";
-import { deckDesignFor, guidanceFor } from "../deck-design-settings.ts";
+import { deckDesignFor, deckDesignKey, guidanceFor } from "../deck-design-settings.ts";
 import { Dictated } from "../dictation.jsx";
 import { ProviderList, ResolvedCatalogList, type ApiKeyProvider, type OAuthCandidate } from "./providers.jsx";
 
@@ -43,7 +42,6 @@ export function Settings({
         onChanged={onChanged}
       />
       <Designer />
-      <BuildWorker status={status} onChanged={onChanged} />
       <ThisComputer status={status} />
       <Diagnostics status={status} />
       <StakeholderDecks />
@@ -281,8 +279,8 @@ function StakeholderDecks() {
   useEffect(() => {
     let cancelled = false;
     void api
-      .preferences()
-      .then(({ preferences }) => {
+      .deckDesigns()
+      .then((preferences) => {
         if (cancelled) return;
         setDesigns(Object.fromEntries(STAKEHOLDER_ROLES.map((role) => [role, deckDesignFor(role, preferences)])));
         setGuidance(Object.fromEntries(STAKEHOLDER_ROLES.map((role) => [role, guidanceFor(role, preferences)])));
@@ -295,13 +293,17 @@ function StakeholderDecks() {
     };
   }, []);
 
-  const save = async <K extends keyof DeckDesign>(role: string, key: K, value: DeckDesign[K]) => {
+  const save = async <K extends "theme" | "typeface" | "density" | "notes" | "images" | "guidance">(
+    role: string,
+    key: K,
+    value: DeckDesign[K],
+  ) => {
     if (!designs) return;
     setError(null);
     const before = designs;
     setDesigns({ ...designs, [role]: { ...designs[role]!, [key]: value } });
     try {
-      await api.setPreference(`deck.${role}.${key}`, value);
+      await api.saveDeckDesignPreference(deckDesignKey(role, key), value);
     } catch (cause) {
       setDesigns(before);
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
@@ -549,119 +551,6 @@ function DeckTemplates() {
           </div>
         ))}
       </details>
-    </Section>
-  );
-}
-
-/* ------------------------------------------------------------- build worker */
-
-/**
- * Which coding agent stage 8 hands the frozen packet to. The bridge runs one
- * tool's non-interactive form and reports final text and an exit status
- * whichever it is; the choice here changes the tool, not what the bridge can
- * see. Availability is the host's word, refreshed with its status, so a
- * change shows its consequence here before anyone reaches stage 8.
- */
-function BuildWorker({ status, onChanged }: { status: HostStatus | null; onChanged: () => void }) {
-  const [worker, setWorker] = useState<string | null>(null);
-  const [executable, setExecutable] = useState("");
-  const [saved, setSaved] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const workers = status?.build?.workers ?? [];
-  const chosen = workers.find((entry) => entry.id === worker);
-
-  useEffect(() => {
-    let cancelled = false;
-    void api
-      .preferences()
-      .then(({ preferences }) => {
-        if (cancelled) return;
-        setWorker(String(preferences["build.worker"] ?? "corbits-code"));
-        const path = String(preferences["build.executable"] ?? "");
-        setExecutable(path);
-        setSaved(path);
-      })
-      .catch((cause) => {
-        if (!cancelled) setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const save = async (key: "worker" | "executable", value: string) => {
-    setError(null);
-    try {
-      await api.setPreference(`build.${key}`, value);
-      if (key === "executable") setSaved(value);
-      // The host's status carries the new worker's availability; asked for
-      // now rather than at the next five-second refresh.
-      onChanged();
-    } catch (cause) {
-      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-    }
-  };
-
-  return (
-    <Section
-      title="Build worker"
-      lead="The coding agent stage 8 hands the frozen packet to. It runs on this computer, with your own configuration of that tool."
-      status={
-        status?.build ? (
-          <StateLabel tone={status.build.available ? "success" : "error"}>
-            {status.build.available ? "Available" : "Unavailable"}
-          </StateLabel>
-        ) : null
-      }
-    >
-      {error ? <Banner tone="error" title={error} /> : null}
-      <div className="setting-row">
-        <div>
-          <strong>Tool</strong>
-          <p>Corbits Code is the default. Whichever you choose, the build shows its final output and exit status and nothing more.</p>
-        </div>
-        <select
-          className="setting-select"
-          aria-label="Build worker"
-          value={worker ?? "corbits-code"}
-          disabled={worker === null || workers.length === 0}
-          onChange={(event) => {
-            setWorker(event.target.value);
-            void save("worker", event.target.value);
-          }}
-        >
-          {workers.map((entry) => (
-            <option key={entry.id} value={entry.id}>
-              {entry.label}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="setting-row">
-        <div>
-          <strong>Executable</strong>
-          <p>Leave empty to use <code>{chosen?.executable ?? "the tool's own name"}</code> from this computer's PATH. Give a full path for an install that is somewhere else. Saved when you leave the field.</p>
-        </div>
-        <Dictated value={executable} onValueChange={setExecutable} disabled={worker === null} align="center">
-        <Input
-          className="setting-path"
-          aria-label="Build worker executable"
-          type="text"
-          value={executable}
-          disabled={worker === null}
-          placeholder={chosen?.executable ?? ""}
-          spellCheck={false}
-          onChange={(event) => setExecutable(event.target.value)}
-          onBlur={() => {
-            if (executable.trim() !== saved) void save("executable", executable.trim());
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") (event.target as HTMLInputElement).blur();
-          }}
-        />
-        </Dictated>
-      </div>
-      {status?.build ? <p className="setting-note">{status.build.detail}</p> : null}
     </Section>
   );
 }

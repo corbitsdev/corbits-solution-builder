@@ -115,6 +115,7 @@ import { openDecisions } from "./decisions-fold.ts";
 import { loadProjectView, toArtifactNode } from "./project-view.ts";
 import { projectUsage, type ProjectUsage, type WorkspaceSpend } from "./project-usage.ts";
 import { designerSettings as loadDesignerSettings, saveDesignerSettings, type DesignerSettings } from "./designer-settings.ts";
+import { deckDesigns as loadDeckDesigns, saveDeckDesignPreference } from "./deck-design-settings.ts";
 import {
   API_KEY_CONNECT_OPTIONS,
   OAUTH_CONNECT_OPTIONS,
@@ -1510,6 +1511,11 @@ export const api = {
       body: JSON.stringify(value),
     }),
   designerSettings: () => loadDesignerSettings(createHubTransport()),
+  deckDesigns: () => loadDeckDesigns(createHubTransport()),
+  saveDeckDesignPreference: (key: string, value: unknown) =>
+    saveDeckDesignPreference(createHubTransport(), key, value).catch((cause) => {
+      installerFailure(cause);
+    }),
   saveDesignerSetting: <K extends keyof DesignerSettings>(key: K, value: DesignerSettings[K]) =>
     saveDesignerSettings(createHubTransport(), { [key]: value } as Partial<DesignerSettings>).catch((cause) => {
       installerFailure(cause);

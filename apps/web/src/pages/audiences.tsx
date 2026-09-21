@@ -432,7 +432,7 @@ export function AudiencePackages({
         downloadArtifact(result.content, `${deck.title}.pptx`);
       } else {
         const packageContent = await api.artifactContent(tenantId, packageNodeId);
-        const { preferences } = await api.preferences();
+        const preferences = await api.deckDesigns();
         const built = await buildPackageDeck({
           projectTitle: detail.project.title,
           audience: name,
