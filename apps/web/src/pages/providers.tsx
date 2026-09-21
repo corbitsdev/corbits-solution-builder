@@ -31,6 +31,17 @@ type Row = {
   needsBaseUrl: boolean;
 };
 
+/**
+ * The model a fresh connection should pin: the first served, when nothing
+ * is chosen yet. Null means there is nothing to pin — either a choice
+ * already exists (an explicit override persists) or no models are served.
+ */
+export function autoPickModel(provider: { selectedModel: string | null; models: readonly string[] }): string | null {
+  if (provider.selectedModel !== null) return null;
+  const [first] = provider.models;
+  return first ?? null;
+}
+
 export function ProviderList({
   providers,
   apiKeyProviders,
@@ -109,21 +120,37 @@ export function ProviderList({
         await api.connectOAuthProvider({ providerId: row.id, label: row.name }, (url) => {
           if (!cancelledRef.current.has(row.id)) setAuthorizeUrl(url);
         });
+        await autoPick(row.id);
       } else if (row.kind === "local_endpoint") {
-        await api.connectLocalProvider({ baseUrl: baseUrl.trim() || LOCAL_DEFAULT_BASE_URL });
+        await autoPickProvider(await api.connectLocalProvider({ baseUrl: baseUrl.trim() || LOCAL_DEFAULT_BASE_URL }));
       } else {
-        await api.connectProvider({
-          providerId: row.id,
-          label: row.name,
-          apiKey: secret,
-          ...(row.needsBaseUrl ? { baseUrl } : {}),
-        });
+        await autoPickProvider(
+          await api.connectProvider({
+            providerId: row.id,
+            label: row.name,
+            apiKey: secret,
+            ...(row.needsBaseUrl ? { baseUrl } : {}),
+          }),
+        );
       }
       setSecret("");
       setBaseUrl("");
       setAuthorizeUrl(null);
       setChosen(null);
     });
+
+  /** Pin the first served model when nothing is chosen yet; explicit choices persist. */
+  const autoPickProvider = async (provider: Provider) => {
+    const pin = autoPickModel(provider);
+    if (pin !== null) await api.selectProviderModel(provider.providerId, pin);
+  };
+
+  /** The OAuth handshake returns no provider; look the fresh row up before pinning. */
+  const autoPick = async (providerId: string) => {
+    const fresh = await api.providers();
+    const provider = fresh.providers.find((entry) => entry.providerId === providerId);
+    if (provider) await autoPickProvider(provider);
+  };
 
   const cancelSignIn = (id: string) => {
     cancelledRef.current.add(id);
@@ -254,30 +281,55 @@ export function ProviderList({
                   {manage && connected && ready ? (
                     <>
                       <ModelPick provider={connected} onPick={(model) => act(row.id, () => api.selectProviderModel(connected.providerId, model || null))} />
-                      <Button
-                        variant="ghost"
-                        disabled={busy !== null || position <= 0}
-                        onClick={() => void move(connected.providerId, -1)}
-                      >
-                        Move up
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        disabled={busy !== null || position < 0 || position === ordered.length - 1}
-                        onClick={() => void move(connected.providerId, 1)}
-                      >
-                        Move down
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        disabled={busy !== null}
-                        loading={busy === row.id}
-                        onClick={() =>
-                          void act(row.id, () => api.refreshProviderModels(connected.providerId), `${row.name} models refreshed.`)
-                        }
-                      >
-                        Refresh models
-                      </Button>
+                      <details>
+                        <summary>Advanced</summary>
+                        <div>
+                          {connected.models.length > 1 ? (
+                            connected.selectedModel !== null ? (
+                              <Button
+                                variant="ghost"
+                                disabled={busy !== null}
+                                onClick={() => void act(row.id, () => api.selectProviderModel(connected.providerId, null))}
+                              >
+                                Let it fail over
+                              </Button>
+                            ) : (
+                              <span className="inline-note">Failing over in order.</span>
+                            )
+                          ) : null}
+                          <Button
+                            variant="ghost"
+                            disabled={busy !== null || position <= 0}
+                            onClick={() => void move(connected.providerId, -1)}
+                          >
+                            Move up
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            disabled={busy !== null || position < 0 || position === ordered.length - 1}
+                            onClick={() => void move(connected.providerId, 1)}
+                          >
+                            Move down
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            disabled={busy !== null}
+                            loading={busy === row.id}
+                            onClick={() =>
+                              void act(
+                                row.id,
+                                async () => {
+                                  await api.refreshProviderModels(connected.providerId);
+                                  await autoPick(connected.providerId);
+                                },
+                                `${row.name} models refreshed.`,
+                              )
+                            }
+                          >
+                            Refresh models
+                          </Button>
+                        </div>
+                      </details>
                     </>
                   ) : null}
                   {waiting ? (
@@ -351,16 +403,13 @@ function ago(iso: string): string {
 }
 
 function ModelPick({ provider, onPick }: { provider: Provider; onPick: (model: string) => void }) {
-  if (provider.models.length <= 1) return null;
+  const [first] = provider.models;
+  if (!first) return null;
+  const value = provider.selectedModel && provider.models.includes(provider.selectedModel) ? provider.selectedModel : first;
   return (
     <label className="provider-model">
       <span className="sr-only">Model for {provider.label}</span>
-      <select
-        className="setting-select"
-        value={provider.selectedModel ?? ""}
-        onChange={(event) => onPick(event.target.value)}
-      >
-        <option value="">Let it fail over</option>
+      <select className="setting-select" value={value} onChange={(event) => onPick(event.target.value)}>
         {provider.models.map((model) => (
           <option key={model} value={model}>
             {model}
