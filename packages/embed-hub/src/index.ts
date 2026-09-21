@@ -412,6 +412,11 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
     plugins: sidecarPlugins,
     router: sidecarRouter,
     hubWebSocketUrl: options.hubWebSocketUrl,
+    // Process-provisioned sidecars die with the host. Replacing them lets
+    // `restoreWorkflowRunToAllocation` replay each run's hub-held refs onto the
+    // new generation; releasing them fails the run and a project restarts at
+    // stage 1 (CL-8784).
+    enableAutomaticReplacementRecovery: true,
     onReady: async (allocation: { anchorRunId: string }, reconciliation: { signal: AbortSignal }) => {
       await workflowAllocationService.deployReadyAllocation(allocation, reconciliation);
       await workflowDispatchService.requeueForReadyAllocation(allocation.anchorRunId);
