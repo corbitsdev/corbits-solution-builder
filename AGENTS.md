@@ -2,18 +2,11 @@
 
 ## Verify before asserting
 
-`bun run check` is the gate: ledger consistency, dependency boundaries,
-typecheck, the nine-stage loop smoke, and the sidecar smoke that deploys the
-lifecycle as a real workflow through the process provisioner. Run it before
-claiming anything works.
+`bun run check` is the gate: shard and migration consistency, dependency
+boundaries, typecheck, unit tests, the interface build and the static
+interface audits. Run it before claiming anything works.
 Green does not mean the product is right - drive the app for anything a person
 would see.
-
-Every in-process smoke imports `scripts/smoke-env.ts` first, which gives the
-run a data directory of its own when `SOLUTIONS_BUILDER_DATA_DIR` is unset.
-Without it a smoke reads the developer's own settings and writes build
-workspaces, decks and hub data into the developer's own workspace. A new smoke
-starts the same way.
 
 ## How this sits on Interchange
 

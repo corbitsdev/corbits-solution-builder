@@ -42,8 +42,8 @@ stage 3.
 To run the desktop shell instead of the browser (`bun run dev:desktop`) or
 build it (`bun run desktop:build`), you also need the
 [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) (Rust and
-Xcode command line tools on macOS). `bun run check` is the full gate — every
-invariant checker and smoke test — before a commit; every script, including
+Xcode command line tools on macOS). `bun run check` is the full gate, run
+before a commit; every script, including
 these, is listed in [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md#scripts).
 
 ## Read next

@@ -9,7 +9,7 @@ import { PROJECT_LIFECYCLE_ID } from "./workflows/stage-ids.js";
 
 export const APP_ID = "solutions-builder";
 
-/** Kept equal to package.json's version; `smoke:kit` fails when it drifts. */
+/** Kept equal to package.json's version. */
 export const APP_VERSION = "0.1.0";
 
 /**

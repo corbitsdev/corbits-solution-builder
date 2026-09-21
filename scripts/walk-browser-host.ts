@@ -1,7 +1,7 @@
 /**
  * Boots an isolated Solutions Builder host for `scripts/walk-browser.sh`.
  *
- * Mirrors `scripts/e2e-client.ts`'s `startHost`: spawns the app's own entry
+ * Spawns the app's own entry
  * (`apps/hub/src/server.ts`) with `--port 0` (OS-assigned free port, never a
  * fixed one another session might own) and `SOLUTIONS_BUILDER_DATA_DIR`
  * pointed at a caller-supplied directory outside the repo.

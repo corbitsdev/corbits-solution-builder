@@ -6,9 +6,7 @@
  * `apply` step output (while the project is still open) or the top-level
  * run's own `rework` step output (once every stage is approved and the loop
  * has converged) -- see
- * `packages/solutions-builder/src/project-workflow/{workflow,contracts}.ts`
- * and `scripts/project-workflow-proof-deployed.ts`'s `finalStateFrom`/
- * `applyStepOutputFrom`, which read the identical shapes.
+ * `packages/solutions-builder/src/project-workflow/{workflow,contracts}.ts`.
  */
 import type { Transport, WorkflowRunEvent } from "@intx/hub-client";
 import { workflowsFor, type ProjectWorkflowDeployment } from "@solutions-builder/installer";
@@ -68,8 +66,7 @@ function outputOf(events: readonly WorkflowRunEvent[], stepId: string): unknown 
 
 /** Every loop-iteration run id keyed into `iterationEventsByRunId`, oldest
  *  first, ordered by the numeric suffix every iteration child run id carries
- *  (`<runId>__rework__<n>`) -- the same convention
- *  `project-workflow-proof-deployed.ts`'s `iterationRunIds` sorts on. */
+ *  (`<runId>__rework__<n>`). */
 function orderedIterationIds(iterationEventsByRunId: Readonly<Record<string, readonly WorkflowRunEvent[]>>): readonly string[] {
   const ids = Object.keys(iterationEventsByRunId);
   return ids

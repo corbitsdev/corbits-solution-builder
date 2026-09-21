@@ -2,11 +2,8 @@ import { describe, expect, test } from "bun:test";
 import type { WorkflowRunEvent } from "@intx/hub-client";
 import { foldProjectWorkflow, newestIterationHasHoldOutput } from "./project-workflow.ts";
 
-// Fixtures modeled on the deployed proof's own recorded wire shape
-// (scripts/project-workflow-proof-deployed.ts's `finalStateFrom`/
-// `applyStepOutputFrom`): a `StepCompleted` event whose `body.output.ref` is
-// an `inline:<json>` string. Real deployed-proof runs exercise this exact
-// decode path end to end; these fixtures isolate the fold.
+// Fixtures modeled on a deployed run's recorded wire shape: a
+// `StepCompleted` event whose `body.output.ref` is an `inline:<json>` string.
 function inline(value: unknown): { ref: string } {
   return { ref: `inline:${JSON.stringify(value)}` };
 }

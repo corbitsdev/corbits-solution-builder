@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 /**
  * The gate runs as parallel CI jobs, so its definition lives in two places: the
- * `check:<shard>` scripts and the workflow's matrix. A smoke added to one and
+ * `check:<shard>` scripts and the workflow's matrix. A check added to one and
  * not the other would pass unnoticed — silently ungated, which is the failure
- * the gate exists to prevent. Asserts the two agree, and that every smoke and
- * check is reachable from `check` or `check:full` unless named ungated here.
+ * the gate exists to prevent. Asserts the two agree, and that every check is
+ * reachable from `check` unless named ungated here.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -12,9 +12,7 @@ import { join } from "node:path";
 const ROOT = join(import.meta.dirname, "..");
 const WORKFLOW = join(ROOT, ".github", "workflows", "check.yml");
 
-const UNGATED = new Map<string, string>([
-  ["smoke:e2e", "needs a live inference provider; run by hand"],
-]);
+const UNGATED = new Map<string, string>();
 
 const { scripts } = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
   scripts: Record<string, string>;
@@ -55,13 +53,13 @@ for (const shard of shards) {
   }
 }
 
-const gated = new Set([...reachable("check"), ...reachable("check:full")]);
+const gated = reachable("check");
 for (const name of Object.keys(scripts)) {
-  if (!name.startsWith("smoke") && !name.startsWith("check:")) continue;
+  if (!name.startsWith("check:")) continue;
   const ungated = UNGATED.get(name);
   if (gated.has(name) && ungated) failures.push(`${name} is named ungated (${ungated}) but a gate runs it`);
   if (!gated.has(name) && !ungated) {
-    failures.push(`${name} runs in no gate; add it to a shard or check:full, or name it ungated`);
+    failures.push(`${name} runs in no gate; add it to a shard, or name it ungated`);
   }
 }
 
