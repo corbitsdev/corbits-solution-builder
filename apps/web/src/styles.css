@@ -67,12 +67,9 @@
   --wb-destructive: var(--destructive);
   --wb-font-ui: var(--font-sans);
   --wb-font-mono: var(--font-mono);
-  /* The one radius scale for the whole app: 8px on every control (buttons,
-     inputs, selects, chips, banners), 12px on every card/panel/dialog. Also
-     overrides @corbits/react-ui's own --radius so its buttons and inputs
-     land on the same 8px as ours. Nothing else defines a radius. */
-  --radius: 8px;
-  --radius-lg: 12px;
+  --radius-panel: var(--radius-lg);
+  --radius-control: var(--radius-md);
+  --radius-tile: var(--radius-lg);
   /* A 4px scale. Nine neighbouring panels previously used nine different
      padding pairs — including 14 and 18, which sit on no grid at all — so no
      two of them ever quite lined up. */
@@ -294,7 +291,7 @@ form:has(> div > textarea) textarea:focus-visible {
   width: 32px;
   height: 32px;
   border: 0;
-  border-radius: var(--radius);
+  border-radius: var(--radius-control);
   background: none;
   color: var(--wb-muted-foreground);
 }
@@ -437,7 +434,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   padding: var(--space-3) var(--space-4);
   display: grid;
   gap: var(--space-1);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-panel);
 }
 
 /* Severity reads from the words and the state label, not a coloured edge. */
@@ -448,6 +445,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 
 .inline-note { font-size: 0.8125rem; color: var(--wb-muted-foreground); margin: 0; }
 
+/* KEEP: delivery per-file verification warning (conv) */
 /* Delivery's per-file verification: a failed check gets a plain warning line, not a colored table row. */
 .warning-note { font-size: 0.8125rem; font-weight: 500; color: var(--wb-destructive); margin: 0 0 0.5rem; }
 
@@ -483,7 +481,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   background: var(--wb-card);
   display: grid;
   gap: var(--space-1);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-panel);
 }
 
 /* What the open stage creates, under the rows: each word is the artifact's
@@ -592,7 +590,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   padding: var(--space-4);
   border: 1px solid var(--wb-border);
   background: var(--wb-background);
-  border-radius: var(--radius-lg);
 }
 
 .decision-meta {
@@ -627,8 +624,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   display: grid;
   gap: 0;
   border: 1px solid var(--wb-border);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
   align-content: start;
   /* Does not stretch to the hero's height: an empty list should read as
      empty, not as a large blank panel. */
@@ -654,6 +649,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   color: var(--wb-muted-foreground);
 }
 
+/* KEEP: inbox list (conv) */
 .inbox-empty {
   margin: 0;
   padding: var(--space-3) var(--space-4);
@@ -796,6 +792,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   border-radius: 0;
 }
 
+/* KEEP: stage-thread flex fix, thread-head/composer flex:none rows (conv CL-8721) */
 /* The conversation: transcript that grows upward, composer pinned beneath.
    A flex column, not a grid: `.thread-head` and `.composer` already declare
    `flex: none` (their fixed rows), and `.thread-turns` — the actual
@@ -810,7 +807,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   display: flex;
   flex-direction: column;
   min-height: 0;
-  overflow: hidden;
   background: var(--wb-background);
   border-right: 1px solid var(--wb-border);
 }
@@ -932,6 +928,37 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   animation-delay: calc(var(--i, 0) * 50ms);
 }
 
+/* The odometer: old digit up and out, new digit up and in. */
+.roll {
+  display: inline-grid;
+  height: 1.3em;
+  line-height: 1.3em;
+  overflow: hidden;
+  vertical-align: bottom;
+}
+
+.roll > span {
+  grid-area: 1 / 1;
+}
+
+.roll-out {
+  animation: roll-out 350ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+.roll-in {
+  animation: roll-in 350ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+@keyframes roll-out {
+  from { transform: translateY(0); }
+  to { transform: translateY(-100%); }
+}
+
+@keyframes roll-in {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
 @keyframes label-shine {
   0%, 18% { background-position: 100% 0; }
   82%, 100% { background-position: 0% 0; }
@@ -945,6 +972,8 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   .stage-gate-dot,
   .guide-live,
   .stagger,
+  .roll-out,
+  .roll-in,
   .composer[data-working] > form::after,
   .newer-version,
   .turn-note,
@@ -980,7 +1009,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 .document {
   border: 1px solid var(--wb-border);
   background: var(--wb-card);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-panel);
   /* Its own scroll. Without this the draft was merely clipped by the fill
      region, so it could not be scrolled at all — and once anything scrolled
      that hidden container (focusing the composer does, to reveal the input)
@@ -1062,7 +1091,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   height: 32px;
   padding: 0 var(--space-2);
   border: 1px solid var(--wb-border-strong);
-  border-radius: var(--radius);
+  border-radius: var(--radius-control);
   background: var(--wb-background);
   font-size: 0.8125rem;
 }
@@ -1247,7 +1276,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   background: var(--wb-background);
   display: grid;
   gap: 0;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-panel);
 }
 
 .onboarding-card h1 {
@@ -1296,16 +1325,14 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   margin: 0 0 var(--space-4);
   padding: 0;
   border: 1px solid var(--wb-border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-control);
 }
 
 .provider-row {
   display: grid;
-  /* The identity keeps a readable minimum: letting it fall to zero wraps the
-     provider's name one word per line while the controls take the width. */
-  grid-template-columns: minmax(11rem, 1fr) auto minmax(0, auto);
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: var(--space-3);
+  gap: var(--space-4);
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--wb-border);
   min-height: 56px;
@@ -1339,6 +1366,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   min-width: 0;
 }
 
+/* KEEP: provider identity min-width (conv) */
 .provider-identity {
   min-width: 0;
 }
@@ -1366,7 +1394,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   max-width: 200px;
   padding: 0 var(--space-2);
   border: 1px solid var(--wb-border-strong);
-  border-radius: var(--radius);
+  border-radius: var(--radius-control);
   background: var(--wb-background);
   font-size: 0.8125rem;
 }
@@ -1398,6 +1426,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   letter-spacing: 0.01em;
 }
 
+/* KEEP: auth form/switch (conv) */
 .auth-form {
   display: grid;
   gap: var(--space-4);
@@ -1502,7 +1531,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   padding: var(--space-2) var(--space-3);
   border-left: 3px solid var(--wb-primary);
   background: var(--wb-muted);
-  border-radius: 0 var(--radius) var(--radius) 0;
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
   font-weight: 500;
   color: var(--wb-foreground);
 }
@@ -1512,7 +1541,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   padding: var(--space-2) var(--space-3);
   border-left: 3px solid var(--wb-destructive);
   background: var(--wb-muted);
-  border-radius: 0 var(--radius) var(--radius) 0;
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
 }
 
 .thread-progress {
@@ -1525,6 +1554,18 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 }
 
 /* Whose move it is, when the specialist has stopped asking. */
+/* A message the person stopped before it was answered: still what they said,
+   dimmed, with the reason no reply follows it. */
+.turn-withdrawn {
+  opacity: 0.72;
+}
+.turn-withdrawn-note {
+  display: block;
+  margin-top: var(--space-1);
+  font-size: 0.75rem;
+  color: var(--wb-muted-foreground);
+}
+
 .composer-cue {
   margin: 0;
   font-size: 0.8125rem;
@@ -1684,7 +1725,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius);
+  border-radius: var(--radius-control);
   border: 1px solid var(--wb-border);
   background: var(--wb-card);
   color: var(--wb-foreground);
@@ -1772,7 +1813,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   align-content: start;
   padding: var(--space-4);
   border: 1px solid var(--wb-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-panel);
   background: var(--wb-background);
   box-shadow: var(--wb-shadow);
   text-align: left;
@@ -1860,7 +1901,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   width: 28px;
   height: 28px;
   border: 0;
-  border-radius: var(--radius);
+  border-radius: var(--radius-control);
   background: none;
   color: var(--wb-muted-foreground);
   opacity: 0;
@@ -1921,7 +1962,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   gap: var(--space-4);
   padding: var(--space-5) var(--space-6);
   border: 1px solid var(--wb-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-panel);
   background: var(--wb-background);
   box-shadow: var(--wb-shadow);
 }
@@ -1955,10 +1996,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 .provider-actions {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  flex-wrap: wrap;
   gap: var(--space-1);
-  min-width: 0;
 }
 
 .icon-button {
@@ -1967,7 +2005,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   width: 32px;
   height: 32px;
   border: 0;
-  border-radius: var(--radius);
+  border-radius: var(--radius-control);
   background: none;
   color: var(--wb-muted-foreground);
 }
@@ -2016,7 +2054,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   min-height: 36px;
   padding: 0 var(--space-3);
   border: 1px solid var(--wb-border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-control);
   background: var(--wb-card);
   color: var(--wb-foreground);
   font: inherit;
@@ -2083,6 +2121,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   overflow-wrap: anywhere;
 }
 
+/* KEEP: deck-role disclosure + template library (conv) */
 /* A stakeholder role's deck design, disclosed on open. */
 .deck-role {
   border-top: 1px solid var(--wb-border);
@@ -2268,7 +2307,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   width: 100%;
   padding: var(--space-4) var(--space-5);
   border: 1px solid var(--wb-border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-control);
   background: var(--wb-card);
 }
 
@@ -2310,6 +2349,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   flex: none;
 }
 
+/* KEEP: stage-view cards + stage-conversation bounds (conv) */
 /* The plain conversation stages (no fill panel of their own): the
    specialist's current reply and the thread below it are two stacked
    regions, and neither had a bounded height, so a long reply just grew past
@@ -2370,6 +2410,13 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   animation: gate-pulse 1.6s ease-in-out infinite;
 }
 
+/* The evaluator's verdict on the brief, advisory only: it colours the dot, it
+   never changes what the gate does. */
+.stage-gate-dot.is-ready {
+  background: var(--wb-okay);
+}
+
+/* KEEP: stage guidance banner (conv) */
 /* The stage guidance: a compact banner sized to its content (title, one-line
    detail, answer chips), not a `Card` — a `Screen` here stretched to fill
    the flex row it shares with the two-pane layout below it, leaving a large
@@ -2399,12 +2446,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   margin-top: var(--space-1);
 }
 
-/* The evaluator's verdict on the brief, advisory only: it colours the dot, it
-   never changes what the gate does. */
-.stage-gate-dot.is-ready {
-  background: var(--wb-okay);
-}
-
 @keyframes gate-pulse {
   0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--wb-primary) 45%, transparent); }
   50% { box-shadow: 0 0 0 6px transparent; }
@@ -2426,7 +2467,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 .approvals-record {
   margin-top: var(--space-2);
   border: 1px solid var(--wb-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-panel);
   background: var(--wb-background);
 }
 
@@ -2568,7 +2609,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   z-index: 30;
   width: 380px;
   max-width: min(380px, calc(100vw - var(--space-8)));
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-panel);
   padding: var(--space-4);
   background: var(--wb-background);
   box-shadow:
@@ -2604,7 +2645,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   padding: 2px;
   color: var(--wb-muted-foreground);
   cursor: pointer;
-  border-radius: var(--radius);
+  border-radius: var(--radius-control);
 }
 
 .guide-close:hover {
@@ -2708,7 +2749,7 @@ button[aria-disabled="true"] {
   min-width: 0;
   padding: var(--space-4);
   border: 1px solid var(--wb-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-panel);
 }
 
 .approach > .prose > h2:first-child,
@@ -2742,7 +2783,7 @@ button[aria-disabled="true"] {
   font-size: 0.8125rem;
   padding: var(--space-1) var(--space-3);
   border: 1px solid var(--wb-border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-control);
   background: var(--wb-card);
   color: var(--wb-foreground);
   cursor: pointer;
@@ -2777,17 +2818,11 @@ button[aria-disabled="true"] {
 
 /* --- Transcript scrolling (CL-7604) -------------------------------------
    ChatThread owns the scroll box; this wraps it so a way back down can sit
-   over its bottom edge without touching the composer. A flex column, so
-   `.thread-turns`'s own `flex-1 min-h-0 overflow-y-auto` (from
-   `@corbits/react-ui`) actually governs its height, rather than shrinking to
-   fit `.stage-thread`'s row only in theory. */
+   over its bottom edge without touching the composer. */
 .thread-scroll {
   position: relative;
-  display: flex;
-  flex-direction: column;
-  flex: 1;
+  display: grid;
   min-height: 0;
-  overflow: hidden;
 }
 
 .jump-down {
@@ -2836,7 +2871,7 @@ button[aria-disabled="true"] {
 .stage-view.is-dragging {
   outline: 2px dashed var(--wb-primary);
   outline-offset: var(--space-2);
-  border-radius: var(--radius);
+  border-radius: var(--radius-control);
 }
 
 .start-material {
@@ -2859,7 +2894,7 @@ button[aria-disabled="true"] {
   gap: var(--space-2);
   padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
   border: 1px solid var(--wb-border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-control);
   font-size: 0.8125rem;
 }
 
@@ -2884,7 +2919,6 @@ button[aria-disabled="true"] {
 }
 
 /* The stakeholder editor: one row per person, name then role then remove. */
-
 /* A stakeholder's slides in the artifacts view: a file, described and saved. */
 .deck-file {
   display: grid;
@@ -2897,7 +2931,7 @@ button[aria-disabled="true"] {
   gap: var(--space-3);
   padding: var(--space-4);
   border: 1px solid var(--wb-border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-control);
   background: var(--wb-card);
 }
 
@@ -2927,7 +2961,7 @@ button[aria-disabled="true"] {
    reports and the stage 6 requirements share it. */
 .document-fold {
   border: 1px solid var(--wb-border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-control);
   background: var(--wb-card);
 }
 
@@ -3130,7 +3164,7 @@ button[aria-disabled="true"] {
   gap: var(--space-2);
   min-height: 44px;
   padding: 0 var(--space-4);
-  border-radius: var(--radius);
+  border-radius: var(--radius-control);
   border: 1px solid var(--wb-primary);
   background: var(--wb-primary);
   color: var(--primary-foreground);
@@ -3177,6 +3211,7 @@ button[aria-disabled="true"] {
   flex-wrap: wrap;
 }
 
+/* KEEP: feedback disposition (conv) */
 /* One feedback comment's disposition select, plus a stale-anchor note. */
 .feedback-disposition {
   display: flex;
@@ -3216,38 +3251,11 @@ button[aria-disabled="true"] {
   }
 }
 
-.project-info {
-  width: min(52rem, calc(100vw - 2rem));
-  max-width: none;
-}
+/* ---- Inference spend ---- */
 
-.project-info-facts {
-  margin-bottom: var(--space-4);
-}
-
-/* A message the person stopped before it was answered: still what they said,
-   dimmed, with the reason no reply follows it (CL-8695). */
-.turn-withdrawn {
-  opacity: 0.72;
-}
-.turn-withdrawn-note {
-  display: block;
-  margin-top: var(--space-1);
-  font-size: 0.75rem;
-  color: var(--wb-muted-foreground);
-}
-
-/* --- Workspace: interview progress, answer attribution, waiting tips,
-   stall recovery (CL-8726) ------------------------------------------------ */
-
-/* Who answered, and when: one line above the turn it belongs to, read from
-   the recorded thread rather than kept in client state. */
-.turn-attribution {
-  margin: 0 0 var(--space-1);
-  font-size: 0.75rem;
-  color: var(--wb-muted-foreground);
-}
-
+/* The workspace's spend at the head of the projects page: one figure, then
+   how it splits by provider. Quiet, since it is a fact and not a call to act. */
+/* KEEP: stage guidance readiness note (conv) */
 /* The readiness note in the stage guidance banner: advisory, not another
    title — it sits under the detail line at the same weight as a caption. */
 .stage-guidance-ready {
@@ -3256,14 +3264,9 @@ button[aria-disabled="true"] {
   color: var(--wb-okay, var(--wb-muted-foreground));
 }
 
+/* KEEP: preparing silent wait (conv) */
 /* Stalled or silent waits get their own actions, stacked under the note
    they belong to rather than crowding the status box's single line. */
-.preparing-stall {
-  display: grid;
-  gap: var(--space-2);
-  justify-items: center;
-}
-
 .preparing-silent {
   color: var(--wb-foreground);
 }
@@ -3304,4 +3307,28 @@ button[aria-disabled="true"] {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2) var(--space-4);
+}
+
+/* Wide enough for the spend table's six columns without clipping the cost. */
+.project-info {
+  width: min(52rem, calc(100vw - 2rem));
+  max-width: none;
+}
+
+.project-info-facts {
+  margin-bottom: var(--space-4);
+}
+
+.project-info-heading {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: 0.9375rem;
+}
+
+.project-info-spend {
+  font-variant-numeric: tabular-nums;
+}
+
+.project-info-total {
+  margin: var(--space-3) 0 0;
+  font-size: 0.875rem;
 }
