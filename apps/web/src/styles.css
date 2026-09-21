@@ -1301,9 +1301,11 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 
 .provider-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  /* The identity keeps a readable minimum: letting it fall to zero wraps the
+     provider's name one word per line while the controls take the width. */
+  grid-template-columns: minmax(11rem, 1fr) auto minmax(0, auto);
   align-items: center;
-  gap: var(--space-4);
+  gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--wb-border);
   min-height: 56px;
@@ -1334,6 +1336,10 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 
 .provider-ask input {
   flex: 1;
+  min-width: 0;
+}
+
+.provider-identity {
   min-width: 0;
 }
 
@@ -1949,7 +1955,10 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 .provider-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: var(--space-1);
+  min-width: 0;
 }
 
 .icon-button {
