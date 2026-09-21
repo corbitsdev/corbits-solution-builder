@@ -31,9 +31,11 @@
  * path) the archive and opens its review, client-side.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Textarea } from "@corbits/react-ui";
 import { api, ApiFailure, type ArtifactNode, type ProjectDetail } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { Banner, Button, Screen, StateLabel } from "../../components.jsx";
+import { Dictated } from "../../dictation.jsx";
 import { StageConversation } from "./thread.jsx";
 import { clock } from "./elapsed.jsx";
 import { BuildFile } from "../graph.jsx";
@@ -254,6 +256,16 @@ function eventRows(events: readonly RunEvent[]): TimelineRow[] {
   });
 }
 
+// CL-8566's `run_shell`/`publish_workspace` calls resolve as a hub approval
+// that carries only status, never a result (`formatApproval` in
+// `vendor/interchange/packages/hub-api/src/routes/approvals.ts`), and the
+// run's own committed event log is step-level only — no event kind carries a
+// tool call's stdout/stderr (`vendor/interchange/packages/workflow/src/
+// state-machine/events.ts`). A failing command's raw output is never
+// recorded anywhere this client can reach: the specialist's own reply is the
+// only account of it, in its own words, and that reply is what this row
+// shows in full — no 140-character cut that would hide the one place a
+// failure's detail can appear at all.
 function replyRows(messages: readonly ChatMessage[]): TimelineRow[] {
   return messages
     .filter((message) => message.author === "agent")
@@ -261,7 +273,7 @@ function replyRows(messages: readonly ChatMessage[]): TimelineRow[] {
       id: `reply:${message.id}`,
       at: message.at,
       label: "reported",
-      detail: message.body.length > 140 ? `${message.body.slice(0, 140)}…` : message.body,
+      detail: message.body,
       tone: "success" as const,
     }));
 }
@@ -482,13 +494,19 @@ export function BuildPanel({
   );
   const state = useMemo(() => currentState(approvals, events, messages, timedOut), [approvals, events, messages, timedOut]);
   const [decidingId, setDecidingId] = useState<string | null>(null);
+  const [rejectReasons, setRejectReasons] = useState<Record<string, string>>({});
 
   const decideRunShell = async (approvalId: string, decision: "once" | "always" | "reject") => {
     setDecidingId(approvalId);
     setError(null);
     try {
       if (decision === "reject") {
-        await rejectTool(tenantId, approvalId, "Rejected from the build panel.");
+        const reason = (rejectReasons[approvalId] ?? "").trim();
+        if (!reason) {
+          setError("A reason is required to reject this call.");
+          return;
+        }
+        await rejectTool(tenantId, approvalId, reason);
       } else {
         await approveTool(tenantId, approvalId, decision);
       }
@@ -586,6 +604,23 @@ export function BuildPanel({
                   "Allow for this build" trusts every future <code>run_shell</code> call on this build attempt,
                   without asking again — not another tool, another attempt, or another project.
                 </p>
+                <div className="field">
+                  <label htmlFor={`reject-reason-${approval.id}`}>Rejection reason, sent to the specialist</label>
+                  <Dictated
+                    value={rejectReasons[approval.id] ?? ""}
+                    onValueChange={(value) => setRejectReasons((prev) => ({ ...prev, [approval.id]: value }))}
+                    align="start"
+                  >
+                    <Textarea
+                      id={`reject-reason-${approval.id}`}
+                      value={rejectReasons[approval.id] ?? ""}
+                      onChange={(event) =>
+                        setRejectReasons((prev) => ({ ...prev, [approval.id]: event.target.value }))
+                      }
+                      placeholder="Why this call is being refused."
+                    />
+                  </Dictated>
+                </div>
                 <div className="button-row">
                   <Button variant="primary" loading={decidingId === approval.id} onClick={() => void decideRunShell(approval.id, "once")}>
                     Allow once
@@ -619,6 +654,12 @@ export function BuildPanel({
         ) : (
           <p className="inline-note">No build activity has reported yet.</p>
         )}
+        <p className="inline-note">
+          A command's raw stdout/stderr is never recorded separately from the specialist's own
+          reply — the hub tracks a tool call's status, not its output, and the run's event log is
+          step-level only. When a command fails, what you see above is the specialist's own
+          account of it, not a captured transcript.
+        </p>
       </Screen>
       <StageConversation
         stage={8}
