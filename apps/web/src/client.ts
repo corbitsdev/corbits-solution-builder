@@ -821,8 +821,11 @@ function stakeholdersPolicy(
   return { ...current, audiences, audienceQuorum: quorum };
 }
 
-let activeModelCache: { value: ActiveModel | null; at: number } | null = null;
+const activeModelCache = new Map<string, { value: ActiveModel | null; at: number }>();
 const ACTIVE_MODEL_CACHE_MS = 60_000;
+function activeModelCacheClear(): void {
+  activeModelCache.clear();
+}
 
 export const api = {
   status: () => request<HostStatus>("/status"),
@@ -868,7 +871,7 @@ export const api = {
   connectProvider: async (input: { providerId: string; label: string; baseUrl?: string; apiKey: string }): Promise<Provider> => {
     try {
       const row = await connectApiKeyProvider(createHubTransport(), input);
-      activeModelCache = null;
+      activeModelCacheClear();
       return row;
     } catch (cause) {
       installerFailure(cause);
@@ -877,7 +880,7 @@ export const api = {
   connectLocalProvider: async (input: { baseUrl?: string }): Promise<Provider> => {
     try {
       const row = await connectLocalProvider(createHubTransport(), input);
-      activeModelCache = null;
+      activeModelCacheClear();
       return row;
     } catch (cause) {
       installerFailure(cause);
@@ -889,7 +892,7 @@ export const api = {
   ): Promise<void> => {
     try {
       await connectOAuthProvider(createHubTransport(), input, onAuthorizeUrl);
-      activeModelCache = null;
+      activeModelCacheClear();
     } catch (cause) {
       installerFailure(cause);
     }
@@ -897,7 +900,7 @@ export const api = {
   disconnectProvider: async (providerId: string): Promise<void> => {
     try {
       await disconnectProvider(createHubTransport(), providerId);
-      activeModelCache = null;
+      activeModelCacheClear();
     } catch (cause) {
       installerFailure(cause);
     }
@@ -905,7 +908,7 @@ export const api = {
   refreshProviderModels: async (providerId: string): Promise<{ clearedModel: string | null }> => {
     try {
       const result = await refreshProviderModels(createHubTransport(), providerId);
-      activeModelCache = null;
+      activeModelCacheClear();
       return result;
     } catch (cause) {
       installerFailure(cause);
@@ -914,7 +917,7 @@ export const api = {
   reorderProviders: async (orderedProviderIds: string[]): Promise<void> => {
     try {
       await reorderProviders(createHubTransport(), orderedProviderIds);
-      activeModelCache = null;
+      activeModelCacheClear();
     } catch (cause) {
       installerFailure(cause);
     }
@@ -922,24 +925,29 @@ export const api = {
   selectProviderModel: async (providerId: string, canonicalName: string | null): Promise<void> => {
     try {
       await selectProviderModel(createHubTransport(), providerId, canonicalName);
-      activeModelCache = null;
+      activeModelCacheClear();
     } catch (cause) {
       installerFailure(cause);
     }
   },
   /**
    * The model specialists are actually drafting with, for the workspace
-   * header. Cached briefly so switching between stages does not re-resolve
-   * the whole catalog on every render; a provider mutation elsewhere in
-   * `api` drops the cache so a change shows up on the next read.
+   * header. `projectId`/`stage` name the stage panel asking, so a specialist
+   * already deployed there reports its own pinned offering rather than the
+   * tenant's current catalog order (see `resolveActiveModel`'s doc). Cached
+   * briefly per project/stage so switching between stages does not re-resolve
+   * the whole catalog on every render; a provider mutation elsewhere in `api`
+   * drops the whole cache so a change shows up on the next read.
    */
-  activeModel: async (): Promise<ActiveModel | null> => {
-    if (activeModelCache && Date.now() - activeModelCache.at < ACTIVE_MODEL_CACHE_MS) {
-      return activeModelCache.value;
+  activeModel: async (projectId?: string, stage?: number): Promise<ActiveModel | null> => {
+    const key = `${projectId ?? ""}:${stage ?? ""}`;
+    const cached = activeModelCache.get(key);
+    if (cached && Date.now() - cached.at < ACTIVE_MODEL_CACHE_MS) {
+      return cached.value;
     }
     try {
-      const value = await resolveActiveModel(createHubTransport());
-      activeModelCache = { value, at: Date.now() };
+      const value = await resolveActiveModel(createHubTransport(), projectId, stage as Stage | undefined);
+      activeModelCache.set(key, { value, at: Date.now() });
       return value;
     } catch (cause) {
       installerFailure(cause);

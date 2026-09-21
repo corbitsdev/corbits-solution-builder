@@ -23,7 +23,7 @@ import {
   type InferenceSourcePin,
 } from "@solutions-builder/app/specialist-source";
 import { ensureWorkflowArtifactsCredential } from "./artifacts-credential.js";
-import { assetsFor, catalogFor, getTenant, workflowsFor, type HubDeployment } from "./hub.js";
+import { assetsFor, catalogFor, getTenant, readWorkflowSourceBlob, workflowsFor, type HubDeployment } from "./hub.js";
 import { readProject } from "./project-tenant.js";
 import {
   appMemberFiles,
@@ -48,6 +48,10 @@ import {
  *  the same layout `workflow-deploy.ts`'s `LIFECYCLE_DIR` uses for the lifecycle. */
 const SPECIALIST_DIR = "packages/specialist";
 const DIGEST_PATH = "closure.sha256";
+/** The offering this asset was last deployed against -- written alongside the
+ *  rendered source so `stageSpecialistSource` can report what a specialist is
+ *  actually running on, rather than the tenant's current catalog order. */
+const SOURCE_PIN_PATH = `${SPECIALIST_DIR}/source.json`;
 
 function normalizedProjectId(projectId: string): string {
   return projectId.toLowerCase().replace(/[^a-z0-9]+/g, "-");
@@ -167,6 +171,43 @@ export async function stageSpecialistStatus(
 }
 
 /**
+ * What `projectId`'s stage-`stage` specialist is actually deployed against --
+ * the `(provider plugin, canonical model)` pin `ensureSpecialistDeploymentOnce`
+ * resolved and wrote to `SOURCE_PIN_PATH` the last time this asset deployed,
+ * read back off the asset's own tree rather than recomputed from the
+ * tenant's current catalog order (which can have moved since). Null when the
+ * asset does not exist yet, or predates this pin file.
+ */
+export async function stageSpecialistSourcePin(
+  transport: Transport,
+  workspaceTenantId: string,
+  projectId: string,
+  stage: Stage,
+  roleKey: string = DEFAULT_ROLE_KEY,
+): Promise<InferenceSourcePin | null> {
+  const assetName = specialistAssetName(projectId, stage, roleKey);
+  const assets = await assetsFor(transport, workspaceTenantId).list("workflow");
+  const asset = assets.find((entry) => entry.name === assetName);
+  if (!asset) return null;
+  const raw = await readWorkflowSourceBlob(transport, workspaceTenantId, asset.id, SOURCE_PIN_PATH);
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      parsed !== null &&
+      typeof parsed === "object" &&
+      typeof (parsed as InferenceSourcePin).provider === "string" &&
+      typeof (parsed as InferenceSourcePin).model === "string"
+    ) {
+      return parsed as InferenceSourcePin;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The asset a stage specialist deploys into: the same package-tree shape
  * `workflow-deploy.ts`'s `renderLifecycleSource` builds for the lifecycle --
  * a root workspace `package.json`, a member whose `interchange.workflow`
@@ -225,6 +266,7 @@ async function renderSpecialistSource(
       artifactTools,
       ...(audiences ? { audiences } : {}),
     }),
+    [SOURCE_PIN_PATH]: `${JSON.stringify(source, null, 2)}\n`,
     // The full closure, the same set the lifecycle ships: whichever tool a
     // given stage's specialist imports (deck, posix, delivery/deliver -- see
     // `specialistEntrySource`) resolves against a member that is always here.

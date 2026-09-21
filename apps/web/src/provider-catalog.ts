@@ -22,6 +22,7 @@ import {
   resolveWorkspace,
   selectModel as selectModelViaHub,
   setProviderOrder as setProviderOrderViaHub,
+  stageSpecialistSourcePin,
   upsertApiKeyProvider,
   upsertOAuthProvider,
   type HubCredential,
@@ -31,6 +32,7 @@ import {
   type HubProvider,
   type ModelProviderPlugin,
 } from "@solutions-builder/installer";
+import type { Stage } from "@solutions-builder/app/ledger";
 import { CODEX_BASE_URL } from "@corbits/codex-provider";
 import { XAI_DEFAULT_MODELS, XAI_OAUTH_PROXY_BASE_URL } from "@corbits/xai-provider";
 import type { Transport } from "./hub.ts";
@@ -472,16 +474,15 @@ export async function selectProviderModel(
 export type ActiveModel = { canonicalName: string; providerLabel: string };
 
 /**
- * The model specialists are actually drafting with, right now: the tenant's
- * first non-disabled offering, resolved the same way `specialist-deploy.ts`'s
- * `ensureSpecialistDeploymentOnce` picks one to deploy against
- * (`offerings.filter(!disabled).sort(priority)[0]`). `null` when nothing is
- * connected or every offering is disabled.
+ * The tenant's first non-disabled offering, resolved the same way
+ * `specialist-deploy.ts`'s `ensureSpecialistDeploymentOnce` picks one for a
+ * specialist that has never deployed yet
+ * (`offerings.filter(!disabled).sort(priority)[0]`). This is only a forecast
+ * of what the *next* deploy would pin, not what an already-deployed
+ * specialist is running -- see `resolveActiveModel` below.
  */
-export async function resolveActiveModel(transport: Transport): Promise<ActiveModel | null> {
-  const workspace = await resolveWorkspace(transport);
-  if (!workspace) return null;
-  const catalog = catalogFor(transport, workspace.tenantId);
+async function resolveCatalogDefaultModel(transport: Transport, workspaceTenantId: string): Promise<ActiveModel | null> {
+  const catalog = catalogFor(transport, workspaceTenantId);
   const [offeringRows, modelRows, providerRows, vendorRows] = await Promise.all([
     catalog.offerings(),
     catalog.models(),
@@ -499,6 +500,45 @@ export async function resolveActiveModel(transport: Transport): Promise<ActiveMo
     canonicalName: model.canonicalName,
     providerLabel: typeof label === "string" ? label : (provider?.name ?? ""),
   };
+}
+
+/**
+ * The model specialists are actually drafting with, right now.
+ *
+ * An already-deployed specialist keeps whatever offering it was deployed
+ * against -- `ensureSpecialistDeploymentOnce` hands back a live deployment
+ * unchanged (`specialist-deploy.ts`), it never rebinds one to a provider
+ * connected or reordered afterward. So once `projectId`/`stage` name a
+ * project and stage whose specialist may already be deployed, this reads
+ * that deployment's own pinned `(provider, model)` back off its asset tree
+ * (`stageSpecialistSourcePin`) instead of recomputing from the tenant's
+ * current catalog order, which can have moved on since. Falls back to the
+ * catalog default -- what the *next* deploy would pin -- when no specialist
+ * is deployed yet for that stage, or when `projectId`/`stage` are omitted
+ * (the workspace-wide callers that predate a stage context).
+ */
+export async function resolveActiveModel(
+  transport: Transport,
+  projectId?: string,
+  stage?: Stage,
+): Promise<ActiveModel | null> {
+  const workspace = await resolveWorkspace(transport);
+  if (!workspace) return null;
+
+  if (projectId !== undefined && stage !== undefined) {
+    const pin = await stageSpecialistSourcePin(transport, workspace.tenantId, projectId, stage);
+    if (pin) {
+      const providerRows = await catalogFor(transport, workspace.tenantId).providers();
+      const provider = providerRows.find((row) => row.plugin === pin.provider);
+      const label = provider?.metadata?.label;
+      return {
+        canonicalName: pin.model,
+        providerLabel: typeof label === "string" ? label : (provider?.name ?? pin.provider),
+      };
+    }
+  }
+
+  return resolveCatalogDefaultModel(transport, workspace.tenantId);
 }
 
 /** A pinned model the fresh discovery no longer serves -- `null` when nothing needs clearing. */

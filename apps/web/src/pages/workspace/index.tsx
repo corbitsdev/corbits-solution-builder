@@ -170,26 +170,14 @@ export function StageWorkspace({
     import("../../client.js").Remediation | undefined
   >(undefined);
 
-  // Which model the project's specialists are actually drafting with, read
-  // the same way `specialist-deploy.ts` resolves one to deploy against (the
-  // tenant's first non-disabled offering) so this never drifts from what a
-  // specialist is really running on. `undefined` while unresolved, `null`
-  // once resolved to nothing connected.
+  // Which model this project's stage specialist is actually drafting with:
+  // its own deployment's pinned offering when one is already deployed for
+  // this stage (an existing deployment keeps its pin across a later provider
+  // change, `specialist-deploy.ts`'s `ensureSpecialistDeploymentOnce`), the
+  // tenant's current catalog default otherwise -- see `resolveActiveModel`'s
+  // doc. `undefined` while unresolved, `null` once resolved to nothing
+  // connected. Declared here; the effect reading it sits below `stage`.
   const [activeModel, setActiveModel] = useState<ActiveModel | null | undefined>(undefined);
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .activeModel()
-      .then((value) => {
-        if (!cancelled) setActiveModel(value ?? null);
-      })
-      .catch(() => {
-        if (!cancelled) setActiveModel(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [detail.project.id]);
 
   // The project workflow (CL-8721) is the ONLY authority for a stage's
   // current position (CL-8687): `workflowView.stage`. There is no artifact-
@@ -205,6 +193,21 @@ export function StageWorkspace({
   const workflowResolved = workflowView !== null;
   const openingFailed = workflowStartError !== null || workflowViewFailed;
   const stage = workflowView?.stage ?? 1;
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .activeModel(detail.project.id, stage)
+      .then((value) => {
+        if (!cancelled) setActiveModel(value ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setActiveModel(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detail.project.id, stage]);
 
   const retryOpening = () => {
     setWorkflowStartError(null);
