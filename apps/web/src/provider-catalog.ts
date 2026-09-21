@@ -73,11 +73,12 @@ export const OAUTH_CONNECT_OPTIONS: ReadonlyArray<{ providerId: string; label: s
 /**
  * An OAuth adapter's fixed wire protocol, endpoint and servable models --
  * `@corbits/xai-provider` exports its own model list (`XAI_DEFAULT_MODELS`);
- * `@corbits/codex-provider` exports none, so this carries the one model its
- * README and adapter tests document (`gpt-5.5`) instead.
+ * `@corbits/codex-provider` exports none, so this carries the current
+ * Codex-servable model (`gpt-5.6-sol` — the `-wm` slug with the suffix
+ * removed, the spelling the Responses endpoint accepts).
  */
 const OAUTH_ADAPTER_OF: Record<string, { plugin: ModelProviderPlugin; baseURL: string; canonicalNames: readonly string[] }> = {
-  "codex-oauth": { plugin: "openai-compatible", baseURL: CODEX_BASE_URL, canonicalNames: ["gpt-5.5"] },
+  "codex-oauth": { plugin: "openai-compatible", baseURL: CODEX_BASE_URL, canonicalNames: ["gpt-5.6-sol"] },
   "xai-oauth": { plugin: "openai-compatible", baseURL: XAI_OAUTH_PROXY_BASE_URL, canonicalNames: [...XAI_DEFAULT_MODELS] },
 };
 
