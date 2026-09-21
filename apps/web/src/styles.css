@@ -7,7 +7,7 @@
  *
  * The palette and the radius scale are the design system's — every --wb-*
  * token here aliases one of its tokens rather than restating a value, which is
- * what lets the app go dark. check:tokens holds that line.
+ * what lets the app go dark.
  *
  * The real typefaces ship with the bundle. The historical mockup pulled them
  * from Google Fonts, which section 10 names as a packaging flaw — a

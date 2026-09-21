@@ -59,7 +59,7 @@ that binds pglite, `createApp`/`createAuth` and the process provisioner lives
 in `packages/embed-hub`; `hub-mount.ts` supplies the host's handle, keychain
 keys and sidecar paths. `hub-keys.ts` still imports `@intx/crypto` to expand
 the signing seed.
-`scripts/check-boundaries.ts` also allow-lists four more files as the
+Four more files form the
 embedding layer — `db`, `schema`, `migrate` and `hub-migrate` — though none
 of them currently has an `@intx` import at all; they reach Interchange's
 data model through raw SQL and a shared drizzle schema instead.
@@ -67,17 +67,14 @@ data model through raw SQL and a shared drizzle schema instead.
 `.sql` files directly (relative paths, not package specifiers), so it needs
 no such exemption. Eight further files use only the platform's runtime
 surface (`@intx/inference`, `@intx/inference-catalog`, `@intx/agent`,
-`@intx/types`, `@intx/workflow`), which the same script treats as product
+`@intx/types`, `@intx/workflow`), which counts as product
 code rather than platform code, because using the platform's own inference
 and workflow runtimes is the point of building on it: `agent-conversation`,
 `catalog`, `failure`, `lifecycle-run`, `inference`, `live-drafts`,
 `responses` and `workflow-seed`. Everything else in the host reaches
 Interchange only through `hub-client.ts`. The host is also the only app
 allowed to reach a provider. Run state moves in the workflow definition in
-the app package, not in `command-dispatch.ts`. All three rules are enforced
-by `check:boundaries`, not left to habit — this paragraph is drawn from its
-`PLATFORM_PACKAGES`/`RUNTIME_PACKAGES` lists and `PLATFORM_FILE` allowlist,
-cross-checked against every literal `@intx` import under `apps/hub/src`.
+the app package, not in `command-dispatch.ts`.
 
 **The client** (`apps/web`) renders and asks. It holds a hub session the
 browser obtained by signing up or signing in, reads and commands over the

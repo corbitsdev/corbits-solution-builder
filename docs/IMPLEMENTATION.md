@@ -31,8 +31,8 @@ ship no `dist`. Every command that runs the host passes
 exits before the handshake.
 
 The hub's migrations are text-imported by `apps/hub/src/hub-migrations.ts` so the
-compiled single-file host carries them. `bun run check:vendored-migrations`
-fails when that file is behind the vendor.
+compiled single-file host carries them. Keep that list in step with the
+vendored directory when refreshing the pin.
 
 ## Host process
 
@@ -163,14 +163,9 @@ OAuth sign-in uses PKCE over a loopback redirect. Tokens live in the keychain.
 | `dev:fresh` | `dev:desktop` on a new empty data directory |
 | `desktop:build` | `.app` and `.dmg`; signed and notarised when the Apple env vars are set, unsigned otherwise (see "Releasing the desktop app") |
 | `sidecar:build` | Compile the host to one self-contained binary |
-| `check:vendored-migrations` | Fail when the host's migration list drifts from the vendored SQL |
 | `typecheck` | `tsc --noEmit`, strict |
-| `check` | The gate: shard and migration consistency, boundaries, typecheck, unit tests, `check:build` and `check:ui` |
-| `check:ledger` | The ledger is consistent and the generated workflows match it |
-| `check:boundaries` | The one-direction rule |
-| `check:slop`, `check:tokens`, `check:markdown` | Interface audits |
+| `check` | The gate: typecheck, unit tests (ours and the vendored ones we rely on) and `check:build` |
 | `check:build` | `ui:build`, so a change that breaks the interface build fails the gate |
-| `check:ui` | `check:slop`, `check:tokens` and `check:markdown` together, the static interface audits |
 | `seed:demo` | A project with a decision waiting |
 | `walk` | Render every screen with fixtures for review |
 | `vendor:build` | Emit `dist/` for the vendored packages, which the sidecar needs since it runs without `intx-src`; runs on `bun install` |

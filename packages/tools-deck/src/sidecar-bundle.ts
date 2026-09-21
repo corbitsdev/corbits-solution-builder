@@ -32,8 +32,7 @@ import {
   type TemplateTheme,
 } from "@solutions-builder/app/deck";
 
-/** The tool's name on the wire, and the id `check-ledger.ts` and the sidecar
- *  smoke look for on the deployed stage 5 agent's tool factories. */
+/** The tool's name on the wire. */
 export const TOOL_NAME = "render_deck";
 
 /** The subset of `DeckDesign` the tool accepts: `images` and `template`

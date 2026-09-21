@@ -12,8 +12,8 @@
  * from the vendored files unmodified - Solutions Builder does not own the hub
  * schema and must not drift from it.
  *
- * The list is explicit because a bundler cannot glob; check:vendored-migrations
- * fails the build when it drifts from the directory.
+ * The list is explicit because a bundler cannot glob, so it must be kept in
+ * step with the directory when the vendored pin moves.
  */
 export type HubMigration = { readonly id: string; readonly sql: string };
 

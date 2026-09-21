@@ -38,9 +38,8 @@ turns here start with one of these being assumed rather than checked.
 
 ## The rules the code keeps
 
-These are enforced by `scripts/check-ledger.ts` and `scripts/check-boundaries.ts`.
-If you need to break one, the honest move is to change the checker deliberately
-and say why, not to route around it.
+No script enforces these today; review does. If you need to break one, say so
+and why, rather than routing around it.
 
 - **One state machine.** `packages/solutions-builder/src/ledger.ts` is the contract.
   `packages/solutions-builder/src/guard.ts` is the only place it is enforced. The

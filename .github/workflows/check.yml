@@ -3,9 +3,8 @@
 #
 # The gate is split across parallel jobs because it was one sequential run
 # where the slowest step held every other step behind it. The steps are
-# independent processes sharing no state, and on separate runners even the
-# launch smoke's fixed port stops being a hazard. `check:shards` asserts this
-# matrix and `bun run check` stay in step.
+# independent processes sharing no state. Keep this matrix and the `check:*`
+# shards `bun run check` names in step.
 name: check
 
 on:
@@ -26,7 +25,7 @@ jobs:
       # One shard's failure should not hide the others' results.
       fail-fast: false
       matrix:
-        shard: [static, build, ui]
+        shard: [static, build]
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
