@@ -245,7 +245,7 @@ const PLUGIN_OF: Record<string, ModelProviderPlugin> = {
 const ANTHROPIC_BROWSER_HEADER = "anthropic-" + "dangerous-direct-browser-access";
 
 const DEFAULT_BASE_URL: Record<string, string> = {
-  anthropic: "https://api.anthropic.com/v1",
+  anthropic: "https://api.anthropic.com",
   openai: "https://api.openai.com/v1",
   openrouter: "https://openrouter.ai/api/v1",
   xai: "https://api.x.ai/v1",
@@ -270,7 +270,8 @@ export class ProviderRejectedError extends Error {
  * than swallowed into a generic failure.
  */
 async function discoverModels(plugin: string, baseUrl: string, apiKey: string): Promise<string[]> {
-  const url = `${baseUrl.replace(/\/+$/, "")}/models`;
+  // Anthropic's base URL carries no version: its adapter appends `/v1/messages`.
+  const url = `${baseUrl.replace(/\/+$/, "")}${plugin === "anthropic" ? "/v1" : ""}/models`;
   let response: Response;
   try {
     response = await fetch(url, {

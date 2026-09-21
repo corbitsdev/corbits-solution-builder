@@ -86,7 +86,7 @@ describe("auto-pick connect wiring", () => {
     const connectProvider = async (): Promise<Provider> =>
       connectedProvider({ selectedModel: null, models: ["model-a", "model-b"] });
     await autoPickProvider(await connectProvider(), select);
-    expect(select.calls).toEqual([{ providerId: "openai", model: "model-a" }]);
+    expect(select.calls).toEqual([{ providerId: "row-1", model: "model-a" }]);
   });
 
   test("connect leaves an explicit choice alone", async () => {
@@ -113,7 +113,7 @@ describe("auto-pick connect wiring", () => {
       "openai",
       fakeList([connectedProvider({ selectedModel: null, models: ["model-a", "model-b"] })], select),
     );
-    expect(select.calls).toEqual([{ providerId: "openai", model: "model-a" }]);
+    expect(select.calls).toEqual([{ providerId: "row-1", model: "model-a" }]);
   });
 });
 
@@ -133,7 +133,7 @@ describe("auto-pick refresh wiring", () => {
       fakeList([connectedProvider({ selectedModel: null, models: ["model-a", "model-b"] })], select),
     );
     expect(refreshed).toEqual(["openai"]);
-    expect(select.calls).toEqual([{ providerId: "openai", model: "model-a" }]);
+    expect(select.calls).toEqual([{ providerId: "row-1", model: "model-a" }]);
   });
 
   test("refresh leaves an explicit choice alone", async () => {
