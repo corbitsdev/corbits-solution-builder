@@ -53,7 +53,7 @@ export async function autoPickProvider(
   deps: Pick<typeof api, "selectProviderModel"> = api,
 ): Promise<void> {
   const pin = autoPickModel(provider);
-  if (pin !== null) await deps.selectProviderModel(provider.providerId, pin);
+  if (pin !== null) await deps.selectProviderModel(provider.id, pin);
 }
 
 /**
@@ -190,13 +190,13 @@ export function ProviderList({
     setBaseUrl("");
   };
 
-  const ordered = providers.map((entry) => entry.providerId);
-  const move = (providerId: string, by: -1 | 1) => {
-    const index = ordered.indexOf(providerId);
+  const ordered = providers.map((entry) => entry.id);
+  const move = (modelProviderId: string, by: -1 | 1) => {
+    const index = ordered.indexOf(modelProviderId);
     const order = [...ordered];
     const [moved] = order.splice(index, 1);
     order.splice(index + by, 0, moved!);
-    return act(providerId, () => api.reorderProviders(order));
+    return act(modelProviderId, () => api.reorderProviders(order));
   };
 
   return (
@@ -213,7 +213,7 @@ export function ProviderList({
           const ready = connected?.status === "ready";
           const asking = chosen === row.id;
           const waiting = busy === row.id && row.kind === "oauth";
-          const position = connected ? ordered.indexOf(connected.providerId) : -1;
+          const position = connected ? ordered.indexOf(connected.id) : -1;
           return (
             <li key={row.id} className={`provider-row${asking ? " is-active" : ""}`}>
               <span className="provider-identity">
@@ -298,7 +298,7 @@ export function ProviderList({
                 <span className="provider-actions">
                   {manage && connected && ready ? (
                     <>
-                      <ModelPick provider={connected} onPick={(model) => act(row.id, () => api.selectProviderModel(connected.providerId, model || null))} />
+                      <ModelPick provider={connected} onPick={(model) => act(row.id, () => api.selectProviderModel(connected.id, model || null))} />
                       <details>
                         <summary>Advanced</summary>
                         <div>
@@ -307,7 +307,7 @@ export function ProviderList({
                               <Button
                                 variant="ghost"
                                 disabled={busy !== null}
-                                onClick={() => void act(row.id, () => api.selectProviderModel(connected.providerId, null))}
+                                onClick={() => void act(row.id, () => api.selectProviderModel(connected.id, null))}
                               >
                                 Let it fail over
                               </Button>
@@ -318,14 +318,14 @@ export function ProviderList({
                           <Button
                             variant="ghost"
                             disabled={busy !== null || position <= 0}
-                            onClick={() => void move(connected.providerId, -1)}
+                            onClick={() => void move(connected.id, -1)}
                           >
                             Move up
                           </Button>
                           <Button
                             variant="ghost"
                             disabled={busy !== null || position < 0 || position === ordered.length - 1}
-                            onClick={() => void move(connected.providerId, 1)}
+                            onClick={() => void move(connected.id, 1)}
                           >
                             Move down
                           </Button>
@@ -337,7 +337,7 @@ export function ProviderList({
                               void act(
                                 row.id,
                                 async () => {
-                                  await api.refreshProviderModels(connected.providerId);
+                                  await api.refreshProviderModels(connected.id);
                                   await autoPick(connected.providerId);
                                 },
                                 `${row.name} models refreshed.`,
@@ -359,7 +359,7 @@ export function ProviderList({
                       variant="destructive"
                       disabled={busy !== null}
                       loading={busy === row.id}
-                      onClick={() => void act(row.id, () => api.disconnectProvider(connected.providerId), `${row.name} disconnected.`)}
+                      onClick={() => void act(row.id, () => api.disconnectProvider(connected.id), `${row.name} disconnected.`)}
                     >
                       Disconnect
                     </Button>

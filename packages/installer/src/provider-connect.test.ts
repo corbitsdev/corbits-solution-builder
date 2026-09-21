@@ -79,7 +79,7 @@ describe("upsertApiKeyProvider", () => {
       providerId: "anthropic",
       label: "Anthropic",
       plugin: "anthropic",
-      baseURL: "https://api.anthropic.com/v1",
+      baseURL: "https://api.anthropic.com",
       apiKey: "sk-ant-test",
     });
 
@@ -111,7 +111,7 @@ describe("upsertApiKeyProvider", () => {
       id: "modelProvider_1",
       name: "anthropic",
       plugin: "anthropic",
-      baseURL: "https://api.anthropic.com/v1",
+      baseURL: "https://api.anthropic.com",
       credentialId: "credential_existing",
       disabled: false,
     };
@@ -119,7 +119,7 @@ describe("upsertApiKeyProvider", () => {
       id: "provider_1",
       name: "anthropic",
       plugin: "anthropic",
-      apiBaseUrl: "https://api.anthropic.com/v1",
+      apiBaseUrl: "https://api.anthropic.com",
       metadata: null,
     };
 
@@ -140,7 +140,7 @@ describe("upsertApiKeyProvider", () => {
       providerId: "anthropic",
       label: "Anthropic",
       plugin: "anthropic",
-      baseURL: "https://api.anthropic.com/v1",
+      baseURL: "https://api.anthropic.com",
       apiKey: "sk-ant-rotated",
     });
 

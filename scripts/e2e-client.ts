@@ -363,7 +363,7 @@ async function authFetch(
 }
 
 const DEFAULT_BASE_URL: Record<string, string> = {
-  anthropic: "https://api.anthropic.com/v1",
+  anthropic: "https://api.anthropic.com",
 };
 
 const DEFAULT_SMOKE_PROVIDER_BASE_URL = "https://thegreataxios-home-studio.tail87f5aa.ts.net/v1";
