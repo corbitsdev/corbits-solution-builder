@@ -19,7 +19,7 @@ import { api, ApiFailure, STAKEHOLDER_ROLES, type DesignerSettings, type HostSta
 import { Banner, Button, StateLabel } from "../components.jsx";
 import { deckDesignFor, guidanceFor } from "../deck-design-settings.ts";
 import { Dictated } from "../dictation.jsx";
-import { ProviderList, type ApiKeyProvider, type OAuthCandidate } from "./providers.jsx";
+import { ProviderList, ResolvedCatalogList, type ApiKeyProvider, type OAuthCandidate } from "./providers.jsx";
 
 export function Settings({
   status,
@@ -95,7 +95,7 @@ function Inference({
   return (
     <Section
       title="Inference"
-      lead="The models that draft every stage. Connected providers are tried top to bottom; if the first cannot answer, the next one does, and each version records who wrote it."
+      lead="The models that draft every stage, in fallback order. If the first cannot answer, the next one does, and each version records who wrote it."
       status={
         connected && active ? (
           <StateLabel tone="success">Connected · {active.label}</StateLabel>
@@ -104,6 +104,10 @@ function Inference({
         )
       }
     >
+      <ResolvedCatalogList providers={providers} onChanged={onChanged} />
+      <h3 id="connections" className="section-sub">
+        Connections
+      </h3>
       <ProviderList
         manage
         providers={providers}

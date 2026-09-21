@@ -123,15 +123,22 @@ import {
   connectOAuthProvider,
   disconnectProvider,
   listConnectedProviders,
+  listResolvedCatalog,
+  makeResolvedDefault,
+  moveResolvedModel,
   refreshProviderModels,
   resolveActiveModel,
   rerankCatalogViaHub,
   reorderProviders,
   selectProviderModel,
+  setResolvedRestricted,
+  setResolvedShadowed,
   type ActiveModel,
+  type ModelMoveDirection,
+  type ResolvedCatalogRow,
 } from "./provider-catalog.ts";
 
-export type { ActiveModel } from "./provider-catalog.ts";
+export type { ActiveModel, ResolvedCatalogRow } from "./provider-catalog.ts";
 
 export type { DesignerSettings } from "./designer-settings.ts";
 
@@ -932,6 +939,50 @@ export const api = {
   selectProviderModel: async (providerId: string, canonicalName: string | null): Promise<void> => {
     try {
       await selectProviderModel(createHubTransport(), providerId, canonicalName);
+      activeModelCacheClear();
+    } catch (cause) {
+      installerFailure(cause);
+    }
+  },
+  /**
+   * The Settings Inference list (CL-8782): resolved-catalog rows in fallback
+   * order, restricted rows included. Reads the hub catalog routes — never the
+   * provider attach list, never a secret.
+   */
+  resolvedCatalog: async (): Promise<ResolvedCatalogRow[]> => {
+    try {
+      return await listResolvedCatalog(createHubTransport());
+    } catch (cause) {
+      installerFailure(cause);
+    }
+  },
+  makeResolvedDefault: async (modelId: string): Promise<void> => {
+    try {
+      await makeResolvedDefault(createHubTransport(), modelId);
+      activeModelCacheClear();
+    } catch (cause) {
+      installerFailure(cause);
+    }
+  },
+  moveResolvedModel: async (modelId: string, direction: ModelMoveDirection): Promise<void> => {
+    try {
+      await moveResolvedModel(createHubTransport(), modelId, direction);
+      activeModelCacheClear();
+    } catch (cause) {
+      installerFailure(cause);
+    }
+  },
+  setResolvedRestricted: async (modelId: string, restricted: boolean): Promise<void> => {
+    try {
+      await setResolvedRestricted(createHubTransport(), modelId, restricted);
+      activeModelCacheClear();
+    } catch (cause) {
+      installerFailure(cause);
+    }
+  },
+  setResolvedShadowed: async (providerRowIds: readonly string[], shadowed: boolean): Promise<void> => {
+    try {
+      await setResolvedShadowed(createHubTransport(), providerRowIds, shadowed);
       activeModelCacheClear();
     } catch (cause) {
       installerFailure(cause);

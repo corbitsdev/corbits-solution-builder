@@ -21,6 +21,7 @@ export * from "./model-default.js";
 export * from "./project-tenant.js";
 export * from "./provider-connect.js";
 export * from "./registry-tarballs.js";
+export * from "./resolved-catalog.js";
 export * from "./tarball-extract.js";
 export * from "./workbench-delegation.js";
 export * from "./workflow-closure.js";

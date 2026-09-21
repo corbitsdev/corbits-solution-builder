@@ -2,19 +2,21 @@
  * The provider list, shared by onboarding and Settings so the two cannot
  * drift. One row per way in. A row that is not connected offers exactly one
  * action, named after how it connects; a row that is connected shows what it
- * serves and lets it be reordered, refreshed or disconnected in place.
+ * serves and lets it be refreshed or disconnected in place. Model default,
+ * fallback order and restrictions live on the `ResolvedCatalogList` below,
+ * which renders the resolved catalog in fallback order.
  *
  * Keys are asked for on the row that was clicked and cleared the moment they
  * are handed over. Nothing here ever renders a secret back.
  *
- * Connecting, reordering, choosing a model and disconnecting drive the hub's
+ * Connecting, refreshing and disconnecting drive the hub's
  * own catalog routes directly (`client.ts` -> `provider-catalog.ts` ->
  * `@solutions-builder/installer`); an OAuth provider signs in through the
  * loopback the embedded hub mounts on `@corbits/oauth-core`
  * (`packages/embed-hub/src/oauth-mount.ts`).
  */
-import { useRef, useState } from "react";
-import { api, ApiFailure, type Provider } from "../client.js";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api, ApiFailure, type Provider, type ResolvedCatalogRow } from "../client.js";
 import { LOCAL_DEFAULT_BASE_URL, LOCAL_PROVIDER_ID } from "../provider-catalog.js";
 import { Banner, Button, StateLabel } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
@@ -43,7 +45,7 @@ export function ProviderList({
   oauthCandidates: OAuthCandidate[];
   /** Called after any successful change; the parent refetches. */
   onChanged: () => Promise<void> | void;
-  /** Settings shows order, model choice and disconnect; onboarding does not. */
+  /** Settings' connections subsection shows disconnect; onboarding does not. */
   manage?: boolean;
 }) {
   const [chosen, setChosen] = useState<string | null>(null);
@@ -150,15 +152,6 @@ export function ProviderList({
     setBaseUrl("");
   };
 
-  const ordered = providers.map((entry) => entry.id);
-  const move = (modelProviderId: string, by: -1 | 1) => {
-    const index = ordered.indexOf(modelProviderId);
-    const order = [...ordered];
-    const [moved] = order.splice(index, 1);
-    order.splice(index + by, 0, moved!);
-    return act(modelProviderId, () => api.reorderProviders(order));
-  };
-
   return (
     <>
       {authorizeUrl ? (
@@ -173,7 +166,6 @@ export function ProviderList({
           const ready = connected?.status === "ready";
           const asking = chosen === row.id;
           const waiting = busy === row.id && row.kind === "oauth";
-          const position = connected ? ordered.indexOf(connected.id) : -1;
           return (
             <li key={row.id} className={`provider-row${asking ? " is-active" : ""}`}>
               <span className="provider-identity">
@@ -181,7 +173,7 @@ export function ProviderList({
                 <small>
                   {connected
                     ? ready
-                      ? describeConnected(connected, manage ? position : -1)
+                      ? describeConnected(connected)
                       : (connected.statusDetail ?? connected.status)
                     : row.how}
                 </small>
@@ -257,57 +249,30 @@ export function ProviderList({
               {asking ? null : (
                 <span className="provider-actions">
                   {manage && connected && ready ? (
-                    <>
-                      <ModelPick provider={connected} onPick={(model) => act(row.id, () => api.selectProviderModel(connected.id, model || null))} />
-                      <details>
-                        <summary>Advanced</summary>
-                        <div>
-                          {connected.models.length > 1 ? (
-                            connected.selectedModel !== null ? (
-                              <Button
-                                variant="ghost"
-                                disabled={busy !== null}
-                                onClick={() => void act(row.id, () => api.selectProviderModel(connected.id, null))}
-                              >
-                                Let it fail over
-                              </Button>
-                            ) : (
-                              <span className="inline-note">Failing over in order.</span>
+                    <details>
+                      <summary>Advanced</summary>
+                      <div>
+                        {/* Model default, fallback order and restrictions live
+                            on the resolved catalog above -- this list only
+                            attaches and detaches connections. */}
+                        <Button
+                          variant="ghost"
+                          disabled={busy !== null}
+                          loading={busy === row.id}
+                          onClick={() =>
+                            void act(
+                              row.id,
+                              async () => {
+                                await api.refreshProviderModels(connected.id);
+                              },
+                              `${row.name} models refreshed.`,
                             )
-                          ) : null}
-                          <Button
-                            variant="ghost"
-                            disabled={busy !== null || position <= 0}
-                            onClick={() => void move(connected.id, -1)}
-                          >
-                            Move up
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            disabled={busy !== null || position < 0 || position === ordered.length - 1}
-                            onClick={() => void move(connected.id, 1)}
-                          >
-                            Move down
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            disabled={busy !== null}
-                            loading={busy === row.id}
-                            onClick={() =>
-                              void act(
-                                row.id,
-                                async () => {
-                                  await api.refreshProviderModels(connected.id);
-                                },
-                                `${row.name} models refreshed.`,
-                              )
-                            }
-                          >
-                            Refresh models
-                          </Button>
-                        </div>
-                      </details>
-                    </>
+                          }
+                        >
+                          Refresh models
+                        </Button>
+                      </div>
+                    </details>
                   ) : null}
                   {waiting ? (
                     <Button variant="ghost" onClick={() => cancelSignIn(row.id)}>
@@ -360,11 +325,9 @@ export function ProviderList({
   );
 }
 
-/** What a connected row says under its name: order, models, and when it was last checked. */
-function describeConnected(provider: Provider, position: number): string {
+/** What a connected row says under its name: models on the connection and when it was last checked. */
+function describeConnected(provider: Provider): string {
   const parts: string[] = [];
-  if (position === 0) parts.push("Answers first");
-  else if (position > 0) parts.push(`Fallback ${position}`);
   parts.push(`${provider.models.length} model${provider.models.length === 1 ? "" : "s"}`);
   if (provider.validatedAt) parts.push(`checked ${ago(provider.validatedAt)}`);
   return parts.join(" · ");
@@ -379,20 +342,166 @@ function ago(iso: string): string {
   return `${Math.round(hours / 24)}d ago`;
 }
 
-function ModelPick({ provider, onPick }: { provider: Provider; onPick: (model: string) => void }) {
-  const [first] = provider.models;
-  if (!first) return null;
-  const value = provider.selectedModel && provider.models.includes(provider.selectedModel) ? provider.selectedModel : first;
+/**
+ * The resolved catalog (CL-8782): one row per model in fallback order from
+ * `GET /api/tenants/:id/models`, with the default, reorder, restrict and
+ * shadow controls. Restricted rows stay visible with a badge -- never default
+ * candidates. Non-chat rows are badged and can never be the chat default. The
+ * credential readout is boolean only; the per-row link jumps to the
+ * connections list below. Every write goes through the existing catalog
+ * routes; an empty catalog renders an explicit empty state, never simulated
+ * rows.
+ */
+export function ResolvedCatalogList({
+  providers,
+  onChanged,
+}: {
+  /** Parent's provider list: a new identity refetches, so connection changes below refresh these rows. */
+  providers: Provider[];
+  /** Called after any successful change; the parent refetches. */
+  onChanged: () => Promise<void> | void;
+}) {
+  const [rows, setRows] = useState<ResolvedCatalogRow[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const reload = useCallback(async () => {
+    try {
+      setRows(await api.resolvedCatalog());
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : cause instanceof Error ? cause.message : String(cause));
+    }
+  }, []);
+
+  useEffect(() => {
+    void reload();
+  }, [reload, providers]);
+
+  const act = async (id: string, work: () => Promise<unknown>, done?: string) => {
+    setBusy(id);
+    setError(null);
+    setNotice(null);
+    try {
+      await work();
+      if (done) setNotice(done);
+      await reload();
+      await onChanged();
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (rows === null) return <p className="inline-note">Loading models…</p>;
+
   return (
-    <label className="provider-model">
-      <span className="sr-only">Model for {provider.label}</span>
-      <select className="setting-select" value={value} onChange={(event) => onPick(event.target.value)}>
-        {provider.models.map((model) => (
-          <option key={model} value={model}>
-            {model}
-          </option>
-        ))}
-      </select>
-    </label>
+    <>
+      {rows.length === 0 ? (
+        <p className="inline-note">
+          No models resolved yet. Connect a provider below — the catalog appears here in fallback order.
+        </p>
+      ) : (
+        <ul className="provider-list">
+          {rows.map((row, index) => {
+            const name = row.displayName ?? row.canonicalName;
+            const movable = !row.restricted;
+            return (
+              <li key={row.modelId} className="provider-row">
+                <span className="provider-identity">
+                  <strong>{name}</strong>
+                  <small>
+                    {describeResolvedRow(row, index)}
+                  </small>
+                </span>
+                <span className="provider-state">
+                  {row.isDefault ? <StateLabel tone="success">Default</StateLabel> : null}
+                  {row.restricted ? <StateLabel tone="warning">Restricted</StateLabel> : null}
+                  {row.shadowed ? <StateLabel tone="warning">Shadowed</StateLabel> : null}
+                  {!row.chatCapable ? <StateLabel tone="warning">Not chat</StateLabel> : null}
+                </span>
+                <span className="provider-actions">
+                  {row.defaultCandidate && !row.isDefault ? (
+                    <Button
+                      variant="primary"
+                      disabled={busy !== null}
+                      loading={busy === `default:${row.modelId}`}
+                      onClick={() => void act(`default:${row.modelId}`, () => api.makeResolvedDefault(row.modelId), `${name} is now the default.`)}
+                    >
+                      Make default
+                    </Button>
+                  ) : null}
+                  {movable ? (
+                    <>
+                      <Button
+                        variant="ghost"
+                        disabled={busy !== null || index <= 0}
+                        onClick={() => void act(`move:${row.modelId}`, () => api.moveResolvedModel(row.modelId, "up"))}
+                      >
+                        Move up
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        disabled={busy !== null || index >= rows.length - 1}
+                        onClick={() => void act(`move:${row.modelId}`, () => api.moveResolvedModel(row.modelId, "down"))}
+                      >
+                        Move down
+                      </Button>
+                    </>
+                  ) : null}
+                  <Button
+                    variant="ghost"
+                    disabled={busy !== null}
+                    loading={busy === `restrict:${row.modelId}`}
+                    onClick={() =>
+                      void act(
+                        `restrict:${row.modelId}`,
+                        () => api.setResolvedRestricted(row.modelId, !row.restricted),
+                        row.restricted ? `${name} unrestricted.` : `${name} restricted.`,
+                      )
+                    }
+                  >
+                    {row.restricted ? "Unrestrict" : "Restrict"}
+                  </Button>
+                  {row.providerRowIds.length > 0 ? (
+                    <Button
+                      variant="ghost"
+                      disabled={busy !== null}
+                      loading={busy === `shadow:${row.modelId}`}
+                      onClick={() =>
+                        void act(
+                          `shadow:${row.modelId}`,
+                          () => api.setResolvedShadowed(row.providerRowIds, !row.shadowed),
+                          row.shadowed ? `${name} unshadowed.` : `${name} shadowed.`,
+                        )
+                      }
+                    >
+                      {row.shadowed ? "Unshadow" : "Shadow"}
+                    </Button>
+                  ) : null}
+                  <a className="inline-note" href="#connections">
+                    {row.credentialConnected ? "Key on file · Manage connection" : "No key · Manage connection"}
+                  </a>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {error ? <Banner tone="error" title={error} /> : null}
+      {notice ? <Banner tone="okay" title={notice} /> : null}
+    </>
   );
+}
+
+/** What a resolved row says under its name: fallback rank, serving providers, and model count position. */
+export function describeResolvedRow(row: ResolvedCatalogRow, position: number): string {
+  const parts: string[] = [];
+  if (!row.restricted && row.chatCapable) {
+    parts.push(position === 0 ? "Answers first" : `Fallback ${position}`);
+  }
+  if (row.providerNames.length > 0) parts.push(`via ${row.providerNames.join(", ")}`);
+  parts.push(row.canonicalName);
+  return parts.join(" · ");
 }

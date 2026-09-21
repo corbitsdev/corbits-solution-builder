@@ -85,10 +85,16 @@ function seedSnapshotOfferings(vendor: HubProvider): SeedOfferingSpec[] {
  * model provider: one created offering per spec, carrying the catalog's model
  * priorities, capabilities and quirks. Strictly additive -- an offering that
  * already exists is left untouched, so a reconnect never clobbers the tenant's
- * provider order or model pins -- and attach-scoped: the `model_provider` and
- * offering rows are the only catalog rows connect may write; vendor and model
- * rows come from the install-time seed, and a snapshot entry with no model
- * row is skipped, never created here.
+ * provider order or model pins (tenant-order-wins) -- and attach-scoped: the
+ * `model_provider` and offering rows are the only catalog rows connect may
+ * write; vendor and model rows come from the install-time seed, and a snapshot
+ * entry with no model row is skipped, never created here.
+ *
+ * When an attached offering diverges from the snapshot, the drift is logged
+ * with a console.warn pointing at the manual repair path (disconnect the
+ * provider with `disconnectProvider`, which cascade-deletes its offerings,
+ * then reconnect to re-materialize from the reseeded snapshot); the
+ * reconnect itself never rewrites it.
  */
 async function materializeSeededOfferings(
   catalog: ReturnType<typeof catalogFor>,
@@ -101,20 +107,35 @@ async function materializeSeededOfferings(
   );
   if (wanted.length === 0) return false;
   const [modelRows, offeringRows] = await Promise.all([catalog.models(), catalog.offerings()]);
-  const attached = new Set(
-    offeringRows.filter((row) => row.providerId === modelProvider.id).map((row) => row.modelId),
+  const attached = new Map(
+    offeringRows.filter((row) => row.providerId === modelProvider.id).map((row) => [row.modelId, row]),
   );
   for (const offering of wanted) {
     const modelRow = modelRows.find((row) => row.canonicalName === offering.model);
-    if (!modelRow || attached.has(modelRow.id)) continue;
-    attached.add(modelRow.id);
-    await catalog.createOffering({
-      modelId: modelRow.id,
-      providerId: modelProvider.id,
-      priority: offering.priority,
-      capabilities: offering.capabilities,
-      ...(Object.keys(offering.quirks).length > 0 ? { quirks: offering.quirks } : {}),
-    });
+    if (!modelRow) continue;
+    const existing = attached.get(modelRow.id);
+    if (!existing) {
+      attached.set(modelRow.id, await catalog.createOffering({
+        modelId: modelRow.id,
+        providerId: modelProvider.id,
+        priority: offering.priority,
+        capabilities: offering.capabilities,
+        ...(Object.keys(offering.quirks).length > 0 ? { quirks: offering.quirks } : {}),
+      }));
+      continue;
+    }
+    // Tenant-order-wins: an attached offering is never rewritten here, even
+    // when it drifted from the snapshot. Log the drift with the manual repair
+    // path so a stale pin is visible instead of silently re-applied.
+    if (
+      existing.priority !== offering.priority ||
+      JSON.stringify(existing.capabilities ?? []) !== JSON.stringify(offering.capabilities) ||
+      JSON.stringify(existing.quirks ?? {}) !== JSON.stringify(offering.quirks)
+    ) {
+      console.warn(
+        `provider-connect: offering for model "${offering.model}" on provider "${modelProvider.name}" drifted from the seeded snapshot -- left as-is (tenant order wins); to re-apply the snapshot, disconnect the provider (disconnectProvider cascade-deletes its offerings) and reconnect to re-materialize from the reseeded snapshot`,
+      );
+    }
   }
   return true;
 }
