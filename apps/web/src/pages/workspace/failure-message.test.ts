@@ -13,16 +13,25 @@ describe("describeFailure", () => {
     expect(describeFailure(cause)).toBe("The hub answered 502: deployment could not be scheduled.");
   });
 
-  test("returns the message of a plain Error", () => {
-    expect(describeFailure(new Error("network dropped"))).toBe("network dropped");
+  test("frames a plain Error as recoverable, keeping its detail", () => {
+    expect(describeFailure(new Error("network dropped"))).toBe(
+      "Something could not be completed: network dropped Nothing was lost — try again.",
+    );
   });
 
-  test("returns a thrown string as-is", () => {
-    expect(describeFailure("boom")).toBe("boom");
+  test("frames a thrown string the same way", () => {
+    expect(describeFailure("boom")).toBe("Something could not be completed: boom Nothing was lost — try again.");
   });
 
-  test("stringifies anything else", () => {
-    expect(describeFailure({ weird: true })).toBe("[object Object]");
-    expect(describeFailure(42)).toBe("42");
+  test("falls back calmly when there is no detail to show", () => {
+    expect(describeFailure({ weird: true })).toBe(
+      "Something could not be completed, and no detail was recorded. Nothing was lost — try again.",
+    );
+    expect(describeFailure(42)).toBe(
+      "Something could not be completed, and no detail was recorded. Nothing was lost — try again.",
+    );
+    expect(describeFailure(new Error("   "))).toBe(
+      "Something could not be completed, and no detail was recorded. Nothing was lost — try again.",
+    );
   });
 });

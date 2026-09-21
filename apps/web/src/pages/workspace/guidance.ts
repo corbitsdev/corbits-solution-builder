@@ -136,7 +136,7 @@ export function workspaceGuidance(stage: number, messages: readonly ChatMessage[
   if (question) {
     return {
       title: "Your input is needed",
-      detail: [purpose, "Answer the specialist's recorded question; “I’m not sure” is a valid answer."].join(" "),
+      detail: [purpose, "The specialist asked a question. Answer it when you are ready — “I’m not sure” is an answer."].join(" "),
       question,
       draft,
       readyNote: null,
@@ -145,16 +145,16 @@ export function workspaceGuidance(stage: number, messages: readonly ChatMessage[
   if (draft) {
     return {
       title: "Review the current draft",
-      detail: [purpose, "The latest substantial draft is available beside the conversation. Request a correction if it does not reflect the decision you want to make."].join(" "),
+      detail: [purpose, "The latest draft is beside the conversation. If something is wrong, say so in the conversation and a new version comes back."].join(" "),
       question: null,
       draft,
-      readyNote: "This draft is substantial and nothing more is being asked: it looks ready for your approval.",
+      readyNote: "Nothing more is being asked. If the draft is right, it is ready for your approval.",
     };
   }
   if (latest) {
     return {
       title: "A reply needs clarification",
-      detail: [purpose, "A specialist reply is recorded, but it is not identifiable as a complete draft. Ask for the complete stage draft or provide the missing detail."].join(" "),
+      detail: [purpose, "A specialist reply is recorded, but it does not read as a complete draft yet. Ask for the complete stage draft, or add the missing detail."].join(" "),
       question: null,
       draft: null,
       readyNote: null,
@@ -163,7 +163,7 @@ export function workspaceGuidance(stage: number, messages: readonly ChatMessage[
   if (messages.length > 0) {
     return {
       title: "Waiting for a reply",
-      detail: [purpose, "Your message is recorded; no specialist reply is visible in this thread yet."].join(" "),
+      detail: [purpose, "Your message is recorded; no specialist reply is visible yet."].join(" "),
       question: null,
       draft: null,
       readyNote: null,
