@@ -4,6 +4,7 @@ import { Markdown } from "../../markdown.jsx";
 import { stageName } from "../../components.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { choicesIn } from "./choices.js";
+import { Elapsed } from "./elapsed.jsx";
 
 /** A stage-mail turn, rendered as a `@corbits/react-ui` chat message: the
  *  person's turns on the right, the specialist's on the left. */
@@ -87,9 +88,16 @@ export function StageConversation({
 const EMPTY_WITHDRAWN: ReadonlySet<string> = new Set();
 
 /** A pending local send is evidence only that the browser has submitted a
- * message; it does not establish what the specialist is doing. */
-export function WorkingLabel() {
-  return <span className="thinking">Message sent; waiting for a reply.</span>;
+ * message; it does not establish what the specialist is doing. The clock is
+ * the one honest signal available without a token stream: time passing since
+ * the message went out, not a guess at what the specialist is producing. */
+export function WorkingLabel({ since = null }: { since?: string | null }) {
+  return (
+    <div className="thinking">
+      <span>Message sent; waiting for a reply.</span>
+      <Elapsed since={since} />
+    </div>
+  );
 }
 
 /**

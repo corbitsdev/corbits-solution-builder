@@ -321,7 +321,7 @@ export function StageDocument({
           // A specialist's turn is its digest of the draft, and the bolding in
           // it is the point — it is what a reader takes in first.
           renderBody={(message) => {
-            if (message.id === "pending") return <WorkingLabel />;
+            if (message.id === "pending") return <WorkingLabel since={message.createdAt} />;
             const turn = turnById.get(message.id);
             // Who answered, and when — read from the recorded turn, so it
             // reads the same after a reload rather than from client state.
