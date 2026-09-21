@@ -1,37 +1,10 @@
 import type { Hono } from "hono";
 import { credentialBackend } from "./host-secrets.js";
 import { hostStatus } from "./lifecycle.js";
-import { ensureHub, hubFetch, mintOwnerSetCookie } from "./hub-client.js";
+import { ensureHub, mintOwnerSetCookie } from "./hub-client.js";
 import { sidecarFacts } from "./hub-mount.js";
 
 export const API_VERSION = "1";
-
-/**
- * What the interface says about the hub. `mode` is the whole point of the
- * seam: the same product runs against an embedded hub today and a hosted one
- * later, and this is where that becomes visible rather than implied.
- */
-async function hubSummary() {
-  const endpoint = await ensureHub().catch((cause: unknown) => ({
-    mode: "embedded" as const,
-    url: null,
-    ready: false,
-    detail: cause instanceof Error ? cause.message : "The hub did not start.",
-  }));
-
-  // The hub reports its own health; this host does not vouch for it.
-  const status = await hubFetch("/status")
-    .then((response) => (response.ok ? response.json() : null))
-    .catch(() => null);
-
-  return {
-    mode: endpoint.mode,
-    url: endpoint.url,
-    ready: endpoint.ready && status !== null,
-    detail: endpoint.detail,
-    reported: status,
-  };
-}
 
 export function registerHostRoutes(api: Hono) {
   api.get("/status", async (context) => {
@@ -43,7 +16,16 @@ export function registerHostRoutes(api: Hono) {
       host: hostStatus(),
       credentialBackend: await credentialBackend(),
       ...sidecarFacts(),
-      hub: await hubSummary(),
+      // What this host knows about the hub: which mode it is in, where it
+      // is, and why embedded start failed when it did. Whether the hub is
+      // actually answering is the client's own read — it has a transport
+      // straight to the hub and does not need this host to relay health.
+      hub: await ensureHub().catch((cause: unknown) => ({
+        mode: "embedded" as const,
+        url: null,
+        ready: false,
+        detail: cause instanceof Error ? cause.message : "The hub did not start.",
+      })),
     });
   });
 

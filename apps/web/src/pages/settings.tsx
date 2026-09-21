@@ -19,6 +19,7 @@ import { api, ApiFailure, STAKEHOLDER_ROLES, type DesignerSettings, type HostSta
 import { Banner, Button, StateLabel } from "../components.jsx";
 import { deckDesignFor, deckDesignKey, guidanceFor } from "../deck-design-settings.ts";
 import { Dictated } from "../dictation.jsx";
+import { createHubTransport } from "../hub.ts";
 import { inShell } from "../shell.ts";
 import { ProviderList, ResolvedCatalogList, type ApiKeyProvider, type OAuthCandidate } from "./providers.jsx";
 
@@ -633,6 +634,23 @@ function ThisComputer({ status }: { status: HostStatus | null }) {
 /* -------------------------------------------------------------- diagnostics */
 
 function Diagnostics({ status }: { status: HostStatus | null }) {
+  // The hub's health is this window's own read of it, not the host's relay.
+  const [hubLive, setHubLive] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!status) return;
+    let cancelled = false;
+    void createHubTransport()
+      .fetch("GET", "/status")
+      .then(() => {
+        if (!cancelled) setHubLive(true);
+      })
+      .catch(() => {
+        if (!cancelled) setHubLive(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [status]);
   if (!status) return null;
   const capabilities = Object.entries(status.build?.capabilities ?? {});
   return (
@@ -661,7 +679,15 @@ function Diagnostics({ status }: { status: HostStatus | null }) {
         <div>
           <dt>Hub</dt>
           <dd>
-            {status.hub.ready ? (status.hub.mode === "embedded" ? "Embedded, in this app" : `Hosted at ${status.hub.url}`) : `Unavailable: ${status.hub.detail}`}
+            {hubLive === null
+              ? "Checking…"
+              : hubLive
+                ? status.hub.mode === "embedded"
+                  ? "Embedded, in this app"
+                  : `Hosted at ${status.hub.url}`
+                : status.hub.ready
+                  ? "The host mounted it, but it is not answering"
+                  : `Unavailable: ${status.hub.detail}`}
           </dd>
         </div>
         {status.build ? (

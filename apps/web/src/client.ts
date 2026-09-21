@@ -239,7 +239,6 @@ export type HostStatus = {
     url: string | null;
     ready: boolean;
     detail: string;
-    reported: { status?: string } | null;
   };
   /** Absent while the host's build-worker bridge is mid-removal (CL-8072). */
   build?: {
