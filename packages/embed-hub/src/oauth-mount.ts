@@ -75,6 +75,10 @@ function callbackConfigFor(redirectUri: string): { host: string; port: number; p
  */
 export function mountProviderOAuth(app: Hono, open: (url: string) => void = openInBrowser): void {
   const logins = new Map<MountableOAuthProviderId, LoginState>();
+  /** One in-flight login per provider. Its callback server holds a fixed
+   *  loopback port, so a second attempt must abort the first or the port is
+   *  still taken and the sign-in fails with "already in use". */
+  const inFlight = new Map<MountableOAuthProviderId, AbortController>();
 
   app.post("/api/oauth/:providerId/start", async (c) => {
     const providerId = c.req.param("providerId");
@@ -85,11 +89,14 @@ export function mountProviderOAuth(app: Hono, open: (url: string) => void = open
     const id = providerId as MountableOAuthProviderId;
     const { host, port, path } = callbackConfigFor(definition.config.redirectUri);
 
+    inFlight.get(id)?.abort();
+    const controller = new AbortController();
+    inFlight.set(id, controller);
     logins.set(id, { status: "pending" });
     let authorizeUrl: string;
     try {
       const handle = await startOAuthLogin(
-        { profile: id, signal: new AbortController().signal },
+        { profile: id, signal: controller.signal },
         {
           startCallbackServer: (state) =>
             startCallbackServer(state, {
@@ -127,6 +134,21 @@ export function mountProviderOAuth(app: Hono, open: (url: string) => void = open
       );
     }
     return c.json({ authorizeUrl });
+  });
+
+  /** Stops an in-flight login and releases its loopback port. Without this a
+   *  cancelled attempt keeps the fixed callback port until the host exits, and
+   *  the next attempt fails with "already in use". */
+  app.post("/api/oauth/:providerId/cancel", (c) => {
+    const providerId = c.req.param("providerId");
+    if (!(providerId in PROVIDERS)) {
+      return c.json({ error: { code: "unknown_provider", message: `No OAuth provider named ${providerId}.` } }, 404);
+    }
+    const id = providerId as MountableOAuthProviderId;
+    inFlight.get(id)?.abort();
+    inFlight.delete(id);
+    logins.delete(id);
+    return c.json({ status: "idle" as const });
   });
 
   app.get("/api/oauth/:providerId/status", (c) => {

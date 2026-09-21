@@ -173,6 +173,9 @@ export function ProviderList({
     setAuthorizeUrl(null);
     setError(null);
     setNotice(null);
+    // Stop the host's callback server too: it holds a fixed loopback port, so
+    // leaving it running makes the next attempt fail as "already in use".
+    void api.cancelProviderSignIn(id).catch(() => undefined);
   };
 
   const canSave = (row: Row) => {

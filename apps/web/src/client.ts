@@ -922,6 +922,13 @@ export const api = {
       installerFailure(cause);
     }
   },
+  /** Stops an in-flight provider sign-in on the host, releasing the loopback
+   *  port its callback server holds so the next attempt can bind it. */
+  cancelProviderSignIn: async (providerId: string): Promise<void> => {
+    await createHubTransport()
+      .fetch<unknown>("POST", `/api/oauth/${providerId}/cancel`)
+      .catch(() => undefined);
+  },
   selectProviderModel: async (providerId: string, canonicalName: string | null): Promise<void> => {
     try {
       await selectProviderModel(createHubTransport(), providerId, canonicalName);
