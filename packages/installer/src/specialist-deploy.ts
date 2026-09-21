@@ -11,7 +11,7 @@
  * write, not a signal this deploy waits on.
  */
 import { ApiError, type Transport } from "@intx/hub-client";
-import { agentFor } from "@solutions-builder/app/kit";
+import { agentFor, type AgentRole } from "@solutions-builder/app/kit";
 import type { Stage } from "@solutions-builder/app/ledger";
 import {
   ARTIFACT_TOOL_DEPENDENCIES,
@@ -182,6 +182,7 @@ async function renderSpecialistSource(
   source: InferenceSourcePin,
   artifactTools: boolean,
   roleKey: string,
+  role: AgentRole,
   audiences?: readonly { readonly name: string; readonly role: string }[],
 ): Promise<Record<string, string>> {
   const name = specialistAssetName(projectId, stage, roleKey);
@@ -219,7 +220,7 @@ async function renderSpecialistSource(
       source,
       projectId,
       assetName: name,
-      role: agentFor(stage),
+      role,
       roleKey,
       artifactTools,
       ...(audiences ? { audiences } : {}),
@@ -267,6 +268,7 @@ async function ensureSpecialistDeploymentOnce(
   hubOrigin: string,
   artifactTools: boolean,
   roleKey: string,
+  role: AgentRole,
 ): Promise<SpecialistDeployment> {
   if (!sidecar.canPlaceSidecars) {
     throw new Error("no host is placing sidecars; cannot deploy a stage specialist");
@@ -305,7 +307,7 @@ async function ensureSpecialistDeploymentOnce(
   const project = stage === PACKAGE_STAGE ? await readProject(transport, projectId) : null;
   const audiences = project?.policy.audiences;
 
-  const rendered = await renderSpecialistSource(closure, projectId, stage, source, artifactTools, roleKey, audiences);
+  const rendered = await renderSpecialistSource(closure, projectId, stage, source, artifactTools, roleKey, role, audiences);
   const commitSha = await pushWorkflowSourceTree(
     transport,
     workspaceTenantId,
@@ -376,6 +378,11 @@ export async function ensureSpecialistDeployment(
    *  per-stage agent, whose asset name this keeps byte-identical to before
    *  roles existed (`DEFAULT_ROLE_KEY`, `specialistAssetName`). */
   roleKey: string = DEFAULT_ROLE_KEY,
+  /** Which agent the deployment actually runs. Defaults to the stage's own
+   *  primary role, so every existing caller is unchanged; a caller naming a
+   *  non-default `roleKey` must pass the matching role or the deployment
+   *  would carry that name while running the stage specialist's prompt. */
+  role: AgentRole = agentFor(stage),
 ): Promise<SpecialistDeployment> {
   const attempt = () =>
     ensureSpecialistDeploymentOnce(
@@ -389,6 +396,7 @@ export async function ensureSpecialistDeployment(
       hubOrigin,
       artifactTools,
       roleKey,
+      role,
     );
   try {
     return await attempt();
