@@ -254,14 +254,46 @@ export function Mark({ size = 26 }: { size?: number }) {
  * In the bar it is laid out with everything else. Closed it still names the
  * next action, because a control that only says "help" is one nobody opens.
  */
+/**
+ * Orientation from the Product guide, or the deterministic checklist.
+ *
+ * Field-for-field the `Guidance` type origin/main's client.ts exports. It is
+ * declared here rather than imported as `import("./client.js").Guidance`
+ * because CL-8492 deleted that export (with the explain panel and the
+ * `api.guidance` endpoint), so naming it would fail typecheck. When the lane
+ * converges back, this alias goes away and the import comes back.
+ */
+export type GuideGuidance = {
+  summary: string;
+  readiness: "ready" | "not_ready" | "blocked";
+  missing: string[];
+  options: { label: string; detail: string }[];
+  recommended: string;
+  questions: string[];
+  sourceVersionIds: string[];
+  origin: "agent" | "deterministic";
+};
+
 export function GuideDock({
   step,
   onGo,
+  onExplain,
+  guidance,
+  explaining = false,
   at,
   stage,
 }: {
   step: import("@solutions-builder/app/next-step").NextStep;
   onGo: (where: import("@solutions-builder/app/next-step").NextStep["where"]) => void;
+  // INTEGRATE (CL-8764): optional here, required on origin/main. CL-8492
+  // deleted the explain panel's backing (the `Guidance` type and the
+  // `api.guidance` endpoint in client.ts) and the app.tsx call site passes
+  // stage/step/at/onGo only, so required props would fail typecheck in files
+  // this lane may not touch. The panel body below is origin/main
+  // line-for-line; passing guidance + onExplain renders exactly as on main.
+  onExplain?: () => void;
+  guidance?: GuideGuidance | null;
+  explaining?: boolean;
   at?: import("@solutions-builder/app/next-step").NextStep["where"];
   /** Which of the nine this project is on, for the ring. */
   stage?: number;
@@ -326,6 +358,27 @@ export function GuideDock({
           </div>
           <p className="guide-detail">{step.detail}</p>
 
+          {guidance ? (
+            <div className="guide-guidance">
+              <p>{guidance.summary}</p>
+              {guidance.missing.length > 0 ? (
+                <>
+                  <h4>Still missing</h4>
+                  <ul>
+                    {guidance.missing.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+              <p className="inline-note">
+                {guidance.origin === "agent"
+                  ? `Read from ${guidance.sourceVersionIds.length} version${guidance.sourceVersionIds.length === 1 ? "" : "s"}. The guide recommends a route; it never takes one.`
+                  : "No specialist was reachable, so this is the deterministic checklist."}
+              </p>
+            </div>
+          ) : null}
+
           <div className="guide-actions">
             {step.ending || step.where === at ? null : (
               <Button variant="primary" onClick={() => onGo(step.where)}>
@@ -336,6 +389,16 @@ export function GuideDock({
                     : step.where === "settings"
                       ? "Open settings"
                       : "Take me there"}
+              </Button>
+            )}
+            {/* INTEGRATE (CL-8764): origin/main tests `guidance` only. The
+                `!onExplain` arm is the lane-types bend: exactOptionalPropertyTypes
+                rejects passing a possibly-undefined handler, and a button with no
+                handler is a dead control — the current app.tsx call site passes
+                none. With both props supplied this renders exactly as on main. */}
+            {guidance || !onExplain ? null : (
+              <Button loading={explaining} onClick={onExplain}>
+                Where does this stand?
               </Button>
             )}
           </div>
