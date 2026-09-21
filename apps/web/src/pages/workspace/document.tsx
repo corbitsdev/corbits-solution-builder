@@ -22,6 +22,7 @@ import { markChanges } from "../../revisions.js";
 import { AddMaterial, Button, documentName } from "../../components.jsx";
 import { PrintButton } from "../../print.jsx";
 import { SpecialistTurn, WorkingLabel, type TurnNote } from "./thread.jsx";
+import { clearQuotedDraft, loadQuotedDraft, saveQuotedDraft } from "./quote-store.js";
 
 /**
  * A drafted stage: the document, and the conversation about it.
@@ -66,8 +67,10 @@ export function StageDocument({
   /** The workspace tenant artifacts are recorded under. */
   tenantId: string;
   turns: StageTurn[];
-  /** A question visibly recorded in the latest specialist mail. */
-  openQuestion: { text: string } | null;
+  /** A question visibly recorded in the latest specialist mail. `ordinal`
+   *  counts it among the questions already answered this stage; `total` is
+   *  set only when the specialist's own text states how many there are. */
+  openQuestion: { text: string; ordinal?: number | null; total?: number | null } | null;
   /** The stage-1 brief evaluator's verdict, advisory only. Null off stage 1. */
   evaluation?: Evaluation | null;
   onSelectVersion: (id: string) => void;
@@ -98,6 +101,21 @@ export function StageDocument({
   useEffect(() => {
     if (seed && seed.text.trim()) setMessage(seed.text);
   }, [seed?.at]);
+  // Quoted passages survive a send-back: restored once per stage on mount,
+  // then kept in step with what is attached. `hydrated` gates the save effect
+  // so the empty initial state is never written over a restored one — it
+  // only flips true (in the same batch as the restore) once the restore has
+  // happened, so the save effect's first live run already sees it.
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    setHydrated(false);
+    setAttached(loadQuotedDraft(tenantId, node.stage));
+    setHydrated(true);
+  }, [tenantId, node.stage]);
+  useEffect(() => {
+    if (!hydrated) return;
+    saveQuotedDraft(tenantId, node.stage, attached);
+  }, [tenantId, node.stage, attached, hydrated]);
   // Stage 3 is a choice, not an approval: the gate names the approaches.
   const sections = useMemo(() => sectionsIn(content), [content]);
   const approaches = node.kind === "chosen_approach"
@@ -184,6 +202,8 @@ export function StageDocument({
   // interview or opens a new one after a full re-read. The turn itself only
   // says the question, so without this an answer looks unheard.
   const versionOf = new Map(versions.map((entry) => [entry.id, entry.version]));
+  const turnById = useMemo(() => new Map(turns.map((turn) => [turn.id, turn])), [turns]);
+  const specialistTitle = agentFor(node.stage as Stage).title;
   const noun = documentName(node.kind).toLowerCase();
   const notes = new Map<string, TurnNote>();
   turns.forEach((turn, index) => {
@@ -283,7 +303,13 @@ export function StageDocument({
           {/* The draft's own header carries the stage, so this says only what
               that does not. */}
           <span className="thread-progress">
-            {openQuestion ? "Question awaiting your answer" : ""}
+            {openQuestion
+              ? openQuestion.ordinal
+                ? openQuestion.total
+                  ? `Question ${openQuestion.ordinal} of ${openQuestion.total}`
+                  : `Question ${openQuestion.ordinal}`
+                : "Question awaiting your answer"
+              : ""}
           </span>
         </header>
 
@@ -294,35 +320,59 @@ export function StageDocument({
           identity={{ name: "Specialist", initials: "SB" }}
           // A specialist's turn is its digest of the draft, and the bolding in
           // it is the point — it is what a reader takes in first.
-          renderBody={(message) =>
-            message.id === "pending" ? (
-              <WorkingLabel />
-            ) : message.role === "agent" && failedTurns.has(message.id) ? (
-              <div className="turn-failed" role="alert">
-                <Markdown source={(message.parts[0] as { text: string }).text} />
-              </div>
-            ) : message.role === "user" && withdrawnIds.has(message.id) ? (
-              <div className="turn-withdrawn">
-                <Markdown source={message.parts.map((part) => (part as { text: string }).text).join("\n\n")} />
-                <span className="turn-withdrawn-note">Stopped before it was answered.</span>
-              </div>
-            ) : message.role === "agent" ? (
-              <SpecialistTurn
-                text={(message.parts[0] as { text: string }).text}
-                note={notes.get(message.id) ?? null}
-                onOpenVersion={onSelectVersion}
-                // Tapping a choice sends it, exactly as typing it would. That
-                // holds outside the interview too: a brainstormer proposing
-                // options is asking for a choice, whether or not a question
-                // is queued.
-                onAnswer={
-                  busy === null && message.id === messages.at(-1)?.id
-                    ? (answer) => onRevise(answer, [])
-                    : undefined
-                }
-              />
-            ) : undefined
-          }
+          renderBody={(message) => {
+            if (message.id === "pending") return <WorkingLabel />;
+            const turn = turnById.get(message.id);
+            // Who answered, and when — read from the recorded turn, so it
+            // reads the same after a reload rather than from client state.
+            const attribution = turn ? (
+              <p className="turn-attribution">
+                {turn.role === "human" ? "You" : specialistTitle} answered {formatWhen(turn.createdAt)}
+              </p>
+            ) : null;
+            if (message.role === "agent" && failedTurns.has(message.id)) {
+              return (
+                <div className="turn-failed" role="alert">
+                  <Markdown source={(message.parts[0] as { text: string }).text} />
+                </div>
+              );
+            }
+            if (message.role === "user" && withdrawnIds.has(message.id)) {
+              return (
+                <div className="turn-withdrawn">
+                  <Markdown source={message.parts.map((part) => (part as { text: string }).text).join("\n\n")} />
+                  <span className="turn-withdrawn-note">Stopped before it was answered.</span>
+                </div>
+              );
+            }
+            if (message.role === "agent") {
+              return (
+                <>
+                  {attribution}
+                  <SpecialistTurn
+                    text={(message.parts[0] as { text: string }).text}
+                    note={notes.get(message.id) ?? null}
+                    onOpenVersion={onSelectVersion}
+                    // Tapping a choice sends it, exactly as typing it would.
+                    // That holds outside the interview too: a brainstormer
+                    // proposing options is asking for a choice, whether or
+                    // not a question is queued.
+                    onAnswer={
+                      busy === null && message.id === messages.at(-1)?.id
+                        ? (answer) => onRevise(answer, [])
+                        : undefined
+                    }
+                  />
+                </>
+              );
+            }
+            return (
+              <>
+                {attribution}
+                {message.parts.map((part) => (part as { text: string }).text).join("\n\n")}
+              </>
+            );
+          }}
           empty={
             <div className="thread-empty">
               {/* The document is beside this, so what is missing is the
@@ -397,7 +447,16 @@ export function StageDocument({
                 data-ready={evaluation?.ready ? "true" : undefined}
                 className={evaluation?.ready ? "is-ready" : undefined}
               >
-                <Button variant="ghost" loading={busy === "submit"} onClick={onSubmit}>
+                <Button
+                  variant="ghost"
+                  loading={busy === "submit"}
+                  onClick={() => {
+                    // Quoted passages are for the stage being sent for
+                    // approval; once it is, nothing is left to restore.
+                    clearQuotedDraft(tenantId, node.stage);
+                    onSubmit();
+                  }}
+                >
                   <Check aria-hidden="true" />
                   {soloApproval ? "Approve and continue" : "Send for approval"}
                 </Button>
@@ -539,3 +598,17 @@ export function DocumentBody({ source, sideBySide }: { source: string; sideBySid
 }
 
 const EMPTY_WITHDRAWN: ReadonlySet<string> = new Set();
+
+/** Who answered, and when — read straight from the thread's own `createdAt`
+ * (the mail's From and date), so it survives a reload rather than living in
+ * client state. */
+function formatWhen(iso: string): string {
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}

@@ -15,7 +15,38 @@ export type WorkspaceGuidance = {
    * a readiness verdict and never authorizes approval.
    */
   readonly draft: ChatMessage | null;
+  /**
+   * A one-line note shown once a substantial draft exists and nothing more is
+   * being asked. Advisory only — it never authorizes approval.
+   */
+  readonly readyNote: string | null;
 };
+
+export type InterviewProgress = {
+  /** The question now open, counting every specialist question already
+   *  answered in this thread before it. */
+  readonly ordinal: number;
+  /** Only set when the specialist's own text states how many there are. */
+  readonly total: number | null;
+};
+
+/**
+ * "Question N of M" while a specialist is interviewing. N counts the
+ * specialist questions already answered in this thread, plus the one now
+ * open; M is shown only when the specialist's own text states a total, and
+ * only when that total is not already exceeded.
+ */
+export function interviewProgress(messages: readonly ChatMessage[]): InterviewProgress | null {
+  const current = latestAgent(messages);
+  if (!current || !questionIn(current.body)) return null;
+  const answered = messages.filter(
+    (message) => message.author === "agent" && message.id !== current.id && questionIn(message.body) !== null,
+  ).length;
+  const ordinal = answered + 1;
+  const stated = /(\d+)\s+questions?\b/i.exec(current.body) ?? /\bof\s+(\d+)\b/i.exec(current.body);
+  const total = stated ? Number(stated[1]) : null;
+  return { ordinal, total: total !== null && total >= ordinal ? total : null };
+}
 
 const PURPOSE: Record<number, string> = {
   1: "Clarify the problem, who is affected, and observable success.",
@@ -85,6 +116,7 @@ export function workspaceGuidance(stage: number, messages: readonly ChatMessage[
       detail: [purpose, "Answer the specialist's recorded question; “I’m not sure” is a valid answer."].join(" "),
       question,
       draft,
+      readyNote: null,
     };
   }
   if (draft) {
@@ -93,6 +125,7 @@ export function workspaceGuidance(stage: number, messages: readonly ChatMessage[
       detail: [purpose, "The latest substantial draft is available beside the conversation. Request a correction if it does not reflect the decision you want to make."].join(" "),
       question: null,
       draft,
+      readyNote: "This draft is substantial and nothing more is being asked: it looks ready for your approval.",
     };
   }
   if (latest) {
@@ -101,6 +134,7 @@ export function workspaceGuidance(stage: number, messages: readonly ChatMessage[
       detail: [purpose, "A specialist reply is recorded, but it is not identifiable as a complete draft. Ask for the complete stage draft or provide the missing detail."].join(" "),
       question: null,
       draft: null,
+      readyNote: null,
     };
   }
   if (messages.length > 0) {
@@ -109,6 +143,7 @@ export function workspaceGuidance(stage: number, messages: readonly ChatMessage[
       detail: [purpose, "Your message is recorded; no specialist reply is visible in this thread yet."].join(" "),
       question: null,
       draft: null,
+      readyNote: null,
     };
   }
   return {
@@ -116,6 +151,7 @@ export function workspaceGuidance(stage: number, messages: readonly ChatMessage[
     detail: [purpose, "No message is recorded for this stage yet."].join(" "),
     question: null,
     draft: null,
+    readyNote: null,
   };
 }
 

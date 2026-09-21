@@ -7,22 +7,30 @@ export function clock(seconds: number): string {
 }
 
 /**
+ * Milliseconds since `since`, ticking every second. `since` is a recorded
+ * timestamp — the outgoing mail's, not an inferred run start — so the count
+ * is the same after a reload as it was before it.
+ */
+export function useElapsedMs(since?: string | null): number {
+  const [ms, setMs] = useState(0);
+  useEffect(() => {
+    const parsed = since ? Date.parse(since) : Number.NaN;
+    const started = Number.isNaN(parsed) ? Date.now() : parsed;
+    const tick = () => setMs(Math.max(0, Date.now() - started));
+    tick();
+    const timer = setInterval(tick, 1_000);
+    return () => clearInterval(timer);
+  }, [since]);
+  return ms;
+}
+
+/**
  * Counts from the recorded outgoing message. It says nothing about what the
  * specialist is doing; the clock is outside a live region so a screen reader
  * is not told the time every second.
  */
 export function Elapsed({ since }: { since?: string | null }) {
-  const [seconds, setSeconds] = useState(0);
-  useEffect(() => {
-    // The timestamp is the outgoing mail's timestamp, not an inferred run
-    // start time.
-    const parsed = since ? Date.parse(since) : Number.NaN;
-    const started = Number.isNaN(parsed) ? Date.now() : parsed;
-    const tick = () => setSeconds(Math.max(0, Math.floor((Date.now() - started) / 1000)));
-    tick();
-    const timer = setInterval(tick, 1_000);
-    return () => clearInterval(timer);
-  }, [since]);
+  const seconds = Math.floor(useElapsedMs(since) / 1_000);
   return (
     <p className="elapsed">
       <span className="elapsed-clock" role="timer" aria-live="off">

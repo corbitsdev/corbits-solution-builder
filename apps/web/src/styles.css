@@ -3227,3 +3227,34 @@ button[aria-disabled="true"] {
   font-size: 0.75rem;
   color: var(--wb-muted-foreground);
 }
+
+/* --- Workspace: interview progress, answer attribution, waiting tips,
+   stall recovery (CL-8726) ------------------------------------------------ */
+
+/* Who answered, and when: one line above the turn it belongs to, read from
+   the recorded thread rather than kept in client state. */
+.turn-attribution {
+  margin: 0 0 var(--space-1);
+  font-size: 0.75rem;
+  color: var(--wb-muted-foreground);
+}
+
+/* The readiness note in the stage guidance banner: advisory, not another
+   title — it sits under the detail line at the same weight as a caption. */
+.stage-guidance-ready {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--wb-okay, var(--wb-muted-foreground));
+}
+
+/* Stalled or silent waits get their own actions, stacked under the note
+   they belong to rather than crowding the status box's single line. */
+.preparing-stall {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: center;
+}
+
+.preparing-silent {
+  color: var(--wb-foreground);
+}

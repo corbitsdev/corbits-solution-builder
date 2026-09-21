@@ -42,7 +42,7 @@ import { BuildPanel, buildEvidenceState, parsePublishedBundle } from "./build.js
 import { TargetPicker, targetOpeningLine } from "./freeze.jsx";
 import { deliveryOpeningLine, parseDeliveryManifest } from "./delivery-opening.ts";
 import { EstimateView } from "./estimate.jsx";
-import { workspaceGuidance } from "./guidance.js";
+import { interviewProgress, workspaceGuidance } from "./guidance.js";
 import { describeFailure } from "./failure-message.ts";
 import {
   applyWithdrawn,
@@ -699,6 +699,20 @@ export function StageWorkspace({
   const guidance = useMemo(() => workspaceGuidance(stage, foldedMessages), [stage, foldedMessages]);
   const draftMessage = guidance.draft;
   const reviewMessage = DOCUMENT_STAGES.has(stage) ? draftMessage : latestSpecialistMessage;
+  const progress = useMemo(() => interviewProgress(foldedMessages), [foldedMessages]);
+
+  // What the person last said, and whether a visible specialist reply has
+  // landed since — a reply with an empty body counts as none, since that is
+  // exactly the weak-model case nothing else would otherwise report.
+  const lastPersonMessage = [...foldedMessages].reverse().find((message) => message.author === "me") ?? null;
+  const awaitingReply =
+    lastPersonMessage !== null &&
+    !foldedMessages.some(
+      (message) =>
+        message.author === "agent" &&
+        message.body.trim().length > 0 &&
+        Date.parse(message.at) > Date.parse(lastPersonMessage.at),
+    );
 
   // Mail turns as StageDocument's turn shape: it wants who spoke and what
   // was said, nothing this contract tracks beyond that (no per-turn quotes
@@ -1193,6 +1207,7 @@ export function StageWorkspace({
         <div className="stage-guidance" aria-label={guidance.title}>
           <p className="stage-guidance-title">{guidance.title}</p>
           <p className="stage-guidance-detail">{guidance.detail}</p>
+          {guidance.readyNote ? <p className="stage-guidance-ready">{guidance.readyNote}</p> : null}
           {guidance.question && guidance.question.choices.length > 0 ? (
             <div className="button-row" aria-label="Recorded answer choices">
               {guidance.question.choices.map((choice) => (
@@ -1271,7 +1286,11 @@ export function StageWorkspace({
           <Preparing
             stage={stage}
             busy={messages.length > 0}
-            since={[...messages].reverse().find((message) => message.author === "me")?.at ?? null}
+            since={lastPersonMessage?.at ?? null}
+            waiting={awaitingReply}
+            lastMessage={lastPersonMessage?.body ?? null}
+            onOpenSettings={onOpenSettings}
+            {...(lastPersonMessage ? { onSendAgain: () => void send(lastPersonMessage.body) } : {})}
           />
           <StageConversation
             stage={stage}
@@ -1309,7 +1328,11 @@ export function StageWorkspace({
             content={activeContent}
             tenantId={tenantId}
             turns={turns}
-            openQuestion={guidance.question ? { text: guidance.question.text } : null}
+            openQuestion={
+              guidance.question
+                ? { text: guidance.question.text, ordinal: progress?.ordinal ?? null, total: progress?.total ?? null }
+                : null
+            }
             onSelectVersion={setSelectedVersionId}
             onRevise={(message, quotes) => {
               setSelectedVersionId(null);
