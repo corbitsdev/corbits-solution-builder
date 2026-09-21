@@ -47,7 +47,7 @@ function callbackConfigFor(redirectUri: string): { host: string; port: number; p
 }
 
 /**
- * Mounts `POST /oauth/:providerId/start` and `GET /oauth/:providerId/status`
+ * Mounts `POST /api/oauth/:providerId/start` and `GET /api/oauth/:providerId/status`
  * on `app`. Starting a login opens the operator's browser (via
  * `@corbits/oauth-core`'s default `openInBrowser`) and returns the same
  * authorize URL for a client that wants to offer it directly; the client
@@ -61,7 +61,7 @@ function callbackConfigFor(redirectUri: string): { host: string; port: number; p
 export function mountProviderOAuth(app: Hono, openInBrowser?: (url: string) => void): void {
   const logins = new Map<MountableOAuthProviderId, LoginState>();
 
-  app.post("/oauth/:providerId/start", async (c) => {
+  app.post("/api/oauth/:providerId/start", async (c) => {
     const providerId = c.req.param("providerId");
     const definition = (PROVIDERS as Record<string, ProviderDefinition | undefined>)[providerId];
     if (!definition) {
@@ -110,7 +110,7 @@ export function mountProviderOAuth(app: Hono, openInBrowser?: (url: string) => v
     return c.json({ authorizeUrl });
   });
 
-  app.get("/oauth/:providerId/status", (c) => {
+  app.get("/api/oauth/:providerId/status", (c) => {
     const providerId = c.req.param("providerId");
     if (!(providerId in PROVIDERS)) {
       return c.json({ error: { code: "unknown_provider", message: `No OAuth provider named ${providerId}.` } }, 404);

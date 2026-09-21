@@ -392,7 +392,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Waits for a login started by `POST /oauth/:id/start` to land: polls the
+ * Waits for a login started by `POST /api/oauth/:id/start` to land: polls the
  * mounted route's status until the loopback callback exchanges a code for
  * tokens, or the login errors or times out.
  */
@@ -402,7 +402,7 @@ async function waitForOAuthTokens(
 ): Promise<{ access: string; refresh: string; expiresAt?: number }> {
   const deadline = Date.now() + OAUTH_LOGIN_TIMEOUT_MS;
   for (;;) {
-    const state = await transport.fetch<OAuthLoginStatus>("GET", `/oauth/${providerId}/status`);
+    const state = await transport.fetch<OAuthLoginStatus>("GET", `/api/oauth/${providerId}/status`);
     if (state.status === "done") return state.tokens;
     if (state.status === "error") throw new Error(state.message);
     if (Date.now() >= deadline) throw new Error("Sign-in timed out. Try again.");
@@ -433,7 +433,7 @@ export async function connectOAuthProvider(
   if (!adapter) throw new Error(`${input.label} has no registered inference adapter.`);
   const workspace = await resolveWorkspace(transport);
   if (!workspace) throw new Error("The workspace is not installed yet.");
-  const { authorizeUrl } = await transport.fetch<{ authorizeUrl: string }>("POST", `/oauth/${input.providerId}/start`);
+  const { authorizeUrl } = await transport.fetch<{ authorizeUrl: string }>("POST", `/api/oauth/${input.providerId}/start`);
   onAuthorizeUrl?.(authorizeUrl);
   const tokens = await waitForOAuthTokens(transport, input.providerId);
   await upsertOAuthProvider(transport, workspace.tenantId, {

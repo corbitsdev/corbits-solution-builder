@@ -7,7 +7,7 @@ describe("mountProviderOAuth", () => {
     const app = new Hono();
     mountProviderOAuth(app, () => undefined);
 
-    const response = await app.request("/oauth/codex-oauth/start", { method: "POST" });
+    const response = await app.request("/api/oauth/codex-oauth/start", { method: "POST" });
     expect(response.status).toBe(200);
     const body = (await response.json()) as { authorizeUrl: string };
     expect(body.authorizeUrl).toContain("auth.openai.com");
@@ -17,7 +17,7 @@ describe("mountProviderOAuth", () => {
     const app = new Hono();
     mountProviderOAuth(app, () => undefined);
 
-    const response = await app.request("/oauth/not-a-provider/start", { method: "POST" });
+    const response = await app.request("/api/oauth/not-a-provider/start", { method: "POST" });
     expect(response.status).toBe(404);
   });
 
@@ -25,7 +25,7 @@ describe("mountProviderOAuth", () => {
     const app = new Hono();
     mountProviderOAuth(app, () => undefined);
 
-    const response = await app.request("/oauth/xai-oauth/status");
+    const response = await app.request("/api/oauth/xai-oauth/status");
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: "idle" });
   });
