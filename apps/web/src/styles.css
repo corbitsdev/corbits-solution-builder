@@ -1797,6 +1797,13 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   gap: var(--space-3);
 }
 
+.project-grid-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
 .project-grid-title {
   font-family: var(--wb-font-mono);
   font-size: 0.6875rem;
@@ -1804,6 +1811,27 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--wb-muted-foreground);
+}
+
+.import-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 0.6875rem;
+  font-family: var(--wb-font-mono);
+  color: var(--wb-muted-foreground);
+  cursor: pointer;
+}
+
+.import-link:hover:not(:disabled),
+.import-link:focus-visible {
+  color: var(--wb-foreground);
+  text-decoration: underline;
+}
+
+.import-link:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 
 .project-grid {
@@ -1854,8 +1882,29 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   color: var(--wb-muted-foreground);
 }
 
-.project-card-stage .stage-ring {
-  color: var(--wb-primary);
+/* The nine-segment track the topbar speaks, one per card: done stages fill
+   in, the live one stretches and takes the accent. */
+.stage-track {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: auto;
+}
+
+.stage-track .seg {
+  width: 14px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--wb-border);
+}
+
+.stage-track .seg.done {
+  background: var(--wb-foreground);
+}
+
+.stage-track .seg.now {
+  background: var(--wb-primary);
+  width: 20px;
 }
 
 .project-card-foot {
@@ -3180,12 +3229,6 @@ button[aria-disabled="true"] {
   overflow-x: auto;
   white-space: pre;
   font-size: 0.8125rem;
-}
-
-/* The import link under the start box: a quieter second way in. */
-.start-import {
-  margin: var(--space-2) 0 0;
-  font-size: 0.875rem;
 }
 
 /* ------------------------------------------------------------------ print */

@@ -29,7 +29,7 @@ import {
 import { ArrowRight, Ellipsis } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, ApiFailure, type ActiveModel, type ProjectInfo, type ProjectSummary } from "../client.js";
-import { Button, Banner, downloadArtifact, StageRing, StateLabel, stageName } from "../components.jsx";
+import { Button, Banner, downloadArtifact, StateLabel, stageName } from "../components.jsx";
 // INTEGRATE (CL-8756): api.exportProject is gone on this lane — export is
 // assembled in the browser (assembleBundle) and saved via downloadArtifact;
 // stage/turn/done come from project-list.ts helpers and spend copy from
@@ -220,10 +220,20 @@ export function Projects({
             Word files and images are kept with the project and named to them.
           </p>
         </div>
-        {/* A project from another instance of this app. The file is one of
-            its own exports; the input is hidden because the file picker is the
-            whole interaction and a bare input reads as a form. */}
-        <p className="start-import">
+      </section>
+
+      <SpendBox key={projects.length} />
+
+      <section className="project-grid-section" aria-labelledby="projects-title">
+        <div className="project-grid-head">
+          <h3 id="projects-title" className="project-grid-title">
+            {live.length === 0
+              ? "Nothing in progress"
+              : `${live.length} project${live.length === 1 ? "" : "s"}`}
+          </h3>
+          {/* A project from another instance of this app. The file is one of
+              its own exports; the input is hidden because the file picker is
+              the whole interaction and a bare input reads as a form. */}
           <input
             ref={importInput}
             type="file"
@@ -235,20 +245,15 @@ export function Projects({
               if (file) void importFile(file);
             }}
           />
-          <Button variant="link" disabled={busy} onClick={() => importInput.current?.click()}>
-            Import a project exported from another copy of this app…
-          </Button>
-        </p>
-      </section>
-
-      <SpendBox key={projects.length} />
-
-      <section className="project-grid-section" aria-labelledby="projects-title">
-        <h3 id="projects-title" className="project-grid-title">
-          {live.length === 0
-            ? "Nothing in progress"
-            : `${live.length} project${live.length === 1 ? "" : "s"}`}
-        </h3>
+          <button
+            type="button"
+            className="import-link"
+            disabled={busy}
+            onClick={() => importInput.current?.click()}
+          >
+            Import bundle
+          </button>
+        </div>
         {live.length === 0 ? (
           <EmptyState
             title="No projects yet"
@@ -450,10 +455,6 @@ function ProjectCard({
       style={{ "--i": index } as React.CSSProperties}
     >
       <div className="project-card-stage">
-        {/* INTEGRATE (CL-8756): stage now resolves per card and can fail — the
-            Retry is lane behavior in main's diction; the stage line keeps
-            main's copy with the resolved stage. */}
-        <StageRing stage={stage ?? 0} />
         {stageFailed ? (
           <span>
             Status unavailable{" "}
@@ -466,11 +467,6 @@ function ProjectCard({
             Stage {stage || "—"} of 9 · {stageName(stage)}
           </span>
         )}
-        {/* INTEGRATE (CL-8756): lane affordance in main's inline-note diction —
-            what this project has run, priced nowhere per project. */}
-        <span className="project-card-usage inline-note">
-          {project.runs} stage run{project.runs === 1 ? "" : "s"} · not priced
-        </span>
         <Menu onOpenChange={(open) => !open && setConfirming(false)}>
           <MenuTrigger asChild>
             <button type="button" className="project-card-menu" aria-label={`Options for ${project.title}`}>
@@ -541,13 +537,32 @@ function ProjectCard({
         </button>
       )}
 
+      <StageTrack stage={stage} done={done} />
+
       <div className="project-card-foot">
         {status}
+        <span className="project-card-usage inline-note">
+          {project.runs} run{project.runs === 1 ? "" : "s"}
+        </span>
         <button type="button" className="project-card-open" onClick={onOpen}>
           Open <ArrowRight aria-hidden="true" />
         </button>
       </div>
     </article>
+  );
+}
+
+/** The same nine-segment language the topbar stepper speaks, one per card. */
+function StageTrack({ stage, done }: { stage: number | null; done: boolean }) {
+  return (
+    <div className="stage-track" role="img" aria-label={stage ? `Stage ${stage} of 9` : "Stage unknown"}>
+      {Array.from({ length: 9 }, (_, index) => {
+        const at = index + 1;
+        const cls =
+          stage === null ? "" : at < stage || (done && at <= stage) ? "done" : at === stage ? "now" : "";
+        return <span key={at} className={cls ? `seg ${cls}` : "seg"} />;
+      })}
+    </div>
   );
 }
 
