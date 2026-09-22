@@ -298,6 +298,58 @@ export async function approveStage(deps: StageApprovalDeps, input: ApproveStageI
   return pollUntil(input.projectId, deps, input.stage, ourDecisionIds);
 }
 
+export type MintRequirementsInput = {
+  readonly projectId: string;
+  readonly stage: number;
+  readonly items: readonly { readonly kind: string; readonly text: string }[];
+  readonly attempt?: number;
+};
+
+export type MintRequirementsResult = { readonly ok: true } | { readonly ok: false; readonly reason: string };
+
+/**
+ * Mints `ProjectState.requirements` from `items` (`P/requirements.ts`'s
+ * `extractRequirementItems`), once, before the Architect drafts. Idempotent
+ * from the caller's point of view: already-minted requirements -- this
+ * session's own earlier call, another tab, or a retry -- is `ok: true`,
+ * whether the view already shows them or the workflow refuses with
+ * `requirements_already_minted`; neither is an error the UI should show.
+ */
+export async function mintRequirements(deps: StageApprovalDeps, input: MintRequirementsInput): Promise<MintRequirementsResult> {
+  const attempt = input.attempt ?? 0;
+  const view = await deps.view(input.projectId);
+  if (!view) return { ok: false, reason: "workflow_unavailable" };
+  if (view.requirements.length > 0) return { ok: true };
+  if (view.stage !== input.stage) return { ok: false, reason: "wrong_stage" };
+  const epoch = view.decisions.length;
+  const id = `dec-${await sha256Hex(`${input.projectId}|${String(input.stage)}|mint_requirements|${String(epoch)}|${String(attempt)}`)}`;
+  const ourDecisionIds = new Set<string>([id]);
+  const sent = await safeDecide(deps, input.projectId, {
+    kind: "mint_requirements",
+    decisionId: id,
+    projectId: input.projectId,
+    stage: input.stage,
+    items: input.items,
+    at: deps.now(),
+  });
+  if (!sent.ok) return sent;
+
+  const deadline = Date.now() + POLL_TIMEOUT_MS;
+  for (;;) {
+    const polled = await deps.view(input.projectId);
+    if (polled) {
+      if (polled.requirements.length > 0) return { ok: true };
+      const refusal = findOurRefusal(polled.decisions, ourDecisionIds);
+      if (refusal) {
+        if (refusal.reason === "requirements_already_minted") return { ok: true };
+        return { ok: false, reason: refusal.reason ?? "refused" };
+      }
+    }
+    if (Date.now() >= deadline) return { ok: false, reason: "timed_out" };
+    await sleep(POLL_INTERVAL_MS);
+  }
+}
+
 export type SendBackInput = {
   readonly projectId: string;
   readonly stage: number;

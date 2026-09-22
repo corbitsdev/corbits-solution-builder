@@ -11,6 +11,7 @@
 import type { Transport, WorkflowRunEvent } from "@intx/hub-client";
 import { workflowsFor, type ProjectWorkflowDeployment } from "@solutions-builder/installer";
 import { approveReason, type ApproveReason, type DecisionRecord, type Freeze, type ProjectState, type ReviewState, type StageNumber } from "@solutions-builder/app/project-workflow/contracts";
+import type { RequirementEntry } from "@solutions-builder/app/stack";
 
 const LOOP_STEP_ID = "rework";
 const APPLY_STEP_ID = "apply";
@@ -35,6 +36,9 @@ export type ProjectWorkflowView = {
   /** Stage 7's freeze, once approved; null before then or after a send-back
    *  to stage <= 7 clears it. */
   readonly freeze: Freeze | null;
+  /** Requirement ids `mint_requirements` minted, once, before the Architect
+   *  runs; empty until then, cleared by a send-back to stage <= 6. */
+  readonly requirements: readonly RequirementEntry[];
 };
 
 const EMPTY_STATE: ProjectState = {
@@ -141,6 +145,7 @@ export function foldProjectWorkflow(
       approveReason: approveReason(state),
     },
     freeze: state.freeze,
+    requirements: state.requirements,
   };
 }
 
