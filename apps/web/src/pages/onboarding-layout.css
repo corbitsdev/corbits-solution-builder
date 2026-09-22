@@ -277,16 +277,18 @@
   object-fit: contain;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme]) .ob-frame .provider-mark img,
-  :root:not([data-theme]) .ob-credit img {
-    filter: invert(1) brightness(0.94);
-  }
+/* Marks are dark ink. Invert only when the resolved theme is dark
+   (`html.dark` from ThemeProvider). `data-theme` is the palette preset,
+   not light/dark — matching it or prefers-color-scheme would bleach logos
+   in explicit light mode on a dark OS. Inline svg uses currentColor. */
+html.dark .ob-frame .provider-mark img,
+html.dark .ob-frame .ob-credit img {
+  filter: invert(1) brightness(0.94);
 }
 
-html[data-theme="dark"] .ob-frame .provider-mark img,
-html[data-theme="dark"] .ob-credit img {
-  filter: invert(1) brightness(0.94);
+html.light .ob-frame .provider-mark img,
+html.light .ob-frame .ob-credit img {
+  filter: none;
 }
 
 .ob-group {

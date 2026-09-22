@@ -60,4 +60,11 @@ describe("mock radius tokens", () => {
     expect(onboarding).toMatch(/\.ob-track \.seg \{[\s\S]*height: 2px/);
     expect(workspace).toMatch(/\.topbar-project \.stepper li > span,[\s\S]*border-radius: 2px/);
   });
+
+  test("provider mark images invert only under html.dark, not OS preference", () => {
+    expect(onboarding).toContain("html.dark .ob-frame .provider-mark img");
+    expect(onboarding).toContain("html.light .ob-frame .provider-mark img");
+    expect(onboarding).not.toMatch(/prefers-color-scheme:\s*dark[\s\S]*provider-mark img/);
+    expect(onboarding).not.toContain('html[data-theme="dark"] .ob-frame .provider-mark img');
+  });
 });
