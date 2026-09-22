@@ -8,7 +8,7 @@ import type { ReactNode } from "react";
 import { Textarea } from "@corbits/react-ui";
 import { Button, Screen, stageName } from "../../components.jsx";
 import { Dictated } from "../../dictation.jsx";
-import { SendBackPicker, defaultTarget } from "../send-back.jsx";
+import { RETURN_TO, SendBackPicker, defaultTarget } from "../send-back.jsx";
 import { STAGE_GOAL } from "./gate.jsx";
 import { Elapsed } from "./elapsed.jsx";
 import type { Guidance } from "./product-guide.js";
@@ -143,6 +143,43 @@ export function SendBackDock({
         </div>
       </div>
     </details>
+  );
+}
+
+/** The send-back picker hold raises over the composer: every stage up to
+ *  this one, newest first, each named by what going back to it is for. The
+ *  dock below stays the visible path — a hold gesture is invisible to
+ *  keyboard and discovery both. */
+export function SendBackPopover({
+  stage,
+  open,
+  onPick,
+  onDismiss,
+}: {
+  stage: number;
+  open: boolean;
+  onPick: (target: number) => void;
+  onDismiss: () => void;
+}) {
+  if (!open || stage < 2) return null;
+  const targets = Array.from({ length: stage }, (_, index) => stage - index);
+  return (
+    <>
+      <button type="button" className="sbpick-backdrop" aria-label="Dismiss" onClick={onDismiss} />
+      <div className="sbpick" role="dialog" aria-label="Send this stage back">
+        <p className="sbpick-head">Send back to…</p>
+        {targets.map((target) => (
+          <button key={target} type="button" className="sbpick-row" onClick={() => onPick(target)}>
+            <span className="sbpick-name">
+              Stage {target} · {stageName(target)}
+            </span>
+            <span className="sbpick-why">
+              {target === stage ? "this stage again" : RETURN_TO[target] ? `to ${RETURN_TO[target]}` : ""}
+            </span>
+          </button>
+        ))}
+      </div>
+    </>
   );
 }
 

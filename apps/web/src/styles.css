@@ -880,6 +880,153 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   display: grid;
   gap: var(--space-2);
   flex: none;
+  position: relative;
+}
+
+/* The send-back picker a hold on send raises: floats above the composer,
+   anchored to it rather than the viewport. */
+.sbpick-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 29;
+  border: 0;
+  background: transparent;
+  cursor: default;
+}
+
+.sbpick {
+  position: absolute;
+  left: var(--space-4);
+  right: var(--space-4);
+  bottom: 100%;
+  z-index: 30;
+  margin-bottom: var(--space-2);
+  border: 1px solid var(--wb-border-strong);
+  border-radius: var(--radius-panel);
+  background: var(--wb-card);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--wb-foreground) 10%, transparent);
+  overflow: hidden;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.sbpick-head {
+  font-family: var(--wb-font-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.08em;
+  color: var(--wb-muted-foreground);
+  padding: var(--space-3) var(--space-4) var(--space-1);
+}
+
+.sbpick-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-4);
+  border: 0;
+  background: none;
+  font-size: 0.8125rem;
+  color: var(--wb-foreground);
+  text-align: left;
+  cursor: pointer;
+}
+
+.sbpick-row:hover,
+.sbpick-row:focus-visible {
+  background: var(--wb-muted);
+}
+
+.sbpick-name {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.sbpick-why {
+  font-size: 0.72rem;
+  color: var(--wb-muted-foreground);
+  font-family: var(--wb-font-mono);
+}
+
+/* The artifact strip at the head of the document pane — one tab per
+   artifact lineage, kind glyph first, a dot on the current stage's. The
+   Tabs' own scrollable variant supplies the horizontal scroll and edge
+   fades; these rules only quiet it into the pane. */
+.artifact-strip-tabs [role="tablist"] {
+  border-bottom: 1px solid var(--wb-border);
+}
+
+.artifact-strip-tabs [role="tab"] {
+  font-family: var(--wb-font-mono);
+  font-size: 0.72rem;
+}
+
+.artifact-strip-live {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--wb-primary);
+}
+
+.version-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-6);
+  border-bottom: 1px solid var(--wb-border);
+  flex: none;
+}
+
+.ver {
+  font-family: var(--wb-font-mono);
+  font-size: 0.6875rem;
+  color: var(--wb-muted-foreground);
+  padding: 2px var(--space-2);
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+}
+
+.ver:hover {
+  color: var(--wb-foreground);
+}
+
+.ver.on {
+  border-color: var(--wb-border-strong);
+  background: var(--wb-background);
+  color: var(--wb-foreground);
+  font-weight: 700;
+}
+
+.ver-nav {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--wb-muted-foreground);
+  cursor: pointer;
+}
+
+.ver-nav:hover:not(:disabled) {
+  background: var(--wb-muted);
+  color: var(--wb-foreground);
+}
+
+.ver-nav:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.version-note {
+  font-family: var(--wb-font-mono);
+  font-size: 0.6875rem;
+  color: var(--wb-muted-foreground);
+  margin-left: var(--space-2);
 }
 
 .document {
@@ -2236,6 +2383,13 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  position: relative;
+}
+
+/* In the plain conversation the popover anchors above the input, which
+   sits flush at the column's foot — roughly its own height plus a gap. */
+.stage-conversation > .sbpick {
+  bottom: 76px;
 }
 
 .stage-conversation > *:last-child {

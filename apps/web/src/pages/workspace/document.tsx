@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   api,
   type ArtifactNode,
@@ -60,6 +60,10 @@ export function StageDocument({
   withdrawnIds = EMPTY_WITHDRAWN,
   pending = false,
   onStop,
+  strip = null,
+  promote = null,
+  onSendHold,
+  composerPopover = null,
 }: {
   node: ArtifactNode;
   versions: ArtifactNode[];
@@ -95,6 +99,20 @@ export function StageDocument({
   pending?: boolean;
   /** Restores that turn to the composer and records the withdrawal. */
   onStop?: () => void;
+  /** The artifact strip, rendered at the head of the document pane. Its
+   *  presence also hands version paging to the strip, so the header's own
+   *  picker hides rather than duplicating it. */
+  strip?: ReactNode;
+  /** Set when the person is reading a superseded version of the stage's
+   *  draft: the composer's gate offers "make this the active version"
+   *  instead of approve — restoring writes it forward as the new head,
+   *  versions are append-only. */
+  promote?: { label: string; run: () => void; busy: boolean } | null;
+  /** Holding send raises the send-back picker; the box's current text goes
+   *  along as the reason. */
+  onSendHold?: (draft: string) => void;
+  /** Floated over the composer — the picker hold opens. */
+  composerPopover?: ReactNode;
 }) {
   const [message, setMessage] = useState("");
   const [attached, setAttached] = useState<Quote[]>([]);
@@ -413,6 +431,13 @@ export function StageDocument({
                 Neither, redraft
               </Button>
             </div>
+          ) : promote ? (
+            <div className="composer-approve">
+              <span>{promote.label}</span>
+              <Button variant="ghost" loading={promote.busy} onClick={() => promote.run()}>
+                Make it the active version
+              </Button>
+            </div>
           ) : canSubmit ? (
             <div className="composer-approve">
               <span>{soloApproval ? "Happy with it?" : "Nothing more to say?"}</span>
@@ -463,8 +488,10 @@ export function StageDocument({
               setAttached(attached.filter((_, at) => `${at}` !== entry.id))
             }
             textareaRef={composer}
+            {...(onSendHold ? { onSendHold: () => onSendHold(message) } : {})}
           />
           </Dictated>
+          {composerPopover}
           {queued && busy !== null ? (
             <p className="composer-cue" aria-live="polite">
               Held until the specialist finishes, then sent.
@@ -480,6 +507,7 @@ export function StageDocument({
       </section>
 
       <article className="document" data-tour="document">
+        {strip}
         <header className="document-header">
           <h2>{documentName(node.kind)}</h2>
           {live !== null ? (
@@ -493,7 +521,7 @@ export function StageDocument({
           {/* Stacked, picker over toggle: on one line they fought the title for
               width and the title wrapped. */}
           <div className="document-tools">
-            {versions.length > 1 ? (
+            {versions.length > 1 && strip === null ? (
               <select
                 aria-label="Version"
                 value={node.id}

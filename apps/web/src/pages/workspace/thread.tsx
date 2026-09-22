@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ChatInput, ChatThread, type ChatMessage as UiChatMessage } from "@corbits/react-ui";
 import { Markdown } from "../../markdown.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
@@ -38,6 +38,8 @@ export function StageConversation({
   withdrawnIds = EMPTY_WITHDRAWN,
   pending = false,
   onStop,
+  onSendHold,
+  popover = null,
 }: {
   stage: number;
   messages: readonly ChatMessage[];
@@ -54,6 +56,10 @@ export function StageConversation({
   pending?: boolean;
   /** Restores that turn to the composer and records the withdrawal. */
   onStop?: () => void;
+  /** Holding send raises the heavier alternative to a plain send. */
+  onSendHold?: () => void;
+  /** Floated over the composer — the send-back picker hold opens. */
+  popover?: ReactNode;
 }) {
   const uiMessages = useMemo(() => {
     const list = toUiMessages(messages);
@@ -97,9 +103,11 @@ export function StageConversation({
         onSend={onSend}
         working={working || pending}
         {...(pending && onStop ? { onStop } : {})}
+        {...(onSendHold ? { onSendHold } : {})}
         disabled={disabled}
         placeholder={placeholder}
       />
+      {popover}
     </div>
   );
 }

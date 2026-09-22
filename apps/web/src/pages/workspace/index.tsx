@@ -50,14 +50,17 @@ import { useStageThread } from "./use-stage-thread.ts";
 import { useWithdrawnTurns } from "./use-withdrawn-turns.ts";
 import { useOpeningDispatch } from "./use-opening-dispatch.ts";
 import { useStageEvaluator, useProductGuide } from "./use-advisory.ts";
-import { useStageDocument } from "./use-stage-document.ts";
+import { useProjectArtifacts } from "./use-project-artifacts.ts";
 import { useStageDecisions } from "./use-stage-decisions.ts";
+import { ArtifactStrip, VersionStrip } from "./artifact-strip.tsx";
+import { STAGE_DRAFT_KIND } from "../../client.js";
 import {
   EvaluatorVerdict,
   GuidanceCard,
   OpeningScreen,
   ProductGuideDock,
   SendBackDock,
+  SendBackPopover,
   WaitingSection,
 } from "./workspace-chrome.tsx";
 import type { FoldedFeedback } from "@solutions-builder/app/project-state";
@@ -220,14 +223,15 @@ export function StageWorkspace({
     [foldedMessages],
   );
 
-  const doc = useStageDocument(tenantId, stage, detail.nodes, draftMessage);
+  const draftKind = STAGE_DRAFT_KIND[stage] ?? null;
+  const artifacts = useProjectArtifacts(tenantId, stage, detail.nodes, draftMessage);
   const decisions = useStageDecisions({
     detail,
     tenantId,
     stage,
     workflowView,
     reviewMessage,
-    draftKind: doc.draftKind,
+    draftKind,
     foldedMessages,
     refreshWorkflow: workflow.refresh,
     markStage: workflow.markStage,
@@ -251,6 +255,49 @@ export function StageWorkspace({
     sendBack,
   } = decisions;
   const refreshWorkflow = workflow.refresh;
+
+  // Holding send raises the send-back picker over the composer; whatever is
+  // typed goes along as the reason. The dock stays the visible path — a
+  // hold gesture is invisible to keyboard and discovery both.
+  const [sendBackOpen, setSendBackOpen] = useState(false);
+  const openSendBack = (draft: string) => {
+    if (draft.trim()) setSendReason(draft);
+    setSendBackOpen(true);
+  };
+  const sendBackPopover = (
+    <SendBackPopover
+      stage={stage}
+      open={sendBackOpen}
+      onDismiss={() => setSendBackOpen(false)}
+      onPick={(target) => {
+        setSendBackOpen(false);
+        void sendBack(target);
+      }}
+    />
+  );
+
+  // Reading a superseded version of the stage's draft: the gate swaps
+  // approve for "make this the active version" — restoring writes the old
+  // content forward as the new head, versions are append-only.
+  const [promoting, setPromoting] = useState(false);
+  const superseded =
+    artifacts.isStageDraft && artifacts.selected !== null && artifacts.activeNode !== null &&
+    artifacts.activeNode !== artifacts.selected.versions.at(-1);
+  const promote = async () => {
+    if (!artifacts.activeContent || !superseded) return;
+    setPromoting(true);
+    setError(null);
+    try {
+      const materials = detail.nodes.filter((node) => node.kind === "source_material").map((node) => node.id);
+      await api.persistStageDraft(detail.project.id, stage, artifacts.activeContent, materials);
+      await refreshWorkflow();
+      artifacts.select(null);
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    } finally {
+      setPromoting(false);
+    }
+  };
 
   const send = async (body: string) => {
     if (!agentAddress || body.trim().length === 0) return;
@@ -492,11 +539,13 @@ export function StageWorkspace({
             withdrawnIds={withdrawnIds}
             pending={pending !== null}
             onStop={() => void stopTurn()}
+            onSendHold={() => openSendBack(composer)}
+            popover={sendBackPopover}
           />
         </WaitingSection>
       ) : null}
 
-      {agentAddress && DOCUMENT_STAGES.has(stage) && draftMessage && doc.activeNode ? (
+      {agentAddress && DOCUMENT_STAGES.has(stage) && draftMessage && artifacts.activeNode && artifacts.selected ? (
         <>
           {stage === 7 ? (
             <EstimateView
@@ -507,9 +556,9 @@ export function StageWorkspace({
           ) : null}
           {stage === 7 ? <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} /> : null}
           <StageDocument
-            node={doc.activeNode}
-            versions={doc.versions}
-            content={doc.activeContent}
+            node={artifacts.activeNode}
+            versions={artifacts.selected.versions}
+            content={artifacts.activeContent}
             tenantId={tenantId}
             turns={turns}
             openQuestion={
@@ -517,9 +566,9 @@ export function StageWorkspace({
                 ? { text: guidance.question.text, ordinal: progress?.ordinal ?? null, total: progress?.total ?? null }
                 : null
             }
-            onSelectVersion={doc.selectVersion}
+            onSelectVersion={artifacts.selectVersion}
             onRevise={(message, quotes) => {
-              doc.selectVersion(null);
+              artifacts.selectVersion(null);
               const quoted = quotes.map((entry) => `> ${entry.quote}`).join("\n");
               void send(quoted ? `${quoted}\n\n${message}` : message);
             }}
@@ -529,15 +578,40 @@ export function StageWorkspace({
             }}
             onSubmit={() => void approve()}
             soloApproval={detail.soloApproval}
-            canSubmit={approveAllowed}
+            canSubmit={approveAllowed && artifacts.isStageDraft && !superseded}
             busy={sending ? "draft" : approving || workflow.refreshingAfterAction ? "submit" : null}
             draftOpen={draftOpen}
-            newer={doc.newerVersion}
+            newer={artifacts.newerVersion}
             live={null}
             seed={stopSeed}
             withdrawnIds={withdrawnIds}
             pending={pending !== null}
             onStop={() => void stopTurn()}
+            onSendHold={openSendBack}
+            composerPopover={sendBackPopover}
+            strip={
+              <>
+                <ArtifactStrip
+                  tabs={artifacts.tabs}
+                  selectedKey={artifacts.selected?.key ?? null}
+                  onSelect={artifacts.select}
+                />
+                <VersionStrip
+                  tab={artifacts.selected}
+                  activeId={artifacts.activeNode.id}
+                  onSelect={artifacts.selectVersion}
+                />
+              </>
+            }
+            promote={
+              superseded
+                ? {
+                    label: `${artifacts.selected.label} v${artifacts.activeNode.version} · superseded by v${artifacts.selected.versions.at(-1)?.version}`,
+                    run: () => void promote(),
+                    busy: promoting,
+                  }
+                : null
+            }
           />
         </>
       ) : null}
@@ -596,6 +670,8 @@ export function StageWorkspace({
             withdrawnIds={withdrawnIds}
             pending={pending !== null}
             onStop={() => void stopTurn()}
+            onSendHold={() => openSendBack(composer)}
+            popover={sendBackPopover}
           />
         </>
       ) : null}
