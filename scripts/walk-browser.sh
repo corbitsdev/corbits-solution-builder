@@ -78,7 +78,10 @@ wait_reply() { # min_count
   local t0=$(date +%s)
   while true; do
     snap
-    [ "$(replies)" -gt "$1" ] && return 0
+    # The transcript's pending row is also an agent article, so the count
+    # alone can't say a reply landed — the composer says it: "Stop
+    # generating" shows while the specialist is still writing.
+    if [ "$(replies)" -gt "$1" ] && ! grep -q 'button "Stop generating"' "$SNAP"; then return 0; fi
     [ $(( $(date +%s) - t0 )) -ge "$WALK_STAGE_TIMEOUT_S" ] && return 1
     sleep 5
   done
@@ -275,8 +278,12 @@ T0=$(date +%s)
 BRIEF_TEXT=$(cat "$WALK_BRIEF")
 PROJECT_TITLE=$(echo "$BRIEF_TEXT" | head -c 40 | tr -d '\n')
 snap
-PROBLEM_FIELD=$(ref '#first-problem')
-[ -z "$PROBLEM_FIELD" ] && PROBLEM_FIELD=$(ref 'textbox')
+PROBLEM_FIELD=$(ref 'textbox "Message"')
+if [ -z "$PROBLEM_FIELD" ]; then
+  shot "no-problem-field"
+  defect_log create-project "the onboarding composer" "no Message textbox found" "shots/no-problem-field.png" "blocker"
+  exit 1
+fi
 ab fill "@$PROBLEM_FIELD" "$BRIEF_TEXT" >/dev/null
 sleep 1; snap
 BEGIN=$(enabled_ref 'button "Begin problem discovery"')
@@ -293,17 +300,26 @@ if ! wait_for "Stage 1 of 9" 120; then
 fi
 walk_log create-project "create project" "opened at stage 1" $(( ($(date +%s)-T0)*1000 ))
 
-# The app uses the first model the endpoint lists unless one is selected.
-# Stage 1 is already deployed; every later stage deploys with this choice.
+# The app uses the first model the endpoint lists unless one is made the
+# default. Stage 1 is already deployed; every later stage deploys with this
+# choice. The resolved catalog in Settings is a row per model — pin the
+# walk's model with its row's "Make default".
 PROJECT_URL=$(ab get url 2>/dev/null | tail -1)
 snap
 SETTINGS=$(ref 'link "Settings"'); [ -z "$SETTINGS" ] && SETTINGS=$(ref 'button "Settings"')
 [ -n "$SETTINGS" ] && ab click "@$SETTINGS" >/dev/null
-if wait_for 'combobox "Model for ' 30; then
-  ab select "@$(ref 'combobox "Model for [^"]*"')" "$WALK_MODEL" >/dev/null; sleep 3
-  walk_log provider "select model" "$WALK_MODEL" 0
+if wait_for 'button "Make default"' 30; then
+  if ab click "li.provider-row:has-text(\"$WALK_MODEL\") button:has-text(\"Make default\")" >/dev/null 2>&1; then
+    sleep 3
+    walk_log provider "select model" "$WALK_MODEL made default" 0
+  elif ab read 2>/dev/null | grep -q "$WALK_MODEL"; then
+    walk_log provider "select model" "$WALK_MODEL already the default" 0
+  else
+    shot "no-model-row"
+    defect_log provider "a $WALK_MODEL row in the resolved catalog" "model not listed" "shots/no-model-row.png" "major"
+  fi
 else
-  shot "no-model-picker"; defect_log provider "a model picker in Settings" "not found" "shots/no-model-picker.png" "major"
+  shot "no-model-picker"; defect_log provider "the resolved model catalog in Settings" "not found" "shots/no-model-picker.png" "major"
 fi
 ab open "$PROJECT_URL" >/dev/null 2>&1
 wait_for 'button "Open" \[ref=' 30 && ab click "@$(ref 'button "Open"')" >/dev/null
