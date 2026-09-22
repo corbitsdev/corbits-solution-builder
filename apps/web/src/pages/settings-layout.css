@@ -81,12 +81,16 @@
   color: var(--muted-foreground);
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: var(--space-3);
   flex-shrink: 0;
+  max-width: min(420px, 100%);
 }
 
 .settings-page .seg-ctl {
   display: inline-flex;
+  flex-wrap: wrap;
   gap: 2px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
@@ -207,38 +211,13 @@
   text-decoration: underline;
 }
 
+.settings-page a.btn {
+  text-decoration: none;
+}
+
 .settings-page .btn:disabled {
   opacity: 0.5;
   cursor: default;
-}
-
-/* Provider / catalog lists live inside a section-body; drop their own frame. */
-.settings-page .section-body > .provider-list,
-.settings-page .section-body > ul.provider-list {
-  border: 0;
-  border-radius: 0;
-  margin: 0;
-}
-
-.settings-page .section-body .provider-row {
-  padding: var(--space-3) var(--space-4);
-  min-height: 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.settings-page .section-body .provider-row:last-child {
-  border-bottom: 0;
-}
-
-.settings-page .section-body .provider-identity strong {
-  font-weight: 600;
-  font-size: 13.5px;
-}
-
-.settings-page .section-body .provider-identity small {
-  margin-top: 1px;
-  font-size: 12px;
-  font-family: var(--font-mono);
 }
 
 .settings-page .section-body > .banner,

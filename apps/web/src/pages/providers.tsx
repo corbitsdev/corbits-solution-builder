@@ -14,11 +14,15 @@
  * `@solutions-builder/installer`); an OAuth provider signs in through the
  * loopback the embedded hub mounts on `@corbits/oauth-core`
  * (`packages/embed-hub/src/oauth-mount.ts`).
+ *
+ * Markup is the Settings mockup's `.row` / `.k` / `.v` language: Connect is
+ * an outline `.btn`, a live connection is muted "Connected" plus Refresh
+ * models, and catalog actions are quiet links in `.v`.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { api, ApiFailure, type Provider, type ResolvedCatalogRow } from "../client.js";
 import { LOCAL_DEFAULT_BASE_URL, LOCAL_PROVIDER_ID } from "../provider-catalog.js";
-import { Banner, Button, StateLabel } from "../components.jsx";
+import { Banner } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
 
 export type ApiKeyProvider = { providerId: string; label: string; needsBaseUrl: boolean };
@@ -32,6 +36,41 @@ type Row = {
   action: "Log in with subscription" | "Connect API key" | "Connect locally";
   needsBaseUrl: boolean;
 };
+
+function ChromeBtn({
+  kind = "outline",
+  loading,
+  children,
+  type = "button",
+  disabled,
+  onClick,
+  title,
+  "aria-label": ariaLabel,
+}: {
+  kind?: "outline" | "link" | "refresh";
+  loading?: boolean;
+  children: ReactNode;
+  type?: "button" | "submit";
+  disabled?: boolean;
+  onClick?: () => void;
+  title?: string;
+  "aria-label"?: string;
+}) {
+  const className = kind === "refresh" ? "refresh-models" : kind === "link" ? "btn link" : "btn";
+  return (
+    <button
+      type={type}
+      className={className}
+      title={title}
+      aria-label={ariaLabel}
+      disabled={disabled || loading}
+      aria-busy={loading || undefined}
+      onClick={onClick}
+    >
+      {loading && kind === "refresh" ? "Refreshing…" : children}
+    </button>
+  );
+}
 
 export function ProviderList({
   providers,
@@ -160,65 +199,45 @@ export function ProviderList({
         </Banner>
       ) : null}
 
-      <ul className="provider-list">
-        {rows.map((row) => {
-          const connected = connectedFor(row);
-          const ready = connected?.status === "ready";
-          const asking = chosen === row.id;
-          const waiting = busy === row.id && row.kind === "oauth";
-          return (
-            <li key={row.id} className={`provider-row${asking ? " is-active" : ""}`}>
-              <span className="provider-identity">
-                <strong>{row.name}</strong>
-                <small>
-                  {connected
-                    ? ready
-                      ? describeConnected(connected)
-                      : (connected.statusDetail ?? connected.status)
-                    : row.how}
-                </small>
-              </span>
+      {rows.map((row) => {
+        const connected = connectedFor(row);
+        const ready = connected?.status === "ready";
+        const asking = chosen === row.id;
+        const waiting = busy === row.id && row.kind === "oauth";
+        const hint = connected
+          ? ready
+            ? describeConnected(connected)
+            : (connected.statusDetail ?? connected.status)
+          : waiting
+            ? "Waiting for the browser"
+            : row.how;
+        return (
+          <div key={row.id} className="row">
+            <div className="k">
+              <b>{row.name}</b>
+              <span>{hint}</span>
+            </div>
 
-              {asking ? (
-                <form
-                  className="provider-ask"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    if (canSave(row)) void connect(row);
-                  }}
-                >
-                  {row.needsBaseUrl ? (
-                    <Dictated value={baseUrl} onValueChange={setBaseUrl} align="center">
-                      <input
-                        className="provider-input"
-                        type="text"
-                        autoFocus={row.kind === "local_endpoint"}
-                        placeholder={row.kind === "local_endpoint" ? LOCAL_DEFAULT_BASE_URL : "https://example.com/v1"}
-                        aria-label="Endpoint"
-                        autoComplete="off"
-                        spellCheck={false}
-                        value={baseUrl}
-                        onChange={(event) => setBaseUrl(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Escape") {
-                            event.stopPropagation();
-                            closeAsk();
-                          }
-                        }}
-                      />
-                    </Dictated>
-                  ) : null}
-                  {row.kind === "api_key" ? (
+            {asking ? (
+              <form
+                className="v"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (canSave(row)) void connect(row);
+                }}
+              >
+                {row.needsBaseUrl ? (
+                  <Dictated value={baseUrl} onValueChange={setBaseUrl} align="center">
                     <input
-                      className="provider-input"
-                      type="password"
-                      autoFocus={!row.needsBaseUrl}
-                      value={secret}
-                      onChange={(event) => setSecret(event.target.value)}
-                      placeholder={`${row.name} API key`}
-                      aria-label={`${row.name} API key`}
+                      className="field"
+                      type="text"
+                      autoFocus={row.kind === "local_endpoint"}
+                      placeholder={row.kind === "local_endpoint" ? LOCAL_DEFAULT_BASE_URL : "https://example.com/v1"}
+                      aria-label="Endpoint"
                       autoComplete="off"
                       spellCheck={false}
+                      value={baseUrl}
+                      onChange={(event) => setBaseUrl(event.target.value)}
                       onKeyDown={(event) => {
                         if (event.key === "Escape") {
                           event.stopPropagation();
@@ -226,85 +245,105 @@ export function ProviderList({
                         }
                       }}
                     />
-                  ) : null}
-                  <Button type="submit" variant="primary" loading={busy === row.id} disabled={!canSave(row)}>
-                    Save
-                  </Button>
-                  <Button type="button" variant="ghost" onClick={closeAsk}>
-                    Cancel
-                  </Button>
-                </form>
-              ) : (
-                <span className="provider-state">
-                  {connected ? (
-                    <StateLabel tone={ready ? "success" : "warning"}>
-                      {ready ? "Connected" : "Needs attention"}
-                    </StateLabel>
-                  ) : waiting ? (
-                    <StateLabel tone="loading">Waiting for the browser</StateLabel>
-                  ) : null}
-                </span>
-              )}
-
-              {asking ? null : (
-                <span className="provider-actions">
-                  {/* Model default, fallback order and restrictions live on
-                      the resolved catalog above -- this list only attaches
-                      and detaches connections, and re-pulls the model list. */}
-                  {manage && connected && ready ? (
-                    <Button
-                      variant="link"
-                      disabled={busy !== null}
-                      loading={busy === row.id}
-                      onClick={() =>
-                        void act(
-                          row.id,
-                          async () => {
-                            await api.refreshProviderModels(connected.id);
-                          },
-                          `${row.name} models refreshed.`,
-                        )
+                  </Dictated>
+                ) : null}
+                {row.kind === "api_key" ? (
+                  <input
+                    className="field"
+                    type="password"
+                    autoFocus={!row.needsBaseUrl}
+                    value={secret}
+                    onChange={(event) => setSecret(event.target.value)}
+                    placeholder={`${row.name} API key`}
+                    aria-label={`${row.name} API key`}
+                    autoComplete="off"
+                    spellCheck={false}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        event.stopPropagation();
+                        closeAsk();
                       }
-                    >
-                      Refresh models
-                    </Button>
-                  ) : null}
-                  {waiting ? (
-                    <Button variant="ghost" onClick={() => cancelSignIn(row.id)}>
-                      Cancel
-                    </Button>
-                  ) : connected && manage ? (
-                    <Button
-                      variant="destructive"
-                      disabled={busy !== null}
-                      loading={busy === row.id}
-                      onClick={() => void act(row.id, () => api.disconnectProvider(connected.id), `${row.name} disconnected.`)}
-                    >
-                      Disconnect
-                    </Button>
-                  ) : (
-                    <Button
-                      variant={connected ? "ghost" : "primary"}
-                      loading={busy === row.id}
-                      disabled={busy !== null}
-                      onClick={() => {
-                        if (row.kind === "oauth") void connect(row);
-                        else {
-                          setChosen(row.id);
-                          setSecret("");
-                          setBaseUrl(row.kind === "local_endpoint" ? LOCAL_DEFAULT_BASE_URL : "");
-                        }
-                      }}
-                    >
-                      {connected ? "Reconnect" : row.action}
-                    </Button>
-                  )}
-                </span>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+                    }}
+                  />
+                ) : null}
+                <ChromeBtn type="submit" loading={busy === row.id} disabled={!canSave(row)}>
+                  Save
+                </ChromeBtn>
+                <ChromeBtn kind="link" onClick={closeAsk}>
+                  Cancel
+                </ChromeBtn>
+              </form>
+            ) : waiting ? (
+              <span className="v">
+                Waiting for the browser
+                <ChromeBtn onClick={() => cancelSignIn(row.id)}>Cancel</ChromeBtn>
+              </span>
+            ) : connected && ready ? (
+              <span className="v">
+                {manage ? (
+                  <ChromeBtn
+                    kind="refresh"
+                    title="Re-pull the model list"
+                    disabled={busy !== null}
+                    loading={busy === row.id}
+                    onClick={() =>
+                      void act(
+                        row.id,
+                        async () => {
+                          await api.refreshProviderModels(connected.id);
+                        },
+                        `${row.name} models refreshed.`,
+                      )
+                    }
+                  >
+                    Refresh models
+                  </ChromeBtn>
+                ) : null}
+                Connected
+                {manage ? (
+                  <ChromeBtn
+                    kind="link"
+                    disabled={busy !== null}
+                    loading={busy === row.id}
+                    onClick={() => void act(row.id, () => api.disconnectProvider(connected.id), `${row.name} disconnected.`)}
+                  >
+                    Disconnect
+                  </ChromeBtn>
+                ) : null}
+              </span>
+            ) : (
+              <span className="v">
+                {connected && !ready ? "Needs attention" : null}
+                {manage && connected ? (
+                  <ChromeBtn
+                    kind="link"
+                    disabled={busy !== null}
+                    loading={busy === row.id}
+                    onClick={() => void act(row.id, () => api.disconnectProvider(connected.id), `${row.name} disconnected.`)}
+                  >
+                    Disconnect
+                  </ChromeBtn>
+                ) : null}
+                <ChromeBtn
+                  loading={busy === row.id}
+                  disabled={busy !== null}
+                  aria-label={row.action}
+                  onClick={() => {
+                    if (row.kind === "oauth") void connect(row);
+                    else {
+                      setChosen(row.id);
+                      setSecret("");
+                      setBaseUrl(row.kind === "local_endpoint" ? LOCAL_DEFAULT_BASE_URL : "");
+                    }
+                  }}
+                >
+                  {connected ? "Reconnect" : "Connect"}
+                </ChromeBtn>
+              </span>
+            )}
+          </div>
+        );
+      })}
 
       {/* Below the list, always. An error above it would move the thing the
           person was about to click. */}
@@ -340,10 +379,10 @@ function ago(iso: string): string {
 /**
  * The resolved catalog (CL-8782): one row per model in fallback order from
  * `GET /api/tenants/:id/models`, with the default, reorder, restrict and
- * shadow controls. Restricted rows stay visible with a badge -- never default
- * candidates. Non-chat rows are badged and can never be the chat default. The
- * credential readout is boolean only; the per-row link jumps to the
- * connections list below. Every write goes through the existing catalog
+ * shadow controls. Restricted rows stay visible with a muted label -- never
+ * default candidates. Non-chat rows are labelled and can never be the chat
+ * default. The credential readout is boolean only; the per-row link jumps to
+ * the connections list above. Every write goes through the existing catalog
  * routes; an empty catalog renders an explicit empty state, never simulated
  * rows.
  */
@@ -395,94 +434,91 @@ export function ResolvedCatalogList({
     <>
       {rows.length === 0 ? (
         <p className="inline-note">
-          No models resolved yet. Connect a provider below — the catalog appears here in fallback order.
+          No models resolved yet. Connect a provider — the catalog appears here in fallback order.
         </p>
       ) : (
-        <ul className="provider-list">
-          {rows.map((row, index) => {
-            const name = row.displayName ?? row.canonicalName;
-            const movable = !row.restricted;
-            return (
-              <li key={row.modelId} className="provider-row">
-                <span className="provider-identity">
-                  <strong>{name}</strong>
-                  <small>
-                    {describeResolvedRow(row, index)}
-                  </small>
-                </span>
-                <span className="provider-state">
-                  {row.isDefault ? <StateLabel tone="success">Default</StateLabel> : null}
-                  {row.restricted ? <StateLabel tone="warning">Restricted</StateLabel> : null}
-                  {row.shadowed ? <StateLabel tone="warning">Shadowed</StateLabel> : null}
-                  {!row.chatCapable ? <StateLabel tone="warning">Not chat</StateLabel> : null}
-                </span>
-                <span className="provider-actions">
-                  {row.defaultCandidate && !row.isDefault ? (
-                    <Button
-                      variant="primary"
-                      disabled={busy !== null}
-                      loading={busy === `default:${row.modelId}`}
-                      onClick={() => void act(`default:${row.modelId}`, () => api.makeResolvedDefault(row.modelId), `${name} is now the default.`)}
-                    >
-                      Make default
-                    </Button>
-                  ) : null}
-                  {movable ? (
-                    <>
-                      <Button
-                        variant="ghost"
-                        disabled={busy !== null || index <= 0}
-                        onClick={() => void act(`move:${row.modelId}`, () => api.moveResolvedModel(row.modelId, "up"))}
-                      >
-                        Move up
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        disabled={busy !== null || index >= rows.length - 1}
-                        onClick={() => void act(`move:${row.modelId}`, () => api.moveResolvedModel(row.modelId, "down"))}
-                      >
-                        Move down
-                      </Button>
-                    </>
-                  ) : null}
-                  <Button
-                    variant="ghost"
+        rows.map((row, index) => {
+          const name = row.displayName ?? row.canonicalName;
+          const movable = !row.restricted;
+          const flags = [
+            row.isDefault ? "Default" : null,
+            row.restricted ? "Restricted" : null,
+            row.shadowed ? "Shadowed" : null,
+            !row.chatCapable ? "Not chat" : null,
+          ].filter((flag): flag is string => flag !== null);
+          return (
+            <div key={row.modelId} className="row">
+              <div className="k">
+                <b>{name}</b>
+                <span>{describeResolvedRow(row, index)}</span>
+              </div>
+              <span className="v">
+                {flags.length > 0 ? flags.join(" · ") : null}
+                {row.defaultCandidate && !row.isDefault ? (
+                  <ChromeBtn
+                    kind="link"
                     disabled={busy !== null}
-                    loading={busy === `restrict:${row.modelId}`}
+                    loading={busy === `default:${row.modelId}`}
+                    onClick={() => void act(`default:${row.modelId}`, () => api.makeResolvedDefault(row.modelId), `${name} is now the default.`)}
+                  >
+                    Make default
+                  </ChromeBtn>
+                ) : null}
+                {movable ? (
+                  <>
+                    <ChromeBtn
+                      kind="link"
+                      disabled={busy !== null || index <= 0}
+                      onClick={() => void act(`move:${row.modelId}`, () => api.moveResolvedModel(row.modelId, "up"))}
+                    >
+                      Move up
+                    </ChromeBtn>
+                    <ChromeBtn
+                      kind="link"
+                      disabled={busy !== null || index >= rows.length - 1}
+                      onClick={() => void act(`move:${row.modelId}`, () => api.moveResolvedModel(row.modelId, "down"))}
+                    >
+                      Move down
+                    </ChromeBtn>
+                  </>
+                ) : null}
+                <ChromeBtn
+                  kind="link"
+                  disabled={busy !== null}
+                  loading={busy === `restrict:${row.modelId}`}
+                  onClick={() =>
+                    void act(
+                      `restrict:${row.modelId}`,
+                      () => api.setResolvedRestricted(row.modelId, !row.restricted),
+                      row.restricted ? `${name} unrestricted.` : `${name} restricted.`,
+                    )
+                  }
+                >
+                  {row.restricted ? "Unrestrict" : "Restrict"}
+                </ChromeBtn>
+                {row.providerRowIds.length > 0 ? (
+                  <ChromeBtn
+                    kind="link"
+                    disabled={busy !== null}
+                    loading={busy === `shadow:${row.modelId}`}
                     onClick={() =>
                       void act(
-                        `restrict:${row.modelId}`,
-                        () => api.setResolvedRestricted(row.modelId, !row.restricted),
-                        row.restricted ? `${name} unrestricted.` : `${name} restricted.`,
+                        `shadow:${row.modelId}`,
+                        () => api.setResolvedShadowed(row.providerRowIds, !row.shadowed),
+                        row.shadowed ? `${name} unshadowed.` : `${name} shadowed.`,
                       )
                     }
                   >
-                    {row.restricted ? "Unrestrict" : "Restrict"}
-                  </Button>
-                  {row.providerRowIds.length > 0 ? (
-                    <Button
-                      variant="ghost"
-                      disabled={busy !== null}
-                      loading={busy === `shadow:${row.modelId}`}
-                      onClick={() =>
-                        void act(
-                          `shadow:${row.modelId}`,
-                          () => api.setResolvedShadowed(row.providerRowIds, !row.shadowed),
-                          row.shadowed ? `${name} unshadowed.` : `${name} shadowed.`,
-                        )
-                      }
-                    >
-                      {row.shadowed ? "Unshadow" : "Shadow"}
-                    </Button>
-                  ) : null}
-                  <a className="inline-note" href="#connections">
-                    {row.credentialConnected ? "Key on file · Manage connection" : "No key · Manage connection"}
-                  </a>
-                </span>
-              </li>
-            );
-          })}
-        </ul>
+                    {row.shadowed ? "Unshadow" : "Shadow"}
+                  </ChromeBtn>
+                ) : null}
+                <a className="btn link" href="#connections">
+                  {row.credentialConnected ? "Key on file · Manage connection" : "No key · Manage connection"}
+                </a>
+              </span>
+            </div>
+          );
+        })
       )}
       {error ? <Banner tone="error" title={error} /> : null}
       {notice ? <Banner tone="okay" title={notice} /> : null}

@@ -48,6 +48,8 @@ describe("settings page markup language", () => {
     expect(css).toContain(".settings-page .section-body");
     expect(css).toContain(".settings-page .row .k");
     expect(css).toContain(".settings-page .seg-ctl");
+    expect(css).toContain(".settings-page .btn");
+    expect(css).toContain(".settings-page .refresh-models");
   });
 
   test("mockup sections stay, and existing extra settings stay in the same language", async () => {
@@ -65,5 +67,56 @@ describe("settings page markup language", () => {
     ]) {
       expect(page).toContain(title);
     }
+    expect(page).toContain("ResolvedCatalogList");
+    expect(page).toContain("ProviderList");
+  });
+
+  test("does not invent a data directory the host never reports", async () => {
+    const page = await Bun.file(new URL("./settings.tsx", import.meta.url)).text();
+    const status = await Bun.file(new URL("../client.ts", import.meta.url)).text();
+    expect(page).not.toContain("~/Library");
+    expect(page).not.toContain('label="Data"');
+    expect(status).not.toMatch(/dataDir|dataDirectory|homeDir/);
+  });
+
+  test("inference and catalog share one section-body of rows, not a second card", async () => {
+    const page = await Bun.file(new URL("./settings.tsx", import.meta.url)).text();
+    const inference = page.slice(page.indexOf("function Inference"), page.indexOf("/* ----------------------------------------------------------------- designer"));
+    expect(inference.match(/className="section-body"/g)?.length).toBe(1);
+    expect(inference).toContain("ProviderList");
+    expect(inference).toContain("ResolvedCatalogList");
+  });
+
+  test("settings chrome is outline .btn / .btn.link, not the library Button", async () => {
+    const page = await Bun.file(new URL("./settings.tsx", import.meta.url)).text();
+    expect(page).not.toMatch(/import \{[^}]*Button[^}]*\} from "\.\.\/components/);
+    expect(page).toContain('className="btn link"');
+    expect(page).toContain('className="btn"');
+  });
+});
+
+describe("provider and catalog row language", () => {
+  test("connections flatten to row / k / v with outline Connect and muted Connected", async () => {
+    const source = await Bun.file(new URL("./providers.tsx", import.meta.url)).text();
+    expect(source).toContain('className="row"');
+    expect(source).toContain('className="k"');
+    expect(source).toContain('className="v"');
+    expect(source).toContain('kind === "refresh" ? "refresh-models"');
+    expect(source).toContain('kind === "link" ? "btn link" : "btn"');
+    expect(source).toContain("Connected");
+    expect(source).toContain("Refresh models");
+    expect(source).toContain("refreshProviderModels");
+    expect(source).toContain("{connected ? \"Reconnect\" : \"Connect\"}");
+    expect(source).not.toContain("StateLabel");
+    expect(source).not.toContain("variant=\"primary\"");
+    expect(source).not.toContain("provider-row");
+  });
+
+  test("catalog keeps its actions as row .v links", async () => {
+    const source = await Bun.file(new URL("./providers.tsx", import.meta.url)).text();
+    for (const action of ["Make default", "Move up", "Move down", "Restrict", "Shadow", "Manage connection"]) {
+      expect(source).toContain(action);
+    }
+    expect(source).not.toContain("<ul className=\"provider-list\"");
   });
 });

@@ -19,7 +19,7 @@ import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { DECK_DENSITY, DECK_THEMES, DECK_TYPEFACES, DEFAULT_DECK_DESIGN, type DeckDensity, type DeckDesign, type DeckTheme, type DeckTypeface } from "@solutions-builder/app/deck";
 import { invoke } from "@tauri-apps/api/core";
 import { api, ApiFailure, STAKEHOLDER_ROLES, type DesignerSettings, type HostStatus, type Provider } from "../client.js";
-import { Banner, Button } from "../components.jsx";
+import { Banner } from "../components.jsx";
 import { deckDesignFor, deckDesignKey, guidanceFor } from "../deck-design-settings.ts";
 import { Dictated } from "../dictation.jsx";
 import { createHubTransport } from "../hub.ts";
@@ -178,8 +178,6 @@ function Inference({
           oauthCandidates={oauthCandidates}
           onChanged={onChanged}
         />
-      </div>
-      <div className="section-body">
         <ResolvedCatalogList providers={providers} onChanged={onChanged} />
       </div>
     </Section>
@@ -396,19 +394,16 @@ function StakeholderDecks() {
               {open ? (
                 <>
                   <Row label="Colour">
-                    <select
-                      className="field"
-                      aria-label={`Colour for ${roleLabel(role)}`}
+                    <SegCtl<DeckTheme>
+                      label={`Colour for ${roleLabel(role)}`}
                       value={design.theme}
                       disabled={!designs}
-                      onChange={(event) => void save(role, "theme", event.target.value as DeckTheme)}
-                    >
-                      {Object.entries(DECK_THEMES).map(([value, meta]) => (
-                        <option key={value} value={value}>
-                          {meta.label}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(value) => void save(role, "theme", value)}
+                      options={Object.entries(DECK_THEMES).map(([value, meta]) => ({
+                        id: value as DeckTheme,
+                        label: meta.label,
+                      }))}
+                    />
                   </Row>
                   <Row label="Typeface">
                     <select
@@ -425,18 +420,18 @@ function StakeholderDecks() {
                       ))}
                     </select>
                   </Row>
-                  <Row label="Density">
-                    <select
-                      className="field"
-                      aria-label={`Density for ${roleLabel(role)}`}
+                  <Row label="Density" hint={`Up to ${DECK_DENSITY[design.density]} points a slide`}>
+                    <SegCtl<DeckDensity>
+                      label={`Density for ${roleLabel(role)}`}
                       value={design.density}
                       disabled={!designs}
-                      onChange={(event) => void save(role, "density", event.target.value as DeckDensity)}
-                    >
-                      <option value="sparse">Sparse · up to {DECK_DENSITY.sparse} points a slide</option>
-                      <option value="standard">Standard · up to {DECK_DENSITY.standard}</option>
-                      <option value="full">Full · up to {DECK_DENSITY.full}</option>
-                    </select>
+                      onChange={(value) => void save(role, "density", value)}
+                      options={[
+                        { id: "sparse", label: "Sparse" },
+                        { id: "standard", label: "Standard" },
+                        { id: "full", label: "Full" },
+                      ]}
+                    />
                   </Row>
                   <Row label="Speaker notes">
                     <Switch checked={design.notes} disabled={!designs} onCheckedChange={(checked) => void save(role, "notes", checked)} />
@@ -570,9 +565,14 @@ function DeckTemplates() {
         {error ? <Banner tone="error" title={error} /> : null}
         {(templates ?? []).map((template) => (
           <Row key={template.id} label={template.name}>
-            <Button loading={removingId === template.id} onClick={() => void remove(template.id)}>
-              Remove
-            </Button>
+            <button
+              type="button"
+              className="btn link"
+              disabled={removingId === template.id}
+              onClick={() => void remove(template.id)}
+            >
+              {removingId === template.id ? "Removing…" : "Remove"}
+            </button>
           </Row>
         ))}
         <Row label="Upload" hint="A .pptx or .potx whose theme a role can follow">
@@ -693,9 +693,9 @@ function ThisComputer({ status }: { status: HostStatus | null }) {
         </Row>
         {inShell() && status?.hub.mode === "embedded" ? (
           <Row label="Stop the host" hint="Closing the window only disconnects it. This ends the host, and everything in progress pauses until it starts again.">
-            <Button variant="destructive" onClick={() => void invoke("quit_app")}>
+            <button type="button" className="btn" onClick={() => void invoke("quit_app")}>
               Stop
-            </Button>
+            </button>
           </Row>
         ) : null}
       </div>
