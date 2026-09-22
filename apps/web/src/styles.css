@@ -1943,6 +1943,42 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   background: color-mix(in srgb, var(--wb-okay) 12%, var(--wb-card));
 }
 
+/* A pending capability grant — the request the specialist is parked on.
+   Same quiet row as the gate, but it stays up while the specialist works:
+   the work IS waiting on this answer. */
+.composer-request {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  font-family: var(--wb-font-mono);
+  font-size: 0.6875rem;
+  color: var(--wb-primary);
+}
+
+.composer-request .sa-txt {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-request .sa-txt code {
+  font-size: 0.6875rem;
+}
+
+.composer-request .sa-actions {
+  display: flex;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+
+.composer-request textarea {
+  min-height: 3rem;
+  font-size: 0.8125rem;
+}
+
 
 /* The filling stage view: its chrome is fixed, the conversation takes the
    rest. Padding lives on the chrome rather than the region, so the panel

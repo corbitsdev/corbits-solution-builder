@@ -324,3 +324,30 @@ export function WaitingSection({
     </section>
   );
 }
+
+/**
+ * The stage workspace's two panes: the conversation on the left, the
+ * artifact strip and the stage's surface on the right. Every stage shares
+ * this shell — a stage's panel never replaces the conversation.
+ */
+export function StagePanes({
+  conversation,
+  strip = null,
+  children,
+}: {
+  conversation: ReactNode;
+  strip?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="document-layout">
+      <section className="stage-thread" aria-label="Conversation with the specialist">
+        {conversation}
+      </section>
+      <article className="document">
+        {strip ? <div className="artifact-strip">{strip}</div> : null}
+        {children}
+      </article>
+    </div>
+  );
+}

@@ -54,6 +54,8 @@ import { useProjectArtifacts } from "./use-project-artifacts.ts";
 import { useStageDecisions } from "./use-stage-decisions.ts";
 import { ArtifactStrip, VersionStrip } from "./artifact-strip.tsx";
 import { stageEvents } from "./stage-events.ts";
+import { agentFor } from "@solutions-builder/app/kit";
+import type { Stage } from "@solutions-builder/app/ledger";
 import { STAGE_DRAFT_KIND } from "../../client.js";
 import {
   EvaluatorVerdict,
@@ -62,6 +64,7 @@ import {
   ProductGuideDock,
   SendBackDock,
   SendBackPopover,
+  StagePanes,
   WaitingSection,
 } from "./workspace-chrome.tsx";
 import type { FoldedFeedback } from "@solutions-builder/app/project-state";
@@ -336,6 +339,69 @@ export function StageWorkspace({
     return <OpeningScreen />;
   }
 
+  // The strip and conversation are the same on every stage; only the right
+  // pane's surface changes. Selecting a tab for another stage reads that
+  // artifact — the stage's own surface only owns its own tab.
+  const stripEl = artifacts.selected ? (
+    <>
+      <ArtifactStrip
+        tabs={artifacts.tabs}
+        selectedKey={artifacts.selected.key}
+        onSelect={artifacts.select}
+      />
+      {artifacts.activeNode ? (
+        <VersionStrip
+          tab={artifacts.selected}
+          activeId={artifacts.activeNode.id}
+          onSelect={artifacts.selectVersion}
+        />
+      ) : null}
+    </>
+  ) : null;
+
+  const reader =
+    artifacts.selected !== null && artifacts.selected.stage !== stage && artifacts.activeNode ? (
+      <div className="stage-inner">
+        <div className="doc">
+          <div className="docmeta">
+            <span>
+              {artifacts.activeNode.title} · v{artifacts.activeNode.version} · stage{" "}
+              {artifacts.activeNode.stage}
+              {artifacts.activeNode.supersededByNodeId ? " · superseded" : ""}
+            </span>
+          </div>
+          {artifacts.activeContent ? (
+            <Markdown source={artifacts.activeContent} />
+          ) : (
+            <p className="inline-note">Loading…</p>
+          )}
+        </div>
+      </div>
+    ) : null;
+
+  const conversation = (
+    <StageConversation
+      stage={stage}
+      messages={foldedMessages}
+      value={composer}
+      onValueChange={setComposer}
+      onSend={() => {
+        const body = composer;
+        setComposer("");
+        void send(body);
+      }}
+      working={sending}
+      disabled={!agentAddress}
+      withdrawnIds={withdrawnIds}
+      pending={pending !== null}
+      onStop={() => void stopTurn()}
+      onSendHold={() => openSendBack(composer)}
+      popover={sendBackPopover}
+      events={events}
+      who={stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title : "Specialist"}
+    />
+  );
+
   return (
     <div className="stage-view">
       {activeModel ? (
@@ -444,49 +510,60 @@ export function StageWorkspace({
       <ProductGuideDock guide={guide.guide} asking={guide.asking} onAsk={() => void guide.ask()} />
 
       {agentAddress && stage === 4 ? (
-        <DesignPanel
-          detail={detail}
-          tenantId={tenantId}
-          onChanged={() => void refreshWorkflow()}
-          onApprove={approve}
-          onRevise={(prompt) => send(prompt)}
-          latestReply={latestSpecialistMessage}
-          canApprove={approveAllowed}
-        />
+        <StagePanes strip={stripEl} conversation={conversation}>
+          {reader ?? (
+            <DesignPanel
+              detail={detail}
+              tenantId={tenantId}
+              onChanged={() => void refreshWorkflow()}
+              onApprove={approve}
+              onRevise={(prompt) => send(prompt)}
+              latestReply={latestSpecialistMessage}
+              canApprove={approveAllowed}
+            />
+          )}
+        </StagePanes>
       ) : null}
 
       {agentAddress && stage === 5 ? (
-        <div className="stage-scroll">
-          <AudiencePackages
-            detail={detail}
-            tenantId={tenantId}
-            onChanged={() => {
-              void refreshWorkflow();
-              void loadThread();
-            }}
-            onApprove={approve}
-            approving={approving || workflow.refreshingAfterAction}
-            canApprove={approveAllowed}
-            approveReason={workflowView?.allowed.approveReason ?? null}
-            lastRefusal={workflowView?.lastRefusal ?? null}
-          />
-        </div>
+        <StagePanes strip={stripEl} conversation={conversation}>
+          {reader ?? (
+            <div className="stage-inner">
+              <AudiencePackages
+                detail={detail}
+                tenantId={tenantId}
+                onChanged={() => {
+                  void refreshWorkflow();
+                  void loadThread();
+                }}
+                onApprove={approve}
+                approving={approving || workflow.refreshingAfterAction}
+                canApprove={approveAllowed}
+                approveReason={workflowView?.allowed.approveReason ?? null}
+                lastRefusal={workflowView?.lastRefusal ?? null}
+              />
+            </div>
+          )}
+        </StagePanes>
       ) : null}
 
       {agentAddress && stage === 8 ? (
-        <div className="stage-scroll">
-          <BuildPanel
-            detail={detail}
-            tenantId={tenantId}
-            onChanged={() => void refreshWorkflow()}
-            onOpenSettings={onOpenSettings}
-            onApprove={approve}
-            approving={approving || workflow.refreshingAfterAction}
-            canApprove={approveAllowed}
-            onAcceptEvidence={openReviewNow}
-            {...(onOpenDecisions ? { onOpenDecisions } : {})}
-          />
-        </div>
+        <BuildPanel
+          detail={detail}
+          tenantId={tenantId}
+          onChanged={() => void refreshWorkflow()}
+          onOpenSettings={onOpenSettings}
+          onApprove={approve}
+          approving={approving || workflow.refreshingAfterAction}
+          canApprove={approveAllowed}
+          onAcceptEvidence={openReviewNow}
+          {...(onOpenDecisions ? { onOpenDecisions } : {})}
+          strip={stripEl}
+          reader={reader}
+          stageEvents={events}
+          onSendHold={openSendBack}
+          popover={sendBackPopover}
+        />
       ) : null}
 
       {agentAddress && (requirements || panelReviews.length > 0) ? (
@@ -598,20 +675,7 @@ export function StageWorkspace({
             onSendHold={openSendBack}
             composerPopover={sendBackPopover}
             events={events}
-            strip={
-              <>
-                <ArtifactStrip
-                  tabs={artifacts.tabs}
-                  selectedKey={artifacts.selected?.key ?? null}
-                  onSelect={artifacts.select}
-                />
-                <VersionStrip
-                  tab={artifacts.selected}
-                  activeId={artifacts.activeNode.id}
-                  onSelect={artifacts.selectVersion}
-                />
-              </>
-            }
+            strip={stripEl}
             promote={
               superseded
                 ? {
@@ -626,64 +690,19 @@ export function StageWorkspace({
       ) : null}
 
       {agentAddress && stage === 9 ? (
-        <DeliveryPanel
-          detail={detail}
-          tenantId={tenantId}
-          latestReply={latestSpecialistMessage}
-          onAccept={acceptDelivery}
-          onRejectSendBack={() => void sendBack(8)}
-        />
-      ) : null}
-
-      {agentAddress && stage !== 4 && stage !== 5 && stage !== 8 && !DOCUMENT_STAGES.has(stage) ? (
-        <>
-          <Screen
-            title={`Stage ${stage} of 9 · ${stageName(stage)}`}
-            description={STAGE_GOAL[stage]}
-            status={
-              stage >= LAST_STAGE ? null : (
-                <Button
-                  variant="primary"
-                  loading={approving || workflow.refreshingAfterAction}
-                  disabled={!approveAllowed}
-                  onClick={() => void approve()}
-                >
-                  Approve and continue
-                </Button>
-              )
-            }
-            tight
-          >
-            {latestSpecialistMessage ? (
-              <div className="document-body">
-                <Markdown source={latestSpecialistMessage.body} />
-              </div>
-            ) : foldedMessages.length > 0 ? (
-              <p className="inline-note">Waiting on the specialist's first reply…</p>
-            ) : (
-              <p className="inline-note">Say what you'd like below to start the conversation.</p>
-            )}
-          </Screen>
-          <StageConversation
-            stage={stage}
-            messages={foldedMessages}
-            value={composer}
-            onValueChange={setComposer}
-            onSend={() => {
-              const body = composer;
-              setComposer("");
-              void send(body);
-            }}
-            working={sending}
-            disabled={!agentAddress}
-            withdrawnIds={withdrawnIds}
-            pending={pending !== null}
-            onStop={() => void stopTurn()}
-            onSendHold={() => openSendBack(composer)}
-            popover={sendBackPopover}
-            events={events}
-          />
-        </>
+        <StagePanes strip={stripEl} conversation={conversation}>
+          {reader ?? (
+            <div className="stage-inner">
+              <DeliveryPanel
+                detail={detail}
+                tenantId={tenantId}
+                latestReply={latestSpecialistMessage}
+                onAccept={acceptDelivery}
+                onRejectSendBack={() => void sendBack(8)}
+              />
+            </div>
+          )}
+        </StagePanes>
       ) : null}
     </div>
   );

@@ -30,17 +30,21 @@
  * `api.persistBuildEvidence`, the fallback path) or reads (the real-upload
  * path) the archive and opens its review, client-side.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Textarea } from "@corbits/react-ui";
 import { api, ApiFailure, type ArtifactNode, type ProjectDetail } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { Banner, Button, Screen, StateLabel } from "../../components.jsx";
 import { Dictated } from "../../dictation.jsx";
+import { agentFor } from "@solutions-builder/app/kit";
+import type { StageEvent } from "./stage-events.ts";
 import { StageConversation } from "./thread.jsx";
 import { clock } from "./elapsed.jsx";
 import { BuildFile } from "../graph.jsx";
 import { createHubTransport } from "../../hub.ts";
 import { approveTool, pendingApprovals, rejectTool, type PendingApproval } from "../../pending-approvals.ts";
+
+const EMPTY_STAGE_EVENTS: readonly StageEvent[] = [];
 
 /** The run_shell tool's declared name — every stage-8 approval this panel
  *  turns into a timeline row is parked on a tool call by this name. */
@@ -344,6 +348,11 @@ export function BuildPanel({
   canApprove,
   onOpenDecisions,
   onAcceptEvidence,
+  strip = null,
+  reader = null,
+  stageEvents = EMPTY_STAGE_EVENTS,
+  onSendHold,
+  popover = null,
 }: {
   detail: ProjectDetail;
   /** The workspace tenant artifacts are recorded under. */
@@ -363,6 +372,15 @@ export function BuildPanel({
    * when the attempt has not published anything to accept yet.
    */
   onAcceptEvidence: () => Promise<{ readonly ok: true } | { readonly ok: false; readonly reason: string }>;
+  /** The artifact tabs + version strip the pane shares with every stage. */
+  strip?: ReactNode;
+  /** What the pane shows while another stage's artifact tab is selected. */
+  reader?: ReactNode;
+  /** The stage's event record, folded into the transcript. */
+  stageEvents?: readonly StageEvent[];
+  /** Holding send raises the send-back picker. */
+  onSendHold?: (draft: string) => void;
+  popover?: ReactNode;
 }) {
   const [address, setAddress] = useState<string | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
@@ -541,29 +559,75 @@ export function BuildPanel({
   };
 
   return (
-    <div data-tour="build-panel">
-      <Screen
-        title="Build supervision"
-        status={
-          address ? (
-            <StateLabel tone={state.tone}>
-              {state.label === "waiting for your approval" && onOpenDecisions ? (
-                <Button variant="link" onClick={onOpenDecisions}>
-                  {state.label}
-                </Button>
-              ) : (
-                state.label
-              )}
-            </StateLabel>
-          ) : null
-        }
-      >
+    <div className="document-layout" data-tour="build-panel">
+      <section className="stage-thread" aria-label="Conversation with the specialist">
         {error ? (
           <Banner tone="error" title="The build attempt could not be changed" action={{ label: "Open Settings", onClick: onOpenSettings }}>
             {error}
           </Banner>
         ) : null}
         {!address ? <p className="inline-note">Starting the build specialist…</p> : null}
+        <StageConversation
+          stage={8}
+          messages={messages}
+          value={composer}
+          onValueChange={setComposer}
+          onSend={() => {
+            const body = composer;
+            setComposer("");
+            void send("message", body);
+          }}
+          working={busy !== null}
+          disabled={!address}
+          events={stageEvents}
+          who={agentFor(8).title}
+          {...(onSendHold ? { onSendHold: () => onSendHold(composer) } : {})}
+          popover={popover}
+          rows={
+            pendingRunShell.length > 0 ? (
+              <>
+                {pendingRunShell.map((approval) => (
+                  <GrantRow
+                    key={approval.id}
+                    approval={approval}
+                    deciding={decidingId === approval.id}
+                    reason={rejectReasons[approval.id] ?? ""}
+                    onReason={(value) =>
+                      setRejectReasons((prev) => ({ ...prev, [approval.id]: value }))
+                    }
+                    onDecide={(decision) => void decideRunShell(approval.id, decision)}
+                  />
+                ))}
+                <p className="composer-cue">
+                  "Allow for this build" trusts every future command on this build
+                  attempt without asking again — not another attempt, or another
+                  project.
+                </p>
+              </>
+            ) : null
+          }
+        />
+      </section>
+      <article className="document">
+        {strip ? <div className="artifact-strip">{strip}</div> : null}
+        {reader ?? (
+          <div className="stage-inner">
+            <Screen
+              title="Build supervision"
+              status={
+                address ? (
+                  <StateLabel tone={state.tone}>
+                    {state.label === "waiting for your approval" && onOpenDecisions ? (
+                      <Button variant="link" onClick={onOpenDecisions}>
+                        {state.label}
+                      </Button>
+                    ) : (
+                      state.label
+                    )}
+                  </StateLabel>
+                ) : null
+              }
+            >
         <BuildClock since={buildStartedAt} />
         <div className="button-row">
           <Button variant="primary" loading={busy === "start"} disabled={!address} onClick={() => void send("start", START_ATTEMPT_BODY)}>
@@ -593,50 +657,6 @@ export function BuildPanel({
               : evidence.reason}
         </p>
 
-        {pendingRunShell.length > 0 ? (
-          <div className="stage-companions" aria-label="Pending build approvals">
-            {pendingRunShell.map((approval) => (
-              <div key={approval.id} className="field">
-                <p>
-                  Asks to run: <code className="hash">{typeof approval.toolArguments["command"] === "string" ? (approval.toolArguments["command"] as string) : JSON.stringify(approval.toolArguments)}</code>
-                </p>
-                <p className="inline-note">
-                  "Allow for this build" trusts every future command on this build attempt,
-                  without asking again — not another attempt, or another project.
-                </p>
-                <div className="field">
-                  <label htmlFor={`reject-reason-${approval.id}`}>Rejection reason, sent to the specialist</label>
-                  <Dictated
-                    value={rejectReasons[approval.id] ?? ""}
-                    onValueChange={(value) => setRejectReasons((prev) => ({ ...prev, [approval.id]: value }))}
-                    align="start"
-                  >
-                    <Textarea
-                      id={`reject-reason-${approval.id}`}
-                      value={rejectReasons[approval.id] ?? ""}
-                      onChange={(event) =>
-                        setRejectReasons((prev) => ({ ...prev, [approval.id]: event.target.value }))
-                      }
-                      placeholder="Why this call is being refused."
-                    />
-                  </Dictated>
-                </div>
-                <div className="button-row">
-                  <Button variant="primary" loading={decidingId === approval.id} onClick={() => void decideRunShell(approval.id, "once")}>
-                    Allow once
-                  </Button>
-                  <Button loading={decidingId === approval.id} onClick={() => void decideRunShell(approval.id, "always")}>
-                    Allow for this build
-                  </Button>
-                  <Button variant="destructive" loading={decidingId === approval.id} onClick={() => void decideRunShell(approval.id, "reject")}>
-                    Reject…
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : null}
-
         {build ? <BuildFile node={build} tenantId={tenantId} /> : null}
 
         {timeline.length > 0 ? (
@@ -659,20 +679,75 @@ export function BuildPanel({
           reply. When a command fails, what you see above is the specialist's own
           account of it, not a captured transcript.
         </p>
-      </Screen>
-      <StageConversation
-        stage={8}
-        messages={messages}
-        value={composer}
-        onValueChange={setComposer}
-        onSend={() => {
-          const body = composer;
-          setComposer("");
-          void send("message", body);
-        }}
-        working={busy !== null}
-        disabled={!address}
-      />
+            </Screen>
+          </div>
+        )}
+      </article>
+    </div>
+  );
+}
+
+/** One pending capability grant as a quiet row above the composer — Deny
+ *  expands the row into the reason field the rejection is sent with. */
+function GrantRow({
+  approval,
+  deciding,
+  reason,
+  onReason,
+  onDecide,
+}: {
+  approval: PendingApproval;
+  deciding: boolean;
+  reason: string;
+  onReason: (value: string) => void;
+  onDecide: (decision: "once" | "always" | "reject") => void;
+}) {
+  const [rejecting, setRejecting] = useState(false);
+  const command =
+    typeof approval.toolArguments["command"] === "string"
+      ? approval.toolArguments["command"]
+      : JSON.stringify(approval.toolArguments);
+  if (rejecting) {
+    return (
+      <div className="composer-request">
+        <label className="sa-txt" htmlFor={`reject-reason-${approval.id}`}>
+          why refused
+        </label>
+        <Dictated value={reason} onValueChange={onReason} align="start">
+          <Textarea
+            id={`reject-reason-${approval.id}`}
+            value={reason}
+            onChange={(event) => onReason(event.target.value)}
+            placeholder="Why this call is being refused."
+          />
+        </Dictated>
+        <span className="sa-actions">
+          <Button variant="ghost" onClick={() => setRejecting(false)}>
+            Cancel
+          </Button>
+          <Button loading={deciding} onClick={() => onDecide("reject")}>
+            Send rejection
+          </Button>
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="composer-request">
+      <span className="sa-txt">
+        requests <code className="hash">{command}</code>
+      </span>
+      <span className="sa-actions">
+        <Button variant="ghost" onClick={() => setRejecting(true)}>
+          Deny
+        </Button>
+        <Button variant="ghost" loading={deciding} onClick={() => onDecide("once")}>
+          Allow once
+        </Button>
+        <Button variant="ghost" loading={deciding} onClick={() => onDecide("always")}>
+          Allow for this build
+        </Button>
+      </span>
     </div>
   );
 }
