@@ -297,7 +297,7 @@ html[data-theme="dark"] .ob-credit img {
   margin: var(--space-3) 0 calc(var(--space-1) * -1) 2px;
 }
 
-.ob-group:first-child {
+.ob-step > .ob-group:first-child {
   margin-top: 0;
 }
 
@@ -523,9 +523,81 @@ html[data-theme="dark"] .ob-credit img {
   min-width: 0;
 }
 
-.ob .ask textarea {
+/* Same composer-box chrome as home: the box is the control, tools sit inside it. */
+.ob .ask .dictated-row {
+  display: block;
+  position: relative;
+}
+
+.ob .ask .dictate {
+  position: absolute;
+  left: calc(var(--space-4) + 30px + 4px);
+  bottom: var(--space-2);
+  width: 30px;
+  height: 30px;
+  margin: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--muted-foreground);
+  z-index: 1;
+}
+
+.ob .ask .dictate:hover:not(:disabled) {
+  background: var(--muted);
+  color: var(--foreground);
+  border-color: transparent;
+}
+
+.ob .composer-box {
+  margin: 0;
+  gap: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--background);
+  padding: var(--space-3) var(--space-4) var(--space-2);
+  box-shadow: none;
+  transition: border-color 150ms;
+}
+
+.ob .composer-box:focus-within {
+  border-color: var(--primary);
+}
+
+.ob .composer-box textarea {
   min-height: 76px;
   font-size: 15.5px;
+  line-height: 1.5;
+  order: -1;
+  flex: 1 1 100%;
+  width: 100%;
+  padding: 0 0 var(--space-2);
+}
+
+.ob .composer-box > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  width: 100%;
+  padding-top: var(--space-2);
+}
+
+.ob .composer-box button[aria-label="Attach files"] {
+  width: 30px;
+  height: 30px;
+  color: var(--muted-foreground);
+}
+
+.ob .composer-box button[aria-label="Send message"] {
+  width: 30px;
+  height: 30px;
+  margin-left: auto;
+  background: var(--foreground);
+  color: var(--background);
+}
+
+.ob .composer-box button[aria-label="Send message"]:hover:not(:disabled) {
+  opacity: 0.85;
 }
 
 .ob .start-hint {

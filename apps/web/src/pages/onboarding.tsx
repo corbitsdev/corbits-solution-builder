@@ -21,7 +21,7 @@
  * grouped provider orows, credit). Behaviour stays on the real catalog.
  */
 import { ChatInput, useTheme, type ThemeMode } from "@corbits/react-ui";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { api, ApiFailure, type Provider } from "../client.js";
 import { Banner, Mark } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
@@ -256,6 +256,7 @@ export function Onboarding({
               apiKeyProviders={apiKeyProviders}
               oauthCandidates={oauthCandidates}
               onSkip={() => setStep("project")}
+              onContinue={() => setAwaitingChoice(true)}
               onConnected={async () => {
                 await onConnected();
                 setAwaitingChoice(true);
@@ -359,12 +360,14 @@ function ProviderStep({
   apiKeyProviders,
   oauthCandidates,
   onSkip,
+  onContinue,
   onConnected,
 }: {
   providers: Provider[];
   apiKeyProviders: ApiKeyProvider[];
   oauthCandidates: OAuthCandidate[];
   onSkip: () => void;
+  onContinue: () => void;
   onConnected: () => Promise<void>;
 }) {
   const rows = onboardingRows(apiKeyProviders, oauthCandidates);
@@ -456,7 +459,7 @@ function ProviderStep({
       ) : null}
 
       {groups.map((group) => (
-        <div key={group.group}>
+        <Fragment key={group.group}>
           <p className="ob-group">{group.label}</p>
           <div className="ob-list">
             {group.rows.map((row) => {
@@ -569,7 +572,7 @@ function ProviderStep({
               );
             })}
           </div>
-        </div>
+        </Fragment>
       ))}
 
       {error ? <Banner tone="error" title={error} /> : null}
@@ -577,6 +580,14 @@ function ProviderStep({
       <div className="ob-foot">
         <button type="button" className="ob-skip" onClick={onSkip}>
           Skip for now
+        </button>
+        <button
+          type="button"
+          className="btn primary"
+          disabled={busy !== null || !providers.some((provider) => provider.status === "ready")}
+          onClick={onContinue}
+        >
+          Continue
         </button>
       </div>
     </>
@@ -696,8 +707,9 @@ function ProjectStep({
       {error ? <Banner tone="error" title={error} /> : null}
 
       <div className="ask">
-        <Dictated value={problem} onValueChange={setProblem} disabled={busy} align="start">
+        <Dictated value={problem} onValueChange={setProblem} disabled={busy}>
           <ChatInput
+            className="composer-box"
             value={problem}
             onValueChange={setProblem}
             onSend={() => void create()}
