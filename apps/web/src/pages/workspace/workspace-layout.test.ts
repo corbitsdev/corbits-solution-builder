@@ -118,10 +118,13 @@ describe("project chrome paint", () => {
     expect(read("./build.tsx")).toContain("<StagePanes");
     const index = read("./index.tsx");
     expect(index).toContain("<StagePanes");
-    expect(index).toContain("DOCUMENT_STAGES.has(stage) && !draftMessage");
+    expect(index).toContain("DOCUMENT_STAGES.has(stage)");
+    expect(index).toContain("!draftMessage");
     expect(index).toContain("stage === 4");
     expect(index).toContain("stage === 5");
+    expect(index).toContain("stage === 6");
     expect(index).toContain("stage === 9");
+    expect(read("./stage6.tsx")).toContain("<StagePanes");
   });
 
   test("project canvas is panes only — no Stage extras fold, no wait essay", () => {
@@ -178,5 +181,24 @@ describe("project chrome paint", () => {
     expect(css).toContain(".ev {");
     expect(css).toContain(".ev .p {");
     expect(css).toContain(".ev .f {");
+  });
+
+  test("stage 6 right pane is a document, not a notes wall", () => {
+    const stage6 = read("./stage6.tsx");
+    expect(stage6).toContain('className="stage-inner"');
+    expect(stage6).toContain('className="doc"');
+    expect(stage6).toContain('className="docmeta"');
+    expect(stage6).toContain("<StagePanes");
+    expect(stage6).toContain("ensureStage6RoleAgent");
+    expect(stage6).toContain("Request review");
+    expect(stage6).not.toContain("stage-companions");
+    expect(stage6).not.toContain("stage6-panel-cards");
+    expect(stage6).not.toContain("<Screen");
+    expect(stage6).not.toContain("<GuidanceFold");
+    expect(stage6).not.toContain("<WaitingSection");
+    const index = read("./index.tsx");
+    expect(index).toContain("<Stage6Panel");
+    expect(index).not.toContain("stage-companions");
+    expect(index).not.toContain("stage6-panel-cards");
   });
 });
