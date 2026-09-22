@@ -16,6 +16,7 @@ import type { ComponentProps, ReactNode } from "react";
 import type { ChatMessage } from "@corbits/react-ui";
 import { GuideDock } from "../apps/web/src/components.js";
 import { StageDocument } from "../apps/web/src/pages/workspace.js";
+import { ArtifactStrip } from "../apps/web/src/pages/workspace/artifact-strip.jsx";
 import { ArtifactGraph } from "../apps/web/src/pages/graph.js";
 import { AppBar } from "../apps/web/src/app.js";
 import { ThemeProvider } from "@corbits/react-ui";
@@ -177,11 +178,57 @@ const turns = messages.map((message) => ({
   createdAt: message.createdAt,
 })) as never;
 
+const strip = (
+  <ArtifactStrip
+    tabs={[
+      {
+        key: "1:problem_brief:",
+        label: "Problem brief",
+        kind: "problem_brief",
+        stage: 1,
+        head: briefNode,
+        versions: [replacedBrief, currentBrief] as never,
+        live: true,
+      },
+      {
+        key: "4:design_doc:",
+        label: "Design",
+        kind: "design_doc",
+        stage: 4,
+        head: { ...briefNode, artifactId: "art_3", kind: "design_doc", stage: 4, version: 3, title: "Design" } as never,
+        versions: [],
+        live: false,
+      },
+      {
+        key: "5:audience_package:Engineers",
+        label: "Audience package · Engineers",
+        kind: "audience_package",
+        stage: 5,
+        head: { ...briefNode, artifactId: "art_4", kind: "audience_package", stage: 5, variant: "Engineers", title: "Engineers package" } as never,
+        versions: [],
+        live: false,
+      },
+      {
+        key: "9:delivery_manifest:",
+        label: "Delivery manifest",
+        kind: "delivery_manifest",
+        stage: 9,
+        head: { ...briefNode, artifactId: "art_5", kind: "delivery_manifest", stage: 9, title: "Delivery manifest" } as never,
+        versions: [],
+        live: false,
+      },
+    ]}
+    selectedKey="1:problem_brief:"
+    onSelect={() => {}}
+  />
+);
+
 function Conversation({ withDocument }: { withDocument?: boolean }) {
   return (
     <StageDocument
       node={node}
-      versions={[node]}
+      versions={[replacedBrief, currentBrief] as never}
+      strip={withDocument ? strip : null}
       content={brief}
       tenantId="demo"
       turns={turns}
