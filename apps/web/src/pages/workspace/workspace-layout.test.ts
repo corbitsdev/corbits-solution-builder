@@ -135,7 +135,9 @@ describe("project chrome paint", () => {
     expect(app).not.toContain("GuideDock");
     expect(app).not.toContain("head-tabs");
     expect(app).toContain("<StageWorkspace");
-    expect(app).toContain('view === "project" ? null : <ThemeToggle />');
+    expect(app).not.toContain("ThemeToggle");
+    expect(app).not.toContain("PanelRight");
+    expect(app).not.toContain("Hide the draft");
     const layout = read("../workspace-layout.css");
     expect(layout).toMatch(/\.stage-pane \{[\s\S]*background: var\(--wb-background\)/);
   });
@@ -151,5 +153,8 @@ describe("project chrome paint", () => {
     expect(chrome).not.toContain("Getting the conversation ready");
     expect(chrome).toContain("Opening…");
     expect(chrome).toContain("<StagePanes");
+    const index = read("./index.tsx");
+    expect(index).not.toContain("Starting the");
+    expect(index).toContain("<OpeningScreen");
   });
 });

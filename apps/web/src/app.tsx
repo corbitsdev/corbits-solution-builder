@@ -18,8 +18,6 @@ import {
 import {
   ArrowLeft,
   Download,
-  PanelRight,
-  PanelRightClose,
   Settings as SettingsIcon,
 } from "lucide-react";
 import { Banner, Mark, downloadArtifact, stageName } from "./components.jsx";
@@ -31,7 +29,6 @@ import {
   BootScreen,
   HorizontalStepper,
   NotificationsBell,
-  ThemeToggle,
   type WorkflowStep,
 } from "@corbits/react-ui";
 import { subscribeInbox, type InboxState } from "./inbox.ts";
@@ -129,8 +126,6 @@ export function AppBar({
   onBellOpenChange,
   onNavigate,
   onOpenProject,
-  draftOpen,
-  onToggleDraft,
   exporting,
   onExport,
   onStageSegment,
@@ -143,7 +138,7 @@ export function AppBar({
   onBellOpenChange: (open: boolean) => void;
   onNavigate: (view: View) => void;
   onOpenProject: (projectId: string) => void;
-  /** Project-view chrome; absent elsewhere so nothing dead renders. */
+  /** Project-view chrome; unused — both panes stay open. Kept so walk-ui still typechecks. */
   draftOpen?: boolean;
   onToggleDraft?: () => void;
   exporting?: boolean;
@@ -193,27 +188,16 @@ export function AppBar({
 
       <div className="topbar-actions">
         {inProject ? (
-          <>
-            <button
-              type="button"
-              className="iconbtn"
-              aria-pressed={draftOpen}
-              aria-label={draftOpen ? "Hide the draft" : "Show the draft"}
-              onClick={onToggleDraft}
-            >
-              {draftOpen ? <PanelRightClose aria-hidden="true" /> : <PanelRight aria-hidden="true" />}
-            </button>
-            <button
-              type="button"
-              className="iconbtn"
-              title="Export bundle"
-              aria-label="Export bundle"
-              disabled={exporting}
-              onClick={onExport}
-            >
-              <Download aria-hidden="true" />
-            </button>
-          </>
+          <button
+            type="button"
+            className="iconbtn"
+            title="Export bundle"
+            aria-label="Export bundle"
+            disabled={exporting}
+            onClick={onExport}
+          >
+            <Download aria-hidden="true" />
+          </button>
         ) : null}
         <NotificationsBell
           count={decisions.length + inbox.unreadCount}
@@ -272,7 +256,6 @@ export function AppBar({
         >
           <SettingsIcon aria-hidden="true" />
         </button>
-        {view === "project" ? null : <ThemeToggle />}
       </div>
     </header>
   );
@@ -286,7 +269,6 @@ export function App() {
   // The project workspace fills the window; every other view scrolls.
   const fills = view === "project";
 
-  const [draftOpen, setDraftOpen] = useState(true);
   const [bellOpen, setBellOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   // A done-segment click in the stepper — carries the stage the workspace
@@ -603,8 +585,6 @@ export function App() {
         onBellOpenChange={setBellOpen}
         onNavigate={setView}
         onOpenProject={openProject}
-        draftOpen={draftOpen}
-        onToggleDraft={() => setDraftOpen((open) => !open)}
         exporting={exporting}
         onExport={() => void exportProject()}
         onStageSegment={(stage) => {
@@ -639,7 +619,7 @@ export function App() {
               <StageWorkspace
                 key={detail.project.id}
                 detail={detail}
-                draftOpen={draftOpen}
+                draftOpen={true}
                 tenantId={tenantId ?? ""}
                 onChanged={reloadDetail}
                 onOpenSettings={() => setView("settings")}
