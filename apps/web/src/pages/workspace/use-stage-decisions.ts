@@ -243,6 +243,7 @@ export function useStageDecisions({
         workflowView,
         stakeholders: api.stakeholders,
         audienceDecisions: (tid, nodeId) => api.audienceDecisions(tid, nodeId),
+        artifactContent: (tid, nodeId) => api.artifactContent(tid, nodeId),
       });
       const result = await approveStage(stageApprovalDeps, {
         projectId: detail.project.id,

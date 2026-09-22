@@ -47,6 +47,7 @@ const EMPTY_STATE: ProjectState = {
   stageOrder: [],
   reviewCounts: {},
   freeze: null,
+  requirements: [],
 };
 
 function decodeInlineOutput(ref: unknown): unknown {

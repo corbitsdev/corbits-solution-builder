@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { applyDecision, initProjectState, type ApplyDecisionInput, type ProjectState } from "./contracts.js";
+import type { StackRecord } from "../stack.js";
 
 const OWNER = "owner-principal";
 const AT = "2026-09-19T00:00:00.000Z";
@@ -219,5 +220,211 @@ describe("applyDecision open_review/approve/send-back/reapprove lifecycle", () =
     const next = applyDecision(input(openStage2, OWNER, sendBack));
     expect(next.stage).toBe(1);
     expect(next.decisions.at(-1)).toMatchObject({ accepted: true, targetStage: 1 });
+  });
+});
+
+describe("mint_requirements", () => {
+  const mintDecision = (id: string) => ({
+    decisionId: id,
+    kind: "mint_requirements",
+    projectId: "p1",
+    stage: 1,
+    items: [
+      { kind: "FR", text: "Does a thing." },
+      { kind: "FR", text: "Does another thing." },
+      { kind: "AC", text: "Proves it." },
+    ],
+    at: AT,
+  });
+
+  test("mints deterministic per-kind ids in order, without advancing the stage", () => {
+    const state = baseState();
+    const next = applyDecision(input(state, OWNER, mintDecision("m1")));
+    expect(next.requirements).toEqual([
+      { id: "FR-1", kind: "FR", text: "Does a thing." },
+      { id: "FR-2", kind: "FR", text: "Does another thing." },
+      { id: "AC-1", kind: "AC", text: "Proves it." },
+    ]);
+    expect(next.stage).toBe(state.stage);
+    expect(next.decisions.at(-1)).toMatchObject({ accepted: true, kind: "mint_requirements" });
+  });
+
+  test("minting twice is refused", () => {
+    const minted = applyDecision(input(baseState(), OWNER, mintDecision("m1")));
+    const again = applyDecision(input(minted, OWNER, mintDecision("m2")));
+    expect(again.requirements).toEqual(minted.requirements);
+    expect(again.decisions.at(-1)).toMatchObject({ accepted: false, reason: "requirements_already_minted" });
+  });
+
+  test("a send-back to stage <= 6 clears minted requirements", () => {
+    const minted = applyDecision(input(baseState(), OWNER, mintDecision("m1")));
+    const opened = applyDecision(input(minted, OWNER, openD1()));
+    const sendBack = { decisionId: "sb1", kind: "send_back", projectId: "p1", stage: 1, targetStage: 1, reason: "revise", at: AT };
+    const next = applyDecision(input(opened, OWNER, sendBack));
+    expect(next.requirements).toEqual([]);
+  });
+});
+
+describe("stage7Rule stack citations", () => {
+  const OWNER7 = "owner7";
+
+  function baseState7(): ProjectState {
+    return initProjectState({
+      projectId: "p1",
+      stages: [1, 2, 3, 4, 5, 6, 7].map((stage) => ({ stage, authorizedPrincipalIds: [OWNER7] })),
+    });
+  }
+
+  /** Walks stages 1..6 open_review/approve with no stage rule involved
+   *  (5 and 6 carry no `evidence` here on purpose -- 5's own quorum rule is
+   *  exercised elsewhere), landing at stage 7 with `state.requirements` set. */
+  function stateAtStage7(requirements: { kind: "FR" | "NFR" | "IR" | "AC"; text: string }[]): ProjectState {
+    let state = baseState7();
+    state = applyDecision(input(state, OWNER7, { decisionId: "mint", kind: "mint_requirements", projectId: "p1", stage: 1, items: requirements, at: AT }));
+    for (const stage of [1, 2, 3, 4]) {
+      state = applyDecision(
+        input(state, OWNER7, { decisionId: `o${String(stage)}`, kind: "open_review", projectId: "p1", stage, artifactId: `a${String(stage)}`, version: 1, sha256: `s${String(stage)}`, at: AT }),
+      );
+      state = applyDecision(
+        input(state, OWNER7, { decisionId: `ap${String(stage)}`, kind: "approve", projectId: "p1", stage, reviewId: `stage-${String(stage)}-review-1`, artifactId: `a${String(stage)}`, version: 1, sha256: `s${String(stage)}`, at: AT }),
+      );
+    }
+    // Stage 5 needs its quorum evidence to advance.
+    state = applyDecision(
+      input(state, OWNER7, { decisionId: "o5", kind: "open_review", projectId: "p1", stage: 5, artifactId: "a5", version: 1, sha256: "s5", at: AT }),
+    );
+    state = applyDecision(
+      input(state, OWNER7, {
+        decisionId: "ap5",
+        kind: "approve",
+        projectId: "p1",
+        stage: 5,
+        reviewId: "stage-5-review-1",
+        artifactId: "a5",
+        version: 1,
+        sha256: "s5",
+        at: AT,
+        evidence: { quorum: 0, stakeholders: [], decisions: [] },
+      }),
+    );
+    for (const stage of [6]) {
+      state = applyDecision(
+        input(state, OWNER7, { decisionId: `o${String(stage)}`, kind: "open_review", projectId: "p1", stage, artifactId: `a${String(stage)}`, version: 1, sha256: `s${String(stage)}`, at: AT }),
+      );
+      state = applyDecision(
+        input(state, OWNER7, { decisionId: `ap${String(stage)}`, kind: "approve", projectId: "p1", stage, reviewId: `stage-${String(stage)}-review-1`, artifactId: `a${String(stage)}`, version: 1, sha256: `s${String(stage)}`, at: AT }),
+      );
+    }
+    return state;
+  }
+
+  function frozenFrom(state: ProjectState) {
+    return [1, 2, 3, 4, 5, 6].map((stage) => ({
+      stage,
+      artifactId: state.reviews[stage]!.artifactId,
+      version: state.reviews[stage]!.version,
+      sha256: state.reviews[stage]!.sha256,
+    }));
+  }
+
+  const STACK: StackRecord = {
+    mode: "plain",
+    runtime: { choice: "TypeScript", reason: "matches the rubric", cites: ["FR-1"] },
+    ui: null,
+    storage: null,
+    auth: null,
+    packaging: { choice: "cli", reason: "matches the rubric", cites: ["FR-1"], kind: "cli" },
+    packages: [],
+    deferred: [],
+  };
+
+  test("approve is refused stack_missing when evidence carries no stack", () => {
+    const state = stateAtStage7([{ kind: "FR", text: "Does a thing." }]);
+    const opened = applyDecision(
+      input(state, OWNER7, { decisionId: "o7", kind: "open_review", projectId: "p1", stage: 7, artifactId: "a7", version: 1, sha256: "s7", at: AT }),
+    );
+    const next = applyDecision(
+      input(opened, OWNER7, {
+        decisionId: "ap7",
+        kind: "approve",
+        projectId: "p1",
+        stage: 7,
+        reviewId: "stage-7-review-1",
+        artifactId: "a7",
+        version: 1,
+        sha256: "s7",
+        at: AT,
+        evidence: { target: "cli", frozen: frozenFrom(state) },
+      }),
+    );
+    expect(next.decisions.at(-1)).toMatchObject({ accepted: false, reason: "stack_missing" });
+    expect(next.freeze).toBeNull();
+  });
+
+  test("approve is refused stack_uncited when an entry cites nothing", () => {
+    const state = stateAtStage7([{ kind: "FR", text: "Does a thing." }]);
+    const opened = applyDecision(
+      input(state, OWNER7, { decisionId: "o7", kind: "open_review", projectId: "p1", stage: 7, artifactId: "a7", version: 1, sha256: "s7", at: AT }),
+    );
+    const next = applyDecision(
+      input(opened, OWNER7, {
+        decisionId: "ap7",
+        kind: "approve",
+        projectId: "p1",
+        stage: 7,
+        reviewId: "stage-7-review-1",
+        artifactId: "a7",
+        version: 1,
+        sha256: "s7",
+        at: AT,
+        evidence: { target: "cli", frozen: frozenFrom(state), stack: { ...STACK, runtime: { ...STACK.runtime, cites: [] } } },
+      }),
+    );
+    expect(next.decisions.at(-1)).toMatchObject({ accepted: false, reason: "stack_uncited" });
+  });
+
+  test("approve is refused stack_unknown_requirement when a citation names an id that does not exist", () => {
+    const state = stateAtStage7([{ kind: "FR", text: "Does a thing." }]);
+    const opened = applyDecision(
+      input(state, OWNER7, { decisionId: "o7", kind: "open_review", projectId: "p1", stage: 7, artifactId: "a7", version: 1, sha256: "s7", at: AT }),
+    );
+    const next = applyDecision(
+      input(opened, OWNER7, {
+        decisionId: "ap7",
+        kind: "approve",
+        projectId: "p1",
+        stage: 7,
+        reviewId: "stage-7-review-1",
+        artifactId: "a7",
+        version: 1,
+        sha256: "s7",
+        at: AT,
+        evidence: { target: "cli", frozen: frozenFrom(state), stack: { ...STACK, runtime: { ...STACK.runtime, cites: ["FR-99"] } } },
+      }),
+    );
+    expect(next.decisions.at(-1)).toMatchObject({ accepted: false, reason: "stack_unknown_requirement" });
+  });
+
+  test("approve freezes the stack, keyed to the minted requirement ids, when every citation is valid", () => {
+    const state = stateAtStage7([{ kind: "FR", text: "Does a thing." }]);
+    const opened = applyDecision(
+      input(state, OWNER7, { decisionId: "o7", kind: "open_review", projectId: "p1", stage: 7, artifactId: "a7", version: 1, sha256: "s7", at: AT }),
+    );
+    const next = applyDecision(
+      input(opened, OWNER7, {
+        decisionId: "ap7",
+        kind: "approve",
+        projectId: "p1",
+        stage: 7,
+        reviewId: "stage-7-review-1",
+        artifactId: "a7",
+        version: 1,
+        sha256: "s7",
+        at: AT,
+        evidence: { target: "cli", frozen: frozenFrom(state), stack: STACK },
+      }),
+    );
+    expect(next.decisions.at(-1)).toMatchObject({ accepted: true, kind: "approve" });
+    expect(next.freeze).toMatchObject({ target: "cli", stack: STACK });
   });
 });
