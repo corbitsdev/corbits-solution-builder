@@ -17,12 +17,12 @@
     }
   },
   "dependencies": {
-    "@intx/log": "workspace:*",
+    "@intx/log": "0.4.0",
     "@intx/types": "workspace:*",
     "arktype": "catalog:"
   },
   "devDependencies": {
-    "@intx/mime": "workspace:*"
+    "@intx/mime": "0.4.0"
   },
   "files": [
     "dist",

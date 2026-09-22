@@ -9,7 +9,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@intx/log": "workspace:*",
+    "@intx/log": "0.4.0",
     "arktype": "catalog:"
   }
 }

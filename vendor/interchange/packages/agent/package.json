@@ -18,13 +18,13 @@
   },
   "dependencies": {
     "@intx/inference": "workspace:*",
-    "@intx/log": "workspace:*",
-    "@intx/mime": "workspace:*",
+    "@intx/log": "0.4.0",
+    "@intx/mime": "0.4.0",
     "@intx/types": "workspace:*",
     "arktype": "catalog:"
   },
   "devDependencies": {
-    "@intx/storage-isogit": "workspace:*"
+    "@intx/storage-isogit": "0.4.0"
   },
   "files": [
     "dist",
