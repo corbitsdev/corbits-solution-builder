@@ -139,4 +139,9 @@ describe("project chrome paint", () => {
     const layout = read("../workspace-layout.css");
     expect(layout).toMatch(/\.stage-pane \{[\s\S]*background: var\(--wb-background\)/);
   });
+
+  test("the chat omits substantial specialist drafts — those belong in the document pane", () => {
+    expect(read("./thread.tsx")).toContain("isSubstantialDraft");
+    expect(read("./thread.tsx")).toContain("message.author === \"me\" || !isSubstantialDraft(message.body)");
+  });
 });
