@@ -1987,19 +1987,29 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 }
 
 
-/* The filling stage view: its chrome is fixed, the conversation takes the
-   rest. Padding lives on the chrome rather than the region, so the panel
-   itself can run edge to edge. */
-/* The design review inside a filling stage: the one region there that
-   scrolls, so the frame, the comments and the form are all reachable. */
+/* DesignPanel's wrapper in the stage pane. The pane scrolls; this is
+   just the document, not a second chrome region. */
 .design-review {
-  flex: 1;
   min-height: 0;
-  overflow-y: auto;
-  padding: var(--space-4) var(--space-5) var(--space-6);
+}
+
+.design-review .doc {
   display: grid;
-  gap: var(--space-2);
-  align-content: start;
+  gap: var(--space-4);
+}
+
+.design-review .doc .docmeta {
+  margin-bottom: 0;
+}
+
+/* The generated mockup is its own page and paints on white whatever
+   theme the app wears. Height is most of the window, not a strip. */
+.design-preview {
+  width: 100%;
+  height: clamp(460px, 72vh, 1100px);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--radius-md);
+  background: #fff;
 }
 
 .canvas-body.is-fill > .banner {
@@ -3729,14 +3739,6 @@ button[aria-disabled="true"] {
   font-size: 0.875rem;
 }
 
-/* The design page's "Reviewing …" note, with the print action at its end. */
-.design-reviewing {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: var(--space-3);
-  flex-wrap: wrap;
-}
 
 /* KEEP: feedback disposition (conv) */
 /* One feedback comment's disposition select, plus a stale-anchor note. */

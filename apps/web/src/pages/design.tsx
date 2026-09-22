@@ -1,7 +1,6 @@
 import { Check } from "lucide-react";
 import {
   Textarea,
-  EmptyState,
   Table,
   TableBody,
   TableCell,
@@ -24,7 +23,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiFailure, type ArtifactNode, type DesignFeedbackEntry } from "../client.js";
 import { revisionPrompt, type Anchor, type Direction } from "@solutions-builder/app/design-prompt";
-import { Banner, Button, Field, Screen, StateLabel } from "../components.jsx";
+import { Banner, Button, Field, StateLabel, documentName } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
 import { PrintButton } from "../print.jsx";
 import { Elapsed } from "./workspace/elapsed.jsx";
@@ -243,14 +242,11 @@ export function DesignFeedbackView({
 
   if (designs.length === 0) {
     return (
-      <Screen
-        title="No design version yet"
-      >
-        <EmptyState
-          title="No design yet"
-          description="Draft this stage and the first mockup appears here."
-        />
-      </Screen>
+      <div className="stage-inner">
+        <div className="doc">
+          <p className="inline-note">Draft this stage and the first mockup appears here.</p>
+        </div>
+      </div>
     );
   }
 
@@ -269,107 +265,67 @@ export function DesignFeedbackView({
   };
 
   return (
-    <>
-      {/* The way forward, first and in plain sight. A screen that offers
-          feedback and a next version but no approval reads as a screen you
-          cannot leave — the guide was telling people to approve, and nothing
-          on the page let them. */}
-      {design && approval.canApprove ? (
-        <div className="stage-gate" role="status">
-          <span className="stage-gate-dot" aria-hidden="true" />
-          <p>
-            {approval.soloApproval
-              ? `Happy with version ${design.version}? Approving it starts the next stage. To change it first, switch Mode to Feedback and say what should change.`
-              : `Version ${design.version} goes to the people who decide when you send it. To change it first, switch Mode to Feedback.`}
-          </p>
-          <Button
-            variant="primary"
-            loading={busy === "approve"}
-            disabled={busy !== null && busy !== "approve"}
-            onClick={() => run("approve", () => approval.onApprove(design))}
-          >
-            <Check aria-hidden="true" />
-            {approval.soloApproval ? "Approve and continue" : "Send for approval"}
-          </Button>
-        </div>
-      ) : null}
-      <div data-tour="design-feedback">
-      <Screen
-        title="Design feedback"
-        description="Click an element to anchor a comment."
-        status={
-          submitted ? (
-            <StateLabel tone="success">Feedback submitted</StateLabel>
-          ) : feedbackMode ? (
-            <StateLabel tone="selected">Feedback mode: click an element</StateLabel>
-          ) : (
-            <StateLabel tone="info">Preview</StateLabel>
-          )
-        }
-      >
-        {error ? <Banner tone="error" title="That did not go through">{error}</Banner> : null}
-
-        <div className="bento">
-          <div className="span-6">
-            <Field label="Design version">
+    <div className="stage-inner">
+      <div className="doc" data-tour="design-feedback">
+        <div className="docmeta">
+          <span>
+            v{design?.version} · {documentName(design?.kind ?? "design_artifact")}
+          </span>
+          <div className="document-tools">
+            {designs.length > 1 ? (
               <select
+                aria-label="Version"
                 value={design?.id ?? ""}
                 onChange={(event) => setSelectedId(event.target.value)}
               >
                 {designs.map((entry) => (
                   <option key={entry.id} value={entry.id}>
-                    v{entry.version} — {new Date(entry.createdAt).toLocaleString()}
+                    Version {entry.version}
                   </option>
                 ))}
               </select>
-            </Field>
-          </div>
-          <div className="span-6">
-            <Field label="Mode" >
-              <select
-                value={feedbackMode ? "feedback" : "preview"}
-                onChange={(event) => setFeedbackMode(event.target.value === "feedback")}
+            ) : null}
+            <select
+              aria-label="Mode"
+              value={feedbackMode ? "feedback" : "preview"}
+              onChange={(event) => setFeedbackMode(event.target.value === "feedback")}
+            >
+              <option value="preview">Preview</option>
+              <option value="feedback">Feedback</option>
+            </select>
+            {design ? <PrintButton node={design} tenantId={tenantId} content={content || null} /> : null}
+            {design && approval.canApprove ? (
+              <Button
+                variant="primary"
+                loading={busy === "approve"}
+                disabled={busy !== null && busy !== "approve"}
+                onClick={() => run("approve", () => approval.onApprove(design))}
               >
-                <option value="preview">Preview</option>
-                <option value="feedback">Feedback</option>
-              </select>
-            </Field>
+                <Check aria-hidden="true" />
+                {approval.soloApproval ? "Approve and continue" : "Send for approval"}
+              </Button>
+            ) : null}
           </div>
         </div>
 
-        {design ? (
-          <p className="inline-note design-reviewing">
-            <span>
-              Reviewing {design.title}, version {design.version}.
-            </span>
-            <PrintButton node={design} tenantId={tenantId} content={content || null} />
-            {/* Converge bend (CL-8770): main passes content={null} with no
-                tenantId; the lane PrintButton requires tenantId and reuses the
-                already-loaded content — kept, typecheck-is-law. */}
-          </p>
+        {error ? (
+          <Banner tone="error" title="That did not go through">
+            {error}
+          </Banner>
         ) : null}
 
         {/* The generated design is untrusted: no scripts, no same-origin. */}
         <iframe
           ref={frame}
+          className="design-preview"
           title={`Design preview: ${design?.title ?? ""} v${design?.version ?? ""}`}
           srcDoc={content}
           sandbox=""
-          style={{
-            width: "100%",
-            // Most of the window, not a strip of it: the mockup is the thing
-            // being reviewed. It scrolls inside the frame past that.
-            height: "clamp(460px, 72vh, 1100px)",
-            border: "1px solid var(--wb-border)",
-            background: "#fff", // not-our-surface: a generated mockup is its
-            // own page and renders on white whatever theme the app wears.
-          }}
         />
-      </Screen>
       </div>
 
       {feedbackMode && !submitted ? (
-        <Screen title="Anchored comments">
+        <div className="doc">
           {draftAnchor ? (
             <>
               <dl className="version-list">
@@ -523,21 +479,18 @@ export function DesignFeedbackView({
             Submit feedback and generate the next version
           </Button>
           {busy === "submit" ? <Elapsed /> : null}
-          </Screen>
+        </div>
       ) : null}
 
       {submitted ? (
-        <Screen
-          title={`Feedback: ${submitted.direction}`}
-          description={submitted.overallNote || "No overall note was recorded."}
-          status={
-            <>
-              <StateLabel tone="success">Feedback submitted</StateLabel>{" "}
-              <StateLabel tone="selected">prompt {shortPromptHash(submitted.prompt)}</StateLabel>
-            </>
-          }
-          tight
-        >
+        <div className="doc">
+          <div className="docmeta">
+            <span>
+              {submitted.direction}
+              {submitted.overallNote ? ` · ${submitted.overallNote}` : ""}
+            </span>
+            <span className="hash">prompt {shortPromptHash(submitted.prompt)}</span>
+          </div>
           <Table>
             <TableHeader>
               <TableRow>
@@ -581,13 +534,11 @@ export function DesignFeedbackView({
               ))}
             </TableBody>
           </Table>
-          <div className="screen-body">
-            <div className="artifact">
-              <pre>{submitted.prompt}</pre>
-            </div>
+          <div className="artifact">
+            <pre>{submitted.prompt}</pre>
           </div>
-        </Screen>
+        </div>
       ) : null}
-    </>
+    </div>
   );
 }
