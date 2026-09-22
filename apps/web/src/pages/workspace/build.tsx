@@ -34,7 +34,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Textarea } from "@corbits/react-ui";
 import { api, ApiFailure, type ArtifactNode, type ProjectDetail } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
-import { Banner, Button, Screen, StateLabel } from "../../components.jsx";
+import { Banner, Button } from "../../components.jsx";
 import { Dictated } from "../../dictation.jsx";
 import { agentFor } from "@solutions-builder/app/kit";
 import type { StageEvent } from "./stage-events.ts";
@@ -207,6 +207,22 @@ type TimelineRow = {
   readonly tone: "info" | "selected" | "success" | "error" | "warning";
 };
 
+/** Mockup `.ev` tone classes: pass / fail / working / queued. */
+const EV_TONE: Record<TimelineRow["tone"], "p" | "f" | "w" | "r"> = {
+  success: "p",
+  error: "f",
+  warning: "w",
+  selected: "w",
+  info: "r",
+};
+
+function evMark(tone: TimelineRow["tone"]): string {
+  if (tone === "success") return "✓ ";
+  if (tone === "error") return "✗ ";
+  if (tone === "warning" || tone === "selected") return "… ";
+  return "";
+}
+
 function approvalRows(approvals: readonly PendingApproval[]): TimelineRow[] {
   return approvals
     .filter((approval) => BUILD_APPROVAL_TOOL_NAMES.has(approval.toolDefinition?.name ?? ""))
@@ -330,12 +346,9 @@ function BuildClock({ since }: { since: string | null }) {
   }, [since]);
   if (!since) return null;
   return (
-    <p className="elapsed">
-      <span className="elapsed-clock" role="timer" aria-live="off">
-        {clock(seconds)}
-      </span>{" "}
-      elapsed since the build attempt started.
-    </p>
+    <span className="elapsed-clock" role="timer" aria-live="off">
+      {clock(seconds)}
+    </span>
   );
 }
 
@@ -573,7 +586,11 @@ export function BuildPanel({
             {error}
           </Banner>
         ) : null}
-        {!address ? <p className="inline-note">Starting the build specialist…</p> : null}
+        {!address ? (
+          <div className="think" role="status">
+            <span className="who conv-who">Opening…</span>
+          </div>
+        ) : null}
         <StageConversation
           stage={8}
           messages={messages}
@@ -620,74 +637,63 @@ export function BuildPanel({
     >
         {reader ?? (
           <div className="stage-inner">
-            <Screen
-              title="Build supervision"
-              status={
-                address ? (
-                  <StateLabel tone={state.tone}>
-                    {state.label === "waiting for your approval" && onOpenDecisions ? (
-                      <Button variant="link" onClick={onOpenDecisions}>
-                        {state.label}
-                      </Button>
-                    ) : (
-                      state.label
-                    )}
-                  </StateLabel>
-                ) : null
-              }
-            >
-        <BuildClock since={buildStartedAt} />
-        <div className="button-row">
-          <Button variant="primary" loading={busy === "start"} disabled={!address} onClick={() => void send("start", START_ATTEMPT_BODY)}>
-            Start the build attempt
-          </Button>
-          <Button variant="primary" loading={busy === "continue"} disabled={!address} onClick={() => void send("continue", CONTINUE_ATTEMPT_BODY)}>
-            Continue from the last attempt
-          </Button>
-          <Button variant="destructive" loading={busy === "cancel"} disabled={!address} onClick={() => void send("cancel", "Cancel the build attempt.")}>
-            Cancel the build attempt
-          </Button>
-          <Button variant="primary" loading={busy === "accept"} disabled={!address} onClick={() => void accept()}>
-            Accept as evidence
-          </Button>
-          <Button variant="destructive" loading={busy === "fail"} disabled={!address} onClick={() => void send("fail", "Mark this build attempt failed.")}>
-            Mark this attempt failed
-          </Button>
-          <Button variant="primary" loading={approving} disabled={!canApprove || !address} onClick={onApprove}>
-            Approve and continue
-          </Button>
-        </div>
-        <p className="inline-note">
-          {canApprove
-            ? "Approving records the published build archive as this stage's evidence and starts delivery."
-            : timedOut
-              ? "The build attempt timed out with no published archive — cancel it and start again, or continue if the specialist is still working."
-              : evidence.reason}
-        </p>
-
-        {build ? <BuildFile node={build} tenantId={tenantId} /> : null}
-
-        {timeline.length > 0 ? (
-          <dl className="version-list">
-            {timeline.map((row) => (
-              <div key={row.id}>
-                <dt>
-                  <StateLabel tone={row.tone}>{row.label}</StateLabel> ·{" "}
-                  {new Date(row.at).toLocaleString()}
-                </dt>
-                {row.detail ? <dd className="hash">{row.detail}</dd> : null}
+            <div className="doc">
+              <h1>Build Evidence</h1>
+              <div className="docmeta">
+                <span>
+                  {address && state.label === "waiting for your approval" && onOpenDecisions ? (
+                    <Button variant="link" onClick={onOpenDecisions}>
+                      {state.label}
+                    </Button>
+                  ) : address ? (
+                    state.label
+                  ) : (
+                    "idle"
+                  )}
+                  {" · "}
+                  {agentFor(8).title}
+                  {buildStartedAt ? (
+                    <>
+                      {" · "}
+                      <BuildClock since={buildStartedAt} />
+                    </>
+                  ) : null}
+                </span>
               </div>
-            ))}
-          </dl>
-        ) : (
-          <p className="inline-note">No build activity has reported yet.</p>
-        )}
-        <p className="inline-note">
-          A command's output is never recorded separately from the specialist's own
-          reply. When a command fails, what you see above is the specialist's own
-          account of it, not a captured transcript.
-        </p>
-            </Screen>
+              <div className="document-tools">
+                <Button variant="primary" loading={busy === "start"} disabled={!address} onClick={() => void send("start", START_ATTEMPT_BODY)}>
+                  Start the build attempt
+                </Button>
+                <Button variant="primary" loading={busy === "continue"} disabled={!address} onClick={() => void send("continue", CONTINUE_ATTEMPT_BODY)}>
+                  Continue from the last attempt
+                </Button>
+                <Button variant="destructive" loading={busy === "cancel"} disabled={!address} onClick={() => void send("cancel", "Cancel the build attempt.")}>
+                  Cancel the build attempt
+                </Button>
+                <Button variant="primary" loading={busy === "accept"} disabled={!address} onClick={() => void accept()}>
+                  Accept as evidence
+                </Button>
+                <Button variant="destructive" loading={busy === "fail"} disabled={!address} onClick={() => void send("fail", "Mark this build attempt failed.")}>
+                  Mark this attempt failed
+                </Button>
+                <Button variant="primary" loading={approving} disabled={!canApprove || !address} onClick={onApprove}>
+                  Approve and continue
+                </Button>
+              </div>
+              {timeline.length > 0 ? (
+                <div className="ev">
+                  {timeline.map((row) => (
+                    <span key={row.id} className={EV_TONE[row.tone]}>
+                      {evMark(row.tone)}
+                      {row.label}
+                      {row.detail ? ` — ${row.detail}` : ""}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              {build ? <BuildFile node={build} tenantId={tenantId} /> : null}
+              {!canApprove && evidence.reason ? <p>{evidence.reason}</p> : null}
+            </div>
           </div>
         )}
     </StagePanes>

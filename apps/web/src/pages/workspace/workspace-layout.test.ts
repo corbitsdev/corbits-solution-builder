@@ -157,4 +157,26 @@ describe("project chrome paint", () => {
     expect(index).not.toContain("Starting the");
     expect(index).toContain("<OpeningScreen");
   });
+
+  test("stage 8 right pane is a document, not a dashboard", () => {
+    const build = read("./build.tsx");
+    expect(build).toContain('className="doc"');
+    expect(build).toContain('className="docmeta"');
+    expect(build).toContain('className="ev"');
+    expect(build).toContain("Build Evidence");
+    expect(build).toContain("Start the build attempt");
+    expect(build).toContain("Accept as evidence");
+    expect(build).not.toContain("Build supervision");
+    expect(build).not.toContain("<Screen");
+    expect(build).not.toContain("Starting the build specialist");
+    expect(build).not.toContain("elapsed since the build attempt started");
+    expect(build).not.toContain("A command's output is never recorded");
+    expect(build).not.toContain("No build activity has reported yet");
+    expect(build).not.toContain("<GuidanceFold");
+    expect(build).not.toContain("<WaitingSection");
+    const css = read("../workspace-layout.css");
+    expect(css).toContain(".ev {");
+    expect(css).toContain(".ev .p {");
+    expect(css).toContain(".ev .f {");
+  });
 });
