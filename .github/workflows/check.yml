@@ -7,10 +7,10 @@
 # shards `bun run check` names in step.
 name: check
 
+# Automatic triggers are off on this branch while the Actions account is
+# unbilled — every run died at runner provisioning. Still runnable by hand.
 on:
-  pull_request:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: check-${{ github.ref }}
