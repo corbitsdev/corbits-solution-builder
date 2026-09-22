@@ -67,12 +67,15 @@ export function Onboarding({
   oauthCandidates,
   onConnected,
   onCreated,
+  onSkipProject,
 }: {
   providers: Provider[];
   apiKeyProviders: ApiKeyProvider[];
   oauthCandidates: OAuthCandidate[];
   onConnected: () => Promise<void>;
   onCreated: (projectId: string) => void;
+  /** "I'll do this later" on the last step — leaves setup without a project. */
+  onSkipProject: () => void;
 }) {
   const connected = providers.some((provider) => provider.status === "ready");
   const [step, setStep] = useState<Step>(connected ? "project" : "welcome");
@@ -138,7 +141,7 @@ export function Onboarding({
         ) : step === "model" && modelProvider ? (
           <ModelStep provider={modelProvider} onChosen={() => setStep("project")} />
         ) : (
-          <ProjectStep onCreated={onCreated} />
+          <ProjectStep onCreated={onCreated} onSkip={onSkipProject} />
         )}
       </main>
 
@@ -303,13 +306,21 @@ function ModelStep({ provider, onChosen }: { provider: Provider; onChosen: () =>
   );
 }
 
-/** The last step: the only question worth asking first. */
-function ProjectStep({ onCreated }: { onCreated: (projectId: string) => void }) {
+/** The last step: the only question worth asking first. The composer sends —
+ *  there is no second button for the same action. */
+function ProjectStep({
+  onCreated,
+  onSkip,
+}: {
+  onCreated: (projectId: string) => void;
+  onSkip: () => void;
+}) {
   const [problem, setProblem] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const create = async () => {
+    if (problem.trim().length < 10) return;
     setBusy(true);
     setError(null);
     try {
@@ -345,15 +356,9 @@ function ProjectStep({ onCreated }: { onCreated: (projectId: string) => void }) 
         </p>
       </div>
       <div className="ob-foot">
-        <span />
-        <Button
-          variant="primary"
-          loading={busy}
-          disabled={problem.trim().length < 10}
-          onClick={() => void create()}
-        >
-          Begin problem discovery
-        </Button>
+        <button type="button" className="ob-skip" onClick={onSkip}>
+          Skip — I'll do this later
+        </button>
       </div>
     </>
   );

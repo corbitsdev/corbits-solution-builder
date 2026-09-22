@@ -270,6 +270,7 @@ const screens: Record<string, ReactNode> = {
         ],
         onConnected: async () => {},
         onCreated: () => {},
+        onSkipProject: () => {},
       } as unknown as ComponentProps<typeof Onboarding>)}
     />
   ),

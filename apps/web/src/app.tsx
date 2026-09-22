@@ -631,6 +631,7 @@ export function App() {
           void refresh();
           openProject(projectId);
         }}
+        onSkipProject={() => setSkippedSetup(true)}
       />
     );
   }
