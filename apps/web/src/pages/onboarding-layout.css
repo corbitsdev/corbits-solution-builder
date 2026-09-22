@@ -1,0 +1,536 @@
+/*
+ * Onboarding layout — the mockup's sheet (`mockups/onboarding.html` + tokens
+ * in `mockups/mock.css`), scoped here so Settings/auth keep the shared
+ * workbench rules. Tokens are the design system's, so dark mode follows.
+ */
+
+.ob-frame {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: clamp(80px, 15vh, 150px) var(--space-6) var(--space-8);
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.ob {
+  width: 100%;
+  max-width: 540px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.ob-brand {
+  position: fixed;
+  top: var(--space-5);
+  left: var(--space-5);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.ob-brand img {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+}
+
+.ob-brand span {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.1em;
+  color: var(--muted-foreground);
+}
+
+.ob-head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  min-height: 118px;
+}
+
+.ob-head h1 {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  margin: 0;
+}
+
+.ob-head p {
+  margin: 0;
+  text-align: left;
+  color: var(--muted-foreground);
+  font-size: 13.5px;
+  line-height: 1.55;
+  max-width: 44ch;
+}
+
+.ob-head.swap h1,
+.ob-head.swap p {
+  animation: ob-fadeup 0.38s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+.ob-head.swap p {
+  animation-delay: 0.04s;
+}
+
+@keyframes ob-fadeup {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.ob-credit {
+  position: fixed;
+  left: var(--space-4);
+  bottom: var(--space-4);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+  color: var(--muted-foreground);
+  opacity: 0.7;
+}
+
+.ob-credit img {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.ob-model {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted-foreground);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.ob-model a,
+.ob-model button {
+  color: var(--muted-foreground);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+}
+
+.ob-model a:hover,
+.ob-model button:hover {
+  color: var(--foreground);
+}
+
+.ob-track {
+  display: flex;
+  gap: 4px;
+  padding: var(--space-1) 0;
+}
+
+.ob-track .seg {
+  width: 16px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--border);
+  transition: background 0.3s, width 0.3s;
+}
+
+.ob-track .seg.done {
+  background: var(--muted-foreground);
+}
+
+.ob-track .seg.now {
+  background: var(--primary);
+  width: 24px;
+}
+
+.ob-step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  animation: ob-stepin 0.34s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+@keyframes ob-stepin {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.ob-points {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-2) 0 0 var(--space-1);
+  margin: 0;
+}
+
+.ob-points li {
+  list-style: none;
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--muted-foreground);
+}
+
+.ob-points li b {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.ob-points li::before {
+  content: "";
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--primary);
+  flex-shrink: 0;
+  transform: translateY(-2px);
+}
+
+.ob-list {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.ob-frame .orow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 10px var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: var(--background);
+}
+
+.ob-list > div:last-child > .orow:last-child,
+.ob-list > div:last-child > .byo-config {
+  border-bottom: 0;
+}
+
+.ob-frame .orow .who {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.ob-frame .orow .who b {
+  font-size: 13.5px;
+  font-weight: 600;
+  display: block;
+  letter-spacing: -0.005em;
+}
+
+.ob-frame .orow .who span,
+.ob-frame .orow .sub {
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  display: block;
+  margin-top: 1px;
+}
+
+.ob-frame .orow .who > span:not(.provider-mark) {
+  min-width: 0;
+}
+
+.ob-frame .provider-mark {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--foreground);
+}
+
+.ob-frame .provider-mark img,
+.ob-frame .provider-mark svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+  object-fit: contain;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .ob-frame .provider-mark img,
+  :root:not([data-theme]) .ob-credit img {
+    filter: invert(1) brightness(0.94);
+  }
+}
+
+html[data-theme="dark"] .ob-frame .provider-mark img,
+html[data-theme="dark"] .ob-credit img {
+  filter: invert(1) brightness(0.94);
+}
+
+.ob-group {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--muted-foreground);
+  margin: var(--space-3) 0 calc(var(--space-1) * -1) 2px;
+}
+
+.ob-group:first-child {
+  margin-top: 0;
+}
+
+.ob-frame .tag {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  color: var(--primary);
+  border: 1px solid color-mix(in srgb, var(--primary) 45%, transparent);
+  border-radius: 999px;
+  padding: 1px 7px;
+  white-space: nowrap;
+}
+
+.ob-frame .orow.pick {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ob-frame .orow.pick:hover:not(:disabled) {
+  background: var(--muted);
+}
+
+.ob-frame .orow.pick.on {
+  background: var(--muted);
+}
+
+.ob-frame .orow.pick.on .btn {
+  border-color: var(--foreground);
+  color: var(--foreground);
+  font-weight: 700;
+}
+
+.ob-frame .byo-config {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--muted);
+  border-bottom: 1px solid var(--border);
+  animation: ob-stepin 0.25s cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+.ob-frame .byo-note {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--muted-foreground);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.ob-frame .byo-note b {
+  color: var(--warn, var(--primary));
+  font-weight: 500;
+}
+
+.ob-frame .loading-line {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted-foreground);
+  padding: var(--space-3) var(--space-4);
+  animation: ob-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes ob-shimmer {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.ob-frame .orow .btn {
+  padding: 5px 12px;
+  font-size: 12.5px;
+  font-weight: 550;
+}
+
+.ob-frame .orow .btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.ob-frame .field-row {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 2px;
+}
+
+.ob-frame .field {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--background);
+  color: var(--foreground);
+  padding: 9px 12px;
+  width: 100%;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.ob-frame .field::placeholder {
+  color: var(--muted-foreground);
+  opacity: 0.6;
+}
+
+.ob-frame .field:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 14%, transparent);
+}
+
+.ob-frame .field-mono {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.ob-frame .seg-ctl {
+  display: inline-flex;
+  gap: 2px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: 2px;
+  background: var(--muted);
+}
+
+.ob-frame .seg-ctl button {
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 3px 11px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+
+.ob-frame .seg-ctl button.on {
+  background: var(--background);
+  color: var(--foreground);
+  font-weight: 700;
+}
+
+.ob-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: var(--space-4);
+}
+
+.ob-foot:has(> :only-child) {
+  justify-content: flex-end;
+}
+
+.ob-skip {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--muted-foreground);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-decoration: none;
+  padding: 0;
+  opacity: 0.75;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.ob-skip:hover:not(:disabled) {
+  color: var(--foreground);
+  opacity: 1;
+}
+
+.ob-frame .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  font-weight: 600;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+
+.ob-frame .btn:hover:not(:disabled) {
+  background: var(--muted);
+}
+
+.ob-frame .btn.primary {
+  background: var(--foreground);
+  border-color: var(--foreground);
+  color: var(--background);
+  padding: 7px 18px;
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.ob-frame .btn.primary:hover:not(:disabled) {
+  opacity: 0.85;
+  background: var(--foreground);
+}
+
+.ob-frame .btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.ob .ask {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.ob .ask textarea {
+  min-height: 76px;
+  font-size: 15.5px;
+}
+
+.ob .start-hint {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
