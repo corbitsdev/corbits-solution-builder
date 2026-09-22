@@ -22,7 +22,7 @@ type Choices = { readonly text: string; readonly choices: readonly string[] } | 
 export function GuidanceFold({ children }: { children: ReactNode }) {
   return (
     <details className="stage-chrome">
-      <summary>Guidance</summary>
+      <summary>Stage extras</summary>
       <div className="stage-chrome-body">{children}</div>
     </details>
   );
