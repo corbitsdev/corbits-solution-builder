@@ -344,3 +344,24 @@ existing grant collection the credential walk already mirrors.
 
 **Kill date.** 2026-10-16. Tracked as
 [INTR-574](https://linear.app/abklabs/issue/INTR-574).
+
+## `packages/types/src/catalog.ts`, `packages/db/src/schema/catalog.ts` — operator-registered provider plugins
+
+**Why.** The catalog restricted `model_provider.plugin` to the four built-in
+adapter keys, so a provider served by an adapter the sidecar loads from
+`SIDECAR_ADAPTER_MANIFEST` could not be recorded. ChatGPT (Codex) speaks
+only the Responses API; as `openai-compatible` it 404s on
+`/chat/completions`.
+
+**What changed.** `ModelProviderPlugin` is any non-empty string
+(`modelProviderPlugins` still lists the built-ins); the Drizzle enum on
+`modelProvider.plugin` is dropped (the SQL column was always plain `text`,
+no migration). An unregistered key fails at deploy admission. Tests in
+`packages/types/src/catalog.test.ts`, `packages/db/src/parse-row.test.ts`.
+
+**Upstream-able.** Yes; identical to `faremeter/interchange` commit
+`50cc0177` on branch
+`intr-583-allow-operator-registered-custom-model-provider-types-in-the`.
+
+**Kill date.** 2026-10-16. Tracked as
+INTR-583.
