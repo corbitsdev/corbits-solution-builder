@@ -178,7 +178,7 @@ HOST_DATA_DIR=$(mktemp -d /tmp/walk-browser-host-XXXXXX)
 export WALK_HOST_DATA_DIR="$HOST_DATA_DIR"
 HOST_LOG=$(mktemp /tmp/walk-browser-host-log-XXXXXX)
 export WALK_HOST_LOG="${WALK_HOST_LOG:-$WALK_OUT_DIR/host.log}"
-bun --conditions intx-src scripts/walk-browser-host.ts > "$HOST_LOG" 2>>"$HOST_LOG" &
+bun scripts/walk-browser-host.ts > "$HOST_LOG" 2>>"$HOST_LOG" &
 HOST_PID=$!
 HOST_URL=""
 for _ in $(seq 1 60); do

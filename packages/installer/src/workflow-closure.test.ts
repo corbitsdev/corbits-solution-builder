@@ -80,7 +80,7 @@ async function fakeClosure(): Promise<{ manifest: ClosureManifest; fetchTarball:
 }
 
 describe("workflow-closure", () => {
-  test("vendoredMemberFiles extracts every @intx/* tarball the manifest carries", async () => {
+  test("vendoredMemberFiles ships @intx/workflow as the only member", async () => {
     const { manifest, fetchTarball } = await fakeClosure();
     const files = await vendoredMemberFiles(manifest, fetchTarball);
     const dir = memberDir("workflow");

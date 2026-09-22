@@ -4,6 +4,7 @@
     "target": "ESNext",
     "module": "Preserve",
     "moduleResolution": "bundler",
+    "customConditions": ["bun"],
     "moduleDetection": "force",
     "jsx": "react-jsx",
     "allowJs": false,

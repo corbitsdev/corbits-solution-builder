@@ -9,10 +9,10 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@intx/crypto": "workspace:*",
-    "@intx/hub-sessions": "workspace:*",
-    "@intx/log": "workspace:*",
-    "@intx/types": "workspace:*",
+    "@intx/crypto": "0.4.0",
+    "@intx/hub-sessions": "0.4.0",
+    "@intx/log": "0.4.0",
+    "@intx/types": "0.4.0",
     "arktype": "catalog:"
   }
 }

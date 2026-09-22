@@ -10,9 +10,9 @@
   },
   "dependencies": {
     "@solutions-builder/app": "workspace:*",
-    "@intx/crypto": "workspace:*",
+    "@intx/crypto": "0.4.0",
     "@intx/hub-client": "workspace:*",
-    "@intx/inference-catalog": "workspace:*",
+    "@intx/inference-catalog": "0.4.0",
     "@intx/types": "workspace:*",
     "@isomorphic-git/lightning-fs": "^4.7.0",
     "buffer": "^6.0.3",

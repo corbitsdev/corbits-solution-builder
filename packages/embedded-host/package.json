@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.3.16",
-    "@intx/crypto": "workspace:*",
+    "@intx/crypto": "0.4.0",
     "@intx/hub-client": "workspace:*",
     "@corbits/embed-hub": "workspace:*",
     "@corbits/keychain": "workspace:*",

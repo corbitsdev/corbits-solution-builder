@@ -77,12 +77,6 @@ type MockDBOpts = {
   targetVersion?: { version: string } | undefined;
   // Rows the versions list returns.
   versions?: Record<string, unknown>[] | undefined;
-  // Rows POST /'s (tenantId, name) lookup returns, across every wireHash
-  // registered under that name so far.
-  existingByName?: Record<string, unknown>[] | undefined;
-  // POST /'s insert, when it happens, pushes the row here for the test to
-  // read back.
-  insertSink?: Record<string, unknown>[];
 };
 
 function makeDef(overrides: Partial<Def> = {}): Def {
@@ -140,9 +134,7 @@ function createMockDB(opts: MockDBOpts) {
         // stands for a definition that is not in the URL tenant (another
         // tenant's, or nonexistent).
         findFirst: async () => opts.definition,
-        // POST /'s (tenantId, name) lookup, across every wireHash registered
-        // under that name so far.
-        findMany: async () => opts.existingByName ?? [],
+        findMany: () => notImpl("db.query.workflowDefinition.findMany"),
       },
       workflowDefinitionVersion: {
         findFirst: () =>
@@ -150,12 +142,6 @@ function createMockDB(opts: MockDBOpts) {
         findMany: async () => opts.versions ?? [],
       },
     },
-    insert: (_table: unknown) => ({
-      values: (row: Record<string, unknown>) => {
-        opts.insertSink?.push(row);
-        return Promise.resolve();
-      },
-    }),
     transaction: async (fn: (tx: typeof txLike) => Promise<unknown>) =>
       fn(txLike),
   } as unknown as Parameters<typeof createApp>[0]["db"];
@@ -365,78 +351,5 @@ describe("POST /workflows/definitions/:definitionId/rollback", () => {
     });
     const res = await rollback(app);
     expect(res.status).toBe(403);
-  });
-});
-
-describe("POST /workflows/definitions", () => {
-  function register(app: ReturnType<typeof createTestApp>, body: Record<string, unknown>) {
-    return app.request(defsURL, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-  }
-
-  test("registers a new definition under a caller-chosen id", async () => {
-    const inserted: Record<string, unknown>[] = [];
-    const app = createTestApp({
-      db: { existingByName: [], insertSink: inserted },
-      grants: [makeGrant({ action: "create" })],
-    });
-    const res = await register(app, {
-      id: "wfd_new",
-      name: "lifecycle",
-      description: "the lifecycle",
-      wireHash: "hash-1",
-    });
-    expect(res.status).toBe(200);
-    const body: unknown = await res.json();
-    expect(body).toEqual({ id: "wfd_new", created: true });
-    expect(inserted).toEqual([
-      expect.objectContaining({ id: "wfd_new", tenantId: TENANT_ID, name: "lifecycle", wireHash: "hash-1" }),
-    ]);
-  });
-
-  test("an existing row at the same wireHash is a no-op, not a second insert", async () => {
-    const inserted: Record<string, unknown>[] = [];
-    const app = createTestApp({
-      db: {
-        existingByName: [{ id: "wfd_current", wireHash: "hash-1" }],
-        insertSink: inserted,
-      },
-      grants: [makeGrant({ action: "create" })],
-    });
-    const res = await register(app, { name: "lifecycle", wireHash: "hash-1" });
-    expect(res.status).toBe(200);
-    const body: unknown = await res.json();
-    expect(body).toEqual({ id: "wfd_current", created: false });
-    expect(inserted).toEqual([]);
-  });
-
-  test("a changed wireHash under the same name registers as a new row", async () => {
-    const inserted: Record<string, unknown>[] = [];
-    const app = createTestApp({
-      db: {
-        existingByName: [{ id: "wfd_current", wireHash: "hash-old" }],
-        insertSink: inserted,
-      },
-      grants: [makeGrant({ action: "create" })],
-    });
-    const res = await register(app, { id: "wfd_new", name: "lifecycle", wireHash: "hash-new" });
-    expect(res.status).toBe(200);
-    const body: unknown = await res.json();
-    expect(body).toEqual({ id: "wfd_new", created: true });
-    expect(inserted).toEqual([expect.objectContaining({ id: "wfd_new", wireHash: "hash-new" })]);
-  });
-
-  test("403 without a create grant", async () => {
-    const inserted: Record<string, unknown>[] = [];
-    const app = createTestApp({
-      db: { existingByName: [], insertSink: inserted },
-      grants: [makeGrant({ action: "read" })],
-    });
-    const res = await register(app, { name: "lifecycle", wireHash: "hash-1" });
-    expect(res.status).toBe(403);
-    expect(inserted).toEqual([]);
   });
 });

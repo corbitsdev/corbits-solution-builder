@@ -37,9 +37,9 @@
     }
   },
   "dependencies": {
-    "@intx/agent": "workspace:*",
-    "@intx/inference": "workspace:*",
-    "@intx/types": "workspace:*",
+    "@intx/agent": "0.4.0",
+    "@intx/inference": "0.4.0",
+    "@intx/types": "0.4.0",
     "arktype": "catalog:"
   },
   "files": [

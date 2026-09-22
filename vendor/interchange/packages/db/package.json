@@ -17,11 +17,11 @@
     }
   },
   "dependencies": {
-    "@intx/authz": "workspace:*",
-    "@intx/crypto": "workspace:*",
-    "@intx/hub-common": "workspace:*",
-    "@intx/log": "workspace:*",
-    "@intx/types": "workspace:*",
+    "@intx/authz": "0.4.0",
+    "@intx/crypto": "0.4.0",
+    "@intx/hub-common": "0.4.0",
+    "@intx/log": "0.4.0",
+    "@intx/types": "0.4.0",
     "arktype": "catalog:",
     "drizzle-orm": "catalog:",
     "postgres": "catalog:"

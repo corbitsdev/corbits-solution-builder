@@ -55,19 +55,20 @@ async function memberTree(
 }
 
 /**
- * Every vendored `@intx/*` package the manifest carries, as workspace
- * members. The manifest already holds the full transitive closure `@intx/
- * workflow` and `@intx/tools-posix` need (`scripts/closure-pack.ts`'s
- * `vendoredShortNames`), so nothing here needs to walk `workspace:*` edges
- * itself -- it just ships whatever the manifest names `@intx/*`.
+ * The vendored `@intx/*` packages a deployed workflow depends on as
+ * `workspace:*`, shipped as workspace members. Every other `@intx/*` package
+ * in the manifest resolves from the registry; shipping it as a member too
+ * would give the closure two origins for one name.
  */
+const VENDORED_MEMBERS: ReadonlySet<string> = new Set(["@intx/workflow"]);
+
 export async function vendoredMemberFiles(
   manifest: ClosureManifest,
   fetchTarball: ClosureTarballFetcher,
 ): Promise<Record<string, string>> {
   const files: Record<string, string> = {};
   for (const entry of manifest.packages) {
-    if (!entry.name.startsWith("@intx/")) continue;
+    if (!VENDORED_MEMBERS.has(entry.name)) continue;
     const shortName = entry.name.slice("@intx/".length);
     Object.assign(files, await memberTree(manifest, entry.name, memberDir(shortName), fetchTarball));
   }

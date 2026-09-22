@@ -11,6 +11,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
 import { Hono } from "hono";
+import type { GrantRule, GrantStore } from "@intx/authz";
 import { createRequireGrant, type TenantEnv } from "@intx/hub-api";
 import { InlineContentStore, mountArtifacts, runArtifactMigrations, type ArtifactDb } from "@corbits/artifacts";
 import { withPostgresJsResultShape } from "./pg-compat.js";
@@ -18,24 +19,6 @@ import { withPostgresJsResultShape } from "./pg-compat.js";
 const TENANT_ID = "t_test";
 const PRINCIPAL_ID = "p_test";
 
-/** Structural match to Interchange's own `GrantRule`/`GrantStore` — `createRequireGrant`'s
- * `grantStore` option is typed `unknown` in this repo's `@intx/hub-api` declarations, so
- * nothing upstream constrains this beyond what `authorize()` actually reads. */
-type GrantRule = {
-  id: string;
-  resource: string;
-  action: string;
-  effect: "allow" | "deny" | "ask";
-  origin: "system" | "role" | "creator" | "invoker";
-  conditions: unknown;
-  expiresAt: Date | null;
-  roleId: string | null;
-  principalId: string | null;
-};
-type GrantStore = {
-  collectGrants(principalId: string, tenantId: string): Promise<GrantRule[]>;
-  collectGrantsInChain(principalId: string, tenantId: string): Promise<GrantRule[]>;
-};
 
 function mutableGrantStore(): GrantStore & { grants: GrantRule[] } {
   const grants: GrantRule[] = [];

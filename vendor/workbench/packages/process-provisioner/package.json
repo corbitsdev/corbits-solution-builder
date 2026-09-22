@@ -11,7 +11,7 @@
   "dependencies": {
     "@corbits/error-sink": "workspace:*",
     "@corbits/sandbox-sidecar": "workspace:*",
-    "@intx/hub-sessions": "workspace:*",
+    "@intx/hub-sessions": "0.4.0",
     "arktype": "catalog:"
   }
 }

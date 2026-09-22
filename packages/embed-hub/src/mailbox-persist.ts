@@ -7,7 +7,7 @@
 import { sql } from "drizzle-orm";
 import type { DB } from "@intx/db";
 import { resolveMailboxRecipients, type AuthorizeMailboxSender, type MailboxPersistArgs } from "@corbits/mailbox";
-import { resolveRoutableAddress } from "@intx/hub-sessions";
+import { resolveRoutableAddress, type SidecarMailPersistedRow } from "@intx/hub-sessions";
 
 /** The `create`/`has` slice of `EventCollectorRegistry` `ensureRunSession`
  * needs (see @intx/hub-sessions's `event-collector-registry.ts`). */
@@ -98,8 +98,8 @@ async function ensureRunSession(params: {
 export function createHubPersistMailWithSessionEnsure(
   db: DB["db"],
   eventCollectors: EventCollectorPort,
-  upstream: (args: MailboxPersistArgs) => Promise<unknown>,
-): (args: MailboxPersistArgs) => Promise<unknown> {
+  upstream: (args: MailboxPersistArgs) => Promise<SidecarMailPersistedRow[]>,
+): (args: MailboxPersistArgs) => Promise<SidecarMailPersistedRow[]> {
   return async (args) => {
     const sender = await resolveRoutableAddress(db, args.senderAddress);
     if (sender !== undefined) {

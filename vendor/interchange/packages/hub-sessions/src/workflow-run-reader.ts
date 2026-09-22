@@ -4,9 +4,7 @@ import git from "isomorphic-git";
 import type { RepoId } from "./repo-store/types";
 import type { RepoStore } from "./repo-store/types";
 import {
-  BLOB_FILENAME_RE,
   requireEventSeq,
-  WORKFLOW_RUN_BLOBS_DIR,
   WORKFLOW_RUN_EVENTS_DIR,
   WORKFLOW_RUN_RUNS_PREFIX,
 } from "./workflow-run-kind";
@@ -63,19 +61,6 @@ export interface WorkflowRunReader {
     ref: string,
     runId: string,
   ): Promise<WorkflowRunEvent[]>;
-  /**
-   * Read one content-addressed blob a step output spilled to
-   * `runs/<runId>/blobs/<sha>` on `ref`. Returns `null` when `sha`
-   * fails the 64-hex shape, or when the repo, ref, run or blob is
-   * absent -- callers that need to tell "malformed" from "absent"
-   * apart validate `sha` before calling.
-   */
-  readRunBlob(
-    repoId: RepoId,
-    ref: string,
-    runId: string,
-    sha: string,
-  ): Promise<Uint8Array | null>;
 }
 
 export function createWorkflowRunReader(
@@ -218,28 +203,6 @@ export function createWorkflowRunReader(
     return events;
   }
 
-  async function readRunBlob(
-    repoId: RepoId,
-    ref: string,
-    runId: string,
-    sha: string,
-  ): Promise<Uint8Array | null> {
-    if (!BLOB_FILENAME_RE.test(sha)) return null;
-    const dir = repoDirOrNull(repoId);
-    if (dir === null) return null;
-    const oid = await resolveRefOrNull(dir, ref);
-    if (oid === null) return null;
-    const blobPath = `${WORKFLOW_RUN_RUNS_PREFIX}/${runId}/${WORKFLOW_RUN_BLOBS_DIR}/${sha}`;
-    let blob: Awaited<ReturnType<typeof git.readBlob>>;
-    try {
-      blob = await git.readBlob({ fs, dir, oid, filepath: blobPath });
-    } catch (cause) {
-      if (cause instanceof git.Errors.NotFoundError) return null;
-      throw cause;
-    }
-    return blob.blob;
-  }
-
   // Parse one combined-log line (the verbatim text of a former
   // `events/<seq>.json` blob): the seq is read from the body, since the
   // combined form drops the per-event filename that carried it.
@@ -277,5 +240,5 @@ export function createWorkflowRunReader(
     return { ...parsed };
   }
 
-  return { listRunIds, readRunEvents, readRunBlob };
+  return { listRunIds, readRunEvents };
 }

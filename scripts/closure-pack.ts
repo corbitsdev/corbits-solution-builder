@@ -44,6 +44,12 @@ export function readManifest(shortName: string): PackageManifest {
   return JSON.parse(readFileSync(path, "utf8")) as PackageManifest;
 }
 
+/** Whether `name` is packed as a vendored workspace member; every other
+ *  package, `@intx/*` included, is packed from its installed directory. */
+function isVendored(name: string): boolean {
+  return name.startsWith("@intx/") && vendoredShortNames().includes(name.slice("@intx/".length));
+}
+
 /** The transitive `workspace:*` closure of `@intx/<root>`, root first. */
 export function vendoredClosure(root: string): string[] {
   const order: string[] = [];
@@ -239,14 +245,14 @@ function discoverExternalClosure(): ExternalPackage[] {
   for (const shortName of vendoredShortNames()) {
     const manifest = readManifest(shortName) as PackageManifest;
     for (const name of Object.keys(manifest.dependencies ?? {})) {
-      if (name.startsWith("@intx/")) continue;
+      if (isVendored(name)) continue;
       queue.push({ name, fromDirs: [join(VENDOR_PACKAGES_DIR, shortName), ROOT_DIR] });
     }
   }
   // The opt-in artifact tools are packed too, so turning them on needs no rebuild.
   const appManifest = JSON.parse(readFileSync(join(APP_PACKAGE_DIR, "package.json"), "utf8")) as PackageManifest;
   for (const name of Object.keys({ ...appManifest.dependencies, ...WORKFLOW_PACKAGE_DEPENDENCIES, ...ARTIFACT_TOOL_DEPENDENCIES })) {
-    if (name.startsWith("@intx/")) continue;
+    if (isVendored(name)) continue;
     queue.push({ name, fromDirs: [ROOT_DIR] });
   }
 
@@ -255,7 +261,7 @@ function discoverExternalClosure(): ExternalPackage[] {
     // The curated app tarball is already packed above, including its source.
     // Repacking its workspace symlink would overwrite the same filename with
     // different bytes and invalidate the advertised integrity.
-    if (found.has(name) || name.startsWith("@intx/") || name === "@solutions-builder/app") continue;
+    if (found.has(name) || isVendored(name) || name === "@solutions-builder/app") continue;
     const dir = resolveExternalPackageDir(name, fromDirs);
     const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as PackageManifest;
     found.set(name, { name: manifest.name, version: manifest.version, dir });
@@ -269,7 +275,7 @@ function discoverExternalClosure(): ExternalPackage[] {
       // `vendoredTarballFiles` entry `vendoredShortNames()` already packed
       // -- two tarballs sharing one filename, the raw one overwriting the
       // curated one on disk.
-      if (found.has(depName) || depName.startsWith("@intx/")) continue;
+      if (found.has(depName) || isVendored(depName)) continue;
       queue.push({ name: depName, fromDirs: [dir, ROOT_DIR] });
     }
   }

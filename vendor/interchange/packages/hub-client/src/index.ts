@@ -14,12 +14,10 @@ export {
   triggerWorkflowRun,
   listWorkflowRuns,
   readWorkflowRunEvents,
-  registerWorkflowDefinition,
   WorkflowDeployment,
   WorkflowRunTrigger,
   type DeployWorkflowInput,
   type DeliverSignalInput,
   type TriggerWorkflowRunInput,
   type TriggerRunAttachment,
-  type RegisterWorkflowDefinitionInput,
 } from "./workflows";

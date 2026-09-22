@@ -11,7 +11,7 @@
  * workspace credential is the client's job, the same way it already is for
  * an API key (`packages/installer/src/provider-connect.ts`).
  */
-import type { Hono } from "hono";
+import type { Env, Hono } from "hono";
 import {
   buildAuthorizeUrl,
   openInBrowser,
@@ -67,8 +67,8 @@ function callbackConfigFor(redirectUri: string): { host: string; port: number; p
  * (tests) can inject a no-op so starting a login never spawns a real
  * browser process.
  */
-export function mountProviderOAuth(
-  app: Hono,
+export function mountProviderOAuth<E extends Env>(
+  app: Hono<E>,
   copy: CallbackPageCopy,
   open: (url: string) => void = openInBrowser,
 ): void {
