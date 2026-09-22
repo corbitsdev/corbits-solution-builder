@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { hostCredentialsCopy, hostDataCopy, hostStatusCopy, roleLabel } from "./settings.tsx";
+import { hostCredentialsCopy, hostDataCopy, hostStatusCopy, roleLabel, deckThemeLabel, DECK_THEME_CHOICES } from "./settings.tsx";
 import type { HostStatus } from "../client.ts";
 
 function fixtureStatus(overrides: Partial<HostStatus> = {}): HostStatus {
@@ -24,6 +24,15 @@ function fixtureStatus(overrides: Partial<HostStatus> = {}): HostStatus {
 describe("settings page copy", () => {
   test("role labels drop underscores", () => {
     expect(roleLabel("budget_approver")).toBe("budget approver");
+  });
+
+  test("deck Edit themes are the mockup's Minimal / Detailed / Bold", () => {
+    expect(DECK_THEME_CHOICES.map((choice) => choice.label)).toEqual(["Minimal", "Detailed", "Bold"]);
+    expect(deckThemeLabel("slate")).toBe("Minimal");
+    expect(deckThemeLabel("navy")).toBe("Detailed");
+    expect(deckThemeLabel("ember")).toBe("Bold");
+    expect(deckThemeLabel("forest")).toBe("Detailed");
+    expect(deckThemeLabel("plum")).toBe("Bold");
   });
 
   test("host status matches the mockup running · embedded hub line", () => {
@@ -119,11 +128,16 @@ describe("settings page markup language", () => {
     const decks = page.slice(page.indexOf("function StakeholderDecks"), page.indexOf("/* ------------------------------------------------------------ this computer"));
     expect(decks).toContain('label="Theme"');
     expect(decks).toContain("<SegCtl");
+    expect(decks).toContain("DECK_THEME_CHOICES");
+    expect(decks).toContain("STAKEHOLDER_ROLES");
+    expect(decks).not.toContain("Executive");
     expect(decks).not.toContain("Typeface");
     expect(decks).not.toContain("Density");
     expect(decks).not.toContain("Speaker notes");
     expect(decks).not.toContain("What the outline should emphasise");
     expect(decks).not.toContain("label=\"Images\"");
+    expect(decks).not.toContain("DECK_THEMES");
+    expect(decks).not.toContain("DeckTemplates");
   });
 
   test("settings chrome is outline .btn / .btn.link, not the library Button", async () => {

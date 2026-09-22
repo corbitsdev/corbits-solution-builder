@@ -15,7 +15,7 @@
  */
 import { useTheme, type ThemeMode } from "@corbits/react-ui";
 import { Fragment, useEffect, useState, type ReactNode } from "react";
-import { DECK_THEMES, DEFAULT_DECK_DESIGN, type DeckDesign, type DeckTheme } from "@solutions-builder/app/deck";
+import { DEFAULT_DECK_DESIGN, type DeckDesign, type DeckTheme } from "@solutions-builder/app/deck";
 import { api, ApiFailure, STAKEHOLDER_ROLES, type DesignerSettings, type HostStatus, type Provider } from "../client.js";
 import { Banner } from "../components.jsx";
 import { deckDesignFor, deckDesignKey } from "../deck-design-settings.ts";
@@ -299,6 +299,35 @@ export function roleLabel(role: string): string {
 }
 
 /**
+ * The mockup names three looks. Live decks still save colour ids; these three
+ * are the closest, and forest/plum fold onto Detailed/Bold for display.
+ */
+export const DECK_THEME_CHOICES = [
+  { id: "slate", label: "Minimal" },
+  { id: "navy", label: "Detailed" },
+  { id: "ember", label: "Bold" },
+] as const satisfies readonly { id: DeckTheme; label: string }[];
+
+type DeckThemeChoice = (typeof DECK_THEME_CHOICES)[number]["id"];
+
+const DECK_THEME_FALLBACK: Record<DeckTheme, DeckThemeChoice> = {
+  slate: "slate",
+  navy: "navy",
+  ember: "ember",
+  forest: "navy",
+  plum: "ember",
+};
+
+export function deckThemeChoice(theme: DeckTheme): DeckThemeChoice {
+  return DECK_THEME_FALLBACK[theme];
+}
+
+export function deckThemeLabel(theme: DeckTheme): string {
+  const id = deckThemeChoice(theme);
+  return DECK_THEME_CHOICES.find((choice) => choice.id === id)?.label ?? "Minimal";
+}
+
+/**
  * How each stakeholder role's deck is composed. Edit opens Theme only; typeface,
  * density, notes, images and guidance stay as saved host defaults.
  */
@@ -342,7 +371,7 @@ function StakeholderDecks() {
         {error ? <Banner tone="error" title={error} /> : null}
         {STAKEHOLDER_ROLES.map((role) => {
           const design = designs?.[role] ?? DEFAULT_DECK_DESIGN;
-          const themeLabel = DECK_THEMES[design.theme].label;
+          const themeLabel = deckThemeLabel(design.theme);
           const open = editing === role;
           return (
             <Fragment key={role}>
@@ -358,15 +387,12 @@ function StakeholderDecks() {
               </Row>
               {open ? (
                 <Row label="Theme">
-                  <SegCtl<DeckTheme>
+                  <SegCtl<DeckThemeChoice>
                     label={`Theme for ${roleLabel(role)}`}
-                    value={design.theme}
+                    value={deckThemeChoice(design.theme)}
                     disabled={!designs}
                     onChange={(value) => void saveTheme(role, value)}
-                    options={Object.entries(DECK_THEMES).map(([value, meta]) => ({
-                      id: value as DeckTheme,
-                      label: meta.label,
-                    }))}
+                    options={DECK_THEME_CHOICES}
                   />
                 </Row>
               ) : null}
