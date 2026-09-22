@@ -353,6 +353,7 @@ export function BuildPanel({
   stageEvents = EMPTY_STAGE_EVENTS,
   onSendHold,
   popover = null,
+  onAttach,
 }: {
   detail: ProjectDetail;
   /** The workspace tenant artifacts are recorded under. */
@@ -381,6 +382,8 @@ export function BuildPanel({
   /** Holding send raises the send-back picker. */
   onSendHold?: (draft: string) => void;
   popover?: ReactNode;
+  /** The paperclip: files join the project as material. */
+  onAttach?: (files: FileList) => void;
 }) {
   const [address, setAddress] = useState<string | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
@@ -582,6 +585,7 @@ export function BuildPanel({
           events={stageEvents}
           who={agentFor(8).title}
           {...(onSendHold ? { onSendHold: () => onSendHold(composer) } : {})}
+          {...(onAttach ? { onAttach } : {})}
           popover={popover}
           rows={
             pendingRunShell.length > 0 ? (

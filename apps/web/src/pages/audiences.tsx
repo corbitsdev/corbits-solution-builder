@@ -170,42 +170,96 @@ function DecisionPanel({
 }
 
 /** One chip per stakeholder, coloured by their latest recorded decision —
-    the quorum readable without opening every tab. Clicking a chip opens
-    that stakeholder's package tab. */
+    the quorum readable without opening every tab. Clicking a chip opens its
+    package tab and a small popover where that stakeholder's call is
+    recorded — the same `sb.decisions` write the panel below makes. */
 function QuorumChips({
   audiences,
   packages,
   decisionsByNode,
   onSelect,
+  onDecide,
 }: {
   audiences: { name: string; role: string }[];
   packages: readonly ArtifactNode[];
   decisionsByNode: ReadonlyMap<string, AudienceDecision[]>;
   onSelect: (variant: string) => void;
+  onDecide: (node: ArtifactNode, decision: AudienceDecision["decision"], note: string) => Promise<void>;
 }) {
-  const packageFor = (name: string) =>
-    packages.find((node) => node.variant === name);
+  const [openFor, setOpenFor] = useState<string | null>(null);
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState<AudienceDecision["decision"] | null>(null);
+  const [popError, setPopError] = useState<string | null>(null);
+  const openNode = packages.find((node) => node.variant === openFor) ?? null;
+
+  const record = async (decision: AudienceDecision["decision"]) => {
+    if (!openNode) return;
+    setBusy(decision);
+    setPopError(null);
+    try {
+      await onDecide(openNode, decision, note);
+      setNote("");
+      setOpenFor(null);
+    } catch (cause) {
+      setPopError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
-    <div className="quorum-chips" role="list" aria-label="Quorum">
-      {audiences.map((audience) => {
-        const node = packageFor(audience.name);
-        const latest = node ? latestDecision(decisionsByNode.get(node.id) ?? []) : null;
-        return (
-          <button
-            key={audience.name}
-            type="button"
-            role="listitem"
-            className={`aud-chip${latest ? ` ${latest.decision}` : ""}`}
-            disabled={!node?.variant}
-            title={latest ? `${audience.name}: ${DECISION_LABEL[latest.decision]}` : `${audience.name}: no decision yet`}
-            onClick={() => {
-              if (node?.variant) onSelect(node.variant);
+    <div className="quorum-wrap">
+      <div className="quorum-chips" role="list" aria-label="Quorum">
+        {audiences.map((audience) => {
+          const node = packages.find((candidate) => candidate.variant === audience.name);
+          const latest = node ? latestDecision(decisionsByNode.get(node.id) ?? []) : null;
+          return (
+            <button
+              key={audience.name}
+              type="button"
+              role="listitem"
+              className={`aud-chip${latest ? ` ${latest.decision}` : ""}`}
+              disabled={!node?.variant}
+              aria-expanded={openFor === node?.variant}
+              title={latest ? `${audience.name}: ${DECISION_LABEL[latest.decision]}` : `${audience.name}: no decision yet`}
+              onClick={() => {
+                if (!node?.variant) return;
+                onSelect(node.variant);
+                setNote("");
+                setPopError(null);
+                setOpenFor(openFor === node.variant ? null : node.variant);
+              }}
+            >
+              {audience.name}
+            </button>
+          );
+        })}
+      </div>
+      {openNode ? (
+        <div className="aud-pop">
+          {popError ? <p className="inline-note">{popError}</p> : null}
+          <Input
+            value={note}
+            aria-label={`${openNode.variant ?? "Stakeholder"}'s note, optional`}
+            placeholder="Their note, optional"
+            onChange={(event) => setNote(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setOpenFor(null);
             }}
-          >
-            {audience.name}
-          </button>
-        );
-      })}
+          />
+          <div className="aud-btns">
+            <Button variant="ghost" loading={busy === "proceed"} disabled={busy !== null} onClick={() => void record("proceed")}>
+              Proceed
+            </Button>
+            <Button variant="ghost" loading={busy === "revise"} disabled={busy !== null} onClick={() => void record("revise")}>
+              Needs revision
+            </Button>
+            <Button variant="ghost" loading={busy === "reject"} disabled={busy !== null} onClick={() => void record("reject")}>
+              Reject
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -723,6 +777,7 @@ export function AudiencePackages({
               packages={packages}
               decisionsByNode={decisionsByNode}
               onSelect={setActive}
+              onDecide={(node, decision, note) => decide(node, decision, note)}
             />
             {/* One tab per audience package. */}
             <Tabs

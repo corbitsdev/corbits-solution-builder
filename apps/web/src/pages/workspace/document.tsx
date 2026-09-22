@@ -540,6 +540,7 @@ export function StageDocument({
             onRemoveAttachment={(entry) =>
               setAttached(attached.filter((_, at) => `${at}` !== entry.id))
             }
+            {...(onAddMaterial ? { onAttach: (files) => void onAddMaterial([...files]) } : {})}
             textareaRef={composer}
             {...(onSendHold ? { onSendHold: () => onSendHold(message) } : {})}
           />

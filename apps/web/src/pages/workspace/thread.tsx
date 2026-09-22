@@ -44,6 +44,7 @@ export function StageConversation({
   events = EMPTY_EVENTS,
   rows = null,
   who = "Specialist",
+  onAttach,
 }: {
   stage: number;
   messages: readonly ChatMessage[];
@@ -71,6 +72,8 @@ export function StageConversation({
   rows?: ReactNode;
   /** The specialist's name on its turns. */
   who?: string;
+  /** The paperclip: files join the project as material for the next draft. */
+  onAttach?: (files: FileList) => void;
 }) {
   const uiMessages = useMemo(() => {
     const list = toUiMessages(messages);
@@ -131,6 +134,7 @@ export function StageConversation({
           working={working || pending}
           {...(pending && onStop ? { onStop } : {})}
           {...(onSendHold ? { onSendHold } : {})}
+          {...(onAttach ? { onAttach } : {})}
           disabled={disabled}
           placeholder={placeholder}
         />

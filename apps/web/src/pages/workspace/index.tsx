@@ -417,6 +417,9 @@ export function StageWorkspace({
       popover={sendBackPopover}
       events={events}
       who={stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title : "Specialist"}
+      onAttach={(files) => {
+        void api.attachMaterial(detail.project.id, [...files]).then(() => void refreshWorkflow());
+      }}
     />
   );
 
@@ -581,6 +584,9 @@ export function StageWorkspace({
           stageEvents={events}
           onSendHold={openSendBack}
           popover={sendBackPopover}
+          onAttach={(files) => {
+            void api.attachMaterial(detail.project.id, [...files]).then(() => void refreshWorkflow());
+          }}
         />
       ) : null}
 
@@ -644,6 +650,9 @@ export function StageWorkspace({
             onSendHold={() => openSendBack(composer)}
             popover={sendBackPopover}
             events={events}
+            onAttach={(files) => {
+              void api.attachMaterial(detail.project.id, [...files]).then(() => void refreshWorkflow());
+            }}
           />
         </WaitingSection>
       ) : null}

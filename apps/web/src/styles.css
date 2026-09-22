@@ -3377,12 +3377,43 @@ button[aria-disabled="true"] {
 }
 
 /* The quorum readable at a glance — one chip per stakeholder, coloured by
-   their latest recorded decision; clicking one opens that package's tab. */
+   their latest recorded decision; clicking one opens that package's tab and
+   the small decision popover beneath the row. */
+.quorum-wrap {
+  display: grid;
+  gap: var(--space-2);
+}
+
 .quorum-chips {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
-  padding: 0 0 var(--space-2);
+}
+
+/* The chip's decision popover — compact, bordered, under the row it came
+   from; the pane already scrolls, so it never needs absolute anchoring. */
+.aud-pop {
+  width: 280px;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--wb-card);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--wb-foreground) 10%, transparent);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  animation: settle-in 180ms ease both;
+}
+
+.aud-btns {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.aud-btns button {
+  flex: 1;
+  justify-content: center;
+  font-size: 0.75rem;
 }
 
 .aud-chip {
