@@ -1,23 +1,53 @@
 /**
  * Onboarding — the guided path into the product.
  *
- * Two steps, one decision each, on a full screen with no navigation rail:
- * connect inference, then describe the first problem. Nothing else is offered
- * until both are done, so there is nothing to get lost in.
+ * A stepped shell, one question per step: welcome, the look, connect
+ * inference, pick a model when the connection genuinely offers a choice,
+ * then describe the first problem. Nothing else is offered until those are
+ * done, so there is nothing to get lost in.
+ *
+ * What is deliberately not a step: the owner account and workspace mint
+ * automatically on an embedded hub (`app.tsx`'s `mintOwner`) — there is no
+ * form for them because nothing about them is asked. Preferences beyond the
+ * theme have no persistence yet, so they are not shown — a switch that does
+ * nothing is worse than its absence.
  *
  * Policy (cost tolerance, audiences, quorum) is not asked here. Somebody
  * arriving with a half-formed problem does not yet know what their cost
  * tolerance is, and asking is how a first run stalls. Sensible defaults apply
  * and Settings can change them before any review begins.
  */
-import { Textarea } from "@corbits/react-ui";
+import { ChatInput, SegmentedControl, useTheme, type ThemeMode } from "@corbits/react-ui";
 import { useEffect, useState } from "react";
 import { api, ApiFailure, type Provider } from "../client.js";
 import { Banner, Button, Mark } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
 import { ProviderList, type ApiKeyProvider, type OAuthCandidate } from "./providers.jsx";
 
-type Step = "provider" | "model" | "project";
+type Step = "welcome" | "look" | "provider" | "model" | "project";
+
+const TITLES: Record<Step, [string, string]> = {
+  welcome: [
+    "Welcome.",
+    "Describe a problem. Specialists take it through nine stages — you decide at the gates.",
+  ],
+  look: [
+    "Set it up how you like.",
+    "This lives in Settings later — nothing here is a commitment.",
+  ],
+  provider: [
+    "Connect a provider.",
+    "API key, sign-in, or something running on this machine — keys and tokens stay here either way.",
+  ],
+  model: [
+    "Which model should it draft with?",
+    "Per stage later — this is just the default.",
+  ],
+  project: [
+    "What problem are you trying to solve?",
+    "A sentence is enough. The discovery specialist will pull it apart with you.",
+  ],
+};
 
 /**
  * Whether the model step is needed for a provider: ready, serving a real
@@ -45,7 +75,7 @@ export function Onboarding({
   onCreated: (projectId: string) => void;
 }) {
   const connected = providers.some((provider) => provider.status === "ready");
-  const [step, setStep] = useState<Step>(connected ? "project" : "provider");
+  const [step, setStep] = useState<Step>(connected ? "project" : "welcome");
   // Set right after a connect, before the refreshed `providers` prop lands --
   // the effect below picks the next step once it does, rather than this
   // component guessing from the stale list it already has.
@@ -65,30 +95,41 @@ export function Onboarding({
   }, [providers, awaitingChoice]);
 
   const modelProvider = providers.find((provider) => provider.id === modelProviderId) ?? null;
-  // Named rather than compared inline: a class list should read as class
-  // names, and a comparison operand sitting in one reads as a class that has
-  // no rule.
-  const onProjectStep = step === "project";
+  // The track's count is fixed; a skipped model step reads as done the
+  // moment the flow passes it rather than resizing the track mid-flow.
+  const ORDER: readonly Step[] = ["welcome", "look", "provider", "model", "project"];
+  const index = step === "model" && modelProvider === null ? ORDER.indexOf("project") : ORDER.indexOf(step);
+  const [title, sub] = TITLES[step];
 
   return (
     <div className="onboarding">
       <div className="onboarding-brand">
-        <Mark size={26} />
+        <Mark size={20} />
         <strong>Solutions Builder</strong>
       </div>
 
-      <div className="onboarding-card">
-        <div className="step-track" aria-label={`Step ${onProjectStep ? 2 : 1} of 2`}>
-          <span className="step-label">Step {onProjectStep ? 2 : 1} of 2</span>
-          <span className="active" />
-          <span className={onProjectStep ? "active" : ""} />
+      <main className="onboarding-card">
+        <header className="onboarding-head" key={step}>
+          <h1>{title}</h1>
+          <p className="lede">{sub}</p>
+        </header>
+
+        <div className="ob-track" role="img" aria-label={`Step ${index + 1} of ${ORDER.length}`}>
+          {ORDER.map((at, i) => (
+            <span key={at} className={i < index ? "seg done" : i === index ? "seg now" : "seg"} />
+          ))}
         </div>
 
-        {step === "provider" ? (
+        {step === "welcome" ? (
+          <WelcomeStep onSkip={() => setStep("provider")} onNext={() => setStep("look")} />
+        ) : step === "look" ? (
+          <LookStep onNext={() => setStep("provider")} />
+        ) : step === "provider" ? (
           <ProviderStep
             providers={providers}
             apiKeyProviders={apiKeyProviders}
             oauthCandidates={oauthCandidates}
+            onSkip={() => setStep("project")}
             onConnected={async () => {
               await onConnected();
               setAwaitingChoice(true);
@@ -99,7 +140,7 @@ export function Onboarding({
         ) : (
           <ProjectStep onCreated={onCreated} />
         )}
-      </div>
+      </main>
 
       <p className="onboarding-foot">
         <Mark size={14} />
@@ -109,30 +150,102 @@ export function Onboarding({
   );
 }
 
-/** Step 1: the shared provider list, with an intro. */
+/** Step 1: what this is, in three lines, then the way in. */
+function WelcomeStep({ onSkip, onNext }: { onSkip: () => void; onNext: () => void }) {
+  return (
+    <>
+      <ul className="ob-points">
+        <li>
+          <span>
+            <b>Stages, not chat.</b> Discovery to delivery — each stage produces an artifact, not a transcript.
+          </span>
+        </li>
+        <li>
+          <span>
+            <b>You hold the gates.</b> Nothing advances until you approve it. Replying sends it back.
+          </span>
+        </li>
+        <li>
+          <span>
+            <b>Runs on this machine.</b> Keys in your keychain, work in your workspace. No cloud account needed.
+          </span>
+        </li>
+      </ul>
+      <div className="ob-foot">
+        <button type="button" className="ob-skip" onClick={onSkip}>
+          Skip setup
+        </button>
+        <Button variant="primary" onClick={onNext}>
+          Get started
+        </Button>
+      </div>
+    </>
+  );
+}
+
+/** Step 2: the only persisted preference a first screen can honestly offer —
+    the theme. The rest of Settings waits until there is something to set. */
+function LookStep({ onNext }: { onNext: () => void }) {
+  const { mode, setMode } = useTheme();
+  return (
+    <>
+      <div className="ob-list">
+        <div className="orow">
+          <div className="who">
+            <span>
+              <b>Theme</b>
+              <span className="sub">Follows the system until you say otherwise</span>
+            </span>
+          </div>
+          <SegmentedControl<ThemeMode>
+            label="Theme"
+            value={mode}
+            onValueChange={setMode}
+            options={[
+              { id: "light", label: "Light" },
+              { id: "system", label: "System" },
+              { id: "dark", label: "Dark" },
+            ]}
+          />
+        </div>
+      </div>
+      <div className="ob-foot">
+        <span />
+        <Button variant="primary" onClick={onNext}>
+          Continue
+        </Button>
+      </div>
+    </>
+  );
+}
+
+/** Step 3: the shared provider list — sign-in, API key, or a local server. */
 function ProviderStep({
   providers,
   apiKeyProviders,
   oauthCandidates,
+  onSkip,
   onConnected,
 }: {
   providers: Provider[];
   apiKeyProviders: ApiKeyProvider[];
   oauthCandidates: OAuthCandidate[];
+  onSkip: () => void;
   onConnected: () => Promise<void>;
 }) {
   return (
     <>
-      <h1>Connect a model.</h1>
-      <p className="lede">
-        Specialists draft with it. You approve everything they produce.
-      </p>
       <ProviderList
         providers={providers}
         apiKeyProviders={apiKeyProviders}
         oauthCandidates={oauthCandidates}
         onChanged={onConnected}
       />
+      <div className="ob-foot">
+        <button type="button" className="ob-skip" onClick={onSkip}>
+          Skip for now
+        </button>
+      </div>
     </>
   );
 }
@@ -140,8 +253,9 @@ function ProviderStep({
 /**
  * Shown only when the provider just connected serves more than one model --
  * otherwise the specialists would silently draft with whichever the endpoint
- * happened to list first. Reuses `api.selectProviderModel` to record the
- * choice; the Settings catalog manages the default from then on.
+ * happened to list first. The first listed is the priority default, so it
+ * carries the "Recommended" tag; `api.selectProviderModel` records the
+ * choice and the Settings catalog manages the default from then on.
  */
 function ModelStep({ provider, onChosen }: { provider: Provider; onChosen: () => void }) {
   const [busy, setBusy] = useState(false);
@@ -161,39 +275,35 @@ function ModelStep({ provider, onChosen }: { provider: Provider; onChosen: () =>
 
   return (
     <>
-      <h1>Which model should {provider.label} draft with?</h1>
-      <p className="lede">
-        It serves {provider.models.length} models. Pick the one specialists should use, or let it fail over between them.
-      </p>
-
       {error ? <Banner tone="error" title={error} /> : null}
 
-      <div className="ask">
-        <select
-          className="setting-select"
-          aria-label={`Model for ${provider.label}`}
-          disabled={busy}
-          defaultValue=""
-          onChange={(event) => void choose(event.target.value || null)}
-        >
-          <option value="" disabled>
-            Choose a model…
-          </option>
-          {provider.models.map((model) => (
-            <option key={model} value={model}>
-              {model}
-            </option>
-          ))}
-        </select>
-        <Button variant="ghost" block disabled={busy} onClick={() => void choose(null)}>
+      <div className="ob-list">
+        {provider.models.map((model, index) => (
+          <button
+            key={model}
+            type="button"
+            className={index === 0 ? "orow pick on" : "orow pick"}
+            disabled={busy}
+            onClick={() => void choose(model)}
+          >
+            <span className="who">
+              <span className="model-name">{model}</span>
+              {index === 0 ? <span className="tag">Recommended</span> : null}
+            </span>
+            <span className="orow-pick">{index === 0 ? "Default" : "Choose"}</span>
+          </button>
+        ))}
+      </div>
+      <div className="ob-foot">
+        <button type="button" className="ob-skip" disabled={busy} onClick={() => void choose(null)}>
           Let it fail over between all {provider.models.length}
-        </Button>
+        </button>
       </div>
     </>
   );
 }
 
-/** Step 2: the only question worth asking first. */
+/** The last step: the only question worth asking first. */
 function ProjectStep({ onCreated }: { onCreated: (projectId: string) => void }) {
   const [problem, setProblem] = useState("");
   const [busy, setBusy] = useState(false);
@@ -216,26 +326,28 @@ function ProjectStep({ onCreated }: { onCreated: (projectId: string) => void }) 
 
   return (
     <>
-      <h1>What problem are you trying to solve?</h1>
-      <p className="lede">
-        Describe it however it comes out. Scoping it is the first stage.
-      </p>
-
       {error ? <Banner tone="error" title={error} /> : null}
 
       <div className="ask">
         <Dictated value={problem} onValueChange={setProblem} disabled={busy} align="start">
-          <Textarea
-            id="first-problem"
+          <ChatInput
             value={problem}
-            onChange={(event) => setProblem(event.target.value)}
+            onValueChange={setProblem}
+            onSend={() => void create()}
+            working={busy}
             placeholder="Something that keeps costing me time, and I have never sat down to fix it properly…"
-            autoFocus
           />
         </Dictated>
+        <p className="start-hint">
+          {problem.trim().length > 0 && problem.trim().length < 10
+            ? "A little more. A sentence is enough."
+            : "Enter to begin. Rough is fine."}
+        </p>
+      </div>
+      <div className="ob-foot">
+        <span />
         <Button
           variant="primary"
-          block
           loading={busy}
           disabled={problem.trim().length < 10}
           onClick={() => void create()}

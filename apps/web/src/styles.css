@@ -1272,74 +1272,255 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 
 .onboarding {
   min-height: 100vh;
-  display: grid;
-  align-content: center;
-  justify-items: center;
-  padding: var(--space-6) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: clamp(80px, 15vh, 150px) var(--space-6) var(--space-8);
   background: var(--wb-card);
 }
 
+/* The brand pins top-left; the credit sits at the foot. Neither moves. */
 .onboarding-brand {
-  width: min(720px, 100%);
+  position: fixed;
+  top: var(--space-5);
+  left: var(--space-5);
+  z-index: 5;
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: 0 0 var(--space-4);
 }
 
 .onboarding-brand strong {
-  font-size: 1rem;
+  font-size: 0.6875rem;
+  font-family: var(--wb-font-mono);
   font-weight: 500;
+  letter-spacing: 0.1em;
+  color: var(--wb-muted-foreground);
 }
 
 .onboarding-card {
-  width: min(720px, 100%);
-  padding: clamp(24px, 3.5vw, 36px);
-  border: 1px solid var(--wb-border);
-  background: var(--wb-background);
-  display: grid;
-  gap: 0;
-  border-radius: var(--radius-panel);
+  width: 100%;
+  max-width: 540px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
 }
 
-.onboarding-card h1 {
-  font-size: clamp(1.625rem, 3vw, 2rem);
-  font-weight: 400;
-  letter-spacing: -0.015em;
-  line-height: 1.1;
-  margin: var(--space-2) 0 var(--space-2);
-}
-
-.onboarding-card > p.lede {
-  margin: 0 0 var(--space-5);
-  color: var(--wb-muted-foreground);
-  max-width: 54ch;
-}
-
-.step-track {
-  display: grid;
-  grid-template-columns: auto 1fr 1fr;
-  align-items: center;
+/* Fixed head height: the step below never shifts when the title swaps. */
+.onboarding-head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-end;
   gap: var(--space-2);
-  margin-bottom: var(--space-6);
+  min-height: 118px;
+  animation: fadeup 0.38s cubic-bezier(0.2, 0.7, 0.3, 1) both;
 }
 
-.step-track span:not(.step-label) {
-  height: 3px;
-  background: var(--wb-border-strong);
+.onboarding-head h1 {
+  font-size: 1.875rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  margin: 0;
 }
 
-.step-track span.active {
+.onboarding-head .lede {
+  margin: 0;
+  color: var(--wb-muted-foreground);
+  font-size: 0.84375rem;
+  line-height: 1.55;
+  max-width: 44ch;
+}
+
+@keyframes fadeup {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Progress: a whisper of a track — done fills muted, the live one stretches
+   into the accent, same language as the stage track. */
+.ob-track {
+  display: flex;
+  gap: 4px;
+  padding: var(--space-1) 0;
+}
+
+.ob-track .seg {
+  width: 16px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--wb-border);
+  transition: background 0.3s, width 0.3s;
+}
+
+.ob-track .seg.done {
+  background: var(--wb-muted-foreground);
+}
+
+.ob-track .seg.now {
   background: var(--wb-primary);
+  width: 24px;
 }
 
-.step-label {
-  margin-right: var(--space-2);
+/* Welcome bullets — no dots, hairline-indented. */
+.ob-points {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-2) 0 0 var(--space-1);
+  margin: 0;
+}
+
+.ob-points li {
+  list-style: none;
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  font-size: 0.84375rem;
+  line-height: 1.6;
+  color: var(--wb-muted-foreground);
+}
+
+.ob-points li b {
+  color: var(--wb-foreground);
+  font-weight: 600;
+}
+
+.ob-points li::before {
+  content: "";
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--wb-primary);
+  flex-shrink: 0;
+  transform: translateY(-2px);
+}
+
+/* List rows — the mock's .ob-list/.orow: hairline-bordered rows with a who
+   on the left and a control on the right. */
+.ob-list {
+  border: 1px solid var(--wb-border);
+  border-radius: var(--radius-panel);
+  overflow: hidden;
+}
+
+.ob-list .orow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 10px var(--space-4);
+  border-bottom: 1px solid var(--wb-border);
+  background: var(--wb-background);
+}
+
+.ob-list .orow:last-child {
+  border-bottom: 0;
+}
+
+.ob-list .orow .who {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.ob-list .orow .who b {
+  font-size: 0.84375rem;
+  font-weight: 600;
+  display: block;
+  letter-spacing: -0.005em;
+}
+
+.ob-list .orow .sub {
+  font-size: 0.72rem;
   color: var(--wb-muted-foreground);
   font-family: var(--wb-font-mono);
+  display: block;
+  margin-top: 1px;
+}
+
+/* Pickable rows (the model list): the whole row is the button. */
+.ob-list button.orow.pick {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--wb-border);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ob-list button.orow.pick:hover:not(:disabled) {
+  background: var(--wb-muted);
+}
+
+.ob-list button.orow.pick.on {
+  background: var(--wb-muted);
+}
+
+.ob-list .model-name {
+  font-family: var(--wb-font-mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.ob-list .orow-pick {
+  font-family: var(--wb-font-mono);
+  font-size: 0.72rem;
+  color: var(--wb-muted-foreground);
+}
+
+.ob-list .orow.pick.on .orow-pick {
+  color: var(--wb-foreground);
+  font-weight: 700;
+}
+
+.ob-list .tag {
+  font-family: var(--wb-font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.04em;
+  color: var(--wb-primary);
+  border: 1px solid color-mix(in srgb, var(--wb-primary) 45%, transparent);
+  border-radius: 999px;
+  padding: 1px 7px;
+  white-space: nowrap;
+}
+
+/* Step footer: skip is a whisper, continue is ink. */
+.ob-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: var(--space-4);
+}
+
+.ob-foot:has(> :only-child) {
+  justify-content: flex-end;
+}
+
+.ob-skip {
+  font-family: var(--wb-font-mono);
   font-size: 0.6875rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--wb-muted-foreground);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  padding: 0;
+  opacity: 0.75;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.ob-skip:hover:not(:disabled) {
+  color: var(--wb-foreground);
+  opacity: 1;
 }
 
 /* A provider is one row: what it is, how it connects, and one action. */
@@ -1432,21 +1613,25 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   }
 }
 
-/* The one place the company's name appears in the product. It reads as a
-   credit line, so it sits in the interface face beside the mark rather than in
-   the mono face, which is reserved here for hashes and identifiers. The two
-   identity typefaces (Belwe for the wordmark, Tratex for display) are
-   deliberately not carried by this surface: it is a workbench, and it uses the
-   utility faces the component library ships. */
+/* The one place the company's name appears in the product. The credit pins
+   bottom-left in the label register — the two identity typefaces (Belwe for
+   the wordmark, Tratex for display) are deliberately not carried by this
+   surface: it is a workbench, and it uses the utility faces the component
+   library ships. */
 .onboarding-foot {
+  position: fixed;
+  left: var(--space-4);
+  bottom: var(--space-4);
+  z-index: 5;
   display: flex;
-  gap: var(--space-2);
+  gap: 6px;
   align-items: center;
-  justify-content: center;
-  margin: var(--space-4) 0 0;
+  margin: 0;
   color: var(--wb-muted-foreground);
-  font-size: 0.75rem;
-  letter-spacing: 0.01em;
+  font-family: var(--wb-font-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.08em;
+  opacity: 0.7;
 }
 
 /* KEEP: auth form/switch (conv) */

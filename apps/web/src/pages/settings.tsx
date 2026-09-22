@@ -1,17 +1,18 @@
 /**
- * Settings: four things a person can actually change.
+ * Settings: five things a person can actually change.
  *
- *   1. Inference — which providers answer, in what order, with which model.
- *   2. Designer — the surface and design language it draws to, how much it
+ *   1. Appearance — the theme, until the system's own is enough.
+ *   2. Inference — which providers answer, in what order, with which model.
+ *   3. Designer — the surface and design language it draws to, how much it
  *      may write, and what happens when a design is cut short.
- *   3. This computer — whether the host starts at login, and stopping it.
- *   4. Diagnostics — folded away; for when something is wrong.
+ *   4. This computer — whether the host starts at login, and stopping it.
+ *   5. Diagnostics — folded away; for when something is wrong.
  *
  * The secret rule shows up in the markup: a key field is cleared the moment it
  * is handed over, and nothing ever renders it back. What the UI sees is a
  * status and a boolean.
  */
-import { Input, Switch, Textarea } from "@corbits/react-ui";
+import { Input, SegmentedControl, Switch, Textarea, useTheme, type ThemeMode } from "@corbits/react-ui";
 import { useEffect, useState } from "react";
 import { DECK_DENSITY, DECK_THEMES, DECK_TYPEFACES, DEFAULT_DECK_DESIGN, type DeckDensity, type DeckDesign, type DeckTheme, type DeckTypeface } from "@solutions-builder/app/deck";
 import { invoke } from "@tauri-apps/api/core";
@@ -38,6 +39,7 @@ export function Settings({
 }) {
   return (
     <div className="settings">
+      <Appearance />
       <Inference
         providers={providers}
         apiKeyProviders={apiKeyProviders}
@@ -75,6 +77,33 @@ function Section({
       </header>
       {children}
     </section>
+  );
+}
+
+/* --------------------------------------------------------------- appearance */
+
+/** The theme, as a segmented choice — the same control onboarding's Look step
+    uses. Persists through ThemeProvider; nothing else is asked yet. */
+function Appearance() {
+  const { mode, setMode } = useTheme();
+  return (
+    <Section title="Appearance" lead="Follows the system until you say otherwise.">
+      <div className="setting-row">
+        <div>
+          <strong>Theme</strong>
+        </div>
+        <SegmentedControl<ThemeMode>
+          label="Theme"
+          value={mode}
+          onValueChange={setMode}
+          options={[
+            { id: "light", label: "Light" },
+            { id: "system", label: "System" },
+            { id: "dark", label: "Dark" },
+          ]}
+        />
+      </div>
+    </Section>
   );
 }
 

@@ -428,16 +428,25 @@ export function App() {
   const mintAttempted = useRef(false);
   const mintOwner = useCallback(async () => {
     setMintError(null);
-    try {
-      await api.mintOwner();
-      const session = await getHubSession();
-      if (session) {
-        setAuth("signed-in");
-      } else {
+    // The embedded hub can still be settling when the first mint lands — one
+    // quiet retry before the failure becomes a screen.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await api.mintOwner();
+        const session = await getHubSession();
+        if (session) {
+          setAuth("signed-in");
+          return;
+        }
         setMintError("The hub accepted the workspace owner but did not sign them in.");
+        return;
+      } catch (cause) {
+        if (attempt === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+          continue;
+        }
+        setMintError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
       }
-    } catch (cause) {
-      setMintError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     }
   }, []);
   useEffect(() => {

@@ -248,31 +248,26 @@ export function ProviderList({
 
               {asking ? null : (
                 <span className="provider-actions">
+                  {/* Model default, fallback order and restrictions live on
+                      the resolved catalog above -- this list only attaches
+                      and detaches connections, and re-pulls the model list. */}
                   {manage && connected && ready ? (
-                    <details>
-                      <summary>Advanced</summary>
-                      <div>
-                        {/* Model default, fallback order and restrictions live
-                            on the resolved catalog above -- this list only
-                            attaches and detaches connections. */}
-                        <Button
-                          variant="ghost"
-                          disabled={busy !== null}
-                          loading={busy === row.id}
-                          onClick={() =>
-                            void act(
-                              row.id,
-                              async () => {
-                                await api.refreshProviderModels(connected.id);
-                              },
-                              `${row.name} models refreshed.`,
-                            )
-                          }
-                        >
-                          Refresh models
-                        </Button>
-                      </div>
-                    </details>
+                    <Button
+                      variant="link"
+                      disabled={busy !== null}
+                      loading={busy === row.id}
+                      onClick={() =>
+                        void act(
+                          row.id,
+                          async () => {
+                            await api.refreshProviderModels(connected.id);
+                          },
+                          `${row.name} models refreshed.`,
+                        )
+                      }
+                    >
+                      Refresh models
+                    </Button>
                   ) : null}
                   {waiting ? (
                     <Button variant="ghost" onClick={() => cancelSignIn(row.id)}>
