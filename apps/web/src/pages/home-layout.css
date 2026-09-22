@@ -289,7 +289,3 @@
 .home-page .project-archive .card {
   opacity: 0.7;
 }
-
-.home-page .spend-box {
-  margin: var(--space-8) 0 0;
-}

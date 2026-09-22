@@ -32,7 +32,7 @@ import { Banner, downloadArtifact, stageName } from "../components.jsx";
 import { assembleBundle, bundleFileName } from "../project-export.js";
 import { readImportPayload } from "../project-import.js";
 import { displayDone, displayStage, displayTurn } from "../project-list.js";
-import { formatSpendHeadline, formatUsage, type TokenCounts, type WorkspaceSpend } from "../project-usage.js";
+import { formatUsage } from "../project-usage.js";
 import { DEFAULT_POLICY } from "./onboarding.jsx";
 import { Dictated } from "../dictation.jsx";
 import "./home-layout.css";
@@ -190,15 +190,15 @@ export function Projects({
       <section className="project-grid-section" aria-labelledby="projects-title">
         <div className="section-label">
           <h2 id="projects-title">Projects</h2>
-          <label className="import-link">
-            Import bundle
+          <label className="import-link" title="A project this app exported — JSON or zip">
+            Import a project
             <input
               ref={importInput}
               type="file"
               accept=".json,.zip,application/json,application/zip"
               hidden
               disabled={busy}
-              aria-label="Choose a project export to import"
+              aria-label="Choose a project this app exported (JSON or zip)"
               onChange={(event) => {
                 const file = event.target.files?.[0];
                 if (file) void importFile(file);
@@ -228,8 +228,6 @@ export function Projects({
           </div>
         )}
       </section>
-
-      <SpendBox key={projects.length} />
 
       {archived.length > 0 ? (
         <details className="project-archive">
@@ -504,62 +502,8 @@ function StageTrack({ stage, done }: { stage: number | null; done: boolean }) {
   );
 }
 
-/* ------------------------------------------------------------------- spend */
-
-const formatTokens = (count: number): string =>
-  count >= 1_000_000 ? `${(count / 1_000_000).toFixed(2)}M` : count >= 1_000 ? `${(count / 1_000).toFixed(1)}k` : String(count);
-// INTEGRATE (CL-8756): SpendTotals is gone with main's client spend shape —
-// TokenCounts (project-usage.ts) is the same five counters under a new name.
-const totalTokens = (tokens: TokenCounts): number =>
-  tokens.input + tokens.output + tokens.cacheRead + tokens.cacheWrite + tokens.thinking;
-const formatMoney = (amount: number, currency: string): string =>
-  new Intl.NumberFormat(undefined, { style: "currency", currency, maximumFractionDigits: amount < 1 ? 4 : 2 }).format(amount);
 const formatBytes = (bytes: number): string =>
   bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
-
-/**
- * What the workspace has spent on inference, across every project: money
- * where the platform has a price for the model, tokens everywhere, and a
- * plain count of calls that reported no tokens at all. An unknown is shown
- * as one rather than as zero.
- */
-// INTEGRATE (CL-8756): main's spend shape is gone on this lane — byProvider,
-// uncounted/images counts — so the headline and rows below fold
-// project-usage.ts's WorkspaceSpend with formatSpendHeadline. Section,
-// order and classNames stay main's.
-function SpendBox() {
-  const [spend, setSpend] = useState<WorkspaceSpend | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    void api
-      .spend()
-      .then((result) => {
-        if (!cancelled) setSpend(result);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  if (!spend) return null;
-  const { figure, caption } = formatSpendHeadline(spend);
-  return (
-    <section className="spend-box" aria-label="Inference spend across projects">
-      <div className="spend-headline">
-        <span className="spend-figure">{figure}</span>
-        <span className="spend-caption">{caption}</span>
-      </div>
-      <ul className="spend-providers">
-        {spend.rows.map((entry) => (
-          <li key={`${entry.provider} ${entry.model}`}>
-            <strong>{entry.provider}</strong> · {entry.model} · {formatTokens(totalTokens(entry.tokens))} tokens
-            {entry.cost !== null ? ` · ${formatMoney(entry.cost, spend.totals.currency)}` : " · unpriced"}
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
 
 /** One project, described: when it began, where it stands, and what it holds. */
 // INTEGRATE (CL-8756): main's info shape is gone on this lane — stage is a

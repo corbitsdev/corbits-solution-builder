@@ -32,7 +32,8 @@ describe("Projects markup", () => {
     expect(html).toContain("card-desc");
     expect(html).toContain("Orbit payroll migration");
     expect(html).toContain("Needs decision");
-    expect(html).toContain("Import bundle");
+    expect(html).toContain("Import a project");
+    expect(html).not.toContain("spend-box");
     expect(html).toContain('accept=".json,.zip,application/json,application/zip"');
     expect(html).toContain("composer-box");
     expect(html).toContain("project-card-menu");
