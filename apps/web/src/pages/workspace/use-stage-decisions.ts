@@ -23,6 +23,7 @@ import { frozenSummaryLine, stageEvidence, stageRefusalMessage } from "../../sta
 import type { Stage7Evidence } from "@solutions-builder/app/project-workflow/contracts";
 import { targetOpeningLine } from "./freeze.jsx";
 import type { ProjectWorkflowView } from "../../project-workflow.ts";
+import { clearQuotedDraft } from "./quote-store.js";
 
 const LAST_STAGE = 9;
 
@@ -329,6 +330,8 @@ export function useStageDecisions({
       await refreshWorkflow();
       setSendReason("");
       setSendTarget(null);
+      // The passages that led the reason are spent with it.
+      clearQuotedDraft(tenantId, stage);
     } catch (cause) {
       onError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     } finally {

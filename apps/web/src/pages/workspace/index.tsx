@@ -51,6 +51,7 @@ import { useWithdrawnTurns } from "./use-withdrawn-turns.ts";
 import { useOpeningDispatch } from "./use-opening-dispatch.ts";
 import { useStageEvaluator, useProductGuide } from "./use-advisory.ts";
 import { useProjectArtifacts } from "./use-project-artifacts.ts";
+import { loadQuotedDraft } from "./quote-store.js";
 import { useStageDecisions } from "./use-stage-decisions.ts";
 import { ArtifactStrip, VersionStrip } from "./artifact-strip.tsx";
 import { stageEvents } from "./stage-events.ts";
@@ -88,6 +89,7 @@ export function StageWorkspace({
   onOpenSettings,
   draftOpen = true,
   onOpenDecisions,
+  focusArtifact,
 }: {
   detail: ProjectDetail;
   /**
@@ -103,6 +105,9 @@ export function StageWorkspace({
   onChanged: () => void;
   onOpenSettings: () => void;
   onOpenDecisions?: () => void;
+  /** A done-segment click: open that stage's newest artifact tab. `at` makes
+   *  a repeat click on the same stage a fresh signal. */
+  focusArtifact?: { readonly stage: number; readonly at: number };
 }) {
   const [error, setError] = useState<string | null>(null);
   const [remediation, setRemediation] = useState<
@@ -229,6 +234,13 @@ export function StageWorkspace({
 
   const draftKind = STAGE_DRAFT_KIND[stage] ?? null;
   const artifacts = useProjectArtifacts(tenantId, stage, detail.nodes, draftMessage);
+  // A done-segment click is a navigation signal, not state — one effect is
+  // where it lands.
+  useEffect(() => {
+    if (focusArtifact) artifacts.selectStage(focusArtifact.stage);
+    // `at` is the nonce; the tabs/artifacts identity is intentionally out.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusArtifact?.at]);
   // The transcript's quiet record: boundaries, versions, decisions and
   // aborted turns, folded in beside the mail as system lines.
   const events = useMemo(
@@ -271,7 +283,13 @@ export function StageWorkspace({
   // hold gesture is invisible to keyboard and discovery both.
   const [sendBackOpen, setSendBackOpen] = useState(false);
   const openSendBack = (draft: string) => {
-    if (draft.trim()) setSendReason(draft);
+    // Queued passages lead the reason — the send-back is what they were
+    // attached for, so they go whether or not a note was typed.
+    const passages = loadQuotedDraft(tenantId, stage).map(
+      (entry) => `> ${entry.note ? `${entry.quote}\n— ${entry.note}` : entry.quote}`,
+    );
+    const reason = [...passages, draft.trim()].filter(Boolean).join("\n\n");
+    if (reason) setSendReason(reason);
     setSendBackOpen(true);
   };
   const sendBackPopover = (

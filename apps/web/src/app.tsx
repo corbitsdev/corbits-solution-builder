@@ -143,6 +143,7 @@ export function AppBar({
   exporting,
   onExport,
   artifactCount = 0,
+  onStageSegment,
 }: {
   view: View;
   detail: ProjectDetail | null;
@@ -160,6 +161,8 @@ export function AppBar({
   exporting?: boolean;
   onExport?: () => void;
   artifactCount?: number;
+  /** A completed stepper segment was clicked — open that stage's artifact. */
+  onStageSegment?: (stage: number) => void;
 }) {
   const inProject = view === "project" && detail !== null;
   return (
@@ -190,7 +193,11 @@ export function AppBar({
       <div className="topbar-center">
         {inProject ? (
           <>
-            <HorizontalStepper variant="segments" steps={stageSteps(detail.stage)} />
+            <HorizontalStepper
+              variant="segments"
+              steps={stageSteps(detail.stage)}
+              {...(onStageSegment ? { onStepClick: (step) => onStageSegment(step.number) } : {})}
+            />
             <span className="step-name">{stageName(detail.stage)}</span>
           </>
         ) : null}
@@ -314,6 +321,9 @@ export function App() {
   const [draftOpen, setDraftOpen] = useState(true);
   const [bellOpen, setBellOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
+  // A done-segment click in the stepper — carries the stage the workspace
+  // should open the artifact tab for, with `at` as the repeat-click nonce.
+  const [focusArtifact, setFocusArtifact] = useState<{ stage: number; at: number } | null>(null);
 
   const [status, setStatus] = useState<HostStatus | null>(null);
   const [decisions, setDecisions] = useState<Wait[]>([]);
@@ -644,6 +654,10 @@ export function App() {
         exporting={exporting}
         onExport={() => void exportProject()}
         artifactCount={graph.nodes.length}
+        onStageSegment={(stage) => {
+          setProjectTab("stage");
+          setFocusArtifact({ stage, at: Date.now() });
+        }}
       />
 
       <main className="canvas">
@@ -709,6 +723,7 @@ export function App() {
                     onChanged={reloadDetail}
                     onOpenSettings={() => setView("settings")}
                     onOpenDecisions={() => setBellOpen(true)}
+                    {...(focusArtifact ? { focusArtifact } : {})}
                   />
                 </>
               ) : (

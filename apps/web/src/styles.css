@@ -1985,8 +1985,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
    itself can run edge to edge. */
 /* The design review inside a filling stage: the one region there that
    scrolls, so the frame, the comments and the form are all reachable. */
-.design-review,
-.stage-scroll {
+.design-review {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -2047,9 +2046,24 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   color: var(--wb-muted-foreground);
 }
 
+/* The home composer is the mock's composer-box: the input IS the page's one
+   control, so it carries the strong border and the primary focus ring the
+   stage composer's quieter version does not. */
 .start-input {
   margin-top: var(--space-2);
+  border-color: var(--wb-border-strong);
+  padding: var(--space-3) var(--space-4) var(--space-2);
   box-shadow: var(--wb-shadow);
+  transition: border-color 150ms;
+}
+
+.start-input:focus-within {
+  border-color: var(--wb-primary);
+}
+
+.start-input textarea {
+  min-height: 64px;
+  font-size: 1rem;
 }
 
 .start-hint {

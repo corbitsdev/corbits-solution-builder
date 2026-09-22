@@ -40,6 +40,8 @@ export type ProjectArtifacts = {
   readonly tabs: ArtifactTab[];
   readonly selected: ArtifactTab | null;
   readonly select: (key: string | null) => void;
+  /** Selects a stage's newest lineage — the done-segment stepper's way in. */
+  readonly selectStage: (stage: number) => void;
   /** The selected tab's active version — the head unless an older version
    *  was paged to. */
   readonly activeNode: ArtifactNode | null;
@@ -175,6 +177,10 @@ export function useProjectArtifacts(
     tabs,
     selected,
     select: setSelectedKey,
+    selectStage: (forStage) => {
+      const tab = tabs.filter((t) => t.stage === forStage).at(-1);
+      if (tab) setSelectedKey(tab.key);
+    },
     activeNode,
     activeContent,
     newerVersion,

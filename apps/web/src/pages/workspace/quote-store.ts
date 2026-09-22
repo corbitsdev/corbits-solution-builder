@@ -11,21 +11,29 @@ function storageKey(tenantId: string, stage: number): string {
   return `sb.quoted-draft.${tenantId}.${stage}`;
 }
 
-export function loadQuotedDraft(tenantId: string, stage: number): Quote[] {
+/** What the queue persists: the wire `Quote` plus the note the popover took
+ *  beside the passage. */
+export type StoredQuote = Quote & { readonly note?: string };
+
+export function loadQuotedDraft(tenantId: string, stage: number): StoredQuote[] {
   try {
     const raw = localStorage.getItem(storageKey(tenantId, stage));
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
     return parsed.filter(
-      (entry): entry is Quote => typeof entry === "object" && entry !== null && typeof (entry as Quote).quote === "string",
+      (entry): entry is StoredQuote =>
+        typeof entry === "object" &&
+        entry !== null &&
+        typeof (entry as StoredQuote).quote === "string" &&
+        ((entry as StoredQuote).note === undefined || typeof (entry as StoredQuote).note === "string"),
     );
   } catch {
     return [];
   }
 }
 
-export function saveQuotedDraft(tenantId: string, stage: number, quotes: readonly Quote[]): void {
+export function saveQuotedDraft(tenantId: string, stage: number, quotes: readonly StoredQuote[]): void {
   try {
     if (quotes.length === 0) {
       localStorage.removeItem(storageKey(tenantId, stage));
