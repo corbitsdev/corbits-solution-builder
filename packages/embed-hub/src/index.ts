@@ -24,6 +24,7 @@ import {
   resolveFrameSenderKey,
   resolveInferenceMaterials,
   resolveSenderKey as resolveSenderKeyStrict,
+  type SidecarAllocation,
 } from "@intx/db";
 import { createEnvKeyCredentialCipher } from "@intx/crypto";
 import { hexDecode, hexEncode } from "@intx/types";
@@ -32,6 +33,7 @@ import {
   createAuth,
   createMailTriggeredRunGrantsMaterializer,
   createRequireGrant,
+  type AppEnv,
   type TenantEnv,
 } from "@intx/hub-api";
 import { timeWindowEvaluator } from "@intx/authz";
@@ -62,6 +64,7 @@ import {
   createWorkflowAllocationService,
   createWorkflowDispatchService,
   WORKSPACE_BUILTINS_REGISTRY,
+  type AllocatedSidecarTarget,
   type SidecarLookups,
   type WsHandle,
 } from "@intx/hub-sessions";
@@ -96,14 +99,6 @@ import { captureMailboxRequest, createMailboxDeliver } from "./mailbox-send.js";
 /** The path a sidecar's WebSocket connects to; part of `@intx/hub-api`'s own contract. */
 export const SIDECAR_WS_PATH = "/api/sidecars/ws";
 export type { CallbackPageCopy };
-
-/** Shape of `SidecarLookups.persistMail`, narrowed from `unknown` since the
- * lookups map is otherwise untyped. */
-type PersistMailFn = (args: {
-  senderAddress: string;
-  recipients: string[];
-  raw: Uint8Array;
-}) => Promise<unknown>;
 
 /** The text of a mailbox frame this package built: flat, so everything after the header section is the body. */
 function frameBody(raw: Uint8Array): string {
@@ -153,7 +148,7 @@ export type CreateEmbeddedHubOptions = {
 };
 
 export type MountedHub = {
-  readonly app: Hono;
+  readonly app: Hono<AppEnv>;
   /** The hub's own database handle, for callers that need its stores. */
   readonly db: ReturnType<typeof createDB>;
   readonly publicKeyHex: string;
@@ -334,11 +329,15 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
   // (ported from workbench's mailbox-persist.ts) sits between it and the
   // mailbox dual-write so that throw is swallowed instead of surfacing as a
   // logged error on every reply.
+  const vendoredPersistMail = lookups.persistMail;
+  if (vendoredPersistMail === undefined) {
+    throw new Error("createHubSessionLookups did not provide persistMail");
+  }
   const wrappedPersistMail = createMailboxPersist(mailboxDb, {
     upstream: createHubPersistMailWithSessionEnsure(
       db.db,
       eventCollectors as unknown as EventCollectorPort,
-      lookups.persistMail as PersistMailFn,
+      vendoredPersistMail,
     ),
     authorizeSender: createHubMailboxAuthorizeSender(db.db),
     bus: mailboxBus,
@@ -439,24 +438,23 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
     // new generation; releasing them fails the run and a project restarts at
     // stage 1 (CL-8784).
     enableAutomaticReplacementRecovery: true,
-    onReady: async (allocation: { anchorRunId: string }, reconciliation: { signal: AbortSignal }) => {
+    onReady: async (allocation: SidecarAllocation, reconciliation) => {
       await workflowAllocationService.deployReadyAllocation(allocation, reconciliation);
       await workflowDispatchService.requeueForReadyAllocation(allocation.anchorRunId);
     },
   });
   await workflowAllocationService.initialize?.();
   await sidecarAllocationReconciler.initialize();
-  type Allocated = Record<string, unknown> | undefined;
-  sidecarRouter.events.on("sidecar.disconnect", ({ allocated }: { allocated: Allocated }) => {
+  sidecarRouter.events.on("sidecar.disconnect", ({ allocated }) => {
     if (allocated === undefined) return;
     return sidecarAllocationReconciler.handleDisconnect(allocated);
   });
-  sidecarRouter.events.on("sidecar.allocated.connected", (allocated: Allocated) =>
+  sidecarRouter.events.on("sidecar.allocated.connected", (allocated: AllocatedSidecarTarget) =>
     sidecarAllocationReconciler.handleConnected(allocated),
   );
   sidecarRouter.events.on(
     "mail.inbound.acknowledged",
-    ({ messageId, allocated }: { messageId: string; allocated: Allocated }) => {
+    ({ messageId, allocated }) => {
       if (allocated === undefined) return;
       return workflowDispatchService.acknowledge({ ...allocated, messageId });
     },
@@ -617,10 +615,7 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
 
   const app = createApp({
     getSession: async (headers: Headers) => {
-      const result = (await auth.api.getSession({ headers })) as {
-        user?: unknown;
-        session?: unknown;
-      } | null;
+      const result = await auth.api.getSession({ headers });
       return result ? { user: result.user, session: result.session } : null;
     },
     authHandler: (context: { req: { raw: Request } }) => auth.handler(context.req.raw),

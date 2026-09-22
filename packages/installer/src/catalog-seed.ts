@@ -22,7 +22,7 @@
  * (the overlay below); anything without a connect path is skipped, with its
  * reason recorded in `SEED_SKIP_REASONS`.
  */
-import { catalogModels, catalogProviders } from "@intx/inference-catalog";
+import { catalogModels, catalogProviders, type Capability } from "@intx/inference-catalog";
 import type { Transport } from "@intx/hub-client";
 import { catalogFor } from "./hub.js";
 
@@ -31,7 +31,7 @@ export type SeedOfferingSpec = {
   model: string;
   displayName: string;
   priority: number;
-  capabilities: string[];
+  capabilities: Capability[];
   quirks: Record<string, unknown>;
 };
 

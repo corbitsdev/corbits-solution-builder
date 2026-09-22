@@ -20,7 +20,7 @@
  */
 import { Hono } from "hono";
 import { sql } from "drizzle-orm";
-import type { AnyDb } from "@intx/db";
+import type { AnyPgDatabase } from "@intx/db";
 import type { TenantEnv } from "@intx/hub-api";
 
 export type TokenCounts = {
@@ -127,27 +127,35 @@ type PricingRow = {
  * the hand-maintained `@intx/db` type stub carries no drizzle schema for
  * `model`/`model_offering`/`model_pricing` to query-build against.
  */
-async function pricesByModel(db: AnyDb, tenantId: string): Promise<Map<string, ModelPrice>> {
+// `db` is typed against the driver-agnostic `PgDatabase` base (see
+// `AnyPgDatabase`'s own doc comment), so `execute`'s result kind cannot
+// resolve to a concrete row type without a driver: every raw query below
+// asserts the row shape its own column aliases produce.
+function rowsOf<T>(result: unknown): T[] {
+  return (result as { rows: T[] }).rows;
+}
+
+async function pricesByModel(db: AnyPgDatabase, tenantId: string): Promise<Map<string, ModelPrice>> {
   const prices = new Map<string, ModelPrice>();
-  const models = (
-    await db.execute<ModelRow>(sql`
+  const models = rowsOf<ModelRow>(
+    await db.execute(sql`
       SELECT "id", "canonical_name" AS "canonicalName" FROM "model" WHERE "tenant_id" = ${tenantId}
-    `)
-  ).rows;
-  const offerings = (
-    await db.execute<OfferingRow>(sql`
+    `),
+  );
+  const offerings = rowsOf<OfferingRow>(
+    await db.execute(sql`
       SELECT "id", "model_id" AS "modelId" FROM "model_offering" WHERE "tenant_id" = ${tenantId}
-    `)
-  ).rows;
-  const pricingRows = (
-    await db.execute<PricingRow>(sql`
+    `),
+  );
+  const pricingRows = rowsOf<PricingRow>(
+    await db.execute(sql`
       SELECT "offering_id" AS "offeringId", "currency", "effective_from" AS "effectiveFrom",
              "input_token_price" AS "inputTokenPrice", "output_token_price" AS "outputTokenPrice",
              "cache_read_token_price" AS "cacheReadTokenPrice", "cache_write_token_price" AS "cacheWriteTokenPrice",
              "thinking_token_price" AS "thinkingTokenPrice"
       FROM "model_pricing" WHERE "tenant_id" = ${tenantId}
-    `)
-  ).rows;
+    `),
+  );
   const names = new Map(models.map((m) => [m.id, m.canonicalName]));
   const now = new Date().toISOString();
   for (const offering of offerings) {
@@ -184,7 +192,7 @@ export type WorkspaceSpend = {
   unpriced: number;
 };
 
-async function summarize(db: AnyDb, tenantId: string, store: SpendStore): Promise<WorkspaceSpend> {
+async function summarize(db: AnyPgDatabase, tenantId: string, store: SpendStore): Promise<WorkspaceSpend> {
   const prices = await pricesByModel(db, tenantId);
   const accumulated = store.forTenant(tenantId);
   const totals = { calls: 0, tokens: emptyTokens(), cost: 0, currency: "USD" };
@@ -219,7 +227,7 @@ async function summarize(db: AnyDb, tenantId: string, store: SpendStore): Promis
  * relies on the same tenant/session middleware `createApp` already applies
  * to every other `TenantEnv` mount there.
  */
-export function createSpendApi(db: AnyDb, store: SpendStore): Hono<TenantEnv> {
+export function createSpendApi(db: AnyPgDatabase, store: SpendStore): Hono<TenantEnv> {
   const spendApi = new Hono<TenantEnv>();
   spendApi.get("/", async (c) => {
     const tenantId = (c.get("tenant") as { id: string }).id;

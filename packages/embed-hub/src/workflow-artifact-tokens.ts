@@ -23,7 +23,7 @@
  * sidecar's own control-channel bearer.
  */
 import { sql } from "drizzle-orm";
-import type { AnyDb } from "@intx/db";
+import type { AnyPgDatabase } from "@intx/db";
 
 async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
@@ -33,7 +33,7 @@ async function sha256Hex(value: string): Promise<string> {
 /** Idempotent, called on every hub boot -- mirrors how `runArtifactMigrations`
  * and `runMailboxMigrations` are called in `index.ts`. This table has no
  * migration history yet, so a single `IF NOT EXISTS` is the whole story. */
-export async function ensureWorkflowArtifactTokensTable(db: AnyDb): Promise<void> {
+export async function ensureWorkflowArtifactTokensTable(db: AnyPgDatabase): Promise<void> {
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "workflow_artifact_token" (
       "token_hash_sha256" text PRIMARY KEY,
@@ -46,7 +46,7 @@ export async function ensureWorkflowArtifactTokensTable(db: AnyDb): Promise<void
 
 /** Called by the installer's deploy path once per specialist deployment. */
 export async function registerWorkflowArtifactToken(
-  db: AnyDb,
+  db: AnyPgDatabase,
   input: { readonly token: string; readonly tenantId: string; readonly anchorRunId: string },
 ): Promise<void> {
   const tokenHash = await sha256Hex(input.token);
@@ -102,7 +102,7 @@ export function decideWorkflowArtifactRunScope(
   return { tenantId: run.tenantId, principalId, runId: run.id };
 }
 
-export function createWorkflowArtifactRunResolver(db: AnyDb) {
+export function createWorkflowArtifactRunResolver(db: AnyPgDatabase) {
   return async function resolveRunScope(
     bearerToken: string,
     runAddress: string,
