@@ -736,11 +736,6 @@ function ProjectStep({
             ) : null}
           </p>
         ) : null}
-        <p className="start-hint">
-          {problem.trim().length > 0 && problem.trim().length < 10
-            ? "A little more. A sentence is enough."
-            : "Enter to begin. Rough is fine."}
-        </p>
       </div>
       <div className="ob-foot">
         <button type="button" className="ob-skip" onClick={onSkip}>

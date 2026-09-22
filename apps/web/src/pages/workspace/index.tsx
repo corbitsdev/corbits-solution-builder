@@ -22,7 +22,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
   ApiFailure,
-  type ActiveModel,
   type ArtifactNode,
   type ProjectDetail,
   type StageTurn,
@@ -30,7 +29,6 @@ import {
 import type { ChatMessage } from "../../stage-mail.ts";
 import { subscribeMailbox } from "../../mailbox-events.ts";
 import { Markdown } from "../../markdown.jsx";
-import { formatUsage, projectUsage } from "../../project-usage.ts";
 import { AudiencePackages } from "../audiences.jsx";
 import { DesignFeedbackView } from "../design.jsx";
 import { Tabs } from "@corbits/react-ui";
@@ -39,7 +37,6 @@ import { STAGE_GOAL } from "./gate.jsx";
 import { DeliveryPanel } from "./delivery.jsx";
 import { StageConversation } from "./thread.jsx";
 import { StageDocument } from "./document.jsx";
-import { STAGE_TIPS } from "./preparing.jsx";
 import { BuildPanel } from "./build.jsx";
 import { TargetPicker } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
@@ -49,7 +46,6 @@ import { useStageAgent } from "./use-stage-agent.ts";
 import { useStageThread } from "./use-stage-thread.ts";
 import { useWithdrawnTurns } from "./use-withdrawn-turns.ts";
 import { useOpeningDispatch } from "./use-opening-dispatch.ts";
-import { useStageEvaluator, useProductGuide } from "./use-advisory.ts";
 import { useProjectArtifacts } from "./use-project-artifacts.ts";
 import { loadQuotedDraft } from "./quote-store.js";
 import { useStageDecisions } from "./use-stage-decisions.ts";
@@ -59,22 +55,15 @@ import { agentFor } from "@solutions-builder/app/kit";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { STAGE_DRAFT_KIND } from "../../client.js";
 import {
-  EvaluatorVerdict,
-  GuidanceCard,
-  GuidanceFold,
   OpeningScreen,
-  ProductGuideDock,
-  SendBackDock,
   SendBackPopover,
   StagePanes,
-  WaitingSection,
 } from "./workspace-chrome.tsx";
 import type { FoldedFeedback } from "@solutions-builder/app/project-state";
 
 export { StageDocument, DocumentBody } from "./document.jsx";
 export { ApprovalsRecord, STAGE_GOAL } from "./gate.jsx";
 
-const LAST_STAGE = 9;
 /** Stages whose draft is prose read in the two-pane document, rather than
  * one of the specialised panels (design, audiences, build) or the final
  * decisions stage. */
@@ -120,29 +109,6 @@ export function StageWorkspace({
   const workflowResolved = workflow.resolved;
   const openingFailed = workflow.openingFailed;
   const stage = workflowView?.stage ?? 1;
-
-  // Which model this project's stage specialist is actually drafting with:
-  // its own deployment's pinned offering when one is already deployed for
-  // this stage (an existing deployment keeps its pin across a later provider
-  // change, `specialist-deploy.ts`'s `ensureSpecialistDeploymentOnce`), the
-  // tenant's current catalog default (the lowest-priority offering, CL-8781)
-  // otherwise -- see `resolveActiveModel`'s doc. `undefined` while
-  // unresolved, `null` once resolved to nothing connected.
-  const [activeModel, setActiveModel] = useState<ActiveModel | null | undefined>(undefined);
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .activeModel(detail.project.id, stage)
-      .then((value) => {
-        if (!cancelled) setActiveModel(value ?? null);
-      })
-      .catch(() => {
-        if (!cancelled) setActiveModel(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [detail.project.id, stage]);
 
   const agent = useStageAgent(detail.project.id, stage, workflowResolved);
   const agentAddress = agent.address;
@@ -198,23 +164,7 @@ export function StageWorkspace({
   const reviewMessage = DOCUMENT_STAGES.has(stage) ? draftMessage : latestSpecialistMessage;
   const progress = useMemo(() => interviewProgress(foldedMessages), [foldedMessages]);
 
-  const evaluator = useStageEvaluator(detail.project.id, tenantId, stage, draftMessage);
-  const evaluatorVerdict = evaluator.verdict;
-
-  // What the person last said, and whether a visible specialist reply has
-  // landed since — a reply with an empty body counts as none, since that is
-  // exactly the weak-model case nothing else would otherwise report.
   const lastPersonMessage = [...foldedMessages].reverse().find((message) => message.author === "me") ?? null;
-  const awaitingReply =
-    lastPersonMessage !== null &&
-    !foldedMessages.some(
-      (message) =>
-        message.author === "agent" &&
-        message.body.trim().length > 0 &&
-        Date.parse(message.at) > Date.parse(lastPersonMessage.at),
-    );
-
-  const guide = useProductGuide(detail.project.id, detail.project.title, tenantId, stage, detail.nodes, workflowView);
 
   // Mail turns as StageDocument's turn shape: it wants who spoke and what
   // was said, nothing this contract tracks beyond that (no per-turn quotes
@@ -270,12 +220,8 @@ export function StageWorkspace({
     openReviewNow,
     chosenTarget,
     setChosenTarget,
-    sendTarget,
-    setSendTarget,
-    sendReason,
-    setSendReason,
-    sendingBack,
     sendBack,
+    setSendReason,
   } = decisions;
   const refreshWorkflow = workflow.refresh;
 
@@ -344,13 +290,6 @@ export function StageWorkspace({
     }
   };
 
-  const panelReviews = detail.nodes.filter(
-    (node) => node.stage === stage && node.kind === "engineering_review",
-  );
-  const requirements =
-    detail.nodes.find((node) => node.stage === stage && node.kind === "product_requirements" && node.supersededByNodeId === null) ??
-    null;
-
   // Neutral until the workflow view says which stage this really is — never
   // the artifact-derived fallback, which for a mid-way project is stage 1
   // and would otherwise flash before the real stage takes over (CL-8721).
@@ -418,6 +357,7 @@ export function StageWorkspace({
       popover={sendBackPopover}
       events={events}
       who={stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title : "Specialist"}
+      placeholder={`Message the ${stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title.toLowerCase() : "specialist"}…`}
       onAttach={(files) => {
         void api.attachMaterial(detail.project.id, [...files]).then(() => void refreshWorkflow());
       }}
@@ -489,64 +429,6 @@ export function StageWorkspace({
           {openingDispatch.error}
         </Banner>
       ) : null}
-
-      <GuidanceFold>
-        {activeModel ? (
-          <p className="inline-note stage-model-line">
-            Drafting with {activeModel.providerLabel} · {activeModel.canonicalName}{" "}
-            <button type="button" className="link-button" onClick={onOpenSettings}>
-              Settings
-            </button>
-          </p>
-        ) : null}
-
-        <p className="inline-note stage-usage-line">
-          {formatUsage(
-            projectUsage(detail.nodes),
-            activeModel ? `${activeModel.providerLabel} · ${activeModel.canonicalName}` : null,
-          )}
-        </p>
-
-        {agentAddress ? (
-          <GuidanceCard
-            guidance={guidance}
-            showChoices={!(DOCUMENT_STAGES.has(stage) && !draftMessage)}
-            sending={sending}
-            onChoice={(choice) => void send(choice)}
-          />
-        ) : null}
-
-        {stage === 1 && evaluatorVerdict ? <EvaluatorVerdict verdict={evaluatorVerdict} /> : null}
-
-        <ProductGuideDock guide={guide.guide} asking={guide.asking} onAsk={() => void guide.ask()} />
-
-        {stage >= 2 && stage < LAST_STAGE ? (
-          <SendBackDock
-            stage={stage}
-            target={sendTarget}
-            reason={sendReason}
-            sendingBack={sendingBack}
-            onTargetChange={setSendTarget}
-            onReasonChange={setSendReason}
-            onSendBack={(target) => void sendBack(target)}
-          />
-        ) : null}
-
-        {agentAddress && (requirements || panelReviews.length > 0) ? (
-          <div className="stage-companions">
-            {requirements ? (
-              <ProductRequirements
-                node={requirements}
-                tenantId={tenantId}
-                canRewrite={agentAddress !== null}
-                busy={sending}
-                onRewrite={() => void send("Write the requirements again, and the plan against them.")}
-              />
-            ) : null}
-            {panelReviews.length > 0 ? <PanelReviews reviews={panelReviews} tenantId={tenantId} /> : null}
-          </div>
-        ) : null}
-      </GuidanceFold>
 
       {agentAddress && stage === 4 ? (
         <StagePanes strip={stripEl} conversation={conversation}>
@@ -620,48 +502,7 @@ export function StageWorkspace({
       {agentAddress && DOCUMENT_STAGES.has(stage) && !draftMessage ? (
         <StagePanes
           strip={stripEl}
-          conversation={
-            <WaitingSection
-              stage={stage}
-              progress={progress}
-              hasMessages={foldedMessages.length > 0}
-              lastPersonAt={lastPersonMessage?.at ?? null}
-              tip={STAGE_TIPS[stage]?.[0] ?? STAGE_TIPS[1]?.[0] ?? "Rough answers are fine."}
-              choices={guidance.question ?? null}
-              sending={sending}
-              awaitingActions={{ canSendAgain: lastPersonMessage !== null && awaitingReply, hasPending: pending !== null }}
-              onChoice={(choice) => void send(choice)}
-              onSendAgain={() => {
-                if (lastPersonMessage) void send(lastPersonMessage.body);
-              }}
-              onStop={() => void stopTurn()}
-              onOpenSettings={onOpenSettings}
-            >
-              <StageConversation
-                stage={stage}
-                messages={foldedMessages}
-                value={composer}
-                onValueChange={setComposer}
-                onSend={() => {
-                  const body = composer;
-                  setComposer("");
-                  void send(body);
-                }}
-                working={sending}
-                disabled={!agentAddress}
-                placeholder={guidance.question ? "Your answer. Rough is fine." : "Add context or ask for the complete draft…"}
-                withdrawnIds={withdrawnIds}
-                pending={pending !== null}
-                onStop={() => void stopTurn()}
-                onSendHold={() => openSendBack(composer)}
-                popover={sendBackPopover}
-                events={events}
-                onAttach={(files) => {
-                  void api.attachMaterial(detail.project.id, [...files]).then(() => void refreshWorkflow());
-                }}
-              />
-            </WaitingSection>
-          }
+          conversation={conversation}
         >
           {reader}
         </StagePanes>
@@ -859,7 +700,7 @@ function DesignPanel({
  * gathered into the document the plan is written against. Folded to one line
  * by default, since the plan is what the person is here to read.
  */
-function ProductRequirements({
+export function ProductRequirements({
   node,
   tenantId,
   canRewrite,
@@ -916,7 +757,7 @@ function ProductRequirements({
   );
 }
 
-function PanelReviews({ reviews, tenantId }: { reviews: ArtifactNode[]; tenantId: string }) {
+export function PanelReviews({ reviews, tenantId }: { reviews: ArtifactNode[]; tenantId: string }) {
   const live = reviews.filter((node) => node.supersededByNodeId === null);
   const [openId, setOpenId] = useState<string | null>(live[0]?.id ?? null);
   const [contents, setContents] = useState(new Map<string, string>());

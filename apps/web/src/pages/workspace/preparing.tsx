@@ -16,7 +16,7 @@ export const STAGE_TIPS: Record<number, string[]> = {
   1: [
     "The specialist interviews the problem, not a solution. Answer with what hurts, not what to build.",
     "One real example beats a general description. Name the last time this cost you an afternoon.",
-    "Rough answers are fine. Every answer becomes a new version of the brief, and you approve before anything is built.",
+    "Every answer becomes a new version of the brief, and you approve before anything is built.",
   ],
   2: [
     "This stage bounds the shape: platforms, privacy, integrations, installation and what is out of scope.",

@@ -26,9 +26,7 @@ import { Banner, Mark, downloadArtifact, stageName } from "./components.jsx";
 import { PrintView, setPrintProject, usePrintTarget } from "./print.jsx";
 import { Projects } from "./pages/projects.jsx";
 import { Settings } from "./pages/settings.jsx";
-import { nextStep } from "@solutions-builder/app/next-step";
 import { StageTour } from "./tour.jsx";
-import { GuideDock } from "./components.jsx";
 import {
   BootScreen,
   HorizontalStepper,
@@ -615,34 +613,6 @@ export function App() {
       />
 
       <main className="canvas">
-        {/* Bottom right, over the canvas: always to hand, never competing
-            with the toolbar, and never a band of the window given to one
-            sentence. */}
-        {view === "project" && detail ? (
-          <GuideDock
-            stage={detail.stage}
-            step={nextStep({
-              // No lifecycle run to read a state off any more (CL-8612
-              // contract v6): a selected project is always "in progress"
-              // from the guide's point of view — there is no
-              // waiting_approval/cost_approved distinction left to draw.
-              state: "in_progress",
-              stage: detail.stage,
-              // So the guide and the composer name the same act. Two words
-              // for one decision is how a person stops trusting either.
-              soloApproval: detail.soloApproval,
-              hasDraft: detail.nodes.some(
-                (node) => node.stage === (detail.stage),
-              ),
-            })}
-            at="stage"
-            onGo={(where) => {
-              if (where === "settings") setView("settings");
-              else if (where === "decisions") setBellOpen(true);
-            }}
-          />
-        ) : null}
-
         <div className={fills ? "canvas-body is-fill" : "canvas-body"}>
 
         {offline ? (

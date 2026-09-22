@@ -539,7 +539,7 @@ export function StageDocument({
                   : attached.length > 0
                   ? "What should change about this?"
                   : openQuestion
-                    ? "Your answer. Rough is fine."
+                    ? "Message the specialist…"
                     : "What should change? Add as much as you like."
             }
             attachments={attached.map((entry, index) => ({
