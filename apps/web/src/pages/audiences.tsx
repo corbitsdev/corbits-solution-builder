@@ -14,9 +14,9 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ApiFailure, type ArtifactNode, type AudienceDecision, type ProjectDetail } from "../client.js";
 import type { ChatMessage } from "../stage-mail.ts";
-import { Banner, Button, downloadArtifact, Field, Screen, StateLabel } from "../components.jsx";
+import { Banner, Button, downloadArtifact, Field, StateLabel } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
-import { Tabs, Input, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@corbits/react-ui";
+import { Tabs, Input } from "@corbits/react-ui";
 import { Markdown } from "../markdown.jsx";
 import { buildPackageDeck } from "../deck-save.ts";
 import { deckDesignFor } from "../deck-design-settings.ts";
@@ -94,85 +94,9 @@ const DECISION_LABEL: Record<AudienceDecision["decision"], string> = {
   reject: "Reject",
 };
 
-const DECISION_TONE: Record<AudienceDecision["decision"], "success" | "warning" | "error"> = {
-  proceed: "success",
-  revise: "warning",
-  reject: "error",
-};
-
-/**
- * One stakeholder's own record on their package: the decisions already
- * appended to `sb.decisions`, and a way to add another.
- */
-function DecisionPanel({
-  audience,
-  decisions,
-  onDecide,
-}: {
-  audience: string;
-  decisions: readonly AudienceDecision[];
-  onDecide: (decision: AudienceDecision["decision"], note: string) => Promise<void>;
-}) {
-  const [note, setNote] = useState("");
-  const [busy, setBusy] = useState<AudienceDecision["decision"] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const current = latestDecision(decisions);
-
-  const decide = async (decision: AudienceDecision["decision"]) => {
-    setBusy(decision);
-    setError(null);
-    try {
-      await onDecide(decision, note);
-      setNote("");
-    } catch (cause) {
-      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  return (
-    <div className="screen-body decision-panel">
-      {error ? <Banner tone="error" title={error} /> : null}
-      {current ? (
-        <StateLabel tone={DECISION_TONE[current.decision]}>
-          {audience}: {DECISION_LABEL[current.decision]}
-        </StateLabel>
-      ) : (
-        <StateLabel tone="info">{audience} has not decided yet</StateLabel>
-      )}
-      {decisions.length > 0 ? (
-        <ul className="decision-history">
-          {decisions.map((entry, index) => (
-            <li key={index}>
-              {DECISION_LABEL[entry.decision]} · {new Date(entry.at).toLocaleString()}
-              {entry.note ? ` · ${entry.note}` : ""}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      <Field label={`${audience}'s note (optional)`}>
-        <Input value={note} placeholder="Why this decision" onChange={(event) => setNote(event.target.value)} />
-      </Field>
-      <div className="button-row">
-        <Button variant="primary" loading={busy === "proceed"} disabled={busy !== null} onClick={() => void decide("proceed")}>
-          Proceed
-        </Button>
-        <Button loading={busy === "revise"} disabled={busy !== null} onClick={() => void decide("revise")}>
-          Needs revision
-        </Button>
-        <Button variant="ghost" loading={busy === "reject"} disabled={busy !== null} onClick={() => void decide("reject")}>
-          Reject
-        </Button>
-      </div>
-    </div>
-  );
-}
-
 /** One chip per stakeholder, coloured by their latest recorded decision —
     the quorum readable without opening every tab. Clicking a chip opens its
-    package tab and a small popover where that stakeholder's call is
-    recorded — the same `sb.decisions` write the panel below makes. */
+    package and a small popover where that stakeholder's call is recorded. */
 function QuorumChips({
   audiences,
   packages,
@@ -208,7 +132,7 @@ function QuorumChips({
   };
 
   return (
-    <div className="quorum-wrap">
+    <div className="quorum-wrap" data-tour="audience-decisions">
       <div className="quorum-chips" role="list" aria-label="Quorum">
         {audiences.map((audience) => {
           const node = packages.find((candidate) => candidate.variant === audience.name);
@@ -312,15 +236,10 @@ function Stakeholders({
   };
 
   return (
-    <Screen
-      title="Stakeholders"
-      description="Who each package is written for, and who records a decision on it."
-      status={<StateLabel tone="info">{audiences.length} named · {quorum} must proceed</StateLabel>}
-      tight
-    >
+    <div>
       {error ? <Banner tone="error" title={error} /> : null}
       {editing ? (
-        <div className="screen-body stakeholder-editor">
+        <div className="stakeholder-editor">
           {rows.map((row, index) => (
             <div key={index} className="stakeholder-row">
               <Dictated
@@ -354,7 +273,7 @@ function Stakeholders({
           <div className="button-row">
             <Button onClick={() => setRows([...rows, { name: "", role: "audience_member" }])}>Add a stakeholder</Button>
           </div>
-          <Field label="How many must proceed for the stage to be approved">
+          <Field label="How many must proceed">
             <Input
               className="setting-number"
               type="number"
@@ -365,9 +284,6 @@ function Stakeholders({
               onChange={(event) => setNeeded(Number(event.target.value))}
             />
           </Field>
-          <p className="inline-note">
-            The next draft writes one package per stakeholder. Decisions already recorded stay recorded.
-          </p>
           <div className="button-row">
             <Button variant="primary" loading={busy} onClick={() => void save()}>
               Save stakeholders
@@ -378,20 +294,16 @@ function Stakeholders({
           </div>
         </div>
       ) : (
-        <div className="screen-body">
-          <ul className="stakeholder-list">
-            {audiences.map((audience) => (
-              <li key={audience.name}>
-                <strong>{audience.name}</strong> · {roleLabel(audience.role)}
-              </li>
-            ))}
-          </ul>
-          <div className="button-row">
-            <Button onClick={() => setEditing(true)}>Edit stakeholders…</Button>
-          </div>
+        <div className="button-row">
+          <p className="inline-note">
+            {audiences.map((audience) => audience.name).join(" · ") || "No stakeholders"} · {quorum} must proceed
+          </p>
+          <Button variant="ghost" onClick={() => setEditing(true)}>
+            Edit
+          </Button>
         </div>
       )}
-    </Screen>
+    </div>
   );
 }
 
@@ -600,11 +512,10 @@ export function AudiencePackages({
 
   // The same evidence an `approve` decision would carry, folded through the
   // identical `quorumState` the stage 5 rule checks -- purely informational
-  // (the live tally the table above already shows one row at a time,
-  // totalled here), never the Approve button's gate: that reads
-  // `canApprove`/`approveReason` off the project workflow itself, since only
-  // an actual approve attempt tells the workflow whether quorum was met
-  // (CL-8687 follow-up).
+  // (the live tally the chips already show), never the Approve button's gate:
+  // that reads `canApprove`/`approveReason` off the project workflow itself,
+  // since only an actual approve attempt tells the workflow whether quorum
+  // was met (CL-8687 follow-up).
   const evidence: Stage5Evidence = {
     quorum: decisionQuorum,
     stakeholders: audiences.map((audience) => audience.name),
@@ -630,246 +541,138 @@ export function AudiencePackages({
     const result = await api.recordAudienceDecision(tenantId, node.id, { audience: node.variant, decision, note });
     setDecisionsByNode((before) => new Map(before).set(node.id, result.decisions));
     // A stakeholder's decision changes the quorum, and so `allowed.approve` —
-    // the workspace must re-read the workflow view, not just this table.
+    // the workspace must re-read the workflow view, not just this pane.
     onChanged();
   };
 
   return (
-    <>
+    <div data-tour="audience-packages">
+      {error ? <Banner tone="error" title="That decision was refused">{error}</Banner> : null}
+      {writeError ? <Banner tone="error" title="That package could not be written">{writeError}</Banner> : null}
+      {audiences.length === 0 ? <Banner title="No stakeholders are named for this project" /> : null}
+
       <Stakeholders projectId={detail.project.id} audiences={audiences} quorum={quorum} onChanged={onChanged} />
-      <div data-tour="audience-packages">
-      <Screen
-        title="Stakeholder packages"
-        description="Rough cost, not the firm estimate."
-        status={
-          missing.length === 0 && packages.length > 0 ? (
-            <StateLabel tone="success">Every stakeholder has a package</StateLabel>
-          ) : (
-            <StateLabel tone="warning">{missing.length} still missing</StateLabel>
-          )
-        }
-      >
-        {error ? <Banner tone="error" title="That decision was refused">{error}</Banner> : null}
-        {writeError ? <Banner tone="error" title="That package could not be written">{writeError}</Banner> : null}
 
-        {audiences.length === 0 ? (
-          <Banner title="No stakeholders are named for this project" />
-        ) : null}
-
-        {/* The quorum count reads as a note beside the record, never as a
-            verdict of its own: the workflow's verdict below is the only
-            gate on Approve. */}
-        {packages.length > 0 && decisionQuorum > 0 ? (
-          <p className="inline-note">
-            {proceeded} of {decisionQuorum} required have proceeded.
+      {missing.length > 0 ? (
+        <div className="packages-missing" role="status">
+          <p className="packages-missing-title">
+            {packages.length === 0
+              ? "No packages yet."
+              : missing.length === 1
+                ? "One stakeholder has no package yet."
+                : `${missing.length} stakeholders have no package yet.`}
           </p>
-        ) : null}
-
-        {packages.length > 0 ? (
-          <>
-            {/* Every named stakeholder's latest decision, folded from each
-                package's own `sb.decisions` — the record a person checks
-                without opening every tab in turn. */}
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Stakeholder</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Decision</TableHead>
-                  <TableHead>Record</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {audiences.map((audience) => {
-                  const node = packages.find((candidate) => candidate.variant === audience.name);
-                  const decision = node ? latestDecision(decisionsByNode.get(node.id) ?? []) : null;
-                  return (
-                    <TableRow key={audience.name}>
-                      <TableCell>{audience.name}</TableCell>
-                      <TableCell>{roleLabel(audience.role)}</TableCell>
-                      <TableCell>
-                        {decision ? (
-                          <StateLabel tone={DECISION_TONE[decision.decision]}>
-                            {DECISION_LABEL[decision.decision]}
-                          </StateLabel>
-                        ) : (
-                          <StateLabel tone="warning">Awaiting</StateLabel>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {decision ? (
-                          <span className="inline-note">
-                            Recorded {new Date(decision.at).toLocaleString()}
-                            {decision.note ? ` · ${decision.note}` : ""}
-                          </span>
-                        ) : (
-                          <span className="inline-note">{node ? "No decision yet." : "No package yet."}</span>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </>
-        ) : null}
-
-        {packages.length > 0 ? (
-          <div className="button-row">
+          <ul className="packages-missing-list">
+            {missing.map((audience) => (
+              <li key={audience.name}>
+                <span>
+                  <strong>{audience.name}</strong> · {roleLabel(audience.role)}
+                </span>
+                {writing.has(audience.name) ? (
+                  <StateLabel tone="info">Writing…</StateLabel>
+                ) : (
+                  <Button loading={false} disabled={writing.size > 0} onClick={() => void writePackages([audience.name])}>
+                    Write it
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+          {missing.length > 1 ? (
             <Button
               variant="primary"
-              loading={approving}
-              disabled={!canApprove || packages.length === 0}
-              onClick={onApprove}
+              loading={writing.size > 1}
+              disabled={writing.size > 0}
+              onClick={() => void writePackages(missing.map((audience) => audience.name))}
             >
+              Write all {missing.length}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {packages.length > 0 ? (
+        <>
+          <QuorumChips
+            audiences={audiences}
+            packages={packages}
+            decisionsByNode={decisionsByNode}
+            onSelect={setActive}
+            onDecide={(node, decision, note) => decide(node, decision, note)}
+          />
+          {decisionQuorum > 0 ? (
+            <p className="inline-note">
+              {proceeded} of {decisionQuorum} required have proceeded.
+            </p>
+          ) : null}
+          <Tabs
+            label="Stakeholder packages"
+            active={selected?.variant ?? ""}
+            onChange={setActive}
+            tabs={packages.map((node) => ({
+              id: node.variant ?? node.id,
+              label: `${node.variant ?? node.title}${
+                slidesState(node.id) === "saving" ? " · saving slides…" : slidesState(node.id) === "saved" ? " · slides saved" : ""
+              }`,
+            }))}
+          >
+            {() => null}
+          </Tabs>
+          {saving.size > 0 ? (
+            <p className="inline-note" aria-live="polite">
+              Saving slides for {packages.filter((node) => saving.has(node.id)).map((node) => node.variant ?? node.title).join(", ")}.
+            </p>
+          ) : null}
+          {selected ? (
+            <>
+              <div className="doc">
+                <div className="docmeta">
+                  <span>
+                    v{selected.version} · {selected.variant ?? selected.title}
+                    {selected.supersededByNodeId ? " · superseded" : ""}
+                  </span>
+                </div>
+                {content ? <Markdown source={content} /> : <p className="inline-note">Loading…</p>}
+              </div>
+              {savedNodes.has(selected.id) ? (
+                <Banner
+                  tone="okay"
+                  title="Slides saved"
+                  action={{
+                    label: "Dismiss",
+                    onClick: () =>
+                      setSavedNodes((before) => {
+                        const next = new Set(before);
+                        next.delete(selected.id);
+                        return next;
+                      }),
+                  }}
+                />
+              ) : null}
+              <div className="button-row">
+                <Button variant="primary" loading={saving.has(selected.id)} onClick={() => saveSlides(selected.id)}>
+                  {saving.has(selected.id) ? "Saving slides…" : "Save slides (.pptx)"}
+                </Button>
+                {selected.variant ? (
+                  <Button
+                    loading={writing.has(selected.variant)}
+                    disabled={writing.size > 0}
+                    onClick={() => void writePackages([selected.variant!])}
+                  >
+                    {writing.has(selected.variant) ? "Writing…" : "Write it again"}
+                  </Button>
+                ) : null}
+              </div>
+            </>
+          ) : null}
+          <div className="button-row">
+            <Button variant="primary" loading={approving} disabled={!canApprove || packages.length === 0} onClick={onApprove}>
               Approve and continue
             </Button>
             {reason ? <p className="inline-note">{reason}</p> : null}
           </div>
-        ) : null}
-
-        {missing.length > 0 ? (
-          <div className="packages-missing" role="status">
-            <p className="packages-missing-title">
-              {packages.length === 0
-                ? "No packages yet."
-                : missing.length === 1
-                  ? "One stakeholder has no package yet."
-                  : `${missing.length} stakeholders have no package yet.`}
-            </p>
-            <ul className="packages-missing-list">
-              {missing.map((audience) => (
-                <li key={audience.name}>
-                  <span>
-                    <strong>{audience.name}</strong> · {roleLabel(audience.role)}
-                  </span>
-                  {writing.has(audience.name) ? (
-                    <StateLabel tone="info">Writing…</StateLabel>
-                  ) : (
-                    <Button
-                      loading={false}
-                      disabled={writing.size > 0}
-                      onClick={() => void writePackages([audience.name])}
-                    >
-                      Write it
-                    </Button>
-                  )}
-                </li>
-              ))}
-            </ul>
-            {missing.length > 1 ? (
-              <Button
-                variant="primary"
-                loading={writing.size > 1}
-                disabled={writing.size > 0}
-                onClick={() => void writePackages(missing.map((audience) => audience.name))}
-              >
-                Write all {missing.length}
-              </Button>
-            ) : null}
-          </div>
-        ) : null}
-
-        {packages.length === 0 ? null : (
-          <>
-            <QuorumChips
-              audiences={audiences}
-              packages={packages}
-              decisionsByNode={decisionsByNode}
-              onSelect={setActive}
-              onDecide={(node, decision, note) => decide(node, decision, note)}
-            />
-            {/* One tab per audience package. */}
-            <Tabs
-              label="Stakeholder packages"
-              active={selected?.variant ?? ""}
-              onChange={setActive}
-              tabs={packages.map((node) => ({
-                id: node.variant ?? node.id,
-                // The tab says where its slides stand, so the person need
-                // not come back to each one to find out.
-                label: `${node.variant ?? node.title}${
-                  slidesState(node.id) === "saving" ? " · saving slides…" : slidesState(node.id) === "saved" ? " · slides saved" : ""
-                }`,
-              }))}
-            >
-              {() => null}
-            </Tabs>
-            {saving.size > 0 ? (
-              <p className="inline-note" aria-live="polite">
-                Saving slides for {packages.filter((node) => saving.has(node.id)).map((node) => node.variant ?? node.title).join(", ")}.
-                Keep going; each tab says when its slides are saved.
-              </p>
-            ) : null}
-
-            {selected ? (
-              <>
-                {/* The package itself stays folded: one line says which
-                    version this is and when it was written, and opening it
-                    shows the report. The fold is one element across the
-                    tabs, so it stays open while reading several in turn. */}
-                <details className="document-fold">
-                  <summary className="document-fold-summary">
-                    <span className="document-fold-title">{selected.title}</span>
-                    <span className="document-fold-digest">
-                      Version {selected.version} · written {new Date(selected.createdAt).toLocaleString()}
-                    </span>
-                  </summary>
-                  <div className="document-body document-fold-body">
-                    {content ? (
-                      <Markdown source={content} />
-                    ) : (
-                      <p className="inline-note">Loading…</p>
-                    )}
-                  </div>
-                </details>
-                {savedNodes.has(selected.id) ? (
-                  <Banner
-                    tone="okay"
-                    title="Slides saved"
-                    action={{
-                      label: "Dismiss",
-                      onClick: () =>
-                        setSavedNodes((before) => {
-                          const next = new Set(before);
-                          next.delete(selected.id);
-                          return next;
-                        }),
-                    }}
-                  />
-                ) : null}
-                {/* The named stakeholder's own record on this package —
-                    appended to its `sb.decisions`, not gated on anything. */}
-                {selected.variant ? (
-                  <DecisionPanel
-                    audience={selected.variant}
-                    decisions={decisionsByNode.get(selected.id) ?? []}
-                    onDecide={(decision, note) => decide(selected, decision, note)}
-                  />
-                ) : null}
-                {/* The slides built from this package's deck outline, and,
-                    while the stage is open, a way to write the package again
-                    on its own; the others keep their versions and decisions. */}
-                <div className="button-row">
-                  <Button variant="primary" loading={saving.has(selected.id)} onClick={() => saveSlides(selected.id)}>
-                    {saving.has(selected.id) ? "Saving slides…" : "Save slides (.pptx)"}
-                  </Button>
-                  {selected.variant ? (
-                    <Button
-                      loading={writing.has(selected.variant)}
-                      disabled={writing.size > 0}
-                      onClick={() => void writePackages([selected.variant!])}
-                    >
-                      {writing.has(selected.variant) ? "Writing…" : "Write it again"}
-                    </Button>
-                  ) : null}
-                </div>
-              </>
-            ) : null}
-          </>
-        )}
-      </Screen>
-      </div>
-    </>
+        </>
+      ) : null}
+    </div>
   );
 }
