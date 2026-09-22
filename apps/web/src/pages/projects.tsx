@@ -41,6 +41,7 @@ import {
   HOME_EMPTY_TITLE,
   HOME_NEEDS_DECISION,
   canStartProject,
+  cardDescription,
   cardFootStage,
   stageTrackSegClass,
 } from "./home-view.js";
@@ -455,6 +456,8 @@ function ProjectCard({
         </div>
         {infoOpen ? <ProjectInfoDialog project={project} onClose={() => setInfoOpen(false)} /> : null}
       </div>
+
+      <p className="card-desc">{cardDescription(project)}</p>
 
       <StageTrack stage={stage} done={done} />
 

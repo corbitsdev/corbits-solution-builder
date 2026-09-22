@@ -94,10 +94,12 @@
   padding: 0 0 var(--space-2);
 }
 
+/* Mockup .composer-foot — ChatInput has no slot, so the inner flex row is it. */
 .home-page .composer-box > div {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: space-between;
   width: 100%;
   padding-top: var(--space-2);
 }
@@ -106,6 +108,34 @@
   width: 30px;
   height: 30px;
   color: var(--wb-muted-foreground);
+}
+
+/* ChatInput has no icon slots; mask Plus / paper-plane over Paperclip / ArrowUp. */
+.home-page .composer-box button[aria-label="Attach files"] svg,
+.home-page .composer-box button[aria-label="Send message"] svg {
+  width: 16px;
+  height: 16px;
+  background-color: currentColor;
+  color: inherit;
+}
+
+.home-page .composer-box button[aria-label="Attach files"] svg *,
+.home-page .composer-box button[aria-label="Send message"] svg * {
+  opacity: 0;
+}
+
+.home-page .composer-box button[aria-label="Attach files"] svg {
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12h14'/%3E%3Cpath d='M12 5v14'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12h14'/%3E%3Cpath d='M12 5v14'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.home-page .composer-box button[aria-label="Send message"] svg {
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0 .024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z'/%3E%3Cpath d='m21.854 2.147-10.94 10.939'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0 .024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z'/%3E%3Cpath d='m21.854 2.147-10.94 10.939'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.home-page .new-project .dictated-row .composer-box button[aria-label="Attach files"] {
+  margin-right: calc(30px + 4px);
 }
 
 .home-page .composer-box button[aria-label="Send message"] {
@@ -160,6 +190,7 @@
 }
 
 .home-page .card {
+  position: relative;
   border: 1px solid var(--wb-border);
   border-radius: var(--radius-lg);
   padding: var(--space-5);
@@ -180,7 +211,7 @@
 }
 
 .home-page .card.needs {
-  border-color: var(--wb-primary);
+  border-color: var(--brand-primary);
 }
 
 .home-page .card.is-empty {
@@ -234,7 +265,7 @@
   font-weight: 700;
   padding: 3px 10px;
   border-radius: 999px;
-  background: var(--wb-primary);
+  background: var(--brand-primary);
   color: #fff;
   white-space: nowrap;
 }
@@ -258,7 +289,7 @@
 }
 
 .home-page .card-track .seg.now {
-  background: var(--wb-primary);
+  background: var(--brand-primary);
   width: 20px;
 }
 
@@ -273,7 +304,11 @@
 }
 
 .home-page .card .project-card-menu {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
   opacity: 0;
+  pointer-events: none;
 }
 
 .home-page .card:hover .project-card-menu,
@@ -281,6 +316,7 @@
 .home-page .card .project-card-menu:focus-visible,
 .home-page .card .project-card-menu[data-state="open"] {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .home-page .project-archive {
