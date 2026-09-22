@@ -43,3 +43,92 @@ describe("project chrome classes", () => {
     expect(read("../workspace.tsx")).toContain('import "./workspace-layout.css"');
   });
 });
+
+describe("project chrome paint", () => {
+  const css = read("../workspace-layout.css");
+  const global = read("../../styles.css");
+
+  test("composer is stacked box/foot with ink send and destructive stop", () => {
+    expect(css).toContain(".composer .composer-foot");
+    expect(css).toContain(".composer .composer-box > div > textarea");
+    expect(css).toContain("order: -1");
+    expect(css).toMatch(/button\[type="submit"\][\s\S]*background: var\(--wb-foreground\)/);
+    expect(css).toMatch(/button\[aria-label="Stop generating"\][\s\S]*background: var\(--wb-destructive\)/);
+    expect(css).toContain(".composer .dictate");
+  });
+
+  test("stepper: done is ink, now is primary, future is faded, hover is muted never primary", () => {
+    expect(css).toContain(".topbar-project .stepper li > button {\n  background: var(--wb-foreground);");
+    expect(css).toContain('.topbar-project .stepper li[aria-current="step"] > span');
+    expect(css).toContain("background: var(--wb-primary);");
+    expect(css).toContain(".topbar-project .stepper li:not([aria-current=\"step\"]) > span {\n  opacity: 0.5;");
+    expect(css).toContain(".topbar-project .stepper li > button:hover {\n  background: var(--wb-muted-foreground);");
+    expect(css).not.toContain("button:hover {\n  background: var(--wb-primary)");
+  });
+
+  test("artifact strip: ghost tabs, selected is pane paper, live is a primary dot", () => {
+    expect(css).toContain('.artifact-strip-tabs [role="tab"] {');
+    expect(css).toContain("background: transparent;");
+    expect(css).toContain('.artifact-strip-tabs [role="tab"][aria-selected="true"]');
+    expect(css).toContain("background: var(--card);");
+    expect(css).toContain(".artifact-strip-live");
+    expect(css).toContain("background: var(--wb-primary);");
+  });
+
+  test("approve stays quiet; is-ready is not a filled green pill", () => {
+    expect(css).toContain(".composer-approve .is-ready button");
+    expect(css).not.toContain("color-mix(in srgb, var(--ok, var(--wb-okay)) 12%");
+    const ready = global.slice(
+      global.indexOf(".composer-approve .is-ready button {"),
+      global.indexOf(".composer-request"),
+    );
+    expect(ready).toContain("background: transparent;");
+    expect(ready).not.toContain("var(--wb-okay)");
+  });
+
+  test("narrow stacks at 900px with conversation first — no order swap", () => {
+    expect(css).toContain("@media (max-width: 900px)");
+    expect(css).not.toContain("@media (max-width: 1080px)");
+    const start = css.indexOf("@media (max-width: 900px)");
+    const end = css.indexOf("}", css.indexOf(".conv {", start)) + 1;
+    const narrow = css.slice(start, end);
+    expect(narrow).toContain("grid-template-rows: 1fr 1fr");
+    expect(narrow).not.toMatch(/(^|\n)\s*order:/);
+  });
+
+  test("send-back popover uses --popover, not --wb-card", () => {
+    expect(css).toContain(".sbpick {\n  background: var(--popover);");
+    const sbpick = global.slice(global.indexOf(".sbpick {"), global.indexOf(".sbpick-head"));
+    expect(sbpick).toContain("background: var(--popover);");
+    expect(sbpick).not.toContain("--wb-card");
+  });
+
+  test("the conversation composer wraps ChatInput in Dictated so the mic can sit in tools", () => {
+    const thread = read("./thread.tsx");
+    expect(thread).toContain("<Dictated");
+    expect(thread).toContain("ChatInput");
+  });
+
+  test("StagePanes is the shell for document, build, waiting, and specialised stages", () => {
+    expect(read("./document.tsx")).toContain("<StagePanes");
+    expect(read("./build.tsx")).toContain("<StagePanes");
+    const index = read("./index.tsx");
+    expect(index).toContain("<StagePanes");
+    expect(index).toContain("DOCUMENT_STAGES.has(stage) && !draftMessage");
+    expect(index).toContain("stage === 4");
+    expect(index).toContain("stage === 5");
+    expect(index).toContain("stage === 9");
+  });
+
+  test("guidance, send-back dock, conversation/artifacts tabs, and theme toggle remain", () => {
+    expect(read("./workspace-chrome.tsx")).toContain("export function GuidanceCard");
+    expect(read("./workspace-chrome.tsx")).toContain("export function SendBackDock");
+    expect(read("./index.tsx")).toContain("<GuidanceCard");
+    expect(read("./index.tsx")).toContain("<SendBackDock");
+    const app = read("../../app.tsx");
+    expect(app).toContain('id: "stage", label: "Conversation"');
+    expect(app).toContain('id: "artifacts"');
+    expect(app).toContain('label: "Artifacts"');
+    expect(app).toContain("<ThemeToggle");
+  });
+});

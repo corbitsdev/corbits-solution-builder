@@ -24,7 +24,8 @@ import { PrintButton } from "../../print.jsx";
 import { SpecialistTurn, WorkingLabel, type TurnNote } from "./thread.jsx";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
 import { clearQuotedDraft, loadQuotedDraft, saveQuotedDraft } from "./quote-store.js";
-import { COMPOSER_BOX_CLASS, CONV_CLASS, CONV_SCROLL_CLASS, PANES_CLASS, STAGE_PANE_CLASS } from "./pane-classes.ts";
+import { COMPOSER_BOX_CLASS, CONV_SCROLL_CLASS } from "./pane-classes.ts";
+import { StagePanes } from "./workspace-chrome.tsx";
 
 /**
  * A drafted stage: the document, and the conversation about it.
@@ -350,8 +351,13 @@ export function StageDocument({
   }, [busy, queued]);
 
   return (
-    <div className={draftOpen ? PANES_CLASS : `${PANES_CLASS} is-solo`}>
-      <section ref={pane} className={CONV_CLASS} aria-label="Conversation with the specialist">
+    <StagePanes
+      solo={!draftOpen}
+      conversationRef={pane}
+      strip={strip}
+      paneTour="document"
+      conversation={
+        <>
         <div className="thread-scroll">
         <ChatThread
           className={CONV_SCROLL_CLASS}
@@ -560,10 +566,9 @@ export function StageDocument({
             </p>
           ) : null}
         </div>
-      </section>
-
-      <article className={STAGE_PANE_CLASS} data-tour="document">
-        {strip ? <div className="artifact-strip">{strip}</div> : null}
+        </>
+      }
+    >
         <div className="stage-inner">
           <div className="doc" data-tour="document-body" onMouseUp={openSelection}>
             <div className="docmeta">
@@ -620,7 +625,6 @@ export function StageDocument({
             )}
           </div>
         </div>
-      </article>
 
       {selPop ? (
         <>
@@ -654,7 +658,7 @@ export function StageDocument({
           </div>
         </>
       ) : null}
-    </div>
+    </StagePanes>
   );
 }
 

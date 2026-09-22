@@ -45,10 +45,26 @@
   height: 4px;
   width: 20px;
   border-radius: 2px;
+  background: var(--wb-border);
+}
+
+.topbar-project .stepper li > button {
+  background: var(--wb-foreground);
+  cursor: pointer;
+}
+
+.topbar-project .stepper li > button:hover {
+  background: var(--wb-muted-foreground);
 }
 
 .topbar-project .stepper li[aria-current="step"] > span {
   width: 28px;
+  background: var(--wb-primary);
+  opacity: 1;
+}
+
+.topbar-project .stepper li:not([aria-current="step"]) > span {
+  opacity: 0.5;
 }
 
 /* ---- two panes: 420px conversation + draft ---- */
@@ -218,10 +234,13 @@
   padding-block: 0;
 }
 
+/* ChatInput's toolbar row is the mock's .composer-foot: tools left, ink send right. */
+.composer .composer-foot,
 .composer .composer-box > div {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: space-between;
   gap: var(--space-1);
   padding-top: var(--space-2);
 }
@@ -234,10 +253,10 @@
 .composer .composer-box > div > button[aria-label="Attach files"] {
   width: 30px;
   height: 30px;
+  color: var(--wb-muted-foreground);
 }
 
-.composer .composer-box > div > button[type="submit"],
-.composer .composer-box > div > button[aria-label="Stop generating"] {
+.composer .composer-box > div > button[type="submit"] {
   margin-left: auto;
   width: 30px;
   height: 30px;
@@ -246,9 +265,50 @@
   border-radius: var(--radius-md, 6px);
 }
 
+.composer .composer-box > div > button[aria-label="Stop generating"] {
+  margin-left: auto;
+  width: 30px;
+  height: 30px;
+  background: var(--wb-destructive);
+  color: var(--wb-background);
+  border-radius: var(--radius-md, 6px);
+}
+
 .composer .composer-box > div > button[type="submit"]:hover:not(:disabled),
 .composer .composer-box > div > button[aria-label="Stop generating"]:hover {
   opacity: 0.85;
+}
+
+/* Mic sits in the tools row next to attach, same overlay as home. */
+.composer .dictated {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.composer .dictated-row {
+  display: block;
+  position: relative;
+  min-width: 0;
+}
+
+.composer .dictate {
+  position: absolute;
+  left: calc(var(--space-4) + 30px + 4px);
+  bottom: var(--space-2);
+  width: 30px;
+  height: 30px;
+  margin: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md, 6px);
+  background: transparent;
+  color: var(--wb-muted-foreground);
+  z-index: 1;
+}
+
+.composer .dictate:hover:not(:disabled) {
+  background: var(--wb-muted);
+  color: var(--wb-foreground);
+  border-color: transparent;
 }
 
 .composer .stage-action {
@@ -259,7 +319,8 @@
   padding: 0 var(--space-1) var(--space-2);
 }
 
-.composer .approve button {
+.composer .approve button,
+.composer-approve .is-ready button {
   background: transparent;
   border-color: transparent;
   color: var(--wb-muted-foreground);
@@ -273,7 +334,8 @@
     background 0.15s;
 }
 
-.composer .approve button:hover:not(:disabled) {
+.composer .approve button:hover:not(:disabled),
+.composer-approve .is-ready button:hover:not(:disabled) {
   color: var(--ok, var(--wb-okay));
   border-color: color-mix(in srgb, var(--ok, var(--wb-okay)) 40%, transparent);
   background: color-mix(in srgb, var(--ok, var(--wb-okay)) 8%, transparent);
@@ -283,17 +345,100 @@
   display: none;
 }
 
-@media (max-width: 1080px) {
+@media (max-width: 900px) {
   .panes {
     grid-template-columns: 1fr;
+    grid-template-rows: 1fr 1fr;
   }
 
   .conv {
-    order: 2;
-    height: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--wb-border);
   }
+}
 
-  .stage-pane {
-    order: 1;
-  }
+/* ---- artifact strip: ghost tabs, selected = pane paper, live = primary ---- */
+
+.artifact-strip {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-6) 0;
+  border-bottom: 1px solid var(--wb-border);
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  background: var(--card);
+  z-index: 2;
+}
+
+.artifact-strip-tabs [role="tabpanel"] {
+  display: none;
+}
+
+.artifact-strip-tabs [role="tablist"] {
+  border-bottom: 0;
+}
+
+.artifact-strip-tabs [role="tab"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--wb-font-mono);
+  font-size: 11.5px;
+  color: var(--wb-muted-foreground);
+  padding: 6px 12px;
+  border-radius: var(--radius-md, 6px) var(--radius-md, 6px) 0 0;
+  border: 1px solid transparent;
+  border-bottom: 1px solid transparent;
+  margin-bottom: -1px;
+  background: transparent;
+  font-weight: 400;
+}
+
+.artifact-strip-tabs [role="tab"]:hover {
+  color: var(--wb-foreground);
+}
+
+.artifact-strip-tabs [role="tab"][aria-selected="true"] {
+  background: var(--card);
+  border-color: var(--wb-border);
+  border-bottom-color: var(--card);
+  color: var(--wb-foreground);
+  font-weight: 700;
+}
+
+.artifact-strip-live {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--wb-primary);
+}
+
+.artifact-strip .version-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-bottom: var(--space-1);
+  flex-shrink: 0;
+  padding: 0 0 var(--space-1);
+  border-bottom: 0;
+}
+
+/* ---- send-back popover: popover paper, not card ---- */
+
+.sbpick {
+  background: var(--popover);
+  border-radius: var(--radius-lg);
+}
+
+/* Extra bands stay in the tree; they just stop eating the panes. */
+
+.stage-view > .stage-guidance,
+.stage-view > .product-guide,
+.stage-view > .send-back,
+.stage-view > .stage-usage-line,
+.stage-view > .stage-model-line,
+.stage-view > .stage-companions {
+  flex: none;
 }

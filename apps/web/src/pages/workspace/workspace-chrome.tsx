@@ -4,7 +4,7 @@
  * two waiting states. All presentational — every prop is already resolved by
  * the stage workspace above them.
  */
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import { Textarea } from "@corbits/react-ui";
 import { Button, Screen, stageName } from "../../components.jsx";
 import { Dictated } from "../../dictation.jsx";
@@ -335,17 +335,29 @@ export function StagePanes({
   conversation,
   strip = null,
   children,
+  solo = false,
+  conversationRef,
+  className,
+  paneTour,
+  tour,
 }: {
   conversation: ReactNode;
   strip?: ReactNode;
   children: ReactNode;
+  /** Draft closed: conversation takes the width. */
+  solo?: boolean;
+  conversationRef?: Ref<HTMLElement>;
+  className?: string;
+  paneTour?: string;
+  tour?: string;
 }) {
+  const panesClass = [PANES_CLASS, solo ? "is-solo" : null, className].filter(Boolean).join(" ");
   return (
-    <div className={PANES_CLASS}>
-      <section className={CONV_CLASS} aria-label="Conversation with the specialist">
+    <div className={panesClass} {...(tour ? { "data-tour": tour } : {})}>
+      <section ref={conversationRef} className={CONV_CLASS} aria-label="Conversation with the specialist">
         {conversation}
       </section>
-      <article className={STAGE_PANE_CLASS}>
+      <article className={STAGE_PANE_CLASS} {...(paneTour ? { "data-tour": paneTour } : {})}>
         {strip ? <div className="artifact-strip">{strip}</div> : null}
         {children}
       </article>

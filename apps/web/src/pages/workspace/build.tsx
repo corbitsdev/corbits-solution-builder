@@ -39,7 +39,7 @@ import { Dictated } from "../../dictation.jsx";
 import { agentFor } from "@solutions-builder/app/kit";
 import type { StageEvent } from "./stage-events.ts";
 import { StageConversation } from "./thread.jsx";
-import { CONV_CLASS, PANES_CLASS, STAGE_PANE_CLASS } from "./pane-classes.ts";
+import { StagePanes } from "./workspace-chrome.tsx";
 import { clock } from "./elapsed.jsx";
 import { BuildFile } from "../graph.jsx";
 import { createHubTransport } from "../../hub.ts";
@@ -563,8 +563,11 @@ export function BuildPanel({
   };
 
   return (
-    <div className={PANES_CLASS} data-tour="build-panel">
-      <section className={CONV_CLASS} aria-label="Conversation with the specialist">
+    <StagePanes
+      tour="build-panel"
+      strip={strip}
+      conversation={
+        <>
         {error ? (
           <Banner tone="error" title="The build attempt could not be changed" action={{ label: "Open Settings", onClick: onOpenSettings }}>
             {error}
@@ -612,9 +615,9 @@ export function BuildPanel({
             ) : null
           }
         />
-      </section>
-      <article className={STAGE_PANE_CLASS}>
-        {strip ? <div className="artifact-strip">{strip}</div> : null}
+        </>
+      }
+    >
         {reader ?? (
           <div className="stage-inner">
             <Screen
@@ -687,8 +690,7 @@ export function BuildPanel({
             </Screen>
           </div>
         )}
-      </article>
-    </div>
+    </StagePanes>
   );
 }
 

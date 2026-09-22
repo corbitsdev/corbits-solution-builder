@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ChatInput, ChatThread, type ChatMessage as UiChatMessage } from "@corbits/react-ui";
 import { Markdown } from "../../markdown.jsx";
+import { Dictated } from "../../dictation.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { choicesIn } from "./choices.js";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
@@ -133,6 +134,7 @@ export function StageConversation({
       />
       <div className="composer" data-working={working || pending ? "" : undefined}>
         {rows}
+        <Dictated value={value} onValueChange={onValueChange} disabled={disabled}>
         <ChatInput
           className={COMPOSER_BOX_CLASS}
           value={value}
@@ -145,6 +147,7 @@ export function StageConversation({
           disabled={disabled}
           placeholder={placeholder}
         />
+        </Dictated>
         {popover}
       </div>
     </div>

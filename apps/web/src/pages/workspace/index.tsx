@@ -615,46 +615,53 @@ export function StageWorkspace({
       ) : null}
 
       {agentAddress && DOCUMENT_STAGES.has(stage) && !draftMessage ? (
-        <WaitingSection
-          stage={stage}
-          progress={progress}
-          hasMessages={foldedMessages.length > 0}
-          lastPersonAt={lastPersonMessage?.at ?? null}
-          tip={STAGE_TIPS[stage]?.[0] ?? STAGE_TIPS[1]?.[0] ?? "Rough answers are fine."}
-          choices={guidance.question ?? null}
-          sending={sending}
-          awaitingActions={{ canSendAgain: lastPersonMessage !== null && awaitingReply, hasPending: pending !== null }}
-          onChoice={(choice) => void send(choice)}
-          onSendAgain={() => {
-            if (lastPersonMessage) void send(lastPersonMessage.body);
-          }}
-          onStop={() => void stopTurn()}
-          onOpenSettings={onOpenSettings}
+        <StagePanes
+          strip={stripEl}
+          conversation={
+            <WaitingSection
+              stage={stage}
+              progress={progress}
+              hasMessages={foldedMessages.length > 0}
+              lastPersonAt={lastPersonMessage?.at ?? null}
+              tip={STAGE_TIPS[stage]?.[0] ?? STAGE_TIPS[1]?.[0] ?? "Rough answers are fine."}
+              choices={guidance.question ?? null}
+              sending={sending}
+              awaitingActions={{ canSendAgain: lastPersonMessage !== null && awaitingReply, hasPending: pending !== null }}
+              onChoice={(choice) => void send(choice)}
+              onSendAgain={() => {
+                if (lastPersonMessage) void send(lastPersonMessage.body);
+              }}
+              onStop={() => void stopTurn()}
+              onOpenSettings={onOpenSettings}
+            >
+              <StageConversation
+                stage={stage}
+                messages={foldedMessages}
+                value={composer}
+                onValueChange={setComposer}
+                onSend={() => {
+                  const body = composer;
+                  setComposer("");
+                  void send(body);
+                }}
+                working={sending}
+                disabled={!agentAddress}
+                placeholder={guidance.question ? "Your answer. Rough is fine." : "Add context or ask for the complete draft…"}
+                withdrawnIds={withdrawnIds}
+                pending={pending !== null}
+                onStop={() => void stopTurn()}
+                onSendHold={() => openSendBack(composer)}
+                popover={sendBackPopover}
+                events={events}
+                onAttach={(files) => {
+                  void api.attachMaterial(detail.project.id, [...files]).then(() => void refreshWorkflow());
+                }}
+              />
+            </WaitingSection>
+          }
         >
-          <StageConversation
-            stage={stage}
-            messages={foldedMessages}
-            value={composer}
-            onValueChange={setComposer}
-            onSend={() => {
-              const body = composer;
-              setComposer("");
-              void send(body);
-            }}
-            working={sending}
-            disabled={!agentAddress}
-            placeholder={guidance.question ? "Your answer. Rough is fine." : "Add context or ask for the complete draft…"}
-            withdrawnIds={withdrawnIds}
-            pending={pending !== null}
-            onStop={() => void stopTurn()}
-            onSendHold={() => openSendBack(composer)}
-            popover={sendBackPopover}
-            events={events}
-            onAttach={(files) => {
-              void api.attachMaterial(detail.project.id, [...files]).then(() => void refreshWorkflow());
-            }}
-          />
-        </WaitingSection>
+          {reader}
+        </StagePanes>
       ) : null}
 
       {agentAddress && DOCUMENT_STAGES.has(stage) && draftMessage && artifacts.activeNode && artifacts.selected ? (

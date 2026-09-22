@@ -949,7 +949,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   margin-bottom: var(--space-2);
   border: 1px solid var(--wb-border-strong);
   border-radius: var(--radius-panel);
-  background: var(--wb-card);
+  background: var(--popover);
   box-shadow: 0 8px 24px color-mix(in srgb, var(--wb-foreground) 10%, transparent);
   overflow: hidden;
   max-height: 50vh;
@@ -1061,19 +1061,21 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   border-bottom: 0;
 }
 
-/* Folder tabs: the open one is the same paper as the document below. */
+/* Folder tabs: ghost until selected; the open one is the pane's paper. */
 .artifact-strip-tabs [role="tab"] {
   font-family: var(--wb-font-mono);
   font-size: 0.72rem;
-  border: 1px solid var(--wb-border);
+  border: 1px solid transparent;
   border-bottom: 0;
   border-radius: 10px 10px 0 0;
-  background: var(--wb-muted);
+  background: transparent;
   margin-bottom: -1px;
 }
 
 .artifact-strip-tabs [role="tab"][aria-selected="true"] {
-  background: var(--background);
+  background: var(--card);
+  border-color: var(--wb-border);
+  border-bottom: 1px solid var(--card);
 }
 
 .artifact-strip .version-strip {
@@ -1935,12 +1937,12 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   font-size: 0.8125rem;
 }
 
-/* The evaluator's verdict, advisory only: it colours the control, it never
-   disables or replaces it. */
+/* Quiet until hover — never a filled green pill. Green on hover lives in
+   workspace-layout.css so this sheet cannot resurrect the ready fill. */
 .composer-approve .is-ready button {
-  border-color: var(--wb-okay);
-  color: var(--wb-okay);
-  background: color-mix(in srgb, var(--wb-okay) 12%, var(--wb-card));
+  border-color: transparent;
+  color: var(--wb-muted-foreground);
+  background: transparent;
 }
 
 /* A pending capability grant — the request the specialist is parked on.
