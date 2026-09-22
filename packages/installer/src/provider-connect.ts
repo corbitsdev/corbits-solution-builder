@@ -19,8 +19,8 @@ import { catalogFor, type HubCredential, type HubModelProvider, type HubProvider
 import { seededVendorSpec, type SeedOfferingSpec } from "./catalog-seed.js";
 import { ensureOpusDefault } from "./model-default.js";
 
-/** Mirrors `@intx/types`' `modelProviderPlugins`: the inference adapters the runtime dispatches to. */
-export type ModelProviderPlugin = "anthropic" | "openai" | "openai-compatible" | "google-genai";
+/** `@intx/types`' built-in `modelProviderPlugins`, plus `openai-responses`, which embed-hub registers in the sidecar's adapter manifest. */
+export type ModelProviderPlugin = "anthropic" | "openai" | "openai-compatible" | "google-genai" | "openai-responses";
 
 export type UpsertApiKeyProviderInput = {
   /** Vendor provider name, e.g. "anthropic" -- also the model-provider's own name. */
@@ -169,7 +169,11 @@ async function ensureModelProvider(
   credentialId: string,
 ): Promise<HubModelProvider> {
   const existing = (await catalog.modelProviders()).find((row) => row.name === input.providerId);
-  if (existing) {
+  // A provider's plugin cannot be patched; a row recorded under another
+  // adapter is replaced (its offerings cascade) rather than left unservable.
+  if (existing && existing.plugin !== input.plugin) {
+    await catalog.deleteModelProvider(existing.id);
+  } else if (existing) {
     if (existing.baseURL !== input.baseURL || existing.disabled) {
       return catalog.patchModelProvider(existing.id, { baseURL: input.baseURL, disabled: false });
     }
@@ -236,6 +240,8 @@ export type UpsertOAuthProviderInput = {
   /** The models this adapter serves -- its own exported list (`XAI_DEFAULT_MODELS`)
    * or, absent one, the small set its README documents (Codex). */
   canonicalNames: readonly string[];
+  /** The adapter's per-backend configuration, written onto every offering. */
+  quirks?: Record<string, unknown>;
 };
 
 export type UpsertOAuthProviderResult = {
@@ -300,6 +306,7 @@ export async function upsertOAuthProvider(
   await registerProviderModels(transport, scope, {
     modelProviderId: modelProvider.id,
     canonicalNames: input.canonicalNames,
+    ...(input.quirks !== undefined ? { quirks: input.quirks } : {}),
   });
   return { vendorProviderId: vendorProvider.id, credentialId: credential.id, modelProviderId: modelProvider.id };
 }
@@ -320,7 +327,7 @@ export async function upsertOAuthProvider(
 export async function registerProviderModels(
   transport: Transport,
   scope: string,
-  input: { modelProviderId: string; canonicalNames: readonly string[] },
+  input: { modelProviderId: string; canonicalNames: readonly string[]; quirks?: Record<string, unknown> },
 ): Promise<void> {
   const catalog = catalogFor(transport, scope);
   const [modelRows, offeringRows] = await Promise.all([catalog.models(), catalog.offerings()]);
@@ -334,10 +341,11 @@ export async function registerProviderModels(
       modelRows.push(modelRow);
     }
     const offering = existingOfferings.find((row) => row.modelId === modelRow!.id);
+    const quirks = input.quirks !== undefined ? { quirks: input.quirks } : {};
     if (!offering) {
-      await catalog.createOffering({ modelId: modelRow.id, providerId: input.modelProviderId, priority: index });
-    } else if (offering.disabled) {
-      await catalog.patchOffering(offering.id, { disabled: false });
+      await catalog.createOffering({ modelId: modelRow.id, providerId: input.modelProviderId, priority: index, ...quirks });
+    } else if (offering.disabled || (input.quirks !== undefined && JSON.stringify(offering.quirks) !== JSON.stringify(input.quirks))) {
+      await catalog.patchOffering(offering.id, { disabled: false, ...quirks });
     }
   }
 

@@ -20,4 +20,5 @@ Local changes, all listed:
   repo root.
 - `process-provisioner/src/process-backend.ts`: the spawned sidecar receives
   `SIDECAR_CREDENTIAL_ENCRYPTION_KEY` from the hub process environment, which
-  the hub sets from its keychain-held key.
+  the hub sets from its keychain-held key, and `SIDECAR_ADAPTER_MANIFEST`
+  (custom inference adapters) when the hub process has it set.

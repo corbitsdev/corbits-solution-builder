@@ -216,9 +216,12 @@ function sidecarEnvFor(
   // Solutions Builder patch: the sidecar seals credentials under its own key;
   // the hub hands it the one it holds instead of requiring an operator env.
   const sidecarKey = process.env["SIDECAR_CREDENTIAL_ENCRYPTION_KEY"];
+  // Solutions Builder patch: custom inference adapters the host registers.
+  const adapterManifest = process.env["SIDECAR_ADAPTER_MANIFEST"];
   return {
     SIDECAR_DATA_DIR: sidecarDataDir,
     ...(sidecarKey === undefined ? {} : { SIDECAR_CREDENTIAL_ENCRYPTION_KEY: sidecarKey }),
+    ...(adapterManifest === undefined ? {} : { SIDECAR_ADAPTER_MANIFEST: adapterManifest }),
     HUB_WS_URL: args.hubWebSocketUrl,
     SIDECAR_ID: args.sidecarId,
     SIDECAR_TOKEN: args.token,

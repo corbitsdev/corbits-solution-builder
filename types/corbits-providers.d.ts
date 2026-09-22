@@ -101,6 +101,7 @@ declare module "@corbits/codex-provider" {
   export const codexOAuthConfig: OAuthClientConfig;
   export const CODEX_BASE_URL: string;
   export const CODEX_RESPONSES_PATH: string;
+  export const CODEX_ORIGINATOR: string;
   export const CODEX_REDIRECT_URI: string;
   export const CODEX_REFRESH_SKEW_MS: number;
   export const CODEX_ACCOUNT_ID_OPTION: string;
@@ -139,4 +140,8 @@ declare module "@corbits/xai-provider" {
     now: number,
   ): Promise<XaiTokens>;
   export function refreshXaiTokens(refreshToken: string, now: number): Promise<XaiTokens>;
+}
+
+declare module "@corbits/openai-responses" {
+  export const OPENAI_RESPONSES_PROVIDER: "openai-responses";
 }

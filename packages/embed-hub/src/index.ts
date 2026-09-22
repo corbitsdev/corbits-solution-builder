@@ -78,6 +78,7 @@ import {
   runMailboxMigrations,
   type InboxItem,
 } from "@corbits/mailbox";
+import { OPENAI_RESPONSES_PROVIDER } from "@corbits/openai-responses";
 import { upgradeWebSocket } from "hono/bun";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
@@ -379,6 +380,15 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
   // of this host per allocation. The sidecar seals credentials under a key of
   // its own; it gets the hub's from the environment the provisioner forwards.
   process.env["SIDECAR_CREDENTIAL_ENCRYPTION_KEY"] ??= options.credentialKeyHex;
+  // Responses-only backends (ChatGPT/Codex) are catalog rows on this adapter,
+  // configured per offering by quirks.
+  process.env["SIDECAR_ADAPTER_MANIFEST"] ??= JSON.stringify([
+    {
+      provider: OPENAI_RESPONSES_PROVIDER,
+      specifier: import.meta.resolve("@corbits/openai-responses"),
+      export: "createOpenAIResponsesAdapter",
+    },
+  ]);
   const provisionerFor = (role: ProcessProvisionerRole) =>
     createProcessSidecarProvisioner({
       role,

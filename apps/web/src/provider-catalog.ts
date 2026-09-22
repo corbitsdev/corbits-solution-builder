@@ -40,7 +40,7 @@ import {
   type ResolvedCatalogRow,
 } from "@solutions-builder/installer";
 import type { Stage } from "@solutions-builder/app/ledger";
-import { CODEX_BASE_URL } from "@corbits/codex-provider";
+import { CODEX_BASE_URL, CODEX_ORIGINATOR, CODEX_RESPONSES_PATH } from "@corbits/codex-provider";
 import { XAI_DEFAULT_MODELS, XAI_OAUTH_PROXY_BASE_URL } from "@corbits/xai-provider";
 import type { Transport } from "./hub.ts";
 
@@ -103,8 +103,39 @@ export const OAUTH_CONNECT_OPTIONS: ReadonlyArray<{ providerId: string; label: s
  * Codex-servable model (`gpt-5.6-sol` — the `-wm` slug with the suffix
  * removed, the spelling the Responses endpoint accepts).
  */
-const OAUTH_ADAPTER_OF: Record<string, { plugin: ModelProviderPlugin; baseURL: string; canonicalNames: readonly string[] }> = {
-  "codex-oauth": { plugin: "openai-compatible", baseURL: CODEX_BASE_URL, canonicalNames: ["gpt-5.6-sol"] },
+type OAuthTokens = { access: string; refresh: string; expiresAt?: number; accountId?: string };
+
+const OAUTH_ADAPTER_OF: Record<
+  string,
+  {
+    plugin: ModelProviderPlugin;
+    baseURL: string;
+    canonicalNames: readonly string[];
+    quirks?: (tokens: OAuthTokens) => Record<string, unknown>;
+  }
+> = {
+  // ChatGPT serves only the Responses API; these quirks are the data half of
+  // `@corbits/codex-provider`'s own adapter configuration.
+  "codex-oauth": {
+    plugin: "openai-responses",
+    baseURL: CODEX_BASE_URL,
+    canonicalNames: ["gpt-5.6-sol"],
+    quirks: (tokens) => ({
+      path: CODEX_RESPONSES_PATH,
+      headers: {
+        static: {
+          "openai-beta": "responses=experimental",
+          originator: CODEX_ORIGINATOR,
+          ...(tokens.accountId !== undefined ? { "chatgpt-account-id": tokens.accountId } : {}),
+        },
+      },
+      systemPrompt: { role: "developer", shape: "parts" },
+      contentShape: "typed",
+      store: false,
+      parallelToolCalls: false,
+      maxOutputTokens: false,
+    }),
+  },
   "xai-oauth": { plugin: "openai-compatible", baseURL: XAI_OAUTH_PROXY_BASE_URL, canonicalNames: [...XAI_DEFAULT_MODELS] },
 };
 
@@ -456,7 +487,7 @@ function sleep(ms: number): Promise<void> {
 async function waitForOAuthTokens(
   transport: Transport,
   providerId: string,
-): Promise<{ access: string; refresh: string; expiresAt?: number }> {
+): Promise<OAuthTokens> {
   const deadline = Date.now() + OAUTH_LOGIN_TIMEOUT_MS;
   for (;;) {
     const state = await transport.fetch<OAuthLoginStatus>("GET", `/api/oauth/${providerId}/status`);
@@ -500,6 +531,7 @@ export async function connectOAuthProvider(
     plugin: adapter.plugin,
     baseURL: adapter.baseURL,
     canonicalNames: adapter.canonicalNames,
+    ...(adapter.quirks !== undefined ? { quirks: adapter.quirks(tokens) } : {}),
   });
 }
 

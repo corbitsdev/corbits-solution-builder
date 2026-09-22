@@ -16,6 +16,7 @@
       "@corbits/oauth-core": ["./types/corbits-providers.d.ts"],
       "@corbits/codex-provider": ["./types/corbits-providers.d.ts"],
       "@corbits/xai-provider": ["./types/corbits-providers.d.ts"],
+      "@corbits/openai-responses": ["./types/corbits-providers.d.ts"],
       "@corbits/artifacts": ["./types/corbits-artifacts.d.ts"],
       "@corbits/mailbox": ["./types/corbits-mailbox.d.ts"],
       "@corbits/process-provisioner": ["./types/corbits-process-provisioner.d.ts"],

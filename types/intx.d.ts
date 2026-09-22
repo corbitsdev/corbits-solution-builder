@@ -402,7 +402,7 @@ declare module "@intx/types" {
   export const CreateModelProvider: {
     infer: {
       name: string;
-      plugin: "anthropic" | "openai" | "openai-compatible" | "google-genai";
+      plugin: string;
       baseURL: string;
       credentialId?: string | null;
       walletId?: string | null;
