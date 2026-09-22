@@ -266,22 +266,6 @@
   font-family: var(--wb-font-mono);
 }
 
-.home-page .card .project-card-menu {
-  position: absolute;
-  top: var(--space-2);
-  right: var(--space-2);
-  opacity: 0;
-  pointer-events: none;
-}
-
-.home-page .card:hover .project-card-menu,
-.home-page .card:focus-within .project-card-menu,
-.home-page .card .project-card-menu:focus-visible,
-.home-page .card .project-card-menu[data-state="open"] {
-  opacity: 1;
-  pointer-events: auto;
-}
-
 .home-page .project-archive {
   margin-top: var(--space-8);
 }

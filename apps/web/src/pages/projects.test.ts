@@ -21,7 +21,7 @@ function summary(overrides: Partial<ProjectSummary> = {}): ProjectSummary {
 }
 
 describe("Projects markup", () => {
-  test("live cards render a card-desc from the list title and keep create/import/menus", () => {
+  test("live cards render a card-desc from the list title and keep create/import, not a kebab", () => {
     const html = renderToStaticMarkup(
       createElement(Projects, {
         projects: [summary()],
@@ -36,8 +36,11 @@ describe("Projects markup", () => {
     expect(html).not.toContain("spend-box");
     expect(html).toContain('accept=".json,.zip,application/json,application/zip"');
     expect(html).toContain("composer-box");
-    expect(html).toContain("project-card-menu");
-    expect(html).toContain("Options for Orbit payroll migration");
+    expect(html).toContain("card-top");
+    expect(html).toContain("card-track");
+    expect(html).toContain("card-foot");
+    expect(html).not.toContain("project-card-menu");
+    expect(html).not.toContain("Options for Orbit payroll migration");
     expect(html).not.toContain("ago");
   });
 
@@ -80,7 +83,7 @@ describe("home composer send", () => {
 });
 
 describe("home layout sheet", () => {
-  test("status orange is brand-primary, kebab is out of flow, composer uses icon slots", async () => {
+  test("status orange is brand-primary, cards have no kebab, composer uses icon slots", async () => {
     const page = await Bun.file(new URL("./projects.tsx", import.meta.url)).text();
     const css = await Bun.file(new URL("./home-layout.css", import.meta.url)).text();
     expect(page).toContain("cardDescription(project)");
@@ -92,6 +95,8 @@ describe("home layout sheet", () => {
     expect(page).toContain("leadingTools");
     expect(page).toContain("Plus");
     expect(page).toContain("Send");
+    expect(page).not.toContain("project-card-menu");
+    expect(page).not.toContain("Ellipsis");
     expect(css).toContain(".home-page .card.needs");
     expect(css).toContain("border-color: var(--brand-primary)");
     expect(css).toContain(".home-page .badge-decision");
@@ -99,10 +104,29 @@ describe("home layout sheet", () => {
     expect(css).toContain(".home-page .card-track .seg.now");
     expect(css).toContain("composer-foot");
     expect(css).toContain('[data-slot="chat-input-footer"]');
-    expect(css).toContain("pointer-events: none");
+    expect(css).not.toContain("project-card-menu");
     expect(css).not.toContain("M5 12h14");
     expect(css).not.toContain("-webkit-mask");
     expect(css).toContain("var(--wb-foreground)");
     expect(css).toContain("var(--wb-background)");
+  });
+});
+
+describe("project info actions", () => {
+  test("rename, export, archive, and delete live in ProjectInfoDialog, opened by context menu or long-press", async () => {
+    const page = await Bun.file(new URL("./projects.tsx", import.meta.url)).text();
+    const dialog = page.slice(page.indexOf("function ProjectInfoDialog"));
+    expect(page).toContain("onContextMenu");
+    expect(page).toContain("LONG_PRESS_MS");
+    expect(page).toContain("setTimeout(openInfo, LONG_PRESS_MS)");
+    expect(dialog).toContain("api.updateProject(project.id, { title: next })");
+    expect(dialog).toContain("exportProject");
+    expect(dialog).toContain("assembleBundle");
+    expect(dialog).toContain('api.updateProject(project.id, { archived: !project.archivedAt })');
+    expect(dialog).toContain("api.deleteProject(project.id)");
+    expect(dialog).toContain("Export…");
+    expect(dialog).toContain("Archive");
+    expect(dialog).toContain("Delete…");
+    expect(dialog).toContain("Yes, delete it");
   });
 });

@@ -6,25 +6,20 @@
 // this lane's client no longer exports SpendRow/SpendTotals (spend now lives
 // in project-usage.ts), so the per-project spend table it backed is adapted
 // below. Import order otherwise verbatim from main.
-import type React from "react";
 import {
   ChatInput,
   Dialog,
   DialogBody,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   Input,
-  Menu,
-  MenuContent,
-  MenuItem,
-  MenuSeparator,
-  MenuTrigger,
 } from "@corbits/react-ui";
-import { Ellipsis, Plus, Send } from "lucide-react";
+import { Plus, Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, ApiFailure, type ActiveModel, type ProjectInfo, type ProjectSummary } from "../client.js";
-import { Banner, downloadArtifact, stageName } from "../components.jsx";
+import { Banner, Button, downloadArtifact, stageName } from "../components.jsx";
 // INTEGRATE (CL-8756): api.exportProject is gone on this lane — export is
 // assembled in the browser (assembleBundle) and saved via downloadArtifact;
 // stage/turn/done come from project-list.ts helpers and spend copy from
@@ -252,6 +247,9 @@ export function Projects({
   );
 }
 
+/** Hold this long on a card to open info — there is no kebab on the face. */
+const LONG_PRESS_MS = 500;
+
 function ProjectCard({
   project,
   onOpen,
@@ -316,75 +314,55 @@ function ProjectCard({
     };
   }, [project.id, project.archivedAt, project.needsDecision, stage]);
   const waiting = project.needsDecision;
-  const [renaming, setRenaming] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
-  const [title, setTitle] = useState(project.title);
-  // Deleting takes two clicks, both in the menu: the second item only exists
-  // after the first, so a slip cannot remove a project.
-  const [confirming, setConfirming] = useState(false);
-  const field = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (renaming) field.current?.select();
-  }, [renaming]);
+  const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suppressOpen = useRef(false);
 
-  const act = async (work: () => Promise<unknown>) => {
-    try {
-      await work();
-      onChanged();
-    } catch (cause) {
-      onError(cause);
+  useEffect(
+    () => () => {
+      if (pressTimer.current !== null) clearTimeout(pressTimer.current);
+    },
+    [],
+  );
+
+  const clearPress = () => {
+    if (pressTimer.current !== null) {
+      clearTimeout(pressTimer.current);
+      pressTimer.current = null;
     }
   };
 
-  // INTEGRATE (CL-8756): api.exportProject is gone on this lane — the bundle
-  // is assembled in the browser and saved as a download, reported in main's
-  // diction through main's notice line; failures ride main's error Banner.
-  const [exporting, setExporting] = useState(false);
-  const exportProject = async () => {
-    if (exporting) return;
-    setExporting(true);
-    try {
-      const bundle = await assembleBundle(project.id, {
-        projectView: api.projectView,
-        artifactContent: api.artifactContent,
-        stageAgentStatus: api.stageAgentStatus,
-        readStageThread: api.readStageThread,
-      });
-      downloadArtifact(JSON.stringify(bundle, null, 2), bundleFileName(project.title));
-      const messageCount = bundle.conversations.reduce((total, thread) => total + thread.messages.length, 0);
-      onNotice(
-        `Exported ${project.title} to ${bundleFileName(project.title)}: ${bundle.artifacts.length} artifact${bundle.artifacts.length === 1 ? "" : "s"} and ${messageCount} message${messageCount === 1 ? "" : "s"}.`,
-      );
-      onChanged();
-    } catch (cause) {
-      onError(cause);
-    } finally {
-      setExporting(false);
-    }
+  const openInfo = () => {
+    suppressOpen.current = true;
+    setInfoOpen(true);
   };
-
-  const rename = () => {
-    const next = title.trim();
-    setRenaming(false);
-    if (next.length === 0 || next === project.title) {
-      setTitle(project.title);
-      return;
-    }
-    void act(() => api.updateProject(project.id, { title: next }));
-  };
-
-  const halt = (event: React.SyntheticEvent) => event.stopPropagation();
 
   return (
     <article
       className={waiting ? "card needs" : "card"}
-      tabIndex={renaming ? -1 : 0}
+      tabIndex={0}
       aria-label={project.title}
       onClick={() => {
-        if (!renaming) onOpen();
+        if (suppressOpen.current) {
+          suppressOpen.current = false;
+          return;
+        }
+        onOpen();
       }}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        openInfo();
+      }}
+      onPointerDown={(event) => {
+        if (event.pointerType === "mouse" && event.button !== 0) return;
+        clearPress();
+        pressTimer.current = setTimeout(openInfo, LONG_PRESS_MS);
+      }}
+      onPointerUp={clearPress}
+      onPointerCancel={clearPress}
+      onPointerLeave={clearPress}
       onKeyDown={(event) => {
-        if (renaming || event.target !== event.currentTarget) return;
+        if (event.target !== event.currentTarget) return;
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           onOpen();
@@ -392,73 +370,21 @@ function ProjectCard({
       }}
     >
       <div className="card-top">
-        {renaming ? (
-          <div onClick={halt} onKeyDown={halt}>
-            <Dictated value={title} onValueChange={setTitle} align="center">
-              <Input
-                ref={field}
-                className="project-card-rename"
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
-                onBlur={rename}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") rename();
-                  if (event.key === "Escape") {
-                    setTitle(project.title);
-                    setRenaming(false);
-                  }
-                }}
-                aria-label="Project name"
-              />
-            </Dictated>
+        <h3>{project.title}</h3>
+        {waiting ? (
+          <div className="card-top-end">
+            <span className="badge-decision">{HOME_NEEDS_DECISION}</span>
           </div>
-        ) : (
-          <h3>{project.title}</h3>
-        )}
-        <div className="card-top-end" onClick={halt} onKeyDown={halt}>
-          {waiting ? <span className="badge-decision">{HOME_NEEDS_DECISION}</span> : null}
-          <Menu onOpenChange={(open) => !open && setConfirming(false)}>
-            <MenuTrigger asChild>
-              <button type="button" className="project-card-menu" aria-label={`Options for ${project.title}`}>
-                <Ellipsis aria-hidden="true" />
-              </button>
-            </MenuTrigger>
-            <MenuContent align="end">
-              <MenuItem onSelect={() => setInfoOpen(true)}>Project info…</MenuItem>
-              <MenuItem onSelect={() => setRenaming(true)}>Rename</MenuItem>
-              <MenuItem disabled={exporting} onSelect={() => void exportProject()}>
-                {exporting ? "Exporting…" : "Export…"}
-              </MenuItem>
-              <MenuItem
-                onSelect={() =>
-                  void act(() => api.updateProject(project.id, { archived: !project.archivedAt }))
-                }
-              >
-                {project.archivedAt ? "Unarchive" : "Archive"}
-              </MenuItem>
-              <MenuSeparator />
-              {confirming ? (
-                <MenuItem
-                  className="menu-danger"
-                  onSelect={() => void act(() => api.deleteProject(project.id))}
-                >
-                  Yes, delete it
-                </MenuItem>
-              ) : (
-                <MenuItem
-                  className="menu-danger"
-                  onSelect={(event) => {
-                    event.preventDefault();
-                    setConfirming(true);
-                  }}
-                >
-                  Delete…
-                </MenuItem>
-              )}
-            </MenuContent>
-          </Menu>
-        </div>
-        {infoOpen ? <ProjectInfoDialog project={project} onClose={() => setInfoOpen(false)} /> : null}
+        ) : null}
+        {infoOpen ? (
+          <ProjectInfoDialog
+            project={project}
+            onClose={() => setInfoOpen(false)}
+            onChanged={onChanged}
+            onError={onError}
+            onNotice={onNotice}
+          />
+        ) : null}
       </div>
 
       <p className="card-desc">{cardDescription(project)}</p>
@@ -511,12 +437,29 @@ const formatBytes = (bytes: number): string =>
 // SpendRow) no longer exist — so the dialog keeps main's shell and row order
 // while usage rides formatUsage and decisions get their own row. Every
 // adapted hunk below carries its own note.
-function ProjectInfoDialog({ project, onClose }: { project: ProjectSummary; onClose: () => void }) {
+function ProjectInfoDialog({
+  project,
+  onClose,
+  onChanged,
+  onError,
+  onNotice,
+}: {
+  project: ProjectSummary;
+  onClose: () => void;
+  onChanged: () => void;
+  onError: (cause: unknown) => void;
+  onNotice: (message: string) => void;
+}) {
   const [info, setInfo] = useState<ProjectInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   // INTEGRATE (CL-8756): lane-only wiring — what the usage line names as the
   // current model. Behavioral-only; main has no equivalent.
   const [activeModel, setActiveModel] = useState<ActiveModel | null>(null);
+  const [title, setTitle] = useState(project.title);
+  // Deleting takes two clicks: the confirm button only exists after the first,
+  // so a slip cannot remove a project.
+  const [confirming, setConfirming] = useState(false);
+  const [exporting, setExporting] = useState(false);
   useEffect(() => {
     let cancelled = false;
     void api
@@ -534,6 +477,53 @@ function ProjectInfoDialog({ project, onClose }: { project: ProjectSummary; onCl
       cancelled = true;
     };
   }, [project.id]);
+
+  const act = async (work: () => Promise<unknown>) => {
+    try {
+      await work();
+      onChanged();
+      return true;
+    } catch (cause) {
+      onError(cause);
+      return false;
+    }
+  };
+
+  const rename = () => {
+    const next = title.trim();
+    if (next.length === 0 || next === project.title) {
+      setTitle(project.title);
+      return;
+    }
+    void act(() => api.updateProject(project.id, { title: next }));
+  };
+
+  // INTEGRATE (CL-8756): api.exportProject is gone on this lane — the bundle
+  // is assembled in the browser and saved as a download, reported in main's
+  // diction through main's notice line; failures ride main's error Banner.
+  const exportProject = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const bundle = await assembleBundle(project.id, {
+        projectView: api.projectView,
+        artifactContent: api.artifactContent,
+        stageAgentStatus: api.stageAgentStatus,
+        readStageThread: api.readStageThread,
+      });
+      downloadArtifact(JSON.stringify(bundle, null, 2), bundleFileName(project.title));
+      const messageCount = bundle.conversations.reduce((total, thread) => total + thread.messages.length, 0);
+      onNotice(
+        `Exported ${project.title} to ${bundleFileName(project.title)}: ${bundle.artifacts.length} artifact${bundle.artifacts.length === 1 ? "" : "s"} and ${messageCount} message${messageCount === 1 ? "" : "s"}.`,
+      );
+      onChanged();
+    } catch (cause) {
+      onError(cause);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <Dialog open onOpenChange={(open) => (open ? undefined : onClose())}>
       <DialogContent className="project-info">
@@ -542,6 +532,22 @@ function ProjectInfoDialog({ project, onClose }: { project: ProjectSummary; onCl
         </DialogHeader>
         <DialogBody>
           {error ? <Banner tone="error" title={error} /> : null}
+          <div className="field">
+            <label htmlFor={`project-name-${project.id}`}>Name</label>
+            <Dictated value={title} onValueChange={setTitle} align="center">
+              <Input
+                id={`project-name-${project.id}`}
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                onBlur={rename}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") rename();
+                  if (event.key === "Escape") setTitle(project.title);
+                }}
+                aria-label="Project name"
+              />
+            </Dictated>
+          </div>
           {!info && !error ? <p className="inline-note">Loading…</p> : null}
           {info ? (
             <>
@@ -607,6 +613,36 @@ function ProjectInfoDialog({ project, onClose }: { project: ProjectSummary; onCl
             </>
           ) : null}
         </DialogBody>
+        <DialogFooter>
+          <Button disabled={exporting} onClick={() => void exportProject()}>
+            {exporting ? "Exporting…" : "Export…"}
+          </Button>
+          <Button
+            onClick={() =>
+              void act(() => api.updateProject(project.id, { archived: !project.archivedAt })).then((ok) => {
+                if (ok) onClose();
+              })
+            }
+          >
+            {project.archivedAt ? "Unarchive" : "Archive"}
+          </Button>
+          {confirming ? (
+            <Button
+              variant="destructive"
+              onClick={() =>
+                void act(() => api.deleteProject(project.id)).then((ok) => {
+                  if (ok) onClose();
+                })
+              }
+            >
+              Yes, delete it
+            </Button>
+          ) : (
+            <Button variant="destructive" onClick={() => setConfirming(true)}>
+              Delete…
+            </Button>
+          )}
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
