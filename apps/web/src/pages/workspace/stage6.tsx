@@ -10,6 +10,7 @@ import { subscribeMailbox } from "../../mailbox-events.ts";
 import { Markdown } from "../../markdown.jsx";
 import { Banner, Button } from "../../components.jsx";
 import { StagePanes } from "./workspace-chrome.tsx";
+import { HowItRuns } from "./how-it-runs.tsx";
 
 /** One role's mail-based ask/reply against stage 6's five real agents
  *  (CL-8737): requirements author or one panel principal, each its own
@@ -219,6 +220,7 @@ export function Stage6Panel({
                 ) : null}
               </div>
             </div>
+            {reviewInput ? <HowItRuns planText={reviewInput} /> : null}
             {current.status === "idle" && page === "requirements" ? (
               <p className="inline-note">Waiting on this stage's opening material.</p>
             ) : null}

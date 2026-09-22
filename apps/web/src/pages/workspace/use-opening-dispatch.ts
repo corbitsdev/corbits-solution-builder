@@ -31,6 +31,7 @@ import type { ProjectWorkflowView } from "../../project-workflow.ts";
 import { frozenSummaryLine } from "../../stage-evidence.ts";
 import { targetOpeningLine } from "./freeze.jsx";
 import { composeStage9Opening } from "./stage9-opening.ts";
+import { renderStackBlock } from "./frozen-stack-text.ts";
 
 export type OpeningDispatch = {
   /** The opening send failed — surfaced with a retry, never retried forever. */
@@ -186,12 +187,13 @@ export function useOpeningDispatch({
           // since `pendingOpening` never survives one (defect 4). Rebuilt from
           // the workflow view's own `freeze`, set the moment stage 7 is
           // approved and cleared only by a send-back to stage <= 7.
+          const stackBlock = stage === 8 && workflowView?.freeze ? renderStackBlock(workflowView.freeze, result.content) : null;
           const body =
             stage === 8 && workflowView?.freeze
               ? `${targetOpeningLine(workflowView.freeze.target)}\n\n${frozenSummaryLine({
                   target: workflowView.freeze.target,
                   frozen: workflowView.freeze.frozen,
-                })}\n\n${result.content}`
+                })}${stackBlock ? `\n\n${stackBlock}` : ""}\n\n${result.content}`
               : result.content;
           dispatchOpening(body);
         })
