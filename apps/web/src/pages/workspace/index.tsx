@@ -61,6 +61,7 @@ import { STAGE_DRAFT_KIND } from "../../client.js";
 import {
   EvaluatorVerdict,
   GuidanceCard,
+  GuidanceFold,
   OpeningScreen,
   ProductGuideDock,
   SendBackDock,
@@ -279,8 +280,8 @@ export function StageWorkspace({
   const refreshWorkflow = workflow.refresh;
 
   // Holding send raises the send-back picker over the composer; whatever is
-  // typed goes along as the reason. The dock stays the visible path — a
-  // hold gesture is invisible to keyboard and discovery both.
+  // typed goes along as the reason. The full picker also lives in Guidance —
+  // a hold gesture is invisible to keyboard and discovery both.
   const [sendBackOpen, setSendBackOpen] = useState(false);
   const openSendBack = (draft: string) => {
     // Queued passages lead the reason — the send-back is what they were
@@ -425,22 +426,6 @@ export function StageWorkspace({
 
   return (
     <div className="stage-view">
-      {activeModel ? (
-        <p className="inline-note stage-model-line">
-          Drafting with {activeModel.providerLabel} · {activeModel.canonicalName}{" "}
-          <button type="button" className="link-button" onClick={onOpenSettings}>
-            Settings
-          </button>
-        </p>
-      ) : null}
-
-      <p className="inline-note stage-usage-line">
-        {formatUsage(
-          projectUsage(detail.nodes),
-          activeModel ? `${activeModel.providerLabel} · ${activeModel.canonicalName}` : null,
-        )}
-      </p>
-
       {workflowView?.done ? (
         <Banner tone="okay" title="This project is delivered — stage 9's approval was recorded and the workflow has finished." />
       ) : null}
@@ -479,18 +464,6 @@ export function StageWorkspace({
         />
       ) : null}
 
-      {stage >= 2 && stage < LAST_STAGE ? (
-        <SendBackDock
-          stage={stage}
-          target={sendTarget}
-          reason={sendReason}
-          sendingBack={sendingBack}
-          onTargetChange={setSendTarget}
-          onReasonChange={setSendReason}
-          onSendBack={(target) => void sendBack(target)}
-        />
-      ) : null}
-
       {!agentAddress && agent.error ? (
         <Banner
           tone="error"
@@ -517,18 +490,48 @@ export function StageWorkspace({
         </Banner>
       ) : null}
 
-      {agentAddress ? (
-        <GuidanceCard
-          guidance={guidance}
-          showChoices={!(DOCUMENT_STAGES.has(stage) && !draftMessage)}
-          sending={sending}
-          onChoice={(choice) => void send(choice)}
-        />
-      ) : null}
+      <GuidanceFold>
+        {activeModel ? (
+          <p className="inline-note stage-model-line">
+            Drafting with {activeModel.providerLabel} · {activeModel.canonicalName}{" "}
+            <button type="button" className="link-button" onClick={onOpenSettings}>
+              Settings
+            </button>
+          </p>
+        ) : null}
 
-      {stage === 1 && evaluatorVerdict ? <EvaluatorVerdict verdict={evaluatorVerdict} /> : null}
+        <p className="inline-note stage-usage-line">
+          {formatUsage(
+            projectUsage(detail.nodes),
+            activeModel ? `${activeModel.providerLabel} · ${activeModel.canonicalName}` : null,
+          )}
+        </p>
 
-      <ProductGuideDock guide={guide.guide} asking={guide.asking} onAsk={() => void guide.ask()} />
+        {agentAddress ? (
+          <GuidanceCard
+            guidance={guidance}
+            showChoices={!(DOCUMENT_STAGES.has(stage) && !draftMessage)}
+            sending={sending}
+            onChoice={(choice) => void send(choice)}
+          />
+        ) : null}
+
+        {stage === 1 && evaluatorVerdict ? <EvaluatorVerdict verdict={evaluatorVerdict} /> : null}
+
+        <ProductGuideDock guide={guide.guide} asking={guide.asking} onAsk={() => void guide.ask()} />
+
+        {stage >= 2 && stage < LAST_STAGE ? (
+          <SendBackDock
+            stage={stage}
+            target={sendTarget}
+            reason={sendReason}
+            sendingBack={sendingBack}
+            onTargetChange={setSendTarget}
+            onReasonChange={setSendReason}
+            onSendBack={(target) => void sendBack(target)}
+          />
+        ) : null}
+      </GuidanceFold>
 
       {agentAddress && stage === 4 ? (
         <StagePanes strip={stripEl} conversation={conversation}>

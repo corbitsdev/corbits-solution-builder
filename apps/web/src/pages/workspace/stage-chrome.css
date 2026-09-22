@@ -1,0 +1,46 @@
+/* Extra chrome folds into one Guidance summary — not stacked bands. */
+
+.stage-chrome {
+  flex: none;
+  border-bottom: 1px solid var(--wb-border);
+  background: var(--wb-background);
+}
+
+.stage-chrome > summary {
+  font-family: var(--wb-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--wb-muted-foreground);
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+}
+
+.stage-chrome > summary:hover {
+  color: var(--wb-foreground);
+}
+
+.stage-chrome-body {
+  max-height: 40vh;
+  overflow-y: auto;
+  padding-bottom: var(--space-3);
+}
+
+.stage-chrome .stage-guidance {
+  border-bottom: 0;
+  background: transparent;
+}
+
+.stage-chrome .send-back,
+.stage-chrome .product-guide {
+  margin: var(--space-2) var(--space-4) 0;
+}
+
+.stage-chrome .stage-model-line,
+.stage-chrome .stage-usage-line {
+  margin: 0;
+  padding: var(--space-1) var(--space-4);
+}
+
+.stage-view > .stage-companions {
+  flex: none;
+}

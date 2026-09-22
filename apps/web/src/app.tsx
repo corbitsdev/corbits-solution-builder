@@ -302,7 +302,7 @@ export function AppBar({
         >
           <SettingsIcon aria-hidden="true" />
         </button>
-        <ThemeToggle />
+        {view === "project" ? null : <ThemeToggle />}
       </div>
     </header>
   );

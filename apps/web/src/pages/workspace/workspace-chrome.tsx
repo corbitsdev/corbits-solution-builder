@@ -1,8 +1,8 @@
 /**
- * The workspace's quiet chrome: the stage guidance card, the stage-1
- * evaluator verdict, the product-guide dock, the send-back surface, and the
- * two waiting states. All presentational — every prop is already resolved by
- * the stage workspace above them.
+ * The workspace's quiet chrome: folded stage extras, the stage-1 evaluator
+ * verdict, the product-guide dock, send-back, and the two waiting states. All
+ * presentational — every prop is already resolved by the stage workspace
+ * above them.
  */
 import type { ReactNode, Ref } from "react";
 import { Textarea } from "@corbits/react-ui";
@@ -16,6 +16,17 @@ import type { evaluatorVerdict } from "./guidance.js";
 import { CONV_CLASS, PANES_CLASS, STAGE_PANE_CLASS } from "./pane-classes.ts";
 
 type Choices = { readonly text: string; readonly choices: readonly string[] } | null;
+
+/** Model, usage, guidance, verdict, send-back, and the product guide — one
+ *  collapsed summary so they never stack as bands above the panes. */
+export function GuidanceFold({ children }: { children: ReactNode }) {
+  return (
+    <details className="stage-chrome">
+      <summary>Guidance</summary>
+      <div className="stage-chrome-body">{children}</div>
+    </details>
+  );
+}
 
 /** The stage's current guidance — what the specialist is doing, and the
  *  recorded answer choices when the guidance carries a question. */
@@ -101,8 +112,8 @@ export function ProductGuideDock({
   );
 }
 
-/** Sending the stage back is offered wherever the person is working, folded
- *  to a line so it never competes with the review itself. */
+/** Sending the stage back is offered on hold-to-send, and again inside
+ *  Guidance so a keyboard user still has a path — never as its own band. */
 export function SendBackDock({
   stage,
   target,
@@ -148,8 +159,8 @@ export function SendBackDock({
 }
 
 /** The send-back picker hold raises over the composer: every stage up to
- *  this one, newest first, each named by what going back to it is for. The
- *  dock below stays the visible path — a hold gesture is invisible to
+ *  this one, newest first, each named by what going back to it is for.
+ *  Guidance still holds the full picker — a hold gesture is invisible to
  *  keyboard and discovery both. */
 export function SendBackPopover({
   stage,

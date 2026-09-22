@@ -41,6 +41,7 @@ describe("project chrome classes", () => {
 
   test("workspace.tsx loads the layout sheet", () => {
     expect(read("../workspace.tsx")).toContain('import "./workspace-layout.css"');
+    expect(read("../workspace.tsx")).toContain('import "./workspace/stage-chrome.css"');
   });
 });
 
@@ -123,15 +124,50 @@ describe("project chrome paint", () => {
     expect(index).toContain("stage === 9");
   });
 
-  test("guidance, send-back dock, conversation/artifacts tabs, and theme toggle remain", () => {
+  test("guidance, send-back, conversation/artifacts remain; theme toggle hides on project view", () => {
     expect(read("./workspace-chrome.tsx")).toContain("export function GuidanceCard");
+    expect(read("./workspace-chrome.tsx")).toContain("export function GuidanceFold");
+    expect(read("./workspace-chrome.tsx")).toContain('className="stage-chrome"');
+    expect(read("./workspace-chrome.tsx")).toMatch(/<summary>(Stage extras|Guidance)<\/summary>/);
     expect(read("./workspace-chrome.tsx")).toContain("export function SendBackDock");
-    expect(read("./index.tsx")).toContain("<GuidanceCard");
-    expect(read("./index.tsx")).toContain("<SendBackDock");
+    const index = read("./index.tsx");
+    expect(index).toContain("<GuidanceFold");
+    expect(index).toContain("<GuidanceCard");
+    expect(index).toContain("<SendBackDock");
+    expect(index).toContain("<ProductGuideDock");
+    expect(index).toContain("<EvaluatorVerdict");
+    expect(index).toContain("onSendHold");
     const app = read("../../app.tsx");
     expect(app).toContain('id: "stage", label: "Conversation"');
     expect(app).toContain('id: "artifacts"');
     expect(app).toContain('label: "Artifacts"');
     expect(app).toContain("<ThemeToggle");
+    expect(app).toContain('view === "project" ? null : <ThemeToggle />');
+  });
+
+  test("extra chrome folds into Stage extras details, not stacked bands above panes", () => {
+    const index = read("./index.tsx");
+    const foldStart = index.indexOf("<GuidanceFold>");
+    const foldEnd = index.indexOf("</GuidanceFold>");
+    expect(foldStart).toBeGreaterThan(-1);
+    expect(foldEnd).toBeGreaterThan(foldStart);
+    const fold = index.slice(foldStart, foldEnd);
+    expect(fold).toContain("stage-model-line");
+    expect(fold).toContain("stage-usage-line");
+    expect(fold).toContain("<GuidanceCard");
+    expect(fold).toContain("<EvaluatorVerdict");
+    expect(fold).toContain("<ProductGuideDock");
+    expect(fold).toContain("<SendBackDock");
+    expect(fold).not.toContain("<Banner");
+    expect(index.indexOf("<StagePanes")).toBeGreaterThan(foldEnd);
+    const beforeFold = index.slice(index.indexOf('className="stage-view"'), foldStart);
+    expect(beforeFold).toContain("<Banner");
+    const foldCss = read("./stage-chrome.css");
+    expect(foldCss).toContain(".stage-chrome");
+    expect(foldCss).not.toContain(".workspace-guidance");
+    expect(foldCss).not.toContain(".stage-view > .stage-guidance");
+    expect(foldCss).not.toContain(".stage-view > .send-back");
+    const layout = read("../workspace-layout.css");
+    expect(layout).toContain(".topbar-project .head-tabs");
   });
 });
