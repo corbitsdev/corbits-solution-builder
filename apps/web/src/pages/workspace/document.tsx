@@ -24,6 +24,7 @@ import { PrintButton } from "../../print.jsx";
 import { SpecialistTurn, WorkingLabel, type TurnNote } from "./thread.jsx";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
 import { clearQuotedDraft, loadQuotedDraft, saveQuotedDraft } from "./quote-store.js";
+import { COMPOSER_BOX_CLASS, CONV_CLASS, CONV_SCROLL_CLASS, PANES_CLASS, STAGE_PANE_CLASS } from "./pane-classes.ts";
 
 /**
  * A drafted stage: the document, and the conversation about it.
@@ -349,11 +350,11 @@ export function StageDocument({
   }, [busy, queued]);
 
   return (
-    <div className={draftOpen ? "document-layout" : "document-layout is-solo"}>
-      <section ref={pane} className="stage-thread" aria-label="Conversation with the specialist">
+    <div className={draftOpen ? PANES_CLASS : `${PANES_CLASS} is-solo`}>
+      <section ref={pane} className={CONV_CLASS} aria-label="Conversation with the specialist">
         <div className="thread-scroll">
         <ChatThread
-          className="thread-turns"
+          className={CONV_SCROLL_CLASS}
           messages={messages}
           identity={{ name: agentFor(node.stage as Stage).title, initials: "SB" }}
           // A specialist's turn is its digest of the draft, and the bolding in
@@ -362,21 +363,21 @@ export function StageDocument({
             const event = eventById.get(message.id);
             if (event) {
               return (
-                <span className={event.tone === "boundary" ? "conv-event conv-boundary" : "conv-event"}>
+                <span className={event.tone === "boundary" ? "event boundary conv-event conv-boundary" : "event conv-event"}>
                   {event.text}
                 </span>
               );
             }
             const who = (
-              <span className="conv-who">
+              <span className="who conv-who">
                 {message.role === "user" ? "You" : agentFor(node.stage as Stage).title}
               </span>
             );
             return message.id === "pending" ? (
-              <>
+              <span className="think">
                 {who}
                 <WorkingLabel since={message.createdAt} />
-              </>
+              </span>
             ) : message.role === "agent" && failedTurns.has(message.id) ? (
               <div className="turn-failed" role="alert">
                 {who}
@@ -446,7 +447,7 @@ export function StageDocument({
             </p>
           ) : null}
           {canSubmit && choosing ? (
-            <div className="composer-approve composer-choose">
+            <div className="stage-action composer-approve composer-choose">
               <span>Which approach?</span>
               {approaches.map((section) => {
                 const letter = /^approach\s+([ab])/i.exec(section.heading)?.[1]?.toUpperCase() ?? "A";
@@ -480,19 +481,19 @@ export function StageDocument({
               </Button>
             </div>
           ) : promote ? (
-            <div className="composer-approve">
+            <div className="stage-action composer-approve">
               <span>{promote.label}</span>
               <Button variant="ghost" loading={promote.busy} onClick={() => promote.run()}>
                 Make it the active version
               </Button>
             </div>
           ) : canSubmit ? (
-            <div className="composer-approve">
+            <div className="stage-action composer-approve">
               <span>{soloApproval ? "Happy with it?" : "Nothing more to say?"}</span>
               <span
                 data-tour="submit"
                 data-ready={evaluation?.ready ? "true" : undefined}
-                className={evaluation?.ready ? "is-ready" : undefined}
+                className={evaluation?.ready ? "is-ready approve" : "approve"}
               >
                 <Button
                   variant="ghost"
@@ -517,6 +518,7 @@ export function StageDocument({
           ) : null}
           <Dictated value={message} onValueChange={setMessage}>
           <ChatInput
+            className={COMPOSER_BOX_CLASS}
             value={message}
             onValueChange={setMessage}
             onSend={send}
@@ -560,7 +562,7 @@ export function StageDocument({
         </div>
       </section>
 
-      <article className="document" data-tour="document">
+      <article className={STAGE_PANE_CLASS} data-tour="document">
         {strip ? <div className="artifact-strip">{strip}</div> : null}
         <div className="stage-inner">
           <div className="doc" data-tour="document-body" onMouseUp={openSelection}>

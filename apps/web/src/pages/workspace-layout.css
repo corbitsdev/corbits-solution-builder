@@ -1,0 +1,299 @@
+/**
+ * Project chrome matching mockups/project.html.
+ *
+ * Scoped to the project topbar toggle and the two-pane workspace so home,
+ * onboarding and settings keep their own sheets.
+ */
+
+/* ---- topbar: three zones, stepper stacked in the centre ---- */
+
+.topbar.topbar-project {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  height: 52px;
+  min-height: 52px;
+}
+
+.topbar-project .topbar-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+}
+
+.topbar-project .topbar-actions {
+  justify-content: flex-end;
+}
+
+.topbar-project .step-name {
+  font-family: var(--wb-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--wb-muted-foreground);
+  white-space: nowrap;
+}
+
+.topbar-project .stepper {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.topbar-project .stepper li > span,
+.topbar-project .stepper li > button {
+  height: 4px;
+  width: 20px;
+  border-radius: 2px;
+}
+
+.topbar-project .stepper li[aria-current="step"] > span {
+  width: 28px;
+}
+
+/* ---- two panes: 420px conversation + draft ---- */
+
+.panes {
+  display: grid;
+  grid-template-columns: 420px minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+}
+
+.canvas-body.is-fill .panes {
+  flex: 1;
+  min-height: 0;
+}
+
+.panes.is-solo {
+  grid-template-columns: minmax(0, 1fr) 0fr;
+}
+
+.panes.is-solo .conv {
+  border-right: 0;
+}
+
+.panes.is-solo .stage-pane {
+  display: none;
+}
+
+.conv {
+  border-right: 1px solid var(--wb-border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--wb-background);
+}
+
+.conv .stage-conversation {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.conv-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.stage-pane {
+  overflow-y: auto;
+  background: var(--card);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* ---- events and messages ---- */
+
+.conv .event,
+.conv .conv-event {
+  font-family: var(--wb-font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: var(--wb-muted-foreground);
+  padding: var(--space-1) 0;
+}
+
+.conv .event b,
+.conv .conv-event b {
+  color: var(--wb-foreground);
+  font-weight: 400;
+}
+
+.conv .event.boundary,
+.conv .conv-boundary {
+  color: var(--wb-foreground);
+}
+
+.conv [data-slot="message-bubble"] {
+  max-width: 92%;
+}
+
+.conv .who,
+.conv .conv-who {
+  font-family: var(--wb-font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  color: var(--wb-muted-foreground);
+}
+
+.conv [data-slot="message-bubble"].items-start > div:first-child:not(:has(.thinking)):not(:has(.conv-event)),
+.conv [data-slot="message-bubble"].items-end > div:first-child {
+  padding: 10px 14px;
+  font-size: 14px;
+  line-height: 1.5;
+  border-radius: var(--radius-lg);
+}
+
+.conv .think {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+}
+
+.conv .think .thinking {
+  font-family: var(--wb-font-mono);
+  font-size: 10.5px;
+  font-weight: 400;
+  letter-spacing: 0.05em;
+  color: var(--wb-muted-foreground);
+  -webkit-text-fill-color: currentColor;
+  background: none;
+  animation: conv-shimmer 1.6s ease-in-out infinite;
+}
+
+@keyframes conv-shimmer {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conv .think .thinking {
+    animation: none;
+  }
+}
+
+/* ---- composer: mock composer-box ---- */
+
+.composer {
+  border-top: 1px solid var(--wb-border);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  position: relative;
+}
+
+.composer .composer-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--wb-background);
+  padding: var(--space-3) var(--space-4) var(--space-2);
+  box-shadow: none;
+  transition: border-color 150ms;
+}
+
+.composer .composer-box:focus-within {
+  outline: none;
+  border-color: var(--wb-primary);
+}
+
+.composer .composer-box textarea {
+  width: 100%;
+  min-height: 44px;
+  font-size: 15px;
+  line-height: 1.5;
+  padding-block: 0;
+}
+
+.composer .composer-box > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  padding-top: var(--space-2);
+}
+
+.composer .composer-box > div > textarea {
+  flex: 1 1 100%;
+  order: -1;
+}
+
+.composer .composer-box > div > button[aria-label="Attach files"] {
+  width: 30px;
+  height: 30px;
+}
+
+.composer .composer-box > div > button[type="submit"],
+.composer .composer-box > div > button[aria-label="Stop generating"] {
+  margin-left: auto;
+  width: 30px;
+  height: 30px;
+  background: var(--wb-foreground);
+  color: var(--wb-background);
+  border-radius: var(--radius-md, 6px);
+}
+
+.composer .composer-box > div > button[type="submit"]:hover:not(:disabled),
+.composer .composer-box > div > button[aria-label="Stop generating"]:hover {
+  opacity: 0.85;
+}
+
+.composer .stage-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: 0 var(--space-1) var(--space-2);
+}
+
+.composer .approve button {
+  background: transparent;
+  border-color: transparent;
+  color: var(--wb-muted-foreground);
+  padding: 4px 8px;
+  font-size: 11.5px;
+  font-weight: 550;
+  border-radius: var(--radius-md, 6px);
+  transition:
+    color 0.15s,
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.composer .approve button:hover:not(:disabled) {
+  color: var(--ok, var(--wb-okay));
+  border-color: color-mix(in srgb, var(--ok, var(--wb-okay)) 40%, transparent);
+  background: color-mix(in srgb, var(--ok, var(--wb-okay)) 8%, transparent);
+}
+
+.composer[data-working] .stage-action:not(.request) {
+  display: none;
+}
+
+@media (max-width: 1080px) {
+  .panes {
+    grid-template-columns: 1fr;
+  }
+
+  .conv {
+    order: 2;
+    height: auto;
+  }
+
+  .stage-pane {
+    order: 1;
+  }
+}

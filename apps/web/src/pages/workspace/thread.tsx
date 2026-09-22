@@ -4,6 +4,7 @@ import { Markdown } from "../../markdown.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { choicesIn } from "./choices.js";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
+import { COMPOSER_BOX_CLASS, CONV_SCROLL_CLASS } from "./pane-classes.ts";
 
 /** A stage-mail turn, rendered as a `@corbits/react-ui` chat message: the
  *  person's turns on the right, the specialist's on the left. */
@@ -94,19 +95,24 @@ export function StageConversation({
   return (
     <div className="stage-conversation">
       <ChatThread
+        className={CONV_SCROLL_CLASS}
         messages={uiMessages}
         identity={{ name: who, initials: "SB" }}
         renderBody={(message) => {
           const event = eventById.get(message.id);
           if (event) {
             return (
-              <span className={event.tone === "boundary" ? "conv-event conv-boundary" : "conv-event"}>
+              <span className={event.tone === "boundary" ? "event boundary conv-event conv-boundary" : "event conv-event"}>
                 {event.text}
               </span>
             );
           }
           // The turn in flight reads as what the wait is for, in main's voice.
-          if (message.id === "pending") return <WorkingLabel stage={stage} />;
+          if (message.id === "pending") return (
+            <span className="think">
+              <WorkingLabel stage={stage} />
+            </span>
+          );
           const text = message.parts.map((part) => (part.type === "text" ? part.text : "")).join("");
           if (message.role === "user" && withdrawnIds.has(message.id)) {
             return (
@@ -118,7 +124,7 @@ export function StageConversation({
           }
           return (
             <>
-              <span className="conv-who">{message.role === "user" ? "You" : who}</span>
+              <span className="who conv-who">{message.role === "user" ? "You" : who}</span>
               <Markdown source={text} />
             </>
           );
@@ -128,6 +134,7 @@ export function StageConversation({
       <div className="composer" data-working={working || pending ? "" : undefined}>
         {rows}
         <ChatInput
+          className={COMPOSER_BOX_CLASS}
           value={value}
           onValueChange={onValueChange}
           onSend={onSend}

@@ -39,6 +39,7 @@ import { Dictated } from "../../dictation.jsx";
 import { agentFor } from "@solutions-builder/app/kit";
 import type { StageEvent } from "./stage-events.ts";
 import { StageConversation } from "./thread.jsx";
+import { CONV_CLASS, PANES_CLASS, STAGE_PANE_CLASS } from "./pane-classes.ts";
 import { clock } from "./elapsed.jsx";
 import { BuildFile } from "../graph.jsx";
 import { createHubTransport } from "../../hub.ts";
@@ -562,8 +563,8 @@ export function BuildPanel({
   };
 
   return (
-    <div className="document-layout" data-tour="build-panel">
-      <section className="stage-thread" aria-label="Conversation with the specialist">
+    <div className={PANES_CLASS} data-tour="build-panel">
+      <section className={CONV_CLASS} aria-label="Conversation with the specialist">
         {error ? (
           <Banner tone="error" title="The build attempt could not be changed" action={{ label: "Open Settings", onClick: onOpenSettings }}>
             {error}
@@ -612,7 +613,7 @@ export function BuildPanel({
           }
         />
       </section>
-      <article className="document">
+      <article className={STAGE_PANE_CLASS}>
         {strip ? <div className="artifact-strip">{strip}</div> : null}
         {reader ?? (
           <div className="stage-inner">
@@ -713,7 +714,7 @@ function GrantRow({
       : JSON.stringify(approval.toolArguments);
   if (rejecting) {
     return (
-      <div className="composer-request">
+      <div className="stage-action request composer-request">
         <label className="sa-txt" htmlFor={`reject-reason-${approval.id}`}>
           why refused
         </label>
@@ -737,7 +738,7 @@ function GrantRow({
     );
   }
   return (
-    <div className="composer-request">
+    <div className="stage-action request composer-request">
       <span className="sa-txt">
         requests <code className="hash">{command}</code>
       </span>

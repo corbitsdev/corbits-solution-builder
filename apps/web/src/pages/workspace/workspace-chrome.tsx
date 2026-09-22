@@ -13,6 +13,7 @@ import { STAGE_GOAL } from "./gate.jsx";
 import { Elapsed } from "./elapsed.jsx";
 import type { Guidance } from "./product-guide.js";
 import type { evaluatorVerdict } from "./guidance.js";
+import { CONV_CLASS, PANES_CLASS, STAGE_PANE_CLASS } from "./pane-classes.ts";
 
 type Choices = { readonly text: string; readonly choices: readonly string[] } | null;
 
@@ -340,11 +341,11 @@ export function StagePanes({
   children: ReactNode;
 }) {
   return (
-    <div className="document-layout">
-      <section className="stage-thread" aria-label="Conversation with the specialist">
+    <div className={PANES_CLASS}>
+      <section className={CONV_CLASS} aria-label="Conversation with the specialist">
         {conversation}
       </section>
-      <article className="document">
+      <article className={STAGE_PANE_CLASS}>
         {strip ? <div className="artifact-strip">{strip}</div> : null}
         {children}
       </article>

@@ -166,7 +166,7 @@ export function AppBar({
 }) {
   const inProject = view === "project" && detail !== null;
   return (
-    <header className="topbar">
+    <header className={inProject ? "topbar topbar-project" : "topbar"}>
       <div className="topbar-left">
         {inProject ? (
           <>
@@ -194,6 +194,7 @@ export function AppBar({
         {inProject ? (
           <>
             <HorizontalStepper
+              className="stepper"
               variant="segments"
               steps={stageSteps(detail.stage)}
               {...(onStageSegment ? { onStepClick: (step) => onStageSegment(step.number) } : {})}
