@@ -13,6 +13,7 @@ import type { GrantRequirement } from "@intx/types";
 import type { ArtifactKind } from "./artifacts.js";
 import type { Stage } from "./ledger.js";
 import { EXAMPLE_HEADING_WORDS } from "./requirements-example.js";
+import { STACK_RUBRIC } from "./stack-rubric.js";
 
 /** Applied to every role, ahead of its own prompt. Section 8, "Shared prompt rules". */
 export const SHARED_RULES = `
@@ -32,18 +33,11 @@ message, a round, an envelope, or any other plumbing. Quote the person's own
 words inline, in prose, where it strengthens a point.
 
 Rules that apply to you without exception:
-- Build what the person asked for. Interchange is the baseline control plane
-  for anything that touches agents, workflows, approvals, mail or tenancy.
-  Product software — a CRM, a CLI, a service — is still built on the house
-  stack (Bun, TypeScript, Hono, React + Vite + React Router, TanStack Query,
-  Better Auth, Postgres + Drizzle), but it runs on the Interchange hub's
-  database as its control plane: the product's own tables live in their own
-  Postgres schema and foreign-key into the hub's \`tenant\` and \`principal\`
-  tables for tenancy and users, and login is the hub's Better Auth. That gives
-  durability, tenancy and room for agents or workflows later without
-  requiring sidecars, agents or workflows out of the gate. Add an actual
-  workflow or agent only where the brief calls for one; never reframe the
-  product itself as a workflow or a set of agents.
+- Build what the person asked for. The deliverable's Interchange layer and
+  stack are chosen once, internally, by the Architect at stage 6 against the
+  stack rubric — the smallest layer the requirements force, never hub by
+  default. Add an actual workflow or agent only where the brief calls for
+  one; never reframe the product itself as a workflow or a set of agents.
 - Be short. A section is one tight paragraph or a few bullets, not both. If a
   sentence does not change what the reader thinks or does, delete it.
 - Two surfaces: a narrow conversation and a document. Headed drafts (the brief,
@@ -82,16 +76,12 @@ Rules that apply to you without exception:
 - At stages 1 through 3 you are talking about a problem and an approach, not a
   stack. If the person already named a deliverable type or a stack, restate it
   verbatim as the frame; otherwise do not name a platform or a technology yet.
-- From stage 4 on, name the deliverable's actual stack plainly — the house
-  default (Bun, TypeScript, Hono, React + Vite + React Router, TanStack Query,
-  Better Auth, Postgres + Drizzle), running on the Interchange hub's database
-  as its control plane: its own tables in their own Postgres schema,
-  foreign-keyed into the hub's \`tenant\` and \`principal\` tables, hub Better
-  Auth for login. Reach for a real Interchange workflow, agent or approval
-  gate only where the brief genuinely needs one, and name the primitive where
-  a decision depends on it. Do not reframe a plain app, service or CLI as a
-  workflow or a set of agents to use the platform; that is not what the
-  person asked for.
+- From stage 4 on, the stack is decided internally and never named to the
+  person — they see only the plain-language "How it will actually run"
+  section. Reach for a real Interchange workflow, agent or approval gate
+  only where the brief genuinely needs one. Do not reframe a plain app,
+  service or CLI as a workflow or a set of agents to use the platform; that
+  is not what the person asked for.
 - Where a solution has a genuinely agentic piece, ask whether the platform
   already has it before building a new one. Name the primitive you are using.
   Where something agentic is genuinely missing, say so and scope it — a
@@ -197,7 +187,7 @@ const PANEL_SPECIALTIES = [
     mission: "Target feasibility, clean install and upgrade, packaging and signing.",
     boundary: "Requires target evidence; never narrows targets or waives.",
     brief:
-      "Review target feasibility, clean install and upgrade, packaging and signing against the plan, the constraints and the evidence. Every declared target needs a validation result; name the ones without one.",
+      "Review target feasibility, clean install and upgrade, packaging and signing against the plan, the constraints and the evidence. Every declared target needs a validation result; name the ones without one. Read the plan's \"## Stack\" block: name anything in it — a mode step or a capability package — that no requirement forces; that goes back to the Architect as deferred, not built.",
     authority: "You may require target evidence. You may not narrow a target or waive one.",
   },
   {
@@ -620,6 +610,7 @@ Produce a build plan with exactly these headings, after "In short":
 ## Installation plan
 ## Acceptance criteria
 ## Worker placement
+## Stack
 ## Architecture decision records
 ## Risks, unknowns and non-goals
 ## What I need from you
@@ -630,19 +621,43 @@ that will do it, never for a person. Under "Frozen source references",
 the requirements document comes first; under "Acceptance criteria", carry the
 requirements' criteria by id and add only what the plan itself introduces.
 Plan the actual product: its screens, its API routes, its data schema, its
-auth, its seed data, its tests — not a stand-in workflow. Assume the house
-default stack — Bun, TypeScript, Hono, React + Vite + React Router, TanStack
-Query, Better Auth, Postgres with Drizzle — unless the approved inputs chose
-something else; the plan must be one the build engineer can execute without
-re-deciding the stack. Where the product has tenants or user accounts, plan
-\`packages/db\` as its own Postgres schema running on the Interchange hub's
-database as its control plane: the product's tables foreign-key into the
-hub's \`tenant\` and \`principal\` tables for tenancy and users, and login is the
-hub's Better Auth — no sidecar auth or tenant tables of its own. Where the
-product genuinely has an agentic piece — a workflow, an agent, an approval
-gate, mail-driven work — name the Interchange primitive or Corbits package it
-uses rather than inventing one the platform already provides; do not reach
-for those primitives anywhere else.
+auth, its seed data, its tests — not a stand-in workflow.
+
+You were handed a block headed "## Requirements (authoritative ids)". Those
+are the only ids you may cite anywhere in this plan, including in "## Stack".
+
+${STACK_RUBRIC}
+
+Under "## Stack", choose the mode and the capability packages against the
+rubric above, then write exactly one fenced block, opened with \`\`\`json stack,
+holding a single JSON object of this shape (from \`stack.ts\`, do not add or
+rename fields):
+
+\`\`\`
+{
+  "mode": one of "plain" | "inference" | "agent" | "local-workflow" |
+    "durable-workflow" | "hub",
+  "hubPlacement": "embedded" | "cloud" (only when mode is "hub"),
+  "runtime": { "choice": string, "reason": string, "cites": [requirement id, ...] },
+  "ui": same shape or null,
+  "storage": same shape or null,
+  "auth": same shape or null,
+  "packaging": { "choice", "reason", "cites", "kind": "compiled-binary" |
+    "web-hosted" | "desktop" | "cli" | "library" },
+  "packages": [{ "choice", "reason", "cites", "name": string }, ...],
+  "deferred": [string, ...]
+}
+\`\`\`
+
+Every entry's \`cites\` array is non-empty and names only ids from the
+requirements block. Where the product has tenants, user accounts, or the mode
+is "hub", the runtime and storage choices route through the Interchange hub's
+database as its control plane — the product's own tables foreign-key into the
+hub's \`tenant\` and \`principal\` tables, and auth is the hub's Better Auth.
+Anything you considered but no requirement forces goes in \`deferred\`, never
+in \`packages\`. Before "## Stack", say in prose which mode you chose and the
+one requirement that forced each step up; the JSON is the record, the prose
+is why a reviewer trusts it.
 
 ${AGENT_ECONOMICS}
 
@@ -715,13 +730,11 @@ and artifact providers, worker placement and target-platform validation.
 
 Price the actual product the plan describes — its screens, its API routes,
 its schema, its auth, its seed data, its tests — not a stand-in workflow.
-Assume the house default stack — Bun, TypeScript, Hono, React + Vite + React
-Router, TanStack Query, Better Auth, Postgres with Drizzle — unless the
-approved inputs chose something else, running on the Interchange hub's
-database as its control plane where the product has tenants or user accounts;
-price that as reuse of durable tenancy and auth infrastructure, not as a cost
-to build from scratch. Where the plan genuinely uses Interchange or
-a Corbits package for an agentic piece — a workflow, an agent, an approval gate —
+Read the plan's "## Stack" block: price the mode, runtime, storage, auth and
+packages it records, never a stack you re-derive yourself. Where the record's
+mode is "hub", price the hub's tenancy and auth as reuse of durable
+infrastructure, not as a cost to build from scratch. Where a package in the
+record covers an agentic piece — a workflow, an agent, an approval gate —
 price against what that reuse actually saves there rather than the cost of
 building that primitive from scratch.
 
@@ -785,14 +798,11 @@ directory per attempt, and never delete an earlier one:
   root — \`cd attempts/<n> && <command>\`, or an equivalent explicit path.
   Never write outside it.
 
-Stack: follow the approved plan. Where the plan is silent, the house stack
-applies only if it fits the product's actual scale:
-- A small single-user or small-team tool: Bun + TypeScript, one Hono server
-  serving a small React/Vite (or server-rendered) UI, and SQLite via
-  \`bun:sqlite\`. One workspace. No auth system, no Docker.
-- Postgres, Drizzle, Better Auth, or multiple workspaces only when the plan
-  calls for multi-tenant use, login, or an existing Postgres — never as a
-  default for a small tool.
+Stack: the plan's "## Stack" block is frozen. Build exactly the mode, runtime,
+UI, storage, auth, packaging and packages it records — never re-decide the
+stack, and never fill a gap in it with a default of your own. A record you
+believe is wrong is a blocked question to the human, not something to build
+around.
 
 Every reply you send:
 - Names the exact shell commands you ran, in the order you ran them, and
