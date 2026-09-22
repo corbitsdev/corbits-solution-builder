@@ -10,9 +10,9 @@
   },
   "dependencies": {
     "@intx/crypto": "0.4.0",
-    "@intx/hub-sessions": "workspace:*",
+    "@intx/hub-sessions": "0.4.0",
     "@intx/log": "0.4.0",
-    "@intx/types": "workspace:*",
+    "@intx/types": "0.4.0",
     "arktype": "catalog:"
   }
 }

@@ -9,13 +9,13 @@
     "workflow-child": "./bin/workflow-child"
   },
   "dependencies": {
-    "@intx/agent": "workspace:*",
+    "@intx/agent": "0.4.0",
     "@intx/authz": "0.4.0",
     "@intx/crypto": "0.4.0",
     "@intx/harness": "0.4.0",
     "@intx/hub-agent": "0.4.0",
-    "@intx/hub-sessions": "workspace:*",
-    "@intx/inference": "workspace:*",
+    "@intx/hub-sessions": "0.4.0",
+    "@intx/inference": "0.4.0",
     "@intx/log": "0.4.0",
     "@intx/mail-memory": "0.4.0",
     "@intx/pack-transport": "0.4.0",
@@ -24,10 +24,10 @@
     "@intx/tools-lsp": "0.4.0",
     "@intx/tools-mail": "0.4.0",
     "@intx/tools-posix": "0.4.0",
-    "@intx/types": "workspace:*",
-    "@intx/workflow": "workspace:*",
+    "@intx/types": "0.4.0",
+    "@intx/workflow": "0.4.0",
     "@intx/workflow-deploy": "0.4.0",
-    "@intx/workflow-host": "workspace:*",
+    "@intx/workflow-host": "0.4.0",
     "arktype": "catalog:"
   },
   "devDependencies": {

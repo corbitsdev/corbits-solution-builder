@@ -44,10 +44,10 @@ export function readManifest(shortName: string): PackageManifest {
   return JSON.parse(readFileSync(path, "utf8")) as PackageManifest;
 }
 
-/** Whether `name` is an `@intx/*` package carried in `vendor/`; the rest
- *  come from npm and are packed like any other external dependency. */
+/** Whether `name` is packed as a vendored workspace member; every other
+ *  package, `@intx/*` included, is packed from its installed directory. */
 function isVendored(name: string): boolean {
-  return name.startsWith("@intx/") && statSync(join(VENDOR_PACKAGES_DIR, name.slice("@intx/".length)), { throwIfNoEntry: false }) !== undefined;
+  return name.startsWith("@intx/") && vendoredShortNames().includes(name.slice("@intx/".length));
 }
 
 /** The transitive `workspace:*` closure of `@intx/<root>`, root first. */

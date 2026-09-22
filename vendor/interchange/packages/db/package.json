@@ -21,7 +21,7 @@
     "@intx/crypto": "0.4.0",
     "@intx/hub-common": "0.4.0",
     "@intx/log": "0.4.0",
-    "@intx/types": "workspace:*",
+    "@intx/types": "0.4.0",
     "arktype": "catalog:",
     "drizzle-orm": "catalog:",
     "postgres": "catalog:"

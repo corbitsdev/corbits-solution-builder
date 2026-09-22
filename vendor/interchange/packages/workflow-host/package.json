@@ -17,17 +17,17 @@
     }
   },
   "dependencies": {
-    "@intx/agent": "workspace:*",
+    "@intx/agent": "0.4.0",
     "@intx/crypto": "0.4.0",
-    "@intx/hub-sessions": "workspace:*",
-    "@intx/inference": "workspace:*",
+    "@intx/hub-sessions": "0.4.0",
+    "@intx/inference": "0.4.0",
     "@intx/log": "0.4.0",
     "@intx/mail-memory": "0.4.0",
     "@intx/mailbox": "0.4.0",
     "@intx/mime": "0.4.0",
     "@intx/storage-isogit": "0.4.0",
-    "@intx/types": "workspace:*",
-    "@intx/workflow": "workspace:*",
+    "@intx/types": "0.4.0",
+    "@intx/workflow": "0.4.0",
     "arktype": "catalog:"
   },
   "files": [

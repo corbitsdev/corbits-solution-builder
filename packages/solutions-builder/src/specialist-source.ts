@@ -79,7 +79,7 @@ export const DELIVERY_STAGE = 9;
  */
 export const WORKFLOW_PACKAGE_DEPENDENCIES: Readonly<Record<string, string>> = {
   "@intx/workflow": "workspace:*",
-  "@intx/agent": "workspace:*",
+  "@intx/agent": "0.4.0",
   "@intx/tools-posix": "0.4.0",
   "@solutions-builder/app": "workspace:*",
   "@solutions-builder/tools-deck": "workspace:*",
