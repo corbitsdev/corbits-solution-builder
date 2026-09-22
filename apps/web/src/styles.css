@@ -67,6 +67,11 @@
   --wb-destructive: var(--destructive);
   --wb-font-ui: var(--font-sans);
   --wb-font-mono: var(--font-mono);
+  /* mock.css pins 10px / 6px. The library derives md/lg from --radius:
+     0.5rem, so md is 8px and rounded-md on ChatInput fights the mock. */
+  --radius: 6px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
   --radius-panel: var(--radius-lg);
   --radius-control: var(--radius-md);
   --radius-tile: var(--radius-lg);
@@ -1067,7 +1072,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   font-size: 0.72rem;
   border: 1px solid transparent;
   border-bottom: 0;
-  border-radius: 10px 10px 0 0;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
   background: transparent;
   margin-bottom: -1px;
 }

@@ -575,6 +575,7 @@ html[data-theme="dark"] .ob-credit img {
   width: 30px;
   height: 30px;
   color: var(--muted-foreground);
+  border-radius: var(--radius-md);
 }
 
 .ob .composer-box button[aria-label="Send message"] {
@@ -583,6 +584,7 @@ html[data-theme="dark"] .ob-credit img {
   margin-left: auto;
   background: var(--foreground);
   color: var(--background);
+  border-radius: var(--radius-md);
 }
 
 .ob .composer-box button[aria-label="Send message"]:hover:not(:disabled) {

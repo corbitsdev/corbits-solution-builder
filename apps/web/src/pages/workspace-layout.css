@@ -261,7 +261,7 @@
   height: 30px;
   background: var(--wb-foreground);
   color: var(--wb-background);
-  border-radius: var(--radius-md, 6px);
+  border-radius: var(--radius-md);
 }
 
 .composer .composer-box button[aria-label="Stop generating"] {
@@ -270,7 +270,7 @@
   height: 30px;
   background: var(--wb-destructive);
   color: var(--wb-background);
-  border-radius: var(--radius-md, 6px);
+  border-radius: var(--radius-md);
 }
 
 .composer .composer-box button[type="submit"]:hover:not(:disabled),
@@ -288,7 +288,7 @@
   height: 30px;
   margin: 0;
   border: 1px solid transparent;
-  border-radius: var(--radius-md, 6px);
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--wb-muted-foreground);
 }
@@ -315,7 +315,7 @@
   padding: 4px 8px;
   font-size: 11.5px;
   font-weight: 550;
-  border-radius: var(--radius-md, 6px);
+  border-radius: var(--radius-md);
   transition:
     color 0.15s,
     border-color 0.15s,
@@ -376,7 +376,7 @@
   font-size: 11.5px;
   color: var(--wb-muted-foreground);
   padding: 6px 12px;
-  border-radius: var(--radius-md, 6px) var(--radius-md, 6px) 0 0;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
   border: 1px solid transparent;
   border-bottom: 1px solid transparent;
   margin-bottom: -1px;

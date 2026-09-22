@@ -97,6 +97,7 @@
   width: 30px;
   height: 30px;
   color: var(--wb-muted-foreground);
+  border-radius: var(--radius-md);
 }
 
 .home-page .composer-box button[aria-label="Send message"] {
@@ -105,6 +106,7 @@
   margin-left: auto;
   background: var(--wb-foreground);
   color: var(--wb-background);
+  border-radius: var(--radius-md);
 }
 
 .home-page .composer-box button[aria-label="Send message"]:hover:not(:disabled) {
