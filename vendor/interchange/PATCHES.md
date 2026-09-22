@@ -139,79 +139,6 @@ entry" and nothing else.
 **Kill date.** 2026-10-16. Tracked as
 [INTR-565](https://linear.app/abklabs/issue/INTR-565).
 
-## `packages/hub-sessions/src/workflow-run-reader.ts`, `packages/hub-api/src/routes/workflows.ts` — HTTP route for run blobs
-
-**Why.** Step outputs whose JSON exceeds the 1 MiB inline threshold spill to
-`runs/<runId>/blobs/<sha256>` on the deployment's workflow-run repo
-(`workflow-host/src/adapters/blob-substrate.ts`). The vendored hub has a route
-for the run's event log (`GET /:runId/runs/:eventRunId/events`) but none to
-fetch a spilled blob's bytes, so a hub client cannot read a large step output
-at all.
-
-**What changed.** `WorkflowRunReader` gains `readRunBlob(repoId, ref, runId,
-sha)`, validating `sha` against the same 64-hex shape the workflow-run kind
-handler enforces at push time and returning `null` when the repo, ref, run, or
-blob is absent. `hub-api/src/routes/workflows.ts` adds
-`GET /:runId/runs/:eventRunId/blobs/:sha`, guarded the same way as the events
-route, returning the bytes as `application/octet-stream`, 404 when the reader
-returns null, 400 when `sha` is malformed.
-
-**Upstream-able.** Yes; it is a read-only addition alongside the existing
-events route, following the same shape.
-
-**Kill date.** 2026-10-16. Tracked as
-[INTR-566](https://linear.app/abklabs/issue/INTR-566).
-
-## `packages/workflow`, `packages/workflow-host`, `packages/agent`, `packages/inference` — per-call inference options on a step
-
-**Why.** An agent step's model call is made by the runtime inside the run,
-and nothing on that path could carry an output cap: an agent definition
-holds only source preferences, a source resolved from a catalog offering has
-no defaults, and the step invoker passed no per-call options, so every
-specialist ran under the provider adapters' hard-coded 4096 output tokens.
-A stage-4 design is a full HTML document that needs several times that, and
-the person's own limit in Settings could not reach the call. The definition
-is fixed at deploy time, so anything decided per run has to arrive with the
-run, the way a step's `input` does.
-
-**What changed.**
-
-- `@intx/workflow`: `step({ inference: Selector })` — a selector resolved
-  beside `input` against the run's trigger payload and step outputs. The
-  runtime hands the resolved object to the invoker as
-  `StepInvokeRequest.inferenceOptions`; `null`/`undefined` means the agent's
-  defaults, anything but an object fails the step as a selector error. Only
-  `maxTokens`, `temperature` and `thinking` may arrive this way
-  (`StepInferenceOptions`): how much the call may spend and how it samples.
-  A `systemPrompt`, `tools` or `providerOptions` in the resolved object
-  fails the step — a run may not displace the definition that was approved
-  at deploy time, which is the control the frozen definition exists to
-  keep. Not recorded on `StepStarted`: it shapes the call, it is not what
-  the agent was asked. `projectPrimitive` spreads the primitive, so the
-  selector is part of the wire definition and its hash. Tests in
-  `src/runtime/step-inference-options.test.ts`.
-- `@intx/workflow-host`: the step invoker forwards them as
-  `SendOptions.inference` on that send alone — the warm agent outlives the
-  step, so they are never built into it.
-- `@intx/agent`: `SendOptions.inference`, carried on the queued send to
-  `reactor.deliver(message, { inference })`. The agent and reactor accept
-  the full `InferenceOptions`: their callers are code with the agent in
-  hand, not a run; the workflow step is where run-supplied values enter,
-  and that is where the allowlist sits.
-- `@intx/inference`: `Reactor.deliver` takes `DeliveryOptions`; the options
-  are held for the message's run (`message.run.started` to
-  `message.run.ended`) and merged beneath the director's own infer options
-  for every inference in it, so a director that names an option outright
-  still wins. A delivery that correlates to a parked gate opens no run and
-  drops them.
-
-**Upstream-able.** Yes, as-is: additive on every surface, no behaviour
-change for a step that names no selector, and the test file is written to
-land beside the runtime's other tests.
-
-**Kill date.** 2026-10-16. Tracked as
-[INTR-567](https://linear.app/abklabs/issue/INTR-567).
-
 ## `packages/workflow/src/runtime/commit-chain.ts` and `packages/workflow-host/src/adapters/repo-store.ts` — a flush another writer overtook is re-folded, not failed
 
 **Why.** A container run's log gains a `SignalReceived` twice for one delivered
@@ -237,29 +164,6 @@ record when both see the same delivery.
 
 **Kill date.** 2026-10-16. Tracked as
 [INTR-568](https://linear.app/abklabs/issue/INTR-568).
-
-## `packages/hub-api/src/routes/workflow-definitions.ts`, `packages/types/src/workflows.ts`, `packages/hub-client/src/workflows.ts` — `POST /workflows/definitions`
-
-**Why.** CL-8075: the host had no route to register a `workflow_definition`
-row it generated itself (`registerDefinition` in `apps/hub/src/hub-gaps.ts`),
-because the only path that creates one is `POST /workflows/deployments`,
-which evaluates source on a probe sidecar. The lifecycle's own definition
-(`workflow-seed.ts`) is keyed to a name the command ledger's session anchors
-on before any deployment exists, so it still needs a direct register.
-
-**What changed.** `createWorkflowDefinitionRoutes` gains `POST /`, gated by
-`requireGrant("workflow-definition:*", "create")`. Identity is keyed on
-`(tenantId, name, wireHash)`: an existing row whose wire hash matches is
-returned unchanged (`created: false`); otherwise a row is inserted under a
-caller-supplied or generated id. `@intx/types` gains `CreateWorkflowDefinition`
-/ `CreateWorkflowDefinitionResponse`; `@intx/hub-client` gains
-`registerWorkflowDefinition(transport, tenantId, input)`.
-
-**Upstream-able.** Yes; it is a small addition alongside the existing
-list/rollback routes, gated the same way.
-
-**Kill date.** 2026-10-16. Tracked as
-[INTR-569](https://linear.app/abklabs/issue/INTR-569).
 
 ## `packages/hub-api/src/routes/assets.ts` — `POST /:assetId/tree`, `GET /:assetId/blob`
 

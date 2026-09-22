@@ -71,7 +71,6 @@ export {
   type SpawnChildWorkflow,
   type SpawnSuspendableChild,
   type StepInvokeRequest,
-  type StepInferenceOptions,
   type StepInvokeResult,
   type StepInvoker,
   type SuspendableChildHandle,

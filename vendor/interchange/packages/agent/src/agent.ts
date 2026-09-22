@@ -41,7 +41,6 @@
 // the caller's responsibility -- the env is the agent's dependency
 // contract; the caller owns the lifetime of what it puts in env.
 
-import type { InferenceOptions } from "@intx/types";
 import {
   createReactorAssembly,
   type Dependencies,
@@ -115,19 +114,6 @@ export type SendOptions = {
   signal?: AbortSignal;
   /** Override the default "from" header on the synthetic inbound message. */
   from?: string;
-  /**
-   * Inference options for this send alone, merged beneath the director's
-   * for every inference the message's run performs. An output cap or a
-   * temperature the caller knows per message and the agent definition,
-   * fixed before any message exists, cannot.
-   */
-  inference?: InferenceOptions;
-};
-
-/** One queued send: the message and what rides with it to the reactor. */
-type SendJob = {
-  message: InboundMessage;
-  inference?: InferenceOptions;
 };
 
 export type SendResult =
@@ -491,7 +477,7 @@ export async function createAgent<EnvReq extends BaseEnv>(
     // the language allows; the comment block above is what makes
     // the "assigned before any reachable read" invariant explicit.
     // eslint-disable-next-line prefer-const -- forward declaration; const cannot express this ordering
-    let sendQueue: SendQueue<SendJob, SendResult>;
+    let sendQueue: SendQueue<InboundMessage, SendResult>;
 
     // shutdownComplete resolves from the assembly's onShutdown hook
     // (composed after audit flush by the assembly) or, as a fallback, from
@@ -731,14 +717,11 @@ export async function createAgent<EnvReq extends BaseEnv>(
       ...(env.compactors !== undefined ? { compactors: env.compactors } : {}),
     });
 
-    sendQueue = createSendQueue<SendJob, SendResult>({
+    sendQueue = createSendQueue<InboundMessage, SendResult>({
       maxDepth: env.sendQueueMax ?? DEFAULT_SEND_QUEUE_MAX,
-      start: (job) => {
+      start: (message) => {
         activeCycle = { lastAssistantTurn: undefined };
-        reactor.deliver(
-          job.message,
-          job.inference !== undefined ? { inference: job.inference } : undefined,
-        );
+        reactor.deliver(message);
       },
     });
 
@@ -777,13 +760,7 @@ export async function createAgent<EnvReq extends BaseEnv>(
       // and per the design must fail loud.
       if (closed) return Promise.reject(new AgentClosedError());
       const message = buildInboundMessage(content, opts);
-      return sendQueue.enqueue(
-        {
-          message,
-          ...(opts?.inference !== undefined ? { inference: opts.inference } : {}),
-        },
-        opts?.signal,
-      );
+      return sendQueue.enqueue(message, opts?.signal);
     }
 
     function stream(): AsyncIterable<ReactorEmittedEvent> {

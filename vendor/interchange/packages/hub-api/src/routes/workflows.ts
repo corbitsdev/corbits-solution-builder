@@ -94,10 +94,6 @@ const DeployWorkflow = type({
 // so a server-generated id would defeat idempotent retries. Reject an
 // empty id at the boundary rather than letting a blank value reach the
 // supervisor.
-// Pins the same shape `BLOB_FILENAME_RE` in the workflow-run kind handler
-// enforces on push: a lowercase 64-character sha256 hex string.
-const BLOB_SHA_RE = /^[0-9a-f]{64}$/;
-
 const DeliverSignal = type({
   runId: "string > 0",
   signalName: "string > 0",
@@ -851,84 +847,6 @@ export function createWorkflowRoutes({
         runId,
       );
       return c.json({ runId, events: events.map(formatRunEvent) });
-    },
-  );
-
-  app.get(
-    "/:runId/runs/:eventRunId/blobs/:sha",
-    requireGrant(idResource("workflow-run", "runId"), "read"),
-    describeRoute({
-      tags: ["Workflows"],
-      summary: "Read a workflow run blob",
-      description:
-        "Returns the raw bytes a step output spilled to runs/<runId>/blobs/<sha> when its JSON-stringified form exceeded the inline threshold. sha must be a 64-character lowercase sha256 hex string.",
-      responses: {
-        200: {
-          description: "Blob bytes",
-          content: { "application/octet-stream": {} },
-        },
-        400: jsonResponse("Malformed sha", ErrorResponse),
-        404: jsonResponse(
-          "Workflow deployment, run, or blob not found",
-          ErrorResponse,
-        ),
-      },
-    }),
-    async (c) => {
-      const tenant = c.get("tenant");
-      const anchorRunId = c.req.param("runId");
-      const runId = c.req.param("eventRunId");
-      const sha = c.req.param("sha");
-
-      if (!BLOB_SHA_RE.test(sha)) {
-        return c.json(
-          {
-            error: {
-              code: "malformed_sha",
-              message: "sha must be a 64-character lowercase sha256 hex string",
-            },
-          },
-          400,
-        );
-      }
-
-      if (!(await deploymentAnchorRunExists(db, anchorRunId, tenant.id))) {
-        return c.json(
-          {
-            error: {
-              code: "not_found",
-              message: "Workflow deployment not found",
-            },
-          },
-          404,
-        );
-      }
-
-      // Same tenant-scoping rationale as the events route: :eventRunId
-      // only selects within this tenant's deployment repo.
-      const bytes = await runReader.readRunBlob(
-        workflowRunRepoId(anchorRunId, tenant.domain),
-        WORKFLOW_RUN_REF,
-        runId,
-        sha,
-      );
-      if (bytes === null) {
-        return c.json(
-          {
-            error: { code: "not_found", message: "Blob not found" },
-          },
-          404,
-        );
-      }
-      return c.body(
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- Uint8Array.buffer.slice always returns ArrayBuffer
-        bytes.buffer.slice(
-          bytes.byteOffset,
-          bytes.byteOffset + bytes.byteLength,
-        ) as ArrayBuffer,
-        200,
-        { "Content-Type": "application/octet-stream" },
-      );
     },
   );
 
