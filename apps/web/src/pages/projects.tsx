@@ -30,6 +30,7 @@ import { Banner, downloadArtifact, stageName } from "../components.jsx";
 // stage/turn/done come from project-list.ts helpers and spend copy from
 // project-usage.ts. Behavioral-only wiring; main's order and copy preserved.
 import { assembleBundle, bundleFileName } from "../project-export.js";
+import { readImportPayload } from "../project-import.js";
 import { displayDone, displayStage, displayTurn } from "../project-list.js";
 import { formatSpendHeadline, formatUsage, type TokenCounts, type WorkspaceSpend } from "../project-usage.js";
 import { DEFAULT_POLICY } from "./onboarding.jsx";
@@ -75,7 +76,7 @@ export function Projects({
     setBusy(true);
     setError(null);
     try {
-      const bundle: unknown = JSON.parse(await file.text());
+      const bundle: unknown = await readImportPayload(file);
       // INTEGRATE (CL-8756): this lane's importProject validates the bundle
       // itself and reports artifacts/conversations, not nodes/commands — main's
       // diction kept, fields mapped to what the client returns.
@@ -194,7 +195,7 @@ export function Projects({
             <input
               ref={importInput}
               type="file"
-              accept="application/json,.json"
+              accept=".json,.zip,application/json,application/zip"
               hidden
               disabled={busy}
               aria-label="Choose a project export to import"

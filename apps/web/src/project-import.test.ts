@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { importedProjectTitle, importPlan, importProject, IMPORTED_CONVERSATION_KIND, type ImportDeps, type ImportWrite } from "./project-import.ts";
-import type { ProjectBundle } from "./project-export.ts";
+import JSZip from "jszip";
+import { importedProjectTitle, importPlan, importProject, jsonFromZip, readImportPayload, IMPORTED_CONVERSATION_KIND, type ImportDeps, type ImportWrite } from "./project-import.ts";
+import { parseBundle, type ProjectBundle } from "./project-export.ts";
 import type { ArtifactNode } from "./client.ts";
 
 function node(overrides: Partial<ArtifactNode> = {}): ArtifactNode {
@@ -37,6 +38,14 @@ function bundle(overrides: Partial<ProjectBundle> = {}): ProjectBundle {
       },
     ],
     notes: "workflow events are not included yet",
+    ...overrides,
+  };
+}
+
+function deps(overrides: Partial<ImportDeps> = {}): ImportDeps {
+  return {
+    createProject: async ({ title }) => ({ projectId: `new:${title}` }),
+    createArtifact: async (write: ImportWrite) => ({ id: `art:${write.title}` }),
     ...overrides,
   };
 }
@@ -89,14 +98,6 @@ describe("importPlan", () => {
 });
 
 describe("importProject", () => {
-  function deps(overrides: Partial<ImportDeps> = {}): ImportDeps {
-    return {
-      createProject: async ({ title }) => ({ projectId: `new:${title}` }),
-      createArtifact: async (write: ImportWrite) => ({ id: `art:${write.title}` }),
-      ...overrides,
-    };
-  }
-
   test("creates the new project with the imported title and the original policy", async () => {
     const created: { title: string; policy: unknown }[] = [];
     const result = await importProject(
@@ -129,3 +130,56 @@ describe("importProject", () => {
     expect(progress).toEqual([[1, 2], [2, 2]]);
   });
 });
+
+describe("readImportPayload", () => {
+  test("parses a .json file as the bundle object", async () => {
+    const payload = bundle();
+    const file = new File([JSON.stringify(payload)], "renew-the-lease.solutions-builder.json", { type: "application/json" });
+    expect(await readImportPayload(file)).toEqual(payload);
+  });
+
+  test("unpacks a zip with one json (plus other files) and imports that bundle", async () => {
+    const payload = bundle();
+    const zip = new JSZip();
+    zip.file("README.txt", "not the bundle");
+    zip.file("export/renew-the-lease.solutions-builder.json", JSON.stringify(payload));
+    const bytes = await zip.generateAsync({ type: "arraybuffer" });
+    const file = new File([bytes], "renew-the-lease.zip", { type: "application/zip" });
+    const raw = await readImportPayload(file);
+    expect(raw).toEqual(payload);
+    const result = await importProject(
+      parseBundle(raw),
+      deps({
+        createProject: async () => ({ projectId: "proj_from_zip" }),
+      }),
+    );
+    expect(result).toEqual({ projectId: "proj_from_zip", artifacts: 1, conversations: 1 });
+  });
+});
+
+describe("jsonFromZip", () => {
+  test("rejects a zip with no json", async () => {
+    const zip = new JSZip();
+    zip.file("notes.txt", "hello");
+    const bytes = await zip.generateAsync({ type: "uint8array" });
+    await expect(jsonFromZip(bytes, "empty.zip")).rejects.toThrow(/no JSON bundle inside/);
+  });
+
+  test("rejects a zip with more than one json", async () => {
+    const zip = new JSZip();
+    zip.file("a.json", "{}");
+    zip.file("b.json", "{}");
+    const bytes = await zip.generateAsync({ type: "uint8array" });
+    await expect(jsonFromZip(bytes, "two.zip")).rejects.toThrow(/more than one JSON file/);
+  });
+
+  test("ignores macOS junk json so a real bundle still counts as one", async () => {
+    const payload = bundle();
+    const zip = new JSZip();
+    zip.file("renew.json", JSON.stringify(payload));
+    zip.file("__MACOSX/._renew.json", "junk");
+    const bytes = await zip.generateAsync({ type: "uint8array" });
+    expect(await jsonFromZip(bytes, "mac.zip")).toEqual(payload);
+  });
+});
+

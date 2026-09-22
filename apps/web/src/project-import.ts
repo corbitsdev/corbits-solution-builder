@@ -9,6 +9,7 @@
  * a stage specialist deploys), so each bundled conversation becomes one
  * read-only text artifact instead, `sb.kind: "imported_conversation"`.
  */
+import JSZip from "jszip";
 import type { ProjectBundle } from "./project-export.ts";
 
 export const IMPORTED_CONVERSATION_KIND = "imported_conversation";
@@ -105,3 +106,45 @@ export async function importProject(bundle: ProjectBundle, deps: ImportDeps): Pr
   }
   return { projectId, artifacts: plan.artifacts.length, conversations: plan.conversations.length };
 }
+
+function looksLikeZip(file: File): boolean {
+  const name = file.name.toLowerCase();
+  return name.endsWith(".zip") || file.type === "application/zip" || file.type === "application/x-zip-compressed";
+}
+
+function isJsonEntry(path: string): boolean {
+  if (path.includes("__MACOSX/")) return false;
+  const base = path.split("/").pop() ?? path;
+  if (base.startsWith(".")) return false;
+  return base.toLowerCase().endsWith(".json");
+}
+
+/**
+ * The JSON object inside a zip export: exactly one `.json` file, which is
+ * the same `assembleBundle` payload a `.json` download carries. Other files
+ * (a README, say) are ignored; more than one JSON is an error, not a guess.
+ */
+export async function jsonFromZip(bytes: Uint8Array, sourceName: string): Promise<unknown> {
+  const zip = await JSZip.loadAsync(bytes);
+  const jsonFiles = Object.values(zip.files).filter((entry) => !entry.dir && isJsonEntry(entry.name));
+  if (jsonFiles.length === 0) {
+    throw new Error(`${sourceName} has no JSON bundle inside.`);
+  }
+  if (jsonFiles.length > 1) {
+    throw new Error(`${sourceName} has more than one JSON file; import needs exactly one.`);
+  }
+  return JSON.parse(await jsonFiles[0]!.async("string"));
+}
+
+/**
+ * Reads a Home import file as the unknown payload `api.importProject` /
+ * `parseBundle` already accept. A `.zip` is unpacked in the browser; a
+ * `.json` is parsed as text. The bundle format itself is unchanged.
+ */
+export async function readImportPayload(file: File): Promise<unknown> {
+  if (looksLikeZip(file)) {
+    return jsonFromZip(new Uint8Array(await file.arrayBuffer()), file.name);
+  }
+  return JSON.parse(await file.text());
+}
+
