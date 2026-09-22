@@ -64,6 +64,19 @@ describe("Projects markup", () => {
   });
 });
 
+describe("home composer send", () => {
+  test("send still createProject behind the silent ten-character gate", async () => {
+    const page = await Bun.file(new URL("./projects.tsx", import.meta.url)).text();
+    expect(page).toContain("onSend={() => void start()}");
+    expect(page).toContain("api.createProject");
+    expect(page).toContain("if (!canStartProject(problem) || busy) return");
+    expect(page).toContain("onAttach={addMaterial}");
+    expect(page).toContain("void importFile(file)");
+    expect(page).toContain("At least ten characters to start a project.");
+    expect(page).toContain('className="visually-hidden"');
+  });
+});
+
 describe("home layout sheet", () => {
   test("status orange is brand-primary, kebab is out of flow, composer uses icon slots", async () => {
     const page = await Bun.file(new URL("./projects.tsx", import.meta.url)).text();

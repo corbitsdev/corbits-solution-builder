@@ -80,6 +80,15 @@ describe("needsModelChoice", () => {
 });
 
 describe("Onboarding shell", () => {
+  test("welcome Skip and Get started render enabled, not as a form submit", () => {
+    const html = renderToStaticMarkup(createElement(Onboarding, props()));
+    expect(html).toContain("Skip setup");
+    expect(html).toContain("Get started");
+    expect(html).toContain('type="button"');
+    expect(html).not.toMatch(/disabled[^>]*>Get started/);
+    expect(html).not.toMatch(/disabled[^>]*>Skip setup/);
+  });
+
   test("pins the brand, whisper track, welcome points and credit", () => {
     const html = renderToStaticMarkup(createElement(Onboarding, props()));
     expect(html).toContain("ob-brand");
@@ -103,15 +112,47 @@ describe("Onboarding shell", () => {
 });
 
 describe("onboarding layout 1:1", () => {
-  test("provider footer is skip plus a disabled Continue until a provider is ready", async () => {
+  test("provider footer Skip leaves; Continue is type=button and disabled until a provider is ready", async () => {
     const page = await Bun.file(new URL("./onboarding.tsx", import.meta.url)).text();
     const provider = page.slice(page.indexOf("function ProviderStep"), page.indexOf("function ProviderMark"));
-    expect(provider).toContain('className="ob-skip"');
-    expect(provider).toContain("Skip for now");
-    expect(provider).toContain('className="btn primary"');
-    expect(provider).toContain("Continue");
-    expect(provider).toContain('provider.status === "ready"');
-    expect(provider).toContain("disabled=");
+    const foot = provider.slice(provider.indexOf('className="ob-foot"'));
+    expect(foot).toContain('className="ob-skip"');
+    expect(foot).toContain("Skip for now");
+    expect(foot).toContain("onClick={onSkip}");
+    expect(foot).toContain('className="btn primary"');
+    expect(foot).toContain("Continue");
+    expect(foot).toContain("onClick={onContinue}");
+    expect(foot).toContain('type="button"');
+    expect(foot).toContain('disabled={busy !== null || !providers.some((provider) => provider.status === "ready")}');
+    const skipBtn = foot.slice(foot.indexOf('className="ob-skip"'), foot.indexOf("Skip for now"));
+    expect(skipBtn).not.toContain("disabled");
+    expect(page).toContain('onSkip={() => setStep("project")}');
+  });
+
+  test("welcome Skip and Get started are type=button with click handlers", async () => {
+    const page = await Bun.file(new URL("./onboarding.tsx", import.meta.url)).text();
+    const welcome = page.slice(page.indexOf("function WelcomeStep"), page.indexOf("function LookStep"));
+    expect(welcome).toContain("Skip setup");
+    expect(welcome).toContain("Get started");
+    expect(welcome).toContain("onClick={onSkip}");
+    expect(welcome).toContain("onClick={onNext}");
+    expect(welcome).toContain('type="button"');
+    expect(welcome).not.toContain("disabled");
+  });
+
+  test("look theme segs, Connect/Detect, and model skip keep their click handlers", async () => {
+    const page = await Bun.file(new URL("./onboarding.tsx", import.meta.url)).text();
+    const look = page.slice(page.indexOf("function LookStep"), page.indexOf("function ProviderStep"));
+    expect(look).toContain("onClick={() => setMode(option.id)}");
+    expect(look).toContain("onClick={onNext}");
+    const provider = page.slice(page.indexOf("function ProviderStep"), page.indexOf("function ProviderMark"));
+    expect(provider).toContain("void connect(row)");
+    expect(provider).toContain("api.connectLocalProvider");
+    expect(provider).toContain("openAsk(row)");
+    const model = page.slice(page.indexOf("function ModelStep"), page.indexOf("function ProjectStep"));
+    expect(model).toContain("onClick={() => void choose(null)}");
+    expect(model).toContain("onClick={() => void choose(picked)}");
+    expect(model).toContain('type="button"');
   });
 
   test("group labels are first-of-step, not first-of-wrapper", async () => {
