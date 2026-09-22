@@ -202,53 +202,71 @@ export AGENT_BROWSER_SESSION="$SESSION"
 ab open "$HOST_URL" >/dev/null 2>&1
 sleep 3
 
+# An embedded hub mints its owner automatically — there is no sign-up form.
+# The first screen is onboarding's Welcome step; "Skip setup" jumps straight
+# to the provider step, which is the only onboarding surface the walk needs.
 STAGE="signup"
 T0=$(date +%s)
-snap
-EMAIL="walker+$(date +%s)@walk-browser.invalid"
-NAME_FIELD=$(ref 'textbox "Name"')
-EMAIL_FIELD=$(ref 'textbox "Email"')
-PASS_FIELD=$(ref 'textbox "Password"')
-if [ -z "$EMAIL_FIELD" ] || [ -z "$PASS_FIELD" ]; then
-  shot "no-signup-form"
-  defect_log signup "a sign-up form (Name/Email/Password)" "form fields not found" "shots/no-signup-form.png" "blocker"
+if ! wait_for 'button "(Get started|Skip setup)"' 60; then
+  shot "no-onboarding"
+  defect_log signup "the onboarding welcome step (embedded hubs mint the owner)" "neither Get started nor Skip setup found" "shots/no-onboarding.png" "blocker"
   exit 1
 fi
-[ -n "$NAME_FIELD" ] && ab fill "@$NAME_FIELD" "Overnight Walker" >/dev/null
-ab fill "@$EMAIL_FIELD" "$EMAIL" >/dev/null
-ab fill "@$PASS_FIELD" "Walk-Browser-Pass-2026!" >/dev/null
 snap
-CREATE=$(enabled_ref 'button "Create account"')
-[ -n "$CREATE" ] && ab click "@$CREATE" >/dev/null
-sleep 3
-walk_log signup "sign up" "submitted account form for $EMAIL" $(( ($(date +%s)-T0)*1000 ))
+SKIP_SETUP=$(ref 'button "Skip setup"')
+[ -n "$SKIP_SETUP" ] && ab click "@$SKIP_SETUP" >/dev/null
+walk_log signup "owner mint" "embedded owner minted; skipped welcome to provider step" $(( ($(date +%s)-T0)*1000 ))
 
 STAGE="provider"
 T0=$(date +%s)
-if ! wait_for 'Connect a model' 30; then
+if ! wait_for 'Connect a provider' 30; then
   shot "no-onboarding-provider-step"
   defect_log provider "the provider-connect onboarding step" "did not appear after sign-up" "shots/no-onboarding-provider-step.png" "blocker"
   exit 1
 fi
 snap
-PROVIDER_SELECT=$(ref 'combobox "Provider to connect"')
-[ -n "$PROVIDER_SELECT" ] && ab select "@$PROVIDER_SELECT" "OpenAI-compatible endpoint" >/dev/null 2>&1
+# The provider step is a list of rows, one per candidate; the
+# OpenAI-compatible endpoint is the last "Connect API key" row, and clicking
+# it expands an Endpoint field, a key field and a Save button in place.
+COMPAT=$(ref 'button "Connect API key"' tail)
+if [ -z "$COMPAT" ]; then
+  shot "no-provider-row"
+  defect_log provider "an OpenAI-compatible endpoint row" "no Connect API key row found" "shots/no-provider-row.png" "blocker"
+  exit 1
+fi
+ab click "@$COMPAT" >/dev/null
 sleep 1; snap
-BASE_FIELD=$(ref 'textbox "https://example.com/v1"')
+BASE_FIELD=$(ref 'textbox "Endpoint"')
 if [ -z "$BASE_FIELD" ]; then
   shot "no-provider-form"
   defect_log provider "a base-URL field for a compatible endpoint" "field not found" "shots/no-provider-form.png" "blocker"
   exit 1
 fi
 ab fill "@$BASE_FIELD" "$WALK_MODEL_BASE_URL" >/dev/null
-ab fill 'input[type="password"]' "$WALK_MODEL_API_KEY" >/dev/null 2>&1
+KEY_FIELD=$(ref 'textbox "OpenAI-compatible endpoint API key"')
+[ -z "$KEY_FIELD" ] && KEY_FIELD=$(ref 'textbox' tail)
+ab fill "@$KEY_FIELD" "$WALK_MODEL_API_KEY" >/dev/null 2>&1
 snap
-CONNECT=$(enabled_ref 'button "Connect[^"]*"')
-[ -n "$CONNECT" ] && ab click "@$CONNECT" >/dev/null
-if ! wait_for 'What problem are you trying to solve' 60; then
+SAVE=$(enabled_ref 'button "Save"')
+[ -n "$SAVE" ] && ab click "@$SAVE" >/dev/null
+# A fresh connection that offers a real model choice lands on the model step
+# before the project step; take the recommended row and move on.
+if ! wait_for 'Which model should it draft with|What problem are you trying to solve' 90; then
   shot "provider-connect-failed"
-  defect_log provider "advance to the project step after connecting" "still on the provider step" "shots/provider-connect-failed.png" "major"
+  defect_log provider "advance past the provider step after connecting" "still on the provider step" "shots/provider-connect-failed.png" "major"
   exit 1
+fi
+snap
+if grep -q 'Which model should it draft with' "$SNAP"; then
+  PICK=$(ref 'button "[^"]*Recommended')
+  [ -z "$PICK" ] && PICK=$(ref 'button "[^"]*Default"')
+  [ -n "$PICK" ] && ab click "@$PICK" >/dev/null
+  walk_log provider "select model" "picked the recommended model row" 0
+  if ! wait_for 'What problem are you trying to solve' 60; then
+    shot "model-choice-stuck"
+    defect_log provider "advance to the project step after choosing a model" "still on the model step" "shots/model-choice-stuck.png" "major"
+    exit 1
+  fi
 fi
 walk_log provider "connect model" "connected $WALK_MODEL_BASE_URL" $(( ($(date +%s)-T0)*1000 ))
 
