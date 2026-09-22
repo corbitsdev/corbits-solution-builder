@@ -11,53 +11,55 @@
  * Comments queue rather than sending one at a time — a reader marks up a whole
  * draft and then hands it back, which is both how people actually read and the
  * only way the specialist sees the notes as one coherent set.
+ *
+ * The file itself is orchestration only: each stateful concern lives in a
+ * `use-*.ts` hook beside it (workflow view, specialist, thread, withdrawn
+ * turns, opening dispatch, advisories, document versions, gate decisions),
+ * and each render block a focused component (`workspace-chrome.tsx`). What
+ * stays here is the wiring between them and the stage-specific composition.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
   ApiFailure,
-  createHubTransport,
-  STAGE_DRAFT_KIND,
   type ActiveModel,
   type ArtifactNode,
   type ProjectDetail,
   type StageTurn,
 } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
-import { markerAlreadySent } from "../../decision-notify.ts";
-import { shouldFallbackRefetch, subscribeMailbox } from "../../mailbox-events.ts";
+import { subscribeMailbox } from "../../mailbox-events.ts";
 import { Markdown } from "../../markdown.jsx";
 import { formatUsage, projectUsage } from "../../project-usage.ts";
 import { AudiencePackages } from "../audiences.jsx";
 import { DesignFeedbackView } from "../design.jsx";
-import { Tabs, Textarea } from "@corbits/react-ui";
+import { Tabs } from "@corbits/react-ui";
 import { Banner, Button, Screen, StateLabel, stageName, versionDigest } from "../../components.jsx";
-import { Dictated } from "../../dictation.jsx";
-import { SendBackPicker, defaultTarget } from "../send-back.jsx";
 import { STAGE_GOAL } from "./gate.jsx";
 import { DeliveryPanel } from "./delivery.jsx";
 import { StageConversation } from "./thread.jsx";
-import { Elapsed } from "./elapsed.jsx";
 import { StageDocument } from "./document.jsx";
 import { STAGE_TIPS } from "./preparing.jsx";
-import { BuildPanel, buildEvidenceState, currentPublishedBundle } from "./build.jsx";
-import { TargetPicker, targetOpeningLine } from "./freeze.jsx";
-import { deliveryOpeningLine, parseDeliveryManifest } from "./delivery-opening.ts";
+import { BuildPanel } from "./build.jsx";
+import { TargetPicker } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
-import { evaluatorVerdict as guidanceEvaluatorVerdict, interviewProgress, workspaceGuidance } from "./guidance.js";
-import { deterministicGuidance, guidancePrompt, parseGuidanceReply, type Guidance } from "./product-guide.js";
-import { describeFailure } from "./failure-message.ts";
+import { interviewProgress, workspaceGuidance } from "./guidance.js";
+import { useWorkflowView } from "./use-workflow-view.ts";
+import { useStageAgent } from "./use-stage-agent.ts";
+import { useStageThread } from "./use-stage-thread.ts";
+import { useWithdrawnTurns } from "./use-withdrawn-turns.ts";
+import { useOpeningDispatch } from "./use-opening-dispatch.ts";
+import { useStageEvaluator, useProductGuide } from "./use-advisory.ts";
+import { useStageDocument } from "./use-stage-document.ts";
+import { useStageDecisions } from "./use-stage-decisions.ts";
 import {
-  applyWithdrawn,
-  parseWithdrawnTurns,
-  pendingTurn,
-  WITHDRAWN_TURNS_KIND,
-  type WithdrawnMark,
-} from "../../withdrawn-turns.ts";
-import type { ProjectWorkflowView } from "../../project-workflow.ts";
-import { approveStage, digestOf, ensureReviewOpen, reviewableArtifact, sendBack as sendBackDecision } from "../../stage-approval.ts";
-import { frozenSummaryLine, stageEvidence, stageRefusalMessage } from "../../stage-evidence.ts";
-import type { ReviewState, Stage7Evidence } from "@solutions-builder/app/project-workflow/contracts";
+  EvaluatorVerdict,
+  GuidanceCard,
+  OpeningScreen,
+  ProductGuideDock,
+  SendBackDock,
+  WaitingSection,
+} from "./workspace-chrome.tsx";
 import type { FoldedFeedback } from "@solutions-builder/app/project-state";
 
 export { StageDocument, DocumentBody } from "./document.jsx";
@@ -71,77 +73,6 @@ const DOCUMENT_STAGES = new Set([1, 2, 3, 6, 7]);
 
 /** Stands in for a version that would not load, so it never reads as empty. */
 const UNREADABLE = "_This version could not be read. It is still on disk — try again._";
-
-/**
- * Stage 8's approved build archive, read straight off the workflow's own
- * recorded review (CL-8687/#496 follow-up) -- the review names the exact
- * artifact/version that was approved, never the newest node of a kind.
- */
-function approvedStage8Archive(nodes: readonly ArtifactNode[], review: ReviewState | undefined): ArtifactNode | null {
-  if (!review || review.status !== "approved") return null;
-  return nodes.find((node) => node.artifactId === review.artifactId && node.version === review.version) ?? null;
-}
-
-/**
- * The delivery manifest `publish_workspace` uploaded alongside a build
- * archive, resolved from the archive's OWN metadata -- they are written by
- * the same call, sharing the same `variant` (`attempt-<n>`), rather than by
- * scanning for the newest `delivery_manifest` node at stage 8 (which could
- * belong to a different, unapproved attempt).
- */
-function manifestCompanionOf(nodes: readonly ArtifactNode[], archive: ArtifactNode): ArtifactNode | null {
-  const candidates = nodes.filter(
-    (node) => node.kind === "delivery_manifest" && node.stage === 8 && node.variant === archive.variant && node.supersededByNodeId === null,
-  );
-  if (candidates.length === 0) return null;
-  return candidates.reduce((latest, node) => (node.createdAt > latest.createdAt ? node : latest));
-}
-
-/**
- * Stage 9's opening mail (defect 3, CL-8723 follow-up): the delivery
- * manifest `publish_workspace` uploaded alongside the approved build
- * archive, read back and rendered into the exact text the
- * delivery-verifier's prompt promises, plus the build-engineer's own latest
- * status reply as "the checks stage 8 declared". Self-contained (reads
- * stage 8's own thread and the manifest artifact itself) so it produces the
- * identical opening whether called right after `approve()` or rebuilt on a
- * page reload. `archiveRef` is stage 8's approved review -- the workflow's
- * own record, never re-derived from the artifact graph.
- */
-async function composeStage9Opening(deps: {
-  readonly tenantId: string;
-  readonly projectId: string;
-  readonly nodes: readonly ArtifactNode[];
-  readonly archiveRef: { readonly artifactId: string; readonly version: number } | null;
-  readonly fallbackBuildStatusBody?: string;
-}): Promise<string> {
-  const archiveNode = deps.archiveRef
-    ? (deps.nodes.find((node) => node.artifactId === deps.archiveRef!.artifactId && node.version === deps.archiveRef!.version) ?? null)
-    : null;
-  const manifestNode = archiveNode ? manifestCompanionOf(deps.nodes, archiveNode) : null;
-  let manifestRef: Parameters<typeof deliveryOpeningLine>[0] = null;
-  if (manifestNode) {
-    try {
-      const result = await api.artifactContent(deps.tenantId, manifestNode.id);
-      const parsed = parseDeliveryManifest(result.content);
-      if (parsed) manifestRef = { artifactId: manifestNode.artifactId, version: manifestNode.version, content: parsed };
-    } catch {
-      // No manifest could be read — deliveryOpeningLine's null branch says so.
-    }
-  }
-  let buildStatusBody = deps.fallbackBuildStatusBody ?? "";
-  try {
-    const stage8 = await api.stageAgentStatus(deps.projectId, 8);
-    if (stage8) {
-      const messages = await api.readStageThread(deps.tenantId, [stage8.address]);
-      const lastAgent = [...messages].reverse().find((message) => message.author === "agent");
-      if (lastAgent) buildStatusBody = lastAgent.body;
-    }
-  } catch {
-    // Keep the fallback (or empty) body — deliveryOpeningLine still sends something.
-  }
-  return deliveryOpeningLine(manifestRef, buildStatusBody || "No build status text was found.");
-}
 
 export function StageWorkspace({
   detail,
@@ -171,31 +102,20 @@ export function StageWorkspace({
     import("../../client.js").Remediation | undefined
   >(undefined);
 
+  const workflow = useWorkflowView(detail.project.id, onChanged);
+  const workflowView = workflow.view;
+  const workflowResolved = workflow.resolved;
+  const openingFailed = workflow.openingFailed;
+  const stage = workflowView?.stage ?? 1;
+
   // Which model this project's stage specialist is actually drafting with:
   // its own deployment's pinned offering when one is already deployed for
   // this stage (an existing deployment keeps its pin across a later provider
   // change, `specialist-deploy.ts`'s `ensureSpecialistDeploymentOnce`), the
   // tenant's current catalog default (the lowest-priority offering, CL-8781)
   // otherwise -- see `resolveActiveModel`'s doc. `undefined` while
-  // unresolved, `null` once resolved to nothing connected. Declared here;
-  // the effect reading it sits below `stage`.
+  // unresolved, `null` once resolved to nothing connected.
   const [activeModel, setActiveModel] = useState<ActiveModel | null | undefined>(undefined);
-
-  // The project workflow (CL-8721) is the ONLY authority for a stage's
-  // current position (CL-8687): `workflowView.stage`. There is no artifact-
-  // derived fallback -- while the view is still loading, `stage` stays
-  // unresolved (see `workflowResolved`) rather than guessing, so the person
-  // never sees a stage briefly flash to something the workflow never said.
-  // Once the workflow has failed to start or load, `openingFailed` drives
-  // the "could not be read" state below instead of a guessed stage.
-  const [workflowView, setWorkflowView] = useState<ProjectWorkflowView | null>(null);
-  const [workflowStartError, setWorkflowStartError] = useState<string | null>(null);
-  const [workflowViewFailed, setWorkflowViewFailed] = useState(false);
-  const [workflowAttempt, setWorkflowAttempt] = useState(0);
-  const workflowResolved = workflowView !== null;
-  const openingFailed = workflowStartError !== null || workflowViewFailed;
-  const stage = workflowView?.stage ?? 1;
-
   useEffect(() => {
     let cancelled = false;
     api
@@ -211,490 +131,47 @@ export function StageWorkspace({
     };
   }, [detail.project.id, stage]);
 
-  const retryOpening = () => {
-    setWorkflowStartError(null);
-    setWorkflowViewFailed(false);
-    setWorkflowAttempt((attempt) => attempt + 1);
-  };
+  const agent = useStageAgent(detail.project.id, stage, workflowResolved);
+  const agentAddress = agent.address;
+  // Stable across renders — an inline arrow would re-subscribe the mailbox
+  // stream every render since it is a dep of the thread effect.
+  const nudgeWorkflow = useCallback(() => void workflow.reload(), [workflow.reload]);
+  const thread = useStageThread(tenantId, agentAddress, nudgeWorkflow, setError);
+  const loadThread = thread.reload;
 
-  const loadWorkflowView = useCallback(async () => {
-    const view = await api.projectWorkflowView(detail.project.id).catch(() => null);
-    if (view && view.stage >= 1) setWorkflowView(view);
-    return view;
-  }, [detail.project.id]);
-
-  // True only while a workflow-view re-read was triggered by something the
-  // person just did or that just landed (`refreshWorkflow` below) — never by
-  // the routine backstop poll, which would otherwise flicker this on and off
-  // every few seconds regardless of activity. Lets the Approve button below
-  // tell "refreshing" apart from "not allowed": a stale, disabled button with
-  // no explanation is exactly what stranded the person at stage 5.
-  const [refreshingAfterAction, setRefreshingAfterAction] = useState(false);
-
-  // The ONE place anything that can change the workflow view's verdict goes
-  // through — every stage panel and every action in this file calls this
-  // instead of touching `loadWorkflowView`/`onChanged` separately, so there is
-  // exactly one refresh path to reason about. Re-reads the view and then
-  // tells the parent (`reloadDetail`) the project's artifacts may have
-  // changed too.
-  const refreshWorkflow = useCallback(async () => {
-    setRefreshingAfterAction(true);
-    try {
-      await loadWorkflowView();
-    } finally {
-      setRefreshingAfterAction(false);
-    }
-    onChanged();
-  }, [loadWorkflowView, onChanged]);
-
-  // Deployed/triggered once per project, then read on mount and re-read.
-  // `ensureProjectWorkflow` and the first `projectWorkflowView` read are each
-  // reported on their own terms, so a failure of either says specifically
-  // what did not start rather than a generic error.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        await api.ensureProjectWorkflow(detail.project.id);
-      } catch (cause) {
-        if (!cancelled) setWorkflowStartError(describeFailure(cause));
-        return;
-      }
-      let view: ProjectWorkflowView | null;
-      try {
-        view = await api.projectWorkflowView(detail.project.id);
-        // A just-triggered run reports stage 0 until its first state lands.
-        for (let tries = 0; view && view.stage < 1 && tries < 120 && !cancelled; tries += 1) {
-          await new Promise((resolve) => setTimeout(resolve, 500));
-          view = await api.projectWorkflowView(detail.project.id);
-        }
-        if (view && view.stage < 1) throw new Error("the project workflow did not start");
-      } catch {
-        if (!cancelled) setWorkflowViewFailed(true);
-        return;
-      }
-      if (cancelled) return;
-      setWorkflowView(view);
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detail.project.id, workflowAttempt]);
-
-  // Backstop poll, since the workflow's own decisions do not land on the
-  // tenant mailbox stream and so cannot rely on `subscribeMailbox`'s nudge
-  // alone. 5s — the same cadence `app.tsx`'s own `refresh()` polls the
-  // decision queue and project list at — so a missed nudge costs at most one
-  // poll tick, not a whole stage sitting stale (the live defect this fixes:
-  // a 20s window read as "a whole stage behind").
-  useEffect(() => {
-    const timer = setInterval(() => void loadWorkflowView(), 5_000);
-    return () => clearInterval(timer);
-  }, [loadWorkflowView]);
-
-  // The specialist for this project's stage: deployed lazily the first time
-  // the stage is opened (CL-8612 contract v6 — one mail agent per stage,
-  // never a lifecycle workflow run). `agentAddress` is the single source of
-  // truth for "the agent is known" — the composer and every stage panel key
-  // off it directly rather than a separate readiness flag, so there is no
-  // window where the address is known but something built on top of it is
-  // still disabled.
-  // Carries the stage the address was resolved for, so a render where
-  // `stage` has already advanced but the previous stage's deployment is
-  // still in flight (or already resolved) never leaks that stale address
-  // into the opening-send effect below (CL-8649).
-  const [agent, setAgent] = useState<{ stage: number; address: string } | null>(null);
-  // The hub's own message for a failed deployment, shown verbatim rather
-  // than left to the waiting UI to imply it's still in progress (CL-8612's
-  // 502 case: the workspace used to sit on "Starting…" forever).
-  const [agentError, setAgentError] = useState<string | null>(null);
-  const [agentAttempt, setAgentAttempt] = useState(0);
-  useEffect(() => {
-    // The real stage has to be known before a specialist is deployed for it
-    // — never for the artifact-derived fallback while the workflow view is
-    // still loading (CL-8721).
-    if (!workflowResolved) return;
-    let cancelled = false;
-    const requestedStage = stage;
-    setAgentError(null);
-    api
-      .ensureStageAgent(detail.project.id, requestedStage)
-      .then((deployment) => {
-        if (!cancelled) setAgent({ stage: requestedStage, address: deployment.address });
-      })
-      .catch((cause: unknown) => {
-        if (cancelled) return;
-        setAgentError(describeFailure(cause));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [detail.project.id, stage, workflowResolved, agentAttempt]);
-  const agentAddress = agent?.stage === stage ? agent.address : null;
-
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  // Tracks which address `messages` actually reflects, so the opening-send
-  // effect below never judges a fresh address's thread empty off stale data
-  // still held over from the previous address (CL-8656).
-  const [threadLoadedFor, setThreadLoadedFor] = useState<string | null>(null);
-  const lastLoadAt = useRef(0);
-  const loadThread = useCallback(async () => {
-    if (!agentAddress) return;
-    const loadedAddress = agentAddress;
-    try {
-      const result = await api.readStageThread(tenantId, [agentAddress]);
-      setMessages(result);
-      setThreadLoadedFor(loadedAddress);
-      lastLoadAt.current = Date.now();
-    } catch (cause) {
-      setError(
-        `The conversation for this stage could not be read: ${
-          cause instanceof ApiFailure ? cause.detail.message : String(cause)
-        }`,
-      );
-    }
-  }, [agentAddress, tenantId]);
-
-  // A new address (fresh run replacing a released one, CL-8654) starts with
-  // no known thread state: clear the previous address's messages rather than
-  // let them linger until the next poll resolves.
-  useEffect(() => {
-    setMessages([]);
-    setThreadLoadedFor(null);
-  }, [agentAddress]);
-
-  // Stop's durable marker: one per-project artifact, read with the rest of
-  // this project's artifacts so a withdrawn turn stays withdrawn across a
-  // refresh or a second browser (CL-8695).
-  const withdrawnNode = useMemo(
-    () => detail.nodes.find((node) => node.kind === WITHDRAWN_TURNS_KIND) ?? null,
-    [detail.nodes],
-  );
-  const [withdrawnMarks, setWithdrawnMarks] = useState<WithdrawnMark[]>([]);
-  useEffect(() => {
-    if (!withdrawnNode) {
-      setWithdrawnMarks([]);
-      return;
-    }
-    let cancelled = false;
-    void api
-      .artifactContent(tenantId, withdrawnNode.id)
-      .then((result) => {
-        if (!cancelled) setWithdrawnMarks(parseWithdrawnTurns(result.content));
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [withdrawnNode?.id, tenantId]);
-  const withdrawnIds = useMemo(
-    () => new Set(withdrawnMarks.filter((mark) => mark.stage === stage).map((mark) => mark.messageId)),
-    [withdrawnMarks, stage],
-  );
-  // The fold runs before guidance ever sees the thread, so a reply Stop hid
-  // can never be read back as the current draft or the open question.
-  const foldedMessages = useMemo(() => applyWithdrawn(messages, withdrawnIds), [messages, withdrawnIds]);
-  const pending = useMemo(() => pendingTurn(foldedMessages, withdrawnIds), [foldedMessages, withdrawnIds]);
-
-  // Refetched on a nudge from the tenant mailbox stream (CL-8694) — the
-  // specialist's reply lands as a `create` event the moment it's sent. A 20s
-  // fallback poll covers the stream being down, so a dropped connection
-  // never strands the person waiting on a reply that already arrived.
-  useEffect(() => {
-    if (!agentAddress) return;
-    void loadThread();
-    // The workflow's own decisions (an approval landing, a send-back) land as
-    // run events on this same tenant mailbox stream — the nudge that already
-    // wakes the thread read is just as much a reason to re-read the workflow
-    // view, so both go on every nudge rather than leaving the view to the
-    // slower backstop poll alone.
-    const subscription = subscribeMailbox(tenantId, () => {
-      void loadThread();
-      void loadWorkflowView();
-    });
-    const timer = setInterval(() => {
-      const open = subscription.isOpen();
-      const msSinceLastLoad = Date.now() - lastLoadAt.current;
-      if (shouldFallbackRefetch({ open, msSinceLastLoad })) {
-        void loadThread();
-        void loadWorkflowView();
-      }
-    }, 20_000);
-    return () => {
-      clearInterval(timer);
-      subscription.unsubscribe();
-    };
-  }, [agentAddress, tenantId, loadThread, loadWorkflowView]);
-
-  // Same cadence, re-checking the agent itself rather than its thread: two
-  // sessions racing to open this stage can each deploy a specialist, the hub
-  // releases the loser, and a session that memoised the loser's address
-  // would otherwise mail into the void forever (CL-8654). When the live pick
-  // has moved to a different deployment, follow it.
-  useEffect(() => {
-    if (!agentAddress) return;
-    const recheck = () => {
-      void api
-        .stageAgentStatus(detail.project.id, stage)
-        .then((current) => {
-          if (current && current.address !== agentAddress) setAgent({ stage, address: current.address });
-        })
-        .catch(() => {});
-    };
-    const timer = setInterval(recheck, 3_000);
-    return () => clearInterval(timer);
-  }, [agentAddress, detail.project.id, stage]);
-
+  // What Stop put back into the box: the composer below for a plain-chat
+  // stage, and this seed for the document composer's own local state.
   const [composer, setComposer] = useState("");
   const [sending, setSending] = useState(false);
-  const [approving, setApproving] = useState(false);
-  // What Stop put back into the box: the composer above for a plain-chat
-  // stage, and this seed for the document composer's own local state.
   const [stopSeed, setStopSeed] = useState<{ text: string; at: number } | null>(null);
-  const stopTurn = async () => {
-    if (!pending) return;
-    const withdrawn = pending;
-    setComposer(withdrawn.body);
-    setStopSeed({ text: withdrawn.body, at: Date.now() });
-    try {
-      await api.withdrawTurn(detail.project.id, tenantId, { messageId: withdrawn.id, stage });
-      setWithdrawnMarks((marks) => [...marks, { messageId: withdrawn.id, stage, at: new Date().toISOString() }]);
-    } catch (cause) {
-      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-    }
-  };
-  // Stage 7 only: the build target chosen at freeze time. Reset whenever the
-  // stage changes so an earlier project's choice never leaks into a new one.
-  const [chosenTarget, setChosenTarget] = useState<string | null>(null);
-  useEffect(() => {
-    setChosenTarget(null);
-  }, [stage]);
 
-  // Stage 1's own opening problem statement, read straight off its
-  // lifecycle deployment (`api.projectOpening`, scoped to the workspace
-  // tenant `createProject` actually deployed it into) rather than
-  // `detail.opening` — `loadProjectView`'s own fold reads that scoped to
-  // the project's own child tenant, where that deployment never lived, and
-  // so always comes back null, silently starving the auto-send below.
-  const [opening, setOpening] = useState<{ body: string } | null | undefined>(undefined);
-  useEffect(() => {
-    if (stage !== 1) return;
-    let cancelled = false;
-    api
-      .projectOpening(detail.project.id)
-      .then((result) => {
-        if (!cancelled) setOpening(result);
-      })
-      .catch(() => {
-        if (!cancelled) setOpening(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [detail.project.id, stage]);
-
-  // The stage-1 opening problem statement is the first message of that
-  // stage's thread, sent once. A later stage's opening is instead the just-
-  // approved draft, sent from `approve()` below the moment the stage
-  // advances — this only fires the very first message of a fresh thread.
-  // Set only once the send is confirmed (either this tab's own send landed,
-  // or another tab's already had, per the marker check below) — never
-  // beforehand, so a send that throws is retried rather than treated as done.
-  const openedRef = useRef<string | null>(null);
-  // Guards a single key against a second concurrent attempt from this same
-  // component (an unrelated dependency of the effect below changing while an
-  // attempt is still in flight) — a narrower, synchronous version of what the
-  // marker already guards across tabs and reloads.
-  const openingInFlightRef = useRef<string | null>(null);
-  // A key already auto-retried once, so a second failure surfaces instead of
-  // retrying forever.
-  const openingAutoRetriedRef = useRef<string | null>(null);
-  const [pendingOpening, setPendingOpening] = useState<{ stage: number; body: string } | null>(null);
-  const [openingError, setOpeningError] = useState<string | null>(null);
-  const [openingRetryAttempt, setOpeningRetryAttempt] = useState(0);
-
-  // Belt-and-braces: `key={detail.project.id}` on this component in App.tsx
-  // already remounts it per project, resetting all of the above. This makes
-  // sure the previous project's workflow view, pending send, and
-  // opened-thread marker never leak into a newly opened one even if that
-  // remount ever regresses.
-  useEffect(() => {
-    setWorkflowView(null);
-    setWorkflowStartError(null);
-    setWorkflowViewFailed(false);
-    setPendingOpening(null);
-    setOpeningError(null);
-    openedRef.current = null;
-    openingInFlightRef.current = null;
-    openingAutoRetriedRef.current = null;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [detail.project.id]);
-
-  // Fallback source for a stage > 1 opening when `pendingOpening` was never
-  // set in this mounted component — a reload, a re-opened project, or the
-  // stage cursor advancing some other way (`approve()` only ever writes
-  // `pendingOpening` in memory, so it never survives any of those). The
-  // previous stage's approved review IS the input to this one (CL-8687): its
-  // exact `artifactId`/`version`, read straight off the workflow's own
-  // record — never re-derived by scanning nodes for a kind. No approved
-  // review at N-1 means there is no input yet.
-  const previousApproved = useMemo(() => {
-    if (stage <= 1 || !workflowView) return null;
-    const review = workflowView.reviews[stage - 1];
-    if (!review || review.status !== "approved") return null;
-    return { artifactId: review.artifactId, version: review.version };
-  }, [workflowView, stage]);
-
-  useEffect(() => {
-    if (!agentAddress || agent?.stage !== stage) return;
-    // Wait for the thread read to land for this exact address before judging
-    // it empty — otherwise a fresh run's still-stale `messages` from the
-    // previous address could either wrongly suppress or wrongly trigger the
-    // opening send (CL-8656).
-    if (threadLoadedFor !== agentAddress || messages.length > 0) return;
-    const key = `${detail.project.id}:${stage}:${agentAddress}`;
-    if (openedRef.current === key || openingInFlightRef.current === key) return;
-
-    let cancelled = false;
-    // Server-visible dedup (defect: duplicate opening mail across two tabs)
-    // — the same `[marker]`-in-Sent-folder check `decision-notify.ts` uses,
-    // keyed to this project's stage rather than a decision id, so two tabs
-    // that both load an empty stage N+1 thread never both send its opening.
-    const marker = `[opening:${detail.project.id}:${stage}]`;
-    const dispatchOpening = (body: string) => {
-      if (cancelled || openedRef.current === key || openingInFlightRef.current === key) return;
-      openingInFlightRef.current = key;
-      void markerAlreadySent(createHubTransport(), tenantId, marker)
-        .then((already) => {
-          if (cancelled) return undefined;
-          if (already) {
-            openedRef.current = key;
-            return loadThread();
-          }
-          return api
-            .sendStageMail(tenantId, agentAddress, { body, subject: `${marker} ${stageName(stage)}` })
-            .then(() => {
-              if (cancelled) return undefined;
-              // Marked as opened only now that the send is confirmed —
-              // a throw above skips this, so a failed send is retried
-              // rather than silently treated as sent.
-              openedRef.current = key;
-              setOpeningError(null);
-              return loadThread();
-            });
-        })
-        .catch((cause: unknown) => {
-          if (cancelled) return;
-          setOpeningError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-          if (openingAutoRetriedRef.current !== key) {
-            openingAutoRetriedRef.current = key;
-            setTimeout(() => {
-              if (!cancelled) setOpeningRetryAttempt((attempt) => attempt + 1);
-            }, 3_000);
-          }
-        })
-        .finally(() => {
-          if (openingInFlightRef.current === key) openingInFlightRef.current = null;
-        });
-    };
-
-    if (stage === 1) {
-      if (opening?.body) dispatchOpening(opening.body);
-      return;
-    }
-    if (pendingOpening?.stage === stage) {
-      dispatchOpening(pendingOpening.body);
-      return;
-    }
-    // Stage 9 never reads the raw stage-8 artifact (it may be the binary
-    // archive itself): its opening is always composed from the manifest and
-    // stage 8's own status reply (defect 3).
-    if (stage === 9) {
-      const review = workflowView?.reviews[8];
-      const archiveRef = review?.status === "approved" ? { artifactId: review.artifactId, version: review.version } : null;
-      void composeStage9Opening({ tenantId, projectId: detail.project.id, nodes: detail.nodes, archiveRef }).then(dispatchOpening);
-      return () => {
-        cancelled = true;
-      };
-    }
-    if (!previousApproved) return;
-    void api
-      .artifactContent(tenantId, previousApproved.artifactId)
-      .then((result) => {
-        if (!result.content) return;
-        // Stage 8's opening also names the frozen target — lost on reload
-        // since `pendingOpening` never survives one (defect 4). Rebuilt from
-        // the workflow view's own `freeze`, set the moment stage 7 is
-        // approved and cleared only by a send-back to stage <= 7.
-        const body =
-          stage === 8 && workflowView?.freeze
-            ? `${targetOpeningLine(workflowView.freeze.target)}\n\n${frozenSummaryLine({
-                target: workflowView.freeze.target,
-                frozen: workflowView.freeze.frozen,
-              })}\n\n${result.content}`
-            : result.content;
-        dispatchOpening(body);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    agentAddress,
-    agent,
-    messages.length,
-    threadLoadedFor,
-    stage,
+  const withdrawn = useWithdrawnTurns(
     detail.project.id,
-    detail.nodes,
-    opening,
-    pendingOpening,
-    previousApproved,
     tenantId,
-    loadThread,
+    stage,
+    detail.nodes,
+    thread.messages,
+    (body) => {
+      setComposer(body);
+      setStopSeed({ text: body, at: Date.now() });
+    },
+    setError,
+  );
+  const foldedMessages = withdrawn.messages;
+  const withdrawnIds = withdrawn.ids;
+  const pending = withdrawn.pending;
+  const stopTurn = withdrawn.stop;
+
+  const openingDispatch = useOpeningDispatch({
+    detail,
+    tenantId,
+    stage,
+    agentAddress,
+    messages: thread.messages,
+    loadedFor: thread.loadedFor,
     workflowView,
-    openingRetryAttempt,
-  ]);
-
-  // Defect 5: a send-back into stage 8 lands on a thread that already has
-  // history, so the opening-send effect above (gated on an EMPTY thread)
-  // never fires — the build specialist sees nothing telling it the stage
-  // came back. Sends one resume cue instead, keyed on the workflow's own
-  // send-back decision id (embedded in the message body) so a reload never
-  // repeats it.
-  useEffect(() => {
-    if (stage !== 8 || !agentAddress || agent?.stage !== 8) return;
-    if (threadLoadedFor !== agentAddress || messages.length === 0) return;
-    const lastSendBack = [...(workflowView?.decisions ?? [])]
-      .reverse()
-      .find((decision) => decision.kind === "send_back" && decision.accepted && decision.targetStage === 8);
-    if (!lastSendBack) return;
-    const marker = lastSendBack.decisionId;
-    if (messages.some((message) => message.body.includes(marker))) return;
-    const reason = lastSendBack.reason ?? "revise and resubmit.";
-    const body = `This stage was sent back: ${reason} Continue in a new attempts/<n+1>/ directory — the next empty one — rather than reusing the last attempt. [ref:${marker}]`;
-    void api
-      .sendStageMail(tenantId, agentAddress, { body })
-      .then(() => loadThread())
-      .catch(() => {});
-  }, [stage, agentAddress, agent, threadLoadedFor, messages, workflowView, tenantId, loadThread]);
-
-  const send = async (body: string) => {
-    if (!agentAddress || body.trim().length === 0) return;
-    setSending(true);
-    setError(null);
-    setRemediation(undefined);
-    try {
-      await api.sendStageMail(tenantId, agentAddress, { body });
-      await loadThread();
-    } catch (cause) {
-      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-      setRemediation(cause instanceof ApiFailure ? cause.detail.remediation : undefined);
-    } finally {
-      setSending(false);
-    }
-  };
+    reloadThread: loadThread,
+  });
 
   // Withdrawn turns are folded out before anything below reads the thread,
   // so a reply Stop hid can never surface as the latest turn, the draft, or
@@ -708,63 +185,8 @@ export function StageWorkspace({
   const reviewMessage = DOCUMENT_STAGES.has(stage) ? draftMessage : latestSpecialistMessage;
   const progress = useMemo(() => interviewProgress(foldedMessages), [foldedMessages]);
 
-  // Stage 1's brief evaluator (CL-8736): a second, deployed-on-demand agent
-  // mailed a copy of the current draft, its reply read back and shown as an
-  // advisory verdict. Never an artifact write, never a decision, and never
-  // wired to the approve gate (`workflowView.allowed.approve`) -- a failure
-  // or missing reply here is silent, the stage works without it either way.
-  const [evaluatorAddress, setEvaluatorAddress] = useState<string | null>(null);
-  const [evaluatorSentFor, setEvaluatorSentFor] = useState<string | null>(null);
-  const [evaluatorMessages, setEvaluatorMessages] = useState<ChatMessage[]>([]);
-  useEffect(() => {
-    setEvaluatorAddress(null);
-    setEvaluatorSentFor(null);
-    setEvaluatorMessages([]);
-  }, [detail.project.id]);
-  useEffect(() => {
-    if (stage !== 1 || !draftMessage || draftMessage.id === evaluatorSentFor) return;
-    let cancelled = false;
-    const draftId = draftMessage.id;
-    const draftBody = draftMessage.body;
-    void api
-      .ensureStage1EvaluatorAgent(detail.project.id)
-      .then((deployment) => {
-        if (cancelled) return null;
-        setEvaluatorAddress(deployment.address);
-        return api.sendStageMail(tenantId, deployment.address, {
-          body: draftBody,
-          subject: "Stage 1 draft for review",
-        });
-      })
-      .then(() => {
-        if (!cancelled) setEvaluatorSentFor(draftId);
-      })
-      .catch(() => {
-        // Silent: the evaluator is advisory, the stage works without it.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [stage, draftMessage, evaluatorSentFor, detail.project.id, tenantId]);
-  useEffect(() => {
-    if (!evaluatorAddress) return;
-    let cancelled = false;
-    const poll = () => {
-      void api
-        .readStageThread(tenantId, [evaluatorAddress])
-        .then((result) => {
-          if (!cancelled) setEvaluatorMessages(result);
-        })
-        .catch(() => {});
-    };
-    poll();
-    const timer = setInterval(poll, 5_000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [evaluatorAddress, tenantId]);
-  const evaluatorVerdict = useMemo(() => guidanceEvaluatorVerdict(evaluatorMessages), [evaluatorMessages]);
+  const evaluator = useStageEvaluator(detail.project.id, tenantId, stage, draftMessage);
+  const evaluatorVerdict = evaluator.verdict;
 
   // What the person last said, and whether a visible specialist reply has
   // landed since — a reply with an empty body counts as none, since that is
@@ -779,49 +201,7 @@ export function StageWorkspace({
         Date.parse(message.at) > Date.parse(lastPersonMessage.at),
     );
 
-  // The Product guide: calm orientation across the nine stages, asked for
-  // rather than shown by default (CL-8737 restore). The checklist is
-  // computed straight from the workflow view and this project's artifact
-  // nodes -- always available, never wrong -- and is what `productGuide`
-  // starts as and falls back to. Asking deploys the guide's own agent
-  // (`api.ensureGuideAgent`, `agentById("product-guide")` under its own
-  // roleKey -- a distinct deployment and mail address, never the stage's own
-  // specialist) and mails it on its own thread; on a reply that reads as
-  // guidance, replaces the checklist with it. A failed or unrecognisable
-  // reply is retried once and otherwise leaves the checklist in place. It
-  // never writes an artifact and never touches the approve gate.
-  const [productGuide, setProductGuide] = useState<Guidance>(() => deterministicGuidance(workflowView, stage, detail.nodes));
-  const [guideAsking, setGuideAsking] = useState(false);
-  useEffect(() => {
-    setProductGuide(deterministicGuidance(workflowView, stage, detail.nodes));
-  }, [workflowView, stage, detail.nodes]);
-  const askGuide = useCallback(async () => {
-    if (guideAsking) return;
-    setGuideAsking(true);
-    const floor = deterministicGuidance(workflowView, stage, detail.nodes);
-    const prompt = guidancePrompt(workflowView, stage, detail.project.title);
-    const attempt = async (): Promise<Guidance | null> => {
-      try {
-        const guideDeployment = await api.ensureGuideAgent(detail.project.id);
-        const sentAt = Date.now();
-        await api.sendStageMail(tenantId, guideDeployment.address, { body: prompt, subject: "Guidance request" });
-        for (let tries = 0; tries < 8; tries += 1) {
-          await new Promise((resolve) => setTimeout(resolve, 1500));
-          const thread = await api.readStageThread(tenantId, [guideDeployment.address]);
-          const reply = [...thread]
-            .reverse()
-            .find((message) => message.author === "agent" && Date.parse(message.at) >= sentAt);
-          if (reply) return parseGuidanceReply(reply.body, floor);
-        }
-        return null;
-      } catch {
-        return null;
-      }
-    };
-    const result = (await attempt()) ?? (await attempt());
-    setProductGuide(result ?? floor);
-    setGuideAsking(false);
-  }, [guideAsking, workflowView, stage, detail.nodes, detail.project.id, detail.project.title, tenantId]);
+  const guide = useProductGuide(detail.project.id, detail.project.title, tenantId, stage, detail.nodes, workflowView);
 
   // Mail turns as StageDocument's turn shape: it wants who spoke and what
   // was said, nothing this contract tracks beyond that (no per-turn quotes
@@ -840,376 +220,53 @@ export function StageWorkspace({
     [foldedMessages],
   );
 
-  // This stage's approved versions, plus the specialist's latest unpersisted
-  // reply as the version being read right now — the same stand-in
-  // `DesignPanel` uses below for stage 4's not-yet-approved mockup, since
-  // nothing writes an artifact for a stage's draft before it is approved.
-  const draftKind = STAGE_DRAFT_KIND[stage] ?? null;
-  const approvedVersions = useMemo(
-    () =>
-      detail.nodes
-        .filter((node) => node.stage === stage && draftKind !== null && node.kind === draftKind)
-        .sort((left, right) => left.version - right.version),
-    [detail.nodes, stage, draftKind],
-  );
-  const draftDocNode: ArtifactNode | null = useMemo(() => {
-    if (!draftMessage || draftKind === null) return null;
-    return {
-      id: `reply:${draftMessage.id}`,
-      kind: draftKind,
-      variant: null,
-      stage,
-      title: stageName(stage),
-      version: (approvedVersions.at(-1)?.version ?? 0) + 1,
-      artifactId: `reply:${draftMessage.id}`,
-      contentHash: "",
-      sizeBytes: draftMessage.body.length,
-      mediaType: "text/markdown",
-      createdAt: draftMessage.at,
-      supersededByNodeId: null,
-      provenance: { producer: "specialist" },
-    };
-  }, [draftMessage, draftKind, stage, approvedVersions]);
-  const documentVersions = useMemo(
-    () => (draftDocNode ? [...approvedVersions, draftDocNode] : approvedVersions),
-    [approvedVersions, draftDocNode],
-  );
-  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
-  useEffect(() => {
-    setSelectedVersionId(null);
-  }, [stage]);
-  const activeNode =
-    documentVersions.find((version) => version.id === selectedVersionId) ?? documentVersions.at(-1) ?? null;
-  const newerVersion =
-    activeNode ? documentVersions.find((version) => version.version > activeNode.version) ?? null : null;
+  const doc = useStageDocument(tenantId, stage, detail.nodes, draftMessage);
+  const decisions = useStageDecisions({
+    detail,
+    tenantId,
+    stage,
+    workflowView,
+    reviewMessage,
+    draftKind: doc.draftKind,
+    foldedMessages,
+    refreshWorkflow: workflow.refresh,
+    markStage: workflow.markStage,
+    queueOpening: openingDispatch.queueOpening,
+    onError: setError,
+    onRemediation: setRemediation,
+  });
+  const {
+    approve,
+    acceptDelivery,
+    approveAllowed,
+    approving,
+    openReviewNow,
+    chosenTarget,
+    setChosenTarget,
+    sendTarget,
+    setSendTarget,
+    sendReason,
+    setSendReason,
+    sendingBack,
+    sendBack,
+  } = decisions;
+  const refreshWorkflow = workflow.refresh;
 
-  const [activeContent, setActiveContent] = useState("");
-  useEffect(() => {
-    if (!activeNode) {
-      setActiveContent("");
-      return;
-    }
-    if (activeNode.id === draftDocNode?.id) {
-      setActiveContent(draftMessage?.body ?? "");
-      return;
-    }
-    let cancelled = false;
-    void api
-      .artifactContent(tenantId, activeNode.id)
-      .then((result) => {
-        if (!cancelled) setActiveContent(result.content);
-      })
-      .catch(() => {
-        if (!cancelled) setActiveContent(UNREADABLE);
-      });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeNode?.id, tenantId]);
-
-  /**
-   * The current attempt's `publish_workspace` fallback result, when some
-   * reply since the last "Start"/"Continue" mail carries one — not only the
-   * latest reply (`build.tsx`'s `currentPublishedBundle`, CL-8739): a
-   * specialist that ran the tool and then kept talking must not lose the
-   * bundle a prior reply already carried. Anything else (a plain status
-   * update, or the real-upload result shape) is not a fallback bundle, so
-   * approve() records the real artifact `publish_workspace` already
-   * uploaded instead of persisting anything.
-   */
-  const publishedBundle = useMemo(
-    () => (stage === 8 ? currentPublishedBundle(foldedMessages) : null),
-    [stage, foldedMessages],
-  );
-
-  /**
-   * Stage 8's own readiness rule (`build.tsx`'s `buildEvidenceState`,
-   * CL-8723): a review may only be opened once the CURRENT build attempt has
-   * published an archive (a `build_evidence` node no older than the last
-   * "Start"/"Continue" mail) or the specialist's latest reply carries the
-   * fallback bundle. Any other specialist reply at stage 8 -- a status
-   * update, "IDLE", a question -- is conversation, not a build archive, and
-   * must never be persisted or reviewed as one.
-   */
-  const stage8Evidence = useMemo(
-    () => (stage === 8 ? buildEvidenceState(foldedMessages, detail.nodes, publishedBundle !== null) : null),
-    [stage, foldedMessages, detail.nodes, publishedBundle],
-  );
-
-  const stageApprovalDeps = useMemo(
-    () => ({
-      view: (projectId: string) => api.projectWorkflowView(projectId),
-      decide: (projectId: string, decision: Record<string, unknown>) => api.decide(projectId, decision),
-      now: () => new Date().toISOString(),
-    }),
-    [],
-  );
-
-  /**
-   * This stage's reviewable version, as `{artifactId, version, sha256}` --
-   * the browser's one legitimate job (it is the only party that may read an
-   * artifact): find or persist the material, never judge whether it is
-   * "ready". Persists a chat draft as a new version when nothing else wrote
-   * one yet (`persistStageDraft`/`persistBuildEvidence`); returns null when
-   * there is nothing reviewable yet.
-   *
-   * Stage 8 is different (CL-8723): `publish_workspace` already uploaded the
-   * build archive as a real artifact, so `reviewableArtifact` finds it
-   * directly and no browser write happens at all — the reference is the
-   * artifact's own id/version/`contentSha256`, not a hash of chat prose.
-   * Every other stage (and stage 8 before the tool has run) still persists
-   * the specialist's latest reply as its draft.
-   *
-   * Stage 7 is also the freeze: the chosen target rides along in the same
-   * artifact write (`sb.target`), so `approve()`'s opening mail can quote it
-   * without re-deriving it from the plan.
-   */
-  const resolveReviewRef = useCallback(async (): Promise<{ artifactId: string; version: number; sha256: string } | null> => {
-    if (!reviewMessage || draftKind === null) return null;
-    if (stage === 8 && !stage8Evidence?.ready) return null;
-    const materials = detail.nodes.filter((node) => node.kind === "source_material").map((node) => node.id);
-    const latestDraft = stage === 8 ? publishedBundle : reviewMessage;
-    const reviewable = reviewableArtifact({ nodes: detail.nodes, stage, kind: draftKind, latestDraft });
-    if (reviewable.status === "found") {
-      return {
-        artifactId: reviewable.node.artifactId,
-        version: reviewable.node.version,
-        sha256: reviewable.node.contentSha256 ?? (await digestOf(reviewMessage.body)),
-      };
-    }
-    if (reviewable.status !== "persist_needed") return null;
-    const persisted = publishedBundle
-      ? await api.persistBuildEvidence(detail.project.id, publishedBundle, materials)
-      : await api.persistStageDraft(
-          detail.project.id,
-          stage,
-          reviewMessage.body,
-          materials,
-          stage === 7 ? (chosenTarget ?? undefined) : undefined,
-        );
-    const version = Number(persisted.contentHash.slice(persisted.contentHash.lastIndexOf("@") + 1));
-    const sha256 = await digestOf(reviewMessage.body);
-    return { artifactId: persisted.artifactId, version, sha256 };
-  }, [reviewMessage, draftKind, detail.nodes, detail.project.id, stage, publishedBundle, chosenTarget, stage8Evidence]);
-
-  /**
-   * Persists (if needed) and opens a review for this stage's current
-   * material, right now rather than waiting on the auto-open effect below to
-   * poll into it. `BuildPanel`'s "Accept as evidence" calls this directly
-   * (CL-8739): accepting a build packages and records it deterministically,
-   * client-side, with no mail sent to the specialist. Shares every check and
-   * step with the auto-open effect so there is exactly one path that decides
-   * a stage's material is ready to review.
-   */
-  const openReviewNow = useCallback(async (): Promise<{ readonly ok: true } | { readonly ok: false; readonly reason: string }> => {
-    if (!workflowView || workflowView.done || stage >= LAST_STAGE) return { ok: false, reason: "There is nothing to review yet." };
-    if (stage === 7 && !chosenTarget) return { ok: false, reason: "No delivery target has been chosen yet." };
-    if (!reviewMessage || draftKind === null) return { ok: false, reason: "There is nothing to review yet." };
-    if (stage === 8 && !stage8Evidence?.ready) {
-      return { ok: false, reason: stage8Evidence?.reason ?? "The build has not published an archive yet." };
-    }
-    const latestDraft = stage === 8 ? publishedBundle : reviewMessage;
-    const reviewable = reviewableArtifact({ nodes: detail.nodes, stage, kind: draftKind, latestDraft });
-    if (reviewable.status === "none") return { ok: false, reason: "There is nothing to review yet." };
-    try {
-      const ref = await resolveReviewRef();
-      if (!ref) return { ok: false, reason: "There is nothing to review yet." };
-      const sameAsOpen =
-        workflowView.openReview !== null &&
-        workflowView.openReview.artifactId === ref.artifactId &&
-        workflowView.openReview.version === ref.version &&
-        workflowView.openReview.sha256 === ref.sha256;
-      if (!sameAsOpen) {
-        await ensureReviewOpen(stageApprovalDeps, { projectId: detail.project.id, stage, ref });
-      }
-      await refreshWorkflow();
-      return { ok: true };
-    } catch (cause) {
-      return { ok: false, reason: cause instanceof ApiFailure ? cause.detail.message : String(cause) };
-    }
-  }, [workflowView, stage, chosenTarget, reviewMessage, draftKind, stage8Evidence, publishedBundle, detail.nodes, detail.project.id, resolveReviewRef, stageApprovalDeps, refreshWorkflow]);
-
-  // Opens the review the moment this stage's material is ready, rather than
-  // at the instant of approval -- the project workflow (`allowed.approve`)
-  // is the only gate on the Approve button, and a review that only opens
-  // inside `approve()` would leave `allowed.approve` false right up until
-  // approval, making it useless as a button gate (CL-8687 follow-up). Skips
-  // stage 7 until a target is chosen -- there is nothing reviewable to name
-  // yet -- and keys on the resolved material's id/version so a fresh draft
-  // (a revision) opens its own review rather than being silently skipped as
-  // "already tried". Idempotent under reload/two tabs: `ensureReviewOpen`
-  // itself no-ops once the view already shows the same ref open.
-  const ensuringReviewKeyRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!workflowView || workflowView.done || stage >= LAST_STAGE) return;
-    if (stage === 7 && !chosenTarget) return;
-    if (!reviewMessage || draftKind === null) return;
-    if (stage === 8 && !stage8Evidence?.ready) return;
-    const latestDraft = stage === 8 ? publishedBundle : reviewMessage;
-    const reviewable = reviewableArtifact({ nodes: detail.nodes, stage, kind: draftKind, latestDraft });
-    if (reviewable.status === "none") return;
-    const key =
-      reviewable.status === "found"
-        ? `${String(stage)}:${reviewable.node.artifactId}@${String(reviewable.node.version)}`
-        : `${String(stage)}:draft:${reviewMessage.id}`;
-    if (ensuringReviewKeyRef.current === key) return;
-    ensuringReviewKeyRef.current = key;
-    void openReviewNow().then((result) => {
-      // Left as the sentinel on refusal: a later render (a poll, a reply) retries.
-      if (!result.ok) ensuringReviewKeyRef.current = null;
-    });
-  }, [workflowView, stage, chosenTarget, reviewMessage, draftKind, detail.nodes, publishedBundle, stage8Evidence, openReviewNow]);
-
-  /**
-   * Sends the workflow's `approve` decision for this stage's already-open
-   * review (`approveStage` opens one itself, belt-and-braces, if somehow
-   * none is), and waits for it to land before treating the stage as
-   * advanced (CL-8687: the workflow is the process authority, not this
-   * write). On a refusal the error banner shows the reason and the next
-   * stage's opening mail is never sent.
-   */
-  const approve = async () => {
-    if (!reviewMessage || stage >= LAST_STAGE) return;
-    if (stage === 7 && !chosenTarget) return;
-    setApproving(true);
+  const send = async (body: string) => {
+    if (!agentAddress || body.trim().length === 0) return;
+    setSending(true);
     setError(null);
     setRemediation(undefined);
     try {
-      // The normal path: a review is already open (the auto-open effect put
-      // it there the moment this stage's material appeared), so its ref is
-      // read straight off the view rather than resolved/persisted again --
-      // resolving it a second time here would persist a second, redundant
-      // draft version every approval. `resolveReviewRef` is the fallback for
-      // the rare case nothing is open yet (`approveStage` also falls back to
-      // opening one itself, belt-and-braces).
-      const ref = workflowView?.openReview
-        ? { artifactId: workflowView.openReview.artifactId, version: workflowView.openReview.version, sha256: workflowView.openReview.sha256 }
-        : await resolveReviewRef();
-      if (!ref) return;
-      const evidence = await stageEvidence(stage, {
-        projectId: detail.project.id,
-        tenantId,
-        nodes: detail.nodes,
-        chosenTarget,
-        workflowView,
-        stakeholders: api.stakeholders,
-        audienceDecisions: (tid, nodeId) => api.audienceDecisions(tid, nodeId),
-      });
-      const result = await approveStage(stageApprovalDeps, {
-        projectId: detail.project.id,
-        stage,
-        ref,
-        evidence,
-      });
-      if (!result.ok) {
-        setError(`This stage's approval was refused: ${stageRefusalMessage(result.reason)}`);
-        await refreshWorkflow();
-        return;
-      }
-      setWorkflowView((current) => (current ? { ...current, stage: result.stage } : current));
-      await refreshWorkflow();
-      const openingBody =
-        stage === 7 && chosenTarget
-          ? `${targetOpeningLine(chosenTarget)}\n\n${frozenSummaryLine(evidence as Stage7Evidence)}\n\n${reviewMessage.body}`
-          : stage === 8
-            ? await composeStage9Opening({
-                tenantId,
-                projectId: detail.project.id,
-                nodes: detail.nodes,
-                archiveRef: { artifactId: ref.artifactId, version: ref.version },
-                fallbackBuildStatusBody: reviewMessage.body,
-              })
-            : reviewMessage.body;
-      setPendingOpening({ stage: result.stage, body: openingBody });
+      await api.sendStageMail(tenantId, agentAddress, { body });
+      await loadThread();
     } catch (cause) {
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
       setRemediation(cause instanceof ApiFailure ? cause.detail.remediation : undefined);
     } finally {
-      setApproving(false);
+      setSending(false);
     }
   };
-
-  /**
-   * Stage 9's Accept (defect 2): `DeliveryPanel`'s Accept button only ever
-   * resolved the hub's `deliver` tool approval — a stock tool-call approval
-   * (CL-8566), not the project workflow's own stage gate. Nothing sent the
-   * workflow its stage 9 `approve` decision, so `contracts.ts`'s `done`
-   * (set only when an `approve` lands on the last stage) never fired and the
-   * project never finished. Called AFTER the tool approval succeeds
-   * (`delivery.jsx`'s own `decide("approve")`); the reference is the
-   * `delivery_manifest` companion of stage 8's approved review (the
-   * workflow's own record of what stage 9 actually reviewed) — falling back
-   * to the archive itself if no manifest companion exists (e.g. the
-   * data-URI fallback path).
-   */
-  const acceptDelivery = async () => {
-    setApproving(true);
-    setError(null);
-    try {
-      const archiveNode = approvedStage8Archive(detail.nodes, workflowView?.reviews[8]);
-      const evidenceNode = archiveNode ? (manifestCompanionOf(detail.nodes, archiveNode) ?? archiveNode) : null;
-      if (!evidenceNode) {
-        setError("No build evidence is recorded for this project yet — delivery cannot be finished.");
-        return;
-      }
-      const ref = {
-        artifactId: evidenceNode.artifactId,
-        version: evidenceNode.version,
-        sha256: evidenceNode.contentSha256 ?? (await digestOf(evidenceNode.id)),
-      };
-      const result = await approveStage(stageApprovalDeps, { projectId: detail.project.id, stage: 9, ref });
-      if (!result.ok) {
-        setError(`Delivery was recorded, but the project workflow refused the final approval: ${stageRefusalMessage(result.reason)}`);
-        await refreshWorkflow();
-        return;
-      }
-      await refreshWorkflow();
-    } catch (cause) {
-      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-    } finally {
-      setApproving(false);
-    }
-  };
-
-  const [sendTarget, setSendTarget] = useState<number | null>(null);
-  const [sendReason, setSendReason] = useState("");
-  const [sendingBack, setSendingBack] = useState(false);
-
-  /** Sends this stage back to `target`, through the workflow's own
-   *  `send_back` decision — every review at `target` and above is marked
-   *  stale, nothing is deleted (`project-workflow/contracts.ts`). */
-  const sendBack = async (target: number) => {
-    setSendingBack(true);
-    setError(null);
-    try {
-      const result = await sendBackDecision(stageApprovalDeps, {
-        projectId: detail.project.id,
-        stage,
-        targetStage: target,
-        reason: sendReason.trim() || `Sent back from stage ${stage} to stage ${target}.`,
-      });
-      if (!result.ok) {
-        setError(`Send-back was refused: ${result.reason}`);
-        return;
-      }
-      setWorkflowView((current) => (current ? { ...current, stage: result.stage } : current));
-      await refreshWorkflow();
-      setSendReason("");
-      setSendTarget(null);
-    } catch (cause) {
-      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-    } finally {
-      setSendingBack(false);
-    }
-  };
-
-  // The Approve button's ONE gate, for every stage panel: the project
-  // workflow's own verdict. Never re-derived from chat messages or artifact
-  // presence (CL-8687 follow-up) — those only decide what to name to
-  // `open_review` (the auto-open effect above), never whether Approve is
-  // clickable.
-  const approveAllowed = workflowView?.allowed.approve ?? false;
 
   const panelReviews = detail.nodes.filter(
     (node) => node.stage === stage && node.kind === "engineering_review",
@@ -1222,43 +279,7 @@ export function StageWorkspace({
   // the artifact-derived fallback, which for a mid-way project is stage 1
   // and would otherwise flash before the real stage takes over (CL-8721).
   if (!workflowResolved && !openingFailed) {
-    return (
-      <div className="stage-view">
-        <Screen
-          title="Opening the project…"
-          description="Finding the project and reading where its workflow stands."
-          tight
-        >
-          <section aria-label="Opening progress">
-            <p className="inline-note">Finding the project → reading its stage → preparing the conversation.</p>
-            <div
-              role="progressbar"
-              aria-label="Opening the project"
-              aria-valuetext="Reading its stage"
-              style={{ height: 6, borderRadius: 4, overflow: "hidden", background: "var(--wb-border)", margin: "8px 0 16px" }}
-            >
-              <div style={{ height: "100%", width: "50%", borderRadius: 4, background: "var(--wb-primary)" }} />
-            </div>
-          </section>
-          <div aria-hidden="true">
-            <div
-              style={{
-                border: "1px solid var(--wb-border)",
-                borderRadius: 8,
-                padding: "12px 14px",
-                marginBottom: 8,
-              }}
-            >
-              <div style={{ height: 11, borderRadius: 6, width: "38%", background: "var(--wb-border)", margin: "6px 0" }} />
-              <div style={{ height: 11, borderRadius: 6, width: "92%", background: "var(--wb-border)", margin: "6px 0" }} />
-              <div style={{ height: 11, borderRadius: 6, width: "78%", background: "var(--wb-border)", margin: "6px 0" }} />
-            </div>
-            <p className="thinking">Getting the conversation ready…</p>
-          </div>
-          <p className="inline-note">What comes next: the conversation opens below.</p>
-        </Screen>
-      </div>
-    );
+    return <OpeningScreen />;
   }
 
   return (
@@ -1287,11 +308,11 @@ export function StageWorkspace({
         <Banner
           tone="error"
           title={
-            workflowStartError
-              ? `The project workflow could not be started: ${workflowStartError}`
+            workflow.startError
+              ? `The project workflow could not be started: ${workflow.startError}`
               : "The project workflow could not be read."
           }
-          action={{ label: "Try again", onClick: retryOpening }}
+          action={{ label: "Try again", onClick: workflow.retryOpening }}
         />
       ) : null}
 
@@ -1317,118 +338,56 @@ export function StageWorkspace({
         />
       ) : null}
 
-      {/* Sending the stage back is offered wherever the person is working,
-          folded to a line so it never competes with the review itself. */}
       {stage >= 2 && stage < LAST_STAGE ? (
-        <details className="approvals-record send-back">
-          <summary>Missed something earlier? Send this stage back…</summary>
-          <div className="send-back-body">
-            <SendBackPicker
-              id="workspace-send-back-target"
-              stage={stage}
-              target={sendTarget ?? defaultTarget(stage)}
-              onChange={setSendTarget}
-            />
-            <div className="field">
-              <label htmlFor="workspace-send-back-reason">What was missed, or what has to change</label>
-              <Dictated value={sendReason} onValueChange={setSendReason} align="start">
-                <Textarea
-                  id="workspace-send-back-reason"
-                  value={sendReason}
-                  onChange={(event) => setSendReason(event.target.value)}
-                  placeholder="Recorded with the send-back, and put in the box at the stage you return to, for the specialist."
-                />
-              </Dictated>
-            </div>
-            <div className="action-row">
-              <Button loading={sendingBack} onClick={() => void sendBack(sendTarget ?? defaultTarget(stage))}>
-                Send back to {stageName(sendTarget ?? defaultTarget(stage))}
-              </Button>
-            </div>
-          </div>
-        </details>
+        <SendBackDock
+          stage={stage}
+          target={sendTarget}
+          reason={sendReason}
+          sendingBack={sendingBack}
+          onTargetChange={setSendTarget}
+          onReasonChange={setSendReason}
+          onSendBack={(target) => void sendBack(target)}
+        />
       ) : null}
 
-      {!agentAddress && agentError ? (
+      {!agentAddress && agent.error ? (
         <Banner
           tone="error"
           title={`The ${stageName(stage).toLowerCase()} specialist could not be started`}
-          action={{ label: "Try again", onClick: () => setAgentAttempt((attempt) => attempt + 1) }}
+          action={{ label: "Try again", onClick: agent.retry }}
         >
-          {agentError}
+          {agent.error}
         </Banner>
       ) : null}
 
-      {!agentAddress && !agentError ? (
+      {!agentAddress && !agent.error ? (
         <Screen title={`Stage ${stage} of 9 · ${stageName(stage)}`} description={STAGE_GOAL[stage]} tight>
           <p className="inline-note">Starting the {stageName(stage).toLowerCase()} specialist…</p>
         </Screen>
       ) : null}
 
-      {agentAddress && openingError ? (
+      {agentAddress && openingDispatch.error ? (
         <Banner
           tone="error"
           title="The opening message could not be sent"
-          action={{ label: "Try again", onClick: () => setOpeningRetryAttempt((attempt) => attempt + 1) }}
+          action={{ label: "Try again", onClick: openingDispatch.retry }}
         >
-          {openingError}
+          {openingDispatch.error}
         </Banner>
       ) : null}
 
       {agentAddress ? (
-        <div className="stage-guidance" aria-label={guidance.title}>
-          <p className="stage-guidance-title">{guidance.title}</p>
-          <p className="stage-guidance-detail">{guidance.detail}</p>
-          {guidance.readyNote ? <p className="stage-guidance-ready">{guidance.readyNote}</p> : null}
-          {guidance.question && guidance.question.choices.length > 0 && !(DOCUMENT_STAGES.has(stage) && !draftMessage) ? (
-            <div className="button-row" aria-label="Recorded answer choices">
-              {guidance.question.choices.map((choice) => (
-                <Button key={choice} variant="ghost" disabled={sending} onClick={() => void send(choice)}>
-                  {choice}
-                </Button>
-              ))}
-            </div>
-          ) : null}
-        </div>
+        <GuidanceCard
+          guidance={guidance}
+          showChoices={!(DOCUMENT_STAGES.has(stage) && !draftMessage)}
+          sending={sending}
+          onChoice={(choice) => void send(choice)}
+        />
       ) : null}
 
-      {stage === 1 && evaluatorVerdict ? (
-        <div className="stage-guidance stage-guidance-evaluator" aria-label="Brief evaluator verdict">
-          <p className="stage-guidance-title">
-            Brief evaluator (advisory): {evaluatorVerdict.ready ? "ready" : "not yet"}
-          </p>
-          {evaluatorVerdict.notes.length > 0 ? (
-            <ul>
-              {evaluatorVerdict.notes.map((note, index) => (
-                <li key={index}>{note}</li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
-      ) : null}
+      {stage === 1 && evaluatorVerdict ? <EvaluatorVerdict verdict={evaluatorVerdict} /> : null}
 
-      <details className="approvals-record product-guide">
-        <summary>{productGuide.origin === "guide" ? "Guide" : "Checklist"} · where this project stands</summary>
-        <div className="product-guide-body">
-          <p className="product-guide-source">
-            {productGuide.origin === "guide"
-              ? "The guide's own words — advisory only, never a verdict."
-              : "The checklist, computed from what is already recorded."}
-          </p>
-          <p>{productGuide.summary}</p>
-          {productGuide.missing.length > 0 ? (
-            <ul>
-              {productGuide.missing.map((item) => (
-                <li key={item}>{item}</li>
-              ))}
-            </ul>
-          ) : null}
-          <p className="product-guide-recommended">Recommended next step: {productGuide.recommended}</p>
-          <Button variant="ghost" loading={guideAsking} onClick={() => void askGuide()}>
-            Ask the guide
-          </Button>
-        </div>
-      </details>
+      <ProductGuideDock guide={guide.guide} asking={guide.asking} onAsk={() => void guide.ask()} />
 
       {agentAddress && stage === 4 ? (
         <DesignPanel
@@ -1452,7 +411,7 @@ export function StageWorkspace({
               void loadThread();
             }}
             onApprove={approve}
-            approving={approving || refreshingAfterAction}
+            approving={approving || workflow.refreshingAfterAction}
             canApprove={approveAllowed}
             approveReason={workflowView?.allowed.approveReason ?? null}
             lastRefusal={workflowView?.lastRefusal ?? null}
@@ -1468,7 +427,7 @@ export function StageWorkspace({
             onChanged={() => void refreshWorkflow()}
             onOpenSettings={onOpenSettings}
             onApprove={approve}
-            approving={approving || refreshingAfterAction}
+            approving={approving || workflow.refreshingAfterAction}
             canApprove={approveAllowed}
             onAcceptEvidence={openReviewNow}
             {...(onOpenDecisions ? { onOpenDecisions } : {})}
@@ -1501,74 +460,22 @@ export function StageWorkspace({
       ) : null}
 
       {agentAddress && DOCUMENT_STAGES.has(stage) && !draftMessage ? (
-        <section
-          aria-label="What is happening now"
-          style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}
+        <WaitingSection
+          stage={stage}
+          progress={progress}
+          hasMessages={foldedMessages.length > 0}
+          lastPersonAt={lastPersonMessage?.at ?? null}
+          tip={STAGE_TIPS[stage]?.[0] ?? STAGE_TIPS[1]?.[0] ?? "Rough answers are fine."}
+          choices={guidance.question ?? null}
+          sending={sending}
+          awaitingActions={{ canSendAgain: lastPersonMessage !== null && awaitingReply, hasPending: pending !== null }}
+          onChoice={(choice) => void send(choice)}
+          onSendAgain={() => {
+            if (lastPersonMessage) void send(lastPersonMessage.body);
+          }}
+          onStop={() => void stopTurn()}
+          onOpenSettings={onOpenSettings}
         >
-          <div
-            role="progressbar"
-            aria-label={`Stage ${stage} of 9 · ${stageName(stage)}`}
-            aria-valuetext={
-              progress && progress.total !== null
-                ? `Question ${progress.ordinal} of ${progress.total}`
-                : progress
-                  ? `Question ${progress.ordinal} so far`
-                  : "Waiting for the specialist's reply"
-            }
-            style={{ height: 6, borderRadius: 4, overflow: "hidden", background: "var(--wb-border)", margin: "0 0 12px" }}
-          >
-            <div
-              style={{
-                height: "100%",
-                borderRadius: 4,
-                background: "var(--wb-primary)",
-                width:
-                  progress && progress.total !== null
-                    ? `${Math.min(100, Math.round((progress.ordinal / progress.total) * 100))}%`
-                    : "38%",
-              }}
-            />
-          </div>
-          <p className="inline-note">
-            Stage {stage} of 9 · {stageName(stage)} — {STAGE_GOAL[stage]}
-          </p>
-          <div className="inline-note" role="status">
-            {messages.length > 0 ? (
-              <span className="thinking">Your message is recorded; no specialist reply is visible yet.</span>
-            ) : (
-              "No message from you is recorded yet."
-            )}{" "}
-            {messages.length > 0 ? <Elapsed since={lastPersonMessage?.at ?? null} /> : null}
-          </div>
-          <p className="inline-note">{STAGE_TIPS[stage]?.[0] ?? STAGE_TIPS[1]?.[0] ?? "Rough answers are fine."}</p>
-          {guidance.question && guidance.question.choices.length > 0 ? (
-            <div className="button-row" aria-label="Recorded answer choices">
-              {guidance.question.choices.map((choice) => (
-                <Button key={choice} variant="ghost" disabled={sending} onClick={() => void send(choice)}>
-                  {choice}
-                </Button>
-              ))}
-            </div>
-          ) : null}
-          {((lastPersonMessage && awaitingReply) || pending !== null) && messages.length > 0 ? (
-            <div className="button-row" aria-label="Waiting actions">
-              {lastPersonMessage && awaitingReply ? (
-                <Button variant="outline" onClick={() => void send(lastPersonMessage.body)}>
-                  Send again
-                </Button>
-              ) : null}
-              {pending !== null ? (
-                <Button variant="ghost" onClick={() => void stopTurn()}>
-                  Stop
-                </Button>
-              ) : null}
-              {lastPersonMessage && awaitingReply ? (
-                <Button variant="ghost" onClick={onOpenSettings}>
-                  Open Settings to pick a different model
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
           <StageConversation
             stage={stage}
             messages={foldedMessages}
@@ -1586,10 +493,10 @@ export function StageWorkspace({
             pending={pending !== null}
             onStop={() => void stopTurn()}
           />
-        </section>
+        </WaitingSection>
       ) : null}
 
-      {agentAddress && DOCUMENT_STAGES.has(stage) && draftMessage && activeNode ? (
+      {agentAddress && DOCUMENT_STAGES.has(stage) && draftMessage && doc.activeNode ? (
         <>
           {stage === 7 ? (
             <EstimateView
@@ -1600,9 +507,9 @@ export function StageWorkspace({
           ) : null}
           {stage === 7 ? <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} /> : null}
           <StageDocument
-            node={activeNode}
-            versions={documentVersions}
-            content={activeContent}
+            node={doc.activeNode}
+            versions={doc.versions}
+            content={doc.activeContent}
             tenantId={tenantId}
             turns={turns}
             openQuestion={
@@ -1610,9 +517,9 @@ export function StageWorkspace({
                 ? { text: guidance.question.text, ordinal: progress?.ordinal ?? null, total: progress?.total ?? null }
                 : null
             }
-            onSelectVersion={setSelectedVersionId}
+            onSelectVersion={doc.selectVersion}
             onRevise={(message, quotes) => {
-              setSelectedVersionId(null);
+              doc.selectVersion(null);
               const quoted = quotes.map((entry) => `> ${entry.quote}`).join("\n");
               void send(quoted ? `${quoted}\n\n${message}` : message);
             }}
@@ -1623,9 +530,9 @@ export function StageWorkspace({
             onSubmit={() => void approve()}
             soloApproval={detail.soloApproval}
             canSubmit={approveAllowed}
-            busy={sending ? "draft" : approving || refreshingAfterAction ? "submit" : null}
+            busy={sending ? "draft" : approving || workflow.refreshingAfterAction ? "submit" : null}
             draftOpen={draftOpen}
-            newer={newerVersion}
+            newer={doc.newerVersion}
             live={null}
             seed={stopSeed}
             withdrawnIds={withdrawnIds}
@@ -1654,7 +561,7 @@ export function StageWorkspace({
               stage >= LAST_STAGE ? null : (
                 <Button
                   variant="primary"
-                  loading={approving || refreshingAfterAction}
+                  loading={approving || workflow.refreshingAfterAction}
                   disabled={!approveAllowed}
                   onClick={() => void approve()}
                 >
