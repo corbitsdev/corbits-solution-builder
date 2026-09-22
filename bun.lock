@@ -13,7 +13,7 @@
         "@corbits/oauth-core": "github:corbitsdev/corbits-oauth-core",
         "@corbits/openai-responses": "github:corbitsdev/corbits-openai-responses",
         "@corbits/process-provisioner": "workspace:*",
-        "@corbits/react-ui": "github:corbitsdev/react-ui#86b172b",
+        "@corbits/react-ui": "github:corbitsdev/react-ui#90bf97b",
         "@corbits/xai-provider": "github:corbitsdev/corbits-xai-provider",
         "@electric-sql/pglite": "^0.3.16",
         "@intx/agent": "workspace:*",
@@ -738,7 +738,7 @@
 
     "@corbits/process-provisioner": ["@corbits/process-provisioner@workspace:vendor/workbench/packages/process-provisioner"],
 
-    "@corbits/react-ui": ["@corbits/react-ui@github:corbitsdev/react-ui#86b172b", { "dependencies": { "class-variance-authority": "^0.7.1", "clsx": "^2.1.1", "tailwind-merge": "^3.3.1" }, "peerDependencies": { "@radix-ui/react-dialog": "^1.1.15", "@radix-ui/react-dropdown-menu": "^2.1.16", "@radix-ui/react-slot": "^1.2.3", "@radix-ui/react-tooltip": "^1.2.8", "lucide-react": "^0.545.0 || ^1.0.0", "react": "^18.2.0 || ^19.0.0", "react-dom": "^18.2.0 || ^19.0.0", "sonner": "^2.0.7" } }, "corbitsdev-react-ui-86b172b", "sha512-M6v4yD85/KVWPCW3/WNaOwFh67DCO4zqCYG5KenJiogO+qYJ0/QMIcX14AGKln+Y0wiQgS/Y7R3LpMDQMA3RNg=="],
+    "@corbits/react-ui": ["@corbits/react-ui@github:corbitsdev/react-ui#90bf97b", { "dependencies": { "class-variance-authority": "^0.7.1", "clsx": "^2.1.1", "tailwind-merge": "^3.3.1" }, "peerDependencies": { "@radix-ui/react-dialog": "^1.1.15", "@radix-ui/react-dropdown-menu": "^2.1.16", "@radix-ui/react-slot": "^1.2.3", "@radix-ui/react-tooltip": "^1.2.8", "lucide-react": "^0.545.0 || ^1.0.0", "react": "^18.2.0 || ^19.0.0", "react-dom": "^18.2.0 || ^19.0.0", "sonner": "^2.0.7" } }, "corbitsdev-react-ui-90bf97b", "sha512-ufU6jgvPfuRHhtwU6mHM32DQ4t9VFc5oYhTvkUZsw9WA2APo4TU3MoZxa+9ynv9ALYb1RseRGo9USXFdFLASbg=="],
 
     "@corbits/sandbox-sidecar": ["@corbits/sandbox-sidecar@workspace:vendor/workbench/packages/sandbox-sidecar"],
 
