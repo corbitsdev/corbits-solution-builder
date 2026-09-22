@@ -15,6 +15,8 @@ import { StateLabel } from "../../components.jsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@corbits/react-ui";
 import { SELECTABLE_TARGETS } from "@solutions-builder/app/targets";
 import type { Freeze } from "@solutions-builder/app/project-workflow/contracts";
+import { parseStackRecord } from "@solutions-builder/app/stack";
+import { HowItRuns } from "./how-it-runs.tsx";
 
 type CostRow = { label: string; amount: string; basis: string };
 
@@ -106,6 +108,7 @@ export function EstimateView({
   freeze?: Freeze | null;
 }) {
   const { costRows, scopeItems } = useMemo(() => parseEstimate(body), [body]);
+  const stack = useMemo(() => parseStackRecord(body), [body]);
   // The workflow's own freeze (once stage 7 is approved) is the only
   // authority on "frozen" -- never re-derived from artifact metadata.
   const frozen = freeze !== null;
@@ -113,10 +116,11 @@ export function EstimateView({
     ? (SELECTABLE_TARGETS.find((option) => option.target === chosenTarget)?.label ?? chosenTarget)
     : null;
 
-  if (costRows.length === 0 && scopeItems.length === 0 && !targetLabel && !frozen) return null;
+  if (costRows.length === 0 && scopeItems.length === 0 && !targetLabel && !frozen && !stack) return null;
 
   return (
     <div className="estimate-view">
+      {stack ? <HowItRuns planText={body} /> : null}
       {targetLabel || frozen ? (
         <div className="button-row">
           {targetLabel ? <StateLabel tone="info">Target chosen: {targetLabel}</StateLabel> : null}
