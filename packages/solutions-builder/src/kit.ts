@@ -14,6 +14,7 @@ import type { ArtifactKind } from "./artifacts.js";
 import type { Stage } from "./ledger.js";
 import { EXAMPLE_HEADING_WORDS } from "./requirements-example.js";
 import { STACK_RUBRIC } from "./stack-rubric.js";
+import { PORTABLE_PACKAGING_GUIDANCE } from "./targets.js";
 
 /** Applied to every role, ahead of its own prompt. Section 8, "Shared prompt rules". */
 export const SHARED_RULES = `
@@ -803,6 +804,9 @@ UI, storage, auth, packaging and packages it records — never re-decide the
 stack, and never fill a gap in it with a default of your own. A record you
 believe is wrong is a blocked question to the human, not something to build
 around.
+
+Packaging, where the record's packaging is not "hub" mode:
+${PORTABLE_PACKAGING_GUIDANCE}
 
 Every reply you send:
 - Names the exact shell commands you ran, in the order you ran them, and
