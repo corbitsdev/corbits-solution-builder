@@ -60,6 +60,7 @@ export function Stage6Panel({
   projectId,
   requirementsInput,
   reviewInput,
+  requirementsBlock = null,
   strip,
   conversation,
   reader,
@@ -69,6 +70,13 @@ export function Stage6Panel({
   projectId: string;
   requirementsInput: string | null;
   reviewInput: string | null;
+  /** The workflow-minted `## Requirements (authoritative ids)` block
+   *  (`P/requirements.ts`'s `renderRequirementsBlock`) -- prefixed onto the
+   *  panel review body so a reviewer checks the Architect's stack citations
+   *  against the same ids the Architect was bound to. Null until
+   *  `mint_requirements` has run for this project; the caller (`index.tsx`)
+   *  still needs to wire that value in. */
+  requirementsBlock?: string | null;
   strip: ReactNode;
   conversation: ReactNode;
   reader: ReactNode;
@@ -112,9 +120,8 @@ export function Stage6Panel({
 
   const requestReview = (roleKey: string) => {
     if (!reviewInput) return;
-    runRole(roleKey, reviewInput, (updater) =>
-      setReviews((prev) => ({ ...prev, [roleKey]: updater(prev[roleKey] ?? STAGE6_IDLE_ROLE) })),
-    );
+    const body = requirementsBlock ? `${requirementsBlock}\n\n${reviewInput}` : reviewInput;
+    runRole(roleKey, body, (updater) => setReviews((prev) => ({ ...prev, [roleKey]: updater(prev[roleKey] ?? STAGE6_IDLE_ROLE) })));
   };
 
   // Reads each waiting role's thread back -- a mailbox nudge wakes this

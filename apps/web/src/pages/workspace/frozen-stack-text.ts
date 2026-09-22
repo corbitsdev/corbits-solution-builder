@@ -3,15 +3,12 @@
  * never a package list -- so the build specialist gets it without re-reading
  * the whole plan for the `## Stack` block.
  *
- * CL-8862 lane A is landing `Freeze.stack`, set the moment stage 7 is
- * approved and the process authority on what was actually frozen. Until that
- * merges, this parses the stack back out of the frozen plan text itself.
- *
- * Swap point: once `Freeze.stack` exists, replace the body of this function
- * with `const stack = freeze.stack;` and drop the `parseStackRecord` fallback
- * and the `planText` parameter entirely.
+ * `Freeze.stack` (`project-workflow/contracts.ts`, CL-8862) is the process
+ * authority on what was actually frozen at stage 7 -- read straight off it,
+ * never re-derived from the plan's text.
  */
-import { describeOperation, parseStackRecord, type StackRecord } from "@solutions-builder/app/stack";
+import { describeOperation, type StackRecord } from "@solutions-builder/app/stack";
+import type { Freeze } from "@solutions-builder/app/project-workflow/contracts";
 
 function renderStackText(stack: StackRecord): string {
   const description = describeOperation(stack);
@@ -26,7 +23,6 @@ function renderStackText(stack: StackRecord): string {
   ].join("\n");
 }
 
-export function renderStackBlock(freeze: unknown, planText: string): string | null {
-  const stack = (freeze as { readonly stack?: StackRecord } | null | undefined)?.stack ?? parseStackRecord(planText);
-  return stack ? renderStackText(stack) : null;
+export function renderStackBlock(freeze: Pick<Freeze, "stack"> | null | undefined): string | null {
+  return freeze ? renderStackText(freeze.stack) : null;
 }

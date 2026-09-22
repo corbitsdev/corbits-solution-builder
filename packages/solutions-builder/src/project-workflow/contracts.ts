@@ -1,5 +1,12 @@
+import { checkStackCitations, type RequirementEntry, type RequirementKind, type StackChoice, type StackRecord } from "../stack.js";
+
 export type StageNumber = number;
-export type DecisionKind = "open_review" | "approve" | "send_back";
+/** `mint_requirements` (CL-8862) mints `ProjectState.requirements` once, from
+ *  items the caller parsed out of the approved stage-6 requirements document
+ *  -- the workflow never reads that document itself. It carries no
+ *  reviewId/artifactId: it is not a review decision, just the one place ids
+ *  become authoritative before the Architect runs. */
+export type DecisionKind = "open_review" | "approve" | "send_back" | "mint_requirements";
 export type ReviewStatus = "open" | "approved" | "stale";
 
 export interface ReviewState {
@@ -62,14 +69,18 @@ export interface FrozenReference {
 export interface Stage7Evidence {
   readonly target: string;
   readonly frozen: readonly FrozenReference[];
+  /** The Architect's stack decision (kit.ts's `## Stack` block), citing only
+   *  `ProjectState.requirements` ids. Validated against them by `stage7Rule`. */
+  readonly stack: StackRecord;
 }
 
 /** The freeze recorded on `ProjectState` once stage 7 is approved: the
- *  chosen target and the frozen references, plus the decision that made
- *  them binding. Cleared by a send-back to stage <= 7. */
+ *  chosen target, the frozen references and the stack, plus the decision
+ *  that made them binding. Cleared by a send-back to stage <= 7. */
 export interface Freeze {
   readonly target: string;
   readonly frozen: readonly FrozenReference[];
+  readonly stack: StackRecord;
   readonly decisionId: string;
 }
 
@@ -107,6 +118,9 @@ export interface ProjectState {
   readonly reviewCounts: Readonly<Record<StageNumber, number>>;
   /** Stage 7's freeze, once approved; cleared by a send-back to stage <= 7. */
   readonly freeze: Freeze | null;
+  /** Requirement ids minted by `mint_requirements`, once, before the
+   *  Architect runs. Cleared by a send-back to stage <= 6 (CL-8862). */
+  readonly requirements: readonly RequirementEntry[];
 }
 
 interface DecisionCommon {
@@ -140,7 +154,15 @@ export interface SendBackPayload extends DecisionCommon {
   readonly reason: string;
 }
 
-export type DecisionPayload = OpenReviewPayload | ApprovePayload | SendBackPayload;
+export interface MintRequirementsPayload extends DecisionCommon {
+  readonly kind: "mint_requirements";
+  /** Items the caller parsed from the approved requirements document
+   *  (`P/requirements.ts`'s `extractRequirementItems`); the reducer mints
+   *  the id, deterministically, per kind in order (`FR-1`, `FR-2`, ...). */
+  readonly items: readonly { readonly kind: RequirementKind; readonly text: string }[];
+}
+
+export type DecisionPayload = OpenReviewPayload | ApprovePayload | SendBackPayload | MintRequirementsPayload;
 
 export type RefusalCode =
   | "duplicate"
@@ -156,7 +178,11 @@ export type RefusalCode =
   | "evidence_missing"
   | "quorum_not_met"
   | "target_missing"
-  | "frozen_already";
+  | "frozen_already"
+  | "requirements_already_minted"
+  | "stack_missing"
+  | "stack_uncited"
+  | "stack_unknown_requirement";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -164,6 +190,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isStageNumber(value: unknown): value is StageNumber {
   return typeof value === "number" && Number.isInteger(value);
+}
+
+const REQUIREMENT_KINDS: readonly RequirementKind[] = ["FR", "NFR", "IR", "AC"];
+
+function isRequirementItem(value: unknown): value is { kind: RequirementKind; text: string } {
+  return (
+    isRecord(value) &&
+    typeof value.text === "string" &&
+    value.text.length > 0 &&
+    REQUIREMENT_KINDS.includes(value.kind as RequirementKind)
+  );
 }
 
 /**
@@ -227,6 +264,11 @@ export function validateDecisionShape(value: unknown): DecisionPayload | null {
     return { ...common, kind: "send_back", reason: value.reason, ...(value.targetStage !== undefined ? { targetStage: value.targetStage } : {}) };
   }
 
+  if (value.kind === "mint_requirements") {
+    if (!Array.isArray(value.items) || value.items.length === 0 || !value.items.every(isRequirementItem)) return null;
+    return { ...common, kind: "mint_requirements", items: value.items as { kind: RequirementKind; text: string }[] };
+  }
+
   return null;
 }
 
@@ -242,6 +284,7 @@ export interface ApplyDecisionInput {
   readonly principalId: unknown;
   readonly decision: unknown;
   readonly freeze: Freeze | null;
+  readonly requirements: readonly RequirementEntry[];
 }
 
 function isQuorumOutcome(value: unknown): value is QuorumDecisionEvidence["outcome"] {
@@ -291,11 +334,45 @@ const stage5Rule: StageRule = (_state, payload) => {
   return quorumState(payload.evidence).met ? null : "quorum_not_met";
 };
 
+function isStackChoiceShape(value: unknown): value is StackChoice {
+  return (
+    isRecord(value) &&
+    typeof value.choice === "string" &&
+    typeof value.reason === "string" &&
+    Array.isArray(value.cites) &&
+    value.cites.every((c) => typeof c === "string")
+  );
+}
+
+const STACK_MODES: readonly StackRecord["mode"][] = ["plain", "inference", "agent", "local-workflow", "durable-workflow", "hub"];
+
+/** Structural check for the `StackRecord` an approve's evidence carries.
+ *  Not a re-implementation of lane C's `parseStackRecord` (`P/stack.ts`,
+ *  markdown -> StackRecord with arktype): this only guards the reducer
+ *  against a malformed JSON payload before `checkStackCitations` walks it. */
+function isStackRecordShape(value: unknown): value is StackRecord {
+  if (!isRecord(value)) return false;
+  if (!STACK_MODES.includes(value.mode as StackRecord["mode"])) return false;
+  if (!isStackChoiceShape(value.runtime)) return false;
+  if (value.ui !== null && !isStackChoiceShape(value.ui)) return false;
+  if (value.storage !== null && !isStackChoiceShape(value.storage)) return false;
+  if (value.auth !== null && !isStackChoiceShape(value.auth)) return false;
+  if (!isStackChoiceShape(value.packaging) || typeof (value.packaging as unknown as Record<string, unknown>).kind !== "string") return false;
+  if (
+    !Array.isArray(value.packages) ||
+    !value.packages.every((p) => isStackChoiceShape(p) && typeof (p as unknown as Record<string, unknown>).name === "string")
+  ) {
+    return false;
+  }
+  return Array.isArray(value.deferred) && value.deferred.every((d) => typeof d === "string");
+}
+
 /** Structural check for `ApprovePayload["evidence"]` at stage 7. */
 export function isStage7Evidence(value: unknown): value is Stage7Evidence {
   if (!isRecord(value)) return false;
   if (typeof value.target !== "string" || value.target.length === 0) return false;
   if (!Array.isArray(value.frozen)) return false;
+  if (!isStackRecordShape(value.stack)) return false;
   return value.frozen.every(
     (f) => isRecord(f) && isStageNumber(f.stage) && typeof f.artifactId === "string" && typeof f.version === "number" && typeof f.sha256 === "string",
   );
@@ -308,6 +385,7 @@ const stage7Rule: StageRule = (state, payload) => {
   const target = isRecord(evidence) && typeof evidence.target === "string" ? evidence.target : "";
   if (target.length === 0) return "target_missing";
   if (state.freeze) return "frozen_already";
+  if (isRecord(evidence) && !isStackRecordShape(evidence.stack)) return "stack_missing";
   if (!isStage7Evidence(evidence)) return "evidence_missing";
   const approvedStages = EARLIER_STAGES.filter((s) => state.reviews[s]?.status === "approved");
   if (evidence.frozen.length !== approvedStages.length) return "evidence_missing";
@@ -317,6 +395,11 @@ const stage7Rule: StageRule = (state, payload) => {
     if (!entry || entry.artifactId !== review.artifactId || entry.version !== review.version || entry.sha256 !== review.sha256) {
       return "evidence_missing";
     }
+  }
+  const requirementIds = new Set(state.requirements.map((r) => r.id));
+  const problems = checkStackCitations(evidence.stack, requirementIds);
+  if (problems.length > 0) {
+    return problems.some((p) => p.problem === "unknown_requirement") ? "stack_unknown_requirement" : "stack_uncited";
   }
   return null;
 };
@@ -367,6 +450,10 @@ const APPROVE_REASON_TEXT: Readonly<Record<ApproveReason, string>> = {
   quorum_not_met: "The stakeholder quorum has not been met yet.",
   target_missing: "Choose a target before approving.",
   frozen_already: "This build is already frozen.",
+  requirements_already_minted: "The requirement ids are already set for this project.",
+  stack_missing: "The plan's stack decision is missing.",
+  stack_uncited: "Every part of the stack must cite the requirement that forces it.",
+  stack_unknown_requirement: "The stack cites a requirement id that does not exist.",
 };
 
 /** `approveReason`'s code, in plain language -- the one place stage 5's
@@ -395,6 +482,7 @@ function stateOf(input: ApplyDecisionInput): ProjectState {
     stageOrder: input.stageOrder,
     reviewCounts: input.reviewCounts,
     freeze: input.freeze,
+    requirements: input.requirements,
   };
 }
 
@@ -414,7 +502,9 @@ function refused(
     principalId,
     at: payload.at,
     ...(payload.kind === "approve" ? { reviewId: payload.reviewId } : {}),
-    ...(payload.kind !== "send_back" ? { artifactId: payload.artifactId, version: payload.version, sha256: payload.sha256 } : {}),
+    ...(payload.kind === "open_review" || payload.kind === "approve"
+      ? { artifactId: payload.artifactId, version: payload.version, sha256: payload.sha256 }
+      : {}),
     ...(payload.kind === "send_back" && payload.targetStage !== undefined ? { targetStage: payload.targetStage } : {}),
     ...extra,
   };
@@ -470,6 +560,27 @@ export function applyDecision(input: ApplyDecisionInput): ProjectState {
   }
   if (payload.stage !== state.stage) {
     return refused(state, payload, principalId, "wrong_stage");
+  }
+
+  if (payload.kind === "mint_requirements") {
+    if (state.requirements.length > 0) {
+      return refused(state, payload, principalId, "requirements_already_minted");
+    }
+    const counts: Partial<Record<RequirementKind, number>> = {};
+    const requirements: RequirementEntry[] = payload.items.map((item) => {
+      const n = (counts[item.kind] ?? 0) + 1;
+      counts[item.kind] = n;
+      return { id: `${item.kind}-${String(n)}`, kind: item.kind, text: item.text };
+    });
+    const record: DecisionRecord = {
+      decisionId: payload.decisionId,
+      kind: "mint_requirements",
+      stage: payload.stage,
+      accepted: true,
+      principalId,
+      at: payload.at,
+    };
+    return { ...state, requirements, decisions: [...state.decisions, record] };
   }
 
   if (payload.kind === "open_review") {
@@ -530,7 +641,7 @@ export function applyDecision(input: ApplyDecisionInput): ProjectState {
     const quorum = state.stage === 5 && isStage5Evidence(payload.evidence) ? quorumState(payload.evidence) : null;
     const freeze: Freeze | null =
       state.stage === 7 && isStage7Evidence(payload.evidence)
-        ? { target: payload.evidence.target, frozen: payload.evidence.frozen, decisionId: payload.decisionId }
+        ? { target: payload.evidence.target, frozen: payload.evidence.frozen, stack: payload.evidence.stack, decisionId: payload.decisionId }
         : state.freeze;
     const record: DecisionRecord = {
       decisionId: payload.decisionId,
@@ -576,7 +687,12 @@ export function applyDecision(input: ApplyDecisionInput): ProjectState {
     reason: payload.reason,
   };
   const freeze = targetStage <= 7 ? null : state.freeze;
-  return { ...state, stage: targetStage, reviews, decisions: [...state.decisions, record], freeze };
+  // Requirement ids are stage 6's: a send-back that reopens stage 6 or
+  // earlier can change the approved document they were minted from, so the
+  // ids are cleared too -- `mint_requirements` runs again before the
+  // Architect's next draft.
+  const requirements = targetStage <= 6 ? [] : state.requirements;
+  return { ...state, stage: targetStage, reviews, decisions: [...state.decisions, record], freeze, requirements };
 }
 
 export interface InitProjectStagePayload {
@@ -606,5 +722,6 @@ export function initProjectState(payload: InitProjectPayload): ProjectState {
     stageOrder: payload.stages.map((s) => s.stage),
     reviewCounts: {},
     freeze: null,
+    requirements: [],
   };
 }

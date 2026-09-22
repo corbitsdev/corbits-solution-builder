@@ -8,6 +8,7 @@
 import type { ArtifactNode, AudienceDecision } from "./client.ts";
 import type { ProjectWorkflowView } from "./project-workflow.ts";
 import type { QuorumDecisionEvidence, Stage5Evidence, Stage7Evidence } from "@solutions-builder/app/project-workflow/contracts";
+import type { StackRecord } from "@solutions-builder/app/stack";
 
 const OUTCOME_OF: Record<AudienceDecision["decision"], QuorumDecisionEvidence["outcome"]> = {
   proceed: "proceed",
@@ -26,6 +27,10 @@ const STAGE_REFUSAL_MESSAGES: Readonly<Record<string, string>> = {
   quorum_not_met: "The stakeholder quorum has not been met yet.",
   target_missing: "Choose a target before approving.",
   frozen_already: "This build is already frozen.",
+  requirements_already_minted: "The requirement ids are already set for this project.",
+  stack_missing: "The plan's stack decision is missing.",
+  stack_uncited: "Every part of the stack must cite the requirement that forces it.",
+  stack_unknown_requirement: "The stack cites a requirement id that does not exist.",
 };
 
 /** A stage rule's refusal code, in plain language; anything not in the map
@@ -42,7 +47,28 @@ export type StageEvidenceDeps = {
   readonly workflowView: ProjectWorkflowView | null;
   readonly stakeholders: (projectId: string) => Promise<{ audiences: { name: string; role: string }[]; audienceQuorum: number }>;
   readonly audienceDecisions: (tenantId: string, packageNodeId: string) => Promise<{ decisions: readonly AudienceDecision[] }>;
+  /** Reads the approved stage-6 build plan's text, to pull its `## Stack`
+   *  block out for stage 7's evidence. */
+  readonly artifactContent: (tenantId: string, nodeId: string) => Promise<{ content: string }>;
 };
+
+/**
+ * Pulls the fenced ```json stack block out of the Architect's build plan.
+ * Temporary until CL-8861's Architect prompt and CL-8862's
+ * `parseStackRecord` (`P/stack.ts`, markdown -> StackRecord with arktype
+ * validation) land -- this is the single place to swap that call in. Until
+ * then this does the minimal JSON.parse a well-formed plan needs; anything
+ * malformed comes back `null` and the reducer refuses `stack_missing`.
+ */
+function extractStackFromPlan(planText: string): StackRecord | null {
+  const match = /```json stack\r?\n([\s\S]*?)```/.exec(planText);
+  if (!match) return null;
+  try {
+    return JSON.parse(match[1]!) as StackRecord;
+  } catch {
+    return null;
+  }
+}
 
 async function stage5Evidence(deps: StageEvidenceDeps): Promise<Stage5Evidence> {
   const policy = await deps.stakeholders(deps.projectId);
@@ -71,8 +97,9 @@ async function stage5Evidence(deps: StageEvidenceDeps): Promise<Stage5Evidence> 
 
 /** Every earlier stage (1..6) the view shows approved, frozen as a reference
  *  to exactly the review the workflow itself holds -- never re-derived from
- *  an artifact's content. */
-function stage7Evidence(deps: StageEvidenceDeps): Stage7Evidence | undefined {
+ *  an artifact's content -- plus the stack the Architect's approved plan
+ *  recorded, read straight off that plan's own text. */
+async function stage7Evidence(deps: StageEvidenceDeps): Promise<Stage7Evidence | undefined> {
   if (!deps.chosenTarget || !deps.workflowView) return undefined;
   const frozen = Object.entries(deps.workflowView.reviews)
     .filter(([stage, review]) => review?.status === "approved" && Number(stage) <= 6)
@@ -82,7 +109,14 @@ function stage7Evidence(deps: StageEvidenceDeps): Stage7Evidence | undefined {
       version: review!.version,
       sha256: review!.sha256,
     }));
-  return { target: deps.chosenTarget, frozen };
+  const stage6Review = deps.workflowView.reviews[6];
+  const planNode =
+    stage6Review && stage6Review.status === "approved"
+      ? deps.nodes.find((node) => node.artifactId === stage6Review.artifactId && node.version === stage6Review.version)
+      : undefined;
+  const planText = planNode ? (await deps.artifactContent(deps.tenantId, planNode.id)).content : "";
+  const stack = extractStackFromPlan(planText) ?? ({} as StackRecord);
+  return { target: deps.chosenTarget, frozen, stack };
 }
 
 /** Builds the `approve` decision's evidence for a stage, or `undefined` for
@@ -95,8 +129,10 @@ export async function stageEvidence(stage: number, deps: StageEvidenceDeps): Pro
 
 /** A short "Frozen for this build" line for stage 8's opening mail, so the
  *  build specialist sees the target and every frozen reference without
- *  re-deriving them from the plan. */
-export function frozenSummaryLine(evidence: Stage7Evidence): string {
+ *  re-deriving them from the plan. Takes only the two fields it renders, so
+ *  a caller reading `workflowView.freeze` back (no `stack` needed here)
+ *  does not have to carry the rest of `Stage7Evidence` just to call it. */
+export function frozenSummaryLine(evidence: Pick<Stage7Evidence, "target" | "frozen">): string {
   const refs = [...evidence.frozen].sort((a, b) => a.stage - b.stage).map((ref) => `stage ${String(ref.stage)} v${String(ref.version)}`);
   return `Frozen for this build: target ${evidence.target}; ${refs.join(", ")}.`;
 }
