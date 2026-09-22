@@ -9,6 +9,7 @@ function summary(overrides: Partial<ProjectSummary> = {}): ProjectSummary {
     id: "proj_1",
     revision: 1,
     title: "Orbit payroll migration",
+    description: null,
     stage: null,
     archivedAt: null,
     needsDecision: true,
@@ -36,6 +37,18 @@ describe("Projects markup", () => {
     expect(html).toContain("project-card-menu");
     expect(html).toContain("Options for Orbit payroll migration");
     expect(html).not.toContain("ago");
+  });
+
+  test("card-desc uses the stored problem one-liner when the list carries it", () => {
+    const html = renderToStaticMarkup(
+      createElement(Projects, {
+        projects: [summary({ description: "Move payroll cutoff + reconciliation off the legacy batch system." })],
+        onOpen: () => undefined,
+        onChanged: () => undefined,
+      }),
+    );
+    expect(html).toContain("card-desc");
+    expect(html).toContain("Move payroll cutoff + reconciliation off the legacy batch system.");
   });
 
   test("an empty list still uses the mockup empty card", () => {

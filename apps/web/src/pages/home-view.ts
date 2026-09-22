@@ -30,12 +30,16 @@ export function canStartProject(problem: string): boolean {
 }
 
 /**
- * One-liner under the card title. The list payload has no problem statement;
- * use it when a caller has one, otherwise the title already on the card.
- * Never invent a subtitle.
+ * One-liner under the card title. Prefers the stored problem line
+ * (`description` / `problemStatement`) when present; otherwise the title
+ * already on the card. Never invent a subtitle.
  */
-export function cardDescription(project: { title: string; problemStatement?: string | null }): string {
-  const problem = project.problemStatement?.trim();
+export function cardDescription(project: {
+  title: string;
+  description?: string | null;
+  problemStatement?: string | null;
+}): string {
+  const problem = (project.description ?? project.problemStatement)?.trim();
   if (problem) {
     const line = problem.split("\n")[0]?.trim();
     if (line) return line;

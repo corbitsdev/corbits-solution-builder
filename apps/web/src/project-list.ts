@@ -15,12 +15,50 @@
  * `listSpecialistDeployments` (same as `decisions-fold.ts`).
  */
 import type { Transport } from "@intx/hub-client";
-import { listProjectRecords, listSpecialistDeployments, resolveWorkspace } from "@solutions-builder/installer";
+import { MATERIAL_KIND } from "@solutions-builder/app/artifacts";
+import {
+  getArtifact,
+  listArtifacts,
+  listProjectRecords,
+  listSpecialistDeployments,
+  resolveWorkspace,
+} from "@solutions-builder/installer";
 import type { ProjectSummary } from "./client.ts";
 import { createHubTransport } from "./hub.ts";
 import { pendingApprovals } from "./pending-approvals.ts";
 import { workspaceGuidance } from "./pages/workspace/guidance.ts";
 import type { ChatMessage } from "./stage-mail.ts";
+
+/**
+ * The `source_material` variant a project's own opening problem statement is
+ * stamped under at create time. `createProject` writes it; `projectOpening`
+ * and the home-card description read it back by this marker.
+ */
+export const OPENING_VARIANT = "__opening__";
+
+/**
+ * First non-empty line of stored problem text. Empty or missing → null;
+ * never invented copy.
+ */
+export function descriptionFromStoredProblem(text: string | null | undefined): string | null {
+  if (text == null) return null;
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed) return trimmed;
+  }
+  return null;
+}
+
+function openingArtifactId(
+  artifacts: readonly { id: string; metadata: Record<string, unknown> | null }[],
+  projectId: string,
+): string | null {
+  for (const artifact of artifacts) {
+    const sb = (artifact.metadata as { sb?: { projectId?: unknown; variant?: unknown } } | null)?.sb;
+    if (sb?.projectId === projectId && sb.variant === OPENING_VARIANT) return artifact.id;
+  }
+  return null;
+}
 
 const workflowStageCache = new Map<string, { stage: number; done: boolean; at: number }>();
 // 5s — the same cadence `app.tsx`'s own `refresh()` polls the project list
@@ -114,6 +152,10 @@ export async function displayTurn(
  * the project workflow is the only authority on it, and reading every
  * project's workflow just to list cards would mean one read per project on
  * every list refresh; `displayStage` reads it per card instead.
+ * `description` is the first non-empty line of the opening problem
+ * (`source_material` / `__opening__`): one tenant-wide list, then one
+ * `getArtifact` per card that has one — same extra-read pattern as
+ * `listSpecialistDeployments`.
  */
 export async function listProjectSummaries(transport: Transport = createHubTransport()): Promise<ProjectSummary[]> {
   const workspace = await resolveWorkspace(transport);
@@ -122,15 +164,21 @@ export async function listProjectSummaries(transport: Transport = createHubTrans
   const pending = (await pendingApprovals(workspace.tenantId, transport).catch(() => [])).filter(
     (approval) => approval.status === "pending",
   );
+  const materials = await listArtifacts(transport, workspace.tenantId, { kind: MATERIAL_KIND }).catch(() => []);
   return Promise.all(
     records.map(async (record): Promise<ProjectSummary> => {
       const deployments = await listSpecialistDeployments(transport, workspace.tenantId, record.id).catch(() => []);
       const deploymentIds = new Set(deployments.map((deployment) => deployment.deploymentId));
       const needsDecision = pending.some((approval) => deploymentIds.has(approval.anchorRunId));
+      const openingId = openingArtifactId(materials, record.id);
+      const opening = openingId
+        ? await getArtifact(transport, workspace.tenantId, openingId).catch(() => null)
+        : null;
       return {
         id: record.id,
         revision: record.revision,
         title: record.title,
+        description: descriptionFromStoredProblem(opening?.content ?? null),
         stage: null,
         archivedAt: record.archivedAt ? record.archivedAt.toISOString() : null,
         needsDecision,

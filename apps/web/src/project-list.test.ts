@@ -1,10 +1,26 @@
 import { describe, expect, test } from "bun:test";
-import { displayTurn, turnLabel, type TurnDeps } from "./project-list.ts";
+import { descriptionFromStoredProblem, displayTurn, turnLabel, type TurnDeps } from "./project-list.ts";
 import type { ChatMessage } from "./stage-mail.ts";
 
 function message(overrides: Partial<ChatMessage> = {}): ChatMessage {
   return { id: "1", author: "agent", body: "hello", at: "2026-01-01T00:00:00.000Z", ...overrides };
 }
+
+describe("descriptionFromStoredProblem", () => {
+  test("first non-empty line, or null — never invented copy", () => {
+    expect(
+      descriptionFromStoredProblem("Move payroll cutoff + reconciliation off the legacy batch system."),
+    ).toBe("Move payroll cutoff + reconciliation off the legacy batch system.");
+    expect(descriptionFromStoredProblem("High-volume vehicle telemetry.\nMore detail on a second line.")).toBe(
+      "High-volume vehicle telemetry.",
+    );
+    expect(descriptionFromStoredProblem("\n  \nFirst real line\nSecond")).toBe("First real line");
+    expect(descriptionFromStoredProblem("   ")).toBeNull();
+    expect(descriptionFromStoredProblem("")).toBeNull();
+    expect(descriptionFromStoredProblem(null)).toBeNull();
+    expect(descriptionFromStoredProblem(undefined)).toBeNull();
+  });
+});
 
 describe("turnLabel", () => {
   test("a pending approval wins over everything else", () => {

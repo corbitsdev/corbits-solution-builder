@@ -48,6 +48,17 @@ describe("cardDescription", () => {
     ).toBe("High-volume vehicle telemetry.");
     expect(cardDescription({ title: "Untitled Project", problemStatement: "   " })).toBe("Untitled Project");
   });
+
+  test("prefers the list description one-liner over the title", () => {
+    expect(
+      cardDescription({
+        title: "Orbit payroll migration",
+        description: "Move payroll cutoff + reconciliation off the legacy batch system.",
+      }),
+    ).toBe("Move payroll cutoff + reconciliation off the legacy batch system.");
+    expect(cardDescription({ title: "Untitled Project", description: null })).toBe("Untitled Project");
+    expect(cardDescription({ title: "Untitled Project", description: "   " })).toBe("Untitled Project");
+  });
 });
 
 describe("stageTrackSegClass", () => {

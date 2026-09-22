@@ -74,15 +74,6 @@ import {
  * mail-chat specialist's reply is the draft, held only in the mailbox, until
  * approval turns it into the stage's document of record.
  */
-/**
- * The `source_material` variant a project's own opening problem statement is
- * stamped under, at create time — the mail-agent contract (CL-8612) has no
- * lifecycle run whose `RunStarted` trigger payload could carry it, so it is
- * written the same way any other attached material is, and `projectOpening`
- * reads it back by this marker.
- */
-const OPENING_VARIANT = "__opening__";
-
 export const STAGE_DRAFT_KIND: Readonly<Record<number, string>> = {
   1: "problem_brief",
   2: "solution_constraints",
@@ -110,7 +101,7 @@ import {
   type WithdrawnMark,
 } from "./withdrawn-turns.ts";
 import { hubCredentials, hubOrigin } from "./hub-origin.ts";
-import { listProjectSummaries } from "./project-list.ts";
+import { listProjectSummaries, OPENING_VARIANT } from "./project-list.ts";
 import { openDecisions } from "./decisions-fold.ts";
 import { loadProjectView, toArtifactNode } from "./project-view.ts";
 import { projectUsage, type ProjectUsage, type WorkspaceSpend } from "./project-usage.ts";
@@ -304,6 +295,8 @@ export type ProjectSummary = {
   id: string;
   revision: number;
   title: string;
+  /** First non-empty line of the stored opening problem, or null when none was written. */
+  description: string | null;
   /** Always null off `listProjectSummaries` -- `project-list.ts`'s `displayStage` reads the project workflow's own stage per card, or null when it could not be read. */
   stage: number | null;
   archivedAt: string | null;
