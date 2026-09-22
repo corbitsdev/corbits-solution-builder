@@ -85,6 +85,8 @@ describe("approveStage", () => {
     const ref = { artifactId: "art_1", version: 1, sha256: "hash1" };
     const opened = view({ openReview: { reviewId: "stage-1-review-1", artifactId: ref.artifactId, version: ref.version, sha256: ref.sha256, status: "open" } });
     const advanced = view({ stage: 2 });
+    // approveStage reads the view once, then ensureReviewOpen reads it again
+    // before deciding to send open_review — the fixture needs both no-review reads.
     const { deps, decisions } = depsFor([view(), view(), opened, advanced]);
     const result = await approveStage(deps, { projectId: "p1", stage: 1, ref });
     expect(result).toEqual({ ok: true, stage: 2 });
@@ -198,9 +200,13 @@ describe("approveStage", () => {
     const deps2: StageApprovalDeps = {
       view: async () => {
         round2Calls += 1;
-        return round2Calls <= 2
-          ? view({ decisions: [{ decisionId: "d1", kind: "send_back", stage: 1, accepted: true, principalId: "p" }], openReview })
-          : view({ stage: 2 });
+        // After the send-back the old review is stale: both pre-decision reads
+        // show no open review, the poll then sees the fresh review open, and
+        // the approve poll sees the stage advance.
+        const sentBack = { decisions: [{ decisionId: "d1", kind: "send_back" as const, stage: 1, accepted: true, principalId: "p" }] };
+        if (round2Calls <= 2) return view(sentBack);
+        if (round2Calls === 3) return view({ ...sentBack, openReview });
+        return view({ stage: 2 });
       },
       decide: async (_projectId, decision) => {
         round2Ids.push(decision["decisionId"] as string);
@@ -222,7 +228,7 @@ describe("approveStage", () => {
       const deps: StageApprovalDeps = {
         view: async () => {
           calls += 1;
-          return calls <= 2 ? view({ decisions: [], openReview }) : view({ stage: 2 });
+          return calls === 1 ? view({ decisions: [], openReview }) : view({ stage: 2 });
         },
         decide: async (_projectId, decision) => {
           ids[i]!.push(decision["decisionId"] as string);
