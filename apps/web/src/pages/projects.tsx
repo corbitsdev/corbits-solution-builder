@@ -1,10 +1,6 @@
 /**
- * Projects: where a person starts something and where they pick up what is
- * already going.
- *
- * One question at the top, asked the way the rest of the app talks — a message
- * box, not a form. Under it the projects as cards, the ones waiting on a
- * decision first, because that is the whole point of surfacing them.
+ * Projects: the home list. A composer to start something, then the work as
+ * cards — the mockup's layout, live data.
  */
 // INTEGRATE (CL-8756): origin/main's SortableTable line is dropped here —
 // this lane's client no longer exports SpendRow/SpendTotals (spend now lives
@@ -18,7 +14,6 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  EmptyState,
   Input,
   Menu,
   MenuContent,
@@ -26,19 +21,28 @@ import {
   MenuSeparator,
   MenuTrigger,
 } from "@corbits/react-ui";
-import { ArrowRight, Ellipsis } from "lucide-react";
+import { Ellipsis } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, ApiFailure, type ActiveModel, type ProjectInfo, type ProjectSummary } from "../client.js";
-import { Button, Banner, downloadArtifact, StateLabel, stageName } from "../components.jsx";
+import { Banner, downloadArtifact, stageName } from "../components.jsx";
 // INTEGRATE (CL-8756): api.exportProject is gone on this lane — export is
 // assembled in the browser (assembleBundle) and saved via downloadArtifact;
 // stage/turn/done come from project-list.ts helpers and spend copy from
-// project-usage.ts. Behavioral-only wiring; main's order/copy preserved.
+// project-usage.ts. Behavioral-only wiring; main's order and copy preserved.
 import { assembleBundle, bundleFileName } from "../project-export.js";
 import { displayDone, displayStage, displayTurn } from "../project-list.js";
 import { formatSpendHeadline, formatUsage, type TokenCounts, type WorkspaceSpend } from "../project-usage.js";
 import { DEFAULT_POLICY } from "./onboarding.jsx";
 import { Dictated } from "../dictation.jsx";
+import {
+  HOME_COMPOSER_PLACEHOLDER,
+  HOME_EMPTY_DESCRIPTION,
+  HOME_EMPTY_TITLE,
+  HOME_NEEDS_DECISION,
+  canStartProject,
+  cardFootStage,
+  stageTrackSegClass,
+} from "./home-view.js";
 
 export function Projects({
   projects,
@@ -56,7 +60,6 @@ export function Projects({
   // exists, then attached before it opens, so the first draft reads it.
   const [material, setMaterial] = useState<File[]>([]);
   const [dragging, setDragging] = useState(false);
-  const materialInput = useRef<HTMLInputElement>(null);
   const addMaterial = (files: FileList | File[]) => {
     const next = [...files].filter((file) => !material.some((held) => held.name === file.name && held.size === file.size));
     if (next.length > 0) setMaterial([...material, ...next]);
@@ -107,7 +110,7 @@ export function Projects({
   });
 
   const start = async () => {
-    if (problem.trim().length < 10 || busy) return;
+    if (!canStartProject(problem) || busy) return;
     setBusy(true);
     setError(null);
     try {
@@ -133,10 +136,10 @@ export function Projects({
     setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
 
   return (
-    <div className="projects">
+    <div className="home-page">
       <section
-        className={dragging ? "start is-dragging" : "start"}
-        aria-labelledby="start-title"
+        className={dragging ? "new-project is-dragging" : "new-project"}
+        aria-label="New project"
         onDragOver={(event) => {
           if ([...event.dataTransfer.types].includes("Files")) {
             event.preventDefault();
@@ -153,119 +156,61 @@ export function Projects({
           addMaterial(event.dataTransfer.files);
         }}
       >
-        <h2 id="start-title">What are we building?</h2>
-        <p className="start-lead">
-          Describe your problem in your own words. We will brainstorm with you to find the right
-          solution. If you have any documents or other information you would like to give us, just
-          drag it here.
-        </p>
         {error ? <Banner tone="error" title={error} /> : null}
-        {/* INTEGRATE (CL-8756): main's okay Banner becomes an inline-note line —
-            same diction, said once next to the input it came from. */}
         {notice ? <p className="inline-note">{notice}</p> : null}
+        <p id="home-composer-hint" className="visually-hidden">
+          At least ten characters to start a project.
+        </p>
         <Dictated value={problem} onValueChange={setProblem} disabled={busy}>
           <ChatInput
-            className="start-input"
+            className="composer-box"
             value={problem}
             onValueChange={setProblem}
             onSend={() => void start()}
             working={busy}
             disabled={busy}
-            placeholder="The thing that keeps eating your afternoons…"
+            placeholder={HOME_COMPOSER_PLACEHOLDER}
+            onAttach={addMaterial}
+            attachments={material.map((file) => ({ id: `${file.name}:${file.size}`, name: file.name }))}
+            onRemoveAttachment={(entry) =>
+              setMaterial(material.filter((held) => `${held.name}:${held.size}` !== entry.id))
+            }
           />
         </Dictated>
-        <p className="start-hint">
-          {problem.trim().length > 0 && problem.trim().length < 10
-            ? "A little more. A sentence is enough."
-            : "Enter to start. Rough is fine."}
-        </p>
-        {/* The material, named, each removable, and a picker for anyone not
-            dragging. What the specialists can read is said plainly. */}
-        <div className="start-material">
-          <input
-            ref={materialInput}
-            type="file"
-            multiple
-            hidden
-            accept=".txt,.md,.csv,.json,.html,.xlsx,.xls,.docx,.doc,.pptx,.ppt,.pdf,.png,.jpg,.jpeg,.gif,.webp"
-            aria-label="Choose documents or images to give the specialists"
-            onChange={(event) => {
-              if (event.target.files) addMaterial(event.target.files);
-              event.target.value = "";
-            }}
-          />
-          {material.length > 0 ? (
-            <ul className="material-list" aria-label="Attached files">
-              {material.map((file) => (
-                <li key={`${file.name}:${file.size}`} className="material-chip">
-                  <span>{file.name}</span>
-                  <span className="material-size">{Math.max(1, Math.round(file.size / 1024))} KB</span>
-                  <button
-                    type="button"
-                    className="material-remove"
-                    aria-label={`Remove ${file.name}`}
-                    onClick={() => setMaterial(material.filter((held) => held !== file))}
-                  >
-                    ×
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          <p className="start-hint">
-            <Button variant="link" disabled={busy} onClick={() => materialInput.current?.click()}>
-              Add documents or images…
-            </Button>
-            {" "}Spreadsheets, PDFs, text, CSV, JSON, Markdown and HTML are read by the specialists.
-            Word files and images are kept with the project and named to them.
-          </p>
-        </div>
       </section>
 
-      <SpendBox key={projects.length} />
-
       <section className="project-grid-section" aria-labelledby="projects-title">
-        <div className="project-grid-head">
-          <h3 id="projects-title" className="project-grid-title">
-            {live.length === 0
-              ? "Nothing in progress"
-              : `${live.length} project${live.length === 1 ? "" : "s"}`}
-          </h3>
-          {/* A project from another instance of this app. The file is one of
-              its own exports; the input is hidden because the file picker is
-              the whole interaction and a bare input reads as a form. */}
-          <input
-            ref={importInput}
-            type="file"
-            accept="application/json,.json"
-            hidden
-            aria-label="Choose a project export to import"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) void importFile(file);
-            }}
-          />
-          <button
-            type="button"
-            className="import-link"
-            disabled={busy}
-            onClick={() => importInput.current?.click()}
-          >
+        <div className="section-label">
+          <h2 id="projects-title">Projects</h2>
+          <label className="import-link">
             Import bundle
-          </button>
+            <input
+              ref={importInput}
+              type="file"
+              accept="application/json,.json"
+              hidden
+              disabled={busy}
+              aria-label="Choose a project export to import"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void importFile(file);
+              }}
+            />
+          </label>
         </div>
         {live.length === 0 ? (
-          <EmptyState
-            title="No projects yet"
-            description="Start with a problem you can describe but have not scoped."
-          />
+          <div className="grid">
+            <div className="card is-empty">
+              <h3>{HOME_EMPTY_TITLE}</h3>
+              <p className="card-desc">{HOME_EMPTY_DESCRIPTION}</p>
+            </div>
+          </div>
         ) : (
-          <div className="project-grid">
-            {ordered.map((project, index) => (
+          <div className="grid">
+            {ordered.map((project) => (
               <ProjectCard
                 key={project.id}
                 project={project}
-                index={index}
                 onOpen={() => onOpen(project.id)}
                 onChanged={onChanged}
                 onError={failed}
@@ -276,17 +221,18 @@ export function Projects({
         )}
       </section>
 
+      <SpendBox key={projects.length} />
+
       {archived.length > 0 ? (
         <details className="project-archive">
           <summary>
             {archived.length} archived
           </summary>
-          <div className="project-grid">
-            {archived.map((project, index) => (
+          <div className="grid">
+            {archived.map((project) => (
               <ProjectCard
                 key={project.id}
                 project={project}
-                index={index}
                 onOpen={() => onOpen(project.id)}
                 onChanged={onChanged}
                 onError={failed}
@@ -302,14 +248,12 @@ export function Projects({
 
 function ProjectCard({
   project,
-  index,
   onOpen,
   onChanged,
   onError,
   onNotice,
 }: {
   project: ProjectSummary;
-  index: number;
   onOpen: () => void;
   onChanged: () => void;
   onError: (cause: unknown) => void;
@@ -423,130 +367,116 @@ function ProjectCard({
     void act(() => api.updateProject(project.id, { title: next }));
   };
 
-  const status = project.archivedAt ? (
-    <StateLabel tone="disabled">Archived</StateLabel>
-  ) : // INTEGRATE (CL-8756): the workflow could not be read at all — lane-only
-  // arm, main has no equivalent; offered so the card never shows a number.
-  stageFailed ? (
-    <StateLabel tone="error">Status unavailable</StateLabel>
-  ) : // INTEGRATE (CL-8756): main's state === "delivered"/"backtracked" arms are
-  // dropped — the summary no longer carries state — done comes from the
-  // workflow view instead; copy kept.
-  done ? (
-    <StateLabel tone="success">Delivered</StateLabel>
-  ) : project.needsDecision ? (
-    <StateLabel tone="warning">{project.waits[0]?.title ?? "Needs your decision"}</StateLabel>
-  ) : project.turn === "writing" ? (
-    <StateLabel tone="loading">Writing the draft</StateLabel>
-  ) : // INTEGRATE (CL-8756): main's turn === "question"/"approve" arms are
-  // dropped — the summary turn is only "writing"|"idle" — whose turn it is
-  // comes off the stage mail thread instead.
-  turn ? (
-    <StateLabel tone={turn === "Specialist working" ? "loading" : "warning"}>{turn}</StateLabel>
-  ) : stage ? (
-    <StateLabel tone="info">Waiting to start</StateLabel>
-  ) : (
-    <StateLabel tone="info">Not started</StateLabel>
-  );
+  const halt = (event: React.SyntheticEvent) => event.stopPropagation();
 
   return (
     <article
-      className={waiting ? "project-card stagger needs-decision" : "project-card stagger"}
-      style={{ "--i": index } as React.CSSProperties}
+      className={waiting ? "card needs" : "card"}
+      tabIndex={renaming ? -1 : 0}
+      aria-label={project.title}
+      onClick={() => {
+        if (!renaming) onOpen();
+      }}
+      onKeyDown={(event) => {
+        if (renaming || event.target !== event.currentTarget) return;
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
     >
-      <div className="project-card-stage">
-        {stageFailed ? (
-          <span>
-            Status unavailable{" "}
-            <button type="button" className="link-button" onClick={() => setStageAttempt((attempt) => attempt + 1)}>
-              Retry
-            </button>
-          </span>
-        ) : (
-          <span>
-            Stage {stage || "—"} of 9 · {stageName(stage)}
-          </span>
-        )}
-        <Menu onOpenChange={(open) => !open && setConfirming(false)}>
-          <MenuTrigger asChild>
-            <button type="button" className="project-card-menu" aria-label={`Options for ${project.title}`}>
-              <Ellipsis aria-hidden="true" />
-            </button>
-          </MenuTrigger>
-          <MenuContent align="end">
-            <MenuItem onSelect={() => setInfoOpen(true)}>Project info…</MenuItem>
-            <MenuItem onSelect={() => setRenaming(true)}>Rename</MenuItem>
-            {/* INTEGRATE (CL-8756): api.exportProject is gone — exportProject
-                above assembles the bundle in the browser instead. Row order,
-                label and position stay main's. */}
-            <MenuItem disabled={exporting} onSelect={() => void exportProject()}>
-              {exporting ? "Exporting…" : "Export…"}
-            </MenuItem>
-            <MenuItem
-              onSelect={() =>
-                void act(() => api.updateProject(project.id, { archived: !project.archivedAt }))
-              }
-            >
-              {project.archivedAt ? "Unarchive" : "Archive"}
-            </MenuItem>
-            <MenuSeparator />
-            {confirming ? (
-              <MenuItem
-                className="menu-danger"
-                onSelect={() => void act(() => api.deleteProject(project.id))}
-              >
-                Yes, delete it
-              </MenuItem>
-            ) : (
-              <MenuItem
-                className="menu-danger"
-                onSelect={(event) => {
-                  event.preventDefault();
-                  setConfirming(true);
+      <div className="card-top">
+        {renaming ? (
+          <div onClick={halt} onKeyDown={halt}>
+            <Dictated value={title} onValueChange={setTitle} align="center">
+              <Input
+                ref={field}
+                className="project-card-rename"
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                onBlur={rename}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") rename();
+                  if (event.key === "Escape") {
+                    setTitle(project.title);
+                    setRenaming(false);
+                  }
                 }}
-              >
-                Delete…
+                aria-label="Project name"
+              />
+            </Dictated>
+          </div>
+        ) : (
+          <h3>{project.title}</h3>
+        )}
+        <div className="card-top-end" onClick={halt} onKeyDown={halt}>
+          {waiting ? <span className="badge-decision">{HOME_NEEDS_DECISION}</span> : null}
+          <Menu onOpenChange={(open) => !open && setConfirming(false)}>
+            <MenuTrigger asChild>
+              <button type="button" className="project-card-menu" aria-label={`Options for ${project.title}`}>
+                <Ellipsis aria-hidden="true" />
+              </button>
+            </MenuTrigger>
+            <MenuContent align="end">
+              <MenuItem onSelect={() => setInfoOpen(true)}>Project info…</MenuItem>
+              <MenuItem onSelect={() => setRenaming(true)}>Rename</MenuItem>
+              <MenuItem disabled={exporting} onSelect={() => void exportProject()}>
+                {exporting ? "Exporting…" : "Export…"}
               </MenuItem>
-            )}
-          </MenuContent>
-        </Menu>
+              <MenuItem
+                onSelect={() =>
+                  void act(() => api.updateProject(project.id, { archived: !project.archivedAt }))
+                }
+              >
+                {project.archivedAt ? "Unarchive" : "Archive"}
+              </MenuItem>
+              <MenuSeparator />
+              {confirming ? (
+                <MenuItem
+                  className="menu-danger"
+                  onSelect={() => void act(() => api.deleteProject(project.id))}
+                >
+                  Yes, delete it
+                </MenuItem>
+              ) : (
+                <MenuItem
+                  className="menu-danger"
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    setConfirming(true);
+                  }}
+                >
+                  Delete…
+                </MenuItem>
+              )}
+            </MenuContent>
+          </Menu>
+        </div>
         {infoOpen ? <ProjectInfoDialog project={project} onClose={() => setInfoOpen(false)} /> : null}
       </div>
 
-      {renaming ? (
-        <Dictated value={title} onValueChange={setTitle} align="center">
-          <Input
-            ref={field}
-            className="project-card-rename"
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-            onBlur={rename}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") rename();
-              if (event.key === "Escape") {
-                setTitle(project.title);
-                setRenaming(false);
-              }
-            }}
-            aria-label="Project name"
-          />
-        </Dictated>
-      ) : (
-        <button type="button" className="project-card-open-area" onClick={onOpen}>
-          <h4>{project.title}</h4>
-        </button>
-      )}
-
       <StageTrack stage={stage} done={done} />
 
-      <div className="project-card-foot">
-        {status}
-        <span className="project-card-usage inline-note">
-          {project.runs} run{project.runs === 1 ? "" : "s"}
+      <div className="card-foot">
+        <span>
+          {cardFootStage(stage, done, stageFailed)}
+          {stageFailed ? (
+            <>
+              {" "}
+              <button
+                type="button"
+                className="link-button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setStageAttempt((attempt) => attempt + 1);
+                }}
+              >
+                Retry
+              </button>
+            </>
+          ) : null}
         </span>
-        <button type="button" className="project-card-open" onClick={onOpen}>
-          Open <ArrowRight aria-hidden="true" />
-        </button>
+        <span>{turn ?? (project.archivedAt ? "Archived" : `${project.runs} run${project.runs === 1 ? "" : "s"}`)}</span>
       </div>
     </article>
   );
@@ -555,12 +485,10 @@ function ProjectCard({
 /** The same nine-segment language the topbar stepper speaks, one per card. */
 function StageTrack({ stage, done }: { stage: number | null; done: boolean }) {
   return (
-    <div className="stage-track" role="img" aria-label={stage ? `Stage ${stage} of 9` : "Stage unknown"}>
+    <div className="card-track" role="img" aria-label={stage ? `Stage ${stage} of 9` : "Stage unknown"}>
       {Array.from({ length: 9 }, (_, index) => {
         const at = index + 1;
-        const cls =
-          stage === null ? "" : at < stage || (done && at <= stage) ? "done" : at === stage ? "now" : "";
-        return <span key={at} className={cls ? `seg ${cls}` : "seg"} />;
+        return <span key={at} className={stageTrackSegClass(at, stage, done)} />;
       })}
     </div>
   );
