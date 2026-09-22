@@ -4,9 +4,9 @@ import {
   SOLUTIONS_BUILDER_APP,
   assertMayMintGrant,
   assertMayRequireGrant,
-} from "@solutions-builder/app/grant-namespaces";
-import { STAGES, type Stage } from "@solutions-builder/app/ledger";
-import { grantRequirementsFor } from "@solutions-builder/app/seed-kit";
+} from "./grant-namespaces.js";
+import { STAGES, type Stage } from "./ledger.js";
+import { grantRequirementsFor } from "./seed-kit.js";
 
 describe("grant namespaces", () => {
   test("an app mints under its own namespace", () => {
