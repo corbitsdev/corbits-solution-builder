@@ -143,4 +143,13 @@ describe("project chrome paint", () => {
   test("the chat shows a short lead for substantial drafts — the document pane has the rest", () => {
     expect(read("./thread.tsx")).toContain("conversationLead");
   });
+
+  test("opening the project uses the two-pane chrome, not a progress essay", () => {
+    const chrome = read("./workspace-chrome.tsx");
+    expect(chrome).toContain("export function OpeningScreen");
+    expect(chrome).not.toContain("Opening the project");
+    expect(chrome).not.toContain("Getting the conversation ready");
+    expect(chrome).toContain("Opening…");
+    expect(chrome).toContain("<StagePanes");
+  });
 });

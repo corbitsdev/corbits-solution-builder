@@ -6,14 +6,14 @@
  */
 import type { ReactNode, Ref } from "react";
 import { Textarea } from "@corbits/react-ui";
-import { Button, Screen, stageName } from "../../components.jsx";
+import { Button, stageName } from "../../components.jsx";
 import { Dictated } from "../../dictation.jsx";
 import { RETURN_TO, SendBackPicker, defaultTarget } from "../send-back.jsx";
 import { STAGE_GOAL } from "./gate.jsx";
 import { Elapsed } from "./elapsed.jsx";
 import type { Guidance } from "./product-guide.js";
 import type { evaluatorVerdict } from "./guidance.js";
-import { CONV_CLASS, PANES_CLASS, STAGE_PANE_CLASS } from "./pane-classes.ts";
+import { CONV_CLASS, CONV_SCROLL_CLASS, PANES_CLASS, STAGE_PANE_CLASS } from "./pane-classes.ts";
 
 type Choices = { readonly text: string; readonly choices: readonly string[] } | null;
 
@@ -195,41 +195,23 @@ export function SendBackPopover({
   );
 }
 
-/** The neutral "opening" screen — shown while the workflow view is still
- *  unresolved so the person never sees a stage briefly flash to something
- *  the workflow never said (CL-8721). */
+/** Same two-pane chrome as a live stage, empty, while the workflow view loads. */
 export function OpeningScreen() {
   return (
     <div className="stage-view">
-      <Screen title="Opening the project…" description="Finding the project and reading where its workflow stands." tight>
-        <section aria-label="Opening progress">
-          <p className="inline-note">Finding the project → reading its stage → preparing the conversation.</p>
-          <div
-            role="progressbar"
-            aria-label="Opening the project"
-            aria-valuetext="Reading its stage"
-            style={{ height: 6, borderRadius: 4, overflow: "hidden", background: "var(--wb-border)", margin: "8px 0 16px" }}
-          >
-            <div style={{ height: "100%", width: "50%", borderRadius: 4, background: "var(--wb-primary)" }} />
+      <StagePanes
+        conversation={
+          <div className="stage-conversation">
+            <div className={CONV_SCROLL_CLASS}>
+              <div className="think" role="status">
+                <span className="who conv-who">Opening…</span>
+              </div>
+            </div>
           </div>
-        </section>
-        <div aria-hidden="true">
-          <div
-            style={{
-              border: "1px solid var(--wb-border)",
-              borderRadius: 8,
-              padding: "12px 14px",
-              marginBottom: 8,
-            }}
-          >
-            <div style={{ height: 11, borderRadius: 6, width: "38%", background: "var(--wb-border)", margin: "6px 0" }} />
-            <div style={{ height: 11, borderRadius: 6, width: "92%", background: "var(--wb-border)", margin: "6px 0" }} />
-            <div style={{ height: 11, borderRadius: 6, width: "78%", background: "var(--wb-border)", margin: "6px 0" }} />
-          </div>
-          <p className="thinking">Getting the conversation ready…</p>
-        </div>
-        <p className="inline-note">What comes next: the conversation opens below.</p>
-      </Screen>
+        }
+      >
+        {null}
+      </StagePanes>
     </div>
   );
 }
