@@ -192,10 +192,28 @@ function describeWho(stack: StackRecord): string {
   return stack.mode === "hub" ? "Multiple people, sharing one deployment." : "One person, on their own machine.";
 }
 
+const INFERENCE_OR_AGENT_RE = /inference|agent/i;
+
+/** Whether anything in the record needs a language model -- the mode itself,
+ *  or a workflow/hub stack whose runtime or packages reference inference or
+ *  agent capability, judged from the fields, never a package name. */
+function needsLanguageModel(stack: StackRecord): boolean {
+  if (stack.mode === "inference" || stack.mode === "agent") return true;
+  if (stack.mode !== "local-workflow" && stack.mode !== "durable-workflow" && stack.mode !== "hub") return false;
+  return (
+    INFERENCE_OR_AGENT_RE.test(stack.runtime.choice) ||
+    INFERENCE_OR_AGENT_RE.test(stack.runtime.reason) ||
+    stack.packages.some(
+      (p) => INFERENCE_OR_AGENT_RE.test(p.name) || INFERENCE_OR_AGENT_RE.test(p.choice) || INFERENCE_OR_AGENT_RE.test(p.reason),
+    )
+  );
+}
+
 function describeNeeds(stack: StackRecord): string {
   const parts: string[] = [];
   if (stack.storage !== null) parts.push("somewhere to keep data between runs");
   if (stack.auth !== null) parts.push("people to sign in");
+  if (needsLanguageModel(stack)) parts.push("access to a language model (a key or local model)");
   return parts.length ? `Needs ${parts.join(" and ")}.` : "Nothing beyond opening it.";
 }
 
@@ -205,9 +223,10 @@ function describeCost(stack: StackRecord): string {
     case "inference":
     case "agent":
     case "local-workflow":
-      return "No ongoing hosting cost.";
     case "durable-workflow":
-      return "Some ongoing hosting cost, to keep it running in the background.";
+      // Runs on the person's own machine, same as the other local modes --
+      // "the background" is still that one machine, not a hosted service.
+      return "No ongoing hosting cost.";
     case "hub":
       if (stack.hubPlacement === "cloud") return "Ongoing hosting cost, paid to run it in the cloud.";
       if (stack.hubPlacement === "embedded") return "No extra hosting cost beyond the one machine running it.";

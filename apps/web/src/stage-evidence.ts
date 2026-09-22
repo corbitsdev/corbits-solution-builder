@@ -8,7 +8,7 @@
 import type { ArtifactNode, AudienceDecision } from "./client.ts";
 import type { ProjectWorkflowView } from "./project-workflow.ts";
 import type { QuorumDecisionEvidence, Stage5Evidence, Stage7Evidence } from "@solutions-builder/app/project-workflow/contracts";
-import type { StackRecord } from "@solutions-builder/app/stack";
+import { parseStackRecord, type StackRecord } from "@solutions-builder/app/stack";
 
 const OUTCOME_OF: Record<AudienceDecision["decision"], QuorumDecisionEvidence["outcome"]> = {
   proceed: "proceed",
@@ -51,24 +51,6 @@ export type StageEvidenceDeps = {
    *  block out for stage 7's evidence. */
   readonly artifactContent: (tenantId: string, nodeId: string) => Promise<{ content: string }>;
 };
-
-/**
- * Pulls the fenced ```json stack block out of the Architect's build plan.
- * Temporary until CL-8861's Architect prompt and CL-8862's
- * `parseStackRecord` (`P/stack.ts`, markdown -> StackRecord with arktype
- * validation) land -- this is the single place to swap that call in. Until
- * then this does the minimal JSON.parse a well-formed plan needs; anything
- * malformed comes back `null` and the reducer refuses `stack_missing`.
- */
-function extractStackFromPlan(planText: string): StackRecord | null {
-  const match = /```json stack\r?\n([\s\S]*?)```/.exec(planText);
-  if (!match) return null;
-  try {
-    return JSON.parse(match[1]!) as StackRecord;
-  } catch {
-    return null;
-  }
-}
 
 async function stage5Evidence(deps: StageEvidenceDeps): Promise<Stage5Evidence> {
   const policy = await deps.stakeholders(deps.projectId);
@@ -115,7 +97,7 @@ async function stage7Evidence(deps: StageEvidenceDeps): Promise<Stage7Evidence |
       ? deps.nodes.find((node) => node.artifactId === stage6Review.artifactId && node.version === stage6Review.version)
       : undefined;
   const planText = planNode ? (await deps.artifactContent(deps.tenantId, planNode.id)).content : "";
-  const stack = extractStackFromPlan(planText) ?? ({} as StackRecord);
+  const stack = parseStackRecord(planText) ?? ({} as StackRecord);
   return { target: deps.chosenTarget, frozen, stack };
 }
 

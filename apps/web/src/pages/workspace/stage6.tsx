@@ -61,6 +61,7 @@ export function Stage6Panel({
   requirementsInput,
   reviewInput,
   requirementsBlock = null,
+  onRequirementsDrafted,
   strip,
   conversation,
   reader,
@@ -73,10 +74,13 @@ export function Stage6Panel({
   /** The workflow-minted `## Requirements (authoritative ids)` block
    *  (`P/requirements.ts`'s `renderRequirementsBlock`) -- prefixed onto the
    *  panel review body so a reviewer checks the Architect's stack citations
-   *  against the same ids the Architect was bound to. Null until
-   *  `mint_requirements` has run for this project; the caller (`index.tsx`)
-   *  still needs to wire that value in. */
+   *  against the same ids the Architect was bound to. Empty ("None minted
+   *  yet.") until `mint_requirements` has run for this project. */
   requirementsBlock?: string | null;
+  /** Fires once the requirements author's PRODUCT_REQUIREMENTS document is
+   *  accepted (its reply lands) — `index.tsx` mints the workflow's
+   *  requirement ids from it (CL-8862), before the Architect drafts. */
+  onRequirementsDrafted?: (markdown: string) => void;
   strip: ReactNode;
   conversation: ReactNode;
   reader: ReactNode;
@@ -87,6 +91,17 @@ export function Stage6Panel({
   const [reviews, setReviews] = useState<Record<string, Stage6RoleState>>({});
   const [page, setPage] = useState("requirements");
   const requirementsRequestedFor = useRef<string | null>(null);
+  // The requirements-author's accepted document mints the workflow's
+  // requirement ids exactly once per reply -- a poll or re-render seeing the
+  // same "done" reply again must never re-mint (CL-8862).
+  const requirementsMintedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!onRequirementsDrafted) return;
+    if (requirements.status !== "done" || !requirements.reply) return;
+    if (requirementsMintedFor.current === requirements.reply) return;
+    requirementsMintedFor.current = requirements.reply;
+    onRequirementsDrafted(requirements.reply);
+  }, [requirements, onRequirementsDrafted]);
 
   const runRole = useCallback(
     (roleKey: string, body: string, onUpdate: (updater: (prev: Stage6RoleState) => Stage6RoleState) => void) => {

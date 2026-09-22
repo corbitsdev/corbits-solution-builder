@@ -13,10 +13,12 @@ import {
   approveStage,
   digestOf,
   ensureReviewOpen,
+  mintRequirements as mintRequirementsDecision,
   reviewableArtifact,
   sendBack as sendBackDecision,
   type StageApprovalDeps,
 } from "../../stage-approval.ts";
+import { extractRequirementItems } from "@solutions-builder/app/requirements";
 import { buildEvidenceState, currentPublishedBundle } from "./build.jsx";
 import { approvedStage8Archive, composeStage9Opening, manifestCompanionOf } from "./stage9-opening.ts";
 import { frozenSummaryLine, stageEvidence, stageRefusalMessage } from "../../stage-evidence.ts";
@@ -66,6 +68,13 @@ export type StageDecisions = {
    *  decision — every review at `target` and above is marked stale, nothing
    *  is deleted. */
   readonly sendBack: (target: number) => Promise<void>;
+  /** Mints `ProjectState.requirements` from the requirements-author's
+   *  accepted PRODUCT_REQUIREMENTS document, once, before the Architect
+   *  drafts (CL-8862) — `Stage6Panel` calls this the moment that document's
+   *  reply lands. Idempotent: a project whose requirements are already
+   *  minted (this call, another tab, a retry) resolves without surfacing an
+   *  error. */
+  readonly mintRequirements: (markdown: string) => Promise<void>;
 };
 
 export function useStageDecisions({
@@ -340,6 +349,25 @@ export function useStageDecisions({
     }
   };
 
+  const mintRequirements = useCallback(
+    async (markdown: string) => {
+      if (stage !== 6) return;
+      const items = extractRequirementItems(markdown);
+      if (items.length === 0) return;
+      const result = await mintRequirementsDecision(stageApprovalDeps, {
+        projectId: detail.project.id,
+        stage,
+        items,
+      });
+      if (!result.ok) {
+        onError(`Minting the requirement ids was refused: ${stageRefusalMessage(result.reason)}`);
+        return;
+      }
+      await refreshWorkflow();
+    },
+    [stage, detail.project.id, onError, refreshWorkflow],
+  );
+
   return {
     approveAllowed: workflowView?.allowed.approve ?? false,
     approving,
@@ -356,5 +384,6 @@ export function useStageDecisions({
     setSendReason,
     sendingBack,
     sendBack,
+    mintRequirements,
   };
 }
