@@ -602,7 +602,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   display: grid;
   /* Two panes, not a pane and a sliver: the conversation stays wide enough to
      read while the draft takes the larger share. */
-  grid-template-columns: minmax(320px, 2fr) 3fr;
+  grid-template-columns: 420px minmax(0, 1fr);
   min-height: 0;
   flex: 1;
 }
@@ -699,6 +699,52 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 /* A turn arriving. The newest row rises into place. */
 .thread-turns > *:last-child {
   animation: turn-in var(--duration-standard, 200ms) var(--ease-out, ease) both;
+}
+
+/* The record between turns — boundaries, versions, decisions, aborts — as
+   quiet mono lines; the stage's boundary is the only one with a rule. */
+[data-slot="message-bubble"]:has(.conv-event) {
+  text-align: left;
+  padding: var(--space-1) 0;
+}
+
+.conv-event {
+  font-family: var(--wb-font-mono);
+  font-size: 0.65625rem;
+  letter-spacing: 0.02em;
+  color: var(--wb-muted-foreground);
+}
+
+[data-slot="message-bubble"]:has(.conv-boundary) {
+  border-top: 1px solid var(--wb-border);
+  padding-top: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.conv-boundary {
+  color: var(--wb-foreground);
+}
+
+/* Who spoke, in mono above the words — the avatar circle says it worse. */
+.conv-who {
+  display: block;
+  font-family: var(--wb-font-mono);
+  font-size: 0.65625rem;
+  letter-spacing: 0.05em;
+  color: var(--wb-muted-foreground);
+  margin-bottom: 2px;
+}
+
+[data-slot="agent-turn"] > span[aria-hidden] {
+  display: none;
+}
+
+/* The specialist's turns are cards on the ground; the person's stay filled. */
+[data-slot="message-bubble"].items-start > div:first-child:not(:has(.thinking)) {
+  background: var(--card);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--radius-lg);
+  padding: 10px 14px;
 }
 
 @keyframes turn-in {
@@ -952,13 +998,46 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
    artifact lineage, kind glyph first, a dot on the current stage's. The
    Tabs' own scrollable variant supplies the horizontal scroll and edge
    fades; these rules only quiet it into the pane. */
-.artifact-strip-tabs [role="tablist"] {
+.artifact-strip {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-4);
+  padding: var(--space-2) var(--space-6) 0;
+  background: var(--card);
   border-bottom: 1px solid var(--wb-border);
 }
 
+.artifact-strip-tabs {
+  flex: 1;
+  min-width: 0;
+}
+
+.artifact-strip-tabs [role="tablist"] {
+  border-bottom: 0;
+}
+
+/* Folder tabs: the open one is the same paper as the document below. */
 .artifact-strip-tabs [role="tab"] {
   font-family: var(--wb-font-mono);
   font-size: 0.72rem;
+  border: 1px solid var(--wb-border);
+  border-bottom: 0;
+  border-radius: 10px 10px 0 0;
+  background: var(--wb-muted);
+  margin-bottom: -1px;
+}
+
+.artifact-strip-tabs [role="tab"][aria-selected="true"] {
+  background: var(--background);
+}
+
+.artifact-strip .version-strip {
+  flex: none;
+  padding: 0 0 var(--space-1);
+  border-bottom: 0;
 }
 
 .artifact-strip-live {
@@ -1043,6 +1122,43 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   overflow: hidden;
 }
 
+/* In the workspace the document pane is the grey ground the strip blends
+   into; the paper is the card inside it, and the pane — not the card —
+   carries the scroll. */
+.document-layout .document {
+  display: block;
+  border: 0;
+  border-radius: 0;
+  background: var(--card);
+  overflow-y: auto;
+}
+
+.stage-inner {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: var(--space-4) var(--space-6) var(--space-8);
+  display: grid;
+  gap: var(--space-4);
+}
+
+.doc {
+  container-type: inline-size;
+  background: var(--background);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-8);
+}
+
+.docmeta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-family: var(--wb-font-mono);
+  font-size: 0.6875rem;
+  color: var(--wb-muted-foreground);
+  margin-bottom: var(--space-6);
+}
+
 .document-body {
   flex: 1;
   min-height: 0;
@@ -1100,6 +1216,14 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   gap: var(--space-2);
   font-size: 0.8125rem;
   flex: none;
+}
+
+/* In the docmeta row the tools sit inline at the right end. */
+.docmeta .document-tools {
+  flex-direction: row;
+  align-items: center;
+  font-family: var(--wb-font-ui);
+  font-size: 0.75rem;
 }
 
 .changes-toggle {
@@ -1675,16 +1799,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   color: var(--wb-foreground);
 }
 
-/* Conversation first. The document opens beside it when asked for. */
-.thread-head {
-  display: flex;
-  gap: var(--space-4);
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--space-3) var(--space-4) var(--space-2);
-  flex: none;
-}
-
 /* What happened to the answer before this turn: one quiet line, dot-separated. */
 .turn-note {
   display: flex;
@@ -1734,15 +1848,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   border-radius: 0 var(--radius-control) var(--radius-control) 0;
 }
 
-.thread-progress {
-  font-size: 0.8125rem;
-  color: var(--wb-muted-foreground);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* Whose move it is, when the specialist has stopped asking. */
 /* A message the person stopped before it was answered: still what they said,
    dimmed, with the reason no reply follows it. */
@@ -1768,10 +1873,24 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 .composer-approve {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: var(--space-2);
-  font-size: 0.8125rem;
+  padding: var(--space-1) var(--space-2);
+  font-family: var(--wb-font-mono);
+  font-size: 0.6875rem;
   color: var(--wb-muted-foreground);
+}
+
+/* While the specialist is writing the gate withdraws — a control you cannot
+   use is noise, and it returns when there is something to decide. */
+.composer[data-working] .composer-approve,
+.composer[data-working] .composer-cue {
+  display: none;
+}
+
+.composer-approve button {
+  font-family: var(--wb-font-ui);
+  font-size: 0.8125rem;
 }
 
 /* The evaluator's verdict, advisory only: it colours the control, it never
@@ -2618,12 +2737,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   flex: 1;
   min-height: 0;
   position: relative;
-}
-
-/* In the plain conversation the popover anchors above the input, which
-   sits flush at the column's foot — roughly its own height plus a gap. */
-.stage-conversation > .sbpick {
-  bottom: 76px;
 }
 
 .stage-conversation > *:last-child {

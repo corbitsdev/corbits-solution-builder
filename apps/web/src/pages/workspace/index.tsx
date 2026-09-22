@@ -53,6 +53,7 @@ import { useStageEvaluator, useProductGuide } from "./use-advisory.ts";
 import { useProjectArtifacts } from "./use-project-artifacts.ts";
 import { useStageDecisions } from "./use-stage-decisions.ts";
 import { ArtifactStrip, VersionStrip } from "./artifact-strip.tsx";
+import { stageEvents } from "./stage-events.ts";
 import { STAGE_DRAFT_KIND } from "../../client.js";
 import {
   EvaluatorVerdict,
@@ -225,6 +226,12 @@ export function StageWorkspace({
 
   const draftKind = STAGE_DRAFT_KIND[stage] ?? null;
   const artifacts = useProjectArtifacts(tenantId, stage, detail.nodes, draftMessage);
+  // The transcript's quiet record: boundaries, versions, decisions and
+  // aborted turns, folded in beside the mail as system lines.
+  const events = useMemo(
+    () => stageEvents(stage, workflowView?.decisions ?? [], detail.nodes, withdrawn.marks),
+    [stage, workflowView?.decisions, detail.nodes, withdrawn.marks],
+  );
   const decisions = useStageDecisions({
     detail,
     tenantId,
@@ -541,6 +548,7 @@ export function StageWorkspace({
             onStop={() => void stopTurn()}
             onSendHold={() => openSendBack(composer)}
             popover={sendBackPopover}
+            events={events}
           />
         </WaitingSection>
       ) : null}
@@ -589,6 +597,7 @@ export function StageWorkspace({
             onStop={() => void stopTurn()}
             onSendHold={openSendBack}
             composerPopover={sendBackPopover}
+            events={events}
             strip={
               <>
                 <ArtifactStrip
@@ -672,6 +681,7 @@ export function StageWorkspace({
             onStop={() => void stopTurn()}
             onSendHold={() => openSendBack(composer)}
             popover={sendBackPopover}
+            events={events}
           />
         </>
       ) : null}

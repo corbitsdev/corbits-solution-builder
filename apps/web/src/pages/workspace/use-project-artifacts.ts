@@ -16,7 +16,7 @@ import { documentName, stageName } from "../../components.jsx";
 
 /** Internal bookkeeping kinds never surface as tabs — the strip lists work
  *  product, not plumbing. */
-const INTERNAL_KINDS = new Set([
+export const INTERNAL_KINDS = new Set([
   "withdrawn_turns",
   "material_reading",
   "deck_template",

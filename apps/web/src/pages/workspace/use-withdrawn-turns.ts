@@ -24,6 +24,8 @@ export type WithdrawnTurnsState = {
   readonly ids: ReadonlySet<string>;
   /** A sent turn still awaiting its reply — what Stop withdraws. */
   readonly pending: ReturnType<typeof pendingTurn>;
+  /** Every recorded withdrawal, all stages — the event fold reads them. */
+  readonly marks: WithdrawnMark[];
   /** Withdraws the pending turn and hands its body back to the composer via
    *  `restoreDraft` — abort restores the draft, it does not discard it. */
   readonly stop: () => Promise<void>;
@@ -79,5 +81,5 @@ export function useWithdrawnTurns(
     }
   };
 
-  return { messages, ids, pending, stop };
+  return { messages, ids, pending, marks, stop };
 }

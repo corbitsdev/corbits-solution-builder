@@ -22,6 +22,7 @@ import { markChanges } from "../../revisions.js";
 import { AddMaterial, Button, documentName } from "../../components.jsx";
 import { PrintButton } from "../../print.jsx";
 import { SpecialistTurn, WorkingLabel, type TurnNote } from "./thread.jsx";
+import { eventMessages, type StageEvent } from "./stage-events.ts";
 import { clearQuotedDraft, loadQuotedDraft, saveQuotedDraft } from "./quote-store.js";
 
 /**
@@ -64,6 +65,7 @@ export function StageDocument({
   promote = null,
   onSendHold,
   composerPopover = null,
+  events = EMPTY_EVENTS,
 }: {
   node: ArtifactNode;
   versions: ArtifactNode[];
@@ -113,6 +115,9 @@ export function StageDocument({
   onSendHold?: (draft: string) => void;
   /** Floated over the composer — the picker hold opens. */
   composerPopover?: ReactNode;
+  /** The stage's event record — decisions, versions, aborted turns — folded
+   *  into the transcript as quiet lines. */
+  events?: readonly StageEvent[];
 }) {
   const [message, setMessage] = useState("");
   const [attached, setAttached] = useState<Quote[]>([]);
@@ -212,8 +217,9 @@ export function StageDocument({
         parts: [{ type: "text", text: "Writing…" }],
       });
     }
-    return list;
-  }, [turns, busy]);
+    return eventMessages(list, events);
+  }, [turns, busy, events]);
+  const eventById = useMemo(() => new Map(events.map((event) => [event.id, event])), [events]);
 
   // What each specialist turn did with the answer before it: which version the
   // answer produced, and whether the question that follows continues the same
@@ -313,58 +319,68 @@ export function StageDocument({
   return (
     <div className={draftOpen ? "document-layout" : "document-layout is-solo"}>
       <section ref={pane} className="stage-thread" aria-label="Conversation with the specialist">
-        <header className="thread-head">
-          {/* With the draft open its own header names the stage, so this says
-              only what that does not. */}
-          {/* The draft's own header carries the stage, so this says only what
-              that does not. */}
-          <span className="thread-progress">
-            {openQuestion
-              ? openQuestion.ordinal
-                ? openQuestion.total
-                  ? `Question ${openQuestion.ordinal} of ${openQuestion.total}`
-                  : `Question ${openQuestion.ordinal}`
-                : "Question awaiting your answer"
-              : ""}
-          </span>
-        </header>
-
         <div className="thread-scroll">
         <ChatThread
           className="thread-turns"
           messages={messages}
-          identity={{ name: "Specialist", initials: "SB" }}
+          identity={{ name: agentFor(node.stage as Stage).title, initials: "SB" }}
           // A specialist's turn is its digest of the draft, and the bolding in
           // it is the point — it is what a reader takes in first.
-          renderBody={(message) =>
-            message.id === "pending" ? (
-              <WorkingLabel since={message.createdAt} />
+          renderBody={(message) => {
+            const event = eventById.get(message.id);
+            if (event) {
+              return (
+                <span className={event.tone === "boundary" ? "conv-event conv-boundary" : "conv-event"}>
+                  {event.text}
+                </span>
+              );
+            }
+            const who = (
+              <span className="conv-who">
+                {message.role === "user" ? "You" : agentFor(node.stage as Stage).title}
+              </span>
+            );
+            return message.id === "pending" ? (
+              <>
+                {who}
+                <WorkingLabel since={message.createdAt} />
+              </>
             ) : message.role === "agent" && failedTurns.has(message.id) ? (
               <div className="turn-failed" role="alert">
+                {who}
                 <Markdown source={(message.parts[0] as { text: string }).text} />
               </div>
             ) : message.role === "user" && withdrawnIds.has(message.id) ? (
               <div className="turn-withdrawn">
+                {who}
                 <Markdown source={message.parts.map((part) => (part as { text: string }).text).join("\n\n")} />
                 <span className="turn-withdrawn-note">Stopped before it was answered.</span>
               </div>
             ) : message.role === "agent" ? (
-              <SpecialistTurn
-                text={(message.parts[0] as { text: string }).text}
-                note={notes.get(message.id) ?? null}
-                onOpenVersion={onSelectVersion}
-                // Tapping a choice sends it, exactly as typing it would. That
-                // holds outside the interview too: a brainstormer proposing
-                // options is asking for a choice, whether or not a question
-                // is queued.
-                onAnswer={
-                  busy === null && message.id === messages.at(-1)?.id
-                    ? (answer) => onRevise(answer, [])
-                    : undefined
-                }
-              />
-            ) : undefined
-          }
+              <>
+                {who}
+                <SpecialistTurn
+                  text={(message.parts[0] as { text: string }).text}
+                  note={notes.get(message.id) ?? null}
+                  onOpenVersion={onSelectVersion}
+                  // Tapping a choice sends it, exactly as typing it would. That
+                  // holds outside the interview too: a brainstormer proposing
+                  // options is asking for a choice, whether or not a question
+                  // is queued.
+                  onAnswer={
+                    busy === null && message.id === messages.at(-1)?.id
+                      ? (answer) => onRevise(answer, [])
+                      : undefined
+                  }
+                />
+              </>
+            ) : (
+              <>
+                {who}
+                <Markdown source={message.parts.map((part) => (part as { text: string }).text).join("\n\n")} />
+              </>
+            );
+          }}
           empty={
             <div className="thread-empty">
               {/* The document is beside this, so what is missing is the
@@ -507,58 +523,62 @@ export function StageDocument({
       </section>
 
       <article className="document" data-tour="document">
-        {strip}
-        <header className="document-header">
-          <h2>{documentName(node.kind)}</h2>
-          {live !== null ? (
-            <span className="thinking">Writing version {node.version + 1}</span>
-          ) : newer ? (
-            <button type="button" className="newer-version" onClick={() => onSelectVersion(newer.id)}>
-              <ArrowUp aria-hidden="true" />
-              Version {newer.version} is ready
-            </button>
-          ) : null}
-          {/* Stacked, picker over toggle: on one line they fought the title for
-              width and the title wrapped. */}
-          <div className="document-tools">
-            {versions.length > 1 && strip === null ? (
-              <select
-                aria-label="Version"
-                value={node.id}
-                onChange={(event) => onSelectVersion(event.target.value)}
-              >
-                {versions.map((version) => (
-                  <option key={version.id} value={version.id}>
-                    Version {version.version}
-                    {version.supersededByNodeId ? " (superseded)" : ""}
-                  </option>
-                ))}
-              </select>
-            ) : null}
-            {previous ? (
-              <label className="changes-toggle" htmlFor="show-changes">
-                <Switch id="show-changes" checked={showChanges} onCheckedChange={setShowChanges} />
-                <span>Changes since v{previous.version}</span>
-              </label>
-            ) : null}
-            <PrintButton node={node} tenantId={tenantId} content={content || null} />
-          </div>
-        </header>
-        <div className="document-body" data-tour="document-body" onMouseUp={attachSelection}>
-          {live !== null ? (
-            <div className="is-live">
-              <Markdown source={live} />
+        {strip ? <div className="artifact-strip">{strip}</div> : null}
+        <div className="stage-inner">
+          <div className="doc" data-tour="document-body" onMouseUp={attachSelection}>
+            <div className="docmeta">
+              <span>
+                v{node.version} · {documentName(node.kind)}
+                {node.supersededByNodeId ? " · superseded" : ""}
+                {node.provenance.agentRole ? ` · ${node.provenance.agentRole}` : ""}
+              </span>
+              {live !== null ? (
+                <span className="thinking">Writing version {node.version + 1}</span>
+              ) : newer ? (
+                <button type="button" className="newer-version" onClick={() => onSelectVersion(newer.id)}>
+                  <ArrowUp aria-hidden="true" />
+                  Version {newer.version} is ready
+                </button>
+              ) : null}
+              <div className="document-tools">
+                {versions.length > 1 && strip === null ? (
+                  <select
+                    aria-label="Version"
+                    value={node.id}
+                    onChange={(event) => onSelectVersion(event.target.value)}
+                  >
+                    {versions.map((version) => (
+                      <option key={version.id} value={version.id}>
+                        Version {version.version}
+                        {version.supersededByNodeId ? " (superseded)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+                {previous ? (
+                  <label className="changes-toggle" htmlFor="show-changes">
+                    <Switch id="show-changes" checked={showChanges} onCheckedChange={setShowChanges} />
+                    <span>Changes since v{previous.version}</span>
+                  </label>
+                ) : null}
+                <PrintButton node={node} tenantId={tenantId} content={content || null} />
+              </div>
             </div>
-          ) : content ? (
-            <DocumentBody
-              source={
-                showChanges && previousContent !== null ? markChanges(previousContent, content) : content
-              }
-              sideBySide={approaches.length >= 2}
-            />
-          ) : (
-            <p className="inline-note">Loading…</p>
-          )}
+            {live !== null ? (
+              <div className="is-live">
+                <Markdown source={live} />
+              </div>
+            ) : content ? (
+              <DocumentBody
+                source={
+                  showChanges && previousContent !== null ? markChanges(previousContent, content) : content
+                }
+                sideBySide={approaches.length >= 2}
+              />
+            ) : (
+              <p className="inline-note">Loading…</p>
+            )}
+          </div>
         </div>
       </article>
     </div>
@@ -600,3 +620,4 @@ export function DocumentBody({ source, sideBySide }: { source: string; sideBySid
 }
 
 const EMPTY_WITHDRAWN: ReadonlySet<string> = new Set();
+const EMPTY_EVENTS: readonly StageEvent[] = [];

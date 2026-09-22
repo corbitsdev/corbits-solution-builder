@@ -16,7 +16,7 @@ import type { ComponentProps, ReactNode } from "react";
 import type { ChatMessage } from "@corbits/react-ui";
 import { GuideDock } from "../apps/web/src/components.js";
 import { StageDocument } from "../apps/web/src/pages/workspace.js";
-import { ArtifactStrip } from "../apps/web/src/pages/workspace/artifact-strip.jsx";
+import { ArtifactStrip, VersionStrip } from "../apps/web/src/pages/workspace/artifact-strip.jsx";
 import { ArtifactGraph } from "../apps/web/src/pages/graph.js";
 import { AppBar } from "../apps/web/src/app.js";
 import { ThemeProvider } from "@corbits/react-ui";
@@ -178,18 +178,16 @@ const turns = messages.map((message) => ({
   createdAt: message.createdAt,
 })) as never;
 
-const strip = (
-  <ArtifactStrip
-    tabs={[
-      {
-        key: "1:problem_brief:",
-        label: "Problem brief",
-        kind: "problem_brief",
-        stage: 1,
-        head: briefNode,
-        versions: [replacedBrief, currentBrief] as never,
-        live: true,
-      },
+const stripTabs = [
+  {
+    key: "1:problem_brief:",
+    label: "Problem brief",
+    kind: "problem_brief",
+    stage: 1,
+    head: briefNode,
+    versions: [replacedBrief, currentBrief] as never,
+    live: true,
+  },
       {
         key: "4:design_doc:",
         label: "Design",
@@ -208,20 +206,30 @@ const strip = (
         versions: [],
         live: false,
       },
-      {
-        key: "9:delivery_manifest:",
-        label: "Delivery manifest",
-        kind: "delivery_manifest",
-        stage: 9,
-        head: { ...briefNode, artifactId: "art_5", kind: "delivery_manifest", stage: 9, title: "Delivery manifest" } as never,
-        versions: [],
-        live: false,
-      },
-    ]}
-    selectedKey="1:problem_brief:"
-    onSelect={() => {}}
-  />
+  {
+    key: "9:delivery_manifest:",
+    label: "Delivery manifest",
+    kind: "delivery_manifest",
+    stage: 9,
+    head: { ...briefNode, artifactId: "art_5", kind: "delivery_manifest", stage: 9, title: "Delivery manifest" } as never,
+    versions: [],
+    live: false,
+  },
+];
+
+const strip = (
+  <>
+    <ArtifactStrip tabs={stripTabs} selectedKey="1:problem_brief:" onSelect={() => {}} />
+    <VersionStrip tab={stripTabs[0] as never} activeId={(currentBrief as { id: string }).id} onSelect={() => {}} />
+  </>
 );
+
+const fixtureEvents = [
+  { id: "ev:boundary", at: "", text: "Stage 1 · Problem discovery", tone: "boundary" },
+  { id: "ev:1", at: now, text: "Problem brief · v1", tone: "line" },
+  { id: "ev:2", at: now, text: "Review opened · Problem brief v2", tone: "line" },
+  { id: "ev:3", at: now, text: "Turn aborted", tone: "line" },
+] as never;
 
 function Conversation({ withDocument }: { withDocument?: boolean }) {
   return (
@@ -239,6 +247,7 @@ function Conversation({ withDocument }: { withDocument?: boolean }) {
       canSubmit
       soloApproval
       busy={null}
+      events={fixtureEvents}
       onSelectVersion={() => {}}
       onRevise={() => {}}
       onSubmit={() => {}}

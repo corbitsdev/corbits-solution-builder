@@ -3,6 +3,7 @@ import { ChatInput, ChatThread, type ChatMessage as UiChatMessage } from "@corbi
 import { Markdown } from "../../markdown.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { choicesIn } from "./choices.js";
+import { eventMessages, type StageEvent } from "./stage-events.ts";
 
 /** A stage-mail turn, rendered as a `@corbits/react-ui` chat message: the
  *  person's turns on the right, the specialist's on the left. */
@@ -40,6 +41,9 @@ export function StageConversation({
   onStop,
   onSendHold,
   popover = null,
+  events = EMPTY_EVENTS,
+  rows = null,
+  who = "Specialist",
 }: {
   stage: number;
   messages: readonly ChatMessage[];
@@ -60,6 +64,13 @@ export function StageConversation({
   onSendHold?: () => void;
   /** Floated over the composer — the send-back picker hold opens. */
   popover?: ReactNode;
+  /** The stage's event record — decisions, versions, aborted turns — folded
+   *  into the transcript as quiet lines. */
+  events?: readonly StageEvent[];
+  /** Quiet rows above the box: the open gate, a pending capability grant. */
+  rows?: ReactNode;
+  /** The specialist's name on its turns. */
+  who?: string;
 }) {
   const uiMessages = useMemo(() => {
     const list = toUiMessages(messages);
@@ -74,14 +85,23 @@ export function StageConversation({
         createdAt: messages.at(-1)?.at ?? new Date().toISOString(),
       });
     }
-    return list;
-  }, [messages, pending]);
+    return eventMessages(list, events);
+  }, [messages, pending, events]);
+  const eventById = useMemo(() => new Map(events.map((event) => [event.id, event])), [events]);
   return (
     <div className="stage-conversation">
       <ChatThread
         messages={uiMessages}
-        identity={{ name: "Specialist", initials: "SB" }}
+        identity={{ name: who, initials: "SB" }}
         renderBody={(message) => {
+          const event = eventById.get(message.id);
+          if (event) {
+            return (
+              <span className={event.tone === "boundary" ? "conv-event conv-boundary" : "conv-event"}>
+                {event.text}
+              </span>
+            );
+          }
           // The turn in flight reads as what the wait is for, in main's voice.
           if (message.id === "pending") return <WorkingLabel stage={stage} />;
           const text = message.parts.map((part) => (part.type === "text" ? part.text : "")).join("");
@@ -93,26 +113,35 @@ export function StageConversation({
               </div>
             );
           }
-          return <Markdown source={text} />;
+          return (
+            <>
+              <span className="conv-who">{message.role === "user" ? "You" : who}</span>
+              <Markdown source={text} />
+            </>
+          );
         }}
         empty={<p className="inline-note">No messages yet.</p>}
       />
-      <ChatInput
-        value={value}
-        onValueChange={onValueChange}
-        onSend={onSend}
-        working={working || pending}
-        {...(pending && onStop ? { onStop } : {})}
-        {...(onSendHold ? { onSendHold } : {})}
-        disabled={disabled}
-        placeholder={placeholder}
-      />
-      {popover}
+      <div className="composer" data-working={working || pending ? "" : undefined}>
+        {rows}
+        <ChatInput
+          value={value}
+          onValueChange={onValueChange}
+          onSend={onSend}
+          working={working || pending}
+          {...(pending && onStop ? { onStop } : {})}
+          {...(onSendHold ? { onSendHold } : {})}
+          disabled={disabled}
+          placeholder={placeholder}
+        />
+        {popover}
+      </div>
     </div>
   );
 }
 
 const EMPTY_WITHDRAWN: ReadonlySet<string> = new Set();
+const EMPTY_EVENTS: readonly StageEvent[] = [];
 
 /**
  * What the specialist is doing while it writes, in its own stage's terms. One
