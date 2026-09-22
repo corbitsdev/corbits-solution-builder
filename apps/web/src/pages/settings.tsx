@@ -625,6 +625,10 @@ export function hostCredentialsCopy(status: HostStatus): string {
   return status.credentialBackend === "keychain" ? "macOS Keychain" : "private file on disk";
 }
 
+export function hostDataCopy(status: HostStatus): string | null {
+  return status.dataDir ?? null;
+}
+
 /**
  * Start-at-login is off until somebody turns it on, the copy says what it does
  * and does not do, and it says when the change takes effect rather than
@@ -673,6 +677,11 @@ function ThisComputer({ status }: { status: HostStatus | null }) {
         {status ? (
           <Row label="Credentials">
             <span className="v">{hostCredentialsCopy(status)}</span>
+          </Row>
+        ) : null}
+        {status && hostDataCopy(status) ? (
+          <Row label="Data">
+            <span className="v">{hostDataCopy(status)}</span>
           </Row>
         ) : null}
         {status ? (

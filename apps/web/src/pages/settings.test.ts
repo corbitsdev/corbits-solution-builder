@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { hostCredentialsCopy, hostStatusCopy, roleLabel } from "./settings.tsx";
+import { hostCredentialsCopy, hostDataCopy, hostStatusCopy, roleLabel } from "./settings.tsx";
 import type { HostStatus } from "../client.ts";
 
 function fixtureStatus(overrides: Partial<HostStatus> = {}): HostStatus {
@@ -33,6 +33,11 @@ describe("settings page copy", () => {
   test("host credentials name the keychain when that is the backend", () => {
     expect(hostCredentialsCopy(fixtureStatus())).toBe("macOS Keychain");
     expect(hostCredentialsCopy(fixtureStatus({ credentialBackend: "file" }))).toBe("private file on disk");
+  });
+
+  test("the Data row is the host-reported workspace directory, not a guessed Library folder", () => {
+    expect(hostDataCopy(fixtureStatus({ dataDir: "/tmp/workspace-data" }))).toBe("/tmp/workspace-data");
+    expect(hostDataCopy(fixtureStatus())).toBeNull();
   });
 });
 
@@ -71,12 +76,21 @@ describe("settings page markup language", () => {
     expect(page).toContain("ProviderList");
   });
 
-  test("does not invent a data directory the host never reports", async () => {
+  test("This computer shows Data from host status between Credentials and Version", async () => {
     const page = await Bun.file(new URL("./settings.tsx", import.meta.url)).text();
-    const status = await Bun.file(new URL("../client.ts", import.meta.url)).text();
+    const client = await Bun.file(new URL("../client.ts", import.meta.url)).text();
+    const host = await Bun.file(new URL("../../../hub/src/api-host.ts", import.meta.url)).text();
+    const credentials = page.indexOf('label="Credentials"');
+    const data = page.indexOf('label="Data"');
+    const version = page.indexOf('label="Version"');
+    expect(credentials).toBeGreaterThan(-1);
+    expect(data).toBeGreaterThan(credentials);
+    expect(version).toBeGreaterThan(data);
+    expect(page).toContain("{hostDataCopy(status)}");
     expect(page).not.toContain("~/Library");
-    expect(page).not.toContain('label="Data"');
-    expect(status).not.toMatch(/dataDir|dataDirectory|homeDir/);
+    expect(page).not.toContain("Application Support");
+    expect(client).toMatch(/dataDir\?: string/);
+    expect(host).toContain("dataDir: dataDirectory()");
   });
 
   test("inference and catalog share one section-body of rows, not a second card", async () => {

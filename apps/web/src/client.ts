@@ -223,6 +223,8 @@ export type HostStatus = {
     windowlessWorkContinues: true;
   };
   credentialBackend: "keychain" | "file";
+  /** Workspace data directory this host is using. From `dataDirectory()` on the host. */
+  dataDir?: string;
   canPlaceSidecars: boolean;
   sidecarFingerprint: string | null;
   hub: {

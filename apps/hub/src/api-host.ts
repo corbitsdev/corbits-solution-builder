@@ -1,6 +1,7 @@
 import type { Hono } from "hono";
 import {
   credentialBackend,
+  dataDirectory,
   ensureHub,
   hostStatus,
   mintOwnerSetCookie,
@@ -18,6 +19,7 @@ export function registerHostRoutes(api: Hono) {
       apiVersion: API_VERSION,
       host: hostStatus(),
       credentialBackend: await credentialBackend(),
+      dataDir: dataDirectory(),
       ...sidecarFacts(),
       // What this host knows about the hub: which mode it is in, where it
       // is, and why embedded start failed when it did. Whether the hub is
