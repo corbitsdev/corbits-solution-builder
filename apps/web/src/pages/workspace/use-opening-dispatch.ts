@@ -32,6 +32,7 @@ import { frozenSummaryLine } from "../../stage-evidence.ts";
 import { targetOpeningLine } from "./freeze.jsx";
 import { composeStage9Opening } from "./stage9-opening.ts";
 import { renderStackBlock } from "./frozen-stack-text.ts";
+import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
 
 export type OpeningDispatch = {
   /** The opening send failed — surfaced with a retry, never retried forever. */
@@ -178,6 +179,11 @@ export function useOpeningDispatch({
       const review = workflowView?.reviews[8];
       const archiveRef = review?.status === "approved" ? { artifactId: review.artifactId, version: review.version } : null;
       void composeStage9Opening({ tenantId, projectId: detail.project.id, nodes: detail.nodes, archiveRef }).then(dispatchOpening);
+    } else if (stage === 6 && (!workflowView || workflowView.requirements.length === 0)) {
+      // The Architect must not draft before `mint_requirements` has run for
+      // this project (CL-8862) — `Stage6Panel` mints them off the
+      // requirements-author's accepted document; this effect re-fires once
+      // `workflowView.requirements` lands, since that view object changes.
     } else if (previousApproved) {
       void api
         .artifactContent(tenantId, previousApproved.artifactId)
@@ -188,13 +194,18 @@ export function useOpeningDispatch({
           // the workflow view's own `freeze`, set the moment stage 7 is
           // approved and cleared only by a send-back to stage <= 7.
           const stackBlock = stage === 8 && workflowView?.freeze ? renderStackBlock(workflowView.freeze) : null;
+          // Stage 6's opening leads with the workflow-minted requirement ids
+          // (CL-8862) — the Architect may cite only these, never invent one.
+          const requirementsBlock = stage === 6 && workflowView ? renderRequirementsBlock(workflowView.requirements) : null;
           const body =
             stage === 8 && workflowView?.freeze
               ? `${targetOpeningLine(workflowView.freeze.target)}\n\n${frozenSummaryLine({
                   target: workflowView.freeze.target,
                   frozen: workflowView.freeze.frozen,
                 })}${stackBlock ? `\n\n${stackBlock}` : ""}\n\n${result.content}`
-              : result.content;
+              : requirementsBlock
+                ? `${requirementsBlock}\n\n${result.content}`
+                : result.content;
           dispatchOpening(body);
         })
         .catch(() => {});

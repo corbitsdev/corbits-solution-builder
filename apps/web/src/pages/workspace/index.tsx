@@ -50,6 +50,7 @@ import { useStageDecisions } from "./use-stage-decisions.ts";
 import { ArtifactStrip, VersionStrip } from "./artifact-strip.tsx";
 import { stageEvents } from "./stage-events.ts";
 import { Stage6Panel } from "./stage6.tsx";
+import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
 import { agentFor } from "@solutions-builder/app/kit";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { STAGE_DRAFT_KIND } from "../../client.js";
@@ -221,6 +222,7 @@ export function StageWorkspace({
     setChosenTarget,
     sendBack,
     setSendReason,
+    mintRequirements,
   } = decisions;
   const refreshWorkflow = workflow.refresh;
 
@@ -491,6 +493,8 @@ export function StageWorkspace({
           projectId={detail.project.id}
           requirementsInput={lastPersonMessage?.body ?? null}
           reviewInput={draftMessage?.body ?? null}
+          requirementsBlock={workflowView ? renderRequirementsBlock(workflowView.requirements) : null}
+          onRequirementsDrafted={mintRequirements}
           strip={stripEl}
           conversation={conversation}
           reader={reader}
