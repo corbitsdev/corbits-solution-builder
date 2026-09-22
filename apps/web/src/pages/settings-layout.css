@@ -1,0 +1,281 @@
+/*
+ * Settings page body — the mockup's section/row language, scoped so it cannot
+ * collide with `.field` / `.settings-section` in the shared sheet.
+ */
+.settings-page {
+  max-width: 720px;
+  width: 100%;
+  margin: 0 auto;
+  padding: var(--space-8) var(--space-6) var(--space-12);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.settings-page > h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.settings-page .section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.settings-page .section-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.settings-page .section-head p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+
+.settings-page .section-body {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--background);
+  overflow: hidden;
+}
+
+.settings-page .row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+
+.settings-page .row:last-child {
+  border-bottom: 0;
+}
+
+.settings-page .row .k {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.settings-page .row .k b {
+  font-weight: 600;
+  font-size: 13.5px;
+}
+
+.settings-page .row .k span {
+  font-size: 12px;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+}
+
+.settings-page .row .v {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted-foreground);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+
+.settings-page .seg-ctl {
+  display: inline-flex;
+  gap: 2px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: 2px;
+  background: var(--muted);
+  flex-shrink: 0;
+}
+
+.settings-page .seg-ctl button {
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.settings-page .seg-ctl button.on {
+  background: var(--background);
+  color: var(--foreground);
+  font-weight: 700;
+}
+
+.settings-page .seg-ctl button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.settings-page .refresh-models {
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted-foreground);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  opacity: 0.75;
+}
+
+.settings-page .refresh-models:hover {
+  opacity: 1;
+  color: var(--foreground);
+}
+
+.settings-page input.field,
+.settings-page select.field,
+.settings-page textarea.field {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--background);
+  color: var(--foreground);
+  padding: 6px 10px;
+  width: 220px;
+  max-width: 100%;
+  outline: none;
+}
+
+.settings-page input.field:focus,
+.settings-page select.field:focus,
+.settings-page textarea.field:focus {
+  border-color: var(--primary);
+}
+
+.settings-page input.field.narrow {
+  width: 110px;
+}
+
+.settings-page textarea.field {
+  min-height: 4.5rem;
+  resize: vertical;
+  width: min(320px, 100%);
+}
+
+.settings-page .row .dictated {
+  width: 220px;
+  max-width: 100%;
+}
+
+.settings-page .row .dictated .field {
+  width: 100%;
+}
+
+.settings-page .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  font-weight: 600;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+
+.settings-page .btn:hover {
+  background: var(--muted);
+}
+
+.settings-page .btn.link {
+  border-color: transparent;
+  background: transparent;
+  color: var(--primary-emphasis);
+  padding: 4px 8px;
+}
+
+.settings-page .btn.link:hover {
+  background: transparent;
+  text-decoration: underline;
+}
+
+.settings-page .btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Provider / catalog lists live inside a section-body; drop their own frame. */
+.settings-page .section-body > .provider-list,
+.settings-page .section-body > ul.provider-list {
+  border: 0;
+  border-radius: 0;
+  margin: 0;
+}
+
+.settings-page .section-body .provider-row {
+  padding: var(--space-3) var(--space-4);
+  min-height: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-page .section-body .provider-row:last-child {
+  border-bottom: 0;
+}
+
+.settings-page .section-body .provider-identity strong {
+  font-weight: 600;
+  font-size: 13.5px;
+}
+
+.settings-page .section-body .provider-identity small {
+  margin-top: 1px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+.settings-page .section-body > .banner,
+.settings-page .section-body > .inline-note,
+.settings-page .section-body > p {
+  margin: var(--space-3) var(--space-4);
+}
+
+.settings-page .section-body > .banner:last-child,
+.settings-page .section-body > .inline-note:last-child,
+.settings-page .section-body > p:last-child {
+  margin-bottom: var(--space-3);
+}
+
+.settings-page .deck-template-pick {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.settings-page .deck-template-pick input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.settings-page details.section > summary.section-head {
+  list-style: none;
+  cursor: pointer;
+}
+
+.settings-page details.section > summary.section-head::-webkit-details-marker {
+  display: none;
+}
+
+.settings-page details.section[open] > summary.section-head {
+  margin-bottom: 0;
+}

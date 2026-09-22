@@ -11,18 +11,21 @@
  * The secret rule shows up in the markup: a key field is cleared the moment it
  * is handed over, and nothing ever renders it back. What the UI sees is a
  * status and a boolean.
+ *
+ * Layout is the mockup's section / section-body / row / k / v language.
  */
-import { Input, SegmentedControl, Switch, Textarea, useTheme, type ThemeMode } from "@corbits/react-ui";
-import { useEffect, useState } from "react";
+import { Switch, useTheme, type ThemeMode } from "@corbits/react-ui";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { DECK_DENSITY, DECK_THEMES, DECK_TYPEFACES, DEFAULT_DECK_DESIGN, type DeckDensity, type DeckDesign, type DeckTheme, type DeckTypeface } from "@solutions-builder/app/deck";
 import { invoke } from "@tauri-apps/api/core";
 import { api, ApiFailure, STAKEHOLDER_ROLES, type DesignerSettings, type HostStatus, type Provider } from "../client.js";
-import { Banner, Button, StateLabel } from "../components.jsx";
+import { Banner, Button } from "../components.jsx";
 import { deckDesignFor, deckDesignKey, guidanceFor } from "../deck-design-settings.ts";
 import { Dictated } from "../dictation.jsx";
 import { createHubTransport } from "../hub.ts";
 import { inShell } from "../shell.ts";
 import { ProviderList, ResolvedCatalogList, type ApiKeyProvider, type OAuthCandidate } from "./providers.jsx";
+import "./settings-layout.css";
 
 export function Settings({
   status,
@@ -38,7 +41,8 @@ export function Settings({
   onChanged: () => void;
 }) {
   return (
-    <div className="settings">
+    <div className="settings-page">
+      <h1>Settings</h1>
       <Appearance />
       <Inference
         providers={providers}
@@ -47,10 +51,10 @@ export function Settings({
         onChanged={onChanged}
       />
       <Designer />
-      <ThisComputer status={status} />
-      <Diagnostics status={status} />
       <StakeholderDecks />
       <DeckTemplates />
+      <ThisComputer status={status} />
+      <Diagnostics status={status} />
     </div>
   );
 }
@@ -58,25 +62,70 @@ export function Settings({
 function Section({
   title,
   lead,
-  status,
   children,
 }: {
   title: string;
   lead?: string;
-  status?: React.ReactNode;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
-    <section className="settings-section" aria-label={title}>
-      <header className="settings-head">
-        <div>
-          <h2>{title}</h2>
-          {lead ? <p>{lead}</p> : null}
-        </div>
-        {status}
-      </header>
+    <section className="section" aria-label={title}>
+      <div className="section-head">
+        <h2>{title}</h2>
+        {lead ? <p>{lead}</p> : null}
+      </div>
       {children}
     </section>
+  );
+}
+
+function Row({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="row">
+      <div className="k">
+        <b>{label}</b>
+        {hint ? <span>{hint}</span> : null}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function SegCtl<T extends string>({
+  label,
+  value,
+  onChange,
+  options,
+  disabled,
+}: {
+  label: string;
+  value: T;
+  onChange: (value: T) => void;
+  options: readonly { id: T; label: string }[];
+  disabled?: boolean;
+}) {
+  return (
+    <div className="seg-ctl" role="group" aria-label={label}>
+      {options.map((option) => (
+        <button
+          key={option.id}
+          type="button"
+          className={option.id === value ? "on" : undefined}
+          disabled={disabled}
+          onClick={() => onChange(option.id)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -88,20 +137,19 @@ function Appearance() {
   const { mode, setMode } = useTheme();
   return (
     <Section title="Appearance" lead="Follows the system until you say otherwise.">
-      <div className="setting-row">
-        <div>
-          <strong>Theme</strong>
-        </div>
-        <SegmentedControl<ThemeMode>
-          label="Theme"
-          value={mode}
-          onValueChange={setMode}
-          options={[
-            { id: "light", label: "Light" },
-            { id: "system", label: "System" },
-            { id: "dark", label: "Dark" },
-          ]}
-        />
+      <div className="section-body">
+        <Row label="Theme">
+          <SegCtl<ThemeMode>
+            label="Theme"
+            value={mode}
+            onChange={setMode}
+            options={[
+              { id: "light", label: "Light" },
+              { id: "system", label: "System" },
+              { id: "dark", label: "Dark" },
+            ]}
+          />
+        </Row>
       </div>
     </Section>
   );
@@ -120,31 +168,20 @@ function Inference({
   oauthCandidates: OAuthCandidate[];
   onChanged: () => void;
 }) {
-  const active = providers.find((provider) => provider.active) ?? providers[0];
-  const connected = providers.some((provider) => provider.status === "ready");
   return (
-    <Section
-      title="Inference"
-      lead="The models that draft every stage, in fallback order. If the first cannot answer, the next one does, and each version records who wrote it."
-      status={
-        connected && active ? (
-          <StateLabel tone="success">Connected · {active.label}</StateLabel>
-        ) : (
-          <StateLabel tone="warning">Nothing connected</StateLabel>
-        )
-      }
-    >
-      <ResolvedCatalogList providers={providers} onChanged={onChanged} />
-      <h3 id="connections" className="section-sub">
-        Connections
-      </h3>
-      <ProviderList
-        manage
-        providers={providers}
-        apiKeyProviders={apiKeyProviders}
-        oauthCandidates={oauthCandidates}
-        onChanged={onChanged}
-      />
+    <Section title="Inference" lead="Where the specialists think. Keys live in this machine's keychain.">
+      <div id="connections" className="section-body">
+        <ProviderList
+          manage
+          providers={providers}
+          apiKeyProviders={apiKeyProviders}
+          oauthCandidates={oauthCandidates}
+          onChanged={onChanged}
+        />
+      </div>
+      <div className="section-body">
+        <ResolvedCatalogList providers={providers} onChanged={onChanged} />
+      </div>
     </Section>
   );
 }
@@ -209,81 +246,74 @@ function Designer() {
   };
 
   return (
-    <Section title="Designer" lead="What the stage-4 designer draws to, how much it may write, and what happens when that is not enough.">
-      {error ? <Banner tone="error" title={error} /> : null}
-      <div className="setting-row">
-        <div>
-          <strong>Surface</strong>
-          <p>Light mockups sit beside the light documents. Dark is for products that are dark. Or leave it to what the brief calls for.</p>
-        </div>
-        <select
-          className="setting-select"
-          aria-label="Surface"
-          value={settings?.surface ?? "light"}
-          disabled={!settings}
-          onChange={(event) => void save("surface", event.target.value as DesignerSettings["surface"])}
-        >
-          <option value="light">Light</option>
-          <option value="dark">Dark</option>
-          <option value="brief">What the brief calls for</option>
-        </select>
-      </div>
-      <div className="setting-field">
-        <div>
-          <strong>Design language</strong>
-          <p>Palette, type, spacing, tone, what to avoid: anything the designer should follow, in your words. It takes precedence over the defaults. Saved when you leave the field.</p>
-        </div>
-        <Dictated value={language} onValueChange={setLanguage} disabled={!settings} align="start">
-          <Textarea
-            aria-label="Design language"
-            value={language}
+    <Section title="Designer" lead="What the stage-4 designer draws to, and how much it may write.">
+      <div className="section-body">
+        {error ? <Banner tone="error" title={error} /> : null}
+        <Row label="Surface" hint="Light, dark, or what the brief calls for">
+          <SegCtl<DesignerSettings["surface"]>
+            label="Surface"
+            value={settings?.surface ?? "light"}
             disabled={!settings}
-            placeholder="e.g. Inter for text, one accent colour, generous whitespace, no gradients, buttons with 6px corners."
-            onChange={(event) => setLanguage(event.target.value)}
-            onBlur={() => {
-              if (settings && language !== settings.language) void save("language", language);
+            onChange={(value) => void save("surface", value)}
+            options={[
+              { id: "light", label: "Light" },
+              { id: "dark", label: "Dark" },
+              { id: "brief", label: "Brief" },
+            ]}
+          />
+        </Row>
+        <Row label="Design language" hint="Palette, type, tone — in your words">
+          <Dictated value={language} onValueChange={setLanguage} disabled={!settings} align="center">
+            <input
+              className="field"
+              aria-label="Design language"
+              value={language}
+              disabled={!settings}
+              placeholder="e.g. one accent colour, generous whitespace, no gradients"
+              onChange={(event) => setLanguage(event.target.value)}
+              onBlur={() => {
+                if (settings && language !== settings.language) void save("language", language);
+              }}
+            />
+          </Dictated>
+        </Row>
+        <Row
+          label="Output limit"
+          hint="Tokens per design — most need 20,000–40,000; a design that uses them all is cut short"
+        >
+          <input
+            className="field narrow"
+            aria-label="Output limit in tokens"
+            type="number"
+            inputMode="numeric"
+            min={TOKENS_MIN}
+            max={TOKENS_MAX}
+            step={500}
+            value={tokens}
+            disabled={!settings}
+            onChange={(event) => setTokens(event.target.value)}
+            onBlur={saveTokens}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") (event.target as HTMLInputElement).blur();
             }}
           />
-        </Dictated>
-      </div>
-      <div className="setting-row">
-        <div>
-          <strong>Output limit</strong>
-          <p>How many tokens one design may use, {TOKENS_MIN} to {TOKENS_MAX}. A full design usually needs 20,000 to 40,000 and takes five to ten minutes; a design that uses them all is cut short.</p>
-        </div>
-        <Input
-          className="setting-number"
-          aria-label="Output limit in tokens"
-          type="number"
-          inputMode="numeric"
-          min={TOKENS_MIN}
-          max={TOKENS_MAX}
-          step={500}
-          value={tokens}
-          disabled={!settings}
-          onChange={(event) => setTokens(event.target.value)}
-          onBlur={saveTokens}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") (event.target as HTMLInputElement).blur();
-          }}
-        />
-      </div>
-      <div className="setting-row">
-        <div>
-          <strong>If a design exceeds the limit</strong>
-          <p>Tell you and stop; raise the limit and try once more; or try once more at lower resolution within the limit, and tell you.</p>
-        </div>
-        <select
-          className="setting-select"
-          aria-label="If a design exceeds the limit"
-          value={settings?.onLimit ?? "tell"}
-          disabled={!settings}
-          onChange={(event) => void save("onLimit", event.target.value as DesignerSettings["onLimit"])}
+        </Row>
+        <Row
+          label="If a design exceeds the limit"
+          hint="Tell you and stop; raise the limit and try once more; or try once more at lower resolution within the limit, and tell you."
         >
-          <option value="tell">Tell me and do nothing else</option>
-          <option value="raise">Raise the limit and try again</option>
-          <option value="reduce">Produce a lower-resolution design and tell me</option>
-        </select>
+          <select
+            className="field"
+            aria-label="If a design exceeds the limit"
+            value={settings?.onLimit ?? "tell"}
+            disabled={!settings}
+            onChange={(event) => void save("onLimit", event.target.value as DesignerSettings["onLimit"])}
+          >
+            <option value="tell">Tell me and do nothing else</option>
+            <option value="raise">Raise the limit and try again</option>
+            <option value="reduce">Produce a lower-resolution design and tell me</option>
+          </select>
+        </Row>
       </div>
     </Section>
   );
@@ -293,7 +323,7 @@ function Designer() {
 
 type DeckTemplate = { id: string; name: string; mediaType: string; createdAt: string };
 
-function roleLabel(role: string): string {
+export function roleLabel(role: string): string {
   return role.replace(/_/g, " ");
 }
 
@@ -306,6 +336,7 @@ function roleLabel(role: string): string {
 function StakeholderDecks() {
   const [designs, setDesigns] = useState<Record<string, DeckDesign> | null>(null);
   const [guidance, setGuidance] = useState<Record<string, string>>({});
+  const [editing, setEditing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -343,113 +374,113 @@ function StakeholderDecks() {
   };
 
   return (
-    <Section
-      title="Stakeholder decks"
-      lead="How each stakeholder role's slides look, and what their deck outline should emphasise. A changed look rebuilds the slides the next time they are saved; changed guidance shapes the next package written for that role. For images, a model reads the whole deck, decides which slides a picture would help and what each should show, and the first connected provider that lists an image model draws them when the slides are saved; each is kept so it is drawn once."
-    >
-      {error ? <Banner tone="error" title={error} /> : null}
-      {STAKEHOLDER_ROLES.map((role) => {
-        const design = designs?.[role] ?? DEFAULT_DECK_DESIGN;
-        const digest = [
-          `${design.theme}, ${design.typeface}`,
-          design.density,
-          design.images === "none" ? "no images" : design.images === "cover" ? "cover image" : design.images === "some" ? "some images" : "images on every slide",
-          design.notes ? "notes" : "no notes",
-        ].join(" · ");
-        return (
-          // One line per role until it is opened: the role and a digest of
-          // its design; the controls only when disclosed.
-          <details key={role} className="deck-role">
-            <summary className="deck-role-summary">
-              <span className="deck-role-title">{roleLabel(role)}</span>
-              <span className="deck-role-digest">{digest}</span>
-            </summary>
-            <div className="deck-role-body">
-              <div className="deck-role-controls">
-                <label className="deck-role-control">
-                  <span>Colour</span>
-                  <select
-                    className="setting-select"
-                    value={design.theme}
-                    disabled={!designs}
-                    onChange={(event) => void save(role, "theme", event.target.value as DeckTheme)}
-                  >
-                    {Object.entries(DECK_THEMES).map(([value, meta]) => (
-                      <option key={value} value={value}>
-                        {meta.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="deck-role-control">
-                  <span>Typeface</span>
-                  <select
-                    className="setting-select"
-                    value={design.typeface}
-                    disabled={!designs}
-                    onChange={(event) => void save(role, "typeface", event.target.value as DeckTypeface)}
-                  >
-                    {DECK_TYPEFACES.map((face) => (
-                      <option key={face} value={face}>
-                        {face}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="deck-role-control">
-                  <span>Density</span>
-                  <select
-                    className="setting-select"
-                    value={design.density}
-                    disabled={!designs}
-                    onChange={(event) => void save(role, "density", event.target.value as DeckDensity)}
-                  >
-                    <option value="sparse">Sparse · up to {DECK_DENSITY.sparse} points a slide</option>
-                    <option value="standard">Standard · up to {DECK_DENSITY.standard}</option>
-                    <option value="full">Full · up to {DECK_DENSITY.full}</option>
-                  </select>
-                </label>
-                <label className="deck-role-control">
-                  <span>Speaker notes</span>
-                  <Switch checked={design.notes} disabled={!designs} onCheckedChange={(checked) => void save(role, "notes", checked)} />
-                </label>
-                <label className="deck-role-control">
-                  <span>Images</span>
-                  <select
-                    className="setting-select"
-                    value={design.images}
-                    disabled={!designs}
-                    onChange={(event) => void save(role, "images", event.target.value as DeckDesign["images"])}
-                  >
-                    <option value="none">None</option>
-                    <option value="cover">The cover</option>
-                    <option value="some">Some slides, chosen for the content</option>
-                    <option value="all">The cover and every slide</option>
-                  </select>
-                </label>
-              </div>
-              <div className="setting-field">
-                <div>
-                  <strong>What the outline should emphasise</strong>
-                  <p>In your words, for this role: what to lead with, what to leave out, the tone. Given to the presentation creator with the next package.</p>
-                </div>
-                <Dictated value={guidance[role] ?? ""} onValueChange={(next) => setGuidance({ ...guidance, [role]: next })} disabled={!designs} align="start">
-                  <Textarea
-                    aria-label={`Deck guidance for ${roleLabel(role)}`}
-                    value={guidance[role] ?? ""}
-                    disabled={!designs}
-                    placeholder="e.g. Lead with cost and timeline; one risk slide at most; no implementation detail."
-                    onChange={(event) => setGuidance({ ...guidance, [role]: event.target.value })}
-                    onBlur={() => {
-                      if (designs && guidance[role] !== designs[role]?.guidance) void save(role, "guidance", guidance[role] ?? "");
-                    }}
-                  />
-                </Dictated>
-              </div>
-            </div>
-          </details>
-        );
-      })}
+    <Section title="Stakeholder decks" lead="How the deck each role receives is composed.">
+      <div className="section-body">
+        {error ? <Banner tone="error" title={error} /> : null}
+        {STAKEHOLDER_ROLES.map((role) => {
+          const design = designs?.[role] ?? DEFAULT_DECK_DESIGN;
+          const themeLabel = DECK_THEMES[design.theme].label;
+          const open = editing === role;
+          return (
+            <Fragment key={role}>
+              <Row label={roleLabel(role)} hint={`${themeLabel} theme`}>
+                <button
+                  type="button"
+                  className="btn link"
+                  disabled={!designs}
+                  onClick={() => setEditing(open ? null : role)}
+                >
+                  Edit
+                </button>
+              </Row>
+              {open ? (
+                <>
+                  <Row label="Colour">
+                    <select
+                      className="field"
+                      aria-label={`Colour for ${roleLabel(role)}`}
+                      value={design.theme}
+                      disabled={!designs}
+                      onChange={(event) => void save(role, "theme", event.target.value as DeckTheme)}
+                    >
+                      {Object.entries(DECK_THEMES).map(([value, meta]) => (
+                        <option key={value} value={value}>
+                          {meta.label}
+                        </option>
+                      ))}
+                    </select>
+                  </Row>
+                  <Row label="Typeface">
+                    <select
+                      className="field"
+                      aria-label={`Typeface for ${roleLabel(role)}`}
+                      value={design.typeface}
+                      disabled={!designs}
+                      onChange={(event) => void save(role, "typeface", event.target.value as DeckTypeface)}
+                    >
+                      {DECK_TYPEFACES.map((face) => (
+                        <option key={face} value={face}>
+                          {face}
+                        </option>
+                      ))}
+                    </select>
+                  </Row>
+                  <Row label="Density">
+                    <select
+                      className="field"
+                      aria-label={`Density for ${roleLabel(role)}`}
+                      value={design.density}
+                      disabled={!designs}
+                      onChange={(event) => void save(role, "density", event.target.value as DeckDensity)}
+                    >
+                      <option value="sparse">Sparse · up to {DECK_DENSITY.sparse} points a slide</option>
+                      <option value="standard">Standard · up to {DECK_DENSITY.standard}</option>
+                      <option value="full">Full · up to {DECK_DENSITY.full}</option>
+                    </select>
+                  </Row>
+                  <Row label="Speaker notes">
+                    <Switch checked={design.notes} disabled={!designs} onCheckedChange={(checked) => void save(role, "notes", checked)} />
+                  </Row>
+                  <Row label="Images">
+                    <select
+                      className="field"
+                      aria-label={`Images for ${roleLabel(role)}`}
+                      value={design.images}
+                      disabled={!designs}
+                      onChange={(event) => void save(role, "images", event.target.value as DeckDesign["images"])}
+                    >
+                      <option value="none">None</option>
+                      <option value="cover">The cover</option>
+                      <option value="some">Some slides, chosen for the content</option>
+                      <option value="all">The cover and every slide</option>
+                    </select>
+                  </Row>
+                  <Row label="What the outline should emphasise" hint="In your words, for this role: what to lead with, what to leave out, the tone.">
+                    <Dictated
+                      value={guidance[role] ?? ""}
+                      onValueChange={(next) => setGuidance({ ...guidance, [role]: next })}
+                      disabled={!designs}
+                      align="start"
+                    >
+                      <textarea
+                        className="field"
+                        aria-label={`Deck guidance for ${roleLabel(role)}`}
+                        value={guidance[role] ?? ""}
+                        disabled={!designs}
+                        placeholder="e.g. Lead with cost and timeline; one risk slide at most; no implementation detail."
+                        onChange={(event) => setGuidance({ ...guidance, [role]: event.target.value })}
+                        onBlur={() => {
+                          if (designs && guidance[role] !== designs[role]?.guidance) void save(role, "guidance", guidance[role] ?? "");
+                        }}
+                      />
+                    </Dictated>
+                  </Row>
+                </>
+              ) : null}
+            </Fragment>
+          );
+        })}
+      </div>
     </Section>
   );
 }
@@ -535,20 +566,18 @@ function DeckTemplates() {
       title="Stakeholder deck templates"
       lead="A PowerPoint whose theme a role's slides follow: its accent and text colours, its title and body typefaces, and its slide size. Nothing else is copied from it. Upload one below, then point a role at it."
     >
-      {error ? <Banner tone="error" title={error} /> : null}
-      <details>
-        <summary>Manage templates</summary>
-        <div className="deck-template-library">
-          {(templates ?? []).map((template) => (
-            <div key={template.id} className="deck-template-row">
-              <span className="deck-template-name">{template.name}</span>
-              <Button loading={removingId === template.id} onClick={() => void remove(template.id)}>
-                Remove
-              </Button>
-            </div>
-          ))}
+      <div className="section-body">
+        {error ? <Banner tone="error" title={error} /> : null}
+        {(templates ?? []).map((template) => (
+          <Row key={template.id} label={template.name}>
+            <Button loading={removingId === template.id} onClick={() => void remove(template.id)}>
+              Remove
+            </Button>
+          </Row>
+        ))}
+        <Row label="Upload" hint="A .pptx or .potx whose theme a role can follow">
           <label className="deck-template-pick">
-            <Input
+            <input
               type="file"
               accept=".pptx,.potx,application/vnd.openxmlformats-officedocument.presentationml.presentation"
               disabled={uploading}
@@ -558,16 +587,13 @@ function DeckTemplates() {
                 if (file) void upload(file);
               }}
             />
-            <span>{uploading ? "Uploading…" : "Choose a PowerPoint…"}</span>
+            <span className="btn">{uploading ? "Uploading…" : "Choose a PowerPoint…"}</span>
           </label>
-        </div>
+        </Row>
         {STAKEHOLDER_ROLES.map((role) => (
-          <div key={role} className="setting-row">
-            <div>
-              <strong>{roleLabel(role)}</strong>
-            </div>
+          <Row key={role} label={roleLabel(role)}>
             <select
-              className="setting-select"
+              className="field"
               aria-label={`Style guide for ${roleLabel(role)}`}
               value={roles?.[role] ?? ""}
               disabled={!roles || !templates || busyRole === role}
@@ -580,14 +606,24 @@ function DeckTemplates() {
                 </option>
               ))}
             </select>
-          </div>
+          </Row>
         ))}
-      </details>
+      </div>
     </Section>
   );
 }
 
 /* ------------------------------------------------------------ this computer */
+
+export function hostStatusCopy(status: HostStatus): string {
+  const running = status.host.state === "ready" ? "Running" : status.host.state;
+  const hub = status.hub.mode === "embedded" ? "embedded hub" : (status.hub.url ?? "remote hub");
+  return `${running} · ${hub}`;
+}
+
+export function hostCredentialsCopy(status: HostStatus): string {
+  return status.credentialBackend === "keychain" ? "macOS Keychain" : "private file on disk";
+}
 
 /**
  * Start-at-login is off until somebody turns it on, the copy says what it does
@@ -627,35 +663,42 @@ function ThisComputer({ status }: { status: HostStatus | null }) {
 
   return (
     <Section title="This computer" lead="The host does the work. This window is only how you watch it.">
-      {error ? <Banner tone="error" title={error} /> : null}
-      <div className="setting-row">
-        <div>
-          <strong>Start when you log in</strong>
-          <p>Keeps projects moving between the times you open this window. Applies from your next login. Never runs while the machine is asleep.</p>
-        </div>
-        <Switch
+      <div className="section-body">
+        {error ? <Banner tone="error" title={error} /> : null}
+        {status ? (
+          <Row label="Status">
+            <span className="v">{hostStatusCopy(status)}</span>
+          </Row>
+        ) : null}
+        {status ? (
+          <Row label="Credentials">
+            <span className="v">{hostCredentialsCopy(status)}</span>
+          </Row>
+        ) : null}
+        {status ? (
+          <Row label="Version">
+            <span className="v">internal-beta</span>
+          </Row>
+        ) : null}
+        <Row
           label="Start when you log in"
-          checked={enabled ?? false}
-          disabled={enabled === null}
-          onCheckedChange={(next) => void toggle(next)}
-        />
+          hint="Keeps projects moving between the times you open this window. Applies from your next login. Never runs while the machine is asleep."
+        >
+          <Switch
+            label="Start when you log in"
+            checked={enabled ?? false}
+            disabled={enabled === null}
+            onCheckedChange={(next) => void toggle(next)}
+          />
+        </Row>
+        {inShell() && status?.hub.mode === "embedded" ? (
+          <Row label="Stop the host" hint="Closing the window only disconnects it. This ends the host, and everything in progress pauses until it starts again.">
+            <Button variant="destructive" onClick={() => void invoke("quit_app")}>
+              Stop
+            </Button>
+          </Row>
+        ) : null}
       </div>
-      {inShell() && status?.hub.mode === "embedded" ? (
-        <div className="setting-row">
-          <div>
-            <strong>Stop the host</strong>
-            <p>Closing the window only disconnects it. This ends the host, and everything in progress pauses until it starts again.</p>
-          </div>
-          <Button variant="destructive" onClick={() => void invoke("quit_app")}>
-            Stop
-          </Button>
-        </div>
-      ) : null}
-      {status ? (
-        <p className="settings-note">
-          Keys are kept {status.credentialBackend === "keychain" ? "in the macOS keychain" : "in a private file on disk"}.
-        </p>
-      ) : null}
     </Section>
   );
 }
@@ -682,52 +725,51 @@ function Diagnostics({ status }: { status: HostStatus | null }) {
   }, [status]);
   if (!status) return null;
   const capabilities = Object.entries(status.build?.capabilities ?? {});
+  const hubCopy =
+    hubLive === null
+      ? "Checking…"
+      : hubLive
+        ? status.hub.mode === "embedded"
+          ? "Embedded, in this app"
+          : `Hosted at ${status.hub.url}`
+        : status.hub.ready
+          ? "The host mounted it, but it is not answering"
+          : `Unavailable: ${status.hub.detail}`;
   return (
-    <details className="settings-diagnostics">
-      <summary>Diagnostics</summary>
-      <dl className="diagnostic-list">
-        <div>
-          <dt>Host</dt>
-          <dd>
+    <details className="section">
+      <summary className="section-head">
+        <h2>Diagnostics</h2>
+        <p>For when something is wrong.</p>
+      </summary>
+      <div className="section-body">
+        <Row label="Host">
+          <span className="v">
             {status.host.state} · pid {status.host.pid} · since {new Date(status.host.startedAt).toLocaleString()}
-          </dd>
-        </div>
+          </span>
+        </Row>
         {status.host.sleepGaps.length > 0 ? (
-          <div>
-            <dt>Not running</dt>
-            <dd>
+          <Row label="Not running">
+            <span className="v">
               {status.host.sleepGaps
                 .map(
                   (gap) =>
                     `${new Date(gap.from).toLocaleTimeString()}–${new Date(gap.to).toLocaleTimeString()} (${gap.seconds}s)`,
                 )
                 .join("; ")}
-            </dd>
-          </div>
+            </span>
+          </Row>
         ) : null}
-        <div>
-          <dt>Hub</dt>
-          <dd>
-            {hubLive === null
-              ? "Checking…"
-              : hubLive
-                ? status.hub.mode === "embedded"
-                  ? "Embedded, in this app"
-                  : `Hosted at ${status.hub.url}`
-                : status.hub.ready
-                  ? "The host mounted it, but it is not answering"
-                  : `Unavailable: ${status.hub.detail}`}
-          </dd>
-        </div>
+        <Row label="Hub">
+          <span className="v">{hubCopy}</span>
+        </Row>
         {status.build ? (
-          <div>
-            <dt>Build worker</dt>
-            <dd>
+          <Row label="Build worker">
+            <span className="v">
               {status.build.detail} ({capabilities.filter(([, ok]) => ok).length} of {capabilities.length} controls)
-            </dd>
-          </div>
+            </span>
+          </Row>
         ) : null}
-      </dl>
+      </div>
     </details>
   );
 }
