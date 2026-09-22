@@ -117,6 +117,18 @@
     "vendor/interchange/apps/*",
     "vendor/workbench/packages/*"
   ],
+  "overrides": {
+    "@intx/hub-common": "0.4.0",
+    "@intx/agent": "workspace:*",
+    "@intx/db": "workspace:*",
+    "@intx/hub-api": "workspace:*",
+    "@intx/hub-client": "workspace:*",
+    "@intx/hub-sessions": "workspace:*",
+    "@intx/inference": "workspace:*",
+    "@intx/types": "workspace:*",
+    "@intx/workflow": "workspace:*",
+    "@intx/workflow-host": "workspace:*"
+  },
   "catalog": {
     "@types/semver": "^7.7.1",
     "@types/ssri": "^7.1.5",

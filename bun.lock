@@ -388,6 +388,18 @@
     "@corbits/react-ui",
     "@corbits/mailbox",
   ],
+  "overrides": {
+    "@intx/agent": "workspace:*",
+    "@intx/db": "workspace:*",
+    "@intx/hub-api": "workspace:*",
+    "@intx/hub-client": "workspace:*",
+    "@intx/hub-common": "0.4.0",
+    "@intx/hub-sessions": "workspace:*",
+    "@intx/inference": "workspace:*",
+    "@intx/types": "workspace:*",
+    "@intx/workflow": "workspace:*",
+    "@intx/workflow-host": "workspace:*",
+  },
   "catalog": {
     "@types/semver": "^7.7.1",
     "@types/ssri": "^7.1.5",
@@ -1342,6 +1354,14 @@
 
     "@corbits/codex-provider/@corbits/oauth-core": ["@corbits/oauth-core@github:corbitsdev/corbits-oauth-core#3028f86", { "dependencies": { "@intx/db": "^0.3.0", "@intx/hub-api": "^0.3.0", "@intx/hub-common": "^0.3.0", "@intx/types": "^0.3.0", "arktype": "2.2.3", "drizzle-orm": "^0.45.2", "hono": "^4.11.9" } }, "corbitsdev-corbits-oauth-core-3028f86", "sha512-KMxRZgEi7S99tqoWhXqAAm5Bv4ef5tn3eYFcfbiHHX/E+GPnbedF44/ISbGs2gedoR2U9EtA1gnmh+q+Qfg00w=="],
 
+    "@corbits/embed-hub/@corbits/codex-provider": ["@corbits/codex-provider@github:corbitsdev/corbits-codex-provider#e7ff4af", { "dependencies": { "@corbits/oauth-core": "github:corbitsdev/corbits-oauth-core#3028f8604155eee63f5a1711f0d4022d7984e3f7", "@corbits/openai-responses": "github:corbitsdev/corbits-openai-responses", "arktype": "2.2.3" }, "peerDependencies": { "@intx/inference": ">=0.4.0", "@intx/types": ">=0.4.0" } }, "corbitsdev-corbits-codex-provider-e7ff4af", "sha512-BWvs1Suwi1rLl4etrxtMcaxKH74UNwditf5LR8RUTjJu1wkbe+S4MMqxGQKCTeDhnHYbRkZs3vOKowtBPsy1gg=="],
+
+    "@corbits/embed-hub/@corbits/mailbox": ["@corbits/mailbox@github:corbitsdev/corbits-mailbox#8289024", { "dependencies": { "@hono/standard-validator": "0.2.3", "@intx/crypto": "0.4.0", "@standard-community/standard-json": "0.3.5", "@standard-community/standard-openapi": "0.2.9", "arktype": "2.1.29", "hono-openapi": "1.3.1" }, "peerDependencies": { "@intx/log": "^0.4.0", "@intx/mailbox": "^0.4.0", "@intx/mime": "^0.4.0", "@intx/types": "^0.4.0", "drizzle-orm": "^0.45.2", "hono": "^4.12.0", "postgres": "^3.4.0" } }, "corbitsdev-corbits-mailbox-8289024", "sha512-ay5tepO3btBxVxUULY0L684lyaLY3MrZU6zjGy2AbU6at3XMY50skt7nnWrFCfD28vJj4PYjvz1eiQ4CCgASnQ=="],
+
+    "@corbits/embed-hub/@corbits/oauth-core": ["@corbits/oauth-core@github:corbitsdev/corbits-oauth-core#03549c9", { "dependencies": { "@intx/db": "^0.4.0", "@intx/hub-api": "^0.4.0", "@intx/hub-common": "^0.4.0", "@intx/types": "^0.4.0", "arktype": "2.2.3", "drizzle-orm": "^0.45.2", "hono": "^4.11.9" } }, "corbitsdev-corbits-oauth-core-03549c9", "sha512-HUDc7mqHKrztTdTi4czsFIQOH87Dy78EowLgnu6jKiF/8pdtC2T2B8WcwzUAfLsVhObJRpG2Jg4CdrBr1QWdTw=="],
+
+    "@corbits/embed-hub/@corbits/xai-provider": ["@corbits/xai-provider@github:corbitsdev/corbits-xai-provider#bd9dd63", { "dependencies": { "@corbits/oauth-core": "github:corbitsdev/corbits-oauth-core#3028f8604155eee63f5a1711f0d4022d7984e3f7", "@corbits/openai-responses": "github:corbitsdev/corbits-openai-responses", "arktype": "2.2.3" }, "peerDependencies": { "@intx/inference": ">=0.4.0", "@intx/types": ">=0.4.0" } }, "corbitsdev-corbits-xai-provider-bd9dd63", "sha512-vV8Mr2yGIEUXGK+lw39pZwRaxc02ZeE4aYmb9IWkS2J7XEQBWpqKi1HXNg2ABn1SxV4QyTzjkyG2s3TffnwL0w=="],
+
     "@corbits/mailbox/arktype": ["arktype@2.1.29", "", { "dependencies": { "@ark/schema": "0.56.0", "@ark/util": "0.56.0", "arkregex": "0.0.5" } }, "sha512-jyfKk4xIOzvYNayqnD8ZJQqOwcrTOUbIU4293yrzAjA3O1dWh61j71ArMQ6tS/u4pD7vabSPe7nG3RCyoXW6RQ=="],
 
     "@corbits/mailbox/hono-openapi": ["hono-openapi@1.3.1", "", { "peerDependencies": { "@hono/standard-validator": "^0.2.0", "@standard-community/standard-json": "^0.3.5", "@standard-community/standard-openapi": "^0.2.9", "@types/json-schema": "^7.0.15", "hono": "^4.11.2", "openapi-types": "^12.1.3" }, "optionalPeers": ["@hono/standard-validator", "hono"] }, "sha512-NLVeVkhKZ3drmQNEIPac8HX8Y54uf1hJAgIM/7MfDsaeVVmB+QILWQxx5x3R3NvRHgedcbEbOCGY2uR7WQYyMw=="],
@@ -1357,6 +1377,10 @@
     "@intx/storage-isogit/@isomorphic-git/lightning-fs": ["@isomorphic-git/lightning-fs@4.7.0", "", { "dependencies": { "@isomorphic-git/idb-keyval": "3.3.2", "isomorphic-textencoder": "1.0.1", "just-debounce-it": "1.1.0", "just-once": "1.1.0" }, "bin": { "superblocktxt": "src/superblocktxt.js" } }, "sha512-eJg541itXKCOyj3DBAnd0KNY1mNgi29GCpy7FgKWsgatu/ulEKv+dMxxjhUNL68Jh3uPTaGNfeAjdJiHUYEGnw=="],
 
     "@npmcli/agent/lru-cache": ["lru-cache@11.5.3", "", {}, "sha512-U4N8FgzmWxc8k1VH8Kr6lQg18U7Fjvby6wXHVRX/ZZ7IwWbRMgrRbP0Wrb5q5NVinryp4SQampHKdvtecItxUg=="],
+
+    "@solutions-builder/web/@corbits/codex-provider": ["@corbits/codex-provider@github:corbitsdev/corbits-codex-provider#e7ff4af", { "dependencies": { "@corbits/oauth-core": "github:corbitsdev/corbits-oauth-core#3028f8604155eee63f5a1711f0d4022d7984e3f7", "@corbits/openai-responses": "github:corbitsdev/corbits-openai-responses", "arktype": "2.2.3" }, "peerDependencies": { "@intx/inference": ">=0.4.0", "@intx/types": ">=0.4.0" } }, "corbitsdev-corbits-codex-provider-e7ff4af", "sha512-BWvs1Suwi1rLl4etrxtMcaxKH74UNwditf5LR8RUTjJu1wkbe+S4MMqxGQKCTeDhnHYbRkZs3vOKowtBPsy1gg=="],
+
+    "@solutions-builder/web/@corbits/xai-provider": ["@corbits/xai-provider@github:corbitsdev/corbits-xai-provider#bd9dd63", { "dependencies": { "@corbits/oauth-core": "github:corbitsdev/corbits-oauth-core#3028f8604155eee63f5a1711f0d4022d7984e3f7", "@corbits/openai-responses": "github:corbitsdev/corbits-openai-responses", "arktype": "2.2.3" }, "peerDependencies": { "@intx/inference": ">=0.4.0", "@intx/types": ">=0.4.0" } }, "corbitsdev-corbits-xai-provider-bd9dd63", "sha512-vV8Mr2yGIEUXGK+lw39pZwRaxc02ZeE4aYmb9IWkS2J7XEQBWpqKi1HXNg2ABn1SxV4QyTzjkyG2s3TffnwL0w=="],
 
     "archiver-utils/readable-stream": ["readable-stream@2.3.8", "", { "dependencies": { "core-util-is": "~1.0.0", "inherits": "~2.0.3", "isarray": "~1.0.0", "process-nextick-args": "~2.0.0", "safe-buffer": "~5.1.1", "string_decoder": "~1.1.1", "util-deprecate": "~1.0.1" } }, "sha512-8p0AUk4XODgIewSi0l8Epjs+EVnWiK7NoDIEGU0HhE7+ZyY8D1IMY7odu5lRrFXGg71L15KG8QrPmum45RTtdA=="],
 
@@ -1420,27 +1444,23 @@
 
     "zip-stream/archiver-utils": ["archiver-utils@3.0.4", "", { "dependencies": { "glob": "^7.2.3", "graceful-fs": "^4.2.0", "lazystream": "^1.0.0", "lodash.defaults": "^4.2.0", "lodash.difference": "^4.5.0", "lodash.flatten": "^4.4.0", "lodash.isplainobject": "^4.0.6", "lodash.union": "^4.6.0", "normalize-path": "^3.0.0", "readable-stream": "^3.6.0" } }, "sha512-KVgf4XQVrTjhyWmx6cte4RxonPLR9onExufI1jhvw/MQ4BB6IsZD5gT8Lq+u/+pRkWna/6JoHpiQioaqFP5Rzw=="],
 
-    "@corbits/codex-provider/@corbits/oauth-core/@intx/db": ["@intx/db@0.3.0", "", { "dependencies": { "@intx/authz": "0.3.0", "@intx/crypto": "0.3.0", "@intx/log": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29", "drizzle-orm": "^0.45.1", "postgres": "^3.4.8" } }, "sha512-MXNeUVJTftQuSHj5zSUBQsUcFN3wUBs8t6yT6lqjbaNxpT1C7kGx8qXb95WuadZln+krlLhyoUwGMF7EmYvlnw=="],
+    "@corbits/embed-hub/@corbits/codex-provider/@corbits/oauth-core": ["@corbits/oauth-core@github:corbitsdev/corbits-oauth-core#3028f86", { "dependencies": { "@intx/db": "^0.3.0", "@intx/hub-api": "^0.3.0", "@intx/hub-common": "^0.3.0", "@intx/types": "^0.3.0", "arktype": "2.2.3", "drizzle-orm": "^0.45.2", "hono": "^4.11.9" } }, "corbitsdev-corbits-oauth-core-3028f86", "sha512-KMxRZgEi7S99tqoWhXqAAm5Bv4ef5tn3eYFcfbiHHX/E+GPnbedF44/ISbGs2gedoR2U9EtA1gnmh+q+Qfg00w=="],
 
-    "@corbits/codex-provider/@corbits/oauth-core/@intx/hub-api": ["@intx/hub-api@0.3.0", "", { "dependencies": { "@hono/standard-validator": "^0.2.2", "@intx/agent": "0.3.0", "@intx/authz": "0.3.0", "@intx/crypto": "0.3.0", "@intx/db": "0.3.0", "@intx/hub-common": "0.3.0", "@intx/hub-sessions": "0.3.0", "@intx/log": "0.3.0", "@intx/mime": "0.3.0", "@intx/storage-isogit": "0.3.0", "@intx/types": "0.3.0", "@intx/workflow-deploy": "0.3.0", "arktype": "^2.1.29", "better-auth": "^1.4.18", "drizzle-orm": "^0.45.1", "hono": "^4.11.9", "hono-openapi": "^1.2.0", "isomorphic-git": "^1.27.2", "ssri": "^12.0.0" } }, "sha512-o3KuJilWywIjQ82q+t3kC5syHm/JCexnEYegngBZ7HD4lvbEoUkJnmhVUS5NxEFsr2Oqp0jEe4kpC96oJ2sKDA=="],
+    "@corbits/embed-hub/@corbits/codex-provider/@corbits/openai-responses": ["@corbits/openai-responses@github:corbitsdev/corbits-openai-responses#889431b", { "dependencies": { "arktype": "2.2.3" }, "peerDependencies": { "@intx/inference": ">=0.4.0", "@intx/types": ">=0.4.0" } }, "corbitsdev-corbits-openai-responses-889431b", "sha512-SXkYxlI2TBe3OMuDnEySUF6XV1jRm1zDcfPFUA486sad2FsS69FlTTchzYtKkaO+okgCvzBxHR0kAOMdr2e57A=="],
 
-    "@corbits/codex-provider/@corbits/oauth-core/@intx/hub-common": ["@intx/hub-common@0.3.0", "", { "dependencies": { "@intx/types": "0.3.0" } }, "sha512-dA8pTmBTu1JHGd3rGJrMsRWrai4GBBNnPxpZFFtXwQPzgL290lx2R+9BpRo2apdKbmgd+KOVshLvOdcUhAqghw=="],
+    "@corbits/embed-hub/@corbits/mailbox/arktype": ["arktype@2.1.29", "", { "dependencies": { "@ark/schema": "0.56.0", "@ark/util": "0.56.0", "arkregex": "0.0.5" } }, "sha512-jyfKk4xIOzvYNayqnD8ZJQqOwcrTOUbIU4293yrzAjA3O1dWh61j71ArMQ6tS/u4pD7vabSPe7nG3RCyoXW6RQ=="],
 
-    "@corbits/codex-provider/@corbits/oauth-core/@intx/types": ["@intx/types@0.3.0", "", { "dependencies": { "arktype": "^2.1.29", "semver": "^7.7.2" } }, "sha512-PJ+v3IhtfZ4J7ZqJ8E39TteRMnC6Y503Q0JeCJdskkK+jhcjx01z7TJSozucagauAlpyh8Hn/9CyWFl53Ji0DQ=="],
+    "@corbits/embed-hub/@corbits/mailbox/hono-openapi": ["hono-openapi@1.3.1", "", { "peerDependencies": { "@hono/standard-validator": "^0.2.0", "@standard-community/standard-json": "^0.3.5", "@standard-community/standard-openapi": "^0.2.9", "@types/json-schema": "^7.0.15", "hono": "^4.11.2", "openapi-types": "^12.1.3" }, "optionalPeers": ["@hono/standard-validator", "hono"] }, "sha512-NLVeVkhKZ3drmQNEIPac8HX8Y54uf1hJAgIM/7MfDsaeVVmB+QILWQxx5x3R3NvRHgedcbEbOCGY2uR7WQYyMw=="],
+
+    "@corbits/embed-hub/@corbits/xai-provider/@corbits/oauth-core": ["@corbits/oauth-core@github:corbitsdev/corbits-oauth-core#3028f86", { "dependencies": { "@intx/db": "^0.3.0", "@intx/hub-api": "^0.3.0", "@intx/hub-common": "^0.3.0", "@intx/types": "^0.3.0", "arktype": "2.2.3", "drizzle-orm": "^0.45.2", "hono": "^4.11.9" } }, "corbitsdev-corbits-oauth-core-3028f86", "sha512-KMxRZgEi7S99tqoWhXqAAm5Bv4ef5tn3eYFcfbiHHX/E+GPnbedF44/ISbGs2gedoR2U9EtA1gnmh+q+Qfg00w=="],
+
+    "@corbits/embed-hub/@corbits/xai-provider/@corbits/openai-responses": ["@corbits/openai-responses@github:corbitsdev/corbits-openai-responses#889431b", { "dependencies": { "arktype": "2.2.3" }, "peerDependencies": { "@intx/inference": ">=0.4.0", "@intx/types": ">=0.4.0" } }, "corbitsdev-corbits-openai-responses-889431b", "sha512-SXkYxlI2TBe3OMuDnEySUF6XV1jRm1zDcfPFUA486sad2FsS69FlTTchzYtKkaO+okgCvzBxHR0kAOMdr2e57A=="],
 
     "@corbits/mailbox/arktype/@ark/schema": ["@ark/schema@0.56.0", "", { "dependencies": { "@ark/util": "0.56.0" } }, "sha512-ECg3hox/6Z/nLajxXqNhgPtNdHWC9zNsDyskwO28WinoFEnWow4IsERNz9AnXRhTZJnYIlAJ4uGn3nlLk65vZA=="],
 
     "@corbits/mailbox/arktype/@ark/util": ["@ark/util@0.56.0", "", {}, "sha512-BghfRC8b9pNs3vBoDJhcta0/c1J1rsoS1+HgVUreMFPdhz/CRAKReAu57YEllNaSy98rWAdY1gE+gFup7OXpgA=="],
 
     "@corbits/mailbox/arktype/arkregex": ["arkregex@0.0.5", "", { "dependencies": { "@ark/util": "0.56.0" } }, "sha512-ncYjBdLlh5/QnVsAA8De16Tc9EqmYM7y/WU9j+236KcyYNUXogpz3sC4ATIZYzzLxwI+0sEOaQLEmLmRleaEXw=="],
-
-    "@corbits/xai-provider/@corbits/oauth-core/@intx/db": ["@intx/db@0.3.0", "", { "dependencies": { "@intx/authz": "0.3.0", "@intx/crypto": "0.3.0", "@intx/log": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29", "drizzle-orm": "^0.45.1", "postgres": "^3.4.8" } }, "sha512-MXNeUVJTftQuSHj5zSUBQsUcFN3wUBs8t6yT6lqjbaNxpT1C7kGx8qXb95WuadZln+krlLhyoUwGMF7EmYvlnw=="],
-
-    "@corbits/xai-provider/@corbits/oauth-core/@intx/hub-api": ["@intx/hub-api@0.3.0", "", { "dependencies": { "@hono/standard-validator": "^0.2.2", "@intx/agent": "0.3.0", "@intx/authz": "0.3.0", "@intx/crypto": "0.3.0", "@intx/db": "0.3.0", "@intx/hub-common": "0.3.0", "@intx/hub-sessions": "0.3.0", "@intx/log": "0.3.0", "@intx/mime": "0.3.0", "@intx/storage-isogit": "0.3.0", "@intx/types": "0.3.0", "@intx/workflow-deploy": "0.3.0", "arktype": "^2.1.29", "better-auth": "^1.4.18", "drizzle-orm": "^0.45.1", "hono": "^4.11.9", "hono-openapi": "^1.2.0", "isomorphic-git": "^1.27.2", "ssri": "^12.0.0" } }, "sha512-o3KuJilWywIjQ82q+t3kC5syHm/JCexnEYegngBZ7HD4lvbEoUkJnmhVUS5NxEFsr2Oqp0jEe4kpC96oJ2sKDA=="],
-
-    "@corbits/xai-provider/@corbits/oauth-core/@intx/hub-common": ["@intx/hub-common@0.3.0", "", { "dependencies": { "@intx/types": "0.3.0" } }, "sha512-dA8pTmBTu1JHGd3rGJrMsRWrai4GBBNnPxpZFFtXwQPzgL290lx2R+9BpRo2apdKbmgd+KOVshLvOdcUhAqghw=="],
-
-    "@corbits/xai-provider/@corbits/oauth-core/@intx/types": ["@intx/types@0.3.0", "", { "dependencies": { "arktype": "^2.1.29", "semver": "^7.7.2" } }, "sha512-PJ+v3IhtfZ4J7ZqJ8E39TteRMnC6Y503Q0JeCJdskkK+jhcjx01z7TJSozucagauAlpyh8Hn/9CyWFl53Ji0DQ=="],
 
     "@esbuild-kit/core-utils/esbuild/@esbuild/android-arm": ["@esbuild/android-arm@0.18.20", "", { "os": "android", "cpu": "arm" }, "sha512-fyi7TDI/ijKKNZTUJAQqiG5T7YjJXgnzkURqmGj13C6dCqckZBLdl4h7bkhHt/t0WP+zO9/zwroDvANaOqO5Sw=="],
 
@@ -1485,6 +1505,14 @@
     "@esbuild-kit/core-utils/esbuild/@esbuild/win32-ia32": ["@esbuild/win32-ia32@0.18.20", "", { "os": "win32", "cpu": "ia32" }, "sha512-Wv7QBi3ID/rROT08SABTS7eV4hX26sVduqDOTe1MvGMjNd3EjOz4b7zeexIR62GTIEKrfJXKL9LFxTYgkyeu7g=="],
 
     "@esbuild-kit/core-utils/esbuild/@esbuild/win32-x64": ["@esbuild/win32-x64@0.18.20", "", { "os": "win32", "cpu": "x64" }, "sha512-kTdfRcSiDfQca/y9QIkng02avJ+NCaQvrMejlsB3RRv5sE9rRoeBPISaZpKxHELzRxZyLvNts1P27W3wV+8geQ=="],
+
+    "@solutions-builder/web/@corbits/codex-provider/@corbits/oauth-core": ["@corbits/oauth-core@github:corbitsdev/corbits-oauth-core#3028f86", { "dependencies": { "@intx/db": "^0.3.0", "@intx/hub-api": "^0.3.0", "@intx/hub-common": "^0.3.0", "@intx/types": "^0.3.0", "arktype": "2.2.3", "drizzle-orm": "^0.45.2", "hono": "^4.11.9" } }, "corbitsdev-corbits-oauth-core-3028f86", "sha512-KMxRZgEi7S99tqoWhXqAAm5Bv4ef5tn3eYFcfbiHHX/E+GPnbedF44/ISbGs2gedoR2U9EtA1gnmh+q+Qfg00w=="],
+
+    "@solutions-builder/web/@corbits/codex-provider/@corbits/openai-responses": ["@corbits/openai-responses@github:corbitsdev/corbits-openai-responses#889431b", { "dependencies": { "arktype": "2.2.3" }, "peerDependencies": { "@intx/inference": ">=0.4.0", "@intx/types": ">=0.4.0" } }, "corbitsdev-corbits-openai-responses-889431b", "sha512-SXkYxlI2TBe3OMuDnEySUF6XV1jRm1zDcfPFUA486sad2FsS69FlTTchzYtKkaO+okgCvzBxHR0kAOMdr2e57A=="],
+
+    "@solutions-builder/web/@corbits/xai-provider/@corbits/oauth-core": ["@corbits/oauth-core@github:corbitsdev/corbits-oauth-core#3028f86", { "dependencies": { "@intx/db": "^0.3.0", "@intx/hub-api": "^0.3.0", "@intx/hub-common": "^0.3.0", "@intx/types": "^0.3.0", "arktype": "2.2.3", "drizzle-orm": "^0.45.2", "hono": "^4.11.9" } }, "corbitsdev-corbits-oauth-core-3028f86", "sha512-KMxRZgEi7S99tqoWhXqAAm5Bv4ef5tn3eYFcfbiHHX/E+GPnbedF44/ISbGs2gedoR2U9EtA1gnmh+q+Qfg00w=="],
+
+    "@solutions-builder/web/@corbits/xai-provider/@corbits/openai-responses": ["@corbits/openai-responses@github:corbitsdev/corbits-openai-responses#889431b", { "dependencies": { "arktype": "2.2.3" }, "peerDependencies": { "@intx/inference": ">=0.4.0", "@intx/types": ">=0.4.0" } }, "corbitsdev-corbits-openai-responses-889431b", "sha512-SXkYxlI2TBe3OMuDnEySUF6XV1jRm1zDcfPFUA486sad2FsS69FlTTchzYtKkaO+okgCvzBxHR0kAOMdr2e57A=="],
 
     "archiver-utils/readable-stream/string_decoder": ["string_decoder@1.1.1", "", { "dependencies": { "safe-buffer": "~5.1.0" } }, "sha512-n/ShnvDi6FHbbVfviro+WojiFzv+s8MPMHBczVePfUpDJLwoLT0ht1l4YwBCbi8pJAveEEdnkHyPyTP/mzRfwg=="],
 
@@ -1562,90 +1590,16 @@
 
     "unzipper/readable-stream/string_decoder": ["string_decoder@1.1.1", "", { "dependencies": { "safe-buffer": "~5.1.0" } }, "sha512-n/ShnvDi6FHbbVfviro+WojiFzv+s8MPMHBczVePfUpDJLwoLT0ht1l4YwBCbi8pJAveEEdnkHyPyTP/mzRfwg=="],
 
-    "@corbits/codex-provider/@corbits/oauth-core/@intx/db/@intx/authz": ["@intx/authz@0.3.0", "", { "dependencies": { "@intx/types": "0.3.0" } }, "sha512-kyIKQAVjfB8H84mES0QA4cNnYfpPoyLmQITVBxiuXv1VO/K74TQZnCDpoo0IL7oFk2q7bbDXSAEE4ubMBVTHzA=="],
+    "@corbits/embed-hub/@corbits/mailbox/arktype/@ark/schema": ["@ark/schema@0.56.0", "", { "dependencies": { "@ark/util": "0.56.0" } }, "sha512-ECg3hox/6Z/nLajxXqNhgPtNdHWC9zNsDyskwO28WinoFEnWow4IsERNz9AnXRhTZJnYIlAJ4uGn3nlLk65vZA=="],
 
-    "@corbits/codex-provider/@corbits/oauth-core/@intx/db/@intx/crypto": ["@intx/crypto@0.3.0", "", { "dependencies": { "@intx/types": "0.3.0" } }, "sha512-NsRzvkFGb0Pcsm9uLFFSXNl6Cbu+ii6VkYAw81qs9IbZzbAFfsZSUVQaX6EZuPNyJ8KK4KmBtqmioq1mhXsJww=="],
+    "@corbits/embed-hub/@corbits/mailbox/arktype/@ark/util": ["@ark/util@0.56.0", "", {}, "sha512-BghfRC8b9pNs3vBoDJhcta0/c1J1rsoS1+HgVUreMFPdhz/CRAKReAu57YEllNaSy98rWAdY1gE+gFup7OXpgA=="],
 
-    "@corbits/codex-provider/@corbits/oauth-core/@intx/db/@intx/log": ["@intx/log@0.3.0", "", { "dependencies": { "@logtape/hono": "^2.0.2", "@logtape/logtape": "^2.0.2" }, "peerDependencies": { "hono": "^4.0.0" }, "optionalPeers": ["hono"] }, "sha512-iooPSZjiEUO1A91X5STRhOAk+2RprliB4nbriV/dOOz86kuxZ60y5T8ISQ5Jaj1US870gntN6QwnefY38aWi2Q=="],
-
-    "@corbits/codex-provider/@corbits/oauth-core/@intx/hub-api/@intx/agent": ["@intx/agent@0.3.0", "", { "dependencies": { "@intx/inference": "0.3.0", "@intx/log": "0.3.0", "@intx/mime": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29" } }, "sha512-a7cgmH8FSsGQ7BpLKQhEwZYRfofWh3lWEGgKFsk53zdgjndtDfqAf2I64QMPAqC2Y2Npag/z1NA5lEsIqAGvPg=="],
-
-    "@corbits/codex-provider/@corbits/oauth-core/@intx/hub-api/@intx/authz": ["@intx/authz@0.3.0", "", { "dependencies": { "@intx/types": "0.3.0" } }, "sha512-kyIKQAVjfB8H84mES0QA4cNnYfpPoyLmQITVBxiuXv1VO/K74TQZnCDpoo0IL7oFk2q7bbDXSAEE4ubMBVTHzA=="],
-
-    "@corbits/codex-provider/@corbits/oauth-core/@intx/hub-api/@intx/crypto": ["@intx/crypto@0.3.0", "", { "dependencies": { "@intx/types": "0.3.0" } }, "sha512-NsRzvkFGb0Pcsm9uLFFSXNl6Cbu+ii6VkYAw81qs9IbZzbAFfsZSUVQaX6EZuPNyJ8KK4KmBtqmioq1mhXsJww=="],
-
-    "@corbits/codex-provider/@corbits/oauth-core/@intx/hub-api/@intx/hub-sessions": ["@intx/hub-sessions@0.3.0", "", { "dependencies": { "@intx/agent": "0.3.0", "@intx/crypto": "0.3.0", "@intx/db": "0.3.0", "@intx/hub-common": "0.3.0", "@intx/log": "0.3.0", "@intx/mime": "0.3.0", "@intx/pack-transport": "0.3.0", "@intx/storage-isogit": "0.3.0", "@intx/tool-packaging": "0.3.0", "@intx/types": "0.3.0", "@intx/workflow": "0.3.0", "@intx/workflow-deploy": "0.3.0", "arktype": "^2.1.29", "drizzle-orm": "^0.45.1", "isomorphic-git": "^1.27.2", "tar": "^7.5.1" } }, "sha512-L9B/vuQakvbj4CYrEhbNwu0z/S9/2jBXmaJdxaC1zfakbOiHya4HFW/YAZKAgOi7z0cpxFftsK/RN3Yyrd/+Wg=="],
-
-    "@corbits/codex-provider/@corbits/oauth-core/@intx/hub-api/@intx/log": ["@intx/log@0.3.0", "", { "dependencies": { "@logtape/hono": "^2.0.2", "@logtape/logtape": "^2.0.2" }, "peerDependencies": { "hono": "^4.0.0" }, "optionalPeers": ["hono"] }, "sha512-iooPSZjiEUO1A91X5STRhOAk+2RprliB4nbriV/dOOz86kuxZ60y5T8ISQ5Jaj1US870gntN6QwnefY38aWi2Q=="],
-
-    "@corbits/codex-provider/@corbits/oauth-core/@intx/hub-api/@intx/mime": ["@intx/mime@0.3.0", "", { "dependencies": { "@intx/crypto": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29" } }, "sha512-jpKZZpfWRQJ6fI8BEpHnr83N+1ZHrnOMY978B/6bgcjFn3qtm1f3KiR0yaQ8eF3r1VF327r3H2qiCCx0OFN9Ow=="],
-
-    "@corbits/codex-provider/@corbits/oauth-core/@intx/hub-api/@intx/storage-isogit": ["@intx/storage-isogit@0.3.0", "", { "dependencies": { "@intx/log": "0.3.0", "@intx/mime": "0.3.0", "@intx/types": "0.3.0", "@isomorphic-git/lightning-fs": "4.7.0", "arktype": "^2.1.29", "buffer": "^6.0.3", "isomorphic-git": "^1.27.2" } }, "sha512-nzhl9WvxV66J1jjBfuAOjvwgiuS1DScnYomCPQrBxZNG35M5CYR3xyqR0RN0GfTj/7JlKWk6rF6Lu44aZDfzuw=="],
-
-    "@corbits/codex-provider/@corbits/oauth-core/@intx/hub-api/@intx/workflow-deploy": ["@intx/workflow-deploy@0.3.0", "", { "dependencies": { "@intx/agent": "0.3.0", "@intx/tool-packaging": "0.3.0", "@intx/types": "0.3.0", "@intx/workflow": "0.3.0" } }, "sha512-eiCFS+e6DV9UTWFX5eINQCbXHi2w5Wn9SXtAOHZa4PIXOzxXKVJL/uXE/c6TfCVqhrsDdzYwrtt9koi5qmYXCg=="],
-
-    "@corbits/xai-provider/@corbits/oauth-core/@intx/db/@intx/authz": ["@intx/authz@0.3.0", "", { "dependencies": { "@intx/types": "0.3.0" } }, "sha512-kyIKQAVjfB8H84mES0QA4cNnYfpPoyLmQITVBxiuXv1VO/K74TQZnCDpoo0IL7oFk2q7bbDXSAEE4ubMBVTHzA=="],
-
-    "@corbits/xai-provider/@corbits/oauth-core/@intx/db/@intx/crypto": ["@intx/crypto@0.3.0", "", { "dependencies": { "@intx/types": "0.3.0" } }, "sha512-NsRzvkFGb0Pcsm9uLFFSXNl6Cbu+ii6VkYAw81qs9IbZzbAFfsZSUVQaX6EZuPNyJ8KK4KmBtqmioq1mhXsJww=="],
-
-    "@corbits/xai-provider/@corbits/oauth-core/@intx/db/@intx/log": ["@intx/log@0.3.0", "", { "dependencies": { "@logtape/hono": "^2.0.2", "@logtape/logtape": "^2.0.2" }, "peerDependencies": { "hono": "^4.0.0" }, "optionalPeers": ["hono"] }, "sha512-iooPSZjiEUO1A91X5STRhOAk+2RprliB4nbriV/dOOz86kuxZ60y5T8ISQ5Jaj1US870gntN6QwnefY38aWi2Q=="],
-
-    "@corbits/xai-provider/@corbits/oauth-core/@intx/hub-api/@intx/agent": ["@intx/agent@0.3.0", "", { "dependencies": { "@intx/inference": "0.3.0", "@intx/log": "0.3.0", "@intx/mime": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29" } }, "sha512-a7cgmH8FSsGQ7BpLKQhEwZYRfofWh3lWEGgKFsk53zdgjndtDfqAf2I64QMPAqC2Y2Npag/z1NA5lEsIqAGvPg=="],
-
-    "@corbits/xai-provider/@corbits/oauth-core/@intx/hub-api/@intx/authz": ["@intx/authz@0.3.0", "", { "dependencies": { "@intx/types": "0.3.0" } }, "sha512-kyIKQAVjfB8H84mES0QA4cNnYfpPoyLmQITVBxiuXv1VO/K74TQZnCDpoo0IL7oFk2q7bbDXSAEE4ubMBVTHzA=="],
-
-    "@corbits/xai-provider/@corbits/oauth-core/@intx/hub-api/@intx/crypto": ["@intx/crypto@0.3.0", "", { "dependencies": { "@intx/types": "0.3.0" } }, "sha512-NsRzvkFGb0Pcsm9uLFFSXNl6Cbu+ii6VkYAw81qs9IbZzbAFfsZSUVQaX6EZuPNyJ8KK4KmBtqmioq1mhXsJww=="],
-
-    "@corbits/xai-provider/@corbits/oauth-core/@intx/hub-api/@intx/hub-sessions": ["@intx/hub-sessions@0.3.0", "", { "dependencies": { "@intx/agent": "0.3.0", "@intx/crypto": "0.3.0", "@intx/db": "0.3.0", "@intx/hub-common": "0.3.0", "@intx/log": "0.3.0", "@intx/mime": "0.3.0", "@intx/pack-transport": "0.3.0", "@intx/storage-isogit": "0.3.0", "@intx/tool-packaging": "0.3.0", "@intx/types": "0.3.0", "@intx/workflow": "0.3.0", "@intx/workflow-deploy": "0.3.0", "arktype": "^2.1.29", "drizzle-orm": "^0.45.1", "isomorphic-git": "^1.27.2", "tar": "^7.5.1" } }, "sha512-L9B/vuQakvbj4CYrEhbNwu0z/S9/2jBXmaJdxaC1zfakbOiHya4HFW/YAZKAgOi7z0cpxFftsK/RN3Yyrd/+Wg=="],
-
-    "@corbits/xai-provider/@corbits/oauth-core/@intx/hub-api/@intx/log": ["@intx/log@0.3.0", "", { "dependencies": { "@logtape/hono": "^2.0.2", "@logtape/logtape": "^2.0.2" }, "peerDependencies": { "hono": "^4.0.0" }, "optionalPeers": ["hono"] }, "sha512-iooPSZjiEUO1A91X5STRhOAk+2RprliB4nbriV/dOOz86kuxZ60y5T8ISQ5Jaj1US870gntN6QwnefY38aWi2Q=="],
-
-    "@corbits/xai-provider/@corbits/oauth-core/@intx/hub-api/@intx/mime": ["@intx/mime@0.3.0", "", { "dependencies": { "@intx/crypto": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29" } }, "sha512-jpKZZpfWRQJ6fI8BEpHnr83N+1ZHrnOMY978B/6bgcjFn3qtm1f3KiR0yaQ8eF3r1VF327r3H2qiCCx0OFN9Ow=="],
-
-    "@corbits/xai-provider/@corbits/oauth-core/@intx/hub-api/@intx/storage-isogit": ["@intx/storage-isogit@0.3.0", "", { "dependencies": { "@intx/log": "0.3.0", "@intx/mime": "0.3.0", "@intx/types": "0.3.0", "@isomorphic-git/lightning-fs": "4.7.0", "arktype": "^2.1.29", "buffer": "^6.0.3", "isomorphic-git": "^1.27.2" } }, "sha512-nzhl9WvxV66J1jjBfuAOjvwgiuS1DScnYomCPQrBxZNG35M5CYR3xyqR0RN0GfTj/7JlKWk6rF6Lu44aZDfzuw=="],
-
-    "@corbits/xai-provider/@corbits/oauth-core/@intx/hub-api/@intx/workflow-deploy": ["@intx/workflow-deploy@0.3.0", "", { "dependencies": { "@intx/agent": "0.3.0", "@intx/tool-packaging": "0.3.0", "@intx/types": "0.3.0", "@intx/workflow": "0.3.0" } }, "sha512-eiCFS+e6DV9UTWFX5eINQCbXHi2w5Wn9SXtAOHZa4PIXOzxXKVJL/uXE/c6TfCVqhrsDdzYwrtt9koi5qmYXCg=="],
+    "@corbits/embed-hub/@corbits/mailbox/arktype/arkregex": ["arkregex@0.0.5", "", { "dependencies": { "@ark/util": "0.56.0" } }, "sha512-ncYjBdLlh5/QnVsAA8De16Tc9EqmYM7y/WU9j+236KcyYNUXogpz3sC4ATIZYzzLxwI+0sEOaQLEmLmRleaEXw=="],
 
     "cacache/glob/minimatch/brace-expansion": ["brace-expansion@5.0.12", "", { "dependencies": { "balanced-match": "^4.0.2" } }, "sha512-YovQ3rzhaLMIrDjNDMkNS01tea93qhEhG5xy8f6+R0l+dw3Ki+5sCoIoI942iuLZTHWogWktgwVDhU09iNEimQ=="],
 
     "npm-registry-fetch/npm-package-arg/hosted-git-info/lru-cache": ["lru-cache@11.5.3", "", {}, "sha512-U4N8FgzmWxc8k1VH8Kr6lQg18U7Fjvby6wXHVRX/ZZ7IwWbRMgrRbP0Wrb5q5NVinryp4SQampHKdvtecItxUg=="],
 
-    "@corbits/codex-provider/@corbits/oauth-core/@intx/hub-api/@intx/agent/@intx/inference": ["@intx/inference@0.3.0", "", { "dependencies": { "@intx/log": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29" } }, "sha512-2DxqWRp5cSziXgDXPomSy0HTLVesBCtZErsKXYFnliTwYM6U+GRKk5rzwWMMgMWMFbtUaiogPExcNQYBYmfjQA=="],
-
-    "@corbits/codex-provider/@corbits/oauth-core/@intx/hub-api/@intx/hub-sessions/@intx/pack-transport": ["@intx/pack-transport@0.3.0", "", { "dependencies": { "@intx/types": "0.3.0" } }, "sha512-EQ1wM16323aIFhw3Ak6HwB8YqzKSAfRmJUwjIfqyXk2t6TGv4grws6dIs7Yau1dc372s/SO+GhvFaKgvI6XTWA=="],
-
-    "@corbits/codex-provider/@corbits/oauth-core/@intx/hub-api/@intx/hub-sessions/@intx/tool-packaging": ["@intx/tool-packaging@0.3.0", "", { "dependencies": { "@intx/agent": "0.3.0", "@intx/log": "0.3.0", "@intx/storage-isogit": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29", "isomorphic-git": "^1.27.2", "npm-package-arg": "^12.0.2", "npm-pick-manifest": "^10.0.0", "npm-registry-fetch": "^19.0.0", "semver": "^7.7.2", "ssri": "^12.0.0", "tar": "^7.5.1" } }, "sha512-Lr/xdEjXTindJRm+eITvfeqpW/yl71thYjr3HXl41GJ9wpuOZPCjm9vBoRVKhUSwmIUKBYbm2VplXCCXaS7f4g=="],
-
-    "@corbits/codex-provider/@corbits/oauth-core/@intx/hub-api/@intx/hub-sessions/@intx/workflow": ["@intx/workflow@0.3.0", "", { "dependencies": { "@intx/agent": "0.3.0", "@intx/inference": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29" } }, "sha512-vaIqTohNNdCVhvZ4btWbIbpjp3140e5939tQP7t+rSkucTvnn6US+bXho1qUJyNQ577mf3YXHGgBCW8ppsnscA=="],
-
-    "@corbits/codex-provider/@corbits/oauth-core/@intx/hub-api/@intx/storage-isogit/@isomorphic-git/lightning-fs": ["@isomorphic-git/lightning-fs@4.7.0", "", { "dependencies": { "@isomorphic-git/idb-keyval": "3.3.2", "isomorphic-textencoder": "1.0.1", "just-debounce-it": "1.1.0", "just-once": "1.1.0" }, "bin": { "superblocktxt": "src/superblocktxt.js" } }, "sha512-eJg541itXKCOyj3DBAnd0KNY1mNgi29GCpy7FgKWsgatu/ulEKv+dMxxjhUNL68Jh3uPTaGNfeAjdJiHUYEGnw=="],
-
-    "@corbits/codex-provider/@corbits/oauth-core/@intx/hub-api/@intx/workflow-deploy/@intx/tool-packaging": ["@intx/tool-packaging@0.3.0", "", { "dependencies": { "@intx/agent": "0.3.0", "@intx/log": "0.3.0", "@intx/storage-isogit": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29", "isomorphic-git": "^1.27.2", "npm-package-arg": "^12.0.2", "npm-pick-manifest": "^10.0.0", "npm-registry-fetch": "^19.0.0", "semver": "^7.7.2", "ssri": "^12.0.0", "tar": "^7.5.1" } }, "sha512-Lr/xdEjXTindJRm+eITvfeqpW/yl71thYjr3HXl41GJ9wpuOZPCjm9vBoRVKhUSwmIUKBYbm2VplXCCXaS7f4g=="],
-
-    "@corbits/codex-provider/@corbits/oauth-core/@intx/hub-api/@intx/workflow-deploy/@intx/workflow": ["@intx/workflow@0.3.0", "", { "dependencies": { "@intx/agent": "0.3.0", "@intx/inference": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29" } }, "sha512-vaIqTohNNdCVhvZ4btWbIbpjp3140e5939tQP7t+rSkucTvnn6US+bXho1qUJyNQ577mf3YXHGgBCW8ppsnscA=="],
-
-    "@corbits/xai-provider/@corbits/oauth-core/@intx/hub-api/@intx/agent/@intx/inference": ["@intx/inference@0.3.0", "", { "dependencies": { "@intx/log": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29" } }, "sha512-2DxqWRp5cSziXgDXPomSy0HTLVesBCtZErsKXYFnliTwYM6U+GRKk5rzwWMMgMWMFbtUaiogPExcNQYBYmfjQA=="],
-
-    "@corbits/xai-provider/@corbits/oauth-core/@intx/hub-api/@intx/hub-sessions/@intx/pack-transport": ["@intx/pack-transport@0.3.0", "", { "dependencies": { "@intx/types": "0.3.0" } }, "sha512-EQ1wM16323aIFhw3Ak6HwB8YqzKSAfRmJUwjIfqyXk2t6TGv4grws6dIs7Yau1dc372s/SO+GhvFaKgvI6XTWA=="],
-
-    "@corbits/xai-provider/@corbits/oauth-core/@intx/hub-api/@intx/hub-sessions/@intx/tool-packaging": ["@intx/tool-packaging@0.3.0", "", { "dependencies": { "@intx/agent": "0.3.0", "@intx/log": "0.3.0", "@intx/storage-isogit": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29", "isomorphic-git": "^1.27.2", "npm-package-arg": "^12.0.2", "npm-pick-manifest": "^10.0.0", "npm-registry-fetch": "^19.0.0", "semver": "^7.7.2", "ssri": "^12.0.0", "tar": "^7.5.1" } }, "sha512-Lr/xdEjXTindJRm+eITvfeqpW/yl71thYjr3HXl41GJ9wpuOZPCjm9vBoRVKhUSwmIUKBYbm2VplXCCXaS7f4g=="],
-
-    "@corbits/xai-provider/@corbits/oauth-core/@intx/hub-api/@intx/hub-sessions/@intx/workflow": ["@intx/workflow@0.3.0", "", { "dependencies": { "@intx/agent": "0.3.0", "@intx/inference": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29" } }, "sha512-vaIqTohNNdCVhvZ4btWbIbpjp3140e5939tQP7t+rSkucTvnn6US+bXho1qUJyNQ577mf3YXHGgBCW8ppsnscA=="],
-
-    "@corbits/xai-provider/@corbits/oauth-core/@intx/hub-api/@intx/storage-isogit/@isomorphic-git/lightning-fs": ["@isomorphic-git/lightning-fs@4.7.0", "", { "dependencies": { "@isomorphic-git/idb-keyval": "3.3.2", "isomorphic-textencoder": "1.0.1", "just-debounce-it": "1.1.0", "just-once": "1.1.0" }, "bin": { "superblocktxt": "src/superblocktxt.js" } }, "sha512-eJg541itXKCOyj3DBAnd0KNY1mNgi29GCpy7FgKWsgatu/ulEKv+dMxxjhUNL68Jh3uPTaGNfeAjdJiHUYEGnw=="],
-
-    "@corbits/xai-provider/@corbits/oauth-core/@intx/hub-api/@intx/workflow-deploy/@intx/tool-packaging": ["@intx/tool-packaging@0.3.0", "", { "dependencies": { "@intx/agent": "0.3.0", "@intx/log": "0.3.0", "@intx/storage-isogit": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29", "isomorphic-git": "^1.27.2", "npm-package-arg": "^12.0.2", "npm-pick-manifest": "^10.0.0", "npm-registry-fetch": "^19.0.0", "semver": "^7.7.2", "ssri": "^12.0.0", "tar": "^7.5.1" } }, "sha512-Lr/xdEjXTindJRm+eITvfeqpW/yl71thYjr3HXl41GJ9wpuOZPCjm9vBoRVKhUSwmIUKBYbm2VplXCCXaS7f4g=="],
-
-    "@corbits/xai-provider/@corbits/oauth-core/@intx/hub-api/@intx/workflow-deploy/@intx/workflow": ["@intx/workflow@0.3.0", "", { "dependencies": { "@intx/agent": "0.3.0", "@intx/inference": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29" } }, "sha512-vaIqTohNNdCVhvZ4btWbIbpjp3140e5939tQP7t+rSkucTvnn6US+bXho1qUJyNQ577mf3YXHGgBCW8ppsnscA=="],
-
     "cacache/glob/minimatch/brace-expansion/balanced-match": ["balanced-match@4.0.4", "", {}, "sha512-BLrgEcRTwX2o6gGxGOCNyMvGSp35YofuYzw9h1IMTRmKqttAZZVU67bdb9Pr2vUHA8+j3i2tJfjO6C6+4myGTA=="],
-
-    "@corbits/codex-provider/@corbits/oauth-core/@intx/hub-api/@intx/hub-sessions/@intx/workflow/@intx/inference": ["@intx/inference@0.3.0", "", { "dependencies": { "@intx/log": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29" } }, "sha512-2DxqWRp5cSziXgDXPomSy0HTLVesBCtZErsKXYFnliTwYM6U+GRKk5rzwWMMgMWMFbtUaiogPExcNQYBYmfjQA=="],
-
-    "@corbits/codex-provider/@corbits/oauth-core/@intx/hub-api/@intx/workflow-deploy/@intx/workflow/@intx/inference": ["@intx/inference@0.3.0", "", { "dependencies": { "@intx/log": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29" } }, "sha512-2DxqWRp5cSziXgDXPomSy0HTLVesBCtZErsKXYFnliTwYM6U+GRKk5rzwWMMgMWMFbtUaiogPExcNQYBYmfjQA=="],
-
-    "@corbits/xai-provider/@corbits/oauth-core/@intx/hub-api/@intx/hub-sessions/@intx/workflow/@intx/inference": ["@intx/inference@0.3.0", "", { "dependencies": { "@intx/log": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29" } }, "sha512-2DxqWRp5cSziXgDXPomSy0HTLVesBCtZErsKXYFnliTwYM6U+GRKk5rzwWMMgMWMFbtUaiogPExcNQYBYmfjQA=="],
-
-    "@corbits/xai-provider/@corbits/oauth-core/@intx/hub-api/@intx/workflow-deploy/@intx/workflow/@intx/inference": ["@intx/inference@0.3.0", "", { "dependencies": { "@intx/log": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29" } }, "sha512-2DxqWRp5cSziXgDXPomSy0HTLVesBCtZErsKXYFnliTwYM6U+GRKk5rzwWMMgMWMFbtUaiogPExcNQYBYmfjQA=="],
   }
 }
