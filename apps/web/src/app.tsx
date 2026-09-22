@@ -5,7 +5,7 @@
  * then a refresh, so what the interface shows is what the host durably holds
  * rather than an optimistic guess.
  */
-import { useCallback, useEffect, useMemo, useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import {
   api,
   ApiFailure,
@@ -14,13 +14,16 @@ import {
   type ProjectSummary,
   type Provider,
   type Wait,
-  type ArtifactNode,
 } from "./client.js";
-import { CircleCheck, FolderKanban, PanelRight, PanelRightClose, Settings as SettingsIcon } from "lucide-react";
-import { Banner, Button, Mark, StateLabel, stageName } from "./components.jsx";
-import { ARTIFACT_STAGE, type ArtifactKind } from "@solutions-builder/app/artifacts";
+import {
+  ArrowLeft,
+  Download,
+  PanelRight,
+  PanelRightClose,
+  Settings as SettingsIcon,
+} from "lucide-react";
+import { Banner, Mark, downloadArtifact, stageName } from "./components.jsx";
 import { PrintView, setPrintProject, usePrintTarget } from "./print.jsx";
-import { DecisionQueue } from "./pages/decisions.jsx";
 import { Projects } from "./pages/projects.jsx";
 import { Settings } from "./pages/settings.jsx";
 import { ArtifactGraph } from "./pages/graph.jsx";
@@ -28,79 +31,32 @@ import { nextStep } from "@solutions-builder/app/next-step";
 import { StageTour } from "./tour.jsx";
 import { GuideDock } from "./components.jsx";
 import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarHeader,
-  SidebarItem,
-  SidebarSection,
   Tabs,
   BootScreen,
+  HorizontalStepper,
   NotificationsBell,
+  ThemeToggle,
+  type WorkflowStep,
 } from "@corbits/react-ui";
 import { subscribeInbox, type InboxState } from "./inbox.ts";
 import { Onboarding } from "./pages/onboarding.jsx";
 import { Auth } from "./pages/auth.jsx";
 import { StageWorkspace } from "./pages/workspace.jsx";
-import { stageRefusalMessage } from "./stage-evidence.ts";
-import { approveTool, rejectTool } from "./pending-approvals.ts";
+import { assembleBundle, bundleFileName } from "./project-export.ts";
 import { firstRunScreen, type HubAuthState } from "./first-run.ts";
 import { getHubSession } from "./hub-auth.ts";
-import { approveStage, sendBack as sendBackStage } from "./stage-approval.ts";
 
 /**
  * Where you are. A project is not a separate destination from its stage: you
- * open a project and you are in it, with a breadcrumb back to the list. What
- * used to be "Stage workspace" and "Artifacts" in the rail were two views of
- * one open project, which is why neither name explained itself.
+ * open a project and you are in it, with a way back to the list. Decisions
+ * are not a destination either — they fold into the bell.
  */
-type View = "decisions" | "projects" | "project" | "settings";
-
-/**
- * What a stage's panel creates, one word each, in the order the panel makes
- * them. Material is handed over, not created, so it is not here.
- */
-const KIND_WORDS: Readonly<Record<ArtifactKind, string | null>> = {
-  source_material: null,
-  problem_brief: "Brief",
-  solution_constraints: "Constraints",
-  chosen_approach: "Approach",
-  design_artifact: "Design",
-  design_feedback: "Feedback",
-  audience_package: "Package",
-  audience_deck: "Deck",
-  product_requirements: "Requirements",
-  build_plan: "Plan",
-  engineering_review: "Review",
-  cost_approval: "Approval",
-  build_packet: "Packet",
-  build_evidence: "Build",
-  build_review: "Panel",
-  delivery_manifest: "Manifest",
-  delivery_verification: "Verification",
-};
-
-/** One kind the current panel creates: its word, and the newest live artifact of that kind, if any. */
-type StageArtifact = { kind: ArtifactKind; word: string; nodeId: string | null };
-
-/** The kinds the stage's panel creates, each with its newest live artifact on the project. */
-function stageArtifacts(stage: number, nodes: readonly ArtifactNode[]): StageArtifact[] {
-  const out: StageArtifact[] = [];
-  for (const [kind, owner] of Object.entries(ARTIFACT_STAGE) as [ArtifactKind, number][]) {
-    const word = KIND_WORDS[kind];
-    if (owner !== stage || !word) continue;
-    const newest = nodes
-      .filter((node) => node.kind === kind && node.supersededByNodeId === null)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-    out.push({ kind, word, nodeId: newest?.id ?? null });
-  }
-  return out;
-}
+type View = "projects" | "project" | "settings";
 
 /** Sections within an open project. */
 type ProjectTab = "stage" | "artifacts";
 
-const VIEWS: View[] = ["decisions", "projects", "project", "settings"];
+const VIEWS: View[] = ["projects", "project", "settings"];
 
 /** Deep link, so a screen can be opened directly: `/?view=settings`. */
 function initialView(): View {
@@ -146,131 +102,201 @@ function Booting({ offline }: { offline: boolean }) {
 }
 
 
+/** The nine stages as stepper segments: done in ink, current stretched, rest hairline. */
+function stageSteps(stage: number): WorkflowStep[] {
+  return Array.from({ length: 9 }, (_, index) => {
+    const number = index + 1;
+    return {
+      number,
+      label: stageName(number),
+      status: number < stage ? "completed" : number === stage ? "current" : "pending",
+    };
+  });
+}
+
 /**
- * The navigation rail.
+ * The bar across the top.
  *
- * Its own component so `scripts/walk-ui.tsx` renders the product's rail rather
- * than a hand-kept copy of it. The copy had already drifted twice — it carried
- * no pinned decision at all, so a fix to that surface was invisible to every
- * screenshot, and its icons were empty `<svg>` elements, which made a working
- * rail look broken and sent me fixing a bug that did not exist.
+ * Its own component so `scripts/walk-ui.tsx` renders the product's chrome
+ * rather than a hand-kept copy of it — the rail version of this drifted twice
+ * before it was replaced.
+ *
+ * Three zones: where you are (back + mark + name), where the project is in
+ * its nine stages (only in a project — elsewhere the centre stays empty so
+ * the bar never shifts), and what needs you. The bell is the decision fold:
+ * waits render under "Needs you" and open their project on click, mailbox
+ * items under "Activity". There is no decisions destination any more.
  */
-export function AppRail({
+export function AppBar({
   view,
+  detail,
   decisions,
-  projects,
-  collapsed,
-  offline,
-  connected,
+  inbox,
+  bellOpen,
+  onBellOpenChange,
   onNavigate,
-  stage = null,
-  onOpenArtifact,
+  onOpenProject,
+  projectTab,
+  onProjectTab,
+  draftOpen,
+  onToggleDraft,
+  exporting,
+  onExport,
+  artifactCount = 0,
 }: {
   view: View;
+  detail: ProjectDetail | null;
   decisions: Wait[];
-  projects: ProjectSummary[];
-  collapsed: boolean;
-  offline: boolean;
-  connected: boolean;
+  inbox: InboxState;
+  bellOpen: boolean;
+  onBellOpenChange: (open: boolean) => void;
   onNavigate: (view: View) => void;
-  /** The open project's current panel and what it creates; null off a project. */
-  stage?: { number: number; artifacts: StageArtifact[] } | null;
-  onOpenArtifact?: ((nodeId: string) => void) | undefined;
+  onOpenProject: (projectId: string) => void;
+  /** Project-view chrome; absent elsewhere so nothing dead renders. */
+  projectTab?: ProjectTab;
+  onProjectTab?: (tab: ProjectTab) => void;
+  draftOpen?: boolean;
+  onToggleDraft?: () => void;
+  exporting?: boolean;
+  onExport?: () => void;
+  artifactCount?: number;
 }) {
+  const inProject = view === "project" && detail !== null;
   return (
-      <Sidebar collapsed={collapsed}>
-        <SidebarHeader className="gap-2.5">
-          <Mark />
-          <p className="min-w-0 truncate text-sm font-semibold">Solutions Builder</p>
-        </SidebarHeader>
+    <header className="topbar">
+      <div className="topbar-left">
+        {inProject ? (
+          <>
+            <button
+              type="button"
+              className="iconbtn"
+              title="All projects"
+              aria-label="All projects"
+              onClick={() => onNavigate("projects")}
+            >
+              <ArrowLeft aria-hidden="true" />
+            </button>
+            <Mark size={20} />
+            <span className="wordmark">{detail.project.title}</span>
+          </>
+        ) : (
+          <>
+            <Mark size={20} />
+            <span className="wordmark">Solutions Builder</span>
+          </>
+        )}
+      </div>
 
-        <SidebarContent>
-          <SidebarSection label="Work">
-              <SidebarItem
-                active={view === "projects" || view === "project"}
-                icon={<FolderKanban aria-hidden="true" />}
-                count={projects.length}
-                href="#projects"
-                onClick={(event) => {
-                  event.preventDefault();
-                  onNavigate("projects");
-                }}
-              >
-                Projects
-              </SidebarItem>
-              <SidebarItem
-                active={view === "decisions"}
-                icon={<CircleCheck aria-hidden="true" />}
-                count={decisions.length}
-                href="#decisions"
-                onClick={(event) => {
-                  event.preventDefault();
-                  onNavigate("decisions");
-                }}
-              >
-                Decision queue
-              </SidebarItem>
-          </SidebarSection>
+      <div className="topbar-center">
+        {inProject ? (
+          <>
+            <HorizontalStepper variant="segments" steps={stageSteps(detail.stage)} />
+            <span className="step-name">{stageName(detail.stage)}</span>
+          </>
+        ) : null}
+      </div>
 
-          {/* What the open panel creates, each word a way to the artifact in
-              the Artifacts panel. A kind not produced yet is named but not
-              linked: the panel is still where it is made. */}
-          {stage ? (
-            <div className="rail-stage" aria-label="What this stage creates">
-              <p className="rail-stage-head">{stageName(stage.number)} creates</p>
-              <ul className="rail-stage-list">
-                {stage.artifacts.map((artifact) =>
-                  artifact.nodeId ? (
-                    <li key={artifact.kind}>
-                      <a
-                        href={`#artifact:${artifact.nodeId}`}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          onOpenArtifact?.(artifact.nodeId!);
-                        }}
-                      >
-                        {artifact.word}
-                      </a>
-                    </li>
-                  ) : (
-                    <li key={artifact.kind} className="is-pending" title="Not produced yet">
-                      {artifact.word}
-                    </li>
-                  ),
-                )}
-              </ul>
-            </div>
+      <div className="topbar-actions">
+        {inProject && projectTab !== undefined && onProjectTab ? (
+          <>
+            <Tabs
+              className="head-tabs"
+              label="This project"
+              active={projectTab}
+              onChange={(id) => onProjectTab(id as ProjectTab)}
+              tabs={[
+                { id: "stage", label: "Conversation" },
+                {
+                  id: "artifacts",
+                  label: "Artifacts",
+                  ...(artifactCount > 0 ? { count: artifactCount } : {}),
+                },
+              ]}
+            >
+              {() => null}
+            </Tabs>
+            <button
+              type="button"
+              className="iconbtn"
+              aria-pressed={draftOpen}
+              aria-label={draftOpen ? "Hide the draft" : "Show the draft"}
+              disabled={projectTab !== "stage"}
+              onClick={onToggleDraft}
+            >
+              {draftOpen ? <PanelRightClose aria-hidden="true" /> : <PanelRight aria-hidden="true" />}
+            </button>
+            <button
+              type="button"
+              className="iconbtn"
+              title="Export bundle"
+              aria-label="Export bundle"
+              disabled={exporting}
+              onClick={onExport}
+            >
+              <Download aria-hidden="true" />
+            </button>
+          </>
+        ) : null}
+        <NotificationsBell
+          count={decisions.length + inbox.unreadCount}
+          marker="dot"
+          open={bellOpen}
+          onOpenChange={onBellOpenChange}
+        >
+          {decisions.length > 0 ? (
+            <>
+              <p className="notif-group">Needs you</p>
+              {decisions.map((wait) => (
+                <button
+                  key={wait.id}
+                  type="button"
+                  className="notif"
+                  onClick={() => {
+                    onBellOpenChange(false);
+                    onOpenProject(wait.projectId);
+                  }}
+                >
+                  <span className="statusdot action" aria-hidden="true" />
+                  <span className="notif-body">
+                    <b>{wait.projectTitle}</b>
+                    <span>{wait.consequence}</span>
+                  </span>
+                </button>
+              ))}
+            </>
           ) : null}
-
-        </SidebarContent>
-
-        <SidebarFooter>
-          <SidebarSection label="Settings">
-              <SidebarItem
-                active={view === "settings"}
-                icon={<SettingsIcon aria-hidden="true" />}
-                href="#settings"
-                onClick={(event) => {
-                  event.preventDefault();
-                  onNavigate("settings");
-                }}
-              >
-                Settings
-              </SidebarItem>
-          </SidebarSection>
-
-          {/* Says only what someone would act on. A healthy host is not news. */}
-          {offline ? (
-            <p className="rail-note">
-              <StateLabel tone="error">Reconnecting</StateLabel>
-            </p>
-          ) : !connected ? (
-            <Button variant="link" onClick={() => onNavigate("settings")}>
-              Connect a model
-            </Button>
+          {inbox.items.length > 0 ? (
+            <>
+              <p className="notif-group">Activity</p>
+              {inbox.items.map((item) => (
+                <div key={item.uid} className="notif">
+                  <span className="statusdot idle" aria-hidden="true" />
+                  <span className="notif-body">
+                    <b>{item.subject}</b>
+                    <span>{item.from}</span>
+                  </span>
+                </div>
+              ))}
+            </>
           ) : null}
-        </SidebarFooter>
-      </Sidebar>
+          {decisions.length === 0 && inbox.items.length === 0 ? (
+            <p className="notif-empty">Nothing waiting on you.</p>
+          ) : (
+            <div className="notif-foot">That's everything</div>
+          )}
+        </NotificationsBell>
+        <button
+          type="button"
+          className="iconbtn"
+          title="Settings"
+          aria-label="Settings"
+          onClick={() => onNavigate("settings")}
+        >
+          <SettingsIcon aria-hidden="true" />
+        </button>
+        <ThemeToggle />
+      </div>
+    </header>
   );
 }
 
@@ -284,20 +310,10 @@ export function App() {
   // view scrolls. Computed here rather than inline so a class list stays a
   // class list.
   const fills = view === "project" && (projectTab === "stage" || projectTab === "artifacts");
-  // Below this width the rail is icons only: two full columns of chrome plus a
-  // conversation does not fit, and stacking the rail on top buries the work.
-  const [narrow, setNarrow] = useState(
-    () => globalThis.matchMedia?.("(max-width: 1080px)").matches ?? false,
-  );
-  useEffect(() => {
-    const query = globalThis.matchMedia?.("(max-width: 1080px)");
-    if (!query) return;
-    const update = () => setNarrow(query.matches);
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
-  }, []);
 
   const [draftOpen, setDraftOpen] = useState(true);
+  const [bellOpen, setBellOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const [status, setStatus] = useState<HostStatus | null>(null);
   const [decisions, setDecisions] = useState<Wait[]>([]);
@@ -314,13 +330,10 @@ export function App() {
   // Resolved once and threaded down as a prop: every artifact read goes
   // through `@corbits/artifacts` over `/hub`, which is tenant-scoped.
   const [tenantId, setTenantId] = useState<string | null>(null);
-  // The artifact the Artifacts panel opens on, when the rail sent us there.
-  const [openedArtifact, setOpenedArtifact] = useState<string | null>(null);
   const [graph, setGraph] = useState<{
     nodes: import("./client.js").ArtifactNode[];
     edges: { childNodeId: string; sourceNodeId: string }[];
   }>({ nodes: [], edges: [] });
-  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
   const [skippedSetup, setSkippedSetup] = useState(false);
@@ -497,84 +510,29 @@ export function App() {
 
   const openProject = (projectId: string) => {
     setSelected(projectId);
-    setOpenedArtifact(null);
     setProjectTab("stage");
     setView("project");
   };
 
-  const stageApprovalDeps = useMemo(
-    () => ({
-      view: (projectId: string) => api.projectWorkflowView(projectId),
-      decide: (projectId: string, decisionPayload: Record<string, unknown>) => api.decide(projectId, decisionPayload),
-      now: () => new Date().toISOString(),
-    }),
-    [],
-  );
-
   /**
-   * Two kinds of wait, two kinds of decision (CL-8724). A wait with
-   * `approvalId` is a stock hub approval on a specialist's own tool call
-   * (CL-8566) — approving resolves the parked call, rejecting carries the
-   * reason back as the tool's own refusal message, which the specialist
-   * sees in the same turn; "revise" has no separate meaning there. A wait
-   * with no `approvalId` is the project workflow's own stage gate: approving
-   * calls `approveStage` against its already-open review (`reviewRef`, the
-   * only case the queue offers "Approve" at all — see `canApprove` in
-   * `pages/decisions.tsx`), and "revise" sends the stage back to `target`
-   * through `sendBack`, which needs a reason to route on.
+   * The bundle is assembled in the browser (`project-export.ts`) and saved as
+   * a download — the same path the projects list's export menu item takes.
    */
-  const decide = async (
-    wait: Wait,
-    decision: "approve" | "reject" | "revise",
-    reason: string,
-    target: number,
-    scope: "once" | "always" = "once",
-  ) => {
-    setBusy(decision);
-    setError(null);
+  const exportProject = async () => {
+    if (exporting || !detail) return;
+    setExporting(true);
     try {
-      if (wait.approvalId) {
-        const workspaceTenantId = await api.workspaceTenantId();
-        if (!workspaceTenantId) throw new Error("no workspace tenant to resolve this approval in");
-        if (decision === "approve") {
-          await approveTool(workspaceTenantId, wait.approvalId, scope);
-        } else {
-          await rejectTool(workspaceTenantId, wait.approvalId, reason);
-        }
-      } else if (decision === "approve") {
-        if (!wait.reviewRef) return;
-        const result = await approveStage(stageApprovalDeps, {
-          projectId: wait.projectId,
-          stage: wait.stage,
-          ref: wait.reviewRef,
-        });
-        if (!result.ok) {
-          setError(`This stage's approval was refused: ${stageRefusalMessage(result.reason)}`);
-          return;
-        }
-      } else {
-        const trimmedReason = reason.trim();
-        if (!trimmedReason) {
-          setError("A reason is required to send this stage back.");
-          return;
-        }
-        const result = await sendBackStage(stageApprovalDeps, {
-          projectId: wait.projectId,
-          stage: wait.stage,
-          targetStage: target,
-          reason: trimmedReason,
-        });
-        if (!result.ok) {
-          setError(`Send-back was refused: ${stageRefusalMessage(result.reason)}`);
-          return;
-        }
-      }
-      setSelected(wait.projectId);
-      await reloadDetail();
+      const bundle = await assembleBundle(detail.project.id, {
+        projectView: api.projectView,
+        artifactContent: api.artifactContent,
+        stageAgentStatus: api.stageAgentStatus,
+        readStageThread: api.readStageThread,
+      });
+      downloadArtifact(JSON.stringify(bundle, null, 2), bundleFileName(detail.project.title));
     } catch (cause) {
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     } finally {
-      setBusy(null);
+      setExporting(false);
     }
   };
 
@@ -661,132 +619,53 @@ export function App() {
   return (
     <>
     <div className="app">
-      <AppRail
+      <AppBar
         view={view}
+        detail={detail}
         decisions={decisions}
-        projects={projects}
-        collapsed={narrow}
-        offline={offline}
-        connected={inferenceConnected}
+        inbox={inbox}
+        bellOpen={bellOpen}
+        onBellOpenChange={setBellOpen}
         onNavigate={setView}
-        stage={
-          view === "project" && detail
-            ? { number: detail.stage, artifacts: stageArtifacts(detail.stage, graph.nodes) }
-            : null
-        }
-        onOpenArtifact={(nodeId) => {
-          setOpenedArtifact(nodeId);
-          setProjectTab("artifacts");
-        }}
+        onOpenProject={openProject}
+        projectTab={projectTab}
+        onProjectTab={setProjectTab}
+        draftOpen={draftOpen}
+        onToggleDraft={() => setDraftOpen((open) => !open)}
+        exporting={exporting}
+        onExport={() => void exportProject()}
+        artifactCount={graph.nodes.length}
       />
 
       <main className="canvas">
-        <div className="canvas-head">
-          {view === "project" && detail ? (
-            <>
-              <button type="button" className="crumb" onClick={() => setView("projects")}>
-                Projects
-              </button>
-              <span className="crumb-sep" aria-hidden="true">
-                /
-              </span>
-              <h1>
-                {detail.project.title}
-                {/* The panel, named: which stage this is, and Artifacts when that is the panel open. */}
-                <span className="head-panel">
-                  {" "}
-                  ({stageName(detail.stage)}
-                  {projectTab === "artifacts" ? " / Artifacts" : ""})
-                </span>
-              </h1>
-            </>
-          ) : (
-            <h1>
-              {view === "decisions"
-                ? "Decision queue"
-                : view === "projects"
-                  ? "Projects"
-                  : "Settings"}
-            </h1>
-          )}
-
-          <div className="head-actions">
-          <NotificationsBell count={inbox.unreadCount}>
-            {inbox.items.length === 0 ? (
-              <p className="inbox-empty">Nothing in your inbox.</p>
-            ) : (
-              <ul className="inbox-list">
-                {inbox.items.map((item) => (
-                  <li key={item.uid} className={item.unread ? "is-unread" : ""}>
-                    <strong>{item.subject}</strong>
-                    <span>{item.from}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </NotificationsBell>
-          {view === "project" && detail ? (
-            <>
-              <Tabs
-                className="head-tabs"
-                label="This project"
-                active={projectTab}
-                onChange={(id) => setProjectTab(id as ProjectTab)}
-                tabs={[
-                  { id: "stage", label: "Conversation" },
-                  {
-                    id: "artifacts",
-                    label: "Artifacts",
-                    ...(graph.nodes.length > 0 ? { count: graph.nodes.length } : {}),
-                  },
-                ]}
-              >
-                {() => null}
-              </Tabs>
-              {/* Always in the bar so the tabs never shift when it toggles. */}
-              <button
-                type="button"
-                className="head-toggle"
-                aria-pressed={draftOpen}
-                aria-label={draftOpen ? "Hide the draft" : "Show the draft"}
-                disabled={projectTab !== "stage"}
-                onClick={() => setDraftOpen((open) => !open)}
-              >
-                {draftOpen ? <PanelRightClose aria-hidden="true" /> : <PanelRight aria-hidden="true" />}
-              </button>
-            </>
-          ) : null}
-
-          {/* Bottom right, over the canvas: always to hand, never competing
-              with the toolbar, and never a band of the window given to one
-              sentence. */}
-          {view === "project" && detail ? (
-            <GuideDock
-              stage={detail.stage}
-              step={nextStep({
-                // No lifecycle run to read a state off any more (CL-8612
-                // contract v6): a selected project is always "in progress"
-                // from the guide's point of view — there is no
-                // waiting_approval/cost_approved distinction left to draw.
-                state: "in_progress",
-                stage: detail.stage,
-                // So the guide and the composer name the same act. Two words
-                // for one decision is how a person stops trusting either.
-                soloApproval: detail.soloApproval,
-                hasDraft: detail.nodes.some(
-                  (node) => node.stage === (detail.stage),
-                ),
-              })}
-              at={projectTab === "artifacts" ? "artifacts" : "stage"}
-              onGo={(where) => {
-                if (where === "settings") setView("settings");
-                else if (where === "decisions") setView("decisions");
-                else setProjectTab(where === "artifacts" ? "artifacts" : "stage");
-              }}
-            />
-          ) : null}
-          </div>
-        </div>
+        {/* Bottom right, over the canvas: always to hand, never competing
+            with the toolbar, and never a band of the window given to one
+            sentence. */}
+        {view === "project" && detail ? (
+          <GuideDock
+            stage={detail.stage}
+            step={nextStep({
+              // No lifecycle run to read a state off any more (CL-8612
+              // contract v6): a selected project is always "in progress"
+              // from the guide's point of view — there is no
+              // waiting_approval/cost_approved distinction left to draw.
+              state: "in_progress",
+              stage: detail.stage,
+              // So the guide and the composer name the same act. Two words
+              // for one decision is how a person stops trusting either.
+              soloApproval: detail.soloApproval,
+              hasDraft: detail.nodes.some(
+                (node) => node.stage === (detail.stage),
+              ),
+            })}
+            at={projectTab === "artifacts" ? "artifacts" : "stage"}
+            onGo={(where) => {
+              if (where === "settings") setView("settings");
+              else if (where === "decisions") setBellOpen(true);
+              else setProjectTab(where === "artifacts" ? "artifacts" : "stage");
+            }}
+          />
+        ) : null}
 
         <div className={fills ? "canvas-body is-fill" : "canvas-body"}>
 
@@ -795,22 +674,9 @@ export function App() {
         ) : null}
 
         {error ? (
-          <Banner tone="error" title="That decision was refused">
+          <Banner tone="error" title="That was refused">
             {error}
           </Banner>
-        ) : null}
-
-        {view === "decisions" ? (
-          <DecisionQueue
-            decisions={decisions}
-            detail={detail}
-            busy={busy}
-            selectedProjectId={selected}
-            onOpen={(wait) => setSelected(wait.projectId)}
-            onInspect={(wait) => openProject(wait.projectId)}
-            onStart={() => setView("projects")}
-            onDecide={decide}
-          />
         ) : null}
 
         {view === "projects" ? (
@@ -833,7 +699,7 @@ export function App() {
                     tenantId={tenantId ?? ""}
                     onChanged={reloadDetail}
                     onOpenSettings={() => setView("settings")}
-                    onOpenDecisions={() => setView("decisions")}
+                    onOpenDecisions={() => setBellOpen(true)}
                   />
                 </>
               ) : (
@@ -841,7 +707,6 @@ export function App() {
                   nodes={graph.nodes}
                   edges={graph.edges}
                   tenantId={tenantId ?? ""}
-                  {...(openedArtifact ? { openedId: openedArtifact } : {})}
                   onAddMaterial={async (files) => {
                     await api.attachMaterial(detail.project.id, files);
                     await reloadDetail();

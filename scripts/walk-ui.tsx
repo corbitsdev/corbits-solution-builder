@@ -14,10 +14,11 @@ import { cp } from "node:fs/promises";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ComponentProps, ReactNode } from "react";
 import type { ChatMessage } from "@corbits/react-ui";
-import { Button, GuideDock } from "../apps/web/src/components.js";
+import { GuideDock } from "../apps/web/src/components.js";
 import { StageDocument } from "../apps/web/src/pages/workspace.js";
 import { ArtifactGraph } from "../apps/web/src/pages/graph.js";
-import { AppRail } from "../apps/web/src/app.js";
+import { AppBar } from "../apps/web/src/app.js";
+import { ThemeProvider } from "@corbits/react-ui";
 import { nextStep } from "@solutions-builder/app/next-step";
 import { Projects } from "../apps/web/src/pages/projects.js";
 import { Onboarding } from "../apps/web/src/pages/onboarding.js";
@@ -28,74 +29,66 @@ const projects = [
   { id: "prj_1", title: "An outreach agent", stage: 1, state: "in_progress", createdAt: now, updatedAt: now, policy: {} },
 ] as never;
 
+const fixtureDetail = {
+  project: { id: "prj_1", title: "An outreach agent" },
+  stage: 1,
+} as never;
+
 /**
- * The product's own rail, with fixture data — never a copy of it. A harness
- * that describes a rail the product does not have produces fixes for bugs
+ * The product's own top bar, with fixture data — never a copy of it. A harness
+ * that describes chrome the product does not have produces fixes for bugs
  * nobody has, and hides the surfaces it forgot to include.
  */
-function Rail({ at, collapsed = false }: { at: string; collapsed?: boolean }) {
-  return (
-    <AppRail
-      view={at as never}
-      decisions={[
-        {
-          id: "wai_1",
-          projectId: "prj_1",
-          projectTitle: "An outreach agent",
-          title: "Approve the problem brief",
-          stage: 1,
-          requiredAuthority: "project_owner",
-          command: "stage.approve",
-          createdAt: now,
-        },
-      ] as never}
-      projects={projects}
-      collapsed={collapsed}
-      offline={false}
-      connected
-      onNavigate={() => {}}
-    />
-  );
-}
-
 function Shell({
   at,
-  head,
   body,
   fill,
-  collapsed,
   tab,
 }: {
-  at: string;
-  head: ReactNode;
+  at: "projects" | "project" | "settings";
   body: ReactNode;
   fill?: boolean;
-  collapsed?: boolean;
   tab?: "stage" | "artifacts";
 }) {
   const artifacts = tab === "artifacts";
   return (
-    <div className="app">
-      <Rail at={at} collapsed={collapsed ?? false} />
-      <main className="canvas">
-        <div className="canvas-head">
-          {head}
-          {/* Only inside a project, as the app renders it. The Artifacts ghost
-              is stage-tab only — the library head is breadcrumbs plus Guide. */}
+    <ThemeProvider>
+      <div className="app">
+        <AppBar
+          view={at}
+          detail={at === "project" ? fixtureDetail : null}
+          decisions={[
+            {
+              id: "wai_1",
+              projectId: "prj_1",
+              projectTitle: "An outreach agent",
+              title: "Stage 1 is waiting on a decision",
+              consequence: "Problem Brief v1 ready — your approval opens Solution Shape",
+              stage: 1,
+              requiredAuthority: "project_owner",
+              runId: "run_1",
+              blockers: null,
+            },
+          ]}
+          inbox={{ items: [], unreadCount: 0 }}
+          bellOpen={false}
+          onBellOpenChange={() => {}}
+          onNavigate={() => {}}
+          onOpenProject={() => {}}
+          projectTab={tab ?? "stage"}
+          onProjectTab={() => {}}
+          draftOpen
+          onToggleDraft={() => {}}
+          artifactCount={1}
+        />
+        <main className="canvas">
           {fill ? (
-            <div className="head-actions">
-              {artifacts ? null : <Button variant="ghost">Artifacts (1)</Button>}
-              <GuideDock
-                step={step}
-                at={artifacts ? "artifacts" : "stage"}
-                onGo={() => {}}
-              />
-            </div>
+            <GuideDock step={step} at={artifacts ? "artifacts" : "stage"} onGo={() => {}} />
           ) : null}
-        </div>
-        <div className={`canvas-body${fill ? " is-fill" : ""}`}>{body}</div>
-      </main>
-    </div>
+          <div className={`canvas-body${fill ? " is-fill" : ""}`}>{body}</div>
+        </main>
+      </div>
+    </ThemeProvider>
   );
 }
 
@@ -175,20 +168,6 @@ const currentBrief = {
   supersededByNodeId: null,
 } as never;
 
-const artifactsHead = (
-  <>
-    <button type="button" className="crumb">
-      Projects
-    </button>
-    <span className="crumb-sep">/</span>
-    <button type="button" className="crumb">
-      An outreach agent
-    </button>
-    <span className="crumb-sep">/</span>
-    <h1>Artifacts</h1>
-  </>
-);
-
 const turns = messages.map((message) => ({
   id: message.id,
   role: message.role === "agent" ? "specialist" : "human",
@@ -238,16 +217,14 @@ const screens: Record<string, ReactNode> = {
       } as unknown as ComponentProps<typeof Onboarding>)}
     />
   ),
-  projects: <Shell at="projects" head={<h1>Projects</h1>} body={<Projects {...({ projects, onOpen: () => {}, onChanged: () => {} } as unknown as ComponentProps<typeof Projects>)} />} />,
-  chat: <Shell at="projects" fill head={<><button type="button" className="crumb">Projects</button><span className="crumb-sep">/</span><h1>An outreach agent</h1></>} body={<Conversation />} />,
-  narrow: <Shell at="projects" fill collapsed head={<><button type="button" className="crumb">Projects</button><span className="crumb-sep">/</span><h1>An outreach agent</h1></>} body={<Conversation />} />,
-  split: <Shell at="projects" fill head={<><button type="button" className="crumb">Projects</button><span className="crumb-sep">/</span><h1>An outreach agent</h1></>} body={<Conversation withDocument />} />,
+  projects: <Shell at="projects" body={<Projects {...({ projects, onOpen: () => {}, onChanged: () => {} } as unknown as ComponentProps<typeof Projects>)} />} />,
+  chat: <Shell at="project" fill body={<Conversation />} />,
+  split: <Shell at="project" fill body={<Conversation withDocument />} />,
   artifacts: (
     <Shell
-      at="projects"
+      at="project"
       fill
       tab="artifacts"
-      head={artifactsHead}
       body={
         <ArtifactGraph
           nodes={[node]}
@@ -260,10 +237,9 @@ const screens: Record<string, ReactNode> = {
   ),
   "artifacts-history": (
     <Shell
-      at="projects"
+      at="project"
       fill
       tab="artifacts"
-      head={artifactsHead}
       body={
         <ArtifactGraph
           nodes={[replacedBrief, currentBrief]}

@@ -41,7 +41,7 @@
     "@corbits/oauth-core": "github:corbitsdev/corbits-oauth-core",
     "@corbits/openai-responses": "github:corbitsdev/corbits-openai-responses",
     "@corbits/process-provisioner": "workspace:*",
-    "@corbits/react-ui": "github:corbitsdev/react-ui",
+    "@corbits/react-ui": "github:corbitsdev/react-ui#459b9d0",
     "@corbits/xai-provider": "github:corbitsdev/corbits-xai-provider",
     "@electric-sql/pglite": "^0.3.16",
     "@intx/agent": "workspace:*",
@@ -95,6 +95,7 @@
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
+    "@corbits/embedded-host": "workspace:*",
     "@electric-sql/pglite-socket": "^0.2.11",
     "@types/bun": "latest",
     "@types/react": "^19.2.0",

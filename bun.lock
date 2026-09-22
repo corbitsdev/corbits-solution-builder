@@ -13,7 +13,7 @@
         "@corbits/oauth-core": "github:corbitsdev/corbits-oauth-core",
         "@corbits/openai-responses": "github:corbitsdev/corbits-openai-responses",
         "@corbits/process-provisioner": "workspace:*",
-        "@corbits/react-ui": "github:corbitsdev/react-ui",
+        "@corbits/react-ui": "github:corbitsdev/react-ui#459b9d0",
         "@corbits/xai-provider": "github:corbitsdev/corbits-xai-provider",
         "@electric-sql/pglite": "^0.3.16",
         "@intx/agent": "workspace:*",
@@ -66,6 +66,7 @@
         "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
       },
       "devDependencies": {
+        "@corbits/embedded-host": "workspace:*",
         "@electric-sql/pglite-socket": "^0.2.11",
         "@types/bun": "latest",
         "@types/react": "^19.2.0",
@@ -180,7 +181,7 @@
     },
     "vendor/interchange/apps/sidecar": {
       "name": "@intx/sidecar-app",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "bin": {
         "workflow-child": "./bin/workflow-child",
       },
@@ -212,7 +213,7 @@
     },
     "vendor/interchange/packages/agent": {
       "name": "@intx/agent",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@intx/inference": "workspace:*",
         "@intx/log": "workspace:*",
@@ -226,21 +227,21 @@
     },
     "vendor/interchange/packages/authz": {
       "name": "@intx/authz",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@intx/types": "workspace:*",
       },
     },
     "vendor/interchange/packages/crypto": {
       "name": "@intx/crypto",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@intx/types": "workspace:*",
       },
     },
     "vendor/interchange/packages/db": {
       "name": "@intx/db",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@intx/authz": "workspace:*",
         "@intx/crypto": "workspace:*",
@@ -257,7 +258,7 @@
     },
     "vendor/interchange/packages/harness": {
       "name": "@intx/harness",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@intx/agent": "workspace:*",
         "@intx/authz": "workspace:*",
@@ -273,7 +274,7 @@
     },
     "vendor/interchange/packages/hub-agent": {
       "name": "@intx/hub-agent",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@intx/log": "workspace:*",
         "@intx/mail-memory": "workspace:*",
@@ -293,7 +294,7 @@
     },
     "vendor/interchange/packages/hub-api": {
       "name": "@intx/hub-api",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@hono/standard-validator": "^0.2.2",
         "@intx/agent": "workspace:*",
@@ -324,7 +325,7 @@
     },
     "vendor/interchange/packages/hub-client": {
       "name": "@intx/hub-client",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@intx/types": "workspace:*",
         "arktype": "catalog:",
@@ -332,14 +333,14 @@
     },
     "vendor/interchange/packages/hub-common": {
       "name": "@intx/hub-common",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@intx/types": "workspace:*",
       },
     },
     "vendor/interchange/packages/hub-sessions": {
       "name": "@intx/hub-sessions",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@intx/agent": "workspace:*",
         "@intx/crypto": "workspace:*",
@@ -361,7 +362,7 @@
     },
     "vendor/interchange/packages/inference": {
       "name": "@intx/inference",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@intx/log": "workspace:*",
         "@intx/types": "workspace:*",
@@ -373,7 +374,7 @@
     },
     "vendor/interchange/packages/inference-catalog": {
       "name": "@intx/inference-catalog",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "devDependencies": {
         "@intx/inference": "workspace:*",
         "@intx/inference-discovery": "workspace:*",
@@ -383,7 +384,7 @@
     },
     "vendor/interchange/packages/inference-discovery": {
       "name": "@intx/inference-discovery",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@intx/types": "workspace:*",
         "arktype": "catalog:",
@@ -391,7 +392,7 @@
     },
     "vendor/interchange/packages/inference-discovery-anthropic": {
       "name": "@intx/inference-discovery-anthropic",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@intx/inference-discovery": "workspace:*",
         "arktype": "catalog:",
@@ -402,7 +403,7 @@
     },
     "vendor/interchange/packages/inference-discovery-google-genai": {
       "name": "@intx/inference-discovery-google-genai",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@intx/inference-discovery": "workspace:*",
         "arktype": "catalog:",
@@ -410,7 +411,7 @@
     },
     "vendor/interchange/packages/inference-discovery-openai": {
       "name": "@intx/inference-discovery-openai",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@intx/inference-discovery": "workspace:*",
         "arktype": "catalog:",
@@ -418,7 +419,7 @@
     },
     "vendor/interchange/packages/inference-testing": {
       "name": "@intx/inference-testing",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@intx/inference": "workspace:*",
         "@intx/inference-discovery": "workspace:*",
@@ -428,7 +429,7 @@
     },
     "vendor/interchange/packages/log": {
       "name": "@intx/log",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@logtape/hono": "^2.0.2",
         "@logtape/logtape": "^2.0.2",
@@ -442,7 +443,7 @@
     },
     "vendor/interchange/packages/mail-memory": {
       "name": "@intx/mail-memory",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@intx/crypto": "workspace:*",
         "@intx/log": "workspace:*",
@@ -454,7 +455,7 @@
     },
     "vendor/interchange/packages/mailbox": {
       "name": "@intx/mailbox",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@intx/crypto": "workspace:*",
         "@intx/mime": "workspace:*",
@@ -464,7 +465,7 @@
     },
     "vendor/interchange/packages/mime": {
       "name": "@intx/mime",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@intx/crypto": "workspace:*",
         "@intx/types": "workspace:*",
@@ -473,14 +474,14 @@
     },
     "vendor/interchange/packages/pack-transport": {
       "name": "@intx/pack-transport",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@intx/types": "workspace:*",
       },
     },
     "vendor/interchange/packages/storage-isogit": {
       "name": "@intx/storage-isogit",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@intx/log": "workspace:*",
         "@intx/mime": "workspace:*",
@@ -496,7 +497,7 @@
     },
     "vendor/interchange/packages/tool-packaging": {
       "name": "@intx/tool-packaging",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@intx/agent": "workspace:*",
         "@intx/log": "workspace:*",
@@ -519,7 +520,7 @@
     },
     "vendor/interchange/packages/tools-lsp": {
       "name": "@intx/tools-lsp",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@intx/agent": "workspace:*",
         "@intx/log": "workspace:*",
@@ -536,7 +537,7 @@
     },
     "vendor/interchange/packages/tools-mail": {
       "name": "@intx/tools-mail",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@intx/agent": "workspace:*",
         "@intx/types": "workspace:*",
@@ -548,7 +549,7 @@
     },
     "vendor/interchange/packages/tools-posix": {
       "name": "@intx/tools-posix",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@intx/agent": "workspace:*",
         "@intx/types": "workspace:*",
@@ -559,7 +560,7 @@
     },
     "vendor/interchange/packages/types": {
       "name": "@intx/types",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "arktype": "catalog:",
         "semver": "catalog:",
@@ -570,7 +571,7 @@
     },
     "vendor/interchange/packages/workflow": {
       "name": "@intx/workflow",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@intx/agent": "workspace:*",
         "@intx/inference": "workspace:*",
@@ -580,7 +581,7 @@
     },
     "vendor/interchange/packages/workflow-deploy": {
       "name": "@intx/workflow-deploy",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@intx/agent": "workspace:*",
         "@intx/tool-packaging": "workspace:*",
@@ -593,7 +594,7 @@
     },
     "vendor/interchange/packages/workflow-host": {
       "name": "@intx/workflow-host",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@intx/agent": "workspace:*",
         "@intx/crypto": "workspace:*",
@@ -737,7 +738,7 @@
 
     "@corbits/process-provisioner": ["@corbits/process-provisioner@workspace:vendor/workbench/packages/process-provisioner"],
 
-    "@corbits/react-ui": ["@corbits/react-ui@github:corbitsdev/react-ui#3b12281", { "dependencies": { "class-variance-authority": "^0.7.1", "clsx": "^2.1.1", "tailwind-merge": "^3.3.1" }, "peerDependencies": { "@radix-ui/react-dialog": "^1.1.15", "@radix-ui/react-dropdown-menu": "^2.1.16", "@radix-ui/react-slot": "^1.2.3", "@radix-ui/react-tooltip": "^1.2.8", "@tanstack/react-query": "^5.90.2", "lucide-react": "^0.545.0 || ^1.0.0", "react": "^18.2.0 || ^19.0.0", "react-dom": "^18.2.0 || ^19.0.0", "sonner": "^2.0.7" }, "optionalPeers": ["@tanstack/react-query"] }, "corbitsdev-react-ui-3b12281", "sha512-Abvm/DO0Gqg0ITHGT9355ZxyKRPMVJLSSQSjpd3a8qt4JPrSMOLIOS4sX8ZMNNaArIbnY9F+VKrOWkUJUyO4Nw=="],
+    "@corbits/react-ui": ["@corbits/react-ui@github:corbitsdev/react-ui#459b9d0", { "dependencies": { "class-variance-authority": "^0.7.1", "clsx": "^2.1.1", "tailwind-merge": "^3.3.1" }, "peerDependencies": { "@radix-ui/react-dialog": "^1.1.15", "@radix-ui/react-dropdown-menu": "^2.1.16", "@radix-ui/react-slot": "^1.2.3", "@radix-ui/react-tooltip": "^1.2.8", "@tanstack/react-query": "^5.90.2", "lucide-react": "^0.545.0 || ^1.0.0", "react": "^18.2.0 || ^19.0.0", "react-dom": "^18.2.0 || ^19.0.0", "sonner": "^2.0.7" }, "optionalPeers": ["@tanstack/react-query"] }, "corbitsdev-react-ui-459b9d0", "sha512-CPXvfIfKoI+fxdnvPMErc1vxlArvzPfCtMj9edYeLMQ/mcro3ncDwNsSqL6V8VhH8nkKxSejELBJyPXzr9HmMA=="],
 
     "@corbits/sandbox-sidecar": ["@corbits/sandbox-sidecar@workspace:vendor/workbench/packages/sandbox-sidecar"],
 
@@ -1617,7 +1618,7 @@
 
     "@corbits/embed-hub/@corbits/mailbox": ["@corbits/mailbox@github:corbitsdev/corbits-mailbox#804ad22", { "dependencies": { "@hono/standard-validator": "0.2.3", "@intx/crypto": "0.3.0", "@standard-community/standard-json": "0.3.5", "@standard-community/standard-openapi": "0.2.9", "arktype": "2.1.29", "hono-openapi": "1.3.1" }, "peerDependencies": { "@intx/log": "^0.2.2", "drizzle-orm": "^0.45.2", "hono": "^4.12.0", "postgres": "^3.4.0" } }, "corbitsdev-corbits-mailbox-804ad22", "sha512-58oIXqGklw1zRzsZuZecgsp4J0Rt59vnFhxIV5sB4FLIgftIv1sat/S2atxjhleNhQjYI5MEorygTB2xG9PeYQ=="],
 
-    "@corbits/embed-hub/@corbits/oauth-core": ["@corbits/oauth-core@github:corbitsdev/corbits-oauth-core#2f520bf", { "dependencies": { "@intx/db": "^0.3.0", "@intx/hub-api": "^0.3.0", "@intx/hub-common": "^0.3.0", "@intx/types": "^0.3.0", "arktype": "2.2.3", "drizzle-orm": "^0.45.2", "hono": "^4.11.9" } }, "corbitsdev-corbits-oauth-core-2f520bf", "sha512-9vBt/2xVONKaNb8W/W0U4qrEP2l+1sTUyAjzvU6JgfukdPrR3fvd7ULu1OmcfU/3JKSApaRIyHEVhMGTwgMOmQ=="],
+    "@corbits/embed-hub/@corbits/oauth-core": ["@corbits/oauth-core@github:corbitsdev/corbits-oauth-core#95527fb", { "dependencies": { "@intx/db": "^0.3.0", "@intx/hub-api": "^0.3.0", "@intx/hub-common": "^0.3.0", "@intx/types": "^0.3.0", "arktype": "2.2.3", "drizzle-orm": "^0.45.2", "hono": "^4.11.9" } }, "corbitsdev-corbits-oauth-core-95527fb", "sha512-iJI7a8HlXE+hy2g+VJnBlKB2DUQW3LEoLCO86v6URfcF2xMuNn70CDHpvlu3wX3iwc4tsZcHsiJHmhNu23RJAA=="],
 
     "@corbits/embed-hub/@corbits/xai-provider": ["@corbits/xai-provider@github:corbitsdev/corbits-xai-provider#d492901", { "dependencies": { "@corbits/oauth-core": "github:corbitsdev/corbits-oauth-core", "@corbits/openai-responses": "github:corbitsdev/corbits-openai-responses", "arktype": "2.2.3" }, "peerDependencies": { "@intx/inference": ">=0.3.0", "@intx/types": ">=0.3.0" } }, "corbitsdev-corbits-xai-provider-d492901", "sha512-Ts1PH/G2FxW9RTXImEvfj4vH6yvxmyXz+Ms36/ji5axc+ubz8YTi6PrRJDdJOSLdb8sf72U36sg8O1SFESfniQ=="],
 
@@ -1697,9 +1698,19 @@
 
     "@corbits/embed-hub/@corbits/codex-provider/@corbits/openai-responses": ["@corbits/openai-responses@github:corbitsdev/corbits-openai-responses#e07b889", { "dependencies": { "arktype": "2.2.3" }, "peerDependencies": { "@intx/inference": ">=0.3.0", "@intx/types": ">=0.3.0" } }, "corbitsdev-corbits-openai-responses-e07b889", "sha512-jR6y6LBeWpMkl4IdTNDEV3IHHIdJ3YZxYOjy6Vz/95+kwrr/lOJ7UALF55EJrAZaIR1Tiy3BrJ39bhnYifujVA=="],
 
+    "@corbits/embed-hub/@corbits/mailbox/@intx/crypto": ["@intx/crypto@0.3.0", "", { "dependencies": { "@intx/types": "0.3.0" } }, "sha512-NsRzvkFGb0Pcsm9uLFFSXNl6Cbu+ii6VkYAw81qs9IbZzbAFfsZSUVQaX6EZuPNyJ8KK4KmBtqmioq1mhXsJww=="],
+
     "@corbits/embed-hub/@corbits/mailbox/arktype": ["arktype@2.1.29", "", { "dependencies": { "@ark/schema": "0.56.0", "@ark/util": "0.56.0", "arkregex": "0.0.5" } }, "sha512-jyfKk4xIOzvYNayqnD8ZJQqOwcrTOUbIU4293yrzAjA3O1dWh61j71ArMQ6tS/u4pD7vabSPe7nG3RCyoXW6RQ=="],
 
     "@corbits/embed-hub/@corbits/mailbox/hono-openapi": ["hono-openapi@1.3.1", "", { "peerDependencies": { "@hono/standard-validator": "^0.2.0", "@standard-community/standard-json": "^0.3.5", "@standard-community/standard-openapi": "^0.2.9", "@types/json-schema": "^7.0.15", "hono": "^4.11.2", "openapi-types": "^12.1.3" }, "optionalPeers": ["@hono/standard-validator", "hono"] }, "sha512-NLVeVkhKZ3drmQNEIPac8HX8Y54uf1hJAgIM/7MfDsaeVVmB+QILWQxx5x3R3NvRHgedcbEbOCGY2uR7WQYyMw=="],
+
+    "@corbits/embed-hub/@corbits/oauth-core/@intx/db": ["@intx/db@0.3.0", "", { "dependencies": { "@intx/authz": "0.3.0", "@intx/crypto": "0.3.0", "@intx/log": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29", "drizzle-orm": "^0.45.1", "postgres": "^3.4.8" } }, "sha512-MXNeUVJTftQuSHj5zSUBQsUcFN3wUBs8t6yT6lqjbaNxpT1C7kGx8qXb95WuadZln+krlLhyoUwGMF7EmYvlnw=="],
+
+    "@corbits/embed-hub/@corbits/oauth-core/@intx/hub-api": ["@intx/hub-api@0.3.0", "", { "dependencies": { "@hono/standard-validator": "^0.2.2", "@intx/agent": "0.3.0", "@intx/authz": "0.3.0", "@intx/crypto": "0.3.0", "@intx/db": "0.3.0", "@intx/hub-common": "0.3.0", "@intx/hub-sessions": "0.3.0", "@intx/log": "0.3.0", "@intx/mime": "0.3.0", "@intx/storage-isogit": "0.3.0", "@intx/types": "0.3.0", "@intx/workflow-deploy": "0.3.0", "arktype": "^2.1.29", "better-auth": "^1.4.18", "drizzle-orm": "^0.45.1", "hono": "^4.11.9", "hono-openapi": "^1.2.0", "isomorphic-git": "^1.27.2", "ssri": "^12.0.0" } }, "sha512-o3KuJilWywIjQ82q+t3kC5syHm/JCexnEYegngBZ7HD4lvbEoUkJnmhVUS5NxEFsr2Oqp0jEe4kpC96oJ2sKDA=="],
+
+    "@corbits/embed-hub/@corbits/oauth-core/@intx/hub-common": ["@intx/hub-common@0.3.0", "", { "dependencies": { "@intx/types": "0.3.0" } }, "sha512-dA8pTmBTu1JHGd3rGJrMsRWrai4GBBNnPxpZFFtXwQPzgL290lx2R+9BpRo2apdKbmgd+KOVshLvOdcUhAqghw=="],
+
+    "@corbits/embed-hub/@corbits/oauth-core/@intx/types": ["@intx/types@0.3.0", "", { "dependencies": { "arktype": "^2.1.29", "semver": "^7.7.2" } }, "sha512-PJ+v3IhtfZ4J7ZqJ8E39TteRMnC6Y503Q0JeCJdskkK+jhcjx01z7TJSozucagauAlpyh8Hn/9CyWFl53Ji0DQ=="],
 
     "@corbits/embed-hub/@corbits/xai-provider/@corbits/openai-responses": ["@corbits/openai-responses@github:corbitsdev/corbits-openai-responses#e07b889", { "dependencies": { "arktype": "2.2.3" }, "peerDependencies": { "@intx/inference": ">=0.3.0", "@intx/types": ">=0.3.0" } }, "corbitsdev-corbits-openai-responses-e07b889", "sha512-jR6y6LBeWpMkl4IdTNDEV3IHHIdJ3YZxYOjy6Vz/95+kwrr/lOJ7UALF55EJrAZaIR1Tiy3BrJ39bhnYifujVA=="],
 
@@ -1829,16 +1840,58 @@
 
     "unzipper/readable-stream/string_decoder": ["string_decoder@1.1.1", "", { "dependencies": { "safe-buffer": "~5.1.0" } }, "sha512-n/ShnvDi6FHbbVfviro+WojiFzv+s8MPMHBczVePfUpDJLwoLT0ht1l4YwBCbi8pJAveEEdnkHyPyTP/mzRfwg=="],
 
+    "@corbits/embed-hub/@corbits/mailbox/@intx/crypto/@intx/types": ["@intx/types@0.3.0", "", { "dependencies": { "arktype": "^2.1.29", "semver": "^7.7.2" } }, "sha512-PJ+v3IhtfZ4J7ZqJ8E39TteRMnC6Y503Q0JeCJdskkK+jhcjx01z7TJSozucagauAlpyh8Hn/9CyWFl53Ji0DQ=="],
+
     "@corbits/embed-hub/@corbits/mailbox/arktype/@ark/schema": ["@ark/schema@0.56.0", "", { "dependencies": { "@ark/util": "0.56.0" } }, "sha512-ECg3hox/6Z/nLajxXqNhgPtNdHWC9zNsDyskwO28WinoFEnWow4IsERNz9AnXRhTZJnYIlAJ4uGn3nlLk65vZA=="],
 
     "@corbits/embed-hub/@corbits/mailbox/arktype/@ark/util": ["@ark/util@0.56.0", "", {}, "sha512-BghfRC8b9pNs3vBoDJhcta0/c1J1rsoS1+HgVUreMFPdhz/CRAKReAu57YEllNaSy98rWAdY1gE+gFup7OXpgA=="],
 
     "@corbits/embed-hub/@corbits/mailbox/arktype/arkregex": ["arkregex@0.0.5", "", { "dependencies": { "@ark/util": "0.56.0" } }, "sha512-ncYjBdLlh5/QnVsAA8De16Tc9EqmYM7y/WU9j+236KcyYNUXogpz3sC4ATIZYzzLxwI+0sEOaQLEmLmRleaEXw=="],
 
+    "@corbits/embed-hub/@corbits/oauth-core/@intx/db/@intx/authz": ["@intx/authz@0.3.0", "", { "dependencies": { "@intx/types": "0.3.0" } }, "sha512-kyIKQAVjfB8H84mES0QA4cNnYfpPoyLmQITVBxiuXv1VO/K74TQZnCDpoo0IL7oFk2q7bbDXSAEE4ubMBVTHzA=="],
+
+    "@corbits/embed-hub/@corbits/oauth-core/@intx/db/@intx/crypto": ["@intx/crypto@0.3.0", "", { "dependencies": { "@intx/types": "0.3.0" } }, "sha512-NsRzvkFGb0Pcsm9uLFFSXNl6Cbu+ii6VkYAw81qs9IbZzbAFfsZSUVQaX6EZuPNyJ8KK4KmBtqmioq1mhXsJww=="],
+
+    "@corbits/embed-hub/@corbits/oauth-core/@intx/db/@intx/log": ["@intx/log@0.3.0", "", { "dependencies": { "@logtape/hono": "^2.0.2", "@logtape/logtape": "^2.0.2" }, "peerDependencies": { "hono": "^4.0.0" }, "optionalPeers": ["hono"] }, "sha512-iooPSZjiEUO1A91X5STRhOAk+2RprliB4nbriV/dOOz86kuxZ60y5T8ISQ5Jaj1US870gntN6QwnefY38aWi2Q=="],
+
+    "@corbits/embed-hub/@corbits/oauth-core/@intx/hub-api/@intx/agent": ["@intx/agent@0.3.0", "", { "dependencies": { "@intx/inference": "0.3.0", "@intx/log": "0.3.0", "@intx/mime": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29" } }, "sha512-a7cgmH8FSsGQ7BpLKQhEwZYRfofWh3lWEGgKFsk53zdgjndtDfqAf2I64QMPAqC2Y2Npag/z1NA5lEsIqAGvPg=="],
+
+    "@corbits/embed-hub/@corbits/oauth-core/@intx/hub-api/@intx/authz": ["@intx/authz@0.3.0", "", { "dependencies": { "@intx/types": "0.3.0" } }, "sha512-kyIKQAVjfB8H84mES0QA4cNnYfpPoyLmQITVBxiuXv1VO/K74TQZnCDpoo0IL7oFk2q7bbDXSAEE4ubMBVTHzA=="],
+
+    "@corbits/embed-hub/@corbits/oauth-core/@intx/hub-api/@intx/crypto": ["@intx/crypto@0.3.0", "", { "dependencies": { "@intx/types": "0.3.0" } }, "sha512-NsRzvkFGb0Pcsm9uLFFSXNl6Cbu+ii6VkYAw81qs9IbZzbAFfsZSUVQaX6EZuPNyJ8KK4KmBtqmioq1mhXsJww=="],
+
+    "@corbits/embed-hub/@corbits/oauth-core/@intx/hub-api/@intx/hub-sessions": ["@intx/hub-sessions@0.3.0", "", { "dependencies": { "@intx/agent": "0.3.0", "@intx/crypto": "0.3.0", "@intx/db": "0.3.0", "@intx/hub-common": "0.3.0", "@intx/log": "0.3.0", "@intx/mime": "0.3.0", "@intx/pack-transport": "0.3.0", "@intx/storage-isogit": "0.3.0", "@intx/tool-packaging": "0.3.0", "@intx/types": "0.3.0", "@intx/workflow": "0.3.0", "@intx/workflow-deploy": "0.3.0", "arktype": "^2.1.29", "drizzle-orm": "^0.45.1", "isomorphic-git": "^1.27.2", "tar": "^7.5.1" } }, "sha512-L9B/vuQakvbj4CYrEhbNwu0z/S9/2jBXmaJdxaC1zfakbOiHya4HFW/YAZKAgOi7z0cpxFftsK/RN3Yyrd/+Wg=="],
+
+    "@corbits/embed-hub/@corbits/oauth-core/@intx/hub-api/@intx/log": ["@intx/log@0.3.0", "", { "dependencies": { "@logtape/hono": "^2.0.2", "@logtape/logtape": "^2.0.2" }, "peerDependencies": { "hono": "^4.0.0" }, "optionalPeers": ["hono"] }, "sha512-iooPSZjiEUO1A91X5STRhOAk+2RprliB4nbriV/dOOz86kuxZ60y5T8ISQ5Jaj1US870gntN6QwnefY38aWi2Q=="],
+
+    "@corbits/embed-hub/@corbits/oauth-core/@intx/hub-api/@intx/mime": ["@intx/mime@0.3.0", "", { "dependencies": { "@intx/crypto": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29" } }, "sha512-jpKZZpfWRQJ6fI8BEpHnr83N+1ZHrnOMY978B/6bgcjFn3qtm1f3KiR0yaQ8eF3r1VF327r3H2qiCCx0OFN9Ow=="],
+
+    "@corbits/embed-hub/@corbits/oauth-core/@intx/hub-api/@intx/storage-isogit": ["@intx/storage-isogit@0.3.0", "", { "dependencies": { "@intx/log": "0.3.0", "@intx/mime": "0.3.0", "@intx/types": "0.3.0", "@isomorphic-git/lightning-fs": "4.7.0", "arktype": "^2.1.29", "buffer": "^6.0.3", "isomorphic-git": "^1.27.2" } }, "sha512-nzhl9WvxV66J1jjBfuAOjvwgiuS1DScnYomCPQrBxZNG35M5CYR3xyqR0RN0GfTj/7JlKWk6rF6Lu44aZDfzuw=="],
+
+    "@corbits/embed-hub/@corbits/oauth-core/@intx/hub-api/@intx/workflow-deploy": ["@intx/workflow-deploy@0.3.0", "", { "dependencies": { "@intx/agent": "0.3.0", "@intx/tool-packaging": "0.3.0", "@intx/types": "0.3.0", "@intx/workflow": "0.3.0" } }, "sha512-eiCFS+e6DV9UTWFX5eINQCbXHi2w5Wn9SXtAOHZa4PIXOzxXKVJL/uXE/c6TfCVqhrsDdzYwrtt9koi5qmYXCg=="],
+
     "cacache/glob/minimatch/brace-expansion": ["brace-expansion@5.0.12", "", { "dependencies": { "balanced-match": "^4.0.2" } }, "sha512-YovQ3rzhaLMIrDjNDMkNS01tea93qhEhG5xy8f6+R0l+dw3Ki+5sCoIoI942iuLZTHWogWktgwVDhU09iNEimQ=="],
 
     "npm-registry-fetch/npm-package-arg/hosted-git-info/lru-cache": ["lru-cache@11.5.2", "", {}, "sha512-4pfM1Ff0x50o0tQwb5ucw/RzNyD0/YJME6IVcStalZuMWxdt3sR3huStTtxz4PUmvZfRguvDejasvQ2kifR11g=="],
 
+    "@corbits/embed-hub/@corbits/mailbox/@intx/crypto/@intx/types/arktype": ["arktype@2.2.3", "", { "dependencies": { "@ark/schema": "0.56.2", "@ark/util": "0.56.2", "arkregex": "0.0.8" } }, "sha512-7W+0RLTUNJiBFIIZXwOQxSR8Z273IAd6IvqBeG9+gHnQKFsIx2C0iOtGTmMrPnlX4qLXyc5+ll7A0BIj9WrbTg=="],
+
+    "@corbits/embed-hub/@corbits/oauth-core/@intx/hub-api/@intx/agent/@intx/inference": ["@intx/inference@0.3.0", "", { "dependencies": { "@intx/log": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29" } }, "sha512-2DxqWRp5cSziXgDXPomSy0HTLVesBCtZErsKXYFnliTwYM6U+GRKk5rzwWMMgMWMFbtUaiogPExcNQYBYmfjQA=="],
+
+    "@corbits/embed-hub/@corbits/oauth-core/@intx/hub-api/@intx/hub-sessions/@intx/pack-transport": ["@intx/pack-transport@0.3.0", "", { "dependencies": { "@intx/types": "0.3.0" } }, "sha512-EQ1wM16323aIFhw3Ak6HwB8YqzKSAfRmJUwjIfqyXk2t6TGv4grws6dIs7Yau1dc372s/SO+GhvFaKgvI6XTWA=="],
+
+    "@corbits/embed-hub/@corbits/oauth-core/@intx/hub-api/@intx/hub-sessions/@intx/tool-packaging": ["@intx/tool-packaging@0.3.0", "", { "dependencies": { "@intx/agent": "0.3.0", "@intx/log": "0.3.0", "@intx/storage-isogit": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29", "isomorphic-git": "^1.27.2", "npm-package-arg": "^12.0.2", "npm-pick-manifest": "^10.0.0", "npm-registry-fetch": "^19.0.0", "semver": "^7.7.2", "ssri": "^12.0.0", "tar": "^7.5.1" } }, "sha512-Lr/xdEjXTindJRm+eITvfeqpW/yl71thYjr3HXl41GJ9wpuOZPCjm9vBoRVKhUSwmIUKBYbm2VplXCCXaS7f4g=="],
+
+    "@corbits/embed-hub/@corbits/oauth-core/@intx/hub-api/@intx/hub-sessions/@intx/workflow": ["@intx/workflow@0.3.0", "", { "dependencies": { "@intx/agent": "0.3.0", "@intx/inference": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29" } }, "sha512-vaIqTohNNdCVhvZ4btWbIbpjp3140e5939tQP7t+rSkucTvnn6US+bXho1qUJyNQ577mf3YXHGgBCW8ppsnscA=="],
+
+    "@corbits/embed-hub/@corbits/oauth-core/@intx/hub-api/@intx/workflow-deploy/@intx/tool-packaging": ["@intx/tool-packaging@0.3.0", "", { "dependencies": { "@intx/agent": "0.3.0", "@intx/log": "0.3.0", "@intx/storage-isogit": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29", "isomorphic-git": "^1.27.2", "npm-package-arg": "^12.0.2", "npm-pick-manifest": "^10.0.0", "npm-registry-fetch": "^19.0.0", "semver": "^7.7.2", "ssri": "^12.0.0", "tar": "^7.5.1" } }, "sha512-Lr/xdEjXTindJRm+eITvfeqpW/yl71thYjr3HXl41GJ9wpuOZPCjm9vBoRVKhUSwmIUKBYbm2VplXCCXaS7f4g=="],
+
+    "@corbits/embed-hub/@corbits/oauth-core/@intx/hub-api/@intx/workflow-deploy/@intx/workflow": ["@intx/workflow@0.3.0", "", { "dependencies": { "@intx/agent": "0.3.0", "@intx/inference": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29" } }, "sha512-vaIqTohNNdCVhvZ4btWbIbpjp3140e5939tQP7t+rSkucTvnn6US+bXho1qUJyNQ577mf3YXHGgBCW8ppsnscA=="],
+
     "cacache/glob/minimatch/brace-expansion/balanced-match": ["balanced-match@4.0.4", "", {}, "sha512-BLrgEcRTwX2o6gGxGOCNyMvGSp35YofuYzw9h1IMTRmKqttAZZVU67bdb9Pr2vUHA8+j3i2tJfjO6C6+4myGTA=="],
+
+    "@corbits/embed-hub/@corbits/oauth-core/@intx/hub-api/@intx/hub-sessions/@intx/workflow/@intx/inference": ["@intx/inference@0.3.0", "", { "dependencies": { "@intx/log": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29" } }, "sha512-2DxqWRp5cSziXgDXPomSy0HTLVesBCtZErsKXYFnliTwYM6U+GRKk5rzwWMMgMWMFbtUaiogPExcNQYBYmfjQA=="],
+
+    "@corbits/embed-hub/@corbits/oauth-core/@intx/hub-api/@intx/workflow-deploy/@intx/workflow/@intx/inference": ["@intx/inference@0.3.0", "", { "dependencies": { "@intx/log": "0.3.0", "@intx/types": "0.3.0", "arktype": "^2.1.29" } }, "sha512-2DxqWRp5cSziXgDXPomSy0HTLVesBCtZErsKXYFnliTwYM6U+GRKk5rzwWMMgMWMFbtUaiogPExcNQYBYmfjQA=="],
   }
 }

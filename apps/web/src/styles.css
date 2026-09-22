@@ -164,30 +164,11 @@ form:has(> div > textarea) textarea:focus-visible {
   outline: none;
 }
 
-/* The rail has one left edge. SidebarContent is `py-2` and SidebarFooter is
-   `p-2`, so the footer's section label would otherwise sit 8px further in than
-   the group above it — the same defect as the pinned decision's inset, one row
-   down. */
-[data-slot="sidebar-footer"] {
-  padding-left: 0;
-  padding-right: 0;
-}
-
-/* One item needs no heading above it. The section keeps its accessible name —
-   SidebarSection puts the label on the nav's aria-label — so only the visible
-   duplicate goes. Written here rather than as an arbitrary Tailwind variant
-   because the library ships prebuilt CSS: a class it never compiled does not
-   exist in the bundle. */
-/* Two items need no heading over them; the section keeps its name for AT. */
-[data-slot="sidebar-section"] > p {
-  display: none;
-}
-
-/* ---- App shell: 240px rail, collapsing to icons, plus a filling canvas ---- */
+/* ---- App shell: one bar across the top, a filling canvas beneath ---- */
 
 .app {
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   /* The window is the app. Nothing scrolls but the one region meant to. */
   height: 100vh;
   overflow: hidden;
@@ -213,79 +194,58 @@ form:has(> div > textarea) textarea:focus-visible {
   background: var(--wb-canvas);
 }
 
-.canvas-head {
+/* ---- Top bar: where you are, where the stage is, what needs you ---- */
+
+.topbar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 3.5rem;
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--wb-border);
   background: var(--wb-background);
 }
 
-/* One thin bar: the way back and where you are. Same height as the rail's
-   header so the two bottom rules meet as one line. */
-.canvas-head {
+.topbar-left {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  min-height: 3.5rem;
-  padding: 0 var(--space-5);
-  border-bottom: 1px solid var(--wb-border);
-  flex: none;
+  min-width: 0;
 }
 
-.canvas-head h1 {
-  font-size: 1rem;
-  font-weight: 500;
-  margin: 0;
+.topbar-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
 }
 
-.crumb {
-  background: none;
-  border: 0;
-  padding: 0;
-  font-size: 1rem;
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1);
+}
+
+.wordmark {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.step-name {
+  font-family: var(--wb-font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
   color: var(--wb-muted-foreground);
-  cursor: pointer;
+  white-space: nowrap;
 }
 
-.crumb:hover {
-  color: var(--wb-foreground);
-}
-
-.crumb-sep {
-  color: var(--wb-border-strong);
-}
-
-/* Where you are on the left; what you can do on the right. Without this the
-   view switch read as a third crumb. */
-.head-actions {
-  display: flex;
-  align-items: stretch;
-  gap: var(--space-2);
-  margin-left: auto;
-  align-self: stretch;
-}
-
-/* The tabs sit on the bar's own rule rather than drawing a second one. */
-.head-actions [role="tablist"] {
-  border-bottom-color: transparent;
-  align-items: stretch;
-  height: 100%;
-  /* The active underline lands on the bar's rule. */
-  margin-bottom: -1px;
-}
-
-.head-actions [role="tablist"] > * {
-  display: inline-flex;
-  align-items: center;
-}
-
-.head-actions [role="tablist"] + [role="tabpanel"] {
-  display: none;
-}
-
-.head-actions > .head-tabs {
-  gap: 0;
-}
-
-.head-toggle {
-  align-self: center;
+.iconbtn {
   display: grid;
   place-items: center;
   width: 32px;
@@ -294,20 +254,123 @@ form:has(> div > textarea) textarea:focus-visible {
   border-radius: var(--radius-control);
   background: none;
   color: var(--wb-muted-foreground);
+  cursor: pointer;
 }
 
-.head-toggle:hover:not(:disabled) {
+.iconbtn:hover:not(:disabled) {
   background: var(--wb-muted);
   color: var(--wb-foreground);
 }
 
-.head-toggle:disabled {
+.iconbtn:disabled {
   opacity: 0.35;
 }
 
-.head-toggle svg {
+.iconbtn svg {
   width: 16px;
   height: 16px;
+}
+
+/* The tabs sit on the bar's own rule rather than drawing a second one. */
+.topbar-actions [role="tablist"] {
+  border-bottom-color: transparent;
+}
+
+.topbar-actions [role="tablist"] + [role="tabpanel"] {
+  display: none;
+}
+
+/* ---- The bell's fold: needs-you waits over mailbox activity ---- */
+
+.statusdot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.statusdot.action {
+  background: var(--wb-primary);
+}
+
+.statusdot.idle {
+  background: var(--wb-border-strong);
+}
+
+.notif-group {
+  margin: 0;
+  font-family: var(--wb-font-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--wb-muted-foreground);
+  padding: var(--space-3) var(--space-4) var(--space-1);
+}
+
+.notif-group ~ .notif-group {
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--wb-border);
+}
+
+.notif {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: 0;
+  border-bottom: 1px solid var(--wb-border);
+  background: none;
+  color: var(--wb-foreground);
+  text-align: left;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+div.notif {
+  cursor: default;
+}
+
+.notif:hover {
+  background: var(--wb-muted);
+}
+
+.notif .statusdot {
+  margin-top: 5px;
+}
+
+.notif-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.notif-body b {
+  font-size: 0.84375rem;
+  font-weight: 600;
+}
+
+.notif-body span {
+  font-size: 0.78125rem;
+  color: var(--wb-muted-foreground);
+}
+
+.notif-empty {
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  font-size: 0.8125rem;
+  color: var(--wb-muted-foreground);
+}
+
+.notif-foot {
+  font-family: var(--wb-font-mono);
+  font-size: 0.6875rem;
+  color: var(--wb-muted-foreground);
+  text-align: center;
+  padding: var(--space-2);
 }
 
 /* Everything below the bar. Scrolls, except where a surface fills instead. */
@@ -467,112 +530,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   .version-list { grid-template-columns: 1fr; }
 }
 
-/* What the open stage creates, under the rows: each word is the artifact's
-   way into the Artifacts panel, on the rows' 16px inset. */
-.rail-stage {
-  margin: 0 var(--space-2);
-  padding: var(--space-2);
-  display: grid;
-  gap: var(--space-1);
-}
 
-.rail-stage-head {
-  margin: 0;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--wb-muted-foreground);
-}
-
-.rail-stage-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 2px;
-  font-size: 0.875rem;
-}
-
-.rail-stage-list a {
-  color: var(--wb-primary);
-  text-decoration: none;
-}
-
-.rail-stage-list a:hover {
-  text-decoration: underline;
-}
-
-.rail-stage-list .is-pending {
-  color: var(--wb-muted-foreground);
-}
-
-.head-panel {
-  font-weight: 400;
-  color: var(--wb-muted-foreground);
-}
-
-.rail-note {
-  margin: 0;
-  padding: 0 var(--space-4);
-}
-
-/* The big waiting count in a screen header. */
-.queue-count {
-  display: grid;
-  min-width: 88px;
-  min-height: 68px;
-  place-items: center;
-  border: 1px solid var(--wb-border-strong);
-  background: var(--wb-background);
-  padding: var(--space-2);
-}
-
-.queue-count strong {
-  color: var(--wb-ring);
-  font-size: 2.5rem;
-  font-weight: 400;
-  line-height: 1;
-}
-
-.queue-count span {
-  color: var(--wb-muted-foreground);
-  font-family: var(--wb-font-mono);
-  font-size: 0.6875rem;
-  font-weight: 500;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-
-/* The dominant decision. Stays dominant at every width. */
-.decision-current {
-  display: grid;
-  gap: var(--space-3);
-  align-content: start;
-  padding: var(--space-4);
-  border: 1px solid var(--wb-border);
-  background: var(--wb-background);
-}
-
-.decision-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-  align-items: center;
-  font-family: var(--wb-font-mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--wb-muted-foreground);
-}
-
-.decision-current h3 {
-  font-size: 1.375rem;
-  font-weight: 400;
-  letter-spacing: -0.01em;
-  margin: 0;
-  line-height: 1.2;
-}
 
 .action-row {
   display: flex;
@@ -609,50 +567,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   margin: 0;
   font-size: 0.8125rem;
   color: var(--wb-muted-foreground);
-}
-
-/* KEEP: inbox list (conv) */
-.inbox-empty {
-  margin: 0;
-  padding: var(--space-3) var(--space-4);
-  font-size: 0.8125rem;
-  color: var(--wb-muted-foreground);
-}
-
-.inbox-list {
-  display: grid;
-  gap: 0;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  max-width: 20rem;
-}
-
-.inbox-list li {
-  display: grid;
-  gap: var(--space-1);
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--wb-border);
-}
-
-.inbox-list li strong {
-  font-weight: 500;
-  font-size: 0.875rem;
-}
-
-.inbox-list li span {
-  font-size: 0.75rem;
-  color: var(--wb-muted-foreground);
-}
-
-.inbox-list li.is-unread strong::before {
-  content: "";
-  display: inline-block;
-  width: 0.375rem;
-  height: 0.375rem;
-  margin-right: var(--space-2);
-  border-radius: 50%;
-  background: var(--wb-primary, currentColor);
 }
 
 .queue-list-head {
@@ -1413,23 +1327,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 
 .banner-action {
   margin-top: var(--space-1);
-}
-
-/* Detail that is true and rarely needed. Folded, not deleted: the person
-   debugging a missing control needs all of it. */
-/* ---- Small screens ----
-   The rail is a full navigation list on a desktop and a header on a phone.
-   Stacking it as-is pushes the work below a screen of links, which is what
-   made the mobile layout unusable. */
-@media (max-width: 1080px) {
-  /* Work and Setup sit on the same row; Setup is pushed to the far end. */
-  .rail-section:first-of-type { margin-left: auto; }
-
-  .rail-section::-webkit-scrollbar { display: none; }
-
-  .rail-stage {
-    display: none;
-  }
 }
 
 .link-button {
