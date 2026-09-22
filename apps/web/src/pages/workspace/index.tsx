@@ -33,7 +33,6 @@ import { AudiencePackages } from "../audiences.jsx";
 import { DesignFeedbackView } from "../design.jsx";
 import { Tabs } from "@corbits/react-ui";
 import { Banner, Button, Screen, StateLabel, stageName, versionDigest } from "../../components.jsx";
-import { STAGE_GOAL } from "./gate.jsx";
 import { DeliveryPanel } from "./delivery.jsx";
 import { StageConversation } from "./thread.jsx";
 import { StageDocument } from "./document.jsx";
@@ -414,11 +413,7 @@ export function StageWorkspace({
         </Banner>
       ) : null}
 
-      {!agentAddress && !agent.error ? (
-        <Screen title={`Stage ${stage} of 9 · ${stageName(stage)}`} description={STAGE_GOAL[stage]} tight>
-          <p className="inline-note">Starting the {stageName(stage).toLowerCase()} specialist…</p>
-        </Screen>
-      ) : null}
+      {!agentAddress && !agent.error ? <OpeningScreen /> : null}
 
       {agentAddress && openingDispatch.error ? (
         <Banner
