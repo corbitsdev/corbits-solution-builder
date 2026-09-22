@@ -2937,7 +2937,51 @@ button[aria-disabled="true"] {
   gap: var(--space-3);
 }
 
-/* Stakeholders without a package: a list, each with its own way to write one. */
+/* The quorum readable at a glance — one chip per stakeholder, coloured by
+   their latest recorded decision; clicking one opens that package's tab. */
+.quorum-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: 0 0 var(--space-2);
+}
+
+.aud-chip {
+  font-family: var(--wb-font-mono);
+  font-size: 0.6875rem;
+  border: 1px solid var(--wb-border-strong);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--wb-muted-foreground);
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.aud-chip:hover:not(:disabled) {
+  color: var(--wb-foreground);
+}
+
+.aud-chip:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.aud-chip.proceed {
+  color: var(--wb-okay);
+  border-color: color-mix(in srgb, var(--wb-okay) 40%, transparent);
+}
+
+.aud-chip.revise {
+  color: var(--wb-primary);
+  border-color: color-mix(in srgb, var(--wb-primary) 40%, transparent);
+}
+
+.aud-chip.reject {
+  color: var(--wb-muted-foreground);
+  text-decoration: line-through;
+}
+
 .packages-missing {
   display: grid;
   gap: var(--space-3);

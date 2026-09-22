@@ -12,7 +12,7 @@
  * (`pages/workspace/index.tsx`); this only restores the record, not a gate.
  */
 import { useEffect, useRef, useState } from "react";
-import { api, ApiFailure, type AudienceDecision, type ProjectDetail } from "../client.js";
+import { api, ApiFailure, type ArtifactNode, type AudienceDecision, type ProjectDetail } from "../client.js";
 import type { ChatMessage } from "../stage-mail.ts";
 import { Banner, Button, downloadArtifact, Field, Screen, StateLabel } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
@@ -165,6 +165,47 @@ function DecisionPanel({
           Reject
         </Button>
       </div>
+    </div>
+  );
+}
+
+/** One chip per stakeholder, coloured by their latest recorded decision —
+    the quorum readable without opening every tab. Clicking a chip opens
+    that stakeholder's package tab. */
+function QuorumChips({
+  audiences,
+  packages,
+  decisionsByNode,
+  onSelect,
+}: {
+  audiences: { name: string; role: string }[];
+  packages: readonly ArtifactNode[];
+  decisionsByNode: ReadonlyMap<string, AudienceDecision[]>;
+  onSelect: (variant: string) => void;
+}) {
+  const packageFor = (name: string) =>
+    packages.find((node) => node.variant === name);
+  return (
+    <div className="quorum-chips" role="list" aria-label="Quorum">
+      {audiences.map((audience) => {
+        const node = packageFor(audience.name);
+        const latest = node ? latestDecision(decisionsByNode.get(node.id) ?? []) : null;
+        return (
+          <button
+            key={audience.name}
+            type="button"
+            role="listitem"
+            className={`aud-chip${latest ? ` ${latest.decision}` : ""}`}
+            disabled={!node?.variant}
+            title={latest ? `${audience.name}: ${DECISION_LABEL[latest.decision]}` : `${audience.name}: no decision yet`}
+            onClick={() => {
+              if (node?.variant) onSelect(node.variant);
+            }}
+          >
+            {audience.name}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -677,6 +718,12 @@ export function AudiencePackages({
 
         {packages.length === 0 ? null : (
           <>
+            <QuorumChips
+              audiences={audiences}
+              packages={packages}
+              decisionsByNode={decisionsByNode}
+              onSelect={setActive}
+            />
             {/* One tab per audience package. */}
             <Tabs
               label="Stakeholder packages"
