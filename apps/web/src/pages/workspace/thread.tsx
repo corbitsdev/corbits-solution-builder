@@ -5,19 +5,17 @@ import { Markdown } from "../../markdown.jsx";
 import { Dictated } from "../../dictation.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { choicesIn } from "./choices.js";
-import { isSubstantialDraft } from "./guidance.js";
+import { conversationLead } from "./guidance.js";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
 import { COMPOSER_BOX_CLASS, CONV_SCROLL_CLASS } from "./pane-classes.ts";
 
 /** A stage-mail turn as a chat row. The specialist's long draft lives in the
  *  right pane, not here — the mockup keeps chat to short status lines. */
 function toUiMessages(messages: readonly ChatMessage[]): UiChatMessage[] {
-  return messages
-    .filter((message) => message.author === "me" || !isSubstantialDraft(message.body))
-    .map((message) => ({
+  return messages.map((message) => ({
     id: message.id,
     role: message.author === "me" ? "user" : "agent",
-    parts: [{ type: "text", text: message.body }],
+    parts: [{ type: "text", text: message.author === "me" ? message.body : conversationLead(message.body) }],
     createdAt: message.at,
   }));
 }

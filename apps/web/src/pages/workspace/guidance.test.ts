@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { ChatMessage } from "../../stage-mail.ts";
-import { isSubstantialDraft, latestSubstantialDraft, workspaceGuidance } from "./guidance.ts";
+import { conversationLead, isSubstantialDraft, latestSubstantialDraft, workspaceGuidance } from "./guidance.ts";
 
 const at = "2026-09-19T12:00:00.000Z";
 const person = (body: string): ChatMessage => ({ id: "person", author: "me", body, at });
@@ -23,6 +23,17 @@ describe("workspace guidance", () => {
     const guidance = workspaceGuidance(1, [person("Build a CRM"), agent("ack", "Thanks — I will update that.")]);
     expect(guidance.title).toBe("A reply needs clarification");
     expect(guidance.draft).toBeNull();
+  });
+
+  test("conversationLead keeps a short status line and drops the headed brief", () => {
+    const withLead = [
+      "Pulled the brief. Drafting the problem — cutoff timing looks sharpest.",
+      "",
+      completeDraft,
+    ].join("\n");
+    expect(conversationLead(withLead)).toBe("Pulled the brief. Drafting the problem — cutoff timing looks sharpest.");
+    expect(conversationLead(completeDraft)).toBe("First draft is in the document.");
+    expect(conversationLead("Which customer group is first?")).toBe("Which customer group is first?");
   });
 
   test("retains a prior substantial draft when a later reply asks a question", () => {

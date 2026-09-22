@@ -140,8 +140,7 @@ describe("project chrome paint", () => {
     expect(layout).toMatch(/\.stage-pane \{[\s\S]*background: var\(--wb-background\)/);
   });
 
-  test("the chat omits substantial specialist drafts — those belong in the document pane", () => {
-    expect(read("./thread.tsx")).toContain("isSubstantialDraft");
-    expect(read("./thread.tsx")).toContain("message.author === \"me\" || !isSubstantialDraft(message.body)");
+  test("the chat shows a short lead for substantial drafts — the document pane has the rest", () => {
+    expect(read("./thread.tsx")).toContain("conversationLead");
   });
 });

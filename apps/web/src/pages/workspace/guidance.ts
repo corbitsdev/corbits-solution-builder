@@ -77,6 +77,18 @@ export function isSubstantialDraft(body: string): boolean {
   return headings.length >= 2 && prose.length >= 200;
 }
 
+/** What the narrow chat column may show of a specialist turn. A headed draft
+ *  is the document pane; chat gets the short lead before the first heading,
+ *  or a one-line pointer if there is no lead. */
+export function conversationLead(body: string): string {
+  if (!isSubstantialDraft(body)) return body.trim();
+  const cut = body.search(/^##\s/m);
+  const before = (cut === -1 ? body : body.slice(0, cut)).trim();
+  const first = before.split(/\n\s*\n/)[0]?.trim() ?? "";
+  if (first.length > 0 && first.length <= 480 && !/^#\s/.test(first)) return first;
+  return "First draft is in the document.";
+}
+
 function questionIn(body: string): InterviewQuestion | null {
   const choices = choicesIn(body);
   if (choices) return { text: choices.question, choices: choices.options };
