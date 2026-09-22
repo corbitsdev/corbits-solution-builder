@@ -983,6 +983,48 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   background: var(--wb-muted);
 }
 
+/* Selecting text in the document floats the comment popover at the cursor —
+   a small dialog, gone on Escape or a click away. */
+.sel-pop {
+  position: fixed;
+  z-index: 60;
+  width: 260px;
+  padding: var(--space-3);
+  border: 1px solid var(--wb-border-strong);
+  border-radius: var(--radius-control);
+  background: var(--wb-card);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--wb-foreground) 12%, transparent);
+}
+
+.sel-pop textarea {
+  width: 100%;
+  min-height: 56px;
+  border: 0;
+  outline: 0;
+  resize: none;
+  background: transparent;
+  color: var(--wb-foreground);
+  font-size: 0.8125rem;
+}
+
+.sel-pop .row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: var(--space-2);
+}
+
+.sel-pop .hint {
+  font-family: var(--wb-font-mono);
+  font-size: 0.625rem;
+  color: var(--wb-muted-foreground);
+}
+
+.sel-pop .row button {
+  padding: 3px 10px;
+  font-size: 0.71875rem;
+}
+
 .sbpick-name {
   font-weight: 600;
   white-space: nowrap;

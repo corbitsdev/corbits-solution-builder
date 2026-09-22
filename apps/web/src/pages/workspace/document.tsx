@@ -120,7 +120,7 @@ export function StageDocument({
   events?: readonly StageEvent[];
 }) {
   const [message, setMessage] = useState("");
-  const [attached, setAttached] = useState<Quote[]>([]);
+  const [attached, setAttached] = useState<AttachedQuote[]>([]);
   useEffect(() => {
     if (seed && seed.text.trim()) setMessage(seed.text);
   }, [seed?.at]);
@@ -174,17 +174,44 @@ export function StageDocument({
   // ChatThread owns the transcript's scrolling, including staying put while
   // the reader is scrolled up.
 
-  /** A selection in the document attaches to the message being written. */
-  const attachSelection = () => {
+  /** A selection in the document opens the comment popover; "Add to chat"
+   *  attaches the passage — and its note, if one was written — to the message
+   *  being written. */
+  const [selPop, setSelPop] = useState<{ x: number; y: number; quote: string } | null>(null);
+  const [selNote, setSelNote] = useState("");
+  const openSelection = (event: { clientX: number; clientY: number }) => {
     const selection = globalThis.getSelection?.();
     const text = selection?.toString().trim() ?? "";
-    if (text.length === 0) return;
+    if (text.length <= 2) {
+      setSelPop(null);
+      return;
+    }
     const quote = text.length > 240 ? `${text.slice(0, 240)}…` : text;
-    if (attached.some((entry) => entry.quote === quote)) return;
-    setAttached([...attached, { quote }]);
-    selection?.removeAllRanges();
+    if (attached.some((entry) => entry.quote === quote)) {
+      setSelPop(null);
+      return;
+    }
+    setSelNote("");
+    setSelPop({ x: Math.min(event.clientX, window.innerWidth - 280), y: event.clientY + 10, quote });
+  };
+  const attachSelection = () => {
+    if (!selPop) return;
+    const note = selNote.trim();
+    setAttached([...attached, { quote: selPop.quote, ...(note ? { note } : {}) }]);
+    globalThis.getSelection?.()?.removeAllRanges();
+    setSelPop(null);
     composer.current?.focus({ preventScroll: true });
   };
+  useEffect(() => {
+    if (selPop === null) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setSelPop(null);
+      globalThis.getSelection?.()?.removeAllRanges();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [selPop]);
 
   // Our turns as the library's message model. A quote the person attached is
   // part of what they said, so it travels in the same message rather than
@@ -302,7 +329,12 @@ export function StageDocument({
       return;
     }
     setQueued(false);
-    onRevise(message.trim(), attached);
+    onRevise(
+      message.trim(),
+      attached.map((entry) =>
+        entry.note ? { quote: `${entry.quote}\n— ${entry.note}` } : { quote: entry.quote },
+      ),
+    );
     setMessage("");
     setAttached([]);
     setRedrafting(false);
@@ -478,6 +510,11 @@ export function StageDocument({
               </span>
             </div>
           ) : null}
+          {attached.length > 0 ? (
+            <p className="composer-cue">
+              {attached.length} passage{attached.length > 1 ? "s" : ""} attached — sent with your reply
+            </p>
+          ) : null}
           <Dictated value={message} onValueChange={setMessage}>
           <ChatInput
             value={message}
@@ -525,7 +562,7 @@ export function StageDocument({
       <article className="document" data-tour="document">
         {strip ? <div className="artifact-strip">{strip}</div> : null}
         <div className="stage-inner">
-          <div className="doc" data-tour="document-body" onMouseUp={attachSelection}>
+          <div className="doc" data-tour="document-body" onMouseUp={openSelection}>
             <div className="docmeta">
               <span>
                 v{node.version} · {documentName(node.kind)}
@@ -581,6 +618,39 @@ export function StageDocument({
           </div>
         </div>
       </article>
+
+      {selPop ? (
+        <>
+          <button
+            type="button"
+            className="sbpick-backdrop"
+            aria-label="Dismiss comment"
+            onClick={() => {
+              setSelPop(null);
+              globalThis.getSelection?.()?.removeAllRanges();
+            }}
+          />
+          <div
+            className="sel-pop"
+            style={{ left: selPop.x, top: selPop.y }}
+            role="dialog"
+            aria-label="Comment on this passage"
+          >
+            <textarea
+              autoFocus
+              placeholder="Comment on this passage…"
+              value={selNote}
+              onChange={(event) => setSelNote(event.target.value)}
+            />
+            <div className="row">
+              <span className="hint">Sent with your reply</span>
+              <Button variant="primary" onClick={attachSelection}>
+                Add to chat
+              </Button>
+            </div>
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -621,3 +691,8 @@ export function DocumentBody({ source, sideBySide }: { source: string; sideBySid
 
 const EMPTY_WITHDRAWN: ReadonlySet<string> = new Set();
 const EMPTY_EVENTS: readonly StageEvent[] = [];
+
+/** A passage attached to the message being written, with the optional
+ *  per-passage note the selection popover collects. The note folds into the
+ *  quote's own line on send — `Quote` on the wire stays what it is. */
+type AttachedQuote = { quote: string; note?: string };
