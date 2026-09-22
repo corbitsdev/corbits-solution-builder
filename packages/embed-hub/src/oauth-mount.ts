@@ -37,13 +37,7 @@ type ProviderDefinition = {
   readonly exchange: (code: string, verifier: string, now: number) => Promise<BaseTokens>;
 };
 
-export const PAGE_COPY: CallbackPageCopy = {
-  productName: "Solutions Builder",
-  siteUrl: "https://corbits.dev",
-  siteLabel: "corbits.dev",
-  githubUrl: "https://github.com/corbitsdev/solutions-builder-alpha",
-  githubLabel: "github.com/corbitsdev/solutions-builder-alpha",
-};
+export type { CallbackPageCopy };
 
 const PROVIDERS: Readonly<Record<MountableOAuthProviderId, ProviderDefinition>> = {
   "codex-oauth": { label: "ChatGPT (Codex)", config: codexOAuthConfig, exchange: exchangeCodexCode },
@@ -73,7 +67,11 @@ function callbackConfigFor(redirectUri: string): { host: string; port: number; p
  * (tests) can inject a no-op so starting a login never spawns a real
  * browser process.
  */
-export function mountProviderOAuth(app: Hono, open: (url: string) => void = openInBrowser): void {
+export function mountProviderOAuth(
+  app: Hono,
+  copy: CallbackPageCopy,
+  open: (url: string) => void = openInBrowser,
+): void {
   const logins = new Map<MountableOAuthProviderId, LoginState>();
   /** One in-flight login per provider. Its callback server holds a fixed
    *  loopback port, so a second attempt must abort the first or the port is
@@ -106,9 +104,9 @@ export function mountProviderOAuth(app: Hono, open: (url: string) => void = open
               // The callback page lands before the exchange and model discovery
               // finish, so it reports the authorization received, not a completed
               // connection — the app closes out the setup.
-              doneHtml: authorizationDoneHtml(definition.label, PAGE_COPY),
+              doneHtml: authorizationDoneHtml(definition.label, copy),
               failedHtml: (reason) =>
-                callbackPageHtml({ subject: definition.label, error: reason }, PAGE_COPY),
+                callbackPageHtml({ subject: definition.label, error: reason }, copy),
             }),
           buildAuthorizeUrl: (pkce, state) => buildAuthorizeUrl(definition.config, pkce, state),
           exchangeCode: (code, verifier, now) => definition.exchange(code, verifier, now),

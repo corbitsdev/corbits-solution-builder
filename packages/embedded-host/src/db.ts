@@ -23,6 +23,7 @@ import { PGlite } from "@electric-sql/pglite";
 import wasmPath from "../../../node_modules/@electric-sql/pglite/dist/pglite.wasm" with { type: "file" };
 import dataPath from "../../../node_modules/@electric-sql/pglite/dist/pglite.data" with { type: "file" };
 import { drizzle, type PgliteDatabase } from "drizzle-orm/pglite";
+import { hostIdentity } from "./identity.js";
 
 export type Db = PgliteDatabase<Record<string, never>>;
 
@@ -94,9 +95,10 @@ async function claimDataDir(dataDir: string): Promise<{ root: string; release: (
       if ((error as { code?: string }).code !== "EEXIST") throw error;
       const existing = Number((await readFile(pidPath, "utf8").catch(() => "")).trim());
       if (processExists(existing)) {
+        const { displayName, envPrefix } = hostIdentity();
         throw new Error(
-          `Solutions Builder is already running (process ${existing}). ` +
-            "Stop that host, or set SOLUTIONS_BUILDER_DATA_DIR to a different directory.",
+          `${displayName} is already running (process ${existing}). ` +
+            `Stop that host, or set ${envPrefix}_DATA_DIR to a different directory.`,
         );
       }
       await unlink(pidPath).catch(() => undefined);
@@ -107,11 +109,12 @@ async function claimDataDir(dataDir: string): Promise<{ root: string; release: (
 }
 
 function openFailure(dataDir: string, cause: unknown): Error {
+  const { displayName, envPrefix } = hostIdentity();
   return new Error(
     `Could not open the host database at ${dataDir}. ` +
       "A previous run may not have shut down cleanly. " +
-      "Stop any other Solutions Builder using this workspace, " +
-      "move that directory aside, or set SOLUTIONS_BUILDER_DATA_DIR to a different directory.",
+      `Stop any other ${displayName} using this workspace, ` +
+      `move that directory aside, or set ${envPrefix}_DATA_DIR to a different directory.`,
     { cause: cause instanceof Error ? cause : undefined },
   );
 }

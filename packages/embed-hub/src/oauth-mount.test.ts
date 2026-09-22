@@ -1,13 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import { Hono } from "hono";
-import { mountProviderOAuth } from "./oauth-mount.js";
-import { PAGE_COPY } from "./oauth-mount.js";
+import { mountProviderOAuth, type CallbackPageCopy } from "./oauth-mount.js";
 import { authorizationDoneHtml, callbackPageHtml } from "./oauth-page.js";
+
+const COPY: CallbackPageCopy = {
+  productName: "Test Product",
+  siteUrl: "https://example.com",
+  siteLabel: "example.com",
+  githubUrl: "https://github.com/example/product",
+  githubLabel: "github.com/example/product",
+};
 
 describe("mountProviderOAuth", () => {
   test("responds on the login-start route for a known provider", async () => {
     const app = new Hono();
-    mountProviderOAuth(app, () => undefined);
+    mountProviderOAuth(app, COPY, () => undefined);
 
     const response = await app.request("/api/oauth/codex-oauth/start", { method: "POST" });
     expect(response.status).toBe(200);
@@ -17,7 +24,7 @@ describe("mountProviderOAuth", () => {
 
   test("404s a login-start route for a provider it does not carry", async () => {
     const app = new Hono();
-    mountProviderOAuth(app, () => undefined);
+    mountProviderOAuth(app, COPY, () => undefined);
 
     const response = await app.request("/api/oauth/not-a-provider/start", { method: "POST" });
     expect(response.status).toBe(404);
@@ -25,7 +32,7 @@ describe("mountProviderOAuth", () => {
 
   test("status is idle before any login has started", async () => {
     const app = new Hono();
-    mountProviderOAuth(app, () => undefined);
+    mountProviderOAuth(app, COPY, () => undefined);
 
     const response = await app.request("/api/oauth/xai-oauth/status");
     expect(response.status).toBe(200);
@@ -37,19 +44,19 @@ describe("oauth callback page", () => {
   test("a hostile reason is escaped on the failure page", async () => {
     const html = callbackPageHtml(
       { subject: "xAI (Grok)", error: "<script>alert(1)</script>" },
-      PAGE_COPY,
+      COPY,
     );
     expect(html).not.toContain("<script>alert(1)</script>");
     expect(html).toContain("&lt;script&gt;");
   });
 
   test("the failure heading names the provider", async () => {
-    const html = callbackPageHtml({ subject: "xAI (Grok)", error: "access_denied" }, PAGE_COPY);
+    const html = callbackPageHtml({ subject: "xAI (Grok)", error: "access_denied" }, COPY);
     expect(html).toContain("xAI (Grok) failed to connect");
   });
 
   test("the done page reports authorization received, not a completed connection", async () => {
-    const html = authorizationDoneHtml("ChatGPT (Codex)", PAGE_COPY);
+    const html = authorizationDoneHtml("ChatGPT (Codex)", COPY);
     expect(html).toContain("ChatGPT (Codex) authorization received");
     expect(html).not.toContain("connected successfully");
   });

@@ -17,9 +17,10 @@ and derives where the run stands by folding the run's own committed events.
 ## Components
 
 ```
-apps/hub/src/                    the desktop host: loopback API, the part of persistence that is not yet native, an optional in-process Interchange hub, sidecar placement
+apps/hub/src/                    the product's host entry: identity, this product's routes, and the serveHost call that composes them
 apps/web/                        the client: hub session, install, project open, the interface
 apps/desktop/                    the native shell and tray
+packages/embedded-host/src/      the host process runtime a desktop product composes: loopback API, pglite, keychain secrets, hub migrations and mount, sidecar reaping, lifecycle
 packages/embed-hub/src/          pglite + createApp/createAuth + process provisioner composition the host mounts
 packages/solutions-builder/src/  the app package: the transition ledger, the lifecycle workflow generated from it, the specialist kit, the document format
 packages/installer/src/          installs the app package into a tenant, driven by a hub transport the signed-in principal already holds
@@ -52,12 +53,13 @@ for product commands, the local database when the hub is embedded, the
 guard that admits a command against the ledger, and the providers. It is a
 client of Interchange, not Interchange itself and not the lifecycle's
 executor. The Interchange hub is Interchange's own hub app, either mounted
-in this process (`hub-mount.ts` calling `@solutions-builder/embed-hub`) or
+in this process (`hub-mount.ts` calling `@corbits/embed-hub`) or
 reached over HTTPS. Platform writes go through that hub's HTTP API
 (`hub-client.ts`) — the same calls a hosted hub would serve. The composition
 that binds pglite, `createApp`/`createAuth` and the process provisioner lives
-in `packages/embed-hub`; `hub-mount.ts` supplies the host's handle, keychain
-keys and sidecar paths. `hub-keys.ts` still imports `@intx/crypto` to expand
+in `packages/embed-hub`; `packages/embedded-host`'s `hub-mount.ts` supplies
+the host's handle, keychain keys and sidecar paths. `hub-keys.ts` still
+imports `@intx/crypto` to expand
 the signing seed.
 Four more files form the
 embedding layer — `db`, `schema`, `migrate` and `hub-migrate` — though none

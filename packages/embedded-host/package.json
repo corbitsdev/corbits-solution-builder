@@ -1,0 +1,19 @@
+{
+  "name": "@corbits/embedded-host",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The embedded-host runtime a desktop product composes: loopback server, session-token handshake, pglite, keychain secrets, embedded Interchange hub mount, sidecar reaping and lifecycle. Product naming, routes and interface location arrive through initHost/serveHost.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.3.16",
+    "@intx/crypto": "workspace:*",
+    "@intx/hub-client": "workspace:*",
+    "@corbits/embed-hub": "workspace:*",
+    "@corbits/keychain": "workspace:*",
+    "drizzle-orm": "catalog:",
+    "hono": "catalog:"
+  }
+}

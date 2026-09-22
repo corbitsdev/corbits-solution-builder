@@ -63,7 +63,7 @@ export async function installState(transport: Transport): Promise<InstallState> 
  * The owner's tenant, resolved or created. Creates neither twice.
  *
  * A workspace from before the hub owned identity is the host's own concern:
- * `adoptLegacyWorkspace` (`apps/hub/src/hub-migrate.ts`) is a one-time
+ * `adoptLegacyWorkspace` (`packages/embedded-host/src/hub-migrate.ts`) is a one-time
  * repair of pre-identity rows, not a hub route, so it cannot live in this
  * package (no `@intx/db`, ever). The host runs it once, before calling
  * `install`/`ensureWorkspace` at all, so a legacy tenant already resolves by

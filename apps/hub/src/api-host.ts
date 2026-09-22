@@ -1,8 +1,11 @@
 import type { Hono } from "hono";
-import { credentialBackend } from "./host-secrets.js";
-import { hostStatus } from "./lifecycle.js";
-import { ensureHub, mintOwnerSetCookie } from "./hub-client.js";
-import { sidecarFacts } from "./hub-mount.js";
+import {
+  credentialBackend,
+  ensureHub,
+  hostStatus,
+  mintOwnerSetCookie,
+  sidecarFacts,
+} from "@corbits/embedded-host";
 
 export const API_VERSION = "1";
 

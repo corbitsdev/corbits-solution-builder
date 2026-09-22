@@ -1,19 +1,19 @@
 /** Where the host keeps its data. One place, so packaging changes one line. */
 import { homedir } from "node:os";
 import { join } from "node:path";
-
-const APP = "SolutionsBuilder";
+import { hostIdentity } from "./identity.js";
 
 export function dataDirectory(): string {
-  const override = process.env.SOLUTIONS_BUILDER_DATA_DIR?.trim();
+  const { appDir, envPrefix } = hostIdentity();
+  const override = process.env[`${envPrefix}_DATA_DIR`]?.trim();
   if (override) return override;
   if (process.platform === "darwin") {
-    return join(homedir(), "Library", "Application Support", APP);
+    return join(homedir(), "Library", "Application Support", appDir);
   }
   if (process.platform === "win32") {
-    return join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), APP);
+    return join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), appDir);
   }
-  return join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), APP);
+  return join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), appDir);
 }
 
 export function databaseDirectory(): string {

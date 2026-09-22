@@ -11,7 +11,7 @@
  * hub run as a hosted service later without changing a line here.
  *
  * This package does not mint the workspace owner password or any other host
- * secret. Those stay in `apps/hub`.
+ * secret. Those stay in the host runtime (`@corbits/embedded-host`).
  */
 import { readSecretResult, secretReference, storeSecret } from "./store.js";
 

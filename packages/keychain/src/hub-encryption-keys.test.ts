@@ -6,7 +6,16 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "bun:test";
+import { configureKeychain } from "./store.js";
 import { hubEncryptionKeys } from "./hub-encryption-keys.js";
+
+// The store is product-agnostic; the test stands in for the entrypoint.
+// The resolver reads the env per call because each test swaps the dir.
+configureKeychain({
+  service: "com.corbits.solutions-builder",
+  envPrefix: "SOLUTIONS_BUILDER",
+  dataDirectory: () => process.env.SOLUTIONS_BUILDER_DATA_DIR ?? join(tmpdir(), "keychain-test"),
+});
 
 const CREDENTIAL_ACCOUNT = "hub:credential-encryption-key";
 const PRINCIPAL_ACCOUNT = "hub:principal-key-encryption-key";

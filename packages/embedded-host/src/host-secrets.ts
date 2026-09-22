@@ -1,6 +1,6 @@
 /**
  * The host's own bootstrap secrets, stored through
- * `@solutions-builder/keychain`'s store primitives (`security(1)` on macOS,
+ * `@corbits/keychain`'s store primitives (`security(1)` on macOS,
  * a 0600 file fallback everywhere else — see `packages/keychain/src/store.ts`
  * for the mechanics; account names and the service id are unchanged, so a
  * secret written before this module re-exported them still reads).
@@ -12,7 +12,7 @@
  * the hub's repo-signing seed (`hub-keys.ts`) — a secret that cannot itself
  * live in a row the encryption keys would have to decrypt. The two
  * Interchange at-rest encryption keys, minted the same way, live in
- * `@solutions-builder/keychain` directly.
+ * `@corbits/keychain` directly.
  */
 export {
   credentialBackend,
@@ -21,4 +21,4 @@ export {
   storeSecret,
   type CredentialBackend,
   type SecretRead,
-} from "@solutions-builder/keychain";
+} from "@corbits/keychain";

@@ -2,7 +2,7 @@
  * Hub auth for a *hosted* hub: sign up or sign in against it directly.
  *
  * A local desktop never reaches this form — its owner mints automatically
- * (`apps/web/src/app.tsx`'s `mintOwner`, `apps/hub/src/hub-client.ts`'s
+ * (`apps/web/src/app.tsx`'s `mintOwner`, `packages/embedded-host/src/hub-client.ts`'s
  * `mintOwnerSetCookie`), because it is a single-user machine with a keychain
  * to hold the password in. A hosted hub has neither: there is no one local
  * owner and no user keychain to mint into, so a real account is the honest

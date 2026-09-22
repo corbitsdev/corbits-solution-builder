@@ -1,7 +1,7 @@
 /**
  * The installer's own error contract.
  *
- * The host's `HostError` (`apps/hub/src/errors.ts`) carries the HTTP status
+ * The host's `HostError` (`packages/embedded-host/src/errors.ts`) carries the HTTP status
  * table and response-body shaping for the loopback API; it is used in thirty
  * hub files and stays there. The package cannot import it — `apps/` is off
  * limits from here — so failures the installer itself refuses (an unknown

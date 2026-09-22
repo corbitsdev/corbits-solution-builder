@@ -30,15 +30,19 @@ ship no `dist`. Every command that runs the host passes
 `--conditions intx-src`. Without it the hub cannot be resolved and the host
 exits before the handshake.
 
-The hub's migrations are text-imported by `apps/hub/src/hub-migrations.ts` so the
+The hub's migrations are text-imported by `packages/embedded-host/src/hub-migrations.ts` so the
 compiled single-file host carries them. Keep that list in step with the
 vendored directory when refreshing the pin.
 
 ## Host process
 
-`apps/hub/src/server.ts` opens the database, applies Interchange's migrations then
-the builder schema, mounts Interchange's hub app when the hub is embedded, and
-listens. Boot seeds nothing: no tenant, no principal, no workflow definition.
+`apps/hub/src/server.ts` is the product composition only: it declares the
+host's identity (`identity.ts`) and this product's routes (`api.ts`,
+`api-host.ts`), then hands them to `serveHost` from
+`@corbits/embedded-host`. The package owns the process skeleton —
+it opens the database, applies Interchange's migrations, mounts
+Interchange's hub app when the hub is embedded, and listens. Boot seeds
+nothing: no tenant, no principal, no workflow definition.
 The host is a client of that hub. Embedded, `hub-client.ts` dispatches into the
 mounted Hono app; hosted (`SOLUTIONS_BUILDER_HUB_URL`), the same calls go over
 HTTPS. Platform writes go through the hub API, not drizzle on public tables.

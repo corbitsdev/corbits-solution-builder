@@ -24,11 +24,12 @@
  * `packages/installer/src/hub.ts` is the hub client for the product; nothing
  * here should grow back into that role.
  *
- * `SOLUTIONS_BUILDER_HUB_URL` selects a hosted hub. Absent, the hub is embedded.
+ * `<envPrefix>_HUB_URL` selects a hosted hub. Absent, the hub is embedded.
  */
 import { ApiError, type Transport } from "@intx/hub-client";
 import { hub, hubIsMounted, mountHub, embeddedHubOrigin } from "./hub-mount.js";
 import { HostError } from "./errors.js";
+import { hostIdentity } from "./identity.js";
 import { readSecretResult, secretReference, storeSecret } from "./host-secrets.js";
 
 /** The Better Auth session pair from an inbound `Cookie` header, if any. */
@@ -90,15 +91,8 @@ export type HubEndpoint = {
   readonly detail: string;
 };
 
-/** Fallback display name when the signed-in profile has none. */
-const FALLBACK_DISPLAY_NAME = "You";
-/** The tenant this app installs into; found again by slug on every launch. */
-export const WORKSPACE_SLUG = "solutions-builder";
-/** The tenant id workspaces carried before the hub owned identity. */
-export const LEGACY_TENANT_ID = "t_local";
-
 function configuredUrl(): string | null {
-  const raw = process.env.SOLUTIONS_BUILDER_HUB_URL?.trim();
+  const raw = process.env[`${hostIdentity().envPrefix}_HUB_URL`]?.trim();
   if (!raw) return null;
   return raw.replace(/\/+$/, "");
 }
@@ -138,7 +132,7 @@ export async function ensureHub(): Promise<HubEndpoint> {
  * scripts running against the embedded hub, the signed-in session's own
  * calls (`hubApi` below). This is not a request-path relay: the browser
  * never reaches the hub through this file. Embedded, it dispatches straight
- * into the mounted Hono app with no socket. Remote, `SOLUTIONS_BUILDER_HUB_URL`
+ * into the mounted Hono app with no socket. Remote, `<envPrefix>_HUB_URL`
  * is the browser's own hub origin too — this call is the host checking the
  * same public readiness the browser could check itself, nothing more; no
  * owner token is attached, no identity is swapped in.
@@ -208,8 +202,7 @@ export async function signUpEmail(input: { email: string; password: string; name
 
 // --- The embedded owner's minted session -----------------------------------
 
-/** The embedded workspace owner's identity. One person, one local account. */
-const OWNER_EMAIL = "owner@solutions-builder.local";
+/** The keychain account the minted owner password lives under. */
 const OWNER_PASSWORD_ACCOUNT = "hub:owner-password";
 
 /**
@@ -263,12 +256,13 @@ export async function mintOwnerSetCookie(): Promise<string[]> {
   }
   if (!hubIsMounted()) await mountHub();
   const password = (await ownerPassword(true))!;
+  const { ownerEmail, ownerName } = hostIdentity();
   const auth = hub().auth as unknown as AuthApi;
 
-  let response = await auth.api.signInEmail({ body: { email: OWNER_EMAIL, password }, asResponse: true });
+  let response = await auth.api.signInEmail({ body: { email: ownerEmail, password }, asResponse: true });
   if (!response.ok) {
-    await auth.api.signUpEmail({ body: { email: OWNER_EMAIL, password, name: FALLBACK_DISPLAY_NAME } });
-    response = await auth.api.signInEmail({ body: { email: OWNER_EMAIL, password }, asResponse: true });
+    await auth.api.signUpEmail({ body: { email: ownerEmail, password, name: ownerName } });
+    response = await auth.api.signInEmail({ body: { email: ownerEmail, password }, asResponse: true });
   }
 
   const cookies = rawSetCookieHeaders(response.headers);
@@ -379,10 +373,9 @@ function createRemoteTransport(): Transport {
 
 /**
  * The same embedded/remote switch `hubMode()` has always driven, now
- * selecting a `Transport`. Exported so `scripts/pack-registry-asset.ts` can
- * hand the same authenticated transport to `@solutions-builder/installer`,
- * which cannot reach `hubApi`/`hubMode` itself — everything in this file is
- * `apps/hub/src`, off limits from `packages/installer/src`.
+ * selecting a `Transport`. Exported so a pack/deploy script can hand the
+ * same authenticated transport to the product's installer package, which
+ * cannot reach `hubApi`/`hubMode` itself.
  */
 export function hubTransport(): Transport {
   return hubMode() === "embedded" ? createEmbeddedTransport() : createRemoteTransport();
@@ -457,11 +450,12 @@ export async function resolveWorkspace(): Promise<Workspace | null> {
   const user = (await me.json()) as { id: string; name?: string | null };
   const memberships = await hubList<Membership>("/api/me/principals");
   const mine = memberships.filter((entry) => entry.kind === "user" && entry.status === "active");
+  const { workspaceSlug, legacyTenantId, ownerName } = hostIdentity();
   const chosen =
-    mine.find((entry) => entry.tenantSlug === WORKSPACE_SLUG) ??
-    mine.find((entry) => entry.tenantId === LEGACY_TENANT_ID);
+    mine.find((entry) => entry.tenantSlug === workspaceSlug) ??
+    mine.find((entry) => entry.tenantId === legacyTenantId);
   if (!chosen) return null;
-  const displayName = user.name?.trim() || FALLBACK_DISPLAY_NAME;
+  const displayName = user.name?.trim() || ownerName;
   workspace = { tenantId: chosen.tenantId, principalId: chosen.principalId, userId: user.id, displayName };
   return workspace;
 }

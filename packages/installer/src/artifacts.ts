@@ -1,7 +1,7 @@
 /**
  * A typed client for the `@corbits/artifacts` module the hub mounts
  * (`packages/embed-hub`), over nothing but `Transport` — the same interface
- * `apps/hub/src/hub-client.ts`'s `artifacts` helpers are built on, rebuilt
+ * `packages/embedded-host/src/hub-client.ts`'s `artifacts` helpers are built on, rebuilt
  * here because `packages/installer/src` may not import `apps/hub/src`.
  *
  * `content` on `Artifact` is always the CURRENT version: the module's HTTP

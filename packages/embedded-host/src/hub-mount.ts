@@ -1,8 +1,8 @@
 /**
- * Mounts the Interchange hub inside the Solutions Builder host.
+ * Mounts the Interchange hub inside the host process.
  *
  * The composition itself — pglite binding, `createAuth`/`createApp`, and the
- * process provisioner — lives in `@solutions-builder/embed-hub`. What's left
+ * process provisioner — lives in `@corbits/embed-hub`. What's left
  * here is this host's own concerns, none of which the package could know:
  *
  *   1. the database is the host's pglite handle (`db.ts`);
@@ -21,9 +21,10 @@ import {
   createEmbeddedHub,
   SIDECAR_WS_PATH,
   type MountedHub,
-} from "@solutions-builder/embed-hub";
+} from "@corbits/embed-hub";
 import { websocket } from "hono/bun";
 import { database } from "./db.js";
+import { hostIdentity } from "./identity.js";
 import { dataDirectory } from "./paths.js";
 import { hubEncryptionKeys, hubSigningKey } from "./hub-keys.js";
 
@@ -117,6 +118,8 @@ export async function mountHub(): Promise<MountedHub> {
     hubWebSocketUrl: `ws://127.0.0.1:${hostPort}${SIDECAR_WS_PATH}`,
     sidecarEntry: SIDECAR_ENTRY,
     sidecarRuntime: SIDECAR_RUNTIME,
+    callbackPageCopy: hostIdentity().oauthPageCopy,
+    notificationSender: hostIdentity().notificationSender,
   });
   return mounted;
 }

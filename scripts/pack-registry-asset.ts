@@ -11,7 +11,7 @@
  *     root set is derived from `WORKFLOW_PACKAGE_DEPENDENCIES`
  *     (`packages/solutions-builder/src/specialist-source.ts`) —
  *     the same constant the current source-tree deploy renders against — not
- *     a hand-maintained list. `vendoredClosure` (`apps/hub/src/workflow-closure.ts`,
+ *     a hand-maintained list. `vendoredClosure` (`scripts/closure-pack.ts`,
  *     already used by that deploy path) walks each root's `workspace:*`
  *     dependency graph to the full vendored set.
  *   - Every *real* npm package that closure (plus `WORKFLOW_PACKAGE_DEPENDENCIES`
@@ -77,19 +77,21 @@ import {
 import { getToolPackageSourceContentIdentity } from "@intx/types/tool-packages";
 
 import { install as installerInstall } from "@solutions-builder/installer";
-import { openDatabase } from "../apps/hub/src/db.js";
-import { migrateHub } from "../apps/hub/src/hub-migrate.js";
-import { rerankCatalogViaHub } from "../apps/web/src/provider-catalog.js";
 import {
   assets as hubAssets,
+  databaseDirectory,
   forgetWorkspace as hubClientForgetWorkspace,
+  hub,
   hubTransport,
+  initHost,
+  migrateHub,
+  openDatabase,
   resolveWorkspace,
   signInEmail,
   signUpEmail,
-} from "../apps/hub/src/hub-client.js";
-import { hub } from "../apps/hub/src/hub-mount.js";
-import { databaseDirectory } from "../apps/hub/src/paths.js";
+} from "@corbits/embedded-host";
+import { IDENTITY } from "../apps/hub/src/identity.js";
+import { rerankCatalogViaHub } from "../apps/web/src/provider-catalog.js";
 import { tarballIntegrity } from "./lib/tarball.js";
 import { buildPackedEntries, VENDOR_PACKAGES_DIR, type PackedEntry } from "./closure-pack.js";
 
@@ -220,6 +222,7 @@ async function resolveAndPrintClosure(assetId: string, pin: string): Promise<voi
 }
 
 async function main(): Promise<void> {
+  initHost(IDENTITY);
   if (!existsSync(join(VENDOR_PACKAGES_DIR, "workflow", "dist"))) {
     throw new Error("vendored packages have no dist/; run `bun run vendor:build` first");
   }

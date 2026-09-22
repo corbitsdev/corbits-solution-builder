@@ -1,7 +1,7 @@
 /**
  * A generic client for the Interchange hub's own HTTP API, built on nothing
  * but the platform's `Transport` — the same interface a browser tab and this
- * host's embedded dispatch both already implement. `apps/hub/src/hub-client.ts`
+ * host's embedded dispatch both already implement. `packages/embedded-host/src/hub-client.ts`
  * has a richer, typed version of most of this for the host's own use; this
  * one exists because the installer package may not import that file (it is
  * `apps/hub/src`, off limits from `packages/installer/src`), so the handful

@@ -1,7 +1,7 @@
 /**
  * Secure storage primitives shared by the hub's two at-rest encryption keys
  * and the host's own bootstrap secrets (owner password, hub token,
- * repo-signing seed — see `apps/hub/src/host-secrets.ts`).
+ * repo-signing seed — see `packages/embedded-host/src/host-secrets.ts`).
  *
  * Secrets go to the OS keychain through `security(1)` on macOS. Where no
  * OS-backed store is available this falls back to a file with 0600
@@ -13,10 +13,34 @@
  * key minted before this package existed still reads.
  */
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 
-const SERVICE = "com.corbits.solutions-builder";
+/**
+ * What makes this store this product's. `service` is the `security -s`
+ * name items live under — changing it orphans every secret minted before
+ * the change, so a product picks one and keeps it. `dataDirectory` is a
+ * resolver, not a string, so a `<envPrefix>_DATA_DIR` override (or a test's
+ * per-case temp dir) keeps working after configuration.
+ */
+export interface KeychainConfig {
+  readonly service: string;
+  readonly dataDirectory: () => string;
+  readonly envPrefix: string;
+}
+
+let config: KeychainConfig | null = null;
+
+export function configureKeychain(next: KeychainConfig): void {
+  if (config) throw new Error("configureKeychain has already run for this process.");
+  config = next;
+}
+
+function keychainConfig(): KeychainConfig {
+  if (!config) {
+    throw new Error("configureKeychain has not run — the entrypoint declares the keychain config first.");
+  }
+  return config;
+}
 
 export type CredentialBackend = "keychain" | "file";
 
@@ -25,39 +49,29 @@ let backend: CredentialBackend | null = null;
 /**
  * Whether this process is a test/smoke run, not a real launch. Only under
  * this condition does `detectBackend` honour
- * `SOLUTIONS_BUILDER_CREDENTIAL_BACKEND` at all — the override exists so a
+ * `<envPrefix>_CREDENTIAL_BACKEND` at all — the override exists so a
  * smoke does not touch the real machine keychain with the production
  * account names, and a real launch that somehow inherited the variable
  * from its environment must not have its keychain silently downgraded to
  * a file because of it.
  */
-function isTestRun(): boolean {
-  return process.env.SOLUTIONS_BUILDER_SMOKE === "1" || process.env.NODE_ENV === "test";
-}
-
-function dataDirectory(): string {
-  const override = process.env.SOLUTIONS_BUILDER_DATA_DIR?.trim();
-  if (override) return override;
-  if (process.platform === "darwin") {
-    return join(homedir(), "Library", "Application Support", "SolutionsBuilder");
-  }
-  if (process.platform === "win32") {
-    return join(process.env.APPDATA ?? join(homedir(), "AppData", "Roaming"), "SolutionsBuilder");
-  }
-  return join(process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"), "SolutionsBuilder");
+function isTestRun(envPrefix: string): boolean {
+  return process.env[`${envPrefix}_SMOKE`] === "1" || process.env.NODE_ENV === "test";
 }
 
 async function detectBackend(): Promise<CredentialBackend> {
   if (backend) return backend;
-  const forced = process.env.SOLUTIONS_BUILDER_CREDENTIAL_BACKEND;
-  if ((forced === "file" || forced === "keychain") && isTestRun()) {
+  const { envPrefix } = keychainConfig();
+  const backendEnv = `${envPrefix}_CREDENTIAL_BACKEND`;
+  const forced = process.env[backendEnv];
+  if ((forced === "file" || forced === "keychain") && isTestRun(envPrefix)) {
     backend = forced;
     return backend;
   }
-  if (forced && !isTestRun()) {
+  if (forced && !isTestRun(envPrefix)) {
     console.warn(
-      `[keychain] SOLUTIONS_BUILDER_CREDENTIAL_BACKEND=${forced} is set but this is not a ` +
-        "recognized test run (SOLUTIONS_BUILDER_SMOKE=1 or NODE_ENV=test), so it is being ignored " +
+      `[keychain] ${backendEnv}=${forced} is set but this is not a ` +
+        `recognized test run (${envPrefix}_SMOKE=1 or NODE_ENV=test), so it is being ignored ` +
         "and the real backend is being detected instead.",
     );
   }
@@ -79,13 +93,13 @@ export async function secretReference(account: string): Promise<string> {
 }
 
 function fallbackPath(account: string) {
-  return join(dataDirectory(), "credentials", `${encodeURIComponent(account)}.secret`);
+  return join(keychainConfig().dataDirectory(), "credentials", `${encodeURIComponent(account)}.secret`);
 }
 
 export async function storeSecret(account: string, secret: string): Promise<string> {
   if ((await detectBackend()) === "keychain") {
     const result = Bun.spawnSync(
-      ["security", "add-generic-password", "-U", "-a", account, "-s", SERVICE, "-w", secret],
+      ["security", "add-generic-password", "-U", "-a", account, "-s", keychainConfig().service, "-w", secret],
       { stdout: "ignore", stderr: "pipe" },
     );
     if (result.exitCode !== 0) {
@@ -95,7 +109,7 @@ export async function storeSecret(account: string, secret: string): Promise<stri
   }
 
   const path = fallbackPath(account);
-  await mkdir(join(dataDirectory(), "credentials"), { recursive: true, mode: 0o700 });
+  await mkdir(join(keychainConfig().dataDirectory(), "credentials"), { recursive: true, mode: 0o700 });
   await writeFile(path, secret, { mode: 0o600 });
   await chmod(path, 0o600);
   return `file:${account}`;
@@ -124,7 +138,7 @@ export async function readSecretResult(reference: string): Promise<SecretRead> {
   const [kind, account] = splitReference(reference);
   if (kind === "keychain") {
     const result = Bun.spawnSync(
-      ["security", "find-generic-password", "-a", account, "-s", SERVICE, "-w"],
+      ["security", "find-generic-password", "-a", account, "-s", keychainConfig().service, "-w"],
       { stdout: "pipe", stderr: "pipe" },
     );
     const problem = classifySecurityExit(result.exitCode, result.stderr.toString());

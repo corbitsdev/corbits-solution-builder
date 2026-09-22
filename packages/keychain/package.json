@@ -1,5 +1,5 @@
 {
-  "name": "@solutions-builder/keychain",
+  "name": "@corbits/keychain",
   "version": "0.1.0",
   "private": true,
   "type": "module",

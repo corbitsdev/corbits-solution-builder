@@ -10,6 +10,7 @@
  */
 import { sql } from "drizzle-orm";
 import type { HostDatabase } from "./db.js";
+import { hostIdentity } from "./identity.js";
 import { dataDirectory } from "./paths.js";
 import { HUB_MIGRATIONS } from "./hub-migrations.js";
 
@@ -128,7 +129,7 @@ export async function migrateHub(host: HostDatabase): Promise<{ applied: string[
       const isInterchangeShape = columns.has("slug") && columns.has("domain");
       if (!isInterchangeShape) {
         throw new PreHubDatabaseError(
-          "This workspace was created before Solutions Builder mounted the Interchange hub, " +
+          `This workspace was created before ${hostIdentity().displayName} mounted the Interchange hub, ` +
             "and its control-plane tables have the older shape, so the hub's schema cannot be " +
             "applied over them.\n\n" +
             "Nothing has been changed. This build is pre-release and the data directory is not " +
@@ -137,7 +138,7 @@ export async function migrateHub(host: HostDatabase): Promise<{ applied: string[
             "To start fresh, remove the data directory and relaunch:\n" +
             `  rm -rf "${dataDirectoryHint()}"\n\n` +
             "To keep it, point the app at a different directory instead:\n" +
-            "  SOLUTIONS_BUILDER_DATA_DIR=/some/other/path",
+            `  ${hostIdentity().envPrefix}_DATA_DIR=/some/other/path`,
         );
       }
       // The tables are Interchange's own, from a run that got partway through.
@@ -183,7 +184,7 @@ export async function migrateHub(host: HostDatabase): Promise<{ applied: string[
           "To start fresh, remove the data directory and relaunch:\n" +
           `  rm -rf "${dataDirectoryHint()}"\n\n` +
           "To keep it, point the app at a different directory instead:\n" +
-          "  SOLUTIONS_BUILDER_DATA_DIR=/some/other/path",
+          `  ${hostIdentity().envPrefix}_DATA_DIR=/some/other/path`,
       );
     });
 

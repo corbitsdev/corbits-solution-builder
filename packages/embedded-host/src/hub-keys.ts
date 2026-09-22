@@ -2,7 +2,7 @@
  * The hub's at-rest keys that still live next to the host.
  *
  * Interchange's credential and principal encryption keys are owned by
- * `@solutions-builder/keychain`: minted into the OS keychain on first run,
+ * `@corbits/keychain`: minted into the OS keychain on first run,
  * with the environment still winning when it is set. The repo-signing seed
  * stays here — it is not one of those two cipher keys, and this package
  * does not take on owner-password minting either.
@@ -10,7 +10,7 @@
 import { derivePublicKeyBytes } from "@intx/crypto";
 import { readSecretResult, secretReference, storeSecret } from "./host-secrets.js";
 
-export { hubEncryptionKeys } from "@solutions-builder/keychain";
+export { hubEncryptionKeys } from "@corbits/keychain";
 
 const SIGNING_ACCOUNT = "hub:repo-signing-key";
 

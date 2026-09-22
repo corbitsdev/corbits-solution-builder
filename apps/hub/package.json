@@ -3,11 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "The Solutions Builder host: loopback API, persistence, and the embedded Interchange hub.",
+  "description": "The Solutions Builder host: the product's identity and routes composed onto @corbits/embedded-host's runtime.",
   "dependencies": {
-    "@solutions-builder/app": "workspace:*",
-    "@solutions-builder/embed-hub": "workspace:*",
-    "@solutions-builder/keychain": "workspace:*",
-    "@solutions-builder/tools-deck": "workspace:*"
+    "@corbits/embedded-host": "workspace:*",
+    "arktype": "catalog:",
+    "hono": "catalog:"
   }
 }

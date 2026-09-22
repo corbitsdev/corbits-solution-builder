@@ -47,7 +47,7 @@ for (const asset of ["pglite.wasm", "pglite.data"]) {
   if (!(await Bun.file(path).exists())) {
     throw new Error(
       `Expected pglite asset is missing: ${path}. ` +
-        `Update the import paths in apps/hub/src/db.ts to match.`,
+        `Update the import paths in packages/embedded-host/src/db.ts to match.`,
     );
   }
 }

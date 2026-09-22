@@ -83,7 +83,7 @@ import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
 import * as intxSchema from "@intx/db/schema";
 import { withPostgresJsResultShape } from "./pg-compat.js";
-import { mountProviderOAuth } from "./oauth-mount.js";
+import { mountProviderOAuth, type CallbackPageCopy } from "./oauth-mount.js";
 import { createSpendApi, createSpendStore, type TurnUsage } from "./spend.js";
 import {
   createHubMailboxAuthorizeSender,
@@ -94,6 +94,7 @@ import { captureMailboxRequest, createMailboxDeliver } from "./mailbox-send.js";
 
 /** The path a sidecar's WebSocket connects to; part of `@intx/hub-api`'s own contract. */
 export const SIDECAR_WS_PATH = "/api/sidecars/ws";
+export type { CallbackPageCopy };
 
 /** Shape of `SidecarLookups.persistMail`, narrowed from `unknown` since the
  * lookups map is otherwise untyped. */
@@ -137,6 +138,17 @@ export type CreateEmbeddedHubOptions = {
   readonly sidecarEntry: string;
   /** Runtime binary the process provisioner execs. */
   readonly sidecarRuntime: string;
+  /**
+   * Copy for the OAuth callback page the loopback login serves — product
+   * name and footer links are the mounting product's, not the hub's.
+   */
+  readonly callbackPageCopy: CallbackPageCopy;
+  /**
+   * Local-part of the `<sender>@<tenant>.local` address notification inbox
+   * rows are filed under — the product's name, so the row reads as coming
+   * from the product rather than from a person.
+   */
+  readonly notificationSender: string;
 };
 
 export type MountedHub = {
@@ -582,7 +594,7 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
         tenantId: input.tenantId,
         principalId,
         address,
-        fromAddress: `solutions-builder@${input.tenantId}.local`,
+        fromAddress: `${options.notificationSender}@${input.tenantId}.local`,
         subject: input.subject,
         body: input.body,
         source: input.source,
@@ -643,12 +655,12 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
   // routes provide. Persisting the exchanged tokens as a credential is the
   // client's job (`packages/installer/src/provider-connect.ts`), same as an
   // API key.
-  mountProviderOAuth(app);
+  mountProviderOAuth(app, options.callbackPageCopy);
   // `@corbits/artifacts` is a mountable Interchange module, not host code:
   // it owns its own schema/migrations and reads tenant/principal off the
   // context the hub's own `/api/tenants/:tenantId/*` middleware places
   // there. Migrating and mounting here — the hub's own composition step —
-  // is what makes its routes reachable from outside apps/hub/src.
+  // is what makes its routes reachable from outside the host runtime.
   const artifactDb = withPostgresJsResultShape(db.db) as unknown as ArtifactDb;
   await runArtifactMigrations(artifactDb);
   const artifactsApi = new Hono<TenantEnv>();
