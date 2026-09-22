@@ -524,15 +524,7 @@ html[data-theme="dark"] .ob-credit img {
 }
 
 /* Same composer-box chrome as home: the box is the control, tools sit inside it. */
-.ob .ask .dictated-row {
-  display: block;
-  position: relative;
-}
-
 .ob .ask .dictate {
-  position: absolute;
-  left: calc(var(--space-4) + 30px + 4px);
-  bottom: var(--space-2);
   width: 30px;
   height: 30px;
   margin: 0;
@@ -540,7 +532,6 @@ html[data-theme="dark"] .ob-credit img {
   border-radius: var(--radius-md);
   background: transparent;
   color: var(--muted-foreground);
-  z-index: 1;
 }
 
 .ob .ask .dictate:hover:not(:disabled) {
@@ -568,13 +559,11 @@ html[data-theme="dark"] .ob-credit img {
   min-height: 76px;
   font-size: 15.5px;
   line-height: 1.5;
-  order: -1;
-  flex: 1 1 100%;
   width: 100%;
   padding: 0 0 var(--space-2);
 }
 
-.ob .composer-box > div {
+.ob .composer-box [data-slot="chat-input-footer"] {
   display: flex;
   flex-wrap: wrap;
   align-items: center;

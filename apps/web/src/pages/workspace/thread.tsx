@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ChatInput, ChatThread, type ChatMessage as UiChatMessage } from "@corbits/react-ui";
+import { Plus, Send } from "lucide-react";
 import { Markdown } from "../../markdown.jsx";
 import { Dictated } from "../../dictation.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
@@ -135,6 +136,7 @@ export function StageConversation({
       <div className="composer" data-working={working || pending ? "" : undefined}>
         {rows}
         <Dictated value={value} onValueChange={onValueChange} disabled={disabled}>
+        {(mic) => (
         <ChatInput
           className={COMPOSER_BOX_CLASS}
           value={value}
@@ -144,9 +146,13 @@ export function StageConversation({
           {...(pending && onStop ? { onStop } : {})}
           {...(onSendHold ? { onSendHold } : {})}
           {...(onAttach ? { onAttach } : {})}
+          attachIcon={<Plus className="size-4" aria-hidden="true" />}
+          sendIcon={<Send className="size-4" aria-hidden="true" />}
+          leadingTools={mic}
           disabled={disabled}
           placeholder={placeholder}
         />
+        )}
         </Dictated>
         {popover}
       </div>

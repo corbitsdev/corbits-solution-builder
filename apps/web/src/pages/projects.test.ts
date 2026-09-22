@@ -65,23 +65,28 @@ describe("Projects markup", () => {
 });
 
 describe("home layout sheet", () => {
-  test("status orange is brand-primary, kebab is out of flow, composer glyphs are masked", async () => {
+  test("status orange is brand-primary, kebab is out of flow, composer uses icon slots", async () => {
     const page = await Bun.file(new URL("./projects.tsx", import.meta.url)).text();
     const css = await Bun.file(new URL("./home-layout.css", import.meta.url)).text();
     expect(page).toContain("cardDescription(project)");
     expect(page).toContain("className=\"card-desc\"");
     expect(page).toContain("ChatInput");
     expect(page).toContain("Dictated");
+    expect(page).toContain("attachIcon");
+    expect(page).toContain("sendIcon");
+    expect(page).toContain("leadingTools");
+    expect(page).toContain("Plus");
+    expect(page).toContain("Send");
     expect(css).toContain(".home-page .card.needs");
     expect(css).toContain("border-color: var(--brand-primary)");
     expect(css).toContain(".home-page .badge-decision");
     expect(css).toContain("background: var(--brand-primary)");
     expect(css).toContain(".home-page .card-track .seg.now");
     expect(css).toContain("composer-foot");
-    expect(css).toContain("position: absolute");
+    expect(css).toContain('[data-slot="chat-input-footer"]');
     expect(css).toContain("pointer-events: none");
-    expect(css).toContain("M5 12h14");
-    expect(css).toContain("m21.854 2.147-10.94 10.939");
+    expect(css).not.toContain("M5 12h14");
+    expect(css).not.toContain("-webkit-mask");
     expect(css).toContain("var(--wb-foreground)");
     expect(css).toContain("var(--wb-background)");
   });

@@ -12,7 +12,7 @@ import {
   Switch,
   type ChatMessage,
 } from "@corbits/react-ui";
-import { ArrowDown, ArrowUp, Check } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, Plus, Send } from "lucide-react";
 import { Markdown } from "../../markdown.jsx";
 import { Dictated } from "../../dictation.jsx";
 import { approachName, sectionsIn } from "@solutions-builder/app/document";
@@ -523,6 +523,7 @@ export function StageDocument({
             </p>
           ) : null}
           <Dictated value={message} onValueChange={setMessage}>
+          {(mic) => (
           <ChatInput
             className={COMPOSER_BOX_CLASS}
             value={message}
@@ -549,9 +550,13 @@ export function StageDocument({
               setAttached(attached.filter((_, at) => `${at}` !== entry.id))
             }
             {...(onAddMaterial ? { onAttach: (files) => void onAddMaterial([...files]) } : {})}
+            attachIcon={<Plus className="size-4" aria-hidden="true" />}
+            sendIcon={<Send className="size-4" aria-hidden="true" />}
+            leadingTools={mic}
             textareaRef={composer}
             {...(onSendHold ? { onSendHold: () => onSendHold(message) } : {})}
           />
+          )}
           </Dictated>
           {composerPopover}
           {queued && busy !== null ? (

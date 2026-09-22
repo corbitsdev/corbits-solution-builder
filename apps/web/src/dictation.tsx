@@ -324,9 +324,12 @@ function SettingsHelp({ help, onClose }: { help: Help; onClose: () => void }) {
  *
  * The microphone sits level with a composer's send button (`end`), at the
  * top of a plain text area (`start`), or centered on a one-line field
- * (`center`). While listening it is green and a line under the box says
- * "Listening:" with a waveform of the input beside it. A refusal takes the
- * same line. Otherwise the line is absent, so the row never changes shape.
+ * (`center`). A ChatInput host passes a function child and places the
+ * returned control in `leadingTools`, so the mic lives in the footer
+ * instead of overlaying it. While listening the button is green and a
+ * line under the box says "Listening:" with a waveform of the input
+ * beside it. A refusal takes the same line. Otherwise the line is
+ * absent, so the row never changes shape.
  */
 export function Dictated({
   value,
@@ -339,34 +342,43 @@ export function Dictated({
   onValueChange: (value: string) => void;
   /** The box is busy; dictation into it would be lost. */
   disabled?: boolean;
-  /** Where the microphone sits against the box. */
+  /** Where the microphone sits against the box. Ignored when `children` is a function. */
   align?: "end" | "start" | "center";
-  children: ReactNode;
+  children: ReactNode | ((control: ReactNode) => ReactNode);
 }) {
   const { supported, listening, live, levels, refusal, dismiss, start, stop } = useDictation(value, onValueChange);
   useEffect(() => {
     if (disabled && listening) stop();
   }, [disabled, listening, stop]);
-  if (!supported) return <>{children}</>;
+  const slotted = typeof children === "function";
+  const control = supported ? (
+    <button
+      type="button"
+      className="dictate"
+      aria-pressed={listening}
+      aria-label={listening ? "Stop dictating" : "Dictate"}
+      title={listening ? "Stop dictating" : "Dictate instead of typing"}
+      disabled={disabled}
+      // The box keeps focus: a field that commits on blur (a name being
+      // renamed) must not close because its microphone was tapped.
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={listening ? stop : () => void start()}
+    >
+      <Mic aria-hidden="true" />
+    </button>
+  ) : null;
+  const field = slotted ? children(control) : children;
+  if (!supported) return <>{field}</>;
   return (
     <div className="dictated">
-      <div className={`dictated-row dictated-row-${align}`}>
-        <button
-          type="button"
-          className="dictate"
-          aria-pressed={listening}
-          aria-label={listening ? "Stop dictating" : "Dictate"}
-          title={listening ? "Stop dictating" : "Dictate instead of typing"}
-          disabled={disabled}
-          // The box keeps focus: a field that commits on blur (a name being
-          // renamed) must not close because its microphone was tapped.
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={listening ? stop : () => void start()}
-        >
-          <Mic aria-hidden="true" />
-        </button>
-        {children}
-      </div>
+      {slotted ? (
+        field
+      ) : (
+        <div className={`dictated-row dictated-row-${align}`}>
+          {control}
+          {field}
+        </div>
+      )}
       {listening && live ? (
         <p className="dictation-state" aria-live="polite">
           <span>Listening:</span>

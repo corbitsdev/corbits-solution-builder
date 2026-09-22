@@ -50,8 +50,8 @@ describe("project chrome paint", () => {
 
   test("composer is stacked box/foot with ink send and destructive stop", () => {
     expect(css).toContain(".composer .composer-foot");
-    expect(css).toContain(".composer .composer-box > div > textarea");
-    expect(css).toContain("order: -1");
+    expect(css).toContain('[data-slot="chat-input-footer"]');
+    expect(css).toContain('[data-slot="chat-input-body"] textarea');
     expect(css).toMatch(/button\[type="submit"\][\s\S]*background: var\(--wb-foreground\)/);
     expect(css).toMatch(/button\[aria-label="Stop generating"\][\s\S]*background: var\(--wb-destructive\)/);
     expect(css).toContain(".composer .dictate");
@@ -103,10 +103,13 @@ describe("project chrome paint", () => {
     expect(sbpick).not.toContain("--wb-card");
   });
 
-  test("the conversation composer wraps ChatInput in Dictated so the mic can sit in tools", () => {
+  test("the conversation composer slots the Dictated mic into ChatInput leadingTools", () => {
     const thread = read("./thread.tsx");
     expect(thread).toContain("<Dictated");
     expect(thread).toContain("ChatInput");
+    expect(thread).toContain("leadingTools={mic}");
+    expect(thread).toContain("attachIcon");
+    expect(thread).toContain("sendIcon");
   });
 
   test("StagePanes is the shell for document, build, waiting, and specialised stages", () => {

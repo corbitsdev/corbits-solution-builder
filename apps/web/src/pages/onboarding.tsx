@@ -21,6 +21,7 @@
  * grouped provider orows, credit). Behaviour stays on the real catalog.
  */
 import { ChatInput, useTheme, type ThemeMode } from "@corbits/react-ui";
+import { Send } from "lucide-react";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { api, ApiFailure, type Provider } from "../client.js";
 import { Banner, Mark } from "../components.jsx";
@@ -708,6 +709,7 @@ function ProjectStep({
 
       <div className="ask">
         <Dictated value={problem} onValueChange={setProblem} disabled={busy}>
+          {(mic) => (
           <ChatInput
             className="composer-box"
             value={problem}
@@ -715,7 +717,10 @@ function ProjectStep({
             onSend={() => void create()}
             working={busy}
             placeholder="What problem are you trying to solve?"
+            sendIcon={<Send className="size-4" aria-hidden="true" />}
+            leadingTools={mic}
           />
+          )}
         </Dictated>
         {modelName ? (
           <p className="ob-model">

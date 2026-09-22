@@ -123,11 +123,14 @@ describe("onboarding layout 1:1", () => {
     expect(css.replaceAll(".ob-step > .ob-group:first-child", "")).not.toContain(".ob-group:first-child");
   });
 
-  test("the last-step mic sits inside the composer box", async () => {
+  test("the last-step mic sits in ChatInput leadingTools", async () => {
+    const page = await Bun.file(new URL("./onboarding.tsx", import.meta.url)).text();
     const css = await Bun.file(new URL("./onboarding-layout.css", import.meta.url)).text();
+    expect(page).toContain("leadingTools={mic}");
+    expect(page).toContain("sendIcon");
     expect(css).toContain(".ob .composer-box");
     expect(css).toContain(".ob .ask .dictate");
-    expect(css).toContain("position: absolute");
-    expect(css).toContain("left: calc(var(--space-4) + 30px + 4px)");
+    expect(css).toContain('[data-slot="chat-input-footer"]');
+    expect(css).not.toContain("left: calc(var(--space-4) + 30px + 4px)");
   });
 });

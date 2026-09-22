@@ -21,7 +21,7 @@ import {
   MenuSeparator,
   MenuTrigger,
 } from "@corbits/react-ui";
-import { Ellipsis } from "lucide-react";
+import { Ellipsis, Plus, Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, ApiFailure, type ActiveModel, type ProjectInfo, type ProjectSummary } from "../client.js";
 import { Banner, downloadArtifact, stageName } from "../components.jsx";
@@ -164,6 +164,7 @@ export function Projects({
           At least ten characters to start a project.
         </p>
         <Dictated value={problem} onValueChange={setProblem} disabled={busy}>
+          {(mic) => (
           <ChatInput
             className="composer-box"
             value={problem}
@@ -173,11 +174,15 @@ export function Projects({
             disabled={busy}
             placeholder={HOME_COMPOSER_PLACEHOLDER}
             onAttach={addMaterial}
+            attachIcon={<Plus className="size-4" aria-hidden="true" />}
+            sendIcon={<Send className="size-4" aria-hidden="true" />}
+            leadingTools={mic}
             attachments={material.map((file) => ({ id: `${file.name}:${file.size}`, name: file.name }))}
             onRemoveAttachment={(entry) =>
               setMaterial(material.filter((held) => `${held.name}:${held.size}` !== entry.id))
             }
           />
+          )}
         </Dictated>
       </section>
 

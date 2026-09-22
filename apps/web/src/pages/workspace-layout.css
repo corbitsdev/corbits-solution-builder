@@ -236,7 +236,7 @@
 
 /* ChatInput's toolbar row is the mock's .composer-foot: tools left, ink send right. */
 .composer .composer-foot,
-.composer .composer-box > div {
+.composer .composer-box [data-slot="chat-input-footer"] {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -245,18 +245,17 @@
   padding-top: var(--space-2);
 }
 
-.composer .composer-box > div > textarea {
-  flex: 1 1 100%;
-  order: -1;
+.composer .composer-box [data-slot="chat-input-body"] textarea {
+  width: 100%;
 }
 
-.composer .composer-box > div > button[aria-label="Attach files"] {
+.composer .composer-box button[aria-label="Attach files"] {
   width: 30px;
   height: 30px;
   color: var(--wb-muted-foreground);
 }
 
-.composer .composer-box > div > button[type="submit"] {
+.composer .composer-box button[type="submit"] {
   margin-left: auto;
   width: 30px;
   height: 30px;
@@ -265,7 +264,7 @@
   border-radius: var(--radius-md, 6px);
 }
 
-.composer .composer-box > div > button[aria-label="Stop generating"] {
+.composer .composer-box button[aria-label="Stop generating"] {
   margin-left: auto;
   width: 30px;
   height: 30px;
@@ -274,27 +273,17 @@
   border-radius: var(--radius-md, 6px);
 }
 
-.composer .composer-box > div > button[type="submit"]:hover:not(:disabled),
-.composer .composer-box > div > button[aria-label="Stop generating"]:hover {
+.composer .composer-box button[type="submit"]:hover:not(:disabled),
+.composer .composer-box button[aria-label="Stop generating"]:hover {
   opacity: 0.85;
 }
 
-/* Mic sits in the tools row next to attach, same overlay as home. */
 .composer .dictated {
   display: grid;
   gap: var(--space-1);
 }
 
-.composer .dictated-row {
-  display: block;
-  position: relative;
-  min-width: 0;
-}
-
 .composer .dictate {
-  position: absolute;
-  left: calc(var(--space-4) + 30px + 4px);
-  bottom: var(--space-2);
   width: 30px;
   height: 30px;
   margin: 0;
@@ -302,7 +291,6 @@
   border-radius: var(--radius-md, 6px);
   background: transparent;
   color: var(--wb-muted-foreground);
-  z-index: 1;
 }
 
 .composer .dictate:hover:not(:disabled) {
