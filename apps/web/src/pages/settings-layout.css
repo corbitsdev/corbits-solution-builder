@@ -232,29 +232,3 @@
   margin-bottom: var(--space-3);
 }
 
-.settings-page .deck-template-pick {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  cursor: pointer;
-}
-
-.settings-page .deck-template-pick input {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
-}
-
-.settings-page details.section > summary.section-head {
-  list-style: none;
-  cursor: pointer;
-}
-
-.settings-page details.section > summary.section-head::-webkit-details-marker {
-  display: none;
-}
-
-.settings-page details.section[open] > summary.section-head {
-  margin-bottom: 0;
-}

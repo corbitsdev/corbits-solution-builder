@@ -2,14 +2,14 @@
  * The provider list, shared by onboarding and Settings so the two cannot
  * drift. One row per way in. A row that is not connected offers exactly one
  * action, named after how it connects; a row that is connected shows what it
- * serves and lets it be refreshed or disconnected in place. Model default,
- * fallback order and restrictions live on the `ResolvedCatalogList` below,
- * which renders the resolved catalog in fallback order.
+ * serves and, on Settings, lets the model list be refreshed in place. Model
+ * default, fallback order and restrictions live on `ResolvedCatalogList`,
+ * which is not mounted on the Settings page.
  *
  * Keys are asked for on the row that was clicked and cleared the moment they
  * are handed over. Nothing here ever renders a secret back.
  *
- * Connecting, refreshing and disconnecting drive the hub's
+ * Connecting and refreshing drive the hub's
  * own catalog routes directly (`client.ts` -> `provider-catalog.ts` ->
  * `@solutions-builder/installer`); an OAuth provider signs in through the
  * loopback the embedded hub mounts on `@corbits/oauth-core`
@@ -84,7 +84,7 @@ export function ProviderList({
   oauthCandidates: OAuthCandidate[];
   /** Called after any successful change; the parent refetches. */
   onChanged: () => Promise<void> | void;
-  /** Settings' connections subsection shows disconnect; onboarding does not. */
+  /** Settings' connections subsection shows Refresh models; onboarding does not. */
   manage?: boolean;
 }) {
   const [chosen, setChosen] = useState<string | null>(null);
@@ -300,30 +300,10 @@ export function ProviderList({
                   </ChromeBtn>
                 ) : null}
                 Connected
-                {manage ? (
-                  <ChromeBtn
-                    kind="link"
-                    disabled={busy !== null}
-                    loading={busy === row.id}
-                    onClick={() => void act(row.id, () => api.disconnectProvider(connected.id), `${row.name} disconnected.`)}
-                  >
-                    Disconnect
-                  </ChromeBtn>
-                ) : null}
               </span>
             ) : (
               <span className="v">
                 {connected && !ready ? "Needs attention" : null}
-                {manage && connected ? (
-                  <ChromeBtn
-                    kind="link"
-                    disabled={busy !== null}
-                    loading={busy === row.id}
-                    onClick={() => void act(row.id, () => api.disconnectProvider(connected.id), `${row.name} disconnected.`)}
-                  >
-                    Disconnect
-                  </ChromeBtn>
-                ) : null}
                 <ChromeBtn
                   loading={busy === row.id}
                   disabled={busy !== null}

@@ -57,23 +57,32 @@ describe("settings page markup language", () => {
     expect(css).toContain(".settings-page .refresh-models");
   });
 
-  test("mockup sections stay, and existing extra settings stay in the same language", async () => {
+  test("mockup sections stay, and the extras the mockup cut are gone", async () => {
     const page = await Bun.file(new URL("./settings.tsx", import.meta.url)).text();
-    for (const title of [
-      "Appearance",
-      "Inference",
-      "Designer",
-      "Stakeholder decks",
-      "This computer",
-      "Start when you log in",
-      "If a design exceeds the limit",
-      "Stakeholder deck templates",
-      "Diagnostics",
-    ]) {
+    for (const title of ["Appearance", "Inference", "Designer", "Stakeholder decks", "This computer"]) {
       expect(page).toContain(title);
     }
-    expect(page).toContain("ResolvedCatalogList");
     expect(page).toContain("ProviderList");
+    expect(page).not.toContain("ResolvedCatalogList");
+    expect(page).not.toContain("DeckTemplates");
+    expect(page).not.toContain("Diagnostics");
+    expect(page).not.toContain("Start when you log in");
+    expect(page).not.toContain("Stop the host");
+    expect(page).not.toContain("If a design exceeds the limit");
+    expect(page).not.toContain("onLimit");
+    expect(page).not.toContain("Stakeholder deck templates");
+    expect(page).not.toContain("document token budget");
+    expect(page).not.toContain("Make default");
+    expect(page).not.toContain("Move up");
+    expect(page).not.toContain("Restrict");
+    expect(page).not.toContain("Shadow");
+  });
+
+  test("Designer output-limit copy is the mockup's, not token-budget jargon", async () => {
+    const page = await Bun.file(new URL("./settings.tsx", import.meta.url)).text();
+    expect(page).toContain('label="Output limit"');
+    expect(page).toContain("Tokens per design — most need 20,000–40,000; a design that uses them all is cut short");
+    expect(page).not.toContain("If a design exceeds the limit");
   });
 
   test("This computer shows Data from host status between Credentials and Version", async () => {
@@ -91,21 +100,41 @@ describe("settings page markup language", () => {
     expect(page).not.toContain("Application Support");
     expect(client).toMatch(/dataDir\?: string/);
     expect(host).toContain("dataDir: dataDirectory()");
+    expect(page).not.toContain("Start when you log in");
+    expect(page).not.toContain("Stop the host");
+    expect(page).not.toContain("quit_app");
+    expect(page).not.toContain("set_start_at_login");
   });
 
-  test("inference and catalog share one section-body of rows, not a second card", async () => {
+  test("inference is one section-body of provider rows, with no catalog card", async () => {
     const page = await Bun.file(new URL("./settings.tsx", import.meta.url)).text();
     const inference = page.slice(page.indexOf("function Inference"), page.indexOf("/* ----------------------------------------------------------------- designer"));
     expect(inference.match(/className="section-body"/g)?.length).toBe(1);
     expect(inference).toContain("ProviderList");
-    expect(inference).toContain("ResolvedCatalogList");
+    expect(inference).not.toContain("ResolvedCatalogList");
+  });
+
+  test("stakeholder Edit opens Theme seg-ctl only", async () => {
+    const page = await Bun.file(new URL("./settings.tsx", import.meta.url)).text();
+    const decks = page.slice(page.indexOf("function StakeholderDecks"), page.indexOf("/* ------------------------------------------------------------ this computer"));
+    expect(decks).toContain('label="Theme"');
+    expect(decks).toContain("<SegCtl");
+    expect(decks).not.toContain("Typeface");
+    expect(decks).not.toContain("Density");
+    expect(decks).not.toContain("Speaker notes");
+    expect(decks).not.toContain("What the outline should emphasise");
+    expect(decks).not.toContain("label=\"Images\"");
   });
 
   test("settings chrome is outline .btn / .btn.link, not the library Button", async () => {
     const page = await Bun.file(new URL("./settings.tsx", import.meta.url)).text();
+    const providers = await Bun.file(new URL("./providers.tsx", import.meta.url)).text();
+    const css = await Bun.file(new URL("./settings-layout.css", import.meta.url)).text();
     expect(page).not.toMatch(/import \{[^}]*Button[^}]*\} from "\.\.\/components/);
     expect(page).toContain('className="btn link"');
-    expect(page).toContain('className="btn"');
+    expect(providers).toContain('kind === "link" ? "btn link" : "btn"');
+    expect(css).toContain(".settings-page .btn");
+    expect(css).toContain(".settings-page .btn.link");
   });
 });
 
@@ -121,15 +150,18 @@ describe("provider and catalog row language", () => {
     expect(source).toContain("Refresh models");
     expect(source).toContain("refreshProviderModels");
     expect(source).toContain("{connected ? \"Reconnect\" : \"Connect\"}");
+    expect(source).not.toContain("Disconnect");
     expect(source).not.toContain("StateLabel");
     expect(source).not.toContain("variant=\"primary\"");
     expect(source).not.toContain("provider-row");
   });
 
-  test("catalog keeps its actions as row .v links", async () => {
+  test("catalog keeps its actions as row .v links off this page", async () => {
     const source = await Bun.file(new URL("./providers.tsx", import.meta.url)).text();
+    const page = await Bun.file(new URL("./settings.tsx", import.meta.url)).text();
     for (const action of ["Make default", "Move up", "Move down", "Restrict", "Shadow", "Manage connection"]) {
       expect(source).toContain(action);
+      expect(page).not.toContain(action);
     }
     expect(source).not.toContain("<ul className=\"provider-list\"");
   });
