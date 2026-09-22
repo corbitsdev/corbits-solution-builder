@@ -22,28 +22,18 @@ describe("stageApprovalDecision", () => {
       done: true,
       openReview: { reviewId: "r1", artifactId: "art_1", version: 1, sha256: "sha1", status: "open" },
     });
-    expect(stageApprovalDecision("p1", "run_1", withReview, true)).toBeNull();
+    expect(stageApprovalDecision("p1", "run_1", withReview)).toBeNull();
   });
 
-  test("null with neither an open review nor a substantial draft", () => {
-    expect(stageApprovalDecision("p1", "run_1", view(), false)).toBeNull();
-  });
-
-  test("a substantial draft alone is approvable to open, but carries no reviewRef", () => {
-    const wait = stageApprovalDecision("p1", "run_1", view(), true);
-    expect(wait).not.toBeNull();
-    expect(wait!.reviewRef).toBeUndefined();
-    expect(wait!.approvalId).toBeUndefined();
-    expect(wait!.stage).toBe(3);
-    expect(wait!.projectId).toBe("p1");
-    expect(wait!.runId).toBe("run_1");
+  test("null without an open review — an unreviewed draft is not a decision due", () => {
+    expect(stageApprovalDecision("p1", "run_1", view())).toBeNull();
   });
 
   test("an open review carries its exact reference, so the queue may approve directly", () => {
     const withReview = view({
       openReview: { reviewId: "r1", artifactId: "art_1", version: 2, sha256: "sha2", status: "open" },
     });
-    const wait = stageApprovalDecision("p1", "run_1", withReview, false);
+    const wait = stageApprovalDecision("p1", "run_1", withReview);
     expect(wait?.reviewRef).toEqual({ artifactId: "art_1", version: 2, sha256: "sha2" });
   });
 
@@ -51,7 +41,7 @@ describe("stageApprovalDecision", () => {
     const withReview = view({
       openReview: { reviewId: "r1", artifactId: "art_1", version: 1, sha256: "sha1", status: "open" },
     });
-    const wait = stageApprovalDecision("p1", "run_1", withReview, false);
+    const wait = stageApprovalDecision("p1", "run_1", withReview);
     expect(wait?.id).toBe("p1:3:stage-approval");
   });
 });

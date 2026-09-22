@@ -54,7 +54,6 @@ function Rail({ at, collapsed = false }: { at: string; collapsed?: boolean }) {
       offline={false}
       connected
       onNavigate={() => {}}
-      onInspect={() => {}}
     />
   );
 }

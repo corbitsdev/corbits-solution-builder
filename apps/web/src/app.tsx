@@ -163,7 +163,6 @@ export function AppRail({
   offline,
   connected,
   onNavigate,
-  onInspect,
   stage = null,
   onOpenArtifact,
 }: {
@@ -174,7 +173,6 @@ export function AppRail({
   offline: boolean;
   connected: boolean;
   onNavigate: (view: View) => void;
-  onInspect: (projectId: string) => void;
   /** The open project's current panel and what it creates; null off a project. */
   stage?: { number: number; artifacts: StageArtifact[] } | null;
   onOpenArtifact?: ((nodeId: string) => void) | undefined;
@@ -244,21 +242,6 @@ export function AppRail({
             </div>
           ) : null}
 
-          {/* One pending decision, pinned. More than one is a queue, and the
-              queue has a screen of its own. */}
-          {decisions[0] ? (
-            <div className="rail-decision">
-              <StateLabel tone="warning">Action required</StateLabel>
-              <p className="rail-decision-title">{decisions[0].title}</p>
-              <p className="rail-decision-meta">{decisions[0].projectTitle}</p>
-              <Button
-                variant="link"
-                onClick={() => onInspect(decisions[0]!.projectId)}
-              >
-                Inspect evidence
-              </Button>
-            </div>
-          ) : null}
         </SidebarContent>
 
         <SidebarFooter>
@@ -686,10 +669,6 @@ export function App() {
         offline={offline}
         connected={inferenceConnected}
         onNavigate={setView}
-        onInspect={(projectId: string) => {
-          setSelected(projectId);
-          setView("decisions");
-        }}
         stage={
           view === "project" && detail
             ? { number: detail.stage, artifacts: stageArtifacts(detail.stage, graph.nodes) }

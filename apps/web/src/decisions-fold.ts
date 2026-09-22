@@ -14,16 +14,17 @@
  * CL-8724: a hub tool approval is not the only thing a person's move can be
  * waiting on. The project workflow (`project-workflow.ts`) is its own
  * process authority, independent of any parked tool call, so its own open
- * review or an unreviewed specialist draft at the project's CURRENT stage is
- * folded in here too, as a second kind of `Wait` (no `approvalId`).
+ * review at the project's CURRENT stage is folded in here too, as a second
+ * kind of `Wait` (no `approvalId`). An unreviewed specialist draft is NOT
+ * one: the workflow is awaiting nothing until a review names an exact
+ * version, and a draft that arrives before anyone has engaged with the
+ * stage must not read as a decision due.
  */
 import type { Transport } from "@intx/hub-client";
-import type { Stage } from "@solutions-builder/app/ledger";
 import {
   listProjectRecords,
   listSpecialistDeployments,
   resolveWorkspace,
-  stageSpecialistStatus,
 } from "@solutions-builder/installer";
 import { CONSEQUENCE, requiredAuthorityFor } from "@solutions-builder/app/decision-copy";
 import type { Wait } from "./client.ts";
@@ -32,8 +33,6 @@ import { createHubTransport } from "./hub.ts";
 import { DELIVER_TOOL_NAME, pendingApprovals, type PendingApproval } from "./pending-approvals.ts";
 import { loadProjectWorkflowView, type ProjectWorkflowView } from "./project-workflow.ts";
 import { resolveProjectWorkflowRef } from "./project-workflow-ref.ts";
-import { readStageThread } from "./stage-mail.ts";
-import { latestSubstantialDraft } from "./pages/workspace/guidance.ts";
 
 /** What the exact command/arguments a non-delivery tool call carries, shown so the person sees exactly what they'd be approving. */
 function toolCommand(approval: PendingApproval): string {
@@ -78,21 +77,18 @@ async function openDecisionsFor(
 
 /**
  * Pure: whether the project workflow's current stage is a person's move, and
- * what to show for it. Never for a converged (`done`) workflow. Approvable
- * two ways — an open review at this stage, or (with no open review yet) a
- * substantial specialist draft sitting in the stage thread — but only the
- * former carries `reviewRef`, since only an exact open review is safe to
- * approve directly from the queue (CL-8724).
+ * what to show for it. Only an open review at the current stage is one —
+ * the wait the workflow itself has recorded, carrying the exact `reviewRef`
+ * the queue needs to approve it directly (CL-8724). Never for a converged
+ * (`done`) workflow.
  */
 export function stageApprovalDecision(
   projectId: string,
   runId: string,
   view: ProjectWorkflowView,
-  hasSubstantialDraft: boolean,
 ): Omit<Wait, "projectTitle"> | null {
-  if (view.done) return null;
   const review = view.openReview;
-  if (!review && !hasSubstantialDraft) return null;
+  if (view.done || !review) return null;
   const stage = view.stage;
   return {
     id: `${projectId}:${String(stage)}:stage-approval`,
@@ -103,7 +99,7 @@ export function stageApprovalDecision(
     consequence: CONSEQUENCE[stage] ?? "A human decision is required to continue.",
     blockers: null,
     requiredAuthority: requiredAuthorityFor(stage),
-    ...(review ? { reviewRef: { artifactId: review.artifactId, version: review.version, sha256: review.sha256 } } : {}),
+    reviewRef: { artifactId: review.artifactId, version: review.version, sha256: review.sha256 },
   };
 }
 
@@ -112,9 +108,8 @@ const stageApprovalCache = new Map<string, { value: Omit<Wait, "projectTitle"> |
 
 /**
  * The project workflow's current-stage wait for one project, read-only and
- * cached ~20s per project — this reads the workflow's own event log plus,
- * when there is no open review yet, the stage thread, so it is bounded to
- * one project/stage per call, never every stage of every project.
+ * cached ~20s per project — this reads the workflow's own event log, bounded
+ * to one project/stage per call, never every stage of every project.
  */
 async function stageApprovalWaitFor(
   workspaceTenantId: string,
@@ -128,14 +123,7 @@ async function stageApprovalWaitFor(
     const ref = await resolveProjectWorkflowRef(transport, workspaceTenantId, projectId);
     if (!ref) return null;
     const view = await loadProjectWorkflowView(transport, workspaceTenantId, ref);
-    if (view.done) return null;
-    if (view.openReview) return stageApprovalDecision(projectId, ref.runId, view, false);
-
-    const status = await stageSpecialistStatus(transport, workspaceTenantId, projectId, view.stage as Stage);
-    if (!status) return null;
-    const messages = await readStageThread(workspaceTenantId, [status.address]);
-    const hasSubstantialDraft = latestSubstantialDraft(messages) !== null;
-    return stageApprovalDecision(projectId, ref.runId, view, hasSubstantialDraft);
+    return stageApprovalDecision(projectId, ref.runId, view);
   })();
 
   stageApprovalCache.set(projectId, { value, expiresAt: Date.now() + STAGE_APPROVAL_CACHE_TTL_MS });

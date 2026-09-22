@@ -102,9 +102,8 @@ export function DecisionQueue({
   // Stage 9's delivery is a stock hub approval on the specialist's own
   // deliver tool call (CL-8566): what is being approved is the pending
   // approval itself, not an artifact version at this stage. A stage-approval
-  // wait (no `approvalId`) only approves directly when the workflow already
-  // has an open review naming the exact artifact (`reviewRef`) — otherwise
-  // the only move from here is to open the workspace and review it there
+  // wait (no `approvalId`) exists only for the workflow's own open review,
+  // so it always carries the exact `reviewRef` the queue approves against
   // (CL-8724).
   const canApprove = current?.approvalId ? true : Boolean(current?.reviewRef);
 

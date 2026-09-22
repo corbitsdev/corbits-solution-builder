@@ -467,23 +467,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   .version-list { grid-template-columns: 1fr; }
 }
 
-/* The next decision, pinned in the rail so it is visible from every screen. */
-.rail-decision {
-  margin: 0 var(--space-2);
-  /* 8px of margin and 8px of padding puts this text on the same 16px inset as
-     the sidebar rows above it: SidebarSection is px-2 and SidebarItem is px-2
-     again. Measured, not assumed — the previous 12px landed 4px off. */
-  padding: var(--space-2);
-  /* Grid children stretch by default, which made the badge a full-width bar
-     and centred the link. Both are inline things. */
-  justify-items: start;
-  border-top: 1px solid var(--wb-border);
-  background: var(--wb-card);
-  display: grid;
-  gap: var(--space-1);
-  border-radius: var(--radius-panel);
-}
-
 /* What the open stage creates, under the rows: each word is the artifact's
    way into the Artifacts panel, on the rows' 16px inset. */
 .rail-stage {
@@ -529,30 +512,9 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   color: var(--wb-muted-foreground);
 }
 
-.rail-decision-title {
-  font-size: 0.875rem;
-  font-weight: 500;
-  margin: 0;
-  line-height: 1.35;
-}
-
-/* The metadata reads as metadata; without this it was typographically
-   identical to the title above it. */
-.rail-decision-meta {
-  margin: 0;
-  font-size: 0.75rem;
-  color: var(--wb-muted-foreground);
-}
-
 .rail-note {
   margin: 0;
   padding: 0 var(--space-4);
-}
-
-.rail-decision p {
-  margin: 0;
-  font-size: 0.8125rem;
-  color: var(--wb-muted-foreground);
 }
 
 /* The big waiting count in a screen header. */
@@ -1465,7 +1427,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 
   .rail-section::-webkit-scrollbar { display: none; }
 
-  .rail-decision,
   .rail-stage {
     display: none;
   }

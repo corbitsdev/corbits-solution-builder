@@ -289,10 +289,10 @@ export type Wait = {
   /** The tool name `approvalId` was raised for, e.g. "run_shell" or "deliver" — lets the queue offer "Allow for this build" only where a standing grant makes sense. */
   toolName?: string;
   /**
-   * Set only for a stage-approval wait (no `approvalId`): the project
-   * workflow's own open review at this stage, when there is one. Its
-   * presence is what lets the queue approve directly rather than only open
-   * the workspace (CL-8724).
+   * Set on every stage-approval wait (no `approvalId`): the project
+   * workflow's own open review at this stage — the only thing that raises
+   * one. Its exact reference is what lets the queue approve directly
+   * (CL-8724).
    */
   reviewRef?: { artifactId: string; version: number; sha256: string };
   /** When the person was notified of this decision, or the error kept while filing the decision if notifying failed (CL-8724). Neither set means "not sent yet". */
