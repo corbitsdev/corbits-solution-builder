@@ -531,6 +531,21 @@ export function StageWorkspace({
             onSendBack={(target) => void sendBack(target)}
           />
         ) : null}
+
+        {agentAddress && (requirements || panelReviews.length > 0) ? (
+          <div className="stage-companions">
+            {requirements ? (
+              <ProductRequirements
+                node={requirements}
+                tenantId={tenantId}
+                canRewrite={agentAddress !== null}
+                busy={sending}
+                onRewrite={() => void send("Write the requirements again, and the plan against them.")}
+              />
+            ) : null}
+            {panelReviews.length > 0 ? <PanelReviews reviews={panelReviews} tenantId={tenantId} /> : null}
+          </div>
+        ) : null}
       </GuidanceFold>
 
       {agentAddress && stage === 4 ? (
@@ -591,21 +606,6 @@ export function StageWorkspace({
             void api.attachMaterial(detail.project.id, [...files]).then(() => void refreshWorkflow());
           }}
         />
-      ) : null}
-
-      {agentAddress && (requirements || panelReviews.length > 0) ? (
-        <div className="stage-companions">
-          {requirements ? (
-            <ProductRequirements
-              node={requirements}
-              tenantId={tenantId}
-              canRewrite={agentAddress !== null}
-              busy={sending}
-              onRewrite={() => void send("Write the requirements again, and the plan against them.")}
-            />
-          ) : null}
-          {panelReviews.length > 0 ? <PanelReviews reviews={panelReviews} tenantId={tenantId} /> : null}
-        </div>
       ) : null}
 
       {agentAddress && stage === 6 ? (

@@ -44,14 +44,11 @@ function Shell({
   at,
   body,
   fill,
-  tab,
 }: {
   at: "projects" | "project" | "settings";
   body: ReactNode;
   fill?: boolean;
-  tab?: "stage" | "artifacts";
 }) {
-  const artifacts = tab === "artifacts";
   return (
     <ThemeProvider>
       <div className="app">
@@ -76,15 +73,12 @@ function Shell({
           onBellOpenChange={() => {}}
           onNavigate={() => {}}
           onOpenProject={() => {}}
-          projectTab={tab ?? "stage"}
-          onProjectTab={() => {}}
           draftOpen
           onToggleDraft={() => {}}
-          artifactCount={1}
         />
         <main className="canvas">
           {fill ? (
-            <GuideDock step={step} at={artifacts ? "artifacts" : "stage"} onGo={() => {}} />
+            <GuideDock step={step} at="stage" onGo={() => {}} />
           ) : null}
           <div className={`canvas-body${fill ? " is-fill" : ""}`}>{body}</div>
         </main>
@@ -281,7 +275,6 @@ const screens: Record<string, ReactNode> = {
     <Shell
       at="project"
       fill
-      tab="artifacts"
       body={
         <ArtifactGraph
           nodes={[node]}
@@ -296,7 +289,6 @@ const screens: Record<string, ReactNode> = {
     <Shell
       at="project"
       fill
-      tab="artifacts"
       body={
         <ArtifactGraph
           nodes={[replacedBrief, currentBrief]}

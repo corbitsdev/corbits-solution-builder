@@ -419,27 +419,3 @@
   background: var(--popover);
   border-radius: var(--radius-lg);
 }
-
-/* Conversation / Artifacts stay for the graph; they should not shout. */
-
-.topbar-project .head-tabs [role="tablist"] {
-  border-bottom: 0;
-  gap: 0;
-}
-
-.topbar-project .head-tabs [role="tab"] {
-  font-family: var(--wb-font-mono);
-  font-size: 10.5px;
-  letter-spacing: 0.04em;
-  color: var(--wb-muted-foreground);
-  padding: 4px 8px;
-  background: transparent;
-  border: 0;
-  font-weight: 400;
-}
-
-.topbar-project .head-tabs [role="tab"][aria-selected="true"] {
-  color: var(--wb-foreground);
-  background: transparent;
-  box-shadow: none;
-}

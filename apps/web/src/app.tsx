@@ -26,12 +26,10 @@ import { Banner, Mark, downloadArtifact, stageName } from "./components.jsx";
 import { PrintView, setPrintProject, usePrintTarget } from "./print.jsx";
 import { Projects } from "./pages/projects.jsx";
 import { Settings } from "./pages/settings.jsx";
-import { ArtifactGraph } from "./pages/graph.jsx";
 import { nextStep } from "@solutions-builder/app/next-step";
 import { StageTour } from "./tour.jsx";
 import { GuideDock } from "./components.jsx";
 import {
-  Tabs,
   BootScreen,
   HorizontalStepper,
   NotificationsBell,
@@ -52,9 +50,6 @@ import { getHubSession } from "./hub-auth.ts";
  * are not a destination either — they fold into the bell.
  */
 type View = "projects" | "project" | "settings";
-
-/** Sections within an open project. */
-type ProjectTab = "stage" | "artifacts";
 
 const VIEWS: View[] = ["projects", "project", "settings"];
 
@@ -136,13 +131,10 @@ export function AppBar({
   onBellOpenChange,
   onNavigate,
   onOpenProject,
-  projectTab,
-  onProjectTab,
   draftOpen,
   onToggleDraft,
   exporting,
   onExport,
-  artifactCount = 0,
   onStageSegment,
 }: {
   view: View;
@@ -154,13 +146,10 @@ export function AppBar({
   onNavigate: (view: View) => void;
   onOpenProject: (projectId: string) => void;
   /** Project-view chrome; absent elsewhere so nothing dead renders. */
-  projectTab?: ProjectTab;
-  onProjectTab?: (tab: ProjectTab) => void;
   draftOpen?: boolean;
   onToggleDraft?: () => void;
   exporting?: boolean;
   onExport?: () => void;
-  artifactCount?: number;
   /** A completed stepper segment was clicked — open that stage's artifact. */
   onStageSegment?: (stage: number) => void;
 }) {
@@ -205,30 +194,13 @@ export function AppBar({
       </div>
 
       <div className="topbar-actions">
-        {inProject && projectTab !== undefined && onProjectTab ? (
+        {inProject ? (
           <>
-            <Tabs
-              className="head-tabs"
-              label="This project"
-              active={projectTab}
-              onChange={(id) => onProjectTab(id as ProjectTab)}
-              tabs={[
-                { id: "stage", label: "Conversation" },
-                {
-                  id: "artifacts",
-                  label: "Artifacts",
-                  ...(artifactCount > 0 ? { count: artifactCount } : {}),
-                },
-              ]}
-            >
-              {() => null}
-            </Tabs>
             <button
               type="button"
               className="iconbtn"
               aria-pressed={draftOpen}
               aria-label={draftOpen ? "Hide the draft" : "Show the draft"}
-              disabled={projectTab !== "stage"}
               onClick={onToggleDraft}
             >
               {draftOpen ? <PanelRightClose aria-hidden="true" /> : <PanelRight aria-hidden="true" />}
@@ -313,11 +285,8 @@ export function App() {
   // A document being printed lies over the app rather than replacing it, so
   // nothing in flight underneath is lost.
   const printing = usePrintTarget();
-  const [projectTab, setProjectTab] = useState<ProjectTab>("stage");
-  // The conversation and the artifact library fill the window; every other
-  // view scrolls. Computed here rather than inline so a class list stays a
-  // class list.
-  const fills = view === "project" && (projectTab === "stage" || projectTab === "artifacts");
+  // The project workspace fills the window; every other view scrolls.
+  const fills = view === "project";
 
   const [draftOpen, setDraftOpen] = useState(true);
   const [bellOpen, setBellOpen] = useState(false);
@@ -341,10 +310,6 @@ export function App() {
   // Resolved once and threaded down as a prop: every artifact read goes
   // through `@corbits/artifacts` over `/hub`, which is tenant-scoped.
   const [tenantId, setTenantId] = useState<string | null>(null);
-  const [graph, setGraph] = useState<{
-    nodes: import("./client.js").ArtifactNode[];
-    edges: { childNodeId: string; sourceNodeId: string }[];
-  }>({ nodes: [], edges: [] });
   const [error, setError] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
   const [skippedSetup, setSkippedSetup] = useState(false);
@@ -510,14 +475,6 @@ export function App() {
     };
   }, [selected, projects]);
 
-  useEffect(() => {
-    if (view !== "project" || !selected) return;
-    void api
-      .artifactGraph(selected)
-      .then(setGraph)
-      .catch(() => setGraph({ nodes: [], edges: [] }));
-  }, [view, selected, detail]);
-
   const reloadDetail = useCallback(async () => {
     // Both at once: the stage view cannot start its draft until the detail
     // lands, so a serial refresh here was dead time on every approval.
@@ -530,7 +487,6 @@ export function App() {
 
   const openProject = (projectId: string) => {
     setSelected(projectId);
-    setProjectTab("stage");
     setView("project");
   };
 
@@ -649,15 +605,11 @@ export function App() {
         onBellOpenChange={setBellOpen}
         onNavigate={setView}
         onOpenProject={openProject}
-        projectTab={projectTab}
-        onProjectTab={setProjectTab}
         draftOpen={draftOpen}
         onToggleDraft={() => setDraftOpen((open) => !open)}
         exporting={exporting}
         onExport={() => void exportProject()}
-        artifactCount={graph.nodes.length}
         onStageSegment={(stage) => {
-          setProjectTab("stage");
           setFocusArtifact({ stage, at: Date.now() });
         }}
       />
@@ -683,11 +635,10 @@ export function App() {
                 (node) => node.stage === (detail.stage),
               ),
             })}
-            at={projectTab === "artifacts" ? "artifacts" : "stage"}
+            at="stage"
             onGo={(where) => {
               if (where === "settings") setView("settings");
               else if (where === "decisions") setBellOpen(true);
-              else setProjectTab(where === "artifacts" ? "artifacts" : "stage");
             }}
           />
         ) : null}
@@ -711,34 +662,20 @@ export function App() {
         {view === "project" ? (
           detail ? (
             <>
-              {projectTab === "stage" ? (
-                <>
-                  {/* Imported and never rendered, so the walkthrough simply
-                      did not exist. It runs once, on the surface it describes,
-                      and remembers that it has. */}
-                  <StageTour enabled={true} stage={detail.stage} />
-                  <StageWorkspace
-                    key={detail.project.id}
-                    detail={detail}
-                    draftOpen={draftOpen}
-                    tenantId={tenantId ?? ""}
-                    onChanged={reloadDetail}
-                    onOpenSettings={() => setView("settings")}
-                    onOpenDecisions={() => setBellOpen(true)}
-                    {...(focusArtifact ? { focusArtifact } : {})}
-                  />
-                </>
-              ) : (
-                <ArtifactGraph
-                  nodes={graph.nodes}
-                  edges={graph.edges}
-                  tenantId={tenantId ?? ""}
-                  onAddMaterial={async (files) => {
-                    await api.attachMaterial(detail.project.id, files);
-                    await reloadDetail();
-                  }}
-                />
-              )}
+              {/* Imported and never rendered, so the walkthrough simply
+                  did not exist. It runs once, on the surface it describes,
+                  and remembers that it has. */}
+              <StageTour enabled={true} stage={detail.stage} />
+              <StageWorkspace
+                key={detail.project.id}
+                detail={detail}
+                draftOpen={draftOpen}
+                tenantId={tenantId ?? ""}
+                onChanged={reloadDetail}
+                onOpenSettings={() => setView("settings")}
+                onOpenDecisions={() => setBellOpen(true)}
+                {...(focusArtifact ? { focusArtifact } : {})}
+              />
             </>
           ) : (
             <Banner title="No project open" />
