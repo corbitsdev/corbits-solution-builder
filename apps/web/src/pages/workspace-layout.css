@@ -144,13 +144,20 @@
 
 .conv .event.boundary,
 .conv .conv-boundary {
+  border-top: 1px solid var(--wb-border);
+  padding-top: var(--space-3);
+  margin-top: var(--space-2);
   color: var(--wb-foreground);
 }
 
-.conv [data-slot="message-bubble"] {
+.conv .msg {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   max-width: 92%;
 }
 
+.conv .msg .who,
 .conv .who,
 .conv .conv-who {
   font-family: var(--wb-font-mono);
@@ -159,12 +166,52 @@
   color: var(--wb-muted-foreground);
 }
 
+.conv .msg .bubble {
+  border: 1px solid var(--wb-border);
+  border-radius: var(--radius-lg);
+  padding: 10px 14px;
+  font-size: 14px;
+  line-height: 1.5;
+  background: var(--card);
+}
+
+.conv .msg.you {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.conv .msg.you .bubble {
+  background: var(--wb-background);
+  border-color: var(--wb-border-strong);
+}
+
+.conv [data-slot="message-bubble"] {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 92%;
+}
+
+.conv [data-slot="message-bubble"] > div:last-child:has(time) {
+  display: none;
+}
+
 .conv [data-slot="message-bubble"].items-start > div:first-child:not(:has(.thinking)):not(:has(.conv-event)),
 .conv [data-slot="message-bubble"].items-end > div:first-child {
   padding: 10px 14px;
   font-size: 14px;
   line-height: 1.5;
   border-radius: var(--radius-lg);
+}
+
+.conv [data-slot="message-bubble"].items-start > div:first-child:not(:has(.thinking)):not(:has(.conv-event)) {
+  background: var(--card);
+  border: 1px solid var(--wb-border);
+}
+
+.conv [data-slot="message-bubble"].items-end > div:first-child {
+  background: var(--wb-background);
+  border: 1px solid var(--wb-border-strong);
 }
 
 .conv .think {
@@ -232,13 +279,14 @@
   font-size: 15px;
   line-height: 1.5;
   padding-block: 0;
+  display: block;
 }
 
 /* ChatInput's toolbar row is the mock's .composer-foot: tools left, ink send right. */
 .composer .composer-foot,
 .composer .composer-box [data-slot="chat-input-footer"] {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-1);
@@ -249,33 +297,72 @@
   width: 100%;
 }
 
+.composer .composer-tools,
+.composer .composer-box [data-slot="chat-input-tools"] {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
 .composer .composer-box button[aria-label="Attach files"] {
   width: 30px;
   height: 30px;
   color: var(--wb-muted-foreground);
 }
 
+/* Ink 30×30 send — never the library's primary fill. Stop is the same
+   square, with destructive fill, not a separate pill. */
+.composer .sendbtn,
+.composer .composer-box [data-slot="chat-input-submit"],
 .composer .composer-box button[type="submit"] {
   margin-left: auto;
   width: 30px;
   height: 30px;
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0;
+  border: 0;
   background: var(--wb-foreground);
   color: var(--wb-background);
   border-radius: var(--radius-md);
+  box-shadow: none;
 }
 
+.composer .sendbtn.stop,
+.composer .composer-box [data-slot="chat-input-submit"][aria-label="Stop generating"],
 .composer .composer-box button[aria-label="Stop generating"] {
   margin-left: auto;
   width: 30px;
   height: 30px;
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0;
+  border: 0;
   background: var(--wb-destructive);
   color: var(--wb-background);
   border-radius: var(--radius-md);
+  box-shadow: none;
 }
 
+.composer .sendbtn:hover,
+.composer .sendbtn.stop:hover,
+.composer .composer-box [data-slot="chat-input-submit"]:hover:not(:disabled),
 .composer .composer-box button[type="submit"]:hover:not(:disabled),
 .composer .composer-box button[aria-label="Stop generating"]:hover {
+  background: var(--wb-foreground);
   opacity: 0.85;
+}
+
+.composer .sendbtn.stop:hover,
+.composer .composer-box [data-slot="chat-input-submit"][aria-label="Stop generating"]:hover,
+.composer .composer-box button[aria-label="Stop generating"]:hover {
+  background: var(--wb-destructive);
+}
+
+.composer .sendbtn.stop svg,
+.composer .composer-box [data-slot="chat-input-submit"][aria-label="Stop generating"] svg {
+  stroke: none;
+  fill: currentColor;
 }
 
 .composer .dictated {

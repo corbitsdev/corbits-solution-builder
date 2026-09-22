@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ChatInput, ChatThread, type ChatMessage as UiChatMessage } from "@corbits/react-ui";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ChatInput, type ChatMessage as UiChatMessage } from "@corbits/react-ui";
 import { Plus, Send } from "lucide-react";
 import { Markdown } from "../../markdown.jsx";
 import { Dictated } from "../../dictation.jsx";
@@ -18,6 +18,10 @@ function toUiMessages(messages: readonly ChatMessage[]): UiChatMessage[] {
     parts: [{ type: "text", text: message.author === "me" ? message.body : conversationLead(message.body) }],
     createdAt: message.at,
   }));
+}
+
+function messageText(message: UiChatMessage): string {
+  return message.parts.map((part) => (part.type === "text" ? part.text : "")).join("");
 }
 
 /**
@@ -95,45 +99,73 @@ export function StageConversation({
     return eventMessages(list, events);
   }, [messages, pending, events]);
   const eventById = useMemo(() => new Map(events.map((event) => [event.id, event])), [events]);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const pinnedRef = useRef(true);
+
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (node === null || !pinnedRef.current) return;
+    node.scrollTop = node.scrollHeight;
+  }, [uiMessages]);
+
   return (
     <div className="stage-conversation">
-      <ChatThread
-        className={CONV_SCROLL_CLASS}
-        messages={uiMessages}
-        identity={{ name: who, initials: "SB" }}
-        renderBody={(message) => {
-          const event = eventById.get(message.id);
-          if (event) {
+      {uiMessages.length === 0 ? (
+        <div className={CONV_SCROLL_CLASS}>
+          <p className="inline-note">No messages yet.</p>
+        </div>
+      ) : (
+        <div
+          ref={scrollRef}
+          className={CONV_SCROLL_CLASS}
+          role="log"
+          aria-live="polite"
+          aria-label="Conversation"
+          onScroll={(event) => {
+            const node = event.currentTarget;
+            pinnedRef.current = node.scrollHeight - node.scrollTop - node.clientHeight < 32;
+          }}
+        >
+          {uiMessages.map((message) => {
+            const event = eventById.get(message.id);
+            if (event) {
+              return (
+                <div
+                  key={message.id}
+                  className={event.tone === "boundary" ? "event boundary conv-event conv-boundary" : "event conv-event"}
+                >
+                  {event.text}
+                </div>
+              );
+            }
+            if (message.id === "pending") {
+              return (
+                <div key={message.id} className="think">
+                  <span className="who conv-who">{who}</span>
+                  <WorkingLabel stage={stage} />
+                </div>
+              );
+            }
+            const text = messageText(message);
+            const you = message.role === "user";
             return (
-              <span className={event.tone === "boundary" ? "event boundary conv-event conv-boundary" : "event conv-event"}>
-                {event.text}
-              </span>
-            );
-          }
-          // The turn in flight reads as what the wait is for, in main's voice.
-          if (message.id === "pending") return (
-            <span className="think">
-              <WorkingLabel stage={stage} />
-            </span>
-          );
-          const text = message.parts.map((part) => (part.type === "text" ? part.text : "")).join("");
-          if (message.role === "user" && withdrawnIds.has(message.id)) {
-            return (
-              <div className="turn-withdrawn">
-                <Markdown source={text} />
-                <span className="turn-withdrawn-note">Stopped before it was answered.</span>
+              <div key={message.id} className={you ? "msg you" : "msg"}>
+                <span className="who conv-who">{you ? "You" : who}</span>
+                <div className="bubble">
+                  {you && withdrawnIds.has(message.id) ? (
+                    <div className="turn-withdrawn">
+                      <Markdown source={text} />
+                      <span className="turn-withdrawn-note">Stopped before it was answered.</span>
+                    </div>
+                  ) : (
+                    <Markdown source={text} />
+                  )}
+                </div>
               </div>
             );
-          }
-          return (
-            <>
-              <span className="who conv-who">{message.role === "user" ? "You" : who}</span>
-              <Markdown source={text} />
-            </>
-          );
-        }}
-        empty={<p className="inline-note">No messages yet.</p>}
-      />
+          })}
+        </div>
+      )}
       <div className="composer" data-working={working || pending ? "" : undefined}>
         {rows}
         <Dictated value={value} onValueChange={onValueChange} disabled={disabled}>

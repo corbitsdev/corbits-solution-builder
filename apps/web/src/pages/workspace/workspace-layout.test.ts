@@ -49,6 +49,18 @@ describe("project chrome paint", () => {
   const css = read("../workspace-layout.css");
   const global = read("../../styles.css");
 
+  test("conversation turns are mock msg/bubble with ink send, not library cards", () => {
+    const thread = read("./thread.tsx");
+    expect(thread).toContain('className={you ? "msg you" : "msg"}');
+    expect(thread).toContain('className="bubble"');
+    expect(thread).not.toContain("ChatThread");
+    expect(css).toContain(".conv .msg {");
+    expect(css).toContain(".conv .msg.you {");
+    expect(css).toContain(".conv .msg .bubble {");
+    expect(css).toContain(".composer .sendbtn");
+    expect(css).toMatch(/\.composer \.sendbtn,[\s\S]*?background: var\(--wb-foreground\)/);
+  });
+
   test("composer is stacked box/foot with ink send and destructive stop", () => {
     expect(css).toContain(".composer .composer-foot");
     expect(css).toContain('[data-slot="chat-input-footer"]');
