@@ -108,4 +108,47 @@ describe("describeOperation", () => {
     expect(both.needs).toContain("somewhere to keep data between runs");
     expect(both.needs).toContain("people to sign in");
   });
+
+  test("durable-workflow runs on the person's own machine: no hosting cost", () => {
+    const description = describeOperation(record({ mode: "durable-workflow" }));
+    expect(description.cost).toBe("No ongoing hosting cost.");
+  });
+
+  test("inference and agent modes need a language model", () => {
+    expect(describeOperation(record({ mode: "inference" })).needs).toContain("access to a language model (a key or local model)");
+    expect(describeOperation(record({ mode: "agent" })).needs).toContain("access to a language model (a key or local model)");
+  });
+
+  test("plain and local-workflow modes don't need a language model unless the fields say so", () => {
+    expect(describeOperation(record({ mode: "plain" })).needs).not.toContain("language model");
+    expect(describeOperation(record({ mode: "local-workflow" })).needs).not.toContain("language model");
+  });
+
+  test("a local-workflow/durable-workflow/hub stack needs a language model when its runtime or a package references inference or agents", () => {
+    const viaRuntime = describeOperation(
+      record({ mode: "local-workflow", runtime: { choice: "x", reason: "runs an agent loop", cites: ["FR-1"] } }),
+    );
+    expect(viaRuntime.needs).toContain("access to a language model (a key or local model)");
+
+    const viaPackage = describeOperation(
+      record({
+        mode: "durable-workflow",
+        packages: [{ choice: "x", reason: "background summarization", cites: ["FR-1"], name: "@intx/inference" }],
+      }),
+    );
+    expect(viaPackage.needs).toContain("access to a language model (a key or local model)");
+
+    const neither = describeOperation(record({ mode: "hub", hubPlacement: "embedded" }));
+    expect(neither.needs).not.toContain("language model");
+  });
+
+  test("needs never shows a package name even when a package forces the language-model need", () => {
+    const description = describeOperation(
+      record({
+        mode: "durable-workflow",
+        packages: [{ choice: "x", reason: "y", cites: ["FR-1"], name: "@intx/agent" }],
+      }),
+    );
+    expect(description.needs.toLowerCase()).not.toContain("@intx");
+  });
 });
