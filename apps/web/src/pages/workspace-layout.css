@@ -554,3 +554,60 @@
 .ev .r {
   color: var(--wb-muted-foreground);
 }
+
+.doc h2 {
+  font-size: 16px;
+  font-weight: 700;
+  margin: var(--space-6) 0 var(--space-2);
+}
+
+.doc p {
+  margin-bottom: var(--space-3);
+}
+
+.cost-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--wb-font-mono);
+  font-size: 12.5px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--wb-border);
+}
+
+.cost-row span:last-child {
+  color: var(--wb-muted-foreground);
+}
+
+.checklist {
+  list-style: none;
+  margin: 0 0 var(--space-3);
+  padding: 0;
+}
+
+.checklist li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+
+.checklist li::before {
+  font-family: var(--wb-font-mono);
+  font-size: 11px;
+}
+
+.checklist li.ok::before {
+  content: "✓";
+  color: var(--ok, var(--wb-okay));
+}
+
+.checklist li.open::before {
+  content: "○";
+  color: var(--wb-primary);
+}
+
+.checklist li.fail::before {
+  content: "✗";
+  color: var(--wb-destructive);
+}

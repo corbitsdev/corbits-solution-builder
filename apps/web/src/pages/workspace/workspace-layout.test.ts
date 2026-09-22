@@ -213,4 +213,23 @@ describe("project chrome paint", () => {
     expect(index).not.toContain("stage-companions");
     expect(index).not.toContain("stage6-panel-cards");
   });
+
+  test("stage 9 right pane is a document, not a decision card", () => {
+    const delivery = read("./delivery.tsx");
+    expect(delivery).toContain('className="doc"');
+    expect(delivery).toContain('className="docmeta"');
+    expect(delivery).toContain('className="checklist"');
+    expect(delivery).toContain('className="cost-row"');
+    expect(delivery).toContain("parseDeliveryVerification");
+    expect(delivery).toMatch(/>\s*Accept\s*</);
+    expect(delivery).toMatch(/>\s*Reject\s*</);
+    expect(delivery).not.toContain("<Screen");
+    expect(delivery).not.toContain("stage-companions");
+    expect(delivery).not.toContain("Accept the delivery");
+    expect(delivery).not.toContain("Reject with feedback");
+    expect(delivery).not.toContain("What was built");
+    const css = read("../workspace-layout.css");
+    expect(css).toContain(".cost-row {");
+    expect(css).toContain(".checklist {");
+  });
 });
