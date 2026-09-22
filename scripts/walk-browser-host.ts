@@ -21,7 +21,7 @@ if (!dataDir) {
 const root = new URL("..", import.meta.url).pathname;
 const entry = `${root}apps/hub/src/server.ts`;
 
-const child = Bun.spawn(["bun", "--conditions", "intx-src", entry, "--port", "0"], {
+const child = Bun.spawn(["bun", entry, "--port", "0"], {
   cwd: root,
   env: { ...process.env, SOLUTIONS_BUILDER_DATA_DIR: dataDir },
   stdout: "pipe",

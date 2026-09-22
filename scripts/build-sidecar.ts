@@ -21,11 +21,6 @@ async function build(architecture: keyof typeof TARGETS) {
     [
       "bun",
       "build",
-      // The vendored Interchange packages publish their source under the
-      // `intx-src` export condition and ship no `dist` in this tree, so the
-      // compile resolves them the same way the runtime does.
-      "--conditions",
-      "intx-src",
       "apps/hub/src/server.ts",
       "--compile",
       `--target=${target.bun}`,

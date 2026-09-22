@@ -6,16 +6,14 @@
   "type": "module",
   "exports": {
     "./sidecar-bundle": {
-      "intx-src": "./src/sidecar-bundle.ts",
       "default": "./src/sidecar-bundle.ts"
     },
     "./publish-workspace": {
-      "intx-src": "./src/publish-workspace.ts",
       "default": "./src/publish-workspace.ts"
     }
   },
   "dependencies": {
-    "@intx/agent": "workspace:*",
+    "@intx/agent": "0.4.0",
     "@intx/types": "workspace:*",
     "@solutions-builder/app": "workspace:*"
   }

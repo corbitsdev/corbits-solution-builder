@@ -7,8 +7,6 @@
  * source rather than a `tsc` build: Bun evaluates `.ts` directly wherever
  * this package runs, in the workspace and in the deployed sidecar alike,
  * matching how `@solutions-builder/app` itself is consumed (no `dist/`).
- * The `intx-src` condition is kept only so this package's exports read the
- * same as the vendored convention elsewhere in the workspace.
  *
  * The tool renders a stakeholder's deck outline as PowerPoint bytes by
  * calling the deck authoring that already lives in `@solutions-builder/app/deck`
