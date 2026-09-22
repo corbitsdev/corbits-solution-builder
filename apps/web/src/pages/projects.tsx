@@ -34,6 +34,7 @@ import { displayDone, displayStage, displayTurn } from "../project-list.js";
 import { formatSpendHeadline, formatUsage, type TokenCounts, type WorkspaceSpend } from "../project-usage.js";
 import { DEFAULT_POLICY } from "./onboarding.jsx";
 import { Dictated } from "../dictation.jsx";
+import "./home-layout.css";
 import {
   HOME_COMPOSER_PLACEHOLDER,
   HOME_EMPTY_DESCRIPTION,
