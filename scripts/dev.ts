@@ -4,6 +4,7 @@
  *   bun run dev                 host from source, interface rebuilt on edit, opens a browser
  *   bun run dev:desktop         the same host inside the Tauri window
  *   bun run dev:fresh           the desktop app on a workspace that has never been used
+ *   bun run dev:stop            stops every host, launcher, watcher and sidecar, from any checkout
  *
  * `SOLUTIONS_BUILDER_HUB_URL` is remote mode: the shell opens that origin and
  * does not spawn a local host. Local mode still builds the interface and

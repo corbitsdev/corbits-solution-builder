@@ -13,6 +13,7 @@
     "dev": "bun run vendor:build && bun scripts/dev.ts",
     "dev:desktop": "bun scripts/dev.ts --desktop",
     "dev:fresh": "bun scripts/dev.ts --desktop --fresh",
+    "dev:stop": "bun scripts/stop-dev.ts",
     "host": "bun apps/hub/src/server.ts",
     "ui:build": "bun run assets:pack-closure && bun run assets:pack-project-workflow && vite build -c apps/web/vite.config.ts",
     "ui:watch": "bun run assets:pack-closure && bun run assets:pack-project-workflow && vite build -c apps/web/vite.config.ts --watch",
@@ -30,7 +31,7 @@
     "assets:pack-project-workflow": "bun scripts/project-workflow-pack.ts",
     "adopt:legacy-projects": "bun scripts/adopt-legacy-projects.ts",
     "postinstall": "bun run vendor:build",
-    "test": "bun test apps/hub/src packages/embed-hub/src packages/embedded-host/src packages/installer/src packages/keychain/src packages/solutions-builder/src packages/tools-delivery/src apps/web/src scripts/desktop-launch-mode.test.ts scripts/interface-build.test.ts scripts/closure-pack.test.ts scripts/lib/tarball.test.ts",
+    "test": "bun test apps/hub/src packages/embed-hub/src packages/embedded-host/src packages/installer/src packages/keychain/src packages/solutions-builder/src packages/tools-delivery/src apps/web/src scripts/desktop-launch-mode.test.ts scripts/interface-build.test.ts scripts/stop-dev.test.ts scripts/closure-pack.test.ts scripts/lib/tarball.test.ts",
     "check:build": "bun run ui:build"
   },
   "dependencies": {
