@@ -206,8 +206,6 @@ export function Stage6Panel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anyWaiting, tenantId]);
 
-  if (!pane) return null;
-
   const current = page === "requirements" ? requirements : (reviews[page] ?? STAGE6_IDLE_ROLE);
   const currentPage = PAGES.find((entry) => entry.key === page) ?? PAGES[0]!;
   const busy = current.status === "starting" || current.status === "waiting";
@@ -223,6 +221,49 @@ export function Stage6Panel({
             : reviewInput
               ? "not yet requested"
               : "waiting on a plan draft";
+
+  // Once a plan draft exists, `index.tsx` renders the plan itself as
+  // `StageDocument` and this panel no longer owns the right pane -- but the
+  // requirements author's document and the four panel reviews (and the
+  // "Request review" buttons that ask for them) must stay reachable, not
+  // disappear with it. A compact companion, not the full two-pane
+  // `StagePanes` layout `reader` already fills.
+  if (!pane) {
+    return (
+      <div className="stage6-companion">
+        <div className="docmeta">
+          <select aria-label="Stage 6 document" value={page} onChange={(event) => setPage(event.target.value)}>
+            {PAGES.map((entry) => (
+              <option key={entry.key} value={entry.key}>
+                {entry.label}
+              </option>
+            ))}
+          </select>
+          <span className="inline-note">{meta}</span>
+          {page !== "requirements" ? (
+            <Button variant="ghost" loading={busy} disabled={!reviewInput || busy} onClick={() => requestReview(page)}>
+              {current.status === "done" ? "Request again" : "Request review"}
+            </Button>
+          ) : null}
+        </div>
+        {current.status === "error" ? (
+          <Banner tone="error" title={page === "requirements" ? "The requirements could not be drafted" : "This review could not be completed"}>
+            {current.error}
+          </Banner>
+        ) : null}
+        {current.status === "done" && current.reply ? (
+          <details className="document-fold">
+            <summary className="document-fold-summary">
+              <span className="document-fold-title">{currentPage.label}</span>
+            </summary>
+            <div className="document-fold-body">
+              <Markdown source={current.reply} />
+            </div>
+          </details>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <StagePanes strip={strip} conversation={conversation}>
