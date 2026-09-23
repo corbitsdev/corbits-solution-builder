@@ -29,6 +29,19 @@ import { PrintButton } from "../print.jsx";
 import { Elapsed } from "./workspace/elapsed.jsx";
 import type { FoldedFeedback } from "@solutions-builder/app/project-state";
 import { anchorResolves, shortPromptHash, withFallbackIds, type Disposition } from "../design-disposition.js";
+import { Markdown } from "../markdown.jsx";
+
+/**
+ * The kit asks the Experience designer for a single self-contained HTML
+ * document and nothing else. A local model does not always keep to that —
+ * it sometimes answers in markdown instead, restating the chosen approach
+ * rather than sketching it. An HTML document goes in the sandboxed preview
+ * frame; anything else is rendered as the markdown it actually is, so the
+ * reader sees formatted text instead of a raw `##`-and-tags page.
+ */
+export function looksLikeHtmlDocument(content: string): boolean {
+  return /^\s*<!doctype\s+html|^\s*<html[\s>]/i.test(content);
+}
 
 type PendingComment = { anchor: Anchor; body: string };
 
@@ -315,13 +328,19 @@ export function DesignFeedbackView({
         ) : null}
 
         {/* The generated design is untrusted: no scripts, no same-origin. */}
-        <iframe
-          ref={frame}
-          className="design-preview"
-          title={`Design preview: ${design?.title ?? ""} v${design?.version ?? ""}`}
-          srcDoc={content}
-          sandbox=""
-        />
+        {looksLikeHtmlDocument(content) ? (
+          <iframe
+            ref={frame}
+            className="design-preview"
+            title={`Design preview: ${design?.title ?? ""} v${design?.version ?? ""}`}
+            srcDoc={content}
+            sandbox=""
+          />
+        ) : (
+          <div className="design-preview design-preview-markdown">
+            <Markdown source={content} />
+          </div>
+        )}
       </div>
 
       {feedbackMode && !submitted ? (
