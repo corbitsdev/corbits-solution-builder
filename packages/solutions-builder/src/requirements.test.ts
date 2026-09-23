@@ -39,6 +39,24 @@ describe("extractRequirementItems", () => {
     ]);
   });
 
+  test("an item written as a paragraph under its own bold id is an item too", () => {
+    const doc = "## Functional requirements\n**FR-1.** The system shall detect balls. (From stage 1.)\n\n**FR-2.** The system shall confirm pots.\n\n## Acceptance criteria\nAC-1: A pot updates the score.\n";
+    expect(extractRequirementItems(doc)).toEqual([
+      { kind: "FR", text: "The system shall detect balls. (From stage 1.)" },
+      { kind: "FR", text: "The system shall confirm pots." },
+      { kind: "AC", text: "A pot updates the score." },
+    ]);
+  });
+
+  test("an item as a table row keyed by its id is an item too", () => {
+    const doc = "## Functional requirements\n\n| ID | Requirement |\n|---|---|\n| FR-1 | The CLI shall elicit a policy. |\n| FR-2 | The policy shall have stable ids. |\n\n## Acceptance criteria\n\n| ID | Check |\n|---|---|\n| AC-1 | A lint reports every clause. |\n";
+    expect(extractRequirementItems(doc)).toEqual([
+      { kind: "FR", text: "The CLI shall elicit a policy." },
+      { kind: "FR", text: "The policy shall have stable ids." },
+      { kind: "AC", text: "A lint reports every clause." },
+    ]);
+  });
+
   test("sections outside the four requirement headings are ignored", () => {
     const items = extractRequirementItems("## Assumptions\n\n- Not a requirement.\n");
     expect(items).toEqual([]);

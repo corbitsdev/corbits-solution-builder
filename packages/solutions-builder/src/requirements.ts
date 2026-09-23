@@ -24,14 +24,22 @@ export interface RequirementItem {
 }
 
 const LIST_ITEM = /^([-*]|\d+[.)])\s+/;
-const LEADING_ID = /^\**[A-Z]{2,3}-\d+\**[:.)]?\s*/;
+const LEADING_ID = /^\**[A-Z]{2,3}-\d+[:.)]?\**[:.)]?\s*/;
+/** An item written as its own paragraph under the id the specialist gave it (`**FR-1.** The system shall…`), one form the requirements author on `main` used. */
+const ID_PARAGRAPH = /^\**[A-Z]{2,3}-\d+[:.)]?\**[:.)]?\s+/;
+/** An item as a table row whose first cell is the id (`| FR-1 | The CLI shall… |`), the other form it used. */
+const ID_TABLE_ROW = /^\|\s*\**[A-Z]{2,3}-\d+\**\s*\|\s*(.*?)\s*\|?\s*$/;
 
 function itemsInSection(body: string): string[] {
   return body
     .split("\n")
     .map((line) => line.trim())
-    .filter((line) => LIST_ITEM.test(line))
-    .map((line) => line.replace(LIST_ITEM, "").replace(LEADING_ID, "").trim())
+    .map((line) => {
+      const row = ID_TABLE_ROW.exec(line);
+      if (row) return row[1]!.trim();
+      if (LIST_ITEM.test(line) || ID_PARAGRAPH.test(line)) return line.replace(LIST_ITEM, "").replace(LEADING_ID, "").trim();
+      return "";
+    })
     .filter((line) => line.length > 0);
 }
 
