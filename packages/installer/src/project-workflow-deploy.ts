@@ -9,6 +9,7 @@
 import { ApiError, type Transport } from "@intx/hub-client";
 import { assetsFor, catalogFor, getTenant, workflowsFor, type HubDeployment } from "./hub.js";
 import {
+  deploymentHasEnded,
   deploymentIsLive,
   ensureWorkflowAsset,
   pushWorkflowSourceTree,
@@ -80,10 +81,35 @@ async function existingProjectRun(
 ): Promise<ProjectWorkflowDeployment | null> {
   const byAge = [...deployments].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   for (const candidate of byAge) {
-    const runId = pickTopLevelRun(topLevelRunIds(await workflows.runs(candidate.id)));
-    if (runId) return { deploymentId: candidate.id, runId };
+    const runIds = await workflows.runs(candidate.id);
+    const runId = pickTopLevelRun(topLevelRunIds(runIds));
+    if (!runId) continue;
+    // A deployment the hub has ended for good -- failed, released -- is one
+    // it will never place again, so a run parked there can never take
+    // another decision. When that run never took one either, its state is
+    // the initial state and a redeploy loses nothing; treating it as the
+    // project's run would hold the project at "did not finish starting up"
+    // forever. A run that did take decisions is still the project's, dead
+    // deployment or not: recovering it is the hub's job, and reading a
+    // fresh run instead is how a project used to reset to stage 1.
+    if (deploymentHasEnded(candidate) && !(await tookADecision(workflows, candidate.id, runId, runIds))) continue;
+    return { deploymentId: candidate.id, runId };
   }
   return null;
+}
+
+/** Whether `runId` or any of its loop iterations ever received a signal: every decision arrives as one. */
+async function tookADecision(
+  workflows: ReturnType<typeof workflowsFor>,
+  deploymentId: string,
+  runId: string,
+  runIds: readonly string[],
+): Promise<boolean> {
+  for (const id of runIds.filter((entry) => entry === runId || entry.startsWith(`${runId}__`))) {
+    const { events } = await workflows.runEvents(deploymentId, id);
+    if (events.some((event) => event.type === "SignalReceived")) return true;
+  }
+  return false;
 }
 
 /** The bytes a project workflow deploy needs: the compiled
