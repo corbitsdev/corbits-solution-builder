@@ -16,7 +16,15 @@
 import { useTheme, type ThemeMode } from "@corbits/react-ui";
 import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { DEFAULT_DECK_DESIGN, type DeckDesign, type DeckTheme } from "@solutions-builder/app/deck";
-import { api, ApiFailure, STAKEHOLDER_ROLES, type DesignerSettings, type HostStatus, type Provider } from "../client.js";
+import {
+  api,
+  ApiFailure,
+  STAKEHOLDER_ROLES,
+  type ActiveModel,
+  type DesignerSettings,
+  type HostStatus,
+  type Provider,
+} from "../client.js";
 import { Banner } from "../components.jsx";
 import { deckDesignFor, deckDesignKey } from "../deck-design-settings.ts";
 import { Dictated } from "../dictation.jsx";
@@ -162,9 +170,32 @@ function Inference({
   oauthCandidates: OAuthCandidate[];
   onChanged: () => void;
 }) {
+  const [activeModel, setActiveModel] = useState<ActiveModel | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .activeModel()
+      .then((model) => {
+        if (!cancelled) setActiveModel(model);
+      })
+      .catch(() => {
+        // Supplementary row; the provider list below still loads and reports its own errors.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <Section title="Inference" lead="Where the specialists think. Keys live in this machine's keychain.">
       <div id="connections" className="section-body">
+        {activeModel ? (
+          <Row label="Default model">
+            <span className="v">
+              {activeModel.providerLabel} · {activeModel.canonicalName}
+            </span>
+          </Row>
+        ) : null}
         <ProviderList
           manage
           providers={providers}
