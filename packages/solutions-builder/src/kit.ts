@@ -440,6 +440,13 @@ Requirements the document must meet:
   that describe the element's role, not its position.
 - Semantic HTML: real headings, buttons, labels and landmarks. Visible focus
   styles. Interactive targets at least 44px. Every input has a persistent label.
+- **The mockup fits the width it is read at.** It is reviewed in a pane and
+  printed on a page, both narrower than a wide monitor, so lay it out to fit
+  any width from 1024px up: fluid columns (\`minmax(0, 1fr)\`, \`min-width: 0\`
+  on grid and flex children), no fixed or minimum width wider than the column
+  it sits in, and nothing clipped at the right edge. A container that hides
+  its overflow hides the design; something genuinely wide, a data table or a
+  sheet, scrolls inside its own panel instead.
 - Show the states real software actually reaches — empty, loading, error and
   disabled — as visible sections of the mockup rather than as prose about them.
   A design that omits them is a sketch.
