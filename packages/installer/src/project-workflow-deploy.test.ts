@@ -13,6 +13,8 @@ type Fixture = {
   runsByDeployment?: Record<string, string[]>;
   /** Each run's event log, by run id; a run left out has an empty log. */
   eventsByRun?: Record<string, Event[]>;
+  /** The hub's own replacement of a dead deployment, appearing on the second listing the way one does seconds after a restart. */
+  replacementAfterFirstListing?: { deployment: { id: string; definitionAssetId: string; status: string; createdAt: string }; runIds: string[]; events: Record<string, Event[]> };
 };
 
 const decision = (n: number): Event => ({
@@ -47,6 +49,7 @@ function fakeHub(fixture: Fixture) {
   const eventsByRun: Record<string, Event[]> = Object.fromEntries(Object.entries(fixture.eventsByRun ?? {}).map(([id, events]) => [id, [...events]]));
   const posts: { path: string; body: unknown }[] = [];
   let pushedTree: Record<string, string> = {};
+  let listings = 0;
   const transport: Transport = {
     async fetch<T>(method: string, path: string, body?: unknown): Promise<T> {
       const [pathname, query] = path.split("?");
@@ -56,7 +59,16 @@ function fakeHub(fixture: Fixture) {
       if (method === "GET" && pathname === `${tenant}/assets`) {
         return (fixture.assets ?? []).map((asset) => ({ ...asset, tenantId: TENANT_ID, kind: "workflow" })) as T;
       }
-      if (method === "GET" && pathname === `${tenant}/workflows/deployments`) return deployments as T;
+      if (method === "GET" && pathname === `${tenant}/workflows/deployments`) {
+        listings += 1;
+        const late = fixture.replacementAfterFirstListing;
+        if (late && listings === 2) {
+          deployments.push({ ...late.deployment, tenantId: TENANT_ID });
+          runsByDeployment[late.deployment.id] = [...late.runIds];
+          Object.assign(eventsByRun, late.events);
+        }
+        return deployments as T;
+      }
       if (method === "POST" && pathname === `${tenant}/workflows/deployments`) {
         const made = { id: "dep_new", tenantId: TENANT_ID, definitionAssetId: ASSET_ID, status: "deployed", createdAt: "2026-02-01T00:00:00.000Z" };
         deployments.push(made);
@@ -106,8 +118,8 @@ function fakeHub(fixture: Fixture) {
   return { transport, gitPush, posts, signalsSent: () => posts.filter((post) => /\/signals$/.test(post.path)).map((post) => post.body as { runId: string; signalName: string; signalId: string; payload: unknown }) };
 }
 
-const ensure = (hub: ReturnType<typeof fakeHub>) =>
-  ensureProjectWorkflow(hub.transport, { canPlaceSidecars: true }, { files: { "workflow.js": "", "actions.js": "", "loops.js": "" } }, hub.gitPush, TENANT_ID, PROJECT_ID, [], {});
+const ensure = (hub: ReturnType<typeof fakeHub>, replacementWaitMs = 0) =>
+  ensureProjectWorkflow(hub.transport, { canPlaceSidecars: true }, { files: { "workflow.js": "", "actions.js": "", "loops.js": "" } }, hub.gitPush, TENANT_ID, PROJECT_ID, [], {}, { replacementWaitMs });
 
 const withAsset = (fixture: Omit<Fixture, "assets">): Fixture => ({ assets: [{ id: ASSET_ID, name: projectWorkflowAssetName(PROJECT_ID) }], ...fixture });
 
@@ -231,6 +243,27 @@ describe("ensureProjectWorkflow", () => {
     );
     expect(await ensure(hub)).toEqual({ deploymentId: "dep_new_live", runId: "run_1" });
     expect(hub.signalsSent().map((sent) => sent.signalId)).toEqual(["dec-2"]);
+  });
+
+  // After a restart the hub replaces a dead deployment on its own, as a new
+  // deployment carrying the run's restored history, within seconds. A
+  // project that deployed its own in that window would have two; waiting
+  // for the replacement first is what keeps it to one.
+  test("waits for the hub's replacement of a dead deployment rather than deploying its own", async () => {
+    const hub = fakeHub(
+      withAsset({
+        deployments: [{ id: "dep_dead", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" }],
+        runsByDeployment: { dep_dead: decidedRun("run_0", [1, 2]).runIds },
+        eventsByRun: decidedRun("run_0", [1, 2]).events,
+        replacementAfterFirstListing: {
+          deployment: { id: "dep_replacement", definitionAssetId: ASSET_ID, status: "running", createdAt: "2026-01-03T00:00:00.000Z" },
+          runIds: decidedRun("run_r", [1, 2]).runIds,
+          events: decidedRun("run_r", [1, 2]).events,
+        },
+      }),
+    );
+    expect(await ensure(hub, 10_000)).toEqual({ deploymentId: "dep_replacement", runId: "run_r" });
+    expect(hub.posts).toEqual([]);
   });
 
   test("deploys afresh when the only deployment has ended and its run never took a decision", async () => {
