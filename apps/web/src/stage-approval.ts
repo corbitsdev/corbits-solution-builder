@@ -63,8 +63,17 @@ export function reviewableArtifact(input: {
       (node) =>
         node.stage === input.stage &&
         node.kind === input.kind &&
-        node.provenance.agentRole !== undefined &&
-        node.supersededByNodeId === null,
+        node.supersededByNodeId === null &&
+        // Every stage but 5 needs `agentRole` stamped to trust a node as
+        // reviewable. Stage 5's reviewable material is a stakeholder
+        // package (`variant` set to the audience name, never null) --
+        // `persistAudiencePackage` now stamps `agentRole` too, but a
+        // project whose packages were saved before that fix landed still
+        // has packages with no `agentRole`. They are still real,
+        // human/agent-authored packages, distinguishable from stage 5's
+        // own chat-reply draft (`variant: null`) by `variant` alone
+        // (CL-8892), so they are accepted here too. Never the chat reply.
+        (node.provenance.agentRole !== undefined || (input.stage === 5 && node.variant !== null)),
     )
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
   if (written) return { status: "found", node: written };

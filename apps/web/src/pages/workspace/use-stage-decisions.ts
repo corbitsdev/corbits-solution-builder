@@ -134,11 +134,21 @@ export function useStageDecisions({
    * in the same artifact write (`sb.target`) so `approve()`'s opening mail
    * can quote it without re-deriving it from the plan.
    */
+  // Stage 5's reviewable material is a stakeholder package
+  // (`persistAudiencePackage`, stamped with `provenance.agentRole` the same
+  // as every other stage's written artifact) -- the stage's own chat reply
+  // is never a fallback draft here, so a stage-5 approve/open-review can
+  // never persist that reply as a nameless package (CL-8892).
+  const latestDraftFor = useCallback(
+    (): unknown => (stage === 8 ? publishedBundle : stage === 5 ? null : reviewMessage),
+    [stage, publishedBundle, reviewMessage],
+  );
+
   const resolveReviewRef = useCallback(async (): Promise<{ artifactId: string; version: number; sha256: string } | null> => {
     if (!reviewMessage || draftKind === null) return null;
     if (stage === 8 && !stage8Evidence?.ready) return null;
     const materials = detail.nodes.filter((node) => node.kind === "source_material").map((node) => node.id);
-    const latestDraft = stage === 8 ? publishedBundle : reviewMessage;
+    const latestDraft = latestDraftFor();
     const reviewable = reviewableArtifact({ nodes: detail.nodes, stage, kind: draftKind, latestDraft });
     if (reviewable.status === "found") {
       return {
@@ -160,7 +170,7 @@ export function useStageDecisions({
     const version = Number(persisted.contentHash.slice(persisted.contentHash.lastIndexOf("@") + 1));
     const sha256 = await digestOf(reviewMessage.body);
     return { artifactId: persisted.artifactId, version, sha256 };
-  }, [reviewMessage, draftKind, detail.nodes, detail.project.id, stage, publishedBundle, chosenTarget, stage8Evidence]);
+  }, [reviewMessage, draftKind, detail.nodes, detail.project.id, stage, chosenTarget, stage8Evidence, latestDraftFor]);
 
   // Stage 5's quorum policy, read fresh off the project's policy right
   // before it is captured onto an `open_review` decision (CL-8870) -- never
@@ -178,7 +188,7 @@ export function useStageDecisions({
     if (stage === 8 && !stage8Evidence?.ready) {
       return { ok: false as const, reason: stage8Evidence?.reason ?? "The build has not published an archive yet." };
     }
-    const latestDraft = stage === 8 ? publishedBundle : reviewMessage;
+    const latestDraft = latestDraftFor();
     const reviewable = reviewableArtifact({ nodes: detail.nodes, stage, kind: draftKind, latestDraft });
     if (reviewable.status === "none") return { ok: false as const, reason: "There is nothing to review yet." };
     try {
@@ -198,7 +208,7 @@ export function useStageDecisions({
     } catch (cause) {
       return { ok: false as const, reason: cause instanceof ApiFailure ? cause.detail.message : String(cause) };
     }
-  }, [workflowView, stage, chosenTarget, reviewMessage, draftKind, stage8Evidence, publishedBundle, detail.nodes, detail.project.id, resolveReviewRef, refreshWorkflow, stage5Policy]);
+  }, [workflowView, stage, chosenTarget, reviewMessage, draftKind, stage8Evidence, detail.nodes, detail.project.id, resolveReviewRef, refreshWorkflow, stage5Policy, latestDraftFor]);
 
   // Opens the review the moment this stage's material is ready rather than
   // at the instant of approval — a review that only opens inside `approve()`
@@ -213,7 +223,7 @@ export function useStageDecisions({
     if (stage === 7 && !chosenTarget) return;
     if (!reviewMessage || draftKind === null) return;
     if (stage === 8 && !stage8Evidence?.ready) return;
-    const latestDraft = stage === 8 ? publishedBundle : reviewMessage;
+    const latestDraft = latestDraftFor();
     const reviewable = reviewableArtifact({ nodes: detail.nodes, stage, kind: draftKind, latestDraft });
     if (reviewable.status === "none") return;
     const key =
@@ -226,7 +236,7 @@ export function useStageDecisions({
       // Left as the sentinel on refusal: a later render (a poll, a reply) retries.
       if (!result.ok) ensuringReviewKeyRef.current = null;
     });
-  }, [workflowView, stage, chosenTarget, reviewMessage, draftKind, detail.nodes, publishedBundle, stage8Evidence, openReviewNow]);
+  }, [workflowView, stage, chosenTarget, reviewMessage, draftKind, detail.nodes, latestDraftFor, stage8Evidence, openReviewNow]);
 
   /**
    * Sends the workflow's `approve` decision for this stage's already-open

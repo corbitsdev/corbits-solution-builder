@@ -1974,7 +1974,10 @@ false,
    * the mail-agent's reply into the artifact the packages list reads, so it
    * never left "No packages yet". Written the same way `persistStageDraft`
    * writes a stage's own draft, stamped with `variant` so it is that
-   * audience's package rather than the stage's single document.
+   * audience's package rather than the stage's single document, and
+   * `provenance.agentRole` the same way every other stage's written
+   * artifact is -- `reviewableArtifact` (`stage-approval.ts`) reads this,
+   * not `producer`, to find stage 5's reviewable material (CL-8892).
    */
   persistAudiencePackage: (projectId: string, audience: string, content: string) =>
     asWorkspaceOwner(async (transport, workspaceTenantId) => {
@@ -1989,7 +1992,7 @@ false,
             variant: audience,
             mediaType: "text/markdown",
             sourceVersionIds: [],
-            provenance: { producer: "agent" as const },
+            provenance: { producer: "agent" as const, agentRole: STAGE_5_PACKAGE_ROLE.id },
           },
         },
       });
