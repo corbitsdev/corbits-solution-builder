@@ -234,9 +234,11 @@ export function StageDocument({
       ],
     }));
     // A turn in flight has no row of its own yet, so the transcript would sit
-    // unchanged after the person hits send. This is the one message the thread
-    // shows that the host has not recorded.
-    if (busy === "draft") {
+    // unchanged after the person hits send. This is the one message the
+    // thread shows that the host has not recorded -- for the send request
+    // itself (`busy === "draft"`) and for the reply it is still awaiting
+    // (`pending`), the same state "Stop generating" is offered for.
+    if (busy === "draft" || pending) {
       // Its time is hidden in CSS: "6s ago" under a turn that has not happened
       // is noise, and the bubble always stamps one.
       list.push({
@@ -247,7 +249,7 @@ export function StageDocument({
       });
     }
     return eventMessages(list, events);
-  }, [turns, busy, events]);
+  }, [turns, busy, pending, events]);
   const eventById = useMemo(() => new Map(events.map((event) => [event.id, event])), [events]);
   // The array's last entry is often a system bookkeeping line ("Review
   // opened", a draft's version) that sorted in after the specialist's real
@@ -389,7 +391,7 @@ export function StageDocument({
             return message.id === "pending" ? (
               <span className="think">
                 {who}
-                <WorkingLabel since={message.createdAt} />
+                <WorkingLabel stage={node.stage as Stage} />
               </span>
             ) : message.role === "agent" && failedTurns.has(message.id) ? (
               <div className="turn-failed" role="alert">

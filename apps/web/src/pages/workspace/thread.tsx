@@ -227,17 +227,7 @@ export const STAGE_VERBS: Record<number, string[]> = {
 };
 
 /** The shimmering "working" word, rotating through the stage's verbs. */
-export function WorkingLabel({
-  stage = null,
-  // Accepted so the document thread's pending row keeps typechecking until its
-  // own convergence passes the stage through. The label itself follows main:
-  // it says what the wait is for, never how long it has been.
-  since = null,
-}: {
-  stage?: number | null;
-  since?: string | null;
-}) {
-  void since;
+export function WorkingLabel({ stage = null }: { stage?: number | null }) {
   const verbs = (stage !== null && stage !== undefined ? STAGE_VERBS[stage] : undefined) ?? ["Writing"];
   const [at, setAt] = useState(0);
   useEffect(() => {
