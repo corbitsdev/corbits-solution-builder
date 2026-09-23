@@ -63,29 +63,34 @@ function pickTopLevelRun(runIds: readonly string[]): string | undefined {
   return [...runIds].sort()[0];
 }
 
-/** A decision as a run received it: the signal to deliver again, verbatim, to a run that has to catch up. */
+/** A decision as a run applied it: the signal to deliver again, verbatim, to a run that has to catch up. */
 type ReceivedDecision = { readonly signalName: string; readonly signalId: string; readonly payload: unknown };
 
-/**
- * Every signal `runId` and its loop iterations received, in the order they
- * were received: iterations by index, events by seq, each signal once. A
- * decision is a signal, so this is the run's decision history, verbatim.
- */
-async function receivedDecisions(
-  workflows: ReturnType<typeof workflowsFor>,
-  deploymentId: string,
-  runId: string,
-): Promise<ReceivedDecision[]> {
-  const runIds = await workflows.runs(deploymentId);
-  const iterations = runIds
+/** The loop iterations of `runId` among `runIds`, by index: the order the loop applied decisions in. */
+function iterationRunIds(runId: string, runIds: readonly string[]): string[] {
+  return runIds
     .filter((id) => id.startsWith(`${runId}__`))
     .map((id) => ({ id, index: Number(id.slice(id.lastIndexOf("__") + 2)) }))
     .filter((entry) => Number.isFinite(entry.index))
     .sort((a, b) => a.index - b.index)
     .map((entry) => entry.id);
+}
+
+/**
+ * Every decision the loop applied to `runId`, in the order it applied them:
+ * the signals its iterations received, iterations by index, events by seq,
+ * each signal once. A signal that reached the top-level run but no
+ * iteration was queued and never applied, so it is not part of the run's
+ * state and not part of its history.
+ */
+async function appliedDecisions(
+  workflows: ReturnType<typeof workflowsFor>,
+  deploymentId: string,
+  runId: string,
+): Promise<ReceivedDecision[]> {
   const received: ReceivedDecision[] = [];
   const seen = new Set<string>();
-  for (const id of [runId, ...iterations]) {
+  for (const id of iterationRunIds(runId, await workflows.runs(deploymentId))) {
     const { events } = await workflows.runEvents(deploymentId, id);
     for (const event of [...events].sort((a, b) => a.seq - b.seq)) {
       if (event.type !== "SignalReceived") continue;
@@ -97,6 +102,8 @@ async function receivedDecisions(
   }
   return received;
 }
+
+const TERMINAL_RUN_EVENTS = new Set(["RunCompleted", "RunFailed", "RunCancelled"]);
 
 type ProjectRunCandidate = { readonly deployment: HubDeployment; readonly runId: string };
 
@@ -148,7 +155,7 @@ async function projectRunState(
   const known = new Set<string>();
   let oldestDead: ProjectRunCandidate | null = null;
   for (const candidate of candidates.filter((entry) => deploymentHasEnded(entry.deployment))) {
-    const decisions = await receivedDecisions(workflows, candidate.deployment.id, candidate.runId);
+    const decisions = await appliedDecisions(workflows, candidate.deployment.id, candidate.runId);
     if (decisions.length === 0) continue;
     oldestDead ??= candidate;
     for (const decision of decisions) {
@@ -160,7 +167,7 @@ async function projectRunState(
   const asRef = (candidate: ProjectRunCandidate): ProjectWorkflowDeployment => ({ deploymentId: candidate.deployment.id, runId: candidate.runId });
   for (const candidate of liveCandidates) {
     if (history.length === 0) return { run: asRef(candidate), live: true, liveCandidates, history };
-    const held = new Set((await receivedDecisions(workflows, candidate.deployment.id, candidate.runId)).map((decision) => decision.signalId));
+    const held = new Set((await appliedDecisions(workflows, candidate.deployment.id, candidate.runId)).map((decision) => decision.signalId));
     if (history.every((decision) => held.has(decision.signalId))) return { run: asRef(candidate), live: true, liveCandidates, history };
   }
   if (oldestDead) return { run: asRef(oldestDead), live: false, liveCandidates, history };
@@ -178,11 +185,14 @@ async function pollUntil<T>(timeoutMs: number, intervalMs: number, read: () => P
 }
 
 /**
- * Brings `target` up to `history`: every decision it has not received is
- * delivered again as the same signal under the same id, in the original
- * order, and the call returns once the run holds them all. The hub treats a
- * byte-identical signal under an id it already holds as a no-op, so a
- * replay interrupted halfway resumes cleanly on the next call.
+ * Brings `target` up to `history`, one decision at a time: the loop takes
+ * one signal per iteration, and signals delivered faster than that race
+ * its log's single writer and fail the run. Each decision the run has not
+ * applied is delivered again as the same signal under the same id, and the
+ * next is not sent until an iteration has applied it. The hub treats a
+ * byte-identical signal under an id it already holds as a no-op, and one it
+ * refuses as a conflict is checked against what the run applied before it
+ * counts as a failure, so a replay interrupted halfway resumes cleanly.
  */
 async function catchUp(
   transport: Transport,
@@ -195,26 +205,31 @@ async function catchUp(
   if (!(await waitForDeploymentDeployed(transport, workspaceTenantId, target.deploymentId))) {
     throw new Error("the project's workflow did not reach deployed, so its history could not be replayed");
   }
-  const started = await pollUntil(120_000, 1_500, async () => {
-    const { events } = await workflows.runEvents(target.deploymentId, target.runId);
-    return events.some((event) => event.type === "RunStarted") ? true : null;
-  });
+  const topLevel = async () => (await workflows.runEvents(target.deploymentId, target.runId)).events;
+  const started = await pollUntil(120_000, 1_500, async () => ((await topLevel()).some((event) => event.type === "RunStarted") ? true : null));
   if (!started) throw new Error("the project's workflow run never started, so its history could not be replayed");
-  const held = new Set((await receivedDecisions(workflows, target.deploymentId, target.runId)).map((decision) => decision.signalId));
+  const applied = async () => new Set((await appliedDecisions(workflows, target.deploymentId, target.runId)).map((decision) => decision.signalId));
+  let held = await applied();
   for (const decision of history) {
     if (held.has(decision.signalId)) continue;
-    await workflows.signal(target.deploymentId, {
-      runId: target.runId,
-      signalName: decision.signalName,
-      signalId: decision.signalId,
-      payload: decision.payload,
+    try {
+      await workflows.signal(target.deploymentId, {
+        runId: target.runId,
+        signalName: decision.signalName,
+        signalId: decision.signalId,
+        payload: decision.payload,
+      });
+    } catch (cause) {
+      if (!(cause instanceof ApiError && cause.status === 409)) throw cause;
+    }
+    const landed = await pollUntil(90_000, 1_500, async () => {
+      held = await applied();
+      if (held.has(decision.signalId)) return true;
+      if ((await topLevel()).some((event) => TERMINAL_RUN_EVENTS.has(event.type))) throw new Error("the project's workflow ended while its history was being replayed");
+      return null;
     });
+    if (!landed) throw new Error(`the project's workflow did not apply decision ${decision.signalId} while catching up`);
   }
-  const caughtUp = await pollUntil(180_000, 1_500, async () => {
-    const now = new Set((await receivedDecisions(workflows, target.deploymentId, target.runId)).map((decision) => decision.signalId));
-    return history.every((decision) => now.has(decision.signalId)) ? true : null;
-  });
-  if (!caughtUp) throw new Error("the project's workflow did not catch up with its history");
 }
 
 /** The bytes a project workflow deploy needs: the compiled
