@@ -8,7 +8,7 @@
  * `approveTool`/`rejectTool` helpers — but inline, on the project's own
  * stage, instead of making the person leave for the queue.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Textarea } from "@corbits/react-ui";
 import { listSpecialistDeployments } from "@solutions-builder/installer";
 import { agentFor } from "@solutions-builder/app/kit";
@@ -26,6 +26,10 @@ import {
 import { parseDeliveryVerification, type DeliveryVerification } from "../../delivery-verification.ts";
 import { Banner, Button, documentName, shortHash } from "../../components.jsx";
 import { Markdown } from "../../markdown.jsx";
+
+/** Same cadence `BuildPanel` polls its own pending approvals at — a manifest
+ *  awaiting review must refresh on its own, not just once at mount. */
+const POLL_INTERVAL_MS = 5_000;
 
 /** The heading the delivery specialist writes for its run instructions, wherever it lands in the reply. */
 const HOW_TO_RUN_HEADING = /^#{1,3}\s*(repo(?:\s+and)?\s+how\s+to\s+run\s+it|how\s+to\s+run(?:\s+it)?)\s*$/im;
@@ -136,13 +140,25 @@ function DeliveryDecision({
   // banner until the next delivery, never the delivery itself.
   const [lastSeenApprovalId, setLastSeenApprovalId] = useState<string | null>(null);
 
+  // A stale in-flight poll must never overwrite what a later call (Accept's
+  // own `load()`, or a newer tick) already found — same shape as the
+  // verification effect below's `cancelled` guard, but as a sequence number
+  // since `load` can be in flight more than once concurrently.
+  const requestSeq = useRef(0);
+  // Mirrors `delivered` for the interval's closure — once the manifest is
+  // delivered there is nothing left to poll for.
+  const deliveredRef = useRef(false);
+
   const load = async () => {
+    if (deliveredRef.current) return;
+    const seq = ++requestSeq.current;
     const transport = createHubTransport();
     try {
       const [approvals, deployments] = await Promise.all([
         pendingApprovals(tenantId, transport),
         listSpecialistDeployments(transport, tenantId, projectId),
       ]);
+      if (seq !== requestSeq.current) return;
       const stage9 = deployments.find((deployment) => deployment.stage === 9);
       // Matched on the deployment's anchor identity, not a nested tool run's
       // own `runId` — see `pending-approvals.ts`'s `deliveryApprovalFor`.
@@ -157,17 +173,29 @@ function DeliveryDecision({
       setPending(null);
       if (lastSeenApprovalId) {
         const resolved = await approvalById(tenantId, lastSeenApprovalId, transport).catch(() => null);
-        setDelivered(resolved && resolved.status === "approved" ? resolved : null);
+        if (seq !== requestSeq.current) return;
+        const isDelivered = resolved !== null && resolved.status === "approved";
+        setDelivered(isDelivered ? resolved : null);
+        deliveredRef.current = isDelivered;
       }
     } catch (cause) {
-      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+      if (seq === requestSeq.current) setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     } finally {
-      setLoaded(true);
+      if (seq === requestSeq.current) setLoaded(true);
     }
   };
 
+  // Polls while a decision is pending, the same cadence every other panel's
+  // pending-approval poll uses — a manifest that only loaded once at mount
+  // never told anyone it had arrived (defect: an empty pane until reload).
+  // Stops once delivered — `load` itself also short-circuits, but skipping
+  // the call here means a pending timer never has to make the round trip.
   useEffect(() => {
     void load();
+    const timer = setInterval(() => {
+      if (!deliveredRef.current) void load();
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenantId, projectId]);
 
@@ -247,6 +275,7 @@ function DeliveryDecision({
       <h1>{documentName("delivery_manifest")}</h1>
       <p className="docmeta">{meta}</p>
       {error ? <Banner tone="error" title={error} /> : null}
+      {!pending && !delivered ? <p className="inline-note">Waiting on {VERIFIER} to submit a delivery for review.</p> : null}
       {summary ? <p>{summary}</p> : null}
       {artifacts.length > 0 ? (
         artifacts.map((artifact, index) => (
