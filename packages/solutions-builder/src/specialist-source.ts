@@ -60,6 +60,23 @@ export const BUILD_STAGE = 8;
 /** The stage whose rounds write one package per stakeholder, each behind its own gate. */
 export const PACKAGE_STAGE = 5;
 
+/** Mirrors `installer/src/specialist-deploy.ts`'s `DEFAULT_ROLE_KEY` (kept as
+ *  its own literal here rather than imported, since `packages/installer`
+ *  depends on this package and not the other way around). Stage 5 deploys
+ *  under this key for two different reasons: the shared specialist
+ *  `use-opening-dispatch.ts` auto-mails the previous stage's approved draft
+ *  to (no audience named — CL-8873), and the per-audience specialists
+ *  (`package-<index>`) `AudiencePackages`'s "Write it" deploys and mails one
+ *  stakeholder at a time. Only the latter should carry `render_deck`: asked
+ *  to write every audience's package with no audience named, the primary
+ *  deployment takes the prompt's "for each audience" literally and tries to
+ *  render every stakeholder's deck, sequentially, in the one turn that has
+ *  to reply before `waitForRunTerminalOrPark`'s fixed backstop -- each deck a
+ *  real render plus its base64 PowerPoint bytes back in context. That turn
+ *  never finishes, the review it was meant to open never opens, and nothing
+ *  past stage 4 can be approved. */
+const PRIMARY_ROLE_KEY = "primary";
+
 /** The stage whose specialist checks a delivery manifest. */
 export const DELIVERY_STAGE = 9;
 
@@ -175,6 +192,17 @@ function audienceSection(audiences: readonly { readonly name: string; readonly r
   return `## Audiences\n\nWrite one package per audience below, in order.\n\n${lines.join("\n")}`;
 }
 
+/** CL-8873: overrides the kit role's "call render_deck ... do not skip it"
+ *  instruction for the one deployment that has no `render_deck` tool to call
+ *  (see `PRIMARY_ROLE_KEY`'s doc comment). Without this the model either
+ *  stalls trying anyway or apologises for a tool it was told exists. */
+const PRIMARY_PACKAGE_DEPLOYMENT_NOTE = `## This reply carries no deck tool
+
+Write every audience's package as markdown only. You have no \`render_deck\`
+tool here and must not attempt to call it -- ignore that instruction above.
+Each stakeholder's slides render separately, on demand, from the package you
+write, when someone asks for that one audience by name.`;
+
 /**
  * The entry module a stage specialist's workflow asset ships, as source: a
  * single-step, mail-triggered, unbounded-turn agent with `drainBehavior:
@@ -186,7 +214,7 @@ function audienceSection(audiences: readonly { readonly name: string; readonly r
  * carries none.
  */
 export function specialistEntrySource(options: SpecialistSourceOptions): string {
-  const { stage, source, audiences, projectId, assetName, role, artifactTools = false } = options;
+  const { stage, source, audiences, projectId, assetName, role, roleKey, artifactTools = false } = options;
   const workflowId = specialistWorkflowId(stage);
   const triggerAddress = `${workflowId}@solutions-builder.local`;
   const kind = STAGE_ARTIFACT_KIND[stage];
@@ -199,8 +227,13 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
   // rule telling the model to call `artifact_create` for its stage document.
   const isBuildStage = stage === BUILD_STAGE;
 
+  // CL-8873: `render_deck` rides only on a per-audience deployment (see
+  // `PRIMARY_ROLE_KEY`'s doc comment) -- the primary deployment writes the
+  // packages' text and nothing else, so its one turn can actually finish.
+  const isPrimaryPackageDeployment = stage === PACKAGE_STAGE && roleKey === PRIMARY_ROLE_KEY;
+
   const stageToolImports =
-    stage === PACKAGE_STAGE
+    stage === PACKAGE_STAGE && !isPrimaryPackageDeployment
       ? `import { deck } from ${JSON.stringify("@solutions-builder/tools-deck/sidecar-bundle")};\n`
       : isBuildStage
         ? `import { posix } from ${JSON.stringify("@intx/tools-posix/sidecar-bundle")};\nimport { publishWorkspaceTool } from ${JSON.stringify("@solutions-builder/tools-delivery/publish-workspace")};\nconst publishWorkspace = publishWorkspaceTool(${JSON.stringify(projectId)});\n`
@@ -208,7 +241,7 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
           ? `import { delivery, deliver } from ${JSON.stringify("@solutions-builder/tools-delivery/sidecar-bundle")};\n`
           : "";
   const stageTools =
-    stage === PACKAGE_STAGE
+    stage === PACKAGE_STAGE && !isPrimaryPackageDeployment
       ? "deck"
       : isBuildStage
         ? "posix, publishWorkspace"
@@ -240,6 +273,9 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
   }
   if (stage === PACKAGE_STAGE && audiences && audiences.length > 0) {
     systemPrompt = `${systemPrompt}\n\n${audienceSection(audiences)}`;
+  }
+  if (isPrimaryPackageDeployment) {
+    systemPrompt = `${systemPrompt}\n\n${PRIMARY_PACKAGE_DEPLOYMENT_NOTE}`;
   }
 
   // `package` must match the consumer identity the sidecar's source-ref
