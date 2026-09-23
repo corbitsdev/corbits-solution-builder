@@ -462,7 +462,13 @@ export function BuildPanel({
       pendingApprovals(tenantId, transport).catch(() => [] as readonly PendingApproval[]),
       runEvents(tenantId, runId),
     ]);
-    setApprovals(nextApprovals.filter((approval) => approval.runId === runId).slice());
+    // Matched on `anchorRunId`, not `runId`: `runId` is the exact run a
+    // nested tool call executed on, which can differ from the deployment's
+    // own anchor run — `pending-approvals.ts`'s own doc comment on
+    // `actionableApprovals` says so. `runId` here is this deployment's id
+    // (the anchor), so matching on it directly would silently drop an
+    // approval raised by a nested run under it.
+    setApprovals(nextApprovals.filter((approval) => approval.anchorRunId === runId).slice());
     setEvents(nextEvents);
   }, [runId, tenantId]);
 
