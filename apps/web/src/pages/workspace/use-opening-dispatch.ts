@@ -173,17 +173,25 @@ export function useOpeningDispatch({
 
     if (stage === 1) {
       if (opening?.body) dispatchOpening(opening.body);
-    } else if (pendingOpening?.stage === stage) {
-      dispatchOpening(pendingOpening.body);
-    } else if (stage === 9) {
-      const review = workflowView?.reviews[8];
-      const archiveRef = review?.status === "approved" ? { artifactId: review.artifactId, version: review.version } : null;
-      void composeStage9Opening({ tenantId, projectId: detail.project.id, nodes: detail.nodes, archiveRef }).then(dispatchOpening);
     } else if (stage === 6 && (!workflowView || workflowView.requirements.length === 0)) {
       // The Architect must not draft before `mint_requirements` has run for
       // this project (CL-8862) — `Stage6Panel` mints them off the
       // requirements-author's accepted document; this effect re-fires once
       // `workflowView.requirements` lands, since that view object changes.
+      // Ahead of `pendingOpening` in this chain on purpose: the in-session
+      // hand-off from `approve()` must wait on the same gate the reload path
+      // does, or the Architect's opening goes out before the ids exist to
+      // put in it.
+    } else if (pendingOpening?.stage === stage) {
+      const body =
+        stage === 6 && workflowView
+          ? `${renderRequirementsBlock(workflowView.requirements)}\n\n${pendingOpening.body}`
+          : pendingOpening.body;
+      dispatchOpening(body);
+    } else if (stage === 9) {
+      const review = workflowView?.reviews[8];
+      const archiveRef = review?.status === "approved" ? { artifactId: review.artifactId, version: review.version } : null;
+      void composeStage9Opening({ tenantId, projectId: detail.project.id, nodes: detail.nodes, archiveRef }).then(dispatchOpening);
     } else if (previousApproved) {
       void api
         .artifactContent(tenantId, previousApproved.artifactId)
