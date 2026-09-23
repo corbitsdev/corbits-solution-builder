@@ -51,6 +51,8 @@ import { loadProjectWorkflowView, type ProjectWorkflowView } from "./project-wor
 import { cacheProjectWorkflowRef, resolveProjectWorkflowRef } from "./project-workflow-ref.ts";
 import { parseBundle } from "./project-export.ts";
 import { importProject as importProjectBundle } from "./project-import.ts";
+import { importLegacyProject, isLegacyBundle, parseLegacyBundle } from "./legacy-import.ts";
+import { replayAdoption } from "./adoption-replay.ts";
 import { MATERIAL_KIND, MATERIAL_READING_KIND } from "@solutions-builder/app/artifacts";
 import { readMaterial } from "./material-reading.ts";
 import type { DesignFeedbackDisposition, DesignFeedbackEntry as DesignFeedbackGraphEntry } from "@solutions-builder/app/artifact-graph";
@@ -322,6 +324,20 @@ export type ProjectInfo = {
   /** Decisions committed in the project workflow view -- no spend, no lifecycle run to fold from any more. */
   decisions: { approved: number; refused: number; sentBack: number };
   lastActivityAt: string;
+};
+
+/** What `api.importProject` reports: the new project, what was written, and,
+ *  for a bundle from `main`, where its old ledger was landed. */
+export type ImportOutcome = {
+  readonly projectId: string;
+  readonly artifacts: number;
+  readonly conversations: number;
+  /** Version 1 bundles only: versions written across every artifact. */
+  readonly versions?: number;
+  /** Version 1 bundles only: the stage the workflow reports after the
+   *  replay (null when there was nothing to replay or it never started),
+   *  why the replay stopped short, and what the plan could not do. */
+  readonly landing?: { readonly landed: number | null; readonly stopped: string | null; readonly notes: readonly string[] };
 };
 
 export type ArtifactNode = {
@@ -1144,11 +1160,43 @@ export const api = {
    * every bundled artifact's `sb` metadata to the new project id. The new
    * project's own workflow starts fresh at stage 1 — no approval is forged
    * from the bundle's history.
+   *
+   * A version 1 bundle, exported from `main`, carries every artifact
+   * version and the ledger the project's position lived in
+   * (`legacy-import.ts`). Its artifacts come in with all their versions,
+   * and once the new project's workflow is running the old ledger is
+   * replayed on it as real decisions (`adoption-replay.ts`), so the project
+   * lands where `main` left it, through stage 6. A replay that stops short
+   * is reported as `landing.stopped`, not thrown: the project is imported
+   * either way.
    */
-  importProject: (raw: unknown) =>
-    asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const bundle = parseBundle(raw);
-      return importProjectBundle(bundle, {
+  importProject: async (raw: unknown): Promise<ImportOutcome> => {
+    if (!isLegacyBundle(raw)) {
+      return asWorkspaceOwner(async (transport, workspaceTenantId) => {
+        const bundle = parseBundle(raw);
+        return importProjectBundle(bundle, {
+          createProject: async ({ title, policy }) => {
+            const { project } = await installerCreateProject(transport, workspaceTenantId, {
+              title,
+              slug: projectSlug(),
+              policy: policy as ProjectPolicy,
+            });
+            return { projectId: project.id };
+          },
+          createArtifact: async ({ title, content, sb }) => {
+            const artifact = await installerCreateArtifact(transport, workspaceTenantId, {
+              title,
+              content,
+              metadata: { sb },
+            });
+            return { id: artifact.id };
+          },
+        });
+      });
+    }
+    const imported = await asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      const bundle = parseLegacyBundle(raw);
+      return importLegacyProject(bundle, {
         createProject: async ({ title, policy }) => {
           const { project } = await installerCreateProject(transport, workspaceTenantId, {
             title,
@@ -1158,15 +1206,30 @@ export const api = {
           return { projectId: project.id };
         },
         createArtifact: async ({ title, content, sb }) => {
-          const artifact = await installerCreateArtifact(transport, workspaceTenantId, {
-            title,
-            content,
-            metadata: { sb },
-          });
-          return { id: artifact.id };
+          const artifact = await installerCreateArtifact(transport, workspaceTenantId, { title, content, metadata: { sb } });
+          return { id: artifact.id, version: artifact.version };
+        },
+        reviseArtifact: async (artifactId, { title, content, sb }) => {
+          const artifact = await installerReviseArtifact(transport, workspaceTenantId, artifactId, { title, content, metadata: { sb } });
+          return { version: artifact.version };
         },
       });
-    }),
+    });
+    const { plan } = imported;
+    if (plan.steps.length === 0) {
+      return { ...imported, landing: { landed: null, stopped: null, notes: plan.notes } };
+    }
+    const landing = await api
+      .ensureProjectWorkflow(imported.projectId)
+      .then(() =>
+        replayAdoption(
+          { view: (projectId) => api.projectWorkflowView(projectId), decide: (projectId, decision) => api.decide(projectId, decision), now: () => new Date().toISOString() },
+          plan,
+        ),
+      )
+      .catch((cause: unknown) => ({ landed: null, stopped: cause instanceof Error ? cause.message : String(cause) }));
+    return { ...imported, landing: { ...landing, notes: plan.notes } };
+  },
   /**
    * Hands files over with the problem; each becomes a `source_material`
    * artifact version the specialists read. Text/JSON stays on the plain
