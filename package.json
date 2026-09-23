@@ -28,6 +28,7 @@
     "assets:pack-registry": "bun scripts/pack-registry-asset.ts",
     "assets:pack-closure": "bun scripts/pack-closure-static.ts",
     "assets:pack-project-workflow": "bun scripts/project-workflow-pack.ts",
+    "adopt:legacy-projects": "bun scripts/adopt-legacy-projects.ts",
     "postinstall": "bun run vendor:build",
     "test": "bun test apps/hub/src packages/embed-hub/src packages/embedded-host/src packages/installer/src packages/keychain/src packages/solutions-builder/src packages/tools-delivery/src apps/web/src scripts/desktop-launch-mode.test.ts scripts/interface-build.test.ts scripts/closure-pack.test.ts scripts/lib/tarball.test.ts",
     "check:build": "bun run ui:build"
