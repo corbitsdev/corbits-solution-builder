@@ -13,6 +13,7 @@ import {
   deploymentIsLive,
   ensureWorkflowAsset,
   pushWorkflowSourceTree,
+  waitForDeploymentDeployed,
   waitForPushVisible,
   type SidecarCapability,
   type WorkflowGitPush,
@@ -62,54 +63,158 @@ function pickTopLevelRun(runIds: readonly string[]): string | undefined {
   return [...runIds].sort()[0];
 }
 
-/**
- * The run this project's workflow already has, if any -- scanned across
- * every deployment ever made for its asset, oldest `createdAt` first, not
- * just the one `pickDeployment` would currently pick as live. A host that
- * gets killed outright (its sidecars die with it) can leave the hub
- * reporting the project's original deployment dead for a while, or even
- * permanently failed, well before or without its own replacement recovery
- * bringing it back; that is never a reason to treat the project as having no
- * run yet. Reusing the oldest deployment that actually has a triggered run
- * is what keeps every caller -- `ensureProjectWorkflow` deciding whether to
- * deploy, and `findProjectWorkflow` reading the current stage -- converged
- * on the one run a project has ever triggered, even across a past redeploy.
- */
-async function existingProjectRun(
-  workflows: ReturnType<typeof workflowsFor>,
-  deployments: readonly HubDeployment[],
-): Promise<ProjectWorkflowDeployment | null> {
-  const byAge = [...deployments].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  for (const candidate of byAge) {
-    const runIds = await workflows.runs(candidate.id);
-    const runId = pickTopLevelRun(topLevelRunIds(runIds));
-    if (!runId) continue;
-    // A deployment the hub has ended for good -- failed, released -- is one
-    // it will never place again, so a run parked there can never take
-    // another decision. When that run never took one either, its state is
-    // the initial state and a redeploy loses nothing; treating it as the
-    // project's run would hold the project at "did not finish starting up"
-    // forever. A run that did take decisions is still the project's, dead
-    // deployment or not: recovering it is the hub's job, and reading a
-    // fresh run instead is how a project used to reset to stage 1.
-    if (deploymentHasEnded(candidate) && !(await tookADecision(workflows, candidate.id, runId, runIds))) continue;
-    return { deploymentId: candidate.id, runId };
-  }
-  return null;
-}
+/** A decision as a run received it: the signal to deliver again, verbatim, to a run that has to catch up. */
+type ReceivedDecision = { readonly signalName: string; readonly signalId: string; readonly payload: unknown };
 
-/** Whether `runId` or any of its loop iterations ever received a signal: every decision arrives as one. */
-async function tookADecision(
+/**
+ * Every signal `runId` and its loop iterations received, in the order they
+ * were received: iterations by index, events by seq, each signal once. A
+ * decision is a signal, so this is the run's decision history, verbatim.
+ */
+async function receivedDecisions(
   workflows: ReturnType<typeof workflowsFor>,
   deploymentId: string,
   runId: string,
-  runIds: readonly string[],
-): Promise<boolean> {
-  for (const id of runIds.filter((entry) => entry === runId || entry.startsWith(`${runId}__`))) {
+): Promise<ReceivedDecision[]> {
+  const runIds = await workflows.runs(deploymentId);
+  const iterations = runIds
+    .filter((id) => id.startsWith(`${runId}__`))
+    .map((id) => ({ id, index: Number(id.slice(id.lastIndexOf("__") + 2)) }))
+    .filter((entry) => Number.isFinite(entry.index))
+    .sort((a, b) => a.index - b.index)
+    .map((entry) => entry.id);
+  const received: ReceivedDecision[] = [];
+  const seen = new Set<string>();
+  for (const id of [runId, ...iterations]) {
     const { events } = await workflows.runEvents(deploymentId, id);
-    if (events.some((event) => event.type === "SignalReceived")) return true;
+    for (const event of [...events].sort((a, b) => a.seq - b.seq)) {
+      if (event.type !== "SignalReceived") continue;
+      const { signalName, signalId, payload } = event.body;
+      if (typeof signalName !== "string" || typeof signalId !== "string" || seen.has(signalId)) continue;
+      seen.add(signalId);
+      received.push({ signalName, signalId, payload });
+    }
   }
-  return false;
+  return received;
+}
+
+type ProjectRunCandidate = { readonly deployment: HubDeployment; readonly runId: string };
+
+/** Every deployment that has a top-level run, oldest first, with the run every caller picks for it. */
+async function candidatesWithRuns(
+  workflows: ReturnType<typeof workflowsFor>,
+  deployments: readonly HubDeployment[],
+): Promise<ProjectRunCandidate[]> {
+  const byAge = [...deployments].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const candidates: ProjectRunCandidate[] = [];
+  for (const deployment of byAge) {
+    const runId = pickTopLevelRun(topLevelRunIds(await workflows.runs(deployment.id)));
+    if (runId) candidates.push({ deployment, runId });
+  }
+  return candidates;
+}
+
+type ProjectRunState = {
+  /** The run every reader converges on right now, or null when nothing holds the project's state. */
+  readonly run: ProjectWorkflowDeployment | null;
+  /** Whether `run` is on a deployment the hub can still place: false means it needs reviving. */
+  readonly live: boolean;
+  /** The live deployments with a run, oldest first. */
+  readonly liveCandidates: readonly ProjectRunCandidate[];
+  /** Every decision the dead deployments' runs took, in order, each once: what a live run must hold to be the project's. */
+  readonly history: readonly ReceivedDecision[];
+};
+
+/**
+ * Where a project's run is, across every deployment ever made for it.
+ *
+ * A host that gets killed outright, or stopped at all, leaves the hub
+ * reporting the project's deployment ended -- failed, released -- and an
+ * ended deployment is one the hub never places, fires or signals again.
+ * The run parked there still holds the project's state, so it is still the
+ * project's run until a live run has caught up with it: a live deployment
+ * wins once it has received every decision the dead ones took. Reading a
+ * live run that has not caught up is how a restart used to reset a project
+ * to stage 1. A dead deployment whose run never took a decision holds
+ * nothing and is passed over.
+ */
+async function projectRunState(
+  workflows: ReturnType<typeof workflowsFor>,
+  deployments: readonly HubDeployment[],
+): Promise<ProjectRunState> {
+  const candidates = await candidatesWithRuns(workflows, deployments);
+  const liveCandidates = candidates.filter((candidate) => !deploymentHasEnded(candidate.deployment));
+  const history: ReceivedDecision[] = [];
+  const known = new Set<string>();
+  let oldestDead: ProjectRunCandidate | null = null;
+  for (const candidate of candidates.filter((entry) => deploymentHasEnded(entry.deployment))) {
+    const decisions = await receivedDecisions(workflows, candidate.deployment.id, candidate.runId);
+    if (decisions.length === 0) continue;
+    oldestDead ??= candidate;
+    for (const decision of decisions) {
+      if (known.has(decision.signalId)) continue;
+      known.add(decision.signalId);
+      history.push(decision);
+    }
+  }
+  const asRef = (candidate: ProjectRunCandidate): ProjectWorkflowDeployment => ({ deploymentId: candidate.deployment.id, runId: candidate.runId });
+  for (const candidate of liveCandidates) {
+    if (history.length === 0) return { run: asRef(candidate), live: true, liveCandidates, history };
+    const held = new Set((await receivedDecisions(workflows, candidate.deployment.id, candidate.runId)).map((decision) => decision.signalId));
+    if (history.every((decision) => held.has(decision.signalId))) return { run: asRef(candidate), live: true, liveCandidates, history };
+  }
+  if (oldestDead) return { run: asRef(oldestDead), live: false, liveCandidates, history };
+  return { run: null, live: false, liveCandidates, history };
+}
+
+async function pollUntil<T>(timeoutMs: number, intervalMs: number, read: () => Promise<T | null>): Promise<T | null> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const found = await read();
+    if (found !== null) return found;
+    if (Date.now() >= deadline) return null;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+}
+
+/**
+ * Brings `target` up to `history`: every decision it has not received is
+ * delivered again as the same signal under the same id, in the original
+ * order, and the call returns once the run holds them all. The hub treats a
+ * byte-identical signal under an id it already holds as a no-op, so a
+ * replay interrupted halfway resumes cleanly on the next call.
+ */
+async function catchUp(
+  transport: Transport,
+  workspaceTenantId: string,
+  target: ProjectWorkflowDeployment,
+  history: readonly ReceivedDecision[],
+): Promise<void> {
+  if (history.length === 0) return;
+  const workflows = workflowsFor(transport, workspaceTenantId);
+  if (!(await waitForDeploymentDeployed(transport, workspaceTenantId, target.deploymentId))) {
+    throw new Error("the project's workflow did not reach deployed, so its history could not be replayed");
+  }
+  const started = await pollUntil(120_000, 1_500, async () => {
+    const { events } = await workflows.runEvents(target.deploymentId, target.runId);
+    return events.some((event) => event.type === "RunStarted") ? true : null;
+  });
+  if (!started) throw new Error("the project's workflow run never started, so its history could not be replayed");
+  const held = new Set((await receivedDecisions(workflows, target.deploymentId, target.runId)).map((decision) => decision.signalId));
+  for (const decision of history) {
+    if (held.has(decision.signalId)) continue;
+    await workflows.signal(target.deploymentId, {
+      runId: target.runId,
+      signalName: decision.signalName,
+      signalId: decision.signalId,
+      payload: decision.payload,
+    });
+  }
+  const caughtUp = await pollUntil(180_000, 1_500, async () => {
+    const now = new Set((await receivedDecisions(workflows, target.deploymentId, target.runId)).map((decision) => decision.signalId));
+    return history.every((decision) => now.has(decision.signalId)) ? true : null;
+  });
+  if (!caughtUp) throw new Error("the project's workflow did not catch up with its history");
 }
 
 /** The bytes a project workflow deploy needs: the compiled
@@ -179,11 +284,16 @@ async function ensureProjectWorkflowOnce(
     deployments.filter((deployment) => deployment.definitionAssetId === assetId);
 
   const existingDeployments = matching(await workflows.deployments());
-
-  const existing = await existingProjectRun(workflows, existingDeployments);
-  if (existing) return existing;
-
-  let deployment = pickDeployment(existingDeployments);
+  const state = await projectRunState(workflows, existingDeployments);
+  if (state.run && state.live) return state.run;
+  // A live run that has not caught up, or none: the project's history (if
+  // any) is replayed onto the oldest live run, or onto a fresh one.
+  if (state.liveCandidates[0]) {
+    const target = { deploymentId: state.liveCandidates[0].deployment.id, runId: state.liveCandidates[0].runId };
+    await catchUp(transport, workspaceTenantId, target, state.history);
+    return target;
+  }
+  let deployment = pickDeployment(existingDeployments.filter((entry) => !deploymentHasEnded(entry)));
   if (!deployment || !(await deploymentIsLive(transport, workspaceTenantId, deployment.id))) {
     const rendered = { ...renderProjectWorkflowSource(assetName, source), ...vendoredWorkflowMemberFiles };
     const digestFile = treeDigestPath(rendered);
@@ -230,12 +340,16 @@ async function ensureProjectWorkflowOnce(
   // re-list so every caller settles on the same (earliest) run id.
   const existingRuns = topLevelRunIds(await workflows.runs(deployment.id));
   const existingRun = pickTopLevelRun(existingRuns);
-  if (existingRun) return { deploymentId: deployment.id, runId: existingRun };
-
-  const payload = { projectId, stages };
-  const fired = await workflows.trigger(deployment.id, { content: JSON.stringify(payload) });
-  const afterTrigger = topLevelRunIds(await workflows.runs(deployment.id));
-  return { deploymentId: deployment.id, runId: pickTopLevelRun(afterTrigger) ?? fired.runId };
+  const target = existingRun
+    ? { deploymentId: deployment.id, runId: existingRun }
+    : await (async () => {
+        const payload = { projectId, stages };
+        const fired = await workflows.trigger(deployment.id, { content: JSON.stringify(payload) });
+        const afterTrigger = topLevelRunIds(await workflows.runs(deployment.id));
+        return { deploymentId: deployment.id, runId: pickTopLevelRun(afterTrigger) ?? fired.runId };
+      })();
+  await catchUp(transport, workspaceTenantId, target, state.history);
+  return target;
 }
 
 /**
@@ -287,5 +401,5 @@ export async function findProjectWorkflow(
 
   const workflows = workflowsFor(transport, workspaceTenantId);
   const deployments = (await workflows.deployments()).filter((entry) => entry.definitionAssetId === asset.id);
-  return existingProjectRun(workflows, deployments);
+  return (await projectRunState(workflows, deployments)).run;
 }

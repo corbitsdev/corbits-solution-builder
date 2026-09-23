@@ -6,198 +6,218 @@ const TENANT_ID = "tnt_1";
 const PROJECT_ID = "proj_1";
 const ASSET_ID = "asset_1";
 
+type Event = { seq: number; type: string; body: Record<string, unknown> };
 type Fixture = {
   assets?: { id: string; name: string }[];
   deployments?: { id: string; definitionAssetId: string; status: string; createdAt: string }[];
   runsByDeployment?: Record<string, string[]>;
   /** Each run's event log, by run id; a run left out has an empty log. */
-  eventsByRun?: Record<string, { seq: number; type: string; body: Record<string, unknown> }[]>;
+  eventsByRun?: Record<string, Event[]>;
 };
 
-const DECIDED = [{ seq: 1, type: "RunStarted", body: {} }, { seq: 2, type: "SignalReceived", body: { signalName: "project.decision" } }];
-const PARKED = [{ seq: 1, type: "RunStarted", body: {} }, { seq: 2, type: "SignalAwaited", body: { signalName: "project.decision" } }];
+const decision = (n: number): Event => ({
+  seq: n + 1,
+  type: "SignalReceived",
+  body: { signalName: "project.decision", signalId: `dec-${String(n)}`, payload: { decision: { decisionId: `dec-${String(n)}`, kind: "approve", stage: n } } },
+});
+const STARTED: Event = { seq: 1, type: "RunStarted", body: {} };
+const PARKED: Event[] = [STARTED, { seq: 2, type: "SignalAwaited", body: { signalName: "project.decision" } }];
+const DECIDED: Event[] = [STARTED, decision(1), decision(2)];
 
-function fakeTransport(fixture: Fixture): Transport {
-  return {
-    async fetch<T>(method: string, path: string): Promise<T> {
-      const [pathname] = path.split("?");
-      if (method === "GET" && pathname === `/api/tenants/${TENANT_ID}`) {
-        return { id: TENANT_ID } as T;
-      }
-      if (method === "GET" && pathname === `/api/tenants/${TENANT_ID}/assets`) {
+/**
+ * A hub with just enough state to be deployed to: `POST /deployments`
+ * makes `dep_new`, a trigger makes `run_new` (started), and a signal lands
+ * on the run it names as a `SignalReceived` event, the way the real hub's
+ * event log would show it once the sidecar took it. Every POST is logged.
+ */
+function fakeHub(fixture: Fixture) {
+  const deployments = (fixture.deployments ?? []).map((entry) => ({ ...entry, tenantId: TENANT_ID }));
+  const runsByDeployment: Record<string, string[]> = { ...fixture.runsByDeployment };
+  const eventsByRun: Record<string, Event[]> = Object.fromEntries(Object.entries(fixture.eventsByRun ?? {}).map(([id, events]) => [id, [...events]]));
+  const posts: { path: string; body: unknown }[] = [];
+  let pushedTree: Record<string, string> = {};
+  const transport: Transport = {
+    async fetch<T>(method: string, path: string, body?: unknown): Promise<T> {
+      const [pathname, query] = path.split("?");
+      const tenant = `/api/tenants/${TENANT_ID}`;
+      if (method === "POST") posts.push({ path: pathname!, body });
+      if (method === "GET" && pathname === tenant) return { id: TENANT_ID } as T;
+      if (method === "GET" && pathname === `${tenant}/assets`) {
         return (fixture.assets ?? []).map((asset) => ({ ...asset, tenantId: TENANT_ID, kind: "workflow" })) as T;
       }
-      if (method === "GET" && pathname === `/api/tenants/${TENANT_ID}/workflows/deployments`) {
-        return (fixture.deployments ?? []).map((entry) => ({ ...entry, tenantId: TENANT_ID })) as T;
+      if (method === "GET" && pathname === `${tenant}/workflows/deployments`) return deployments as T;
+      if (method === "POST" && pathname === `${tenant}/workflows/deployments`) {
+        const made = { id: "dep_new", tenantId: TENANT_ID, definitionAssetId: ASSET_ID, status: "deployed", createdAt: "2026-02-01T00:00:00.000Z" };
+        deployments.push(made);
+        runsByDeployment.dep_new = [];
+        return made as T;
       }
-      const runsMatch = /^\/api\/tenants\/[^/]+\/workflows\/([^/]+)\/runs$/.exec(pathname ?? "");
-      if (method === "GET" && runsMatch) {
-        return { runIds: fixture.runsByDeployment?.[runsMatch[1]!] ?? [] } as T;
+      if (method === "GET" && pathname === `${tenant}/catalog/offerings`) return { data: [{ id: "off_1", priority: 0, disabled: false }], nextCursor: null } as T;
+      if (method === "POST" && /git-tokens$/.test(pathname!)) return { id: "gtk_1", secret: "git-token", expiresAt: "2099-01-01T00:00:00.000Z" } as T;
+      if (method === "DELETE" && /git-tokens\//.test(pathname!)) return undefined as T;
+      if (method === "GET" && pathname === `${tenant}/assets/${ASSET_ID}/blob`) {
+        const wanted = new URLSearchParams(query).get("path") ?? "";
+        const content = pushedTree[wanted];
+        if (content === undefined) throw Object.assign(new Error("not found"), { status: 404 });
+        return { content: btoa(content) } as T;
       }
-      const eventsMatch = /^\/api\/tenants\/[^/]+\/workflows\/[^/]+\/runs\/([^/]+)\/events$/.exec(pathname ?? "");
-      if (method === "GET" && eventsMatch) {
-        return { runId: eventsMatch[1], events: fixture.eventsByRun?.[eventsMatch[1]!] ?? [] } as T;
+      const runs = /^\/api\/tenants\/[^/]+\/workflows\/([^/]+)\/runs$/.exec(pathname!);
+      if (method === "GET" && runs) return { runIds: runsByDeployment[runs[1]!] ?? [] } as T;
+      const events = /^\/api\/tenants\/[^/]+\/workflows\/[^/]+\/runs\/([^/]+)\/events$/.exec(pathname!);
+      if (method === "GET" && events) return { runId: events[1], events: eventsByRun[events[1]!] ?? [] } as T;
+      const trigger = /^\/api\/tenants\/[^/]+\/workflows\/([^/]+)\/mail$/.exec(pathname!);
+      if (method === "POST" && trigger) {
+        runsByDeployment[trigger[1]!] = [...(runsByDeployment[trigger[1]!] ?? []), "run_new"];
+        eventsByRun.run_new = [STARTED];
+        return { runId: "run_new", address: "run_new@hub", messageId: "msg_1" } as T;
       }
-      if (method === "POST" && /git-tokens/.test(pathname ?? "")) {
-        return { id: "gtk_1", secret: "git-token", expiresAt: "2099-01-01T00:00:00.000Z" } as T;
-      }
-      if (method === "DELETE" && /git-tokens/.test(pathname ?? "")) {
-        return undefined as T; // the push revokes its token on every exit
+      const signal = /^\/api\/tenants\/[^/]+\/workflows\/([^/]+)\/signals$/.exec(pathname!);
+      if (method === "POST" && signal) {
+        const input = body as { runId: string; signalName: string; signalId: string; payload: unknown };
+        const log = (eventsByRun[input.runId] ??= []);
+        log.push({ seq: log.length + 1, type: "SignalReceived", body: { signalName: input.signalName, signalId: input.signalId, payload: input.payload } });
+        return undefined as T;
       }
       throw new Error(`unexpected ${method} ${path}`);
     },
   } as Transport;
+  const gitPush = async ({ tree }: { tree: Readonly<Record<string, string>> }) => {
+    pushedTree = { ...tree };
+    return "commit_1";
+  };
+  return { transport, gitPush, posts, signalsSent: () => posts.filter((post) => /\/signals$/.test(post.path)).map((post) => post.body as { runId: string; signalName: string; signalId: string; payload: unknown }) };
 }
+
+const ensure = (hub: ReturnType<typeof fakeHub>) =>
+  ensureProjectWorkflow(hub.transport, { canPlaceSidecars: true }, { files: { "workflow.js": "", "actions.js": "", "loops.js": "" } }, hub.gitPush, TENANT_ID, PROJECT_ID, [], {});
+
+const withAsset = (fixture: Omit<Fixture, "assets">): Fixture => ({ assets: [{ id: ASSET_ID, name: projectWorkflowAssetName(PROJECT_ID) }], ...fixture });
 
 describe("findProjectWorkflow", () => {
   test("no asset yet -> null", async () => {
-    const transport = fakeTransport({});
-    expect(await findProjectWorkflow(transport, TENANT_ID, PROJECT_ID)).toBeNull();
+    expect(await findProjectWorkflow(fakeHub({}).transport, TENANT_ID, PROJECT_ID)).toBeNull();
   });
 
   test("asset exists but no deployment matches it -> null", async () => {
-    const transport = fakeTransport({
-      assets: [{ id: ASSET_ID, name: projectWorkflowAssetName(PROJECT_ID) }],
-      deployments: [{ id: "dep_other", definitionAssetId: "asset_other", status: "active", createdAt: "2026-01-01T00:00:00.000Z" }],
-    });
-    expect(await findProjectWorkflow(transport, TENANT_ID, PROJECT_ID)).toBeNull();
+    const hub = fakeHub(withAsset({ deployments: [{ id: "dep_other", definitionAssetId: "asset_other", status: "active", createdAt: "2026-01-01T00:00:00.000Z" }] }));
+    expect(await findProjectWorkflow(hub.transport, TENANT_ID, PROJECT_ID)).toBeNull();
   });
 
   test("deployment exists but no top-level run has been triggered -> null", async () => {
-    const transport = fakeTransport({
-      assets: [{ id: ASSET_ID, name: projectWorkflowAssetName(PROJECT_ID) }],
-      deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "active", createdAt: "2026-01-01T00:00:00.000Z" }],
-      runsByDeployment: { dep_1: [] },
-    });
-    expect(await findProjectWorkflow(transport, TENANT_ID, PROJECT_ID)).toBeNull();
+    const hub = fakeHub(withAsset({ deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "active", createdAt: "2026-01-01T00:00:00.000Z" }], runsByDeployment: { dep_1: [] } }));
+    expect(await findProjectWorkflow(hub.transport, TENANT_ID, PROJECT_ID)).toBeNull();
   });
 
   test("several top-level runs already exist -> picks the oldest, the same winner every caller converges on", async () => {
-    const transport = fakeTransport({
-      assets: [{ id: ASSET_ID, name: projectWorkflowAssetName(PROJECT_ID) }],
-      deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "active", createdAt: "2026-01-01T00:00:00.000Z" }],
-      runsByDeployment: {
+    const hub = fakeHub(
+      withAsset({
+        deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "active", createdAt: "2026-01-01T00:00:00.000Z" }],
         // Iteration children (contain `__`) are excluded; only bare ids count.
-        dep_1: ["run_b", "run_a__rework__1", "run_c", "run_a"],
-      },
-    });
-    const result = await findProjectWorkflow(transport, TENANT_ID, PROJECT_ID);
-    expect(result).toEqual({ deploymentId: "dep_1", runId: "run_a" });
+        runsByDeployment: { dep_1: ["run_b", "run_a__rework__1", "run_c", "run_a"] },
+      }),
+    );
+    expect(await findProjectWorkflow(hub.transport, TENANT_ID, PROJECT_ID)).toEqual({ deploymentId: "dep_1", runId: "run_a" });
   });
 
-  // CL-8867: a host that gets killed outright can leave the hub reporting a
-  // project's original deployment not-live (or even permanently failed)
-  // well before, or without, the hub's own recovery reconnecting it. That
-  // deployment still owns the project's real run and its stage history; a
-  // newer deployment made on top of it (a redeploy this project should never
-  // have taken) holds an unrelated, freshly-started run. The oldest
-  // deployment that actually has a triggered run wins, live or not --
-  // reading the newer one's run instead is exactly how a restart used to
-  // reset a project back to stage 1.
-  test("keeps the project's original run even when its deployment reports not live and a newer deployment exists", async () => {
-    const transport = fakeTransport({
-      assets: [{ id: ASSET_ID, name: projectWorkflowAssetName(PROJECT_ID) }],
-      deployments: [
-        { id: "dep_old_failed", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" },
-        { id: "dep_new_live", definitionAssetId: ASSET_ID, status: "active", createdAt: "2026-01-02T00:00:00.000Z" },
-      ],
-      runsByDeployment: { dep_new_live: ["run_1"], dep_old_failed: ["run_0"] },
-      eventsByRun: { run_0: DECIDED },
-    });
-    const result = await findProjectWorkflow(transport, TENANT_ID, PROJECT_ID);
-    expect(result).toEqual({ deploymentId: "dep_old_failed", runId: "run_0" });
+  // CL-8867: a dead deployment's run still holds the project's history. A
+  // newer live deployment only speaks for the project once it has received
+  // every decision that history holds; before that, reading it is how a
+  // restart used to reset a project to stage 1.
+  test("keeps the dead deployment's run while a newer live run has not caught up with its decisions", async () => {
+    const hub = fakeHub(
+      withAsset({
+        deployments: [
+          { id: "dep_old_failed", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" },
+          { id: "dep_new_live", definitionAssetId: ASSET_ID, status: "active", createdAt: "2026-01-02T00:00:00.000Z" },
+        ],
+        runsByDeployment: { dep_new_live: ["run_1"], dep_old_failed: ["run_0"] },
+        eventsByRun: { run_0: DECIDED, run_1: PARKED },
+      }),
+    );
+    expect(await findProjectWorkflow(hub.transport, TENANT_ID, PROJECT_ID)).toEqual({ deploymentId: "dep_old_failed", runId: "run_0" });
   });
 
-  // A deployment the hub has ended for good is one it never places again,
-  // so a run parked there can never take another decision. When it never
-  // took one at all, its state is the initial state and there is nothing to
-  // keep: passing it over is what lets the project deploy afresh instead of
-  // sitting at "did not finish starting up" forever.
+  test("a live run that holds every decision the dead one took is the project's run", async () => {
+    const hub = fakeHub(
+      withAsset({
+        deployments: [
+          { id: "dep_old_failed", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" },
+          { id: "dep_new_live", definitionAssetId: ASSET_ID, status: "active", createdAt: "2026-01-02T00:00:00.000Z" },
+        ],
+        runsByDeployment: { dep_new_live: ["run_1"], dep_old_failed: ["run_0", "run_0__rework__0"] },
+        eventsByRun: { run_0: PARKED, run_0__rework__0: DECIDED, run_1: DECIDED },
+      }),
+    );
+    expect(await findProjectWorkflow(hub.transport, TENANT_ID, PROJECT_ID)).toEqual({ deploymentId: "dep_new_live", runId: "run_1" });
+  });
+
   test("passes over a failed deployment whose run never took a decision", async () => {
-    const transport = fakeTransport({
-      assets: [{ id: ASSET_ID, name: projectWorkflowAssetName(PROJECT_ID) }],
-      deployments: [
-        { id: "dep_old_failed", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" },
-        { id: "dep_new_live", definitionAssetId: ASSET_ID, status: "active", createdAt: "2026-01-02T00:00:00.000Z" },
-      ],
-      runsByDeployment: { dep_new_live: ["run_1"], dep_old_failed: ["run_0", "run_0__rework__0"] },
-      eventsByRun: { run_0: PARKED, run_0__rework__0: PARKED, run_1: DECIDED },
-    });
-    expect(await findProjectWorkflow(transport, TENANT_ID, PROJECT_ID)).toEqual({ deploymentId: "dep_new_live", runId: "run_1" });
-  });
-
-  test("a decision taken on a loop iteration counts for its failed deployment", async () => {
-    const transport = fakeTransport({
-      assets: [{ id: ASSET_ID, name: projectWorkflowAssetName(PROJECT_ID) }],
-      deployments: [{ id: "dep_old_failed", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" }],
-      runsByDeployment: { dep_old_failed: ["run_0", "run_0__rework__0", "run_0__rework__1"] },
-      eventsByRun: { run_0: PARKED, run_0__rework__0: DECIDED, run_0__rework__1: PARKED },
-    });
-    expect(await findProjectWorkflow(transport, TENANT_ID, PROJECT_ID)).toEqual({ deploymentId: "dep_old_failed", runId: "run_0" });
+    const hub = fakeHub(
+      withAsset({
+        deployments: [
+          { id: "dep_old_failed", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" },
+          { id: "dep_new_live", definitionAssetId: ASSET_ID, status: "active", createdAt: "2026-01-02T00:00:00.000Z" },
+        ],
+        runsByDeployment: { dep_new_live: ["run_1"], dep_old_failed: ["run_0", "run_0__rework__0"] },
+        eventsByRun: { run_0: PARKED, run_0__rework__0: PARKED, run_1: PARKED },
+      }),
+    );
+    expect(await findProjectWorkflow(hub.transport, TENANT_ID, PROJECT_ID)).toEqual({ deploymentId: "dep_new_live", runId: "run_1" });
   });
 
   test("only a failed deployment whose run never took a decision -> null, so the project deploys afresh", async () => {
-    const transport = fakeTransport({
-      assets: [{ id: ASSET_ID, name: projectWorkflowAssetName(PROJECT_ID) }],
-      deployments: [{ id: "dep_old_failed", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" }],
-      runsByDeployment: { dep_old_failed: ["run_0"] },
-      eventsByRun: { run_0: PARKED },
-    });
-    expect(await findProjectWorkflow(transport, TENANT_ID, PROJECT_ID)).toBeNull();
+    const hub = fakeHub(withAsset({ deployments: [{ id: "dep_old_failed", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" }], runsByDeployment: { dep_old_failed: ["run_0"] }, eventsByRun: { run_0: PARKED } }));
+    expect(await findProjectWorkflow(hub.transport, TENANT_ID, PROJECT_ID)).toBeNull();
   });
 });
 
 describe("ensureProjectWorkflow", () => {
-  // CL-8867 root cause: `ensureProjectWorkflowOnce` used to redeploy and
-  // trigger a brand-new top-level run whenever the picked deployment was
-  // not live, even when that deployment already had a run. A host killed
-  // outright reports its deployment not-live right after restart, so
-  // reopening a project redeployed it and reset it to stage 1. Reusing the
-  // existing run means this call must never push source, never deploy and
-  // never trigger -- the fake transport throws on any of those routes.
-  test("reuses the project's existing run instead of redeploying when its deployment is not live", async () => {
-    const transport = fakeTransport({
-      assets: [{ id: ASSET_ID, name: projectWorkflowAssetName(PROJECT_ID) }],
-      deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" }],
-      runsByDeployment: { dep_1: ["run_1"] },
-      eventsByRun: { run_1: DECIDED },
-    });
-    const result = await ensureProjectWorkflow(
-      transport,
-      { canPlaceSidecars: true },
-      { files: { "workflow.js": "", "actions.js": "", "loops.js": "" } },
-      async () => {
-        throw new Error("must not push a new source tree onto a deployment that already has a run");
-      },
-      TENANT_ID,
-      PROJECT_ID,
-      [],
-      {},
-    );
-    expect(result).toEqual({ deploymentId: "dep_1", runId: "run_1" });
+  test("a live run that has caught up is returned as is: nothing pushed, deployed, triggered or signalled", async () => {
+    const hub = fakeHub(withAsset({ deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "deployed", createdAt: "2026-01-01T00:00:00.000Z" }], runsByDeployment: { dep_1: ["run_1"] }, eventsByRun: { run_1: DECIDED } }));
+    expect(await ensure(hub)).toEqual({ deploymentId: "dep_1", runId: "run_1" });
+    expect(hub.posts).toEqual([]);
   });
 
-  test("redeploys when the only deployment has ended and its run never took a decision", async () => {
-    const transport = fakeTransport({
-      assets: [{ id: ASSET_ID, name: projectWorkflowAssetName(PROJECT_ID) }],
-      deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" }],
-      runsByDeployment: { dep_1: ["run_1"] },
-      eventsByRun: { run_1: PARKED },
-    });
-    // Reaching the push at all is the point: a fresh source tree is only
-    // pushed on the way to a new deployment, never for a reused run.
-    const pushed = ensureProjectWorkflow(
-      transport,
-      { canPlaceSidecars: true },
-      { files: { "workflow.js": "", "actions.js": "", "loops.js": "" } },
-      async () => {
-        throw new Error("pushed a fresh source tree");
-      },
-      TENANT_ID,
-      PROJECT_ID,
-      [],
-      {},
+  // The stop of a host leaves the hub reporting a project's deployment
+  // failed, and a failed deployment is never placed, fired or signalled
+  // again. The run there still holds the project's decisions, so a fresh
+  // deployment is triggered and brought up to them, in their original
+  // order and under their original ids, before anything reads it.
+  test("revives a dead deployment's run: deploys afresh, triggers, and replays every decision in order", async () => {
+    const hub = fakeHub(
+      withAsset({
+        deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" }],
+        runsByDeployment: { dep_1: ["run_1", "run_1__rework__0", "run_1__rework__1"] },
+        eventsByRun: { run_1: PARKED, run_1__rework__0: [STARTED, decision(1)], run_1__rework__1: [STARTED, decision(2)] },
+      }),
     );
-    await expect(pushed).rejects.toThrow("pushed a fresh source tree");
+    expect(await ensure(hub)).toEqual({ deploymentId: "dep_new", runId: "run_new" });
+    expect(hub.signalsSent()).toEqual([
+      { runId: "run_new", signalName: "project.decision", signalId: "dec-1", payload: decision(1).body.payload },
+      { runId: "run_new", signalName: "project.decision", signalId: "dec-2", payload: decision(2).body.payload },
+    ]);
+    // And from then on, every reader converges on the revived run.
+    expect(await findProjectWorkflow(hub.transport, TENANT_ID, PROJECT_ID)).toEqual({ deploymentId: "dep_new", runId: "run_new" });
+  });
+
+  test("a live run that has not caught up is brought up to the dead run's decisions, not replaced", async () => {
+    const hub = fakeHub(
+      withAsset({
+        deployments: [
+          { id: "dep_old_failed", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" },
+          { id: "dep_new_live", definitionAssetId: ASSET_ID, status: "deployed", createdAt: "2026-01-02T00:00:00.000Z" },
+        ],
+        runsByDeployment: { dep_old_failed: ["run_0"], dep_new_live: ["run_1"] },
+        eventsByRun: { run_0: DECIDED, run_1: [STARTED, decision(1)] },
+      }),
+    );
+    expect(await ensure(hub)).toEqual({ deploymentId: "dep_new_live", runId: "run_1" });
+    expect(hub.signalsSent().map((sent) => sent.signalId)).toEqual(["dec-2"]);
+  });
+
+  test("deploys afresh when the only deployment has ended and its run never took a decision", async () => {
+    const hub = fakeHub(withAsset({ deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" }], runsByDeployment: { dep_1: ["run_1"] }, eventsByRun: { run_1: PARKED } }));
+    expect(await ensure(hub)).toEqual({ deploymentId: "dep_new", runId: "run_new" });
+    expect(hub.signalsSent()).toEqual([]);
   });
 });
