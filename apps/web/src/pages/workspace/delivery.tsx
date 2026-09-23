@@ -18,7 +18,7 @@ import { createHubTransport } from "../../hub.ts";
 import {
   approvalById,
   approveTool,
-  DELIVER_TOOL_NAME,
+  deliveryApprovalFor,
   pendingApprovals,
   rejectTool,
   type PendingApproval,
@@ -144,14 +144,9 @@ function DeliveryDecision({
         listSpecialistDeployments(transport, tenantId, projectId),
       ]);
       const stage9 = deployments.find((deployment) => deployment.stage === 9);
-      const found = stage9
-        ? approvals.find(
-            (approval) =>
-              approval.status === "pending" &&
-              approval.runId === stage9.deploymentId &&
-              approval.toolDefinition?.name === DELIVER_TOOL_NAME,
-          )
-        : undefined;
+      // Matched on the deployment's anchor identity, not a nested tool run's
+      // own `runId` — see `pending-approvals.ts`'s `deliveryApprovalFor`.
+      const found = stage9 ? deliveryApprovalFor(approvals, stage9.deploymentId) : null;
       if (found) {
         setLastSeenApprovalId(found.id);
         setPending(found);
