@@ -327,9 +327,21 @@ export function DesignFeedbackView({
           </Banner>
         ) : null}
 
-        {/* The generated design is untrusted: no scripts, no same-origin. */}
-        {looksLikeHtmlDocument(content) ? (
+        {/* The generated design is untrusted: no scripts, no same-origin.
+
+            One frame per document, and none until the document is here. The
+            version list arrives before the versions' bodies do, and a frame
+            mounted empty and given its document a moment later is a frame
+            Chrome loads but never paints: a sandboxed srcdoc frame whose
+            document is replaced while its first is still committing stays
+            blank for good, with nothing logged. So the frame waits for its
+            content and is keyed by the version, which makes a change of
+            version a new frame rather than a second navigation. */}
+        {!content ? (
+          <div className="design-preview" aria-busy="true" aria-label="Loading the design preview" />
+        ) : looksLikeHtmlDocument(content) ? (
           <iframe
+            key={design?.id}
             ref={frame}
             className="design-preview"
             title={`Design preview: ${design?.title ?? ""} v${design?.version ?? ""}`}
