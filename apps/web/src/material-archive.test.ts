@@ -8,12 +8,12 @@ async function zipFile(name: string, entries: Record<string, string | Uint8Array
     if (typeof content === "object" && !(content instanceof Uint8Array)) {
       const inner = new JSZip();
       for (const [innerPath, innerContent] of Object.entries(content.zip)) inner.file(innerPath, innerContent);
-      zip.file(path, await inner.generateAsync({ type: "uint8array" }));
+      zip.file(path, await inner.generateAsync({ type: "arraybuffer" }));
     } else {
       zip.file(path, content);
     }
   }
-  return new File([await zip.generateAsync({ type: "uint8array" })], name, { type: "application/zip" });
+  return new File([await zip.generateAsync({ type: "arraybuffer" })], name, { type: "application/zip" });
 }
 
 describe("isZipArchive", () => {

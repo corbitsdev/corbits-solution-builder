@@ -77,14 +77,14 @@ export async function filesInZip(archive: File, depth = 1): Promise<File[]> {
     const extension = extensionOf(path);
     if (extension === ".zip") {
       if (depth < MAX_ZIP_DEPTH) {
-        const inner = new File([await entry.async("uint8array")], path, { type: "application/zip" });
+        const inner = new File([await entry.async("arraybuffer")], path, { type: "application/zip" });
         files.push(...(await filesInZip(inner, depth + 1).catch(() => [])));
       }
       continue;
     }
     const type = KEPT_KINDS.get(extension);
     if (!type) continue;
-    files.push(new File([await entry.async("uint8array")], path, { type }));
+    files.push(new File([await entry.async("arraybuffer")], path, { type }));
   }
   if (files.length === 0) {
     throw new ArchiveRefused(`${archive.name} holds nothing this can keep. Documents, spreadsheets, and PNG, JPEG, GIF or WebP images are.`);
