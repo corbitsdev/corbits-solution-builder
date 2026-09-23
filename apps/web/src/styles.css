@@ -2012,6 +2012,17 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   background: #fff;
 }
 
+/* The designer did not return a mockup, so this is a document, not a page:
+   scrolls with the pane instead of being a fixed-height frame, and reads in
+   the app's own theme rather than forcing white. */
+.design-preview-markdown {
+  height: auto;
+  overflow: auto;
+  padding: var(--space-4);
+  background: var(--wb-background);
+  color: var(--wb-foreground);
+}
+
 .canvas-body.is-fill > .banner {
   flex: none;
   margin: var(--space-3) var(--space-4) 0;
