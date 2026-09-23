@@ -17,7 +17,7 @@ globalThis.Buffer ??= Buffer;
 
 export class GitPushError extends Error {}
 
-const COMMIT_AUTHOR = { name: "Solutions Builder", email: "solutions-builder@corbits.dev" };
+const COMMIT_AUTHOR = { name: "Solution Builder", email: "solutions-builder@corbits.dev" };
 const MAIN_REF = "refs/heads/main";
 const ZERO_OID = "0".repeat(40);
 

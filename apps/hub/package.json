@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "The Solutions Builder host: the product's identity and routes composed onto @corbits/embedded-host's runtime.",
+  "description": "The Solution Builder host: the product's identity and routes composed onto @corbits/embedded-host's runtime.",
   "dependencies": {
     "@corbits/embedded-host": "workspace:*",
     "arktype": "catalog:",

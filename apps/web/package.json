@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "The Solutions Builder client.",
+  "description": "The Solution Builder client.",
   "dependencies": {
     "@corbits/codex-provider": "github:corbitsdev/corbits-codex-provider",
     "@corbits/xai-provider": "github:corbitsdev/corbits-xai-provider",

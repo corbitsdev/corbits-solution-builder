@@ -1,6 +1,6 @@
 # Product
 
-Solutions Builder turns a half-formed problem into shipped software. Someone
+Solution Builder turns a half-formed problem into shipped software. Someone
 arrives with a problem they can describe but have not scoped. They leave with
 working software and the documents they needed to get approval along the way.
 

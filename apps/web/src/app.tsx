@@ -186,7 +186,7 @@ export function AppBar({
         ) : (
           <>
             <Mark size={20} />
-            <span className="wordmark">Solutions Builder</span>
+            <span className="wordmark">Solution Builder</span>
           </>
         )}
       </div>

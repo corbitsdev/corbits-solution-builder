@@ -1,6 +1,6 @@
 # walk-browser
 
-A repeatable real-browser walk of Solutions Builder through all nine stages
+A repeatable real-browser walk of Solution Builder through all nine stages
 against a local OpenAI-compatible model.
 
 Boots an isolated host (fresh temp data dir, OS-assigned port — never 4880),

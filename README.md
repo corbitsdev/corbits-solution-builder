@@ -32,8 +32,8 @@ it works you'll see the host print its launch URL, then a browser tab open on
 it:
 
 ```
-Solutions Builder host: http://127.0.0.1:PORT (api v1)
-Solutions Builder launch URL: http://127.0.0.1:PORT/?token=...
+Solution Builder host: http://127.0.0.1:PORT (api v1)
+Solution Builder launch URL: http://127.0.0.1:PORT/?token=...
 ```
 
 The window opens on an empty workspace. Connect a provider in Settings — an

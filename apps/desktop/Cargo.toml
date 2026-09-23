@@ -1,7 +1,7 @@
 [package]
 name = "solutions-builder-desktop"
 version = "0.1.0"
-description = "Native desktop host for Solutions Builder"
+description = "Native desktop host for Solution Builder"
 authors = ["Corbits"]
 edition = "2021"
 rust-version = "1.77.2"

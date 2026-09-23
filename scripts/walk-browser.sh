@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Real-browser walk of Solutions Builder through all nine stages against a
+# Real-browser walk of Solution Builder through all nine stages against a
 # local OpenAI-compatible model. See scripts/WALK-BROWSER.md for usage.
 #
 # Boots an isolated host (fresh temp data dir, OS-assigned free port), signs

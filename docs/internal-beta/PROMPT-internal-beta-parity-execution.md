@@ -1,12 +1,12 @@
-# Execution prompt: native Solutions Builder parity
+# Execution prompt: native Solution Builder parity
 
-You are the lead implementation coordinator for Solutions Builder. Carry this project through implementation and verification; do not stop at another plan. Delegate bounded parallel work through the available dispatch facility using GPT-5.6-family agents. You own architectural decisions, integration, evidence, and the final result.
+You are the lead implementation coordinator for Solution Builder. Carry this project through implementation and verification; do not stop at another plan. Delegate bounded parallel work through the available dispatch facility using GPT-5.6-family agents. You own architectural decisions, integration, evidence, and the final result.
 
 ## Mission
 
 Bring `internal-beta` to 1:1 functionality and process parity with `origin/main` across ALL NINE stages, while implementing the process through application-owned, native Interchange workflows and agents. Match main's guidance and UI quality before introducing enhancements. The final result must take a person from an opening idea to a downloaded, runnable, verified delivery, including revision and recovery.
 
-Build a simpler native project-tracking workflow that coordinates individually deployable stage workflows. Prove the topology before rolling it out. Independent specialist agents are intentional: focused prompts, clear responsibilities, separate conversational context, and reuse outside Solutions Builder as versioned packages/tarballs.
+Build a simpler native project-tracking workflow that coordinates individually deployable stage workflows. Prove the topology before rolling it out. Independent specialist agents are intentional: focused prompts, clear responsibilities, separate conversational context, and reuse outside Solution Builder as versioned packages/tarballs.
 
 Package composition is not the same as runtime child-workflow nesting. Do not make a giant nested workflow merely to make the package tree look compositional.
 
@@ -18,14 +18,14 @@ Package composition is not the same as runtime child-workflow nesting. Do not ma
 4. Read the relevant vendored Interchange handlers and types before declaring a capability missing. Check https://github.com/faremeter/interchange for upstream changes. Inspect https://github.com/corbitsdev/workbench as a reference for package boundaries and native deployment, not as proof that our tracker works.
 5. Record a concise execution board: lane, owner/model, files/worktree, dependencies, state, evidence, and remaining blockers. Keep it current across compaction and agent restarts.
 
-Historical inspection points, to refresh rather than assume current: Solutions Builder `f96eb557`; Interchange `79adc43350a535e808439f05b71ec70aa00490a0`; Workbench `ec8bbbad7f6e150c9b67b75fcdf5b2342acb770f`. `run-ib` was moved outside this checkout to `../run-ib-archived`; leave existing worktrees alone.
+Historical inspection points, to refresh rather than assume current: Solution Builder `f96eb557`; Interchange `79adc43350a535e808439f05b71ec70aa00490a0`; Workbench `ec8bbbad7f6e150c9b67b75fcdf5b2342acb770f`. `run-ib` was moved outside this checkout to `../run-ib-archived`; leave existing worktrees alone.
 
 ## Mandatory ownership boundaries
 
 - Interchange is the platform. Corbits packages are reusable packages and solutions. Do not introduce the retired “Corbits Core” naming as a separate layer.
-- All Solutions Builder-specific UI belongs in `apps/*`, primarily `apps/web`. Shared component libraries remain dependencies.
+- All Solution Builder-specific UI belongs in `apps/*`, primarily `apps/web`. Shared component libraries remain dependencies.
 - Reusable agents, workflows, tools, contracts, and ordinary domain helpers belong in packages. No package depends on `apps/*`.
-- The hub hosts/composes Interchange and approved modules. No hardcoded Solutions Builder stage orchestration, custom provider loop, decision engine, or parallel persistence system in the hub.
+- The hub hosts/composes Interchange and approved modules. No hardcoded Solution Builder stage orchestration, custom provider loop, decision engine, or parallel persistence system in the hub.
 - Native application workflow execution owns authoritative progression, approval validation, send-back, and final delivery state. The UI submits intent and renders committed state. It does not advance stages by stamping `sb.approvedAt` itself.
 - Artifacts carry content, versions, provenance, and projections; an artifact timestamp is not an approval mechanism. Do not maintain two authoritative stage machines during migration.
 - Use Interchange's native mail, grants, tool approvals, author signals, actions, deployment, and dependency resolution where appropriate. Native tool permission approvals and business-stage decisions are distinct; do not bypass reserved approval channels or force every business decision into a tool approval.
@@ -104,9 +104,9 @@ After the native proof succeeds, use disjoint ownership:
 
 Divide UI work further only along non-overlapping screen boundaries. Keep the central workspace/client integration under one owner. Prioritize a continuous usable journey over nine disconnected screens.
 
-Package direction (names to choose from actual conventions): shared contracts; specialist packages; tracker package; reusable tool packages; installer/client transport; umbrella Solutions Builder composition. Depend on these as normal versioned packages. Avoid tools depending back on the umbrella app and avoid shipping all tools to every specialist unnecessarily. Reuse native closure resolution and integrity checks.
+Package direction (names to choose from actual conventions): shared contracts; specialist packages; tracker package; reusable tool packages; installer/client transport; umbrella Solution Builder composition. Depend on these as normal versioned packages. Avoid tools depending back on the umbrella app and avoid shipping all tools to every specialist unnecessarily. Reuse native closure resolution and integrity checks.
 
-Packed artifacts must be usable outside this monorepo: install a tarball in a clean consumer, resolve its actual dependencies, inspect exports and contents, deploy a specialist without the Solutions Builder UI, and then exercise the full composition. `private: true`, raw workspace dependencies, or a tar file existing is not publication readiness. Do not publish to npm without separate instruction.
+Packed artifacts must be usable outside this monorepo: install a tarball in a clean consumer, resolve its actual dependencies, inspect exports and contents, deploy a specialist without the Solution Builder UI, and then exercise the full composition. `private: true`, raw workspace dependencies, or a tar file existing is not publication readiness. Do not publish to npm without separate instruction.
 
 ## Required nine-stage parity
 

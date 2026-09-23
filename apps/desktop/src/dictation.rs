@@ -108,7 +108,7 @@ fn help_for(reason: &str) -> Option<Help> {
     if lower.contains("microphone was not allowed") {
         return help(
             "Allow the microphone",
-            "macOS is not letting Solutions Builder use the microphone. Turn it on under Privacy & Security, Microphone, then tap the microphone again.",
+            "macOS is not letting Solution Builder use the microphone. Turn it on under Privacy & Security, Microphone, then tap the microphone again.",
             "Open Microphone privacy settings",
             "microphone",
         );
@@ -116,7 +116,7 @@ fn help_for(reason: &str) -> Option<Help> {
     if lower.contains("speech recognition was not allowed") {
         return help(
             "Allow speech recognition",
-            "macOS is not letting Solutions Builder use speech recognition. Turn it on under Privacy & Security, Speech Recognition, then tap the microphone again.",
+            "macOS is not letting Solution Builder use speech recognition. Turn it on under Privacy & Security, Speech Recognition, then tap the microphone again.",
             "Open Speech Recognition privacy settings",
             "speech",
         );
@@ -238,7 +238,7 @@ fn speech_allowed() -> Result<(), String> {
     match rx.recv_timeout(PERMISSION_WAIT) {
         Ok(SFSpeechRecognizerAuthorizationStatus::Authorized) => Ok(()),
         Ok(SFSpeechRecognizerAuthorizationStatus::Denied) => Err(
-            "Speech recognition was not allowed. Turn it on for Solutions Builder in System Settings, Privacy & Security."
+            "Speech recognition was not allowed. Turn it on for Solution Builder in System Settings, Privacy & Security."
                 .into(),
         ),
         Ok(SFSpeechRecognizerAuthorizationStatus::Restricted) => {
@@ -284,7 +284,7 @@ pub fn start(emit: Emit) -> Result<Running, String> {
 fn start_session(emit: Emit, stopped: impl Fn() -> bool) -> Result<Option<Arc<Inner>>, String> {
     if !microphone_allowed() {
         return Err(
-            "The microphone was not allowed. Turn it on for Solutions Builder in System Settings, Privacy & Security."
+            "The microphone was not allowed. Turn it on for Solution Builder in System Settings, Privacy & Security."
                 .into(),
         );
     }

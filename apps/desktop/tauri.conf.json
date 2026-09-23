@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Solutions Builder",
+  "productName": "Solution Builder",
   "version": "0.1.0",
   "identifier": "com.corbits.solutions-builder",
   "build": {

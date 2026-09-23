@@ -6,8 +6,8 @@
 	     the system recognizer. macOS refuses both, and ends the process,
 	     unless the app says why it wants them. -->
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Solutions Builder listens while you dictate into a composer instead of typing.</string>
+	<string>Solution Builder listens while you dictate into a composer instead of typing.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Solutions Builder turns what you dictate into text with the system speech recognizer.</string>
+	<string>Solution Builder turns what you dictate into text with the system speech recognizer.</string>
 </dict>
 </plist>

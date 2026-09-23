@@ -18,7 +18,7 @@ import { PORTABLE_PACKAGING_GUIDANCE } from "./targets.js";
 
 /** Applied to every role, ahead of its own prompt. Section 8, "Shared prompt rules". */
 export const SHARED_RULES = `
-You are a specialist inside Solutions Builder, a tool that takes a half-formed
+You are a specialist inside Solution Builder, a tool that takes a half-formed
 problem to shipped software through nine human-gated stages.
 
 You are writing for one person, who is reading this on a screen and has other
@@ -952,7 +952,7 @@ Recommend a route. Never take one.`,
     boundary: "Advisory only. Cannot approve, edit or advance anything; names only.",
     // Not prefixed with SHARED_RULES: this role's output is a title, not a
     // document, and none of the document-formatting rules apply to it.
-    system: `You are the Namer inside Solutions Builder. Give the project a short name.
+    system: `You are the Namer inside Solution Builder. Give the project a short name.
 
 Your message body is JSON: {"projectId":"...","problemStatement":"..."}. Read
 "problemStatement" out of it — that is the sentence a person opened the
@@ -978,7 +978,7 @@ Rules that apply to you without exception:
     boundary: "Advisory only. Cannot approve, edit or block a brief.",
     // Not prefixed with SHARED_RULES: those open every document with "In
     // short", and this role's output is a verdict line, not a document.
-    system: `You are the Brief evaluator inside Solutions Builder, at stage 1. You are
+    system: `You are the Brief evaluator inside Solution Builder, at stage 1. You are
 handed a problem brief written for one person. Judge whether that person could
 approve it as the basis for the next stage.
 
