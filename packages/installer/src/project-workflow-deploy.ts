@@ -13,7 +13,6 @@ import {
   deploymentIsLive,
   ensureWorkflowAsset,
   pushWorkflowSourceTree,
-  waitForDeploymentDeployed,
   waitForPushVisible,
   type SidecarCapability,
   type WorkflowGitPush,
@@ -104,6 +103,8 @@ async function appliedDecisions(
 }
 
 const TERMINAL_RUN_EVENTS = new Set(["RunCompleted", "RunFailed", "RunCancelled"]);
+/** How long a project with history waits for the hub to replace its dead deployment before deploying its own. */
+const REPLACEMENT_WAIT_MS = 45_000;
 
 type ProjectRunCandidate = { readonly deployment: HubDeployment; readonly runId: string };
 
@@ -202,9 +203,14 @@ async function catchUp(
 ): Promise<void> {
   if (history.length === 0) return;
   const workflows = workflowsFor(transport, workspaceTenantId);
-  if (!(await waitForDeploymentDeployed(transport, workspaceTenantId, target.deploymentId))) {
-    throw new Error("the project's workflow did not reach deployed, so its history could not be replayed");
-  }
+  // Placed, and its run started: a replacement reports `running` rather
+  // than `deployed`, and either takes a signal once the run is on.
+  const placed = await pollUntil(120_000, 1_500, async () => {
+    const found = (await workflows.deployments()).find((entry) => entry.id === target.deploymentId);
+    if (!found || deploymentHasEnded(found)) throw new Error("the project's workflow ended before its history could be replayed");
+    return found.status === "deployed" || found.status === "running" ? true : null;
+  });
+  if (!placed) throw new Error("the project's workflow was not placed, so its history could not be replayed");
   const topLevel = async () => (await workflows.runEvents(target.deploymentId, target.runId)).events;
   const started = await pollUntil(120_000, 1_500, async () => ((await topLevel()).some((event) => event.type === "RunStarted") ? true : null));
   if (!started) throw new Error("the project's workflow run never started, so its history could not be replayed");
@@ -275,6 +281,12 @@ function treeDigestPath(files: Record<string, string>): { path: string; content:
   return { path, content: files[path]! };
 }
 
+/** What `ensureProjectWorkflow` may be told beyond its inputs. */
+export type EnsureProjectWorkflowOptions = {
+  /** How long a project with history waits for the hub's replacement before deploying its own; the default suits a host restart. */
+  readonly replacementWaitMs?: number;
+};
+
 async function ensureProjectWorkflowOnce(
   transport: Transport,
   sidecar: SidecarCapability,
@@ -284,6 +296,7 @@ async function ensureProjectWorkflowOnce(
   projectId: string,
   stages: readonly ProjectWorkflowStageInput[],
   vendoredWorkflowMemberFiles: Record<string, string>,
+  options: EnsureProjectWorkflowOptions,
 ): Promise<ProjectWorkflowDeployment> {
   if (!sidecar.canPlaceSidecars) {
     throw new Error("no host is placing sidecars; cannot deploy a project workflow");
@@ -298,9 +311,22 @@ async function ensureProjectWorkflowOnce(
   const matching = (deployments: readonly HubDeployment[]) =>
     deployments.filter((deployment) => deployment.definitionAssetId === assetId);
 
-  const existingDeployments = matching(await workflows.deployments());
-  const state = await projectRunState(workflows, existingDeployments);
+  let existingDeployments = matching(await workflows.deployments());
+  let state = await projectRunState(workflows, existingDeployments);
   if (state.run && state.live) return state.run;
+  // The hub replaces a dead deployment's sidecar on its own after a host
+  // restart (CL-8784), as a new deployment carrying the run's restored
+  // history, within seconds of boot. Deploying afresh before it has is a
+  // race two mechanisms lose together, so a project with history and no
+  // live run waits for the replacement a while before deploying its own.
+  if (!state.liveCandidates[0] && state.history.length > 0) {
+    const replaced = await pollUntil(options.replacementWaitMs ?? REPLACEMENT_WAIT_MS, 2_000, async () => {
+      existingDeployments = matching(await workflows.deployments());
+      state = await projectRunState(workflows, existingDeployments);
+      return state.liveCandidates[0] ? true : null;
+    });
+    if (replaced && state.run && state.live) return state.run;
+  }
   // A live run that has not caught up, or none: the project's history (if
   // any) is replayed onto the oldest live run, or onto a fresh one.
   if (state.liveCandidates[0]) {
@@ -384,9 +410,10 @@ export async function ensureProjectWorkflow(
   projectId: string,
   stages: readonly ProjectWorkflowStageInput[],
   vendoredWorkflowMemberFiles: Record<string, string>,
+  options: EnsureProjectWorkflowOptions = {},
 ): Promise<ProjectWorkflowDeployment> {
   const attempt = () =>
-    ensureProjectWorkflowOnce(transport, sidecar, source, gitPush, workspaceTenantId, projectId, stages, vendoredWorkflowMemberFiles);
+    ensureProjectWorkflowOnce(transport, sidecar, source, gitPush, workspaceTenantId, projectId, stages, vendoredWorkflowMemberFiles, options);
   try {
     return await attempt();
   } catch (cause) {
