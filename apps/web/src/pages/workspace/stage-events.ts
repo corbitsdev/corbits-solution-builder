@@ -10,7 +10,6 @@ import type { WithdrawnMark } from "../../withdrawn-turns.ts";
 import type { DecisionRecord } from "@solutions-builder/app/project-workflow/contracts";
 import type { ChatMessage as UiChatMessage } from "@corbits/react-ui";
 import { stageName } from "../../components.jsx";
-import { INTERNAL_KINDS } from "./use-project-artifacts.ts";
 
 export type StageEvent = {
   readonly id: string;
@@ -40,28 +39,18 @@ export function stageEvents(
   ];
 
   for (const node of nodes) {
-    if (node.stage !== stage || INTERNAL_KINDS.has(node.kind)) continue;
+    if (node.stage !== stage || node.kind !== "source_material") continue;
     out.push({
       id: `ev:node:${node.id}`,
       at: node.createdAt,
-      text:
-        node.kind === "source_material"
-          ? `Attached · ${node.title}`
-          : `${node.title} · v${node.version}`,
+      text: `Attached · ${node.title}`,
       tone: "line",
     });
   }
 
   for (const decision of decisions) {
     const at = decision.at ?? "";
-    if (decision.kind === "open_review" && decision.stage === stage) {
-      out.push({
-        id: `ev:${decision.decisionId}`,
-        at,
-        text: `Review opened · ${decision.artifactId ? `${titleOf.get(decision.artifactId) ?? "the draft"} v${decision.version ?? ""}` : "the draft"}`,
-        tone: "line",
-      });
-    } else if (decision.kind === "approve" && decision.stage === stage) {
+    if (decision.kind === "approve" && decision.stage === stage) {
       out.push({
         id: `ev:${decision.decisionId}`,
         at,

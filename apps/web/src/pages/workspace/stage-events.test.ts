@@ -44,12 +44,7 @@ describe("stageEvents", () => {
     );
     expect(events[0]?.tone).toBe("boundary");
     expect(events[0]?.text).toContain("Stage 1");
-    expect(events.map((e) => e.text)).toEqual([
-      "Stage 1 · Problem discovery",
-      "Problem brief · v1",
-      "Problem brief · v2",
-      "Review opened · Problem brief v2",
-    ]);
+    expect(events.map((e) => e.text)).toEqual(["Stage 1 · Problem discovery"]);
   });
 
   test("scopes nodes to the stage and hides internal kinds", () => {
@@ -99,7 +94,7 @@ describe("eventMessages", () => {
       ],
       stageEvents(1, [], [node({})], []),
     );
-    expect(merged.map((m) => m.role)).toEqual(["system", "system", "user"]);
+    expect(merged.map((m) => m.role)).toEqual(["system", "user"]);
     expect(merged[0]?.id).toBe("ev:boundary");
   });
 });
