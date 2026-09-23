@@ -460,6 +460,7 @@ export function StageWorkspace({
                 approveReason={workflowView?.allowed.approveReason ?? null}
                 lastRefusal={workflowView?.lastRefusal ?? null}
                 workflowView={workflowView}
+                onStakeholdersSaved={() => void openReviewNow()}
               />
             </div>
           )}

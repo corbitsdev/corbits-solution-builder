@@ -206,6 +206,16 @@ function findOurRefusal(decisions: readonly DecisionRecord[], ourDecisionIds: Re
   return decisions.find((d) => !d.accepted && ourDecisionIds.has(d.decisionId)) ?? null;
 }
 
+/** Whether `next` is the same quorum policy the workflow already captured --
+ *  order-sensitive on `stakeholders`, since a reordered list is still a
+ *  changed policy worth recapturing. */
+function policyEquals(next: AudiencePolicy, current: AudiencePolicy | null): boolean {
+  if (!current) return false;
+  if (next.quorum !== current.quorum) return false;
+  if (next.stakeholders.length !== current.stakeholders.length) return false;
+  return next.stakeholders.every((name, index) => name === current.stakeholders[index]);
+}
+
 export type EnsureReviewOpenInput = {
   readonly projectId: string;
   readonly stage: number;
@@ -244,7 +254,12 @@ export async function ensureReviewOpen(deps: StageApprovalDeps, input: EnsureRev
   const epoch = view.decisions.length;
 
   const sameRef = view.openReview !== null && view.openReview.artifactId === input.ref.artifactId && view.openReview.version === input.ref.version && view.openReview.sha256 === input.ref.sha256;
-  if (sameRef) return { ok: true, review: view.openReview! };
+  // Stage 5 only: a saved edit to the stakeholder list/quorum must still
+  // recapture the policy even when the reviewed package hasn't changed --
+  // otherwise editing stakeholders while a review is open never re-opens it
+  // (CL-8891). Every other stage has no `policy`, so this is a no-op there.
+  const policyChanged = input.policy !== undefined && !policyEquals(input.policy, view.audiencePolicy);
+  if (sameRef && !policyChanged) return { ok: true, review: view.openReview! };
 
   const ourDecisionIds = new Set<string>();
   const openId = await decisionId(input.projectId, input.stage, input.ref.artifactId, input.ref.version, "open_review", epoch, attempt);
