@@ -60,6 +60,14 @@ const PURPOSE: Record<number, string> = {
   9: "Verify the delivery evidence and decide whether it is acceptable.",
 };
 
+/** A stage-4 (or stage-8) design reply: a self-contained HTML document
+ *  rather than markdown. It has no markdown headings for `isSubstantialDraft`
+ *  to count, so it is recognised separately — otherwise its full HTML, tags
+ *  and all, is what the narrow chat column would fall back to showing. */
+export function isHtmlDocument(body: string): boolean {
+  return /^\s*<!doctype\s+html|^\s*<html[\s>]/i.test(body);
+}
+
 /**
  * A mail reply may be an acknowledgement, a question, or a draft. A reply is
  * only promoted into the draft pane when it has enough concrete content to
@@ -68,6 +76,7 @@ const PURPOSE: Record<number, string> = {
  */
 export function isSubstantialDraft(body: string): boolean {
   const trimmed = body.trim();
+  if (isHtmlDocument(trimmed)) return trimmed.length >= 240;
   if (trimmed.length < 240) return false;
   const headings = trimmed.match(/^#{1,3}\s+\S.+$/gm) ?? [];
   const prose = trimmed
@@ -82,6 +91,7 @@ export function isSubstantialDraft(body: string): boolean {
  *  or a one-line pointer if there is no lead. */
 export function conversationLead(body: string): string {
   if (!isSubstantialDraft(body)) return body.trim();
+  if (isHtmlDocument(body)) return "First draft is in the document.";
   const cut = body.search(/^##\s/m);
   const before = (cut === -1 ? body : body.slice(0, cut)).trim();
   const first = before.split(/\n\s*\n/)[0]?.trim() ?? "";

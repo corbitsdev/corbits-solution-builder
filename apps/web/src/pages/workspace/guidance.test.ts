@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import type { ChatMessage } from "../../stage-mail.ts";
-import { conversationLead, isSubstantialDraft, latestSubstantialDraft, workspaceGuidance } from "./guidance.ts";
+import {
+  conversationLead,
+  isHtmlDocument,
+  isSubstantialDraft,
+  latestSubstantialDraft,
+  workspaceGuidance,
+} from "./guidance.ts";
 
 const at = "2026-09-19T12:00:00.000Z";
 const person = (body: string): ChatMessage => ({ id: "person", author: "me", body, at });
@@ -34,6 +40,32 @@ describe("workspace guidance", () => {
     expect(conversationLead(withLead)).toBe("Pulled the brief. Drafting the problem — cutoff timing looks sharpest.");
     expect(conversationLead(completeDraft)).toBe("First draft is in the document.");
     expect(conversationLead("Which customer group is first?")).toBe("Which customer group is first?");
+  });
+
+  test("a stage-4 HTML mockup is a substantial draft, never dumped raw into chat", () => {
+    const html = `<!doctype html>
+<html>
+<head><style>body{font:1rem sans-serif}</style></head>
+<body>
+  <ul>
+    <li data-testid="appointment-form">Book now</li>
+    <li data-testid="stylist-picker">Choose a stylist</li>
+  </ul>
+  <section data-testid="design-notes">
+    <h2>Primary flows</h2>
+    <p>Book an appointment end to end.</p>
+  </section>
+</body>
+</html>`;
+    expect(isHtmlDocument(html)).toBe(true);
+    expect(isSubstantialDraft(html)).toBe(true);
+    expect(conversationLead(html)).toBe("First draft is in the document.");
+    expect(conversationLead(html)).not.toContain("<ul>");
+    expect(conversationLead(html)).not.toContain("<li");
+  });
+
+  test("a short reply is not mistaken for an HTML document", () => {
+    expect(isHtmlDocument("Thanks — I will update that.")).toBe(false);
   });
 
   test("retains a prior substantial draft when a later reply asks a question", () => {

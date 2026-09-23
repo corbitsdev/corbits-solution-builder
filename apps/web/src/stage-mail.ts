@@ -62,6 +62,25 @@ function textPart(entity: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Undoes a JSON string's escaping when it has leaked into a rendered body
+ * without ever being through `JSON.parse` — a small local model asked for
+ * multi-line markdown sometimes emits the literal two characters `\` `n`
+ * instead of a newline, as if it were still inside a quoted string. Ordinary
+ * prose has no reason to carry more than a couple of literal `\n` pairs, so
+ * this only fires when they dominate over real newlines.
+ */
+export function unescapeLiteralNewlines(text: string): string {
+  const real = (text.match(/\n/g) ?? []).length;
+  const literal = (text.match(/\\n/g) ?? []).length;
+  if (literal < 2 || real > literal / 4) return text;
+  return text
+    .replace(/\\r\\n/g, "\n")
+    .replace(/\\n/g, "\n")
+    .replace(/\\t/g, "\t")
+    .replace(/\\"/g, '"');
+}
+
 /** The readable text of an RFC 5322 frame: the bytes after the header
  * section, or the first `text/plain` part of a multipart one. */
 function frameBody(raw: string): string {
@@ -71,7 +90,8 @@ function frameBody(raw: string): string {
   } catch {
     return "";
   }
-  return textPart(decoded.replace(/\r\n/g, "\n")) ?? "";
+  const body = textPart(decoded.replace(/\r\n/g, "\n")) ?? "";
+  return unescapeLiteralNewlines(body);
 }
 
 function extractAddress(raw: string): string {
