@@ -129,6 +129,7 @@ export function AppBar({
   exporting,
   onExport,
   onStageSegment,
+  onSettingsClose,
 }: {
   view: View;
   detail: ProjectDetail | null;
@@ -145,8 +146,12 @@ export function AppBar({
   onExport?: () => void;
   /** A completed stepper segment was clicked — open that stage's artifact. */
   onStageSegment?: (stage: number) => void;
+  /** Returns to wherever Settings was opened from. Omitted where Settings
+   *  cannot be reached (`scripts/walk-ui.tsx`'s chrome-only render). */
+  onSettingsClose?: () => void;
 }) {
   const inProject = view === "project" && detail !== null;
+  const inSettings = view === "settings";
   return (
     <header className={inProject ? "topbar topbar-project" : "topbar"}>
       <div className="topbar-left">
@@ -163,6 +168,20 @@ export function AppBar({
             </button>
             <Mark size={20} />
             <span className="wordmark">{detail.project.title}</span>
+          </>
+        ) : inSettings ? (
+          <>
+            <button
+              type="button"
+              className="iconbtn"
+              title="Back"
+              aria-label="Back"
+              onClick={() => (onSettingsClose ? onSettingsClose() : onNavigate("projects"))}
+            >
+              <ArrowLeft aria-hidden="true" />
+            </button>
+            <Mark size={20} />
+            <span className="wordmark">Settings</span>
           </>
         ) : (
           <>
@@ -252,7 +271,10 @@ export function AppBar({
           className="iconbtn"
           title="Settings"
           aria-label="Settings"
-          onClick={() => onNavigate("settings")}
+          aria-pressed={inSettings}
+          onClick={() =>
+            inSettings ? (onSettingsClose ? onSettingsClose() : onNavigate("projects")) : onNavigate("settings")
+          }
         >
           <SettingsIcon aria-hidden="true" />
         </button>
@@ -263,6 +285,19 @@ export function AppBar({
 
 export function App() {
   const [view, setView] = useState<View>(initialView);
+  // Where Settings was opened from, so its back control and the gear's
+  // toggle-to-close return there rather than always landing on the projects
+  // list.
+  const [settingsFrom, setSettingsFrom] = useState<View>("projects");
+  const openSettings = () => {
+    setSettingsFrom(view);
+    setView("settings");
+  };
+  const navigate = (next: View) => {
+    if (next === "settings") openSettings();
+    else setView(next);
+  };
+  const closeSettings = () => setView(settingsFrom === "settings" ? "projects" : settingsFrom);
   // A document being printed lies over the app rather than replacing it, so
   // nothing in flight underneath is lost.
   const printing = usePrintTarget();
@@ -583,7 +618,8 @@ export function App() {
         inbox={inbox}
         bellOpen={bellOpen}
         onBellOpenChange={setBellOpen}
-        onNavigate={setView}
+        onNavigate={navigate}
+        onSettingsClose={closeSettings}
         onOpenProject={openProject}
         exporting={exporting}
         onExport={() => void exportProject()}
@@ -622,7 +658,7 @@ export function App() {
                 draftOpen={true}
                 tenantId={tenantId ?? ""}
                 onChanged={reloadDetail}
-                onOpenSettings={() => setView("settings")}
+                onOpenSettings={openSettings}
                 onOpenDecisions={() => setBellOpen(true)}
                 {...(focusArtifact ? { focusArtifact } : {})}
               />
