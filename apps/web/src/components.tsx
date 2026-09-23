@@ -512,8 +512,8 @@ export function downloadArtifact(content: string, filename: string): void {
   if (!content.startsWith("data:")) URL.revokeObjectURL(href);
 }
 
-/** What the specialists can read: the same list the Projects page and the Artifacts tab accept. */
-export const MATERIAL_ACCEPT = ".txt,.md,.csv,.json,.html,.xlsx,.xls,.docx,.doc,.pptx,.ppt,.pdf,.png,.jpg,.jpeg,.gif,.webp";
+/** What the specialists can read, or a zip of it: the same list the Projects page and the Artifacts tab accept. */
+export const MATERIAL_ACCEPT = ".txt,.md,.csv,.json,.html,.xlsx,.xls,.docx,.doc,.pptx,.ppt,.pdf,.png,.jpg,.jpeg,.gif,.webp,.zip";
 
 /**
  * The one way to hand documents or images over mid-project, wherever it
