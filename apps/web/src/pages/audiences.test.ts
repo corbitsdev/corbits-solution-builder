@@ -4,7 +4,6 @@ import { join } from "node:path";
 
 const source = readFileSync(join(import.meta.dir, "audiences.tsx"), "utf8");
 const index = readFileSync(join(import.meta.dir, "workspace/index.tsx"), "utf8");
-const client = readFileSync(join(import.meta.dir, "../client.ts"), "utf8");
 
 describe("stage 5 audience packages", () => {
   test("render as the document pane, not Screen essays", () => {
@@ -15,7 +14,9 @@ describe("stage 5 audience packages", () => {
     expect(source).toContain("persistAudiencePackage");
     expect(source).toContain("QuorumChips");
     expect(source).toContain("saveSlides");
-    expect(source).toContain("recordAudienceDecision");
+    // CL-8870: a stakeholder's vote is its own `project.decision` signal on
+    // the project workflow run, not an artifact-metadata write.
+    expect(source).toContain("recordAudienceVote");
     expect(source).not.toContain("<Screen");
     expect(source).not.toContain("Rough cost, not the firm estimate.");
     expect(source).not.toContain("document-fold");
@@ -30,18 +31,8 @@ describe("stage 5 audience packages", () => {
   // indistinguishable from the click having done nothing.
   test("a failed decision reaches the page-level Banner, not just the popover", () => {
     const decideFn = source.slice(source.indexOf("const decide = async ("));
-    const body = decideFn.slice(0, decideFn.indexOf("\n  return (\n"));
+    const body = decideFn.slice(0, decideFn.indexOf("\n  return ("));
     expect(body).toContain("} catch (cause) {");
     expect(body).toContain("setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));");
-  });
-
-  // The popover and the Banner both branch on `cause instanceof ApiFailure`;
-  // that only works if a refused/failed write actually throws an
-  // `ApiFailure` rather than the hub client's raw, unmapped `ApiError`.
-  test("recordAudienceDecision maps a thrown failure through installerFailure", () => {
-    const fn = client.slice(client.indexOf("recordAudienceDecision: async ("));
-    const body = fn.slice(0, fn.indexOf("\n  },\n"));
-    expect(body).toContain("} catch (cause) {");
-    expect(body).toContain("installerFailure(cause);");
   });
 });

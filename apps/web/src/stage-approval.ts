@@ -16,7 +16,7 @@
  * on, since `at` differs but the id would not). `attempt` still separates a
  * REFUSED decision from its retry within the same epoch.
  */
-import type { DecisionRecord, ReviewState } from "@solutions-builder/app/project-workflow/contracts";
+import type { AudiencePolicy, DecisionRecord, ReviewState } from "@solutions-builder/app/project-workflow/contracts";
 import type { ArtifactNode } from "./client.ts";
 import type { ProjectWorkflowView } from "./project-workflow.ts";
 
@@ -202,6 +202,11 @@ export type EnsureReviewOpenInput = {
   readonly stage: number;
   readonly ref: ArtifactRef;
   readonly attempt?: number;
+  /** Stage 5 only: the quorum policy in effect right now, carried onto the
+   *  `open_review` decision so the reducer captures it (CL-8870) -- an edit
+   *  to the stakeholder list after this review opens can never change the
+   *  gate it is checked against. */
+  readonly policy?: AudiencePolicy;
 };
 
 export type EnsureReviewOpenResult =
@@ -244,6 +249,7 @@ export async function ensureReviewOpen(deps: StageApprovalDeps, input: EnsureRev
     version: input.ref.version,
     sha256: input.ref.sha256,
     at: deps.now(),
+    ...(input.policy ? { policy: input.policy } : {}),
   });
   if (!sent.ok) return sent;
 
@@ -255,9 +261,12 @@ export type ApproveStageInput = {
   readonly stage: number;
   readonly ref: ArtifactRef;
   readonly attempt?: number;
-  /** Stage-rule input (stage 5 quorum, stage 7 freeze); never read here,
-   *  only forwarded on the `approve` decision. Does not affect id derivation. */
+  /** Stage-rule input (stage 7's freeze); never read here, only forwarded on
+   *  the `approve` decision. Does not affect id derivation. */
   readonly evidence?: unknown;
+  /** Stage 5 only: forwarded to `ensureReviewOpen`'s belt-and-braces open --
+   *  see that input's own doc comment. */
+  readonly policy?: AudiencePolicy;
 };
 
 /**
@@ -274,7 +283,13 @@ export async function approveStage(deps: StageApprovalDeps, input: ApproveStageI
   if (view.stage !== input.stage) return { ok: false, reason: "wrong_stage" };
   const epoch = view.decisions.length;
 
-  const opened = await ensureReviewOpen(deps, { projectId: input.projectId, stage: input.stage, ref: input.ref, attempt });
+  const opened = await ensureReviewOpen(deps, {
+    projectId: input.projectId,
+    stage: input.stage,
+    ref: input.ref,
+    attempt,
+    ...(input.policy ? { policy: input.policy } : {}),
+  });
   if (!opened.ok) return opened;
   const review = opened.review;
 
@@ -376,4 +391,50 @@ export async function sendBack(deps: StageApprovalDeps, input: SendBackInput): P
   });
   if (!sent.ok) return sent;
   return pollUntil(input.projectId, deps, input.stage, ourDecisionIds);
+}
+
+export type RecordAudienceVoteInput = {
+  readonly projectId: string;
+  readonly stage: number;
+  readonly audience: string;
+  readonly decision: "proceed" | "revise" | "reject";
+  readonly note?: string;
+  readonly decisionId: string;
+};
+
+export type RecordAudienceVoteResult = { readonly ok: true } | { readonly ok: false; readonly reason: string };
+
+/**
+ * Records one stakeholder's own proceed/revise/reject as the loop's own
+ * `project.decision` `audience` signal (CL-8870) -- the mail-agent-shaped
+ * replacement for the deleted `recordAudienceDecision` artifact-metadata
+ * write. Polls (same bounds as the other stage decisions) until the
+ * workflow's own view shows this exact `decisionId` recorded against that
+ * audience, or a refusal for it lands.
+ */
+export async function recordAudienceVote(deps: StageApprovalDeps, input: RecordAudienceVoteInput): Promise<RecordAudienceVoteResult> {
+  const ourDecisionIds = new Set<string>([input.decisionId]);
+  const sent = await safeDecide(deps, input.projectId, {
+    kind: "audience",
+    decisionId: input.decisionId,
+    projectId: input.projectId,
+    stage: input.stage,
+    audience: input.audience,
+    decision: input.decision,
+    at: deps.now(),
+    ...(input.note ? { note: input.note } : {}),
+  });
+  if (!sent.ok) return sent;
+
+  const deadline = Date.now() + POLL_TIMEOUT_MS;
+  for (;;) {
+    const view = await deps.view(input.projectId);
+    if (view) {
+      if (view.audienceDecisions[input.audience]?.decisionId === input.decisionId) return { ok: true };
+      const refusal = findOurRefusal(view.decisions, ourDecisionIds);
+      if (refusal) return { ok: false, reason: refusal.reason ?? "refused" };
+    }
+    if (Date.now() >= deadline) return { ok: false, reason: "timed_out" };
+    await sleep(POLL_INTERVAL_MS);
+  }
 }

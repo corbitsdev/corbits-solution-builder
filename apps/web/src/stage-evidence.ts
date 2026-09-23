@@ -1,26 +1,20 @@
 /**
- * CL-8690/CL-8691: the project workflow never reads an artifact or a
- * project's policy, so an `approve` decision carries the evidence its stage
- * rule needs and the reducer validates it (`project-workflow/contracts.ts`'s
- * `stageRules`). This module builds that evidence client-side; `approveStage`
+ * CL-8690/CL-8691: the project workflow never reads an artifact, so a stage
+ * 7 `approve` decision carries the evidence its stage rule needs and the
+ * reducer validates it (`project-workflow/contracts.ts`'s `stageRules`).
+ * This module builds that evidence client-side; `approveStage`
  * (`stage-approval.ts`) just forwards whatever it is given.
+ *
+ * Stage 5 is different (CL-8870): its rule reads `ProjectState`'s own
+ * captured `audiencePolicy`/`audienceDecisions` -- the policy rides on the
+ * `open_review` that opens a stage-5 review (`stage-approval.ts`'s
+ * `policy`), and each stakeholder's vote is its own `audience` decision.
+ * Nothing here builds evidence for it any more.
  */
-import type { ArtifactNode, AudienceDecision } from "./client.ts";
+import type { ArtifactNode } from "./client.ts";
 import type { ProjectWorkflowView } from "./project-workflow.ts";
-import type { QuorumDecisionEvidence, Stage5Evidence, Stage7Evidence } from "@solutions-builder/app/project-workflow/contracts";
+import type { Stage7Evidence } from "@solutions-builder/app/project-workflow/contracts";
 import { parseStackRecord, type StackRecord } from "@solutions-builder/app/stack";
-
-const OUTCOME_OF: Record<AudienceDecision["decision"], QuorumDecisionEvidence["outcome"]> = {
-  proceed: "proceed",
-  revise: "revise",
-  reject: "block",
-};
-
-/** `AudienceDecision["decision"]` as `quorumState` reads it -- shared with
- *  `pages/audiences.tsx`'s own quorum banner so both read the same outcome. */
-export function audienceOutcome(decision: AudienceDecision["decision"]): QuorumDecisionEvidence["outcome"] {
-  return OUTCOME_OF[decision];
-}
 
 const STAGE_REFUSAL_MESSAGES: Readonly<Record<string, string>> = {
   evidence_missing: "The recorded decisions don't match what this approval expects.",
@@ -45,37 +39,10 @@ export type StageEvidenceDeps = {
   readonly nodes: readonly ArtifactNode[];
   readonly chosenTarget: string | null;
   readonly workflowView: ProjectWorkflowView | null;
-  readonly stakeholders: (projectId: string) => Promise<{ audiences: { name: string; role: string }[]; audienceQuorum: number }>;
-  readonly audienceDecisions: (tenantId: string, packageNodeId: string) => Promise<{ decisions: readonly AudienceDecision[] }>;
   /** Reads the approved stage-6 build plan's text, to pull its `## Stack`
    *  block out for stage 7's evidence. */
   readonly artifactContent: (tenantId: string, nodeId: string) => Promise<{ content: string }>;
 };
-
-async function stage5Evidence(deps: StageEvidenceDeps): Promise<Stage5Evidence> {
-  const policy = await deps.stakeholders(deps.projectId);
-  const packages = deps.nodes.filter((node) => node.kind === "audience_package" && node.supersededByNodeId === null);
-  const perPackage = await Promise.all(
-    packages.map((node) => deps.audienceDecisions(deps.tenantId, node.id).then((result) => ({ node, decisions: result.decisions }))),
-  );
-  const decisions: QuorumDecisionEvidence[] = [];
-  for (const { node, decisions: recorded } of perPackage) {
-    if (!node.variant) continue;
-    for (const decision of recorded) {
-      decisions.push({
-        by: node.variant,
-        outcome: OUTCOME_OF[decision.decision],
-        packageArtifactId: node.artifactId,
-        packageVersion: node.version,
-      });
-    }
-  }
-  return {
-    quorum: policy.audienceQuorum,
-    stakeholders: policy.audiences.map((audience) => audience.name),
-    decisions,
-  };
-}
 
 /** Every earlier stage (1..6) the view shows approved, frozen as a reference
  *  to exactly the review the workflow itself holds -- never re-derived from
@@ -102,9 +69,9 @@ async function stage7Evidence(deps: StageEvidenceDeps): Promise<Stage7Evidence |
 }
 
 /** Builds the `approve` decision's evidence for a stage, or `undefined` for
- *  a stage with no rule (every stage but 5 and 7). */
-export async function stageEvidence(stage: number, deps: StageEvidenceDeps): Promise<Stage5Evidence | Stage7Evidence | undefined> {
-  if (stage === 5) return stage5Evidence(deps);
+ *  a stage with no evidence to carry (every stage but 7 -- stage 5's rule
+ *  reads `ProjectState` directly, CL-8870). */
+export async function stageEvidence(stage: number, deps: StageEvidenceDeps): Promise<Stage7Evidence | undefined> {
   if (stage === 7) return stage7Evidence(deps);
   return undefined;
 }

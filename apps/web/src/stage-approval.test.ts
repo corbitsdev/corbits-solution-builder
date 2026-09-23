@@ -31,6 +31,9 @@ function view(overrides: Partial<ProjectWorkflowView> = {}): ProjectWorkflowView
     allowed: { openReview: true, approve: false, sendBack: true, approveReason: "no_open_review" },
     freeze: null,
     requirements: [],
+    audiencePolicy: null,
+    audienceDecisions: {},
+    stage5Quorum: null,
     ...overrides,
   };
 }

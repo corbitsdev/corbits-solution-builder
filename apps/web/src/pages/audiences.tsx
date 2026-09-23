@@ -1,18 +1,18 @@
 /**
  * Stage 5 — one package per named audience.
  *
- * The per-stakeholder quorum decision (`audience.decide`, once recorded
- * against a parked ledger run) is restored here in a mail-agent shape
- * (CL-8625): each stakeholder's own proceed/revise/reject is appended to
- * their own package artifact's `sb.decisions` through `reviseArtifact`, and
- * the quorum count is folded client-side from those decisions against the
- * project policy's `audienceQuorum` — a note beside the record, not a
- * banner. Advancing past the stage is still the
- * same "Approve and continue" the other stages use
- * (`pages/workspace/index.tsx`); this only restores the record, not a gate.
+ * Each stakeholder's own proceed/revise/reject is its own `project.decision`
+ * signal on the project workflow run -- a stage-5 `audience` decision, same
+ * `decide()` path every other stage decision uses (CL-8870). The quorum
+ * tally is read straight off the workflow view (`ProjectWorkflowView`'s
+ * `audienceDecisions`/`stage5Quorum`), never folded here and never read off
+ * artifact metadata. Advancing past the stage is still the same "Approve and
+ * continue" the other stages use (`pages/workspace/index.tsx`); this only
+ * records the vote, not a gate -- `stage5Rule` (`project-workflow/contracts.ts`)
+ * is the only place quorum is enforced.
  */
 import { useEffect, useRef, useState } from "react";
-import { api, ApiFailure, type ArtifactNode, type AudienceDecision, type ProjectDetail } from "../client.js";
+import { api, ApiFailure, type ArtifactNode, type ProjectDetail } from "../client.js";
 import type { ChatMessage } from "../stage-mail.ts";
 import { Banner, Button, downloadArtifact, Field, StateLabel } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
@@ -21,14 +21,21 @@ import { Markdown } from "../markdown.jsx";
 import { buildPackageDeck } from "../deck-save.ts";
 import { deckDesignFor } from "../deck-design-settings.ts";
 import { slidesSource } from "../deck-templates.ts";
-import { audienceOutcome } from "../stage-evidence.ts";
+import { recordAudienceVote, type StageApprovalDeps } from "../stage-approval.ts";
+import { stageRefusalMessage } from "../stage-evidence.ts";
+import type { ProjectWorkflowView } from "../project-workflow.ts";
 import {
   approveReasonText,
-  quorumState,
   type ApproveReason,
+  type AudienceVote,
   type DecisionRecord,
-  type Stage5Evidence,
 } from "@solutions-builder/app/project-workflow/contracts";
+
+const audienceApprovalDeps: StageApprovalDeps = {
+  view: (projectId: string) => api.projectWorkflowView(projectId),
+  decide: (projectId: string, decision: Record<string, unknown>) => api.decide(projectId, decision),
+  now: () => new Date().toISOString(),
+};
 
 const POLL_INTERVAL_MS = 3_000;
 const POLL_TIMEOUT_MS = 10 * 60 * 1_000;
@@ -83,40 +90,36 @@ function roleLabel(role: string): string {
   return role.replace(/_/g, " ");
 }
 
-/** The most recent decision recorded, or null if none has been. */
-function latestDecision(decisions: readonly AudienceDecision[]): AudienceDecision | null {
-  return decisions.length > 0 ? decisions[decisions.length - 1]! : null;
-}
-
-const DECISION_LABEL: Record<AudienceDecision["decision"], string> = {
+const DECISION_LABEL: Record<AudienceVote["decision"], string> = {
   proceed: "Proceed",
   revise: "Needs revision",
   reject: "Reject",
 };
 
-/** One chip per stakeholder, coloured by their latest recorded decision —
-    the quorum readable without opening every tab. Clicking a chip opens its
+/** One chip per stakeholder, coloured by their latest recorded vote (read
+    off the workflow view, `ProjectWorkflowView.audienceDecisions`) — the
+    quorum readable without opening every tab. Clicking a chip opens its
     package and a small popover where that stakeholder's call is recorded. */
 function QuorumChips({
   audiences,
   packages,
-  decisionsByNode,
+  votesByAudience,
   onSelect,
   onDecide,
 }: {
   audiences: { name: string; role: string }[];
   packages: readonly ArtifactNode[];
-  decisionsByNode: ReadonlyMap<string, AudienceDecision[]>;
+  votesByAudience: Readonly<Record<string, AudienceVote>>;
   onSelect: (variant: string) => void;
-  onDecide: (node: ArtifactNode, decision: AudienceDecision["decision"], note: string) => Promise<void>;
+  onDecide: (node: ArtifactNode, decision: AudienceVote["decision"], note: string) => Promise<void>;
 }) {
   const [openFor, setOpenFor] = useState<string | null>(null);
   const [note, setNote] = useState("");
-  const [busy, setBusy] = useState<AudienceDecision["decision"] | null>(null);
+  const [busy, setBusy] = useState<AudienceVote["decision"] | null>(null);
   const [popError, setPopError] = useState<string | null>(null);
   const openNode = packages.find((node) => node.variant === openFor) ?? null;
 
-  const record = async (decision: AudienceDecision["decision"]) => {
+  const record = async (decision: AudienceVote["decision"]) => {
     if (!openNode) return;
     setBusy(decision);
     setPopError(null);
@@ -136,7 +139,7 @@ function QuorumChips({
       <div className="quorum-chips" role="list" aria-label="Quorum">
         {audiences.map((audience) => {
           const node = packages.find((candidate) => candidate.variant === audience.name);
-          const latest = node ? latestDecision(decisionsByNode.get(node.id) ?? []) : null;
+          const latest = votesByAudience[audience.name] ?? null;
           return (
             <button
               key={audience.name}
@@ -316,6 +319,7 @@ export function AudiencePackages({
   canApprove,
   approveReason,
   lastRefusal,
+  workflowView,
 }: {
   detail: ProjectDetail;
   /** The workspace tenant artifacts are recorded under. */
@@ -330,6 +334,9 @@ export function AudiencePackages({
   approveReason: ApproveReason | null;
   /** `ProjectWorkflowView.lastRefusal` — carries the quorum breakdown when `approveReason` is `quorum_not_met`. */
   lastRefusal: DecisionRecord | null;
+  /** The project workflow's own view -- `audienceDecisions`/`stage5Quorum`
+   *  are the quorum tally's ONE source (CL-8870), never artifact metadata. */
+  workflowView: ProjectWorkflowView | null;
 }) {
   // Which stakeholders' packages are being written right now: "Write it"
   // sends the mail, then waits for the reply that follows it and keeps
@@ -485,63 +492,38 @@ export function AudiencePackages({
     };
   }, [selected?.id, tenantId]);
 
-  // The quorum is read off the same project policy `api.stakeholders`
-  // already reads for the editor above, rather than off this component's
-  // own `Policy` cast, so the banner tracks the same source of truth a
-  // decision is checked against server-side one day.
-  const [decisionQuorum, setDecisionQuorum] = useState(quorum);
-  useEffect(() => {
-    void api.stakeholders(detail.project.id).then((result) => setDecisionQuorum(result.audienceQuorum ?? 0)).catch(() => {});
-  }, [detail.project.id]);
-
-  // Every package's own decision history, recorded on its `sb.decisions` —
-  // fetched for all packages at once so the quorum banner can total proceeds
-  // across stakeholders, not just the one open in the tab.
-  const [decisionsByNode, setDecisionsByNode] = useState<ReadonlyMap<string, AudienceDecision[]>>(new Map());
-  useEffect(() => {
-    let cancelled = false;
-    void Promise.all(
-      packages.map((node) => api.audienceDecisions(tenantId, node.id).then((result) => [node.id, result.decisions] as const)),
-    ).then((entries) => {
-      if (!cancelled) setDecisionsByNode(new Map(entries));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [tenantId, packages.map((node) => node.id).join(",")]);
-
-  // The same evidence an `approve` decision would carry, folded through the
-  // identical `quorumState` the stage 5 rule checks -- purely informational
-  // (the live tally the chips already show), never the Approve button's gate:
-  // that reads `canApprove`/`approveReason` off the project workflow itself,
-  // since only an actual approve attempt tells the workflow whether quorum
-  // was met (CL-8687 follow-up).
-  const evidence: Stage5Evidence = {
-    quorum: decisionQuorum,
-    stakeholders: audiences.map((audience) => audience.name),
-    decisions: packages.flatMap((node) =>
-      node.variant
-        ? (decisionsByNode.get(node.id) ?? []).map((decision) => ({
-            by: node.variant!,
-            outcome: audienceOutcome(decision.decision),
-            packageArtifactId: node.artifactId,
-            packageVersion: node.version,
-          }))
-        : [],
-    ),
-  };
-  const quorumOutcome = quorumState(evidence);
-  const proceeded = quorumOutcome.proceeded;
+  // The quorum tally is the workflow's own view -- `stage5Quorum`, folded by
+  // `foldProjectWorkflow` from the `audiencePolicy` an `open_review` captured
+  // and the votes recorded since (CL-8870). Never re-derived here; before a
+  // review has opened it is null, so the display falls back to the policy's
+  // own `audienceQuorum` (the "must proceed" count the editor above shows).
+  const votesByAudience = workflowView?.audienceDecisions ?? {};
+  const requiredQuorum = workflowView?.stage5Quorum?.required ?? quorum;
+  const proceeded = workflowView?.stage5Quorum?.proceeded ?? 0;
   // The workflow's own verdict -- never recomputed here (`approveReasonText`
   // is the one place that translates `approveReason` to copy).
   const reason = approveReason ? approveReasonText(approveReason, lastRefusal) : null;
 
-  const decide = async (node: (typeof packages)[number], decision: AudienceDecision["decision"], note: string) => {
+  const decide = async (node: (typeof packages)[number], decision: AudienceVote["decision"], note: string) => {
     if (!node.variant) return;
     try {
-      const result = await api.recordAudienceDecision(tenantId, node.id, { audience: node.variant, decision, note });
+      const result = await recordAudienceVote(audienceApprovalDeps, {
+        projectId: detail.project.id,
+        stage: workflowView?.stage ?? 5,
+        audience: node.variant,
+        decision,
+        note: note.trim(),
+        decisionId: `dec-${crypto.randomUUID()}`,
+      });
+      if (!result.ok) {
+        throw new ApiFailure({
+          code: "conflict",
+          message: `That decision was refused: ${stageRefusalMessage(result.reason)}`,
+          correlationId: "-",
+          retryable: true,
+        });
+      }
       setError(null);
-      setDecisionsByNode((before) => new Map(before).set(node.id, result.decisions));
       // A stakeholder's decision changes the quorum, and so `allowed.approve` —
       // the workspace must re-read the workflow view, not just this pane.
       onChanged();
@@ -607,13 +589,13 @@ export function AudiencePackages({
           <QuorumChips
             audiences={audiences}
             packages={packages}
-            decisionsByNode={decisionsByNode}
+            votesByAudience={votesByAudience}
             onSelect={setActive}
             onDecide={(node, decision, note) => decide(node, decision, note)}
           />
-          {decisionQuorum > 0 ? (
+          {requiredQuorum > 0 ? (
             <p className="inline-note">
-              {proceeded} of {decisionQuorum} required have proceeded.
+              {proceeded} of {requiredQuorum} required have proceeded.
             </p>
           ) : null}
           <Tabs
