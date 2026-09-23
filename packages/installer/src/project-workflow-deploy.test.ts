@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Transport } from "@intx/hub-client";
-import { findProjectWorkflow, projectWorkflowAssetName } from "./project-workflow-deploy.js";
+import { ensureProjectWorkflow, findProjectWorkflow, projectWorkflowAssetName } from "./project-workflow-deploy.js";
 
 const TENANT_ID = "tnt_1";
 const PROJECT_ID = "proj_1";
@@ -16,6 +16,9 @@ function fakeTransport(fixture: Fixture): Transport {
   return {
     async fetch<T>(method: string, path: string): Promise<T> {
       const [pathname] = path.split("?");
+      if (method === "GET" && pathname === `/api/tenants/${TENANT_ID}`) {
+        return { id: TENANT_ID } as T;
+      }
       if (method === "GET" && pathname === `/api/tenants/${TENANT_ID}/assets`) {
         return (fixture.assets ?? []).map((asset) => ({ ...asset, tenantId: TENANT_ID, kind: "workflow" })) as T;
       }
@@ -67,16 +70,55 @@ describe("findProjectWorkflow", () => {
     expect(result).toEqual({ deploymentId: "dep_1", runId: "run_a" });
   });
 
-  test("prefers the live deployment over an ended one on the same asset", async () => {
+  // CL-8867: a host that gets killed outright can leave the hub reporting a
+  // project's original deployment not-live (or even permanently failed)
+  // well before, or without, the hub's own recovery reconnecting it. That
+  // deployment still owns the project's real run and its stage history; a
+  // newer deployment made on top of it (a redeploy this project should never
+  // have taken) holds an unrelated, freshly-started run. The oldest
+  // deployment that actually has a triggered run wins, live or not --
+  // reading the newer one's run instead is exactly how a restart used to
+  // reset a project back to stage 1.
+  test("keeps the project's original run even when its deployment reports not live and a newer deployment exists", async () => {
     const transport = fakeTransport({
       assets: [{ id: ASSET_ID, name: projectWorkflowAssetName(PROJECT_ID) }],
       deployments: [
         { id: "dep_old_failed", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" },
-        { id: "dep_live", definitionAssetId: ASSET_ID, status: "active", createdAt: "2026-01-02T00:00:00.000Z" },
+        { id: "dep_new_live", definitionAssetId: ASSET_ID, status: "active", createdAt: "2026-01-02T00:00:00.000Z" },
       ],
-      runsByDeployment: { dep_live: ["run_1"], dep_old_failed: ["run_0"] },
+      runsByDeployment: { dep_new_live: ["run_1"], dep_old_failed: ["run_0"] },
     });
     const result = await findProjectWorkflow(transport, TENANT_ID, PROJECT_ID);
-    expect(result).toEqual({ deploymentId: "dep_live", runId: "run_1" });
+    expect(result).toEqual({ deploymentId: "dep_old_failed", runId: "run_0" });
+  });
+});
+
+describe("ensureProjectWorkflow", () => {
+  // CL-8867 root cause: `ensureProjectWorkflowOnce` used to redeploy and
+  // trigger a brand-new top-level run whenever the picked deployment was
+  // not live, even when that deployment already had a run. A host killed
+  // outright reports its deployment not-live right after restart, so
+  // reopening a project redeployed it and reset it to stage 1. Reusing the
+  // existing run means this call must never push source, never deploy and
+  // never trigger -- the fake transport throws on any of those routes.
+  test("reuses the project's existing run instead of redeploying when its deployment is not live", async () => {
+    const transport = fakeTransport({
+      assets: [{ id: ASSET_ID, name: projectWorkflowAssetName(PROJECT_ID) }],
+      deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" }],
+      runsByDeployment: { dep_1: ["run_1"] },
+    });
+    const result = await ensureProjectWorkflow(
+      transport,
+      { canPlaceSidecars: true },
+      { files: { "workflow.js": "", "actions.js": "", "loops.js": "" } },
+      async () => {
+        throw new Error("must not push a new source tree onto a deployment that already has a run");
+      },
+      TENANT_ID,
+      PROJECT_ID,
+      [],
+      {},
+    );
+    expect(result).toEqual({ deploymentId: "dep_1", runId: "run_1" });
   });
 });

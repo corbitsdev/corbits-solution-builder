@@ -61,6 +61,31 @@ function pickTopLevelRun(runIds: readonly string[]): string | undefined {
   return [...runIds].sort()[0];
 }
 
+/**
+ * The run this project's workflow already has, if any -- scanned across
+ * every deployment ever made for its asset, oldest `createdAt` first, not
+ * just the one `pickDeployment` would currently pick as live. A host that
+ * gets killed outright (its sidecars die with it) can leave the hub
+ * reporting the project's original deployment dead for a while, or even
+ * permanently failed, well before or without its own replacement recovery
+ * bringing it back; that is never a reason to treat the project as having no
+ * run yet. Reusing the oldest deployment that actually has a triggered run
+ * is what keeps every caller -- `ensureProjectWorkflow` deciding whether to
+ * deploy, and `findProjectWorkflow` reading the current stage -- converged
+ * on the one run a project has ever triggered, even across a past redeploy.
+ */
+async function existingProjectRun(
+  workflows: ReturnType<typeof workflowsFor>,
+  deployments: readonly HubDeployment[],
+): Promise<ProjectWorkflowDeployment | null> {
+  const byAge = [...deployments].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  for (const candidate of byAge) {
+    const runId = pickTopLevelRun(topLevelRunIds(await workflows.runs(candidate.id)));
+    if (runId) return { deploymentId: candidate.id, runId };
+  }
+  return null;
+}
+
 /** The bytes a project workflow deploy needs: the compiled
  *  `workflow.js`/`actions.js`/`loops.js` `scripts/project-workflow-pack.ts`
  *  produces, fetched by the caller the same way `ClosureSource` fetches
@@ -127,7 +152,12 @@ async function ensureProjectWorkflowOnce(
   const matching = (deployments: readonly HubDeployment[]) =>
     deployments.filter((deployment) => deployment.definitionAssetId === assetId);
 
-  let deployment = pickDeployment(matching(await workflows.deployments()));
+  const existingDeployments = matching(await workflows.deployments());
+
+  const existing = await existingProjectRun(workflows, existingDeployments);
+  if (existing) return existing;
+
+  let deployment = pickDeployment(existingDeployments);
   if (!deployment || !(await deploymentIsLive(transport, workspaceTenantId, deployment.id))) {
     const rendered = { ...renderProjectWorkflowSource(assetName, source), ...vendoredWorkflowMemberFiles };
     const digestFile = treeDigestPath(rendered);
@@ -215,9 +245,9 @@ export async function ensureProjectWorkflow(
  * deploying or triggering anything -- for a page that just needs to read the
  * project workflow's current stage (`project-view.ts`'s `loadProjectView`).
  * Null when the project has no workflow asset yet (a brand-new project the
- * workspace has not ensured yet), no live-or-ended deployment on it, or no
- * top-level run triggered against it -- any of which means there is nothing
- * here to fold yet; the caller treats the project as still at stage 1 until
+ * workspace has not ensured yet), or no deployment on it has ever had a
+ * top-level run triggered -- either of which means there is nothing here to
+ * fold yet; the caller treats the project as still at stage 1 until
  * `StageWorkspace` ensures and triggers the workflow.
  */
 export async function findProjectWorkflow(
@@ -230,10 +260,6 @@ export async function findProjectWorkflow(
   if (!asset) return null;
 
   const workflows = workflowsFor(transport, workspaceTenantId);
-  const deployment = pickDeployment((await workflows.deployments()).filter((entry) => entry.definitionAssetId === asset.id));
-  if (!deployment) return null;
-
-  const runId = pickTopLevelRun(topLevelRunIds(await workflows.runs(deployment.id)));
-  if (!runId) return null;
-  return { deploymentId: deployment.id, runId };
+  const deployments = (await workflows.deployments()).filter((entry) => entry.definitionAssetId === asset.id);
+  return existingProjectRun(workflows, deployments);
 }
