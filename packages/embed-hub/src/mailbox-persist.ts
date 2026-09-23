@@ -94,6 +94,11 @@ async function ensureRunSession(params: {
  * in the sidecar handler on every first reply. Skip the vendored write
  * instead of letting it throw; `@corbits/mailbox`'s own write already
  * persisted this frame.
+ *
+ * The same holds for a sender that is not a run at all: a person's address
+ * (`<ref_id>@domain`) never resolves through `resolveRoutableAddress`, which
+ * only reads `workflow_run`, so the vendored write always throws
+ * `No active endpoint found for sender address` for it.
  */
 export function createHubPersistMailWithSessionEnsure(
   db: DB["db"],
@@ -111,7 +116,7 @@ export function createHubPersistMailWithSessionEnsure(
         );
       }
     }
-    if (sender !== undefined && sender.sessionId === null) {
+    if (sender === undefined || sender.sessionId === null) {
       return [];
     }
     return upstream(args);
