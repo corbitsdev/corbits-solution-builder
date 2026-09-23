@@ -226,14 +226,14 @@ export function Projects({
           </label>
         </div>
         {live.length === 0 ? (
-          <div className="grid">
+          <div className="project-grid">
             <div className="card is-empty">
               <h3>{HOME_EMPTY_TITLE}</h3>
               <p className="card-desc">{HOME_EMPTY_DESCRIPTION}</p>
             </div>
           </div>
         ) : (
-          <div className="grid">
+          <div className="project-grid">
             {ordered.map((project) => (
               <ProjectCard
                 key={project.id}
@@ -253,7 +253,7 @@ export function Projects({
           <summary>
             {archived.length} archived
           </summary>
-          <div className="grid">
+          <div className="project-grid">
             {archived.map((project) => (
               <ProjectCard
                 key={project.id}
