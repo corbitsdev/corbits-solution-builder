@@ -1,5 +1,5 @@
 /**
- * The Solutions Builder host.
+ * The Solution Builder host.
  *
  * The process skeleton — loopback port, session token and handshake, pglite,
  * the embedded hub mount, SPA serving, drain — is `@solutions-builder/host`'s
@@ -8,7 +8,7 @@
  * routes (`api.ts`), and where this checkout keeps its built interface.
  *
  * Boot ends when the runtime reports ready. Everything that makes this
- * tenant Solutions Builder — the user principal, workflow definitions,
+ * tenant Solution Builder — the user principal, workflow definitions,
  * roles, specialist prompts — is installed by the client through
  * `@solutions-builder/installer`, not on every boot.
  */

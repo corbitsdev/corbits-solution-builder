@@ -40,7 +40,7 @@ function MintFailureCard({ failure }: { failure: MintFailure }) {
     <div className="onboarding">
       <div className="onboarding-brand">
         <Mark size={26} />
-        <strong>Solutions Builder</strong>
+        <strong>Solution Builder</strong>
       </div>
 
       <div className="onboarding-card">
@@ -94,7 +94,7 @@ function HostedAuth({ onSignedIn }: { onSignedIn: () => void }) {
     <div className="onboarding">
       <div className="onboarding-brand">
         <Mark size={26} />
-        <strong>Solutions Builder</strong>
+        <strong>Solution Builder</strong>
       </div>
 
       <div className="onboarding-card">

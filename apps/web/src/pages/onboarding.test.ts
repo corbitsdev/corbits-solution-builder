@@ -92,7 +92,7 @@ describe("Onboarding shell", () => {
   test("pins the brand, whisper track, welcome points and credit", () => {
     const html = renderToStaticMarkup(createElement(Onboarding, props()));
     expect(html).toContain("ob-brand");
-    expect(html).toContain("Solutions Builder");
+    expect(html).toContain("Solution Builder");
     expect(html).toContain("ob-track");
     expect(html).toContain("ob-credit");
     expect(html).toContain("Powered by Corbits");

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Solutions Builder as an installable Interchange app: the transition ledger, the workflow definitions generated from it, the specialist kit, and the document format.",
+  "description": "Solution Builder as an installable Interchange app: the transition ledger, the workflow definitions generated from it, the specialist kit, and the document format.",
   "exports": {
     ".": "./src/index.ts",
     "./deck": "./src/deck.ts",

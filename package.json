@@ -7,7 +7,7 @@
     "type": "git",
     "url": "git+https://github.com/corbitsdev/solutions-builder-alpha.git"
   },
-  "description": "Solutions Builder \u2014 turns a half-formed problem into shipped software through nine human-gated stages.",
+  "description": "Solution Builder \u2014 turns a half-formed problem into shipped software through nine human-gated stages.",
   "type": "module",
   "scripts": {
     "dev": "bun run vendor:build && bun scripts/dev.ts",

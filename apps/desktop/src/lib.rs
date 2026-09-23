@@ -37,9 +37,9 @@ use tauri::{
     AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent,
 };
 
-const HANDSHAKE_PREFIX: &str = "Solutions Builder launch URL: ";
+const HANDSHAKE_PREFIX: &str = "Solution Builder launch URL: ";
 /** The window's name when the page has none of its own to give it. */
-const APP_TITLE: &str = "Solutions Builder";
+const APP_TITLE: &str = "Solution Builder";
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(60);
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
@@ -93,7 +93,7 @@ impl HostProcess {
         let mut child = command.spawn().map_err(|error| {
             io::Error::new(
                 error.kind(),
-                format!("could not start the bundled Solutions Builder host: {error}"),
+                format!("could not start the bundled Solution Builder host: {error}"),
             )
         })?;
 
@@ -228,7 +228,7 @@ fn resolve_host_executable() -> AppResult<PathBuf> {
         .join("solutions-builder-host");
     if !path.is_file() {
         return Err(invalid_input(format!(
-            "the bundled Solutions Builder host is missing: {}",
+            "the bundled Solution Builder host is missing: {}",
             path.display()
         )));
     }
@@ -448,14 +448,14 @@ fn show_startup_failure(app: &AppHandle, detail: &str) {
         .replace('>', "&gt;");
 
     let html = format!(
-        "<!doctype html><meta charset=\"utf-8\"><title>Solutions Builder</title>\
+        "<!doctype html><meta charset=\"utf-8\"><title>Solution Builder</title>\
 <style>body{{font:15px/1.55 -apple-system,system-ui,sans-serif;margin:0;padding:40px;\
 background:#fff;color:#2b2627}}h1{{font-size:1.375rem;font-weight:400;margin:0 0 8px}}\
 p{{color:#5c5555;margin:0 0 20px;max-width:64ch}}pre{{font:12px/1.6 ui-monospace,Menlo,monospace;\
 background:#f2f4f5;border:1px solid #dfe3e6;padding:16px;overflow:auto;white-space:pre-wrap;\
 max-height:52vh;margin:0}}</style>\
 <h1>The host did not start.</h1>\
-<p>Solutions Builder runs its API and the Interchange hub in a background \
+<p>Solution Builder runs its API and the Interchange hub in a background \
 process. That process exited before it was ready, so there is nothing to show \
 yet. The reason it gave is below.</p>\
 <pre>{escaped}</pre>"
@@ -466,7 +466,7 @@ yet. The reason it gave is below.</p>\
         .map_err(|error| error.to_string())
         .and_then(|url| {
             WebviewWindowBuilder::new(app, "startup-failure", WebviewUrl::External(url))
-                .title("Solutions Builder")
+                .title("Solution Builder")
                 .inner_size(760.0, 560.0)
                 .center()
                 .build()
@@ -476,7 +476,7 @@ yet. The reason it gave is below.</p>\
     if let Err(error) = built {
         // Last resort: the window itself could not be opened. The console is
         // all that is left, and saying so is better than exiting silently.
-        eprintln!("Solutions Builder could not start, and could not show why: {error}");
+        eprintln!("Solution Builder could not start, and could not show why: {error}");
         eprintln!("{detail}");
     }
 }
@@ -574,14 +574,14 @@ pub fn run() {
             // stop lives. It exists precisely because closing the window is
             // not a stop.
             let open =
-                MenuItem::with_id(app, "open", "Open Solutions Builder", true, None::<&str>)?;
+                MenuItem::with_id(app, "open", "Open Solution Builder", true, None::<&str>)?;
             let quit =
                 MenuItem::with_id(app, "quit", "Stop the host and quit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &quit])?;
 
             let mut tray = TrayIconBuilder::with_id("main")
                 .menu(&menu)
-                .tooltip("Solutions Builder — the host keeps working with the window closed")
+                .tooltip("Solution Builder — the host keeps working with the window closed")
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "open" => {
                         if let Err(error) = open_window(app) {
@@ -599,7 +599,7 @@ pub fn run() {
             Ok(())
         })
         .build(tauri::generate_context!())
-        .expect("failed to build the Solutions Builder desktop host");
+        .expect("failed to build the Solution Builder desktop host");
 
     app.run(|app_handle, event| match event {
         // Quit is the only thing that stops the host.

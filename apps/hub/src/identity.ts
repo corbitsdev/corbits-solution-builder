@@ -1,5 +1,5 @@
 /**
- * What makes this host Solutions Builder, declared in one place.
+ * What makes this host Solution Builder, declared in one place.
  *
  * `@corbits/embedded-host` is the generic runtime; these are the
  * strings and names a running process needs to be *this* product — the data
@@ -12,12 +12,12 @@ import { initHost, type HostIdentity } from "@corbits/embedded-host";
 
 export const IDENTITY: HostIdentity = {
   appDir: "SolutionsBuilder",
-  displayName: "Solutions Builder",
+  displayName: "Solution Builder",
   envPrefix: "SOLUTIONS_BUILDER",
   // Stable: the service name existing installs' keychain items live under.
   keychainService: "com.corbits.solutions-builder",
   oauthPageCopy: {
-    productName: "Solutions Builder",
+    productName: "Solution Builder",
     siteUrl: "https://corbits.dev",
     siteLabel: "corbits.dev",
     githubUrl: "https://github.com/corbitsdev/solutions-builder-alpha",
@@ -25,7 +25,7 @@ export const IDENTITY: HostIdentity = {
   },
   notificationSender: "solutions-builder",
   sessionCookie: "solutions_builder_session",
-  handshakePrefix: "Solutions Builder launch URL: ",
+  handshakePrefix: "Solution Builder launch URL: ",
   hubConfigScriptId: "sb-hub-config",
   globalTokenKey: "solutionsBuilderToken",
   // The shell's IPC schemes (the webview calls the shell over `ipc:` on macOS

@@ -232,7 +232,7 @@ export function Onboarding({
       <main className="ob">
         <div className="ob-brand">
           <Mark size={20} />
-          <span>Solutions Builder</span>
+          <span>Solution Builder</span>
         </div>
 
         <header className="ob-head swap" key={step}>

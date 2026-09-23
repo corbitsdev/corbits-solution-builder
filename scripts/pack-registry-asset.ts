@@ -140,7 +140,7 @@ async function ensureRegistryAssetId(): Promise<string> {
   const created = await hubAssets.create({
     kind: "package-registry",
     name: REGISTRY_ASSET_NAME,
-    displayName: "Solutions Builder packages",
+    displayName: "Solution Builder packages",
   });
   return created.id;
 }

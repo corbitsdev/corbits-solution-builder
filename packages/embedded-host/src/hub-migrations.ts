@@ -9,7 +9,7 @@
  * This lives here, not in the vendored tree, on purpose. The vendor is upstream
  * source at a pinned revision and stays 1:1 with it; what this host needs and
  * upstream does not provide is the host own concern. The SQL itself is read
- * from the vendored files unmodified - Solutions Builder does not own the hub
+ * from the vendored files unmodified - Solution Builder does not own the hub
  * schema and must not drift from it.
  *
  * The list is explicit because a bundler cannot glob, so it must be kept in

@@ -1,6 +1,6 @@
 # Architecture
 
-Solutions Builder is a client of Interchange. A person signs up, the hub
+Solution Builder is a client of Interchange. A person signs up, the hub
 mints a principal, that principal creates a tenant, and the client installs
 the app into that tenant — workflow definitions, skills, tools, roles and
 grants — through the hub's own HTTP API. The desktop window, the tray, and

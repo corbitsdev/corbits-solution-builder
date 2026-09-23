@@ -2,7 +2,7 @@
 
 # Native tracker prototype proof
 
-Baseline: Solutions Builder `f96eb557bb7409c700c06364c7b44fcc3bdf6692` with vendored Interchange `79adc43350a535e808439f05b71ec70aa00490a0`.
+Baseline: Solution Builder `f96eb557bb7409c700c06364c7b44fcc3bdf6692` with vendored Interchange `79adc43350a535e808439f05b71ec70aa00490a0`.
 
 Upstream was refreshed during the investigation. `faremeter/interchange` at `bca283b734a972e87a5d12ad36673d55baa80aec` is 16 commits ahead. The changed production files concern test seams, timeout scheduling, and reconnect diagnostics/configuration; the workflow action, signal, and composition surfaces used here are unchanged.
 

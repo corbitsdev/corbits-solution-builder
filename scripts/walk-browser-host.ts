@@ -1,5 +1,5 @@
 /**
- * Boots an isolated Solutions Builder host for `scripts/walk-browser.sh`.
+ * Boots an isolated Solution Builder host for `scripts/walk-browser.sh`.
  *
  * Spawns the app's own entry
  * (`apps/hub/src/server.ts`) with `--port 0` (OS-assigned free port, never a

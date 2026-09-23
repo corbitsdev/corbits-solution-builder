@@ -7,7 +7,7 @@ deployment changes.
 ## Result
 
 The current stage specialist is a native, single-step mail workflow, but it
-is *generated inside the Solutions Builder app package* and deployed with one
+is *generated inside the Solution Builder app package* and deployed with one
 shared closure.  It is therefore not independently reusable or packable as a
 specialist package yet.
 

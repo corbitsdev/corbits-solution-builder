@@ -2,7 +2,7 @@
  * Installing the app into the workspace.
  *
  * The hub boots vanilla: migrate, mount, serve. Everything that makes it
- * *Solutions Builder* — the owner as a hub user with a tenant, human roles
+ * *Solution Builder* — the owner as a hub user with a tenant, human roles
  * and grants, and project authority — is installed here, driven by a hub
  * `Transport` already authenticated as the signed-in principal. First run
  * signs up or in against the hub, then this call creates the workspace

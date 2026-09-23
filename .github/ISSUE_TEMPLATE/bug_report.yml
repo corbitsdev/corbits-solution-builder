@@ -27,7 +27,7 @@ body:
     attributes:
       label: App version
       description: >-
-        Right-click Solutions Builder.app, "Get Info", and copy the version
+        Right-click Solution Builder.app, "Get Info", and copy the version
         number. If you're running from source, the commit hash instead.
       placeholder: "0.1.0"
     validations:

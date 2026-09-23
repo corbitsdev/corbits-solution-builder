@@ -69,7 +69,7 @@ export async function ensureRegistryAssetId(transport: Transport, scope: string)
   const created = await assets.create({
     kind: "package-registry",
     name: REGISTRY_ASSET_NAME,
-    displayName: "Solutions Builder packages",
+    displayName: "Solution Builder packages",
   });
   return created.id;
 }

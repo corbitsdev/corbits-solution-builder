@@ -1,5 +1,5 @@
 /**
- * Stops every Solutions Builder process on this machine.
+ * Stops every Solution Builder process on this machine.
  *
  *   bun run dev:stop
  *
@@ -41,7 +41,7 @@ function roleOf(command: string): SolutionsBuilderProcess["role"] | null {
   return null;
 }
 
-/** The Solutions Builder processes among `ps -axo pid,command` lines, in the order given; never this process or the shell that ran it. */
+/** The Solution Builder processes among `ps -axo pid,command` lines, in the order given; never this process or the shell that ran it. */
 export function solutionsBuilderProcesses(psLines: readonly string[], own: { readonly pid: number; readonly ppid: number } = { pid: process.pid, ppid: process.ppid }): SolutionsBuilderProcess[] {
   const found: SolutionsBuilderProcess[] = [];
   for (const line of psLines) {
@@ -91,7 +91,7 @@ if (import.meta.main) {
   const GRACE_MS = 10_000;
   const running = stopOrder(solutionsBuilderProcesses(await listProcesses()));
   if (running.length === 0) {
-    console.log("No Solutions Builder host, launcher, watcher, shell or sidecar is running.");
+    console.log("No Solution Builder host, launcher, watcher, shell or sidecar is running.");
     process.exit(0);
   }
   for (const entry of running) {

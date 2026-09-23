@@ -100,7 +100,7 @@ export async function resolveWorkspace(transport: Transport): Promise<Workspace 
 
 /** Creates the workspace tenant; the hub makes the signed-in owner its principal. */
 export async function createWorkspace(transport: Transport): Promise<Workspace> {
-  await transport.fetch("POST", "/api/tenants", { name: "Solutions Builder", slug: WORKSPACE_SLUG });
+  await transport.fetch("POST", "/api/tenants", { name: "Solution Builder", slug: WORKSPACE_SLUG });
   const resolved = await resolveWorkspace(transport);
   if (!resolved) throw new Error("The hub created the workspace but does not list it.");
   return resolved;
