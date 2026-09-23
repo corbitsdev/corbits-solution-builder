@@ -32,6 +32,11 @@ function isLive(deployment: HubDeployment | undefined): deployment is HubDeploym
   return deployment !== undefined && !ENDED_DEPLOYMENT_STATUSES.has(deployment.status);
 }
 
+/** Whether the hub has ended this deployment for good: it will never be placed, fired or signalled again. */
+export function deploymentHasEnded(deployment: Pick<HubDeployment, "status">): boolean {
+  return ENDED_DEPLOYMENT_STATUSES.has(deployment.status);
+}
+
 /**
  * Whether this deployment's sidecar is still placed, or on its way: released,
  * releasing and failed deployments cannot be fired or signalled again.
