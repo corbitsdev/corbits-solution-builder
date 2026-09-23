@@ -185,6 +185,17 @@
   border-color: var(--wb-border-strong);
 }
 
+/* A person's message that is a whole HTML document (a stage's opening hands
+   over the approved design) is shown as that document, in a frame. */
+.conv .bubble .bubble-document {
+  display: block;
+  width: 100%;
+  height: 360px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--radius-md);
+  background: #fff;
+}
+
 .conv [data-slot="message-bubble"] {
   display: flex;
   flex-direction: column;

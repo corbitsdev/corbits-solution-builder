@@ -5,7 +5,7 @@ import { Markdown } from "../../markdown.jsx";
 import { Dictated } from "../../dictation.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { choicesIn } from "./choices.js";
-import { conversationLead } from "./guidance.js";
+import { conversationLead, isHtmlDocument } from "./guidance.js";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
 import { COMPOSER_BOX_CLASS, CONV_SCROLL_CLASS } from "./pane-classes.ts";
 
@@ -18,6 +18,22 @@ function toUiMessages(messages: readonly ChatMessage[]): UiChatMessage[] {
     parts: [{ type: "text", text: message.author === "me" ? message.body : conversationLead(message.body) }],
     createdAt: message.at,
   }));
+}
+
+/**
+ * A message body as the person reads it. A stage after the first opens with
+ * the previous stage's approved artifact as the person's own first mail
+ * (`use-opening-dispatch.ts`); at stage 5 that is the stage 4 design, an
+ * HTML document, which Markdown would show as a wall of markup. It is shown
+ * the way the design page shows it: in a frame with no scripts and no
+ * same-origin, since a generated design is untrusted. Everything else is
+ * Markdown as before.
+ */
+function MessageBody({ text }: { text: string }) {
+  if (isHtmlDocument(text)) {
+    return <iframe className="bubble-document" title="The approved design" srcDoc={text} sandbox="" />;
+  }
+  return <Markdown source={text} />;
 }
 
 function messageText(message: UiChatMessage): string {
@@ -154,11 +170,11 @@ export function StageConversation({
                 <div className="bubble">
                   {you && withdrawnIds.has(message.id) ? (
                     <div className="turn-withdrawn">
-                      <Markdown source={text} />
+                      <MessageBody text={text} />
                       <span className="turn-withdrawn-note">Stopped before it was answered.</span>
                     </div>
                   ) : (
-                    <Markdown source={text} />
+                    <MessageBody text={text} />
                   )}
                 </div>
               </div>
