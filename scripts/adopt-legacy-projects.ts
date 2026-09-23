@@ -61,8 +61,9 @@ import {
   type LegacyNode,
 } from "@solutions-builder/app/legacy-adoption";
 import { IDENTITY, initSolutionsBuilderHost } from "../apps/hub/src/identity.js";
-import { approveStage, ensureReviewOpen, mintRequirements, type StageApprovalDeps } from "../apps/web/src/stage-approval.ts";
-import { loadProjectWorkflowView, type ProjectWorkflowView } from "../apps/web/src/project-workflow.ts";
+import { replayAdoption } from "../apps/web/src/adoption-replay.ts";
+import type { StageApprovalDeps } from "../apps/web/src/stage-approval.ts";
+import { loadProjectWorkflowView } from "../apps/web/src/project-workflow.ts";
 import { buildManifest, buildPackedEntries } from "./closure-pack.ts";
 import { buildProjectWorkflowEntryFiles } from "./project-workflow-pack.ts";
 
@@ -296,19 +297,6 @@ async function closureAndPush(host: Host, cookie: () => string): Promise<{ closu
   return { closure, gitPush };
 }
 
-async function pollView(view: () => Promise<ProjectWorkflowView | null>, until: (view: ProjectWorkflowView) => boolean, timeoutMs: number): Promise<ProjectWorkflowView | null> {
-  const deadline = Date.now() + timeoutMs;
-  let latest: ProjectWorkflowView | null = null;
-  while (Date.now() < deadline) {
-    latest = await view().catch(() => null);
-    if (latest && until(latest)) return latest;
-    await new Promise((resolve) => setTimeout(resolve, 1_500));
-  }
-  return latest;
-}
-
-const slug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-
 type Outcome = { project: ProjectRow; plan: AdoptionPlan; landed: number | null; stopped: string | null };
 
 async function replay(transport: Transport, workspace: { tenantId: string; principalId: string }, sidecar: SidecarCapability, closure: ClosureSource, gitPush: WorkflowGitPush, entry: Prepared): Promise<Outcome> {
@@ -328,10 +316,9 @@ async function replay(transport: Transport, workspace: { tenantId: string; princ
     await vendoredMemberFiles(closure.manifest, closure.fetchTarball),
   );
   // `ensureProjectWorkflow` has already waited for the run to be placed and
-  // caught up; what matters here is that the run reports a stage.
-  const view = () => loadProjectWorkflowView(transport, workspace.tenantId, deployment);
+  // caught up; `replayAdoption` waits for the run to report a stage.
   const deps: StageApprovalDeps = {
-    view: () => view(),
+    view: () => loadProjectWorkflowView(transport, workspace.tenantId, deployment),
     decide: async (_projectId, decision) => {
       await workflowsFor(transport, workspace.tenantId).signal(deployment.deploymentId, {
         runId: deployment.runId,
@@ -343,40 +330,8 @@ async function replay(transport: Transport, workspace: { tenantId: string; princ
     },
     now: () => new Date().toISOString(),
   };
-  let current = await pollView(view, (candidate) => candidate.stage >= 1, 120_000);
-  if (!current || current.stage < 1) return { project, plan, landed: null, stopped: "the project's workflow never reported a stage" };
-
-  for (const step of plan.steps) {
-    if (current.stage > step.stage) continue; // already past it: an earlier run, or the person
-    if (current.stage < step.stage) return { project, plan, landed: current.stage, stopped: `the workflow is at stage ${String(current.stage)}, not ${String(step.stage)}` };
-
-    if (step.stage === 5 && step.votes) {
-      for (const [audience, vote] of Object.entries(step.votes)) {
-        await deps.decide(project.id, {
-          kind: "audience",
-          decisionId: `adopt-${project.id}-5-audience-${slug(audience)}`,
-          projectId: project.id,
-          stage: 5,
-          audience,
-          decision: vote.decision,
-          ...(vote.note ? { note: vote.note } : {}),
-          at: deps.now(),
-        });
-      }
-      const voted = await pollView(view, (candidate) => Object.keys(step.votes!).every((name) => name in candidate.audienceDecisions), 60_000);
-      if (!voted) return { project, plan, landed: current.stage, stopped: "the stakeholders' votes did not land" };
-    }
-    if (step.stage === 6 && step.requirementItems && step.requirementItems.length > 0) {
-      const minted = await mintRequirements(deps, { projectId: project.id, stage: 6, items: step.requirementItems });
-      if (!minted.ok) return { project, plan, landed: current.stage, stopped: `minting the requirements was refused: ${minted.reason}` };
-    }
-    const opened = await ensureReviewOpen(deps, { projectId: project.id, stage: step.stage, ref: step.ref, ...(step.policy ? { policy: step.policy } : {}) });
-    if (!opened.ok) return { project, plan, landed: current.stage, stopped: `opening stage ${String(step.stage)}'s review was refused: ${opened.reason}` };
-    const approved = await approveStage(deps, { projectId: project.id, stage: step.stage, ref: step.ref, ...(step.policy ? { policy: step.policy } : {}) });
-    if (!approved.ok) return { project, plan, landed: current.stage, stopped: `approving stage ${String(step.stage)} was refused: ${approved.reason}` };
-    current = (await view()) ?? current;
-  }
-  return { project, plan, landed: current.stage, stopped: null };
+  const outcome = await replayAdoption(deps, plan);
+  return { project, plan, ...outcome };
 }
 
 // --- Main ------------------------------------------------------------------
