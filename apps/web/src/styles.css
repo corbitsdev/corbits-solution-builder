@@ -1208,6 +1208,25 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   margin-bottom: var(--space-6);
 }
 
+/* Stage 6's compact companion (CL-8894) -- the requirements document and the
+ * four "Request review" buttons once the plan's own StageDocument has taken
+ * the pane. Same card as `.doc`, just tighter, since it sits beside a full
+ * document rather than filling the pane itself. */
+.stage6-companion {
+  background: var(--background);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+}
+
+.stage6-companion .docmeta {
+  margin-bottom: 0;
+}
+
+.stage6-companion .document-fold {
+  margin-top: var(--space-3);
+}
+
 .document-body {
   flex: 1;
   min-height: 0;
