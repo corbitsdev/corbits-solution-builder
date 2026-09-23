@@ -538,11 +538,22 @@ export function AudiencePackages({
 
   const decide = async (node: (typeof packages)[number], decision: AudienceDecision["decision"], note: string) => {
     if (!node.variant) return;
-    const result = await api.recordAudienceDecision(tenantId, node.id, { audience: node.variant, decision, note });
-    setDecisionsByNode((before) => new Map(before).set(node.id, result.decisions));
-    // A stakeholder's decision changes the quorum, and so `allowed.approve` —
-    // the workspace must re-read the workflow view, not just this pane.
-    onChanged();
+    try {
+      const result = await api.recordAudienceDecision(tenantId, node.id, { audience: node.variant, decision, note });
+      setError(null);
+      setDecisionsByNode((before) => new Map(before).set(node.id, result.decisions));
+      // A stakeholder's decision changes the quorum, and so `allowed.approve` —
+      // the workspace must re-read the workflow view, not just this pane.
+      onChanged();
+    } catch (cause) {
+      // The popover shows the same message inline (its own `popError`), but a
+      // failed write must also be visible here: closing the popover, opening
+      // another stakeholder's tab, or simply not noticing the small popover
+      // text otherwise reads as "nothing happened" rather than "refused"
+      // (CL-8866).
+      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+      throw cause;
+    }
   };
 
   return (
