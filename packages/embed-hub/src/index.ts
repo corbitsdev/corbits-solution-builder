@@ -92,6 +92,7 @@ import { createSpendApi, createSpendStore, type TurnUsage } from "./spend.js";
 import {
   createHubMailboxAuthorizeSender,
   createHubPersistMailWithSessionEnsure,
+  ensureRunSession,
   type EventCollectorPort,
 } from "./mailbox-persist.js";
 import { captureMailboxRequest, createMailboxDeliver } from "./mailbox-send.js";
@@ -415,6 +416,29 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
     allocationRouter: sidecarRouter,
     hubWebSocketUrl: options.hubWebSocketUrl,
   });
+  // `prepareProvisionedDeployment` commits the run's `workflow_run` and
+  // `workflow_run_launch_spec` rows before returning -- the same
+  // provision-time point workbench records the agent session at. Wrapped
+  // here (as `persistMail` is above) so the run's event collector exists
+  // before its first turn, not only once its first OUTBOUND mail lands.
+  // The mail-triggered call still matters: collectors live in memory, and a
+  // run recovered after a host restart never passes through this again.
+  const vendoredPrepareProvisionedDeployment = workflowAllocationService.prepareProvisionedDeployment;
+  workflowAllocationService.prepareProvisionedDeployment = async (args) => {
+    const result = await vendoredPrepareProvisionedDeployment(args);
+    try {
+      await ensureRunSession({
+        db: db.db,
+        eventCollectors: eventCollectors as unknown as EventCollectorPort,
+        runId: result.anchorRunId,
+      });
+    } catch (err) {
+      console.error(
+        `hub.workflowAllocationService.ensureRunSession failed for ${result.anchorRunId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    return result;
+  };
   const sidecarAllocationStore = createSidecarAllocationStore(db.db);
   const workflowDispatchService = createWorkflowDispatchService({
     dispatchStore: createWorkflowRunDispatchStore(db.db),
