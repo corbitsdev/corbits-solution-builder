@@ -10,7 +10,7 @@ import { Button, stageName } from "../../components.jsx";
 import { Dictated } from "../../dictation.jsx";
 import { RETURN_TO, SendBackPicker, defaultTarget } from "../send-back.jsx";
 import { STAGE_GOAL } from "./gate.jsx";
-import { Elapsed } from "./elapsed.jsx";
+import { clock, Elapsed, useElapsedMs } from "./elapsed.jsx";
 import type { Guidance } from "./product-guide.js";
 import type { evaluatorVerdict } from "./guidance.js";
 import { CONV_CLASS, CONV_SCROLL_CLASS, PANES_CLASS, STAGE_PANE_CLASS } from "./pane-classes.ts";
@@ -195,8 +195,14 @@ export function SendBackPopover({
   );
 }
 
-/** Same two-pane chrome as a live stage, empty, while the workflow view loads. */
+/** Same two-pane chrome as a live stage, empty, while the workflow view loads.
+ *  After a host restart this can legitimately take minutes — every sidecar
+ *  has to reconnect and the workflow run has to catch up before its stage
+ *  becomes readable — and a bare, unchanging "Opening…" is indistinguishable
+ *  from a hang. A running clock (CL-8874) is the only signal that anything
+ *  is happening at all. */
 export function OpeningScreen() {
+  const seconds = Math.floor(useElapsedMs() / 1_000);
   return (
     <div className="stage-view">
       <StagePanes
@@ -205,6 +211,12 @@ export function OpeningScreen() {
             <div className={CONV_SCROLL_CLASS}>
               <div className="think" role="status">
                 <span className="who conv-who">Opening…</span>
+                <p className="elapsed">
+                  <span className="elapsed-clock" role="timer" aria-live="off">
+                    {clock(seconds)}
+                  </span>{" "}
+                  elapsed. A project reopened right after a restart can take several minutes to catch up.
+                </p>
               </div>
             </div>
           </div>
