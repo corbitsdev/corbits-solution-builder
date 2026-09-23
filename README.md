@@ -1,4 +1,4 @@
-# Solutions Builder
+# Solution Builder
 
 Turns a half-formed problem into shipped software through nine human-gated
 stages. A specialist agent drafts each stage; a person approves it against an
@@ -12,7 +12,15 @@ and a desktop notification fires when it gets there.
 ## Getting started
 
 Requires [Bun](https://bun.sh) 1.4 or newer (`engines.bun` in
-[package.json](package.json)). Check with `bun --version`.
+[package.json](package.json)). Check with `bun --version`.  Use ```bun upgrade``` to upgrade if necessary.
+
+If you are upgrading from an earlier version of solution-builder, you will need to update the existing assets:
+
+```
+bun run assets:pack-closure && bun run assets:pack-project-workflow
+```
+
+In either case:
 
 ```bash
 bun install
@@ -26,7 +34,7 @@ it:
 ```
 Solutions Builder host: http://127.0.0.1:PORT (api v1)
 Solutions Builder launch URL: http://127.0.0.1:PORT/?token=...
-```
+```
 
 The window opens on an empty workspace. Connect a provider in Settings — an
 API key, a sign-in with ChatGPT or xAI, or a local endpoint that speaks the
