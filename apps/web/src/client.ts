@@ -1481,22 +1481,33 @@ export const api = {
     input: { audience: string; decision: AudienceDecision["decision"]; note: string },
   ): Promise<{ decisions: AudienceDecision[] }> => {
     const transport = createHubTransport();
-    const artifact = await installerGetArtifact(transport, tenantId, packageNodeId);
-    const sb = (artifact?.metadata as { sb?: Record<string, unknown> } | null)?.sb ?? {};
-    const decisions = [
-      ...readAudienceDecisions(artifact?.metadata ?? null),
-      {
-        audience: input.audience,
-        decision: input.decision,
-        note: input.note.trim(),
-        at: new Date().toISOString(),
-        by: input.audience,
-      },
-    ];
-    await installerReviseArtifact(transport, tenantId, packageNodeId, {
-      metadata: { sb: { ...sb, decisions } },
-    });
-    return { decisions };
+    try {
+      const artifact = await installerGetArtifact(transport, tenantId, packageNodeId);
+      const sb = (artifact?.metadata as { sb?: Record<string, unknown> } | null)?.sb ?? {};
+      const decisions = [
+        ...readAudienceDecisions(artifact?.metadata ?? null),
+        {
+          audience: input.audience,
+          decision: input.decision,
+          note: input.note.trim(),
+          at: new Date().toISOString(),
+          by: input.audience,
+        },
+      ];
+      await installerReviseArtifact(transport, tenantId, packageNodeId, {
+        metadata: { sb: { ...sb, decisions } },
+      });
+      return { decisions };
+    } catch (cause) {
+      // `installerGetArtifact` swallows its own failure into `null` (its usual
+      // "not found" contract), but `installerReviseArtifact` does not -- a
+      // refused or dropped write throws the hub client's raw `ApiError`
+      // here, uncaught until now. Without this mapping it never becomes an
+      // `ApiFailure`, so neither the popover's nor the page's `instanceof
+      // ApiFailure` check recognizes it and both fall back to a raw
+      // `String(cause)` instead of the host's own message (CL-8866).
+      installerFailure(cause);
+    }
   },
   designerSettings: () => loadDesignerSettings(createHubTransport()),
   deckDesigns: () => loadDeckDesigns(createHubTransport()),
