@@ -52,6 +52,7 @@ import { cacheProjectWorkflowRef, resolveProjectWorkflowRef } from "./project-wo
 import { parseBundle } from "./project-export.ts";
 import { importProject as importProjectBundle } from "./project-import.ts";
 import { importLegacyProject, isLegacyBundle, parseLegacyBundle } from "./legacy-import.ts";
+import { ArchiveRefused, expandArchives } from "./material-archive.ts";
 import { replayAdoption } from "./adoption-replay.ts";
 import { MATERIAL_KIND, MATERIAL_READING_KIND } from "@solutions-builder/app/artifacts";
 import { readMaterial } from "./material-reading.ts";
@@ -569,6 +570,9 @@ const lifecycleGitPush: WorkflowGitPush = ({ scope, assetKind, assetName, token,
 
 function installerFailure(cause: unknown): never {
   if (cause instanceof ApiFailure) throw cause;
+  if (cause instanceof ArchiveRefused) {
+    throw new ApiFailure({ code: "validation_failed", message: cause.message, correlationId: "-", retryable: false });
+  }
   if (cause instanceof InstallerError) {
     throw new ApiFailure({
       code: cause.code,
@@ -1239,11 +1243,14 @@ export const api = {
    * it — `upload` carries no metadata field of its own. Unlike the deleted
    * host route, a same-named re-upload always starts a fresh artifact
    * rather than a new version of the same one.
+   *
+   * A zip archive stands for the files inside it (`material-archive.ts`):
+   * those are what get attached, each under its path in the archive.
    */
   attachMaterial: (projectId: string, files: File[]) =>
     asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const attached = await Promise.all(
-        files.map(async (file) => {
+        (await expandArchives(files)).map(async (file) => {
           const mediaType = file.type || "application/octet-stream";
           const sb = {
             projectId,
