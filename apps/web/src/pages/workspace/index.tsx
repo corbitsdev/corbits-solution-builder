@@ -164,8 +164,6 @@ export function StageWorkspace({
   const reviewMessage = DOCUMENT_STAGES.has(stage) ? draftMessage : latestSpecialistMessage;
   const progress = useMemo(() => interviewProgress(foldedMessages), [foldedMessages]);
 
-  const lastPersonMessage = [...foldedMessages].reverse().find((message) => message.author === "me") ?? null;
-
   // Mail turns as StageDocument's turn shape: it wants who spoke and what
   // was said, nothing this contract tracks beyond that (no per-turn quotes
   // or result-node bookkeeping under mail-chat).
@@ -493,9 +491,10 @@ export function StageWorkspace({
         <Stage6Panel
           tenantId={tenantId}
           projectId={detail.project.id}
-          requirementsInput={lastPersonMessage?.body ?? null}
+          requirementsInput={openingDispatch.stage6Material}
           reviewInput={draftMessage?.body ?? null}
           requirementsBlock={workflowView ? renderRequirementsBlock(workflowView.requirements) : null}
+          requirementsMinted={!!workflowView && workflowView.requirements.length > 0}
           onRequirementsDrafted={mintRequirements}
           strip={stripEl}
           conversation={conversation}

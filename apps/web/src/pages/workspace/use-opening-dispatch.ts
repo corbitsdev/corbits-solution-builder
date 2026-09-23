@@ -40,6 +40,14 @@ export type OpeningDispatch = {
   readonly retry: () => void;
   /** `approve()` hands the just-approved draft to the next stage's thread. */
   readonly queueOpening: (stage: number, body: string) => void;
+  /** Stage 6's own opening material -- stage 5's approved review, the same
+   *  content the Architect's opening would carry -- fetched independently of
+   *  whether requirements have been minted yet. `Stage6Panel` asks the
+   *  requirements author from this, never from the person's last chat
+   *  message (empty on a fresh stage 6, on reload and in session alike, so
+   *  minting could never start without the person typing first). Null off
+   *  stage 6, or before stage 5's review is readable. */
+  readonly stage6Material: string | null;
 };
 
 export function useOpeningDispatch({
@@ -117,6 +125,26 @@ export function useOpeningDispatch({
     if (!review || review.status !== "approved") return null;
     return { artifactId: review.artifactId, version: review.version };
   })();
+
+  const [stage6Material, setStage6Material] = useState<string | null>(null);
+  useEffect(() => {
+    if (stage !== 6 || !previousApproved) {
+      setStage6Material(null);
+      return;
+    }
+    let cancelled = false;
+    void api
+      .artifactContent(tenantId, previousApproved.artifactId)
+      .then((result) => {
+        if (!cancelled) setStage6Material(result.content || null);
+      })
+      .catch(() => {
+        if (!cancelled) setStage6Material(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [stage, previousApproved, tenantId]);
 
   useEffect(() => {
     if (!agentAddress) return;
@@ -263,5 +291,6 @@ export function useOpeningDispatch({
     error,
     retry: () => setRetryAttempt((attempt) => attempt + 1),
     queueOpening: (nextStage, body) => setPendingOpening({ stage: nextStage, body }),
+    stage6Material,
   };
 }

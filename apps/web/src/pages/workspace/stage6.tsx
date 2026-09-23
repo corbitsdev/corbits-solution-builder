@@ -61,6 +61,7 @@ export function Stage6Panel({
   requirementsInput,
   reviewInput,
   requirementsBlock = null,
+  requirementsMinted,
   onRequirementsDrafted,
   strip,
   conversation,
@@ -77,6 +78,11 @@ export function Stage6Panel({
    *  against the same ids the Architect was bound to. Empty ("None minted
    *  yet.") until `mint_requirements` has run for this project. */
   requirementsBlock?: string | null;
+  /** `workflowView.requirements.length > 0` -- once minting has run for this
+   *  project, `requirementsInput` is stage 6's opening material on every
+   *  reload, not a fresh ask, so the requirements author must not re-run
+   *  (same gate `use-opening-dispatch.ts` holds the Architect's opening to). */
+  requirementsMinted: boolean;
   /** Fires once the requirements author's PRODUCT_REQUIREMENTS document is
    *  accepted (its reply lands) — `index.tsx` mints the workflow's
    *  requirement ids from it (CL-8862), before the Architect drafts. */
@@ -126,12 +132,14 @@ export function Stage6Panel({
 
   // The requirements author runs first, once per opening input -- a fresh
   // send-back or a new project resets `requirementsInput` and asks again.
+  // Once minting has run, `requirementsInput` is stage 6's own opening
+  // material on every reload, not a fresh ask, so this must not re-fire.
   useEffect(() => {
-    if (!requirementsInput) return;
+    if (!requirementsInput || requirementsMinted) return;
     if (requirementsRequestedFor.current === requirementsInput) return;
     requirementsRequestedFor.current = requirementsInput;
     runRole(STAGE6_REQUIREMENTS_ROLE_KEY, requirementsInput, setRequirements);
-  }, [requirementsInput, runRole]);
+  }, [requirementsInput, requirementsMinted, runRole]);
 
   const requestReview = (roleKey: string) => {
     if (!reviewInput) return;
