@@ -18,7 +18,7 @@ import {
 } from "@corbits/react-ui";
 import { Plus, Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { api, ApiFailure, type ActiveModel, type ProjectInfo, type ProjectSummary } from "../client.js";
+import { api, ApiFailure, type ActiveModel, type ImportOutcome, type ProjectInfo, type ProjectSummary } from "../client.js";
 import { Banner, Button, downloadArtifact, stageName } from "../components.jsx";
 // INTEGRATE (CL-8756): api.exportProject is gone on this lane — export is
 // assembled in the browser (assembleBundle) and saved via downloadArtifact;
@@ -41,6 +41,29 @@ import {
   cardFootStage,
   stageTrackSegClass,
 } from "./home-view.js";
+
+function plural(count: number, noun: string): string {
+  return `${String(count)} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+/** What the import did, and, for a bundle from `main`, where the project landed. */
+export function importNotice(fileName: string, brought: ImportOutcome): string {
+  const written =
+    brought.versions === undefined
+      ? `${plural(brought.artifacts, "artifact")} and ${plural(brought.conversations, "conversation")}`
+      : `${plural(brought.artifacts, "artifact")} (${plural(brought.versions, "version")}) and ${plural(brought.conversations, "conversation")}`;
+  const parts = [`Imported ${fileName}: ${written}.`];
+  const landing = brought.landing;
+  if (landing) {
+    if (landing.stopped) {
+      parts.push(`The project's history could not be fully replayed${landing.landed === null ? "" : `; it is at stage ${String(landing.landed)}`}: ${landing.stopped}.`);
+    } else if (landing.landed !== null) {
+      parts.push(`Its history was replayed; it is at stage ${String(landing.landed)}.`);
+    }
+    parts.push(...landing.notes);
+  }
+  return parts.join(" ");
+}
 
 export function Projects({
   projects,
@@ -68,6 +91,7 @@ export function Projects({
 
   /** Reads the chosen export and brings it in as a new project. */
   const importFile = async (file: File) => {
+    setNotice("Importing…");
     setBusy(true);
     setError(null);
     try {
@@ -76,7 +100,7 @@ export function Projects({
       // itself and reports artifacts/conversations, not nodes/commands — main's
       // diction kept, fields mapped to what the client returns.
       const brought = await api.importProject(bundle);
-      setNotice(`Imported ${file.name}: ${brought.artifacts} artifact${brought.artifacts === 1 ? "" : "s"} and ${brought.conversations} conversation${brought.conversations === 1 ? "" : "s"}.`);
+      setNotice(importNotice(file.name, brought));
       onChanged();
       onOpen(brought.projectId);
     } catch (cause) {
