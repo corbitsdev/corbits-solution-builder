@@ -1,4 +1,4 @@
-# Solutions Builder
+# Solution Builder
 
 Turns a half-formed problem into shipped software through nine human-gated
 stages. A specialist agent drafts each stage; a person approves it against an
