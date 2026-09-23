@@ -22,7 +22,18 @@ const decision = (n: number): Event => ({
 });
 const STARTED: Event = { seq: 1, type: "RunStarted", body: {} };
 const PARKED: Event[] = [STARTED, { seq: 2, type: "SignalAwaited", body: { signalName: "project.decision" } }];
-const DECIDED: Event[] = [STARTED, decision(1), decision(2)];
+const PARKED_TOP = PARKED;
+
+/** A run whose loop applied `decisions` decisions, one iteration each: the run ids and event logs to register. */
+function decidedRun(runId: string, decisions: readonly number[]): { runIds: string[]; events: Record<string, Event[]> } {
+  const runIds = [runId, ...decisions.map((_, index) => `${runId}__rework__${String(index)}`)];
+  const events: Record<string, Event[]> = { [runId]: PARKED_TOP };
+  decisions.forEach((n, index) => {
+    events[`${runId}__rework__${String(index)}`] = [STARTED, decision(n)];
+  });
+  return { runIds, events };
+}
+
 
 /**
  * A hub with just enough state to be deployed to: `POST /deployments`
@@ -73,9 +84,16 @@ function fakeHub(fixture: Fixture) {
       }
       const signal = /^\/api\/tenants\/[^/]+\/workflows\/([^/]+)\/signals$/.exec(pathname!);
       if (method === "POST" && signal) {
+        // The loop applies one signal per iteration: the fake spawns the
+        // next iteration of the run named and records the signal there,
+        // which is what the real hub's event log shows once the sidecar
+        // has taken it.
         const input = body as { runId: string; signalName: string; signalId: string; payload: unknown };
-        const log = (eventsByRun[input.runId] ??= []);
-        log.push({ seq: log.length + 1, type: "SignalReceived", body: { signalName: input.signalName, signalId: input.signalId, payload: input.payload } });
+        const runs = (runsByDeployment[signal[1]!] ??= []);
+        const index = runs.filter((id) => id.startsWith(`${input.runId}__`)).length;
+        const iteration = `${input.runId}__rework__${String(index)}`;
+        runs.push(iteration);
+        eventsByRun[iteration] = [STARTED, { seq: 2, type: "SignalReceived", body: { signalName: input.signalName, signalId: input.signalId, payload: input.payload } }];
         return undefined as T;
       }
       throw new Error(`unexpected ${method} ${path}`);
@@ -130,8 +148,8 @@ describe("findProjectWorkflow", () => {
           { id: "dep_old_failed", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" },
           { id: "dep_new_live", definitionAssetId: ASSET_ID, status: "active", createdAt: "2026-01-02T00:00:00.000Z" },
         ],
-        runsByDeployment: { dep_new_live: ["run_1"], dep_old_failed: ["run_0"] },
-        eventsByRun: { run_0: DECIDED, run_1: PARKED },
+        runsByDeployment: { dep_new_live: ["run_1"], dep_old_failed: decidedRun("run_0", [1, 2]).runIds },
+        eventsByRun: { ...decidedRun("run_0", [1, 2]).events, run_1: PARKED },
       }),
     );
     expect(await findProjectWorkflow(hub.transport, TENANT_ID, PROJECT_ID)).toEqual({ deploymentId: "dep_old_failed", runId: "run_0" });
@@ -144,8 +162,8 @@ describe("findProjectWorkflow", () => {
           { id: "dep_old_failed", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" },
           { id: "dep_new_live", definitionAssetId: ASSET_ID, status: "active", createdAt: "2026-01-02T00:00:00.000Z" },
         ],
-        runsByDeployment: { dep_new_live: ["run_1"], dep_old_failed: ["run_0", "run_0__rework__0"] },
-        eventsByRun: { run_0: PARKED, run_0__rework__0: DECIDED, run_1: DECIDED },
+        runsByDeployment: { dep_new_live: decidedRun("run_1", [1, 2]).runIds, dep_old_failed: decidedRun("run_0", [1, 2]).runIds },
+        eventsByRun: { ...decidedRun("run_0", [1, 2]).events, ...decidedRun("run_1", [1, 2]).events },
       }),
     );
     expect(await findProjectWorkflow(hub.transport, TENANT_ID, PROJECT_ID)).toEqual({ deploymentId: "dep_new_live", runId: "run_1" });
@@ -173,7 +191,7 @@ describe("findProjectWorkflow", () => {
 
 describe("ensureProjectWorkflow", () => {
   test("a live run that has caught up is returned as is: nothing pushed, deployed, triggered or signalled", async () => {
-    const hub = fakeHub(withAsset({ deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "deployed", createdAt: "2026-01-01T00:00:00.000Z" }], runsByDeployment: { dep_1: ["run_1"] }, eventsByRun: { run_1: DECIDED } }));
+    const hub = fakeHub(withAsset({ deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "deployed", createdAt: "2026-01-01T00:00:00.000Z" }], runsByDeployment: { dep_1: decidedRun("run_1", [1, 2]).runIds }, eventsByRun: decidedRun("run_1", [1, 2]).events }));
     expect(await ensure(hub)).toEqual({ deploymentId: "dep_1", runId: "run_1" });
     expect(hub.posts).toEqual([]);
   });
@@ -187,8 +205,8 @@ describe("ensureProjectWorkflow", () => {
     const hub = fakeHub(
       withAsset({
         deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" }],
-        runsByDeployment: { dep_1: ["run_1", "run_1__rework__0", "run_1__rework__1"] },
-        eventsByRun: { run_1: PARKED, run_1__rework__0: [STARTED, decision(1)], run_1__rework__1: [STARTED, decision(2)] },
+        runsByDeployment: { dep_1: decidedRun("run_1", [1, 2]).runIds },
+        eventsByRun: decidedRun("run_1", [1, 2]).events,
       }),
     );
     expect(await ensure(hub)).toEqual({ deploymentId: "dep_new", runId: "run_new" });
@@ -207,8 +225,8 @@ describe("ensureProjectWorkflow", () => {
           { id: "dep_old_failed", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" },
           { id: "dep_new_live", definitionAssetId: ASSET_ID, status: "deployed", createdAt: "2026-01-02T00:00:00.000Z" },
         ],
-        runsByDeployment: { dep_old_failed: ["run_0"], dep_new_live: ["run_1"] },
-        eventsByRun: { run_0: DECIDED, run_1: [STARTED, decision(1)] },
+        runsByDeployment: { dep_old_failed: decidedRun("run_0", [1, 2]).runIds, dep_new_live: decidedRun("run_1", [1]).runIds },
+        eventsByRun: { ...decidedRun("run_0", [1, 2]).events, ...decidedRun("run_1", [1]).events },
       }),
     );
     expect(await ensure(hub)).toEqual({ deploymentId: "dep_new_live", runId: "run_1" });
