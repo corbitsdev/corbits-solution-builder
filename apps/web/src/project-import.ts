@@ -30,7 +30,8 @@ export function importedProjectTitle(bundle: ProjectBundle): string {
   return `${bundle.project.title} (imported)`;
 }
 
-function transcript(messages: ProjectBundle["conversations"][number]["messages"]): string {
+/** One stage's messages as the read-only text an `imported_conversation` artifact holds. */
+export function transcript(messages: ProjectBundle["conversations"][number]["messages"]): string {
   return messages
     .map((message) => `**${message.author === "me" ? "You" : "Specialist"}** — ${message.at}\n\n${message.body}`)
     .join("\n\n---\n\n");
@@ -59,7 +60,12 @@ export function importPlan(bundle: ProjectBundle, newProjectId: string): ImportP
     },
   }));
 
-  const conversations: ImportWrite[] = bundle.conversations.map(({ stage, messages }) => ({
+  return { artifacts, conversations: bundle.conversations.map((conversation) => conversationWrite(conversation, newProjectId)) };
+}
+
+/** The transcript artifact one bundled conversation becomes under `newProjectId`. */
+export function conversationWrite({ stage, messages }: ProjectBundle["conversations"][number], newProjectId: string): ImportWrite {
+  return {
     title: `Stage ${stage} conversation (imported)`,
     content: transcript(messages),
     sb: {
@@ -71,9 +77,7 @@ export function importPlan(bundle: ProjectBundle, newProjectId: string): ImportP
       provenance: { producer: "human" as const },
       mediaType: "text/markdown",
     },
-  }));
-
-  return { artifacts, conversations };
+  };
 }
 
 export type ImportDeps = {

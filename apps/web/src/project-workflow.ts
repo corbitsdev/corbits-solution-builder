@@ -151,7 +151,11 @@ export function foldProjectWorkflow(
   topEvents: readonly WorkflowRunEvent[],
   iterationEventsByRunId: Readonly<Record<string, readonly WorkflowRunEvent[]>>,
 ): ProjectWorkflowView {
-  const state = projectStateOf(topEvents, iterationEventsByRunId);
+  return projectWorkflowViewOf(projectStateOf(topEvents, iterationEventsByRunId));
+}
+
+/** The view one carried `ProjectState` renders as; `foldProjectWorkflow` over the state it finds in the events. */
+export function projectWorkflowViewOf(state: ProjectState): ProjectWorkflowView {
   const openReview = state.reviews[state.stage]?.status === "open" ? state.reviews[state.stage]! : null;
   const lastRefusal = [...state.decisions].reverse().find((d) => !d.accepted) ?? null;
   return {

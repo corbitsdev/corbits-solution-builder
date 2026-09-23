@@ -263,7 +263,8 @@ export function legacyArtifactMetadata(nodes: readonly LegacyNode[], edges: read
   }));
 }
 
-function legacyProvenance(raw: Record<string, unknown> | null): ArtifactProvenance {
+/** The graph's provenance from an old node row's: the producer, and the strings the graph keeps. */
+export function legacyProvenance(raw: Record<string, unknown> | null): ArtifactProvenance {
   const producer = raw?.producer === "human" ? "human" : "agent";
   const provenance: ArtifactProvenance = { producer };
   for (const key of ["agentRole", "providerId", "model", "runId", "promptKey"] as const) {
