@@ -443,6 +443,14 @@
   }
 }
 
+/* ---- wide screens: chat gets more room, document keeps its measure ---- */
+
+@media (min-width: 1400px) {
+  .panes {
+    grid-template-columns: 540px minmax(0, 1fr);
+  }
+}
+
 /* ---- artifact strip: ghost tabs, selected = pane paper, live = primary ---- */
 
 .artifact-strip {
