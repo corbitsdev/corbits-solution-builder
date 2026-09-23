@@ -399,19 +399,6 @@ export type ProjectDetail = {
   }[];
 };
 
-/**
- * One stakeholder's own proceed/revise/reject on a stage-5 package,
- * appended to that package artifact's `sb.decisions` — no lifecycle run to
- * park a decision on any more (CL-8612 contract v6; CL-8625).
- */
-export type AudienceDecision = {
-  audience: string;
-  decision: "proceed" | "revise" | "reject";
-  note: string;
-  at: string;
-  by: string;
-};
-
 export type { Quote, StageTurn };
 
 /** The stage-1 brief evaluator's verdict. Advisory only — nothing gates on it. */
@@ -732,13 +719,6 @@ async function asWorkspaceOwner<T>(
   } catch (cause) {
     installerFailure(cause);
   }
-}
-
-/** `sb.decisions` off a package artifact's metadata, or empty if none are recorded yet. */
-function readAudienceDecisions(metadata: Record<string, unknown> | null): AudienceDecision[] {
-  const sb = (metadata as { sb?: Record<string, unknown> } | null)?.sb;
-  const decisions = sb?.decisions;
-  return Array.isArray(decisions) ? (decisions as AudienceDecision[]) : [];
 }
 
 export const STAKEHOLDER_ROLES: readonly Authority[] = AUTHORITIES.filter((role) => role !== "system");
@@ -1463,51 +1443,6 @@ export const api = {
     const uploadId = (artifact.source as { upload?: { id?: unknown } }).upload?.id;
     if (typeof uploadId !== "string") return { content: artifact.content };
     return { content: await downloadUploadedArtifact(tenantId, nodeId) };
-  },
-  /** The decisions already recorded on a stage-5 package artifact's `sb.decisions`, oldest first. */
-  audienceDecisions: async (tenantId: string, packageNodeId: string): Promise<{ decisions: AudienceDecision[] }> => {
-    const artifact = await installerGetArtifact(createHubTransport(), tenantId, packageNodeId);
-    return { decisions: readAudienceDecisions(artifact?.metadata ?? null) };
-  },
-  /**
-   * Records one stakeholder's own proceed/revise/reject on their package,
-   * by revising that package artifact's `sb` metadata — the mail-agent-shaped
-   * replacement for the deleted lifecycle-run `audience.decide` (CL-8625).
-   * Title and content carry forward unchanged; only `sb.decisions` grows.
-   */
-  recordAudienceDecision: async (
-    tenantId: string,
-    packageNodeId: string,
-    input: { audience: string; decision: AudienceDecision["decision"]; note: string },
-  ): Promise<{ decisions: AudienceDecision[] }> => {
-    const transport = createHubTransport();
-    try {
-      const artifact = await installerGetArtifact(transport, tenantId, packageNodeId);
-      const sb = (artifact?.metadata as { sb?: Record<string, unknown> } | null)?.sb ?? {};
-      const decisions = [
-        ...readAudienceDecisions(artifact?.metadata ?? null),
-        {
-          audience: input.audience,
-          decision: input.decision,
-          note: input.note.trim(),
-          at: new Date().toISOString(),
-          by: input.audience,
-        },
-      ];
-      await installerReviseArtifact(transport, tenantId, packageNodeId, {
-        metadata: { sb: { ...sb, decisions } },
-      });
-      return { decisions };
-    } catch (cause) {
-      // `installerGetArtifact` swallows its own failure into `null` (its usual
-      // "not found" contract), but `installerReviseArtifact` does not -- a
-      // refused or dropped write throws the hub client's raw `ApiError`
-      // here, uncaught until now. Without this mapping it never becomes an
-      // `ApiFailure`, so neither the popover's nor the page's `instanceof
-      // ApiFailure` check recognizes it and both fall back to a raw
-      // `String(cause)` instead of the host's own message (CL-8866).
-      installerFailure(cause);
-    }
   },
   designerSettings: () => loadDesignerSettings(createHubTransport()),
   deckDesigns: () => loadDeckDesigns(createHubTransport()),

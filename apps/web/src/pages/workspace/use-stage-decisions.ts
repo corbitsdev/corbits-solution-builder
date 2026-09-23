@@ -162,6 +162,15 @@ export function useStageDecisions({
     return { artifactId: persisted.artifactId, version, sha256 };
   }, [reviewMessage, draftKind, detail.nodes, detail.project.id, stage, publishedBundle, chosenTarget, stage8Evidence]);
 
+  // Stage 5's quorum policy, read fresh off the project's policy right
+  // before it is captured onto an `open_review` decision (CL-8870) -- never
+  // cached, so the policy captured is whatever is in effect at that moment.
+  const stage5Policy = useCallback(async () => {
+    if (stage !== 5) return undefined;
+    const policy = await api.stakeholders(detail.project.id);
+    return { quorum: policy.audienceQuorum, stakeholders: policy.audiences.map((audience) => audience.name) };
+  }, [stage, detail.project.id]);
+
   const openReviewNow = useCallback(async () => {
     if (!workflowView || workflowView.done || stage >= LAST_STAGE) return { ok: false as const, reason: "There is nothing to review yet." };
     if (stage === 7 && !chosenTarget) return { ok: false as const, reason: "No delivery target has been chosen yet." };
@@ -181,14 +190,15 @@ export function useStageDecisions({
         workflowView.openReview.version === ref.version &&
         workflowView.openReview.sha256 === ref.sha256;
       if (!sameAsOpen) {
-        await ensureReviewOpen(stageApprovalDeps, { projectId: detail.project.id, stage, ref });
+        const policy = await stage5Policy();
+        await ensureReviewOpen(stageApprovalDeps, { projectId: detail.project.id, stage, ref, ...(policy ? { policy } : {}) });
       }
       await refreshWorkflow();
       return { ok: true as const };
     } catch (cause) {
       return { ok: false as const, reason: cause instanceof ApiFailure ? cause.detail.message : String(cause) };
     }
-  }, [workflowView, stage, chosenTarget, reviewMessage, draftKind, stage8Evidence, publishedBundle, detail.nodes, detail.project.id, resolveReviewRef, refreshWorkflow]);
+  }, [workflowView, stage, chosenTarget, reviewMessage, draftKind, stage8Evidence, publishedBundle, detail.nodes, detail.project.id, resolveReviewRef, refreshWorkflow, stage5Policy]);
 
   // Opens the review the moment this stage's material is ready rather than
   // at the instant of approval — a review that only opens inside `approve()`
@@ -250,15 +260,15 @@ export function useStageDecisions({
         nodes: detail.nodes,
         chosenTarget,
         workflowView,
-        stakeholders: api.stakeholders,
-        audienceDecisions: (tid, nodeId) => api.audienceDecisions(tid, nodeId),
         artifactContent: (tid, nodeId) => api.artifactContent(tid, nodeId),
       });
+      const policy = await stage5Policy();
       const result = await approveStage(stageApprovalDeps, {
         projectId: detail.project.id,
         stage,
         ref,
         evidence,
+        ...(policy ? { policy } : {}),
       });
       if (!result.ok) {
         onError(`This stage's approval was refused: ${stageRefusalMessage(result.reason)}`);

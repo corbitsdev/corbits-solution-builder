@@ -6,7 +6,7 @@ export type StageNumber = number;
  *  -- the workflow never reads that document itself. It carries no
  *  reviewId/artifactId: it is not a review decision, just the one place ids
  *  become authoritative before the Architect runs. */
-export type DecisionKind = "open_review" | "approve" | "send_back" | "mint_requirements";
+export type DecisionKind = "open_review" | "approve" | "send_back" | "mint_requirements" | "audience";
 export type ReviewStatus = "open" | "approved" | "stale";
 
 export interface ReviewState {
@@ -35,24 +35,33 @@ export interface DecisionRecord {
   readonly quorum?: { readonly proceeded: number; readonly required: number; readonly blocked: readonly string[] };
   /** Stage 7 approvals only: the target the freeze was made for. */
   readonly target?: string;
+  /** `audience` decisions only: which stakeholder, and their own
+   *  proceed/revise/reject and optional note. */
+  readonly audience?: string;
+  readonly outcome?: AudienceVote["decision"];
+  readonly note?: string;
 }
 
-/** One stakeholder's own outcome on a stage-5 package, as carried in an
- *  `approve` decision's `evidence.decisions`. */
-export interface QuorumDecisionEvidence {
-  readonly by: string;
-  readonly outcome: "proceed" | "block" | "revise";
-  readonly packageArtifactId: string;
-  readonly packageVersion: number;
+/** One stakeholder's own proceed/revise/reject, as carried by an `audience`
+ *  decision and folded into `ProjectState.audienceDecisions` -- keyed by
+ *  audience name, latest decisionId per audience wins. */
+export interface AudienceVote {
+  readonly audience: string;
+  readonly decision: "proceed" | "revise" | "reject";
+  readonly note: string;
+  readonly principalId: string;
+  readonly at: string;
+  readonly decisionId: string;
 }
 
-/** Stage 5 approve evidence: the quorum policy plus every stakeholder
- *  decision recorded so far (oldest first -- only the latest per stakeholder
- *  counts). */
-export interface Stage5Evidence {
+/** Stage 5's quorum policy: the required proceed count and the named
+ *  stakeholder list. Captured onto `ProjectState.audiencePolicy` by the
+ *  `open_review` decision that opens a stage-5 review (see that payload's
+ *  `policy` field) so an edit to the stakeholder list after a review has
+ *  opened can never change the gate that review is checked against. */
+export interface AudiencePolicy {
   readonly quorum: number;
   readonly stakeholders: readonly string[];
-  readonly decisions: readonly QuorumDecisionEvidence[];
 }
 
 /** A reference to a stage's approved review, as frozen into stage 7's
@@ -84,10 +93,12 @@ export interface Freeze {
   readonly decisionId: string;
 }
 
-/** `evidence`'s outcome as `quorumState` reports it: pure, no lookups --
- *  the reducer and the UI (`apps/web/src/pages/audiences.tsx`) both import
- *  this from `@solutions-builder/app/project-workflow/contracts` so the
- *  banner text and the refusal agree on what "met" means. */
+/** The captured policy and the recorded votes' outcome as `quorumState`
+ *  reports it: pure, no lookups -- the reducer's stage-5 rule and the view
+ *  `apps/web/src/project-workflow.ts`'s `foldProjectWorkflow` exposes (read
+ *  by `apps/web/src/pages/audiences.tsx`'s banner) both read this from
+ *  `@solutions-builder/app/project-workflow/contracts` so the banner text
+ *  and the refusal agree on what "met" means. */
 export interface QuorumState {
   readonly met: boolean;
   readonly proceeded: number;
@@ -121,6 +132,12 @@ export interface ProjectState {
   /** Requirement ids minted by `mint_requirements`, once, before the
    *  Architect runs. Cleared by a send-back to stage <= 6 (CL-8862). */
   readonly requirements: readonly RequirementEntry[];
+  /** Stage 5's quorum policy, captured by the `open_review` decision that
+   *  opened the currently (or most recently) open stage-5 review; null
+   *  before any stage-5 review has opened. */
+  readonly audiencePolicy: AudiencePolicy | null;
+  /** Every stakeholder's latest `audience` vote, keyed by audience name. */
+  readonly audienceDecisions: Readonly<Record<string, AudienceVote>>;
 }
 
 interface DecisionCommon {
@@ -135,6 +152,11 @@ export interface OpenReviewPayload extends DecisionCommon {
   readonly artifactId: string;
   readonly version: number;
   readonly sha256: string;
+  /** Stage 5 only: the quorum policy in effect right now, captured onto
+   *  `ProjectState.audiencePolicy` -- so an edit to the stakeholder list
+   *  after this review opens can never change the gate it is checked
+   *  against. Ignored at every other stage. */
+  readonly policy?: AudiencePolicy;
 }
 
 export interface ApprovePayload extends DecisionCommon {
@@ -143,9 +165,18 @@ export interface ApprovePayload extends DecisionCommon {
   readonly artifactId: string;
   readonly version: number;
   readonly sha256: string;
-  /** Stage-rule input (`Stage5Evidence`/`Stage7Evidence`), never read by the
-   *  reducer's own structural/reference checks -- only by `stageRules`. */
+  /** Stage-rule input (`Stage7Evidence`), never read by the reducer's own
+   *  structural/reference checks -- only by `stageRules`. Stage 5 needs
+   *  none: its rule reads `ProjectState.audiencePolicy`/`audienceDecisions`
+   *  directly. */
   readonly evidence?: unknown;
+}
+
+export interface AudiencePayload extends DecisionCommon {
+  readonly kind: "audience";
+  readonly audience: string;
+  readonly decision: "proceed" | "revise" | "reject";
+  readonly note?: string;
 }
 
 export interface SendBackPayload extends DecisionCommon {
@@ -162,7 +193,7 @@ export interface MintRequirementsPayload extends DecisionCommon {
   readonly items: readonly { readonly kind: RequirementKind; readonly text: string }[];
 }
 
-export type DecisionPayload = OpenReviewPayload | ApprovePayload | SendBackPayload | MintRequirementsPayload;
+export type DecisionPayload = OpenReviewPayload | ApprovePayload | SendBackPayload | MintRequirementsPayload | AudiencePayload;
 
 export type RefusalCode =
   | "duplicate"
@@ -235,7 +266,15 @@ export function validateDecisionShape(value: unknown): DecisionPayload | null {
     ) {
       return null;
     }
-    return { ...common, kind: "open_review", artifactId: value.artifactId, version: value.version, sha256: value.sha256 };
+    if (value.policy !== undefined && !isAudiencePolicy(value.policy)) return null;
+    return {
+      ...common,
+      kind: "open_review",
+      artifactId: value.artifactId,
+      version: value.version,
+      sha256: value.sha256,
+      ...(value.policy !== undefined ? { policy: value.policy } : {}),
+    };
   }
 
   if (value.kind === "approve") {
@@ -269,6 +308,19 @@ export function validateDecisionShape(value: unknown): DecisionPayload | null {
     return { ...common, kind: "mint_requirements", items: value.items as { kind: RequirementKind; text: string }[] };
   }
 
+  if (value.kind === "audience") {
+    if (typeof value.audience !== "string" || value.audience.length === 0) return null;
+    if (value.decision !== "proceed" && value.decision !== "revise" && value.decision !== "reject") return null;
+    if (value.note !== undefined && typeof value.note !== "string") return null;
+    return {
+      ...common,
+      kind: "audience",
+      audience: value.audience,
+      decision: value.decision,
+      ...(value.note !== undefined ? { note: value.note } : {}),
+    };
+  }
+
   return null;
 }
 
@@ -285,53 +337,44 @@ export interface ApplyDecisionInput {
   readonly decision: unknown;
   readonly freeze: Freeze | null;
   readonly requirements: readonly RequirementEntry[];
+  readonly audiencePolicy: AudiencePolicy | null;
+  readonly audienceDecisions: Readonly<Record<string, AudienceVote>>;
 }
 
-function isQuorumOutcome(value: unknown): value is QuorumDecisionEvidence["outcome"] {
-  return value === "proceed" || value === "block" || value === "revise";
-}
-
-/** Structural check for `ApprovePayload["evidence"]` at stage 5. */
-export function isStage5Evidence(value: unknown): value is Stage5Evidence {
+/** Structural check for `OpenReviewPayload["policy"]` at stage 5. */
+export function isAudiencePolicy(value: unknown): value is AudiencePolicy {
   if (!isRecord(value)) return false;
   if (typeof value.quorum !== "number" || !Number.isInteger(value.quorum) || value.quorum < 0) return false;
-  if (!Array.isArray(value.stakeholders) || !value.stakeholders.every((s) => typeof s === "string")) return false;
-  if (!Array.isArray(value.decisions)) return false;
-  return value.decisions.every(
-    (d) =>
-      isRecord(d) &&
-      typeof d.by === "string" &&
-      isQuorumOutcome(d.outcome) &&
-      typeof d.packageArtifactId === "string" &&
-      typeof d.packageVersion === "number",
-  );
+  return Array.isArray(value.stakeholders) && value.stakeholders.every((s) => typeof s === "string");
 }
 
 /**
- * Pure fold of stage 5 evidence into the quorum outcome. Only the LATEST
- * decision per stakeholder counts (`decisions` is oldest-first); a decision
- * by someone not in `stakeholders` is ignored. Quorum 0 with no blockers is
- * met (solo policy) -- exported so both the reducer's stage rule and
- * `apps/web/src/pages/audiences.tsx`'s banner read the identical outcome.
+ * Pure fold of the captured policy and the recorded votes into the quorum
+ * outcome. `votes` already carries only the latest vote per audience (the
+ * reducer overwrites on each `audience` decision), and a vote by someone not
+ * in `policy.stakeholders` is ignored. Quorum 0 with no blockers is met
+ * (solo policy) -- exported so both the reducer's stage rule and
+ * `foldProjectWorkflow`'s view (read by `apps/web/src/pages/audiences.tsx`'s
+ * banner) read the identical outcome.
  */
-export function quorumState(evidence: Stage5Evidence): QuorumState {
-  const latestByStakeholder = new Map<string, QuorumDecisionEvidence>();
-  for (const decision of evidence.decisions) {
-    if (!evidence.stakeholders.includes(decision.by)) continue;
-    latestByStakeholder.set(decision.by, decision);
-  }
-  const blocked = evidence.stakeholders.filter((who) => {
-    const decision = latestByStakeholder.get(who);
-    return decision !== undefined && decision.outcome !== "proceed";
+export function quorumState(policy: AudiencePolicy, votes: Readonly<Record<string, AudienceVote>>): QuorumState {
+  const blocked = policy.stakeholders.filter((who) => {
+    const vote = votes[who];
+    return vote !== undefined && vote.decision !== "proceed";
   });
-  const missing = evidence.stakeholders.filter((who) => !latestByStakeholder.has(who));
-  const proceeded = evidence.stakeholders.filter((who) => latestByStakeholder.get(who)?.outcome === "proceed").length;
-  return { met: blocked.length === 0 && proceeded >= evidence.quorum, proceeded, required: evidence.quorum, blocked, missing };
+  const missing = policy.stakeholders.filter((who) => votes[who] === undefined);
+  const proceeded = policy.stakeholders.filter((who) => votes[who]?.decision === "proceed").length;
+  return { met: blocked.length === 0 && proceeded >= policy.quorum, proceeded, required: policy.quorum, blocked, missing };
 }
 
-const stage5Rule: StageRule = (_state, payload) => {
-  if (!isStage5Evidence(payload.evidence)) return "evidence_missing";
-  return quorumState(payload.evidence).met ? null : "quorum_not_met";
+/** Stage 5's own rule reads `ProjectState` directly -- the policy an
+ *  `open_review` captured and the votes recorded since -- never the
+ *  approve's own `evidence` (CL-8870: an edit to the stakeholder list after
+ *  a review opens can never change the gate that review is checked
+ *  against). */
+const stage5Rule: StageRule = (state) => {
+  if (!state.audiencePolicy) return "evidence_missing";
+  return quorumState(state.audiencePolicy, state.audienceDecisions).met ? null : "quorum_not_met";
 };
 
 function isStackChoiceShape(value: unknown): value is StackChoice {
@@ -483,6 +526,8 @@ function stateOf(input: ApplyDecisionInput): ProjectState {
     reviewCounts: input.reviewCounts,
     freeze: input.freeze,
     requirements: input.requirements,
+    audiencePolicy: input.audiencePolicy,
+    audienceDecisions: input.audienceDecisions,
   };
 }
 
@@ -506,6 +551,9 @@ function refused(
       ? { artifactId: payload.artifactId, version: payload.version, sha256: payload.sha256 }
       : {}),
     ...(payload.kind === "send_back" && payload.targetStage !== undefined ? { targetStage: payload.targetStage } : {}),
+    ...(payload.kind === "audience"
+      ? { audience: payload.audience, outcome: payload.decision, ...(payload.note ? { note: payload.note } : {}) }
+      : {}),
     ...extra,
   };
   return { ...state, decisions: [...state.decisions, record] };
@@ -515,9 +563,9 @@ function refused(
  *  record so `allowed.approveReason`'s UI copy can explain WHY (which
  *  stakeholders block quorum, what target was missing) without re-deriving
  *  it from the evidence itself -- the workflow already computed it once. */
-function refusalExtra(stage: StageNumber, code: RefusalCode, evidence: unknown): Partial<Pick<DecisionRecord, "quorum" | "target">> {
-  if (code === "quorum_not_met" && stage === 5 && isStage5Evidence(evidence)) {
-    const q = quorumState(evidence);
+function refusalExtra(state: ProjectState, code: RefusalCode, evidence: unknown): Partial<Pick<DecisionRecord, "quorum" | "target">> {
+  if (code === "quorum_not_met" && state.stage === 5 && state.audiencePolicy) {
+    const q = quorumState(state.audiencePolicy, state.audienceDecisions);
     return { quorum: { proceeded: q.proceeded, required: q.required, blocked: q.blocked } };
   }
   if (code === "target_missing" && isRecord(evidence) && typeof evidence.target === "string" && evidence.target.length > 0) {
@@ -583,6 +631,32 @@ export function applyDecision(input: ApplyDecisionInput): ProjectState {
     return { ...state, requirements, decisions: [...state.decisions, record] };
   }
 
+  if (payload.kind === "audience") {
+    const audienceDecisions: Record<string, AudienceVote> = {
+      ...state.audienceDecisions,
+      [payload.audience]: {
+        audience: payload.audience,
+        decision: payload.decision,
+        note: payload.note ?? "",
+        principalId,
+        at: payload.at,
+        decisionId: payload.decisionId,
+      },
+    };
+    const record: DecisionRecord = {
+      decisionId: payload.decisionId,
+      kind: "audience",
+      stage: payload.stage,
+      accepted: true,
+      principalId,
+      at: payload.at,
+      audience: payload.audience,
+      outcome: payload.decision,
+      ...(payload.note ? { note: payload.note } : {}),
+    };
+    return { ...state, audienceDecisions, decisions: [...state.decisions, record] };
+  }
+
   if (payload.kind === "open_review") {
     const reviews: Record<StageNumber, ReviewState | undefined> = { ...state.reviews };
     const previous = reviews[state.stage];
@@ -611,6 +685,7 @@ export function applyDecision(input: ApplyDecisionInput): ProjectState {
       reviews,
       decisions: [...state.decisions, record],
       reviewCounts: { ...state.reviewCounts, [state.stage]: count },
+      audiencePolicy: payload.policy ?? state.audiencePolicy,
     };
   }
 
@@ -631,14 +706,14 @@ export function applyDecision(input: ApplyDecisionInput): ProjectState {
     const rule = stageRules[state.stage];
     if (rule) {
       const code = rule(state, payload, principalId);
-      if (code) return refused(state, payload, principalId, code, refusalExtra(state.stage, code, payload.evidence));
+      if (code) return refused(state, payload, principalId, code, refusalExtra(state, code, payload.evidence));
     }
 
     const approvedReviews: Record<StageNumber, ReviewState | undefined> = {
       ...state.reviews,
       [state.stage]: { ...review, status: "approved" },
     };
-    const quorum = state.stage === 5 && isStage5Evidence(payload.evidence) ? quorumState(payload.evidence) : null;
+    const quorum = state.stage === 5 && state.audiencePolicy ? quorumState(state.audiencePolicy, state.audienceDecisions) : null;
     const freeze: Freeze | null =
       state.stage === 7 && isStage7Evidence(payload.evidence)
         ? { target: payload.evidence.target, frozen: payload.evidence.frozen, stack: payload.evidence.stack, decisionId: payload.decisionId }
@@ -692,7 +767,13 @@ export function applyDecision(input: ApplyDecisionInput): ProjectState {
   // ids are cleared too -- `mint_requirements` runs again before the
   // Architect's next draft.
   const requirements = targetStage <= 6 ? [] : state.requirements;
-  return { ...state, stage: targetStage, reviews, decisions: [...state.decisions, record], freeze, requirements };
+  // A send-back that reopens stage 5 or earlier means new packages get
+  // written; the votes and the policy they were checked against are stale
+  // -- the next stage-5 `open_review` captures a fresh policy and
+  // stakeholders vote again.
+  const audiencePolicy = targetStage <= 5 ? null : state.audiencePolicy;
+  const audienceDecisions = targetStage <= 5 ? {} : state.audienceDecisions;
+  return { ...state, stage: targetStage, reviews, decisions: [...state.decisions, record], freeze, requirements, audiencePolicy, audienceDecisions };
 }
 
 export interface InitProjectStagePayload {
@@ -723,5 +804,7 @@ export function initProjectState(payload: InitProjectPayload): ProjectState {
     reviewCounts: {},
     freeze: null,
     requirements: [],
+    audiencePolicy: null,
+    audienceDecisions: {},
   };
 }

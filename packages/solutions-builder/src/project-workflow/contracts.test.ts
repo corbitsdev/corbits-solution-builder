@@ -289,9 +289,19 @@ describe("stage7Rule stack citations", () => {
         input(state, OWNER7, { decisionId: `ap${String(stage)}`, kind: "approve", projectId: "p1", stage, reviewId: `stage-${String(stage)}-review-1`, artifactId: `a${String(stage)}`, version: 1, sha256: `s${String(stage)}`, at: AT }),
       );
     }
-    // Stage 5 needs its quorum evidence to advance.
+    // Stage 5 needs its policy captured (solo, 0 required) to advance.
     state = applyDecision(
-      input(state, OWNER7, { decisionId: "o5", kind: "open_review", projectId: "p1", stage: 5, artifactId: "a5", version: 1, sha256: "s5", at: AT }),
+      input(state, OWNER7, {
+        decisionId: "o5",
+        kind: "open_review",
+        projectId: "p1",
+        stage: 5,
+        artifactId: "a5",
+        version: 1,
+        sha256: "s5",
+        at: AT,
+        policy: { quorum: 0, stakeholders: [] },
+      }),
     );
     state = applyDecision(
       input(state, OWNER7, {
@@ -304,7 +314,6 @@ describe("stage7Rule stack citations", () => {
         version: 1,
         sha256: "s5",
         at: AT,
-        evidence: { quorum: 0, stakeholders: [], decisions: [] },
       }),
     );
     for (const stage of [6]) {
@@ -426,5 +435,118 @@ describe("stage7Rule stack citations", () => {
     );
     expect(next.decisions.at(-1)).toMatchObject({ accepted: true, kind: "approve" });
     expect(next.freeze).toMatchObject({ target: "cli", stack: STACK });
+  });
+});
+
+describe("stage 5 audience decisions (CL-8870)", () => {
+  const OWNER5 = "owner5";
+
+  function baseState5(): ProjectState {
+    return initProjectState({ projectId: "p1", stages: [{ stage: 5, authorizedPrincipalIds: [OWNER5] }] });
+  }
+
+  function openReview5(policy?: { quorum: number; stakeholders: string[] }, decisionId = "o5", artifactId = "a5", version = 1, sha256 = "s5"): ProjectState {
+    return reopen5(baseState5(), policy, decisionId, artifactId, version, sha256);
+  }
+
+  function reopen5(
+    state: ProjectState,
+    policy?: { quorum: number; stakeholders: string[] },
+    decisionId = "o5",
+    artifactId = "a5",
+    version = 1,
+    sha256 = "s5",
+  ): ProjectState {
+    return applyDecision(
+      input(state, OWNER5, {
+        decisionId,
+        kind: "open_review",
+        projectId: "p1",
+        stage: 5,
+        artifactId,
+        version,
+        sha256,
+        at: AT,
+        ...(policy ? { policy } : {}),
+      }),
+    );
+  }
+
+  function vote(state: ProjectState, decisionId: string, audience: string, decision: string): ProjectState {
+    return applyDecision(input(state, OWNER5, { decisionId, kind: "audience", projectId: "p1", stage: 5, audience, decision, at: AT }));
+  }
+
+  function approve5(state: ProjectState, decisionId: string, reviewId = "stage-5-review-1", artifactId = "a5", version = 1, sha256 = "s5"): ProjectState {
+    return applyDecision(input(state, OWNER5, { decisionId, kind: "approve", projectId: "p1", stage: 5, reviewId, artifactId, version, sha256, at: AT }));
+  }
+
+  test("a vote is tallied", () => {
+    const state = vote(openReview5({ quorum: 2, stakeholders: ["alice", "bob"] }), "v1", "alice", "proceed");
+    expect(state.audienceDecisions["alice"]).toMatchObject({ audience: "alice", decision: "proceed", decisionId: "v1" });
+    expect(state.decisions.at(-1)).toMatchObject({ accepted: true, kind: "audience", audience: "alice", outcome: "proceed" });
+  });
+
+  test("a repeated signal (same decisionId) is deduped and does not change the recorded vote", () => {
+    let state = vote(openReview5({ quorum: 2, stakeholders: ["alice", "bob"] }), "v1", "alice", "proceed");
+    const before = state.decisions.length;
+    state = vote(state, "v1", "alice", "reject");
+    expect(state.decisions).toHaveLength(before + 1);
+    expect(state.decisions.at(-1)).toMatchObject({ decisionId: "v1", accepted: false, reason: "duplicate" });
+    expect(state.audienceDecisions["alice"]).toMatchObject({ decision: "proceed" });
+  });
+
+  test("the latest vote per stakeholder wins", () => {
+    let state = openReview5({ quorum: 1, stakeholders: ["alice"] });
+    state = vote(state, "v1", "alice", "reject");
+    state = vote(state, "v2", "alice", "proceed");
+    expect(state.audienceDecisions["alice"]).toMatchObject({ decision: "proceed", decisionId: "v2" });
+  });
+
+  test("approve is refused below quorum and accepted once it is met", () => {
+    let state = openReview5({ quorum: 2, stakeholders: ["alice", "bob"] });
+    state = vote(state, "v1", "alice", "proceed");
+    const short = approve5(state, "ap1");
+    expect(short.decisions.at(-1)).toMatchObject({ accepted: false, reason: "quorum_not_met" });
+    expect(short.decisions.at(-1)).toMatchObject({ quorum: { proceeded: 1, required: 2, blocked: [] } });
+
+    state = vote(state, "v2", "bob", "proceed");
+    const met = approve5(state, "ap2");
+    expect(met.decisions.at(-1)).toMatchObject({ accepted: true, kind: "approve" });
+    expect(met.done).toBe(true);
+  });
+
+  test("a blocking vote refuses approve even once the proceed count is met", () => {
+    let state = openReview5({ quorum: 1, stakeholders: ["alice", "bob"] });
+    state = vote(state, "v1", "alice", "proceed");
+    state = vote(state, "v2", "bob", "reject");
+    const next = approve5(state, "ap1");
+    expect(next.decisions.at(-1)).toMatchObject({ accepted: false, reason: "quorum_not_met" });
+  });
+
+  // CL-8870 scope addition: the policy is captured once, by the `open_review`
+  // that opens a stage-5 review -- nothing else can touch it, so a client
+  // that edits the stakeholder list after the review is open can never
+  // change the gate that review is checked against.
+  test("the quorum policy is captured on open_review, immune to anything but a fresh open_review", () => {
+    let state = openReview5({ quorum: 2, stakeholders: ["alice", "bob"] });
+    expect(state.audiencePolicy).toEqual({ quorum: 2, stakeholders: ["alice", "bob"] });
+    state = vote(state, "v1", "alice", "proceed");
+    state = vote(state, "v2", "bob", "proceed");
+    // Nothing but a fresh open_review can change the captured policy.
+    expect(state.audiencePolicy).toEqual({ quorum: 2, stakeholders: ["alice", "bob"] });
+    expect(approve5(state, "ap1").decisions.at(-1)).toMatchObject({ accepted: true });
+  });
+
+  test("re-opening the review (a redraft) recaptures the policy in effect at that moment", () => {
+    let state = openReview5({ quorum: 1, stakeholders: ["alice"] });
+    state = vote(state, "v1", "alice", "proceed");
+    // The stakeholder list changed; the next open_review (a new package
+    // version) carries the new policy.
+    state = reopen5(state, { quorum: 2, stakeholders: ["alice", "carol"] }, "o5b", "a5", 2, "s5b");
+    expect(state.audiencePolicy).toEqual({ quorum: 2, stakeholders: ["alice", "carol"] });
+    // Alice's earlier vote still counts (latest per audience, by name), but
+    // carol has not voted, so the new policy's quorum is not met.
+    const next = approve5(state, "ap1", "stage-5-review-2", "a5", 2, "s5b");
+    expect(next.decisions.at(-1)).toMatchObject({ accepted: false, reason: "quorum_not_met" });
   });
 });

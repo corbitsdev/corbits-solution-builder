@@ -459,6 +459,7 @@ export function StageWorkspace({
                 canApprove={approveAllowed}
                 approveReason={workflowView?.allowed.approveReason ?? null}
                 lastRefusal={workflowView?.lastRefusal ?? null}
+                workflowView={workflowView}
               />
             </div>
           )}
