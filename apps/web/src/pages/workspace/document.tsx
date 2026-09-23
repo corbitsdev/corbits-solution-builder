@@ -249,6 +249,13 @@ export function StageDocument({
     return eventMessages(list, events);
   }, [turns, busy, events]);
   const eventById = useMemo(() => new Map(events.map((event) => [event.id, event])), [events]);
+  // The array's last entry is often a system bookkeeping line ("Review
+  // opened", a draft's version) that sorted in after the specialist's real
+  // last turn. Answer chips belong to the last turn, not the last line.
+  const lastTurnId = useMemo(
+    () => messages.findLast((message) => message.role !== "system")?.id,
+    [messages],
+  );
 
   // What each specialist turn did with the answer before it: which version the
   // answer produced, and whether the question that follows continues the same
@@ -407,7 +414,7 @@ export function StageDocument({
                   // options is asking for a choice, whether or not a question
                   // is queued.
                   onAnswer={
-                    busy === null && message.id === messages.at(-1)?.id
+                    busy === null && message.id === lastTurnId
                       ? (answer) => onRevise(answer, [])
                       : undefined
                   }
