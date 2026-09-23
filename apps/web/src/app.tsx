@@ -322,6 +322,12 @@ export function App() {
   >([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<ProjectDetail | null>(null);
+  // A project failing to load is never the same as no project being open
+  // (CL-8874): swallowing the failure and leaving `detail` null made a
+  // transient read error look identical to nothing selected, and every
+  // reopen from the list hit the same silent failure with no way out.
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [detailAttempt, setDetailAttempt] = useState(0);
   // Resolved once and threaded down as a prop: every artifact read goes
   // through `@corbits/artifacts` over `/hub`, which is tenant-scoped.
   const [tenantId, setTenantId] = useState<string | null>(null);
@@ -476,29 +482,55 @@ export function App() {
   useEffect(() => {
     if (!selected) {
       setDetail(null);
+      setDetailError(null);
       return;
     }
+    // A switch to a different project must never keep showing the one that
+    // was open -- reloadDetail's "keep the stale detail" behavior is only
+    // for a failed re-read of the SAME open project. Without this, a failed
+    // read of project B left project A on screen with no error rendered.
+    setDetail((current) => (current && current.project.id !== selected ? null : current));
     let cancelled = false;
+    setDetailError(null);
     void api
       .projectView(selected)
       .then((result) => {
         if (!cancelled) setDetail(result);
       })
-      .catch(() => undefined);
+      .catch((cause: unknown) => {
+        if (!cancelled) setDetailError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+      });
     return () => {
       cancelled = true;
     };
-  }, [selected, projects]);
+  }, [selected, projects, detailAttempt]);
 
   const reloadDetail = useCallback(async () => {
     // Both at once: the stage view cannot start its draft until the detail
     // lands, so a serial refresh here was dead time on every approval.
     const [, next] = await Promise.all([
       refresh(),
-      selected ? api.projectView(selected).catch(() => null) : Promise.resolve(null),
+      selected
+        ? api.projectView(selected).catch((cause: unknown) => {
+            // A failed re-read is never a reason to blank an already-open
+            // project (CL-8874) — the stale detail stays on screen with the
+            // failure surfaced, rather than the workspace collapsing to
+            // "No project open" on every action that happens to race a
+            // backend hiccup.
+            setDetailError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+            return undefined;
+          })
+        : Promise.resolve(undefined),
     ]);
-    if (selected) setDetail(next);
+    if (selected && next) {
+      setDetail(next);
+      setDetailError(null);
+    }
   }, [refresh, selected]);
+
+  const retryDetail = useCallback(() => {
+    setDetailAttempt((value) => value + 1);
+  }, []);
 
   const openProject = (projectId: string) => {
     setSelected(projectId);
@@ -663,6 +695,10 @@ export function App() {
                 {...(focusArtifact ? { focusArtifact } : {})}
               />
             </>
+          ) : detailError ? (
+            <Banner tone="error" title="The project could not be loaded" action={{ label: "Try again", onClick: retryDetail }}>
+              {detailError}
+            </Banner>
           ) : (
             <Banner title="No project open" />
           )
