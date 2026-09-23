@@ -15,8 +15,13 @@ import {
   DialogHeader,
   DialogTitle,
   Input,
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuSeparator,
+  MenuTrigger,
 } from "@corbits/react-ui";
-import { Plus, Send } from "lucide-react";
+import { Ellipsis, Plus, Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, ApiFailure, type ActiveModel, type ImportOutcome, type ProjectInfo, type ProjectSummary } from "../client.js";
 import { Banner, Button, downloadArtifact, stageName } from "../components.jsx";
@@ -271,8 +276,25 @@ export function Projects({
   );
 }
 
-/** Hold this long on a card to open info — there is no kebab on the face. */
+/** Hold this long on a card to open info; the options menu on the face reaches it too. */
 const LONG_PRESS_MS = 500;
+
+/**
+ * Exports one project the way this lane can: the bundle is assembled in the
+ * browser (`assembleBundle`) and saved as a download. Returns the notice
+ * line; shared by the card's options menu and the Project info dialog.
+ */
+async function exportProjectBundle(project: ProjectSummary): Promise<string> {
+  const bundle = await assembleBundle(project.id, {
+    projectView: api.projectView,
+    artifactContent: api.artifactContent,
+    stageAgentStatus: api.stageAgentStatus,
+    readStageThread: api.readStageThread,
+  });
+  downloadArtifact(JSON.stringify(bundle, null, 2), bundleFileName(project.title));
+  const messageCount = bundle.conversations.reduce((total, thread) => total + thread.messages.length, 0);
+  return `Exported ${project.title} to ${bundleFileName(project.title)}: ${bundle.artifacts.length} artifact${bundle.artifacts.length === 1 ? "" : "s"} and ${messageCount} message${messageCount === 1 ? "" : "s"}.`;
+}
 
 function ProjectCard({
   project,
@@ -339,8 +361,22 @@ function ProjectCard({
   }, [project.id, project.archivedAt, project.needsDecision, stage]);
   const waiting = project.needsDecision;
   const [infoOpen, setInfoOpen] = useState(false);
+  // Rename opens the same dialog with the name field focused.
+  const [focusName, setFocusName] = useState(false);
+  // Deleting takes two clicks, both in the menu: the second item only exists
+  // after the first, so a slip cannot remove a project.
+  const [confirming, setConfirming] = useState(false);
   const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suppressOpen = useRef(false);
+
+  const act = async (work: () => Promise<unknown>) => {
+    try {
+      await work();
+      onChanged();
+    } catch (cause) {
+      onError(cause);
+    }
+  };
 
   useEffect(
     () => () => {
@@ -356,8 +392,9 @@ function ProjectCard({
     }
   };
 
-  const openInfo = () => {
+  const openInfo = (withName = false) => {
     suppressOpen.current = true;
+    setFocusName(withName);
     setInfoOpen(true);
   };
 
@@ -380,7 +417,7 @@ function ProjectCard({
       onPointerDown={(event) => {
         if (event.pointerType === "mouse" && event.button !== 0) return;
         clearPress();
-        pressTimer.current = setTimeout(openInfo, LONG_PRESS_MS);
+        pressTimer.current = setTimeout(() => openInfo(), LONG_PRESS_MS);
       }}
       onPointerUp={clearPress}
       onPointerCancel={clearPress}
@@ -395,14 +432,63 @@ function ProjectCard({
     >
       <div className="card-top">
         <h3>{project.title}</h3>
-        {waiting ? (
-          <div className="card-top-end">
-            <span className="badge-decision">{HOME_NEEDS_DECISION}</span>
+        <div className="card-top-end">
+          {waiting ? <span className="badge-decision">{HOME_NEEDS_DECISION}</span> : null}
+          {/* The menu sits inside the card, whose face opens the project on
+              click and long-press; nothing from the menu, its trigger or its
+              (portaled, but React-nested) items may reach those handlers. */}
+          <div
+            className="card-menu"
+            onClick={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+            onContextMenu={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
+          >
+            <Menu onOpenChange={(open) => !open && setConfirming(false)}>
+              <MenuTrigger asChild>
+                <button type="button" className="project-card-menu" aria-label={`Options for ${project.title}`}>
+                  <Ellipsis aria-hidden="true" />
+                </button>
+              </MenuTrigger>
+              <MenuContent align="end">
+                <MenuItem onSelect={() => openInfo()}>Project info…</MenuItem>
+                <MenuItem onSelect={() => openInfo(true)}>Rename</MenuItem>
+                <MenuItem
+                  onSelect={() =>
+                    void act(async () => {
+                      onNotice(await exportProjectBundle(project));
+                    })
+                  }
+                >
+                  Export…
+                </MenuItem>
+                <MenuItem onSelect={() => void act(() => api.updateProject(project.id, { archived: !project.archivedAt }))}>
+                  {project.archivedAt ? "Unarchive" : "Archive"}
+                </MenuItem>
+                <MenuSeparator />
+                {confirming ? (
+                  <MenuItem className="menu-danger" onSelect={() => void act(() => api.deleteProject(project.id))}>
+                    Yes, delete it
+                  </MenuItem>
+                ) : (
+                  <MenuItem
+                    className="menu-danger"
+                    onSelect={(event) => {
+                      event.preventDefault();
+                      setConfirming(true);
+                    }}
+                  >
+                    Delete…
+                  </MenuItem>
+                )}
+              </MenuContent>
+            </Menu>
           </div>
-        ) : null}
+        </div>
         {infoOpen ? (
           <ProjectInfoDialog
             project={project}
+            focusName={focusName}
             onClose={() => setInfoOpen(false)}
             onChanged={onChanged}
             onError={onError}
@@ -463,12 +549,15 @@ const formatBytes = (bytes: number): string =>
 // adapted hunk below carries its own note.
 function ProjectInfoDialog({
   project,
+  focusName = false,
   onClose,
   onChanged,
   onError,
   onNotice,
 }: {
   project: ProjectSummary;
+  /** Open with the name field focused (the card menu's Rename). */
+  focusName?: boolean;
   onClose: () => void;
   onChanged: () => void;
   onError: (cause: unknown) => void;
@@ -529,17 +618,7 @@ function ProjectInfoDialog({
     if (exporting) return;
     setExporting(true);
     try {
-      const bundle = await assembleBundle(project.id, {
-        projectView: api.projectView,
-        artifactContent: api.artifactContent,
-        stageAgentStatus: api.stageAgentStatus,
-        readStageThread: api.readStageThread,
-      });
-      downloadArtifact(JSON.stringify(bundle, null, 2), bundleFileName(project.title));
-      const messageCount = bundle.conversations.reduce((total, thread) => total + thread.messages.length, 0);
-      onNotice(
-        `Exported ${project.title} to ${bundleFileName(project.title)}: ${bundle.artifacts.length} artifact${bundle.artifacts.length === 1 ? "" : "s"} and ${messageCount} message${messageCount === 1 ? "" : "s"}.`,
-      );
+      onNotice(await exportProjectBundle(project));
       onChanged();
     } catch (cause) {
       onError(cause);
@@ -561,6 +640,7 @@ function ProjectInfoDialog({
             <Dictated value={title} onValueChange={setTitle} align="center">
               <Input
                 id={`project-name-${project.id}`}
+                autoFocus={focusName}
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
                 onBlur={rename}

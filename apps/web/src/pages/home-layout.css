@@ -205,6 +205,18 @@
   flex: none;
 }
 
+/* The options menu rides `styles.css`'s `.project-card-menu`, which reveals
+   itself on `.project-card:hover`; this page's card is `.card`. */
+.home-page .card-menu {
+  display: flex;
+  margin: -4px -6px 0 0;
+}
+
+.home-page .card:hover .project-card-menu,
+.home-page .card:focus-within .project-card-menu {
+  opacity: 1;
+}
+
 .home-page .card h3 {
   margin: 0;
   font-size: 16.5px;
