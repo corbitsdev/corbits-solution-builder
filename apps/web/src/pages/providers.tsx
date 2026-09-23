@@ -280,6 +280,29 @@ export function ProviderList({
               </span>
             ) : connected && ready ? (
               <span className="v">
+                {manage && connected.models.length > 1 ? (
+                  <select
+                    className="field"
+                    aria-label={`${row.name} model`}
+                    disabled={busy !== null}
+                    value={connected.selectedModel ?? ""}
+                    onChange={(event) => {
+                      const model = event.target.value || null;
+                      void act(
+                        row.id,
+                        () => api.selectProviderModel(connected.id, model),
+                        model ? `${row.name} now uses ${model}.` : `${row.name} fails over between all models.`,
+                      );
+                    }}
+                  >
+                    <option value="">Any (fail over)</option>
+                    {connected.models.map((model) => (
+                      <option key={model} value={model}>
+                        {model}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
                 {manage ? (
                   <ChromeBtn
                     kind="refresh"
