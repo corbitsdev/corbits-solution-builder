@@ -202,11 +202,16 @@ function Stakeholders({
   audiences,
   quorum,
   onChanged,
+  onSaved,
 }: {
   projectId: string;
   audiences: { name: string; role: string }[];
   quorum: number;
   onChanged: () => void;
+  /** Fires after a successful save, in addition to `onChanged` — a stage-5
+   *  review already open must recapture the new policy rather than sit on
+   *  whatever quorum was in effect when it opened (CL-8891). */
+  onSaved?: () => void;
 }) {
   const [rows, setRows] = useState(audiences);
   const [needed, setNeeded] = useState(quorum);
@@ -231,6 +236,7 @@ function Stakeholders({
       await api.setStakeholders(projectId, { audiences: rows, audienceQuorum: needed });
       setEditing(false);
       onChanged();
+      onSaved?.();
     } catch (cause) {
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     } finally {
@@ -320,6 +326,7 @@ export function AudiencePackages({
   approveReason,
   lastRefusal,
   workflowView,
+  onStakeholdersSaved,
 }: {
   detail: ProjectDetail;
   /** The workspace tenant artifacts are recorded under. */
@@ -337,6 +344,12 @@ export function AudiencePackages({
   /** The project workflow's own view -- `audienceDecisions`/`stage5Quorum`
    *  are the quorum tally's ONE source (CL-8870), never artifact metadata. */
   workflowView: ProjectWorkflowView | null;
+  /** Recaptures a fresh `open_review` against whatever review is currently
+   *  open, right after the stakeholder list/quorum is saved -- an edit made
+   *  while a review is open must never leave it checked against the old
+   *  policy (CL-8891). Best-effort: a review not yet open simply stays
+   *  unopened until it is reachable. */
+  onStakeholdersSaved?: () => void;
 }) {
   // Which stakeholders' packages are being written right now: "Write it"
   // sends the mail, then waits for the reply that follows it and keeps
@@ -544,7 +557,13 @@ export function AudiencePackages({
       {writeError ? <Banner tone="error" title="That package could not be written">{writeError}</Banner> : null}
       {audiences.length === 0 ? <Banner title="No stakeholders are named for this project" /> : null}
 
-      <Stakeholders projectId={detail.project.id} audiences={audiences} quorum={quorum} onChanged={onChanged} />
+      <Stakeholders
+        projectId={detail.project.id}
+        audiences={audiences}
+        quorum={quorum}
+        onChanged={onChanged}
+        {...(onStakeholdersSaved ? { onSaved: onStakeholdersSaved } : {})}
+      />
 
       {missing.length > 0 ? (
         <div className="packages-missing" role="status">

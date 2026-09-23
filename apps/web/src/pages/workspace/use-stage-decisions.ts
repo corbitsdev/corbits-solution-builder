@@ -29,6 +29,19 @@ import { clearQuotedDraft } from "./quote-store.js";
 
 const LAST_STAGE = 9;
 
+/** Whether a freshly-read stakeholder policy is the one the workflow's own
+ *  view already has captured -- order-sensitive, since a reordered list is
+ *  still a changed policy worth recapturing on the next `open_review`. */
+function audiencePolicyEquals(
+  next: { quorum: number; stakeholders: readonly string[] },
+  current: { quorum: number; stakeholders: readonly string[] } | null,
+): boolean {
+  if (!current) return false;
+  if (next.quorum !== current.quorum) return false;
+  if (next.stakeholders.length !== current.stakeholders.length) return false;
+  return next.stakeholders.every((name, index) => name === current.stakeholders[index]);
+}
+
 const stageApprovalDeps: StageApprovalDeps = {
   view: (projectId: string) => api.projectWorkflowView(projectId),
   decide: (projectId: string, decision: Record<string, unknown>) => api.decide(projectId, decision),
@@ -188,6 +201,14 @@ export function useStageDecisions({
     if (stage === 8 && !stage8Evidence?.ready) {
       return { ok: false as const, reason: stage8Evidence?.reason ?? "The build has not published an archive yet." };
     }
+    // Stage 5's policy is read fresh, before anything else -- a review must
+    // never auto-open on whatever default policy happened to exist when the
+    // first reply landed (CL-8891); it waits until stakeholders are named
+    // with a quorum they can actually reach.
+    const policy = await stage5Policy();
+    if (stage === 5 && (!policy || policy.quorum > policy.stakeholders.length)) {
+      return { ok: false as const, reason: "Stakeholders need to be named, with a reachable quorum, before a review can open." };
+    }
     const latestDraft = latestDraftFor();
     const reviewable = reviewableArtifact({ nodes: detail.nodes, stage, kind: draftKind, latestDraft });
     if (reviewable.status === "none") return { ok: false as const, reason: "There is nothing to review yet." };
@@ -199,8 +220,12 @@ export function useStageDecisions({
         workflowView.openReview.artifactId === ref.artifactId &&
         workflowView.openReview.version === ref.version &&
         workflowView.openReview.sha256 === ref.sha256;
-      if (!sameAsOpen) {
-        const policy = await stage5Policy();
+      // Editing the stakeholder list/quorum while a review is already open
+      // on the same material must still recapture the policy -- otherwise
+      // the review stays checked against whatever policy existed when it
+      // first opened (CL-8891).
+      const policyChanged = stage === 5 && policy && !audiencePolicyEquals(policy, workflowView.audiencePolicy);
+      if (!sameAsOpen || policyChanged) {
         await ensureReviewOpen(stageApprovalDeps, { projectId: detail.project.id, stage, ref, ...(policy ? { policy } : {}) });
       }
       await refreshWorkflow();
