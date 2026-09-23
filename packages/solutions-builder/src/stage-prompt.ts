@@ -109,8 +109,8 @@ export function buildDraftPrompt(args: {
         : "(The user gave no further input; work from the approved inputs above.)"),
     "",
     revising
-      ? `Produce the next version of the stage ${args.stage} artifact. Revise the current version above rather than starting over: keep every part that was not objected to, apply what is asked for, and honour the standing directions. Use exactly the headings your instructions specify.`
-      : `Produce the stage ${args.stage} artifact now, using exactly the headings your instructions specify.`,
+      ? `Produce the next version of the stage ${args.stage} artifact. Revise the current version above rather than starting over: keep every part that was not objected to, apply what is asked for, and honour the standing directions. Use exactly the structure and format your instructions specify.`
+      : `Produce the stage ${args.stage} artifact now, using exactly the structure and format your instructions specify.`,
   ].join("\n");
 }
 
