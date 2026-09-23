@@ -16,6 +16,7 @@
  */
 import { timingSafeEqual } from "node:crypto";
 import { extname, join } from "node:path";
+import { asksForInterfaceFile, missingInterfaceFile } from "./interface-files.js";
 import { mkdir, stat } from "node:fs/promises";
 import { watch } from "node:fs";
 import { Hono } from "hono";
@@ -360,6 +361,14 @@ export async function serveHost(options: ServeOptions): Promise<void> {
       const requested = url.pathname === "/" ? "index.html" : url.pathname.slice(1);
       const candidate = join(dist, requested);
       const info = await stat(candidate).catch(() => null);
+      // A file the build should have produced and did not is a 404 that
+      // names it, never the app page: see `interface-files.ts`.
+      if (!info?.isFile() && asksForInterfaceFile(url.pathname)) {
+        return new Response(missingInterfaceFile(url.pathname, interfaceBuildHint), {
+          status: 404,
+          headers: { "content-type": "text/plain", "cache-control": "no-store" },
+        });
+      }
       const selected = info?.isFile() ? candidate : join(dist, "index.html");
       const file = Bun.file(selected);
       if (!(await file.exists())) {
