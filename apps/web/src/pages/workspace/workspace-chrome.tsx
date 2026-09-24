@@ -206,11 +206,16 @@ export function SendBackPopover({
 export function OpeningScreen({
   status = "Starting the project…",
   resuming = false,
+  since,
 }: {
   status?: string;
   resuming?: boolean;
+  /** When the opening sequence for this project began — one clock shared
+   *  across every phase (workflow resolving, then the stage agent
+   *  deploying), so it never visibly resets to 0:00 mid-open. */
+  since?: string | null;
 }) {
-  const seconds = Math.floor(useElapsedMs() / 1_000);
+  const seconds = Math.floor(useElapsedMs(since) / 1_000);
   return (
     <div className="stage-view">
       <StagePanes

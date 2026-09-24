@@ -104,6 +104,12 @@ export function StageWorkspace({
     import("../../client.js").Remediation | undefined
   >(undefined);
 
+  // One clock for the whole opening sequence — the workflow resolving, then
+  // the stage agent deploying — set once on mount (this component remounts
+  // per project via `key={detail.project.id}` in app.tsx) so it never
+  // visibly resets to 0:00 as the opening screen moves between phases.
+  const [openingSince] = useState(() => new Date().toISOString());
+
   const workflow = useWorkflowView(detail.project.id, onChanged);
   const workflowView = workflow.view;
   const workflowResolved = workflow.resolved;
@@ -299,7 +305,7 @@ export function StageWorkspace({
   // the artifact-derived fallback, which for a mid-way project is stage 1
   // and would otherwise flash before the real stage takes over (CL-8721).
   if (!workflowResolved && !openingFailed) {
-    return <OpeningScreen status="Starting the project…" resuming={resuming} />;
+    return <OpeningScreen status="Starting the project…" resuming={resuming} since={openingSince} />;
   }
 
   // The strip and conversation are the same on every stage; only the right
@@ -423,6 +429,7 @@ export function StageWorkspace({
         <OpeningScreen
           status={`Setting up your ${agentFor(stage as Stage).title.toLowerCase()}…`}
           resuming={resuming}
+          since={openingSince}
         />
       ) : null}
 
