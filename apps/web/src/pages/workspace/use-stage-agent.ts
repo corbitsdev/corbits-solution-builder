@@ -68,11 +68,18 @@ export function useStageAgent(
     (async () => {
       // Re-entering a stage already deployed and live: attach with the same
       // non-deploying read `stageAgentStatus` (CL-8654's own re-check) uses,
-      // instead of running `ensureStageAgent`'s deploy-and-wait path. Only a
-      // stage with no `"deployed"` status yet -- never opened, or still
-      // starting up -- falls through to ensure/deploy. `attempt` (retry)
-      // always falls through too: a failed attach is exactly the case
-      // ensure needs to run again.
+      // for an instant paint, instead of waiting on `ensureStageAgent`'s
+      // deploy-and-wait path to render anything.
+      //
+      // This attach is display-only, never a substitute for ensure: the
+      // hub's persisted "deployed" status can outlive a dead sidecar (e.g.
+      // after a host restart), so a plain read can never tell "live" from
+      // "needs reviving onto a fresh deployment" on its own -- only
+      // `ensureStageAgent` does that. So `ensureStageAgent` still runs every
+      // mount, in the background, after the instant paint above -- never
+      // awaited before rendering, but never skipped either (CL-8935, fixing
+      // a regression from #669 where a "deployed" attach returned early and
+      // left the composer pointed at a dead sidecar until a manual retry).
       if (attempt === 0) {
         const attached = await api.stageAgentStatus(projectId, requestedStage).catch(() => null);
         if (cancelled) return;
@@ -80,7 +87,6 @@ export function useStageAgent(
           const next = { stage: requestedStage, address: attached.address };
           setAgent(next);
           agentSnapshots.set(`${projectId}:${requestedStage}`, next);
-          return;
         }
       }
       await api
