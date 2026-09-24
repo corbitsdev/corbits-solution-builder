@@ -4,9 +4,11 @@
  * stage's live lineage — and, under it, the selected artifact's version
  * chips. Presentational; the model comes from `useProjectArtifacts`.
  */
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Tabs } from "@corbits/react-ui";
 import {
+  ChevronLeft,
+  ChevronRight,
   Component,
   DollarSign,
   FileCheck2,
@@ -36,6 +38,28 @@ const KIND_ICON: Record<string, ReactNode> = {
   source_material: <Paperclip size={13} aria-hidden="true" />,
 };
 
+/** Which edges of a scrolling strip still hide tabs. Pure, so the rule the
+ *  edge controls follow is testable without a DOM. */
+export function stripOverflow(metrics: {
+  readonly scrollLeft: number;
+  readonly clientWidth: number;
+  readonly scrollWidth: number;
+}): { readonly left: boolean; readonly right: boolean } {
+  return {
+    left: metrics.scrollLeft > 1,
+    right: metrics.scrollLeft + metrics.clientWidth < metrics.scrollWidth - 1,
+  };
+}
+
+/**
+ * A project soon has more lineages than the strip is wide, and the library's
+ * scrollable tab list hides its scrollbar and only fades the overflowing
+ * edge -- a person looking for the Design saw the strip end at "Chosen
+ * approach" and took that for all there was. So: a control at each edge
+ * that still hides tabs, which scrolls them into view, and the selected tab
+ * brought into view whenever the selection changes, the initial one
+ * included.
+ */
 export function ArtifactStrip({
   tabs,
   selectedKey,
@@ -45,23 +69,73 @@ export function ArtifactStrip({
   selectedKey: string | null;
   onSelect: (key: string) => void;
 }) {
+  const scroller = useRef<HTMLDivElement>(null);
+  const [overflow, setOverflow] = useState({ left: false, right: false });
+  const list = () => scroller.current?.querySelector<HTMLElement>('[role="tablist"]') ?? null;
+
+  useEffect(() => {
+    const el = list();
+    if (!el) return;
+    const update = () => {
+      const next = stripOverflow(el);
+      setOverflow((prev) => (prev.left === next.left && prev.right === next.right ? prev : next));
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => {
+      el.removeEventListener("scroll", update);
+      observer.disconnect();
+    };
+  }, [tabs.length]);
+
+  useEffect(() => {
+    const selected = list()?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+    selected?.scrollIntoView({ inline: "nearest", block: "nearest" });
+  }, [selectedKey, tabs.length]);
+
   if (tabs.length === 0 || selectedKey === null) return null;
+  const scrollBy = (direction: -1 | 1) => {
+    const el = list();
+    if (el) el.scrollBy({ left: direction * el.clientWidth * 0.8, behavior: "smooth" });
+  };
   return (
-    <Tabs
-      className="artifact-strip-tabs"
-      scrollable
-      label="Project artifacts"
-      active={selectedKey}
-      onChange={onSelect}
-      tabs={tabs.map((tab) => ({
-        id: tab.key,
-        label: tab.label,
-        icon: KIND_ICON[tab.kind] ?? <FileText size={13} aria-hidden="true" />,
-        marker: tab.live ? <span className="artifact-strip-live" aria-label="Current stage" /> : undefined,
-      }))}
-    >
-      {() => null}
-    </Tabs>
+    <div ref={scroller} className="artifact-strip-scroller">
+      <button
+        type="button"
+        className="artifact-strip-scroll is-left"
+        hidden={!overflow.left}
+        aria-label="Show earlier artifacts"
+        onClick={() => scrollBy(-1)}
+      >
+        <ChevronLeft size={14} aria-hidden="true" />
+      </button>
+      <Tabs
+        className="artifact-strip-tabs"
+        scrollable
+        label="Project artifacts"
+        active={selectedKey}
+        onChange={onSelect}
+        tabs={tabs.map((tab) => ({
+          id: tab.key,
+          label: tab.label,
+          icon: KIND_ICON[tab.kind] ?? <FileText size={13} aria-hidden="true" />,
+          marker: tab.live ? <span className="artifact-strip-live" aria-label="Current stage" /> : undefined,
+        }))}
+      >
+        {() => null}
+      </Tabs>
+      <button
+        type="button"
+        className="artifact-strip-scroll is-right"
+        hidden={!overflow.right}
+        aria-label="Show more artifacts"
+        onClick={() => scrollBy(1)}
+      >
+        <ChevronRight size={14} aria-hidden="true" />
+      </button>
+    </div>
   );
 }
 
