@@ -195,27 +195,38 @@ export function SendBackPopover({
   );
 }
 
-/** Same two-pane chrome as a live stage, empty, while the workflow view loads.
- *  After a host restart this can legitimately take minutes — every sidecar
- *  has to reconnect and the workflow run has to catch up before its stage
- *  becomes readable — and a bare, unchanging "Opening…" is indistinguishable
- *  from a hang. A running clock (CL-8874) is the only signal that anything
- *  is happening at all. */
-export function OpeningScreen() {
+/** Same centered, chat-first chrome as a stage with no draft yet, empty,
+ *  for every phase before the first specialist reply: the workflow hasn't
+ *  resolved a stage yet, or it has and the stage's specialist is still being
+ *  deployed. One status line names which of those is true; the clock (CL-8874)
+ *  is the only signal that anything is happening at all once it legitimately
+ *  takes minutes (a host restart reconnecting every sidecar and catching the
+ *  workflow run up). The restart-specific copy only applies to a project that
+ *  already has history — never a brand-new one still on its first stage. */
+export function OpeningScreen({
+  status = "Starting the project…",
+  resuming = false,
+}: {
+  status?: string;
+  resuming?: boolean;
+}) {
   const seconds = Math.floor(useElapsedMs() / 1_000);
   return (
     <div className="stage-view">
       <StagePanes
+        className="chat-first"
+        solo
         conversation={
           <div className="stage-conversation">
             <div className={CONV_SCROLL_CLASS}>
               <div className="think" role="status">
-                <span className="who conv-who">Opening…</span>
+                <span className="who conv-who">{status}</span>
                 <p className="elapsed">
                   <span className="elapsed-clock" role="timer" aria-live="off">
                     {clock(seconds)}
                   </span>{" "}
-                  elapsed. A project reopened right after a restart can take several minutes to catch up.
+                  elapsed.
+                  {resuming ? " A project reopened right after a restart can take several minutes to catch up." : ""}
                 </p>
               </div>
             </div>

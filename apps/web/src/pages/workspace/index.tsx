@@ -289,11 +289,17 @@ export function StageWorkspace({
     }
   };
 
+  // Whether this project already has history to catch up on — the only
+  // honest basis for the restart-recovery copy below. A brand-new project
+  // has no nodes and sits at stage 1 until its first stage lands, so this
+  // is false for it and true for anything actually resuming.
+  const resuming = detail.nodes.length > 0 || detail.stage > 1;
+
   // Neutral until the workflow view says which stage this really is — never
   // the artifact-derived fallback, which for a mid-way project is stage 1
   // and would otherwise flash before the real stage takes over (CL-8721).
   if (!workflowResolved && !openingFailed) {
-    return <OpeningScreen />;
+    return <OpeningScreen status="Starting the project…" resuming={resuming} />;
   }
 
   // The strip and conversation are the same on every stage; only the right
@@ -413,7 +419,12 @@ export function StageWorkspace({
         </Banner>
       ) : null}
 
-      {!agentAddress && !agent.error ? <OpeningScreen /> : null}
+      {!agentAddress && !agent.error ? (
+        <OpeningScreen
+          status={`Setting up your ${agentFor(stage as Stage).title.toLowerCase()}…`}
+          resuming={resuming}
+        />
+      ) : null}
 
       {agentAddress && openingDispatch.error ? (
         <Banner
