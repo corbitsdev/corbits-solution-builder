@@ -75,9 +75,40 @@
    on very wide monitors, where the document pane should get the room. */
 .panes {
   display: grid;
-  grid-template-columns: minmax(420px, min(40%, 640px)) minmax(0, 1fr);
+  grid-template-columns: var(--panes-chat-w, minmax(420px, min(40%, 640px))) minmax(0, 1fr);
   flex: 1;
   min-height: 0;
+}
+
+.panes-splitter {
+  position: relative;
+  width: 9px;
+  margin: 0 -4px;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+  z-index: 1;
+}
+
+.panes-splitter::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 1px;
+  background: var(--wb-border);
+}
+
+.panes-splitter:hover::after,
+.panes-splitter:focus-visible::after {
+  background: var(--wb-muted-foreground);
+}
+
+.panes-splitter:focus-visible {
+  outline: 2px solid var(--wb-primary);
+  outline-offset: -2px;
+  border-radius: 2px;
 }
 
 .canvas-body.is-fill .panes {
@@ -478,6 +509,10 @@
   .conv {
     border-right: 0;
     border-bottom: 1px solid var(--wb-border);
+  }
+
+  .panes-splitter {
+    display: none;
   }
 }
 
