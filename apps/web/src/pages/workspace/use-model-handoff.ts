@@ -4,12 +4,14 @@
  * A stage specialist's inference chain is frozen at deploy
  * (`sourceOfferingIds`, `specialist-deploy.ts`); there is no live rebind, so
  * moving it onto a different offering is a new deployment at a new address.
- * `pickDeployment`'s newest-wins tie-break makes every reader of the asset —
- * `useStageAgent`'s own poll included — resolve to it, and CL-8927's merged
- * thread read (`useStageThread`, across every address the stage has ever
- * run at) keeps the transcript from reading empty. But the NEW deployment's
- * own mailbox starts empty, so the specialist behind it has nothing of the
- * prior conversation to answer from until something is sent to it.
+ * The durable switch record (`writeStageSwitch`, on the project tenant's own
+ * config) is what makes every reader of the asset — `useStageAgent`'s own
+ * poll included — resolve to the new one while it's live, and CL-8927's
+ * merged thread read (`useStageThread`, across every address the stage has
+ * ever run at) keeps the transcript from reading empty. But the NEW
+ * deployment's own mailbox starts empty, so the specialist behind it has
+ * nothing of the prior conversation to answer from until something is sent
+ * to it.
  *
  * `useModelHandoff` is that something, and it fires for ANY redeploy of a
  * stage that already has history — an explicit "Switch model", a restart, a
@@ -20,22 +22,65 @@
  * draft, mirroring `composeStage9Opening`'s self-contained compose pattern)
  * to the new address. A brand-new stage has no prior addresses, so the
  * ordinary opening dispatch handles it instead — this never fires there.
- * Idempotent by construction: it checks the new address's OWN thread (not
- * the merged one) before sending, so a reload or a second mount that finds
- * mail already there skips silently, and the opening guard is untouched —
- * `use-opening-dispatch.ts` reads the merged thread, which is already
- * non-empty once history exists, so it never re-fires here either.
  *
- * The hand-off's first line is a `[switch]` marker; `stage-events.ts`'s
- * `switchEvents` reads it back off the sent mail to render the system line
- * in the transcript -- the record is the mail itself, nothing is
- * synthesized only for display.
+ * Idempotency has no atomic compare-and-set to lean on (mail send has no
+ * "only if this address has never been written to" primitive), so this is
+ * idempotent by CONTENT rather than by a true atomic claim: `handoffId` is
+ * deterministic (a hash of the new address plus the prior transcript's own
+ * head message id), embedded in a marker a specialist's own reply could not
+ * plausibly reproduce (`[[sb-switch:<id>]]`, on its own line, and only ever
+ * read back off a message authored by the person — `stage-events.ts`'s
+ * `switchEvents` and `thread.tsx`'s marker-stripping both gate on that). The
+ * pre-send check reads the new address's OWN thread (not the merged one)
+ * and skips if it already holds ANY mail — since nothing but this hook ever
+ * sends the first mail to a freshly switched-to address, that is sufficient
+ * in the overwhelmingly common case. The read-then-send has an unavoidable
+ * TOCTOU window (two tabs can both read "empty" before either sends): a true
+ * atomic claim would need a hub primitive that does not exist, so a rare
+ * benign duplicate is accepted rather than engineered around here. Because
+ * `handoffId` is computed from the same inputs in both tabs, the two sends
+ * that can result are byte-identical in their marker line, so a duplicate
+ * is recognizably the same event rather than two different ones — and
+ * `switchEvents` de-duplicates by `handoffId` when rendering the system
+ * line, so the rare duplicate shows once even though two mails went out.
  */
 import { useEffect, useRef, useState } from "react";
 import { api, ApiFailure } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
 
-export const SWITCH_MARKER_PREFIX = "[switch]";
+/** The exact marker line's shape: `[[sb-switch:<hex id>]]`. Deliberately not
+ *  the bare word "switch" or anything a specialist's own prose could
+ *  plausibly type verbatim — paired with the author gate in
+ *  `stage-events.ts`/`thread.tsx`, a specialist message is never mistaken
+ *  for one of these regardless of what it says. */
+const MARKER_RE = /^\[\[sb-switch:([0-9a-f]{1,8})\]\]$/;
+
+/** A short, deterministic, synchronous hash (FNV-1a, 32-bit) — no crypto
+ *  API needed for a collision-improbable, human-scannable id, and staying
+ *  synchronous keeps `composeModelHandoff` synchronous too. */
+function shortHash(input: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16);
+}
+
+/** Deterministic from (the new address, the prior transcript's own head) —
+ *  two tabs racing the same redeploy compute the identical id. */
+export function handoffId(address: string, priorHeadMessageId: string): string {
+  return shortHash(`${address}|${priorHeadMessageId}`);
+}
+
+export function switchMarker(id: string): string {
+  return `[[sb-switch:${id}]]`;
+}
+
+/** The id a switch-marker line names, or null if `line` isn't one. */
+export function matchSwitchMarker(line: string): string | null {
+  return MARKER_RE.exec(line.trim())?.[1] ?? null;
+}
 
 /** Long transcripts are condensed to the last 20 turns plus a count of what
  *  was dropped — enough for the new specialist to pick the thread back up
@@ -51,13 +96,14 @@ function transcriptBlock(messages: readonly ChatMessage[]): string {
 }
 
 export function composeModelHandoff(args: {
+  readonly id: string;
   readonly messages: readonly ChatMessage[];
   readonly draft: ChatMessage | null;
   readonly providerLabel: string | null;
   readonly modelName: string | null;
 }): string {
   const onto = args.providerLabel && args.modelName ? ` on ${args.providerLabel} · ${args.modelName}` : "";
-  const announcement = `${SWITCH_MARKER_PREFIX} This stage continues${onto}.`;
+  const announcement = `${switchMarker(args.id)}\nThis stage continues${onto}.`;
   const recap = `Here is the conversation so far, so you can pick it up without restarting it:\n\n${transcriptBlock(args.messages)}`;
   const draftBlock = args.draft && args.draft.body.trim() ? `The current draft:\n\n${args.draft.body}` : null;
   return [announcement, recap, draftBlock].filter((part): part is string => part !== null).join("\n\n---\n\n");
@@ -71,7 +117,10 @@ export type ModelSwitchState = {
 
 /** Deploys the stage's specialist onto `offeringId` (CL-8899). Sends
  *  nothing itself — `useModelHandoff` below notices the live address moved
- *  and carries the conversation over. */
+ *  and carries the conversation over. Rapid double-clicks/two tabs are
+ *  serialized server-side (`switchSpecialistDeployment`'s own queue, keyed
+ *  per project+stage); this hook does not need its own debounce beyond the
+ *  disabled-while-switching flag it exposes. */
 export function useModelSwitch(args: {
   readonly projectId: string;
   readonly stage: number;
@@ -122,6 +171,8 @@ export function useModelHandoff(args: {
     // is the ordinary opening's job, not a hand-off.
     if (priorAddresses.length === 0) return;
     if (resolvedRef.current === args.address) return;
+    const priorHead = args.unionMessages.at(-1);
+    if (!priorHead) return;
 
     let cancelled = false;
     void (async () => {
@@ -129,7 +180,9 @@ export function useModelHandoff(args: {
         // The new deployment's OWN thread, not the merged one -- an empty
         // merged thread is impossible here (priorAddresses is non-empty),
         // so idempotency has to ask the one address that would actually be
-        // empty on a fresh deployment.
+        // empty on a fresh deployment. See the module doc: this read-then-
+        // send has a TOCTOU window this hook accepts rather than pretends
+        // to close, since no atomic claim exists to close it with.
         const own = await api.readStageThread(args.tenantId, [args.address!]);
         if (cancelled) return;
         if (own.length > 0) {
@@ -137,7 +190,9 @@ export function useModelHandoff(args: {
           return;
         }
         resolvedRef.current = args.address;
+        const id = handoffId(args.address!, priorHead.id);
         const body = composeModelHandoff({
+          id,
           messages: args.unionMessages,
           draft: args.draft,
           providerLabel: args.providerLabel,
@@ -155,10 +210,10 @@ export function useModelHandoff(args: {
     return () => {
       cancelled = true;
     };
-    // unionMessages/draft/providerLabel/modelName/reloadThread deliberately
-    // excluded: this must fire once per address transition, off whatever
-    // those hold at that moment, not re-run every time the transcript
-    // changes underneath it.
+    // unionMessages (past its head)/draft/providerLabel/modelName/
+    // reloadThread deliberately excluded: this must fire once per address
+    // transition, off whatever those hold at that moment, not re-run every
+    // time the transcript changes underneath it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [args.address, args.addresses.join(","), args.tenantId]);
 

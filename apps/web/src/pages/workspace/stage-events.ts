@@ -11,7 +11,7 @@ import type { DecisionRecord } from "@solutions-builder/app/project-workflow/con
 import type { ChatMessage as UiChatMessage } from "@corbits/react-ui";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { stageName } from "../../components.jsx";
-import { SWITCH_MARKER_PREFIX } from "./use-model-handoff.ts";
+import { matchSwitchMarker } from "./use-model-handoff.ts";
 
 export type StageEvent = {
   readonly id: string;
@@ -96,20 +96,32 @@ export function stageEvents(
 }
 
 /**
- * CL-8899: a model hand-off's `[switch]`-marked first line, read back off
- * the sent mail itself as a boundary event -- the record is the mail
- * (`use-model-handoff.ts`'s `composeModelHandoff`), not something
+ * CL-8899: a model hand-off's `[[sb-switch:<id>]]`-marked first line, read
+ * back off the sent mail itself as a boundary event -- the record is the
+ * mail (`use-model-handoff.ts`'s `composeModelHandoff`), not something
  * synthesized only for display. `thread.tsx` strips the same marker line off
- * the message's own bubble so the announcement is not shown twice.
+ * the message's own bubble so the id is not shown twice.
+ *
+ * Gated on `message.author === "me"`: the hand-off is always sent BY the
+ * person's own address TO the new specialist (`useModelHandoff`), so only a
+ * "me" turn can legitimately carry one -- a specialist reply is never
+ * inspected for the marker at all, regardless of what it says, so it cannot
+ * spoof a system line by echoing one back. De-duplicates by the marker's own
+ * id: the two mails a rare benign race can produce (`use-model-handoff.ts`'s
+ * module doc) carry the identical id, so this renders the switch once even
+ * if it was announced twice.
  */
 export function switchEvents(messages: readonly ChatMessage[]): StageEvent[] {
   const out: StageEvent[] = [];
+  const seenIds = new Set<string>();
   for (const message of messages) {
-    if (!message.body.startsWith(SWITCH_MARKER_PREFIX)) continue;
-    const newline = message.body.indexOf("\n");
-    const firstLine = newline < 0 ? message.body : message.body.slice(0, newline);
-    const line = firstLine.slice(SWITCH_MARKER_PREFIX.length).trim();
-    out.push({ id: `ev:switch:${message.id}`, at: message.at, text: line, tone: "boundary" });
+    if (message.author !== "me") continue;
+    const firstLine = message.body.slice(0, message.body.indexOf("\n") < 0 ? undefined : message.body.indexOf("\n"));
+    const id = matchSwitchMarker(firstLine);
+    if (!id || seenIds.has(id)) continue;
+    seenIds.add(id);
+    const secondLine = message.body.split("\n")[1]?.trim();
+    out.push({ id: `ev:switch:${id}`, at: message.at, text: secondLine || "This stage continued on a different model.", tone: "boundary" });
   }
   return out;
 }
