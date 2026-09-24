@@ -303,6 +303,27 @@ export function ProviderList({
                     ))}
                   </select>
                 ) : null}
+                {manage && providers[0]?.id !== connected.id ? (
+                  <ChromeBtn
+                    kind="link"
+                    title="Make this the provider new stages draft with"
+                    disabled={busy !== null}
+                    loading={busy === row.id}
+                    onClick={() =>
+                      void act(
+                        row.id,
+                        () =>
+                          api.reorderProviders([
+                            connected.id,
+                            ...providers.filter((entry) => entry.id !== connected.id).map((entry) => entry.id),
+                          ]),
+                        `${row.name} is now the default. Applies to stages that start from now on.`,
+                      )
+                    }
+                  >
+                    Use as default
+                  </ChromeBtn>
+                ) : null}
                 {manage ? (
                   <ChromeBtn
                     kind="refresh"

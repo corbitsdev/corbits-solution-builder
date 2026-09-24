@@ -184,7 +184,10 @@ function Inference({
     return () => {
       cancelled = true;
     };
-  }, []);
+    // Re-reads after `onChanged` refetches `providers` (a new array on every
+    // change), so picking a default shows up here immediately, not just on
+    // the next reload.
+  }, [providers]);
 
   return (
     <Section title="Inference" lead="Where the specialists think. Keys live in this machine's keychain.">
