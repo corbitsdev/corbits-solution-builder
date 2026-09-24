@@ -24,6 +24,7 @@ import {
   ApiFailure,
   type ArtifactNode,
   type ProjectDetail,
+  type ResolvedCatalogRow,
   type StageTurn,
 } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
@@ -48,7 +49,8 @@ import { useProjectArtifacts } from "./use-project-artifacts.ts";
 import { loadQuotedDraft } from "./quote-store.js";
 import { useStageDecisions } from "./use-stage-decisions.ts";
 import { ArtifactStrip, VersionStrip } from "./artifact-strip.tsx";
-import { stageEvents } from "./stage-events.ts";
+import { stageEvents, switchEvents } from "./stage-events.ts";
+import { useModelSwitch, useModelHandoff } from "./use-model-handoff.ts";
 import { Stage6Panel } from "./stage6.tsx";
 import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
 import { agentFor } from "@solutions-builder/app/kit";
@@ -252,12 +254,57 @@ export function StageWorkspace({
     // `at` is the nonce; the tabs/artifacts identity is intentionally out.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusArtifact?.at]);
-  // The transcript's quiet record: boundaries, versions, decisions and
-  // aborted turns, folded in beside the mail as system lines.
+  // The transcript's quiet record: boundaries, versions, decisions, aborted
+  // turns and a model switch's own announcement, folded in beside the mail
+  // as system lines.
   const events = useMemo(
-    () => stageEvents(stage, workflowView?.decisions ?? [], detail.nodes, withdrawn.marks),
-    [stage, workflowView?.decisions, detail.nodes, withdrawn.marks],
+    () => [
+      ...stageEvents(stage, workflowView?.decisions ?? [], detail.nodes, withdrawn.marks),
+      ...switchEvents(foldedMessages),
+    ],
+    [stage, workflowView?.decisions, detail.nodes, withdrawn.marks, foldedMessages],
   );
+
+  // CL-8899: the current stage's provider/model, reporting-only (read off
+  // the live deployment's pinned source, `resolveActiveModel`) — refetched
+  // whenever the live address moves, since that's exactly when a new pin
+  // has landed, whether from an explicit switch or any other redeploy.
+  const [activeModel, setActiveModel] = useState<{ providerLabel: string; canonicalName: string } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void api.activeModel(detail.project.id, stage).then((model) => {
+      if (!cancelled) setActiveModel(model);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [detail.project.id, stage, agentAddress]);
+
+  const [modelOptions, setModelOptions] = useState<ResolvedCatalogRow[] | null>(null);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  useEffect(() => {
+    if (!modelPickerOpen || modelOptions) return;
+    void api.resolvedCatalog().then(setModelOptions);
+  }, [modelPickerOpen, modelOptions]);
+  const switchableModels = (modelOptions ?? []).filter(
+    (row) => row.chatCapable && !row.restricted && row.credentialConnected && row.offeringIds.length > 0,
+  );
+
+  const modelSwitch = useModelSwitch({ projectId: detail.project.id, stage });
+  // Fires the hand-off for ANY redeploy of a stage that already has mail
+  // under a prior address — an explicit switch (above) or any other cause
+  // (restart, recovery) — never for a brand-new stage (CL-8927's own opening
+  // dispatch handles that).
+  const modelHandoff = useModelHandoff({
+    tenantId,
+    address: agentAddress,
+    addresses: agent.addresses,
+    unionMessages: foldedMessages,
+    draft: draftMessage,
+    providerLabel: activeModel?.providerLabel ?? null,
+    modelName: activeModel?.canonicalName ?? null,
+    reloadThread: loadThread,
+  });
   const decisions = useStageDecisions({
     detail,
     tenantId,
@@ -536,6 +583,41 @@ export function StageWorkspace({
           opening={openingStatement}
           draft={openingDraft}
         />
+      ) : null}
+
+      {agentAddress ? (
+        <div className="stage-model-row">
+          <span className="inline-note">
+            Model:{" "}
+            {activeModel ? `${activeModel.providerLabel} · ${activeModel.canonicalName}` : "Loading…"}
+          </span>
+          <select
+            aria-label="Switch this stage's model"
+            disabled={modelSwitch.switching}
+            value=""
+            onChange={(event) => {
+              const offeringId = event.target.value;
+              if (offeringId) void modelSwitch.switchTo(offeringId);
+            }}
+            onFocus={() => setModelPickerOpen(true)}
+          >
+            <option value="" disabled>
+              {modelSwitch.switching ? "Switching…" : "Switch model…"}
+            </option>
+            {switchableModels.map((row) => (
+              <option key={row.offeringIds[0]} value={row.offeringIds[0]}>
+                {row.providerNames.join(", ")} · {row.displayName ?? row.canonicalName}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
+
+      {modelSwitch.error ? <Banner tone="error" title="The model could not be switched">{modelSwitch.error}</Banner> : null}
+      {modelHandoff.error ? (
+        <Banner tone="error" title="The new specialist could not be told about the prior conversation">
+          {modelHandoff.error}
+        </Banner>
       ) : null}
 
       {agentAddress && openingDispatch.error ? (

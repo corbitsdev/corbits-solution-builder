@@ -16,6 +16,7 @@ import {
   createProject as installerCreateProject,
   ensureProjectWorkflow,
   ensureSpecialistDeployment,
+  switchSpecialistDeployment,
   waitForDeploymentDeployed,
   getArtifact as installerGetArtifact,
   reviseArtifact as installerReviseArtifact,
@@ -1657,6 +1658,47 @@ false,
     return call;
   },
   /**
+   * CL-8899 "Switch model": deploys a new specialist for `projectId`'s
+   * current stage whose inference chain leads with `offeringId`, and hands
+   * back its address. The old deployment stays live (the hub cannot stop a
+   * run, INTR-454) but `pickDeployment`'s newest-wins tie-break means every
+   * subsequent read of this asset -- including `ensureStageAgent`'s own
+   * memo, primed here so an immediate re-render sees the switch without
+   * waiting on `useStageAgent`'s poll -- resolves to the new one.
+   */
+  switchStageAgent: (projectId: string, stage: number, offeringId: string): Promise<SpecialistDeployment> => {
+    const key = `${projectId}:${stage}`;
+    const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      const status = await request<HostStatus>("/status");
+      const deployment = await switchSpecialistDeployment(
+        transport,
+        sidecarCapabilityOf(status),
+        await lifecycleClosureSource(),
+        lifecycleGitPush,
+        workspaceTenantId,
+        projectId,
+        stage as Stage,
+        hubOrigin(),
+        offeringId,
+        false,
+      );
+      const ready = await waitForDeploymentDeployed(transport, workspaceTenantId, deployment.deploymentId);
+      if (!ready) {
+        throw new ApiFailure({
+          code: "unavailable",
+          message: `The stage ${stage} specialist did not finish starting up on the new model.`,
+          correlationId: "-",
+          retryable: true,
+        });
+      }
+      activeModelCacheClear();
+      return deployment;
+    });
+    ensureStageAgentCalls.set(key, call);
+    call.catch(() => ensureStageAgentCalls.delete(key));
+    return call;
+  },
+  /**
    * Stage 1's brief evaluator (CL-8736): its own deployed agent, running
    * `BRIEF_EVALUATOR_ROLE` (`agentById("brief-evaluator")`), mailed a copy of
    * the current draft and read back for an advisory verdict. Deploys lazily
@@ -1795,7 +1837,9 @@ false,
    * Every address `projectId`'s stage-`stage` specialist has ever run at --
    * the input `useStageThread`'s merge needs so a redeploy (restart, model
    * switch) never empties a stage's chat: earlier mail lives under earlier
-   * deployments' addresses, not the live one alone (CL-8927).
+   * deployments' addresses, not the live one alone (CL-8927), and it is what
+   * `useModelHandoff` (CL-8899) compares the live address against to tell a
+   * redeploy-with-history from a genuinely new stage.
    */
   stageAgentAddresses: (projectId: string, stage: number): Promise<string[]> =>
     asWorkspaceOwner((transport, workspaceTenantId) =>

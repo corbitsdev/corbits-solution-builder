@@ -7,17 +7,30 @@ import type { ChatMessage } from "../../stage-mail.ts";
 import { answerText, segmentsIn } from "./choices.js";
 import { conversationLead, isHtmlDocument } from "./guidance.js";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
+import { SWITCH_MARKER_PREFIX } from "./use-model-handoff.ts";
 import { COMPOSER_BOX_CLASS, CONV_SCROLL_CLASS } from "./pane-classes.ts";
+
+/** A model hand-off's `[switch]` marker line, rendered separately as a
+ *  system boundary line (`stage-events.ts`'s `switchEvents`) — dropped here
+ *  so the bubble shows only the hand-off recap that follows it. */
+function withoutSwitchMarker(body: string): string {
+  if (!body.startsWith(SWITCH_MARKER_PREFIX)) return body;
+  const boundary = body.indexOf("\n\n");
+  return boundary < 0 ? "" : body.slice(boundary + 2);
+}
 
 /** A stage-mail turn as a chat row. The specialist's long draft lives in the
  *  right pane, not here — the mockup keeps chat to short status lines. */
 function toUiMessages(messages: readonly ChatMessage[]): UiChatMessage[] {
-  return messages.map((message) => ({
-    id: message.id,
-    role: message.author === "me" ? "user" : "agent",
-    parts: [{ type: "text", text: message.author === "me" ? message.body : conversationLead(message.body) }],
-    createdAt: message.at,
-  }));
+  return messages.map((message) => {
+    const body = withoutSwitchMarker(message.body);
+    return {
+      id: message.id,
+      role: message.author === "me" ? "user" : "agent",
+      parts: [{ type: "text", text: message.author === "me" ? body : conversationLead(body) }],
+      createdAt: message.at,
+    };
+  });
 }
 
 /**

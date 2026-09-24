@@ -9,7 +9,9 @@ import type { ArtifactNode } from "../../client.ts";
 import type { WithdrawnMark } from "../../withdrawn-turns.ts";
 import type { DecisionRecord } from "@solutions-builder/app/project-workflow/contracts";
 import type { ChatMessage as UiChatMessage } from "@corbits/react-ui";
+import type { ChatMessage } from "../../stage-mail.ts";
 import { stageName } from "../../components.jsx";
+import { SWITCH_MARKER_PREFIX } from "./use-model-handoff.ts";
 
 export type StageEvent = {
   readonly id: string;
@@ -90,6 +92,25 @@ export function stageEvents(
     out.push({ id: `ev:mark:${mark.messageId}`, at: mark.at, text: "Turn aborted", tone: "line" });
   }
 
+  return out;
+}
+
+/**
+ * CL-8899: a model hand-off's `[switch]`-marked first line, read back off
+ * the sent mail itself as a boundary event -- the record is the mail
+ * (`use-model-handoff.ts`'s `composeModelHandoff`), not something
+ * synthesized only for display. `thread.tsx` strips the same marker line off
+ * the message's own bubble so the announcement is not shown twice.
+ */
+export function switchEvents(messages: readonly ChatMessage[]): StageEvent[] {
+  const out: StageEvent[] = [];
+  for (const message of messages) {
+    if (!message.body.startsWith(SWITCH_MARKER_PREFIX)) continue;
+    const newline = message.body.indexOf("\n");
+    const firstLine = newline < 0 ? message.body : message.body.slice(0, newline);
+    const line = firstLine.slice(SWITCH_MARKER_PREFIX.length).trim();
+    out.push({ id: `ev:switch:${message.id}`, at: message.at, text: line, tone: "boundary" });
+  }
   return out;
 }
 
