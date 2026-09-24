@@ -52,6 +52,7 @@ import { stageEvents } from "./stage-events.ts";
 import { Stage6Panel } from "./stage6.tsx";
 import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
 import { agentFor } from "@solutions-builder/app/kit";
+import { MATERIAL_KIND, MATERIAL_READING_KIND } from "@solutions-builder/app/artifacts";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { STAGE_DRAFT_KIND } from "../../client.js";
 import {
@@ -351,10 +352,13 @@ export function StageWorkspace({
   };
 
   // Whether this project already has history to catch up on — the only
-  // honest basis for the reconnect copy below. A brand-new project has no
-  // nodes and sits at stage 1 until its first stage lands, so this is false
-  // for it and true for anything actually resuming.
-  const resuming = detail.nodes.length > 0 || detail.stage > 1;
+  // honest basis for the reconnect copy below. A brand-new project already
+  // has its opening statement (and, if it attached a file, the extracted
+  // reading beside it), so those two kinds don't count as history; anything
+  // else — a draft, a turn — means there's something to resume.
+  const resuming =
+    detail.nodes.some((node) => node.kind !== MATERIAL_KIND && node.kind !== MATERIAL_READING_KIND) ||
+    detail.stage > 1;
 
   // The confirmed current stage for the opening screen's own reads: the
   // resolved workflow stage once known, else the same non-deploying
