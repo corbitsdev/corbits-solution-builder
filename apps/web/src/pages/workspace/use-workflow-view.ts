@@ -78,13 +78,24 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
     setView((current) => (current ? { ...current, stage } : current));
   }, []);
 
-  // Re-entering a project whose workflow is already live: attach to it with
-  // the same non-deploying read `reload` uses (`projectWorkflowView`, backed
-  // by `findProjectWorkflow`/`resolveProjectWorkflowRef`) instead of running
-  // `ensureProjectWorkflow`'s deploy-and-wait path. Only a project this
-  // workspace has never opened -- no live workflow to attach to -- falls
-  // through to ensure/deploy. `attempt` (Retry) always falls through too: a
-  // failed open is exactly the case ensure needs to run again.
+  // Re-entering a project whose workflow is already live: paint it
+  // immediately with the same non-deploying read `reload` uses
+  // (`projectWorkflowView`, backed by `findProjectWorkflow`/
+  // `resolveProjectWorkflowRef`) instead of blocking on
+  // `ensureProjectWorkflow`'s deploy-and-wait path.
+  //
+  // This attach is display-only, never a substitute for ensure:
+  // `findProjectWorkflow`'s own `projectRunState` deliberately returns the
+  // OLDEST DEAD deployment's ref (`live: false`) rather than flash the view
+  // back to stage 1, so a plain read can never tell "live" from "needs
+  // reviving onto a fresh deployment" on its own -- only `ensureProjectWorkflow`
+  // does that (its replacement-wait + `catchUp` replay). So `ensureProjectWorkflow`
+  // still runs every mount, in the background, after the instant paint above
+  // -- never awaited before rendering, but never skipped either. A newer
+  // view it turns up lands the same way it always has; a failure surfaces
+  // through `startError` exactly as before attach existed. `attempt` (Retry)
+  // skips the instant paint and goes straight to ensure: a failed open is
+  // exactly the case that needs it to run again, not another stale read.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -94,7 +105,6 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
         if (attached && attached.stage >= 1) {
           setView(attached);
           viewSnapshots.set(projectId, attached);
-          return;
         }
       }
       try {

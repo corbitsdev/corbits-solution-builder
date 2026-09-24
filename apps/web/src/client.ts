@@ -1901,15 +1901,27 @@ false,
    * under an already-used `decisionId` is the hub's `signal_id_conflict`
    * (409), surfaced as a hard error rather than swallowed.
    *
-   * The ref is resolved read-only (`resolveProjectWorkflowRef`, the same
-   * cheap lookup `projectWorkflowView` uses), not off `ensureProjectWorkflow`'s
-   * in-session memo: a re-entered project that attached to an already-live
-   * workflow (`useWorkflowView`'s attach-first read) never calls
-   * `ensureProjectWorkflow` at all this session, and this must still find it.
+   * The `ensureProjectWorkflow` in-session memo, when there is one, wins:
+   * it is the only path that waits for the hub's own replacement of a dead
+   * deployment and replays that project's history onto it
+   * (`projectRunState`/`catchUp`), so it is the only ref guaranteed live and
+   * caught up. `useWorkflowView`'s attach-first read still starts an
+   * `ensureProjectWorkflow` call in the background every mount, so in
+   * practice the memo is populated (or in flight, in which case this awaits
+   * it) almost immediately -- the plain read-only fallback
+   * (`resolveProjectWorkflowRef`, the same cheap lookup `projectWorkflowView`
+   * uses) only matters in the narrow window before that background call has
+   * had a chance to run, and can itself return a dead deployment's ref
+   * (`projectRunState` deliberately does, rather than flash the view back to
+   * stage 1) -- acceptable there only because the hub's own `signal_id_conflict`
+   * / not-found response on a dead deployment is a hard error either way, not
+   * a silently wrong success.
    */
   decide: (projectId: string, decision: Record<string, unknown>): Promise<{ ok: true }> =>
     asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const ref = await resolveProjectWorkflowRef(transport, workspaceTenantId, projectId);
+      const ref =
+        (await ensureProjectWorkflowCalls.get(projectId)) ??
+        (await resolveProjectWorkflowRef(transport, workspaceTenantId, projectId));
       if (!ref) throw new Error(`project workflow for ${projectId} has not been deployed yet`);
       // A `signal_id_conflict` (409, a different payload under a reused
       // decisionId) is a hard error, not swallowed here -- it propagates as
