@@ -4,7 +4,7 @@
  * presentational — every prop is already resolved by the stage workspace
  * above them.
  */
-import type { ReactNode, Ref } from "react";
+import type { CSSProperties, ReactNode, Ref } from "react";
 import { Textarea } from "@corbits/react-ui";
 import { Button, stageName } from "../../components.jsx";
 import { Dictated } from "../../dictation.jsx";
@@ -15,6 +15,7 @@ import { Elapsed } from "./elapsed.jsx";
 import type { Guidance } from "./product-guide.js";
 import type { evaluatorVerdict } from "./guidance.js";
 import { CONV_CLASS, CONV_SCROLL_CLASS, PANES_CLASS, STAGE_PANE_CLASS } from "./pane-classes.ts";
+import { usePanesWidth } from "./use-panes-width.ts";
 
 type Choices = { readonly text: string; readonly choices: readonly string[] } | null;
 
@@ -392,12 +393,36 @@ export function StagePanes({
   paneTour?: string;
   tour?: string;
 }) {
+  const split = !solo && className !== "chat-first";
+  const panesWidth = usePanesWidth();
   const panesClass = [PANES_CLASS, solo ? "is-solo" : null, className].filter(Boolean).join(" ");
   return (
-    <div className={panesClass} {...(tour ? { "data-tour": tour } : {})}>
+    <div
+      className={panesClass}
+      style={split ? (panesWidth.style as CSSProperties) : undefined}
+      {...(tour ? { "data-tour": tour } : {})}
+    >
       <section ref={conversationRef} className={CONV_CLASS} aria-label="Conversation with the specialist">
         {conversation}
       </section>
+      {split ? (
+        <div
+          ref={panesWidth.separatorRef}
+          className="panes-splitter"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize the chat and document panes"
+          aria-valuenow={panesWidth.valueNow}
+          aria-valuemin={panesWidth.min}
+          aria-valuemax={panesWidth.max}
+          tabIndex={0}
+          onPointerDown={panesWidth.onPointerDown}
+          onPointerMove={panesWidth.onPointerMove}
+          onPointerUp={panesWidth.onPointerUp}
+          onKeyDown={panesWidth.onKeyDown}
+          onDoubleClick={panesWidth.onDoubleClick}
+        />
+      ) : null}
       <article className={STAGE_PANE_CLASS} {...(paneTour ? { "data-tour": paneTour } : {})}>
         {strip ? <div className="artifact-strip">{strip}</div> : null}
         {children}
