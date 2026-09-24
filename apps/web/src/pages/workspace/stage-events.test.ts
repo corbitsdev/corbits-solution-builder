@@ -35,6 +35,11 @@ function decision(over: Partial<DecisionRecord>): DecisionRecord {
 }
 
 describe("stageEvents", () => {
+  test("a brand-new project has no boundary to show -- nothing precedes it yet", () => {
+    const events = stageEvents(1, [], [node({ kind: "source_material", title: "Opening problem statement" })], []);
+    expect(events.some((event) => event.tone === "boundary")).toBe(false);
+  });
+
   test("opens with the stage boundary, then orders by time", () => {
     const events = stageEvents(
       1,
