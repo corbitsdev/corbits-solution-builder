@@ -1900,10 +1900,16 @@ false,
    * itself treats a byte-identical retry as accepted); a DIFFERENT payload
    * under an already-used `decisionId` is the hub's `signal_id_conflict`
    * (409), surfaced as a hard error rather than swallowed.
+   *
+   * The ref is resolved read-only (`resolveProjectWorkflowRef`, the same
+   * cheap lookup `projectWorkflowView` uses), not off `ensureProjectWorkflow`'s
+   * in-session memo: a re-entered project that attached to an already-live
+   * workflow (`useWorkflowView`'s attach-first read) never calls
+   * `ensureProjectWorkflow` at all this session, and this must still find it.
    */
   decide: (projectId: string, decision: Record<string, unknown>): Promise<{ ok: true }> =>
     asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const ref = await ensureProjectWorkflowCalls.get(projectId);
+      const ref = await resolveProjectWorkflowRef(transport, workspaceTenantId, projectId);
       if (!ref) throw new Error(`project workflow for ${projectId} has not been deployed yet`);
       // A `signal_id_conflict` (409, a different payload under a reused
       // decisionId) is a hard error, not swallowed here -- it propagates as
