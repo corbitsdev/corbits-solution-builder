@@ -651,15 +651,13 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   margin: 0;
 }
 
-/* A drafted stage: notes rail beside the document, document dominant. */
-.document-layout {
-  display: grid;
-  /* Two panes, not a pane and a sliver: the conversation stays wide enough to
-     read while the draft takes the larger share. */
-  grid-template-columns: 420px minmax(0, 1fr);
-  min-height: 0;
-  flex: 1;
-}
+/* A drafted stage: notes rail beside the document, document dominant.
+   `.document-layout` is always paired with `.panes` (see PANES_CLASS in
+   pane-classes.ts) — the proportional, resizable column comes from
+   `.panes` in workspace-layout.css. A fixed 420px column used to live
+   here too; at equal specificity it fought that rule and, depending on
+   stylesheet load order, could win outright, pinning the chat column to
+   420px regardless of window width or the splitter's own state. */
 
 /* Documents beside the open reader. Narrower than the conversation split:
    names and a current/replaced word, not a thread. */
@@ -1389,9 +1387,12 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
    or embedded frame inside the same document reads better at the pane's
    full width than squeezed into the same column as the prose around it.
    Left-aligned rather than centred: the measure lines up with the document
-   header above it, and a centred column in a wide pane reads as a mistake. */
+   header above it, and a centred column in a wide pane reads as a mistake.
+   Wide enough that the card's own width — not this cap — is usually what
+   limits a line: 80ch left a wide empty gutter once the document pane grew
+   to take the room the proportional chat column gave up (CL-8944). */
 .prose > :where(h1, h2, h3, h4, h5, h6, p, ul, ol, blockquote) {
-  max-width: 80ch;
+  max-width: min(120ch, 1100px);
 }
 
 .prose > * + * {
