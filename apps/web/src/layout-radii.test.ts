@@ -8,17 +8,18 @@ function read(relative: string): string {
   return readFileSync(join(here, relative), "utf8");
 }
 
+// The mockups the layout sheets were written against (`mockups/mock.css` and
+// the pages beside it) were never part of this repository, so the tokens the
+// mock set are pinned here as values rather than read back from it: 10px for
+// panels and cards, 6px for controls.
 describe("mock radius tokens", () => {
-  const mock = read("../../../mockups/mock.css");
   const styles = read("./styles.css");
   const home = read("./pages/home-layout.css");
   const onboarding = read("./pages/onboarding-layout.css");
   const settings = read("./pages/settings-layout.css");
   const workspace = read("./pages/workspace-layout.css");
 
-  test("styles.css pins mock.css --radius-lg 10px and --radius-md 6px", () => {
-    expect(mock).toMatch(/--radius-lg:\s*10px/);
-    expect(mock).toMatch(/--radius-md:\s*6px/);
+  test("styles.css pins the mock's --radius-lg 10px and --radius-md 6px", () => {
     expect(styles).toMatch(/--radius-lg:\s*10px/);
     expect(styles).toMatch(/--radius-md:\s*6px/);
     expect(styles).toContain("--radius-panel: var(--radius-lg)");
