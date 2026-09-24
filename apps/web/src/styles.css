@@ -513,6 +513,55 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 
 .inline-note { font-size: 0.8125rem; color: var(--wb-muted-foreground); margin: 0; }
 
+/* A failed project load: calm and centered, not a raw red box (CL-8931). */
+.project-load-failure {
+  max-width: 32rem;
+  margin: var(--space-8) auto;
+  padding: var(--space-6);
+  display: grid;
+  justify-items: center;
+  gap: var(--space-2);
+  text-align: center;
+}
+
+.project-load-failure-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.project-load-failure p { margin: 0; color: var(--wb-muted-foreground); }
+
+.project-load-failure-actions {
+  margin-top: var(--space-2);
+  display: flex;
+  gap: var(--space-2);
+}
+
+.project-load-failure-details {
+  margin-top: var(--space-4);
+  width: 100%;
+  text-align: left;
+}
+
+.project-load-failure-details summary {
+  cursor: pointer;
+  color: var(--wb-muted-foreground);
+  font-size: 0.8125rem;
+}
+
+.project-load-failure-details pre {
+  margin: var(--space-2) 0;
+  padding: var(--space-3);
+  border: 1px solid var(--wb-border-strong);
+  border-radius: var(--radius-panel);
+  background: var(--wb-card);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--wb-font-mono);
+  font-size: 0.8125rem;
+}
+
 /* KEEP: delivery per-file verification warning (conv) */
 /* Delivery's per-file verification: a failed check gets a plain warning line, not a colored table row. */
 .warning-note { font-size: 0.8125rem; font-weight: 500; color: var(--wb-destructive); margin: 0 0 0.5rem; }
