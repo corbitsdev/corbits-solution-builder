@@ -1231,9 +1231,11 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   overflow-y: auto;
 }
 
+/* Fills the pane rather than capping at a fixed measure: tables, mockup
+   iframes and other wide content should use the room the split gives them.
+   Running text keeps its own measure via `.prose`'s max-width instead. */
 .stage-inner {
-  max-width: 760px;
-  margin: 0 auto;
+  width: 100%;
   padding: var(--space-4) var(--space-6) var(--space-8);
   display: grid;
   gap: var(--space-4);
@@ -1379,11 +1381,17 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 /* The document itself. Measure and rhythm are the whole job here: this is the
    one surface in the app a person reads rather than scans. */
 .prose {
-  /* Left-aligned rather than centred: the measure lines up with the document
-     header above it, and a centred column in a wide pane reads as a mistake. */
-  max-width: 68ch;
   font-size: 0.9375rem;
   line-height: 1.7;
+}
+
+/* The measure applies to running text, not the block: a table, code fence
+   or embedded frame inside the same document reads better at the pane's
+   full width than squeezed into the same column as the prose around it.
+   Left-aligned rather than centred: the measure lines up with the document
+   header above it, and a centred column in a wide pane reads as a mistake. */
+.prose > :where(h1, h2, h3, h4, h5, h6, p, ul, ol, blockquote) {
+  max-width: 80ch;
 }
 
 .prose > * + * {

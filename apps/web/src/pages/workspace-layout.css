@@ -67,11 +67,15 @@
   opacity: 0.5;
 }
 
-/* ---- two panes: 420px conversation + draft ---- */
+/* ---- two panes: proportional conversation + draft ---- */
 
+/* The chat column scales with the window instead of sitting at a fixed
+   420px, which reads as cramped past a phone-sized viewport. minmax keeps
+   it readable at narrow widths and min(...,640px) stops it from ballooning
+   on very wide monitors, where the document pane should get the room. */
 .panes {
   display: grid;
-  grid-template-columns: 420px minmax(0, 1fr);
+  grid-template-columns: minmax(420px, min(40%, 640px)) minmax(0, 1fr);
   flex: 1;
   min-height: 0;
 }
@@ -458,14 +462,6 @@
   .conv {
     border-right: 0;
     border-bottom: 1px solid var(--wb-border);
-  }
-}
-
-/* ---- wide screens: chat gets more room, document keeps its measure ---- */
-
-@media (min-width: 1400px) {
-  .panes {
-    grid-template-columns: 540px minmax(0, 1fr);
   }
 }
 
