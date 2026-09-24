@@ -93,6 +93,24 @@
   display: none;
 }
 
+/* Chat-first: before a stage has a drafted artifact, the conversation is
+   the whole page — a single centered column, generous margins either side,
+   the composer at its bottom. The split earns its keep only once there is
+   something to split against. */
+.panes.chat-first {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.panes.chat-first .conv {
+  width: 100%;
+  border-right: 0;
+}
+
 .conv {
   border-right: 1px solid var(--wb-border);
   display: flex;

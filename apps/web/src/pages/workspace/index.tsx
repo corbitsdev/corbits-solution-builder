@@ -504,9 +504,14 @@ export function StageWorkspace({
       ) : null}
 
       {agentAddress && DOCUMENT_STAGES.has(stage) && stage !== 6 && !draftMessage ? (
+        // No drafted artifact yet: a single centered column, chat only, no
+        // right pane — the split only earns its keep once there is
+        // something to split against.
         <StagePanes
           strip={stripEl}
           conversation={conversation}
+          solo
+          className="chat-first"
         >
           {reader}
         </StagePanes>
