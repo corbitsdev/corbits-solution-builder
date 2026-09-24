@@ -39,14 +39,40 @@ function view(overrides: Partial<ProjectWorkflowView> = {}): ProjectWorkflowView
 }
 
 describe("reviewableArtifact", () => {
-  // The "found" branch (a specialist-written artifact, unambiguously
-  // identified) is intentionally never returned yet -- see the doc comment
-  // on `reviewableArtifact`. The fallback path below is what actually runs.
+  const written = (overrides: Partial<ArtifactNode> = {}) =>
+    node({ id: "a", stage: 6, version: 1, createdAt: "2026-09-24T10:00:00.000Z", provenance: { producer: "agent", agentRole: "architect" }, ...overrides });
 
-  test("signals persist_needed when a draft is sitting unpersisted, regardless of existing nodes", () => {
+  test("signals persist_needed when a draft is sitting unpersisted and no node carries a specialist's stamp", () => {
     const nodes = [node({ id: "a", version: 1 })];
     const result = reviewableArtifact({ nodes, stage: 1, kind: "problem_statement", latestDraft: { body: "draft" } });
     expect(result).toEqual({ status: "persist_needed" });
+  });
+
+  test("finds the persisted version when the chat draft is the one it was persisted from", () => {
+    const result = reviewableArtifact({
+      nodes: [written()],
+      stage: 6,
+      kind: "problem_statement",
+      latestDraft: { body: "draft" },
+      latestDraftAt: "2026-09-24T09:59:00.000Z",
+    });
+    expect(result).toEqual({ status: "found", node: written() });
+  });
+
+  test("a draft newer than the newest persisted version (after a send-back) is persisted, not the old version reviewed again", () => {
+    const result = reviewableArtifact({
+      nodes: [written()],
+      stage: 6,
+      kind: "problem_statement",
+      latestDraft: { body: "re-issued plan" },
+      latestDraftAt: "2026-09-24T10:55:00.000Z",
+    });
+    expect(result).toEqual({ status: "persist_needed" });
+  });
+
+  test("without a draft timestamp the persisted version is found as before (stage 8's archive, stage 5's packages)", () => {
+    const result = reviewableArtifact({ nodes: [written({ stage: 8, kind: "build_archive" })], stage: 8, kind: "build_archive", latestDraft: { bundle: true }, latestDraftAt: null });
+    expect(result).toMatchObject({ status: "found" });
   });
 
   test("signals none when there is no draft and nothing to review", () => {
