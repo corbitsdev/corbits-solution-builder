@@ -176,8 +176,10 @@ describe("project chrome paint", () => {
     expect(chrome).not.toContain("useElapsedMs");
     expect(chrome).not.toContain("elapsed-clock");
     expect(chrome).toContain("Reconnecting to the");
-    expect(chrome).toContain("Starting the project…");
+    expect(chrome).toContain("is getting ready…");
     expect(chrome).toContain("<StagePanes");
+    expect(chrome).toContain("opening-stage-name");
+    expect(chrome).toContain("<ChatInput");
     const index = read("./index.tsx");
     expect(index).not.toContain("Starting the");
     expect(index).toContain("<OpeningScreen");

@@ -170,6 +170,22 @@
   text-align: center;
 }
 
+/* The opening screen: a calm chat start, not a loading screen. The stage
+   intro sits a little below the top of the column — near the upper-middle,
+   never dead center — so the composer at the bottom doesn't read as an
+   empty page. */
+.opening-intro {
+  margin-top: clamp(24px, 10vh, 96px);
+  margin-bottom: var(--space-4);
+}
+
+.opening-stage-name {
+  margin: 0 0 var(--space-1);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--wb-foreground);
+}
+
 .conv {
   border-right: 1px solid var(--wb-border);
   display: flex;

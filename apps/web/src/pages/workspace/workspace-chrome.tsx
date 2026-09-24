@@ -5,7 +5,7 @@
  * above them.
  */
 import type { CSSProperties, ReactNode, Ref } from "react";
-import { Textarea } from "@corbits/react-ui";
+import { ChatInput, Textarea } from "@corbits/react-ui";
 import { Button, stageName } from "../../components.jsx";
 import { Dictated } from "../../dictation.jsx";
 import { Markdown } from "../../markdown.jsx";
@@ -14,7 +14,7 @@ import { STAGE_GOAL } from "./gate.jsx";
 import { Elapsed } from "./elapsed.jsx";
 import type { Guidance } from "./product-guide.js";
 import type { evaluatorVerdict } from "./guidance.js";
-import { CONV_CLASS, CONV_SCROLL_CLASS, PANES_CLASS, STAGE_PANE_CLASS } from "./pane-classes.ts";
+import { COMPOSER_BOX_CLASS, CONV_CLASS, CONV_SCROLL_CLASS, PANES_CLASS, STAGE_PANE_CLASS } from "./pane-classes.ts";
 import { usePanesWidth } from "./use-panes-width.ts";
 
 type Choices = { readonly text: string; readonly choices: readonly string[] } | null;
@@ -197,16 +197,23 @@ export function SendBackPopover({
   );
 }
 
+function capitalize(word: string): string {
+  return word.length > 0 ? word.charAt(0).toUpperCase() + word.slice(1) : word;
+}
+
 /** Same centered, chat-first chrome as a stage with no draft yet, empty, for
  *  every phase before the first specialist reply lands — no clock, no
  *  sidecar-dependent copy: what shows here is only what is already on hand.
- *  A project reopening (`resuming`) shows its current stage's own latest
- *  persisted draft (`draft`, read off the artifact fold the same way the
- *  document pane does) beside a quiet "Reconnecting…" line while the mail
- *  thread catches up; a brand-new project shows the person's own opening
- *  statement (`opening`) plus the stage's one-line goal as a refresher —
- *  both real reads, never simulated, so either renders blank rather than a
- *  fake state until its read resolves. */
+ *  A calm chat start: the stage's own intro, the person's opening statement
+ *  as their own chat bubble (once a brand-new project's read resolves), a
+ *  quiet status line in the specialist's slot, and the composer already in
+ *  place — never a loading screen. A project reopening (`resuming`) shows
+ *  its current stage's own latest persisted draft (`draft`, read off the
+ *  artifact fold the same way the document pane does) beside a
+ *  "Reconnecting…" status line while the mail thread catches up; a
+ *  brand-new project shows its opening statement plus a "getting ready"
+ *  status line — both real reads, never simulated, so either renders blank
+ *  rather than a fake state until its read resolves. */
 export function OpeningScreen({
   resuming = false,
   stage,
@@ -225,6 +232,7 @@ export function OpeningScreen({
    *  — null while none exists yet (a brand-new project) or none is selected. */
   draft?: { title: string; version: number; content: string } | null | undefined;
 }) {
+  const specialist = capitalize(who);
   return (
     <div className="stage-view">
       <StagePanes
@@ -233,17 +241,34 @@ export function OpeningScreen({
         conversation={
           <div className="stage-conversation">
             <div className={CONV_SCROLL_CLASS}>
-              <div className="think" role="status">
-                <span className="who conv-who">
-                  {resuming ? `Reconnecting to the ${who}…` : "Starting the project…"}
-                </span>
-                {!resuming ? (
-                  <>
-                    {opening ? <p className="inline-note">{opening}</p> : null}
-                    <p className="inline-note">{STAGE_GOAL[stage] ?? ""}</p>
-                  </>
-                ) : null}
+              <div className="opening-intro">
+                <p className="opening-stage-name">{stageName(stage)}</p>
+                <p className="inline-note">{STAGE_GOAL[stage] ?? ""}</p>
               </div>
+              {!resuming && opening ? (
+                <div className="msg you">
+                  <span className="who conv-who">You</span>
+                  <div className="bubble">
+                    <Markdown source={opening} />
+                  </div>
+                </div>
+              ) : null}
+              <div className="think" role="status">
+                <span className="who conv-who">{specialist}</span>
+                <span className="thinking">
+                  {resuming ? `Reconnecting to the ${specialist}…` : `The ${specialist} is getting ready…`}
+                </span>
+              </div>
+            </div>
+            <div className="composer" aria-hidden="true">
+              <ChatInput
+                className={COMPOSER_BOX_CLASS}
+                value=""
+                onValueChange={() => {}}
+                onSend={() => {}}
+                disabled
+                placeholder={`Message the ${who}…`}
+              />
             </div>
           </div>
         }
