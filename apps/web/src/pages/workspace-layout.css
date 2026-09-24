@@ -111,6 +111,22 @@
   border-right: 0;
 }
 
+/* Chat-first, before the first message: center the composer (and the empty
+   note) vertically in the column, like a fresh page, rather than pinning it
+   to the bottom below mostly empty space. Once a message lands, `.conv-scroll`
+   goes back to filling the column and the composer settles to the bottom as
+   the thread grows -- the normal, already-existing layout. */
+.panes.chat-first .stage-conversation:has(> .conv-scroll > .inline-note:only-child) {
+  flex: 1;
+  justify-content: center;
+}
+
+.panes.chat-first .stage-conversation:has(> .conv-scroll > .inline-note:only-child) .conv-scroll {
+  flex: 0 1 auto;
+  justify-content: center;
+  text-align: center;
+}
+
 .conv {
   border-right: 1px solid var(--wb-border);
   display: flex;
