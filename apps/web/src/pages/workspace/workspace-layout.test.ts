@@ -24,9 +24,9 @@ describe("project chrome classes", () => {
     expect(COMPOSER_BOX_CLASS).toBe("composer-box");
   });
 
-  test("the layout sheet pins 420px conversation, conv-scroll, and composer-box", () => {
+  test("the layout sheet gives the conversation a proportional column with a 420px floor, conv-scroll, and composer-box", () => {
     const css = read("../workspace-layout.css");
-    expect(css).toContain("grid-template-columns: 420px minmax(0, 1fr)");
+    expect(css).toContain("grid-template-columns: minmax(420px, min(40%, 640px)) minmax(0, 1fr)");
     expect(css).toContain(".conv-scroll");
     expect(css).toContain(".composer .composer-box");
     expect(css).toContain(".topbar.topbar-project");
