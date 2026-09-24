@@ -4,7 +4,7 @@ import { Plus, Send } from "lucide-react";
 import { Markdown } from "../../markdown.jsx";
 import { Dictated } from "../../dictation.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
-import { choicesIn } from "./choices.js";
+import { answerText, segmentsIn } from "./choices.js";
 import { conversationLead, isHtmlDocument } from "./guidance.js";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
 import { COMPOSER_BOX_CLASS, CONV_SCROLL_CLASS } from "./pane-classes.ts";
@@ -247,14 +247,13 @@ export function SpecialistTurn({
   /** Set while the turn can be answered; a tapped option is sent as the answer. */
   onAnswer?: ((answer: string) => void) | undefined;
 }) {
-  // A turn that offers choices ends in the question and its options. One that
-  // only asks ends in the question. Either way the question is set apart.
-  const choices = choicesIn(text);
-  const cut = text.lastIndexOf("\n\n");
-  const last = (cut >= 0 ? text.slice(cut + 2) : text).trim();
-  const question = choices?.question ?? (last.endsWith("?") ? last : null);
-  const before = choices ? choices.before : question ? text.slice(0, Math.max(cut, 0)) : text;
-  const options = choices?.options ?? [];
+  // Every question the turn asks is set apart with its own options -- a
+  // turn that lists two under "What I need from you" has asked two, and
+  // each must be answerable (`segmentsIn`).
+  const segments = segmentsIn(text);
+  const questions = segments.filter((segment) => segment.kind === "question");
+  const question = questions.length > 0;
+  const several = questions.length > 1;
   return (
     <>
       {note ? (
@@ -268,23 +267,30 @@ export function SpecialistTurn({
           {question ? <span>{note.fresh ? "new round of questions" : "next question"}</span> : null}
         </p>
       ) : null}
-      {before.trim() ? <Markdown source={before} /> : null}
-      {question ? <p className="turn-question">{question}</p> : null}
-      {question && options.length > 0 ? (
-        <div className="turn-options" role="group" aria-label="Likely answers">
-          {options.map((option) => (
-            <button
-              key={option}
-              type="button"
-              className="turn-option"
-              disabled={!onAnswer}
-              onClick={() => onAnswer?.(option)}
-            >
-              {option}
-            </button>
-          ))}
-        </div>
-      ) : null}
+      {segments.map((segment, index) =>
+        segment.kind === "text" ? (
+          <Markdown key={index} source={segment.markdown} />
+        ) : (
+          <div key={index} className="turn-ask">
+            <p className="turn-question">{segment.question}</p>
+            {segment.options.length > 0 ? (
+              <div className="turn-options" role="group" aria-label="Likely answers">
+                {segment.options.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    className="turn-option"
+                    disabled={!onAnswer}
+                    onClick={() => onAnswer?.(answerText(segment.question, option, several))}
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ),
+      )}
     </>
   );
 }

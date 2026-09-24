@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ChatMessage } from "../../stage-mail.ts";
-import { StageConversation } from "./thread.tsx";
+import { SpecialistTurn, StageConversation } from "./thread.tsx";
 
 const DESIGN = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Inteva Complete – Stage 4 Interface</title>
@@ -43,5 +43,25 @@ describe("StageConversation message bodies", () => {
     const html = render([{ id: "m1", author: "agent", body: DESIGN, at: "2026-09-23T00:00:00.000Z" }]);
     expect(html).not.toContain("<iframe");
     expect(html).toContain("First draft is in the document.");
+  });
+});
+
+describe("SpecialistTurn questions", () => {
+  test("a turn asking two questions with options sets both apart, each with its own tappable options", () => {
+    const text = [
+      "What should the default be for the bystander photo setting?",
+      "",
+      "- Option: Warn me before saving",
+      "- Option: Block saving",
+      "",
+      "Which cloud recognition service should settings support first?",
+      "",
+      "- Option: Pick a common service during the build",
+      "- Option: I will name a specific service later",
+    ].join("\n");
+    const html = renderToStaticMarkup(createElement(SpecialistTurn, { text, note: null, onOpenVersion: () => undefined, onAnswer: () => undefined }));
+    expect(html.match(/class="turn-question"/g)?.length).toBe(2);
+    expect(html.match(/class="turn-option"/g)?.length).toBe(4);
+    expect(html.indexOf("bystander")).toBeLessThan(html.indexOf("cloud recognition"));
   });
 });
