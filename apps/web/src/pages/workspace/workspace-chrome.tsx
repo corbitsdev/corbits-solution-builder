@@ -8,9 +8,10 @@ import type { ReactNode, Ref } from "react";
 import { Textarea } from "@corbits/react-ui";
 import { Button, stageName } from "../../components.jsx";
 import { Dictated } from "../../dictation.jsx";
+import { Markdown } from "../../markdown.jsx";
 import { RETURN_TO, SendBackPicker, defaultTarget } from "../send-back.jsx";
 import { STAGE_GOAL } from "./gate.jsx";
-import { clock, Elapsed, useElapsedMs } from "./elapsed.jsx";
+import { Elapsed } from "./elapsed.jsx";
 import type { Guidance } from "./product-guide.js";
 import type { evaluatorVerdict } from "./guidance.js";
 import { CONV_CLASS, CONV_SCROLL_CLASS, PANES_CLASS, STAGE_PANE_CLASS } from "./pane-classes.ts";
@@ -195,34 +196,69 @@ export function SendBackPopover({
   );
 }
 
-/** Same two-pane chrome as a live stage, empty, while the workflow view loads.
- *  After a host restart this can legitimately take minutes — every sidecar
- *  has to reconnect and the workflow run has to catch up before its stage
- *  becomes readable — and a bare, unchanging "Opening…" is indistinguishable
- *  from a hang. A running clock (CL-8874) is the only signal that anything
- *  is happening at all. */
-export function OpeningScreen() {
-  const seconds = Math.floor(useElapsedMs() / 1_000);
+/** Same centered, chat-first chrome as a stage with no draft yet, empty, for
+ *  every phase before the first specialist reply lands — no clock, no
+ *  sidecar-dependent copy: what shows here is only what is already on hand.
+ *  A project reopening (`resuming`) shows its current stage's own latest
+ *  persisted draft (`draft`, read off the artifact fold the same way the
+ *  document pane does) beside a quiet "Reconnecting…" line while the mail
+ *  thread catches up; a brand-new project shows the person's own opening
+ *  statement (`opening`) plus the stage's one-line goal as a refresher —
+ *  both real reads, never simulated, so either renders blank rather than a
+ *  fake state until its read resolves. */
+export function OpeningScreen({
+  resuming = false,
+  stage,
+  who,
+  opening,
+  draft,
+}: {
+  resuming?: boolean;
+  stage: number;
+  /** The specialist's name, lowercased, for the reconnect line — e.g.
+   *  "brainstormer". */
+  who: string;
+  /** A brand-new project's own opening statement, once its read resolves. */
+  opening?: string | null | undefined;
+  /** The current stage's latest persisted draft, already on `detail.nodes`
+   *  — null while none exists yet (a brand-new project) or none is selected. */
+  draft?: { title: string; version: number; content: string } | null | undefined;
+}) {
   return (
     <div className="stage-view">
       <StagePanes
+        className="chat-first"
+        solo
         conversation={
           <div className="stage-conversation">
             <div className={CONV_SCROLL_CLASS}>
               <div className="think" role="status">
-                <span className="who conv-who">Opening…</span>
-                <p className="elapsed">
-                  <span className="elapsed-clock" role="timer" aria-live="off">
-                    {clock(seconds)}
-                  </span>{" "}
-                  elapsed. A project reopened right after a restart can take several minutes to catch up.
-                </p>
+                <span className="who conv-who">
+                  {resuming ? `Reconnecting to the ${who}…` : "Starting the project…"}
+                </span>
+                {!resuming ? (
+                  <>
+                    {opening ? <p className="inline-note">{opening}</p> : null}
+                    <p className="inline-note">{STAGE_GOAL[stage] ?? ""}</p>
+                  </>
+                ) : null}
               </div>
             </div>
           </div>
         }
       >
-        {null}
+        {draft ? (
+          <div className="stage-inner">
+            <div className="doc">
+              <div className="docmeta">
+                <span>
+                  {draft.title} · v{draft.version}
+                </span>
+              </div>
+              {draft.content ? <Markdown source={draft.content} /> : <p className="inline-note">Loading…</p>}
+            </div>
+          </div>
+        ) : null}
       </StagePanes>
     </div>
   );

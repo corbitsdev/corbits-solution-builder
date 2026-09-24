@@ -104,6 +104,54 @@ export function StageWorkspace({
     import("../../client.js").Remediation | undefined
   >(undefined);
 
+  // A brand-new project's own opening statement — real content for the
+  // opening screen's "before the first reply" chrome, read the same way
+  // `api.projectOpening` always has (the `source_material`/opening artifact
+  // `createProject` wrote), never simulated. Null once read resolves with
+  // nothing recorded; undefined while still loading.
+  const [openingStatement, setOpeningStatement] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    setOpeningStatement(undefined);
+    void api
+      .projectOpening(detail.project.id)
+      .then((result) => {
+        if (!cancelled) setOpeningStatement(result?.body ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setOpeningStatement(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detail.project.id]);
+
+  // The opening screen's own current-stage draft content — read the same
+  // way `ProductRequirements` reads a single node's content below, off the
+  // artifact fold already on `detail.nodes` rather than the mail thread, so
+  // it renders before the stage specialist (and its mailbox) exist at all.
+  const [openingDraftNodeId, setOpeningDraftNodeId] = useState<string | null>(null);
+  const [openingDraftContent, setOpeningDraftContent] = useState<string | null>(null);
+  useEffect(() => {
+    if (!openingDraftNodeId) {
+      setOpeningDraftContent(null);
+      return;
+    }
+    let cancelled = false;
+    setOpeningDraftContent(null);
+    void api
+      .artifactContent(tenantId, openingDraftNodeId)
+      .then((result) => {
+        if (!cancelled) setOpeningDraftContent(result.content);
+      })
+      .catch(() => {
+        if (!cancelled) setOpeningDraftContent(UNREADABLE);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [openingDraftNodeId, tenantId]);
+
   const workflow = useWorkflowView(detail.project.id, onChanged);
   const workflowView = workflow.view;
   const workflowResolved = workflow.resolved;
@@ -302,11 +350,53 @@ export function StageWorkspace({
     }
   };
 
+  // Whether this project already has history to catch up on — the only
+  // honest basis for the reconnect copy below. A brand-new project has no
+  // nodes and sits at stage 1 until its first stage lands, so this is false
+  // for it and true for anything actually resuming.
+  const resuming = detail.nodes.length > 0 || detail.stage > 1;
+
+  // The confirmed current stage for the opening screen's own reads: the
+  // resolved workflow stage once known, else the same non-deploying
+  // `detail.stage` confirmation `use-stage-agent.ts`'s early start trusts —
+  // never the unresolved `stage` fallback (`workflowView?.stage ?? 1`),
+  // which would show a resuming project's draft under the wrong stage while
+  // the workflow view is still catching up.
+  const openingStage = workflowResolved ? stage : detail.stage;
+  const openingDraftKind = STAGE_DRAFT_KIND[openingStage] ?? null;
+  const openingDraftNode =
+    openingDraftKind !== null
+      ? (detail.nodes
+          .filter(
+            (node) =>
+              node.stage === openingStage && node.kind === openingDraftKind && node.supersededByNodeId === null,
+          )
+          .sort((a, b) => a.version - b.version)
+          .at(-1) ?? null)
+      : null;
+  const openingDraftNodeIdKey = openingDraftNode?.id ?? null;
+  useEffect(() => {
+    setOpeningDraftNodeId(openingDraftNodeIdKey);
+  }, [openingDraftNodeIdKey]);
+  const openingDraft =
+    openingDraftNode && openingDraftContent !== null
+      ? { title: openingDraftNode.title, version: openingDraftNode.version, content: openingDraftContent }
+      : null;
+  const openingWho = agentFor(openingStage as Stage).title.toLowerCase();
+
   // Neutral until the workflow view says which stage this really is — never
   // the artifact-derived fallback, which for a mid-way project is stage 1
   // and would otherwise flash before the real stage takes over (CL-8721).
   if (!workflowResolved && !openingFailed) {
-    return <OpeningScreen />;
+    return (
+      <OpeningScreen
+        resuming={resuming}
+        stage={openingStage}
+        who={openingWho}
+        opening={openingStatement}
+        draft={openingDraft}
+      />
+    );
   }
 
   // The strip and conversation are the same on every stage; only the right
@@ -426,7 +516,15 @@ export function StageWorkspace({
         </Banner>
       ) : null}
 
-      {!agentAddress && !agent.error ? <OpeningScreen /> : null}
+      {!agentAddress && !agent.error ? (
+        <OpeningScreen
+          resuming={resuming}
+          stage={openingStage}
+          who={openingWho}
+          opening={openingStatement}
+          draft={openingDraft}
+        />
+      ) : null}
 
       {agentAddress && openingDispatch.error ? (
         <Banner
