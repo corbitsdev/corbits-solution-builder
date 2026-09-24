@@ -24,6 +24,7 @@ import {
 import { Ellipsis, Plus, Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { api, ApiFailure, type ActiveModel, type ImportOutcome, type ProjectInfo, type ProjectSummary } from "../client.js";
+import { faceOpensProject } from "./card-face-guard.ts";
 import { Banner, Button, downloadArtifact, stageName } from "../components.jsx";
 // INTEGRATE (CL-8756): api.exportProject is gone on this lane — export is
 // assembled in the browser (assembleBundle) and saved via downloadArtifact;
@@ -372,7 +373,16 @@ function ProjectCard({
   // after the first, so a slip cannot remove a project.
   const [confirming, setConfirming] = useState(false);
   const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const suppressOpen = useRef(false);
+  // The face is inert while the options menu or the info dialog is up, and
+  // for a moment after either closes (`card-face-guard.ts`): the click that
+  // dismisses a menu lands on the face the instant the menu lets go.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const closedAt = useRef<number | null>(null);
+  // Set by the press that dismisses the menu, consumed by the click it
+  // produces; a fresh press on the face clears it first.
+  const dismissing = useRef(false);
+  const faceOpens = () =>
+    faceOpensProject({ menuOpen, dialogOpen: infoOpen, dismissingClick: dismissing.current, closedAt: closedAt.current, now: Date.now() });
 
   const act = async (work: () => Promise<unknown>) => {
     try {
@@ -398,9 +408,12 @@ function ProjectCard({
   };
 
   const openInfo = (withName = false) => {
-    suppressOpen.current = true;
     setFocusName(withName);
     setInfoOpen(true);
+  };
+  const closeInfo = () => {
+    closedAt.current = Date.now();
+    setInfoOpen(false);
   };
 
   return (
@@ -409,19 +422,22 @@ function ProjectCard({
       tabIndex={0}
       aria-label={project.title}
       onClick={() => {
-        if (suppressOpen.current) {
-          suppressOpen.current = false;
-          return;
-        }
-        onOpen();
+        const opens = faceOpens();
+        dismissing.current = false;
+        if (opens) onOpen();
       }}
       onContextMenu={(event) => {
         event.preventDefault();
-        openInfo();
+        if (faceOpens()) openInfo();
       }}
       onPointerDown={(event) => {
+        // A fresh press: whatever the last one dismissed is done with. Runs
+        // before the menu's own outside-press handler on the document, so a
+        // press that dismisses the menu clears this first and then marks it.
+        dismissing.current = false;
         if (event.pointerType === "mouse" && event.button !== 0) return;
         clearPress();
+        if (!faceOpens()) return;
         pressTimer.current = setTimeout(() => openInfo(), LONG_PRESS_MS);
       }}
       onPointerUp={clearPress}
@@ -431,7 +447,7 @@ function ProjectCard({
         if (event.target !== event.currentTarget) return;
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
-          onOpen();
+          if (faceOpens()) onOpen();
         }
       }}
     >
@@ -449,13 +465,21 @@ function ProjectCard({
             onContextMenu={(event) => event.stopPropagation()}
             onKeyDown={(event) => event.stopPropagation()}
           >
-            <Menu onOpenChange={(open) => !open && setConfirming(false)}>
+            <Menu
+              onOpenChange={(open) => {
+                setMenuOpen(open);
+                if (!open) {
+                  setConfirming(false);
+                  closedAt.current = Date.now();
+                }
+              }}
+            >
               <MenuTrigger asChild>
                 <button type="button" className="project-card-menu" aria-label={`Options for ${project.title}`}>
                   <Ellipsis aria-hidden="true" />
                 </button>
               </MenuTrigger>
-              <MenuContent align="end">
+              <MenuContent align="end" onPointerDownOutside={() => (dismissing.current = true)}>
                 <MenuItem onSelect={() => openInfo()}>Project info…</MenuItem>
                 <MenuItem onSelect={() => openInfo(true)}>Rename</MenuItem>
                 <MenuItem
@@ -491,14 +515,24 @@ function ProjectCard({
           </div>
         </div>
         {infoOpen ? (
-          <ProjectInfoDialog
-            project={project}
-            focusName={focusName}
-            onClose={() => setInfoOpen(false)}
-            onChanged={onChanged}
-            onError={onError}
-            onNotice={onNotice}
-          />
+          // Portaled, but React-nested in the card: its events bubble to the
+          // face's handlers unless stopped here, the same as the menu's.
+          <div
+            className="card-dialog"
+            onClick={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+            onContextMenu={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
+          >
+            <ProjectInfoDialog
+              project={project}
+              focusName={focusName}
+              onClose={closeInfo}
+              onChanged={onChanged}
+              onError={onError}
+              onNotice={onNotice}
+            />
+          </div>
         ) : null}
       </div>
 
