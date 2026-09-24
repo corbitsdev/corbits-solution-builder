@@ -33,6 +33,7 @@ import { targetOpeningLine } from "./freeze.jsx";
 import { composeStage9Opening } from "./stage9-opening.ts";
 import { renderStackBlock } from "./frozen-stack-text.ts";
 import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
+import { sendBackResumeCue } from "./send-back-cue.ts";
 
 export type OpeningDispatch = {
   /** The opening send failed — surfaced with a retry, never retried forever. */
@@ -265,26 +266,32 @@ export function useOpeningDispatch({
     retryAttempt,
   ]);
 
-  // A send-back into stage 8 lands on a thread that already has history, so
-  // the opening-send effect above (gated on an EMPTY thread) never fires —
-  // the build specialist sees nothing telling it the stage came back. Sends
-  // one resume cue instead, keyed on the workflow's own send-back decision id
-  // (embedded in the message body) so a reload never repeats it.
+  // A send-back lands on a thread that already has history, so the
+  // opening-send effect above (gated on an EMPTY thread) never fires — the
+  // specialist sees nothing telling it the stage came back, or why, and the
+  // person is left facing the draft that was just sent back. One resume cue
+  // carrying the send-back's reason goes instead, keyed on the workflow's
+  // own decision id so a reload never repeats it (`send-back-cue.ts` holds
+  // the rule, including stage 6's wait for the re-minted requirement ids).
+  const cueInFlightRef = useRef<string | null>(null);
   useEffect(() => {
-    if (stage !== 8 || !agentAddress) return;
+    if (!agentAddress) return;
     if (loadedFor !== agentAddress || messages.length === 0) return;
-    const lastSendBack = [...(workflowView?.decisions ?? [])]
-      .reverse()
-      .find((decision) => decision.kind === "send_back" && decision.accepted && decision.targetStage === 8);
-    if (!lastSendBack) return;
-    const marker = lastSendBack.decisionId;
-    if (messages.some((message) => message.body.includes(marker))) return;
-    const reason = lastSendBack.reason ?? "revise and resubmit.";
-    const body = `This stage was sent back: ${reason} Continue in a new attempts/<n+1>/ directory — the next empty one — rather than reusing the last attempt. [ref:${marker}]`;
+    const cue = sendBackResumeCue({
+      stage,
+      decisions: workflowView?.decisions ?? [],
+      messages,
+      requirements: workflowView?.requirements ?? [],
+    });
+    if (!cue || cueInFlightRef.current === cue.marker) return;
+    cueInFlightRef.current = cue.marker;
     void api
-      .sendStageMail(tenantId, agentAddress, { body })
+      .sendStageMail(tenantId, agentAddress, { body: cue.body })
       .then(() => reloadThread())
-      .catch(() => {});
+      .catch(() => {
+        // Not marked as sent: the next thread or view change retries.
+        cueInFlightRef.current = null;
+      });
   }, [stage, agentAddress, loadedFor, messages, workflowView, tenantId, reloadThread]);
 
   return {
