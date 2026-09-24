@@ -134,6 +134,12 @@ export type AgentRole = {
   /** Curated purpose binding — section 8's `sb-model-*` seed key, never a vendor model id. */
   readonly modelKey?: string;
   readonly temperature: number;
+  /** Output-token cap for this role's step, reasoning included: 8000 for a
+   *  reply that is never persisted (`produces: null`), 32000 for a document
+   *  or review. Without one the provider default applies (4096 on Anthropic),
+   *  and a turn that thinks past it ends with no reply at all. Kept at 32000
+   *  because some providers refuse a higher cap. */
+  readonly maxTokens: number;
   readonly system: string;
   /** What this role may never do, restated where the prompt can see it. */
   readonly boundary: string;
@@ -247,6 +253,7 @@ export const AGENT_KIT: readonly AgentRole[] = [
     produces: "problem_brief",
     promptKey: "sb-prompt-brainstormer-v1",
     temperature: 0.6,
+    maxTokens: 32000,
     boundary: "Cannot select an approach or relax a recorded constraint.",
     system: `${SHARED_RULES}
 
@@ -292,6 +299,7 @@ change the most.`,
     produces: "solution_constraints",
     promptKey: "sb-prompt-constraints-v1",
     temperature: 0.3,
+    maxTokens: 32000,
     boundary: "Cannot grant an exception or choose an architecture.",
     system: `${SHARED_RULES}
 
@@ -349,6 +357,7 @@ ${INTERVIEW}`,
     produces: "chosen_approach",
     promptKey: "sb-prompt-proposer-v1",
     temperature: 0.6,
+    maxTokens: 32000,
     boundary: "Cannot select the winning approach; the user does that at the gate.",
     system: `${SHARED_RULES}
 
@@ -417,6 +426,7 @@ ${INTERVIEW}`,
     produces: "design_artifact",
     promptKey: "sb-prompt-design-v1",
     temperature: 0.5,
+    maxTokens: 32000,
     boundary: "Cannot approve a design or waive an accessibility requirement.",
     system: `${SHARED_RULES}
 
@@ -491,6 +501,7 @@ note sections.`,
     produces: "audience_package",
     promptKey: "sb-prompt-presentation-v1",
     temperature: 0.5,
+    maxTokens: 32000,
     boundary: "Cannot change scope or bind an unauthorised commitment.",
     system: `${SHARED_RULES}
 
@@ -537,6 +548,7 @@ head do not need the same one-pager.`,
     produces: "product_requirements",
     promptKey: "sb-prompt-requirements-v1",
     temperature: 0.2,
+    maxTokens: 32000,
     boundary: "Cannot add scope the approved inputs do not support, design the solution, or approve anything.",
     system: `${SHARED_RULES}
 
@@ -614,6 +626,7 @@ differently worded heading is invisible to it.`,
     produces: "build_plan",
     promptKey: "sb-prompt-architect-v1",
     temperature: 0.3,
+    maxTokens: 32000,
     boundary: "Cannot change the approved shape or authorise a build.",
     system: `${SHARED_RULES}
 
@@ -713,6 +726,7 @@ ${INTERVIEW}`,
       promptKey: `sb-prompt-engineering-${specialty.id}-v1`,
       modelKey: `sb-model-engineering-${specialty.id}`,
       temperature: 0.3,
+      maxTokens: 32000,
       boundary: specialty.boundary,
       system: `${SHARED_RULES}
 
@@ -751,6 +765,7 @@ Distinguish a blocking finding from a suggestion. ${specialty.authority}`,
     produces: "cost_approval",
     promptKey: "sb-prompt-estimator-v1",
     temperature: 0.2,
+    maxTokens: 32000,
     boundary: "Cannot spend, and cannot change the tolerance it is measured against.",
     system: `${SHARED_RULES}
 
@@ -800,6 +815,7 @@ ${INTERVIEW}`,
     produces: "build_evidence",
     promptKey: "sb-prompt-supervision-v1",
     temperature: 0.2,
+    maxTokens: 32000,
     boundary: "Writes and runs the code itself. Humans decide permissions, cost and material changes; the code is never invented in prose.",
     system: `${SHARED_RULES}
 
@@ -889,6 +905,7 @@ shown the output that proves it.`,
     produces: "delivery_manifest",
     promptKey: "sb-prompt-verification-v1",
     temperature: 0.2,
+    maxTokens: 32000,
     boundary: "Cannot accept, waive, or claim bytes it could not read.",
     system: `${SHARED_RULES}
 
@@ -955,6 +972,7 @@ whether a human may be asked to accept, and what remains if not.`,
     produces: "problem_brief",
     promptKey: "sb-prompt-guide-v1",
     temperature: 0.2,
+    maxTokens: 32000,
     boundary: "No dispatch, no artifact alteration, no decision.",
     system: `${SHARED_RULES}
 
@@ -978,6 +996,7 @@ Recommend a route. Never take one.`,
     produces: null,
     promptKey: "sb-prompt-namer-v1",
     temperature: 0.3,
+    maxTokens: 8000,
     boundary: "Advisory only. Cannot approve, edit or advance anything; names only.",
     // Not prefixed with SHARED_RULES: this role's output is a title, not a
     // document, and none of the document-formatting rules apply to it.
@@ -1004,6 +1023,7 @@ Rules that apply to you without exception:
     produces: null,
     promptKey: "sb-prompt-brief-eval-v1",
     temperature: 0,
+    maxTokens: 8000,
     boundary: "Advisory only. Cannot approve, edit or block a brief.",
     // Not prefixed with SHARED_RULES: those open every document with "In
     // short", and this role's output is a verdict line, not a document.

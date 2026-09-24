@@ -325,6 +325,7 @@ export default defineWorkflow({
     run: step({
       agent: AGENT,
       input: { from: "trigger.payload" },
+      inference: { literal: ${JSON.stringify({ maxTokens: role.maxTokens })} },
       drainBehavior: "wait",
       triggers: "unbounded",
     }),

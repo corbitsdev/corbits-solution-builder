@@ -325,4 +325,5 @@ swaps in `package.json` (root, `tools-deck`, `tools-delivery`) back to the
 released version, and drop this entry.
 
 **Kill date.** 2026-10-16. Tracked as
-[CL-8915](https://linear.app/abklabs/issue/CL-8915).
+[CL-8915](https://linear.app/abklabs/issue/CL-8915), and in this repository
+as #45.
