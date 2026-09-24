@@ -2927,6 +2927,18 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   gap: var(--space-2);
 }
 
+/* Answered: the target on one line, the way to change it beside it. */
+.target-picker.target-chosen {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.target-picker.target-chosen > p {
+  margin: 0;
+}
+
 /* KEEP: stage-view cards + stage-conversation bounds (conv) */
 /* The plain conversation stages (no fill panel of their own): the
    specialist's current reply and the thread below it are two stacked

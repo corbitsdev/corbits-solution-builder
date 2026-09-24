@@ -13,7 +13,6 @@
 import { useMemo } from "react";
 import { StateLabel } from "../../components.jsx";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@corbits/react-ui";
-import { SELECTABLE_TARGETS } from "@solutions-builder/app/targets";
 import type { Freeze } from "@solutions-builder/app/project-workflow/contracts";
 import { parseStackRecord } from "@solutions-builder/app/stack";
 import { HowItRuns } from "./how-it-runs.tsx";
@@ -97,11 +96,9 @@ function parseEstimate(body: string): { costRows: CostRow[]; scopeItems: string[
 
 export function EstimateView({
   body,
-  chosenTarget,
   freeze = null,
 }: {
   body: string;
-  chosenTarget: string | null;
   /** The project workflow's own freeze, once stage 7 is approved
    *  (`ProjectWorkflowView.freeze`) -- the process authority, not a guess
    *  from artifact metadata. */
@@ -112,19 +109,15 @@ export function EstimateView({
   // The workflow's own freeze (once stage 7 is approved) is the only
   // authority on "frozen" -- never re-derived from artifact metadata.
   const frozen = freeze !== null;
-  const targetLabel = chosenTarget
-    ? (SELECTABLE_TARGETS.find((option) => option.target === chosenTarget)?.label ?? chosenTarget)
-    : null;
 
-  if (costRows.length === 0 && scopeItems.length === 0 && !targetLabel && !frozen && !stack) return null;
+  if (costRows.length === 0 && scopeItems.length === 0 && !frozen && !stack) return null;
 
   return (
     <div className="stage-lead estimate-view">
       {stack ? <HowItRuns planText={body} /> : null}
-      {targetLabel || frozen ? (
+      {frozen ? (
         <div className="button-row">
-          {targetLabel ? <StateLabel tone="info">Target chosen: {targetLabel}</StateLabel> : null}
-          {frozen ? <StateLabel tone="success">Approved · frozen</StateLabel> : null}
+          <StateLabel tone="success">Approved · frozen</StateLabel>
         </div>
       ) : null}
       {freeze ? (

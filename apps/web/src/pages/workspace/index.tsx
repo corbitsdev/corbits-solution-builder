@@ -635,11 +635,7 @@ export function StageWorkspace({
       {agentAddress && DOCUMENT_STAGES.has(stage) && draftMessage && artifacts.activeNode && artifacts.selected ? (
         <>
           {stage === 7 ? (
-            <EstimateView
-              body={draftMessage.body}
-              chosenTarget={chosenTarget}
-              freeze={workflowView?.freeze ?? null}
-            />
+            <EstimateView body={draftMessage.body} freeze={workflowView?.freeze ?? null} />
           ) : null}
           {stage === 7 ? <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} /> : null}
           <StageDocument

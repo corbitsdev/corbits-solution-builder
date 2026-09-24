@@ -8,7 +8,8 @@
  * and read straight off it by the stage 8 agent's opening mail. No signal,
  * no freeze step — approving stage 7 with a target chosen is the freeze.
  */
-import { StateLabel } from "../../components.jsx";
+import { useState } from "react";
+import { Button, StateLabel } from "../../components.jsx";
 import { SELECTABLE_TARGETS } from "@solutions-builder/app/targets";
 
 /** One line naming the chosen target, prefixed onto stage 8's opening mail so the build specialist knows what it is building without re-deriving it from the plan. */
@@ -17,6 +18,12 @@ export function targetOpeningLine(target: string): string {
   return `Target: ${option?.label ?? target}.`;
 }
 
+/**
+ * Asks the question until it has an answer, then states the answer. A card
+ * that keeps asking "How will this be used?" under a badge saying the target
+ * is chosen reads as if the choice did not register; one statement of the
+ * fact, with a way to change it, is the whole surface.
+ */
 export function TargetPicker({
   chosen,
   onChange,
@@ -24,6 +31,25 @@ export function TargetPicker({
   chosen: string | null;
   onChange: (target: string) => void;
 }) {
+  const [changing, setChanging] = useState(false);
+  const chosenOption = chosen ? SELECTABLE_TARGETS.find((option) => option.target === chosen) : undefined;
+  if (chosenOption && !changing) {
+    return (
+      <div className="stage-lead target-picker target-chosen">
+        <p className="text-sm">
+          <span className="font-medium">Target:</span> {chosenOption.label}{" "}
+          {chosenOption.verified ? (
+            <StateLabel tone="okay">verified today</StateLabel>
+          ) : (
+            <StateLabel tone="disabled">not verified yet</StateLabel>
+          )}
+        </p>
+        <Button variant="link" onClick={() => setChanging(true)}>
+          Change
+        </Button>
+      </div>
+    );
+  }
   return (
     <div className="stage-lead target-picker" role="group" aria-labelledby="build-target-question">
       <p id="build-target-question" className="text-sm font-medium">
@@ -40,7 +66,10 @@ export function TargetPicker({
               type="radio"
               name="build-target"
               checked={chosen === option.target}
-              onChange={() => onChange(option.target)}
+              onChange={() => {
+                onChange(option.target);
+                setChanging(false);
+              }}
             />
             <span>
               <span className="text-sm">{option.label}</span>{" "}
