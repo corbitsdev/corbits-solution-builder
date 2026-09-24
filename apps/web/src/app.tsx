@@ -20,7 +20,7 @@ import {
   Download,
   Settings as SettingsIcon,
 } from "lucide-react";
-import { Banner, Mark, downloadArtifact, stageName } from "./components.jsx";
+import { Banner, Button, Mark, downloadArtifact, stageName } from "./components.jsx";
 import { PrintView, setPrintProject, usePrintTarget } from "./print.jsx";
 import { Projects } from "./pages/projects.jsx";
 import { Settings } from "./pages/settings.jsx";
@@ -93,6 +93,55 @@ function Booting({ offline }: { offline: boolean }) {
 
 
 /** The nine stages as stepper segments: done in ink, current stretched, rest hairline. */
+/**
+ * A failed project load: plain language and a way out first, the raw cause
+ * behind a disclosure rather than in a red box (CL-8931, follow-up to CL-8918).
+ */
+function ProjectLoadFailure({
+  detail,
+  onRetry,
+  onBackToProjects,
+}: {
+  detail: string;
+  onRetry: () => void;
+  onBackToProjects: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const copyDetail = () => {
+    void navigator.clipboard
+      .writeText(detail)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => {
+        // Clipboard access can be denied; the text is still selectable in the disclosure.
+      });
+  };
+
+  return (
+    <div className="project-load-failure">
+      <p className="project-load-failure-title">This project couldn't be opened</p>
+      <p>Something went wrong while loading it. You can try again, or go back and pick another project.</p>
+      <div className="project-load-failure-actions">
+        <Button variant="primary" onClick={onBackToProjects}>
+          Back to projects
+        </Button>
+        <Button variant="secondary" onClick={onRetry}>
+          Try again
+        </Button>
+      </div>
+      <details className="project-load-failure-details">
+        <summary>Technical details</summary>
+        <pre>{detail}</pre>
+        <Button variant="outline" onClick={copyDetail}>
+          {copied ? "Copied" : "Copy"}
+        </Button>
+      </details>
+    </div>
+  );
+}
+
 function stageSteps(stage: number): WorkflowStep[] {
   return Array.from({ length: 9 }, (_, index) => {
     const number = index + 1;
@@ -696,9 +745,7 @@ export function App() {
               />
             </>
           ) : detailError ? (
-            <Banner tone="error" title="The project could not be loaded" action={{ label: "Try again", onClick: retryDetail }}>
-              {detailError}
-            </Banner>
+            <ProjectLoadFailure detail={detailError} onRetry={retryDetail} onBackToProjects={() => navigate("projects")} />
           ) : (
             <Banner title="No project open" />
           )
