@@ -115,13 +115,17 @@ const StackRecordSchema = type({
 });
 
 const STACK_HEADING_RE = /^##\s+Stack\s*$/m;
-const STACK_BLOCK_RE = /```json stack\r?\n([\s\S]*?)```/;
+// The prompt asks for the fence opened with "```json stack" (`kit.ts`), but a
+// specialist sometimes drops the " stack" tag and just writes "```json" --
+// the tag carries no data, so that variant is accepted too. The JSON body
+// itself is never touched.
+const STACK_BLOCK_RE = /```json(?:\s+stack)?\r?\n([\s\S]*?)```/;
 
 /**
- * Finds the ```json stack fenced block under the Architect plan's `## Stack`
- * heading and validates it into a `StackRecord`. Anything short of a clean
- * parse -- no heading, no fence, invalid JSON, or a shape arktype rejects --
- * is `null`, never a best-effort guess.
+ * Finds the fenced JSON block (```json stack, or plain ```json) under the
+ * Architect plan's `## Stack` heading and validates it into a `StackRecord`.
+ * Anything short of a clean parse -- no heading, no fence, invalid JSON, or
+ * a shape arktype rejects -- is `null`, never a best-effort guess.
  */
 export function parseStackRecord(markdown: string): StackRecord | null {
   const headingIndex = markdown.search(STACK_HEADING_RE);

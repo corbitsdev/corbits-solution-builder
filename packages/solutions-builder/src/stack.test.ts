@@ -59,6 +59,14 @@ describe("parseStackRecord", () => {
     const markdown = planWithStack({ mode: "not-a-real-mode", runtime: CHOICE, ui: null, storage: null, auth: null, packaging: { ...CHOICE, kind: "cli" }, packages: [], deferred: [] });
     expect(parseStackRecord(markdown)).toBeNull();
   });
+
+  test("parses a fence opened with plain ```json (no ` stack` tag)", () => {
+    const stack = record();
+    const markdown = ["## Stack", "", "```json", JSON.stringify(stack, null, 2), "```"].join("\n");
+    const parsed = parseStackRecord(markdown);
+    expect(parsed).not.toBeNull();
+    expect(parsed?.mode).toBe("plain");
+  });
 });
 
 describe("describeOperation", () => {

@@ -14,7 +14,7 @@
 import type { ArtifactNode } from "./client.ts";
 import type { ProjectWorkflowView } from "./project-workflow.ts";
 import type { Stage7Evidence } from "@solutions-builder/app/project-workflow/contracts";
-import { parseStackRecord, type StackRecord } from "@solutions-builder/app/stack";
+import { checkStackCitations, parseStackRecord, type StackRecord } from "@solutions-builder/app/stack";
 
 const STAGE_REFUSAL_MESSAGES: Readonly<Record<string, string>> = {
   evidence_missing: "The recorded decisions don't match what this approval expects.",
@@ -74,6 +74,33 @@ async function stage7Evidence(deps: StageEvidenceDeps): Promise<Stage7Evidence |
 export async function stageEvidence(stage: number, deps: StageEvidenceDeps): Promise<Stage7Evidence | undefined> {
   if (stage === 7) return stage7Evidence(deps);
   return undefined;
+}
+
+/**
+ * Stage 6's own gate on the plan being approved: the same checks stage 7's
+ * `stack_missing`/`stack_uncited`/`stack_unknown_requirement` refusals apply
+ * (`project-workflow/contracts.ts`'s `stage7Rule`), run here so a plan whose
+ * `## Stack` block doesn't parse or cite real requirement ids never gets
+ * past stage 6 in the first place -- stage 6 is read-only once approved, so
+ * catching it here is the only chance. `null` means the plan's stack is
+ * fine to approve; anything else is a message for the person to act on,
+ * never sent to the workflow.
+ */
+export function stage6StackProblem(planText: string, requirementIds: ReadonlySet<string>): string | null {
+  const stack = parseStackRecord(planText);
+  if (!stack) {
+    return "The plan's ## Stack section doesn't hold a valid stack decision (a fenced JSON block matching the required shape). Ask the architect to resend it in that shape before approving.";
+  }
+  const problems = checkStackCitations(stack, requirementIds);
+  if (problems.length === 0) return null;
+  const detail = problems
+    .map((p) =>
+      p.problem === "uncited"
+        ? `${p.entry} cites no requirement`
+        : `${p.entry} cites unknown requirement id(s) ${(p.ids ?? []).join(", ")}`,
+    )
+    .join("; ");
+  return `The plan's stack decision has uncited or unknown requirement ids (${detail}). Ask the architect to fix the citations before approving.`;
 }
 
 /** A short "Frozen for this build" line for stage 8's opening mail, so the
