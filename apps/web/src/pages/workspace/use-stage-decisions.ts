@@ -21,7 +21,7 @@ import {
 import { extractRequirementItems } from "@solutions-builder/app/requirements";
 import { buildEvidenceState, currentPublishedBundle } from "./build.jsx";
 import { approvedStage8Archive, composeStage9Opening, manifestCompanionOf } from "./stage9-opening.ts";
-import { frozenSummaryLine, stageEvidence, stageRefusalMessage } from "../../stage-evidence.ts";
+import { frozenSummaryLine, stage6StackProblem, stageEvidence, stageRefusalMessage } from "../../stage-evidence.ts";
 import type { Stage7Evidence } from "@solutions-builder/app/project-workflow/contracts";
 import { targetOpeningLine } from "./freeze.jsx";
 import type { ProjectWorkflowView } from "../../project-workflow.ts";
@@ -273,6 +273,18 @@ export function useStageDecisions({
   const approve = async () => {
     if (!reviewMessage || stage >= LAST_STAGE) return;
     if (stage === 7 && !chosenTarget) return;
+    // Stage 6 is read-only once approved and stage 7's own gate is the last
+    // chance to catch a bad stack decision -- checking it here, before the
+    // plan is ever approved, means a project can never end up stuck the way
+    // stage 7's `stack_missing`/`stack_uncited` refusal otherwise leaves it.
+    if (stage === 6) {
+      const requirementIds = new Set((workflowView?.requirements ?? []).map((r) => r.id));
+      const problem = stage6StackProblem(reviewMessage.body, requirementIds);
+      if (problem) {
+        onError(problem);
+        return;
+      }
+    }
     setApproving(true);
     onError(null);
     onRemediation(undefined);
