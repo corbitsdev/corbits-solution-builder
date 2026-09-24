@@ -99,6 +99,12 @@ describe("project chrome paint", () => {
     expect(ready).not.toContain("var(--wb-okay)");
   });
 
+  test("the splitter gets its own grid track — StagePanes renders it as a third child", () => {
+    expect(css).toContain(
+      ".panes:has(> .panes-splitter) {\n  grid-template-columns: var(--panes-chat-w, minmax(420px, min(40%, 640px))) auto minmax(0, 1fr);",
+    );
+  });
+
   test("narrow stacks at 900px with conversation first — no order swap", () => {
     expect(css).toContain("@media (max-width: 900px)");
     expect(css).not.toContain("@media (max-width: 1080px)");
@@ -106,6 +112,7 @@ describe("project chrome paint", () => {
     const end = css.indexOf("}", css.indexOf(".conv {", start)) + 1;
     const narrow = css.slice(start, end);
     expect(narrow).toContain("grid-template-rows: 1fr 1fr");
+    expect(narrow).toContain(".panes:has(> .panes-splitter)");
     expect(narrow).not.toMatch(/(^|\n)\s*order:/);
   });
 
