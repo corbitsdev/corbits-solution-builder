@@ -16,7 +16,7 @@
     }
   },
   "dependencies": {
-    "@intx/agent": "0.4.0",
+    "@intx/agent": "workspace:*",
     "@solutions-builder/app": "workspace:*",
     "pptxgenjs": "4",
     "jszip": "3"
