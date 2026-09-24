@@ -21,6 +21,7 @@ import {
   reviseArtifact as installerReviseArtifact,
   install as installerInstall,
   installState as installerInstallState,
+  upgradeWorkspace as installerUpgradeWorkspace,
   installProjectAuthority,
   InstallerError,
   liveDelegationStore,
@@ -814,6 +815,15 @@ export const api = {
     try {
       const state = await installerInstall(createHubTransport(), { afterSkillAssets: rerankCatalogAfterSkillAssets });
       return state;
+    } catch (cause) {
+      installerFailure(cause);
+    }
+  },
+  upgradeWorkspace: async (): Promise<void> => {
+    const status = await request<HostStatus>("/status");
+    if (status.hub.mode !== "embedded") return;
+    try {
+      await installerUpgradeWorkspace(createHubTransport());
     } catch (cause) {
       installerFailure(cause);
     }
