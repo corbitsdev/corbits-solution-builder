@@ -494,9 +494,10 @@ const APPROVE_REASON_TEXT: Readonly<Record<ApproveReason, string>> = {
   target_missing: "Choose a target before approving.",
   frozen_already: "This build is already frozen.",
   requirements_already_minted: "The requirement ids are already set for this project.",
-  stack_missing: "The plan's stack decision is missing.",
-  stack_uncited: "Every part of the stack must cite the requirement that forces it.",
-  stack_unknown_requirement: "The stack cites a requirement id that does not exist.",
+  stack_missing:
+    "The approved build plan (stage 6) has no Stack section, so there is nothing to freeze. Send the project back to stage 6 and ask the architect to re-issue the plan with one.",
+  stack_uncited: "Every part of the build plan's Stack section must cite the requirement that forces it.",
+  stack_unknown_requirement: "The build plan's Stack section cites a requirement id that does not exist.",
 };
 
 /** `approveReason`'s code, in plain language -- the one place stage 5's
