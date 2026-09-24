@@ -433,10 +433,17 @@ const HOSTED_INSTALL: InstallState = {
 const TITLE_MAX = 60;
 const SLUG_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz";
 
-/** The fallback name: first line of the problem, trimmed to a title. */
+/**
+ * The fallback name until the namer agent step names the project for real
+ * (`@solutions-builder/app/project-state`'s `projectTitle`, folded from the
+ * "name" step's output): the opening statement's first clause, trimmed to
+ * about five words, never the whole paragraph.
+ */
 export function titleFromProblem(problem: string): string {
   const line = problem.trim().split("\n")[0]!.trim();
-  return line.length > TITLE_MAX ? `${line.slice(0, TITLE_MAX - 1).trimEnd()}…` : line;
+  const clause = (line.split(/[.!?]/)[0] ?? line).trim() || line;
+  const short = clause.split(/\s+/).filter(Boolean).slice(0, 5).join(" ");
+  return short.length > TITLE_MAX ? `${short.slice(0, TITLE_MAX - 1).trimEnd()}…` : short;
 }
 
 function projectSlug(): string {
