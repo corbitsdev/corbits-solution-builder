@@ -178,7 +178,10 @@ export function foldArtifactGraph(artifacts: ArtifactListEntry[], projectId: str
   });
 
   const edges: ArtifactGraphEdge[] = scoped.flatMap(({ entry, sb }) =>
-    sb.sourceVersionIds.map((sourceVersionId) => ({
+    // A record written before `sourceVersionIds` was required on every `sb`
+    // writer (e.g. the withdrawn-turns marker, CL-8920) has none; treat it
+    // as a graph root rather than throwing.
+    (sb.sourceVersionIds ?? []).map((sourceVersionId) => ({
       childNodeId: entry.id,
       sourceNodeId: artifactIdFromVersionId(sourceVersionId),
     })),

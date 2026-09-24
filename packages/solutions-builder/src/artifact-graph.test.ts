@@ -79,4 +79,17 @@ describe("foldArtifactGraph", () => {
     const graph = foldArtifactGraph([brief, bare], "proj_1");
     expect(graph.nodes.map((n) => n.id)).toEqual(["art_brief"]);
   });
+
+  test("folds a withdrawn-turns record with no sourceVersionIds (CL-8920)", () => {
+    const withdrawnTurns = entry("art_withdrawn", 1, "Withdrawn turns", {
+      projectId: "proj_1",
+      kind: "withdrawn_turns",
+      stage: 0,
+      mediaType: "application/json",
+      provenance: { producer: "human" },
+    });
+    const graph = foldArtifactGraph([brief, withdrawnTurns], "proj_1");
+    expect(graph.nodes.map((n) => n.id).sort()).toEqual(["art_brief", "art_withdrawn"]);
+    expect(graph.edges).toEqual([]);
+  });
 });

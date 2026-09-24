@@ -1592,6 +1592,7 @@ export const api = {
             kind: WITHDRAWN_TURNS_KIND,
             stage: 0,
             mediaType: "application/json",
+            sourceVersionIds: [],
             provenance: { producer: "human" as const },
           },
         },
