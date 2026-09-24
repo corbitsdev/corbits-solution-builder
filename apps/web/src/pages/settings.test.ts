@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { hostCredentialsCopy, hostDataCopy, hostStatusCopy, roleLabel, deckThemeLabel, DECK_THEME_CHOICES } from "./settings.tsx";
+import { hostConnectionCopy, hostCredentialsCopy, hostDataCopy, roleLabel, deckThemeLabel, DECK_THEME_CHOICES } from "./settings.tsx";
 import type { HostStatus } from "../client.ts";
 
 function fixtureStatus(overrides: Partial<HostStatus> = {}): HostStatus {
@@ -35,13 +35,19 @@ describe("settings page copy", () => {
     expect(deckThemeLabel("plum")).toBe("Bold");
   });
 
-  test("host status matches the mockup running · embedded hub line", () => {
-    expect(hostStatusCopy(fixtureStatus())).toBe("Running · embedded hub");
+  test("host connection names local vs. remote Interchange from hub mode", () => {
+    expect(hostConnectionCopy(fixtureStatus())).toBe("Local Interchange Connection");
+    expect(hostConnectionCopy(fixtureStatus({ hub: { mode: "remote", url: "https://hub.example", ready: true, detail: "" } }))).toBe(
+      "Remote Interchange Connection",
+    );
   });
 
-  test("host credentials name the keychain when that is the backend", () => {
+  test("host credentials name the keychain when that is the backend, and Interchange storage for a remote hub", () => {
     expect(hostCredentialsCopy(fixtureStatus())).toBe("macOS Keychain");
     expect(hostCredentialsCopy(fixtureStatus({ credentialBackend: "file" }))).toBe("private file on disk");
+    expect(
+      hostCredentialsCopy(fixtureStatus({ credentialBackend: "file", hub: { mode: "remote", url: "https://hub.example", ready: true, detail: "" } })),
+    ).toBe("Interchange Credential Storage");
   });
 
   test("the Data row is the host-reported workspace directory, not a guessed Library folder", () => {

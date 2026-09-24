@@ -5,7 +5,7 @@
  *   2. Inference — live providers: Connect, or Connected plus Refresh models.
  *   3. Designer — surface, design language, output limit.
  *   4. Stakeholder decks — one row per live role; Edit is Theme only.
- *   5. This computer — Status, Credentials, Data, Version.
+ *   5. This computer — Connection, Credentials, Data, Version.
  *
  * Host and API keep the rest (catalog order, on-limit, templates, start-at-login,
  * diagnostics) as silent defaults. The secret rule still holds: a key field is
@@ -401,13 +401,20 @@ function StakeholderDecks() {
 
 /* ------------------------------------------------------------ this computer */
 
-export function hostStatusCopy(status: HostStatus): string {
-  const running = status.host.state === "ready" ? "Running" : status.host.state;
-  const hub = status.hub.mode === "embedded" ? "embedded hub" : (status.hub.url ?? "remote hub");
-  return `${running} · ${hub}`;
+/** Local runs the hub in this process on the embedded database; remote points
+    at a separately hosted Interchange (`status.hub.mode`, from hub-client.ts). */
+export function hostConnectionCopy(status: HostStatus): string {
+  return status.hub.mode === "embedded" ? "Local Interchange Connection" : "Remote Interchange Connection";
 }
 
+/**
+ * A remote hub mints its own account and holds provider credentials in its
+ * own storage, never this host's local keychain/file (see
+ * `packages/embedded-host/src/hub-client.ts`). Embedded, it's this host's own
+ * backend: the OS keychain where available, else a private file.
+ */
 export function hostCredentialsCopy(status: HostStatus): string {
+  if (status.hub.mode === "remote") return "Interchange Credential Storage";
   return status.credentialBackend === "keychain" ? "macOS Keychain" : "private file on disk";
 }
 
@@ -420,8 +427,8 @@ function ThisComputer({ status }: { status: HostStatus | null }) {
     <Section title="This computer" lead="The host does the work. This window is only how you watch it.">
       <div className="section-body">
         {status ? (
-          <Row label="Status">
-            <span className="v">{hostStatusCopy(status)}</span>
+          <Row label="Connection">
+            <span className="v">{hostConnectionCopy(status)}</span>
           </Row>
         ) : null}
         {status ? (
