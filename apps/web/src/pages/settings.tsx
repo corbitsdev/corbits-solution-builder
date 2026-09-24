@@ -210,20 +210,14 @@ function Inference({
 
 /* ----------------------------------------------------------------- designer */
 
-const TOKENS_MIN = 1000;
-const TOKENS_MAX = 64000;
-/** What the host uses when nothing is saved; kept in step with the host's own default. */
-const TOKENS_DEFAULT = 32000;
-
 /**
- * What the stage-4 designer draws to and how much it may write. Each control
- * saves on its own as it changes; the design language saves when the field is
- * left, since it is typed. on-limit stays a host default — not a row here.
+ * What the stage-4 designer draws to. Each control saves on its own as it
+ * changes; the design language saves when the field is left, since it is
+ * typed. The output limit stays a host default — not a row here.
  */
 function Designer() {
   const [settings, setSettings] = useState<DesignerSettings | null>(null);
   const [language, setLanguage] = useState("");
-  const [tokens, setTokens] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -234,7 +228,6 @@ function Designer() {
         if (cancelled) return;
         setSettings(loaded);
         setLanguage(loaded.language);
-        setTokens(String(loaded.maxTokens));
       })
       .catch((cause) => {
         if (!cancelled) setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
@@ -255,16 +248,6 @@ function Designer() {
       setSettings(before);
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     }
-  };
-
-  const saveTokens = () => {
-    const value = Number(tokens);
-    if (!Number.isInteger(value) || value < TOKENS_MIN || value > TOKENS_MAX) {
-      setTokens(String(settings?.maxTokens ?? TOKENS_DEFAULT));
-      setError(`The output limit is a whole number between ${TOKENS_MIN} and ${TOKENS_MAX} tokens.`);
-      return;
-    }
-    if (value !== settings?.maxTokens) void save("maxTokens", value);
   };
 
   return (
@@ -298,27 +281,6 @@ function Designer() {
               }}
             />
           </Dictated>
-        </Row>
-        <Row
-          label="Output limit"
-          hint="Tokens per design — most need 20,000–40,000; a design that uses them all is cut short"
-        >
-          <input
-            className="field narrow"
-            aria-label="Output limit in tokens"
-            type="number"
-            inputMode="numeric"
-            min={TOKENS_MIN}
-            max={TOKENS_MAX}
-            step={500}
-            value={tokens}
-            disabled={!settings}
-            onChange={(event) => setTokens(event.target.value)}
-            onBlur={saveTokens}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") (event.target as HTMLInputElement).blur();
-            }}
-          />
         </Row>
       </div>
     </Section>
