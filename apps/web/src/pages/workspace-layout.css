@@ -19,7 +19,8 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  /* Room for the pointer under the current segment, above the stage name. */
+  gap: 7px;
 }
 
 .topbar-project .topbar-actions {
@@ -65,6 +66,26 @@
 
 .topbar-project .stepper li:not([aria-current="step"]) > span {
   opacity: 0.5;
+}
+
+/* Where you are: a small pointer under the current segment, aimed at it,
+   so the position reads at a glance and the stage name beneath the track
+   visibly belongs to that segment rather than to the whole row. */
+.topbar-project .stepper li[aria-current="step"] {
+  position: relative;
+}
+
+.topbar-project .stepper li[aria-current="step"]::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 2px);
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-bottom: 4px solid var(--wb-primary);
 }
 
 /* ---- two panes: proportional conversation + draft ---- */

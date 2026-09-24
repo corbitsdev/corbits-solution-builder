@@ -93,6 +93,11 @@ describe("project chrome paint", () => {
     expect(css).not.toContain("button:hover {\n  background: var(--wb-primary)");
   });
 
+  test("a pointer under the current segment marks where you are", () => {
+    expect(css).toMatch(/\.topbar-project \.stepper li\[aria-current="step"\]::after \{[^}]*border-bottom: 4px solid var\(--wb-primary\);/);
+    expect(css).toMatch(/\.topbar-project \.stepper li\[aria-current="step"\] \{[^}]*position: relative;/);
+  });
+
   test("artifact strip: ghost tabs, selected is pane paper, live is a primary dot", () => {
     expect(css).toContain('.artifact-strip-tabs [role="tab"] {');
     expect(css).toContain("background: transparent;");
