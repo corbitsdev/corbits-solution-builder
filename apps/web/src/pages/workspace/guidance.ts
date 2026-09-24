@@ -1,5 +1,5 @@
 import type { ChatMessage } from "../../stage-mail.ts";
-import { choicesIn } from "./choices.ts";
+import { segmentsIn } from "./choices.ts";
 
 export type InterviewQuestion = {
   readonly text: string;
@@ -99,17 +99,13 @@ export function conversationLead(body: string): string {
   return "First draft is in the document.";
 }
 
+/** The question now open: the first the turn asks -- the kit orders them
+ *  most important first -- with its options. A turn asking several is still
+ *  one open question here; the thread offers every one of them. */
 function questionIn(body: string): InterviewQuestion | null {
-  const choices = choicesIn(body);
-  if (choices) return { text: choices.question, choices: choices.options };
-
-  const paragraphs = body
-    .split(/\n\s*\n/)
-    .map((paragraph) => paragraph.trim())
-    .filter(Boolean);
-  const last = paragraphs.at(-1);
-  if (!last || !last.endsWith("?")) return null;
-  return { text: last, choices: [] };
+  const first = segmentsIn(body).find((segment) => segment.kind === "question");
+  if (!first || first.kind !== "question") return null;
+  return { text: first.question, choices: [...first.options] };
 }
 
 function latestAgent(messages: readonly ChatMessage[]): ChatMessage | null {
