@@ -1661,10 +1661,12 @@ false,
    * CL-8899 "Switch model": deploys a new specialist for `projectId`'s
    * current stage whose inference chain leads with `offeringId`, and hands
    * back its address. The old deployment stays live (the hub cannot stop a
-   * run, INTR-454) but `pickDeployment`'s newest-wins tie-break means every
-   * subsequent read of this asset -- including `ensureStageAgent`'s own
-   * memo, primed here so an immediate re-render sees the switch without
-   * waiting on `useStageAgent`'s poll -- resolves to the new one.
+   * run, INTR-454); `switchSpecialistDeployment` records the new one as the
+   * durable switch target (`resolveLiveDeployment`, `project-tenant.ts`) so
+   * every subsequent read of this asset -- including `ensureStageAgent`'s
+   * own memo, primed here so an immediate re-render sees the switch without
+   * waiting on `useStageAgent`'s poll -- resolves to it, while
+   * `pickDeployment` itself stays oldest-wins for every other caller.
    */
   switchStageAgent: (projectId: string, stage: number, offeringId: string): Promise<SpecialistDeployment> => {
     const key = `${projectId}:${stage}`;
