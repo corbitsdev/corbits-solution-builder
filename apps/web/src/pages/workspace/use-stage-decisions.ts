@@ -21,7 +21,13 @@ import {
 import { extractRequirementItems } from "@solutions-builder/app/requirements";
 import { buildEvidenceState, currentPublishedBundle } from "./build.jsx";
 import { approvedStage8Archive, composeStage9Opening, manifestCompanionOf } from "./stage9-opening.ts";
-import { frozenSummaryLine, stage6StackProblem, stageEvidence, stageRefusalMessage } from "../../stage-evidence.ts";
+import {
+  frozenSummaryLine,
+  stage6StackProblem,
+  stage7StackProblem,
+  stageEvidence,
+  stageRefusalMessage,
+} from "../../stage-evidence.ts";
 import type { Stage7Evidence } from "@solutions-builder/app/project-workflow/contracts";
 import { targetOpeningLine } from "./freeze.jsx";
 import type { ProjectWorkflowView } from "../../project-workflow.ts";
@@ -289,6 +295,25 @@ export function useStageDecisions({
     onError(null);
     onRemediation(undefined);
     try {
+      // Stage 7 freezes the approved plan's Stack section. A plan that has
+      // none (approved before stage 6 gated on it) or cites badly would be
+      // refused by the workflow with nothing to do about it; checked here
+      // first, the person reads why and is offered the send-back to stage 6.
+      if (stage === 7) {
+        const problem = await stage7StackProblem({
+          projectId: detail.project.id,
+          tenantId,
+          nodes: detail.nodes,
+          chosenTarget,
+          workflowView,
+          artifactContent: (tid, nodeId) => api.artifactContent(tid, nodeId),
+        });
+        if (problem) {
+          onError(problem.message);
+          onRemediation(problem.remediation);
+          return;
+        }
+      }
       // The normal path reads the ref straight off the already-open review —
       // resolving it again would persist a second, redundant draft version
       // every approval. `resolveReviewRef` is the fallback for the rare case

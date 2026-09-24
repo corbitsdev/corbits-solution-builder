@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { applyDecision, initProjectState, type ApplyDecisionInput, type ProjectState } from "./contracts.js";
+import { applyDecision, approveReasonText, initProjectState, type ApplyDecisionInput, type ProjectState } from "./contracts.js";
 import type { StackRecord } from "../stack.js";
 
 const OWNER = "owner-principal";
@@ -346,6 +346,15 @@ describe("stage7Rule stack citations", () => {
     packages: [],
     deferred: [],
   };
+
+  test("the stack refusals read in the person's terms: the build plan's Stack section, not a 'stack decision'", () => {
+    for (const code of ["stack_missing", "stack_uncited", "stack_unknown_requirement"] as const) {
+      const text = approveReasonText(code, null);
+      expect(text).toContain("build plan");
+      expect(text).not.toContain("stack decision");
+    }
+    expect(approveReasonText("stack_missing", null)).toContain("stage 6");
+  });
 
   test("approve is refused stack_missing when evidence carries no stack", () => {
     const state = stateAtStage7([{ kind: "FR", text: "Does a thing." }]);

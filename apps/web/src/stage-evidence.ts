@@ -11,10 +11,23 @@
  * `policy`), and each stakeholder's vote is its own `audience` decision.
  * Nothing here builds evidence for it any more.
  */
-import type { ArtifactNode } from "./client.ts";
+import type { ArtifactNode, Remediation } from "./client.ts";
 import type { ProjectWorkflowView } from "./project-workflow.ts";
 import type { Stage7Evidence } from "@solutions-builder/app/project-workflow/contracts";
-import { checkStackCitations, parseStackRecord, type StackRecord } from "@solutions-builder/app/stack";
+import {
+  checkStackCitations,
+  parseStackRecord,
+  type StackCitationProblem,
+  type StackRecord,
+} from "@solutions-builder/app/stack";
+
+/** The "stack" is the architect's technical decision -- runtime, storage,
+ *  packaging and so on -- recorded as a fenced JSON block under `## Stack`
+ *  in the stage 6 build plan. It is not the target the person picks on
+ *  stage 7, and the copy never calls it a "stack decision": a person has
+ *  only ever seen the build plan and its Stack section. */
+const STACK_MISSING_MESSAGE =
+  "The approved build plan (stage 6) has no Stack section, so there is nothing to freeze. Send the project back to stage 6 and ask the architect to re-issue the plan with one.";
 
 const STAGE_REFUSAL_MESSAGES: Readonly<Record<string, string>> = {
   evidence_missing: "The recorded decisions don't match what this approval expects.",
@@ -22,9 +35,9 @@ const STAGE_REFUSAL_MESSAGES: Readonly<Record<string, string>> = {
   target_missing: "Choose a target before approving.",
   frozen_already: "This build is already frozen.",
   requirements_already_minted: "The requirement ids are already set for this project.",
-  stack_missing: "The plan's stack decision is missing.",
-  stack_uncited: "Every part of the stack must cite the requirement that forces it.",
-  stack_unknown_requirement: "The stack cites a requirement id that does not exist.",
+  stack_missing: STACK_MISSING_MESSAGE,
+  stack_uncited: "Every part of the build plan's Stack section must cite the requirement that forces it.",
+  stack_unknown_requirement: "The build plan's Stack section cites a requirement id that does not exist.",
 };
 
 /** A stage rule's refusal code, in plain language; anything not in the map
@@ -48,6 +61,22 @@ export type StageEvidenceDeps = {
  *  to exactly the review the workflow itself holds -- never re-derived from
  *  an artifact's content -- plus the stack the Architect's approved plan
  *  recorded, read straight off that plan's own text. */
+/** The approved stage 6 build plan's text, read off exactly the version
+ *  the workflow's own review names. `unapproved` when stage 6 holds no
+ *  approved review; `unread` when that review names a version this
+ *  project's artifact graph does not hold. */
+async function approvedPlanText(
+  deps: Pick<StageEvidenceDeps, "tenantId" | "nodes" | "workflowView" | "artifactContent">,
+): Promise<{ status: "read"; text: string } | { status: "unapproved" } | { status: "unread" }> {
+  const stage6Review = deps.workflowView?.reviews[6];
+  if (!stage6Review || stage6Review.status !== "approved") return { status: "unapproved" };
+  const planNode = deps.nodes.find(
+    (node) => node.artifactId === stage6Review.artifactId && node.version === stage6Review.version,
+  );
+  if (!planNode) return { status: "unread" };
+  return { status: "read", text: (await deps.artifactContent(deps.tenantId, planNode.id)).content };
+}
+
 async function stage7Evidence(deps: StageEvidenceDeps): Promise<Stage7Evidence | undefined> {
   if (!deps.chosenTarget || !deps.workflowView) return undefined;
   const frozen = Object.entries(deps.workflowView.reviews)
@@ -58,13 +87,8 @@ async function stage7Evidence(deps: StageEvidenceDeps): Promise<Stage7Evidence |
       version: review!.version,
       sha256: review!.sha256,
     }));
-  const stage6Review = deps.workflowView.reviews[6];
-  const planNode =
-    stage6Review && stage6Review.status === "approved"
-      ? deps.nodes.find((node) => node.artifactId === stage6Review.artifactId && node.version === stage6Review.version)
-      : undefined;
-  const planText = planNode ? (await deps.artifactContent(deps.tenantId, planNode.id)).content : "";
-  const stack = parseStackRecord(planText) ?? ({} as StackRecord);
+  const plan = await approvedPlanText(deps);
+  const stack = parseStackRecord(plan.status === "read" ? plan.text : "") ?? ({} as StackRecord);
   return { target: deps.chosenTarget, frozen, stack };
 }
 
@@ -89,18 +113,70 @@ export async function stageEvidence(stage: number, deps: StageEvidenceDeps): Pro
 export function stage6StackProblem(planText: string, requirementIds: ReadonlySet<string>): string | null {
   const stack = parseStackRecord(planText);
   if (!stack) {
-    return "The plan's ## Stack section doesn't hold a valid stack decision (a fenced JSON block matching the required shape). Ask the architect to resend it in that shape before approving.";
+    return "The build plan's Stack section is missing or not in the required shape (a fenced JSON block). Ask the architect to resend it before approving.";
   }
   const problems = checkStackCitations(stack, requirementIds);
   if (problems.length === 0) return null;
-  const detail = problems
+  return `The build plan's Stack section has uncited or unknown requirement ids (${citationDetail(problems)}). Ask the architect to fix the citations before approving.`;
+}
+
+function citationDetail(problems: readonly StackCitationProblem[]): string {
+  return problems
     .map((p) =>
       p.problem === "uncited"
         ? `${p.entry} cites no requirement`
         : `${p.entry} cites unknown requirement id(s) ${(p.ids ?? []).join(", ")}`,
     )
     .join("; ");
-  return `The plan's stack decision has uncited or unknown requirement ids (${detail}). Ask the architect to fix the citations before approving.`;
+}
+
+/** What stops a stage 7 approval, and the way out, or null when nothing
+ *  does. The workflow's `stage7Rule` remains the authority; this is the
+ *  same check run first, so the person reads why and gets the action. */
+export type Stage7Problem = { readonly message: string; readonly remediation?: Remediation };
+
+/** A way out of stage 7 for a plan whose Stack section cannot be frozen:
+ *  the send-back picker, seeded with the reason, aimed at stage 6. Stage 6
+ *  is read-only once approved, so re-issuing the plan is the only fix. */
+function sendBackToStage6(reason: string): Remediation {
+  return { kind: "send_back", label: "Send back to stage 6…", targetStage: 6, reason };
+}
+
+/**
+ * Stage 7's own pre-check on the plan it is about to freeze: the checks
+ * `stage7Rule`'s `stack_missing`/`stack_uncited`/`stack_unknown_requirement`
+ * refusals apply, run before the approval is sent so the person reads what
+ * is wrong in the build plan's own terms and is offered the send-back that
+ * resolves it. A plan approved before stage 6 gated on its Stack section
+ * (CL-8861 and after) reaches here with no section at all; without this
+ * the refusal named a "stack decision" the person had never seen and
+ * offered nothing.
+ */
+export async function stage7StackProblem(deps: StageEvidenceDeps): Promise<Stage7Problem | null> {
+  const plan = await approvedPlanText(deps);
+  // No approved stage 6 review: the workflow's own evidence check answers that, not this.
+  if (plan.status === "unapproved") return null;
+  if (plan.status === "unread") {
+    return {
+      message:
+        "The approved build plan could not be read from this project's artifacts, so its Stack section could not be checked. Reload and try again.",
+    };
+  }
+  const stack = parseStackRecord(plan.text);
+  if (!stack) {
+    return {
+      message: STACK_MISSING_MESSAGE,
+      remediation: sendBackToStage6("The approved build plan has no Stack section. Please re-issue it with one."),
+    };
+  }
+  const requirementIds = new Set((deps.workflowView?.requirements ?? []).map((r) => r.id));
+  const problems = checkStackCitations(stack, requirementIds);
+  if (problems.length === 0) return null;
+  const detail = citationDetail(problems);
+  return {
+    message: `The approved build plan's Stack section has uncited or unknown requirement ids (${detail}), so it cannot be frozen. Send the project back to stage 6 and ask the architect to fix the citations.`,
+    remediation: sendBackToStage6(`The build plan's Stack section has citation problems: ${detail}. Please fix them.`),
+  };
 }
 
 /** A short "Frozen for this build" line for stage 8's opening mail, so the

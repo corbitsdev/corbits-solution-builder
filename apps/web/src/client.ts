@@ -139,9 +139,14 @@ export type { DesignerSettings } from "./designer-settings.ts";
 export { createHubTransport } from "./hub.ts";
 
 export type Remediation = {
-  kind: "switch_provider" | "reconnect" | "retry";
+  kind: "switch_provider" | "reconnect" | "retry" | "send_back";
   label: string;
   providerId?: string;
+  /** `send_back` only: the stage the way out returns the project to, and
+   *  the reason to seed the send-back with. Raised client-side by a
+   *  pre-check (`stage-evidence.ts`), never by the host. */
+  targetStage?: number;
+  reason?: string;
 };
 
 export type ApiError = {

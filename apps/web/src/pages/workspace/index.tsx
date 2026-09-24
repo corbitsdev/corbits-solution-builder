@@ -502,6 +502,14 @@ export function StageWorkspace({
                       setRemediation(undefined);
                       return;
                     }
+                    if (remediation.kind === "send_back") {
+                      // The picker, seeded with the reason: the person
+                      // still names the stage, so the send-back is theirs.
+                      setError(null);
+                      setRemediation(undefined);
+                      openSendBack(remediation.reason ?? "");
+                      return;
+                    }
                     onOpenSettings();
                   },
                 },
