@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { ChatInput, type ChatMessage as UiChatMessage } from "@corbits/react-ui";
 import { Plus, Send } from "lucide-react";
 import { Markdown } from "../../markdown.jsx";
@@ -158,7 +158,7 @@ export function StageConversation({
               return (
                 <div key={message.id} className="think">
                   <span className="who conv-who">{who}</span>
-                  <WorkingLabel stage={stage} />
+                  <WorkingLabel />
                 </div>
               );
             }
@@ -212,34 +212,11 @@ export function StageConversation({
 const EMPTY_WITHDRAWN: ReadonlySet<string> = new Set();
 const EMPTY_EVENTS: readonly StageEvent[] = [];
 
-/**
- * What the specialist is doing while it writes, in its own stage's terms. One
- * word for every stage read as a spinner; these say what the wait is for.
- */
-export const STAGE_VERBS: Record<number, string[]> = {
-  1: ["Listening", "Sharpening the problem", "Finding the real pain", "Writing the brief"],
-  2: ["Drawing the boundaries", "Weighing constraints", "Naming the non-goals", "Writing"],
-  3: ["Weighing trade-offs", "Comparing approaches", "Testing each against your criteria", "Writing"],
-  4: ["Sketching", "Walking the flows", "Working out the states", "Writing"],
-  5: ["Writing for each audience", "Making the case", "Writing"],
-  6: ["Sequencing the work", "Sizing the steps", "Checking dependencies", "Writing"],
-  7: ["Counting", "Costing the plan", "Checking the numbers", "Writing"],
-};
-
-/** The shimmering "working" word, rotating through the stage's verbs. */
-export function WorkingLabel({ stage = null }: { stage?: number | null }) {
-  const verbs = (stage !== null && stage !== undefined ? STAGE_VERBS[stage] : undefined) ?? ["Writing"];
-  const [at, setAt] = useState(0);
-  useEffect(() => {
-    if (verbs.length < 2) return;
-    const timer = setInterval(() => setAt((current) => (current + 1) % verbs.length), 3_200);
-    return () => clearInterval(timer);
-  }, [verbs.length]);
-  return (
-    <span className="thinking" key={at}>
-      {verbs[at]}
-    </span>
-  );
+/** One calm, honest line while the specialist writes — no cycling phrases
+ *  presented as live activity (CL-8726). The turn's own "who" label already
+ *  names the specialist, so this just says what's happening. */
+export function WorkingLabel() {
+  return <span className="thinking">Working on it…</span>;
 }
 
 /**

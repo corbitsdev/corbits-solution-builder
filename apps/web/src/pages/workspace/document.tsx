@@ -391,7 +391,7 @@ export function StageDocument({
             return message.id === "pending" ? (
               <span className="think">
                 {who}
-                <WorkingLabel stage={node.stage as Stage} />
+                <WorkingLabel />
               </span>
             ) : message.role === "agent" && failedTurns.has(message.id) ? (
               <div className="turn-failed" role="alert">
