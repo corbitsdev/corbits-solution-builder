@@ -18,7 +18,7 @@ import {
   workflowsFor,
   type HubDeployment,
 } from "./hub.js";
-import type { ClosureManifest } from "./registry-tarballs.js";
+import type { ClosureManifest } from "./closure-manifest.js";
 import { type ClosureTarballFetcher } from "./workflow-closure.js";
 
 /**
@@ -71,8 +71,8 @@ export async function waitForDeploymentDeployed(
 /** The closure bytes a workflow deploy needs, fetched from the static
  *  tarballs `scripts/pack-closure-static.ts` writes under
  *  `apps/web/public/closure/` -- this package has no `node:fs` to read them
- *  itself. Supplied by the caller, the same way `SidecarCapability` and
- *  `RegistryTarballUploader` are: apps/web fetches same-origin static files. */
+ *  itself. Supplied by the caller, the same way `SidecarCapability` is:
+ *  apps/web fetches same-origin static files. */
 export type ClosureSource = { manifest: ClosureManifest; fetchTarball: ClosureTarballFetcher };
 
 /**
@@ -108,9 +108,9 @@ export type SidecarCapability = { canPlaceSidecars: boolean };
  * repo over the hub's stock git smart-HTTP route and returns the new commit
  * sha. The push itself carries raw pkt-lines and a binary packfile, so it
  * cannot ride `Transport` (which always JSON-encodes) -- this is supplied by
- * the caller the same way `RegistryTarballUploader` is, implemented over the
- * browser's own `fetch` (`apps/web/src/client.ts`) or, for a local smoke,
- * the embedded host's direct dispatch.
+ * the caller, implemented over the browser's own `fetch`
+ * (`apps/web/src/client.ts`) or, for a local smoke, the embedded host's
+ * direct dispatch.
  */
 export type WorkflowGitPush = (args: {
   scope: string;

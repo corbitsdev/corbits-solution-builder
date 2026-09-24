@@ -21,7 +21,7 @@
  * (same-origin static files) and hands the bytes in; this module only
  * extracts and reshapes them into asset-tree paths.
  */
-import type { ClosureManifest, ClosureManifestEntry } from "./registry-tarballs.js";
+import type { ClosureManifest, ClosureManifestEntry } from "./closure-manifest.js";
 import { extractTarballFiles } from "./tarball-extract.js";
 
 /** Where a vendored package lands inside the asset: `packages/intx-<name>`. */
