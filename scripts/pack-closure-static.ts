@@ -9,14 +9,13 @@
  * `@solutions-builder/app`, and every real npm dependency that closure
  * imports at runtime. That script pushes the set into a live hub asset for
  * local/dev seeding; this one writes the same bytes to disk under
- * `apps/web/public/closure/`, where the web app can serve them as static
- * files and `packages/installer/src/registry-tarballs.ts`'s
- * `ensureRegistryTarballs` can upload whichever ones a tenant's hub does not
- * already have, at install time.
+ * `apps/web/public/closure/`, where the web app fetches them at deploy time
+ * and `packages/installer/src/workflow-closure.ts` extracts the vendored
+ * members into the git-push source tree.
  *
  * `manifest.json` lists `{ name, version, filename, sha256 }` per tarball:
- * the install-time step reads this to know what to fetch and upload without
- * touching the vendor tree itself (it may run in the browser, which has no
+ * the deploy-time step reads this to know what to fetch without touching
+ * the vendor tree itself (it may run in the browser, which has no
  * `node:fs`).
  *
  * This script only writes files. It does not touch a hub, a database, or

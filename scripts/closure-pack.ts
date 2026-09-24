@@ -321,8 +321,8 @@ export async function buildPackedEntries(): Promise<PackedEntry[]> {
 }
 
 // --- the static manifest: name/version/sha256 per tarball, so the
-// install-time step (`packages/installer/src/registry-tarballs.ts`) knows
-// what to upload without re-reading the vendor tree itself. ---
+// deploy-time step (`packages/installer/src/workflow-closure.ts`) knows
+// what to fetch without re-reading the vendor tree itself. ---
 
 export type ClosureManifestEntry = {
   readonly name: string;

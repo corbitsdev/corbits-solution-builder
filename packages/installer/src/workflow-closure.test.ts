@@ -9,7 +9,7 @@ import {
   vendoredMemberFiles,
   type ClosureTarballFetcher,
 } from "./workflow-closure.js";
-import type { ClosureManifest } from "./registry-tarballs.js";
+import type { ClosureManifest } from "./closure-manifest.js";
 
 /**
  * A synthetic closure manifest built from real `packTarballFiles` output
