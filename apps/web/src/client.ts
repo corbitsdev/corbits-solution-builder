@@ -1432,11 +1432,18 @@ export const api = {
       // re-approval, or `promote()` restoring an older version forward) --
       // each write must supersede the lineage's current head, or the graph
       // fold (`foldArtifactGraph`) never links them and every write shows up
-      // as its own unrelated version 1 (the "v1 v1 v1" defect).
-      const graph = await artifactGraphFor(transport, workspaceTenantId, projectId);
-      const previousHead = graph.nodes
-        .filter((node) => node.stage === stage && node.kind === kind && node.variant === null && node.supersededByNodeId === null)
-        .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
+      // as its own unrelated version 1 (the "v1 v1 v1" defect). The lookup
+      // is best-effort: a tenant-wide list that fails here must never block
+      // the draft itself from being saved -- falling back to no `supersedes`
+      // is exactly today's (already shipped) behavior, not a regression.
+      const previousHead = await artifactGraphFor(transport, workspaceTenantId, projectId)
+        .then(
+          (graph) =>
+            graph.nodes
+              .filter((node) => node.stage === stage && node.kind === kind && node.variant === null && node.supersededByNodeId === null)
+              .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0],
+        )
+        .catch(() => undefined);
       const artifact = await installerCreateArtifact(transport, workspaceTenantId, {
         title: `Stage ${stage} draft`,
         content,
