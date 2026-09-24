@@ -161,12 +161,15 @@ describe("project chrome paint", () => {
     expect(read("./thread.tsx")).toContain("conversationLead");
   });
 
-  test("opening the project uses the two-pane chrome, not a progress essay", () => {
+  test("opening the project uses the two-pane chrome, not a progress essay, and never a timer", () => {
     const chrome = read("./workspace-chrome.tsx");
     expect(chrome).toContain("export function OpeningScreen");
     expect(chrome).not.toContain("Opening the project");
     expect(chrome).not.toContain("Getting the conversation ready");
-    expect(chrome).toContain("Opening…");
+    expect(chrome).not.toContain("useElapsedMs");
+    expect(chrome).not.toContain("elapsed-clock");
+    expect(chrome).toContain("Reconnecting to the");
+    expect(chrome).toContain("Starting the project…");
     expect(chrome).toContain("<StagePanes");
     const index = read("./index.tsx");
     expect(index).not.toContain("Starting the");
