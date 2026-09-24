@@ -25,8 +25,10 @@ export function TargetPicker({
   onChange: (target: string) => void;
 }) {
   return (
-    <div className="grid gap-2">
-      <p className="text-sm font-medium">How will this be used?</p>
+    <div className="stage-lead target-picker" role="group" aria-labelledby="build-target-question">
+      <p id="build-target-question" className="text-sm font-medium">
+        How will this be used?
+      </p>
       <p className="inline-note">
         Choose how the finished build will be used. Only a command-line check is actually run
         today — the others are honest about not being verified yet.

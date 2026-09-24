@@ -45,6 +45,20 @@ describe("project chrome classes", () => {
   });
 });
 
+describe("stage 7 lead cards", () => {
+  const global = read("../../styles.css");
+
+  test("the target question and estimate summary are cards on the conversation's gutter, not bare text", () => {
+    expect(read("./freeze.tsx")).toContain('className="stage-lead target-picker"');
+    expect(read("./estimate.tsx")).toContain('className="stage-lead estimate-view"');
+    expect(global).toMatch(
+      /\.stage-view > \.stage-lead \{[^}]*margin: var\(--space-4\) var\(--space-5\) 0;[^}]*border: 1px solid var\(--wb-border\);[^}]*border-radius: var\(--radius-lg\);[^}]*background: var\(--wb-card\);/,
+    );
+    // The gutter is the one `.conv-scroll` gives the turns beneath the card.
+    expect(read("../workspace-layout.css")).toMatch(/\.conv-scroll \{[^}]*padding: var\(--space-5\);/);
+  });
+});
+
 describe("project chrome paint", () => {
   const css = read("../workspace-layout.css");
   const global = read("../../styles.css");

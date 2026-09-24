@@ -119,7 +119,7 @@ export function EstimateView({
   if (costRows.length === 0 && scopeItems.length === 0 && !targetLabel && !frozen && !stack) return null;
 
   return (
-    <div className="estimate-view">
+    <div className="stage-lead estimate-view">
       {stack ? <HowItRuns planText={body} /> : null}
       {targetLabel || frozen ? (
         <div className="button-row">

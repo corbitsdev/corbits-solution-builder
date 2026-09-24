@@ -2904,6 +2904,29 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   flex: none;
 }
 
+/* Stage 7's lead cards -- the estimate summary and the target question --
+   sit above the panes as paper on the ground, not as bare text. They keep
+   the gutter the conversation gives its turns (`.conv-scroll`), so a card's
+   left edge lines up with the box beneath it and its right edge sits the
+   same distance from the window. */
+.stage-view > .stage-lead {
+  flex: none;
+  margin: var(--space-4) var(--space-5) 0;
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--radius-lg);
+  background: var(--wb-card);
+}
+
+.stage-view > .stage-lead + .stage-lead {
+  margin-top: var(--space-2);
+}
+
+.target-picker {
+  display: grid;
+  gap: var(--space-2);
+}
+
 /* KEEP: stage-view cards + stage-conversation bounds (conv) */
 /* The plain conversation stages (no fill panel of their own): the
    specialist's current reply and the thread below it are two stacked
