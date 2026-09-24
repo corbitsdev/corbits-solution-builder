@@ -24,8 +24,14 @@ export type EventCollectorPort = {
  * typecheck surface has no relational query builder for `workflow_run`,
  * `workflow_run_launch_spec`, or `agent_session` — every other lookup in
  * this package goes through `db.execute(sql\`...\`)` for the same reason).
+ *
+ * Exported so index.ts can also call this right after
+ * `workflowAllocationService.prepareProvisionedDeployment` commits, the same
+ * provision-time point workbench records the session at. Without that call
+ * the event collector below is created only on the run's first OUTBOUND
+ * mail, dropping every event a specialist's first turn emits before then.
  */
-async function ensureRunSession(params: {
+export async function ensureRunSession(params: {
   readonly db: DB["db"];
   readonly eventCollectors: EventCollectorPort;
   readonly runId: string;
