@@ -620,6 +620,57 @@
   background: var(--wb-primary);
 }
 
+/* The strip's own edge controls: shown only on an edge that still hides
+   tabs, over the list's fade, so "there is more" is a control and not a
+   hint. The scroller takes the room the tab list used to. */
+.artifact-strip-scroller {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+}
+
+.artifact-strip-scroller .artifact-strip-tabs {
+  flex: 1;
+  min-width: 0;
+}
+
+.artifact-strip-scroll {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--wb-border);
+  border-radius: 50%;
+  background: var(--card);
+  color: var(--wb-muted-foreground);
+  box-shadow: var(--wb-shadow);
+  cursor: pointer;
+}
+
+.artifact-strip-scroll:hover {
+  color: var(--wb-foreground);
+}
+
+.artifact-strip-scroll[hidden] {
+  display: none;
+}
+
+.artifact-strip-scroll.is-left {
+  left: 0;
+}
+
+.artifact-strip-scroll.is-right {
+  right: 0;
+}
+
 .artifact-strip .version-strip {
   display: flex;
   align-items: center;
