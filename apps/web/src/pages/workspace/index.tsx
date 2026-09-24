@@ -51,6 +51,7 @@ import { useStageDecisions } from "./use-stage-decisions.ts";
 import { ArtifactStrip, VersionStrip } from "./artifact-strip.tsx";
 import { stageEvents, switchEvents } from "./stage-events.ts";
 import { useModelSwitch, useModelHandoff } from "./use-model-handoff.ts";
+import { loadDismissedDefault, saveDismissedDefault } from "./model-nudge-store.ts";
 import { Stage6Panel } from "./stage6.tsx";
 import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
 import { agentFor } from "@solutions-builder/app/kit";
@@ -280,17 +281,58 @@ export function StageWorkspace({
     };
   }, [detail.project.id, stage, agentAddress]);
 
+  // Fetched once the specialist exists — both the manual "Switch model"
+  // select and the default-model nudge below need it to turn a model into
+  // an offering id.
   const [modelOptions, setModelOptions] = useState<ResolvedCatalogRow[] | null>(null);
-  const [modelPickerOpen, setModelPickerOpen] = useState(false);
   useEffect(() => {
-    if (!modelPickerOpen || modelOptions) return;
+    if (!agentAddress || modelOptions) return;
     void api.resolvedCatalog().then(setModelOptions);
-  }, [modelPickerOpen, modelOptions]);
+  }, [agentAddress, modelOptions]);
   const switchableModels = (modelOptions ?? []).filter(
     (row) => row.chatCapable && !row.restricted && row.credentialConnected && row.offeringIds.length > 0,
   );
 
   const modelSwitch = useModelSwitch({ projectId: detail.project.id, stage });
+
+  // The owner's ask: opening a project whose current stage is running a
+  // model other than the workspace's current default should offer, not
+  // force, catching it up -- never a redeploy the person did not choose.
+  // `workspaceDefaultModel` is unscoped (`api.activeModel()`, no
+  // projectId/stage), the same "lowest-priority offering" read Settings'
+  // own default row uses, so this nudge and the deploy path always agree on
+  // what "the default" means. Dismissing records the default's OWN name
+  // (`model-nudge-store.ts`), so a later default change asks again rather
+  // than staying quiet forever.
+  const [workspaceDefaultModel, setWorkspaceDefaultModel] = useState<{ providerLabel: string; canonicalName: string } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void api.activeModel().then((model) => {
+      if (!cancelled) setWorkspaceDefaultModel(model);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [detail.project.id]);
+  const [nudgeDismissedFor, setNudgeDismissedFor] = useState<string | null>(null);
+  useEffect(() => {
+    setNudgeDismissedFor(loadDismissedDefault(detail.project.id, stage));
+  }, [detail.project.id, stage]);
+  const defaultOffering = workspaceDefaultModel
+    ? switchableModels.find((row) => row.canonicalName === workspaceDefaultModel.canonicalName)
+    : undefined;
+  const modelNudgeVisible =
+    !!agentAddress &&
+    !!activeModel &&
+    !!workspaceDefaultModel &&
+    !!defaultOffering &&
+    activeModel.canonicalName !== workspaceDefaultModel.canonicalName &&
+    nudgeDismissedFor !== workspaceDefaultModel.canonicalName;
+  const dismissModelNudge = () => {
+    if (!workspaceDefaultModel) return;
+    saveDismissedDefault(detail.project.id, stage, workspaceDefaultModel.canonicalName);
+    setNudgeDismissedFor(workspaceDefaultModel.canonicalName);
+  };
   // Fires the hand-off for ANY redeploy of a stage that already has mail
   // under a prior address — an explicit switch (above) or any other cause
   // (restart, recovery) — never for a brand-new stage (CL-8927's own opening
@@ -599,7 +641,6 @@ export function StageWorkspace({
               const offeringId = event.target.value;
               if (offeringId) void modelSwitch.switchTo(offeringId);
             }}
-            onFocus={() => setModelPickerOpen(true)}
           >
             <option value="" disabled>
               {modelSwitch.switching ? "Switching…" : "Switch model…"}
@@ -610,6 +651,32 @@ export function StageWorkspace({
               </option>
             ))}
           </select>
+        </div>
+      ) : null}
+
+      {/* The owner's ask: a calm inline prompt, never a modal wall, and never
+          a redeploy without the person choosing — "Keep" just dismisses
+          (remembered per project+stage until the default moves again),
+          "Switch" runs the same switch path the manual select above uses. */}
+      {modelNudgeVisible && workspaceDefaultModel && defaultOffering ? (
+        <div className="model-nudge" role="status">
+          <span className="inline-note">
+            Your default model is now {workspaceDefaultModel.providerLabel} · {workspaceDefaultModel.canonicalName}.
+            Switch this stage to it?
+          </span>
+          <div className="model-nudge-actions">
+            <Button
+              onClick={() => {
+                dismissModelNudge();
+                void modelSwitch.switchTo(defaultOffering.offeringIds[0]!);
+              }}
+            >
+              Switch
+            </Button>
+            <Button variant="ghost" onClick={dismissModelNudge}>
+              Keep {activeModel?.canonicalName}
+            </Button>
+          </div>
         </div>
       ) : null}
 
