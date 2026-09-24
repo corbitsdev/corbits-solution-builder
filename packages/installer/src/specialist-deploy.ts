@@ -145,6 +145,34 @@ export type SpecialistDeployment = {
 export type SpecialistDeploymentStatus = SpecialistDeployment & { readonly status: string };
 
 /**
+ * Every address `projectId`'s stage-`stage` specialist asset has ever been
+ * deployed to -- unlike `stageSpecialistStatus`, this does NOT narrow to the
+ * live pick (`pickDeployment`): a released or failed deployment's address
+ * still received mail while it was live, and that mail is part of the
+ * stage's conversation. A caller merges reads across the whole list; a send
+ * still goes to the current live address alone (`stageSpecialistStatus`).
+ * Empty when the asset does not exist yet or the tenant has no domain.
+ */
+export async function stageSpecialistAddresses(
+  transport: Transport,
+  workspaceTenantId: string,
+  projectId: string,
+  stage: Stage,
+  roleKey: string = DEFAULT_ROLE_KEY,
+): Promise<string[]> {
+  const tenant = await getTenant(transport, workspaceTenantId);
+  if (!tenant?.domain) return [];
+  const assetName = specialistAssetName(projectId, stage, roleKey);
+  const assets = await assetsFor(transport, workspaceTenantId).list("workflow");
+  const asset = assets.find((entry) => entry.name === assetName);
+  if (!asset) return [];
+  const deployments = (await workflowsFor(transport, workspaceTenantId).deployments()).filter(
+    (deployment) => deployment.definitionAssetId === asset.id,
+  );
+  return deployments.map((deployment) => `${deployment.id}@${tenant.domain}`);
+}
+
+/**
  * Re-lists `projectId`'s stage-`stage` asset's deployments and picks the live
  * one (`pickDeployment`), without deploying anything -- CL-8654: two sessions
  * opening the same stage within milliseconds can each deploy, leaving one
