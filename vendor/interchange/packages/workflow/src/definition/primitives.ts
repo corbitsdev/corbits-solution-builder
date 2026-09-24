@@ -78,18 +78,10 @@ export interface StepPrimitive extends PrimitiveBase {
   agent: AgentDefinition<BaseEnv>;
   input?: Selector;
   /**
-   * Per-call inference options for the agent's turn, resolved against the
-   * run exactly as `input` is. The agent definition is fixed at deploy time,
-   * so anything a caller decides per run — an output cap sized to the
-   * document asked for, a temperature — has to arrive with the run, and this
-   * is where a step reads it. Only `maxTokens`, `temperature` and
-   * `thinking` may arrive this way: how much the call may spend and how it
-   * samples. The system prompt and the tools are the definition's alone,
-   * approved at deploy time, and a run naming them fails the step. Resolving
-   * to `null` or `undefined` means the agent's own defaults; anything but an
-   * object, or an object with another key, fails the step as a definition
-   * error. Not recorded on `StepStarted`: it shapes the call, it is not what
-   * the agent was asked.
+   * Per-call inference options for this step's model call, resolved beside
+   * `input`. Must resolve to `null`, `undefined`, or an object limited to
+   * `PerCallInferenceOptions` keys; anything else fails the step as a
+   * selector error. Absent means the agent's defaults.
    */
   inference?: Selector;
   reads?: readonly Selector[];

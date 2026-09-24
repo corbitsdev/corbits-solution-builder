@@ -269,3 +269,60 @@ no migration). An unregistered key fails at deploy admission. Tests in
 
 **Kill date.** 2026-10-16. Tracked as
 INTR-583.
+
+## `packages/agent`, `packages/inference` — vendored temporarily; per-call inference options (#194)
+
+**Why.** `b2b33bb5`/`644c85c1` moved `@intx/agent` and `@intx/inference` to
+npm `0.4.0` consumption. INTR-600: a workflow step has no way to bound a
+call's output tokens or reasoning effort, so a stage specialist's step falls
+through to each provider's hard-coded default (`max_tokens ?? 4096` in both
+`providers/anthropic.ts` and `providers/openai.ts`), and a Sonnet turn that
+reasons past that window ends with no text and no tool call — the workflow
+step then waits forever. The fix is `faremeter/interchange#194`
+(`intr-567-a-workflow-step-has-no-way-to-set-per-call-inference-options`,
+head `f451560a`, based on `5453d0b0` — our own `VENDORED_REVISION`). It
+touches `packages/agent/src/agent.ts` and
+`packages/inference/src/{reactor,providers/anthropic,providers/openai}.ts`
+alongside the already-vendored `types`/`workflow`/`workflow-host`, so `agent`
+and `inference` are vendored back in rather than patched as npm packages,
+which cannot carry a local diff.
+
+**What changed.** `packages/agent` and `packages/inference` are copied from
+`faremeter/interchange` at `5453d0b0` (`git archive` from the `#194`
+worktree), laid out the same as the other seven vendored packages: their
+internal `@intx/*` dependency versions rewritten from the monorepo's
+`workspace:*` to the pinned `0.4.0` string (resolution comes from root
+`overrides`, not the package's own manifest — matches `hub-sessions`,
+`workflow`, etc.). Root `package.json` moves `@intx/agent` and
+`@intx/inference` from `"0.4.0"` to `"workspace:*"` in `dependencies` and
+adds both to `overrides`; `packages/tools-deck` and
+`packages/tools-delivery` (the two other first-party consumers of
+`@intx/agent`) get the same `workspace:*` swap. `#194`'s application-code
+diff (`types/src/runtime.ts`, `agent/src/agent.ts`,
+`inference/src/{reactor,providers/anthropic,providers/openai}.ts`,
+`workflow/src/{definition/primitives,definition/workflow,live-inert-projector,runtime/env,runtime/run,runtime/selectors}.ts`,
+`workflow-host/src/adapters/step-invoker.ts`) is applied on top, tests and
+examples excluded. `primitives.ts` already carried a vestigial `inference?:
+Selector` field and doc comment from `bbb69890`'s incomplete revert of an
+earlier local copy of this feature (that revert landed before this issue
+had a caller); the file is replaced with upstream `f451560a`'s version
+outright so the result is byte-identical to upstream rather than a patch
+applied over stale context. `dist/` for both packages (and the three
+touched existing vendored packages) is rebuilt via `bun run vendor:build`.
+
+Consumer: `packages/solutions-builder/src/specialist-source.ts` names a
+per-role `inference: { literal: { maxTokens: <role.maxTokens> } }` selector
+on the rendered step (CL-8859); `AgentRole.maxTokens` is set per role in
+`packages/solutions-builder/src/kit.ts`.
+
+**Upstream-able.** Yes — `faremeter/interchange#194` is an open upstream PR,
+unchanged here.
+
+**Removal.** When an `@intx/agent`/`@intx/inference` npm release includes
+`#194` (or `VENDORED_REVISION` refreshes past its merge), drop
+`vendor/interchange/packages/{agent,inference}`, revert the `workspace:*`
+swaps in `package.json` (root, `tools-deck`, `tools-delivery`) back to the
+released version, and drop this entry.
+
+**Kill date.** 2026-10-16. Tracked as
+[CL-8915](https://linear.app/abklabs/issue/CL-8915).
