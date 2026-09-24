@@ -34,8 +34,16 @@ export type WorkflowViewState = {
   readonly markStage: (stage: number) => void;
 };
 
+// Re-entering a project this session already has a workflow view for: a
+// thin snapshot so the pane renders that view immediately instead of a blank
+// "resolved: false" while the mount effect below re-confirms it off the hub.
+// Never the source of truth -- every mount still re-reads before trusting it,
+// and a stale or wrong snapshot only ever costs one extra render, never a
+// wrong decision (nothing here gates `decide`).
+const viewSnapshots = new Map<string, ProjectWorkflowView>();
+
 export function useWorkflowView(projectId: string, onArtifactsChanged: () => void): WorkflowViewState {
-  const [view, setView] = useState<ProjectWorkflowView | null>(null);
+  const [view, setView] = useState<ProjectWorkflowView | null>(() => viewSnapshots.get(projectId) ?? null);
   const [startError, setStartError] = useState<string | null>(null);
   const [viewFailed, setViewFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -43,7 +51,10 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
 
   const reload = useCallback(async () => {
     const next = await api.projectWorkflowView(projectId).catch(() => null);
-    if (next && next.stage >= 1) setView(next);
+    if (next && next.stage >= 1) {
+      setView(next);
+      viewSnapshots.set(projectId, next);
+    }
     return next;
   }, [projectId]);
 
@@ -67,15 +78,25 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
     setView((current) => (current ? { ...current, stage } : current));
   }, []);
 
-  // Deployed/triggered once per project, then read on mount and re-read.
-  // `ensureProjectWorkflow` and the first `projectWorkflowView` read are each
-  // reported on their own terms, so a failure of either says specifically
-  // what did not start rather than a generic error. A ref rather than a
-  // cancellation flag pattern is NOT used here: `attempt` is the retry, so
-  // the effect legitimately re-runs on it.
+  // Re-entering a project whose workflow is already live: attach to it with
+  // the same non-deploying read `reload` uses (`projectWorkflowView`, backed
+  // by `findProjectWorkflow`/`resolveProjectWorkflowRef`) instead of running
+  // `ensureProjectWorkflow`'s deploy-and-wait path. Only a project this
+  // workspace has never opened -- no live workflow to attach to -- falls
+  // through to ensure/deploy. `attempt` (Retry) always falls through too: a
+  // failed open is exactly the case ensure needs to run again.
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      if (attempt === 0) {
+        const attached = await api.projectWorkflowView(projectId).catch(() => null);
+        if (cancelled) return;
+        if (attached && attached.stage >= 1) {
+          setView(attached);
+          viewSnapshots.set(projectId, attached);
+          return;
+        }
+      }
       try {
         await api.ensureProjectWorkflow(projectId);
       } catch (cause) {
@@ -95,7 +116,10 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
         if (!cancelled) setViewFailed(true);
         return;
       }
-      if (!cancelled) setView(next);
+      if (!cancelled) {
+        setView(next);
+        if (next) viewSnapshots.set(projectId, next);
+      }
     })();
     return () => {
       cancelled = true;
@@ -113,9 +137,12 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
 
   // Belt-and-braces against a missed remount: `key={detail.project.id}` on
   // the component already resets all of this per project; this clears the
-  // previous project's view even if that remount ever regresses.
+  // previous project's view even if that remount ever regresses. Seeds from
+  // this project's own snapshot (if any) rather than null, so it cannot
+  // undo the instant-render attach the effect above just did in the same
+  // commit.
   useEffect(() => {
-    setView(null);
+    setView(viewSnapshots.get(projectId) ?? null);
     setStartError(null);
     setViewFailed(false);
   }, [projectId]);
