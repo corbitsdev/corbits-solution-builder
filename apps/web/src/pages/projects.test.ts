@@ -123,10 +123,19 @@ describe("project card menu", () => {
     expect(card).toContain("api.deleteProject(project.id)");
     // A slip cannot delete: the confirming item only exists after Delete… was chosen, and closing the menu forgets it.
     expect(card).toContain("setConfirming(true)");
-    expect(card).toContain("!open && setConfirming(false)");
+    expect(card).toMatch(/if \(!open\) \{[^}]*setConfirming\(false\);/);
     // The card face opens the project on click and long-press; the menu must not.
     const menuWrapper = card.slice(card.indexOf('className="card-menu"'), card.indexOf("<Menu "));
     for (const handler of ["onClick", "onPointerDown", "onContextMenu", "onKeyDown"]) expect(menuWrapper).toContain(`${handler}={(event) => event.stopPropagation()}`);
+    // Nor may the info dialog, portaled but React-nested in the card.
+    const dialogWrapper = card.slice(card.indexOf('className="card-dialog"'), card.indexOf("<ProjectInfoDialog"));
+    for (const handler of ["onClick", "onPointerDown", "onContextMenu", "onKeyDown"]) expect(dialogWrapper).toContain(`${handler}={(event) => event.stopPropagation()}`);
+    // While the menu or dialog is up, and just after it closes, the face itself is inert (card-face-guard.ts).
+    expect(card).toContain("setMenuOpen(open)");
+    expect(card).toContain("closedAt.current = Date.now()");
+    expect(card).toContain("if (opens) onOpen();");
+    expect(card).toContain("if (!faceOpens()) return;");
+    expect(card).toContain("onPointerDownOutside={() => (dismissing.current = true)}");
   });
 
   test("the menu renders closed: only its trigger is in the markup", () => {
