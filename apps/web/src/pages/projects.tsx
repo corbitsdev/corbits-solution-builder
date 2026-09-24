@@ -51,6 +51,11 @@ function plural(count: number, noun: string): string {
   return `${String(count)} ${noun}${count === 1 ? "" : "s"}`;
 }
 
+/** Card foot's right side, non-archived case: an absolute date, never a fake relative time. */
+function startedLabel(createdAt: string): string {
+  return `Started ${new Date(createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
+}
+
 /** What the import did, and, for a bundle from `main`, where the project landed. */
 export function importNotice(fileName: string, brought: ImportOutcome): string {
   const written =
@@ -520,7 +525,7 @@ function ProjectCard({
             </>
           ) : null}
         </span>
-        <span>{turn ?? (project.archivedAt ? "Archived" : `${project.runs} run${project.runs === 1 ? "" : "s"}`)}</span>
+        <span>{turn ?? (project.archivedAt ? "Archived" : startedLabel(project.createdAt))}</span>
       </div>
     </article>
   );
