@@ -22,8 +22,8 @@ function fixtureStatus(overrides: Partial<HostStatus> = {}): HostStatus {
 }
 
 describe("settings page copy", () => {
-  test("role labels drop underscores", () => {
-    expect(roleLabel("budget_approver")).toBe("budget approver");
+  test("role labels drop underscores and capitalize", () => {
+    expect(roleLabel("budget_approver")).toBe("Budget approver");
   });
 
   test("deck Edit themes are the mockup's Minimal / Detailed / Bold", () => {

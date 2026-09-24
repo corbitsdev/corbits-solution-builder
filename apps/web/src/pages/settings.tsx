@@ -326,7 +326,8 @@ function Designer() {
 }
 
 export function roleLabel(role: string): string {
-  return role.replace(/_/g, " ");
+  const words = role.replace(/_/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 /**
@@ -399,6 +400,7 @@ function StakeholderDecks() {
   return (
     <Section title="Stakeholder decks" lead="How the deck each role receives is composed.">
       <div className="section-body">
+        <p className="inline-note">The theme you pick here only changes the slides you download at stage 5.</p>
         {error ? <Banner tone="error" title={error} /> : null}
         {STAKEHOLDER_ROLES.map((role) => {
           const design = designs?.[role] ?? DEFAULT_DECK_DESIGN;
