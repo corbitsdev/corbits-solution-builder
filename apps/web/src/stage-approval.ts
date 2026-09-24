@@ -51,12 +51,25 @@ export type ReviewableArtifact = { readonly status: "found"; readonly node: Arti
  * artifact; approving it needs no browser write at all, and it is preferred
  * over `persist_needed` even when a chat draft (a status update, not the
  * archive) also exists.
+ *
+ * On every other stage the newest written node is found the same way: a
+ * draft `persistStageDraft` wrote (stamped with the stage's specialist) or
+ * an imported one. That is right only while it is still the newest draft.
+ * After a send-back the specialist drafts again, and that reply is newer
+ * than anything persisted: it, not the version that was just sent back, is
+ * what gets persisted and reviewed. `latestDraftAt` is the chat draft's own
+ * timestamp; the node persisted from it is created after it, so on the next
+ * look that node is found and nothing is written twice.
  */
 export function reviewableArtifact(input: {
   readonly nodes: readonly ArtifactNode[];
   readonly stage: number;
   readonly kind: string;
   readonly latestDraft: unknown;
+  /** When the chat draft stands in for the next version (every stage but 5
+   *  and 8): when it was sent, so a draft newer than the newest persisted
+   *  version is persisted rather than the old version being reviewed again. */
+  readonly latestDraftAt?: string | null;
 }): ReviewableArtifact {
   const written = input.nodes
     .filter(
@@ -76,7 +89,12 @@ export function reviewableArtifact(input: {
         (node.provenance.agentRole !== undefined || (input.stage === 5 && node.variant !== null)),
     )
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
-  if (written) return { status: "found", node: written };
+  const draftIsNewer =
+    !!input.latestDraft &&
+    typeof input.latestDraftAt === "string" &&
+    written !== undefined &&
+    Date.parse(input.latestDraftAt) > Date.parse(written.createdAt);
+  if (written && !draftIsNewer) return { status: "found", node: written };
   if (input.latestDraft) return { status: "persist_needed" };
   return { status: "none" };
 }

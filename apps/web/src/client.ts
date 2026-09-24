@@ -7,7 +7,7 @@
  */
 import { APP_VERSION } from "@solutions-builder/app/manifest";
 import { AUTHORITIES, type Authority, type Stage } from "@solutions-builder/app/ledger";
-import { agentById, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
+import { agentById, agentFor, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
 import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
 import {
   ApiError as HubApiError,
@@ -1413,7 +1413,16 @@ export const api = {
             stage,
             mediaType: "text/markdown",
             sourceVersionIds,
-            provenance: { producer: "agent" as const },
+            // Stamped with the stage's own specialist so `reviewableArtifact`
+            // recognises the write as the draft's persisted form: found on
+            // the next load instead of persisted again, and superseded only
+            // by a draft the specialist sends later. Stage 8 is left
+            // unstamped on purpose -- there `agentRole` is the mark of
+            // `publish_workspace`'s own archive, never a browser write.
+            provenance: {
+              producer: "agent" as const,
+              ...(stage === 8 ? {} : { agentRole: agentFor(stage as Stage).id }),
+            },
             ...(target ? { target } : {}),
             ...(previousHead ? { supersedes: previousHead.id } : {}),
           },
