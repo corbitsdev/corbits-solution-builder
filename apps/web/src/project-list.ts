@@ -184,7 +184,7 @@ export async function listProjectSummaries(transport: Transport = createHubTrans
         needsDecision,
         waits: [],
         turn: "idle",
-        runs: deployments.length,
+        createdAt: record.createdAt.toISOString(),
       };
     }),
   );

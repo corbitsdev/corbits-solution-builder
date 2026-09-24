@@ -15,7 +15,7 @@ function summary(overrides: Partial<ProjectSummary> = {}): ProjectSummary {
     needsDecision: true,
     waits: [],
     turn: "idle",
-    runs: 2,
+    createdAt: "2024-01-01T00:00:00.000Z",
     ...overrides,
   };
 }

@@ -310,8 +310,8 @@ export type ProjectSummary = {
   waits: Wait[];
   /** Whether the specialist is drafting or the person's move — no gate, no signal, just "is there an unapproved reply." */
   turn: "writing" | "idle";
-  /** Specialist deployments for this project so far -- see `ProjectInfo.runs`; already fetched per card, so this rides along at no extra cost. */
-  runs: number;
+  /** When the project's tenant was created -- already read per card (`record.createdAt`), so this rides along at no extra cost. */
+  createdAt: string;
 };
 
 export type ProjectInfo = {
