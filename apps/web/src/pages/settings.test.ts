@@ -87,11 +87,9 @@ describe("settings page markup language", () => {
     expect(page).not.toContain("Shadow");
   });
 
-  test("Designer output-limit copy is the mockup's, not token-budget jargon", async () => {
+  test("Designer no longer shows the unused Output limit control", async () => {
     const page = await Bun.file(new URL("./settings.tsx", import.meta.url)).text();
-    expect(page).toContain('label="Output limit"');
-    expect(page).toContain("Tokens per design — most need 20,000–40,000; a design that uses them all is cut short");
-    expect(page).not.toContain("If a design exceeds the limit");
+    expect(page).not.toContain('label="Output limit"');
   });
 
   test("This computer shows Data from host status between Credentials and Version", async () => {
