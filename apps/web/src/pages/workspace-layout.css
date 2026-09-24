@@ -80,6 +80,14 @@
   min-height: 0;
 }
 
+/* StagePanes renders the splitter as a third grid child (chat, splitter,
+   document) whenever the pane is split. Give it its own track — `auto`
+   sizes to the splitter's own 9px width, and its -4px margins still let it
+   overlap the chat/document edge the way the two-column layout did. */
+.panes:has(> .panes-splitter) {
+  grid-template-columns: var(--panes-chat-w, minmax(420px, min(40%, 640px))) auto minmax(0, 1fr);
+}
+
 .panes-splitter {
   position: relative;
   width: 9px;
@@ -501,7 +509,8 @@
 }
 
 @media (max-width: 900px) {
-  .panes {
+  .panes,
+  .panes:has(> .panes-splitter) {
     grid-template-columns: 1fr;
     grid-template-rows: 1fr 1fr;
   }
