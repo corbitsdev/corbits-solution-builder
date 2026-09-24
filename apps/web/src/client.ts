@@ -31,6 +31,7 @@ import {
   requireProject as installerRequireProject,
   resolveWorkspace,
   revokeAllDelegations,
+  stageSpecialistAddresses,
   stageSpecialistStatus,
   updateProject as installerUpdateProject,
   vendoredMemberFiles,
@@ -1427,6 +1428,22 @@ export const api = {
           retryable: false,
         });
       }
+      // A stage's draft can be persisted more than once (a send-back and
+      // re-approval, or `promote()` restoring an older version forward) --
+      // each write must supersede the lineage's current head, or the graph
+      // fold (`foldArtifactGraph`) never links them and every write shows up
+      // as its own unrelated version 1 (the "v1 v1 v1" defect). The lookup
+      // is best-effort: a tenant-wide list that fails here must never block
+      // the draft itself from being saved -- falling back to no `supersedes`
+      // is exactly today's (already shipped) behavior, not a regression.
+      const previousHead = await artifactGraphFor(transport, workspaceTenantId, projectId)
+        .then(
+          (graph) =>
+            graph.nodes
+              .filter((node) => node.stage === stage && node.kind === kind && node.variant === null && node.supersededByNodeId === null)
+              .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0],
+        )
+        .catch(() => undefined);
       const artifact = await installerCreateArtifact(transport, workspaceTenantId, {
         title: `Stage ${stage} draft`,
         content,
@@ -1439,6 +1456,7 @@ export const api = {
             sourceVersionIds,
             provenance: { producer: "agent" as const },
             ...(target ? { target } : {}),
+            ...(previousHead ? { supersedes: previousHead.id } : {}),
           },
         },
       });
@@ -1804,6 +1822,16 @@ false,
   stageAgentStatus: (projectId: string, stage: number): Promise<SpecialistDeploymentStatus | null> =>
     asWorkspaceOwner((transport, workspaceTenantId) =>
       stageSpecialistStatus(transport, workspaceTenantId, projectId, stage as Stage),
+    ),
+  /**
+   * Every address `projectId`'s stage-`stage` specialist has ever run at --
+   * the input `useStageThread`'s merge needs so a redeploy (restart, model
+   * switch) never empties a stage's chat: earlier mail lives under earlier
+   * deployments' addresses, not the live one alone (CL-8927).
+   */
+  stageAgentAddresses: (projectId: string, stage: number): Promise<string[]> =>
+    asWorkspaceOwner((transport, workspaceTenantId) =>
+      stageSpecialistAddresses(transport, workspaceTenantId, projectId, stage as Stage),
     ),
   /**
    * Makes sure `projectId`'s `audienceIndex`-th stakeholder has its own

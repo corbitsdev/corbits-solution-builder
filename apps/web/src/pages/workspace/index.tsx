@@ -176,7 +176,7 @@ export function StageWorkspace({
   // Stable across renders — an inline arrow would re-subscribe the mailbox
   // stream every render since it is a dep of the thread effect.
   const nudgeWorkflow = useCallback(() => void workflow.reload(), [workflow.reload]);
-  const thread = useStageThread(tenantId, agentAddress, nudgeWorkflow, setError);
+  const thread = useStageThread(tenantId, agentAddress, agent.addresses, nudgeWorkflow, setError);
   const loadThread = thread.reload;
 
   // What Stop put back into the box: the composer below for a plain-chat

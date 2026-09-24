@@ -107,7 +107,11 @@ export function useProjectArtifacts(
         const sorted = [...versions].sort(
           (a, b) => a.version - b.version || Date.parse(a.createdAt) - Date.parse(b.createdAt),
         );
-        const head = sorted.find((v) => v.supersededByNodeId === null) ?? sorted.at(-1)!;
+        // The newest non-superseded node, not the first — a lineage written
+        // before every write chained `sb.supersedes` can have more than one
+        // node with no successor; the most recent of those is still the
+        // right head to show, never the oldest.
+        const head = sorted.filter((v) => v.supersededByNodeId === null).at(-1) ?? sorted.at(-1)!;
         const label =
           head.kind === "source_material"
             ? head.title

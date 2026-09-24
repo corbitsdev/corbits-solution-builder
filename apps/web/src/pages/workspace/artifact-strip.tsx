@@ -96,15 +96,19 @@ export function VersionStrip({
       >
         ‹
       </button>
-      {versions.map((v) => (
+      {versions.map((v, i) => (
+        // The lineage's position, not `v.version` — a superseded draft is
+        // superseded by stamping a fresh artifact (`sb.supersedes`), so each
+        // node's own `version` field is 1 regardless of where it sits in the
+        // chain; the chips would otherwise all read "v1".
         <button
           key={v.id}
           type="button"
           className={v.id === active.id ? "ver on" : "ver"}
           onClick={() => onSelect(v.id)}
-          title={v.supersededByNodeId ? `v${v.version} · superseded` : `v${v.version}`}
+          title={v.supersededByNodeId ? `v${i + 1} · superseded` : `v${i + 1}`}
         >
-          v{v.version}
+          v{i + 1}
         </button>
       ))}
       <button
