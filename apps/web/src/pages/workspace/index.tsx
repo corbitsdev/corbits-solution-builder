@@ -110,7 +110,20 @@ export function StageWorkspace({
   const openingFailed = workflow.openingFailed;
   const stage = workflowView?.stage ?? 1;
 
-  const agent = useStageAgent(detail.project.id, stage, workflowResolved);
+  // `detail.stage` was already resolved by the same non-deploying read
+  // (`resolveProjectWorkflowRef`/`findProjectWorkflow`, via `project-view.ts`'s
+  // `workflowStage`) when this project's detail loaded — it is 1 only when no
+  // workflow ref exists yet for this project, never a guess: any other value
+  // can only come from a ref that actually resolved. A stage of 1 on a
+  // project that already has nodes stays ambiguous (that same fallback is
+  // also what a failed ref lookup collapses to), so the early start is
+  // withheld there. This lets the stage specialist begin deploying
+  // concurrently with `ensureProjectWorkflow`'s own ensure/poll cycle
+  // instead of serially after it, without ever guessing a stage for a
+  // project with history.
+  const confirmedStage = detail.stage > 1 || detail.nodes.length === 0 ? detail.stage : null;
+
+  const agent = useStageAgent(detail.project.id, stage, workflowResolved, confirmedStage);
   const agentAddress = agent.address;
   // Stable across renders — an inline arrow would re-subscribe the mailbox
   // stream every render since it is a dep of the thread effect.

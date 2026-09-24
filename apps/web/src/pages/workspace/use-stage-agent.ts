@@ -21,18 +21,32 @@ export type StageAgentState = {
   readonly retry: () => void;
 };
 
-export function useStageAgent(projectId: string, stage: number, workflowResolved: boolean): StageAgentState {
+export function useStageAgent(
+  projectId: string,
+  stage: number,
+  workflowResolved: boolean,
+  /** A stage already confirmed by a cheap, non-deploying read (never a
+   *  guess — see `index.tsx`'s `confirmedStage`), so the specialist can
+   *  start deploying concurrently with the project workflow's own
+   *  ensure/poll cycle instead of waiting for it to finish. Null when no
+   *  such confirmation exists yet, which keeps this the same
+   *  wait-for-`workflowResolved` behavior as before. */
+  earlyStage: number | null,
+): StageAgentState {
   const [agent, setAgent] = useState<{ stage: number; address: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
 
+  // The real stage once the workflow view has resolved it; until then, only
+  // the confirmed early stage — never `stage` itself, which is an unresolved
+  // display fallback (`workflowView?.stage ?? 1`) rather than a confirmation
+  // (CL-8721).
+  const deployStage = workflowResolved ? stage : earlyStage;
+
   useEffect(() => {
-    // The real stage has to be known before a specialist is deployed for it
-    // — never for the artifact-derived fallback while the workflow view is
-    // still loading (CL-8721).
-    if (!workflowResolved) return;
+    if (deployStage === null) return;
     let cancelled = false;
-    const requestedStage = stage;
+    const requestedStage = deployStage;
     setError(null);
     api
       .ensureStageAgent(projectId, requestedStage)
@@ -45,7 +59,7 @@ export function useStageAgent(projectId: string, stage: number, workflowResolved
     return () => {
       cancelled = true;
     };
-  }, [projectId, stage, workflowResolved, attempt]);
+  }, [projectId, deployStage, attempt]);
 
   // Re-checking the agent itself rather than its thread: two sessions racing
   // to open this stage can each deploy a specialist, the hub releases the
