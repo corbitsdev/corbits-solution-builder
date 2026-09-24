@@ -29,14 +29,25 @@ export function stageEvents(
   marks: readonly WithdrawnMark[],
 ): StageEvent[] {
   const titleOf = new Map(nodes.map((node) => [node.artifactId, node.title]));
-  const out: StageEvent[] = [
-    {
-      id: "ev:boundary",
-      at: "",
-      text: `Stage ${stage} · ${stageName(stage)}`,
-      tone: "boundary",
-    },
-  ];
+  // A brand-new project at stage 1 has nothing before it to bound -- its
+  // only nodes are the opening statement and, if it attached a file, the
+  // extracted reading beside it. The hairline rule and heading are only
+  // worth showing once there's something they're separating.
+  const freshProject =
+    stage === 1 &&
+    decisions.length === 0 &&
+    marks.length === 0 &&
+    nodes.every((node) => node.kind === "source_material" || node.kind === "material_reading");
+  const out: StageEvent[] = freshProject
+    ? []
+    : [
+        {
+          id: "ev:boundary",
+          at: "",
+          text: `Stage ${stage} · ${stageName(stage)}`,
+          tone: "boundary",
+        },
+      ];
 
   for (const node of nodes) {
     if (node.stage !== stage || node.kind !== "source_material") continue;
