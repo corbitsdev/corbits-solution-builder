@@ -513,9 +513,27 @@ export function AudiencePackages({
   const votesByAudience = workflowView?.audienceDecisions ?? {};
   const requiredQuorum = workflowView?.stage5Quorum?.required ?? quorum;
   const proceeded = workflowView?.stage5Quorum?.proceeded ?? 0;
+  const blockedBy = workflowView?.stage5Quorum?.blocked ?? [];
   // The workflow's own verdict -- never recomputed here (`approveReasonText`
   // is the one place that translates `approveReason` to copy).
   const reason = approveReason ? approveReasonText(approveReason, lastRefusal) : null;
+  // `allowed.approve` only gates on a review being open, not on quorum --
+  // the stage rule that actually enforces quorum only fires once an approve
+  // is attempted (CL-8687's `approveReason` doc comment). Left alone, that
+  // makes "Approve and continue" clickable before anyone has voted: the
+  // click round-trips to a refusal instead of ever doing what it looks like
+  // it does. This mirrors `quorumState`'s own `met` test (`blocked.length
+  // === 0 && proceeded >= required`) using the fields the workflow view
+  // already exposes, purely to hold the button until quorum is actually
+  // met -- it never changes what gets recorded (CL-8866).
+  const quorumMet = blockedBy.length === 0 && proceeded >= requiredQuorum;
+  const quorumWaiting = Math.max(requiredQuorum - proceeded, 0);
+  const quorumReason = quorumMet
+    ? null
+    : blockedBy.length > 0
+      ? `${blockedBy.join(" and ")} ${blockedBy.length === 1 ? "has" : "have"} blocked this.`
+      : `Waiting for ${quorumWaiting} stakeholder${quorumWaiting === 1 ? "" : "s"} to proceed.`;
+  const approveReasonDisplay = reason ?? quorumReason;
 
   const decide = async (node: (typeof packages)[number], decision: AudienceVote["decision"], note: string) => {
     if (!node.variant) return;
@@ -550,6 +568,30 @@ export function AudiencePackages({
       throw cause;
     }
   };
+
+  // The open package's own Proceed/Needs revision/Reject -- visible beside
+  // the content a person is already reading, not behind a chip that has to
+  // be found and clicked first (CL-8866: that hidden control was the only
+  // place a decision actually recorded).
+  const [inlineNote, setInlineNote] = useState("");
+  const [inlineBusy, setInlineBusy] = useState<AudienceVote["decision"] | null>(null);
+  useEffect(() => {
+    setInlineNote("");
+    setInlineBusy(null);
+  }, [selected?.variant]);
+  const recordInlineDecision = async (decision: AudienceVote["decision"]) => {
+    if (!selected) return;
+    setInlineBusy(decision);
+    try {
+      await decide(selected, decision, inlineNote);
+      setInlineNote("");
+    } catch {
+      // decide() already surfaced the error via setError.
+    } finally {
+      setInlineBusy(null);
+    }
+  };
+  const selectedVote = selected?.variant ? (votesByAudience[selected.variant] ?? null) : null;
 
   return (
     <div data-tour="audience-packages">
@@ -646,6 +688,45 @@ export function AudiencePackages({
                 </div>
                 {content ? <Markdown source={content} /> : <p className="inline-note">Loading…</p>}
               </div>
+              {selected.variant ? (
+                <div className="aud-decision" data-tour="audience-your-decision">
+                  <p className="inline-note">
+                    {selected.variant}: {selectedVote ? DECISION_LABEL[selectedVote.decision] : "no decision yet"}
+                  </p>
+                  <Input
+                    value={inlineNote}
+                    aria-label={`${selected.variant}'s note, optional`}
+                    placeholder="Their note, optional"
+                    onChange={(event) => setInlineNote(event.target.value)}
+                  />
+                  <div className="aud-btns">
+                    <Button
+                      variant="ghost"
+                      loading={inlineBusy === "proceed"}
+                      disabled={inlineBusy !== null}
+                      onClick={() => void recordInlineDecision("proceed")}
+                    >
+                      Proceed
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      loading={inlineBusy === "revise"}
+                      disabled={inlineBusy !== null}
+                      onClick={() => void recordInlineDecision("revise")}
+                    >
+                      Needs revision
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      loading={inlineBusy === "reject"}
+                      disabled={inlineBusy !== null}
+                      onClick={() => void recordInlineDecision("reject")}
+                    >
+                      Reject
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
               {savedNodes.has(selected.id) ? (
                 <Banner
                   tone="okay"
@@ -678,10 +759,15 @@ export function AudiencePackages({
             </>
           ) : null}
           <div className="button-row">
-            <Button variant="primary" loading={approving} disabled={!canApprove || packages.length === 0} onClick={onApprove}>
+            <Button
+              variant="primary"
+              loading={approving}
+              disabled={!canApprove || packages.length === 0 || !quorumMet}
+              onClick={onApprove}
+            >
               Approve and continue
             </Button>
-            {reason ? <p className="inline-note">{reason}</p> : null}
+            {approveReasonDisplay ? <p className="inline-note">{approveReasonDisplay}</p> : null}
           </div>
         </>
       ) : null}
