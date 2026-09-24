@@ -608,9 +608,7 @@ function ProjectInfoDialog({
   // current model. Behavioral-only; main has no equivalent.
   const [activeModel, setActiveModel] = useState<ActiveModel | null>(null);
   const [title, setTitle] = useState(project.title);
-  // Deleting takes two clicks: the confirm button only exists after the first,
-  // so a slip cannot remove a project.
-  const [confirming, setConfirming] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
   useEffect(() => {
     let cancelled = false;
@@ -641,13 +639,16 @@ function ProjectInfoDialog({
     }
   };
 
-  const rename = () => {
-    const next = title.trim();
-    if (next.length === 0 || next === project.title) {
-      setTitle(project.title);
-      return;
-    }
-    void act(() => api.updateProject(project.id, { title: next }));
+  // Edits are explicit: nothing is written until Save, which then closes
+  // the dialog. Save is offered only once there is a change to keep.
+  const nextTitle = title.trim();
+  const dirty = nextTitle.length > 0 && nextTitle !== project.title;
+  const save = async () => {
+    if (!dirty || saving) return;
+    setSaving(true);
+    const ok = await act(() => api.updateProject(project.id, { title: nextTitle }));
+    setSaving(false);
+    if (ok) onClose();
   };
 
   // INTEGRATE (CL-8756): api.exportProject is gone on this lane — the bundle
@@ -682,9 +683,8 @@ function ProjectInfoDialog({
                 autoFocus={focusName}
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
-                onBlur={rename}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter") rename();
+                  if (event.key === "Enter") void save();
                   if (event.key === "Escape") setTitle(project.title);
                 }}
                 aria-label="Project name"
@@ -769,22 +769,11 @@ function ProjectInfoDialog({
           >
             {project.archivedAt ? "Unarchive" : "Archive"}
           </Button>
-          {confirming ? (
-            <Button
-              variant="destructive"
-              onClick={() =>
-                void act(() => api.deleteProject(project.id)).then((ok) => {
-                  if (ok) onClose();
-                })
-              }
-            >
-              Yes, delete it
-            </Button>
-          ) : (
-            <Button variant="destructive" onClick={() => setConfirming(true)}>
-              Delete…
-            </Button>
-          )}
+          {/* Deleting is the card menu's two-step affair, not part of editing
+              a project's info. */}
+          <Button variant="primary" disabled={!dirty || saving} onClick={() => void save()}>
+            {saving ? "Saving…" : "Save"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

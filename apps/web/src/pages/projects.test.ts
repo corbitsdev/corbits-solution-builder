@@ -149,20 +149,25 @@ describe("project card menu", () => {
 });
 
 describe("project info actions", () => {
-  test("rename, export, archive, and delete also live in ProjectInfoDialog, opened by the menu, context menu or long-press", async () => {
+  test("ProjectInfoDialog, opened by the menu, context menu or long-press, saves the name on Save, exports and archives, and does not delete", async () => {
     const page = await Bun.file(new URL("./projects.tsx", import.meta.url)).text();
     const dialog = page.slice(page.indexOf("function ProjectInfoDialog"));
     expect(page).toContain("onContextMenu");
     expect(page).toContain("LONG_PRESS_MS");
     expect(page).toContain("setTimeout(() => openInfo(), LONG_PRESS_MS)");
-    expect(dialog).toContain("api.updateProject(project.id, { title: next })");
+    // Explicit: the name is written on Save (or Enter), never on blur, and Save is offered only once something changed.
+    expect(dialog).toContain("api.updateProject(project.id, { title: nextTitle })");
+    expect(dialog).not.toContain("onBlur=");
+    expect(dialog).toContain('if (event.key === "Enter") void save();');
+    expect(dialog).toContain("disabled={!dirty || saving}");
+    expect(dialog).toContain('{saving ? "Saving…" : "Save"}');
     expect(dialog).toContain("exportProjectBundle(project)");
     expect(page).toContain("assembleBundle(project.id");
     expect(dialog).toContain('api.updateProject(project.id, { archived: !project.archivedAt })');
-    expect(dialog).toContain("api.deleteProject(project.id)");
     expect(dialog).toContain("Export…");
     expect(dialog).toContain("Archive");
-    expect(dialog).toContain("Delete…");
-    expect(dialog).toContain("Yes, delete it");
+    // Deleting stays the card menu's two-step affair.
+    expect(dialog).not.toContain("api.deleteProject(project.id)");
+    expect(dialog).not.toContain("Delete…");
   });
 });
