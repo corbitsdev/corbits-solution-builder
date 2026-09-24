@@ -27,6 +27,14 @@ export type StageAgentState = {
   readonly retry: () => void;
 };
 
+// Re-entering a stage this session has already resolved an agent for: a
+// thin snapshot so a remount can render its address immediately instead of
+// `null` while the mount effect below re-confirms it off the hub. Never the
+// source of truth -- every mount still attaches or deploys before trusting
+// it, and the CL-8654 re-check effect below keeps following the live pick
+// regardless of what this held.
+const agentSnapshots = new Map<string, { stage: number; address: string }>();
+
 export function useStageAgent(
   projectId: string,
   stage: number,
@@ -39,7 +47,9 @@ export function useStageAgent(
    *  wait-for-`workflowResolved` behavior as before. */
   earlyStage: number | null,
 ): StageAgentState {
-  const [agent, setAgent] = useState<{ stage: number; address: string } | null>(null);
+  const [agent, setAgent] = useState<{ stage: number; address: string } | null>(
+    () => agentSnapshots.get(`${projectId}:${stage}`) ?? null,
+  );
   const [addresses, setAddresses] = useState<{ stage: number; list: readonly string[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -55,14 +65,37 @@ export function useStageAgent(
     let cancelled = false;
     const requestedStage = deployStage;
     setError(null);
-    api
-      .ensureStageAgent(projectId, requestedStage)
-      .then((deployment) => {
-        if (!cancelled) setAgent({ stage: requestedStage, address: deployment.address });
-      })
-      .catch((cause: unknown) => {
-        if (!cancelled) setError(describeFailure(cause));
-      });
+    (async () => {
+      // Re-entering a stage already deployed and live: attach with the same
+      // non-deploying read `stageAgentStatus` (CL-8654's own re-check) uses,
+      // instead of running `ensureStageAgent`'s deploy-and-wait path. Only a
+      // stage with no `"deployed"` status yet -- never opened, or still
+      // starting up -- falls through to ensure/deploy. `attempt` (retry)
+      // always falls through too: a failed attach is exactly the case
+      // ensure needs to run again.
+      if (attempt === 0) {
+        const attached = await api.stageAgentStatus(projectId, requestedStage).catch(() => null);
+        if (cancelled) return;
+        if (attached && attached.status === "deployed") {
+          const next = { stage: requestedStage, address: attached.address };
+          setAgent(next);
+          agentSnapshots.set(`${projectId}:${requestedStage}`, next);
+          return;
+        }
+      }
+      await api
+        .ensureStageAgent(projectId, requestedStage)
+        .then((deployment) => {
+          if (!cancelled) {
+            const next = { stage: requestedStage, address: deployment.address };
+            setAgent(next);
+            agentSnapshots.set(`${projectId}:${requestedStage}`, next);
+          }
+        })
+        .catch((cause: unknown) => {
+          if (!cancelled) setError(describeFailure(cause));
+        });
+    })();
     return () => {
       cancelled = true;
     };
@@ -79,7 +112,11 @@ export function useStageAgent(
       void api
         .stageAgentStatus(projectId, stage)
         .then((current) => {
-          if (current && current.address !== agent.address) setAgent({ stage, address: current.address });
+          if (current && current.address !== agent.address) {
+            const next = { stage, address: current.address };
+            setAgent(next);
+            agentSnapshots.set(`${projectId}:${stage}`, next);
+          }
         })
         .catch(() => {});
     };
