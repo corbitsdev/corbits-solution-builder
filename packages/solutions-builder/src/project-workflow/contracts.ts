@@ -213,7 +213,9 @@ export type RefusalCode =
   | "requirements_already_minted"
   | "stack_missing"
   | "stack_uncited"
-  | "stack_unknown_requirement";
+  | "stack_unknown_requirement"
+  | "not_audience_stage"
+  | "unknown_audience";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -498,6 +500,8 @@ const APPROVE_REASON_TEXT: Readonly<Record<ApproveReason, string>> = {
     "The approved build plan (stage 6) has no Stack section, so there is nothing to freeze. Send the project back to stage 6 and ask the architect to re-issue the plan with one.",
   stack_uncited: "Every part of the build plan's Stack section must cite the requirement that forces it.",
   stack_unknown_requirement: "The build plan's Stack section cites a requirement id that does not exist.",
+  not_audience_stage: "Stakeholder decisions are recorded at stage 5 only.",
+  unknown_audience: "That stakeholder is not on this project's list for the open review.",
 };
 
 /** `approveReason`'s code, in plain language -- the one place stage 5's
@@ -633,6 +637,16 @@ export function applyDecision(input: ApplyDecisionInput): ProjectState {
   }
 
   if (payload.kind === "audience") {
+    // Stakeholders decide on stage 5's packages and nowhere else. Until a
+    // stage-5 review captures the policy there is no list to check a name
+    // against (an adoption replay records its votes before opening the
+    // review), and `quorumState` counts only named stakeholders regardless.
+    if (state.stage !== 5) {
+      return refused(state, payload, principalId, "not_audience_stage");
+    }
+    if (state.audiencePolicy && !state.audiencePolicy.stakeholders.includes(payload.audience)) {
+      return refused(state, payload, principalId, "unknown_audience");
+    }
     const audienceDecisions: Record<string, AudienceVote> = {
       ...state.audienceDecisions,
       [payload.audience]: {

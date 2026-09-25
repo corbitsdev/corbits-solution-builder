@@ -504,6 +504,36 @@ describe("stage 5 audience decisions (CL-8870)", () => {
     expect(state.audienceDecisions["alice"]).toMatchObject({ decision: "proceed" });
   });
 
+  test("a vote outside stage 5 is refused and not tallied", () => {
+    const state4 = initProjectState({
+      projectId: "p1",
+      stages: [
+        { stage: 4, authorizedPrincipalIds: [OWNER5] },
+        { stage: 5, authorizedPrincipalIds: [OWNER5] },
+      ],
+    });
+    expect(state4.stage).toBe(4);
+    const state = applyDecision(
+      input(state4, OWNER5, { decisionId: "v4", kind: "audience", projectId: "p1", stage: 4, audience: "alice", decision: "proceed", at: AT }),
+    );
+    expect(state.decisions.at(-1)).toMatchObject({ decisionId: "v4", accepted: false, reason: "not_audience_stage" });
+    expect(state.audienceDecisions).toEqual({});
+  });
+
+  test("a vote for someone not on the captured stakeholder list is refused", () => {
+    const state = vote(openReview5({ quorum: 1, stakeholders: ["alice"] }), "v1", "mallory", "proceed");
+    expect(state.decisions.at(-1)).toMatchObject({ decisionId: "v1", accepted: false, reason: "unknown_audience" });
+    expect(state.audienceDecisions).toEqual({});
+  });
+
+  test("a vote before any review has captured a policy is recorded", () => {
+    // An adoption replay records its stakeholders' votes before opening the
+    // stage-5 review that captures the policy.
+    const state = vote(baseState5(), "v1", "alice", "proceed");
+    expect(state.decisions.at(-1)).toMatchObject({ decisionId: "v1", accepted: true, kind: "audience" });
+    expect(state.audienceDecisions["alice"]).toMatchObject({ decision: "proceed" });
+  });
+
   test("the latest vote per stakeholder wins", () => {
     let state = openReview5({ quorum: 1, stakeholders: ["alice"] });
     state = vote(state, "v1", "alice", "reject");
