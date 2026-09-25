@@ -110,12 +110,23 @@
   box-shadow: inset 0 2px 0 var(--primary);
 }
 
-.settings-page .row .k b .default-mark {
+.settings-page .row .k b .default-mark,
+.settings-page .row .k b .fallback-mark {
   margin-left: var(--space-2);
   font: 600 10px/1 var(--font-mono);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--primary);
+}
+
+.settings-page .row .k b .fallback-mark {
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+
+.settings-page .row .v .model-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
 }
 
 .settings-page .row.row-divider {

@@ -119,6 +119,7 @@ describe("api.providers", () => {
         // CL-8781: the selected model is the priority-first enabled offering,
         // not a pin — nothing was pinned, yet the default still resolves.
         selectedModel: "gpt-4o",
+        enabledModels: ["gpt-4o"],
       },
     ]);
     expect(listed.apiKeyProviders.map((entry) => entry.providerId)).toContain("openai");

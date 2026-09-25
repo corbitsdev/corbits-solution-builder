@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { GripVertical } from "lucide-react";
 import { api, ApiFailure, type Provider, type ResolvedCatalogRow } from "../client.js";
-import { blocksCollide, defaultProviderId, dropOn, moveBy, moveTo, sameOrder } from "./provider-order.ts";
+import { blocksCollide, dropOn, moveBy, moveTo, rankLabel, sameOrder } from "./provider-order.ts";
 import { LOCAL_DEFAULT_BASE_URL, LOCAL_PROVIDER_ID } from "../provider-catalog.js";
 import { Banner } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
@@ -140,17 +140,27 @@ export function ProviderList({
   }, [providers]);
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
-  // The default comes from the first provider in order that has an enabled
-  // model (`defaultProviderId`); the mark goes there, not blindly on row one.
-  const defaultId = manage ? defaultProviderId(order, providers) : null;
-  // Two providers connected before any order was saved share block 0, and
-  // then what the list shows first and what the catalog picks can differ.
-  // Saving the order as shown, once, gives every provider its own block.
+  // Each row is one combination, a provider and the model it tries, and the
+  // rows are the failover chain: the head is the default and is tried first,
+  // each row below is tried if the one above fails. Two things the stored
+  // catalog can drift from that are settled once, on view: providers
+  // connected before any order was saved share block 0 (so what the list
+  // shows first and what the catalog picks can differ), and a provider
+  // never chosen for still has every model enabled (so the chain would try
+  // all of them before the next row). Saving the order as shown, and
+  // restricting each such provider to the model its row shows, makes the
+  // chain exactly the list.
   const settledRef = useRef(false);
   useEffect(() => {
-    if (!manage || settledRef.current || busy !== null || providers.length < 2 || !blocksCollide(providers)) return;
+    if (!manage || settledRef.current || busy !== null || providers.length === 0) return;
+    const unrestricted = providers.filter((provider) => provider.enabledModels.length > 1 && provider.selectedModel !== null);
+    const collide = providers.length > 1 && blocksCollide(providers);
+    if (!collide && unrestricted.length === 0) return;
     settledRef.current = true;
-    void act("order", () => api.reorderProviders(providers.map((provider) => provider.id)));
+    void act("order", async () => {
+      if (collide) await api.reorderProviders(providers.map((provider) => provider.id));
+      for (const provider of unrestricted) await api.selectProviderModel(provider.id, provider.selectedModel);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [manage, providers]);
   const connectedRows = manage
@@ -185,7 +195,7 @@ export function ProviderList({
     void act(
       "order",
       () => api.reorderProviders(next),
-      head ? `${head.name} is now the default. Applies to stages that start from now on.` : "Provider order saved.",
+      head ? `${head.name} is tried first now. Applies to stages that start from now on.` : "Order saved.",
     );
   };
 
@@ -250,7 +260,7 @@ export function ProviderList({
         const asking = chosen === row.id;
         const waiting = busy === row.id && row.kind === "oauth";
         const sortable = manage && connected !== undefined && ready;
-        const isHead = sortable && defaultId === connected.id;
+        const rank = sortable ? rankLabel(order.indexOf(connected.id), connected.selectedModel !== null) : null;
         const rowClass = [
           "row",
           sortable && dragging === connected.id ? "is-dragging" : null,
@@ -299,7 +309,7 @@ export function ProviderList({
                 className="drag-handle"
                 draggable
                 aria-label={`Reorder ${row.name}`}
-                title="Drag to reorder. Arrow keys move it; Home makes it the default."
+                title="Drag to change the order tried. Arrow keys move it; Home puts it first."
                 disabled={busy !== null}
                 onDragStart={(event) => {
                   event.dataTransfer.effectAllowed = "move";
@@ -329,7 +339,8 @@ export function ProviderList({
             <div className="k">
               <b>
                 {row.name}
-                {isHead ? <em className="default-mark">Default</em> : null}
+                {rank ? <em className={rank.startsWith("Default") ? "default-mark" : "fallback-mark"}>{rank}</em> : null}
+                {sortable && !rank ? <em className="fallback-mark">No model enabled · skipped</em> : null}
               </b>
               <span>{hint}</span>
             </div>
@@ -397,38 +408,28 @@ export function ProviderList({
             ) : connected && ready ? (
               <span className="v">
                 {manage && connected.models.length > 1 ? (
+                  // The model this row tries. Choosing one restricts the
+                  // provider to it, so the chain moves on to the next row
+                  // rather than through the provider's other models.
                   <select
                     className="field"
                     aria-label={`${row.name} model`}
                     disabled={busy !== null}
-                    value={connected.selectedModel ?? ""}
+                    value={connected.selectedModel ?? connected.models[0] ?? ""}
                     onChange={(event) => {
-                      const model = event.target.value || null;
-                      void act(
-                        row.id,
-                        () => api.selectProviderModel(connected.id, model),
-                        model ? `${row.name} now uses ${model}.` : `${row.name} fails over between all models.`,
-                      );
+                      const model = event.target.value;
+                      if (!model) return;
+                      void act(row.id, () => api.selectProviderModel(connected.id, model), `${row.name} now tries ${model}.`);
                     }}
                   >
-                    <option value="">Any (fail over)</option>
                     {connected.models.map((model) => (
                       <option key={model} value={model}>
                         {model}
                       </option>
                     ))}
                   </select>
-                ) : null}
-                {manage && order[0] !== connected.id ? (
-                  <ChromeBtn
-                    kind="link"
-                    title="Move this provider to the top: new stages draft with it"
-                    disabled={busy !== null}
-                    loading={busy === "order"}
-                    onClick={() => persistOrder(moveTo(order, connected.id, 0))}
-                  >
-                    Use as default
-                  </ChromeBtn>
+                ) : manage && connected.models.length === 1 ? (
+                  <span className="model-name">{connected.models[0]}</span>
                 ) : null}
                 {manage ? (
                   <ChromeBtn

@@ -79,3 +79,14 @@ export function blocksCollide(providers: readonly OrderedProvider[]): boolean {
   }
   return false;
 }
+
+/** What a row's place in the order means, in the person's words: the head
+ *  is the default and is tried first; each row below is tried if the one
+ *  above fails. `null` for a row that has no model enabled: it is skipped. */
+export function rankLabel(position: number, hasModel: boolean): string | null {
+  if (!hasModel) return null;
+  if (position === 0) return "Default · tried first";
+  const n = position + 1;
+  const suffix = n === 2 ? "nd" : n === 3 ? "rd" : "th";
+  return `Tried ${n}${suffix} if the one above fails`;
+}
