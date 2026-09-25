@@ -391,8 +391,8 @@ export function App() {
   const [mintError, setMintError] = useState<string | null>(null);
   // The client is the installer. Once the host answers and a hub session
   // exists, the tenant is checked against the app the client ships with;
-  // missing or stale, it is installed before any screen that depends on it
-  // renders. First run and upgrade are the same call.
+  // missing, it is installed before any screen that depends on it renders;
+  // existing, it gets only what is safe to repeat (`api.upgradeWorkspace`).
   const [installed, setInstalled] = useState<"checking" | "installing" | "ready">("checking");
 
   const refresh = useCallback(async () => {
@@ -448,6 +448,8 @@ export function App() {
           setInstalled("installing");
           await api.install();
           await refresh();
+        } else {
+          await api.upgradeWorkspace();
         }
       } catch (cause) {
         // The app still opens: what is missing shows as it is met, and the
