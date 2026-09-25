@@ -24,6 +24,7 @@ import {
   ApiFailure,
   type ArtifactNode,
   type ProjectDetail,
+  type ResolvedCatalogRow,
   type StageTurn,
 } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
@@ -50,7 +51,9 @@ import { useProjectArtifacts } from "./use-project-artifacts.ts";
 import { loadQuotedDraft } from "./quote-store.js";
 import { useStageDecisions } from "./use-stage-decisions.ts";
 import { ArtifactStrip, VersionStrip } from "./artifact-strip.tsx";
-import { stageEvents } from "./stage-events.ts";
+import { stageEvents, switchEvents } from "./stage-events.ts";
+import { useModelSwitch, useModelHandoff } from "./use-model-handoff.ts";
+import { loadDismissedDefault, saveDismissedDefault } from "./model-nudge-store.ts";
 import { Stage6Panel } from "./stage6.tsx";
 import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
 import { agentFor } from "@solutions-builder/app/kit";
@@ -267,12 +270,98 @@ export function StageWorkspace({
     // `at` is the nonce; the tabs/artifacts identity is intentionally out.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusArtifact?.at]);
-  // The transcript's quiet record: boundaries, versions, decisions and
-  // aborted turns, folded in beside the mail as system lines.
+  // The transcript's quiet record: boundaries, versions, decisions, aborted
+  // turns and a model switch's own announcement, folded in beside the mail
+  // as system lines.
   const events = useMemo(
-    () => stageEvents(stage, workflowView?.decisions ?? [], detail.nodes, withdrawn.marks),
-    [stage, workflowView?.decisions, detail.nodes, withdrawn.marks],
+    () => [
+      ...stageEvents(stage, workflowView?.decisions ?? [], detail.nodes, withdrawn.marks),
+      ...switchEvents(foldedMessages),
+    ],
+    [stage, workflowView?.decisions, detail.nodes, withdrawn.marks, foldedMessages],
   );
+
+  // CL-8899: the current stage's provider/model, reporting-only (read off
+  // the live deployment's pinned source, `resolveActiveModel`) — refetched
+  // whenever the live address moves, since that's exactly when a new pin
+  // has landed, whether from an explicit switch or any other redeploy.
+  const [activeModel, setActiveModel] = useState<{ providerLabel: string; canonicalName: string } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void api.activeModel(detail.project.id, stage).then((model) => {
+      if (!cancelled) setActiveModel(model);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [detail.project.id, stage, agentAddress]);
+
+  // Fetched once the specialist exists — both the manual "Switch model"
+  // select and the default-model nudge below need it to turn a model into
+  // an offering id.
+  const [modelOptions, setModelOptions] = useState<ResolvedCatalogRow[] | null>(null);
+  useEffect(() => {
+    if (!agentAddress || modelOptions) return;
+    void api.resolvedCatalog().then(setModelOptions);
+  }, [agentAddress, modelOptions]);
+  const switchableModels = (modelOptions ?? []).filter(
+    (row) => row.chatCapable && !row.restricted && row.credentialConnected && row.offeringIds.length > 0,
+  );
+
+  const modelSwitch = useModelSwitch({ projectId: detail.project.id, stage });
+
+  // The owner's ask: opening a project whose current stage is running a
+  // model other than the workspace's current default should offer, not
+  // force, catching it up -- never a redeploy the person did not choose.
+  // `workspaceDefaultModel` is unscoped (`api.activeModel()`, no
+  // projectId/stage), the same "lowest-priority offering" read Settings'
+  // own default row uses, so this nudge and the deploy path always agree on
+  // what "the default" means. Dismissing records the default's OWN name
+  // (`model-nudge-store.ts`), so a later default change asks again rather
+  // than staying quiet forever.
+  const [workspaceDefaultModel, setWorkspaceDefaultModel] = useState<{ providerLabel: string; canonicalName: string } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void api.activeModel().then((model) => {
+      if (!cancelled) setWorkspaceDefaultModel(model);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [detail.project.id]);
+  const [nudgeDismissedFor, setNudgeDismissedFor] = useState<string | null>(null);
+  useEffect(() => {
+    setNudgeDismissedFor(loadDismissedDefault(detail.project.id, stage));
+  }, [detail.project.id, stage]);
+  const defaultOffering = workspaceDefaultModel
+    ? switchableModels.find((row) => row.canonicalName === workspaceDefaultModel.canonicalName)
+    : undefined;
+  const modelNudgeVisible =
+    !!agentAddress &&
+    !!activeModel &&
+    !!workspaceDefaultModel &&
+    !!defaultOffering &&
+    activeModel.canonicalName !== workspaceDefaultModel.canonicalName &&
+    nudgeDismissedFor !== workspaceDefaultModel.canonicalName;
+  const dismissModelNudge = () => {
+    if (!workspaceDefaultModel) return;
+    saveDismissedDefault(detail.project.id, stage, workspaceDefaultModel.canonicalName);
+    setNudgeDismissedFor(workspaceDefaultModel.canonicalName);
+  };
+  // Fires the hand-off for ANY redeploy of a stage that already has mail
+  // under a prior address — an explicit switch (above) or any other cause
+  // (restart, recovery) — never for a brand-new stage (CL-8927's own opening
+  // dispatch handles that).
+  const modelHandoff = useModelHandoff({
+    tenantId,
+    address: agentAddress,
+    addresses: agent.addresses,
+    unionMessages: foldedMessages,
+    draft: draftMessage,
+    providerLabel: activeModel?.providerLabel ?? null,
+    modelName: activeModel?.canonicalName ?? null,
+    reloadThread: loadThread,
+  });
   const decisions = useStageDecisions({
     detail,
     tenantId,
@@ -551,6 +640,66 @@ export function StageWorkspace({
           opening={openingStatement}
           draft={openingDraft}
         />
+      ) : null}
+
+      {agentAddress ? (
+        <div className="stage-model-row">
+          <span className="inline-note">
+            Model:{" "}
+            {activeModel ? `${activeModel.providerLabel} · ${activeModel.canonicalName}` : "Loading…"}
+          </span>
+          <select
+            aria-label="Switch this stage's model"
+            disabled={modelSwitch.switching}
+            value=""
+            onChange={(event) => {
+              const offeringId = event.target.value;
+              if (offeringId) void modelSwitch.switchTo(offeringId);
+            }}
+          >
+            <option value="" disabled>
+              {modelSwitch.switching ? "Switching…" : "Switch model…"}
+            </option>
+            {switchableModels.map((row) => (
+              <option key={row.offeringIds[0]} value={row.offeringIds[0]}>
+                {row.providerNames.join(", ")} · {row.displayName ?? row.canonicalName}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
+
+      {/* The owner's ask: a calm inline prompt, never a modal wall, and never
+          a redeploy without the person choosing — "Keep" just dismisses
+          (remembered per project+stage until the default moves again),
+          "Switch" runs the same switch path the manual select above uses. */}
+      {modelNudgeVisible && workspaceDefaultModel && defaultOffering ? (
+        <div className="model-nudge" role="status">
+          <span className="inline-note">
+            Your default model is now {workspaceDefaultModel.providerLabel} · {workspaceDefaultModel.canonicalName}.
+            Switch this stage to it?
+          </span>
+          <div className="model-nudge-actions">
+            <Button
+              onClick={() => {
+                dismissModelNudge();
+                void modelSwitch.switchTo(defaultOffering.offeringIds[0]!);
+              }}
+            >
+              Switch
+            </Button>
+            <Button variant="ghost" onClick={dismissModelNudge}>
+              Keep {activeModel?.canonicalName}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {modelSwitch.error ? <Banner tone="error" title="The model could not be switched">{modelSwitch.error}</Banner> : null}
+      {modelHandoff.error ? (
+        <Banner tone="error" title="The new specialist could not be told about the prior conversation">
+          {modelHandoff.error}
+        </Banner>
       ) : null}
 
       {/* Bottom right, over the canvas: always to hand, never a band of the

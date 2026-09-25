@@ -7,17 +7,36 @@ import type { ChatMessage } from "../../stage-mail.ts";
 import { answerText, segmentsIn } from "./choices.js";
 import { conversationLead, isHtmlDocument } from "./guidance.js";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
+import { matchSwitchMarker } from "./use-model-handoff.ts";
 import { COMPOSER_BOX_CLASS, CONV_SCROLL_CLASS } from "./pane-classes.ts";
+
+/** A model hand-off's `[[sb-switch:<id>]]` marker line, rendered separately
+ *  as a system boundary line (`stage-events.ts`'s `switchEvents`) — dropped
+ *  here so the bubble doesn't repeat the raw id. Gated on `author === "me"`
+ *  (the hand-off's own sender, same as `switchEvents`): a specialist-
+ *  authored message is never inspected for the marker, so nothing a
+ *  specialist writes can ever have its content stripped by this.
+ */
+function withoutSwitchMarker(message: ChatMessage): string {
+  if (message.author !== "me") return message.body;
+  const newline = message.body.indexOf("\n");
+  const firstLine = newline < 0 ? message.body : message.body.slice(0, newline);
+  if (!matchSwitchMarker(firstLine)) return message.body;
+  return newline < 0 ? "" : message.body.slice(newline + 1);
+}
 
 /** A stage-mail turn as a chat row. The specialist's long draft lives in the
  *  right pane, not here — the mockup keeps chat to short status lines. */
 function toUiMessages(messages: readonly ChatMessage[]): UiChatMessage[] {
-  return messages.map((message) => ({
-    id: message.id,
-    role: message.author === "me" ? "user" : "agent",
-    parts: [{ type: "text", text: message.author === "me" ? message.body : conversationLead(message.body) }],
-    createdAt: message.at,
-  }));
+  return messages.map((message) => {
+    const body = withoutSwitchMarker(message);
+    return {
+      id: message.id,
+      role: message.author === "me" ? "user" : "agent",
+      parts: [{ type: "text", text: message.author === "me" ? body : conversationLead(body) }],
+      createdAt: message.at,
+    };
+  });
 }
 
 /**

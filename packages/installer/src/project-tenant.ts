@@ -51,6 +51,9 @@ type StoredProject = {
   deletedAt: string | null;
   /** What the owner consented to delegate into this tenant, for audit and revocation. */
   delegation?: DelegationRecord;
+  /** CL-8899: which deployment an explicit "Switch model" chose, per stage
+   *  (keyed by stage number as a string) -- see `StageModelSwitchRecord`. */
+  modelSwitch?: Record<string, StageModelSwitchRecord>;
 };
 
 /** What the owner consented to, stored on the project tenant for audit. */
@@ -60,6 +63,29 @@ export type DelegationRecord = {
   principalId: string;
   grantedAt: string;
   grantIds: string[];
+};
+
+/**
+ * CL-8899 "Switch model": the deployment an explicit switch chose for one
+ * stage, recorded durably on the project tenant's own config -- the same
+ * read-modify-write `patchTenant` mechanism `writeDelegationRecord` already
+ * uses, not a new hub route. Durable (survives a restart) and shared (every
+ * window reads the same tenant), unlike a browser-local preference.
+ *
+ * `specialist-deploy.ts`'s deployment resolution prefers this over its
+ * default oldest-live-wins pick ONLY while `deploymentId` is still live --
+ * once the hub ends it (including a restart-driven replacement, which never
+ * itself writes this record), resolution falls back to oldest-wins exactly
+ * as before the switch ever happened, so a restart never "redirects" an
+ * active session onto stale switch intent.
+ */
+export type StageModelSwitchRecord = {
+  readonly deploymentId: string;
+  /** The offering the switch targeted -- lets a repeat "switch to the same
+   *  model" recognize it has nothing to do without a network round trip to
+   *  the asset's own pin. */
+  readonly offeringId: string;
+  readonly switchedAt: string;
 };
 
 function fromTenant(row: {
@@ -91,6 +117,7 @@ function toConfig(record: ProjectRecord, existing: Record<string, unknown> | und
     archivedAt: record.archivedAt?.toISOString() ?? null,
     deletedAt: record.deletedAt?.toISOString() ?? null,
     ...(prior?.delegation !== undefined ? { delegation: prior.delegation } : {}),
+    ...(prior?.modelSwitch !== undefined ? { modelSwitch: prior.modelSwitch } : {}),
   };
   return { ...(existing ?? {}), [CONFIG_KEY]: stored };
 }
@@ -156,6 +183,40 @@ export async function writeDelegationRecord(
   if (!stored) throw notFound("That project");
   await patchTenant(transport, projectId, {
     config: { ...(tenant.config ?? {}), [CONFIG_KEY]: { ...stored, delegation: record } },
+  });
+}
+
+/** The stage's explicitly-switched-to deployment, or null when the stage
+ *  has never been switched (or the project has no config yet). */
+export async function readStageSwitch(
+  transport: Transport,
+  projectId: string,
+  stage: number,
+): Promise<StageModelSwitchRecord | null> {
+  const tenant = await getTenant(transport, projectId);
+  const stored = tenant?.config?.[CONFIG_KEY] as StoredProject | undefined;
+  return stored?.modelSwitch?.[String(stage)] ?? null;
+}
+
+/** Records an explicit switch's target; read-modify-write like every config
+ *  change (`writeDelegationRecord`'s pattern) -- a plain last-write-wins on
+ *  the tenant's config, which is fine here: `switchSpecialistDeployment`
+ *  serializes callers per project+stage itself, so this is never raced from
+ *  two switches at once within one process, and two processes racing here
+ *  is no worse than two processes racing to deploy in the first place. */
+export async function writeStageSwitch(
+  transport: Transport,
+  projectId: string,
+  stage: number,
+  record: StageModelSwitchRecord,
+): Promise<void> {
+  const tenant = await getTenant(transport, projectId);
+  if (!tenant) throw notFound("That project");
+  const stored = (tenant.config?.[CONFIG_KEY] as StoredProject | undefined) ?? null;
+  if (!stored) throw notFound("That project");
+  const modelSwitch = { ...(stored.modelSwitch ?? {}), [String(stage)]: record };
+  await patchTenant(transport, projectId, {
+    config: { ...(tenant.config ?? {}), [CONFIG_KEY]: { ...stored, modelSwitch } },
   });
 }
 

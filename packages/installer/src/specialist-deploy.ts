@@ -24,7 +24,7 @@ import {
 } from "@solutions-builder/app/specialist-source";
 import { ensureWorkflowArtifactsCredential } from "./artifacts-credential.js";
 import { assetsFor, catalogFor, getTenant, readWorkflowSourceBlob, workflowsFor, type HubDeployment } from "./hub.js";
-import { readProject } from "./project-tenant.js";
+import { readProject, readStageSwitch, writeStageSwitch } from "./project-tenant.js";
 import {
   appMemberFiles,
   artifactsMemberFiles,
@@ -92,6 +92,16 @@ const ENDED_DEPLOYMENT_STATUSES = new Set(["releasing", "released", "failed"]);
  * (non-ended) deployment over an ended one, then the oldest `createdAt` --
  * the first one ever deployed for this asset, so a later duplicate never
  * displaces the address callers already have.
+ *
+ * This is the DEFAULT resolution, not the whole story once CL-8899's
+ * "switch model" exists: `resolveLiveDeployment` below layers the durable,
+ * explicit switch target over this, and every caller that means "the
+ * deployment mail should route to right now" (`stageSpecialistStatus`,
+ * `ensureSpecialistDeploymentOnce`'s own existing-check) goes through that,
+ * not this function directly. This stays oldest-wins so a restart-driven
+ * replacement deployment -- which never touches the switch record -- is
+ * picked exactly as it always was, with no special-casing for CL-8899 at
+ * this layer at all.
  */
 function pickDeployment(deployments: readonly HubDeployment[]): HubDeployment | undefined {
   return [...deployments].sort((a, b) => {
@@ -100,6 +110,34 @@ function pickDeployment(deployments: readonly HubDeployment[]): HubDeployment | 
     if (aLive !== bLive) return aLive ? -1 : 1;
     return a.createdAt.localeCompare(b.createdAt);
   })[0];
+}
+
+/**
+ * CL-8899 "Switch model": the deployment this asset's mail should actually
+ * route to. Prefers the project tenant's durably-recorded explicit switch
+ * target (`StageModelSwitchRecord`, `project-tenant.ts`) while it is still
+ * live; otherwise falls back to the default `pickDeployment` (oldest-wins).
+ *
+ * The switch record is written ONLY by `switchSpecialistDeployment` below,
+ * on a person's explicit choice -- never by an ordinary deploy, and never by
+ * a restart-driven replacement. So once a switch's target deployment ends
+ * (the hub replaces it for any reason, including a restart recovery), this
+ * silently reverts to oldest-wins exactly as if no switch had ever happened
+ * -- a restart never "redirects" an active session onto stale switch
+ * intent, because nothing here treats a dead switch target as special.
+ */
+async function resolveLiveDeployment(
+  transport: Transport,
+  projectId: string,
+  stage: Stage,
+  deployments: readonly HubDeployment[],
+): Promise<HubDeployment | undefined> {
+  const switched = await readStageSwitch(transport, projectId, stage);
+  if (switched) {
+    const target = deployments.find((deployment) => deployment.id === switched.deploymentId);
+    if (target && !ENDED_DEPLOYMENT_STATUSES.has(target.status)) return target;
+  }
+  return pickDeployment(deployments);
 }
 
 export type SpecialistDeploymentRef = { readonly stage: Stage; readonly deploymentId: string };
@@ -149,9 +187,11 @@ export type SpecialistDeploymentStatus = SpecialistDeployment & { readonly statu
  * deployed to -- unlike `stageSpecialistStatus`, this does NOT narrow to the
  * live pick (`pickDeployment`): a released or failed deployment's address
  * still received mail while it was live, and that mail is part of the
- * stage's conversation. A caller merges reads across the whole list; a send
- * still goes to the current live address alone (`stageSpecialistStatus`).
- * Empty when the asset does not exist yet or the tenant has no domain.
+ * stage's conversation (CL-8927; also what CL-8899's "switch model" hand-off
+ * needs to tell a fresh, history-less deployment from a genuinely new
+ * stage). A caller merges reads across the whole list; a send still goes to
+ * the current live address alone (`stageSpecialistStatus`). Empty when the
+ * asset does not exist yet or the tenant has no domain.
  */
 export async function stageSpecialistAddresses(
   transport: Transport,
@@ -174,12 +214,14 @@ export async function stageSpecialistAddresses(
 
 /**
  * Re-lists `projectId`'s stage-`stage` asset's deployments and picks the live
- * one (`pickDeployment`), without deploying anything -- CL-8654: two sessions
- * opening the same stage within milliseconds can each deploy, leaving one
- * deployment `released` and the other live for the same asset. A caller
- * holding an `ensureStageAgent` result from before that resolved uses this to
- * notice its memoised deployment id is no longer the live pick. Null when the
- * asset does not exist yet -- the specialist has never been deployed.
+ * one (`resolveLiveDeployment` -- an explicit switch target while live, else
+ * `pickDeployment`'s oldest-wins), without deploying anything -- CL-8654: two
+ * sessions opening the same stage within milliseconds can each deploy,
+ * leaving one deployment `released` and the other live for the same asset. A
+ * caller holding an `ensureStageAgent` result from before that resolved uses
+ * this to notice its memoised deployment id is no longer the live pick. Null
+ * when the asset does not exist yet -- the specialist has never been
+ * deployed.
  */
 export async function stageSpecialistStatus(
   transport: Transport,
@@ -197,7 +239,7 @@ export async function stageSpecialistStatus(
   const deployments = (await workflowsFor(transport, workspaceTenantId).deployments()).filter(
     (deployment) => deployment.definitionAssetId === asset.id,
   );
-  const winner = pickDeployment(deployments);
+  const winner = await resolveLiveDeployment(transport, projectId, stage, deployments);
   if (!winner) return null;
   return { deploymentId: winner.id, address: `${winner.id}@${tenant.domain}`, status: winner.status };
 }
@@ -353,6 +395,12 @@ async function ensureSpecialistDeploymentOnce(
   artifactTools: boolean,
   roleKey: string,
   role: AgentRole,
+  /** CL-8899 "Switch model": when set, names the offering the new deployment
+   *  must lead with, and forces a fresh deploy even though a live deployment
+   *  already exists on this asset -- the two early "already live" returns
+   *  below both skip when this is set. Undefined for every existing caller,
+   *  which keeps their deploy-once-per-asset behavior unchanged. */
+  switchToOfferingId: string | undefined,
 ): Promise<SpecialistDeployment> {
   if (!sidecar.canPlaceSidecars) {
     throw new Error("no host is placing sidecars; cannot deploy a stage specialist");
@@ -369,8 +417,8 @@ async function ensureSpecialistDeploymentOnce(
   const workflows = workflowsFor(transport, workspaceTenantId);
   const matching = (deployments: readonly HubDeployment[]) =>
     deployments.filter((deployment) => deployment.definitionAssetId === assetId);
-  const existing = pickDeployment(matching(await workflows.deployments()));
-  if (existing && (await deploymentIsLive(transport, workspaceTenantId, existing.id))) {
+  const existing = await resolveLiveDeployment(transport, projectId, stage, matching(await workflows.deployments()));
+  if (!switchToOfferingId && existing && (await deploymentIsLive(transport, workspaceTenantId, existing.id))) {
     return { deploymentId: existing.id, address: `${existing.id}@${tenant.domain}` };
   }
 
@@ -382,13 +430,22 @@ async function ensureSpecialistDeploymentOnce(
   // delegation re-check) is picked up without redeploying, and the pin here
   // never constrains what the specialist runs. A post-deploy priority reorder
   // still needs a redeploy (stored id order).
-  const catalog = catalogFor(transport, workspaceTenantId);
-  const offerings = (await catalog.offerings())
+  const catalogOfferings = (await catalogFor(transport, workspaceTenantId).offerings())
     .filter((offering) => !offering.disabled)
     .sort((a, b) => a.priority - b.priority);
-  if (offerings.length === 0) {
+  if (catalogOfferings.length === 0) {
     throw new Error("connect a model provider before deploying a stage specialist");
   }
+  // A switch reorders the chain so the chosen offering leads -- the same
+  // `sourceOfferingIds`/`defaultSourceOfferingId` story every other deploy
+  // uses, just with the person's pick standing in for "offerings[0]".
+  const offerings = switchToOfferingId
+    ? (() => {
+        const chosen = catalogOfferings.find((offering) => offering.id === switchToOfferingId);
+        if (!chosen) throw new Error("the chosen model is no longer a connected offering");
+        return [chosen, ...catalogOfferings.filter((offering) => offering.id !== switchToOfferingId)];
+      })()
+    : catalogOfferings;
   const source = await sourceFor(transport, workspaceTenantId, offerings[0]!);
   if (!source) {
     throw new Error("the tenant's offering does not resolve to a known model");
@@ -406,7 +463,7 @@ async function ensureSpecialistDeploymentOnce(
     assetId,
     assetName,
     { ...rendered },
-    `Deploy stage ${stage} specialist`,
+    switchToOfferingId ? `Switch stage ${stage} specialist model` : `Deploy stage ${stage} specialist`,
     gitPush,
   );
 
@@ -421,10 +478,14 @@ async function ensureSpecialistDeploymentOnce(
   // Rendering and pushing the source above takes long enough for a
   // concurrent caller to have deployed onto this asset meanwhile; re-check
   // once more right before deploying so we don't create a second live
-  // deployment for the same asset.
-  const justDeployed = pickDeployment(matching(await workflows.deployments()));
-  if (justDeployed && (await deploymentIsLive(transport, workspaceTenantId, justDeployed.id))) {
-    return { deploymentId: justDeployed.id, address: `${justDeployed.id}@${tenant.domain}` };
+  // deployment for the same asset. Skipped for a switch: a live deployment
+  // existing here is expected (the one being switched away from), not a race
+  // to fold into.
+  if (!switchToOfferingId) {
+    const justDeployed = await resolveLiveDeployment(transport, projectId, stage, matching(await workflows.deployments()));
+    if (justDeployed && (await deploymentIsLive(transport, workspaceTenantId, justDeployed.id))) {
+      return { deploymentId: justDeployed.id, address: `${justDeployed.id}@${tenant.domain}` };
+    }
   }
 
   // CL-8783 verdict: specialists deploy via the allocation path, NOT
@@ -445,8 +506,15 @@ async function ensureSpecialistDeploymentOnce(
 
   // A concurrent caller may have deployed onto this asset in the meantime;
   // re-resolve so every caller lands on the same, deterministically-chosen
-  // deployment rather than each keeping the one it happened to create.
-  const winner = pickDeployment(matching(await workflows.deployments())) ?? deployment;
+  // deployment rather than each keeping the one it happened to create. Not
+  // for a switch: `resolveLiveDeployment`'s oldest-wins fallback would pick
+  // the deployment being switched AWAY from (it's older and still live) --
+  // the switch record that would override that isn't written until the
+  // caller (`switchSpecialistDeployment`) gets this result back, so the
+  // deployment this call itself just created is unambiguously the answer.
+  const winner = switchToOfferingId
+    ? deployment
+    : ((await resolveLiveDeployment(transport, projectId, stage, matching(await workflows.deployments()))) ?? deployment);
 
   // CL-8719: the credential the winning deployment's `credentialBindings`
   // names must exist -- and be scoped to the winning anchor run -- before
@@ -501,6 +569,7 @@ export async function ensureSpecialistDeployment(
       artifactTools,
       roleKey,
       role,
+      undefined,
     );
   try {
     return await attempt();
@@ -508,4 +577,112 @@ export async function ensureSpecialistDeployment(
     if (cause instanceof ApiError && cause.status === 409) return await attempt();
     throw cause;
   }
+}
+
+/** In-flight/queued `switchSpecialistDeployment` calls, keyed
+ *  `${projectId}:${stage}:${roleKey}` -- see that function's doc comment. */
+const switchQueues = new Map<string, Promise<unknown>>();
+
+/**
+ * Runs `work` after every earlier call queued under the same `key` has
+ * settled, so two rapid switches for the same project+stage+role never race
+ * each other's read-decide-push-deploy-record sequence. The queue is a
+ * plain chain (not a lock with a release): a call joins the tail, runs once
+ * every prior entry has settled (success or failure), and its own
+ * completion becomes the new tail. Because each call re-reads the durable
+ * switch record (`readStageSwitch`) only once it actually starts, the LAST
+ * call queued is the last to decide anything and the one whose choice ends
+ * up recorded -- "the latest selection wins" falls out of queue order
+ * rather than needing its own comparison.
+ */
+function serialize<T>(key: string, work: () => Promise<T>): Promise<T> {
+  const prior = switchQueues.get(key) ?? Promise.resolve();
+  const settled = prior.then(work, work);
+  switchQueues.set(
+    key,
+    settled.then(
+      () => undefined,
+      () => undefined,
+    ),
+  );
+  return settled;
+}
+
+/**
+ * CL-8899 "Switch model": deploys a NEW specialist for `projectId`'s
+ * stage-`stage` asset whose inference chain leads with `offeringId`, even
+ * though a live deployment already exists on that asset -- a stage
+ * specialist's chain is frozen at deploy (`sourceOfferingIds`), so moving it
+ * onto a different offering is a new deployment, never a live rebind.
+ *
+ * The hub cannot stop the old deployment's run (INTR-454), so it stays live;
+ * what makes every subsequent reader of this asset (`stageSpecialistStatus`,
+ * `ensureSpecialistDeployment`'s own existing-check, `useStageAgent`'s poll)
+ * converge on the new one is the durable switch record this writes on
+ * success (`writeStageSwitch`, on the project tenant's own config --
+ * `resolveLiveDeployment` is what every reader consults), not a change to
+ * the default oldest-wins pick itself.
+ *
+ * Two callers for the same project+stage+role are serialized (`serialize`
+ * above) so a rapid double-switch (a slow click landing twice, two tabs)
+ * never races the read-decide-deploy-record sequence; whichever call was
+ * queued last is the one that runs last and whose record sticks. A repeat
+ * switch to the offering already recorded as live is a no-op -- it neither
+ * redeploys nor rewrites the record's timestamp.
+ */
+export async function switchSpecialistDeployment(
+  transport: Transport,
+  sidecar: SidecarCapability,
+  closure: ClosureSource,
+  gitPush: WorkflowGitPush,
+  workspaceTenantId: string,
+  projectId: string,
+  stage: Stage,
+  hubOrigin: string,
+  offeringId: string,
+  artifactTools = false,
+  roleKey: string = DEFAULT_ROLE_KEY,
+  role: AgentRole = agentFor(stage),
+): Promise<SpecialistDeployment> {
+  return serialize(`${projectId}:${stage}:${roleKey}`, async () => {
+    const recorded = await readStageSwitch(transport, projectId, stage);
+    if (recorded && recorded.offeringId === offeringId) {
+      const status = await stageSpecialistStatus(transport, workspaceTenantId, projectId, stage, roleKey);
+      // `resolveLiveDeployment` (inside `stageSpecialistStatus`) only
+      // returns the recorded target while it's still live, so this check
+      // both confirms the offering matches AND that there is nothing to do.
+      if (status && status.deploymentId === recorded.deploymentId) {
+        return { deploymentId: status.deploymentId, address: status.address };
+      }
+    }
+
+    const attempt = () =>
+      ensureSpecialistDeploymentOnce(
+        transport,
+        sidecar,
+        closure,
+        gitPush,
+        workspaceTenantId,
+        projectId,
+        stage,
+        hubOrigin,
+        artifactTools,
+        roleKey,
+        role,
+        offeringId,
+      );
+    let result: SpecialistDeployment;
+    try {
+      result = await attempt();
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 409) result = await attempt();
+      else throw cause;
+    }
+    await writeStageSwitch(transport, projectId, stage, {
+      deploymentId: result.deploymentId,
+      offeringId,
+      switchedAt: new Date().toISOString(),
+    });
+    return result;
+  });
 }

@@ -2900,7 +2900,9 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 }
 
 .stage-view > .banner,
-.stage-view > .stage-gate {
+.stage-view > .stage-gate,
+.stage-view > .stage-model-row,
+.stage-view > .model-nudge {
   flex: none;
 }
 
@@ -2937,6 +2939,34 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 
 .target-picker.target-chosen > p {
   margin: 0;
+}
+
+/* CL-8899: the model report/switch and the "default moved" nudge — calm
+   inline rows, not banners, so a routine "here's the model" line doesn't
+   read as a warning. */
+.stage-model-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-4);
+}
+
+.model-nudge {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  margin: 0 var(--space-4);
+  border: 1px solid var(--wb-border);
+  border-radius: 8px;
+  background: var(--wb-card);
+}
+
+.model-nudge-actions {
+  display: flex;
+  gap: var(--space-2);
 }
 
 /* KEEP: stage-view cards + stage-conversation bounds (conv) */
