@@ -46,6 +46,12 @@ export type ReplyPairing = {
  *
  * An agent message that arrives with nothing queued (the stage's opening
  * reply, or an unsolicited message) answers nothing and is never paired.
+ *
+ * FIFO holds only while every delivered person turn gets exactly one reply
+ * and `messages` is the whole thread. A turn that never reaches the agent but
+ * still has a Sent row (#61), or a thread read back cut unevenly by the
+ * mailbox's page size, shifts every later pairing by one. Pairing by the
+ * trigger's own message id is #62.
  */
 export function pairReplies(messages: readonly ChatMessage[]): ReplyPairing {
   const queue: ChatMessage[] = [];
