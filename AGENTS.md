@@ -41,10 +41,24 @@ turns here start with one of these being assumed rather than checked.
 No script enforces these today; review does. If you need to break one, say so
 and why, rather than routing around it.
 
-- **One state machine.** `packages/solutions-builder/src/ledger.ts` is the contract.
-  `packages/solutions-builder/src/guard.ts` is the only place it is enforced. The
-  workflow definition in the app package (`packages/solutions-builder/src/workflows/`,
-  `admit.ts`) is the only place a run's state is written.
+- **One state machine.** A project's `ProjectState` (stage, reviews,
+  decisions, freeze, requirements, stakeholder votes) is written only by its
+  project workflow (`packages/solutions-builder/src/project-workflow/`):
+  `initProjectState` builds the first state, and `applyDecision` in
+  `project-workflow/contracts.ts`, the reducer the workflow's `apply` step
+  runs, produces every later one. That reducer and its `stageRules` are the
+  authority on a transition; a decision it refuses is never applied, and a
+  client that checks one of its rules first only explains it. The client
+  alone gates three things today: stage 6's Stack check before the plan is
+  approved, stage 8's requirement that a build archive be published before a
+  review opens, and stage 9's final approval, sent only after the delivery
+  tool call is approved. The project record (title, stakeholder policy,
+  archive and delete marks) is not `ProjectState` and is written through the
+  installer (`packages/installer/src/project-tenant.ts`); a stage 5 review
+  captures the stakeholder policy into `ProjectState` when it opens.
+  `packages/solutions-builder/src/ledger.ts` names the stages, authorities and
+  transition rows that the installer's roles and authority grants and the
+  client's stakeholder roles read; it enforces nothing.
 - **The app package depends on nothing in the apps.** `packages/solutions-builder/src/`
   imports only the workflow authoring surface and the platform's types.
 - **Only the host runtime touches a provider** or an agent runtime:
