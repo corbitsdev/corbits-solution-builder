@@ -174,6 +174,22 @@ describe("provider and catalog row language", () => {
     expect(source).not.toContain("provider-row");
   });
 
+  test("connected providers are one draggable list, head marked as the default, unconnected set off beneath", async () => {
+    const source = await Bun.file(new URL("./providers.tsx", import.meta.url)).text();
+    expect(source).toContain('className="drag-handle"');
+    expect(source).toContain("draggable");
+    expect(source).toContain('aria-label={`Reorder ${row.name}`}');
+    expect(source).toContain('<em className="default-mark">Default</em>');
+    expect(source).toContain('className="row row-divider"');
+    // Every way of ordering reduces to the same persisted order: drag, keys, and Use as default.
+    expect(source).toContain("persistOrder(dropOn(order, dragging, connected.id))");
+    expect(source).toContain("persistOrder(moveBy(order, connected.id, -1))");
+    expect(source).toContain("persistOrder(moveTo(order, connected.id, 0))");
+    expect(source).toContain("api.reorderProviders(next)");
+    const page = await Bun.file(new URL("./settings.tsx", import.meta.url)).text();
+    expect(page).toContain("From the provider at the top of the connected list");
+  });
+
   test("catalog keeps its actions as row .v links off this page", async () => {
     const source = await Bun.file(new URL("./providers.tsx", import.meta.url)).text();
     const page = await Bun.file(new URL("./settings.tsx", import.meta.url)).text();
