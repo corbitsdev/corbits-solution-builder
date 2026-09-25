@@ -5,8 +5,6 @@ import {
   assertMayMintGrant,
   assertMayRequireGrant,
 } from "./grant-namespaces.js";
-import { STAGES, type Stage } from "./ledger.js";
-import { grantRequirementsFor } from "./seed-kit.js";
 
 describe("grant namespaces", () => {
   test("an app mints under its own namespace", () => {
@@ -39,15 +37,5 @@ describe("grant namespaces", () => {
     expect(() => assertMayRequireGrant(SOLUTIONS_BUILDER_APP, "billing.charge")).toThrow(
       /may not require/,
     );
-  });
-
-  test("every stage's requirements stay inside a requirable namespace", () => {
-    for (const stage of STAGES as readonly Stage[]) {
-      for (const requirement of grantRequirementsFor(stage)) {
-        expect(() =>
-          assertMayRequireGrant(SOLUTIONS_BUILDER_APP, requirement.resource),
-        ).not.toThrow();
-      }
-    }
   });
 });

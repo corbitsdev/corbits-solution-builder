@@ -24,7 +24,7 @@ export type PlatformSkill = {
   readonly description: string;
   /** The document body — the kit's `instructions`, the SKILL.md's content. */
   readonly body: string;
-  /** The kit tools a carrying role gains; knowledge skills need to read inputs only. */
+  /** Tools the carrying role is deployed with. Knowledge skills list none: they are read, not called. */
   readonly tools: readonly string[];
 };
 
@@ -33,31 +33,31 @@ export const PLATFORM_SKILLS: readonly PlatformSkill[] = [
     key: "what-is-interchange",
     description: "What Interchange is: the hub, tenants, principals and grants, workflows and runs, agents deployed as workflow definitions, sidecars, assets, credentials.",
     body: whatIsInterchange,
-    tools: ["artifact-read"],
+    tools: [],
   },
   {
     key: "corbits-packages",
     description: "Reusable Corbits packages and solutions: the corbitsdev catalog, distinct from the Interchange platform.",
     body: corbitsPackages,
-    tools: ["artifact-read"],
+    tools: [],
   },
   {
     key: "using-interchange",
     description: "How to get and use the @intx/* packages — npm tags versus vendoring faremeter/interchange — and the workflow authoring surface, with an example.",
     body: usingInterchange,
-    tools: ["artifact-read", "plan-validate"],
+    tools: [],
   },
   {
     key: "using-corbits-packages",
     description: "How to install the @corbits/* packages — git dependencies, not npm — and how the unpublished workbench packages are vendored.",
     body: usingCorbitsPackages,
-    tools: ["artifact-read"],
+    tools: [],
   },
   {
     key: "designing-on-interchange",
     description: "How to shape a deliverable on the platform: the three shapes, agents as workflows, skills tools and directors as assets, apps as clients of the hub.",
     body: designingOnInterchange,
-    tools: ["artifact-read", "plan-validate"],
+    tools: [],
   },
 ];
 
