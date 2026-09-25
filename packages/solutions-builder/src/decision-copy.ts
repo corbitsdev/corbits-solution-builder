@@ -24,8 +24,8 @@ export const STATE_CONSEQUENCE: Record<string, string> = {
 };
 
 /**
- * The stage-to-authority mapping: pure and stage-only, so both the hub (guard
- * inputs) and the client (the decision-queue fold) apply the identical rule.
+ * The stage-to-authority mapping: pure and stage-only, so every reader
+ * (the decision-queue fold, the project view) applies the identical rule.
  */
 export function requiredAuthorityFor(stage: number): import("./ledger.js").Authority {
   if (stage === 7) return "budget_approver";

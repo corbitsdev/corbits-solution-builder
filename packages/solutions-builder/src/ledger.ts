@@ -1,9 +1,10 @@
 /**
  * The sole transition ledger — BUILD_PLAN_V3 section 7.
  *
- * This file is the single machine-readable contract. Command guards, UI
- * labels and transition tests all consume it. A second handwritten state
- * machine anywhere in the tree is a defect.
+ * This file names the stages, commands and authorities that UI labels and
+ * authority grants read. It enforces nothing: a project's transitions are
+ * enforced by its project workflow's reducer (`project-workflow/contracts.ts`),
+ * and a second handwritten state machine anywhere else is a defect.
  */
 
 export const RUN_KINDS = ["stage", "build"] as const;
@@ -27,8 +28,8 @@ export const STAGE_TITLES: Readonly<Record<Stage, string>> = {
 
 /**
  * Run states. `stage` runs and `build` runs share this union but never share a
- * value: a state belongs to exactly one kind, which is what lets the guard
- * reject mismatched routing without a second lookup.
+ * value: a state belongs to exactly one kind, so a reader can tell the kinds
+ * apart without a second lookup.
  */
 export const STAGE_STATES = [
   "in_progress",
@@ -57,17 +58,6 @@ export const BUILD_STATES = [
 export type BuildState = (typeof BUILD_STATES)[number];
 
 export type RunState = StageState | BuildState;
-
-/** States no command may leave. Terminal build runs never reactivate. */
-export const TERMINAL_STATES = [
-  "approved_frozen",
-  "failed",
-  "cancelled",
-  "delivered",
-  "archived",
-  "deleted",
-  "evidence_accepted",
-] as const satisfies readonly RunState[];
 
 export const COMMANDS = [
   "project.create",
@@ -130,7 +120,7 @@ export type Transition = {
    */
   readonly to: { readonly kind: RunKind; readonly state: RunState } | null;
   readonly authority: readonly Authority[];
-  /** Preconditions in prose, mirrored one-to-one by `guard.ts`. */
+  /** Preconditions in prose. */
   readonly preconditions: readonly string[];
   /** What durably exists after the command commits. */
   readonly effects: readonly string[];
@@ -561,31 +551,6 @@ export const LEDGER: readonly Transition[] = [
   },
 ];
 
-/** `build.freeze` a second time for the same source is rejected, not queued. */
-export const FORBIDDEN: readonly {
-  readonly command: Command;
-  readonly when: string;
-  readonly reason: string;
-}[] = [
-  {
-    command: "build.freeze",
-    when: "a frozen packet already exists for the same run source",
-    reason:
-      "Re-freeze creates a new linked version only through a routed re-approval of stages 6 and 7.",
-  },
-  {
-    command: "stage.approve",
-    when: "the run is at stage 7",
-    reason: "Stage 7 leaves waiting_approval through cost.approve, then build.freeze.",
-  },
-  {
-    command: "build.answer",
-    when: "the waiting request did not originate from a queued attempt of this run",
-    reason:
-      "build.answer resumes the same queued-origin attempt; it never creates one or changes origin.",
-  },
-];
-
 /**
  * `project.delete` is deliberately outside `LEDGER`: it acts on a project, not
  * on a run, and project status is a projection of stage runs rather than a
@@ -601,6 +566,3 @@ export const PROJECT_DELETE = {
   effects: ["tombstone", "sink receipts", "deletion audit"],
 };
 
-export function isTerminal(state: RunState): boolean {
-  return (TERMINAL_STATES as readonly RunState[]).includes(state);
-}
