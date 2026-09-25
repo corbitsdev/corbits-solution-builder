@@ -144,5 +144,8 @@
   "trustedDependencies": [
     "@corbits/react-ui",
     "@corbits/mailbox"
-  ]
+  ],
+  "patchedDependencies": {
+    "@intx/inference@0.4.0": "patches/@intx%2Finference@0.4.0.patch"
+  }
 }

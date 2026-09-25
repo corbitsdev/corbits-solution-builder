@@ -1,0 +1,30 @@
+diff --git a/dist/providers/anthropic.js b/dist/providers/anthropic.js
+index 8ff9e4b54d98a7454c519c9811a710b21e1c6087..c21dd15129d002f5e35a080dd8cee9b9f09d26ea 100644
+--- a/dist/providers/anthropic.js
++++ b/dist/providers/anthropic.js
+@@ -48,7 +48,9 @@ function buildRequest(messages, model, options) {
+         : systemText || undefined;
+     const body = {
+         model,
+-        max_tokens: options.maxTokens ?? 4096,
++        // Local patch (corbits-solution-builder#45): 4096 left no room for a
++        // reply once adaptive thinking spent the cap. Drop with faremeter/interchange#194.
++        max_tokens: options.maxTokens ?? 32000,
+         messages: conversationMessages.map((msg, i) => {
+             // Place a cache breakpoint on the last user message so all prior
+             // turns are cached on the next request.
+diff --git a/dist/providers/openai.js b/dist/providers/openai.js
+index 12e8b9a199ae06a06db18c4ff2c4084fa46c03ca..2e84e4a68adce60c5ddc8ef25ee9972f9aba9405 100644
+--- a/dist/providers/openai.js
++++ b/dist/providers/openai.js
+@@ -44,7 +44,9 @@ function buildRequest(messages, model, options, quirks) {
+     const convertedMessages = messages.flatMap((msg) => toOpenAIMessage(msg, quirks.forceAssistantReasoningContent));
+     const body = {
+         model,
+-        [quirks.maxTokensField]: options.maxTokens ?? 4096,
++        // Local patch (corbits-solution-builder#45): 4096 left no room for a
++        // reply once reasoning spent the cap. Drop with faremeter/interchange#194.
++        [quirks.maxTokensField]: options.maxTokens ?? 32000,
+         messages: convertedMessages,
+         stream: true,
+     };

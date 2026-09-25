@@ -269,3 +269,49 @@ no migration). An unregistered key fails at deploy admission. Tests in
 
 **Kill date.** 2026-10-16. Tracked as
 INTR-583.
+
+## `@intx/inference@0.4.0` (npm, not vendored) — default output cap 4096 → 32000
+
+**Why.** #45: a stage specialist's step names no output cap, so every call
+goes out with its adapter's default `max_tokens: 4096`. On `claude-sonnet-5`
+adaptive thinking counts against that cap, and a turn that reasons past it
+ends with a thinking block and no text: no reply mail, the run never parks,
+and the stage sits on "Working on it…" until the supervisor's backstop. The
+proper fix is a per-step cap, which needs `faremeter/interchange#194`
+(per-call inference options), still open and unreleased. Vendoring
+`@intx/agent` and `@intx/inference` to carry it was judged too large for the
+size of the problem.
+
+**What changed.** A `bun patch` (`patches/@intx%2Finference@0.4.0.patch`,
+wired through `patchedDependencies` in the root `package.json`) changes the
+fallback cap in the two adapters that hardcode one: `options.maxTokens ?? 4096`
+becomes `?? 32000` in `dist/providers/anthropic.js` and
+`dist/providers/openai.js` (which also serves `openai-compatible`: xAI, the
+xAI OAuth proxy, OpenRouter, OpenCode Zen, local endpoints). An explicit
+`maxTokens` still wins. `google-genai` and `openai-responses` (Codex) send no
+cap unless one is set and are not touched.
+
+**Where it takes effect.** The request is built by the adapters of the
+sidecar's own installed `@intx/inference`: the workflow child builds its
+adapter registry from it (`apps/sidecar/src/workflow-substrate-factory.ts`,
+`loadAdapterRegistry`) and hands it to every step agent. The copy packed into
+a deployment's closure is loaded but never builds a request. So the patch
+applies after `bun install` once the host's sidecar processes are restarted,
+to already-deployed specialists as well, and a checkout installed before the
+patch keeps 4096 whatever it deploys.
+
+**Known cost.** A model whose own output limit is below 32000 now refuses an
+uncapped call instead of answering at 4096. Among the seeded models that is
+OpenAI's `gpt-4o` and `gpt-4o-mini` (16,384) and `gpt-4-turbo` (4,096), which
+return HTTP 400 on `max_completion_tokens` above their limit; they remain
+selectable, though none is the default. The same applies to an
+OpenAI-compatible server whose context or output limit is below 32000. No
+seeded Anthropic model allows less than 64,000.
+
+**Upstream-able.** No — upstream's answer is `#194`, not a larger default.
+
+**Removal.** When an `@intx/inference` release includes `#194`, bump the
+dependency, set per-role caps on the specialist step, and drop the patch file,
+the `patchedDependencies` entry and this section.
+
+**Kill date.** When `faremeter/interchange#194` is released; tracked as #45.
