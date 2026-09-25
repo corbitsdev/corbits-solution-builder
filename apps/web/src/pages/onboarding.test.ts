@@ -31,6 +31,7 @@ const readyProvider: Provider = {
   validatedAt: null,
   selectedModel: "claude",
   enabledModels: ["claude"],
+  selectedOfferingId: null,
 };
 
 function props(overrides: Partial<Parameters<typeof Onboarding>[0]> = {}) {

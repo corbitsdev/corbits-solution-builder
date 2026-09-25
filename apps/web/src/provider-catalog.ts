@@ -61,6 +61,9 @@ export type ListedProvider = {
   /** The models the provider is allowed to try, in priority order; one once
    *  the person has chosen, every servable one before that. */
   enabledModels: string[];
+  /** The offering the provider tries first (its selected model), or null when
+   *  none is enabled: what a stage switches onto to run this row. */
+  selectedOfferingId: string | null;
 };
 
 export const API_KEY_CONNECT_OPTIONS: ReadonlyArray<{
@@ -192,6 +195,7 @@ function toListedProvider(
       const modelRow = modelRows.find((entry) => entry.id === offering.modelId);
       const canonicalName = modelRow?.canonicalName ?? "";
       return {
+        offeringId: offering.id,
         canonicalName,
         priority: offering.priority,
         disabled: offering.disabled,
@@ -219,6 +223,7 @@ function toListedProvider(
     validatedAt: credentialRow?.updatedAt ?? null,
     selectedModel: selectedModelOf(models),
     enabledModels: models.filter((entry) => !entry.disabled).map((entry) => entry.canonicalName),
+    selectedOfferingId: models.filter((entry) => !entry.disabled).sort((a, b) => a.priority - b.priority)[0]?.offeringId ?? null,
   };
 }
 

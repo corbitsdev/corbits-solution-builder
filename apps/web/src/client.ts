@@ -270,6 +270,7 @@ export type Provider = {
   validatedAt: string | null;
   selectedModel: string | null;
   enabledModels: string[];
+  selectedOfferingId: string | null;
 };
 
 export type Wait = {
