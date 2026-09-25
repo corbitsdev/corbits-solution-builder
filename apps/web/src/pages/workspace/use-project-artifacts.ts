@@ -182,7 +182,12 @@ export function useProjectArtifacts(
     selected,
     select: setSelectedKey,
     selectStage: (forStage) => {
-      const tab = tabs.filter((t) => t.stage === forStage).at(-1);
+      // The stage's own document first -- a stage 4 click means the design,
+      // not the imported conversation or a package recorded at stage 4 --
+      // then whatever lineage that stage does have.
+      const atStage = tabs.filter((t) => t.stage === forStage);
+      const own = STAGE_DRAFT_KIND[forStage];
+      const tab = (own ? atStage.find((t) => t.kind === own) : undefined) ?? atStage.at(-1);
       if (tab) setSelectedKey(tab.key);
     },
     activeNode,

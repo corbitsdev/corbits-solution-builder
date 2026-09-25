@@ -27,7 +27,6 @@ import { Settings } from "./pages/settings.jsx";
 import { StageTour } from "./tour.jsx";
 import {
   BootScreen,
-  HorizontalStepper,
   NotificationsBell,
   type WorkflowStep,
 } from "@corbits/react-ui";
@@ -142,6 +141,45 @@ function ProjectLoadFailure({
   );
 }
 
+/**
+ * The nine stages as a whisper track: done segments in ink and clickable,
+ * the current one wider in the primary colour with the pointer beneath, the
+ * rest hairline. The segment being looked at, when it is a done stage
+ * opened from here, is ringed -- the track still says how far the project
+ * has come; the ring says where the eyes are.
+ */
+function StageStepper({
+  steps,
+  viewed,
+  onStepClick,
+}: {
+  steps: readonly WorkflowStep[];
+  viewed: number | null;
+  onStepClick?: (stage: number) => void;
+}) {
+  return (
+    <ol className="stepper" aria-label="Stages">
+      {steps.map((step) => (
+        <li
+          key={step.number}
+          aria-current={step.status === "current" ? "step" : undefined}
+          {...(viewed === step.number ? { "data-viewed": "" } : {})}
+        >
+          {step.status === "completed" && onStepClick ? (
+            <button type="button" title={step.label} onClick={() => onStepClick(step.number)}>
+              <span className="sr-only">{step.label}</span>
+            </button>
+          ) : (
+            <span title={step.label}>
+              <span className="sr-only">{step.label}</span>
+            </span>
+          )}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 function stageSteps(stage: number): WorkflowStep[] {
   return Array.from({ length: 9 }, (_, index) => {
     const number = index + 1;
@@ -178,6 +216,7 @@ export function AppBar({
   exporting,
   onExport,
   onStageSegment,
+  viewedStage = null,
   onSettingsClose,
 }: {
   view: View;
@@ -195,6 +234,10 @@ export function AppBar({
   onExport?: () => void;
   /** A completed stepper segment was clicked — open that stage's artifact. */
   onStageSegment?: (stage: number) => void;
+  /** The stage whose document is on screen when it is not the current one:
+   *  the stepper marks it and the name beneath the track says so, while
+   *  the track keeps showing how far the project has come. */
+  viewedStage?: number | null;
   /** Returns to wherever Settings was opened from. Omitted where Settings
    *  cannot be reached (`scripts/walk-ui.tsx`'s chrome-only render). */
   onSettingsClose?: () => void;
@@ -243,13 +286,16 @@ export function AppBar({
       <div className="topbar-center">
         {inProject ? (
           <>
-            <HorizontalStepper
-              className="stepper"
-              variant="segments"
+            <StageStepper
               steps={stageSteps(detail.stage)}
-              {...(onStageSegment ? { onStepClick: (step) => onStageSegment(step.number) } : {})}
+              viewed={viewedStage !== null && viewedStage !== detail.stage ? viewedStage : null}
+              {...(onStageSegment ? { onStepClick: onStageSegment } : {})}
             />
-            <span className="step-name">{stageName(detail.stage)}</span>
+            <span className="step-name">
+              {viewedStage !== null && viewedStage !== detail.stage
+                ? `${stageName(viewedStage)} · viewing · at ${stageName(detail.stage)}`
+                : stageName(detail.stage)}
+            </span>
           </>
         ) : null}
       </div>
@@ -358,6 +404,9 @@ export function App() {
   // A done-segment click in the stepper — carries the stage the workspace
   // should open the artifact tab for, with `at` as the repeat-click nonce.
   const [focusArtifact, setFocusArtifact] = useState<{ stage: number; at: number } | null>(null);
+  // Which stage's document the workspace has on screen, when not the
+  // current stage's own: reported up so the stepper can mark it.
+  const [viewedStage, setViewedStage] = useState<number | null>(null);
 
   const [status, setStatus] = useState<HostStatus | null>(null);
   const [decisions, setDecisions] = useState<Wait[]>([]);
@@ -706,6 +755,7 @@ export function App() {
         onOpenProject={openProject}
         exporting={exporting}
         onExport={() => void exportProject()}
+        viewedStage={viewedStage}
         onStageSegment={(stage) => {
           setFocusArtifact({ stage, at: Date.now() });
         }}
@@ -744,6 +794,7 @@ export function App() {
                 onOpenSettings={openSettings}
                 onOpenDecisions={() => setBellOpen(true)}
                 {...(focusArtifact ? { focusArtifact } : {})}
+                onViewedStage={setViewedStage}
               />
             </>
           ) : detailError ? (

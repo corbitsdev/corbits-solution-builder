@@ -29,10 +29,11 @@ import {
 } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { Markdown } from "../../markdown.jsx";
+import { BinaryFile, isDataUrl } from "../../binary-file.tsx";
 import { AudiencePackages } from "../audiences.jsx";
 import { DesignFeedbackView } from "../design.jsx";
 import { Tabs } from "@corbits/react-ui";
-import { Banner, Button, GuideDock, Screen, StateLabel, stageName, versionDigest } from "../../components.jsx";
+import { Banner, Button, GuideDock, Screen, StateLabel, documentName, stageName, versionDigest } from "../../components.jsx";
 import { DeliveryPanel } from "./delivery.jsx";
 import { StageConversation } from "./thread.jsx";
 import { StageDocument } from "./document.jsx";
@@ -88,6 +89,7 @@ export function StageWorkspace({
   draftOpen = true,
   onOpenDecisions,
   focusArtifact,
+  onViewedStage,
 }: {
   detail: ProjectDetail;
   /**
@@ -106,6 +108,9 @@ export function StageWorkspace({
   /** A done-segment click: open that stage's newest artifact tab. `at` makes
    *  a repeat click on the same stage a fresh signal. */
   focusArtifact?: { readonly stage: number; readonly at: number };
+  /** Reports which stage's document is on screen when it is not this
+   *  stage's own (null otherwise), so the top bar can mark it. */
+  onViewedStage?: (stage: number | null) => void;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [remediation, setRemediation] = useState<
@@ -271,6 +276,14 @@ export function StageWorkspace({
     // `at` is the nonce; the tabs/artifacts identity is intentionally out.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusArtifact?.at]);
+  // Which stage's document is on screen, reported up for the stepper: a
+  // past stage opened from the track, or null for this stage's own work.
+  const viewedStage = artifacts.selected !== null && artifacts.selected.stage !== stage ? artifacts.selected.stage : null;
+  useEffect(() => {
+    onViewedStage?.(viewedStage);
+    return () => onViewedStage?.(null);
+  }, [viewedStage, onViewedStage]);
+
   // The transcript's quiet record: boundaries, versions, decisions, aborted
   // turns and a model switch's own announcement, folded in beside the mail
   // as system lines.
@@ -542,21 +555,45 @@ export function StageWorkspace({
     </>
   ) : null;
 
+  // A past stage's document, opened from the stepper: read as what it is
+  // (a design is a page in a sandbox, a file is a file), headed by which
+  // stage it belongs to, with the two things a person can do from here --
+  // go back to this stage's work, or send the project back to change it.
   const reader =
     artifacts.selected !== null && artifacts.selected.stage !== stage && artifacts.activeNode ? (
       <div className="stage-inner">
-        <div className="doc">
+        <div className="doc reader-doc">
           <div className="docmeta">
             <span>
-              {artifacts.activeNode.title} · v{artifacts.activeNode.version} · stage{" "}
-              {artifacts.activeNode.stage}
-              {artifacts.activeNode.supersededByNodeId ? " · superseded" : ""}
+              <b>{stageName(artifacts.activeNode.stage)}</b> · {documentName(artifacts.activeNode.kind)} · v
+              {artifacts.activeNode.version}
+              {artifacts.activeNode.supersededByNodeId ? " · superseded" : " · viewing"}
             </span>
+            <div className="document-tools">
+              <Button variant="ghost" onClick={() => artifacts.select(null)}>
+                Back to {stageName(stage)}
+              </Button>
+              {artifacts.activeNode.stage < stage ? (
+                <Button variant="ghost" onClick={() => openSendBack("")}>
+                  Change it: send back to stage {artifacts.activeNode.stage}…
+                </Button>
+              ) : null}
+            </div>
           </div>
-          {artifacts.activeContent ? (
-            <Markdown source={artifacts.activeContent} />
-          ) : (
+          {!artifacts.activeContent ? (
             <p className="inline-note">Loading…</p>
+          ) : isDataUrl(artifacts.activeContent) ? (
+            <BinaryFile node={artifacts.activeNode} tenantId={tenantId} content={artifacts.activeContent} />
+          ) : artifacts.activeNode.mediaType === "text/html" || artifacts.activeNode.kind === "design_artifact" ? (
+            <iframe
+              className="artifact-page"
+              title={`${stageName(artifacts.activeNode.stage)} v${artifacts.activeNode.version}`}
+              srcDoc={artifacts.activeContent}
+              sandbox=""
+              style={{ background: "#fff" }} // not-our-surface: a generated mockup is its own page
+            />
+          ) : (
+            <Markdown source={artifacts.activeContent} />
           )}
         </div>
       </div>
@@ -836,7 +873,15 @@ export function StageWorkspace({
         </StagePanes>
       ) : null}
 
-      {agentAddress && DOCUMENT_STAGES.has(stage) && draftMessage && artifacts.activeNode && artifacts.selected ? (
+      {/* A past stage opened from the stepper while this stage has a draft:
+          the reader, not this stage's document and its approve gate. */}
+      {agentAddress && DOCUMENT_STAGES.has(stage) && draftMessage && viewedStage !== null ? (
+        <StagePanes strip={stripEl} conversation={conversation}>
+          {reader}
+        </StagePanes>
+      ) : null}
+
+      {agentAddress && DOCUMENT_STAGES.has(stage) && draftMessage && viewedStage === null && artifacts.activeNode && artifacts.selected ? (
         <>
           {stage === 7 ? (
             <EstimateView body={draftMessage.body} freeze={workflowView?.freeze ?? null} />

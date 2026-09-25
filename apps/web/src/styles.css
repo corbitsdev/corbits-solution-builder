@@ -4026,3 +4026,17 @@ button[aria-disabled="true"] {
   margin: var(--space-3) 0 0;
   font-size: 0.875rem;
 }
+
+/* A past stage's document opened from the stepper: its head names the
+   stage and offers the way back and the way to change it; a design fills
+   the paper as a page. */
+.reader-doc .docmeta {
+  align-items: center;
+}
+
+.reader-doc .artifact-page {
+  width: 100%;
+  min-height: 70vh;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--radius-md);
+}
