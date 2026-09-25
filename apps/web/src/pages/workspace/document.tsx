@@ -21,6 +21,7 @@ import type { Stage } from "@solutions-builder/app/ledger";
 import { markChanges } from "../../revisions.js";
 import { Button, documentName } from "../../components.jsx";
 import { PrintButton } from "../../print.jsx";
+import { BinaryFile, isDataUrl } from "../../binary-file.tsx";
 import { SpecialistTurn, WorkingLabel, type TurnNote } from "./thread.jsx";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
 import { clearQuotedDraft, loadQuotedDraft, saveQuotedDraft } from "./quote-store.js";
@@ -148,6 +149,10 @@ export function StageDocument({
     : [];
   const chosen = sections.some((section) => /^chosen approach\b/i.test(section.heading));
   const choosing = approaches.length > 0 && !chosen;
+  // A binary artifact is recognised by its bytes (a data: URL) or by the
+  // kinds that are always files, so an as-yet-unloaded deck is a file card
+  // from the first paint too.
+  const binary = (!!content && isDataUrl(content)) || node.kind === "audience_deck" || node.kind === "build_evidence";
   const [redrafting, setRedrafting] = useState(false);
   // Against the version before this one, like tracked changes: what a revision
   // did is otherwise something the reader has to find by rereading the whole
@@ -612,19 +617,24 @@ export function StageDocument({
                     ))}
                   </select>
                 ) : null}
-                {previous ? (
+                {previous && !binary ? (
                   <label className="changes-toggle" htmlFor="show-changes">
                     <Switch id="show-changes" checked={showChanges} onCheckedChange={setShowChanges} />
                     <span>Changes since v{previous.version}</span>
                   </label>
                 ) : null}
-                <PrintButton node={node} tenantId={tenantId} content={content || null} />
+                {binary ? null : <PrintButton node={node} tenantId={tenantId} content={content || null} />}
               </div>
             </div>
             {live !== null ? (
               <div className="is-live">
                 <Markdown source={live} />
               </div>
+            ) : binary ? (
+              // Bytes, not prose: a slide deck, a workbook, an archive. The
+              // pane says what it is and offers the download rather than
+              // printing the data: URL as the document (issue #11).
+              <BinaryFile node={node} tenantId={tenantId} content={content || null} />
             ) : content ? (
               <DocumentBody
                 source={
