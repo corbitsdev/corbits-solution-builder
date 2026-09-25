@@ -9,7 +9,6 @@
  * human crosses the gate. No profile here carries approval authority, and none
  * can widen a grant or spend.
  */
-import type { GrantRequirement } from "@intx/types";
 import type { ArtifactKind } from "./artifacts.js";
 import type { Stage } from "./ledger.js";
 import { EXAMPLE_HEADING_WORDS } from "./requirements-example.js";
@@ -1090,24 +1089,11 @@ export type SkillRecord = {
    * must set it: the platform's schema forbids angle brackets there.
    */
   readonly description?: string;
-  /** Tool declarations this skill may call, by key. */
+  /** The tools, by the names the model calls, that the tool-bearing
+   *  deployment of a role carrying this skill is deployed with
+   *  (`SPECIALIST_TOOLS` in `seed-kit.ts`). A skill does not grant them;
+   *  stage 5's primary deployment, for one, carries no deck tool. */
   readonly tools: readonly string[];
-};
-
-/** A tool, and the single grant that authorises it. */
-export type ToolDeclaration = {
-  readonly key: string;
-  readonly source: "builder" | "interchange";
-  readonly mode: "read" | "propose" | "write";
-  readonly grantKey: string;
-};
-
-export type GrantCapability = {
-  readonly key: string;
-  readonly capability: string;
-  readonly scope: "project" | "tenant";
-  /** True where exercising it requires a human decision first. */
-  readonly requiresApproval: boolean;
 };
 
 /** A named group of agents and the workflows they participate in. */
@@ -1133,7 +1119,6 @@ export type AgentSeed = {
   readonly promptKey: string;
   readonly skillKeys: readonly string[];
   readonly toolKeys: readonly string[];
-  readonly grantKeys: readonly string[];
   readonly directorKey: string;
   readonly modelKey: string;
   /** Set for the four senior-engineer principals, empty for everyone else. */
@@ -1144,24 +1129,7 @@ export type AgentSeed = {
 export type KitSeed = {
   readonly prompts: readonly PromptRecord[];
   readonly skills: readonly SkillRecord[];
-  readonly tools: readonly ToolDeclaration[];
-  readonly grants: readonly GrantCapability[];
   readonly directors: readonly DirectorRecord[];
   readonly models: readonly CuratedModelBinding[];
   readonly agents: readonly AgentSeed[];
-};
-
-/**
- * A grant a workflow definition requires, narrowed from Interchange's own
- * `GrantRequirement` (`@intx/types`) to what §8's kit ever produces: an
- * `action` drawn from the read/propose/write split, an `effect` always
- * stated (never left to the `allow` default), and a `source` that is always
- * `"invoker"` — an agent acts on the authority of whoever launched the run,
- * never the definition's author, which is what stops a definition granting
- * itself something its author could not.
- */
-export type RequiredGrant = GrantRequirement & {
-  readonly action: "read" | "propose" | "write";
-  readonly effect: "allow" | "ask";
-  readonly source: "invoker";
 };

@@ -33,12 +33,10 @@
  *   `provider.` — provider-connection management (tenant scope).
  *   `credential.` — credential metadata, never secrets (tenant scope).
  *   `sink.` — verifying delivered bytes against the manifest. All owned by
- *   solutions-builder: the kit declares them as requirements (`source:
- *   "invoker"`, so an agent acts on whoever launched the run and a definition
- *   can never grant itself what its author could not), and the hub
- *   materializes them per run at launch. Capabilities whose exercise needs a
- *   human decision (`signal.propose`, `packet.freeze`, `provider.manage`) are
- *   asked for, never assumed.
+ *   solutions-builder and reserved: no deployed tool exercises them and the
+ *   kit declares none of them as a requirement today, so nothing mints or
+ *   materializes them. They stay in the table so no other app claims the
+ *   prefix.
  * - `conversation.` — appending to the project conversation. `workflow.` —
  *   reading workflow definitions. `workflow-run:` — a run the hub signals.
  *   The installer mints `workflow-run:*` with action `signal:<awaiter>` from
@@ -131,14 +129,14 @@ export const GRANT_NAMESPACES: readonly GrantNamespaceEntry[] = [
     owner: BUILDER,
     mintedBy: [BUILDER],
     requiredBy: [BUILDER],
-    meaning: "Freezing the build packet a worker executes. Asked for, never assumed.",
+    meaning: "Freezing the build packet a worker executes.",
   },
   {
     prefix: "provider.",
     owner: BUILDER,
     mintedBy: [BUILDER],
     requiredBy: [BUILDER],
-    meaning: "Provider-connection management, tenant scope. Asked for, never assumed.",
+    meaning: "Provider-connection management, tenant scope.",
   },
   {
     prefix: "credential.",
