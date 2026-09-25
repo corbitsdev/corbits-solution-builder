@@ -120,6 +120,7 @@ describe("api.providers", () => {
         // not a pin — nothing was pinned, yet the default still resolves.
         selectedModel: "gpt-4o",
         enabledModels: ["gpt-4o"],
+        selectedOfferingId: "o-chat",
       },
     ]);
     expect(listed.apiKeyProviders.map((entry) => entry.providerId)).toContain("openai");

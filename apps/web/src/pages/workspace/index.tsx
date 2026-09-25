@@ -24,7 +24,7 @@ import {
   ApiFailure,
   type ArtifactNode,
   type ProjectDetail,
-  type ResolvedCatalogRow,
+  type Provider,
   type StageTurn,
 } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
@@ -53,6 +53,7 @@ import { useStageDecisions } from "./use-stage-decisions.ts";
 import { ArtifactStrip, VersionStrip } from "./artifact-strip.tsx";
 import { stageEvents, switchEvents } from "./stage-events.ts";
 import { useModelSwitch, useModelHandoff } from "./use-model-handoff.ts";
+import { currentInference, inferenceOptions, orderLeadingWith, type InferenceOption } from "./inference-options.ts";
 import { loadDismissedDefault, saveDismissedDefault } from "./model-nudge-store.ts";
 import { Stage6Panel } from "./stage6.tsx";
 import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
@@ -296,19 +297,34 @@ export function StageWorkspace({
     };
   }, [detail.project.id, stage, agentAddress]);
 
-  // Fetched once the specialist exists — both the manual "Switch model"
-  // select and the default-model nudge below need it to turn a model into
-  // an offering id.
-  const [modelOptions, setModelOptions] = useState<ResolvedCatalogRow[] | null>(null);
+  // The Inference picker: Settings' provider-and-model rows, in Settings'
+  // order (`inference-options.ts`). Fetched once the specialist exists and
+  // again after a pick, since a pick reorders those rows.
+  const [inferenceProviders, setInferenceProviders] = useState<Provider[] | null>(null);
+  const [inferenceNonce, setInferenceNonce] = useState(0);
   useEffect(() => {
-    if (!agentAddress || modelOptions) return;
-    void api.resolvedCatalog().then(setModelOptions);
-  }, [agentAddress, modelOptions]);
-  const switchableModels = (modelOptions ?? []).filter(
-    (row) => row.chatCapable && !row.restricted && row.credentialConnected && row.offeringIds.length > 0,
-  );
+    if (!agentAddress) return;
+    let cancelled = false;
+    void api.providers().then((result) => {
+      if (!cancelled) setInferenceProviders(result.providers);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [agentAddress, inferenceNonce]);
+  const inferenceChoices = inferenceOptions(inferenceProviders ?? []);
+  const runningInference = currentInference(activeModel, inferenceChoices);
 
   const modelSwitch = useModelSwitch({ projectId: detail.project.id, stage });
+  // Choosing an inference is the same as dragging its row to the top in
+  // Settings -- it becomes the default -- and this stage switches onto it.
+  const pickInference = async (option: InferenceOption) => {
+    if (!inferenceProviders) return;
+    await api.reorderProviders(orderLeadingWith(inferenceProviders, option.providerRowId));
+    setInferenceNonce((nonce) => nonce + 1);
+    setWorkspaceDefaultModel({ providerLabel: option.providerLabel, canonicalName: option.model });
+    await modelSwitch.switchTo(option.offeringId);
+  };
 
   // The owner's ask: opening a project whose current stage is running a
   // model other than the workspace's current default should offer, not
@@ -333,9 +349,8 @@ export function StageWorkspace({
   useEffect(() => {
     setNudgeDismissedFor(loadDismissedDefault(detail.project.id, stage));
   }, [detail.project.id, stage]);
-  const defaultOffering = workspaceDefaultModel
-    ? switchableModels.find((row) => row.canonicalName === workspaceDefaultModel.canonicalName)
-    : undefined;
+  // The default is Settings' top row: the first inference option.
+  const defaultOffering = inferenceChoices[0] ?? undefined;
   const modelNudgeVisible =
     !!agentAddress &&
     !!activeModel &&
@@ -645,24 +660,25 @@ export function StageWorkspace({
       {agentAddress ? (
         <div className="stage-model-row">
           <span className="inline-note">
-            Model:{" "}
+            Inference:{" "}
             {activeModel ? `${activeModel.providerLabel} · ${activeModel.canonicalName}` : "Loading…"}
           </span>
           <select
-            aria-label="Switch this stage's model"
-            disabled={modelSwitch.switching}
-            value=""
+            aria-label="Switch this stage's inference"
+            title="The provider and model rows from Settings, in their order. Choosing one makes it the default there and switches this stage to it."
+            disabled={modelSwitch.switching || inferenceProviders === null}
+            value={runningInference?.providerRowId ?? ""}
             onChange={(event) => {
-              const offeringId = event.target.value;
-              if (offeringId) void modelSwitch.switchTo(offeringId);
+              const option = inferenceChoices.find((entry) => entry.providerRowId === event.target.value);
+              if (option) void pickInference(option);
             }}
           >
             <option value="" disabled>
-              {modelSwitch.switching ? "Switching…" : "Switch model…"}
+              {modelSwitch.switching ? "Switching…" : "Switch inference…"}
             </option>
-            {switchableModels.map((row) => (
-              <option key={row.offeringIds[0]} value={row.offeringIds[0]}>
-                {row.providerNames.join(", ")} · {row.displayName ?? row.canonicalName}
+            {inferenceChoices.map((option) => (
+              <option key={option.providerRowId} value={option.providerRowId}>
+                {option.label}
               </option>
             ))}
           </select>
@@ -683,7 +699,7 @@ export function StageWorkspace({
             <Button
               onClick={() => {
                 dismissModelNudge();
-                void modelSwitch.switchTo(defaultOffering.offeringIds[0]!);
+                void modelSwitch.switchTo(defaultOffering.offeringId);
               }}
             >
               Switch
@@ -695,7 +711,7 @@ export function StageWorkspace({
         </div>
       ) : null}
 
-      {modelSwitch.error ? <Banner tone="error" title="The model could not be switched">{modelSwitch.error}</Banner> : null}
+      {modelSwitch.error ? <Banner tone="error" title="The inference could not be switched">{modelSwitch.error}</Banner> : null}
       {modelHandoff.error ? (
         <Banner tone="error" title="The new specialist could not be told about the prior conversation">
           {modelHandoff.error}
