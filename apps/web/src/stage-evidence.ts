@@ -38,6 +38,8 @@ const STAGE_REFUSAL_MESSAGES: Readonly<Record<string, string>> = {
   stack_missing: STACK_MISSING_MESSAGE,
   stack_uncited: "Every part of the build plan's Stack section must cite the requirement that forces it.",
   stack_unknown_requirement: "The build plan's Stack section cites a requirement id that does not exist.",
+  not_audience_stage: "Stakeholder decisions are recorded at stage 5 only.",
+  unknown_audience: "That stakeholder is not on this project's list for the open review.",
 };
 
 /** A stage rule's refusal code, in plain language; anything not in the map

@@ -50,6 +50,7 @@ export function StageDocument({
   turns,
   openQuestion,
   evaluation = null,
+  advisory = null,
   onSelectVersion,
   onRevise,
   onAddMaterial,
@@ -82,6 +83,9 @@ export function StageDocument({
   openQuestion: { text: string; ordinal?: number | null; total?: number | null } | null;
   /** The stage-1 brief evaluator's verdict, advisory only. Null off stage 1. */
   evaluation?: Evaluation | null;
+  /** Advice shown beside the approve control, such as the brief evaluator's
+   *  notes. It never enables or blocks approval. */
+  advisory?: ReactNode;
   onSelectVersion: (id: string) => void;
   onRevise: (message: string, quotes: Quote[], revise?: boolean) => void;
   /** Hands files over as material, mid-project. Absent where nothing can be added. */
@@ -459,6 +463,7 @@ export function StageDocument({
         </div>
 
         <div className="composer" data-tour="composer" data-working={busy === "draft" || undefined}>
+          {advisory}
           {/* The specialist has gone quiet without asking anything. Whose move
               it is has to be said, or the screen reads as stuck. */}
           {canSubmit && !openQuestion && busy === null && turns.at(-1)?.role === "specialist" && !turns.at(-1)!.body.trimEnd().endsWith("?") ? (

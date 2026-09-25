@@ -6,8 +6,9 @@
  * and grants, and project authority — is installed here, driven by a hub
  * `Transport` already authenticated as the signed-in principal. First run
  * signs up or in against the hub, then this call creates the workspace
- * tenant as that session. First run and upgrade are the same call, and it
- * is idempotent, so the host can ask again whenever a credential changes.
+ * tenant as that session. `install` runs once, for a workspace that does
+ * not exist yet; an existing workspace re-runs only `upgradeWorkspace`,
+ * the part that is safe to repeat.
  *
  * There is no lifecycle workflow to seed or deploy any more: a stage
  * specialist is a per-project, per-stage deployment made lazily the first
@@ -60,6 +61,24 @@ export async function installState(transport: Transport): Promise<InstallState> 
 }
 
 /**
+ * What an already-installed workspace re-runs on boot: the catalog seed, and
+ * nothing else. `install` runs once, when there is no workspace yet, so a
+ * workspace created before the seed existed never got its vendor rows, and
+ * an API-key connect then has no endpoint to dial. The seed adds what is
+ * missing and refreshes only its own offering snapshot; it never touches a
+ * connected provider's offerings, so repeating it is safe. The rest of
+ * `install` is not repeated here: the Opus-default migration and the catalog
+ * rerank rewrite offering order, which on an existing workspace is the
+ * user's own.
+ */
+export async function upgradeWorkspace(transport: Transport): Promise<void> {
+  const found = workspace ?? (await resolveWorkspace(transport));
+  if (!found) return;
+  workspace = found;
+  await seedCatalog(transport, found.tenantId);
+}
+
+/**
  * The owner's tenant, resolved or created. Creates neither twice.
  *
  * A workspace from before the hub owned identity is the host's own concern:
@@ -81,7 +100,7 @@ export async function ensureWorkspace(transport: Transport): Promise<Workspace> 
 }
 
 /**
- * Everything the tenant needs, in dependency order. Safe to run any time.
+ * Everything a new workspace needs, in dependency order.
  *
  * `afterEnsureWorkspace` is CL-8076's one-time carry of a pre-upgrade
  * keychain/file provider secret into the hub's own credential row
