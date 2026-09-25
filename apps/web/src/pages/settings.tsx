@@ -193,7 +193,7 @@ function Inference({
     <Section title="Inference" lead="Where the specialists think. Keys live in this machine's keychain.">
       <div id="connections" className="section-body">
         {activeModel ? (
-          <Row label="Default model">
+          <Row label="Default model" hint="From the provider at the top of the connected list. Drag rows to change it.">
             <span className="v">
               {activeModel.providerLabel} · {activeModel.canonicalName}
             </span>

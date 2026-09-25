@@ -20,7 +20,9 @@
  * models, and catalog actions are quiet links in `.v`.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { GripVertical } from "lucide-react";
 import { api, ApiFailure, type Provider, type ResolvedCatalogRow } from "../client.js";
+import { blocksCollide, defaultProviderId, dropOn, moveBy, moveTo, sameOrder } from "./provider-order.ts";
 import { LOCAL_DEFAULT_BASE_URL, LOCAL_PROVIDER_ID } from "../provider-catalog.js";
 import { Banner } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
@@ -126,6 +128,38 @@ export function ProviderList({
 
   const connectedFor = (row: Row) => providers.find((provider) => provider.providerId === row.id);
 
+  // Settings: the connected providers are one list, most preferred first,
+  // that the person orders by dragging a row's handle (or with the arrow
+  // keys on it); the head is where the default model comes from, since a
+  // saved order re-bases every provider's offering priorities behind it.
+  // The unconnected ones wait below. Onboarding keeps the catalog's order.
+  const [order, setOrder] = useState<string[]>(() => providers.map((provider) => provider.id));
+  useEffect(() => {
+    const fresh = providers.map((provider) => provider.id);
+    setOrder((current) => (sameOrder(current, fresh) ? current : fresh));
+  }, [providers]);
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [over, setOver] = useState<string | null>(null);
+  // The default comes from the first provider in order that has an enabled
+  // model (`defaultProviderId`); the mark goes there, not blindly on row one.
+  const defaultId = manage ? defaultProviderId(order, providers) : null;
+  // Two providers connected before any order was saved share block 0, and
+  // then what the list shows first and what the catalog picks can differ.
+  // Saving the order as shown, once, gives every provider its own block.
+  const settledRef = useRef(false);
+  useEffect(() => {
+    if (!manage || settledRef.current || busy !== null || providers.length < 2 || !blocksCollide(providers)) return;
+    settledRef.current = true;
+    void act("order", () => api.reorderProviders(providers.map((provider) => provider.id)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manage, providers]);
+  const connectedRows = manage
+    ? order.map((id) => rows.find((row) => connectedFor(row)?.id === id)).filter((row): row is Row => row !== undefined)
+    : [];
+  const otherRows = manage ? rows.filter((row) => !connectedFor(row)) : rows;
+  const listRows = [...connectedRows, ...otherRows];
+  const dividerBefore = manage && connectedRows.length > 0 && otherRows.length > 0 ? otherRows[0]!.id : null;
+
   const act = async (id: string, work: () => Promise<unknown>, done?: string) => {
     setBusy(id);
     setError(null);
@@ -142,6 +176,17 @@ export function ProviderList({
     } finally {
       if (!cancelledRef.current.has(id)) setBusy(null);
     }
+  };
+
+  const persistOrder = (next: string[]) => {
+    if (sameOrder(next, order)) return;
+    setOrder(next);
+    const head = rows.find((row) => connectedFor(row)?.id === next[0]);
+    void act(
+      "order",
+      () => api.reorderProviders(next),
+      head ? `${head.name} is now the default. Applies to stages that start from now on.` : "Provider order saved.",
+    );
   };
 
   const connect = (row: Row) =>
@@ -199,11 +244,20 @@ export function ProviderList({
         </Banner>
       ) : null}
 
-      {rows.map((row) => {
+      {listRows.map((row) => {
         const connected = connectedFor(row);
         const ready = connected?.status === "ready";
         const asking = chosen === row.id;
         const waiting = busy === row.id && row.kind === "oauth";
+        const sortable = manage && connected !== undefined && ready;
+        const isHead = sortable && defaultId === connected.id;
+        const rowClass = [
+          "row",
+          sortable && dragging === connected.id ? "is-dragging" : null,
+          sortable && over === connected.id && dragging !== connected.id ? "is-drop-target" : null,
+        ]
+          .filter(Boolean)
+          .join(" ");
         const hint = connected
           ? ready
             ? describeConnected(connected)
@@ -212,9 +266,71 @@ export function ProviderList({
             ? "Waiting for the browser"
             : row.how;
         return (
-          <div key={row.id} className="row">
+          <div key={row.id} className="contents">
+            {dividerBefore === row.id ? (
+              <div className="row row-divider">
+                <div className="k">
+                  <span>Not connected</span>
+                </div>
+              </div>
+            ) : null}
+          <div
+            className={rowClass}
+            onDragOver={(event) => {
+              if (!sortable || dragging === null) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+              if (over !== connected.id) setOver(connected.id);
+            }}
+            onDragLeave={() => {
+              if (sortable && over === connected.id) setOver(null);
+            }}
+            onDrop={(event) => {
+              if (!sortable || dragging === null) return;
+              event.preventDefault();
+              persistOrder(dropOn(order, dragging, connected.id));
+              setDragging(null);
+              setOver(null);
+            }}
+          >
+            {sortable ? (
+              <button
+                type="button"
+                className="drag-handle"
+                draggable
+                aria-label={`Reorder ${row.name}`}
+                title="Drag to reorder. Arrow keys move it; Home makes it the default."
+                disabled={busy !== null}
+                onDragStart={(event) => {
+                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.setData("text/plain", connected.id);
+                  setDragging(connected.id);
+                }}
+                onDragEnd={() => {
+                  setDragging(null);
+                  setOver(null);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowUp") {
+                    event.preventDefault();
+                    persistOrder(moveBy(order, connected.id, -1));
+                  } else if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    persistOrder(moveBy(order, connected.id, 1));
+                  } else if (event.key === "Home") {
+                    event.preventDefault();
+                    persistOrder(moveTo(order, connected.id, 0));
+                  }
+                }}
+              >
+                <GripVertical size={14} aria-hidden="true" />
+              </button>
+            ) : null}
             <div className="k">
-              <b>{row.name}</b>
+              <b>
+                {row.name}
+                {isHead ? <em className="default-mark">Default</em> : null}
+              </b>
               <span>{hint}</span>
             </div>
 
@@ -303,23 +419,13 @@ export function ProviderList({
                     ))}
                   </select>
                 ) : null}
-                {manage && providers[0]?.id !== connected.id ? (
+                {manage && order[0] !== connected.id ? (
                   <ChromeBtn
                     kind="link"
-                    title="Make this the provider new stages draft with"
+                    title="Move this provider to the top: new stages draft with it"
                     disabled={busy !== null}
-                    loading={busy === row.id}
-                    onClick={() =>
-                      void act(
-                        row.id,
-                        () =>
-                          api.reorderProviders([
-                            connected.id,
-                            ...providers.filter((entry) => entry.id !== connected.id).map((entry) => entry.id),
-                          ]),
-                        `${row.name} is now the default. Applies to stages that start from now on.`,
-                      )
-                    }
+                    loading={busy === "order"}
+                    onClick={() => persistOrder(moveTo(order, connected.id, 0))}
                   >
                     Use as default
                   </ChromeBtn>
@@ -365,6 +471,7 @@ export function ProviderList({
                 </ChromeBtn>
               </span>
             )}
+          </div>
           </div>
         );
       })}
