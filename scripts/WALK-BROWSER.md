@@ -11,7 +11,7 @@ stages 1-9, and writes compact per-step records instead of raw page dumps.
 
 ```
 bun run ui:build   # once, or after any web/UI change
-scripts/walk-browser.sh
+WALK_MODEL_BASE_URL=http://127.0.0.1:11434/v1 WALK_MODEL=gpt-oss:20b scripts/walk-browser.sh
 ```
 
 or via the package script:
@@ -24,9 +24,9 @@ bun run walk:browser
 
 | Var | Default | Meaning |
 | --- | --- | --- |
-| `WALK_MODEL_BASE_URL` | `https://thegreataxios-home-studio.tail87f5aa.ts.net/v1` | OpenAI-compatible base URL |
+| `WALK_MODEL_BASE_URL` | required | OpenAI-compatible base URL, e.g. `http://127.0.0.1:11434/v1` |
 | `WALK_MODEL_API_KEY` | `ollama` | its API key |
-| `WALK_MODEL` | `gpt-oss:20b` | model name (informational; the provider serves whatever it discovers) |
+| `WALK_MODEL` | required | a model that endpoint serves, e.g. `gpt-oss:20b`; the walk makes it the default |
 | `WALK_BRIEF` | `scripts/walk-browser-brief.md` | path to the opening problem statement |
 | `WALK_RESUME_STAGE` | `0` (start fresh) | resume the stage loop at this stage number (only meaningful with `WALK_KEEP_HOST=1` and a project already open) |
 | `WALK_END_STAGE` | `9` | stop after this stage |

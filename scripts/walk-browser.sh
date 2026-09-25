@@ -11,9 +11,11 @@ set -u
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-WALK_MODEL_BASE_URL=${WALK_MODEL_BASE_URL:-https://thegreataxios-home-studio.tail87f5aa.ts.net/v1}
+# The model under test is whoever runs the walk's own endpoint, so it has no
+# default: an unset endpoint or model stops here, before a host is booted.
+: "${WALK_MODEL_BASE_URL:?set WALK_MODEL_BASE_URL to an OpenAI-compatible base URL, e.g. http://127.0.0.1:11434/v1}"
+: "${WALK_MODEL:?set WALK_MODEL to a model that endpoint serves, e.g. gpt-oss:20b}"
 WALK_MODEL_API_KEY=${WALK_MODEL_API_KEY:-ollama}
-WALK_MODEL=${WALK_MODEL:-gpt-oss:20b}
 WALK_BRIEF=${WALK_BRIEF:-scripts/walk-browser-brief.md}
 WALK_RESUME_STAGE=${WALK_RESUME_STAGE:-0}
 WALK_END_STAGE=${WALK_END_STAGE:-9}
