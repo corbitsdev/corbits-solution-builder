@@ -58,6 +58,9 @@ export type ListedProvider = {
   hasCredential: boolean;
   validatedAt: string | null;
   selectedModel: string | null;
+  /** The models the provider is allowed to try, in priority order; one once
+   *  the person has chosen, every servable one before that. */
+  enabledModels: string[];
 };
 
 export const API_KEY_CONNECT_OPTIONS: ReadonlyArray<{
@@ -215,6 +218,7 @@ function toListedProvider(
     hasCredential: kind !== "local_endpoint",
     validatedAt: credentialRow?.updatedAt ?? null,
     selectedModel: selectedModelOf(models),
+    enabledModels: models.filter((entry) => !entry.disabled).map((entry) => entry.canonicalName),
   };
 }
 

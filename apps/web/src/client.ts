@@ -269,6 +269,7 @@ export type Provider = {
   hasCredential: boolean;
   validatedAt: string | null;
   selectedModel: string | null;
+  enabledModels: string[];
 };
 
 export type Wait = {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { blocksCollide, defaultProviderId, dropOn, moveBy, moveTo, sameOrder } from "./provider-order.ts";
+import { blocksCollide, defaultProviderId, dropOn, moveBy, moveTo, rankLabel, sameOrder } from "./provider-order.ts";
 
 const ORDER = ["anthropic", "openai", "xai", "ollama"];
 
@@ -39,5 +39,17 @@ describe("where the default comes from", () => {
   test("two providers in the same block collide; distinct blocks do not", () => {
     expect(blocksCollide(providers)).toBe(true);
     expect(blocksCollide([providers[1]!, providers[2]!])).toBe(false);
+  });
+});
+
+describe("rankLabel", () => {
+  test("the head is the default and tried first; the rest say when they are tried", () => {
+    expect(rankLabel(0, true)).toBe("Default · tried first");
+    expect(rankLabel(1, true)).toBe("Tried 2nd if the one above fails");
+    expect(rankLabel(2, true)).toBe("Tried 3rd if the one above fails");
+    expect(rankLabel(3, true)).toBe("Tried 4th if the one above fails");
+  });
+  test("a row with no model enabled has no place in the order", () => {
+    expect(rankLabel(0, false)).toBeNull();
   });
 });

@@ -179,15 +179,20 @@ describe("provider and catalog row language", () => {
     expect(source).toContain('className="drag-handle"');
     expect(source).toContain("draggable");
     expect(source).toContain('aria-label={`Reorder ${row.name}`}');
-    expect(source).toContain('<em className="default-mark">Default</em>');
     expect(source).toContain('className="row row-divider"');
-    // Every way of ordering reduces to the same persisted order: drag, keys, and Use as default.
+    // One default: the head of the order, said as such; the rows below say when they are tried.
+    expect(source).toContain("rankLabel(order.indexOf(connected.id), connected.selectedModel !== null)");
+    expect(source).not.toContain("Use as default");
+    expect(source).not.toContain("Any (fail over)");
+    // Every way of ordering reduces to the same persisted order: drag and keys.
     expect(source).toContain("persistOrder(dropOn(order, dragging, connected.id))");
     expect(source).toContain("persistOrder(moveBy(order, connected.id, -1))");
     expect(source).toContain("persistOrder(moveTo(order, connected.id, 0))");
     expect(source).toContain("api.reorderProviders(next)");
+    // A row is one provider and one model: a never-chosen provider is restricted to the model its row shows.
+    expect(source).toContain("api.selectProviderModel(provider.id, provider.selectedModel)");
     const page = await Bun.file(new URL("./settings.tsx", import.meta.url)).text();
-    expect(page).toContain("From the provider at the top of the connected list");
+    expect(page).toContain("tried first");
   });
 
   test("catalog keeps its actions as row .v links off this page", async () => {
