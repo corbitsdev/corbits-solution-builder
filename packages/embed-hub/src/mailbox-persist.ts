@@ -50,8 +50,9 @@ export async function ensureRunSession(params: {
   if (runRow === undefined) return null;
 
   const [launchSpecRow] = (await db.execute(
-    sql`SELECT "session_id" AS "sessionId" FROM "public"."workflow_run_launch_spec" WHERE "anchor_run_id" = ${runId} LIMIT 1`,
-  )) as unknown as { sessionId: string }[];
+    sql`SELECT "session_id" AS "sessionId", "source_authority_principal_id" AS "sourceAuthorityPrincipalId"
+        FROM "public"."workflow_run_launch_spec" WHERE "anchor_run_id" = ${runId} LIMIT 1`,
+  )) as unknown as { sessionId: string; sourceAuthorityPrincipalId: string }[];
   if (launchSpecRow === undefined) {
     throw new Error(
       `ensureRunSession: no workflow_run_launch_spec for run "${runId}" — every launcher records one at provision time`,
@@ -59,23 +60,28 @@ export async function ensureRunSession(params: {
   }
   const sessionId = launchSpecRow.sessionId;
 
-  if (runRow.principalId !== null) {
-    const [sessionRow] = (await db.execute(
-      sql`SELECT "principal_id" AS "principalId" FROM "public"."agent_session" WHERE "id" = ${sessionId} LIMIT 1`,
-    )) as unknown as { principalId: string }[];
-    const now = new Date();
-    if (sessionRow === undefined) {
-      await db.execute(
-        sql`INSERT INTO "public"."agent_session"
-              ("id", "tenant_id", "agent_id", "principal_id", "status", "created_at", "updated_at")
-            VALUES (${sessionId}, ${runRow.tenantId}, ${runRow.definitionId}, ${runRow.principalId}, 'active', ${now}, ${now})
-            ON CONFLICT ("id") DO NOTHING`,
-      );
-    } else if (sessionRow.principalId !== runRow.principalId) {
-      await db.execute(
-        sql`UPDATE "public"."agent_session" SET "principal_id" = ${runRow.principalId}, "updated_at" = ${now} WHERE "id" = ${sessionId}`,
-      );
-    }
+  // An anchor run has no principal until its first trigger reconciles one, but
+  // its first turn's events are persisted against this session row before the
+  // first reply. Until then the row belongs to the deploying principal the
+  // launch spec records -- the same principal the provisioned harness config
+  // carries for this session. The reconcile below moves it to the run's own on
+  // the next call, which the mail path makes on the run's first outbound mail.
+  const [sessionRow] = (await db.execute(
+    sql`SELECT "principal_id" AS "principalId" FROM "public"."agent_session" WHERE "id" = ${sessionId} LIMIT 1`,
+  )) as unknown as { principalId: string }[];
+  const now = new Date();
+  if (sessionRow === undefined) {
+    const principalId = runRow.principalId ?? launchSpecRow.sourceAuthorityPrincipalId;
+    await db.execute(
+      sql`INSERT INTO "public"."agent_session"
+            ("id", "tenant_id", "agent_id", "principal_id", "status", "created_at", "updated_at")
+          VALUES (${sessionId}, ${runRow.tenantId}, ${runRow.definitionId}, ${principalId}, 'active', ${now}, ${now})
+          ON CONFLICT ("id") DO NOTHING`,
+    );
+  } else if (runRow.principalId !== null && sessionRow.principalId !== runRow.principalId) {
+    await db.execute(
+      sql`UPDATE "public"."agent_session" SET "principal_id" = ${runRow.principalId}, "updated_at" = ${now} WHERE "id" = ${sessionId}`,
+    );
   }
 
   if (runRow.address !== null && !eventCollectors.has(runRow.address)) {
