@@ -12,8 +12,7 @@ import { Markdown } from "../../markdown.jsx";
 import { RETURN_TO, SendBackPicker, defaultTarget } from "../send-back.jsx";
 import { STAGE_GOAL } from "./gate.jsx";
 import { Elapsed } from "./elapsed.jsx";
-import type { Guidance } from "./product-guide.js";
-import type { evaluatorVerdict } from "./guidance.js";
+import type { StageEvaluator } from "./use-advisory.ts";
 import { COMPOSER_BOX_CLASS, CONV_CLASS, CONV_SCROLL_CLASS, PANES_CLASS, STAGE_PANE_CLASS } from "./pane-classes.ts";
 import { usePanesWidth } from "./use-panes-width.ts";
 
@@ -62,9 +61,25 @@ export function GuidanceCard({
 }
 
 /** Stage 1's advisory brief-evaluator verdict — never a gate. */
-export function EvaluatorVerdict({ verdict }: { verdict: NonNullable<ReturnType<typeof evaluatorVerdict>> }) {
+export function EvaluatorVerdict({ evaluator }: { evaluator: StageEvaluator }) {
+  if (evaluator.status === "idle") return null;
+  if (evaluator.status === "checking") {
+    return (
+      <p className="stage-guidance stage-guidance-evaluator" aria-label="Brief evaluator verdict" aria-live="polite">
+        Brief evaluator (advisory): reading this draft…
+      </p>
+    );
+  }
+  if (evaluator.status === "unavailable") {
+    return (
+      <p className="stage-guidance stage-guidance-evaluator" aria-label="Brief evaluator verdict" aria-live="polite">
+        Brief evaluator (advisory): unavailable. {evaluator.reason}
+      </p>
+    );
+  }
+  const { verdict } = evaluator;
   return (
-    <div className="stage-guidance stage-guidance-evaluator" aria-label="Brief evaluator verdict">
+    <div className="stage-guidance stage-guidance-evaluator" aria-label="Brief evaluator verdict" aria-live="polite">
       <p className="stage-guidance-title">Brief evaluator (advisory): {verdict.ready ? "ready" : "not yet"}</p>
       {verdict.notes.length > 0 ? (
         <ul>
@@ -74,43 +89,6 @@ export function EvaluatorVerdict({ verdict }: { verdict: NonNullable<ReturnType<
         </ul>
       ) : null}
     </div>
-  );
-}
-
-/** The Product guide, folded: the deterministic checklist by default, the
- *  guide agent's own words once asked. */
-export function ProductGuideDock({
-  guide,
-  asking,
-  onAsk,
-}: {
-  guide: Guidance;
-  asking: boolean;
-  onAsk: () => void;
-}) {
-  return (
-    <details className="approvals-record product-guide">
-      <summary>{guide.origin === "guide" ? "Guide" : "Checklist"} · where this project stands</summary>
-      <div className="product-guide-body">
-        <p className="product-guide-source">
-          {guide.origin === "guide"
-            ? "The guide's own words — advisory only, never a verdict."
-            : "The checklist, computed from what is already recorded."}
-        </p>
-        <p>{guide.summary}</p>
-        {guide.missing.length > 0 ? (
-          <ul>
-            {guide.missing.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        ) : null}
-        <p className="product-guide-recommended">Recommended next step: {guide.recommended}</p>
-        <Button variant="ghost" loading={asking} onClick={onAsk}>
-          Ask the guide
-        </Button>
-      </div>
-    </details>
   );
 }
 

@@ -31,7 +31,7 @@ import { Markdown } from "../../markdown.jsx";
 import { AudiencePackages } from "../audiences.jsx";
 import { DesignFeedbackView } from "../design.jsx";
 import { Tabs } from "@corbits/react-ui";
-import { Banner, Button, Screen, StateLabel, stageName, versionDigest } from "../../components.jsx";
+import { Banner, Button, GuideDock, Screen, StateLabel, stageName, versionDigest } from "../../components.jsx";
 import { DeliveryPanel } from "./delivery.jsx";
 import { StageConversation } from "./thread.jsx";
 import { StageDocument } from "./document.jsx";
@@ -44,6 +44,8 @@ import { useStageAgent } from "./use-stage-agent.ts";
 import { useStageThread } from "./use-stage-thread.ts";
 import { useWithdrawnTurns } from "./use-withdrawn-turns.ts";
 import { useOpeningDispatch } from "./use-opening-dispatch.ts";
+import { useProductGuide, useStageEvaluator } from "./use-advisory.ts";
+import { guideStep } from "./product-guide.ts";
 import { useProjectArtifacts } from "./use-project-artifacts.ts";
 import { loadQuotedDraft } from "./quote-store.js";
 import { useStageDecisions } from "./use-stage-decisions.ts";
@@ -56,6 +58,7 @@ import { MATERIAL_KIND, MATERIAL_READING_KIND } from "@solutions-builder/app/art
 import type { Stage } from "@solutions-builder/app/ledger";
 import { STAGE_DRAFT_KIND } from "../../client.js";
 import {
+  EvaluatorVerdict,
   OpeningScreen,
   SendBackPopover,
   StagePanes,
@@ -223,6 +226,18 @@ export function StageWorkspace({
   // or a follow-up question never replaces the document being reviewed.
   const guidance = useMemo(() => workspaceGuidance(stage, foldedMessages), [stage, foldedMessages]);
   const draftMessage = guidance.draft;
+
+  // Stage 1's brief evaluator reads each new draft; the Product guide answers
+  // when asked, on any stage. Both are advisory and never touch the gate.
+  const evaluator = useStageEvaluator(detail.project.id, tenantId, stage, draftMessage);
+  const guideContext = {
+    projectTitle: detail.project.title,
+    stage,
+    view: workflowView,
+    nodes: detail.nodes,
+    soloApproval: detail.soloApproval,
+  };
+  const guide = useProductGuide(tenantId, detail.project.id, guideContext);
   const reviewMessage = DOCUMENT_STAGES.has(stage) ? draftMessage : latestSpecialistMessage;
   const progress = useMemo(() => interviewProgress(foldedMessages), [foldedMessages]);
 
@@ -538,6 +553,22 @@ export function StageWorkspace({
         />
       ) : null}
 
+      {/* Bottom right, over the canvas: always to hand, never a band of the
+          window given to one sentence. */}
+      <GuideDock
+        stage={stage}
+        step={guideStep(guideContext)}
+        at="stage"
+        onGo={(where) => {
+          if (where === "settings") onOpenSettings();
+          else if (where === "decisions") onOpenDecisions?.();
+        }}
+        onExplain={() => void guide.explain()}
+        guidance={guide.guidance}
+        explaining={guide.explaining}
+        note={guide.note}
+      />
+
       {agentAddress && openingDispatch.error ? (
         <Banner
           tone="error"
@@ -657,6 +688,12 @@ export function StageWorkspace({
                 ? { text: guidance.question.text, ordinal: progress?.ordinal ?? null, total: progress?.total ?? null }
                 : null
             }
+            evaluation={
+              stage === 1 && evaluator.status === "verdict"
+                ? { ready: evaluator.verdict.ready, notes: [...evaluator.verdict.notes] }
+                : null
+            }
+            advisory={stage === 1 ? <EvaluatorVerdict evaluator={evaluator} /> : null}
             onSelectVersion={artifacts.selectVersion}
             onRevise={(message, quotes) => {
               artifacts.selectVersion(null);

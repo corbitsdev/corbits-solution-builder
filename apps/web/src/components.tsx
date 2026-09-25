@@ -274,12 +274,65 @@ export type GuideGuidance = {
   origin: "agent" | "deterministic";
 };
 
+/** What the guide said, or the checklist standing in for it, and which. */
+export function GuideExplanation({ guidance, note = null }: { guidance: GuideGuidance; note?: string | null }) {
+  const read = guidance.sourceVersionIds.length;
+  return (
+    <div className="guide-guidance">
+      <p>{guidance.summary}</p>
+      {guidance.missing.length > 0 ? (
+        <>
+          <h4>Still missing</h4>
+          <ul>
+            {guidance.missing.map((item, index) => (
+              <li key={`${index}:${item}`}>{item}</li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+      {guidance.origin === "agent" && guidance.options.length > 0 ? (
+        <>
+          <h4>Your options</h4>
+          <ul>
+            {guidance.options.map((option, index) => (
+              <li key={`${index}:${option.label}`}>
+                {option.label}
+                {option.detail ? ` — ${option.detail}` : ""}
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+      {guidance.origin === "agent" && guidance.recommended ? <p>Recommended: {guidance.recommended}</p> : null}
+      {guidance.questions.length > 0 ? (
+        <>
+          <h4>Worth answering</h4>
+          <ul>
+            {guidance.questions.map((question, index) => (
+              <li key={`${index}:${question}`}>{question}</li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+      <p className="inline-note">
+        {guidance.origin === "agent"
+          ? read > 0
+            ? `Read from ${read} version${read === 1 ? "" : "s"}. The guide recommends a route; it never takes one.`
+            : "Nothing had been written yet. The guide recommends a route; it never takes one."
+          : "The guide gave no answer, so this is the checklist, computed from what is recorded."}
+      </p>
+      {note ? <p className="inline-note">{note}</p> : null}
+    </div>
+  );
+}
+
 export function GuideDock({
   step,
   onGo,
   onExplain,
   guidance,
   explaining = false,
+  note = null,
   at,
   stage,
 }: {
@@ -294,6 +347,8 @@ export function GuideDock({
   onExplain?: () => void;
   guidance?: GuideGuidance | null;
   explaining?: boolean;
+  /** Why the guide gave no answer, when the checklist stands in for it. */
+  note?: string | null;
   at?: import("@solutions-builder/app/next-step").NextStep["where"];
   /** Which of the nine this project is on, for the ring. */
   stage?: number;
@@ -358,26 +413,7 @@ export function GuideDock({
           </div>
           <p className="guide-detail">{step.detail}</p>
 
-          {guidance ? (
-            <div className="guide-guidance">
-              <p>{guidance.summary}</p>
-              {guidance.missing.length > 0 ? (
-                <>
-                  <h4>Still missing</h4>
-                  <ul>
-                    {guidance.missing.map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
-                </>
-              ) : null}
-              <p className="inline-note">
-                {guidance.origin === "agent"
-                  ? `Read from ${guidance.sourceVersionIds.length} version${guidance.sourceVersionIds.length === 1 ? "" : "s"}. The guide recommends a route; it never takes one.`
-                  : "No specialist was reachable, so this is the deterministic checklist."}
-              </p>
-            </div>
-          ) : null}
+          {guidance ? <GuideExplanation guidance={guidance} note={note} /> : null}
 
           <div className="guide-actions">
             {step.ending || step.where === at ? null : (
@@ -391,16 +427,15 @@ export function GuideDock({
                       : "Take me there"}
               </Button>
             )}
-            {/* INTEGRATE (CL-8764): origin/main tests `guidance` only. The
-                `!onExplain` arm is the lane-types bend: exactOptionalPropertyTypes
-                rejects passing a possibly-undefined handler, and a button with no
-                handler is a dead control — the current app.tsx call site passes
-                none. With both props supplied this renders exactly as on main. */}
-            {guidance || !onExplain ? null : (
+            {/* Always offered while there is someone to ask: a guide that timed
+                out, or answered before the project moved on, must be askable
+                again. No handler, no button: a control that does nothing is
+                absent. */}
+            {onExplain ? (
               <Button loading={explaining} onClick={onExplain}>
-                Where does this stand?
+                {guidance ? "Ask again" : "Where does this stand?"}
               </Button>
-            )}
+            ) : null}
           </div>
         </div>
       ) : null}
