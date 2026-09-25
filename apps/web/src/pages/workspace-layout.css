@@ -68,6 +68,15 @@
   opacity: 0.5;
 }
 
+/* The segment being looked at, when a done stage was opened from the
+   track: ringed in the primary colour. The pointer stays on the current
+   stage and the ink on the done ones, so progress still reads. */
+.topbar-project .stepper li[data-viewed] > button,
+.topbar-project .stepper li[data-viewed] > span {
+  outline: 2px solid var(--wb-primary);
+  outline-offset: 2px;
+}
+
 /* Where you are: a small pointer under the current segment, aimed at it,
    so the position reads at a glance and the stage name beneath the track
    visibly belongs to that segment rather than to the whole row. */

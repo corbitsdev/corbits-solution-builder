@@ -93,6 +93,17 @@ describe("project chrome paint", () => {
     expect(css).not.toContain("button:hover {\n  background: var(--wb-primary)");
   });
 
+  test("a done stage opened from the track is ringed as the one being viewed, and named as such beneath the track", () => {
+    expect(css).toMatch(/\.topbar-project \.stepper li\[data-viewed\] > button,\n\.topbar-project \.stepper li\[data-viewed\] > span \{[^}]*outline: 2px solid var\(--wb-primary\);/);
+    const app = read("../../app.tsx");
+    expect(app).toContain('{ "data-viewed": "" }');
+    expect(app).toContain("· viewing · at ");
+    const workspace = read("./index.tsx");
+    expect(workspace).toContain("onViewedStage?.(viewedStage)");
+    expect(workspace).toContain("Change it: send back to stage ");
+    expect(workspace).toContain("Back to {stageName(stage)}");
+  });
+
   test("a pointer under the current segment marks where you are", () => {
     expect(css).toMatch(/\.topbar-project \.stepper li\[aria-current="step"\]::after \{[^}]*border-bottom: 4px solid var\(--wb-primary\);/);
     expect(css).toMatch(/\.topbar-project \.stepper li\[aria-current="step"\] \{[^}]*position: relative;/);
