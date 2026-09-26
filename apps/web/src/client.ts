@@ -39,6 +39,7 @@ import {
   workflowsFor,
   type ClosureManifest,
   type ClosureSource,
+  type EnsuredProjectWorkflow,
   type InstallState as PackageInstallState,
   type ProjectPolicy,
   type ProjectWorkflowDeployment,
@@ -696,7 +697,7 @@ const ensureStage6RoleAgentCalls = new Map<string, Promise<SpecialistDeployment>
 /** In-flight/resolved `ensureProjectWorkflow` calls, keyed by `projectId` --
  *  see that method's doc comment. Also `projectWorkflowView`/`decide`'s only
  *  way to find the deployment/run they read or signal. */
-const ensureProjectWorkflowCalls = new Map<string, Promise<ProjectWorkflowDeployment>>();
+const ensureProjectWorkflowCalls = new Map<string, Promise<EnsuredProjectWorkflow>>();
 
 async function asWorkspaceOwner<T>(
   work: (transport: ReturnType<typeof createHubTransport>, workspaceTenantId: string) => Promise<T>,
@@ -1941,8 +1942,13 @@ false,
    * the signed-in workspace owner -- the only principal that can approve
    * today; a future multi-principal policy is a later change to this one
    * call site.
+   *
+   * A run on other code than the interface currently ships is replaced and
+   * its decisions replayed through the new code (#51); the answer then
+   * carries a `replay`, whose `refused` names any decision the new rules
+   * turned down, for the page to show.
    */
-  ensureProjectWorkflow: (projectId: string): Promise<ProjectWorkflowDeployment> => {
+  ensureProjectWorkflow: (projectId: string): Promise<EnsuredProjectWorkflow> => {
     const pending = ensureProjectWorkflowCalls.get(projectId);
     if (pending) return pending;
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {

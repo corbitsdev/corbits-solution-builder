@@ -65,7 +65,23 @@ The reducer is deterministic: no clock, no randomness.
 deploys one `sb-project-<projectId>` asset per project, pushes the compiled
 package, deploys and triggers one manual run, reusing the live
 deployment/run on later calls (mirrors `ensureSpecialistDeployment`'s
-ensure-and-reuse discipline).
+ensure-and-reuse discipline) -- as long as that run is on the code the
+interface currently ships.
+
+A change to this directory's code reaches existing projects too (#51). Every
+run is triggered with the digest of the tree it was deployed from and a
+generation number (`code` on the trigger payload, beside `projectId` and
+`stages`; `initProjectState` ignores it), and both read back off the run's
+own `RunStarted` event. When a live run's digest differs from the current
+render, `ensureProjectWorkflow` deploys the current code at the next
+generation, triggers it, and replays every decision the old run applied onto
+it, in order and under the same ids, through the new reducer -- the same
+path a host restart's dead deployment is revived by. A replayed decision the
+new rules refuse is recorded by the reducer as any refusal is (a ledger row
+with `accepted: false` and its reason) and returned to the client as
+`replay.refused`, which the stage page shows. The hub has no way to end a
+deployment, so the old run stays placed; readers prefer the newest generation
+once it has caught up, and never signal the old one again.
 
 The deployed package's `interchange.workflow`/`actions`/`loops` modules are
 compiled from this directory's TypeScript (`workflow.ts`, `actions.ts`,

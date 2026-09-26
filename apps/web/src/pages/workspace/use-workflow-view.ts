@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../../client.js";
 import { describeFailure } from "./failure-message.ts";
+import { describeReplay } from "./replay-notice.ts";
 import type { ProjectWorkflowView } from "../../project-workflow.ts";
 
 export type WorkflowViewState = {
@@ -17,6 +18,10 @@ export type WorkflowViewState = {
   /** The workflow failed to start or load — drive the failure state, never a guessed stage. */
   readonly openingFailed: boolean;
   readonly startError: string | null;
+  /** The workflow was moved onto new code, and the new rules refused an
+   *  earlier decision (#51): what was refused, in the workflow's own words.
+   *  Null when nothing was refused, or no replay happened. */
+  readonly replayNotice: { title: string; detail: string } | null;
   /** Retries the ensure + first read after a failure. */
   readonly retryOpening: () => void;
   /** A person-triggered re-read is in flight — lets the approve control tell
@@ -45,6 +50,7 @@ const viewSnapshots = new Map<string, ProjectWorkflowView>();
 export function useWorkflowView(projectId: string, onArtifactsChanged: () => void): WorkflowViewState {
   const [view, setView] = useState<ProjectWorkflowView | null>(() => viewSnapshots.get(projectId) ?? null);
   const [startError, setStartError] = useState<string | null>(null);
+  const [replayNotice, setReplayNotice] = useState<{ title: string; detail: string } | null>(null);
   const [viewFailed, setViewFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [refreshingAfterAction, setRefreshingAfterAction] = useState(false);
@@ -108,7 +114,10 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
         }
       }
       try {
-        await api.ensureProjectWorkflow(projectId);
+        const ensured = await api.ensureProjectWorkflow(projectId);
+        // A replay's refusals are the reducer's own ledger rows; this only
+        // reads them out. Set once per ensure, never cleared by a poll.
+        if (!cancelled) setReplayNotice(describeReplay(ensured.replay));
       } catch (cause) {
         if (!cancelled) setStartError(describeFailure(cause));
         return;
@@ -154,6 +163,7 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
   useEffect(() => {
     setView(viewSnapshots.get(projectId) ?? null);
     setStartError(null);
+    setReplayNotice(null);
     setViewFailed(false);
   }, [projectId]);
 
@@ -162,6 +172,7 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
     resolved: view !== null,
     openingFailed: startError !== null || viewFailed,
     startError,
+    replayNotice,
     retryOpening,
     refreshingAfterAction,
     refresh,

@@ -673,6 +673,12 @@ export function StageWorkspace({
         />
       ) : null}
 
+      {workflow.replayNotice ? (
+        <Banner tone="warning" title={workflow.replayNotice.title}>
+          {workflow.replayNotice.detail}
+        </Banner>
+      ) : null}
+
       {error ? (
         <Banner
           tone="error"

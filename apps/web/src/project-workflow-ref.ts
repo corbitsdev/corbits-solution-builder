@@ -5,8 +5,11 @@
  * (`findProjectWorkflow`, which never deploys or triggers anything) at most
  * every few seconds per project, not once per render or per project-view
  * load, so this memoises the resolved ref for a short TTL to absorb bursts
- * without hiding a real change in who owns the workflow (there is none --
- * a project's workflow asset/deployment/run never changes once it exists).
+ * without hiding a real change in who owns the workflow for long: the ref
+ * moves when a host restart revives the run on a fresh deployment, or when
+ * `ensureProjectWorkflow` replaces a run on outdated code (#51), and either
+ * seeds the cache with the new ref (`cacheProjectWorkflowRef`) as soon as
+ * it has it.
  */
 import type { Transport } from "@intx/hub-client";
 import { findProjectWorkflow, type ProjectWorkflowDeployment } from "@solutions-builder/installer";
