@@ -4084,10 +4084,10 @@ button[aria-disabled="true"] {
 /* ---- The busy indicator: a zen garden along the foot of the window (#93, #107) ---- */
 
 /* Always in the grid and 0 tall until there is something to wait for, so
-   arriving is a slide rather than a jump. Tall enough for the film to read
-   as a scene, never more than a fifth of the window. */
+   arriving is a slide rather than a jump. A tenth of the window at most:
+   the film is small and whole rather than large and cropped (#109). */
 .zen-garden {
-  --zen-height: clamp(140px, 22vh, 240px);
+  --zen-height: clamp(70px, 11vh, 120px);
   position: relative;
   height: 0;
   overflow: hidden;
@@ -4105,18 +4105,22 @@ button[aria-disabled="true"] {
   box-sizing: border-box;
   height: var(--zen-height);
   overflow: hidden;
+  display: flex;
+  justify-content: center;
   border-top: 1px solid var(--wb-border);
-  background: color-mix(in srgb, var(--wb-primary) 9%, var(--wb-background));
+  /* Sand, tiled along the strip at the strip's own height (#109). */
+  background: url("/zen-garden-bg.jpg") center / auto 100% repeat-x
+    color-mix(in srgb, var(--wb-primary) 9%, var(--wb-background));
 }
 
-/* The film fills the strip's width and is cropped to its height, kept on
-   the raking, which sits just below the frame's middle. */
+/* The whole film, fitted to the strip's height and centred, the sand
+   showing either side (#109). */
 .zen-garden-video {
   display: block;
-  width: 100%;
   height: 100%;
-  object-fit: cover;
-  object-position: center 52%;
+  width: auto;
+  max-width: 100%;
+  object-fit: contain;
 }
 
 .zen-garden-caption {
