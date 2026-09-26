@@ -109,6 +109,27 @@ export function composeModelHandoff(args: {
   return [announcement, recap, draftBlock].filter((part): part is string => part !== null).join("\n\n---\n\n");
 }
 
+/**
+ * Whether a hand-off attempt is due for `address` right now: only once the
+ * live address is known, other addresses already hold this stage's mail,
+ * and the merged thread has actually loaded for the live address -- on a
+ * reload the address arrives from a snapshot, the address list polls in,
+ * and the thread read lands last, so judging the transcript before it has
+ * loaded silently skipped the hand-off for good (#82). `priorHead` is the
+ * merged thread's newest message once loaded.
+ */
+export function handoffDue(args: {
+  readonly address: string | null;
+  readonly addresses: readonly string[];
+  readonly threadLoaded: boolean;
+  readonly priorHead: ChatMessage | null;
+}): boolean {
+  if (!args.address) return false;
+  if (!args.addresses.some((candidate) => candidate !== args.address)) return false;
+  if (!args.threadLoaded) return false;
+  return args.priorHead !== null;
+}
+
 export type ModelSwitchState = {
   readonly switching: boolean;
   readonly error: string | null;
@@ -154,6 +175,9 @@ export function useModelHandoff(args: {
   readonly address: string | null;
   readonly addresses: readonly string[];
   readonly unionMessages: readonly ChatMessage[];
+  /** `useStageThread`'s `loadedFor === address`: the merged transcript
+   *  below reflects a read that landed for the live address. */
+  readonly threadLoaded: boolean;
   readonly draft: ChatMessage | null;
   readonly providerLabel: string | null;
   readonly modelName: string | null;
@@ -165,14 +189,13 @@ export function useModelHandoff(args: {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!args.address) return;
-    const priorAddresses = args.addresses.filter((candidate) => candidate !== args.address);
     // A brand-new stage (no other address has ever held this stage's mail)
-    // is the ordinary opening's job, not a hand-off.
-    if (priorAddresses.length === 0) return;
+    // is the ordinary opening's job, not a hand-off; and nothing is judged
+    // off a transcript that has not loaded for the live address yet (#82).
+    const priorHead = args.unionMessages.at(-1) ?? null;
+    if (!handoffDue({ address: args.address, addresses: args.addresses, threadLoaded: args.threadLoaded, priorHead })) return;
+    if (!priorHead) return; // `handoffDue` already guarantees this; narrows the type.
     if (resolvedRef.current === args.address) return;
-    const priorHead = args.unionMessages.at(-1);
-    if (!priorHead) return;
 
     let cancelled = false;
     void (async () => {
@@ -213,9 +236,10 @@ export function useModelHandoff(args: {
     // unionMessages (past its head)/draft/providerLabel/modelName/
     // reloadThread deliberately excluded: this must fire once per address
     // transition, off whatever those hold at that moment, not re-run every
-    // time the transcript changes underneath it.
+    // time the transcript changes underneath it. `threadLoaded` IS a dep:
+    // it is the one signal that the transcript is there to read at all.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [args.address, args.addresses.join(","), args.tenantId]);
+  }, [args.address, args.addresses.join(","), args.tenantId, args.threadLoaded]);
 
   return { error };
 }

@@ -395,6 +395,7 @@ export function StageWorkspace({
     address: agentAddress,
     addresses: agent.addresses,
     unionMessages: foldedMessages,
+    threadLoaded,
     draft: draftMessage,
     providerLabel: activeModel?.providerLabel ?? null,
     modelName: activeModel?.canonicalName ?? null,
