@@ -19,9 +19,21 @@ import { API_VERSION, createApi } from "./api.js";
 
 initSolutionsBuilderHost();
 
+/**
+ * Where `@corbits/embed-hub` mounts the run-scoped artifacts API. A deployed
+ * specialist's sidecar dials it with the purpose-minted bearer the installer
+ * registered for its run, and the mount's own resolver is the authority for
+ * that request; it holds no host session and needs none. The path is fixed
+ * on the sidecar side (`WORKFLOW_ARTIFACTS_BASE_PATH` in `@corbits/artifacts`'
+ * sidecar bundle and in `@solutions-builder/tools-delivery`), so it is named
+ * here rather than moved out from under `/api`.
+ */
+const WORKFLOW_ARTIFACTS_MOUNT_PATH = "/api/workflow-artifacts";
+
 await serveHost({
   api: createApi(),
   apiVersion: API_VERSION,
+  selfAuthenticatingPaths: [WORKFLOW_ARTIFACTS_MOUNT_PATH],
   distDirs: [
     // What the desktop shell passes (Tauri bundles `dist/` as a resource),
     // a `dist/` beside the executable for a standalone binary, and the web
