@@ -26,7 +26,9 @@ import {
   installProjectAuthority,
   InstallerError,
   delegateMore,
+  delegateWorkspaceDefaultsIfSealed,
   liveDelegationStore,
+  workspaceOwnedCredentialIds,
   listArtifacts,
   listSpecialistDeployments,
   ModelProviderNotDelegatedError,
@@ -541,6 +543,29 @@ async function projectWorkflowSource(): Promise<{ files: Record<string, string> 
  */
 function specialistHubOrigin(): string {
   return hubOrigin() || window.location.origin;
+}
+
+const projectRunnableCalls = new Map<string, Promise<void>>();
+
+/**
+ * What every deploy into a project needs first: the host's status, and a
+ * project that can run something. A project created before this interface
+ * delegated at creation is sealed -- nothing the workspace holds is usable
+ * in its tenant -- and since #29 that is where its specialists and workflow
+ * deploy, so opening it would only ever fail. It is given the workspace's
+ * own credentials once, the default a new project gets, before the first
+ * deploy; a set the owner chose is never touched. Memoised per project so
+ * concurrent deploys on one open share the one consent write.
+ */
+async function readyToDeploy(transport: ReturnType<typeof createHubTransport>, workspaceTenantId: string, projectId: string): Promise<HostStatus> {
+  let pending = projectRunnableCalls.get(projectId);
+  if (!pending) {
+    pending = delegateWorkspaceDefaultsIfSealed(liveDelegationStore(transport, workspaceTenantId), projectId).then(() => undefined);
+    pending.catch(() => projectRunnableCalls.delete(projectId));
+    projectRunnableCalls.set(projectId, pending);
+  }
+  await pending;
+  return request<HostStatus>("/status");
 }
 
 const lifecycleGitPush: WorkflowGitPush = ({ scope, assetKind, assetName, token, tree, message }) => {
@@ -1102,10 +1127,7 @@ export const api = {
       // workspace holds. Personal credentials never cross (the installer
       // refuses them), so they are left out here too.
       const delegatedCredentialIds =
-        payload.delegatedCredentialIds ??
-        (await liveDelegationStore(transport, workspace.tenantId).listDelegatableCredentials())
-          .filter((credential) => credential.principalId === null)
-          .map((credential) => credential.id);
+        payload.delegatedCredentialIds ?? (await workspaceOwnedCredentialIds(liveDelegationStore(transport, workspace.tenantId)));
       const { project } = await installerCreateProject(transport, workspace.tenantId, {
         title,
         slug: projectSlug(),
@@ -1558,10 +1580,7 @@ export const api = {
   delegateWorkspaceProviders: (projectId: string) =>
     asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const store = liveDelegationStore(transport, workspaceTenantId);
-      const delegatedCredentialIds = (await store.listDelegatableCredentials())
-        .filter((credential) => credential.principalId === null)
-        .map((credential) => credential.id);
-      await delegateMore(store, { projectId, delegatedCredentialIds });
+      await delegateMore(store, { projectId, delegatedCredentialIds: await workspaceOwnedCredentialIds(store) });
       return { ok: true as const };
     }),
   deleteProject: (projectId: string) =>
@@ -1722,7 +1741,7 @@ export const api = {
       });
     }
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const status = await request<HostStatus>("/status");
+      const status = await readyToDeploy(transport, workspaceTenantId, projectId);
       // Mailing a deployment whose sidecar is not placed yet loses the
       // message: the run never starts and the stage waits on a reply that
       // cannot come. Wait for the hub to call it deployed first.
@@ -1770,7 +1789,7 @@ false,
   switchStageAgent: (projectId: string, stage: number, offeringId: string): Promise<SpecialistDeployment> => {
     const key = `${projectId}:${stage}`;
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const status = await request<HostStatus>("/status");
+      const status = await readyToDeploy(transport, workspaceTenantId, projectId);
       const deployment = await switchSpecialistDeployment(
         transport,
         sidecarCapabilityOf(status),
@@ -1811,7 +1830,7 @@ false,
     const pending = ensureStage1EvaluatorCalls.get(projectId);
     if (pending) return pending;
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const status = await request<HostStatus>("/status");
+      const status = await readyToDeploy(transport, workspaceTenantId, projectId);
       const deployment = await ensureSpecialistDeployment(
         transport,
         sidecarCapabilityOf(status),
@@ -1853,7 +1872,7 @@ false,
     const pending = ensureGuideAgentCalls.get(projectId);
     if (pending) return pending;
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const status = await request<HostStatus>("/status");
+      const status = await readyToDeploy(transport, workspaceTenantId, projectId);
       const deployment = await ensureSpecialistDeployment(
         transport,
         sidecarCapabilityOf(status),
@@ -1891,7 +1910,7 @@ false,
     const pending = ensureStage6RoleAgentCalls.get(key);
     if (pending) return pending;
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const status = await request<HostStatus>("/status");
+      const status = await readyToDeploy(transport, workspaceTenantId, projectId);
       const deployment = await ensureSpecialistDeployment(
         transport,
         sidecarCapabilityOf(status),
@@ -1960,7 +1979,7 @@ false,
     if (pending) return pending;
     const roleKey = `package-${audienceIndex}`;
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const status = await request<HostStatus>("/status");
+      const status = await readyToDeploy(transport, workspaceTenantId, projectId);
       const deployment = await ensureSpecialistDeployment(
         transport,
         sidecarCapabilityOf(status),
@@ -2012,7 +2031,7 @@ false,
         stage: index + 1,
         authorizedPrincipalIds: [workspace.principalId],
       }));
-      const status = await request<HostStatus>("/status");
+      const status = await readyToDeploy(transport, workspaceTenantId, projectId);
       const ref = await ensureProjectWorkflow(
         transport,
         sidecarCapabilityOf(status),
