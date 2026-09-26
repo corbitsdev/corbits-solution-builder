@@ -8,6 +8,7 @@
  * of the list rather than an attempt to apply the event in place.
  */
 import { hubCredentials, hubEventSourceCredentials, hubOrigin } from "./hub-origin.ts";
+import { openSharedEventSource } from "./shared-event-source.ts";
 
 export type InboxItem = {
   uid: number;
@@ -74,13 +75,11 @@ export function subscribeInbox(
 
   refresh();
 
-  const source = new EventSource(`${hubOrigin()}/api/me/inbox/events`, {
-    withCredentials: hubEventSourceCredentials(),
-  });
+  const source = openSharedEventSource(`${hubOrigin()}/api/me/inbox/events`, hubEventSourceCredentials());
   source.addEventListener("mailbox", (event) => {
     if (closed) return;
     try {
-      onEvent?.(JSON.parse((event as MessageEvent).data) as InboxEvent);
+      onEvent?.(JSON.parse(event.data) as InboxEvent);
     } catch {
       // Malformed event body — the refetch below still keeps the list correct.
     }
