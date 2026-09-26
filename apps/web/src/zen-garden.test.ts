@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const here = import.meta.dir;
@@ -37,15 +37,21 @@ describe("the zen garden busy indicator", () => {
     expect(garden).toContain('data-visible={visible ? "" : undefined}');
   });
 
-  test("the figure walks and rakes in step, the strip grows from nothing, and all of it stills under reduced motion", () => {
+  // #107: the film, looped and silent, mounted only while the strip is up,
+  // and held on its first frame under reduced motion.
+  test("the film loops silently while the strip is up, and holds still under reduced motion", () => {
+    const garden = read("./zen-garden.tsx");
+    expect(garden).toContain("{visible ? <GardenFilm still={still} /> : null}");
+    expect(garden).toContain("autoPlay={!still}");
+    expect(garden).toMatch(/<video[\s\S]*?\bloop\b[\s\S]*?\bmuted\b[\s\S]*?\bplaysInline\b/);
+    expect(garden).toContain("element.muted = true;");
+    expect(garden).toContain('window.matchMedia("(prefers-reduced-motion: reduce)")');
+    expect(existsSync(join(here, "../public/zen-garden.mp4"))).toBe(true);
+    expect(existsSync(join(here, "../public/zen-garden-poster.jpg"))).toBe(true);
     const css = read("./styles.css");
     expect(css).toMatch(/\.zen-garden \{[^}]*height: 0;/s);
     expect(css).toContain(".zen-garden[data-visible] {");
-    expect(css).toMatch(/\.zen-raked \{[^}]*animation: zen-rake 14s linear infinite;/s);
-    expect(css).toMatch(/\.zen-raker \{[^}]*animation: zen-walk 14s linear infinite;/s);
-    expect(css).toContain("100% { transform: translateX(calc(100vw - 56px)); opacity: 0; }");
-    const reduced = css.slice(css.lastIndexOf("@media (prefers-reduced-motion: reduce)"));
-    expect(reduced).toContain(".zen-raker,");
-    expect(reduced).toContain(".zen-raked {\n    clip-path: none;\n  }");
+    expect(css).toMatch(/\.zen-garden-video \{[^}]*object-fit: cover;/s);
+    expect(css).not.toContain("zen-raker");
   });
 });

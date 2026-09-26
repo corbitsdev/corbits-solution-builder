@@ -61,7 +61,19 @@ const mime: Record<string, string> = {
   ".svg": "image/svg+xml",
   ".json": "application/json",
   ".woff2": "font/woff2",
+  // The busy indicator's film and its poster (#107). Served as octet-stream
+  // a browser will not decode them into a <video>.
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
 };
+
+/** The content type a static file is served with, by its extension. */
+export function contentTypeFor(path: string): string {
+  return mime[extname(path)] ?? "application/octet-stream";
+}
 
 export async function serveHost(options: ServeOptions): Promise<void> {
   const { displayName, envPrefix, sessionCookie, handshakePrefix, hubConfigScriptId, globalTokenKey, connectSrcExtra, interfaceBuildHint } =
@@ -391,7 +403,7 @@ export async function serveHost(options: ServeOptions): Promise<void> {
       }
       return new Response(file, {
         headers: {
-          "content-type": mime[extname(selected)] ?? "application/octet-stream",
+          "content-type": contentTypeFor(selected),
           "cache-control": "no-store",
           "content-security-policy": CSP,
         },
