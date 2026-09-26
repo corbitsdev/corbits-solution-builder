@@ -18,8 +18,8 @@
  * and returns bytes.
  */
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync, statSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 
 import { packTarballFiles, tarballFilename, type TarballFiles } from "./lib/tarball.js";
 import { ARTIFACT_TOOL_DEPENDENCIES, WORKFLOW_PACKAGE_DEPENDENCIES } from "@solutions-builder/app/specialist-source";
@@ -152,16 +152,52 @@ function vendoredShortNames(): string[] {
   return [...seen].sort();
 }
 
-/** A `workspace:*`/`catalog:` spec is not a real npm range; rewrite it to
- *  `"*"` since the packed set carries exactly one version of the name
- *  either way. Anything else (a real npm range on a real npm dependency) is
- *  kept as declared. */
-function rewriteDependencies(dependencies: Record<string, string> | undefined): Record<string, string> {
+/** The spec prefixes that only mean something inside this repository's bun
+ *  workspace. An offline registry, or a resolver reading a packed tarball's
+ *  manifest verbatim, fails on any of them (`Unsupported URL Type "catalog:"`). */
+const WORKSPACE_ONLY_SPEC = /^(workspace|catalog|link|file):/;
+
+/** Whether `spec` is a real npm range, as every packed manifest must carry. */
+export function isRegistrySpec(spec: string): boolean {
+  return !WORKSPACE_ONLY_SPEC.test(spec);
+}
+
+/** A `workspace:`/`catalog:`/`link:`/`file:` spec is not a real npm range;
+ *  rewrite it to `"*"` since the packed set carries exactly one version of
+ *  the name either way. Anything else (a real npm range on a real npm
+ *  dependency) is kept as declared. */
+export function rewriteDependencies(dependencies: Record<string, string> | undefined): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [name, spec] of Object.entries(dependencies ?? {})) {
-    out[name] = spec === "workspace:*" || spec === "catalog:" ? "*" : spec;
+    out[name] = isRegistrySpec(spec) ? spec : "*";
   }
   return out;
+}
+
+/** Whether an installed package directory is really one of this repository's
+ *  own packages (a workspace member or a vendored Interchange package)
+ *  reached through a `node_modules` symlink, as opposed to a real npm
+ *  package installed under some `node_modules`. Only the former carry
+ *  workspace-only specs, and only they are rewritten. */
+export function isRepoPackageDir(dir: string): boolean {
+  const rel = relative(ROOT_DIR, realpathSync(dir));
+  if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return false;
+  return !rel.split(sep).includes("node_modules");
+}
+
+/** The `package.json` an external tarball ships: byte-identical for a real
+ *  npm package, and for one of this repository's own packages the same
+ *  manifest with every workspace-only spec in its dependency fields
+ *  rewritten. Nothing else in the manifest, or the package, changes. */
+export function externalManifestBytes(dir: string, original: Uint8Array): Uint8Array {
+  if (!isRepoPackageDir(dir)) return original;
+  const manifest = JSON.parse(new TextDecoder().decode(original)) as PackageManifest & {
+    optionalDependencies?: Record<string, string>;
+  };
+  for (const field of ["dependencies", "peerDependencies", "optionalDependencies"] as const) {
+    if (manifest[field] !== undefined) manifest[field] = rewriteDependencies(manifest[field]);
+  }
+  return encode(`${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 /** The tarball's file tree, rooted at `package/` (the npm-tarball convention
@@ -284,7 +320,10 @@ function discoverExternalClosure(): ExternalPackage[] {
 
 /** A real npm package's installed directory, packed unmodified. Only its own
  *  `node_modules` (its *own* dependencies' bytes, packed as their own
- *  separate tarballs) is excluded. */
+ *  separate tarballs) is excluded. One of this repository's own packages
+ *  reached this way (`@intx/types` through `@intx/agent`'s real dependency
+ *  edge, `@solutions-builder/tools-*` through `WORKFLOW_PACKAGE_DEPENDENCIES`)
+ *  ships with its workspace-only specs rewritten; see `externalManifestBytes`. */
 function externalTarballFiles(pkg: ExternalPackage): TarballFiles {
   const paths: string[] = [];
   walk(pkg.dir, paths);
@@ -292,7 +331,8 @@ function externalTarballFiles(pkg: ExternalPackage): TarballFiles {
   for (const full of paths) {
     const rel = relative(pkg.dir, full).split("\\").join("/");
     if (rel === "node_modules" || rel.startsWith("node_modules/")) continue;
-    files[rel] = new Uint8Array(readFileSync(full));
+    const bytes = new Uint8Array(readFileSync(full));
+    files[rel] = rel === "package.json" ? externalManifestBytes(pkg.dir, bytes) : bytes;
   }
   return files;
 }
