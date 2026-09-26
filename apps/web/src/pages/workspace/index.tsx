@@ -229,6 +229,7 @@ export function StageWorkspace({
     tenantId,
     stage,
     agentAddress,
+    addresses: agent.addresses,
     messages: thread.messages,
     loadedFor: thread.loadedFor,
     workflowView,
