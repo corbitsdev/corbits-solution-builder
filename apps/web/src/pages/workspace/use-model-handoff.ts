@@ -148,6 +148,39 @@ export function handoffDue(args: {
   return args.priorHead !== null;
 }
 
+/**
+ * Whether the hand-off to `address` is in the transcript: a message the
+ * person sent whose marker names this address and some earlier message as
+ * the head it was composed against. Read off the merged thread, so it holds
+ * on a reload long after the hand-off went.
+ */
+export function handoffLanded(address: string, messages: readonly ChatMessage[]): boolean {
+  return messages.some((message, index) => {
+    if (message.author !== "me") return false;
+    const id = matchSwitchMarker(message.body.split("\n")[0] ?? "");
+    if (!id) return false;
+    return messages.slice(0, index).some((prior) => handoffId(address, prior.id) === id);
+  });
+}
+
+/**
+ * Whether anything else must wait before mailing `address`: a hand-off is
+ * due for it and has not landed. The hand-off skips itself when the new
+ * address already holds any mail, so a send-back cue that reached the
+ * address first left the specialist with the cue and nothing of the
+ * conversation or the draft it was meant to revise (#105).
+ */
+export function handoffPending(args: {
+  readonly address: string | null;
+  readonly addresses: readonly string[];
+  readonly threadLoaded: boolean;
+  readonly messages: readonly ChatMessage[];
+}): boolean {
+  const priorHead = args.messages.at(-1) ?? null;
+  if (!handoffDue({ address: args.address, addresses: args.addresses, threadLoaded: args.threadLoaded, priorHead })) return false;
+  return !handoffLanded(args.address!, args.messages);
+}
+
 export type ModelSwitchState = {
   readonly switching: boolean;
   readonly error: string | null;

@@ -34,6 +34,7 @@ import { composeStage9Opening } from "./stage9-opening.ts";
 import { renderStackBlock } from "./frozen-stack-text.ts";
 import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
 import { sendBackResumeCue } from "./send-back-cue.ts";
+import { handoffPending } from "./use-model-handoff.ts";
 
 export type OpeningDispatch = {
   /** The opening send failed — surfaced with a retry, never retried forever. */
@@ -56,6 +57,7 @@ export function useOpeningDispatch({
   tenantId,
   stage,
   agentAddress,
+  addresses,
   messages,
   loadedFor,
   workflowView,
@@ -67,6 +69,9 @@ export function useOpeningDispatch({
   /** Already scoped to the current stage by `useStageAgent` — a null or
    *  stale address never reaches here (CL-8649). */
   agentAddress: string | null;
+  /** Every address this stage's mail has lived at (`useStageAgent.addresses`):
+   *  the live one among others means a redeploy, and a hand-off owed. */
+  addresses: readonly string[];
   messages: ChatMessage[];
   loadedFor: string | null;
   workflowView: ProjectWorkflowView | null;
@@ -277,6 +282,12 @@ export function useOpeningDispatch({
   useEffect(() => {
     if (!agentAddress) return;
     if (loadedFor !== agentAddress || messages.length === 0) return;
+    // A freshly redeployed specialist is owed the hand-off first: the cue
+    // says the stage came back, the hand-off says what the stage is. Sent
+    // ahead of it, the cue was the mail that made the hand-off stand down,
+    // and the specialist answered from the cue alone (#105). The hand-off's
+    // own reload of the thread re-runs this once it has landed.
+    if (handoffPending({ address: agentAddress, addresses, threadLoaded: loadedFor === agentAddress, messages })) return;
     const cue = sendBackResumeCue({
       stage,
       decisions: workflowView?.decisions ?? [],
@@ -292,7 +303,7 @@ export function useOpeningDispatch({
         // Not marked as sent: the next thread or view change retries.
         cueInFlightRef.current = null;
       });
-  }, [stage, agentAddress, loadedFor, messages, workflowView, tenantId, reloadThread]);
+  }, [stage, agentAddress, addresses, loadedFor, messages, workflowView, tenantId, reloadThread]);
 
   return {
     error,
