@@ -23,6 +23,7 @@ import { deckDesignFor } from "../deck-design-settings.ts";
 import { slidesSource } from "../deck-templates.ts";
 import { SlidePreview } from "../slide-preview.tsx";
 import { packageRequest } from "../package-request.ts";
+import { packagesByStakeholder } from "../package-lineages.ts";
 import { deckFrom, packageOutlineProblem, type Deck, type TemplateTheme } from "@solutions-builder/app/deck";
 import { recordAudienceVote, type StageApprovalDeps } from "../stage-approval.ts";
 import { stageRefusalMessage } from "../stage-evidence.ts";
@@ -419,15 +420,10 @@ export function AudiencePackages({
     }
   };
 
-  // Packages in the stakeholders' order, so the tabs and the decisions
-  // table read the same way, with the person's own first.
-  const rank = (name: string | null) => {
-    const index = audiences.findIndex((audience) => audience.name === name);
-    return index === -1 ? audiences.length : index;
-  };
-  const packages = detail.nodes
-    .filter((node) => node.kind === "audience_package" && node.supersededByNodeId === null)
-    .sort((a, b) => rank(a.variant) - rank(b.variant));
+  // One package per stakeholder, the newest, in the stakeholders' order so
+  // the tabs and the decisions table read the same way, the person's own
+  // first (#122).
+  const packages = packagesByStakeholder(detail.nodes, audiences);
   // The open tab is a stakeholder, not a version: writing a package again
   // gives it a new version id, and a tab keyed on the id fell back to the
   // first stakeholder the moment the rewrite landed.
