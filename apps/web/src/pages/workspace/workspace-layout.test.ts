@@ -100,7 +100,8 @@ describe("project chrome paint", () => {
     expect(app).toContain("· viewing · at ");
     const workspace = read("./index.tsx");
     expect(workspace).toContain("onViewedStage?.(viewedStage)");
-    expect(workspace).toContain("Change it: send back to stage ");
+    // #116: the stage by its name, never its number.
+    expect(workspace).toContain("Change it: send back to {stageName(artifacts.activeNode.stage)}…");
     expect(workspace).toContain("Back to {stageName(stage)}");
   });
 
