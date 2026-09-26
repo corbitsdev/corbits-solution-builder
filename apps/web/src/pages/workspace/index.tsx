@@ -40,7 +40,7 @@ import { StageDocument } from "./document.jsx";
 import { BuildPanel } from "./build.jsx";
 import { TargetPicker } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
-import { interviewProgress, workspaceGuidance } from "./guidance.js";
+import { interviewProgress, latestDesignReply, workspaceGuidance } from "./guidance.js";
 import { useWorkflowView } from "./use-workflow-view.ts";
 import { useStageAgent } from "./use-stage-agent.ts";
 import { useStageThread } from "./use-stage-thread.ts";
@@ -247,7 +247,17 @@ export function StageWorkspace({
     soloApproval: detail.soloApproval,
   };
   const guide = useProductGuide(tenantId, detail.project.id, guideContext);
-  const reviewMessage = DOCUMENT_STAGES.has(stage) ? draftMessage : latestSpecialistMessage;
+  // Stage 4's reviewable material is a design reply and nothing else: the
+  // designer's contract is one self-contained HTML document per design, so
+  // an error, a question or an acknowledgement is conversation, never a
+  // version to open a review on (#81). Every stage also waits for the thread
+  // to have loaded for this stage's own specialist -- at a stage transition
+  // the previous stage's messages linger for a few renders, and a review
+  // opened off them would persist the previous stage's document as this
+  // stage's first draft.
+  const threadLoaded = thread.loadedFor !== null && thread.loadedFor === agentAddress;
+  const latestDesign = useMemo(() => latestDesignReply(foldedMessages), [foldedMessages]);
+  const reviewMessage = !threadLoaded ? null : DOCUMENT_STAGES.has(stage) ? draftMessage : stage === 4 ? latestDesign : latestSpecialistMessage;
   const progress = useMemo(() => interviewProgress(foldedMessages), [foldedMessages]);
 
   // Mail turns as StageDocument's turn shape: it wants who spoke and what
@@ -794,7 +804,7 @@ export function StageWorkspace({
               onChanged={() => void refreshWorkflow()}
               onApprove={approve}
               onRevise={(prompt) => send(prompt)}
-              latestReply={latestSpecialistMessage}
+              latestReply={latestDesign}
               canApprove={approveAllowed}
             />
           )}
