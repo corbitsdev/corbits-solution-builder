@@ -29,9 +29,10 @@ describe("stage 4 design pane", () => {
   });
 
   test("iframe preview, approve, and comment stay", () => {
-    expect(page).toContain("srcDoc={content}");
-    expect(page).toContain('sandbox=""');
-    expect(page).toContain('className="design-preview"');
+    expect(page).toContain("<DesignFrames");
+    expect(page).toContain('paneClassName="design-preview"');
+    // The frames themselves, and their sandbox, live in the shared module (#101).
+    expect(read("../design-frames.tsx")).toContain('sandbox=""');
     expect(page).toContain("Approve and continue");
     expect(page).toContain("Send for approval");
     expect(page).toContain("Add this comment");

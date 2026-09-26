@@ -13,3 +13,15 @@ describe("Experience designer prompt", () => {
     expect(prompt).toContain("scrolls inside its own panel");
   });
 });
+
+// #101: a phone screen is the screen only; the review window draws the phone.
+describe("Experience designer phone screens", () => {
+  test("marks each phone screen and draws no device around it", () => {
+    const prompt = agentById("experience-designer")!.system;
+    expect(prompt).toContain("A phone screen is drawn as the screen, never as the phone.");
+    expect(prompt).toContain('<section data-testid="screen-<name>" data-surface="phone">');
+    expect(prompt).toContain("402px-wide viewport");
+    expect(prompt).toContain("no bezel, notch or rounded device");
+    expect(prompt).not.toContain("a phone-width frame\n  with a notch");
+  });
+});
