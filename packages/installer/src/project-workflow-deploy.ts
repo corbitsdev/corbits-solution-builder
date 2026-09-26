@@ -145,6 +145,14 @@ type ProjectRunState = {
  * live run that has not caught up is how a restart used to reset a project
  * to stage 1. A dead deployment whose run never took a decision holds
  * nothing and is passed over.
+ *
+ * Among several dead runs, the one holding the most decisions is read --
+ * every replacement replays the whole history onto itself, so a newer dead
+ * run holds everything an older one took plus whatever was decided after
+ * it. Reading the oldest instead showed a stage the project had already
+ * left (its approval landed on a later replacement), and the page then
+ * re-opened that stage's review and offered its approval again, both
+ * refused as `wrong_stage` (#77).
  */
 async function projectRunState(
   workflows: ReturnType<typeof workflowsFor>,
@@ -154,11 +162,12 @@ async function projectRunState(
   const liveCandidates = candidates.filter((candidate) => !deploymentHasEnded(candidate.deployment));
   const history: ReceivedDecision[] = [];
   const known = new Set<string>();
-  let oldestDead: ProjectRunCandidate | null = null;
+  let fullestDead: { candidate: ProjectRunCandidate; held: number } | null = null;
   for (const candidate of candidates.filter((entry) => deploymentHasEnded(entry.deployment))) {
     const decisions = await appliedDecisions(workflows, candidate.deployment.id, candidate.runId);
     if (decisions.length === 0) continue;
-    oldestDead ??= candidate;
+    // `>=`: candidates come oldest first, so a tie goes to the newer run.
+    if (fullestDead === null || decisions.length >= fullestDead.held) fullestDead = { candidate, held: decisions.length };
     for (const decision of decisions) {
       if (known.has(decision.signalId)) continue;
       known.add(decision.signalId);
@@ -171,7 +180,7 @@ async function projectRunState(
     const held = new Set((await appliedDecisions(workflows, candidate.deployment.id, candidate.runId)).map((decision) => decision.signalId));
     if (history.every((decision) => held.has(decision.signalId))) return { run: asRef(candidate), live: true, liveCandidates, history };
   }
-  if (oldestDead) return { run: asRef(oldestDead), live: false, liveCandidates, history };
+  if (fullestDead) return { run: asRef(fullestDead.candidate), live: false, liveCandidates, history };
   return { run: null, live: false, liveCandidates, history };
 }
 

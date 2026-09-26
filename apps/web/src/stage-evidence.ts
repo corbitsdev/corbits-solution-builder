@@ -13,7 +13,7 @@
  */
 import type { ArtifactNode, Remediation } from "./client.ts";
 import type { ProjectWorkflowView } from "./project-workflow.ts";
-import type { Stage7Evidence } from "@solutions-builder/app/project-workflow/contracts";
+import { approveReasonText, type ApproveReason, type Stage7Evidence } from "@solutions-builder/app/project-workflow/contracts";
 import {
   checkStackCitations,
   parseStackRecord,
@@ -42,10 +42,12 @@ const STAGE_REFUSAL_MESSAGES: Readonly<Record<string, string>> = {
   unknown_audience: "That stakeholder is not on this project's list for the open review.",
 };
 
-/** A stage rule's refusal code, in plain language; anything not in the map
- *  (a structural refusal like `stale_review`) is shown as-is. */
+/** A refusal code in plain language: a stage rule's from the map above,
+ *  otherwise the workflow contract's own text for a structural refusal
+ *  (`wrong_stage`, `stale_review`, ...). A code neither knows is shown
+ *  as-is. */
 export function stageRefusalMessage(reason: string): string {
-  return STAGE_REFUSAL_MESSAGES[reason] ?? reason;
+  return STAGE_REFUSAL_MESSAGES[reason] ?? approveReasonText(reason as ApproveReason, null);
 }
 
 export type StageEvidenceDeps = {

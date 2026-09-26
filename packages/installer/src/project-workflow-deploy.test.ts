@@ -167,6 +167,29 @@ describe("findProjectWorkflow", () => {
     expect(await findProjectWorkflow(hub.transport, TENANT_ID, PROJECT_ID)).toEqual({ deploymentId: "dep_old_failed", runId: "run_0" });
   });
 
+  // #77: every replacement replays the whole history onto itself, so the
+  // newest dead run that took decisions holds everything the older ones
+  // did and more. Reading the oldest showed a stage the project had already
+  // left, and the page offered that stage's approval again.
+  test("several dead runs, none caught up by a live one -> reads the one holding the most decisions, not the oldest", async () => {
+    const hub = fakeHub(
+      withAsset({
+        deployments: [
+          { id: "dep_oldest_failed", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" },
+          { id: "dep_later_failed", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-02T00:00:00.000Z" },
+          { id: "dep_new_live", definitionAssetId: ASSET_ID, status: "active", createdAt: "2026-01-03T00:00:00.000Z" },
+        ],
+        runsByDeployment: {
+          dep_oldest_failed: decidedRun("run_0", [1, 2]).runIds,
+          dep_later_failed: decidedRun("run_1", [1, 2, 3]).runIds,
+          dep_new_live: decidedRun("run_2", [1]).runIds,
+        },
+        eventsByRun: { ...decidedRun("run_0", [1, 2]).events, ...decidedRun("run_1", [1, 2, 3]).events, ...decidedRun("run_2", [1]).events },
+      }),
+    );
+    expect(await findProjectWorkflow(hub.transport, TENANT_ID, PROJECT_ID)).toEqual({ deploymentId: "dep_later_failed", runId: "run_1" });
+  });
+
   test("a live run that holds every decision the dead one took is the project's run", async () => {
     const hub = fakeHub(
       withAsset({
