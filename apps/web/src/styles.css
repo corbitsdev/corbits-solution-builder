@@ -4128,14 +4128,30 @@ button[aria-disabled="true"] {
   position: absolute;
   right: var(--space-4);
   top: var(--space-3);
-  margin: 0;
+  max-width: min(60%, 48ch);
   padding: 2px var(--space-2);
   border-radius: var(--radius-control);
   background: color-mix(in srgb, var(--wb-background) 80%, transparent);
   font-family: var(--wb-font-mono);
   font-size: 0.75rem;
   color: var(--wb-muted-foreground);
+  text-align: right;
   pointer-events: none;
+}
+
+.zen-garden-caption-line,
+.zen-garden-doing {
+  margin: 0;
+}
+
+/* Under the clock: which specialist, doing what (#113). Empty when the
+   work has nothing to say, and then takes no room. */
+.zen-garden-doing {
+  color: var(--wb-foreground);
+}
+
+.zen-garden-doing:empty {
+  display: none;
 }
 
 .zen-garden-clock {

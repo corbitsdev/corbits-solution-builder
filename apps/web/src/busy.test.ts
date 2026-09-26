@@ -3,6 +3,7 @@ import {
   IDLE,
   beginBusy,
   busyCount,
+  busyLabel,
   indicatorVisible,
   nextDeadline,
   stepIndicator,
@@ -30,6 +31,21 @@ describe("the busy count", () => {
     await expect(trackBusy(Promise.resolve("ok"))).resolves.toBe("ok");
     expect(busyCount()).toBe(0);
     await expect(trackBusy(Promise.reject(new Error("no")))).rejects.toThrow("no");
+    expect(busyCount()).toBe(0);
+  });
+
+  // #113: the newest labelled work names itself; unlabelled work says nothing.
+  test("the label is the newest labelled work's, and goes when that work is released", () => {
+    expect(busyLabel()).toBeNull();
+    const quiet = beginBusy();
+    const first = beginBusy("Opening the project");
+    const second = beginBusy("Presentation creator is writing the stakeholder packages and their slides");
+    expect(busyLabel()).toBe("Presentation creator is writing the stakeholder packages and their slides");
+    second();
+    expect(busyLabel()).toBe("Opening the project");
+    first();
+    expect(busyLabel()).toBeNull();
+    quiet();
     expect(busyCount()).toBe(0);
   });
 

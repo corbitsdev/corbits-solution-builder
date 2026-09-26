@@ -12,8 +12,8 @@ describe("the zen garden busy indicator", () => {
   test("the shell mounts the garden as its third row, and registers its own waits", () => {
     const app = read("./app.tsx");
     expect(app).toContain("<ZenGarden />");
-    expect(app).toContain('useBusyWhile(view === "project" && detail === null && detailError === null);');
-    expect(app).toContain("useBusyWhile(exporting);");
+    expect(app).toContain('useBusyWhile(view === "project" && detail === null && detailError === null, "Opening the project");');
+    expect(app).toContain('useBusyWhile(exporting, "Exporting the bundle");');
     const css = read("./styles.css");
     expect(css).toMatch(/\.app \{[^}]*grid-template-rows: auto minmax\(0, 1fr\) auto;/s);
   });
@@ -25,8 +25,8 @@ describe("the zen garden busy indicator", () => {
 
   test("the workspace counts a specialist turn in flight and a thread still loading", () => {
     const index = read("./pages/workspace/index.tsx");
-    expect(index).toContain("useBusyWhile(pending !== null);");
-    expect(index).toContain("useBusyWhile(!threadLoaded);");
+    expect(index).toContain("useBusyWhile(pending !== null, specialistActivity(stage));");
+    expect(index).toContain('useBusyWhile(!threadLoaded, "Loading the conversation");');
   });
 
   test("the garden names its state, keeps the clock out of the live region, and is hidden from readers as decoration", () => {
@@ -35,6 +35,10 @@ describe("the zen garden busy indicator", () => {
     expect(garden).toContain('<span role="status" aria-live="polite">');
     expect(garden).toContain('<span className="zen-garden-clock" role="timer" aria-live="off">');
     expect(garden).toContain('data-visible={visible ? "" : undefined}');
+    // #113: what the work is, under the clock, in a live region of its own.
+    expect(garden).toContain('<p className="zen-garden-doing" role="status" aria-live="polite">');
+    expect(garden).toContain("{visible && label ? label : null}");
+    expect(read("./pages/workspace/index.tsx")).toContain("useBusyWhile(pending !== null, specialistActivity(stage));");
   });
 
   // #107: the film, looped and silent, mounted only while the strip is up,

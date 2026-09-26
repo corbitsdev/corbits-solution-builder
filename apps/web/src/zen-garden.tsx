@@ -77,7 +77,7 @@ function GardenFilm({ still }: { still: boolean }) {
 }
 
 export function ZenGarden() {
-  const { visible, since } = useBusyIndicator();
+  const { visible, since, label } = useBusyIndicator();
   const seconds = useSecondsSince(visible ? since : null);
   const still = useReducedMotion();
   return (
@@ -85,16 +85,24 @@ export function ZenGarden() {
       <div className="zen-garden-strip" aria-hidden="true">
         {visible ? <GardenFilm still={still} /> : null}
       </div>
-      <p className="zen-garden-caption">
-        <span role="status" aria-live="polite">
-          {visible ? "Working…" : null}
-        </span>{" "}
-        {visible ? (
-          <span className="zen-garden-clock" role="timer" aria-live="off">
-            {clock(seconds)}
-          </span>
-        ) : null}
-      </p>
+      <div className="zen-garden-caption">
+        <p className="zen-garden-caption-line">
+          <span role="status" aria-live="polite">
+            {visible ? "Working…" : null}
+          </span>{" "}
+          {visible ? (
+            <span className="zen-garden-clock" role="timer" aria-live="off">
+              {clock(seconds)}
+            </span>
+          ) : null}
+        </p>
+        {/* What the work is, when it says: a specialist's turn names the
+            specialist and the stage's task (#113). Its own live region, so
+            a change of task is announced once and the clock never is. */}
+        <p className="zen-garden-doing" role="status" aria-live="polite">
+          {visible && label ? label : null}
+        </p>
+      </div>
     </div>
   );
 }
