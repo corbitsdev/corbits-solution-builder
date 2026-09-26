@@ -6,6 +6,7 @@
  * is open and whether an approve lands (`allowed.approve` is the ONE gate
  * on the Approve control, CL-8687).
  */
+import { stageName } from "../../components.jsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiFailure, type ProjectDetail, type Remediation } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
@@ -419,7 +420,7 @@ export function useStageDecisions({
         projectId: detail.project.id,
         stage,
         targetStage: target,
-        reason: sendReason.trim() || `Sent back from stage ${stage} to stage ${target}.`,
+        reason: sendReason.trim() || `Sent back from ${stageName(stage)} to ${stageName(target)}.`,
       });
       if (!result.ok) {
         onError(`Send-back was refused: ${result.reason}`);

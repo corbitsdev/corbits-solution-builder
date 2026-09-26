@@ -97,9 +97,13 @@ export const HANDOFF_BUBBLE_TEXT = "Handed the conversation so far, and the curr
  *  (`kit.ts`), which quoted in full makes the recap unreadable and repeats
  *  the draft block below it, so it is named instead and the draft block
  *  alone carries the document (#85). */
-function transcriptTurn(message: ChatMessage): string {
+function transcriptTurn(message: ChatMessage, opening = false): string {
   const who = message.author === "me" ? "Person" : "Specialist";
-  if (isHtmlDocument(message.body)) {
+  // The stage's opening is its input -- at stage 5 the approved design,
+  // an HTML document -- and a specialist handed a recap that only names it
+  // has nothing to work from (#115). It is quoted whole; only a design
+  // reply is named.
+  if (isHtmlDocument(message.body) && !opening) {
     return `${who}: (${message.author === "me" ? "shared" : "sent"} a design mockup as a whole HTML document; the current draft below is the latest one)`;
   }
   return `${who}: ${message.body}`;
@@ -107,10 +111,16 @@ function transcriptTurn(message: ChatMessage): string {
 
 function transcriptBlock(messages: readonly ChatMessage[]): string {
   if (messages.length === 0) return "(No conversation yet.)";
-  const kept = messages.length > MAX_HANDOFF_TURNS ? messages.slice(-MAX_HANDOFF_TURNS) : messages;
-  const omitted = messages.length - kept.length;
-  const lines = kept.map(transcriptTurn);
-  return omitted > 0 ? [`(${omitted} earlier turn${omitted === 1 ? "" : "s"} omitted.)`, ...lines].join("\n\n") : lines.join("\n\n");
+  const opening = messages[0]!;
+  const rest = messages.slice(1);
+  // The opening always rides along in full; the condensing applies to
+  // what followed it.
+  const kept = rest.length > MAX_HANDOFF_TURNS - 1 ? rest.slice(-(MAX_HANDOFF_TURNS - 1)) : rest;
+  const omitted = rest.length - kept.length;
+  const lines = [transcriptTurn(opening, opening.author === "me"), ...kept.map((message) => transcriptTurn(message))];
+  return omitted > 0
+    ? [lines[0]!, `(${omitted} earlier turn${omitted === 1 ? "" : "s"} omitted.)`, ...lines.slice(1)].join("\n\n")
+    : lines.join("\n\n");
 }
 
 export function composeModelHandoff(args: {

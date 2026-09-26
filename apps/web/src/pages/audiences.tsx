@@ -22,6 +22,7 @@ import { buildPackageDeck } from "../deck-save.ts";
 import { deckDesignFor } from "../deck-design-settings.ts";
 import { slidesSource } from "../deck-templates.ts";
 import { SlidePreview } from "../slide-preview.tsx";
+import { packageRequest } from "../package-request.ts";
 import { deckFrom, packageOutlineProblem, type Deck, type TemplateTheme } from "@solutions-builder/app/deck";
 import { recordAudienceVote, type StageApprovalDeps } from "../stage-approval.ts";
 import { stageRefusalMessage } from "../stage-evidence.ts";
@@ -388,7 +389,15 @@ export function AudiencePackages({
     const deployment = await api.ensureStage5PackageAgent(detail.project.id, index);
     const before = await api.readStageThread(tenantId, [deployment.address]);
     const seenIds = new Set(before.map((message) => message.id));
-    await api.sendStageMail(tenantId, deployment.address, { body: `Write the package for: ${name}.` });
+    // The approved design this stage opened with (the review at stage 4
+    // names the exact artifact), read fresh: this stakeholder's specialist
+    // is its own deployment and never had the opening (#115).
+    const designReview = workflowView?.reviews[4];
+    const design =
+      designReview?.status === "approved"
+        ? await api.artifactContent(tenantId, designReview.artifactId).then((result) => result.content, () => null)
+        : null;
+    await api.sendStageMail(tenantId, deployment.address, { body: packageRequest(name, design) });
     const reply = await awaitAgentReply(tenantId, deployment.address, seenIds, () => cancelledRef.current);
     if (cancelledRef.current) return;
     await api.persistAudiencePackage(detail.project.id, name, reply.body);
