@@ -2,14 +2,14 @@
  * Sidecar-bundle entry for `@solutions-builder/tools-delivery`, following
  * `@solutions-builder/tools-deck`'s convention.
  *
- * The tool turns a manifest's already-checked items into the completeness
- * report and one-sentence blocker summary the decision queue shows, calling
- * `summarizeVerification`/`describeBlockers` from `@solutions-builder/app/delivery`
- * — the same deterministic evidence logic `apps/hub/src/delivery.ts` uses.
- * Checking each descriptor against the build workspace (`hashFile`,
- * `checkDescriptor`) stays host-side: it reads the workspace's actual files
- * and the project's database, neither of which a tool package may touch, so
- * a caller runs those checks first and hands this tool their results.
+ * The tool turns the items it is handed into the completeness report and
+ * one-sentence blocker summary the decision queue shows, calling
+ * `summarizeVerification`/`describeBlockers` from `@solutions-builder/app/delivery`.
+ * It checks nothing itself: the statuses are whatever the calling agent
+ * scored them, from the text of its opening message. No code today hashes
+ * the delivered files against the manifest or probes the deliverable (#129),
+ * which is why the stage 9 screen renders a `"verified"` item as
+ * unverified, reported by the agent (#32).
  */
 import { defineTool, type BaseEnv } from "@intx/agent";
 import {
