@@ -28,16 +28,44 @@ function mintToken(): string {
   return Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex");
 }
 
-async function ensureProvider(
-  catalog: ReturnType<typeof catalogFor>,
+/**
+ * The provider's `apiBaseUrl` is the origin the sidecar's tool calls are
+ * pinned to, and the hub fails closed (`no_origin`) at launch when it is
+ * empty -- then retries silently, so the deployment sits `pending` with no
+ * run and nothing recorded. The hub accepts an empty string, so the guard
+ * lives here: refuse one before it becomes a provider row.
+ */
+function requireOrigin(hubOrigin: string): string {
+  const origin = hubOrigin.trim();
+  if (origin === "") {
+    throw new Error(
+      "the artifacts provider needs the hub's origin: a credential-bound specialist's sidecar dials it, and the hub refuses to launch one pinned to an empty origin",
+    );
+  }
+  return origin;
+}
+
+/**
+ * Exported for tests. Creates the workspace's provider, or repairs an
+ * existing row whose `apiBaseUrl` is empty or differs from `hubOrigin`:
+ * workspaces that tried artifact tools from the embedded app before the
+ * client passed a real origin still hold a row created with `""`, and
+ * reusing it as-is would keep every later bound deploy stuck.
+ */
+export async function ensureProvider(
+  catalog: Pick<ReturnType<typeof catalogFor>, "providers" | "createProvider" | "patchProvider">,
   hubOrigin: string,
 ): Promise<HubProvider> {
+  const origin = requireOrigin(hubOrigin);
   const existing = (await catalog.providers()).find((row) => row.name === WORKFLOW_ARTIFACTS_PROVIDER_NAME);
-  if (existing) return existing;
+  if (existing) {
+    if (existing.apiBaseUrl === origin) return existing;
+    return catalog.patchProvider(existing.id, { apiBaseUrl: origin });
+  }
   return catalog.createProvider({
     name: WORKFLOW_ARTIFACTS_PROVIDER_NAME,
     plugin: "http",
-    apiBaseUrl: hubOrigin,
+    apiBaseUrl: origin,
   });
 }
 
