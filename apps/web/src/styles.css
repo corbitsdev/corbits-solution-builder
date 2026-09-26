@@ -4098,6 +4098,31 @@ button[aria-disabled="true"] {
   height: var(--zen-height);
 }
 
+/* Mid-drag the height follows the pointer, not a transition. */
+.zen-garden[data-resizing] {
+  transition: none;
+  user-select: none;
+}
+
+/* The grip: the top few pixels of the strip, where the pointer becomes a
+   vertical resize cursor (#120). Above the film, invisible, and the only
+   part of the strip that takes the pointer. */
+.zen-garden-grip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: ns-resize;
+  touch-action: none;
+  z-index: 3;
+}
+
+.zen-garden-grip:focus-visible {
+  outline: 2px solid var(--wb-primary);
+  outline-offset: -2px;
+}
+
 /* The rule sits on the strip, inside the clipped box, so the hidden row is
    0 tall and not a 1px line across the foot of the canvas. */
 .zen-garden-strip {
