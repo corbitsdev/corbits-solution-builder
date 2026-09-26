@@ -4,7 +4,7 @@
  * travels with the markup.
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Compass, Loader2, X } from "lucide-react";
+import { Compass, Copy, Loader2, X } from "lucide-react";
 import {
   Badge,
   Button as UiButton,
@@ -114,6 +114,37 @@ export function Button({
       {loading ? <Loader2 className="animate-spin" aria-hidden="true" /> : null}
       {children}
     </UiButton>
+  );
+}
+
+/**
+ * Puts a document's text on the clipboard (#117). Every artifact a person
+ * can read carries one, so the text can go wherever they need it -- a
+ * message to a specialist, most often -- without selecting a whole page by
+ * hand. Says "Copied" for a moment afterwards, and says so plainly when the
+ * clipboard refuses.
+ */
+export function CopyButton({ text, label = "Copy" }: { text: string | null | undefined; label?: string }) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  useEffect(() => {
+    if (state === "idle") return;
+    const timer = setTimeout(() => setState("idle"), 1_800);
+    return () => clearTimeout(timer);
+  }, [state]);
+  const copy = async () => {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setState("copied");
+    } catch {
+      setState("failed");
+    }
+  };
+  return (
+    <Button variant="ghost" disabled={!text} onClick={() => void copy()}>
+      <Copy aria-hidden="true" />
+      {state === "copied" ? "Copied" : state === "failed" ? "Couldn't copy" : label}
+    </Button>
   );
 }
 

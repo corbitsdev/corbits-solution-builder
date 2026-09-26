@@ -33,7 +33,7 @@ import { BinaryFile, isDataUrl } from "../../binary-file.tsx";
 import { AudiencePackages } from "../audiences.jsx";
 import { DesignFeedbackView } from "../design.jsx";
 import { Tabs } from "@corbits/react-ui";
-import { Banner, Button, GuideDock, Screen, StateLabel, documentName, stageName, versionDigest } from "../../components.jsx";
+import { Banner, Button, CopyButton, GuideDock, Screen, StateLabel, documentName, stageName, versionDigest } from "../../components.jsx";
 import { useBusyWhile } from "../../use-busy.ts";
 import { DesignFrames, FrameSelect, framedDesign, type FrameMode } from "../../design-frames.tsx";
 import { specialistActivity } from "./specialist-activity.ts";
@@ -596,6 +596,7 @@ export function StageWorkspace({
               {artifacts.activeNode.mediaType === "text/html" || artifacts.activeNode.kind === "design_artifact" ? (
                 <FrameSelect value={frameMode} onChange={setFrameMode} />
               ) : null}
+              <CopyButton text={isDataUrl(artifacts.activeContent) ? null : artifacts.activeContent} />
               <Button variant="ghost" onClick={() => artifacts.select(null)}>
                 Back to {stageName(stage)}
               </Button>

@@ -24,7 +24,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiFailure, type ArtifactNode, type DesignFeedbackEntry } from "../client.js";
 import { DesignFrames, FrameSelect, framedDesign, type FrameMode } from "../design-frames.tsx";
 import { revisionPrompt, type Anchor, type Direction } from "@solutions-builder/app/design-prompt";
-import { Banner, Button, Field, StateLabel, documentName } from "../components.jsx";
+import { Banner, Button, CopyButton, Field, StateLabel, documentName } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
 import { PrintButton } from "../print.jsx";
 import { Elapsed } from "./workspace/elapsed.jsx";
@@ -323,6 +323,7 @@ export function DesignFeedbackView({
               <option value="feedback">Feedback</option>
             </select>
             <FrameSelect value={frameMode} onChange={setFrameMode} />
+            <CopyButton text={content || null} />
             {design ? <PrintButton node={design} tenantId={tenantId} content={content || null} /> : null}
             {design && approval.canApprove ? (
               <Button
