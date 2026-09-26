@@ -4,6 +4,7 @@ import {
   INDICATOR_TIMING,
   beginBusy,
   busyCount,
+  busyLabel,
   indicatorVisible,
   nextDeadline,
   stepIndicator,
@@ -13,15 +14,16 @@ import {
 } from "./busy.ts";
 
 /**
- * Counts the surface as busy for as long as `active` holds. The one hook a
- * screen needs: hand it the flag it already keeps for its own spinner or
- * "Loading…" line and the shell's indicator follows.
+ * Counts the surface as busy for as long as `active` holds, saying what it
+ * is doing when `label` is given. The one hook a screen needs: hand it the
+ * flag it already keeps for its own spinner or "Loading…" line and the
+ * shell's indicator follows.
  */
-export function useBusyWhile(active: boolean): void {
+export function useBusyWhile(active: boolean, label?: string): void {
   useEffect(() => {
     if (!active) return;
-    return beginBusy();
-  }, [active]);
+    return beginBusy(label);
+  }, [active, label]);
 }
 
 /**
@@ -32,11 +34,17 @@ export function useBusyWhile(active: boolean): void {
 export function useBusyIndicator(timing: IndicatorTiming = INDICATOR_TIMING): {
   visible: boolean;
   since: number | null;
+  /** What the newest labelled work says it is doing, while any is in flight. */
+  label: string | null;
 } {
   const [state, setState] = useState<IndicatorState>(IDLE);
+  const [label, setLabel] = useState<string | null>(null);
 
   useEffect(() => {
-    const step = () => setState((current) => stepIndicator(current, busyCount(), Date.now(), timing));
+    const step = () => {
+      setState((current) => stepIndicator(current, busyCount(), Date.now(), timing));
+      setLabel(busyLabel());
+    };
     step();
     return subscribeBusy(step);
   }, [timing]);
@@ -54,5 +62,6 @@ export function useBusyIndicator(timing: IndicatorTiming = INDICATOR_TIMING): {
   return {
     visible: indicatorVisible(state),
     since: state.phase === "idle" ? null : state.since,
+    label,
   };
 }

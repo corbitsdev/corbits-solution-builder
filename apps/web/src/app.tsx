@@ -584,8 +584,8 @@ export function App() {
   // The shell's own waits, for the busy indicator at the foot of the window:
   // a project that has not landed yet, and an export in flight. Everything
   // a button does registers itself through `Button`.
-  useBusyWhile(view === "project" && detail === null && detailError === null);
-  useBusyWhile(exporting);
+  useBusyWhile(view === "project" && detail === null && detailError === null, "Opening the project");
+  useBusyWhile(exporting, "Exporting the bundle");
 
   useEffect(() => {
     if (!selected) {

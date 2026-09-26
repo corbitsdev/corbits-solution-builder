@@ -36,6 +36,7 @@ import { Tabs } from "@corbits/react-ui";
 import { Banner, Button, GuideDock, Screen, StateLabel, documentName, stageName, versionDigest } from "../../components.jsx";
 import { useBusyWhile } from "../../use-busy.ts";
 import { DesignFrames, FrameSelect, framedDesign, type FrameMode } from "../../design-frames.tsx";
+import { specialistActivity } from "./specialist-activity.ts";
 import { DeliveryPanel } from "./delivery.jsx";
 import { StageConversation } from "./thread.jsx";
 import { StageDocument } from "./document.jsx";
@@ -222,7 +223,7 @@ export function StageWorkspace({
   const stopTurn = withdrawn.stop;
   // A specialist turn in flight is the longest wait in the product; the
   // busy indicator at the foot of the window counts it alongside the flame.
-  useBusyWhile(pending !== null);
+  useBusyWhile(pending !== null, specialistActivity(stage));
 
   const openingDispatch = useOpeningDispatch({
     detail,
@@ -266,7 +267,7 @@ export function StageWorkspace({
   // opened off them would persist the previous stage's document as this
   // stage's first draft.
   const threadLoaded = thread.loadedFor !== null && thread.loadedFor === agentAddress;
-  useBusyWhile(!threadLoaded);
+  useBusyWhile(!threadLoaded, "Loading the conversation");
   const latestDesign = useMemo(() => latestDesignReply(foldedMessages), [foldedMessages]);
   const reviewMessage = !threadLoaded ? null : DOCUMENT_STAGES.has(stage) ? draftMessage : stage === 4 ? latestDesign : latestSpecialistMessage;
   const progress = useMemo(() => interviewProgress(foldedMessages), [foldedMessages]);

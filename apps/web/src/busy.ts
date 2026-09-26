@@ -18,6 +18,9 @@
 type Listener = (count: number) => void;
 
 let count = 0;
+let nextToken = 0;
+/** The labelled work in flight, in the order it began. */
+const labels = new Map<number, string>();
 const listeners = new Set<Listener>();
 
 function notify(): void {
@@ -30,17 +33,32 @@ export function busyCount(): number {
 }
 
 /**
- * Registers one piece of work. Returns its release; calling that more than
- * once is harmless, so a `finally` and an effect cleanup can both hold it.
+ * What the newest labelled piece of work says it is doing, or null: the
+ * indicator shows it under the clock (#113). Most work is unlabelled (a
+ * button doing its thing); a specialist's turn names the specialist.
  */
-export function beginBusy(): () => void {
+export function busyLabel(): string | null {
+  let latest: string | null = null;
+  for (const label of labels.values()) latest = label;
+  return latest;
+}
+
+/**
+ * Registers one piece of work, with what it is doing when that is worth
+ * saying. Returns its release; calling that more than once is harmless, so
+ * a `finally` and an effect cleanup can both hold it.
+ */
+export function beginBusy(label?: string): () => void {
   count += 1;
+  const token = nextToken++;
+  if (label) labels.set(token, label);
   notify();
   let released = false;
   return () => {
     if (released) return;
     released = true;
     count -= 1;
+    labels.delete(token);
     notify();
   };
 }
