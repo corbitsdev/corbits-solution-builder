@@ -191,6 +191,8 @@ describe("provider and catalog row language", () => {
     expect(source).toContain("api.reorderProviders(next)");
     // A row is one provider and one model: a never-chosen provider is restricted to the model its row shows.
     expect(source).toContain("api.selectProviderModel(provider.id, provider.selectedModel)");
+    // A stale Anthropic base (#73) is mended in the same pass, before anything else.
+    expect(source).toContain("if (staleBase) await api.repairProviderBases();");
     const page = await Bun.file(new URL("./settings.tsx", import.meta.url)).text();
     expect(page).toContain("tried first");
   });

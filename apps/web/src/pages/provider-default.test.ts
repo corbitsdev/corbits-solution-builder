@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Transport } from "@intx/hub-client";
-import { listWorkspaceResolvedModels, resolveActiveModel, type ResolvedModel } from "../provider-catalog.js";
+import { listWorkspaceResolvedModels, resolveActiveModel, staleAnthropicBase, type ResolvedModel } from "../provider-catalog.js";
 import { needsModelChoice } from "./onboarding.jsx";
 
 /**
@@ -127,5 +127,18 @@ describe("needsModelChoice", () => {
 
   test("a provider that is not ready does not", () => {
     expect(needsModelChoice({ status: "error", selectedModel: null, models: ["model-a", "model-b"] })).toBe(false);
+  });
+});
+
+describe("staleAnthropicBase", () => {
+  test("an Anthropic row connected before 9b1de80d carries a /v1 base that must go", () => {
+    expect(staleAnthropicBase("anthropic", "https://api.anthropic.com/v1")).toBe("https://api.anthropic.com");
+    expect(staleAnthropicBase("anthropic", "https://api.anthropic.com/v1/")).toBe("https://api.anthropic.com");
+  });
+  test("the fixed base, and every other vendor's /v1 base, are left alone", () => {
+    expect(staleAnthropicBase("anthropic", "https://api.anthropic.com")).toBeNull();
+    expect(staleAnthropicBase("openai", "https://api.openai.com/v1")).toBeNull();
+    expect(staleAnthropicBase("openai-compatible", "http://localhost:11434/v1")).toBeNull();
+    expect(staleAnthropicBase("anthropic", null)).toBeNull();
   });
 });

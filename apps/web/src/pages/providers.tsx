@@ -23,7 +23,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { GripVertical } from "lucide-react";
 import { api, ApiFailure, type Provider, type ResolvedCatalogRow } from "../client.js";
 import { blocksCollide, dropOn, moveBy, moveTo, rankLabel, sameOrder } from "./provider-order.ts";
-import { LOCAL_DEFAULT_BASE_URL, LOCAL_PROVIDER_ID } from "../provider-catalog.js";
+import { LOCAL_DEFAULT_BASE_URL, LOCAL_PROVIDER_ID, staleAnthropicBase } from "../provider-catalog.js";
 import { Banner } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
 
@@ -155,9 +155,13 @@ export function ProviderList({
     if (!manage || settledRef.current || busy !== null || providers.length === 0) return;
     const unrestricted = providers.filter((provider) => provider.enabledModels.length > 1 && provider.selectedModel !== null);
     const collide = providers.length > 1 && blocksCollide(providers);
-    if (!collide && unrestricted.length === 0) return;
+    // A row connected before its vendor's base-URL fix still carries the
+    // stale base and 404s on every call (#73); mended here, without the key.
+    const staleBase = providers.some((provider) => staleAnthropicBase(provider.providerId, provider.baseUrl) !== null);
+    if (!collide && unrestricted.length === 0 && !staleBase) return;
     settledRef.current = true;
     void act("order", async () => {
+      if (staleBase) await api.repairProviderBases();
       if (collide) await api.reorderProviders(providers.map((provider) => provider.id));
       for (const provider of unrestricted) await api.selectProviderModel(provider.id, provider.selectedModel);
     });

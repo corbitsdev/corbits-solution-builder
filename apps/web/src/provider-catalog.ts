@@ -773,6 +773,36 @@ export function droppedSelection(selected: string | null, discovered: readonly s
  * pinned model dropped out of the fresh list, its pin is cleared so failover
  * picks among what is actually served.
  */
+/**
+ * The base an Anthropic row should carry, when the one it carries is the
+ * pre-2026-09-20 `…/v1` form (commit 9b1de80d fixed new connections; rows
+ * connected before it were never repaired). The adapter appends
+ * `/v1/messages` and the harness joins by concatenation, so that base
+ * sends every call and every model refresh to `/v1/v1/…` and a 404. Null
+ * when the base is fine or the plugin is not Anthropic's.
+ */
+export function staleAnthropicBase(plugin: string, baseURL: string | null): string | null {
+  if (plugin !== "anthropic" || !baseURL) return null;
+  const match = /^(https?:\/\/[^/]+)\/v1\/?$/i.exec(baseURL.trim());
+  return match ? match[1]! : null;
+}
+
+/** Repairs every connected row whose base is stale (`staleAnthropicBase`),
+ *  in place and without the key. Returns the ids repaired. */
+export async function repairProviderBases(transport: Transport): Promise<string[]> {
+  const workspace = await resolveWorkspace(transport);
+  if (!workspace) return [];
+  const catalog = catalogFor(transport, workspace.tenantId);
+  const repaired: string[] = [];
+  for (const row of await catalog.modelProviders()) {
+    const base = staleAnthropicBase(row.plugin, row.baseURL);
+    if (!base) continue;
+    await catalog.patchModelProvider(row.id, { baseURL: base });
+    repaired.push(row.id);
+  }
+  return repaired;
+}
+
 export async function refreshProviderModels(
   transport: Transport,
   modelProviderId: string,
@@ -780,6 +810,8 @@ export async function refreshProviderModels(
   const workspace = await resolveWorkspace(transport);
   if (!workspace) throw new Error("The workspace is not installed yet.");
   const catalog = catalogFor(transport, workspace.tenantId);
+  // A stale base would send the refresh itself to a 404; mend it first.
+  await repairProviderBases(transport);
   const providerRows = await catalog.modelProviders();
   const row = providerRows.find((entry) => entry.id === modelProviderId);
   if (!row) throw new Error("This provider is no longer connected.");
