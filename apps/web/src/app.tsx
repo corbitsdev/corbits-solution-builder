@@ -37,6 +37,8 @@ import { StageWorkspace } from "./pages/workspace.jsx";
 import { assembleBundle, bundleFileName } from "./project-export.ts";
 import { firstRunScreen, type HubAuthState } from "./first-run.ts";
 import { getHubSession } from "./hub-auth.ts";
+import { useBusyWhile } from "./use-busy.ts";
+import { ZenGarden } from "./zen-garden.tsx";
 
 /**
  * Where you are. A project is not a separate destination from its stage: you
@@ -579,6 +581,12 @@ export function App() {
     setPrintProject(detail?.project.title ?? null);
   }, [detail?.project.title]);
 
+  // The shell's own waits, for the busy indicator at the foot of the window:
+  // a project that has not landed yet, and an export in flight. Everything
+  // a button does registers itself through `Button`.
+  useBusyWhile(view === "project" && detail === null && detailError === null);
+  useBusyWhile(exporting);
+
   useEffect(() => {
     if (!selected) {
       setDetail(null);
@@ -815,6 +823,8 @@ export function App() {
         ) : null}
         </div>
       </main>
+
+      <ZenGarden />
     </div>
     {printing ? <PrintView target={printing} /> : null}
     </>
