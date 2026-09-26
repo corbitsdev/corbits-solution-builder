@@ -7,12 +7,14 @@ import { App } from "./app.jsx";
 // owns. Order is the whole contract between the two.
 import "@corbits/react-ui/styles.css";
 import "./styles.css";
+import { openSharedEventSource } from "./shared-event-source.ts";
 
 // Development only, and compiled out of a production bundle: `bun run dev`
 // rebuilds the interface on every edit, and this is how the window hears about
 // it. Without it the loop was "edit, alt-tab, reload by hand".
 if (import.meta.env.DEV) {
-  const source = new EventSource("/api/dev/reload");
+  // Through the shared source so a hidden tab holds no connection for it (#91).
+  const source = openSharedEventSource("/api/dev/reload", false);
   source.addEventListener("rebuilt", () => location.reload());
 }
 

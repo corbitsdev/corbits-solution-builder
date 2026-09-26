@@ -9,6 +9,7 @@
  * means (`shouldRefetch`) and drives its own reconnect backoff.
  */
 import { hubEventSourceCredentials, hubOrigin } from "./hub-origin.ts";
+import { openSharedEventSource } from "./shared-event-source.ts";
 
 export type MailboxEvent = {
   id: string;
@@ -55,7 +56,7 @@ export type SubscribeMailboxDeps = {
 };
 
 const defaultDeps: SubscribeMailboxDeps = {
-  createEventSource: (url, withCredentials) => new EventSource(url, { withCredentials }),
+  createEventSource: (url, withCredentials) => openSharedEventSource(url, withCredentials),
   setTimeout: (callback, ms) => setTimeout(callback, ms) as unknown as number,
   clearTimeout: (handle) => clearTimeout(handle),
 };
@@ -78,6 +79,7 @@ export function subscribeMailbox(
   let closed = false;
   let open = false;
   let attempt = 0;
+  let everOpened = false;
   let source: EventSourceLike | null = null;
   let retryHandle: number | null = null;
 
@@ -90,6 +92,11 @@ export function subscribeMailbox(
       if (closed) return;
       open = true;
       attempt = 0;
+      // A stream that opens again (the shared source reconnecting after the
+      // tab was hidden, #91) may have missed nudges meanwhile: one synthetic
+      // INBOX create makes the caller refetch, the same as a real one.
+      if (everOpened) onNudge({ id: "INBOX:reconnected", op: "create" });
+      everOpened = true;
     });
     es.addEventListener("mailbox", (event) => {
       if (closed) return;

@@ -11,6 +11,7 @@
  */
 import { ApiError, type Transport } from "@intx/hub-client";
 import { hubCredentials, hubEventSourceCredentials, hubOrigin } from "./hub-origin.ts";
+import { openSharedEventSource } from "./shared-event-source.ts";
 
 export type { Transport };
 export { ApiError };
@@ -58,14 +59,11 @@ export function createHubTransport(): Transport {
       return parsed as T;
     },
     subscribe(path: string, onEvent: (event: unknown) => void, opts?: { eventName?: string }): () => void {
-      const source = new EventSource(`${hubOrigin()}${path}`, {
-        withCredentials: hubEventSourceCredentials(),
-      });
-      const handler = (event: MessageEvent) => {
+      const source = openSharedEventSource(`${hubOrigin()}${path}`, hubEventSourceCredentials());
+      const handler = (event: { data: string }) => {
         onEvent(JSON.parse(event.data));
       };
-      if (opts?.eventName) source.addEventListener(opts.eventName, handler);
-      else source.onmessage = handler;
+      source.addEventListener(opts?.eventName ?? "message", handler);
       return () => source.close();
     },
   };
