@@ -2,12 +2,27 @@
  * The project workflow (CL-8721) as a hub deployment: one native `loop`
  * workflow per project, holding real review references and deciding a
  * project's stage-by-stage progress. Deployed lazily, once per project, and
- * reused after that -- the same ensure-and-reuse discipline
- * `specialist-deploy.ts`'s `ensureSpecialistDeployment` uses for a stage
- * specialist.
+ * reused after that as long as it runs the current code -- the same
+ * ensure-and-reuse discipline `specialist-deploy.ts`'s
+ * `ensureSpecialistDeployment` uses for a stage specialist, with the same
+ * exception: a live run on code that differs from the current render is
+ * replaced (#51). The replacement is the dead-deployment revival path: a
+ * fresh deployment is triggered and every decision the old run applied is
+ * replayed onto it, in order, under the same ids, through the new code's
+ * reducer. A decision the new rules refuse is recorded as refused by that
+ * reducer and reported back, never dropped.
+ *
+ * Every run is triggered with the digest of the code it was deployed from
+ * and a generation number, and the hub's own event log hands both back
+ * (`RunStarted.trigger.payload`). That is what tells a reader which of two
+ * live runs is the project's: the newer generation, once it has caught up.
+ * The hub has no way to end a deployment (`POST /runs/:id/stop` is
+ * unsupported upstream), so a superseded run stays placed; it is simply
+ * never read or signalled again.
  */
 import { ApiError, type Transport } from "@intx/hub-client";
 import { assetsFor, catalogFor, getTenant, workflowsFor, type HubDeployment } from "./hub.js";
+import { treeDigest } from "./workflow-closure.js";
 import {
   deploymentHasEnded,
   deploymentIsLive,
@@ -29,6 +44,10 @@ export function projectWorkflowAssetName(projectId: string): string {
 }
 
 const ENDED_DEPLOYMENT_STATUSES = new Set(["releasing", "released", "failed"]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 /** See `specialist-deploy.ts`'s `pickDeployment`: a live deployment over an
  *  ended one, then the oldest `createdAt`, so every concurrent caller lands
@@ -102,6 +121,81 @@ async function appliedDecisions(
   return received;
 }
 
+/** The code a project workflow run was triggered on: the digest of the
+ *  pushed tree it was deployed from, and its generation -- one more than
+ *  the run it replaced. Carried on the trigger payload beside `projectId`
+ *  and `stages`, and read back off the run's own `RunStarted` event. */
+export type ProjectWorkflowCode = { readonly digest: string; readonly generation: number };
+
+/** `null` for a run triggered before code was recorded on the trigger: its
+ *  code is unknown, which the caller treats as not current. */
+function codeOfTriggerPayload(payload: unknown): ProjectWorkflowCode | null {
+  // A REAL deployed run's trigger payload is the decoded mail that fired
+  // it, with the JSON in a part's inline `text` (see `actions.ts`'s
+  // `initProject`, which reads the same shape); an in-process run's is the
+  // payload itself.
+  let init: unknown = payload;
+  if (isRecord(payload) && Array.isArray(payload["parts"])) {
+    const part = (payload["parts"] as unknown[]).find((p): p is { text: string } => isRecord(p) && typeof p["text"] === "string");
+    if (!part) return null;
+    try {
+      init = JSON.parse(part.text);
+    } catch {
+      return null;
+    }
+  }
+  const code = isRecord(init) ? init["code"] : undefined;
+  if (!isRecord(code) || typeof code["digest"] !== "string" || typeof code["generation"] !== "number") return null;
+  return { digest: code["digest"], generation: code["generation"] };
+}
+
+/** The code `runId` was triggered on, off its top-level `RunStarted` event. */
+async function runCode(
+  workflows: ReturnType<typeof workflowsFor>,
+  deploymentId: string,
+  runId: string,
+): Promise<ProjectWorkflowCode | null> {
+  const { events } = await workflows.runEvents(deploymentId, runId);
+  const started = events.find((event) => event.type === "RunStarted");
+  const trigger = started?.body["trigger"];
+  return isRecord(trigger) ? codeOfTriggerPayload(trigger["payload"]) : null;
+}
+
+/** One row of the reducer's ledger, as far as a replay needs to read it. */
+type LedgerRecord = { readonly decisionId: string; readonly accepted: boolean; readonly reason?: unknown; readonly kind?: unknown; readonly stage?: unknown };
+
+function decodeInlineOutput(ref: unknown): unknown {
+  if (typeof ref !== "string" || !ref.startsWith("inline:")) return undefined;
+  try {
+    return JSON.parse(ref.slice("inline:".length));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The run's decision ledger as its reducer last wrote it: the `apply` step
+ * output of the newest iteration that has one (the newest iteration is
+ * usually parked, waiting; its carried-in state equals the previous
+ * iteration's `apply` output). Null when no iteration has applied anything.
+ */
+async function ledgerOf(
+  workflows: ReturnType<typeof workflowsFor>,
+  deploymentId: string,
+  runId: string,
+): Promise<readonly LedgerRecord[] | null> {
+  const iterations = iterationRunIds(runId, await workflows.runs(deploymentId));
+  for (const id of [...iterations].reverse()) {
+    const { events } = await workflows.runEvents(deploymentId, id);
+    const completed = [...events].reverse().find((event) => event.type === "StepCompleted" && event.body["stepId"] === "apply");
+    const output = decodeInlineOutput((completed?.body["output"] as { ref?: unknown } | undefined)?.ref);
+    const decisions = isRecord(output) ? output["decisions"] : undefined;
+    if (!Array.isArray(decisions)) continue;
+    return decisions.filter((row): row is LedgerRecord => isRecord(row) && typeof row["decisionId"] === "string" && typeof row["accepted"] === "boolean");
+  }
+  return null;
+}
+
 const TERMINAL_RUN_EVENTS = new Set(["RunCompleted", "RunFailed", "RunCancelled"]);
 /** How long a project with history waits for the hub to replace its dead deployment before deploying its own. */
 const REPLACEMENT_WAIT_MS = 45_000;
@@ -125,11 +219,15 @@ async function candidatesWithRuns(
 type ProjectRunState = {
   /** The run every reader converges on right now, or null when nothing holds the project's state. */
   readonly run: ProjectWorkflowDeployment | null;
-  /** Whether `run` is on a deployment the hub can still place: false means it needs reviving. */
+  /** Whether `run` is on a deployment the hub can still place and no newer generation has replaced: false means it needs reviving. */
   readonly live: boolean;
-  /** The live deployments with a run, oldest first. */
+  /** The code `run` was triggered on; null when unknown (a run from before code was recorded) or when there is no run. */
+  readonly code: ProjectWorkflowCode | null;
+  /** The live deployments of the newest generation with a run, oldest first. */
   readonly liveCandidates: readonly ProjectRunCandidate[];
-  /** Every decision the dead deployments' runs took, in order, each once: what a live run must hold to be the project's. */
+  /** The newest generation any live run was triggered on; 0 when none carries one. */
+  readonly generation: number;
+  /** Every decision the dead and superseded runs took, in order, each once: what a live run must hold to be the project's. */
   readonly history: readonly ReceivedDecision[];
 };
 
@@ -146,6 +244,13 @@ type ProjectRunState = {
  * to stage 1. A dead deployment whose run never took a decision holds
  * nothing and is passed over.
  *
+ * A live run of an older generation than another live run is superseded
+ * (#51): the newer one was deployed to replace it with new code, and the
+ * hub cannot end the old one. It counts exactly as a dead one does -- its
+ * decisions are history the newer run must hold, and until the newer run
+ * holds them the old run is still read, so an upgrade interrupted halfway
+ * never shows a project at stage 1.
+ *
  * Among several dead runs, the one holding the most decisions is read --
  * every replacement replays the whole history onto itself, so a newer dead
  * run holds everything an older one took plus whatever was decided after
@@ -159,15 +264,28 @@ async function projectRunState(
   deployments: readonly HubDeployment[],
 ): Promise<ProjectRunState> {
   const candidates = await candidatesWithRuns(workflows, deployments);
-  const liveCandidates = candidates.filter((candidate) => !deploymentHasEnded(candidate.deployment));
+  const live: { candidate: ProjectRunCandidate; code: ProjectWorkflowCode | null }[] = [];
+  for (const candidate of candidates) {
+    if (deploymentHasEnded(candidate.deployment)) continue;
+    live.push({ candidate, code: await runCode(workflows, candidate.deployment.id, candidate.runId) });
+  }
+  const generation = Math.max(0, ...live.map((entry) => entry.code?.generation ?? 0));
+  const newest = live.filter((entry) => (entry.code?.generation ?? 0) === generation);
+  const liveCandidates = newest.map((entry) => entry.candidate);
+  const superseded = live.filter((entry) => (entry.code?.generation ?? 0) < generation);
+
   const history: ReceivedDecision[] = [];
   const known = new Set<string>();
-  let fullestDead: { candidate: ProjectRunCandidate; held: number } | null = null;
-  for (const candidate of candidates.filter((entry) => deploymentHasEnded(entry.deployment))) {
+  let fullest: { candidate: ProjectRunCandidate; code: ProjectWorkflowCode | null; held: number } | null = null;
+  const folded = [
+    ...candidates.filter((entry) => deploymentHasEnded(entry.deployment)).map((candidate) => ({ candidate, code: null })),
+    ...superseded,
+  ].sort((a, b) => a.candidate.deployment.createdAt.localeCompare(b.candidate.deployment.createdAt));
+  for (const { candidate, code } of folded) {
     const decisions = await appliedDecisions(workflows, candidate.deployment.id, candidate.runId);
     if (decisions.length === 0) continue;
     // `>=`: candidates come oldest first, so a tie goes to the newer run.
-    if (fullestDead === null || decisions.length >= fullestDead.held) fullestDead = { candidate, held: decisions.length };
+    if (fullest === null || decisions.length >= fullest.held) fullest = { candidate, code, held: decisions.length };
     for (const decision of decisions) {
       if (known.has(decision.signalId)) continue;
       known.add(decision.signalId);
@@ -175,13 +293,13 @@ async function projectRunState(
     }
   }
   const asRef = (candidate: ProjectRunCandidate): ProjectWorkflowDeployment => ({ deploymentId: candidate.deployment.id, runId: candidate.runId });
-  for (const candidate of liveCandidates) {
-    if (history.length === 0) return { run: asRef(candidate), live: true, liveCandidates, history };
+  for (const { candidate, code } of newest) {
+    if (history.length === 0) return { run: asRef(candidate), live: true, code, liveCandidates, generation, history };
     const held = new Set((await appliedDecisions(workflows, candidate.deployment.id, candidate.runId)).map((decision) => decision.signalId));
-    if (history.every((decision) => held.has(decision.signalId))) return { run: asRef(candidate), live: true, liveCandidates, history };
+    if (history.every((decision) => held.has(decision.signalId))) return { run: asRef(candidate), live: true, code, liveCandidates, generation, history };
   }
-  if (fullestDead) return { run: asRef(fullestDead.candidate), live: false, liveCandidates, history };
-  return { run: null, live: false, liveCandidates, history };
+  if (fullest) return { run: asRef(fullest.candidate), live: false, code: fullest.code, liveCandidates, generation, history };
+  return { run: null, live: false, code: null, liveCandidates, generation, history };
 }
 
 async function pollUntil<T>(timeoutMs: number, intervalMs: number, read: () => Promise<T | null>): Promise<T | null> {
@@ -247,6 +365,52 @@ async function catchUp(
   }
 }
 
+/** A replayed decision the run it came from had accepted, and the run it was replayed onto refused. */
+export type ProjectWorkflowReplayRefusal = {
+  readonly decisionId: string;
+  readonly kind: string | null;
+  readonly stage: number | null;
+  readonly reason: string;
+};
+
+/** What a fresh run was brought up to: the run its history came from, how
+ *  many decisions were replayed, and the ones the new code refused. */
+export type ProjectWorkflowReplay = {
+  readonly from: ProjectWorkflowDeployment;
+  readonly replayed: number;
+  readonly refused: readonly ProjectWorkflowReplayRefusal[];
+};
+
+/**
+ * What the replay changed: every replayed decision the source run's ledger
+ * shows accepted and the target run's ledger shows refused. Replay delivers
+ * the same signals through the new code's reducer, which records a refusal
+ * as a ledger row rather than dropping the decision, so this is read off
+ * the two ledgers rather than guessed. A source ledger that cannot be read
+ * counts every refused replayed decision, so a refusal is never hidden by
+ * a read that failed.
+ */
+async function replayOutcome(
+  workflows: ReturnType<typeof workflowsFor>,
+  from: ProjectWorkflowDeployment,
+  target: ProjectWorkflowDeployment,
+  history: readonly ReceivedDecision[],
+): Promise<ProjectWorkflowReplay> {
+  const replayed = new Set(history.map((decision) => decision.signalId));
+  const before = await ledgerOf(workflows, from.deploymentId, from.runId);
+  const after = (await ledgerOf(workflows, target.deploymentId, target.runId)) ?? [];
+  const acceptedBefore = new Set((before ?? []).filter((row) => row.accepted).map((row) => row.decisionId));
+  const refused = after
+    .filter((row) => replayed.has(row.decisionId) && !row.accepted && (before === null || acceptedBefore.has(row.decisionId)))
+    .map((row) => ({
+      decisionId: row.decisionId,
+      kind: typeof row.kind === "string" ? row.kind : null,
+      stage: typeof row.stage === "number" ? row.stage : null,
+      reason: typeof row.reason === "string" ? row.reason : "refused",
+    }));
+  return { from, replayed: history.length, refused };
+}
+
 /** The bytes a project workflow deploy needs: the compiled
  *  `workflow.js`/`actions.js`/`loops.js` `scripts/project-workflow-pack.ts`
  *  produces, fetched by the caller the same way `ClosureSource` fetches
@@ -259,6 +423,10 @@ export type ProjectWorkflowStageInput = {
 };
 
 export type ProjectWorkflowDeployment = { readonly deploymentId: string; readonly runId: string };
+
+/** `ensureProjectWorkflow`'s answer: the run to read and signal, plus what
+ *  was replayed onto it when it was brought up from another run's history. */
+export type EnsuredProjectWorkflow = ProjectWorkflowDeployment & { readonly replay?: ProjectWorkflowReplay };
 
 /** The asset a project workflow deploys into: a root workspace `package.json`,
  *  a member whose `interchange.workflow`/`actions`/`loops` point at the
@@ -285,7 +453,8 @@ function renderProjectWorkflowSource(assetName: string, source: ProjectWorkflowS
   };
 }
 
-function treeDigestPath(files: Record<string, string>): { path: string; content: string } {
+/** The file whose read-back proves a push is visible to the hub's deploy path. */
+function pushProbePath(files: Record<string, string>): { path: string; content: string } {
   const path = "packages/project/actions.js";
   return { path, content: files[path]! };
 }
@@ -295,6 +464,71 @@ export type EnsureProjectWorkflowOptions = {
   /** How long a project with history waits for the hub's replacement before deploying its own; the default suits a host restart. */
   readonly replacementWaitMs?: number;
 };
+
+type DeployContext = {
+  readonly transport: Transport;
+  readonly gitPush: WorkflowGitPush;
+  readonly workspaceTenantId: string;
+  readonly projectId: string;
+  readonly stages: readonly ProjectWorkflowStageInput[];
+  readonly assetId: string;
+  readonly assetName: string;
+  readonly rendered: Record<string, string>;
+  readonly code: ProjectWorkflowCode;
+};
+
+/**
+ * Pushes the current render, deploys it, and returns a run on the result:
+ * the deployment's first top-level run if a concurrent caller already
+ * triggered one, else one triggered here with the project's stages and the
+ * code it runs. `known` names every deployment that existed before the
+ * push -- including a live one being replaced -- so only a deployment a
+ * concurrent caller made meanwhile is reused rather than deployed beside.
+ */
+async function deployFreshRun(context: DeployContext, known: ReadonlySet<string>): Promise<ProjectWorkflowDeployment> {
+  const { transport, workspaceTenantId, assetId, assetName, rendered } = context;
+  const workflows = workflowsFor(transport, workspaceTenantId);
+  const matching = (deployments: readonly HubDeployment[]) =>
+    deployments.filter((deployment) => deployment.definitionAssetId === assetId && !known.has(deployment.id));
+
+  const probe = pushProbePath(rendered);
+  const commitSha = await pushWorkflowSourceTree(transport, workspaceTenantId, assetId, assetName, rendered, "Deploy project workflow", context.gitPush);
+  await waitForPushVisible(transport, workspaceTenantId, assetId, probe.path, probe.content);
+
+  // A concurrent caller may have deployed onto this asset while the push
+  // above was in flight; re-check before deploying a second live one.
+  let deployment = pickDeployment(matching(await workflows.deployments()));
+  if (!deployment || !(await deploymentIsLive(transport, workspaceTenantId, deployment.id))) {
+    // The project workflow runs no inference itself, but a deploy still
+    // requires a non-empty offering chain -- the tenant's first offering is
+    // pinned and simply never dispatched to.
+    const offerings = (await catalogFor(transport, workspaceTenantId).offerings())
+      .filter((offering) => !offering.disabled)
+      .sort((a, b) => a.priority - b.priority);
+    if (offerings.length === 0) {
+      throw new Error("connect a model provider before deploying the project workflow");
+    }
+    const offeringIds = offerings.map((offering) => offering.id);
+    const deployed = await workflows.deploy({
+      source: { kind: "asset", assetId, package: { format: "source", commitSha, packageName: assetName } },
+      entry: "./workflow.js",
+      sourceOfferingIds: offeringIds,
+      defaultSourceOfferingId: offeringIds[0]!,
+    });
+    deployment = pickDeployment(matching(await workflows.deployments())) ?? deployed;
+  }
+
+  // Reuse the first-ever top-level run triggered against this deployment,
+  // the same way `deployment` above resolves to the one winner across
+  // concurrent callers: list, and if none exists yet, trigger once and
+  // re-list so every caller settles on the same (earliest) run id.
+  const existingRun = pickTopLevelRun(topLevelRunIds(await workflows.runs(deployment.id)));
+  if (existingRun) return { deploymentId: deployment.id, runId: existingRun };
+  const payload = { projectId: context.projectId, stages: context.stages, code: context.code };
+  const fired = await workflows.trigger(deployment.id, { content: JSON.stringify(payload) });
+  const afterTrigger = topLevelRunIds(await workflows.runs(deployment.id));
+  return { deploymentId: deployment.id, runId: pickTopLevelRun(afterTrigger) ?? fired.runId };
+}
 
 async function ensureProjectWorkflowOnce(
   transport: Transport,
@@ -306,7 +540,7 @@ async function ensureProjectWorkflowOnce(
   stages: readonly ProjectWorkflowStageInput[],
   vendoredWorkflowMemberFiles: Record<string, string>,
   options: EnsureProjectWorkflowOptions,
-): Promise<ProjectWorkflowDeployment> {
+): Promise<EnsuredProjectWorkflow> {
   if (!sidecar.canPlaceSidecars) {
     throw new Error("no host is placing sidecars; cannot deploy a project workflow");
   }
@@ -315,14 +549,41 @@ async function ensureProjectWorkflowOnce(
 
   const assetName = projectWorkflowAssetName(projectId);
   const assetId = await ensureWorkflowAsset(transport, workspaceTenantId, assetName, `${projectId} project workflow`);
+  const rendered = { ...renderProjectWorkflowSource(assetName, source), ...vendoredWorkflowMemberFiles };
+  const digest = await treeDigest(rendered);
 
   const workflows = workflowsFor(transport, workspaceTenantId);
   const matching = (deployments: readonly HubDeployment[]) =>
     deployments.filter((deployment) => deployment.definitionAssetId === assetId);
+  const context = (generation: number): DeployContext => ({
+    transport,
+    gitPush,
+    workspaceTenantId,
+    projectId,
+    stages,
+    assetId,
+    assetName,
+    rendered,
+    code: { digest, generation },
+  });
 
   let existingDeployments = matching(await workflows.deployments());
   let state = await projectRunState(workflows, existingDeployments);
-  if (state.run && state.live) return state.run;
+  if (state.run && state.live) {
+    if (state.code?.digest === digest) return state.run;
+    // The live run is on other code than this render (#51): a reducer fix
+    // that never reached this project, or a run from before code was
+    // recorded. It is replaced the way a dead run is revived -- a fresh
+    // deployment of the current code, brought up to every decision the
+    // live run applied -- and superseded by generation, since the hub
+    // cannot end it. Its own applied decisions are the whole history: it
+    // held everything the runs before it took, or it would not be the run.
+    const from = state.run;
+    const history = await appliedDecisions(workflows, from.deploymentId, from.runId);
+    const target = await deployFreshRun(context(state.generation + 1), new Set(existingDeployments.map((entry) => entry.id)));
+    await catchUp(transport, workspaceTenantId, target, history);
+    return { ...target, replay: await replayOutcome(workflows, from, target, history) };
+  }
   // The hub replaces a dead deployment's sidecar on its own after a host
   // restart (CL-8784), as a new deployment carrying the run's restored
   // history, within seconds of boot. Deploying afresh before it has is a
@@ -334,81 +595,35 @@ async function ensureProjectWorkflowOnce(
       state = await projectRunState(workflows, existingDeployments);
       return state.liveCandidates[0] ? true : null;
     });
-    if (replaced && state.run && state.live) return state.run;
+    if (replaced && state.run && state.live && state.code?.digest === digest) return state.run;
   }
   // A live run that has not caught up, or none: the project's history (if
-  // any) is replayed onto the oldest live run, or onto a fresh one.
+  // any) is replayed onto the oldest live run, or onto a fresh one. A live
+  // run that has caught up but runs other code is left to the next call,
+  // which takes the replacement path above.
   if (state.liveCandidates[0]) {
     const target = { deploymentId: state.liveCandidates[0].deployment.id, runId: state.liveCandidates[0].runId };
     await catchUp(transport, workspaceTenantId, target, state.history);
-    return target;
+    return state.run && state.run.deploymentId !== target.deploymentId
+      ? { ...target, replay: await replayOutcome(workflows, state.run, target, state.history) }
+      : target;
   }
-  let deployment = pickDeployment(existingDeployments.filter((entry) => !deploymentHasEnded(entry)));
-  if (!deployment || !(await deploymentIsLive(transport, workspaceTenantId, deployment.id))) {
-    const rendered = { ...renderProjectWorkflowSource(assetName, source), ...vendoredWorkflowMemberFiles };
-    const digestFile = treeDigestPath(rendered);
-    const commitSha = await pushWorkflowSourceTree(
-      transport,
-      workspaceTenantId,
-      assetId,
-      assetName,
-      rendered,
-      "Deploy project workflow",
-      gitPush,
-    );
-    await waitForPushVisible(transport, workspaceTenantId, assetId, digestFile.path, digestFile.content);
-
-    // A concurrent caller may have deployed onto this asset while the push
-    // above was in flight; re-check before deploying a second live one.
-    const justDeployed = pickDeployment(matching(await workflows.deployments()));
-    if (justDeployed && (await deploymentIsLive(transport, workspaceTenantId, justDeployed.id))) {
-      deployment = justDeployed;
-    } else {
-      // The project workflow runs no inference itself, but a deploy still
-      // requires a non-empty offering chain -- the tenant's first offering is
-      // pinned and simply never dispatched to.
-      const offerings = (await catalogFor(transport, workspaceTenantId).offerings())
-        .filter((offering) => !offering.disabled)
-        .sort((a, b) => a.priority - b.priority);
-      if (offerings.length === 0) {
-        throw new Error("connect a model provider before deploying the project workflow");
-      }
-      const offeringIds = offerings.map((offering) => offering.id);
-      const deployed = await workflows.deploy({
-        source: { kind: "asset", assetId, package: { format: "source", commitSha, packageName: assetName } },
-        entry: "./workflow.js",
-        sourceOfferingIds: offeringIds,
-        defaultSourceOfferingId: offeringIds[0]!,
-      });
-      deployment = pickDeployment(matching(await workflows.deployments())) ?? deployed;
-    }
-  }
-
-  // Reuse the first-ever top-level run triggered against this deployment,
-  // the same way `deployment` above resolves to the one winner across
-  // concurrent callers: list, and if none exists yet, trigger once and
-  // re-list so every caller settles on the same (earliest) run id.
-  const existingRuns = topLevelRunIds(await workflows.runs(deployment.id));
-  const existingRun = pickTopLevelRun(existingRuns);
-  const target = existingRun
-    ? { deploymentId: deployment.id, runId: existingRun }
-    : await (async () => {
-        const payload = { projectId, stages };
-        const fired = await workflows.trigger(deployment.id, { content: JSON.stringify(payload) });
-        const afterTrigger = topLevelRunIds(await workflows.runs(deployment.id));
-        return { deploymentId: deployment.id, runId: pickTopLevelRun(afterTrigger) ?? fired.runId };
-      })();
+  const from = state.run;
+  const target = await deployFreshRun(context(state.generation + 1), new Set(existingDeployments.filter((entry) => deploymentHasEnded(entry)).map((entry) => entry.id)));
   await catchUp(transport, workspaceTenantId, target, state.history);
-  return target;
+  return from ? { ...target, replay: await replayOutcome(workflows, from, target, state.history) } : target;
 }
 
 /**
- * Makes sure `projectId` has a live project workflow deployment, with its ONE
- * top-level run triggered, and hands back both ids. Deploys/triggers lazily,
- * once per project; on later calls, reuses the live deployment and the
- * already-triggered run rather than deploying or triggering again. Retries
- * once on a 409, the same way `ensureSpecialistDeployment` absorbs a
- * concurrent caller's race on the asset-create or push-token-mint step.
+ * Makes sure `projectId` has a live project workflow deployment running the
+ * current code, with its ONE top-level run triggered, and hands back both
+ * ids. Deploys/triggers lazily, once per project; on later calls, reuses
+ * the live deployment and the already-triggered run rather than deploying
+ * or triggering again -- unless that run is on other code than `source`
+ * and `vendoredWorkflowMemberFiles` render to, in which case it is replaced
+ * and its decisions replayed (see the module comment). Retries once on a
+ * 409, the same way `ensureSpecialistDeployment` absorbs a concurrent
+ * caller's race on the asset-create or push-token-mint step.
  */
 export async function ensureProjectWorkflow(
   transport: Transport,
@@ -420,7 +635,7 @@ export async function ensureProjectWorkflow(
   stages: readonly ProjectWorkflowStageInput[],
   vendoredWorkflowMemberFiles: Record<string, string>,
   options: EnsureProjectWorkflowOptions = {},
-): Promise<ProjectWorkflowDeployment> {
+): Promise<EnsuredProjectWorkflow> {
   const attempt = () =>
     ensureProjectWorkflowOnce(transport, sidecar, source, gitPush, workspaceTenantId, projectId, stages, vendoredWorkflowMemberFiles, options);
   try {
@@ -439,7 +654,9 @@ export async function ensureProjectWorkflow(
  * workspace has not ensured yet), or no deployment on it has ever had a
  * top-level run triggered -- either of which means there is nothing here to
  * fold yet; the caller treats the project as still at stage 1 until
- * `StageWorkspace` ensures and triggers the workflow.
+ * `StageWorkspace` ensures and triggers the workflow. A run on outdated
+ * code is still returned here: only `ensureProjectWorkflow` knows the
+ * current code, and replaces it.
  */
 export async function findProjectWorkflow(
   transport: Transport,
