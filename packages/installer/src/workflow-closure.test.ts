@@ -1,12 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { packTarballFiles, tarballFilename } from "./tarball-pack.js";
 import {
+  ARTIFACTS_MISSING_RUNTIME_DEPENDENCIES,
   appMemberFiles,
+  artifactsMemberFiles,
   memberDir,
   toolsDeckMemberFiles,
   toolsDeliveryMemberFiles,
   treeDigest,
   vendoredMemberFiles,
+  withPatchedDependencies,
   type ClosureTarballFetcher,
 } from "./workflow-closure.js";
 import type { ClosureManifest } from "./closure-manifest.js";
@@ -49,6 +52,15 @@ async function fakeClosure(): Promise<{ manifest: ClosureManifest; fetchTarball:
       version: "0.1.0",
       files: {
         "package.json": '{"name":"@solutions-builder/tools-delivery","version":"0.1.0","type":"module"}\n',
+        "src/sidecar-bundle.ts": "export const bundle = true;\n",
+      },
+    },
+    {
+      name: "@corbits/artifacts",
+      version: "0.1.0",
+      files: {
+        "package.json":
+          '{"name":"@corbits/artifacts","version":"0.1.0","type":"module","peerDependencies":{"@intx/agent":"*","@intx/types":"*","arktype":"^2.1.29","hono":"*"}}\n',
         "src/sidecar-bundle.ts": "export const bundle = true;\n",
       },
     },
@@ -100,5 +112,33 @@ describe("workflow-closure", () => {
 
     const delivery = await toolsDeliveryMemberFiles(manifest, fetchTarball);
     expect(delivery["packages/tools-delivery/src/sidecar-bundle.ts"]).toContain("bundle");
+  });
+
+  test("the shipped @corbits/artifacts member pins @intx/agent and @intx/types to registry versions", async () => {
+    const { manifest, fetchTarball } = await fakeClosure();
+    const files = await artifactsMemberFiles(manifest, fetchTarball);
+    const packageJson = JSON.parse(files["packages/corbits-artifacts/package.json"]!) as {
+      dependencies: Record<string, string>;
+      peerDependencies: Record<string, string>;
+    };
+    const registryRange = /^\d+\.\d+\.\d+$/;
+    expect(packageJson.dependencies["@intx/agent"]).toMatch(registryRange);
+    expect(packageJson.dependencies["@intx/types"]).toMatch(registryRange);
+    expect(packageJson.dependencies["@intx/types"]).toBe(packageJson.dependencies["@intx/agent"]);
+    for (const spec of Object.values(packageJson.dependencies)) expect(spec).not.toMatch(/^(workspace|catalog):/);
+    // Moved, not duplicated: the peer entry would otherwise conflict.
+    expect(packageJson.peerDependencies["@intx/agent"]).toBeUndefined();
+    expect(packageJson.peerDependencies.arktype).toBeUndefined();
+    expect(packageJson.peerDependencies.hono).toBe("*");
+    expect(files["packages/corbits-artifacts/src/sidecar-bundle.ts"]).toContain("bundle");
+  });
+
+  test("withPatchedDependencies refuses a workspace:* spec for a name that is not a member", () => {
+    const original = '{"name":"x","version":"0.0.0"}';
+    expect(() => withPatchedDependencies(original, { "@intx/agent": "workspace:*" })).toThrow(
+      /@intx\/agent .*not a workspace member/,
+    );
+    expect(() => withPatchedDependencies(original, { "@intx/workflow": "workspace:*" })).not.toThrow();
+    for (const spec of Object.values(ARTIFACTS_MISSING_RUNTIME_DEPENDENCIES)) expect(spec).not.toMatch(/^workspace:/);
   });
 });
