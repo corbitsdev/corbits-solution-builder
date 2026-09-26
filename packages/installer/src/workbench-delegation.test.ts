@@ -5,6 +5,7 @@ import type { DelegationRecord } from "./project-tenant.js";
 import {
   delegateAtCreation,
   delegateMore,
+  delegateWorkspaceDefaultsIfSealed,
   delegationAudit,
   delegationResource,
   ensureDelegationGrants,
@@ -13,6 +14,7 @@ import {
   resolveDelegationConsent,
   revokeAllDelegations,
   revokeDelegationGrants,
+  workspaceOwnedCredentialIds,
   type DelegatableCredential,
   type DelegationStore,
 } from "./workbench-delegation.js";
@@ -295,5 +297,59 @@ describe("creation, audit and revocation", () => {
     const revoked = await revokeAllDelegations(store, "project-a");
     expect(revoked).toEqual(["cred-shared"]);
     expect(store.grants).toHaveLength(0);
+  });
+});
+
+describe("workspaceOwnedCredentialIds", () => {
+  test("names every tenant-owned credential and no personal one", async () => {
+    expect(await workspaceOwnedCredentialIds(fakeStore())).toEqual(["cred-shared", "cred-other"]);
+  });
+});
+
+// #29: a project created before the interface delegated at creation is
+// sealed, and since its specialists now deploy in its own tenant it could
+// run nothing. Opening it gives it the same default a new project gets.
+describe("delegateWorkspaceDefaultsIfSealed", () => {
+  test("a project with no consent record is given every workspace-owned credential", async () => {
+    const store = fakeStore();
+    const record = await delegateWorkspaceDefaultsIfSealed(store, "project-1");
+    expect(record?.mode).toBe("chosen");
+    expect(record?.credentialIds).toEqual(["cred-shared", "cred-other"]);
+    expect(store.records.get("project-1")).toEqual(record ?? undefined);
+    expect(store.grants.map((entry) => entry.resource)).toEqual([delegationResource("cred-shared"), delegationResource("cred-other")]);
+  });
+
+  test("a project created with the explicit default of none is given the same", async () => {
+    const store = fakeStore();
+    await delegateAtCreation(store, { projectId: "project-1" });
+    expect(store.records.get("project-1")?.mode).toBe("default");
+    const record = await delegateWorkspaceDefaultsIfSealed(store, "project-1");
+    expect(record?.credentialIds).toEqual(["cred-shared", "cred-other"]);
+  });
+
+  test("a set the owner chose is left alone, even an empty one", async () => {
+    const chosen = fakeStore();
+    await delegateAtCreation(chosen, { projectId: "project-1", delegatedCredentialIds: ["cred-shared"] });
+    expect(await delegateWorkspaceDefaultsIfSealed(chosen, "project-1")).toBeNull();
+    expect(chosen.records.get("project-1")?.credentialIds).toEqual(["cred-shared"]);
+
+    const none = fakeStore();
+    await delegateAtCreation(none, { projectId: "project-1", delegatedCredentialIds: [] });
+    expect(await delegateWorkspaceDefaultsIfSealed(none, "project-1")).toBeNull();
+    expect(none.grants).toEqual([]);
+  });
+
+  test("runs once: the second open finds the chosen record and changes nothing", async () => {
+    const store = fakeStore();
+    await delegateWorkspaceDefaultsIfSealed(store, "project-1");
+    const minted = store.grants.length;
+    expect(await delegateWorkspaceDefaultsIfSealed(store, "project-1")).toBeNull();
+    expect(store.grants.length).toBe(minted);
+  });
+
+  test("a workspace with nothing to delegate changes nothing", async () => {
+    const store = { ...fakeStore(), listDelegatableCredentials: async () => [{ id: "cred-personal", principalId: "someone" }] };
+    expect(await delegateWorkspaceDefaultsIfSealed(store, "project-1")).toBeNull();
+    expect(store.records.size).toBe(0);
   });
 });

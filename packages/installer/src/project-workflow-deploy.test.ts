@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { Transport } from "@intx/hub-client";
 import { ensureProjectWorkflow, findProjectWorkflow, projectWorkflowAssetName, type ProjectWorkflowCode } from "./project-workflow-deploy.js";
 
-const TENANT_ID = "tnt_1";
+const TENANT_ID = "proj_1";
 const PROJECT_ID = "proj_1";
 const ASSET_ID = "asset_1";
 
@@ -163,7 +163,7 @@ function fakeHub(fixture: Fixture) {
 }
 
 const ensure = (hub: ReturnType<typeof fakeHub>, replacementWaitMs = 0) =>
-  ensureProjectWorkflow(hub.transport, { canPlaceSidecars: true }, { files: { "workflow.js": "", "actions.js": "", "loops.js": "" } }, hub.gitPush, TENANT_ID, PROJECT_ID, [], {}, { replacementWaitMs });
+  ensureProjectWorkflow(hub.transport, { canPlaceSidecars: true }, { files: { "workflow.js": "", "actions.js": "", "loops.js": "" } }, hub.gitPush, PROJECT_ID, [], {}, { replacementWaitMs });
 
 const withAsset = (fixture: Omit<Fixture, "assets">): Fixture => ({ assets: [{ id: ASSET_ID, name: projectWorkflowAssetName(PROJECT_ID) }], ...fixture });
 
@@ -180,17 +180,17 @@ const OUTDATED: ProjectWorkflowCode = { digest: "0".repeat(64), generation: 1 };
 
 describe("findProjectWorkflow", () => {
   test("no asset yet -> null", async () => {
-    expect(await findProjectWorkflow(fakeHub({}).transport, TENANT_ID, PROJECT_ID)).toBeNull();
+    expect(await findProjectWorkflow(fakeHub({}).transport, PROJECT_ID)).toBeNull();
   });
 
   test("asset exists but no deployment matches it -> null", async () => {
     const hub = fakeHub(withAsset({ deployments: [{ id: "dep_other", definitionAssetId: "asset_other", status: "active", createdAt: "2026-01-01T00:00:00.000Z" }] }));
-    expect(await findProjectWorkflow(hub.transport, TENANT_ID, PROJECT_ID)).toBeNull();
+    expect(await findProjectWorkflow(hub.transport, PROJECT_ID)).toBeNull();
   });
 
   test("deployment exists but no top-level run has been triggered -> null", async () => {
     const hub = fakeHub(withAsset({ deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "active", createdAt: "2026-01-01T00:00:00.000Z" }], runsByDeployment: { dep_1: [] } }));
-    expect(await findProjectWorkflow(hub.transport, TENANT_ID, PROJECT_ID)).toBeNull();
+    expect(await findProjectWorkflow(hub.transport, PROJECT_ID)).toBeNull();
   });
 
   test("several top-level runs already exist -> picks the oldest, the same winner every caller converges on", async () => {
@@ -201,7 +201,7 @@ describe("findProjectWorkflow", () => {
         runsByDeployment: { dep_1: ["run_b", "run_a__rework__1", "run_c", "run_a"] },
       }),
     );
-    expect(await findProjectWorkflow(hub.transport, TENANT_ID, PROJECT_ID)).toEqual({ deploymentId: "dep_1", runId: "run_a" });
+    expect(await findProjectWorkflow(hub.transport, PROJECT_ID)).toEqual({ deploymentId: "dep_1", runId: "run_a", tenantId: TENANT_ID });
   });
 
   // CL-8867: a dead deployment's run still holds the project's history. A
@@ -219,7 +219,7 @@ describe("findProjectWorkflow", () => {
         eventsByRun: { ...decidedRun("run_0", [1, 2]).events, run_1: PARKED },
       }),
     );
-    expect(await findProjectWorkflow(hub.transport, TENANT_ID, PROJECT_ID)).toEqual({ deploymentId: "dep_old_failed", runId: "run_0" });
+    expect(await findProjectWorkflow(hub.transport, PROJECT_ID)).toEqual({ deploymentId: "dep_old_failed", runId: "run_0", tenantId: TENANT_ID });
   });
 
   // #77: every replacement replays the whole history onto itself, so the
@@ -242,7 +242,7 @@ describe("findProjectWorkflow", () => {
         eventsByRun: { ...decidedRun("run_0", [1, 2]).events, ...decidedRun("run_1", [1, 2, 3]).events, ...decidedRun("run_2", [1]).events },
       }),
     );
-    expect(await findProjectWorkflow(hub.transport, TENANT_ID, PROJECT_ID)).toEqual({ deploymentId: "dep_later_failed", runId: "run_1" });
+    expect(await findProjectWorkflow(hub.transport, PROJECT_ID)).toEqual({ deploymentId: "dep_later_failed", runId: "run_1", tenantId: TENANT_ID });
   });
 
   test("a live run that holds every decision the dead one took is the project's run", async () => {
@@ -256,7 +256,7 @@ describe("findProjectWorkflow", () => {
         eventsByRun: { ...decidedRun("run_0", [1, 2]).events, ...decidedRun("run_1", [1, 2]).events },
       }),
     );
-    expect(await findProjectWorkflow(hub.transport, TENANT_ID, PROJECT_ID)).toEqual({ deploymentId: "dep_new_live", runId: "run_1" });
+    expect(await findProjectWorkflow(hub.transport, PROJECT_ID)).toEqual({ deploymentId: "dep_new_live", runId: "run_1", tenantId: TENANT_ID });
   });
 
   test("passes over a failed deployment whose run never took a decision", async () => {
@@ -270,12 +270,12 @@ describe("findProjectWorkflow", () => {
         eventsByRun: { run_0: PARKED, run_0__rework__0: PARKED, run_1: PARKED },
       }),
     );
-    expect(await findProjectWorkflow(hub.transport, TENANT_ID, PROJECT_ID)).toEqual({ deploymentId: "dep_new_live", runId: "run_1" });
+    expect(await findProjectWorkflow(hub.transport, PROJECT_ID)).toEqual({ deploymentId: "dep_new_live", runId: "run_1", tenantId: TENANT_ID });
   });
 
   test("only a failed deployment whose run never took a decision -> null, so the project deploys afresh", async () => {
     const hub = fakeHub(withAsset({ deployments: [{ id: "dep_old_failed", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" }], runsByDeployment: { dep_old_failed: ["run_0"] }, eventsByRun: { run_0: PARKED } }));
-    expect(await findProjectWorkflow(hub.transport, TENANT_ID, PROJECT_ID)).toBeNull();
+    expect(await findProjectWorkflow(hub.transport, PROJECT_ID)).toBeNull();
   });
 
   // #51: the hub cannot end a deployment, so a run replaced by a newer
@@ -292,7 +292,7 @@ describe("findProjectWorkflow", () => {
         eventsByRun: { ...decidedRun("run_0", [1, 2], OUTDATED).events, ...decidedRun("run_1", [1], { ...CURRENT, generation: 2 }).events },
       }),
     );
-    expect(await findProjectWorkflow(notCaughtUp.transport, TENANT_ID, PROJECT_ID)).toEqual({ deploymentId: "dep_old", runId: "run_0" });
+    expect(await findProjectWorkflow(notCaughtUp.transport, PROJECT_ID)).toEqual({ deploymentId: "dep_old", runId: "run_0", tenantId: TENANT_ID });
 
     const caughtUp = fakeHub(
       withAsset({
@@ -304,20 +304,20 @@ describe("findProjectWorkflow", () => {
         eventsByRun: { ...decidedRun("run_0", [1, 2], OUTDATED).events, ...decidedRun("run_1", [1, 2], { ...CURRENT, generation: 2 }).events },
       }),
     );
-    expect(await findProjectWorkflow(caughtUp.transport, TENANT_ID, PROJECT_ID)).toEqual({ deploymentId: "dep_upgraded", runId: "run_1" });
+    expect(await findProjectWorkflow(caughtUp.transport, PROJECT_ID)).toEqual({ deploymentId: "dep_upgraded", runId: "run_1", tenantId: TENANT_ID });
   });
 });
 
 describe("ensureProjectWorkflow", () => {
   test("a live run on the current code that has caught up is returned as is: nothing pushed, deployed, triggered or signalled", async () => {
     const hub = fakeHub(withAsset({ deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "deployed", createdAt: "2026-01-01T00:00:00.000Z" }], runsByDeployment: { dep_1: decidedRun("run_1", [1, 2], CURRENT).runIds }, eventsByRun: decidedRun("run_1", [1, 2], CURRENT).events }));
-    expect(await ensure(hub)).toEqual({ deploymentId: "dep_1", runId: "run_1" });
+    expect(await ensure(hub)).toEqual({ deploymentId: "dep_1", runId: "run_1", tenantId: TENANT_ID });
     expect(hub.posts).toEqual([]);
   });
 
   test("a fresh deploy triggers its run with the code it runs, at generation 1", async () => {
     const hub = fakeHub(withAsset({}));
-    expect(await ensure(hub)).toEqual({ deploymentId: "dep_new", runId: "run_new" });
+    expect(await ensure(hub)).toEqual({ deploymentId: "dep_new", runId: "run_new", tenantId: TENANT_ID });
     expect(hub.triggeredCode()).toEqual({ digest: CURRENT_DIGEST, generation: 1 });
     expect(hub.signalsSent()).toEqual([]);
   });
@@ -338,14 +338,15 @@ describe("ensureProjectWorkflow", () => {
     expect(await ensure(hub)).toEqual({
       deploymentId: "dep_new",
       runId: "run_new",
-      replay: { from: { deploymentId: "dep_1", runId: "run_1" }, replayed: 2, refused: [] },
+      tenantId: TENANT_ID,
+      replay: { from: { deploymentId: "dep_1", runId: "run_1", tenantId: TENANT_ID }, replayed: 2, refused: [] },
     });
     expect(hub.signalsSent()).toEqual([
       { runId: "run_new", signalName: "project.decision", signalId: "dec-1", payload: decisionPayload(1) },
       { runId: "run_new", signalName: "project.decision", signalId: "dec-2", payload: decisionPayload(2) },
     ]);
     // And from then on, every reader converges on the revived run.
-    expect(await findProjectWorkflow(hub.transport, TENANT_ID, PROJECT_ID)).toEqual({ deploymentId: "dep_new", runId: "run_new" });
+    expect(await findProjectWorkflow(hub.transport, PROJECT_ID)).toEqual({ deploymentId: "dep_new", runId: "run_new", tenantId: TENANT_ID });
   });
 
   test("a live run that has not caught up is brought up to the dead run's decisions, not replaced", async () => {
@@ -359,7 +360,7 @@ describe("ensureProjectWorkflow", () => {
         eventsByRun: { ...decidedRun("run_0", [1, 2]).events, ...decidedRun("run_1", [1]).events },
       }),
     );
-    expect(await ensure(hub)).toMatchObject({ deploymentId: "dep_new_live", runId: "run_1", replay: { from: { deploymentId: "dep_old_failed", runId: "run_0" }, replayed: 2, refused: [] } });
+    expect(await ensure(hub)).toMatchObject({ deploymentId: "dep_new_live", runId: "run_1", replay: { from: { deploymentId: "dep_old_failed", runId: "run_0", tenantId: TENANT_ID }, replayed: 2, refused: [] } });
     expect(hub.signalsSent().map((sent) => sent.signalId)).toEqual(["dec-2"]);
   });
 
@@ -380,13 +381,13 @@ describe("ensureProjectWorkflow", () => {
         },
       }),
     );
-    expect(await ensure(hub, 10_000)).toEqual({ deploymentId: "dep_replacement", runId: "run_r" });
+    expect(await ensure(hub, 10_000)).toEqual({ deploymentId: "dep_replacement", runId: "run_r", tenantId: TENANT_ID });
     expect(hub.posts).toEqual([]);
   });
 
   test("deploys afresh when the only deployment has ended and its run never took a decision", async () => {
     const hub = fakeHub(withAsset({ deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" }], runsByDeployment: { dep_1: ["run_1"] }, eventsByRun: { run_1: PARKED } }));
-    expect(await ensure(hub)).toEqual({ deploymentId: "dep_new", runId: "run_new" });
+    expect(await ensure(hub)).toEqual({ deploymentId: "dep_new", runId: "run_new", tenantId: TENANT_ID });
     expect(hub.signalsSent()).toEqual([]);
   });
 
@@ -410,7 +411,8 @@ describe("ensureProjectWorkflow", () => {
       expect(await ensure(hub)).toEqual({
         deploymentId: "dep_new",
         runId: "run_new",
-        replay: { from: { deploymentId: "dep_old", runId: "run_old" }, replayed: 2, refused: [] },
+        tenantId: TENANT_ID,
+        replay: { from: { deploymentId: "dep_old", runId: "run_old", tenantId: TENANT_ID }, replayed: 2, refused: [] },
       });
       expect(hub.triggeredCode()).toEqual({ digest: CURRENT_DIGEST, generation: 2 });
       expect(hub.signalsSent()).toEqual([
@@ -418,10 +420,10 @@ describe("ensureProjectWorkflow", () => {
         { runId: "run_new", signalName: "project.decision", signalId: "dec-2", payload: decisionPayload(2) },
       ]);
       // The old deployment is still live (the hub cannot end it), and every reader now converges on the new run.
-      expect(await findProjectWorkflow(hub.transport, TENANT_ID, PROJECT_ID)).toEqual({ deploymentId: "dep_new", runId: "run_new" });
+      expect(await findProjectWorkflow(hub.transport, PROJECT_ID)).toEqual({ deploymentId: "dep_new", runId: "run_new", tenantId: TENANT_ID });
       // And the new run is current: the next call reuses it without deploying again.
       const before = hub.posts.length;
-      expect(await ensure(hub)).toEqual({ deploymentId: "dep_new", runId: "run_new" });
+      expect(await ensure(hub)).toEqual({ deploymentId: "dep_new", runId: "run_new", tenantId: TENANT_ID });
       expect(hub.posts.length).toBe(before);
     });
 
@@ -441,7 +443,7 @@ describe("ensureProjectWorkflow", () => {
       const hub = outdatedLive((decisionId) => (decisionId === "dec-2" ? { accepted: false, reason: "quorum_not_met" } : { accepted: true }));
       const ensured = await ensure(hub);
       expect(ensured.replay).toEqual({
-        from: { deploymentId: "dep_old", runId: "run_old" },
+        from: { deploymentId: "dep_old", runId: "run_old", tenantId: TENANT_ID },
         replayed: 2,
         refused: [{ decisionId: "dec-2", kind: "approve", stage: 2, reason: "quorum_not_met" }],
       });
@@ -461,7 +463,7 @@ describe("ensureProjectWorkflow", () => {
           reducer: () => ({ accepted: false, reason: "wrong_stage" }),
         }),
       );
-      expect((await ensure(hub)).replay).toEqual({ from: { deploymentId: "dep_old", runId: "run_old" }, replayed: 1, refused: [] });
+      expect((await ensure(hub)).replay).toEqual({ from: { deploymentId: "dep_old", runId: "run_old", tenantId: TENANT_ID }, replayed: 1, refused: [] });
     });
   });
 });

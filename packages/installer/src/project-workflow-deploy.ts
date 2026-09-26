@@ -21,7 +21,8 @@
  * never read or signalled again.
  */
 import { ApiError, type Transport } from "@intx/hub-client";
-import { assetsFor, getTenant, workflowsFor, type HubDeployment, type HubTenant } from "./hub.js";
+import { assetsFor, workflowsFor, type HubDeployment, type HubTenant } from "./hub.js";
+import { projectHome, projectTenants, type ProjectHome } from "./project-home.js";
 import { treeDigest } from "./workflow-closure.js";
 import { visibleCatalog } from "./visible-catalog.js";
 import {
@@ -202,20 +203,29 @@ const TERMINAL_RUN_EVENTS = new Set(["RunCompleted", "RunFailed", "RunCancelled"
 /** How long a project with history waits for the hub to replace its dead deployment before deploying its own. */
 const REPLACEMENT_WAIT_MS = 45_000;
 
-type ProjectRunCandidate = { readonly deployment: HubDeployment; readonly runId: string };
+type ProjectRunCandidate = { readonly tenantId: string; readonly deployment: HubDeployment; readonly runId: string };
 
-/** Every deployment that has a top-level run, oldest first, with the run every caller picks for it. */
-async function candidatesWithRuns(
-  workflows: ReturnType<typeof workflowsFor>,
-  deployments: readonly HubDeployment[],
-): Promise<ProjectRunCandidate[]> {
-  const byAge = [...deployments].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+/** A project's workflow deployments in one of its tenants: its own, or the
+ *  workspace for a project whose workflow was deployed before #29. */
+type DeploymentGroup = { readonly tenantId: string; readonly deployments: readonly HubDeployment[] };
+
+/** Every deployment that has a top-level run, oldest first across every
+ *  group, with the run every caller picks for it. */
+async function candidatesWithRuns(transport: Transport, groups: readonly DeploymentGroup[]): Promise<ProjectRunCandidate[]> {
+  const byAge = groups
+    .flatMap((group) => group.deployments.map((deployment) => ({ tenantId: group.tenantId, deployment })))
+    .sort((a, b) => a.deployment.createdAt.localeCompare(b.deployment.createdAt));
   const candidates: ProjectRunCandidate[] = [];
-  for (const deployment of byAge) {
-    const runId = pickTopLevelRun(topLevelRunIds(await workflows.runs(deployment.id)));
-    if (runId) candidates.push({ deployment, runId });
+  for (const { tenantId, deployment } of byAge) {
+    const runId = pickTopLevelRun(topLevelRunIds(await workflowsFor(transport, tenantId).runs(deployment.id)));
+    if (runId) candidates.push({ tenantId, deployment, runId });
   }
   return candidates;
+}
+
+/** The hub client for the tenant a candidate's deployment and run live in. */
+function workflowsOf(transport: Transport, candidate: Pick<ProjectRunCandidate, "tenantId">): ReturnType<typeof workflowsFor> {
+  return workflowsFor(transport, candidate.tenantId);
 }
 
 type ProjectRunState = {
@@ -261,15 +271,12 @@ type ProjectRunState = {
  * re-opened that stage's review and offered its approval again, both
  * refused as `wrong_stage` (#77).
  */
-async function projectRunState(
-  workflows: ReturnType<typeof workflowsFor>,
-  deployments: readonly HubDeployment[],
-): Promise<ProjectRunState> {
-  const candidates = await candidatesWithRuns(workflows, deployments);
+async function projectRunState(transport: Transport, groups: readonly DeploymentGroup[]): Promise<ProjectRunState> {
+  const candidates = await candidatesWithRuns(transport, groups);
   const live: { candidate: ProjectRunCandidate; code: ProjectWorkflowCode | null }[] = [];
   for (const candidate of candidates) {
     if (deploymentHasEnded(candidate.deployment)) continue;
-    live.push({ candidate, code: await runCode(workflows, candidate.deployment.id, candidate.runId) });
+    live.push({ candidate, code: await runCode(workflowsOf(transport, candidate), candidate.deployment.id, candidate.runId) });
   }
   const generation = Math.max(0, ...live.map((entry) => entry.code?.generation ?? 0));
   const newest = live.filter((entry) => (entry.code?.generation ?? 0) === generation);
@@ -284,7 +291,7 @@ async function projectRunState(
     ...superseded,
   ].sort((a, b) => a.candidate.deployment.createdAt.localeCompare(b.candidate.deployment.createdAt));
   for (const { candidate, code } of folded) {
-    const decisions = await appliedDecisions(workflows, candidate.deployment.id, candidate.runId);
+    const decisions = await appliedDecisions(workflowsOf(transport, candidate), candidate.deployment.id, candidate.runId);
     if (decisions.length === 0) continue;
     // `>=`: candidates come oldest first, so a tie goes to the newer run.
     if (fullest === null || decisions.length >= fullest.held) fullest = { candidate, code, held: decisions.length };
@@ -294,10 +301,16 @@ async function projectRunState(
       history.push(decision);
     }
   }
-  const asRef = (candidate: ProjectRunCandidate): ProjectWorkflowDeployment => ({ deploymentId: candidate.deployment.id, runId: candidate.runId });
+  const asRef = (candidate: ProjectRunCandidate): ProjectWorkflowDeployment => ({
+    deploymentId: candidate.deployment.id,
+    runId: candidate.runId,
+    tenantId: candidate.tenantId,
+  });
   for (const { candidate, code } of newest) {
     if (history.length === 0) return { run: asRef(candidate), live: true, code, liveCandidates, generation, history };
-    const held = new Set((await appliedDecisions(workflows, candidate.deployment.id, candidate.runId)).map((decision) => decision.signalId));
+    const held = new Set(
+      (await appliedDecisions(workflowsOf(transport, candidate), candidate.deployment.id, candidate.runId)).map((decision) => decision.signalId),
+    );
     if (history.every((decision) => held.has(decision.signalId))) return { run: asRef(candidate), live: true, code, liveCandidates, generation, history };
   }
   if (fullest) return { run: asRef(fullest.candidate), live: false, code: fullest.code, liveCandidates, generation, history };
@@ -324,14 +337,9 @@ async function pollUntil<T>(timeoutMs: number, intervalMs: number, read: () => P
  * refuses as a conflict is checked against what the run applied before it
  * counts as a failure, so a replay interrupted halfway resumes cleanly.
  */
-async function catchUp(
-  transport: Transport,
-  workspaceTenantId: string,
-  target: ProjectWorkflowDeployment,
-  history: readonly ReceivedDecision[],
-): Promise<void> {
+async function catchUp(transport: Transport, target: ProjectWorkflowDeployment, history: readonly ReceivedDecision[]): Promise<void> {
   if (history.length === 0) return;
-  const workflows = workflowsFor(transport, workspaceTenantId);
+  const workflows = workflowsOf(transport, target);
   // Placed, and its run started: a replacement reports `running` rather
   // than `deployed`, and either takes a signal once the run is on.
   const placed = await pollUntil(120_000, 1_500, async () => {
@@ -393,14 +401,16 @@ export type ProjectWorkflowReplay = {
  * a read that failed.
  */
 async function replayOutcome(
-  workflows: ReturnType<typeof workflowsFor>,
+  transport: Transport,
   from: ProjectWorkflowDeployment,
   target: ProjectWorkflowDeployment,
   history: readonly ReceivedDecision[],
 ): Promise<ProjectWorkflowReplay> {
   const replayed = new Set(history.map((decision) => decision.signalId));
-  const before = await ledgerOf(workflows, from.deploymentId, from.runId);
-  const after = (await ledgerOf(workflows, target.deploymentId, target.runId)) ?? [];
+  // `from` and `target` may live in different tenants: a legacy run in the
+  // workspace, revived in the project tenant (#29).
+  const before = await ledgerOf(workflowsOf(transport, from), from.deploymentId, from.runId);
+  const after = (await ledgerOf(workflowsOf(transport, target), target.deploymentId, target.runId)) ?? [];
   const acceptedBefore = new Set((before ?? []).filter((row) => row.accepted).map((row) => row.decisionId));
   const refused = after
     .filter((row) => replayed.has(row.decisionId) && !row.accepted && (before === null || acceptedBefore.has(row.decisionId)))
@@ -424,7 +434,13 @@ export type ProjectWorkflowStageInput = {
   readonly authorizedPrincipalIds: readonly string[];
 };
 
-export type ProjectWorkflowDeployment = { readonly deploymentId: string; readonly runId: string };
+export type ProjectWorkflowDeployment = {
+  readonly deploymentId: string;
+  readonly runId: string;
+  /** The tenant the deployment and its run live in: the project's own, or
+   *  the workspace for a workflow deployed before #29 and still live. */
+  readonly tenantId: string;
+};
 
 /** `ensureProjectWorkflow`'s answer: the run to read and signal, plus what
  *  was replayed onto it when it was brought up from another run's history. */
@@ -470,7 +486,8 @@ export type EnsureProjectWorkflowOptions = {
 type DeployContext = {
   readonly transport: Transport;
   readonly gitPush: WorkflowGitPush;
-  readonly workspaceTenantId: string;
+  /** The project's own tenant, where every deploy lands (#29). */
+  readonly tenantId: string;
   readonly tenant: HubTenant;
   readonly projectId: string;
   readonly stages: readonly ProjectWorkflowStageInput[];
@@ -489,19 +506,19 @@ type DeployContext = {
  * concurrent caller made meanwhile is reused rather than deployed beside.
  */
 async function deployFreshRun(context: DeployContext, known: ReadonlySet<string>): Promise<ProjectWorkflowDeployment> {
-  const { transport, workspaceTenantId, assetId, assetName, rendered } = context;
-  const workflows = workflowsFor(transport, workspaceTenantId);
+  const { transport, tenantId, assetId, assetName, rendered } = context;
+  const workflows = workflowsFor(transport, tenantId);
   const matching = (deployments: readonly HubDeployment[]) =>
     deployments.filter((deployment) => deployment.definitionAssetId === assetId && !known.has(deployment.id));
 
   const probe = pushProbePath(rendered);
-  const commitSha = await pushWorkflowSourceTree(transport, workspaceTenantId, assetId, assetName, rendered, "Deploy project workflow", context.gitPush);
-  await waitForPushVisible(transport, workspaceTenantId, assetId, probe.path, probe.content);
+  const commitSha = await pushWorkflowSourceTree(transport, tenantId, assetId, assetName, rendered, "Deploy project workflow", context.gitPush);
+  await waitForPushVisible(transport, tenantId, assetId, probe.path, probe.content);
 
   // A concurrent caller may have deployed onto this asset while the push
   // above was in flight; re-check before deploying a second live one.
   let deployment = pickDeployment(matching(await workflows.deployments()));
-  if (!deployment || !(await deploymentIsLive(transport, workspaceTenantId, deployment.id))) {
+  if (!deployment || !(await deploymentIsLive(transport, tenantId, deployment.id))) {
     // The project workflow runs no inference itself, but a deploy still
     // requires a non-empty offering chain -- the tenant's first offering is
     // pinned and simply never dispatched to.
@@ -527,11 +544,32 @@ async function deployFreshRun(context: DeployContext, known: ReadonlySet<string>
   // concurrent callers: list, and if none exists yet, trigger once and
   // re-list so every caller settles on the same (earliest) run id.
   const existingRun = pickTopLevelRun(topLevelRunIds(await workflows.runs(deployment.id)));
-  if (existingRun) return { deploymentId: deployment.id, runId: existingRun };
+  if (existingRun) return { deploymentId: deployment.id, runId: existingRun, tenantId };
   const payload = { projectId: context.projectId, stages: context.stages, code: context.code };
   const fired = await workflows.trigger(deployment.id, { content: JSON.stringify(payload) });
   const afterTrigger = topLevelRunIds(await workflows.runs(deployment.id));
-  return { deploymentId: deployment.id, runId: pickTopLevelRun(afterTrigger) ?? fired.runId };
+  return { deploymentId: deployment.id, runId: pickTopLevelRun(afterTrigger) ?? fired.runId, tenantId };
+}
+
+/**
+ * A project's workflow deployments wherever they are: on the project
+ * tenant's own asset, and -- for a project whose workflow was deployed
+ * before #29 -- on the workspace's same-named asset. The listing is
+ * inherited, so one read of the project tenant's assets finds both, told
+ * apart by `asset.tenantId`.
+ */
+async function projectWorkflowDeployments(transport: Transport, home: ProjectHome, assetName: string): Promise<DeploymentGroup[]> {
+  const listed = await assetsFor(transport, home.tenantId).list("workflow");
+  const groups: DeploymentGroup[] = [];
+  for (const tenantId of projectTenants(home)) {
+    const asset = listed.find((entry) => entry.name === assetName && entry.tenantId === tenantId);
+    if (!asset) continue;
+    const deployments = (await workflowsFor(transport, tenantId).deployments()).filter(
+      (deployment) => deployment.definitionAssetId === asset.id,
+    );
+    groups.push({ tenantId, deployments });
+  }
+  return groups;
 }
 
 async function ensureProjectWorkflowOnce(
@@ -539,7 +577,6 @@ async function ensureProjectWorkflowOnce(
   sidecar: SidecarCapability,
   source: ProjectWorkflowSource,
   gitPush: WorkflowGitPush,
-  workspaceTenantId: string,
   projectId: string,
   stages: readonly ProjectWorkflowStageInput[],
   vendoredWorkflowMemberFiles: Record<string, string>,
@@ -548,22 +585,28 @@ async function ensureProjectWorkflowOnce(
   if (!sidecar.canPlaceSidecars) {
     throw new Error("no host is placing sidecars; cannot deploy a project workflow");
   }
-  const tenant = await getTenant(transport, workspaceTenantId);
-  if (!tenant) throw new Error("the workspace tenant does not exist");
+  // The project's own tenant is where the workflow deploys (#29). A
+  // workflow deployed before that, in the workspace, is reused while it
+  // lives and runs the current code, and read for its history otherwise:
+  // the revival below lands in the project tenant and replays every
+  // decision onto it, which is how an existing project moves without
+  // losing its stage.
+  const home = await projectHome(transport, projectId);
+  const { tenant, tenantId } = home;
 
   const assetName = projectWorkflowAssetName(projectId);
-  const assetId = await ensureWorkflowAsset(transport, workspaceTenantId, assetName, `${projectId} project workflow`);
+  const assetId = await ensureWorkflowAsset(transport, tenantId, assetName, `${projectId} project workflow`);
   const rendered = { ...renderProjectWorkflowSource(assetName, source), ...vendoredWorkflowMemberFiles };
   const digest = await treeDigest(rendered);
 
-  const workflows = workflowsFor(transport, workspaceTenantId);
-  const matching = (deployments: readonly HubDeployment[]) =>
-    deployments.filter((deployment) => deployment.definitionAssetId === assetId);
+  const everywhere = () => projectWorkflowDeployments(transport, home, assetName);
+  const idsOf = (groups: readonly DeploymentGroup[], keep: (deployment: HubDeployment) => boolean = () => true) =>
+    new Set(groups.flatMap((group) => group.deployments.filter(keep).map((deployment) => deployment.id)));
   const context = (generation: number): DeployContext => ({
     transport,
     gitPush,
     tenant,
-    workspaceTenantId,
+    tenantId,
     projectId,
     stages,
     assetId,
@@ -572,8 +615,8 @@ async function ensureProjectWorkflowOnce(
     code: { digest, generation },
   });
 
-  let existingDeployments = matching(await workflows.deployments());
-  let state = await projectRunState(workflows, existingDeployments);
+  let groups = await everywhere();
+  let state = await projectRunState(transport, groups);
   if (state.run && state.live) {
     if (state.code?.digest === digest) return state.run;
     // The live run is on other code than this render (#51): a reducer fix
@@ -584,10 +627,10 @@ async function ensureProjectWorkflowOnce(
     // cannot end it. Its own applied decisions are the whole history: it
     // held everything the runs before it took, or it would not be the run.
     const from = state.run;
-    const history = await appliedDecisions(workflows, from.deploymentId, from.runId);
-    const target = await deployFreshRun(context(state.generation + 1), new Set(existingDeployments.map((entry) => entry.id)));
-    await catchUp(transport, workspaceTenantId, target, history);
-    return { ...target, replay: await replayOutcome(workflows, from, target, history) };
+    const history = await appliedDecisions(workflowsOf(transport, from), from.deploymentId, from.runId);
+    const target = await deployFreshRun(context(state.generation + 1), idsOf(groups));
+    await catchUp(transport, target, history);
+    return { ...target, replay: await replayOutcome(transport, from, target, history) };
   }
   // The hub replaces a dead deployment's sidecar on its own after a host
   // restart (CL-8784), as a new deployment carrying the run's restored
@@ -596,8 +639,8 @@ async function ensureProjectWorkflowOnce(
   // live run waits for the replacement a while before deploying its own.
   if (!state.liveCandidates[0] && state.history.length > 0) {
     const replaced = await pollUntil(options.replacementWaitMs ?? REPLACEMENT_WAIT_MS, 2_000, async () => {
-      existingDeployments = matching(await workflows.deployments());
-      state = await projectRunState(workflows, existingDeployments);
+      groups = await everywhere();
+      state = await projectRunState(transport, groups);
       return state.liveCandidates[0] ? true : null;
     });
     if (replaced && state.run && state.live && state.code?.digest === digest) return state.run;
@@ -607,16 +650,17 @@ async function ensureProjectWorkflowOnce(
   // run that has caught up but runs other code is left to the next call,
   // which takes the replacement path above.
   if (state.liveCandidates[0]) {
-    const target = { deploymentId: state.liveCandidates[0].deployment.id, runId: state.liveCandidates[0].runId };
-    await catchUp(transport, workspaceTenantId, target, state.history);
+    const candidate = state.liveCandidates[0];
+    const target = { deploymentId: candidate.deployment.id, runId: candidate.runId, tenantId: candidate.tenantId };
+    await catchUp(transport, target, state.history);
     return state.run && state.run.deploymentId !== target.deploymentId
-      ? { ...target, replay: await replayOutcome(workflows, state.run, target, state.history) }
+      ? { ...target, replay: await replayOutcome(transport, state.run, target, state.history) }
       : target;
   }
   const from = state.run;
-  const target = await deployFreshRun(context(state.generation + 1), new Set(existingDeployments.filter((entry) => deploymentHasEnded(entry)).map((entry) => entry.id)));
-  await catchUp(transport, workspaceTenantId, target, state.history);
-  return from ? { ...target, replay: await replayOutcome(workflows, from, target, state.history) } : target;
+  const target = await deployFreshRun(context(state.generation + 1), idsOf(groups, deploymentHasEnded));
+  await catchUp(transport, target, state.history);
+  return from ? { ...target, replay: await replayOutcome(transport, from, target, state.history) } : target;
 }
 
 /**
@@ -635,14 +679,12 @@ export async function ensureProjectWorkflow(
   sidecar: SidecarCapability,
   source: ProjectWorkflowSource,
   gitPush: WorkflowGitPush,
-  workspaceTenantId: string,
   projectId: string,
   stages: readonly ProjectWorkflowStageInput[],
   vendoredWorkflowMemberFiles: Record<string, string>,
   options: EnsureProjectWorkflowOptions = {},
 ): Promise<EnsuredProjectWorkflow> {
-  const attempt = () =>
-    ensureProjectWorkflowOnce(transport, sidecar, source, gitPush, workspaceTenantId, projectId, stages, vendoredWorkflowMemberFiles, options);
+  const attempt = () => ensureProjectWorkflowOnce(transport, sidecar, source, gitPush, projectId, stages, vendoredWorkflowMemberFiles, options);
   try {
     return await attempt();
   } catch (cause) {
@@ -663,16 +705,9 @@ export async function ensureProjectWorkflow(
  * code is still returned here: only `ensureProjectWorkflow` knows the
  * current code, and replaces it.
  */
-export async function findProjectWorkflow(
-  transport: Transport,
-  workspaceTenantId: string,
-  projectId: string,
-): Promise<ProjectWorkflowDeployment | null> {
-  const assetName = projectWorkflowAssetName(projectId);
-  const asset = (await assetsFor(transport, workspaceTenantId).list("workflow")).find((entry) => entry.name === assetName);
-  if (!asset) return null;
-
-  const workflows = workflowsFor(transport, workspaceTenantId);
-  const deployments = (await workflows.deployments()).filter((entry) => entry.definitionAssetId === asset.id);
-  return (await projectRunState(workflows, deployments)).run;
+export async function findProjectWorkflow(transport: Transport, projectId: string): Promise<ProjectWorkflowDeployment | null> {
+  const home = await projectHome(transport, projectId);
+  const groups = await projectWorkflowDeployments(transport, home, projectWorkflowAssetName(projectId));
+  if (groups.length === 0) return null;
+  return (await projectRunState(transport, groups)).run;
 }

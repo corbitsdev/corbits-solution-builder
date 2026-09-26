@@ -198,12 +198,10 @@ export function projectWorkflowViewOf(state: ProjectState): ProjectWorkflowView 
  * read -- one over an already-triggered ref, the other over a ref resolved
  * read-only by `findProjectWorkflow`.
  */
-export async function loadProjectWorkflowView(
-  transport: Transport,
-  workspaceTenantId: string,
-  ref: ProjectWorkflowDeployment,
-): Promise<ProjectWorkflowView> {
-  const workflows = workflowsFor(transport, workspaceTenantId);
+export async function loadProjectWorkflowView(transport: Transport, ref: ProjectWorkflowDeployment): Promise<ProjectWorkflowView> {
+  // The ref names the tenant its run lives in: the project's own, or the
+  // workspace for a workflow deployed before #29 (`ProjectWorkflowDeployment`).
+  const workflows = workflowsFor(transport, ref.tenantId);
   const [topEvents, runIds] = await Promise.all([
     workflows.runEvents(ref.deploymentId, ref.runId),
     workflows.runs(ref.deploymentId),

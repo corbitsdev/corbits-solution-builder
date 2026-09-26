@@ -241,6 +241,38 @@ export async function delegateMore(
   return record;
 }
 
+/** Every credential the workspace itself owns: what a project is given when
+ *  nobody chose a set (#29). A personal credential never crosses into a
+ *  project, so it is left out here as the installer would refuse it. */
+export async function workspaceOwnedCredentialIds(
+  store: Pick<DelegationStore, "listDelegatableCredentials">,
+): Promise<string[]> {
+  return (await store.listDelegatableCredentials())
+    .filter((credential) => credential.principalId === null)
+    .map((credential) => credential.id);
+}
+
+/**
+ * A project the interface created before it delegated anything at creation
+ * holds no consent record, or the explicit default of none. Since #29 its
+ * specialists deploy in its own tenant, where nothing is usable until
+ * delegated, so such a project could run nothing. Opening it delegates
+ * every workspace-owned credential, once, the same default a new project
+ * gets; the record then reads `chosen`, and nothing here touches it again.
+ * A set the owner chose, even an empty one, is theirs and is left alone.
+ * Null when nothing was changed.
+ */
+export async function delegateWorkspaceDefaultsIfSealed(
+  store: DelegationStore,
+  projectId: string,
+): Promise<DelegationRecord | null> {
+  const prior = await store.readRecord(projectId);
+  if (prior && (prior.mode === "chosen" || prior.credentialIds.length > 0)) return null;
+  const delegatedCredentialIds = await workspaceOwnedCredentialIds(store);
+  if (delegatedCredentialIds.length === 0) return null;
+  return delegateMore(store, { projectId, delegatedCredentialIds });
+}
+
 /** What the owner consented to plus the live grants carrying it: the audit view. */
 export async function delegationAudit(
   store: DelegationStore,

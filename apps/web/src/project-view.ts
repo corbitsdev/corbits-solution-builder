@@ -105,14 +105,10 @@ export function toArtifactNode(node: Awaited<ReturnType<typeof artifactGraphFor>
  * project the workspace has not opened yet) is not a failure: `stage` stays
  * at 1 and `done` at false until `StageWorkspace` ensures and triggers it.
  */
-async function workflowStage(
-  transport: Transport,
-  workspaceTenantId: string,
-  projectId: string,
-): Promise<{ stage: number; done: boolean }> {
-  const ref = await resolveProjectWorkflowRef(transport, workspaceTenantId, projectId).catch(() => null);
+async function workflowStage(transport: Transport, projectId: string): Promise<{ stage: number; done: boolean }> {
+  const ref = await resolveProjectWorkflowRef(transport, projectId).catch(() => null);
   if (!ref) return { stage: 1, done: false };
-  const view = await loadProjectWorkflowView(transport, workspaceTenantId, ref);
+  const view = await loadProjectWorkflowView(transport, ref);
   return { stage: view.done ? LAST_STAGE : view.stage, done: view.done };
 }
 
@@ -121,11 +117,11 @@ export async function loadProjectView(projectId: string, transport: Transport = 
   if (!workspace) throw new Error("The workspace is not installed yet.");
   const [project, graph] = await Promise.all([
     installerRequireProject(transport, projectId),
-    artifactGraphFor(transport, workspace.tenantId, projectId),
+    artifactGraphFor(transport, projectId),
   ]);
   const nodes = graph.nodes.map((node) => toArtifactNode(node));
 
-  const { stage, done } = await workflowStage(transport, workspace.tenantId, projectId);
+  const { stage, done } = await workflowStage(transport, projectId);
 
   const soloApproval = await soloApprovalFor(transport, projectId, stage as Stage).catch(() => true);
 
@@ -136,7 +132,9 @@ export async function loadProjectView(projectId: string, transport: Transport = 
       policy: project.policy,
       archivedAt: project.archivedAt ? project.archivedAt.toISOString() : null,
     },
-    tenantId: workspace.tenantId,
+    // The project's own tenant (#29): where its artifacts, specialists and
+    // mail are, and what every page-level read and write is scoped to.
+    tenantId: projectId,
     stage,
     done,
     soloApproval,

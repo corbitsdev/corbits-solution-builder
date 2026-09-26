@@ -401,6 +401,9 @@ export function BuildPanel({
 }) {
   const [address, setAddress] = useState<string | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
+  // The tenant the specialist's run, approvals and events are in: the
+  // project's own, or the workspace for one deployed before #29.
+  const [runTenantId, setRunTenantId] = useState<string>(tenantId);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [approvals, setApprovals] = useState<PendingApproval[]>([]);
   const [events, setEvents] = useState<RunEvent[]>([]);
@@ -417,6 +420,7 @@ export function BuildPanel({
         if (cancelled) return;
         setAddress(deployment.address);
         setRunId(deployment.deploymentId);
+        setRunTenantId(deployment.tenantId);
       })
       .catch((cause: unknown) => {
         if (!cancelled) setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
@@ -459,8 +463,8 @@ export function BuildPanel({
     if (!runId) return;
     const transport = createHubTransport();
     const [nextApprovals, nextEvents] = await Promise.all([
-      pendingApprovals(tenantId, transport).catch(() => [] as readonly PendingApproval[]),
-      runEvents(tenantId, runId),
+      pendingApprovals(runTenantId, transport).catch(() => [] as readonly PendingApproval[]),
+      runEvents(runTenantId, runId),
     ]);
     // Matched on `anchorRunId`, not `runId`: `runId` is the exact run a
     // nested tool call executed on, which can differ from the deployment's
@@ -470,7 +474,7 @@ export function BuildPanel({
     // approval raised by a nested run under it.
     setApprovals(nextApprovals.filter((approval) => approval.anchorRunId === runId).slice());
     setEvents(nextEvents);
-  }, [runId, tenantId]);
+  }, [runId, runTenantId]);
 
   useEffect(() => {
     if (!runId) return;
@@ -547,9 +551,9 @@ export function BuildPanel({
           setError("A reason is required to reject.");
           return;
         }
-        await rejectTool(tenantId, approvalId, reason);
+        await rejectTool(runTenantId, approvalId, reason);
       } else {
-        await approveTool(tenantId, approvalId, decision);
+        await approveTool(runTenantId, approvalId, decision);
       }
       await loadTimeline();
     } catch (cause) {

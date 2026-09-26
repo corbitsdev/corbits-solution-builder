@@ -745,7 +745,7 @@ export async function resolveActiveModel(
   if (!workspace) return null;
 
   if (projectId !== undefined && stage !== undefined) {
-    const pin = await stageSpecialistSourcePin(transport, workspace.tenantId, projectId, stage);
+    const pin = await stageSpecialistSourcePin(transport, projectId, stage);
     if (pin) {
       const providerRows = await catalogFor(transport, workspace.tenantId).providers();
       const provider = providerRows.find((row) => row.plugin === pin.provider);

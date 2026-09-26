@@ -10,22 +10,18 @@
  * stock hub approval is pending on one of this project's stage specialists"
  * and `turn` stays `"idle"` — telling whether the specialist is mid-draft
  * would mean polling every project's mailbox on every list refresh, which
- * this list does not do. Specialists deploy into the WORKSPACE tenant, so
- * approvals are read from there and matched back to this project via
- * `listSpecialistDeployments` (same as `decisions-fold.ts`).
+ * this list does not do. Specialists deploy into the PROJECT tenant (#29),
+ * and an older project may still run one in the workspace, so approvals
+ * are read from each tenant a project's specialists run in and matched back
+ * to it via `listSpecialistDeployments` (same as `decisions-fold.ts`).
  */
 import type { Transport } from "@intx/hub-client";
 import { MATERIAL_KIND } from "@solutions-builder/app/artifacts";
-import {
-  getArtifact,
-  listArtifacts,
-  listProjectRecords,
-  listSpecialistDeployments,
-  resolveWorkspace,
-} from "@solutions-builder/installer";
+import { listProjectRecords, listSpecialistDeployments, resolveWorkspace } from "@solutions-builder/installer";
 import type { ProjectSummary } from "./client.ts";
 import { createHubTransport } from "./hub.ts";
-import { pendingApprovals } from "./pending-approvals.ts";
+import { pendingApprovals, type PendingApproval } from "./pending-approvals.ts";
+import { findArtifact, listProjectArtifacts } from "./project-artifacts.ts";
 import { workspaceGuidance } from "./pages/workspace/guidance.ts";
 import type { ChatMessage } from "./stage-mail.ts";
 
@@ -161,24 +157,36 @@ export async function listProjectSummaries(transport: Transport = createHubTrans
   const workspace = await resolveWorkspace(transport);
   if (!workspace) return [];
   const records = await listProjectRecords(transport, workspace.tenantId);
-  const pending = (await pendingApprovals(workspace.tenantId, transport).catch(() => [])).filter(
-    (approval) => approval.status === "pending",
-  );
-  const materials = await listArtifacts(transport, workspace.tenantId, { kind: MATERIAL_KIND }).catch(() => []);
+  // Approvals are read once per tenant a specialist runs in: each project's
+  // own, and the workspace while an older project's specialist still runs
+  // there. The workspace read is shared across every card.
+  const pendingByTenant = new Map<string, Promise<readonly PendingApproval[]>>();
+  const pendingIn = (tenantId: string) => {
+    let read = pendingByTenant.get(tenantId);
+    if (!read) {
+      read = pendingApprovals(tenantId, transport)
+        .then((approvals) => approvals.filter((approval) => approval.status === "pending"))
+        .catch(() => [] as readonly PendingApproval[]);
+      pendingByTenant.set(tenantId, read);
+    }
+    return read;
+  };
   return Promise.all(
     records.map(async (record): Promise<ProjectSummary> => {
-      const deployments = await listSpecialistDeployments(transport, workspace.tenantId, record.id).catch(() => []);
+      const deployments = await listSpecialistDeployments(transport, record.id).catch(() => []);
       const deploymentIds = new Set(deployments.map((deployment) => deployment.deploymentId));
+      const tenantIds = [...new Set(deployments.map((deployment) => deployment.tenantId))];
+      const pending = (await Promise.all(tenantIds.map(pendingIn))).flat();
       const needsDecision = pending.some((approval) => deploymentIds.has(approval.anchorRunId));
+      // The project's own material, plus what an older project still has in the workspace.
+      const materials = await listProjectArtifacts(transport, record.id, { kind: MATERIAL_KIND }).catch(() => []);
       const openingId = openingArtifactId(materials, record.id);
-      const opening = openingId
-        ? await getArtifact(transport, workspace.tenantId, openingId).catch(() => null)
-        : null;
+      const opening = openingId ? await findArtifact(transport, record.id, openingId).catch(() => null) : null;
       return {
         id: record.id,
         revision: record.revision,
         title: record.title,
-        description: descriptionFromStoredProblem(opening?.content ?? null),
+        description: descriptionFromStoredProblem(opening?.artifact.content ?? null),
         stage: null,
         archivedAt: record.archivedAt ? record.archivedAt.toISOString() : null,
         needsDecision,

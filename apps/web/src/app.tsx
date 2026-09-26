@@ -797,7 +797,7 @@ export function App() {
                 key={detail.project.id}
                 detail={detail}
                 draftOpen={true}
-                tenantId={tenantId ?? ""}
+                tenantId={detail.tenantId}
                 onChanged={reloadDetail}
                 onOpenSettings={openSettings}
                 onOpenDecisions={() => setBellOpen(true)}

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { describeReplay } from "./replay-notice.ts";
 
-const FROM = { deploymentId: "dep_old", runId: "run_old" };
+const FROM = { deploymentId: "dep_old", runId: "run_old", tenantId: "proj_1" };
 
 describe("describeReplay", () => {
   test("no replay, or one that refused nothing, needs no notice", () => {

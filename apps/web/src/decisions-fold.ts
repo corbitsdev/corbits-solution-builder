@@ -6,10 +6,12 @@
  * approval on one of its stage specialists' own tool calls (CL-8566) —
  * stage 9's `deliver`, or any other stage's tool (e.g. stage 8's
  * `run_shell`) — read straight off `pending-approvals.ts`. Specialists
- * deploy into the WORKSPACE tenant (`ensureSpecialistDeployment`), not the
- * project's own tenant, so approvals are read from there and matched back to
- * a project/stage via `listSpecialistDeployments`. `GET /decisions` is gone
- * (CL-8510); this is what `api.decisions` read from it.
+ * deploy into the PROJECT tenant (`ensureSpecialistDeployment`, #29), and
+ * a project older than that may still run one in the workspace, so
+ * approvals are read from each tenant a project's specialists run in --
+ * `listSpecialistDeployments` names it per deployment -- and matched back
+ * to a project/stage by anchor run. `GET /decisions` is gone (CL-8510);
+ * this is what `api.decisions` read from it.
  *
  * CL-8724: a hub tool approval is not the only thing a person's move can be
  * waiting on. The project workflow (`project-workflow.ts`) is its own
@@ -60,16 +62,13 @@ function toDecision(approval: PendingApproval, projectId: string, stage: number)
 
 /** Every decision waiting on one project: a pending approval on a run that
  *  belongs to one of its stage specialist deployments. */
-async function openDecisionsFor(
-  workspaceTenantId: string,
-  projectId: string,
-  transport: Transport,
-): Promise<Omit<Wait, "projectTitle">[]> {
-  const [approvals, deployments] = await Promise.all([
-    pendingApprovals(workspaceTenantId, transport),
-    listSpecialistDeployments(transport, workspaceTenantId, projectId),
-  ]);
+async function openDecisionsFor(projectId: string, transport: Transport): Promise<Omit<Wait, "projectTitle">[]> {
+  const deployments = await listSpecialistDeployments(transport, projectId);
   const stageByRunId = new Map(deployments.map((deployment) => [deployment.deploymentId, deployment.stage]));
+  // One approvals read per tenant the project's specialists run in: its
+  // own, and the workspace while an older specialist still runs there.
+  const tenantIds = [...new Set(deployments.map((deployment) => deployment.tenantId))];
+  const approvals = (await Promise.all(tenantIds.map((tenantId) => pendingApprovals(tenantId, transport)))).flat();
   return approvals
     .filter((approval) => approval.status === "pending" && stageByRunId.has(approval.anchorRunId))
     .map((approval) => toDecision(approval, projectId, stageByRunId.get(approval.anchorRunId)!));
@@ -111,18 +110,14 @@ const stageApprovalCache = new Map<string, { value: Omit<Wait, "projectTitle"> |
  * cached ~20s per project — this reads the workflow's own event log, bounded
  * to one project/stage per call, never every stage of every project.
  */
-async function stageApprovalWaitFor(
-  workspaceTenantId: string,
-  projectId: string,
-  transport: Transport,
-): Promise<Omit<Wait, "projectTitle"> | null> {
+async function stageApprovalWaitFor(projectId: string, transport: Transport): Promise<Omit<Wait, "projectTitle"> | null> {
   const cached = stageApprovalCache.get(projectId);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
 
   const value = await (async (): Promise<Omit<Wait, "projectTitle"> | null> => {
-    const ref = await resolveProjectWorkflowRef(transport, workspaceTenantId, projectId);
+    const ref = await resolveProjectWorkflowRef(transport, projectId);
     if (!ref) return null;
-    const view = await loadProjectWorkflowView(transport, workspaceTenantId, ref);
+    const view = await loadProjectWorkflowView(transport, ref);
     return stageApprovalDecision(projectId, ref.runId, view);
   })();
 
@@ -135,9 +130,7 @@ export async function openDecisionFor(
   projectId: string,
   transport: Transport = createHubTransport(),
 ): Promise<Omit<Wait, "projectTitle"> | null> {
-  const workspace = await resolveWorkspace(transport);
-  if (!workspace) return null;
-  const decisions = await openDecisionsFor(workspace.tenantId, projectId, transport);
+  const decisions = await openDecisionsFor(projectId, transport);
   return decisions[0] ?? null;
 }
 
@@ -161,8 +154,8 @@ export async function openDecisions(transport: Transport = createHubTransport())
   const decisions = await Promise.all(
     records.map(async (record) => {
       const [toolWaits, stageWait] = await Promise.all([
-        openDecisionsFor(workspace.tenantId, record.id, transport),
-        stageApprovalWaitFor(workspace.tenantId, record.id, transport),
+        openDecisionsFor(record.id, transport),
+        stageApprovalWaitFor(record.id, transport),
       ]);
       const found = stageWait ? [...toolWaits, stageWait] : toolWaits;
       const withOutcomes = await Promise.all(

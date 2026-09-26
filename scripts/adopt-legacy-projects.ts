@@ -310,7 +310,6 @@ async function replay(transport: Transport, workspace: { tenantId: string; princ
     sidecar,
     { files: await buildProjectWorkflowEntryFiles() },
     gitPush,
-    workspace.tenantId,
     project.id,
     stages,
     await vendoredMemberFiles(closure.manifest, closure.fetchTarball),
@@ -318,9 +317,9 @@ async function replay(transport: Transport, workspace: { tenantId: string; princ
   // `ensureProjectWorkflow` has already waited for the run to be placed and
   // caught up; `replayAdoption` waits for the run to report a stage.
   const deps: StageApprovalDeps = {
-    view: () => loadProjectWorkflowView(transport, workspace.tenantId, deployment),
+    view: () => loadProjectWorkflowView(transport, deployment),
     decide: async (_projectId, decision) => {
-      await workflowsFor(transport, workspace.tenantId).signal(deployment.deploymentId, {
+      await workflowsFor(transport, deployment.tenantId).signal(deployment.deploymentId, {
         runId: deployment.runId,
         signalName: "project.decision",
         signalId: decision["decisionId"] as string,
