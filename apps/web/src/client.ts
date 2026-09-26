@@ -526,8 +526,19 @@ async function projectWorkflowSource(): Promise<{ files: Record<string, string> 
  * browser speaks the pack, this file only supplies the same-origin-
  * credentialed URL `pushSourceTree` cannot construct itself.
  */
+/**
+ * The origin a specialist's sidecar dials for its artifact tool calls, and
+ * the one `lifecycleGitPush` pushes to. `hubOrigin()` is `""` in the embedded
+ * app, where the hub is same-origin; that empty string must never reach the
+ * installer, which pins the `sb-workflow-artifacts` provider to it and the
+ * hub then refuses to launch any specialist bound to that provider, silently.
+ */
+function specialistHubOrigin(): string {
+  return hubOrigin() || window.location.origin;
+}
+
 const lifecycleGitPush: WorkflowGitPush = ({ scope, assetKind, assetName, token, tree, message }) => {
-  const base = hubOrigin() || window.location.origin;
+  const base = specialistHubOrigin();
   const url = new URL(
     `/api/tenants/${encodeURIComponent(scope)}/assets/${assetKind}/${assetName}.git`,
     base,
@@ -1658,7 +1669,7 @@ export const api = {
         workspaceTenantId,
         projectId,
         stage as Stage,
-        hubOrigin(),
+        specialistHubOrigin(),
         // The hub credential binding for `publish_workspace`'s real upload is
         // off until a run has been seen to start with it: a stage 8 deployed
         // with it never produced a run, while every unbound stage does.
@@ -1704,7 +1715,7 @@ false,
         workspaceTenantId,
         projectId,
         stage as Stage,
-        hubOrigin(),
+        specialistHubOrigin(),
         offeringId,
         false,
       );
@@ -1746,7 +1757,7 @@ false,
         workspaceTenantId,
         projectId,
         1 as Stage,
-        hubOrigin(),
+        specialistHubOrigin(),
         false,
         BRIEF_EVALUATOR_ROLE_KEY,
         BRIEF_EVALUATOR_ROLE,
@@ -1789,7 +1800,7 @@ false,
         workspaceTenantId,
         projectId,
         1 as Stage,
-        hubOrigin(),
+        specialistHubOrigin(),
         false,
         PRODUCT_GUIDE_ROLE_KEY,
         PRODUCT_GUIDE_ROLE,
@@ -1828,7 +1839,7 @@ false,
         workspaceTenantId,
         projectId,
         6 as Stage,
-        hubOrigin(),
+        specialistHubOrigin(),
         false,
         roleKey,
         stage6RoleFor(roleKey),
@@ -1902,7 +1913,7 @@ false,
         workspaceTenantId,
         projectId,
         5 as Stage,
-        hubOrigin(),
+        specialistHubOrigin(),
         false,
         roleKey,
       );
