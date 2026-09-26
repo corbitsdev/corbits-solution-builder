@@ -19,18 +19,14 @@ const CACHE_TTL_MS = 5_000;
 const cache = new Map<string, { ref: ProjectWorkflowDeployment | null; expiresAt: number }>();
 const inFlight = new Map<string, Promise<ProjectWorkflowDeployment | null>>();
 
-export async function resolveProjectWorkflowRef(
-  transport: Transport,
-  workspaceTenantId: string,
-  projectId: string,
-): Promise<ProjectWorkflowDeployment | null> {
+export async function resolveProjectWorkflowRef(transport: Transport, projectId: string): Promise<ProjectWorkflowDeployment | null> {
   const cached = cache.get(projectId);
   if (cached && cached.expiresAt > Date.now()) return cached.ref;
 
   const pending = inFlight.get(projectId);
   if (pending) return pending;
 
-  const call = findProjectWorkflow(transport, workspaceTenantId, projectId).then((ref) => {
+  const call = findProjectWorkflow(transport, projectId).then((ref) => {
     cache.set(projectId, { ref, expiresAt: Date.now() + CACHE_TTL_MS });
     return ref;
   });

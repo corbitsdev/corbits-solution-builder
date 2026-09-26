@@ -139,6 +139,10 @@ function DeliveryDecision({
   // memory only — a reload before this fires just loses the "Delivered"
   // banner until the next delivery, never the delivery itself.
   const [lastSeenApprovalId, setLastSeenApprovalId] = useState<string | null>(null);
+  // The tenant the stage 9 specialist's approval is parked in: the
+  // project's own, or the workspace for a specialist deployed before #29.
+  // Learned from the deployment on each load, never assumed.
+  const approvalTenant = useRef(tenantId);
 
   // A stale in-flight poll must never overwrite what a later call (Accept's
   // own `load()`, or a newer tick) already found — same shape as the
@@ -154,12 +158,13 @@ function DeliveryDecision({
     const seq = ++requestSeq.current;
     const transport = createHubTransport();
     try {
-      const [approvals, deployments] = await Promise.all([
-        pendingApprovals(tenantId, transport),
-        listSpecialistDeployments(transport, tenantId, projectId),
-      ]);
-      if (seq !== requestSeq.current) return;
+      // The approval is parked in the tenant the stage 9 specialist runs in:
+      // the project's own, or the workspace for one deployed before #29.
+      const deployments = await listSpecialistDeployments(transport, projectId);
       const stage9 = deployments.find((deployment) => deployment.stage === 9);
+      approvalTenant.current = stage9?.tenantId ?? tenantId;
+      const approvals = await pendingApprovals(approvalTenant.current, transport);
+      if (seq !== requestSeq.current) return;
       // Matched on the deployment's anchor identity, not a nested tool run's
       // own `runId` — see `pending-approvals.ts`'s `deliveryApprovalFor`.
       const found = stage9 ? deliveryApprovalFor(approvals, stage9.deploymentId) : null;
@@ -172,7 +177,7 @@ function DeliveryDecision({
       }
       setPending(null);
       if (lastSeenApprovalId) {
-        const resolved = await approvalById(tenantId, lastSeenApprovalId, transport).catch(() => null);
+        const resolved = await approvalById(approvalTenant.current, lastSeenApprovalId, transport).catch(() => null);
         if (seq !== requestSeq.current) return;
         const isDelivered = resolved !== null && resolved.status === "approved";
         setDelivered(isDelivered ? resolved : null);
@@ -240,7 +245,7 @@ function DeliveryDecision({
     setError(null);
     try {
       if (decision === "approve") {
-        await approveTool(tenantId, pending.id);
+        await approveTool(approvalTenant.current, pending.id);
         try {
           await onAccept();
         } catch (cause) {
@@ -251,7 +256,7 @@ function DeliveryDecision({
           );
         }
       } else {
-        await rejectTool(tenantId, pending.id, feedback);
+        await rejectTool(approvalTenant.current, pending.id, feedback);
         setFeedback("");
         onRejectSendBack();
       }

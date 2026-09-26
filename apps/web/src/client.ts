@@ -25,9 +25,11 @@ import {
   upgradeWorkspace as installerUpgradeWorkspace,
   installProjectAuthority,
   InstallerError,
+  delegateMore,
   liveDelegationStore,
   listArtifacts,
   listSpecialistDeployments,
+  ModelProviderNotDelegatedError,
   pushSourceTree,
   requireProject as installerRequireProject,
   resolveWorkspace,
@@ -91,6 +93,8 @@ export const STAGE_DRAFT_KIND: Readonly<Record<number, string>> = {
   9: "delivery_manifest",
 };
 import { artifactGraphFor } from "./artifact-graph.ts";
+import { findArtifact, listProjectArtifacts } from "./project-artifacts.ts";
+import { addressesByMailTenant, mailTenantFor, parentTenantOf } from "./project-tenants.ts";
 import { toBase64 } from "./base64.ts";
 import { openCreatedProject } from "./create-project-open.ts";
 import { createHubTransport } from "./hub.ts";
@@ -143,7 +147,7 @@ export type { DesignerSettings } from "./designer-settings.ts";
 export { createHubTransport } from "./hub.ts";
 
 export type Remediation = {
-  kind: "switch_provider" | "reconnect" | "retry" | "send_back";
+  kind: "switch_provider" | "reconnect" | "retry" | "send_back" | "delegate_providers";
   label: string;
   providerId?: string;
   /** `send_back` only: the stage the way out returns the project to, and
@@ -391,7 +395,8 @@ export type ProjectDetail = {
     policy: unknown;
     archivedAt: string | null;
   };
-  /** The workspace tenant artifacts are recorded under. */
+  /** The project's own tenant (#29): where its artifacts, specialists and
+   *  mail are, and what every page-level read and write is scoped to. */
   tenantId: string;
   /**
    * The project's current stage: the project workflow's own committed stage
@@ -552,6 +557,20 @@ function installerFailure(cause: unknown): never {
   if (cause instanceof ArchiveRefused) {
     throw new ApiFailure({ code: "validation_failed", message: cause.message, correlationId: "-", retryable: false });
   }
+  if (cause instanceof ModelProviderNotDelegatedError) {
+    // The hub refused the deploy's offering chain: in a project, the owner
+    // delegated none of the workspace's providers to it (#29). The way out
+    // is offered, not described: `delegateWorkspaceProviders`.
+    throw new ApiFailure({
+      code: "provider_not_delegated",
+      message: cause.message,
+      correlationId: "-",
+      retryable: true,
+      ...(cause.parentId
+        ? { remediation: { kind: "delegate_providers" as const, label: "Let this project use the workspace's providers" } }
+        : {}),
+    });
+  }
   if (cause instanceof InstallerError) {
     throw new ApiFailure({
       code: cause.code,
@@ -628,6 +647,12 @@ async function downloadArtifactBytes(tenantId: string, artifactId: string): Prom
     `${hubOrigin()}/api/tenants/${encodeURIComponent(tenantId)}/artifacts/${encodeURIComponent(artifactId)}/download`,
     { credentials: hubCredentials() },
   );
+  if (response.status === 404) {
+    // A project's older upload can still sit in the workspace tenant (#29);
+    // the same read against the parent answers it there.
+    const parentId = await parentTenantOf(createHubTransport(), tenantId).catch(() => null);
+    if (parentId) return downloadArtifactBytes(parentId, artifactId);
+  }
   if (!response.ok) {
     throw new ApiFailure(
       { code: "internal_error", message: `The host answered ${response.status}.`, correlationId: "-", retryable: false },
@@ -1069,13 +1094,23 @@ export const api = {
         });
       }
       const transport = createHubTransport();
+      // A project tenant starts sealed: only the credentials named here are
+      // usable inside it, and that is what its specialists deploy against
+      // (#29). This interface offers no choice at creation, and a project
+      // that can run no specialist is not one anyone meant to open, so a
+      // payload naming none delegates every workspace-owned credential the
+      // workspace holds. Personal credentials never cross (the installer
+      // refuses them), so they are left out here too.
+      const delegatedCredentialIds =
+        payload.delegatedCredentialIds ??
+        (await liveDelegationStore(transport, workspace.tenantId).listDelegatableCredentials())
+          .filter((credential) => credential.principalId === null)
+          .map((credential) => credential.id);
       const { project } = await installerCreateProject(transport, workspace.tenantId, {
         title,
         slug: projectSlug(),
         policy: payload.policy,
-        ...(payload.delegatedCredentialIds !== undefined
-          ? { delegatedCredentialIds: payload.delegatedCredentialIds }
-          : {}),
+        delegatedCredentialIds,
       });
       // No lifecycle run to deploy or trigger any more (CL-8612 contract
       // v6): a stage's specialist deploys lazily the first time its panel
@@ -1087,7 +1122,7 @@ export const api = {
         projectId: project.id,
         open: async () => {
           if (problem) {
-            await installerCreateArtifact(transport, workspace.tenantId, {
+            await installerCreateArtifact(transport, project.id, {
               title: "Opening problem statement",
               content: problem,
               metadata: {
@@ -1122,10 +1157,10 @@ export const api = {
       const [project, detail, deployments, ref] = await Promise.all([
         installerRequireProject(transport, projectId),
         loadProjectView(projectId, transport),
-        listSpecialistDeployments(transport, workspaceTenantId, projectId),
-        resolveProjectWorkflowRef(transport, workspaceTenantId, projectId).catch(() => null),
+        listSpecialistDeployments(transport, projectId),
+        resolveProjectWorkflowRef(transport, projectId).catch(() => null),
       ]);
-      const view = ref ? await loadProjectWorkflowView(transport, workspaceTenantId, ref).catch(() => null) : null;
+      const view = ref ? await loadProjectWorkflowView(transport, ref).catch(() => null) : null;
       const decisions = view?.decisions ?? [];
       const live = detail.nodes.filter((node) => node.supersededByNodeId === null);
       const stamps = detail.nodes.map((node) => node.createdAt);
@@ -1185,7 +1220,8 @@ export const api = {
             return { projectId: project.id };
           },
           createArtifact: async ({ title, content, sb }) => {
-            const artifact = await installerCreateArtifact(transport, workspaceTenantId, {
+            // The project's own tenant (#29): `sb.projectId` names it.
+            const artifact = await installerCreateArtifact(transport, sb.projectId as string, {
               title,
               content,
               metadata: { sb },
@@ -1207,11 +1243,11 @@ export const api = {
           return { projectId: project.id };
         },
         createArtifact: async ({ title, content, sb }) => {
-          const artifact = await installerCreateArtifact(transport, workspaceTenantId, { title, content, metadata: { sb } });
+          const artifact = await installerCreateArtifact(transport, sb.projectId as string, { title, content, metadata: { sb } });
           return { id: artifact.id, version: artifact.version };
         },
         reviseArtifact: async (artifactId, { title, content, sb }) => {
-          const artifact = await installerReviseArtifact(transport, workspaceTenantId, artifactId, { title, content, metadata: { sb } });
+          const artifact = await installerReviseArtifact(transport, sb.projectId as string, artifactId, { title, content, metadata: { sb } });
           return { version: artifact.version };
         },
       });
@@ -1260,22 +1296,22 @@ export const api = {
           };
           if (mediaType.startsWith("text/") || mediaType === "application/json") {
             const content = await file.text();
-            const artifact = await installerCreateArtifact(transport, workspaceTenantId, {
+            const artifact = await installerCreateArtifact(transport, projectId, {
               title: file.name,
               content,
               metadata: { sb },
             });
             return { nodeId: artifact.id, name: file.name, mediaType, sizeBytes: file.size };
           }
-          const uploaded = await uploadArtifactFile(workspaceTenantId, file);
+          const uploaded = await uploadArtifactFile(projectId, file);
           try {
-            await installerReviseArtifact(transport, workspaceTenantId, uploaded.id, { metadata: { sb } });
+            await installerReviseArtifact(transport, projectId, uploaded.id, { metadata: { sb } });
           } catch (cause) {
             // Unstamped, the upload is invisible to the project forever (no
             // `sb.projectId` for the fold to match) — archive it rather than
             // leaving an orphan artifact behind, then surface the original
             // failure.
-            await installerArchiveArtifact(transport, workspaceTenantId, uploaded.id).catch(() => {});
+            await installerArchiveArtifact(transport, projectId, uploaded.id).catch(() => {});
             throw cause;
           }
           // A companion `material_reading` version alongside the file: what a
@@ -1288,7 +1324,7 @@ export const api = {
           const readingText = await readMaterial({ name: file.name, mediaType, bytes: new Uint8Array(await file.arrayBuffer()) })
             .then((result) => result.text)
             .catch((cause) => `(Could not read ${file.name}: ${cause instanceof Error ? cause.message : String(cause)}.)`);
-          const readingFailed = await installerCreateArtifact(transport, workspaceTenantId, {
+          const readingFailed = await installerCreateArtifact(transport, projectId, {
             title: `${file.name} (reading)`,
             content: readingText,
             metadata: {
@@ -1432,7 +1468,7 @@ export const api = {
       // is best-effort: a tenant-wide list that fails here must never block
       // the draft itself from being saved -- falling back to no `supersedes`
       // is exactly today's (already shipped) behavior, not a regression.
-      const previousHead = await artifactGraphFor(transport, workspaceTenantId, projectId)
+      const previousHead = await artifactGraphFor(transport, projectId)
         .then(
           (graph) =>
             graph.nodes
@@ -1440,7 +1476,7 @@ export const api = {
               .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0],
         )
         .catch(() => undefined);
-      const artifact = await installerCreateArtifact(transport, workspaceTenantId, {
+      const artifact = await installerCreateArtifact(transport, projectId, {
         title: `Stage ${stage} draft`,
         content,
         metadata: {
@@ -1513,6 +1549,21 @@ export const api = {
       });
       return { ok: true as const };
     }),
+  /**
+   * Lets `projectId` use every workspace-owned credential the workspace
+   * holds (#29): the way out when its specialist cannot deploy because the
+   * project was opened with nothing delegated. Idempotent, additive, and
+   * recorded on the project the way creation-time consent is.
+   */
+  delegateWorkspaceProviders: (projectId: string) =>
+    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      const store = liveDelegationStore(transport, workspaceTenantId);
+      const delegatedCredentialIds = (await store.listDelegatableCredentials())
+        .filter((credential) => credential.principalId === null)
+        .map((credential) => credential.id);
+      await delegateMore(store, { projectId, delegatedCredentialIds });
+      return { ok: true as const };
+    }),
   deleteProject: (projectId: string) =>
     asWorkspaceOwner(async (transport, workspaceTenantId) => {
       await revokeAllDelegations(liveDelegationStore(transport, workspaceTenantId), projectId);
@@ -1531,11 +1582,13 @@ export const api = {
    * stays on one code path.
    */
   artifactContent: async (tenantId: string, nodeId: string): Promise<{ content: string }> => {
-    const artifact = await installerGetArtifact(createHubTransport(), tenantId, nodeId);
-    if (!artifact) return { content: "" };
-    const uploadId = (artifact.source as { upload?: { id?: unknown } }).upload?.id;
-    if (typeof uploadId !== "string") return { content: artifact.content };
-    return { content: await downloadUploadedArtifact(tenantId, nodeId) };
+    // The project's own tenant, else the workspace for an older project's
+    // artifact still recorded there (#29, `findArtifact`).
+    const found = await findArtifact(createHubTransport(), tenantId, nodeId);
+    if (!found) return { content: "" };
+    const uploadId = (found.artifact.source as { upload?: { id?: unknown } }).upload?.id;
+    if (typeof uploadId !== "string") return { content: found.artifact.content };
+    return { content: await downloadUploadedArtifact(found.tenantId, nodeId) };
   },
   designerSettings: () => loadDesignerSettings(createHubTransport()),
   deckDesigns: () => loadDeckDesigns(createHubTransport()),
@@ -1556,7 +1609,7 @@ export const api = {
    */
   artifactGraph: (projectId: string) =>
     asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const graph = await artifactGraphFor(transport, workspaceTenantId, projectId);
+      const graph = await artifactGraphFor(transport, projectId);
       return { nodes: graph.nodes.map(toArtifactNode), edges: graph.edges };
     }),
 
@@ -1566,14 +1619,24 @@ export const api = {
     input: { body: string; subject?: string; inReplyTo?: string },
   ): Promise<void> => {
     try {
-      await sendStageMailViaHub(tenantId, agentAddress, input);
+      // The mailbox the conversation is in is the one the address's domain
+      // names: the project's own, or the workspace's for a specialist
+      // deployed there before #29 (`mailTenantFor`).
+      await sendStageMailViaHub(await mailTenantFor(createHubTransport(), tenantId, agentAddress), agentAddress, input);
     } catch (cause) {
       installerFailure(cause);
     }
   },
   readStageThread: async (tenantId: string, agentAddresses: string[]): Promise<ChatMessage[]> => {
     try {
-      return await readStageThreadViaHub(tenantId, agentAddresses);
+      // Read from each mailbox the addresses' domains name (see `sendStageMail`),
+      // merged oldest first: a stage's thread can span a legacy workspace
+      // deployment and its revival in the project tenant.
+      const groups = await addressesByMailTenant(createHubTransport(), tenantId, agentAddresses);
+      const threads = await Promise.all(
+        [...groups.entries()].map(([mailTenantId, addresses]) => readStageThreadViaHub(mailTenantId, addresses)),
+      );
+      return threads.flat().sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
     } catch (cause) {
       installerFailure(cause);
     }
@@ -1593,7 +1656,7 @@ export const api = {
   ): Promise<void> => {
     try {
       const transport = createHubTransport();
-      const artifacts = await listArtifacts(transport, tenantId, { kind: WITHDRAWN_TURNS_KIND });
+      const artifacts = await listProjectArtifacts(transport, projectId, { kind: WITHDRAWN_TURNS_KIND });
       const existing = artifacts.find(
         (artifact) =>
           artifact.archivedAt === null &&
@@ -1601,9 +1664,10 @@ export const api = {
       );
       const mark: WithdrawnMark = { messageId: entry.messageId, stage: entry.stage, at: new Date().toISOString() };
       if (existing) {
-        const artifact = await installerGetArtifact(transport, tenantId, existing.id);
-        const marks = [...parseWithdrawnTurns(artifact?.content ?? null), mark];
-        await installerReviseArtifact(transport, tenantId, existing.id, { content: withdrawnTurnsContent(marks) });
+        // Revised where it is: an older project's marker can still sit in the workspace tenant (#29).
+        const found = await findArtifact(transport, tenantId, existing.id);
+        const marks = [...parseWithdrawnTurns(found?.artifact.content ?? null), mark];
+        await installerReviseArtifact(transport, found?.tenantId ?? tenantId, existing.id, { content: withdrawnTurnsContent(marks) });
         return;
       }
       await installerCreateArtifact(transport, tenantId, {
@@ -1667,7 +1731,6 @@ export const api = {
         sidecarCapabilityOf(status),
         await lifecycleClosureSource(),
         lifecycleGitPush,
-        workspaceTenantId,
         projectId,
         stage as Stage,
         specialistHubOrigin(),
@@ -1678,7 +1741,7 @@ export const api = {
         // the client persists it on approval.
 false,
       );
-      const ready = await waitForDeploymentDeployed(transport, workspaceTenantId, deployment.deploymentId);
+      const ready = await waitForDeploymentDeployed(transport, deployment.tenantId, deployment.deploymentId);
       if (!ready) {
         throw new ApiFailure({
           code: "unavailable",
@@ -1713,14 +1776,13 @@ false,
         sidecarCapabilityOf(status),
         await lifecycleClosureSource(),
         lifecycleGitPush,
-        workspaceTenantId,
         projectId,
         stage as Stage,
         specialistHubOrigin(),
         offeringId,
         false,
       );
-      const ready = await waitForDeploymentDeployed(transport, workspaceTenantId, deployment.deploymentId);
+      const ready = await waitForDeploymentDeployed(transport, deployment.tenantId, deployment.deploymentId);
       if (!ready) {
         throw new ApiFailure({
           code: "unavailable",
@@ -1755,7 +1817,6 @@ false,
         sidecarCapabilityOf(status),
         await lifecycleClosureSource(),
         lifecycleGitPush,
-        workspaceTenantId,
         projectId,
         1 as Stage,
         specialistHubOrigin(),
@@ -1763,7 +1824,7 @@ false,
         BRIEF_EVALUATOR_ROLE_KEY,
         BRIEF_EVALUATOR_ROLE,
       );
-      const ready = await waitForDeploymentDeployed(transport, workspaceTenantId, deployment.deploymentId);
+      const ready = await waitForDeploymentDeployed(transport, deployment.tenantId, deployment.deploymentId);
       if (!ready) {
         throw new ApiFailure({
           code: "unavailable",
@@ -1798,7 +1859,6 @@ false,
         sidecarCapabilityOf(status),
         await lifecycleClosureSource(),
         lifecycleGitPush,
-        workspaceTenantId,
         projectId,
         1 as Stage,
         specialistHubOrigin(),
@@ -1806,7 +1866,7 @@ false,
         PRODUCT_GUIDE_ROLE_KEY,
         PRODUCT_GUIDE_ROLE,
       );
-      const ready = await waitForDeploymentDeployed(transport, workspaceTenantId, deployment.deploymentId);
+      const ready = await waitForDeploymentDeployed(transport, deployment.tenantId, deployment.deploymentId);
       if (!ready) {
         throw new ApiFailure({
           code: "unavailable",
@@ -1837,7 +1897,6 @@ false,
         sidecarCapabilityOf(status),
         await lifecycleClosureSource(),
         lifecycleGitPush,
-        workspaceTenantId,
         projectId,
         6 as Stage,
         specialistHubOrigin(),
@@ -1845,7 +1904,7 @@ false,
         roleKey,
         stage6RoleFor(roleKey),
       );
-      const ready = await waitForDeploymentDeployed(transport, workspaceTenantId, deployment.deploymentId);
+      const ready = await waitForDeploymentDeployed(transport, deployment.tenantId, deployment.deploymentId);
       if (!ready) {
         throw new ApiFailure({
           code: "unavailable",
@@ -1868,9 +1927,7 @@ false,
    * holding an address polling for whether it is still the live one.
    */
   stageAgentStatus: (projectId: string, stage: number): Promise<SpecialistDeploymentStatus | null> =>
-    asWorkspaceOwner((transport, workspaceTenantId) =>
-      stageSpecialistStatus(transport, workspaceTenantId, projectId, stage as Stage),
-    ),
+    asWorkspaceOwner((transport) => stageSpecialistStatus(transport, projectId, stage as Stage)),
   /**
    * Every address `projectId`'s stage-`stage` specialist has ever run at --
    * the input `useStageThread`'s merge needs so a redeploy (restart, model
@@ -1880,9 +1937,7 @@ false,
    * redeploy-with-history from a genuinely new stage.
    */
   stageAgentAddresses: (projectId: string, stage: number): Promise<string[]> =>
-    asWorkspaceOwner((transport, workspaceTenantId) =>
-      stageSpecialistAddresses(transport, workspaceTenantId, projectId, stage as Stage),
-    ),
+    asWorkspaceOwner((transport) => stageSpecialistAddresses(transport, projectId, stage as Stage)),
   /**
    * Makes sure `projectId`'s `audienceIndex`-th stakeholder has its own
    * stage-5 package specialist deployed, and hands back its mail address --
@@ -1911,14 +1966,13 @@ false,
         sidecarCapabilityOf(status),
         await lifecycleClosureSource(),
         lifecycleGitPush,
-        workspaceTenantId,
         projectId,
         5 as Stage,
         specialistHubOrigin(),
         false,
         roleKey,
       );
-      const ready = await waitForDeploymentDeployed(transport, workspaceTenantId, deployment.deploymentId);
+      const ready = await waitForDeploymentDeployed(transport, deployment.tenantId, deployment.deploymentId);
       if (!ready) {
         throw new ApiFailure({
           code: "unavailable",
@@ -1964,12 +2018,11 @@ false,
         sidecarCapabilityOf(status),
         await projectWorkflowSource(),
         lifecycleGitPush,
-        workspaceTenantId,
         projectId,
         stages,
         await vendoredMemberFiles(await fetchClosureManifestOrThrow(), fetchClosureTarball),
       );
-      const ready = await waitForDeploymentDeployed(transport, workspaceTenantId, ref.deploymentId);
+      const ready = await waitForDeploymentDeployed(transport, ref.tenantId, ref.deploymentId);
       if (!ready) {
         throw new ApiFailure({
           code: "unavailable",
@@ -1997,9 +2050,9 @@ false,
    */
   projectWorkflowView: (projectId: string): Promise<ProjectWorkflowView | null> =>
     asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const ref = await resolveProjectWorkflowRef(transport, workspaceTenantId, projectId);
+      const ref = await resolveProjectWorkflowRef(transport, projectId);
       if (!ref) return null;
-      return loadProjectWorkflowView(transport, workspaceTenantId, ref);
+      return loadProjectWorkflowView(transport, ref);
     }),
   /**
    * Delivers one decision as the loop's `project.decision` signal,
@@ -2029,7 +2082,7 @@ false,
     asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const ref =
         (await ensureProjectWorkflowCalls.get(projectId)) ??
-        (await resolveProjectWorkflowRef(transport, workspaceTenantId, projectId));
+        (await resolveProjectWorkflowRef(transport, projectId));
       if (!ref) throw new Error(`project workflow for ${projectId} has not been deployed yet`);
       // A `signal_id_conflict` (409, a different payload under a reused
       // decisionId) is a hard error, not swallowed here -- it propagates as
@@ -2052,7 +2105,7 @@ false,
    */
   projectOpening: (projectId: string): Promise<{ body: string; createdAt: string } | null> =>
     asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const graph = await artifactGraphFor(transport, workspaceTenantId, projectId);
+      const graph = await artifactGraphFor(transport, projectId);
       const node = graph.nodes.find((entry) => entry.kind === MATERIAL_KIND && entry.variant === OPENING_VARIANT);
       if (!node) return null;
       const artifact = await installerGetArtifact(transport, workspaceTenantId, node.id);
@@ -2087,7 +2140,7 @@ false,
       // the way `persistStageDraft` chains a stage's draft -- without it both
       // stayed live and the page showed the stakeholder twice (#122). Best
       // effort, as there: a graph read that fails never blocks the write.
-      const previousHead = await artifactGraphFor(transport, workspaceTenantId, projectId)
+      const previousHead = await artifactGraphFor(transport, projectId)
         .then(
           (graph) =>
             graph.nodes

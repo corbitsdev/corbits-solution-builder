@@ -6,7 +6,7 @@
  * window where the address is known but something built on it is disabled.
  */
 import { useEffect, useState } from "react";
-import { api } from "../../client.js";
+import { api, ApiFailure, type Remediation } from "../../client.js";
 import { describeFailure } from "./failure-message.ts";
 
 export type StageAgentState = {
@@ -24,6 +24,9 @@ export type StageAgentState = {
    *  than left to the waiting UI to imply it's still in progress (CL-8612's
    *  502 case: the workspace used to sit on "Starting…" forever). */
   readonly error: string | null;
+  /** The way out the failure offered, when it did (an `ApiFailure`'s
+   *  `remediation`): e.g. the project has no delegated provider (#29). */
+  readonly remediation: Remediation | undefined;
   readonly retry: () => void;
 };
 
@@ -52,6 +55,7 @@ export function useStageAgent(
   );
   const [addresses, setAddresses] = useState<{ stage: number; list: readonly string[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [remediation, setRemediation] = useState<Remediation | undefined>(undefined);
   const [attempt, setAttempt] = useState(0);
 
   // The real stage once the workflow view has resolved it; until then, only
@@ -65,6 +69,7 @@ export function useStageAgent(
     let cancelled = false;
     const requestedStage = deployStage;
     setError(null);
+    setRemediation(undefined);
     (async () => {
       // Re-entering a stage already deployed and live: attach with the same
       // non-deploying read `stageAgentStatus` (CL-8654's own re-check) uses,
@@ -99,7 +104,9 @@ export function useStageAgent(
           }
         })
         .catch((cause: unknown) => {
-          if (!cancelled) setError(describeFailure(cause));
+          if (cancelled) return;
+          setError(describeFailure(cause));
+          setRemediation(cause instanceof ApiFailure ? cause.detail.remediation : undefined);
         });
     })();
     return () => {
@@ -157,6 +164,7 @@ export function useStageAgent(
     address: agent?.stage === stage ? agent.address : null,
     addresses: addresses?.stage === stage ? addresses.list : agent?.stage === stage ? [agent.address] : [],
     error,
+    remediation,
     retry: () => setAttempt((value) => value + 1),
   };
 }
