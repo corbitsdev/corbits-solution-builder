@@ -77,6 +77,14 @@ describe("stage7StackProblem", () => {
   });
 });
 
+describe("refusal copy", () => {
+  test("a structural refusal reads as the workflow contract's own sentence, never its raw code", () => {
+    expect(stageRefusalMessage("wrong_stage")).toBe("The project has moved to a different stage.");
+    expect(stageRefusalMessage("stale_review")).not.toBe("stale_review");
+    expect(stageRefusalMessage("something_unknown")).toBe("something_unknown");
+  });
+});
+
 describe("stack refusal copy", () => {
   test("names the build plan's Stack section in the person's terms, never a 'stack decision'", () => {
     for (const code of ["stack_missing", "stack_uncited", "stack_unknown_requirement"]) {
