@@ -367,6 +367,59 @@ async function renderSpecialistSource(
 }
 
 /**
+ * The offering a live deployment leads with: the one the switch that chose
+ * it named, while that record still points at it; otherwise the catalog's
+ * first, which is what an ordinary deploy led with.
+ */
+export function leadingOffering<T extends { readonly id: string }>(
+  recorded: { readonly deploymentId: string; readonly offeringId: string } | null,
+  deploymentId: string,
+  offerings: readonly T[],
+): T {
+  const switched =
+    recorded?.deploymentId === deploymentId ? offerings.find((offering) => offering.id === recorded.offeringId) : undefined;
+  return switched ?? offerings[0]!;
+}
+
+/**
+ * Whether the entry at the asset's head -- what its live deployment runs --
+ * is what the kit would render today for the same stage, role and model.
+ * The entry alone, not the whole tree: the closure beside it changes with
+ * every release, and a release is not a reason to hand every open project a
+ * new specialist. No entry to read back is not a reason either.
+ */
+export async function specialistEntryIsCurrent(
+  transport: Transport,
+  workspaceTenantId: string,
+  assetId: string,
+  assetName: string,
+  projectId: string,
+  stage: Stage,
+  offering: Parameters<typeof sourceFor>[2],
+  artifactTools: boolean,
+  roleKey: string,
+  role: AgentRole,
+): Promise<boolean> {
+  const deployed = await readWorkflowSourceBlob(transport, workspaceTenantId, assetId, `${SPECIALIST_DIR}/${SPECIALIST_ENTRY_PATH}`);
+  if (deployed === null) return true;
+  const source = await sourceFor(transport, workspaceTenantId, offering);
+  if (!source) return true;
+  const project = stage === PACKAGE_STAGE ? await readProject(transport, projectId) : null;
+  const audiences = project?.policy.audiences;
+  const rendered = specialistEntrySource({
+    stage,
+    source,
+    projectId,
+    assetName,
+    role,
+    roleKey,
+    artifactTools,
+    ...(audiences ? { audiences } : {}),
+  });
+  return rendered === deployed;
+}
+
+/**
  * Makes sure `projectId`'s stage-`stage` specialist has a live deployment.
  * When one already exists on this asset and is still live, hands it back
  * unchanged -- a specialist deploys once per stage per project, lazily.
@@ -418,9 +471,6 @@ async function ensureSpecialistDeploymentOnce(
   const matching = (deployments: readonly HubDeployment[]) =>
     deployments.filter((deployment) => deployment.definitionAssetId === assetId);
   const existing = await resolveLiveDeployment(transport, projectId, stage, matching(await workflows.deployments()));
-  if (!switchToOfferingId && existing && (await deploymentIsLive(transport, workspaceTenantId, existing.id))) {
-    return { deploymentId: existing.id, address: `${existing.id}@${tenant.domain}` };
-  }
 
   // CL-8783 verdict: `offerings[0]` picks only the installer's local render
   // pin (what `SOURCE_PIN_PATH` reports). The deploy below hands the FULL
@@ -435,6 +485,54 @@ async function ensureSpecialistDeploymentOnce(
     .sort((a, b) => a.priority - b.priority);
   if (catalogOfferings.length === 0) {
     throw new Error("connect a model provider before deploying a stage specialist");
+  }
+
+  if (!switchToOfferingId && existing && (await deploymentIsLive(transport, workspaceTenantId, existing.id))) {
+    // A live specialist runs the entry it was deployed with, and the kit
+    // moves on without it: a revised brief (#103) reached no project whose
+    // specialist was already up, and stayed unreached until a model switch
+    // happened to redeploy it. So the entry it runs is compared against a
+    // fresh render on the model it leads with -- the switch it was chosen
+    // by, else the catalog's first -- and when the two differ it is
+    // redeployed onto that same model, recorded as a switch so mail follows
+    // the new deployment rather than `pickDeployment`'s oldest.
+    const recorded = await readStageSwitch(transport, projectId, stage);
+    const leading = leadingOffering(recorded, existing.id, catalogOfferings);
+    const current = await specialistEntryIsCurrent(
+      transport,
+      workspaceTenantId,
+      assetId,
+      assetName,
+      projectId,
+      stage,
+      leading,
+      artifactTools,
+      roleKey,
+      role,
+    );
+    if (current) {
+      return { deploymentId: existing.id, address: `${existing.id}@${tenant.domain}` };
+    }
+    const fresh = await ensureSpecialistDeploymentOnce(
+      transport,
+      sidecar,
+      closure,
+      gitPush,
+      workspaceTenantId,
+      projectId,
+      stage,
+      hubOrigin,
+      artifactTools,
+      roleKey,
+      role,
+      leading.id,
+    );
+    await writeStageSwitch(transport, projectId, stage, {
+      deploymentId: fresh.deploymentId,
+      offeringId: leading.id,
+      switchedAt: new Date().toISOString(),
+    });
+    return fresh;
   }
   // A switch reorders the chain so the chosen offering leads -- the same
   // `sourceOfferingIds`/`defaultSourceOfferingId` story every other deploy
