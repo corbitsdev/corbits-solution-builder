@@ -26,6 +26,7 @@ import { databaseDirectory, dataDirectory, portFile } from "./paths.js";
 import { stopSpawnedSidecars } from "./sidecar-processes.js";
 import { ensureHub, hubMode, remoteHubOrigin, resolveWorkspace } from "./hub-client.js";
 import { hub, hubWebSocket, setHostPort, SIDECAR_WS_PATH } from "./hub-mount.js";
+import { sessionDoor } from "./door.js";
 import { readSecretResult, secretReference, storeSecret } from "./host-secrets.js";
 import {
   clientConnected,
@@ -42,6 +43,14 @@ export interface ServeOptions {
   distDirs: string[];
   /** The API version string the startup log line reports. */
   apiVersion: string;
+  /**
+   * `/api` path prefixes the session door leaves to their own mounts, each
+   * an absolute path without a trailing slash. A request to one of these,
+   * or to anything under `<prefix>/`, is passed through without the host
+   * credential: the mount there authenticates every request itself. The
+   * product declares them; this skeleton knows none. See `door.ts`.
+   */
+  selfAuthenticatingPaths?: readonly string[];
 }
 
 function numberFlag(name: string): number | undefined {
@@ -277,15 +286,20 @@ export async function serveHost(options: ServeOptions): Promise<void> {
   // and, embedded, the hub's own mounted routes — sees the client's own
   // cookies untouched. There is no owner-cookie swap here.
   //
+  // The product's `selfAuthenticatingPaths` are the one exception: mounts a
+  // sidecar dials with a bearer of their own, which the mount itself checks
+  // (#28). The door judges those by normalised pathname and exact prefix, so
+  // it cannot be widened by a sibling name or a dot segment.
+  //
   // The hub's own bare `/status` is deliberately outside this door: it is
   // public on the hub's own side too (`vendor/interchange/packages/hub-api/src
   // /app.ts`'s auth `skip`), so mounting it behind a token here would make
   // this host less permissive than the hub it embeds, for a route that
   // answers nothing but `{ status: "ok" }`.
-  app.use("/api/*", async (context, next) => {
-    if (!authorised(context)) return context.json(unauthorised, 401);
-    await next();
-  });
+  app.use(
+    "/api/*",
+    sessionDoor({ authorised, selfAuthenticatingPaths: options.selfAuthenticatingPaths ?? [], unauthorised }),
+  );
 
   app.route("/api", options.api);
 
