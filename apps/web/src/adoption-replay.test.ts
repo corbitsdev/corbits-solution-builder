@@ -55,16 +55,33 @@ describe("replayAdoption", () => {
     const wf = workflow("proj_1");
     const policy = { quorum: 1, stakeholders: ["You", "Brian J. Finance"] };
     const votes = { You: { decision: "proceed" as const, note: "" }, "Brian J. Finance": { decision: "proceed" as const, note: "Within budget." } };
+    const packages = { You: { artifactId: "art_you", version: 3, sha256: "sha_you" }, "Brian J. Finance": { artifactId: "art_fin", version: 1, sha256: "sha_fin" } };
     const outcome = await replayAdoption(
       wf.deps,
-      plan({ legacyStage: 6, steps: [...[1, 2, 3, 4].map((stage) => ({ stage, ref: ref(stage) })), { stage: 5, ref: ref(5), policy, votes }] }),
+      plan({ legacyStage: 6, steps: [...[1, 2, 3, 4].map((stage) => ({ stage, ref: ref(stage) })), { stage: 5, ref: ref(5), policy, votes, packages }] }),
       fast,
     );
     expect(outcome).toEqual({ landed: 6, stopped: null });
     const voted = wf.decisions.filter((decision) => decision["kind"] === "audience");
     expect(voted.map((decision) => decision["decisionId"])).toEqual([replayedVoteDecisionId("proj_1", "You"), replayedVoteDecisionId("proj_1", "Brian J. Finance")]);
-    expect(voted[1]).toMatchObject({ audience: "Brian J. Finance", decision: "proceed", note: "Within budget." });
+    // Each vote names the package the plan found for its stakeholder, and the
+    // review names the same map, so the workflow counts them (#50).
+    expect(voted[1]).toMatchObject({ audience: "Brian J. Finance", decision: "proceed", note: "Within budget.", ...packages["Brian J. Finance"] });
     expect(wf.state().audiencePolicy).toEqual(policy);
+    expect(wf.state().audiencePackages).toEqual(packages);
+    expect(wf.state().audienceDecisions["You"]).toMatchObject({ package: packages.You });
+  });
+
+  test("stops before a stage 5 vote the plan found no package for", async () => {
+    const wf = workflow("proj_1");
+    const policy = { quorum: 1, stakeholders: ["You"] };
+    const outcome = await replayAdoption(
+      wf.deps,
+      plan({ legacyStage: 6, steps: [...[1, 2, 3, 4].map((stage) => ({ stage, ref: ref(stage) })), { stage: 5, ref: ref(5), policy, votes: { You: { decision: "proceed", note: "" } } }] }),
+      fast,
+    );
+    expect(outcome).toEqual({ landed: 5, stopped: "You's vote names no package" });
+    expect(wf.decisions.filter((decision) => decision["kind"] === "audience")).toEqual([]);
   });
 
   test("mints stage 6's requirements before opening its review", async () => {

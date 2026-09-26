@@ -16,7 +16,7 @@
  * on, since `at` differs but the id would not). `attempt` still separates a
  * REFUSED decision from its retry within the same epoch.
  */
-import type { AudiencePolicy, DecisionRecord, ReviewState } from "@solutions-builder/app/project-workflow/contracts";
+import { samePackage, type AudiencePackageRef, type AudiencePolicy, type DecisionRecord, type ReviewState } from "@solutions-builder/app/project-workflow/contracts";
 import type { ArtifactNode } from "./client.ts";
 import type { ProjectWorkflowView } from "./project-workflow.ts";
 
@@ -114,6 +114,44 @@ async function sha256Hex(content: string): Promise<string> {
 export async function digestOf(content: string, contentSha256?: string | null): Promise<string> {
   if (contentSha256) return contentSha256;
   return sha256Hex(content);
+}
+
+/**
+ * The reference a stakeholder's package node is named by, on a vote and in
+ * a stage-5 `open_review`'s `packages` map alike (#50): the artifact, its
+ * version, and the content's sha256 -- the hub's own digest when the node
+ * carries one, else computed from the content `readContent` returns. One
+ * function for both callers so a vote and the map it is checked against
+ * can never name the same package two different ways.
+ */
+export async function packageRefOf(node: ArtifactNode, readContent: (nodeId: string) => Promise<string>): Promise<AudiencePackageRef> {
+  const sha256 = node.contentSha256 ?? (await sha256Hex(await readContent(node.id)));
+  return { artifactId: node.artifactId, version: node.version, sha256 };
+}
+
+/** `packageRefOf` over every package, keyed by its stakeholder's name (the
+ *  node's `variant`). A package with no stakeholder name is not one. */
+export async function packageRefsOf(
+  packages: readonly ArtifactNode[],
+  readContent: (nodeId: string) => Promise<string>,
+): Promise<Readonly<Record<string, AudiencePackageRef>>> {
+  const refs: Record<string, AudiencePackageRef> = {};
+  for (const node of packages) {
+    if (!node.variant) continue;
+    refs[node.variant] = await packageRefOf(node, readContent);
+  }
+  return refs;
+}
+
+/** Whether the packages a stage-5 review would name are exactly the ones
+ *  the workflow's view already holds -- same stakeholders, same refs. */
+export function packagesEqual(
+  next: Readonly<Record<string, AudiencePackageRef>>,
+  current: Readonly<Record<string, AudiencePackageRef>>,
+): boolean {
+  const names = Object.keys(next);
+  if (names.length !== Object.keys(current).length) return false;
+  return names.every((name) => samePackage(next[name], current[name]));
 }
 
 async function decisionId(
@@ -244,6 +282,11 @@ export type EnsureReviewOpenInput = {
    *  to the stakeholder list after this review opens can never change the
    *  gate it is checked against. */
   readonly policy?: AudiencePolicy;
+  /** Stage 5 only: each stakeholder's current package, carried onto the
+   *  `open_review` decision so the reducer knows which package a vote must
+   *  name to count (#50). A rewrite of any stakeholder's package re-opens
+   *  the review with the new map, the way a policy edit does. */
+  readonly packages?: Readonly<Record<string, AudiencePackageRef>>;
 };
 
 export type EnsureReviewOpenResult =
@@ -277,7 +320,11 @@ export async function ensureReviewOpen(deps: StageApprovalDeps, input: EnsureRev
   // otherwise editing stakeholders while a review is open never re-opens it
   // (CL-8891). Every other stage has no `policy`, so this is a no-op there.
   const policyChanged = input.policy !== undefined && !policyEquals(input.policy, view.audiencePolicy);
-  if (sameRef && !policyChanged) return { ok: true, review: view.openReview! };
+  // Likewise a stakeholder's package written again while the review is open
+  // on someone else's: the review must name the new package before a vote
+  // on it can count (#50).
+  const packagesChanged = input.packages !== undefined && !packagesEqual(input.packages, view.audiencePackages);
+  if (sameRef && !policyChanged && !packagesChanged) return { ok: true, review: view.openReview! };
 
   const ourDecisionIds = new Set<string>();
   const openId = await decisionId(input.projectId, input.stage, input.ref.artifactId, input.ref.version, "open_review", epoch, attempt);
@@ -292,6 +339,7 @@ export async function ensureReviewOpen(deps: StageApprovalDeps, input: EnsureRev
     sha256: input.ref.sha256,
     at: deps.now(),
     ...(input.policy ? { policy: input.policy } : {}),
+    ...(input.packages ? { packages: input.packages } : {}),
   });
   if (!sent.ok) return sent;
 
@@ -309,6 +357,8 @@ export type ApproveStageInput = {
   /** Stage 5 only: forwarded to `ensureReviewOpen`'s belt-and-braces open --
    *  see that input's own doc comment. */
   readonly policy?: AudiencePolicy;
+  /** Stage 5 only: forwarded with `policy`. */
+  readonly packages?: Readonly<Record<string, AudiencePackageRef>>;
 };
 
 /**
@@ -331,6 +381,7 @@ export async function approveStage(deps: StageApprovalDeps, input: ApproveStageI
     ref: input.ref,
     attempt,
     ...(input.policy ? { policy: input.policy } : {}),
+    ...(input.packages ? { packages: input.packages } : {}),
   });
   if (!opened.ok) return opened;
   const review = opened.review;
@@ -442,6 +493,10 @@ export type RecordAudienceVoteInput = {
   readonly decision: "proceed" | "revise" | "reject";
   readonly note?: string;
   readonly decisionId: string;
+  /** The package the stakeholder decided on (`packageRefOf` over its node).
+   *  The reducer stores it on the vote and counts the vote only while it is
+   *  still that stakeholder's current package (#50). */
+  readonly package: AudiencePackageRef;
 };
 
 export type RecordAudienceVoteResult = { readonly ok: true } | { readonly ok: false; readonly reason: string };
@@ -465,6 +520,9 @@ export async function recordAudienceVote(deps: StageApprovalDeps, input: RecordA
     decision: input.decision,
     at: deps.now(),
     ...(input.note ? { note: input.note } : {}),
+    artifactId: input.package.artifactId,
+    version: input.package.version,
+    sha256: input.package.sha256,
   });
   if (!sent.ok) return sent;
 

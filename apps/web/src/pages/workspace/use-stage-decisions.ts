@@ -15,10 +15,13 @@ import {
   digestOf,
   ensureReviewOpen,
   mintRequirements as mintRequirementsDecision,
+  packageRefsOf,
+  packagesEqual,
   reviewableArtifact,
   sendBack as sendBackDecision,
   type StageApprovalDeps,
 } from "../../stage-approval.ts";
+import { packagesByStakeholder } from "../../package-lineages.ts";
 import { extractRequirementItems } from "@solutions-builder/app/requirements";
 import { buildEvidenceState, currentPublishedBundle } from "./build.jsx";
 import { approvedStage8Archive, composeStage9Opening, manifestCompanionOf } from "./stage9-opening.ts";
@@ -208,6 +211,23 @@ export function useStageDecisions({
     return { quorum: policy.audienceQuorum, stakeholders: policy.audiences.map((audience) => audience.name) };
   }, [stage, detail.project.id]);
 
+  // Stage 5's packages, one per stakeholder, referenced the way a vote
+  // references one (`packageRefOf`) and captured onto the same `open_review`
+  // as the policy -- so the reducer can tell a vote on a stakeholder's
+  // current package from one on an earlier version of it (#50). Read fresh
+  // off the graph each time, like the policy.
+  const stage5Packages = useCallback(
+    async (policy: { readonly stakeholders: readonly string[] }) => {
+      if (stage !== 5) return undefined;
+      const nodes = packagesByStakeholder(
+        detail.nodes,
+        policy.stakeholders.map((name) => ({ name })),
+      );
+      return packageRefsOf(nodes, (nodeId) => api.artifactContent(tenantId, nodeId).then((result) => result.content));
+    },
+    [stage, detail.nodes, tenantId],
+  );
+
   const openReviewNow = useCallback(async () => {
     if (!workflowView || workflowView.done || stage >= LAST_STAGE) return { ok: false as const, reason: "There is nothing to review yet." };
     if (stage === 7 && !chosenTarget) return { ok: false as const, reason: "No delivery target has been chosen yet." };
@@ -239,15 +259,26 @@ export function useStageDecisions({
       // the review stays checked against whatever policy existed when it
       // first opened (CL-8891).
       const policyChanged = stage === 5 && policy && !audiencePolicyEquals(policy, workflowView.audiencePolicy);
-      if (!sameAsOpen || policyChanged) {
-        await ensureReviewOpen(stageApprovalDeps, { projectId: detail.project.id, stage, ref, ...(policy ? { policy } : {}) });
+      // And a stakeholder's package written again while the review is open
+      // on another's: the review must name the new package for a vote on
+      // it to count (#50).
+      const packages = policy ? await stage5Packages(policy) : undefined;
+      const packagesChanged = packages !== undefined && !packagesEqual(packages, workflowView.audiencePackages);
+      if (!sameAsOpen || policyChanged || packagesChanged) {
+        await ensureReviewOpen(stageApprovalDeps, {
+          projectId: detail.project.id,
+          stage,
+          ref,
+          ...(policy ? { policy } : {}),
+          ...(packages ? { packages } : {}),
+        });
       }
       await refreshWorkflow();
       return { ok: true as const };
     } catch (cause) {
       return { ok: false as const, reason: cause instanceof ApiFailure ? cause.detail.message : String(cause) };
     }
-  }, [workflowView, stage, chosenTarget, reviewMessage, draftKind, stage8Evidence, detail.nodes, detail.project.id, resolveReviewRef, refreshWorkflow, stage5Policy, latestDraftFor, latestDraftAtFor]);
+  }, [workflowView, stage, chosenTarget, reviewMessage, draftKind, stage8Evidence, detail.nodes, detail.project.id, resolveReviewRef, refreshWorkflow, stage5Policy, stage5Packages, latestDraftFor, latestDraftAtFor]);
 
   // Opens the review the moment this stage's material is ready rather than
   // at the instant of approval — a review that only opens inside `approve()`
@@ -265,9 +296,19 @@ export function useStageDecisions({
     const latestDraft = latestDraftFor();
     const reviewable = reviewableArtifact({ nodes: detail.nodes, stage, kind: draftKind, latestDraft, latestDraftAt: latestDraftAtFor() });
     if (reviewable.status === "none") return;
+    // Stage 5 keys on every live package, not only the newest: a rewrite
+    // of any stakeholder's package must re-open the review naming it (#50).
+    const packagesKey =
+      stage === 5
+        ? detail.nodes
+            .filter((node) => node.kind === "audience_package" && node.supersededByNodeId === null && node.variant)
+            .map((node) => node.id)
+            .sort()
+            .join(",")
+        : "";
     const key =
       reviewable.status === "found"
-        ? `${String(stage)}:${reviewable.node.artifactId}@${String(reviewable.node.version)}`
+        ? `${String(stage)}:${reviewable.node.artifactId}@${String(reviewable.node.version)}:${packagesKey}`
         : `${String(stage)}:draft:${reviewMessage.id}`;
     if (ensuringReviewKeyRef.current === key) return;
     ensuringReviewKeyRef.current = key;
@@ -343,12 +384,14 @@ export function useStageDecisions({
         artifactContent: (tid, nodeId) => api.artifactContent(tid, nodeId),
       });
       const policy = await stage5Policy();
+      const packages = policy ? await stage5Packages(policy) : undefined;
       const result = await approveStage(stageApprovalDeps, {
         projectId: detail.project.id,
         stage,
         ref,
         evidence,
         ...(policy ? { policy } : {}),
+        ...(packages ? { packages } : {}),
       });
       if (!result.ok) {
         onError(`This stage's approval was refused: ${stageRefusalMessage(result.reason)}`);

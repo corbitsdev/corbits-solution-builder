@@ -48,7 +48,8 @@ engineer-days.
 Stage 7 cannot be approved the way the others are. Spend needs its own decision,
 so it routes through a cost approval and a freeze. Stage 5 cannot be approved
 until the configured quorum of audiences has recorded a proceed with no reject
-or revise outstanding.
+or revise outstanding. A proceed counts only for the package version the
+audience read: rewrite their package and they decide again.
 
 Stage 6 opens by gathering what stages 1 to 4 agreed into one product
 requirements document, with an id on every requirement and acceptance

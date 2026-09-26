@@ -15,6 +15,7 @@ function view(overrides: Partial<ProjectWorkflowView> = {}): ProjectWorkflowView
     requirements: [],
     audiencePolicy: null,
     audienceDecisions: {},
+    audiencePackages: {},
     stage5Quorum: null,
     ...overrides,
   };
