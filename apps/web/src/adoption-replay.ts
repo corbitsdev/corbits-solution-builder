@@ -76,6 +76,10 @@ export async function replayAdoption(deps: StageApprovalDeps, plan: AdoptionPlan
 
     if (step.stage === 5 && step.votes) {
       for (const [audience, vote] of Object.entries(step.votes)) {
+        // The vote names the package the plan found for its stakeholder;
+        // the plan leaves out a vote it found none for (#50).
+        const reviewed = step.packages?.[audience];
+        if (!reviewed) return { landed: current.stage, stopped: `${audience}'s vote names no package` };
         await deps.decide(plan.projectId, {
           kind: "audience",
           decisionId: replayedVoteDecisionId(plan.projectId, audience),
@@ -84,6 +88,9 @@ export async function replayAdoption(deps: StageApprovalDeps, plan: AdoptionPlan
           audience,
           decision: vote.decision,
           ...(vote.note ? { note: vote.note } : {}),
+          artifactId: reviewed.artifactId,
+          version: reviewed.version,
+          sha256: reviewed.sha256,
           at: deps.now(),
         });
       }
@@ -95,9 +102,10 @@ export async function replayAdoption(deps: StageApprovalDeps, plan: AdoptionPlan
       const minted = await mintRequirements(deps, { projectId: plan.projectId, stage: 6, items: step.requirementItems });
       if (!minted.ok) return { landed: current.stage, stopped: `minting the requirements was refused: ${minted.reason}` };
     }
-    const opened = await ensureReviewOpen(deps, { projectId: plan.projectId, stage: step.stage, ref: step.ref, ...(step.policy ? { policy: step.policy } : {}) });
+    const stage5 = { ...(step.policy ? { policy: step.policy } : {}), ...(step.packages ? { packages: step.packages } : {}) };
+    const opened = await ensureReviewOpen(deps, { projectId: plan.projectId, stage: step.stage, ref: step.ref, ...stage5 });
     if (!opened.ok) return { landed: current.stage, stopped: `opening stage ${String(step.stage)}'s review was refused: ${opened.reason}` };
-    const approved = await approveStage(deps, { projectId: plan.projectId, stage: step.stage, ref: step.ref, ...(step.policy ? { policy: step.policy } : {}) });
+    const approved = await approveStage(deps, { projectId: plan.projectId, stage: step.stage, ref: step.ref, ...stage5 });
     if (!approved.ok) return { landed: current.stage, stopped: `approving stage ${String(step.stage)} was refused: ${approved.reason}` };
     current = (await view()) ?? current;
   }

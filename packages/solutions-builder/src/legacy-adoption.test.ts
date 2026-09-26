@@ -97,11 +97,31 @@ describe("adoptionPlan", () => {
     const five = plan.steps[4]!;
     expect(five.policy).toEqual({ quorum: 1, stakeholders: ["You", "Finance"] });
     expect(five.votes).toEqual({ You: { decision: "proceed", note: "" } });
+    // The vote is replayed on the package the old approval named for You (#50).
+    expect(five.packages).toEqual({ You: { artifactId: "art_package", version: 1, sha256: "sha-package" } });
     const six = plan.steps[5]!;
     expect(six.ref).toEqual({ artifactId: "art_plan", version: 6, sha256: "sha-plan" });
     expect(six.requirementItems?.map((item) => item.kind)).toEqual(["FR", "AC"]);
     // Left at stage 7 on the old ledger, landed at stage 7 here: nothing to note.
     expect(plan.notes).toEqual([]);
+  });
+
+  test("a stage 5 vote whose package the old approval never named is left out and noted", () => {
+    const further: LegacyCommand[] = [
+      ...inteva,
+      { command: "audience.decide", stage: 5, decision: "proceed", audienceName: "You", rationale: "", after: { stage: 5, state: "waiting_approval" } },
+      { command: "audience.decide", stage: 5, decision: "proceed", audienceName: "Finance", rationale: "", after: { stage: 5, state: "waiting_approval" } },
+      { command: "stage.approve", stage: 5, decision: "approve", versions: [version("nod_package", "art_package", "sha-package")], after: { stage: 6, state: "in_progress" } },
+    ];
+    const more: LegacyNode[] = [
+      ...nodes,
+      { id: "nod_package", projectId: "p", artifactId: "art_package", version: 1, kind: "audience_package", stage: 5, variant: "You", mediaType: "text/markdown", provenance: null, supersededByNodeId: null },
+    ];
+    const plan = adoptionPlan({ projectId: "p", position: legacyPosition(further), nodes: more, policy, readContent: () => null });
+    const five = plan.steps[4]!;
+    expect(five.votes).toEqual({ You: { decision: "proceed", note: "" } });
+    expect(five.packages).toEqual({ You: { artifactId: "art_package", version: 1, sha256: "sha-package" } });
+    expect(plan.notes).toEqual(["Stage 5: Finance's vote names no package the old approval recorded, so it is not replayed; they decide again here."]);
   });
 
   test("a project past stage 6 is landed at stage 7 and told why", () => {

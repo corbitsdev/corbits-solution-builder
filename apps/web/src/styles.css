@@ -3674,6 +3674,12 @@ button[aria-disabled="true"] {
   text-decoration: line-through;
 }
 
+/* A vote on an earlier package: recorded, but not counted until they decide again (#50). */
+.aud-chip.stale {
+  color: var(--wb-muted-foreground);
+  border-style: dashed;
+}
+
 .packages-missing {
   display: grid;
   gap: var(--space-3);

@@ -1,5 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { approveStage, digestOf, reviewableArtifact, sendBack, type StageApprovalDeps } from "./stage-approval.ts";
+import {
+  approveStage,
+  digestOf,
+  ensureReviewOpen,
+  packageRefOf,
+  packageRefsOf,
+  packagesEqual,
+  recordAudienceVote,
+  reviewableArtifact,
+  sendBack,
+  type StageApprovalDeps,
+} from "./stage-approval.ts";
 import type { ArtifactNode } from "./client.ts";
 import type { ProjectWorkflowView } from "./project-workflow.ts";
 
@@ -33,6 +44,7 @@ function view(overrides: Partial<ProjectWorkflowView> = {}): ProjectWorkflowView
     requirements: [],
     audiencePolicy: null,
     audienceDecisions: {},
+    audiencePackages: {},
     stage5Quorum: null,
     ...overrides,
   };
@@ -304,5 +316,73 @@ describe("sendBack", () => {
     expect(result).toEqual({ ok: true, stage: 2 });
     expect(decisions).toHaveLength(1);
     expect(decisions[0]).toMatchObject({ kind: "send_back", targetStage: 2, reason: "needs rework" });
+  });
+});
+
+describe("stakeholder packages on stage 5 (#50)", () => {
+  const pkgNode = (variant: string, overrides: Partial<ArtifactNode> = {}) =>
+    node({ id: `n_${variant}`, kind: "audience_package", stage: 5, variant, artifactId: `art_${variant}`, version: 2, contentSha256: `sha_${variant}`, ...overrides });
+
+  test("packageRefOf names the artifact, its version and the hub's digest, computing one only when the hub has none", async () => {
+    let reads = 0;
+    const read = async (_nodeId: string) => {
+      reads += 1;
+      return "hello";
+    };
+    expect(await packageRefOf(pkgNode("alice"), read)).toEqual({ artifactId: "art_alice", version: 2, sha256: "sha_alice" });
+    expect(reads).toBe(0);
+    const computed = await packageRefOf(pkgNode("bob", { contentSha256: null }), read);
+    expect(reads).toBe(1);
+    expect(computed).toEqual({ artifactId: "art_bob", version: 2, sha256: await digestOf("hello") });
+  });
+
+  test("packageRefsOf keys each package by its stakeholder and skips a nameless one", async () => {
+    const refs = await packageRefsOf([pkgNode("alice"), pkgNode("draft", { variant: null })], async () => "");
+    expect(refs).toEqual({ alice: { artifactId: "art_alice", version: 2, sha256: "sha_alice" } });
+  });
+
+  test("packagesEqual compares by value, over the same stakeholders", () => {
+    const alice = { artifactId: "art_alice", version: 2, sha256: "sha_alice" };
+    expect(packagesEqual({ alice }, { alice: { ...alice } })).toBe(true);
+    expect(packagesEqual({ alice }, { alice: { ...alice, version: 3 } })).toBe(false);
+    expect(packagesEqual({ alice }, {})).toBe(false);
+    expect(packagesEqual({}, { alice })).toBe(false);
+  });
+
+  test("ensureReviewOpen re-opens a review already open on the same ref when a stakeholder's package changed", async () => {
+    const ref = { artifactId: "art_alice", version: 2, sha256: "sha_alice" };
+    const policy = { quorum: 1, stakeholders: ["alice", "bob"] };
+    const before = { alice: ref, bob: { artifactId: "art_bob", version: 1, sha256: "sha_bob_1" } };
+    const after = { alice: ref, bob: { artifactId: "art_bob", version: 2, sha256: "sha_bob_2" } };
+    const open = { reviewId: "stage-5-review-1", ...ref, status: "open" as const };
+    const opened = view({ stage: 5, openReview: open, audiencePolicy: policy, audiencePackages: before });
+    const { deps, decisions } = depsFor([opened, view({ stage: 5, openReview: { ...open, reviewId: "stage-5-review-2" }, audiencePolicy: policy, audiencePackages: after })]);
+    const result = await ensureReviewOpen(deps, { projectId: "p1", stage: 5, ref, policy, packages: after });
+    expect(result.ok).toBe(true);
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]).toMatchObject({ kind: "open_review", stage: 5, policy, packages: after });
+  });
+
+  test("ensureReviewOpen leaves a review alone when the ref, the policy and the packages all match", async () => {
+    const ref = { artifactId: "art_alice", version: 2, sha256: "sha_alice" };
+    const policy = { quorum: 1, stakeholders: ["alice"] };
+    const packages = { alice: ref };
+    const opened = view({ stage: 5, openReview: { reviewId: "stage-5-review-1", ...ref, status: "open" }, audiencePolicy: policy, audiencePackages: packages });
+    const { deps, decisions } = depsFor([opened]);
+    const result = await ensureReviewOpen(deps, { projectId: "p1", stage: 5, ref, policy, packages: { alice: { ...ref } } });
+    expect(result.ok).toBe(true);
+    expect(decisions).toEqual([]);
+  });
+
+  test("recordAudienceVote sends the package the stakeholder decided on", async () => {
+    const reviewed = { artifactId: "art_alice", version: 2, sha256: "sha_alice" };
+    const decided = view({
+      stage: 5,
+      audienceDecisions: { alice: { audience: "alice", decision: "proceed", note: "", principalId: "p", at: "", decisionId: "dec-1", package: reviewed } },
+    });
+    const { deps, decisions } = depsFor([decided]);
+    const result = await recordAudienceVote(deps, { projectId: "p1", stage: 5, audience: "alice", decision: "proceed", decisionId: "dec-1", package: reviewed });
+    expect(result).toEqual({ ok: true });
+    expect(decisions[0]).toMatchObject({ kind: "audience", audience: "alice", decision: "proceed", decisionId: "dec-1", ...reviewed });
   });
 });

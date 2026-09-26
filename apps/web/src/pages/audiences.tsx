@@ -25,7 +25,7 @@ import { SlidePreview } from "../slide-preview.tsx";
 import { packageRequest } from "../package-request.ts";
 import { packagesByStakeholder } from "../package-lineages.ts";
 import { deckFrom, packageOutlineProblem, type Deck, type TemplateTheme } from "@solutions-builder/app/deck";
-import { recordAudienceVote, type StageApprovalDeps } from "../stage-approval.ts";
+import { packageRefOf, recordAudienceVote, type StageApprovalDeps } from "../stage-approval.ts";
 import { stageRefusalMessage } from "../stage-evidence.ts";
 import type { ProjectWorkflowView } from "../project-workflow.ts";
 import {
@@ -108,12 +108,17 @@ function QuorumChips({
   audiences,
   packages,
   votesByAudience,
+  staleVoters,
   onSelect,
   onDecide,
 }: {
   audiences: { name: string; role: string }[];
   packages: readonly ArtifactNode[];
   votesByAudience: Readonly<Record<string, AudienceVote>>;
+  /** Stakeholders whose vote names an earlier package than their current
+   *  one (`stage5Quorum.stale`): shown as needing a new decision, never as
+   *  their old call (#50). */
+  staleVoters: ReadonlySet<string>;
   onSelect: (variant: string) => void;
   onDecide: (node: ArtifactNode, decision: AudienceVote["decision"], note: string) => Promise<void>;
 }) {
@@ -144,15 +149,22 @@ function QuorumChips({
         {audiences.map((audience) => {
           const node = packages.find((candidate) => candidate.variant === audience.name);
           const latest = votesByAudience[audience.name] ?? null;
+          const stale = latest !== null && staleVoters.has(audience.name);
           return (
             <button
               key={audience.name}
               type="button"
               role="listitem"
-              className={`aud-chip${latest ? ` ${latest.decision}` : ""}`}
+              className={`aud-chip${latest && !stale ? ` ${latest.decision}` : ""}${stale ? " stale" : ""}`}
               disabled={!node?.variant}
               aria-expanded={openFor === node?.variant}
-              title={latest ? `${audience.name}: ${DECISION_LABEL[latest.decision]}` : `${audience.name}: no decision yet`}
+              title={
+                stale
+                  ? `${audience.name}: decided on an earlier package; needs a new decision`
+                  : latest
+                    ? `${audience.name}: ${DECISION_LABEL[latest.decision]}`
+                    : `${audience.name}: no decision yet`
+              }
               onClick={() => {
                 if (!node?.variant) return;
                 onSelect(node.variant);
@@ -590,6 +602,11 @@ export function AudiencePackages({
   const requiredQuorum = workflowView?.stage5Quorum?.required ?? quorum;
   const proceeded = workflowView?.stage5Quorum?.proceeded ?? 0;
   const blockedBy = workflowView?.stage5Quorum?.blocked ?? [];
+  // A vote cast on an earlier version of a stakeholder's package is neither
+  // a proceed nor a block: the workflow lists it as stale and it needs a
+  // new decision (#50).
+  const staleBy = workflowView?.stage5Quorum?.stale ?? [];
+  const staleVoters = new Set(staleBy);
   // The workflow's own verdict -- never recomputed here (`approveReasonText`
   // is the one place that translates `approveReason` to copy).
   const reason = approveReason ? approveReasonText(approveReason, lastRefusal) : null;
@@ -608,12 +625,17 @@ export function AudiencePackages({
     ? null
     : blockedBy.length > 0
       ? `${blockedBy.join(" and ")} ${blockedBy.length === 1 ? "has" : "have"} blocked this.`
-      : `Waiting for ${quorumWaiting} stakeholder${quorumWaiting === 1 ? "" : "s"} to proceed.`;
+      : staleBy.length > 0
+        ? `${staleBy.join(" and ")} decided on an earlier package and ${staleBy.length === 1 ? "needs" : "need"} to decide again.`
+        : `Waiting for ${quorumWaiting} stakeholder${quorumWaiting === 1 ? "" : "s"} to proceed.`;
   const approveReasonDisplay = reason ?? quorumReason;
 
   const decide = async (node: (typeof packages)[number], decision: AudienceVote["decision"], note: string) => {
     if (!node.variant) return;
     try {
+      // The vote names the package it was cast on -- this node, exactly --
+      // so a rewrite afterwards leaves it stale rather than counted (#50).
+      const reviewed = await packageRefOf(node, (nodeId) => api.artifactContent(tenantId, nodeId).then((result) => result.content));
       const result = await recordAudienceVote(audienceApprovalDeps, {
         projectId: detail.project.id,
         stage: workflowView?.stage ?? 5,
@@ -621,6 +643,7 @@ export function AudiencePackages({
         decision,
         note: note.trim(),
         decisionId: `dec-${crypto.randomUUID()}`,
+        package: reviewed,
       });
       if (!result.ok) {
         throw new ApiFailure({
@@ -668,6 +691,7 @@ export function AudiencePackages({
     }
   };
   const selectedVote = selected?.variant ? (votesByAudience[selected.variant] ?? null) : null;
+  const selectedVoteStale = selected?.variant ? staleVoters.has(selected.variant) : false;
 
   return (
     <div data-tour="audience-packages">
@@ -727,6 +751,7 @@ export function AudiencePackages({
             audiences={audiences}
             packages={packages}
             votesByAudience={votesByAudience}
+            staleVoters={staleVoters}
             onSelect={setActive}
             onDecide={(node, decision, note) => decide(node, decision, note)}
           />
@@ -775,7 +800,12 @@ export function AudiencePackages({
               {selected.variant ? (
                 <div className="aud-decision" data-tour="audience-your-decision">
                   <p className="inline-note">
-                    {selected.variant}: {selectedVote ? DECISION_LABEL[selectedVote.decision] : "no decision yet"}
+                    {selected.variant}:{" "}
+                    {selectedVote && selectedVoteStale
+                      ? `${DECISION_LABEL[selectedVote.decision]} on an earlier package · needs a new decision`
+                      : selectedVote
+                        ? DECISION_LABEL[selectedVote.decision]
+                        : "no decision yet"}
                   </p>
                   <Input
                     value={inlineNote}

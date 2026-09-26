@@ -50,7 +50,7 @@ function stateOf(view: ProjectWorkflowView | null): RunState | null {
 
 function quorumOf(view: ProjectWorkflowView | null, stage: number): { recorded: number; needed: number; blocked: number } | undefined {
   if (stage !== 5 || !view?.audiencePolicy) return undefined;
-  const quorum = quorumState(view.audiencePolicy, view.audienceDecisions);
+  const quorum = quorumState(view.audiencePolicy, view.audienceDecisions, view.audiencePackages);
   return { recorded: quorum.proceeded, needed: quorum.required, blocked: quorum.blocked.length };
 }
 

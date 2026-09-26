@@ -454,8 +454,22 @@ describe("stage 5 audience decisions (CL-8870)", () => {
     return initProjectState({ projectId: "p1", stages: [{ stage: 5, authorizedPrincipalIds: [OWNER5] }] });
   }
 
-  function openReview5(policy?: { quorum: number; stakeholders: string[] }, decisionId = "o5", artifactId = "a5", version = 1, sha256 = "s5"): ProjectState {
-    return reopen5(baseState5(), policy, decisionId, artifactId, version, sha256);
+  /** Each stakeholder's package at version 1: what a stage-5 `open_review`
+   *  names by default here, and what a vote names unless told otherwise. */
+  type Ref = { artifactId: string; version: number; sha256: string };
+  const pkg = (audience: string, version = 1): Ref => ({ artifactId: `pkg-${audience}`, version, sha256: `sha-${audience}-${String(version)}` });
+  const packagesFor = (policy: { stakeholders: string[] } | undefined, versions: Record<string, number> = {}): Record<string, Ref> =>
+    Object.fromEntries((policy?.stakeholders ?? []).map((who) => [who, pkg(who, versions[who] ?? 1)]));
+
+  function openReview5(
+    policy?: { quorum: number; stakeholders: string[] },
+    decisionId = "o5",
+    artifactId = "a5",
+    version = 1,
+    sha256 = "s5",
+    packages: Record<string, Ref> | undefined = packagesFor(policy),
+  ): ProjectState {
+    return reopen5(baseState5(), policy, decisionId, artifactId, version, sha256, packages);
   }
 
   function reopen5(
@@ -465,6 +479,7 @@ describe("stage 5 audience decisions (CL-8870)", () => {
     artifactId = "a5",
     version = 1,
     sha256 = "s5",
+    packages: Record<string, Ref> | undefined = packagesFor(policy),
   ): ProjectState {
     return applyDecision(
       input(state, OWNER5, {
@@ -477,22 +492,37 @@ describe("stage 5 audience decisions (CL-8870)", () => {
         sha256,
         at: AT,
         ...(policy ? { policy } : {}),
+        ...(packages ? { packages } : {}),
       }),
     );
   }
 
-  function vote(state: ProjectState, decisionId: string, audience: string, decision: string): ProjectState {
-    return applyDecision(input(state, OWNER5, { decisionId, kind: "audience", projectId: "p1", stage: 5, audience, decision, at: AT }));
+  function vote(state: ProjectState, decisionId: string, audience: string, decision: string, reviewed: Ref = pkg(audience)): ProjectState {
+    return applyDecision(input(state, OWNER5, { decisionId, kind: "audience", projectId: "p1", stage: 5, audience, decision, at: AT, ...reviewed }));
   }
 
   function approve5(state: ProjectState, decisionId: string, reviewId = "stage-5-review-1", artifactId = "a5", version = 1, sha256 = "s5"): ProjectState {
     return applyDecision(input(state, OWNER5, { decisionId, kind: "approve", projectId: "p1", stage: 5, reviewId, artifactId, version, sha256, at: AT }));
   }
 
-  test("a vote is tallied", () => {
+  test("a vote is tallied, naming the package it was cast on", () => {
     const state = vote(openReview5({ quorum: 2, stakeholders: ["alice", "bob"] }), "v1", "alice", "proceed");
-    expect(state.audienceDecisions["alice"]).toMatchObject({ audience: "alice", decision: "proceed", decisionId: "v1" });
-    expect(state.decisions.at(-1)).toMatchObject({ accepted: true, kind: "audience", audience: "alice", outcome: "proceed" });
+    expect(state.audienceDecisions["alice"]).toMatchObject({ audience: "alice", decision: "proceed", decisionId: "v1", package: pkg("alice") });
+    expect(state.decisions.at(-1)).toMatchObject({ accepted: true, kind: "audience", audience: "alice", outcome: "proceed", ...pkg("alice") });
+  });
+
+  test("a vote that names no package is not a decision at all", () => {
+    const state = openReview5({ quorum: 1, stakeholders: ["alice"] });
+    const next = applyDecision(input(state, OWNER5, { decisionId: "v1", kind: "audience", projectId: "p1", stage: 5, audience: "alice", decision: "proceed", at: AT }));
+    expect(next).toEqual(state);
+  });
+
+  test("open_review refuses a malformed packages map", () => {
+    const state = baseState5();
+    const next = applyDecision(
+      input(state, OWNER5, { decisionId: "o5", kind: "open_review", projectId: "p1", stage: 5, artifactId: "a5", version: 1, sha256: "s5", at: AT, packages: { alice: { artifactId: "x" } } }),
+    );
+    expect(next).toEqual(state);
   });
 
   test("a repeated signal (same decisionId) is deduped and does not change the recorded vote", () => {
@@ -514,7 +544,7 @@ describe("stage 5 audience decisions (CL-8870)", () => {
     });
     expect(state4.stage).toBe(4);
     const state = applyDecision(
-      input(state4, OWNER5, { decisionId: "v4", kind: "audience", projectId: "p1", stage: 4, audience: "alice", decision: "proceed", at: AT }),
+      input(state4, OWNER5, { decisionId: "v4", kind: "audience", projectId: "p1", stage: 4, audience: "alice", decision: "proceed", at: AT, ...pkg("alice") }),
     );
     expect(state.decisions.at(-1)).toMatchObject({ decisionId: "v4", accepted: false, reason: "not_audience_stage" });
     expect(state.audienceDecisions).toEqual({});
@@ -574,6 +604,79 @@ describe("stage 5 audience decisions (CL-8870)", () => {
     // Nothing but a fresh open_review can change the captured policy.
     expect(state.audiencePolicy).toEqual({ quorum: 2, stakeholders: ["alice", "bob"] });
     expect(approve5(state, "ap1").decisions.at(-1)).toMatchObject({ accepted: true });
+  });
+
+  // #50: a vote is tied to the package the stakeholder read. The stage-5
+  // `open_review` names each stakeholder's current package, and only a vote
+  // naming that exact reference counts.
+  test("a vote on the stakeholder's current package counts toward quorum", () => {
+    let state = openReview5({ quorum: 1, stakeholders: ["alice"] });
+    expect(state.audiencePackages).toEqual({ alice: pkg("alice") });
+    state = vote(state, "v1", "alice", "proceed", pkg("alice"));
+    const next = approve5(state, "ap1");
+    expect(next.decisions.at(-1)).toMatchObject({ accepted: true, kind: "approve", quorum: { proceeded: 1, required: 1, blocked: [], stale: [] } });
+  });
+
+  test("a vote on a superseded package does not count, and is reported as stale", () => {
+    let state = openReview5({ quorum: 1, stakeholders: ["alice"] });
+    state = vote(state, "v1", "alice", "proceed", pkg("alice", 1));
+    // Alice's package is written again: the next open_review names version 2.
+    state = reopen5(state, { quorum: 1, stakeholders: ["alice"] }, "o5b", "a5", 2, "s5b", packagesFor({ stakeholders: ["alice"] }, { alice: 2 }));
+    expect(state.audiencePackages).toEqual({ alice: pkg("alice", 2) });
+    expect(state.audienceDecisions["alice"]).toMatchObject({ decision: "proceed", package: pkg("alice", 1) });
+    const next = approve5(state, "ap1", "stage-5-review-2", "a5", 2, "s5b");
+    expect(next.decisions.at(-1)).toMatchObject({ accepted: false, reason: "quorum_not_met", quorum: { proceeded: 0, required: 1, blocked: [], stale: ["alice"] } });
+    expect(next.stage).toBe(5);
+    expect(approveReasonText("quorum_not_met", next.decisions.at(-1)!)).toBe("alice decided on an earlier package and needs to decide again.");
+  });
+
+  test("a stale reject no longer blocks either: it waits for a new decision", () => {
+    let state = openReview5({ quorum: 0, stakeholders: ["alice", "bob"] });
+    state = vote(state, "v1", "bob", "reject", pkg("bob", 1));
+    state = reopen5(state, { quorum: 0, stakeholders: ["alice", "bob"] }, "o5b", "a5", 2, "s5b", packagesFor({ stakeholders: ["alice", "bob"] }, { bob: 2 }));
+    const next = approve5(state, "ap1", "stage-5-review-2", "a5", 2, "s5b");
+    expect(next.decisions.at(-1)).toMatchObject({ accepted: true, quorum: { proceeded: 0, required: 0, blocked: [], stale: ["bob"] } });
+  });
+
+  test("a re-vote on the new package counts", () => {
+    let state = openReview5({ quorum: 1, stakeholders: ["alice"] });
+    state = vote(state, "v1", "alice", "proceed", pkg("alice", 1));
+    state = reopen5(state, { quorum: 1, stakeholders: ["alice"] }, "o5b", "a5", 2, "s5b", packagesFor({ stakeholders: ["alice"] }, { alice: 2 }));
+    expect(approve5(state, "ap1", "stage-5-review-2", "a5", 2, "s5b").decisions.at(-1)).toMatchObject({ accepted: false, reason: "quorum_not_met" });
+    state = vote(state, "v2", "alice", "proceed", pkg("alice", 2));
+    const next = approve5(state, "ap2", "stage-5-review-2", "a5", 2, "s5b");
+    expect(next.decisions.at(-1)).toMatchObject({ accepted: true, kind: "approve", quorum: { proceeded: 1, required: 1, blocked: [], stale: [] } });
+  });
+
+  test("a vote on a package the review never named for that stakeholder does not count", () => {
+    let state = openReview5({ quorum: 1, stakeholders: ["alice", "bob"] }, "o5", "a5", 1, "s5", packagesFor({ stakeholders: ["alice"] }));
+    state = vote(state, "v1", "bob", "proceed", pkg("bob"));
+    const next = approve5(state, "ap1");
+    expect(next.decisions.at(-1)).toMatchObject({ accepted: false, reason: "quorum_not_met", quorum: { proceeded: 0, stale: ["bob"] } });
+  });
+
+  test("an open_review without a packages map keeps the one already captured", () => {
+    let state = openReview5({ quorum: 1, stakeholders: ["alice"] });
+    state = reopen5(state, { quorum: 1, stakeholders: ["alice"] }, "o5b", "a5", 2, "s5b", undefined);
+    expect(state.audiencePackages).toEqual({ alice: pkg("alice") });
+  });
+
+  test("a send-back to stage 5 or earlier clears the captured packages with the votes", () => {
+    let state = initProjectState({
+      projectId: "p1",
+      stages: [
+        { stage: 5, authorizedPrincipalIds: [OWNER5] },
+        { stage: 6, authorizedPrincipalIds: [OWNER5] },
+      ],
+    });
+    state = reopen5(state, { quorum: 1, stakeholders: ["alice"] });
+    state = vote(state, "v1", "alice", "proceed");
+    state = approve5(state, "ap1");
+    expect(state.stage).toBe(6);
+    state = applyDecision(input(state, OWNER5, { decisionId: "sb1", kind: "send_back", projectId: "p1", stage: 6, targetStage: 5, reason: "again", at: AT }));
+    expect(state.stage).toBe(5);
+    expect(state.audiencePackages).toEqual({});
+    expect(state.audienceDecisions).toEqual({});
   });
 
   test("re-opening the review (a redraft) recaptures the policy in effect at that moment", () => {

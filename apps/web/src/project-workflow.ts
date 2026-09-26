@@ -14,6 +14,7 @@ import {
   approveReason,
   quorumState,
   type ApproveReason,
+  type AudiencePackageRef,
   type AudiencePolicy,
   type AudienceVote,
   type DecisionRecord,
@@ -57,8 +58,11 @@ export type ProjectWorkflowView = {
   /** Every stakeholder's latest `audience` vote, keyed by audience name --
    *  `pages/audiences.tsx`'s tally reads this, never artifact metadata. */
   readonly audienceDecisions: Readonly<Record<string, AudienceVote>>;
-  /** `audiencePolicy`/`audienceDecisions` folded through `quorumState`; null
-   *  until `audiencePolicy` is captured. */
+  /** Each stakeholder's current package as the stage-5 `open_review` named
+   *  them -- what a vote is checked against before it counts (#50). */
+  readonly audiencePackages: Readonly<Record<string, AudiencePackageRef>>;
+  /** `audiencePolicy`/`audienceDecisions`/`audiencePackages` folded through
+   *  `quorumState`; null until `audiencePolicy` is captured. */
   readonly stage5Quorum: QuorumState | null;
 };
 
@@ -75,6 +79,7 @@ const EMPTY_STATE: ProjectState = {
   requirements: [],
   audiencePolicy: null,
   audienceDecisions: {},
+  audiencePackages: {},
 };
 
 function decodeInlineOutput(ref: unknown): unknown {
@@ -158,6 +163,10 @@ export function foldProjectWorkflow(
 export function projectWorkflowViewOf(state: ProjectState): ProjectWorkflowView {
   const openReview = state.reviews[state.stage]?.status === "open" ? state.reviews[state.stage]! : null;
   const lastRefusal = [...state.decisions].reverse().find((d) => !d.accepted) ?? null;
+  // A run deployed before stage-5 reviews named each stakeholder's package
+  // carries no map at all; read as empty, every vote it holds is stale
+  // rather than the fold failing (#50).
+  const audiencePackages: Readonly<Record<string, AudiencePackageRef>> = state.audiencePackages ?? {};
   return {
     stage: state.stage,
     done: state.done,
@@ -175,7 +184,8 @@ export function projectWorkflowViewOf(state: ProjectState): ProjectWorkflowView 
     requirements: state.requirements,
     audiencePolicy: state.audiencePolicy,
     audienceDecisions: state.audienceDecisions,
-    stage5Quorum: state.audiencePolicy ? quorumState(state.audiencePolicy, state.audienceDecisions) : null,
+    audiencePackages,
+    stage5Quorum: state.audiencePolicy ? quorumState(state.audiencePolicy, state.audienceDecisions, audiencePackages) : null,
   };
 }
 

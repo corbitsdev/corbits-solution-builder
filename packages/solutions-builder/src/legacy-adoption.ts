@@ -122,6 +122,11 @@ export type AdoptionStep = {
   /** Stage 5: the quorum policy the review is opened under, and the votes replayed before the approval. */
   readonly policy?: AudiencePolicy;
   readonly votes?: Readonly<Record<string, AudienceVote>>;
+  /** Stage 5: each voting stakeholder's package, as the old approval named
+   *  it -- the reference the replayed vote and the review both carry, so
+   *  the workflow counts the vote as cast on that package (#50). A vote
+   *  whose package the approval never named is left out of `votes`. */
+  readonly packages?: Readonly<Record<string, AdoptedReference>>;
   /** Stage 6: the requirement items minted before the plan is approved. */
   readonly requirementItems?: readonly { readonly kind: "FR" | "NFR" | "IR" | "AC"; readonly text: string }[];
 };
@@ -196,7 +201,22 @@ export function adoptionPlan(args: {
     const step: AdoptionStep = { stage, ref };
     if (stage === 5) {
       const policy: AudiencePolicy = { quorum: args.policy.audienceQuorum, stakeholders: args.policy.audiences.map((audience) => audience.name) };
-      steps.push({ ...step, policy, votes: args.position.audienceVotes });
+      // A vote is replayed on the package the old approval named for that
+      // stakeholder; the workflow counts a vote only on a package the
+      // review names (#50), so one with no named package is left out and
+      // said so.
+      const packages: Record<string, AdoptedReference> = {};
+      const votes: Record<string, AudienceVote> = {};
+      for (const [audience, vote] of Object.entries(args.position.audienceVotes)) {
+        const reviewed = named5PackageFor(named, audience);
+        if (!reviewed) {
+          notes.push(`Stage 5: ${audience}'s vote names no package the old approval recorded, so it is not replayed; they decide again here.`);
+          continue;
+        }
+        packages[audience] = reviewed;
+        votes[audience] = vote;
+      }
+      steps.push({ ...step, policy, votes, packages });
       continue;
     }
     if (stage === 6) {
@@ -210,6 +230,12 @@ export function adoptionPlan(args: {
     steps.push(step);
   }
   return { projectId: args.projectId, legacyStage: args.position.stage, legacyDone: args.position.done, steps, notes };
+}
+
+/** The package the old stage-5 approval named for `audience`: the `audience_package` node row carrying that name. */
+function named5PackageFor(named: readonly { version: LegacyVersion; node: LegacyNode }[], audience: string): AdoptedReference | undefined {
+  const entry = named.find((candidate) => candidate.node.kind === "audience_package" && candidate.node.variant === audience);
+  return entry ? { artifactId: entry.version.artifactId, version: entry.node.version, sha256: entry.version.contentHash } : undefined;
 }
 
 /** The `sb` metadata to stamp on one artifact's current version, and which version that is. */
