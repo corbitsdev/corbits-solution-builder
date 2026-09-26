@@ -2066,6 +2066,24 @@ false,
    */
   persistAudiencePackage: (projectId: string, audience: string, content: string) =>
     asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      // A package written again supersedes the stakeholder's current head,
+      // the way `persistStageDraft` chains a stage's draft -- without it both
+      // stayed live and the page showed the stakeholder twice (#122). Best
+      // effort, as there: a graph read that fails never blocks the write.
+      const previousHead = await artifactGraphFor(transport, workspaceTenantId, projectId)
+        .then(
+          (graph) =>
+            graph.nodes
+              .filter(
+                (node) =>
+                  node.stage === 5 &&
+                  node.kind === STAGE_DRAFT_KIND[5] &&
+                  node.variant === audience &&
+                  node.supersededByNodeId === null,
+              )
+              .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0],
+        )
+        .catch(() => undefined);
       const artifact = await installerCreateArtifact(transport, workspaceTenantId, {
         title: `${audience}'s package`,
         content,
@@ -2078,6 +2096,7 @@ false,
             mediaType: "text/markdown",
             sourceVersionIds: [],
             provenance: { producer: "agent" as const, agentRole: STAGE_5_PACKAGE_ROLE.id },
+            ...(previousHead ? { supersedes: previousHead.id } : {}),
           },
         },
       });
