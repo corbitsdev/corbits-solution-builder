@@ -7,7 +7,7 @@ import type { ChatMessage } from "../../stage-mail.ts";
 import { answerText, segmentsIn } from "./choices.js";
 import { conversationLead, isHtmlDocument } from "./guidance.js";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
-import { matchSwitchMarker } from "./use-model-handoff.ts";
+import { HANDOFF_BUBBLE_TEXT, matchSwitchMarker } from "./use-model-handoff.ts";
 import { COMPOSER_BOX_CLASS, CONV_SCROLL_CLASS } from "./pane-classes.ts";
 
 /** A model hand-off's `[[sb-switch:<id>]]` marker line, rendered separately
@@ -17,12 +17,15 @@ import { COMPOSER_BOX_CLASS, CONV_SCROLL_CLASS } from "./pane-classes.ts";
  *  authored message is never inspected for the marker, so nothing a
  *  specialist writes can ever have its content stripped by this.
  */
-function withoutSwitchMarker(message: ChatMessage): string {
+export function withoutSwitchMarker(message: ChatMessage): string {
   if (message.author !== "me") return message.body;
   const newline = message.body.indexOf("\n");
   const firstLine = newline < 0 ? message.body : message.body.slice(0, newline);
   if (!matchSwitchMarker(firstLine)) return message.body;
-  return newline < 0 ? "" : message.body.slice(newline + 1);
+  // The recap and draft it carries are for the new specialist; read back
+  // by a person they were the last twenty turns over again, a whole HTML
+  // mockup included (#85). One line says what the mail did instead.
+  return HANDOFF_BUBBLE_TEXT;
 }
 
 /** A stage-mail turn as a chat row. The specialist's long draft lives in the

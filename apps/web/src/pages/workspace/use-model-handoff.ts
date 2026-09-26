@@ -47,6 +47,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ApiFailure } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
+import { isHtmlDocument } from "./guidance.ts";
 
 /** The exact marker line's shape: `[[sb-switch:<hex id>]]`. Deliberately not
  *  the bare word "switch" or anything a specialist's own prose could
@@ -86,12 +87,29 @@ export function matchSwitchMarker(line: string): string | null {
  *  was dropped — enough for the new specialist to pick the thread back up
  *  without every hand-off ballooning into the entire stage history. */
 const MAX_HANDOFF_TURNS = 20;
+/** What the chat column shows for a hand-off mail in place of its recap:
+ *  the recap is for the new specialist, and read back by a person it is
+ *  the last twenty turns again, a whole HTML mockup included (#85). The
+ *  boundary line from `stage-events.ts`'s `switchEvents` says which model
+ *  the stage continued on. */
+export const HANDOFF_BUBBLE_TEXT = "Handed the conversation so far, and the current draft, to the new specialist.";
+/** A turn as the recap quotes it. A design reply is a whole HTML document
+ *  (`kit.ts`), which quoted in full makes the recap unreadable and repeats
+ *  the draft block below it, so it is named instead and the draft block
+ *  alone carries the document (#85). */
+function transcriptTurn(message: ChatMessage): string {
+  const who = message.author === "me" ? "Person" : "Specialist";
+  if (isHtmlDocument(message.body)) {
+    return `${who}: (${message.author === "me" ? "shared" : "sent"} a design mockup as a whole HTML document; the current draft below is the latest one)`;
+  }
+  return `${who}: ${message.body}`;
+}
 
 function transcriptBlock(messages: readonly ChatMessage[]): string {
   if (messages.length === 0) return "(No conversation yet.)";
   const kept = messages.length > MAX_HANDOFF_TURNS ? messages.slice(-MAX_HANDOFF_TURNS) : messages;
   const omitted = messages.length - kept.length;
-  const lines = kept.map((message) => `${message.author === "me" ? "Person" : "Specialist"}: ${message.body}`);
+  const lines = kept.map(transcriptTurn);
   return omitted > 0 ? [`(${omitted} earlier turn${omitted === 1 ? "" : "s"} omitted.)`, ...lines].join("\n\n") : lines.join("\n\n");
 }
 
