@@ -8,9 +8,19 @@
  * `status` of `"verified" | "missing" | "hash_mismatch" | "inaccessible"`.
  * Neither shape is trusted here — a status this module does not recognize,
  * or a descriptor never mentioned, is `"unverified"`, never `"passed"`.
+ *
+ * Nor is `"verified"` a pass (#32). Every item reaching this module was
+ * scored by the delivery-verifier agent from the text of its opening
+ * message: no code hashes the delivered files or probes the deliverable, so
+ * `"verified"` is the agent's claim and renders as unverified, with that
+ * reason on the row. `"passed"` is reserved for a row whose status came
+ * from a deterministic check; nothing produces one today (#129).
  */
 
 export type VerificationRowStatus = "passed" | "failed" | "unverified";
+
+/** The reason a row the agent scored `"verified"` is shown unverified. */
+export const AGENT_REPORTED_NOTE = "reported by the agent, not checked";
 
 export type VerificationRow = {
   path: string;
@@ -28,14 +38,17 @@ export type DeliveryVerification = {
 };
 
 const STATUS_MAP: Record<string, VerificationRowStatus> = {
-  verified: "passed",
+  verified: "unverified",
   missing: "failed",
   hash_mismatch: "failed",
   inaccessible: "unverified",
-  passed: "passed",
   failed: "failed",
   unverified: "unverified",
 };
+
+/** Statuses that are the agent's own claim of success. A row carrying one is
+ *  unverified, and says why, so a person never reads a claim as a check. */
+const AGENT_CLAIMS: ReadonlySet<string> = new Set(["verified", "passed"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -72,14 +85,16 @@ function parseRow(raw: unknown, problems: string[]): VerificationRow | null {
   const kind = typeof raw["category"] === "string" ? raw["category"] : typeof raw["kind"] === "string" ? raw["kind"] : undefined;
   const sha256 = typeof raw["sha256"] === "string" ? raw["sha256"] : undefined;
   const sizeBytes = typeof raw["sizeBytes"] === "number" ? raw["sizeBytes"] : undefined;
-  const note = typeof raw["detail"] === "string" ? raw["detail"] : typeof raw["note"] === "string" ? raw["note"] : undefined;
+  const given = typeof raw["detail"] === "string" ? raw["detail"] : typeof raw["note"] === "string" ? raw["note"] : undefined;
 
   const rawStatus = raw["status"];
-  const mapped = typeof rawStatus === "string" ? STATUS_MAP[rawStatus] : undefined;
+  const claimed = typeof rawStatus === "string" && AGENT_CLAIMS.has(rawStatus);
+  const mapped = claimed ? "unverified" : typeof rawStatus === "string" ? STATUS_MAP[rawStatus] : undefined;
   const status: VerificationRowStatus = mapped ?? "unverified";
   if (!mapped) {
     problems.push(`"${path}" has an unrecognized status${typeof rawStatus === "string" ? ` "${rawStatus}"` : ""}`);
   }
+  const note = claimed ? (given ? `${AGENT_REPORTED_NOTE}: ${given}` : AGENT_REPORTED_NOTE) : given;
 
   return { path, ...(kind ? { kind } : {}), ...(sha256 ? { sha256 } : {}), ...(sizeBytes !== undefined ? { sizeBytes } : {}), status, ...(note ? { note } : {}) };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseDeliveryVerification } from "./delivery-verification.ts";
+import { AGENT_REPORTED_NOTE, parseDeliveryVerification } from "./delivery-verification.ts";
 
 describe("parseDeliveryVerification", () => {
   test("reads the delivery_status tool-argument shape", () => {
@@ -12,10 +12,28 @@ describe("parseDeliveryVerification", () => {
       ],
     });
     expect(result.rows).toEqual([
-      { path: "src/index.ts", kind: "source", status: "passed" },
+      { path: "src/index.ts", kind: "source", status: "unverified", note: AGENT_REPORTED_NOTE },
       { path: "README.md", kind: "docs", status: "failed" },
     ]);
-    expect(result.summary).toEqual({ passed: 1, failed: 1, unverified: 0 });
+    expect(result.summary).toEqual({ passed: 0, failed: 1, unverified: 1 });
+    expect(result.problems).toEqual([]);
+  });
+
+  // #32: the agent scores items from the text it was handed; no code checks
+  // the files, so its "verified" is a claim, never a pass.
+  test("an agent-reported verified item never renders as passed, and says why", () => {
+    const result = parseDeliveryVerification({
+      items: [
+        { category: "source", path: "a.ts", required: true, status: "verified" },
+        { category: "source", path: "b.ts", required: true, status: "verified", detail: "hash matches the manifest" },
+        { category: "source", path: "c.ts", required: true, status: "passed" },
+      ],
+    });
+    expect(result.rows.map((row) => row.status)).toEqual(["unverified", "unverified", "unverified"]);
+    expect(result.rows[0]?.note).toBe(AGENT_REPORTED_NOTE);
+    expect(result.rows[1]?.note).toBe(`${AGENT_REPORTED_NOTE}: hash matches the manifest`);
+    expect(result.rows[2]?.note).toBe(AGENT_REPORTED_NOTE);
+    expect(result.summary).toEqual({ passed: 0, failed: 0, unverified: 3 });
     expect(result.problems).toEqual([]);
   });
 
@@ -30,7 +48,7 @@ describe("parseDeliveryVerification", () => {
       },
       blockers: null,
     });
-    expect(result.rows).toEqual([{ path: "a.ts", kind: "source", status: "passed" }]);
+    expect(result.rows).toEqual([{ path: "a.ts", kind: "source", status: "unverified", note: AGENT_REPORTED_NOTE }]);
   });
 
   test("reads a delivery_manifest artifact's embedded verification field", () => {
@@ -94,6 +112,6 @@ describe("parseDeliveryVerification", () => {
         { path: "d.ts", status: "inaccessible" },
       ],
     });
-    expect(result.summary).toEqual({ passed: 2, failed: 1, unverified: 1 });
+    expect(result.summary).toEqual({ passed: 0, failed: 1, unverified: 3 });
   });
 });
