@@ -1,5 +1,42 @@
+diff --git a/node_modules/@intx/inference/.bun-tag-29a7a9f43115bbe4 b/.bun-tag-29a7a9f43115bbe4
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/dist/default-director.js b/dist/default-director.js
+index 41a198800efc6b20030556b2888291ceafe303ee..f880bfa81737861fc968231bb3b8cd857870be46 100644
+--- a/dist/default-director.js
++++ b/dist/default-director.js
+@@ -64,6 +64,9 @@ const ERROR_PREAMBLE = {
+     retryable: "This agent encountered a temporary error communicating with the inference provider",
+     fatal: "This agent could not complete your request due to an unrecoverable inference error",
+     aborted: "This agent's inference request was aborted",
++    // Local patch (corbits-solution-builder#74): said only once every
++    // configured source has been tried and the last answered this way.
++    protocol_mismatch: "This agent could not complete your request because no configured inference source could serve it",
+ };
+ function formatInferenceError(error) {
+     const preamble = ERROR_PREAMBLE[error.category] ?? ERROR_PREAMBLE["fatal"];
+diff --git a/dist/errors.js b/dist/errors.js
+index 67accfde34156a98b7ddead775418e37f7f1c339..9bba5fd0a7ae326fea49674ece36d4e7c1c53556 100644
+--- a/dist/errors.js
++++ b/dist/errors.js
+@@ -22,6 +22,15 @@ export function classifyHTTPError(statusCode, message, raw, retryAfterMs) {
+     if (statusCode >= 500 && statusCode < 600) {
+         return { category: "retryable", message, statusCode, raw };
+     }
++    if (statusCode === 404) {
++        // Local patch (corbits-solution-builder#74): a 404 is this source's
++        // failure -- an unknown model, or an endpoint that is not there --
++        // not the call's. `fatal` is treated as source-invariant and aborts
++        // the whole chain; `protocol_mismatch` is source-specific, takes no
++        // mechanical retries, and lets the reactor fail over to the next
++        // configured source. Belongs upstream in faremeter/interchange.
++        return { category: "protocol_mismatch", message, statusCode, raw };
++    }
+     return { category: "fatal", message, statusCode, raw };
+ }
+ export function classifyNetworkError(cause) {
 diff --git a/dist/providers/anthropic.js b/dist/providers/anthropic.js
-index 8ff9e4b54d98a7454c519c9811a710b21e1c6087..c21dd15129d002f5e35a080dd8cee9b9f09d26ea 100644
+index 8ff9e4b54d98a7454c519c9811a710b21e1c6087..4b71fbbfcbcb139f9239db02226f79093596d3e4 100644
 --- a/dist/providers/anthropic.js
 +++ b/dist/providers/anthropic.js
 @@ -48,7 +48,9 @@ function buildRequest(messages, model, options) {
@@ -14,7 +51,7 @@ index 8ff9e4b54d98a7454c519c9811a710b21e1c6087..c21dd15129d002f5e35a080dd8cee9b9
              // Place a cache breakpoint on the last user message so all prior
              // turns are cached on the next request.
 diff --git a/dist/providers/openai.js b/dist/providers/openai.js
-index 12e8b9a199ae06a06db18c4ff2c4084fa46c03ca..2e84e4a68adce60c5ddc8ef25ee9972f9aba9405 100644
+index 12e8b9a199ae06a06db18c4ff2c4084fa46c03ca..d0a49365529f496979f9536b15dc8374147e473c 100644
 --- a/dist/providers/openai.js
 +++ b/dist/providers/openai.js
 @@ -44,7 +44,9 @@ function buildRequest(messages, model, options, quirks) {
