@@ -51,8 +51,8 @@ describe("the zen garden busy indicator", () => {
     const css = read("./styles.css");
     expect(css).toMatch(/\.zen-garden \{[^}]*height: 0;/s);
     expect(css).toContain(".zen-garden[data-visible] {");
-    // #109: the whole film, fitted to the strip's height and centred, over tiled sand.
-    expect(css).toMatch(/\.zen-garden-video \{[^}]*height: 100%;[^}]*width: auto;[^}]*object-fit: contain;/s);
+    // #111: the film edge to edge across the strip, cropped to its height.
+    expect(css).toMatch(/\.zen-garden-video \{[^}]*width: 100%;[^}]*height: 100%;[^}]*object-fit: cover;/s);
     expect(css).toMatch(/\.zen-garden-strip \{[^}]*justify-content: center;/s);
     expect(css).toContain('background: url("/zen-garden-bg.jpg") center / auto 100% repeat-x');
     expect(css).toMatch(/\.zen-garden \{[^}]*--zen-height: clamp\(70px, 11vh, 120px\);/s);
