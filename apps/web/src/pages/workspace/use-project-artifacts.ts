@@ -162,6 +162,11 @@ export function useProjectArtifacts(
       setActiveContent(draftMessage?.body ?? "");
       return;
     }
+    // Nothing of the previous document while this one loads: a reader that
+    // hands a sandboxed frame one document and then another never paints
+    // the second (see design.tsx), and the stale text was never this
+    // document's anyway.
+    setActiveContent("");
     let cancelled = false;
     void api
       .artifactContent(tenantId, activeNode.id)
