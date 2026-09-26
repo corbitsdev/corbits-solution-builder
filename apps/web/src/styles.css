@@ -4429,3 +4429,136 @@ button[aria-disabled="true"] {
   outline: 2px solid var(--wb-primary);
   outline-offset: 2px;
 }
+
+/* ---- Stage 4: a phone screen inside an iPhone 17 Pro (#101) ---- */
+
+/* One phone per marked screen, side by side; the rack scrolls sideways when
+   there are more than fit. The pane scrolls for the height. */
+.phone-rack {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-6);
+  overflow-x: auto;
+  padding: var(--space-2) 2px var(--space-3);
+}
+
+.iphone {
+  --iphone-w: 402px;
+  --iphone-h: 874px;
+  --iphone-bezel: 11px;
+  --iphone-radius: 55px;
+  --iphone-status: 54px;
+  flex: none;
+  display: grid;
+  gap: var(--space-2);
+  justify-items: center;
+  margin: 0;
+}
+
+/* The device: a dark titanium band with a hairline highlight, and the four
+   buttons standing just proud of it. */
+.iphone-body {
+  position: relative;
+  box-sizing: content-box;
+  width: var(--iphone-w);
+  height: var(--iphone-h);
+  padding: var(--iphone-bezel);
+  border-radius: calc(var(--iphone-radius) + var(--iphone-bezel));
+  background: linear-gradient(160deg, #55565c 0%, #2b2c30 45%, #131316 100%);
+  box-shadow:
+    inset 0 0 0 1.5px rgba(255, 255, 255, 0.16),
+    inset 0 0 0 3px rgba(0, 0, 0, 0.6),
+    0 24px 48px -24px rgba(0, 0, 0, 0.55);
+}
+
+.iphone-button {
+  position: absolute;
+  width: 4px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #3a3b40, #1d1e22);
+}
+
+.iphone-button-action { left: -4px; top: 168px; height: 32px; }
+.iphone-button-up { left: -4px; top: 226px; height: 62px; }
+.iphone-button-down { left: -4px; top: 302px; height: 62px; }
+.iphone-button-side { right: -4px; top: 258px; height: 98px; }
+
+.iphone-screen {
+  position: relative;
+  width: var(--iphone-w);
+  height: var(--iphone-h);
+  overflow: hidden;
+  border-radius: var(--iphone-radius);
+  background: #fff;
+}
+
+/* The status bar is the phone's, not the design's: the screen's content
+   starts beneath it. */
+.iphone-status {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--iphone-status);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 18px 34px 0 42px;
+  background: #fff;
+  color: #000;
+  font-family: -apple-system, "SF Pro Text", "Helvetica Neue", var(--wb-font-sans, sans-serif);
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.iphone-island {
+  position: absolute;
+  top: 11px;
+  left: 50%;
+  width: 126px;
+  height: 37px;
+  transform: translateX(-50%);
+  border-radius: 20px;
+  background: #000;
+}
+
+.iphone-indicators {
+  fill: #000;
+  stroke: #000;
+}
+
+.iphone-content {
+  position: absolute;
+  inset: var(--iphone-status) 0 0 0;
+  background: #fff;
+}
+
+.iphone-content > iframe,
+.design-phone-screen {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.iphone-home {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  width: 134px;
+  height: 5px;
+  transform: translateX(-50%);
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.85);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.iphone-caption {
+  font-size: 0.8125rem;
+  color: var(--wb-muted-foreground);
+}

@@ -457,7 +457,8 @@ Requirements the document must meet:
   on grid and flex children), no fixed or minimum width wider than the column
   it sits in, and nothing clipped at the right edge. A container that hides
   its overflow hides the design; something genuinely wide, a data table or a
-  sheet, scrolls inside its own panel instead.
+  sheet, scrolls inside its own panel instead. A phone screen is the one
+  exception, below.
 - Show the states real software actually reaches — empty, loading, error and
   disabled — as visible sections of the mockup rather than as prose about them.
   A design that omits them is a sketch.
@@ -466,11 +467,22 @@ Requirements the document must meet:
   there (a phone SMS thread, a hosted web admin, a desktop window, a CLI…). A
   deliverable with more than one surface — a text-message flow and the web
   console that manages it, say — gets one \`<section data-testid="screen-<name>">\`
-  per surface, each laid out and chrome'd (via CSS only: a phone-width frame
-  with a notch and message bubbles, a browser-chrome bar and sidebar, a
-  terminal frame) so the two are visually distinct without leaving the single
-  document. A deliverable with one surface still gets exactly one such
-  section — do not invent extra screens it does not need.
+  per surface, each laid out and chrome'd (via CSS only: a browser-chrome
+  bar and sidebar, a terminal frame, an SMS thread's bubbles) so the two are
+  visually distinct without leaving the single document. A deliverable with
+  one surface still gets exactly one such section — do not invent extra
+  screens it does not need.
+- **A phone screen is drawn as the screen, never as the phone.** Mark each
+  one \`<section data-testid="screen-<name>" data-surface="phone">\`. The
+  review window puts every such section inside a real iPhone of its own,
+  402px wide, and draws the status bar, Dynamic Island and home indicator
+  itself — so draw none of those, and no bezel, notch or rounded device
+  outline. Lay the section out for a 402px-wide viewport: a single column
+  that fills its width, the app's own navigation and tab bars as its chrome,
+  and content taller than the screen simply continuing downward, since the
+  screen scrolls the way the real one does. Several screens of one phone app
+  are several such sections, one per screen, in the order a person meets
+  them. Nothing outside those sections is laid out for a phone.
 - After the mockup, include these three sections inside
   \`<section data-testid="design-notes">\`, each under an \`<h2>\`:
   "Primary flows", "Interaction notes", and "Visual verification criteria".

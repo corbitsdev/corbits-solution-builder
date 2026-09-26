@@ -20,8 +20,9 @@ import {
  * Anchoring works because the parent reads the frame's document directly, which
  * a `srcdoc` frame permits without granting the frame anything.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiFailure, type ArtifactNode, type DesignFeedbackEntry } from "../client.js";
+import { DesignFrames, FrameSelect, framedDesign, type FrameMode } from "../design-frames.tsx";
 import { revisionPrompt, type Anchor, type Direction } from "@solutions-builder/app/design-prompt";
 import { Banner, Button, Field, StateLabel, documentName } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
@@ -43,7 +44,6 @@ import { Markdown } from "../markdown.jsx";
 export function looksLikeHtmlDocument(content: string): boolean {
   return /^\s*<!doctype\s+html|^\s*<html[\s>]/i.test(content);
 }
-
 type PendingComment = { anchor: Anchor; body: string };
 
 /** Builds an anchor for a clicked element, preferring a stable id. */
@@ -172,10 +172,21 @@ export function DesignFeedbackView({
   const [overallNote, setOverallNote] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const frame = useRef<HTMLIFrameElement>(null);
+  const [frameMode, setFrameMode] = useState<FrameMode>("auto");
+  // Every frame the design is shown in — the pane's and one per phone — so
+  // feedback mode can listen in all of them.
+  const frames = useRef(new Map<string, HTMLIFrameElement>());
+  const registerFrame = (id: string, element: HTMLIFrameElement | null) => {
+    if (element) frames.current.set(id, element);
+    else frames.current.delete(id);
+  };
 
   const design = designs.find((entry) => entry.id === selectedId) ?? designs.at(-1) ?? null;
   const content = design ? (contentByNode.get(design.id) ?? "") : "";
+  const framed = useMemo(
+    () => (content && looksLikeHtmlDocument(content) ? framedDesign(content, frameMode, design?.title ?? "Design") : null),
+    [content, frameMode, design?.title],
+  );
 
   // Feedback on each node lives on that node's own artifact metadata
   // (`sb.feedback`), not the deleted lifecycle run — read straight off it
@@ -215,10 +226,9 @@ export function DesignFeedbackView({
   // Click-to-anchor. The listener lives on the frame's document, added only
   // while feedback mode is on so ordinary preview stays ordinary.
   useEffect(() => {
-    const element = frame.current;
-    if (!element || !feedbackMode) return;
+    if (!feedbackMode) return;
 
-    const attach = () => {
+    const attach = (element: HTMLIFrameElement) => {
       const document_ = element.contentDocument;
       if (!document_) return;
       const onClick = (event: Event) => {
@@ -242,17 +252,22 @@ export function DesignFeedbackView({
       };
     };
 
-    let detach = attach();
-    const onLoad = () => {
-      detach?.();
-      detach = attach();
-    };
-    element.addEventListener("load", onLoad);
+    const cleanups = [...frames.current.values()].map((element) => {
+      let detach = attach(element);
+      const onLoad = () => {
+        detach?.();
+        detach = attach(element);
+      };
+      element.addEventListener("load", onLoad);
+      return () => {
+        detach?.();
+        element.removeEventListener("load", onLoad);
+      };
+    });
     return () => {
-      detach?.();
-      element.removeEventListener("load", onLoad);
+      for (const cleanup of cleanups) cleanup();
     };
-  }, [feedbackMode, design?.id]);
+  }, [feedbackMode, design?.id, framed]);
 
   if (designs.length === 0) {
     return (
@@ -307,6 +322,7 @@ export function DesignFeedbackView({
               <option value="preview">Preview</option>
               <option value="feedback">Feedback</option>
             </select>
+            <FrameSelect value={frameMode} onChange={setFrameMode} />
             {design ? <PrintButton node={design} tenantId={tenantId} content={content || null} /> : null}
             {design && approval.canApprove ? (
               <Button
@@ -340,14 +356,13 @@ export function DesignFeedbackView({
             version a new frame rather than a second navigation. */}
         {!content ? (
           <div className="design-preview" aria-busy="true" aria-label="Loading the design preview" />
-        ) : looksLikeHtmlDocument(content) ? (
-          <iframe
-            key={design?.id}
-            ref={frame}
-            className="design-preview"
+        ) : framed ? (
+          <DesignFrames
+            framed={framed}
+            frameKey={design?.id ?? ""}
             title={`Design preview: ${design?.title ?? ""} v${design ? designOrdinal(designs, design) : ""}`}
-            srcDoc={content}
-            sandbox=""
+            paneClassName="design-preview"
+            registerFrame={registerFrame}
           />
         ) : (
           <div className="design-preview design-preview-markdown">

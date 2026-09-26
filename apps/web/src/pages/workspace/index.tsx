@@ -35,6 +35,7 @@ import { DesignFeedbackView } from "../design.jsx";
 import { Tabs } from "@corbits/react-ui";
 import { Banner, Button, GuideDock, Screen, StateLabel, documentName, stageName, versionDigest } from "../../components.jsx";
 import { useBusyWhile } from "../../use-busy.ts";
+import { DesignFrames, FrameSelect, framedDesign, type FrameMode } from "../../design-frames.tsx";
 import { DeliveryPanel } from "./delivery.jsx";
 import { StageConversation } from "./thread.jsx";
 import { StageDocument } from "./document.jsx";
@@ -200,6 +201,8 @@ export function StageWorkspace({
   const [composer, setComposer] = useState("");
   const [sending, setSending] = useState(false);
   const [stopSeed, setStopSeed] = useState<{ text: string; at: number } | null>(null);
+  // How a design read here is framed: phone screens in iPhones, or the pane (#101).
+  const [frameMode, setFrameMode] = useState<FrameMode>("auto");
 
   const withdrawn = useWithdrawnTurns(
     detail.project.id,
@@ -588,6 +591,9 @@ export function StageWorkspace({
               {artifacts.activeNode.supersededByNodeId ? " · superseded" : " · viewing"}
             </span>
             <div className="document-tools">
+              {artifacts.activeNode.mediaType === "text/html" || artifacts.activeNode.kind === "design_artifact" ? (
+                <FrameSelect value={frameMode} onChange={setFrameMode} />
+              ) : null}
               <Button variant="ghost" onClick={() => artifacts.select(null)}>
                 Back to {stageName(stage)}
               </Button>
@@ -603,16 +609,14 @@ export function StageWorkspace({
           ) : isDataUrl(artifacts.activeContent) ? (
             <BinaryFile node={artifacts.activeNode} tenantId={tenantId} content={artifacts.activeContent} />
           ) : artifacts.activeNode.mediaType === "text/html" || artifacts.activeNode.kind === "design_artifact" ? (
-            // One frame per document, mounted only once its document is
-            // here: a sandboxed srcdoc frame given a second document never
-            // paints it (design.tsx has the same rule).
-            <iframe
-              key={artifacts.activeNode.id}
-              className="artifact-page"
+            // Each phone screen in an iPhone, the rest in the page frame
+            // (#101); one frame per document, mounted only once its
+            // document is here.
+            <DesignFrames
+              framed={framedDesign(artifacts.activeContent, frameMode, artifacts.activeNode.title)}
+              frameKey={artifacts.activeNode.id}
               title={`${stageName(artifacts.activeNode.stage)} v${artifacts.activeNode.version}`}
-              srcDoc={artifacts.activeContent}
-              sandbox=""
-              style={{ background: "#fff" }} // not-our-surface: a generated mockup is its own page
+              paneClassName="artifact-page"
             />
           ) : (
             <Markdown source={artifacts.activeContent} />
