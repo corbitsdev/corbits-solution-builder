@@ -585,7 +585,11 @@ export function StageWorkspace({
           ) : isDataUrl(artifacts.activeContent) ? (
             <BinaryFile node={artifacts.activeNode} tenantId={tenantId} content={artifacts.activeContent} />
           ) : artifacts.activeNode.mediaType === "text/html" || artifacts.activeNode.kind === "design_artifact" ? (
+            // One frame per document, mounted only once its document is
+            // here: a sandboxed srcdoc frame given a second document never
+            // paints it (design.tsx has the same rule).
             <iframe
+              key={artifacts.activeNode.id}
               className="artifact-page"
               title={`${stageName(artifacts.activeNode.stage)} v${artifacts.activeNode.version}`}
               srcDoc={artifacts.activeContent}
