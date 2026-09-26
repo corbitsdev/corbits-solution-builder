@@ -4,6 +4,7 @@ import {
   conversationLead,
   isHtmlDocument,
   isSubstantialDraft,
+  latestDesignReply,
   latestSubstantialDraft,
   workspaceGuidance,
 } from "./guidance.ts";
@@ -117,3 +118,28 @@ describe("workspace guidance", () => {
   });
 });
 
+
+describe("latestDesignReply", () => {
+  const agent = (id: string, body: string): ChatMessage => ({ id, author: "agent", body, at });
+  const mockup = `<!doctype html>\n<html lang="en"><head><style>body{margin:0}</style></head><body>${"<section data-testid=\"screen-phone\">Workout Log</section>".repeat(8)}</body></html>`;
+
+  test("the latest HTML document reply is the design, even when later replies are conversation", () => {
+    const messages = [person("Design it"), agent("d1", mockup), agent("ack", "Noted: a deadline deletes unreviewed items, so a clock is now in both states.")];
+    expect(latestDesignReply(messages)?.id).toBe("d1");
+  });
+
+  test("an error reply, a markdown document and a short HTML fragment are never a design (#81)", () => {
+    const markdownDoc = ["## In short", "- You chose Approach B", "", "## Fit", "The app stays an iPhone application.", "", "## Risks", "A false station change may split several later sets until reviewed. ".repeat(4)].join("\n");
+    const messages = [
+      agent("doc", markdownDoc),
+      agent("err", "This agent could not complete your request due to an unrecoverable inference error [HTTP 404]: Not found"),
+      agent("frag", "<!doctype html><html><body>tiny</body></html>"),
+    ];
+    expect(latestDesignReply(messages)).toBeNull();
+    expect(latestSubstantialDraft(messages)?.id).toBe("doc");
+  });
+
+  test("the person's own HTML never counts", () => {
+    expect(latestDesignReply([person(mockup)])).toBeNull();
+  });
+});

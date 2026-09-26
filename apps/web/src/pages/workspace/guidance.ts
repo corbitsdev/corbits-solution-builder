@@ -118,6 +118,16 @@ export function latestSubstantialDraft(messages: readonly ChatMessage[]): ChatMe
   return [...messages].reverse().find((message) => message.author === "agent" && isSubstantialDraft(message.body)) ?? null;
 }
 
+/** The latest design reply: a stage-4 specialist's whole reply is one
+ *  self-contained HTML document (`kit.ts`), so only such a reply is a design
+ *  version. An error, a question or an acknowledgement from the same
+ *  specialist is conversation and never stands in as the mockup (#81). */
+export function latestDesignReply(messages: readonly ChatMessage[]): ChatMessage | null {
+  return (
+    [...messages].reverse().find((message) => message.author === "agent" && isHtmlDocument(message.body) && isSubstantialDraft(message.body)) ?? null
+  );
+}
+
 export type EvaluatorVerdict = {
   readonly ready: boolean;
   readonly notes: readonly string[];
