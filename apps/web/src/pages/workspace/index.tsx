@@ -41,6 +41,7 @@ import { BuildPanel } from "./build.jsx";
 import { TargetPicker } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
 import { interviewProgress, latestDesignReply, workspaceGuidance } from "./guidance.js";
+import { designHistory } from "./design-history.ts";
 import { useWorkflowView } from "./use-workflow-view.ts";
 import { useStageAgent } from "./use-stage-agent.ts";
 import { useStageThread } from "./use-stage-thread.ts";
@@ -1004,10 +1005,7 @@ function DesignPanel({
   // the mail-chat contract nothing writes one of these until approval, so
   // the specialist's latest reply stands in as a not-yet-persisted design
   // while none exists yet.
-  const persisted = useMemo(
-    () => detail.nodes.filter((node) => node.kind === "design_artifact").sort((left, right) => left.version - right.version),
-    [detail.nodes],
-  );
+  const persisted = useMemo(() => designHistory(detail.nodes), [detail.nodes]);
   const draftNode: ArtifactNode | null = latestReply
     ? {
         id: `reply:${latestReply.id}`,
