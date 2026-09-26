@@ -42,6 +42,7 @@ import { TargetPicker } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
 import { interviewProgress, latestDesignReply, workspaceGuidance } from "./guidance.js";
 import { designHistory } from "./design-history.ts";
+import { Flame } from "lucide-react";
 import { useWorkflowView } from "./use-workflow-view.ts";
 import { useStageAgent } from "./use-stage-agent.ts";
 import { useStageThread } from "./use-stage-thread.ts";
@@ -711,7 +712,12 @@ export function StageWorkspace({
       ) : null}
 
       {agentAddress ? (
-        <div className="stage-model-row">
+        <div className="stage-model-row" data-inference-pending={pending !== null ? "" : undefined}>
+          {/* The flame burns while a specialist turn is in flight and sits
+              still otherwise (#87); the text keeps the state readable. */}
+          <span className="inference-flame" role="img" aria-label={pending !== null ? "Inference running" : "Inference idle"}>
+            <Flame aria-hidden="true" />
+          </span>
           <span className="inline-note">
             Inference:{" "}
             {activeModel ? `${activeModel.providerLabel} · ${activeModel.canonicalName}` : "Loading…"}
@@ -798,7 +804,7 @@ export function StageWorkspace({
       ) : null}
 
       {agentAddress && stage === 4 ? (
-        <StagePanes strip={stripEl} conversation={conversation}>
+        <StagePanes strip={stripEl} conversation={conversation} busy={pending !== null}>
           {reader ?? (
             <DesignPanel
               detail={detail}
@@ -814,7 +820,7 @@ export function StageWorkspace({
       ) : null}
 
       {agentAddress && stage === 5 ? (
-        <StagePanes strip={stripEl} conversation={conversation}>
+        <StagePanes strip={stripEl} conversation={conversation} busy={pending !== null}>
           {reader ?? (
             <div className="stage-inner">
               <AudiencePackages
@@ -884,6 +890,7 @@ export function StageWorkspace({
           conversation={conversation}
           solo
           className="chat-first"
+          busy={pending !== null}
         >
           {reader}
         </StagePanes>
@@ -892,7 +899,7 @@ export function StageWorkspace({
       {/* A past stage opened from the stepper while this stage has a draft:
           the reader, not this stage's document and its approve gate. */}
       {agentAddress && DOCUMENT_STAGES.has(stage) && draftMessage && viewedStage !== null ? (
-        <StagePanes strip={stripEl} conversation={conversation}>
+        <StagePanes strip={stripEl} conversation={conversation} busy={pending !== null}>
           {reader}
         </StagePanes>
       ) : null}
@@ -959,7 +966,7 @@ export function StageWorkspace({
       ) : null}
 
       {agentAddress && stage === 9 ? (
-        <StagePanes strip={stripEl} conversation={conversation}>
+        <StagePanes strip={stripEl} conversation={conversation} busy={pending !== null}>
           {reader ?? (
             <div className="stage-inner">
               <DeliveryPanel

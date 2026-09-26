@@ -385,12 +385,16 @@ export function StagePanes({
   className,
   paneTour,
   tour,
+  busy = false,
 }: {
   conversation: ReactNode;
   strip?: ReactNode;
   children: ReactNode;
   /** Draft closed: conversation takes the width. */
   solo?: boolean;
+  /** A specialist turn is in flight: the conversation column breathes
+   *  (`.conv[data-inference-pending]`, #87) until the reply lands. */
+  busy?: boolean;
   conversationRef?: Ref<HTMLElement>;
   className?: string;
   paneTour?: string;
@@ -405,7 +409,12 @@ export function StagePanes({
       style={split ? (panesWidth.style as CSSProperties) : undefined}
       {...(tour ? { "data-tour": tour } : {})}
     >
-      <section ref={conversationRef} className={CONV_CLASS} aria-label="Conversation with the specialist">
+      <section
+        ref={conversationRef}
+        className={CONV_CLASS}
+        aria-label="Conversation with the specialist"
+        data-inference-pending={busy ? "" : undefined}
+      >
         {conversation}
       </section>
       {split ? (
