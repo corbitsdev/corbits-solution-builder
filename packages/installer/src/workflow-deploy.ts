@@ -47,26 +47,98 @@ export async function deploymentIsLive(transport: Transport, tenantId: string, d
   return isLive((await workflows.deployments()).find((entry: HubDeployment) => entry.id === deploymentId));
 }
 
+/** Placed, from a caller's point of view: `running` is what a deployment
+ *  the hub restored after a restart reports once its anchor run is on. */
+function isPlaced(deployment: HubDeployment): boolean {
+  return deployment.status === "deployed" || deployment.status === "running";
+}
+
 /**
- * Resolves once the hub reports this deployment `deployed`, so a caller does
- * not mail a run that has no placed sidecar yet. Returns false if it ends or
- * the wait runs out; the caller decides how loudly to say so.
+ * How long a wait on the hub's placement may last. Every bound has a
+ * default sized for a host restart, when the hub restores each dead
+ * deployment's sidecar in turn and each takes a minute or more.
+ */
+export type PlacementWait = {
+  /** How long the hub may go with no deployment in the tenant changing
+   *  before the wait gives up: the hub has stopped placing anything. */
+  readonly stallMs?: number;
+  /** The most a wait lasts however busy the hub stays. */
+  readonly ceilingMs?: number;
+  readonly pollMs?: number;
+};
+
+const PLACEMENT_STALL_MS = 120_000;
+const PLACEMENT_CEILING_MS = 15 * 60_000;
+const PLACEMENT_POLL_MS = 2_000;
+
+/** Every deployment's status, so a change to any of them reads as the hub having moved. */
+function placementFingerprint(deployments: readonly HubDeployment[]): string {
+  return deployments
+    .map((entry) => `${entry.id}:${entry.status}`)
+    .sort()
+    .join("\n");
+}
+
+/**
+ * Polls the tenant's deployments until `read` settles on a result, and
+ * gives up (null) only once the hub has visibly stopped: no deployment in
+ * the tenant has appeared or changed status for `stallMs`, or the wait has
+ * lasted `ceilingMs`. After a host restart the hub restores every dead
+ * deployment's sidecar one at a time, so a deadline counted from the
+ * caller's own start ran out while the hub was still working through the
+ * ones ahead of this caller's. Counting from the hub's last visible move
+ * instead keeps a page opened mid-restart waiting -- honestly, since the
+ * hub is still placing -- rather than reporting a failure that a retry a
+ * minute later would not see.
+ */
+export async function pollWhilePlacing<T>(
+  workflows: { deployments: () => Promise<readonly HubDeployment[]> },
+  read: (deployments: readonly HubDeployment[]) => Promise<T | null> | T | null,
+  wait: PlacementWait = {},
+): Promise<T | null> {
+  const stallMs = wait.stallMs ?? PLACEMENT_STALL_MS;
+  const ceilingMs = wait.ceilingMs ?? PLACEMENT_CEILING_MS;
+  const pollMs = wait.pollMs ?? PLACEMENT_POLL_MS;
+  const started = Date.now();
+  let lastMove = started;
+  let seen: string | undefined;
+  for (;;) {
+    const deployments = await workflows.deployments();
+    const found = await read(deployments);
+    if (found !== null) return found;
+    const now = Date.now();
+    const fingerprint = placementFingerprint(deployments);
+    if (seen !== undefined && fingerprint !== seen) lastMove = now;
+    seen = fingerprint;
+    if (now - lastMove >= stallMs || now - started >= ceilingMs) return null;
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+}
+
+/**
+ * Resolves once the hub reports this deployment placed, so a caller does
+ * not mail a run that has no placed sidecar yet. Returns false if it ends,
+ * or if the hub stops placing (see `pollWhilePlacing`); the caller decides
+ * how loudly to say so.
  */
 export async function waitForDeploymentDeployed(
   transport: Transport,
   tenantId: string,
   deploymentId: string,
-  timeoutMs = 120_000,
+  wait: PlacementWait = {},
 ): Promise<boolean> {
   const workflows = workflowsFor(transport, tenantId);
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const found = (await workflows.deployments()).find((entry: HubDeployment) => entry.id === deploymentId);
-    if (found?.status === "deployed") return true;
-    if (!isLive(found)) return false;
-    if (Date.now() >= deadline) return false;
-    await new Promise((resolve) => setTimeout(resolve, 2_000));
-  }
+  const outcome = await pollWhilePlacing(
+    workflows,
+    (deployments) => {
+      const found = deployments.find((entry: HubDeployment) => entry.id === deploymentId);
+      if (found && isPlaced(found)) return "placed" as const;
+      if (!isLive(found)) return "ended" as const;
+      return null;
+    },
+    wait,
+  );
+  return outcome === "placed";
 }
 
 /** The closure bytes a workflow deploy needs, fetched from the static
