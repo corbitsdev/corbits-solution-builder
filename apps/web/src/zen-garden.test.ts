@@ -5,7 +5,7 @@ import { join } from "node:path";
 const here = import.meta.dir;
 const read = (relative: string) => readFileSync(join(here, relative), "utf8");
 
-// #93: an action longer than half a second must say the app is busy somewhere
+// #93: an action longer than one second must say the app is busy somewhere
 // the eye can find it — the garden along the foot of the window — not only
 // inside the button that was pressed.
 describe("the zen garden busy indicator", () => {

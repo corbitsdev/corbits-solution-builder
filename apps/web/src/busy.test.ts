@@ -11,7 +11,7 @@ import {
   type IndicatorState,
 } from "./busy.ts";
 
-const timing = { showAfterMs: 500, lingerMs: 600 };
+const timing = { showAfterMs: 1_000, lingerMs: 600 };
 
 describe("the busy count", () => {
   test("counts each registration until it is released, and a release is idempotent", () => {
@@ -44,7 +44,7 @@ describe("the busy count", () => {
   });
 });
 
-// The product rule: an action longer than half a second must say the app is
+// The product rule: an action longer than one second must say the app is
 // busy, and one shorter than that must not flash an indicator on and off.
 describe("when the indicator shows", () => {
   test("work shorter than the grace period never shows", () => {
@@ -57,13 +57,13 @@ describe("when the indicator shows", () => {
 
   test("continuous work shows once the grace period has passed, counting from when it began", () => {
     let state: IndicatorState = stepIndicator(IDLE, 1, 1_000, timing);
-    expect(nextDeadline(state, 1_100, timing)).toBe(400);
-    state = stepIndicator(state, 1, 1_499, timing);
+    expect(nextDeadline(state, 1_100, timing)).toBe(900);
+    state = stepIndicator(state, 1, 1_999, timing);
     expect(state.phase).toBe("arming");
-    state = stepIndicator(state, 1, 1_500, timing);
+    state = stepIndicator(state, 1, 2_000, timing);
     expect(state).toEqual({ phase: "shown", since: 1_000 });
     expect(indicatorVisible(state)).toBe(true);
-    expect(nextDeadline(state, 1_500, timing)).toBeNull();
+    expect(nextDeadline(state, 2_000, timing)).toBeNull();
   });
 
   test("a gap between chained requests shorter than the linger keeps it up", () => {
