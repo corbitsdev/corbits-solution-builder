@@ -36,3 +36,11 @@ describe("stage 5 audience packages", () => {
     expect(body).toContain("setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));");
   });
 });
+
+// #99: the control that opens the stakeholder editor says what it opens.
+describe("the stakeholder editor's control", () => {
+  test("is named for what it manages, not a bare Edit", () => {
+    expect(source).toContain("Manage stakeholders");
+    expect(source).not.toMatch(/>\s*Edit\s*</);
+  });
+});

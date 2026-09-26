@@ -310,7 +310,7 @@ function Stakeholders({
             {audiences.map((audience) => audience.name).join(" · ") || "No stakeholders"} · {quorum} must proceed
           </p>
           <Button variant="ghost" onClick={() => setEditing(true)}>
-            Edit
+            Manage stakeholders
           </Button>
         </div>
       )}
