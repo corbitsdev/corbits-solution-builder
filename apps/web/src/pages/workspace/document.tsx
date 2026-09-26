@@ -19,7 +19,7 @@ import { approachName, sectionsIn } from "@solutions-builder/app/document";
 import { agentFor } from "@solutions-builder/app/kit";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { markChanges } from "../../revisions.js";
-import { Button, documentName } from "../../components.jsx";
+import { Button, documentName, CopyButton } from "../../components.jsx";
 import { PrintButton } from "../../print.jsx";
 import { BinaryFile, isDataUrl } from "../../binary-file.tsx";
 import { SpecialistTurn, WorkingLabel, type TurnNote } from "./thread.jsx";
@@ -608,6 +608,7 @@ export function StageDocument({
                 </button>
               ) : null}
               <div className="document-tools">
+                {!binary ? <CopyButton text={content} /> : null}
                 {versions.length > 1 && strip === null ? (
                   <select
                     aria-label="Version"

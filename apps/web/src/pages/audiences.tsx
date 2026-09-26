@@ -14,7 +14,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ApiFailure, type ArtifactNode, type ProjectDetail } from "../client.js";
 import type { ChatMessage } from "../stage-mail.ts";
-import { Banner, Button, downloadArtifact, Field, StateLabel } from "../components.jsx";
+import { Banner, Button, CopyButton, downloadArtifact, Field, StateLabel } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
 import { Tabs, Input } from "@corbits/react-ui";
 import { Markdown } from "../markdown.jsx";
@@ -765,6 +765,9 @@ export function AudiencePackages({
                     v{selected.version} · {selected.variant ?? selected.title}
                     {selected.supersededByNodeId ? " · superseded" : ""}
                   </span>
+                  <div className="document-tools">
+                    <CopyButton text={content || null} />
+                  </div>
                 </div>
                 {content ? <Markdown source={content} /> : <p className="inline-note">Loading…</p>}
               </div>
