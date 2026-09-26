@@ -173,7 +173,9 @@ form:has(> div > textarea) textarea:focus-visible {
 
 .app {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  /* The third row is the busy indicator's garden; it is 0 tall until there
+     is something to wait for. */
+  grid-template-rows: auto minmax(0, 1fr) auto;
   /* The window is the app. Nothing scrolls but the one region meant to. */
   height: 100vh;
   overflow: hidden;
@@ -4077,4 +4079,177 @@ button[aria-disabled="true"] {
   min-height: 70vh;
   border: 1px solid var(--wb-border);
   border-radius: var(--radius-md);
+}
+
+/* ---- The busy indicator: a zen garden along the foot of the window (#93) ---- */
+
+/* Always in the grid and 0 tall until there is something to wait for, so
+   arriving is a slide rather than a jump. The colours are mixes of the
+   theme's own tokens — a warm sand off the primary, lines a shade darker —
+   which is what lets the garden go dark with the rest of the frame. */
+.zen-garden {
+  --zen-sand: color-mix(in srgb, var(--wb-primary) 9%, var(--wb-background));
+  --zen-line: color-mix(in srgb, var(--wb-primary) 30%, var(--wb-border-strong));
+  --zen-stone: color-mix(in srgb, var(--wb-foreground) 55%, var(--wb-muted));
+  --zen-figure: var(--wb-foreground);
+  --zen-hat: color-mix(in srgb, var(--wb-primary) 70%, var(--wb-foreground));
+  --zen-height: 44px;
+  position: relative;
+  height: 0;
+  overflow: hidden;
+  transition: height 260ms ease;
+}
+
+.zen-garden[data-visible] {
+  height: var(--zen-height);
+}
+
+/* The rule sits on the strip, inside the clipped box, so the hidden row is
+   0 tall and not a 1px line across the foot of the canvas. */
+.zen-garden-strip {
+  position: relative;
+  box-sizing: border-box;
+  height: var(--zen-height);
+  overflow: hidden;
+  border-top: 1px solid var(--wb-border);
+}
+
+.zen-sand,
+.zen-raked {
+  position: absolute;
+  inset: 0;
+}
+
+.zen-sand {
+  background: var(--zen-sand);
+}
+
+/* The lines the rake leaves: horizontal, the way tines dragged along the
+   direction of travel would leave them. Revealed from the left in step with
+   the figure — both animations are linear over the same period, so the
+   reveal's edge stays where the tines are. */
+.zen-raked {
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0 5px,
+    var(--zen-line) 5px 6px
+  );
+  opacity: 0.85;
+  clip-path: inset(0 calc(100% - 10px) 0 0);
+  animation: zen-rake 14s linear infinite;
+}
+
+.zen-stone {
+  position: absolute;
+  bottom: 9px;
+  border-radius: 50%;
+  background: var(--zen-stone);
+  box-shadow: inset 2px 2px 0 color-mix(in srgb, var(--wb-background) 35%, transparent);
+}
+
+.zen-stone-a { left: 31%; width: 16px; height: 9px; }
+.zen-stone-b { left: 69%; width: 11px; height: 7px; bottom: 13px; }
+
+.zen-raker {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 56px;
+  height: 44px;
+  animation: zen-walk 14s linear infinite;
+  will-change: transform;
+}
+
+.zen-raker-figure {
+  display: block;
+  stroke: var(--zen-figure);
+  animation: zen-bob 0.35s ease-in-out infinite alternate;
+}
+
+.zen-raker-figure .zen-head { fill: var(--zen-figure); stroke: none; }
+.zen-raker-figure .zen-hat { fill: var(--zen-hat); stroke: none; }
+.zen-raker-figure .zen-hat-brim { stroke: var(--zen-hat); }
+
+.zen-leg,
+.zen-arm {
+  transform-box: view-box;
+}
+
+.zen-leg {
+  transform-origin: 30px 27px;
+  animation: zen-stride 0.7s ease-in-out infinite alternate;
+}
+
+.zen-leg-front {
+  animation-delay: -0.7s;
+}
+
+.zen-arm {
+  transform-origin: 31px 18px;
+  animation: zen-pull 0.7s ease-in-out infinite alternate;
+}
+
+.zen-garden-caption {
+  position: absolute;
+  right: var(--space-4);
+  top: 50%;
+  transform: translateY(-50%);
+  margin: 0;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--wb-background) 80%, transparent);
+  font-family: var(--wb-font-mono);
+  font-size: 0.75rem;
+  color: var(--wb-muted-foreground);
+  pointer-events: none;
+}
+
+.zen-garden-clock {
+  color: var(--wb-foreground);
+}
+
+/* The walk spans the window, less the figure's own width; the sand is
+   raked to the tines, ten pixels into the figure's box. Both fade at the
+   ends so a lap ends with a breath rather than a cut. */
+@keyframes zen-walk {
+  0% { transform: translateX(0); opacity: 0; }
+  3% { opacity: 1; }
+  97% { opacity: 1; }
+  100% { transform: translateX(calc(100vw - 56px)); opacity: 0; }
+}
+
+@keyframes zen-rake {
+  0% { clip-path: inset(0 calc(100% - 10px) 0 0); opacity: 0.85; }
+  97% { opacity: 0.85; }
+  100% { clip-path: inset(0 46px 0 0); opacity: 0; }
+}
+
+@keyframes zen-stride {
+  from { transform: rotate(-16deg); }
+  to { transform: rotate(16deg); }
+}
+
+@keyframes zen-pull {
+  from { transform: rotate(-5deg); }
+  to { transform: rotate(5deg); }
+}
+
+@keyframes zen-bob {
+  from { transform: translateY(0); }
+  to { transform: translateY(-1px); }
+}
+
+/* Still under reduced motion: the figure stands at the left of a garden
+   already raked, and only the clock moves. */
+@media (prefers-reduced-motion: reduce) {
+  .zen-raker,
+  .zen-raker-figure,
+  .zen-raked,
+  .zen-leg,
+  .zen-arm {
+    animation: none;
+  }
+  .zen-raked {
+    clip-path: none;
+  }
 }

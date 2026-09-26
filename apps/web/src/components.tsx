@@ -16,6 +16,7 @@ import {
   type StatusDotTone,
 } from "@corbits/react-ui";
 import corbitsMark from "./assets/corbits-mark.svg";
+import { beginBusy } from "./busy.ts";
 
 type Tone =
   | "success"
@@ -94,6 +95,12 @@ export function Button({
   "data-tour"?: string;
 }) {
   const inert = disabled || loading;
+  // A loading button is the one mark most actions make, and the busy
+  // indicator at the foot of the window counts every one of them (#93).
+  useEffect(() => {
+    if (!loading) return;
+    return beginBusy();
+  }, [loading]);
   return (
     <UiButton
       type={type}
