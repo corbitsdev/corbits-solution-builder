@@ -79,13 +79,20 @@ export async function ensureProvider(
  */
 export async function ensureWorkflowArtifactsCredential(
   transport: Transport,
-  workspaceTenantId: string,
+  /** The tenant the specialist deploys in: the project's own (#29). The
+   *  credential and the token registration land here, where its run is. */
+  tenantId: string,
   hubOrigin: string,
   assetName: string,
   anchorRunId: string,
+  /** The tenant holding the one `sb-workflow-artifacts` provider: the
+   *  workspace. A project-owned credential resolves an inherited provider
+   *  through the hub's tenant walk-up, so there is one provider row for
+   *  every project rather than one per tenant. Defaults to `tenantId`. */
+  providerTenantId: string = tenantId,
 ): Promise<void> {
-  const catalog = catalogFor(transport, workspaceTenantId);
-  const provider = await ensureProvider(catalog, hubOrigin);
+  const catalog = catalogFor(transport, tenantId);
+  const provider = await ensureProvider(catalogFor(transport, providerTenantId), hubOrigin);
   const token = mintToken();
   const name = workflowArtifactsCredentialName(assetName);
   try {
@@ -96,5 +103,5 @@ export async function ensureWorkflowArtifactsCredential(
     if (!existing) throw cause;
     await catalog.patchCredential(existing.id, { secret: token, status: "active" });
   }
-  await registerWorkflowArtifactToken(transport, workspaceTenantId, { token, anchorRunId });
+  await registerWorkflowArtifactToken(transport, tenantId, { token, anchorRunId });
 }

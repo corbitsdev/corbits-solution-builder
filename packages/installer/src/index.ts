@@ -19,6 +19,7 @@ export * from "./tenants.js";
 export * from "./assets.js";
 export * from "./install.js";
 export * from "./model-default.js";
+export * from "./project-home.js";
 export * from "./project-tenant.js";
 export * from "./provider-connect.js";
 export * from "./closure-manifest.js";

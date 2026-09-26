@@ -15,6 +15,7 @@ import {
   gitTokensFor,
   readWorkflowSourceBlob,
   workflowsFor,
+  type HubAsset,
   type HubDeployment,
 } from "./hub.js";
 import type { ClosureManifest } from "./closure-manifest.js";
@@ -223,13 +224,19 @@ export async function ensureWorkflowAsset(
   displayName: string,
 ): Promise<string> {
   const assets = assetsFor(transport, tenantId);
-  const existing = (await assets.list("workflow")).find((asset) => asset.name === name);
+  // The listing is inherited (a child tenant lists its ancestors' assets
+  // too), so the match is on the tenant as well as the name: a project
+  // tenant must never adopt the workspace's same-named asset, whose repo
+  // URL under the project's scope answers `404 no asset workflow/<name>`
+  // to the push that follows (#29).
+  const own = (asset: HubAsset) => asset.name === name && asset.tenantId === tenantId;
+  const existing = (await assets.list("workflow")).find(own);
   if (existing) return existing.id;
   try {
     return (await assets.create({ kind: "workflow", name, displayName })).id;
   } catch (cause) {
     if (cause instanceof ApiError && cause.status === 409) {
-      const created = (await assets.list("workflow")).find((asset) => asset.name === name);
+      const created = (await assets.list("workflow")).find(own);
       if (created) return created.id;
     }
     throw cause;

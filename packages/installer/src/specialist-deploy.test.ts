@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Transport } from "@intx/hub-client";
-import { leadingOffering, specialistEntryIsCurrent, stageSpecialistAddresses } from "./specialist-deploy.js";
+import { leadingOffering, specialistEntryIsCurrent, stageSpecialistAddresses, stageSpecialistStatus } from "./specialist-deploy.js";
 import { visibleCatalog } from "./visible-catalog.js";
 import { deployOrExplain, ModelProviderNotDelegatedError, sourceFor } from "./workflow-deploy.js";
 import { ApiError } from "@intx/hub-client";
@@ -16,23 +16,39 @@ const TENANT = {
   domain: "ws.example",
 };
 
-function assetRow(id: string, name: string) {
-  return { id, tenantId: TENANT.id, kind: "workflow", name };
+/** The project: a child tenant of the workspace, with its own mail domain. */
+const PROJECT_TENANT = {
+  id: "p1",
+  name: "Project",
+  slug: "p1",
+  parentId: TENANT.id,
+  createdAt: "2026-01-02T00:00:00.000Z",
+  domain: "p1.example",
+};
+
+function assetRow(id: string, name: string, tenantId: string = PROJECT_TENANT.id) {
+  return { id, tenantId, kind: "workflow", name };
 }
 
-function deploymentRow(id: string, definitionAssetId: string, status: string) {
-  return { id, tenantId: TENANT.id, definitionAssetId, status, createdAt: "2026-01-01T00:00:00.000Z" };
+function deploymentRow(id: string, definitionAssetId: string, status: string, tenantId: string = PROJECT_TENANT.id) {
+  return { id, tenantId, definitionAssetId, status, createdAt: "2026-01-01T00:00:00.000Z" };
 }
 
+/** A hub whose asset listing is inherited (the project lists the workspace's
+ *  rows too, tagged with their tenant) and whose deployments are per tenant. */
 function fakeTransport(args: {
   assets: ReturnType<typeof assetRow>[];
   deployments: ReturnType<typeof deploymentRow>[];
+  project?: typeof PROJECT_TENANT;
 }): Transport {
+  const project = args.project ?? PROJECT_TENANT;
   return {
     async fetch<T>(method: string, path: string): Promise<T> {
       if (method === "GET" && path === `/api/tenants/${TENANT.id}`) return TENANT as T;
-      if (method === "GET" && path.startsWith(`/api/tenants/${TENANT.id}/assets?kind=`)) return args.assets as T;
-      if (method === "GET" && path === `/api/tenants/${TENANT.id}/workflows/deployments`) return args.deployments as T;
+      if (method === "GET" && path === `/api/tenants/${project.id}`) return project as T;
+      if (method === "GET" && path.startsWith(`/api/tenants/${project.id}/assets?kind=`)) return args.assets as T;
+      const deployments = /^\/api\/tenants\/([^/]+)\/workflows\/deployments$/.exec(path);
+      if (method === "GET" && deployments) return args.deployments.filter((row) => row.tenantId === deployments[1]) as T;
       throw new Error(`unexpected ${method} ${path}`);
     },
   } as Transport;
@@ -48,25 +64,70 @@ describe("stageSpecialistAddresses", () => {
         deploymentRow("dep_other_stage", "asset_2", "deployed"),
       ],
     });
-    const addresses = await stageSpecialistAddresses(transport, TENANT.id, "p1", 1 as never);
-    expect(addresses.sort()).toEqual(["dep_live@ws.example", "dep_old@ws.example"].sort());
+    const addresses = await stageSpecialistAddresses(transport, "p1", 1);
+    expect(addresses.sort()).toEqual(["dep_live@p1.example", "dep_old@p1.example"].sort());
+  });
+
+  // #29: a project deployed before specialists moved into its own tenant
+  // still has a specialist in the workspace. Its addresses are part of the
+  // stage's thread, at the workspace's domain, after the project's own.
+  test("includes a legacy deployment on the workspace's same-named asset, at the workspace's domain", async () => {
+    const transport = fakeTransport({
+      assets: [assetRow("asset_own", "sb-project-p1-stage-1"), assetRow("asset_ws", "sb-project-p1-stage-1", TENANT.id)],
+      deployments: [deploymentRow("dep_own", "asset_own", "deployed"), deploymentRow("dep_legacy", "asset_ws", "released", TENANT.id)],
+    });
+    expect(await stageSpecialistAddresses(transport, "p1", 1)).toEqual(["dep_own@p1.example", "dep_legacy@ws.example"]);
   });
 
   test("empty when the stage's asset has never been deployed", async () => {
     const transport = fakeTransport({ assets: [], deployments: [] });
-    const addresses = await stageSpecialistAddresses(transport, TENANT.id, "p1", 1 as never);
+    const addresses = await stageSpecialistAddresses(transport, "p1", 1);
     expect(addresses).toEqual([]);
   });
 
   test("empty when the tenant has no mail domain yet", async () => {
-    const transport = {
-      async fetch<T>(method: string, path: string): Promise<T> {
-        if (method === "GET" && path === `/api/tenants/${TENANT.id}`) return { ...TENANT, domain: undefined } as T;
-        throw new Error(`unexpected ${method} ${path}`);
-      },
-    } as Transport;
-    const addresses = await stageSpecialistAddresses(transport, TENANT.id, "p1", 1 as never);
+    const transport = fakeTransport({
+      assets: [assetRow("asset_1", "sb-project-p1-stage-1")],
+      deployments: [deploymentRow("dep_live", "asset_1", "deployed")],
+      project: { ...PROJECT_TENANT, domain: undefined as unknown as string },
+    });
+    const addresses = await stageSpecialistAddresses(transport, "p1", 1);
     expect(addresses).toEqual([]);
+  });
+});
+
+// #29: the live pick comes from the project's own tenant first; a legacy
+// workspace deployment is reported only while nothing of the project's own
+// is live, and never displaces a live one.
+describe("stageSpecialistStatus across the project tenant and the workspace", () => {
+  const assets = [assetRow("asset_own", "sb-project-p1-stage-1"), assetRow("asset_ws", "sb-project-p1-stage-1", TENANT.id)];
+  const withConfig = (transport: Transport): Transport =>
+    ({
+      async fetch<T>(method: string, path: string, body?: unknown): Promise<T> {
+        // No switch record on the project tenant.
+        if (method === "GET" && path === `/api/tenants/${PROJECT_TENANT.id}`) return { ...PROJECT_TENANT, config: {} } as T;
+        return transport.fetch<T>(method, path, body);
+      },
+    }) as Transport;
+
+  test("a live legacy deployment is the pick while the project tenant has none", async () => {
+    const transport = withConfig(fakeTransport({ assets, deployments: [deploymentRow("dep_legacy", "asset_ws", "deployed", TENANT.id)] }));
+    expect(await stageSpecialistStatus(transport, "p1", 1)).toEqual({
+      deploymentId: "dep_legacy",
+      address: "dep_legacy@ws.example",
+      status: "deployed",
+      tenantId: TENANT.id,
+    });
+  });
+
+  test("a live deployment in the project tenant wins over an ended legacy one", async () => {
+    const transport = withConfig(
+      fakeTransport({
+        assets,
+        deployments: [deploymentRow("dep_legacy", "asset_ws", "released", TENANT.id), deploymentRow("dep_own", "asset_own", "deployed")],
+      }),
+    );
+    expect(await stageSpecialistStatus(transport, "p1", 1)).toMatchObject({ deploymentId: "dep_own", tenantId: PROJECT_TENANT.id });
   });
 });
 
