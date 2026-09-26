@@ -77,7 +77,7 @@ function fakeHub(fixture: Fixture) {
       const [pathname, query] = path.split("?");
       const tenant = `/api/tenants/${TENANT_ID}`;
       if (method === "POST") posts.push({ path: pathname!, body });
-      if (method === "GET" && pathname === tenant) return { id: TENANT_ID } as T;
+      if (method === "GET" && pathname === tenant) return { id: TENANT_ID, parentId: null } as T;
       if (method === "GET" && pathname === `${tenant}/assets`) {
         return (fixture.assets ?? []).map((asset) => ({ ...asset, tenantId: TENANT_ID, kind: "workflow" })) as T;
       }
@@ -97,7 +97,13 @@ function fakeHub(fixture: Fixture) {
         runsByDeployment.dep_new = [];
         return made as T;
       }
-      if (method === "GET" && pathname === `${tenant}/catalog/offerings`) return { data: [{ id: "off_1", priority: 0, disabled: false }], nextCursor: null } as T;
+      if (method === "GET" && pathname === `${tenant}/catalog/offerings`) {
+        return { data: [{ id: "off_1", modelId: "mdl_1", providerId: "mpv_1", priority: 0, disabled: false }], nextCursor: null } as T;
+      }
+      if (method === "GET" && pathname === `${tenant}/catalog/providers`) {
+        return { data: [{ id: "mpv_1", name: "openai", plugin: "openai", disabled: false }], nextCursor: null } as T;
+      }
+      if (method === "GET" && pathname === `${tenant}/catalog/models`) return { data: [{ id: "mdl_1", canonicalName: "gpt-5.5" }], nextCursor: null } as T;
       if (method === "POST" && /git-tokens$/.test(pathname!)) return { id: "gtk_1", secret: "git-token", expiresAt: "2099-01-01T00:00:00.000Z" } as T;
       if (method === "DELETE" && /git-tokens\//.test(pathname!)) return undefined as T;
       if (method === "GET" && pathname === `${tenant}/assets/${ASSET_ID}/blob`) {
