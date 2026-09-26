@@ -601,7 +601,7 @@ export function StageWorkspace({
               </Button>
               {artifacts.activeNode.stage < stage ? (
                 <Button variant="ghost" onClick={() => openSendBack("")}>
-                  Change it: send back to stage {artifacts.activeNode.stage}…
+                  Change it: send back to {stageName(artifacts.activeNode.stage)}…
                 </Button>
               ) : null}
             </div>

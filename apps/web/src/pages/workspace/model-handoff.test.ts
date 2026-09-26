@@ -60,6 +60,31 @@ describe("composeModelHandoff", () => {
   });
 });
 
+// #115: the stage's opening is its input, and rides along whole even when it
+// is an HTML document; a design reply is still only named.
+describe("composeModelHandoff keeps the opening", () => {
+  const design = "<!doctype html><html><body><section data-testid=\"screen-capture\">Capture</section></body></html>";
+  const opening: ChatMessage = { id: "opening-design", author: "me", body: design, at };
+  const ask: ChatMessage = { id: "ask", author: "me", body: "Write the package for: Mr Finance.", at };
+  const reply: ChatMessage = { id: "reply", author: "agent", body: design, at };
+
+  test("quotes an HTML opening in full and names a design reply", () => {
+    const body = composeModelHandoff({ id: "a1", messages: [opening, ask, reply], draft: null, providerLabel: null, modelName: null });
+    expect(body).toContain(`Person: ${design}`);
+    expect(body).toContain("Specialist: (sent a design mockup as a whole HTML document");
+  });
+
+  test("keeps the opening ahead of the condensed turns", () => {
+    const many = Array.from({ length: 30 }, (_, i) => ({ id: `t${i}`, author: i % 2 ? "agent" : "me", body: `turn ${i}`, at }) as ChatMessage);
+    const body = composeModelHandoff({ id: "a2", messages: [opening, ...many], draft: null, providerLabel: null, modelName: null });
+    const recap = body.slice(body.indexOf("Here is the conversation so far"));
+    expect(recap.indexOf(`Person: ${design}`)).toBeLessThan(recap.indexOf("earlier turn"));
+    expect(recap).toContain("(11 earlier turns omitted.)");
+    expect(recap).toContain("turn 29");
+    expect(recap).not.toContain("turn 5\n");
+  });
+});
+
 describe("withoutSwitchMarker", () => {
   test("a hand-off mail reads as one line in the bubble, never as its recap (#85)", () => {
     const body = `${switchMarker("abc123")}\nThis stage continues on OpenAI · gpt-5.5.\n\n---\n\nHere is the conversation so far:\n\nSpecialist: <!doctype html><html></html>`;
