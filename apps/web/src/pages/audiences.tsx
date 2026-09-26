@@ -21,6 +21,8 @@ import { Markdown } from "../markdown.jsx";
 import { buildPackageDeck } from "../deck-save.ts";
 import { deckDesignFor } from "../deck-design-settings.ts";
 import { slidesSource } from "../deck-templates.ts";
+import { SlidePreview } from "../slide-preview.tsx";
+import { deckFrom, packageOutlineProblem, type Deck, type TemplateTheme } from "@solutions-builder/app/deck";
 import { recordAudienceVote, type StageApprovalDeps } from "../stage-approval.ts";
 import { stageRefusalMessage } from "../stage-evidence.ts";
 import type { ProjectWorkflowView } from "../project-workflow.ts";
@@ -505,6 +507,75 @@ export function AudiencePackages({
     };
   }, [selected?.id, tenantId]);
 
+  // The slides on screen, drawn from the same outline, design and style
+  // guide theme `saveSlides` builds the file from, so what is shown is what
+  // would be saved (#95). The designs are read once, a role's theme once per
+  // role; a theme that cannot be read falls back to the default look and
+  // says so, the way the download does.
+  const designsRef = useRef<Promise<Record<string, unknown>> | null>(null);
+  const themesRef = useRef(new Map<string, Promise<{ theme: TemplateTheme | null; failed: boolean }>>());
+  const [preview, setPreview] = useState<{ deck: Deck; note: string | null } | { deck: null; note: string } | null>(null);
+  // A string, not the stakeholder row: `audiences` is a fresh array every
+  // render, and an effect keyed on it would rebuild the deck on every click.
+  const previewRole = selected ? (audiences.find((audience) => audience.name === selected.variant)?.role ?? "") : "";
+  useEffect(() => {
+    if (!selected || !content) {
+      setPreview(null);
+      return;
+    }
+    const problem = packageOutlineProblem(content);
+    if (problem) {
+      setPreview({ deck: null, note: `No slides to show yet: ${problem}` });
+      return;
+    }
+    const name = selected.variant ?? selected.title;
+    const role = previewRole;
+    let cancelled = false;
+    void (async () => {
+      designsRef.current ??= api.deckDesigns().then(
+        (loaded) => loaded as Record<string, unknown>,
+        () => ({}),
+      );
+      const preferences = await designsRef.current;
+      let theme: TemplateTheme | null = null;
+      let themeFailed = false;
+      if (role) {
+        if (!themesRef.current.has(role)) {
+          themesRef.current.set(
+            role,
+            api.deckTemplateThemeForRole(role).then(
+              (loaded) => ({ theme: loaded, failed: false }),
+              () => ({ theme: null, failed: true }),
+            ),
+          );
+        }
+        ({ theme, failed: themeFailed } = await themesRef.current.get(role)!);
+      }
+      if (cancelled) return;
+      const design = deckDesignFor(role, preferences);
+      const deck = deckFrom({
+        projectTitle: detail.project.title,
+        audience: name,
+        role,
+        markdown: content,
+        design,
+        ...(theme ? { theme } : {}),
+      });
+      if (!deck) {
+        setPreview({ deck: null, note: "No slides to show yet: the deck outline has no slides." });
+        return;
+      }
+      const notes = [
+        themeFailed ? "Its style guide could not be read, so this is the default look." : null,
+        design.images !== "none" ? "Pictures are drawn when the slides are saved." : null,
+      ].filter((line): line is string => line !== null);
+      setPreview({ deck, note: notes.length > 0 ? notes.join(" ") : null });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [content, selected?.id, selected?.variant, selected?.title, previewRole, detail.project.title]);
+
   // The quorum tally is the workflow's own view -- `stage5Quorum`, folded by
   // `foldProjectWorkflow` from the `audiencePolicy` an `open_review` captured
   // and the votes recorded since (CL-8870). Never re-derived here; before a
@@ -688,6 +759,11 @@ export function AudiencePackages({
                 </div>
                 {content ? <Markdown source={content} /> : <p className="inline-note">Loading…</p>}
               </div>
+              {preview?.deck ? (
+                <SlidePreview key={selected.id} deck={preview.deck} note={preview.note} />
+              ) : preview ? (
+                <p className="inline-note">{preview.note}</p>
+              ) : null}
               {selected.variant ? (
                 <div className="aud-decision" data-tour="audience-your-decision">
                   <p className="inline-note">
