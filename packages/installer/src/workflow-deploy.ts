@@ -12,13 +12,13 @@ import type { InferenceSourcePin } from "@solutions-builder/app/specialist-sourc
 import {
   ApiError,
   assetsFor,
-  catalogFor,
   gitTokensFor,
   readWorkflowSourceBlob,
   workflowsFor,
   type HubDeployment,
 } from "./hub.js";
 import type { ClosureManifest } from "./closure-manifest.js";
+import { visibleCatalog, type VisibleCatalog } from "./visible-catalog.js";
 import { type ClosureTarballFetcher } from "./workflow-closure.js";
 
 /**
@@ -82,19 +82,29 @@ export type ClosureSource = { manifest: ClosureManifest; fetchTarball: ClosureTa
  * agent's declared preference matches an approved source rather than falling
  * back to the default.
  */
+export function pinFor(
+  catalog: Pick<VisibleCatalog, "modelProviders" | "models">,
+  offering: { providerId: string; modelId: string },
+): InferenceSourcePin | undefined {
+  // An offering points at a model provider (the catalog's `mpv_` row, whose
+  // plugin names the inference adapter), not at the credential provider.
+  const provider = catalog.modelProviders.find((row) => row.id === offering.providerId);
+  const model = catalog.models.find((row) => row.id === offering.modelId);
+  if (!provider || !model) return undefined;
+  return { provider: provider.plugin, model: model.canonicalName };
+}
+
+/**
+ * `pinFor` over the catalog `tenantId` can see: its own rows and, for a
+ * project tenant, the workspace's it inherits (`visibleCatalog`). The
+ * offering's referents can live on any tenant in that chain.
+ */
 export async function sourceFor(
   transport: Transport,
   tenantId: string,
   offering: { providerId: string; modelId: string },
 ): Promise<InferenceSourcePin | undefined> {
-  // An offering points at a model provider (the catalog's `mpv_` row, whose
-  // plugin names the inference adapter), not at the credential provider.
-  const catalog = catalogFor(transport, tenantId);
-  const [providers, models] = await Promise.all([catalog.modelProviders(), catalog.models()]);
-  const provider = providers.find((row) => row.id === offering.providerId);
-  const model = models.find((row) => row.id === offering.modelId);
-  if (!provider || !model) return undefined;
-  return { provider: provider.plugin, model: model.canonicalName };
+  return pinFor(await visibleCatalog(transport, tenantId), offering);
 }
 
 /**
@@ -150,6 +160,48 @@ async function mintPushToken(
   } catch (cause) {
     if (cause instanceof ApiError && (cause.status === 409 || cause.status === 500)) {
       return await gitTokens.mint(assetId, pushTokenName(assetName), PUSH_TOKEN_LIFETIME_MS);
+    }
+    throw cause;
+  }
+}
+
+/**
+ * The hub's refusal of a deploy's offering chain: `source_offering_unavailable`
+ * (a 409 from `prepareProvisionedDeployment`) means an offering the tenant
+ * can see resolves to a credential the deploying principal may not use
+ * there. In a project tenant that is the seal working as designed: the
+ * owner delegated none of the workspace's model providers to this project
+ * (`delegateAtCreation`). Thrown as a plain error, never an `ApiError`, so a
+ * caller's "retry once on 409" (a genuine race absorber) does not repeat a
+ * refusal that will not change.
+ */
+export class ModelProviderNotDelegatedError extends Error {
+  constructor(
+    readonly tenantId: string,
+    readonly parentId: string | null,
+    cause: unknown,
+  ) {
+    super(
+      parentId
+        ? "This project has not been given a model provider. Delegate one of the workspace's connected providers to it, then try again."
+        : "The workspace's model provider cannot be used by this deployment.",
+      { cause },
+    );
+    this.name = "ModelProviderNotDelegatedError";
+  }
+}
+
+/** Runs `deploy`, translating the hub's offering refusal (see
+ *  `ModelProviderNotDelegatedError`); every other failure passes through. */
+export async function deployOrExplain<T>(
+  tenant: { readonly id: string; readonly parentId: string | null },
+  deploy: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await deploy();
+  } catch (cause) {
+    if (cause instanceof ApiError && cause.code === "source_offering_unavailable") {
+      throw new ModelProviderNotDelegatedError(tenant.id, tenant.parentId, cause);
     }
     throw cause;
   }

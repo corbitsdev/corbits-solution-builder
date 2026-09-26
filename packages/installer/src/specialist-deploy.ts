@@ -23,8 +23,9 @@ import {
   type InferenceSourcePin,
 } from "@solutions-builder/app/specialist-source";
 import { ensureWorkflowArtifactsCredential } from "./artifacts-credential.js";
-import { assetsFor, catalogFor, getTenant, readWorkflowSourceBlob, workflowsFor, type HubDeployment } from "./hub.js";
+import { assetsFor, getTenant, readWorkflowSourceBlob, workflowsFor, type HubDeployment } from "./hub.js";
 import { readProject, readStageSwitch, writeStageSwitch } from "./project-tenant.js";
+import { visibleCatalog } from "./visible-catalog.js";
 import {
   appMemberFiles,
   artifactsMemberFiles,
@@ -34,8 +35,10 @@ import {
   vendoredMemberFiles,
 } from "./workflow-closure.js";
 import {
+  deployOrExplain,
   deploymentIsLive,
   ensureWorkflowAsset,
+  pinFor,
   pushWorkflowSourceTree,
   sourceFor,
   waitForPushVisible,
@@ -144,7 +147,7 @@ export type SpecialistDeploymentRef = { readonly stage: Stage; readonly deployme
 
 /**
  * Every stage specialist deployed for `projectId`: workflow assets named
- * `sb-project-<projectId>-stage-<N>` in the workspace tenant, paired with
+ * `sb-project-<projectId>-stage-<N>` in `tenantId`, paired with
  * their live deployment by `definitionAssetId` -- the same pairing
  * `ensureSpecialistDeployment` itself relies on. A pending approval's
  * `runId` is the deployment id it was parked under (a specialist's mail
@@ -153,13 +156,13 @@ export type SpecialistDeploymentRef = { readonly stage: Stage; readonly deployme
  */
 export async function listSpecialistDeployments(
   transport: Transport,
-  workspaceTenantId: string,
+  tenantId: string,
   projectId: string,
   roleKey: string = DEFAULT_ROLE_KEY,
 ): Promise<SpecialistDeploymentRef[]> {
   const prefix = `sb-project-${normalizedProjectId(projectId)}-stage-`;
   const stagePattern = specialistAssetStagePattern(roleKey);
-  const assets = await assetsFor(transport, workspaceTenantId).list("workflow");
+  const assets = await assetsFor(transport, tenantId).list("workflow");
   const stageByAssetId = new Map<string, number>();
   for (const asset of assets) {
     if (!asset.name.startsWith(prefix)) continue;
@@ -167,7 +170,7 @@ export async function listSpecialistDeployments(
     if (match) stageByAssetId.set(asset.id, Number(match[1]));
   }
   if (stageByAssetId.size === 0) return [];
-  const deployments = await workflowsFor(transport, workspaceTenantId).deployments();
+  const deployments = await workflowsFor(transport, tenantId).deployments();
   return deployments.flatMap((deployment) => {
     const stage = stageByAssetId.get(deployment.definitionAssetId);
     return stage === undefined ? [] : [{ stage: stage as Stage, deploymentId: deployment.id }];
@@ -195,18 +198,18 @@ export type SpecialistDeploymentStatus = SpecialistDeployment & { readonly statu
  */
 export async function stageSpecialistAddresses(
   transport: Transport,
-  workspaceTenantId: string,
+  tenantId: string,
   projectId: string,
   stage: Stage,
   roleKey: string = DEFAULT_ROLE_KEY,
 ): Promise<string[]> {
-  const tenant = await getTenant(transport, workspaceTenantId);
+  const tenant = await getTenant(transport, tenantId);
   if (!tenant?.domain) return [];
   const assetName = specialistAssetName(projectId, stage, roleKey);
-  const assets = await assetsFor(transport, workspaceTenantId).list("workflow");
+  const assets = await assetsFor(transport, tenantId).list("workflow");
   const asset = assets.find((entry) => entry.name === assetName);
   if (!asset) return [];
-  const deployments = (await workflowsFor(transport, workspaceTenantId).deployments()).filter(
+  const deployments = (await workflowsFor(transport, tenantId).deployments()).filter(
     (deployment) => deployment.definitionAssetId === asset.id,
   );
   return deployments.map((deployment) => `${deployment.id}@${tenant.domain}`);
@@ -225,18 +228,18 @@ export async function stageSpecialistAddresses(
  */
 export async function stageSpecialistStatus(
   transport: Transport,
-  workspaceTenantId: string,
+  tenantId: string,
   projectId: string,
   stage: Stage,
   roleKey: string = DEFAULT_ROLE_KEY,
 ): Promise<SpecialistDeploymentStatus | null> {
-  const tenant = await getTenant(transport, workspaceTenantId);
+  const tenant = await getTenant(transport, tenantId);
   if (!tenant?.domain) return null;
   const assetName = specialistAssetName(projectId, stage, roleKey);
-  const assets = await assetsFor(transport, workspaceTenantId).list("workflow");
+  const assets = await assetsFor(transport, tenantId).list("workflow");
   const asset = assets.find((entry) => entry.name === assetName);
   if (!asset) return null;
-  const deployments = (await workflowsFor(transport, workspaceTenantId).deployments()).filter(
+  const deployments = (await workflowsFor(transport, tenantId).deployments()).filter(
     (deployment) => deployment.definitionAssetId === asset.id,
   );
   const winner = await resolveLiveDeployment(transport, projectId, stage, deployments);
@@ -259,16 +262,16 @@ export async function stageSpecialistStatus(
  */
 export async function stageSpecialistSourcePin(
   transport: Transport,
-  workspaceTenantId: string,
+  tenantId: string,
   projectId: string,
   stage: Stage,
   roleKey: string = DEFAULT_ROLE_KEY,
 ): Promise<InferenceSourcePin | null> {
   const assetName = specialistAssetName(projectId, stage, roleKey);
-  const assets = await assetsFor(transport, workspaceTenantId).list("workflow");
+  const assets = await assetsFor(transport, tenantId).list("workflow");
   const asset = assets.find((entry) => entry.name === assetName);
   if (!asset) return null;
-  const raw = await readWorkflowSourceBlob(transport, workspaceTenantId, asset.id, SOURCE_PIN_PATH);
+  const raw = await readWorkflowSourceBlob(transport, tenantId, asset.id, SOURCE_PIN_PATH);
   if (!raw) return null;
   try {
     const parsed: unknown = JSON.parse(raw);
@@ -390,7 +393,7 @@ export function leadingOffering<T extends { readonly id: string }>(
  */
 export async function specialistEntryIsCurrent(
   transport: Transport,
-  workspaceTenantId: string,
+  tenantId: string,
   assetId: string,
   assetName: string,
   projectId: string,
@@ -400,9 +403,9 @@ export async function specialistEntryIsCurrent(
   roleKey: string,
   role: AgentRole,
 ): Promise<boolean> {
-  const deployed = await readWorkflowSourceBlob(transport, workspaceTenantId, assetId, `${SPECIALIST_DIR}/${SPECIALIST_ENTRY_PATH}`);
+  const deployed = await readWorkflowSourceBlob(transport, tenantId, assetId, `${SPECIALIST_DIR}/${SPECIALIST_ENTRY_PATH}`);
   if (deployed === null) return true;
-  const source = await sourceFor(transport, workspaceTenantId, offering);
+  const source = await sourceFor(transport, tenantId, offering);
   if (!source) return true;
   const project = stage === PACKAGE_STAGE ? await readProject(transport, projectId) : null;
   const audiences = project?.policy.audiences;
@@ -441,7 +444,7 @@ async function ensureSpecialistDeploymentOnce(
   sidecar: SidecarCapability,
   closure: ClosureSource,
   gitPush: WorkflowGitPush,
-  workspaceTenantId: string,
+  tenantId: string,
   projectId: string,
   stage: Stage,
   hubOrigin: string,
@@ -459,15 +462,15 @@ async function ensureSpecialistDeploymentOnce(
     throw new Error("no host is placing sidecars; cannot deploy a stage specialist");
   }
 
-  const tenant = await getTenant(transport, workspaceTenantId);
+  const tenant = await getTenant(transport, tenantId);
   if (!tenant?.domain) {
-    throw new Error("the workspace tenant has no domain to address a specialist at");
+    throw new Error("the tenant has no domain to address a specialist at");
   }
 
   const assetName = specialistAssetName(projectId, stage, roleKey);
-  const assetId = await ensureWorkflowAsset(transport, workspaceTenantId, assetName, `Stage ${stage} specialist`);
+  const assetId = await ensureWorkflowAsset(transport, tenantId, assetName, `Stage ${stage} specialist`);
 
-  const workflows = workflowsFor(transport, workspaceTenantId);
+  const workflows = workflowsFor(transport, tenantId);
   const matching = (deployments: readonly HubDeployment[]) =>
     deployments.filter((deployment) => deployment.definitionAssetId === assetId);
   const existing = await resolveLiveDeployment(transport, projectId, stage, matching(await workflows.deployments()));
@@ -480,14 +483,18 @@ async function ensureSpecialistDeploymentOnce(
   // delegation re-check) is picked up without redeploying, and the pin here
   // never constrains what the specialist runs. A post-deploy priority reorder
   // still needs a redeploy (stored id order).
-  const catalogOfferings = (await catalogFor(transport, workspaceTenantId).offerings())
-    .filter((offering) => !offering.disabled)
-    .sort((a, b) => a.priority - b.priority);
+  //
+  // Read from the catalog this tenant can SEE, not the rows it owns: a
+  // project tenant owns none and inherits the workspace's (#30). Whether the
+  // deploying principal may use an inherited offering's credential is the
+  // hub's call at deploy time, below -- no delegation is judged here.
+  const catalog = await visibleCatalog(transport, tenant);
+  const catalogOfferings = [...catalog.offerings].sort((a, b) => a.priority - b.priority);
   if (catalogOfferings.length === 0) {
     throw new Error("connect a model provider before deploying a stage specialist");
   }
 
-  if (!switchToOfferingId && existing && (await deploymentIsLive(transport, workspaceTenantId, existing.id))) {
+  if (!switchToOfferingId && existing && (await deploymentIsLive(transport, tenantId, existing.id))) {
     // A live specialist runs the entry it was deployed with, and the kit
     // moves on without it: a revised brief (#103) reached no project whose
     // specialist was already up, and stayed unreached until a model switch
@@ -500,7 +507,7 @@ async function ensureSpecialistDeploymentOnce(
     const leading = leadingOffering(recorded, existing.id, catalogOfferings);
     const current = await specialistEntryIsCurrent(
       transport,
-      workspaceTenantId,
+      tenantId,
       assetId,
       assetName,
       projectId,
@@ -518,7 +525,7 @@ async function ensureSpecialistDeploymentOnce(
       sidecar,
       closure,
       gitPush,
-      workspaceTenantId,
+      tenantId,
       projectId,
       stage,
       hubOrigin,
@@ -544,7 +551,7 @@ async function ensureSpecialistDeploymentOnce(
         return [chosen, ...catalogOfferings.filter((offering) => offering.id !== switchToOfferingId)];
       })()
     : catalogOfferings;
-  const source = await sourceFor(transport, workspaceTenantId, offerings[0]!);
+  const source = pinFor(catalog, offerings[0]!);
   if (!source) {
     throw new Error("the tenant's offering does not resolve to a known model");
   }
@@ -557,7 +564,7 @@ async function ensureSpecialistDeploymentOnce(
   const rendered = await renderSpecialistSource(closure, projectId, stage, source, artifactTools, roleKey, role, audiences);
   const commitSha = await pushWorkflowSourceTree(
     transport,
-    workspaceTenantId,
+    tenantId,
     assetId,
     assetName,
     { ...rendered },
@@ -571,7 +578,7 @@ async function ensureSpecialistDeploymentOnce(
   // sidecar's pinned subtree read fails (`git.materialization.failed`).
   // Wait for the pushed digest to read back through the hub's own blob
   // route -- the same read path the deploy uses -- before deploying.
-  await waitForPushVisible(transport, workspaceTenantId, assetId, DIGEST_PATH, rendered[DIGEST_PATH]!);
+  await waitForPushVisible(transport, tenantId, assetId, DIGEST_PATH, rendered[DIGEST_PATH]!);
 
   // Rendering and pushing the source above takes long enough for a
   // concurrent caller to have deployed onto this asset meanwhile; re-check
@@ -581,7 +588,7 @@ async function ensureSpecialistDeploymentOnce(
   // to fold into.
   if (!switchToOfferingId) {
     const justDeployed = await resolveLiveDeployment(transport, projectId, stage, matching(await workflows.deployments()));
-    if (justDeployed && (await deploymentIsLive(transport, workspaceTenantId, justDeployed.id))) {
+    if (justDeployed && (await deploymentIsLive(transport, tenantId, justDeployed.id))) {
       return { deploymentId: justDeployed.id, address: `${justDeployed.id}@${tenant.domain}` };
     }
   }
@@ -595,12 +602,14 @@ async function ensureSpecialistDeploymentOnce(
   // `modelRequirements` field, so `sourceOfferingIds` is the whole inference
   // story. Declaring per-specialist model needs is deferred to the full slice.
   const offeringIds = offerings.map((offering) => offering.id);
-  const deployment = await workflows.deploy({
-    source: { kind: "asset", assetId, package: { format: "source", commitSha, packageName: assetName } },
-    entry: `./${SPECIALIST_ENTRY_PATH}`,
-    sourceOfferingIds: offeringIds,
-    defaultSourceOfferingId: offeringIds[0]!,
-  });
+  const deployment = await deployOrExplain(tenant, () =>
+    workflows.deploy({
+      source: { kind: "asset", assetId, package: { format: "source", commitSha, packageName: assetName } },
+      entry: `./${SPECIALIST_ENTRY_PATH}`,
+      sourceOfferingIds: offeringIds,
+      defaultSourceOfferingId: offeringIds[0]!,
+    }),
+  );
 
   // A concurrent caller may have deployed onto this asset in the meantime;
   // re-resolve so every caller lands on the same, deterministically-chosen
@@ -626,7 +635,7 @@ async function ensureSpecialistDeploymentOnce(
   // (`anchorRunId IS NULL`), so this per-deployment bearer stays the only
   // credential story for specialists. See `docs/specialist-model-requirements.md`.
   if (artifactTools) {
-    await ensureWorkflowArtifactsCredential(transport, workspaceTenantId, hubOrigin, assetName, winner.id);
+    await ensureWorkflowArtifactsCredential(transport, tenantId, hubOrigin, assetName, winner.id);
   }
 
   return { deploymentId: winner.id, address: `${winner.id}@${tenant.domain}` };
@@ -637,7 +646,7 @@ export async function ensureSpecialistDeployment(
   sidecar: SidecarCapability,
   closure: ClosureSource,
   gitPush: WorkflowGitPush,
-  workspaceTenantId: string,
+  tenantId: string,
   projectId: string,
   stage: Stage,
   hubOrigin: string,
@@ -660,7 +669,7 @@ export async function ensureSpecialistDeployment(
       sidecar,
       closure,
       gitPush,
-      workspaceTenantId,
+      tenantId,
       projectId,
       stage,
       hubOrigin,
@@ -733,7 +742,7 @@ export async function switchSpecialistDeployment(
   sidecar: SidecarCapability,
   closure: ClosureSource,
   gitPush: WorkflowGitPush,
-  workspaceTenantId: string,
+  tenantId: string,
   projectId: string,
   stage: Stage,
   hubOrigin: string,
@@ -745,7 +754,7 @@ export async function switchSpecialistDeployment(
   return serialize(`${projectId}:${stage}:${roleKey}`, async () => {
     const recorded = await readStageSwitch(transport, projectId, stage);
     if (recorded && recorded.offeringId === offeringId) {
-      const status = await stageSpecialistStatus(transport, workspaceTenantId, projectId, stage, roleKey);
+      const status = await stageSpecialistStatus(transport, tenantId, projectId, stage, roleKey);
       // `resolveLiveDeployment` (inside `stageSpecialistStatus`) only
       // returns the recorded target while it's still live, so this check
       // both confirms the offering matches AND that there is nothing to do.
@@ -760,7 +769,7 @@ export async function switchSpecialistDeployment(
         sidecar,
         closure,
         gitPush,
-        workspaceTenantId,
+        tenantId,
         projectId,
         stage,
         hubOrigin,

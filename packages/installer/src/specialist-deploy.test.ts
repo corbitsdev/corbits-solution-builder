@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type { Transport } from "@intx/hub-client";
 import { leadingOffering, specialistEntryIsCurrent, stageSpecialistAddresses } from "./specialist-deploy.js";
+import { visibleCatalog } from "./visible-catalog.js";
+import { deployOrExplain, ModelProviderNotDelegatedError, sourceFor } from "./workflow-deploy.js";
 import { ApiError } from "@intx/hub-client";
 import { agentFor } from "@solutions-builder/app/kit";
 import { SPECIALIST_ENTRY_PATH, specialistEntrySource } from "@solutions-builder/app/specialist-source";
@@ -92,7 +94,7 @@ describe("leadingOffering", () => {
 // for the same stage, role and model -- the brief included.
 describe("specialistEntryIsCurrent", () => {
   const offering = { id: "off_1", providerId: "mpv_1", modelId: "mdl_1" };
-  const providers = [{ id: "mpv_1", plugin: "openai" }];
+  const providers = [{ id: "mpv_1", name: "openai", plugin: "openai", disabled: false }];
   const models = [{ id: "mdl_1", canonicalName: "gpt-5.5" }];
   const role = agentFor(4);
   const rendered = specialistEntrySource({
@@ -113,6 +115,8 @@ describe("specialistEntryIsCurrent", () => {
           if (deployed === null) throw new ApiError(404, "not_found", "no such blob");
           return { content: btoa(String.fromCharCode(...new TextEncoder().encode(deployed))) } as T;
         }
+        if (method === "GET" && path === `/api/tenants/${TENANT.id}`) return TENANT as T;
+        if (method === "GET" && path.startsWith(`/api/tenants/${TENANT.id}/catalog/offerings`)) return { data: [offering], nextCursor: null } as T;
         if (method === "GET" && path.startsWith(`/api/tenants/${TENANT.id}/catalog/providers`)) return { data: providers, nextCursor: null } as T;
         if (method === "GET" && path.startsWith(`/api/tenants/${TENANT.id}/catalog/models`)) return { data: models, nextCursor: null } as T;
         throw new Error(`unexpected ${method} ${path}`);
@@ -135,5 +139,68 @@ describe("specialistEntryIsCurrent", () => {
 
   test("an entry that cannot be read back is not a reason to redeploy", async () => {
     expect(await check(null)).toBe(true);
+  });
+});
+
+// #30: a project (child) tenant owns no catalog rows. The installer's reads
+// must see the workspace's rows the project inherits, so a deploy into the
+// project tenant can name them -- and the hub, not the installer, then
+// decides whether the project was given the credential behind them.
+describe("deploying into a project tenant", () => {
+  const PROJECT = { id: "tnt_prj", name: "Project", slug: "prj", parentId: TENANT.id, createdAt: "2026-01-02T00:00:00.000Z", domain: "prj.example" };
+  const offering = { id: "off_1", providerId: "mpv_1", modelId: "mdl_1", priority: 0, disabled: false };
+  const providers = [{ id: "mpv_1", name: "openai", plugin: "openai", disabled: false }];
+  const models = [{ id: "mdl_1", canonicalName: "gpt-5.5" }];
+
+  /** Catalog routes list a tenant's OWN rows: the workspace has them, the project has none. */
+  function transportWithParentCatalog(): Transport {
+    return {
+      async fetch<T>(method: string, path: string): Promise<T> {
+        const [pathname] = path.split("?");
+        if (method === "GET" && pathname === `/api/tenants/${TENANT.id}`) return TENANT as T;
+        if (method === "GET" && pathname === `/api/tenants/${PROJECT.id}`) return PROJECT as T;
+        const catalog = /^\/api\/tenants\/([^/]+)\/catalog\/(offerings|providers|models)$/.exec(pathname!);
+        if (method === "GET" && catalog) {
+          if (catalog[1] !== TENANT.id) return { data: [], nextCursor: null } as T;
+          const data = catalog[2] === "offerings" ? [offering] : catalog[2] === "providers" ? providers : models;
+          return { data, nextCursor: null } as T;
+        }
+        throw new Error(`unexpected ${method} ${path}`);
+      },
+    } as Transport;
+  }
+
+  test("the source pin resolves through the workspace's catalog", async () => {
+    expect(await sourceFor(transportWithParentCatalog(), PROJECT.id, offering)).toEqual({ provider: "openai", model: "gpt-5.5" });
+  });
+
+  test("the visible offerings are the workspace's, from a project whose own catalog is empty", async () => {
+    const catalog = await visibleCatalog(transportWithParentCatalog(), PROJECT.id);
+    expect(catalog.offerings.map((row) => row.id)).toEqual(["off_1"]);
+  });
+
+  test("the hub's offering refusal in a project reads as an undelegated provider, not a missing one", async () => {
+    const refusal = new ApiError(409, "source_offering_unavailable", "Catalog offering off_1 cannot be used by the deployment authority");
+    const thrown = await deployOrExplain(PROJECT, () => Promise.reject(refusal)).catch((cause: unknown) => cause);
+    expect(thrown).toBeInstanceOf(ModelProviderNotDelegatedError);
+    expect((thrown as Error).message).toContain("has not been given a model provider");
+    expect((thrown as Error).message).not.toContain("connect a model provider");
+    // Not an `ApiError`: `ensureSpecialistDeployment`'s retry-once-on-409
+    // absorbs races, and must not repeat a refusal that will not change.
+    expect(thrown).not.toBeInstanceOf(ApiError);
+  });
+
+  test("the same refusal in the workspace itself does not blame a delegation", async () => {
+    const refusal = new ApiError(409, "source_offering_unavailable", "Catalog offering off_1 cannot be used by the deployment authority");
+    const thrown = await deployOrExplain(TENANT, () => Promise.reject(refusal)).catch((cause: unknown) => cause);
+    expect(thrown).toBeInstanceOf(ModelProviderNotDelegatedError);
+    expect((thrown as Error).message).not.toContain("project");
+  });
+
+  test("every other deploy failure passes through untouched", async () => {
+    const conflict = new ApiError(409, "conflict", "deployment exists");
+    const thrown = await deployOrExplain(PROJECT, () => Promise.reject(conflict)).catch((cause: unknown) => cause);
+    expect(thrown).toBe(conflict);
+    expect(await deployOrExplain(PROJECT, () => Promise.resolve("ok"))).toBe("ok");
   });
 });

@@ -25,6 +25,7 @@ export * from "./closure-manifest.js";
 export * from "./resolved-catalog.js";
 export * from "./tarball-extract.js";
 export * from "./workbench-delegation.js";
+export * from "./visible-catalog.js";
 export * from "./workflow-closure.js";
 export * from "./workflow-deploy.js";
 export * from "./skill-assets.js";

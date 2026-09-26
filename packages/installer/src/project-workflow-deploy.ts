@@ -21,9 +21,11 @@
  * never read or signalled again.
  */
 import { ApiError, type Transport } from "@intx/hub-client";
-import { assetsFor, catalogFor, getTenant, workflowsFor, type HubDeployment } from "./hub.js";
+import { assetsFor, getTenant, workflowsFor, type HubDeployment, type HubTenant } from "./hub.js";
 import { treeDigest } from "./workflow-closure.js";
+import { visibleCatalog } from "./visible-catalog.js";
 import {
+  deployOrExplain,
   deploymentHasEnded,
   deploymentIsLive,
   ensureWorkflowAsset,
@@ -469,6 +471,7 @@ type DeployContext = {
   readonly transport: Transport;
   readonly gitPush: WorkflowGitPush;
   readonly workspaceTenantId: string;
+  readonly tenant: HubTenant;
   readonly projectId: string;
   readonly stages: readonly ProjectWorkflowStageInput[];
   readonly assetId: string;
@@ -502,19 +505,20 @@ async function deployFreshRun(context: DeployContext, known: ReadonlySet<string>
     // The project workflow runs no inference itself, but a deploy still
     // requires a non-empty offering chain -- the tenant's first offering is
     // pinned and simply never dispatched to.
-    const offerings = (await catalogFor(transport, workspaceTenantId).offerings())
-      .filter((offering) => !offering.disabled)
-      .sort((a, b) => a.priority - b.priority);
+    // The catalog this tenant can see, own rows or inherited (#30).
+    const offerings = [...(await visibleCatalog(transport, context.tenant)).offerings].sort((a, b) => a.priority - b.priority);
     if (offerings.length === 0) {
       throw new Error("connect a model provider before deploying the project workflow");
     }
     const offeringIds = offerings.map((offering) => offering.id);
-    const deployed = await workflows.deploy({
-      source: { kind: "asset", assetId, package: { format: "source", commitSha, packageName: assetName } },
-      entry: "./workflow.js",
-      sourceOfferingIds: offeringIds,
-      defaultSourceOfferingId: offeringIds[0]!,
-    });
+    const deployed = await deployOrExplain(context.tenant, () =>
+      workflows.deploy({
+        source: { kind: "asset", assetId, package: { format: "source", commitSha, packageName: assetName } },
+        entry: "./workflow.js",
+        sourceOfferingIds: offeringIds,
+        defaultSourceOfferingId: offeringIds[0]!,
+      }),
+    );
     deployment = pickDeployment(matching(await workflows.deployments())) ?? deployed;
   }
 
@@ -558,6 +562,7 @@ async function ensureProjectWorkflowOnce(
   const context = (generation: number): DeployContext => ({
     transport,
     gitPush,
+    tenant,
     workspaceTenantId,
     projectId,
     stages,
