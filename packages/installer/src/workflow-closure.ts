@@ -21,6 +21,7 @@
  * (same-origin static files) and hands the bytes in; this module only
  * extracts and reshapes them into asset-tree paths.
  */
+import { WORKFLOW_PACKAGE_DEPENDENCIES } from "@solutions-builder/app/specialist-source";
 import type { ClosureManifest, ClosureManifestEntry } from "./closure-manifest.js";
 import { extractTarballFiles } from "./tarball-extract.js";
 
@@ -131,9 +132,17 @@ export async function toolsDeliveryMemberFiles(
  * `@corbits/artifacts`'s own repository and our installed `node_modules` copy
  * are untouched.
  */
-const ARTIFACTS_MISSING_RUNTIME_DEPENDENCIES: Readonly<Record<string, string>> = {
-  "@intx/agent": "workspace:*",
-  "@intx/types": "workspace:*",
+/** The registry version every `@intx/*` package outside `VENDORED_MEMBERS`
+ *  resolves at. Taken from the specialist's own `@intx/agent` pin so the
+ *  shipped `@corbits/artifacts` member can never drift from the rest of the
+ *  closure: since `@intx/workflow` became the only vendored member, a
+ *  `workspace:*` spec for any other `@intx/*` name is refused by the closure
+ *  resolver ("uses "workspace:*" but is not a workspace member"). */
+const INTX_REGISTRY_VERSION = WORKFLOW_PACKAGE_DEPENDENCIES["@intx/agent"]!;
+
+export const ARTIFACTS_MISSING_RUNTIME_DEPENDENCIES: Readonly<Record<string, string>> = {
+  "@intx/agent": INTX_REGISTRY_VERSION,
+  "@intx/types": INTX_REGISTRY_VERSION,
   // `"*"`, not a hardcoded range: `scripts/closure-pack.ts`'s
   // `rewriteDependencies` already rewrites every vendored `@intx/*` member's
   // own `catalog:`-pinned "arktype"/"drizzle-orm"/"postgres" to `"*"` in the
@@ -147,7 +156,12 @@ const ARTIFACTS_MISSING_RUNTIME_DEPENDENCIES: Readonly<Record<string, string>> =
   postgres: "*",
 };
 
-function withPatchedDependencies(packageJson: string, added: Readonly<Record<string, string>>): string {
+export function withPatchedDependencies(packageJson: string, added: Readonly<Record<string, string>>): string {
+  for (const [name, spec] of Object.entries(added)) {
+    if (spec.startsWith("workspace:") && !VENDORED_MEMBERS.has(name)) {
+      throw new Error(`${name} is pinned "${spec}" but is not a workspace member of the pushed tree`);
+    }
+  }
   const parsed = JSON.parse(packageJson) as {
     dependencies?: Record<string, string>;
     peerDependencies?: Record<string, string>;
