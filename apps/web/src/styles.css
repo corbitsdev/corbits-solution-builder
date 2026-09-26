@@ -4113,14 +4113,15 @@ button[aria-disabled="true"] {
     color-mix(in srgb, var(--wb-primary) 9%, var(--wb-background));
 }
 
-/* The whole film, fitted to the strip's height and centred, the sand
-   showing either side (#109). */
+/* The film edge to edge across the strip, cropped top and bottom to a
+   band centred on the raking, which sits just below the frame's middle
+   (#111). The sand behind it shows only until the film has loaded. */
 .zen-garden-video {
   display: block;
+  width: 100%;
   height: 100%;
-  width: auto;
-  max-width: 100%;
-  object-fit: contain;
+  object-fit: cover;
+  object-position: center 55%;
 }
 
 .zen-garden-caption {
