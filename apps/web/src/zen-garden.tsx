@@ -9,7 +9,7 @@
  * show for it (#93).
  *
  * The strip is always mounted and grows from nothing, so its arrival is a
- * slide rather than a jump. It shows after half a second of continuous work
+ * slide rather than a jump. It shows after one second of continuous work
  * and outlives short gaps between chained requests; both timings live in
  * `busy.ts`. Under reduced motion the figure stands still on raked sand and
  * only the clock moves.

@@ -85,13 +85,13 @@ export type IndicatorState =
   | { readonly phase: "lingering"; readonly since: number; readonly idleAt: number };
 
 export type IndicatorTiming = {
-  /** Continuous work shorter than this never shows. The product rule is half a second. */
+  /** Continuous work shorter than this never shows. The product rule is one second. */
   readonly showAfterMs: number;
   /** How long a shown indicator outlives the count reaching zero. */
   readonly lingerMs: number;
 };
 
-export const INDICATOR_TIMING: IndicatorTiming = { showAfterMs: 500, lingerMs: 600 };
+export const INDICATOR_TIMING: IndicatorTiming = { showAfterMs: 1_000, lingerMs: 600 };
 
 export const IDLE: IndicatorState = { phase: "idle" };
 
