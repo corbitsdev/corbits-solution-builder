@@ -31,7 +31,9 @@ describe("the zen garden busy indicator", () => {
 
   test("the garden names its state, keeps the clock out of the live region, and is hidden from readers as decoration", () => {
     const garden = read("./zen-garden.tsx");
-    expect(garden).toContain('<div className="zen-garden-strip" aria-hidden="true">');
+    // The film is decoration; the strip itself holds the grip, which readers do reach (#120).
+    expect(garden).toContain('<div className="zen-garden-strip">');
+    expect(garden).toMatch(/<video[\s\S]*?aria-hidden="true"/);
     expect(garden).toContain('<span role="status" aria-live="polite">');
     expect(garden).toContain('<span className="zen-garden-clock" role="timer" aria-live="off">');
     expect(garden).toContain('data-visible={visible ? "" : undefined}');
@@ -39,6 +41,20 @@ describe("the zen garden busy indicator", () => {
     expect(garden).toContain('<p className="zen-garden-doing" role="status" aria-live="polite">');
     expect(garden).toContain("{visible && label ? label : null}");
     expect(read("./pages/workspace/index.tsx")).toContain("useBusyWhile(pending !== null, specialistActivity(stage));");
+  });
+
+  // #120: a grip along the top edge sets the height by drag or keyboard,
+  // and the chosen height is applied as the strip's own variable.
+  test("the strip's top edge is a resize grip, and a chosen height overrides the default", () => {
+    const garden = read("./zen-garden.tsx");
+    expect(garden).toContain('className="zen-garden-grip"');
+    expect(garden).toContain('role="separator"');
+    expect(garden).toContain("onPointerDown={size.onPointerDown}");
+    expect(garden).toContain("onKeyDown={size.onKeyDown}");
+    expect(garden).toContain('style={size.height !== null ? ({ "--zen-height": `${size.height}px` } as CSSProperties) : undefined}');
+    const css = read("./styles.css");
+    expect(css).toMatch(/\.zen-garden-grip \{[^}]*cursor: ns-resize;/s);
+    expect(css).toMatch(/\.zen-garden\[data-resizing\] \{[^}]*transition: none;/s);
   });
 
   // #107: the film, looped and silent, mounted only while the strip is up,

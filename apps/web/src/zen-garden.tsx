@@ -13,7 +13,15 @@
  * timings live in `busy.ts`. Under reduced motion the film holds on its
  * first frame and only the clock moves.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
+import {
+  STRIP_KEY_STEP,
+  STRIP_MIN_HEIGHT,
+  clampStripHeight,
+  draggedStripHeight,
+  readStripHeight,
+  writeStripHeight,
+} from "./busy-strip-height.ts";
 import { clock } from "./pages/workspace/elapsed.tsx";
 import { useBusyIndicator } from "./use-busy.ts";
 
@@ -76,13 +84,100 @@ function GardenFilm({ still }: { still: boolean }) {
   );
 }
 
+/**
+ * The strip's height as the person set it, or null for the default (#120).
+ * A drag on the grip along the strip's top edge sets it; the arrow keys on
+ * the grip do the same; a double-click lets it go. Held in browser storage
+ * across reloads.
+ */
+function useStripHeight(): {
+  height: number | null;
+  resizing: boolean;
+  onPointerDown: (event: PointerEvent<HTMLDivElement>) => void;
+  onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
+  reset: () => void;
+} {
+  const [height, setHeight] = useState<number | null>(() => readStripHeight());
+  const [resizing, setResizing] = useState(false);
+  const commit = (next: number | null) => {
+    setHeight(next);
+    writeStripHeight(next);
+  };
+  const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    const strip = event.currentTarget.parentElement;
+    if (!strip) return;
+    event.preventDefault();
+    const startHeight = strip.getBoundingClientRect().height;
+    const startY = event.clientY;
+    const grip = event.currentTarget;
+    // Capture keeps the drag alive when the pointer leaves the grip; a
+    // pointer that cannot be captured (already released, or synthetic)
+    // still drags for as long as it stays over the grip.
+    try {
+      grip.setPointerCapture(event.pointerId);
+    } catch {
+      // See above.
+    }
+    setResizing(true);
+    let latest = startHeight;
+    const onMove = (move: globalThis.PointerEvent) => {
+      latest = draggedStripHeight(startHeight, startY, move.clientY, window.innerHeight);
+      setHeight(latest);
+    };
+    const onUp = () => {
+      grip.removeEventListener("pointermove", onMove);
+      grip.removeEventListener("pointerup", onUp);
+      grip.removeEventListener("pointercancel", onUp);
+      setResizing(false);
+      commit(latest);
+    };
+    grip.addEventListener("pointermove", onMove);
+    grip.addEventListener("pointerup", onUp);
+    grip.addEventListener("pointercancel", onUp);
+  };
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const current = height ?? event.currentTarget.parentElement?.getBoundingClientRect().height ?? STRIP_MIN_HEIGHT;
+    if (event.key === "ArrowUp") commit(clampStripHeight(current + STRIP_KEY_STEP, window.innerHeight));
+    else if (event.key === "ArrowDown") commit(clampStripHeight(current - STRIP_KEY_STEP, window.innerHeight));
+    else if (event.key === "Home") commit(null);
+    else return;
+    event.preventDefault();
+  };
+  return { height, resizing, onPointerDown, onKeyDown, reset: () => commit(null) };
+}
+
 export function ZenGarden() {
   const { visible, since, label } = useBusyIndicator();
   const seconds = useSecondsSince(visible ? since : null);
   const still = useReducedMotion();
+  const size = useStripHeight();
   return (
-    <div className="zen-garden" data-visible={visible ? "" : undefined}>
-      <div className="zen-garden-strip" aria-hidden="true">
+    <div
+      className="zen-garden"
+      data-visible={visible ? "" : undefined}
+      data-resizing={size.resizing ? "" : undefined}
+      style={size.height !== null ? ({ "--zen-height": `${size.height}px` } as CSSProperties) : undefined}
+    >
+      <div className="zen-garden-strip">
+        {/* The grip: a few pixels along the top edge where the pointer
+            becomes a resize cursor. A separator for assistive technology,
+            with the arrow keys and Home as its keyboard. */}
+        {visible ? (
+          <div
+            className="zen-garden-grip"
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Busy strip height"
+            aria-valuenow={size.height ?? undefined}
+            aria-valuemin={STRIP_MIN_HEIGHT}
+            tabIndex={0}
+            title="Drag to change the height; double-click for the default"
+            onPointerDown={size.onPointerDown}
+            onKeyDown={size.onKeyDown}
+            onDoubleClick={size.reset}
+          />
+        ) : null}
         {visible ? <GardenFilm still={still} /> : null}
       </div>
       <div className="zen-garden-caption">
