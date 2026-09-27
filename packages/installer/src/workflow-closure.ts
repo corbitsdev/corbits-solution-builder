@@ -77,21 +77,23 @@ export async function vendoredMemberFiles(
 }
 
 /**
- * `@solutions-builder/app`'s files, as a workspace member: the deck/delivery
- * tools' own imports, the chat section's `routeMessage` action, and
- * everything else `src/` carries. Shipped as source, matching every other
- * environment this package runs consumed-as-source in.
+ * `@solutions-builder/specialist-runtime`'s files, as a workspace member: the
+ * deck authoring, delivery evidence, target verifier and artifact kinds the
+ * deck and delivery tools import, and nothing of the app package beyond that
+ * (#42). Shipped as source, matching every other environment this package
+ * runs consumed-as-source in. Only a specialist whose entry imports one of
+ * those tools ships it (`renderSpecialistSource`).
  */
-export async function appMemberFiles(
+export async function runtimeMemberFiles(
   manifest: ClosureManifest,
   fetchTarball: ClosureTarballFetcher,
 ): Promise<Record<string, string>> {
-  return memberTree(manifest, "@solutions-builder/app", "packages/solutions-builder-app", fetchTarball);
+  return memberTree(manifest, "@solutions-builder/specialist-runtime", "packages/specialist-runtime", fetchTarball);
 }
 
 /** Stage 5's deck tool, as a workspace member: `render_deck`'s own package,
- *  whose `@solutions-builder/app: workspace:*` dependency resolves against
- *  the member `appMemberFiles` ships beside it. */
+ *  whose `@solutions-builder/specialist-runtime: workspace:*` dependency
+ *  resolves against the member `runtimeMemberFiles` ships beside it. */
 export async function toolsDeckMemberFiles(
   manifest: ClosureManifest,
   fetchTarball: ClosureTarballFetcher,

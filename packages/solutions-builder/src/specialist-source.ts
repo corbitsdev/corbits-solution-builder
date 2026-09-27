@@ -81,38 +81,99 @@ const PRIMARY_ROLE_KEY = "primary";
 export const DELIVERY_STAGE = 9;
 
 /**
- * What the deployed package depends on. `@intx/workflow` is a workspace member
- * of the asset (the vendored revision, shipped beside the workflow by
+ * What every deployed specialist depends on. `@intx/workflow` is a workspace
+ * member of the asset (the vendored revision, shipped beside the workflow by
  * `packages/installer/src/workflow-closure.ts`); everything else comes from
  * npm. `hono` is imported by nothing here: it satisfies the peer dependency
  * `@logtape/hono` declares inside `@intx/log`, which the closure resolver
- * refuses to leave unmet. `@solutions-builder/tools-deck` is the
- * deck-rendering tool stage 5's specialist carries: it ships beside the
- * workflow the same way `@intx/tools-posix` does, so a running workflow
- * renders a stakeholder's slides itself instead of asking the hub to do it.
- * `@solutions-builder/tools-delivery` is the same shape for stage 9's
- * delivery-verifier: it summarizes a manifest's already-checked descriptors
- * into a completeness report without a hub round trip.
+ * refuses to leave unmet.
  */
-export const WORKFLOW_PACKAGE_DEPENDENCIES: Readonly<Record<string, string>> = {
+export const SPECIALIST_BASE_DEPENDENCIES: Readonly<Record<string, string>> = {
   "@intx/workflow": "workspace:*",
   "@intx/agent": "0.4.0",
-  "@intx/tools-posix": "0.4.0",
-  "@solutions-builder/app": "workspace:*",
-  "@solutions-builder/tools-deck": "workspace:*",
-  "@solutions-builder/tools-delivery": "workspace:*",
   hono: "^4.0.0",
 };
 
+/** Stage 8's shell: `run_shell` and the file tools the build engineer works with. */
+export const POSIX_TOOL_DEPENDENCIES: Readonly<Record<string, string>> = {
+  "@intx/tools-posix": "0.4.0",
+};
+
 /**
- * What a specialist additionally depends on when it carries the
- * `@corbits/artifacts` tool bundle. Kept apart from the base set because the
- * packed `@solutions-builder/app` member derives its own dependencies from
- * that set: `@corbits/artifacts` is a workspace member only when the tools are
- * on, and it is not on the npm registry, so naming it unconditionally makes
- * every sidecar's install fail. `@standard-schema/spec` satisfies the peer of
- * its `@hono/standard-validator` dependency.
+ * Stage 5's deck-rendering tool, and the runtime package it authors decks
+ * with. Both ship beside the workflow as members, the same way
+ * `@intx/tools-posix` ships from npm, so a running workflow renders a
+ * stakeholder's slides itself instead of asking the hub to do it.
  */
+export const DECK_TOOL_DEPENDENCIES: Readonly<Record<string, string>> = {
+  "@solutions-builder/specialist-runtime": "workspace:*",
+  "@solutions-builder/tools-deck": "workspace:*",
+};
+
+/** Stages 8 and 9's delivery tools (`publish_workspace`, `deliver`) and the
+ *  runtime package that holds the delivery evidence and target verifier. */
+export const DELIVERY_TOOL_DEPENDENCIES: Readonly<Record<string, string>> = {
+  "@solutions-builder/specialist-runtime": "workspace:*",
+  "@solutions-builder/tools-delivery": "workspace:*",
+};
+
+/**
+ * Everything any specialist can depend on: the union of the sets above.
+ * `scripts/closure-pack.ts` packs this whole set once, so the static closure
+ * the installer ships holds every member any stage may need; a specialist's
+ * own `package.json` names only its share (`specialistDependencies`, #42).
+ */
+export const WORKFLOW_PACKAGE_DEPENDENCIES: Readonly<Record<string, string>> = {
+  ...SPECIALIST_BASE_DEPENDENCIES,
+  ...POSIX_TOOL_DEPENDENCIES,
+  ...DECK_TOOL_DEPENDENCIES,
+  ...DELIVERY_TOOL_DEPENDENCIES,
+};
+
+/**
+ * The tools a specialist's rendered entry imports, by stage and role: what
+ * `specialistEntrySource` writes into the entry, and therefore what the
+ * pushed tree must ship as members and the package must depend on (#42).
+ * One place decides, so an entry never imports a tool its closure lacks.
+ */
+export type SpecialistTooling = {
+  /** `render_deck`: a stage 5 per-audience deployment, never the primary one (CL-8873). */
+  readonly deck: boolean;
+  /** `@intx/tools-posix`: stage 8's shell. */
+  readonly posix: boolean;
+  /** `@solutions-builder/tools-delivery`: stage 8's `publish_workspace`, stage 9's `deliver`. */
+  readonly delivery: boolean;
+  /** `@corbits/artifacts`' generic bundle: opt-in, never on stage 8 (CL-8723). */
+  readonly artifacts: boolean;
+};
+
+export function specialistTooling(options: {
+  readonly stage: Stage;
+  readonly roleKey?: string | undefined;
+  readonly artifactTools?: boolean | undefined;
+}): SpecialistTooling {
+  const { stage, roleKey = PRIMARY_ROLE_KEY, artifactTools = false } = options;
+  const isBuildStage = stage === BUILD_STAGE;
+  return {
+    deck: stage === PACKAGE_STAGE && roleKey !== PRIMARY_ROLE_KEY,
+    posix: isBuildStage,
+    delivery: isBuildStage || stage === DELIVERY_STAGE,
+    artifacts: artifactTools && !isBuildStage,
+  };
+}
+
+/** The `dependencies` a specialist's own package declares: the base set plus
+ *  each tool set its entry imports, nothing it does not ship. */
+export function specialistDependencies(tooling: SpecialistTooling): Record<string, string> {
+  return {
+    ...SPECIALIST_BASE_DEPENDENCIES,
+    ...(tooling.posix ? POSIX_TOOL_DEPENDENCIES : {}),
+    ...(tooling.deck ? DECK_TOOL_DEPENDENCIES : {}),
+    ...(tooling.delivery ? DELIVERY_TOOL_DEPENDENCIES : {}),
+    ...(tooling.artifacts ? ARTIFACT_TOOL_DEPENDENCIES : {}),
+  };
+}
+
 export const ARTIFACT_TOOL_DEPENDENCIES: Readonly<Record<string, string>> = {
   "@corbits/artifacts": "workspace:*",
   "@standard-schema/spec": "^1.0.0",
@@ -227,27 +288,20 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
   // rule telling the model to call `artifact_create` for its stage document.
   const isBuildStage = stage === BUILD_STAGE;
 
-  // CL-8873: `render_deck` rides only on a per-audience deployment (see
-  // `PRIMARY_ROLE_KEY`'s doc comment) -- the primary deployment writes the
-  // packages' text and nothing else, so its one turn can actually finish.
+  // What this entry imports, decided once for the entry and its closure
+  // (`specialistTooling`): CL-8873 keeps `render_deck` off stage 5's primary
+  // deployment, and stage 8's delivery tool is `publish_workspace` where
+  // stage 9's is `deliver`.
+  const tooling = specialistTooling({ stage, roleKey, artifactTools });
   const isPrimaryPackageDeployment = stage === PACKAGE_STAGE && roleKey === PRIMARY_ROLE_KEY;
-
-  const stageToolImports =
-    stage === PACKAGE_STAGE && !isPrimaryPackageDeployment
-      ? `import { deck } from ${JSON.stringify("@solutions-builder/tools-deck/sidecar-bundle")};\n`
-      : isBuildStage
-        ? `import { posix } from ${JSON.stringify("@intx/tools-posix/sidecar-bundle")};\nimport { publishWorkspaceTool } from ${JSON.stringify("@solutions-builder/tools-delivery/publish-workspace")};\nconst publishWorkspace = publishWorkspaceTool(${JSON.stringify(projectId)});\n`
-        : stage === DELIVERY_STAGE
-          ? `import { deliver } from ${JSON.stringify("@solutions-builder/tools-delivery/sidecar-bundle")};\n`
-          : "";
-  const stageTools =
-    stage === PACKAGE_STAGE && !isPrimaryPackageDeployment
-      ? "deck"
-      : isBuildStage
-        ? "posix, publishWorkspace"
-        : stage === DELIVERY_STAGE
-          ? "deliver"
-          : "";
+  const stageToolImports = tooling.deck
+    ? `import { deck } from ${JSON.stringify("@solutions-builder/tools-deck/sidecar-bundle")};\n`
+    : isBuildStage
+      ? `import { posix } from ${JSON.stringify("@intx/tools-posix/sidecar-bundle")};\nimport { publishWorkspaceTool } from ${JSON.stringify("@solutions-builder/tools-delivery/publish-workspace")};\nconst publishWorkspace = publishWorkspaceTool(${JSON.stringify(projectId)});\n`
+      : tooling.delivery
+        ? `import { deliver } from ${JSON.stringify("@solutions-builder/tools-delivery/sidecar-bundle")};\n`
+        : "";
+  const stageTools = tooling.deck ? "deck" : isBuildStage ? "posix, publishWorkspace" : tooling.delivery ? "deliver" : "";
 
   // CL-8719: every other credential-bound stage specialist writes its draft
   // as a real artifact through `@corbits/artifacts`' agent tool bundle,
@@ -260,7 +314,7 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
   // `SpecialistSourceOptions`; today only stage 8 turns it on, and
   // `publish_workspace` resolves the same credential itself rather than
   // through this generic bundle (see `genericArtifactTools` below).
-  const genericArtifactTools = artifactTools && !isBuildStage;
+  const genericArtifactTools = tooling.artifacts;
   const toolImports = genericArtifactTools
     ? `import { artifacts } from ${JSON.stringify("@corbits/artifacts/sidecar-bundle")};\n${stageToolImports}`
     : stageToolImports;

@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { packTarballFiles, tarballFilename } from "./tarball-pack.js";
 import {
   ARTIFACTS_MISSING_RUNTIME_DEPENDENCIES,
-  appMemberFiles,
   artifactsMemberFiles,
+  runtimeMemberFiles,
   memberDir,
   toolsDeckMemberFiles,
   toolsDeliveryMemberFiles,
@@ -31,12 +31,12 @@ async function fakeClosure(): Promise<{ manifest: ClosureManifest; fetchTarball:
       },
     },
     {
-      name: "@solutions-builder/app",
+      name: "@solutions-builder/specialist-runtime",
       version: "0.1.0",
       files: {
-        "package.json": '{"name":"@solutions-builder/app","version":"0.1.0","type":"module"}\n',
+        "package.json": '{"name":"@solutions-builder/specialist-runtime","version":"0.1.0","type":"module"}\n',
         "src/deck.ts": "export function deck() {}\n",
-        "src/admit.ts": "export function admitGate() {}\n",
+        "src/delivery.ts": "export function summarizeVerification() {}\n",
       },
     },
     {
@@ -101,11 +101,11 @@ describe("workflow-closure", () => {
     expect((await treeDigest(files)).length).toBe(64);
   });
 
-  test("app and tools members extract from their own tarballs", async () => {
+  test("runtime and tools members extract from their own tarballs", async () => {
     const { manifest, fetchTarball } = await fakeClosure();
-    const app = await appMemberFiles(manifest, fetchTarball);
-    expect(app["packages/solutions-builder-app/src/deck.ts"]).toContain("export function deck");
-    expect(app["packages/solutions-builder-app/src/admit.ts"]).toContain("admitGate");
+    const runtime = await runtimeMemberFiles(manifest, fetchTarball);
+    expect(runtime["packages/specialist-runtime/src/deck.ts"]).toContain("export function deck");
+    expect(runtime["packages/specialist-runtime/src/delivery.ts"]).toContain("summarizeVerification");
 
     const deck = await toolsDeckMemberFiles(manifest, fetchTarball);
     expect(deck["packages/tools-deck/src/sidecar-bundle.ts"]).toContain("bundle");
