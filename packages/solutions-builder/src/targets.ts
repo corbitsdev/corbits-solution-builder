@@ -8,9 +8,9 @@
  * rather than being reimplemented at either call site.
  */
 
-/** A declared target's modality. `"cli"`, `"web"` and `"api"` have a verifier
- *  implemented (`target-verify.ts`); `"desktop"` and `"other"` are honestly
- *  reported as not exercised. */
+/** A declared target's modality. `"web"` and `"api"` have a verifier
+ *  (`target-verify.ts`), run by stage 8's `publish_workspace` (#129);
+ *  `"cli"`, `"desktop"` and `"other"` are honestly reported as not exercised. */
 export type TargetModality = "cli" | "web" | "api" | "desktop" | "other";
 
 /**
@@ -68,14 +68,16 @@ export function classifyTarget(target: string): TargetModality {
  * exercised.
  *
  * `verifyApiTarget` and `verifyWebTarget` (`target-verify.ts`, this package)
- * implement the `api` and `web` checks described here; nothing in this repo
- * calls them yet — see that file's header for exactly where they need to be
- * wired in. `verifyCliTarget` (the `cli` check) has no implementation left
- * in this repo at all: it existed in the deleted `apps/hub/src/completion-judge.ts`
- * (CL-8340, commit ebf6e896) and was not resurrected here.
+ * implement the `api` and `web` checks described here; stage 8's
+ * `publish_workspace` (`@solutions-builder/tools-delivery/verify`) runs them
+ * on the targets the build engineer names (#129). `verifyCliTarget` (the
+ * `cli` check) has no implementation left in this repo at all: it existed in
+ * the deleted `apps/hub/src/completion-judge.ts` (CL-8340, commit ebf6e896)
+ * and was not resurrected here, so a `cli` target is reported as not
+ * exercised.
  */
 const GUIDANCE: Record<TargetModality, string> = {
-  cli: "The deliverable must be runnable as a command. It will be exercised by running it and feeding it real input drawn from the requirements on stdin, then checking that it runs successfully and produces output. To be runnable, it must be startable from the workspace root: declare a `start` script in the root `package.json` (the plainest way), or a `bin` entry, or `main` pointing at the entry file. A target nobody can start contributes nothing toward completion.",
+  cli: "The deliverable must be runnable as a command. No command-line verification is implemented today — this target will be reported as not exercised, so it contributes no confidence toward completion on its own. To be runnable, it must still be startable from the workspace root: declare a `start` script in the root `package.json` (the plainest way), or a `bin` entry, or `main` pointing at the entry file.",
   web: "The deliverable must be usable as a browser-run web app. It will be exercised by starting it, waiting for its port to open, then fetching `/` over plain HTTP and checking for a 200 with an HTML body, plus one referenced static asset (a script or stylesheet) also fetched and checked for a 200. This is an HTTP-response check, not a browser: no DOM, no JavaScript execution, no console-error capture, and no scripted user flow — this repo has no headless browser (no playwright, no puppeteer). A page that only renders correctly once its own JavaScript runs is not covered, and that gap is reported, not hidden.",
   api: "The deliverable must expose a network service (HTTP/REST/gRPC). It will be exercised by starting it, waiting for its port to open, then sending a GET to each declared route and recording the status and body it returned. A route that errors, times out, or never responds is reported as such, not silently skipped.",
   desktop: "The deliverable must be an installable desktop app. No desktop verification is implemented yet — this target will be reported as not exercised, so it contributes no confidence toward completion on its own.",
@@ -105,11 +107,11 @@ export const SELECTABLE_TARGETS: ReadonlyArray<{
   readonly target: string;
   readonly modality: Exclude<TargetModality, "other">;
   readonly label: string;
-  /** Whether choosing this target actually gets exercised at verification time, today. `false` here means no live call site runs the check yet, not that no implementation exists — see `target-verify.ts` for `web`/`api`. */
+  /** Whether choosing this target actually gets exercised at verification time, today: `web` and `api` are started and probed by stage 8's `publish_workspace`; nothing runs a `cli` or `desktop` check. */
   readonly verified: boolean;
 }> = [
-  { target: "cli", modality: "cli", label: "A command you run in a terminal", verified: true },
-  { target: "web", modality: "web", label: "A website", verified: false },
-  { target: "api", modality: "api", label: "A service other software calls", verified: false },
+  { target: "cli", modality: "cli", label: "A command you run in a terminal", verified: false },
+  { target: "web", modality: "web", label: "A website", verified: true },
+  { target: "api", modality: "api", label: "A service other software calls", verified: true },
   { target: "desktop", modality: "desktop", label: "An app you install", verified: false },
 ];
