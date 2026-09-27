@@ -4467,9 +4467,9 @@ async function parkOnSignalResult(
   if (parkToNotify !== undefined) {
     env.onPark?.(parkToNotify);
   }
-  // The author-signal sibling notify: a suspendable-child body's `awaitSignal`
-  // gate is surfaced up so the section can proxy it. Fired after the flush like
-  // `onPark` so the `SignalAwaited` is durable before the section observes it.
+  // A suspendable-child body's author-signal gate is surfaced up so its
+  // container can proxy it. A top-level host may also observe its own park.
+  // Fire after the flush so the `SignalAwaited` is durable before it is seen.
   if (signalParkToNotify !== undefined) {
     env.onSignalPark?.({ runId, name: signalParkToNotify });
   }

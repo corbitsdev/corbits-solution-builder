@@ -48,7 +48,11 @@ import {
   type RunWorkflowChildBindings,
 } from "./index";
 import type { MailboxEvent } from "@intx/types/runtime";
-import { emitParkNotify, emitTerminalEvent } from "./run-child";
+import {
+  emitParkNotify,
+  emitRunParked,
+  emitTerminalEvent,
+} from "./run-child";
 import type { RunResult, WorkflowPark } from "@intx/workflow";
 import {
   createChangeNotifier,
@@ -2458,7 +2462,7 @@ describe("emitTerminalEvent", () => {
   });
 });
 
-describe("emitParkNotify", () => {
+describe("park emitters", () => {
   function capturingSender(): {
     sender: ControlChannelSender;
     sent: ControlPayload[];
@@ -2503,6 +2507,22 @@ describe("emitParkNotify", () => {
     ]);
   });
 
+  test("forwards an author-signal park as a run-scoped wakeup", async () => {
+    const { sender, sent } = capturingSender();
+    const park = {
+      runId: "run-park",
+    };
+
+    await emitRunParked(sender, park);
+
+    expect(sent).toEqual([
+      {
+        type: "run.parked",
+        data: { runId: "run-park" },
+      },
+    ]);
+  });
+
   test("swallows a send failure so a lost frame does not crash the caller", async () => {
     const sender: ControlChannelSender = {
       seq: 0,
@@ -2517,5 +2537,16 @@ describe("emitParkNotify", () => {
       parkKind: "approval",
       approvalSnapshot: parkSnapshot,
     });
+  });
+
+  test("swallows a run.parked send failure so the park path stays intact", async () => {
+    const sender: ControlChannelSender = {
+      seq: 0,
+      send: () => Promise.reject(new Error("child link down")),
+    };
+
+    await expect(
+      emitRunParked(sender, { runId: "run-park" }),
+    ).resolves.toBeUndefined();
   });
 });

@@ -1469,6 +1469,13 @@ async function handleControlPayload(
         "workflow-child received a `park.notify` frame on its inbound control channel; this is a child-only upstream payload",
       );
     }
+    case "run.parked": {
+      // `run.parked` is a child->supervisor dispatch notification; receiving
+      // it from the supervisor is a protocol violation.
+      throw new Error(
+        "workflow-child received a `run.parked` frame on its inbound control channel; this is a child-only upstream payload",
+      );
+    }
     case "outbound.message": {
       // `outbound.message` is the child->supervisor outbound-mail
       // request frame; receiving one on the child's downstream side is a
@@ -1755,6 +1762,12 @@ function buildRuntimeEnv(args: {
     onPark: (park) => {
       void emitParkNotify(args.upstreamSender, park);
     },
+    // A top-level author-signal park has no enclosing runtime container to
+    // notify its supervisor. Send a run-scoped wakeup after the runtime flushes
+    // the park; the supervisor does not register this at the hub.
+    onSignalPark: (park) => {
+      void emitRunParked(args.upstreamSender, park);
+    },
     // Let the resume classifier recover a step that crashed across the park
     // boundary. Absent (tests, the recursive child-workflow adapter) leaves a
     // crashed invocation a terminal failure.
@@ -1886,6 +1899,26 @@ export function emitParkNotify(
     .catch((cause) => {
       const message = cause instanceof Error ? cause.message : String(cause);
       logger.error`park.notify upstream send failed for runId=${park.runId} correlationId=${park.correlationId}: ${message}`;
+    });
+}
+
+/**
+ * Notify the supervisor that an author-signal park is durable. This is only a
+ * dispatch-wait wakeup; the author-chosen signal has no hub correlation to
+ * register.
+ */
+export function emitRunParked(
+  upstreamSender: ControlChannelSender,
+  park: { runId: string },
+): Promise<void> {
+  return upstreamSender
+    .send({
+      type: "run.parked",
+      data: { runId: park.runId },
+    })
+    .catch((cause) => {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      logger.error`run.parked upstream send failed for runId=${park.runId}: ${message}`;
     });
 }
 

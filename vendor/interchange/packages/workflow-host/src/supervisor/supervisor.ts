@@ -502,14 +502,14 @@ export function createWorkflowSupervisor(
     { correlationId: string; parkKind: "input" }
   >();
   /**
-   * Waiters for dispatch loops blocked on a `park.notify` for a
-   * specific runId. When `park.notify` arrives, the handler resolves
-   * the waiter so the dispatch loop re-evaluates routing.
+   * Waiters for dispatch loops blocked on a run's terminal-or-park decision.
+   * A `park.notify` or `run.parked` frame resolves the waiter so the dispatch
+   * loop re-evaluates routing.
    */
   const parkNotifyWaiters = new Map<string, () => void>();
   /**
-   * Monotonic per-run INPUT-park generation. Bumped on every
-   * `park.notify(input)` for a runId. `waitForRunTerminalOrPark` captures a
+   * Monotonic per-run park generation. Bumped on every `park.notify` and
+   * `run.parked` frame for a runId. `waitForRunTerminalOrPark` captures a
    * `sinceGen` before its caller's pre-wait awaits and returns `"parked"` when
    * the generation later exceeds it, so the wait keys on the park EDGE rather
    * than `runInputChannels`' LEVEL state: a park that fired during the pre-wait
@@ -1547,6 +1547,16 @@ export function createWorkflowSupervisor(
           (parkGenerations.get(payload.data.runId) ?? 0) + 1,
         );
         // Wake any dispatch loop waiting for this run to park.
+        resolveParkNotifyWaiter(payload.data.runId);
+        continue;
+      }
+      if (payload.type === "run.parked") {
+        // Author-signal parks are not hub-registered, but they still suspend
+        // the top-level run and must release its dispatch wait.
+        parkGenerations.set(
+          payload.data.runId,
+          (parkGenerations.get(payload.data.runId) ?? 0) + 1,
+        );
         resolveParkNotifyWaiter(payload.data.runId);
         continue;
       }
