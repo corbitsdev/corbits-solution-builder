@@ -1,24 +1,15 @@
 /**
  * `web` and `api` target verification — CL-8863.
  *
- * `targets.ts` describes what these checks do (`GUIDANCE.web`/`GUIDANCE.api`)
- * but nothing in this repo calls them: `apps/hub/src/completion-judge.ts`,
- * the file that used to run `cli` verification the same way, was deleted in
- * commit ebf6e896 (CL-8340) when stage 8 moved to a mail-fed agent (the
- * `build-engineer` role in `kit.ts`) that runs its own shell commands and
- * self-reports, rather than a bounded bridge process this host drove. No
- * replacement call site for *any* modality's verification exists today —
- * this module is a pure implementation of the `web`/`api` checks, written
- * ahead of that wiring so it does not block on it. It needs a caller that:
- *   1. Starts the deliverable the same way stage 8's evidence says it runs
- *      (a command and a port), most likely from the `build_evidence` the
- *      build engineer already reports, or from the frozen `StackRecord`.
- *   2. Feeds `api` its declared routes — there is nowhere today that a
- *      route list is recorded; the acceptance criteria or the requirements
- *      block is the likely source, not invented here.
- *   3. Puts the resulting `TargetVerification` somewhere a human or a judge
- *      reads it — the old `CompletionVerdict` shape (deleted) or whatever
- *      stage 8's evidence review adopts next.
+ * `targets.ts` describes what these checks do (`GUIDANCE.web`/`GUIDANCE.api`).
+ * Their caller is stage 8's `publish_workspace` tool
+ * (`@solutions-builder/tools-delivery/verify`, #129), which runs in the
+ * build engineer's sidecar: the engineer names each target's start command,
+ * port and routes, the tool starts and probes it from the attempt
+ * directory, and the resulting `TargetVerification` is recorded on the
+ * delivery manifest, where stage 9 and the person read it. The `cli` check
+ * that `apps/hub/src/completion-judge.ts` used to run was deleted with that
+ * file in commit ebf6e896 (CL-8340) and has no replacement.
  *
  * Both checks are HTTP-only. There is no headless browser in this repo (no
  * playwright, no puppeteer) — `verifyWebTarget` fetches pages over plain

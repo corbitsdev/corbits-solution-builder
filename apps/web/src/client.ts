@@ -60,7 +60,7 @@ import { importProject as importProjectBundle } from "./project-import.ts";
 import { importLegacyProject, isLegacyBundle, parseLegacyBundle } from "./legacy-import.ts";
 import { ArchiveRefused, expandArchives } from "./material-archive.ts";
 import { replayAdoption } from "./adoption-replay.ts";
-import { MATERIAL_KIND, MATERIAL_READING_KIND } from "@solutions-builder/app/artifacts";
+import { DELIVERY_MANIFEST_KIND, MATERIAL_KIND, MATERIAL_READING_KIND } from "@solutions-builder/app/artifacts";
 import { readMaterial } from "./material-reading.ts";
 import type { DesignFeedbackDisposition, DesignFeedbackEntry as DesignFeedbackGraphEntry } from "@solutions-builder/app/artifact-graph";
 import type { TemplateTheme } from "@solutions-builder/app/deck";
@@ -2206,10 +2206,14 @@ false,
    */
   persistBuildEvidence: (
     projectId: string,
-    bundle: { fileName: string; mediaType: string; dataUri: string; sizeBytes: number },
+    bundle: { fileName: string; mediaType: string; dataUri: string; sizeBytes: number; manifest?: { attempt: string } & Record<string, unknown> },
     sourceVersionIds: string[] = [],
   ) =>
     asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      // The attempt the archive and its manifest share, so stage 9 finds the
+      // manifest as the archive's companion the way it does for the real
+      // upload path (`manifestCompanionOf`).
+      const variant = bundle.manifest?.attempt ?? null;
       const artifact = await installerCreateArtifact(transport, workspaceTenantId, {
         title: bundle.fileName,
         content: bundle.dataUri,
@@ -2219,11 +2223,32 @@ false,
             kind: STAGE_DRAFT_KIND[8]!,
             stage: 8,
             mediaType: bundle.mediaType,
+            ...(variant === null ? {} : { variant }),
             sourceVersionIds,
             provenance: { producer: "agent" as const },
           },
         },
       });
+      // The fallback result carries the manifest inline, verification and
+      // all (#129): the tool had no credential to upload it, so it is
+      // written here beside the archive, as the real path would have.
+      if (bundle.manifest) {
+        await installerCreateArtifact(transport, workspaceTenantId, {
+          title: `${bundle.fileName.replace(/\.tar\.gz$/, "")}-manifest.json`,
+          content: JSON.stringify(bundle.manifest),
+          metadata: {
+            sb: {
+              projectId,
+              kind: DELIVERY_MANIFEST_KIND,
+              stage: 8,
+              mediaType: "application/json",
+              ...(variant === null ? {} : { variant }),
+              sourceVersionIds: [artifact.id],
+              provenance: { producer: "agent" as const },
+            },
+          },
+        });
+      }
       return {
         artifactId: artifact.id,
         versionId: artifact.id,

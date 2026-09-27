@@ -1004,6 +1004,11 @@ export function StageWorkspace({
               <DeliveryPanel
                 detail={detail}
                 tenantId={tenantId}
+                archiveRef={
+                  workflowView?.reviews[8]?.status === "approved"
+                    ? { artifactId: workflowView.reviews[8].artifactId, version: workflowView.reviews[8].version }
+                    : null
+                }
                 latestReply={latestSpecialistMessage}
                 onAccept={acceptDelivery}
                 onRejectSendBack={() => void sendBack(8)}

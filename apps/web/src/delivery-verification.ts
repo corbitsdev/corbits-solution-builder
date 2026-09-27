@@ -1,25 +1,24 @@
 /**
  * Per-file verification for stage 9's decision (CL-8728).
  *
- * `delivery_status`'s tool arguments and a `delivery_verification`/
- * `delivery_manifest` artifact's content (`packages/solutions-builder/src/delivery.ts`'s
- * `VerificationReport`/`VerificationItem`) both carry the same `items` shape:
- * one entry per descriptor with `category`, `path`, `required` and a
- * `status` of `"verified" | "missing" | "hash_mismatch" | "inaccessible"`.
- * Neither shape is trusted here — a status this module does not recognize,
- * or a descriptor never mentioned, is `"unverified"`, never `"passed"`.
+ * A `delivery_manifest` artifact's embedded `verification` (what stage 8's
+ * `publish_workspace` recorded, `packages/tools-delivery/src/verify.ts`) and
+ * a `delivery_verification` record carry the same `items` shape
+ * (`packages/solutions-builder/src/delivery.ts`'s `VerificationItem`): one
+ * entry per descriptor with `category`, `path`, `required`, a `status` and
+ * who set it, `checkedBy`. Nothing here is taken on trust — a status this
+ * module does not recognize, or a descriptor never mentioned, is
+ * `"unverified"`, never `"passed"`.
  *
- * Nor is `"verified"` a pass (#32). Every item reaching this module was
- * scored by the delivery-verifier agent from the text of its opening
- * message: no code hashes the delivered files or probes the deliverable, so
- * `"verified"` is the agent's claim and renders as unverified, with that
- * reason on the row. `"passed"` is reserved for a row whose status came
- * from a deterministic check; nothing produces one today (#129).
+ * Only a tool's `"verified"` is a pass (#32, #129): `checkedBy: "tool"`
+ * means deterministic code read the bytes or drove the process. An item
+ * without that provenance was scored by a model from text it was handed,
+ * and renders as unverified with that reason on the row, whatever it says.
  */
 
 export type VerificationRowStatus = "passed" | "failed" | "unverified";
 
-/** The reason a row the agent scored `"verified"` is shown unverified. */
+/** The reason a row not checked by a tool is shown unverified, whatever its status claims. */
 export const AGENT_REPORTED_NOTE = "reported by the agent, not checked";
 
 export type VerificationRow = {
@@ -38,17 +37,18 @@ export type DeliveryVerification = {
 };
 
 const STATUS_MAP: Record<string, VerificationRowStatus> = {
-  verified: "unverified",
+  verified: "passed",
   missing: "failed",
   hash_mismatch: "failed",
-  inaccessible: "unverified",
   failed: "failed",
+  inaccessible: "unverified",
   unverified: "unverified",
 };
 
-/** Statuses that are the agent's own claim of success. A row carrying one is
- *  unverified, and says why, so a person never reads a claim as a check. */
-const AGENT_CLAIMS: ReadonlySet<string> = new Set(["verified", "passed"]);
+/** Statuses that claim success. Only a tool may make that claim; from anyone
+ *  else the row is unverified, and says why, so a person never reads a claim
+ *  as a check. */
+const SUCCESS_CLAIMS: ReadonlySet<string> = new Set(["verified", "passed"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -88,7 +88,8 @@ function parseRow(raw: unknown, problems: string[]): VerificationRow | null {
   const given = typeof raw["detail"] === "string" ? raw["detail"] : typeof raw["note"] === "string" ? raw["note"] : undefined;
 
   const rawStatus = raw["status"];
-  const claimed = typeof rawStatus === "string" && AGENT_CLAIMS.has(rawStatus);
+  const checkedByTool = raw["checkedBy"] === "tool";
+  const claimed = typeof rawStatus === "string" && SUCCESS_CLAIMS.has(rawStatus) && !checkedByTool;
   const mapped = claimed ? "unverified" : typeof rawStatus === "string" ? STATUS_MAP[rawStatus] : undefined;
   const status: VerificationRowStatus = mapped ?? "unverified";
   if (!mapped) {

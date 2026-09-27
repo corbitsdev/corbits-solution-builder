@@ -39,6 +39,7 @@ import { Dictated } from "../../dictation.jsx";
 import { agentFor } from "@solutions-builder/app/kit";
 import type { StageEvent } from "./stage-events.ts";
 import { StageConversation } from "./thread.jsx";
+import { parseDeliveryManifest, type DeliveryManifestContent } from "./delivery-opening.ts";
 import { StagePanes } from "./workspace-chrome.tsx";
 import { clock } from "./elapsed.jsx";
 import { BuildFile } from "../graph.jsx";
@@ -76,6 +77,17 @@ function lastAttemptStartedAt(messages: readonly ChatMessage[]): number | undefi
     .sort((a, b) => b - a)[0];
 }
 
+/** A `publish_workspace` fallback result as a reply carries it. `manifest`
+ *  is the delivery manifest, with the tool's verification, that the real
+ *  upload path would have written as its own artifact (#129). */
+export type PublishedBundle = {
+  fileName: string;
+  mediaType: string;
+  dataUri: string;
+  sizeBytes: number;
+  manifest?: DeliveryManifestContent;
+};
+
 /**
  * The stage 8 build specialist's `publish_workspace` fallback result, when
  * a reply carries one: `{fileName, mediaType, dataUri, sizeBytes}`, either as
@@ -83,9 +95,7 @@ function lastAttemptStartedAt(messages: readonly ChatMessage[]): number | undefi
  * plain status update, or the real-upload result shape which has no
  * `dataUri`) is not a fallback bundle.
  */
-export function parsePublishedBundle(
-  body: string | undefined,
-): { fileName: string; mediaType: string; dataUri: string; sizeBytes: number } | null {
+export function parsePublishedBundle(body: string | undefined): PublishedBundle | null {
   if (!body) return null;
   const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(body)?.[1] ?? body;
   try {
@@ -96,7 +106,14 @@ export function parsePublishedBundle(
       typeof parsed["dataUri"] === "string" &&
       typeof parsed["sizeBytes"] === "number"
     ) {
-      return parsed as { fileName: string; mediaType: string; dataUri: string; sizeBytes: number };
+      const manifest = parseDeliveryManifest(JSON.stringify(parsed["manifest"] ?? null));
+      return {
+        fileName: parsed["fileName"],
+        mediaType: parsed["mediaType"],
+        dataUri: parsed["dataUri"],
+        sizeBytes: parsed["sizeBytes"],
+        ...(manifest ? { manifest } : {}),
+      };
     }
   } catch {
     // Not a bundle — an ordinary chat reply.

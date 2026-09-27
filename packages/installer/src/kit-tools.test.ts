@@ -9,7 +9,7 @@ import { AGENT_KIT } from "@solutions-builder/app/kit";
 import { SPECIALIST_TOOLS, kitSeed } from "@solutions-builder/app/seed-kit";
 import { BUILD_STAGE, DELIVERY_STAGE, PACKAGE_STAGE } from "@solutions-builder/app/specialist-source";
 import { TOOL_NAME as RENDER_DECK } from "@solutions-builder/tools-deck/sidecar-bundle";
-import { DELIVER_TOOL_NAME, TOOL_NAME as DELIVERY_STATUS } from "@solutions-builder/tools-delivery/sidecar-bundle";
+import { DELIVER_TOOL_NAME } from "@solutions-builder/tools-delivery/sidecar-bundle";
 import { TOOL_NAME as PUBLISH_WORKSPACE } from "@solutions-builder/tools-delivery/publish-workspace";
 
 describe("the kit's tool names", () => {
@@ -18,7 +18,7 @@ describe("the kit's tool names", () => {
     expect(names(SPECIALIST_TOOLS.deck)).toEqual([RENDER_DECK]);
     expect(names(SPECIALIST_TOOLS.posix)).toEqual(names(Object.values(POSIX_TOOL_NAMES)));
     expect(names(SPECIALIST_TOOLS.publishWorkspace)).toEqual([PUBLISH_WORKSPACE]);
-    expect(names(SPECIALIST_TOOLS.delivery)).toEqual(names([DELIVERY_STATUS, DELIVER_TOOL_NAME]));
+    expect(names(SPECIALIST_TOOLS.delivery)).toEqual([DELIVER_TOOL_NAME]);
   });
 
   test("a role's skills name only tools its stage's deployment carries", () => {
