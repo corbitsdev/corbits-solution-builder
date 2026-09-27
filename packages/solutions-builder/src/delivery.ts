@@ -38,14 +38,25 @@ export const DeliveryManifest = type({
 });
 export type DeliveryManifest = typeof DeliveryManifest.infer;
 
-export const VERIFICATION_STATUSES = ["verified", "missing", "hash_mismatch", "inaccessible"] as const;
+/** `failed`: a check that ran and did not pass, such as a target whose port
+ *  never opened. Distinct from `inaccessible`, which is a check nobody could
+ *  run; neither is a pass. */
+export const VERIFICATION_STATUSES = ["verified", "missing", "hash_mismatch", "failed", "inaccessible"] as const;
 export type VerificationStatus = (typeof VERIFICATION_STATUSES)[number];
+
+/** Who produced an item's status. `tool`: deterministic code that read the
+ *  bytes or drove the process (`publish_workspace`'s own checks, #129).
+ *  `agent`: a model's reading of text it was handed. Only a `tool` item's
+ *  `verified` is ever shown as a pass; an `agent` claim is a claim (#32). */
+export const VERIFICATION_PROVENANCES = ["tool", "agent"] as const;
+export type VerificationProvenance = (typeof VERIFICATION_PROVENANCES)[number];
 
 export const VerificationItem = type({
   category: type.enumerated(...DESCRIPTOR_CATEGORIES),
   path: "string > 0",
   required: "boolean",
   status: type.enumerated(...VERIFICATION_STATUSES),
+  "checkedBy?": type.enumerated(...VERIFICATION_PROVENANCES),
   "detail?": "string",
 });
 export type VerificationItem = typeof VerificationItem.infer;

@@ -23,6 +23,12 @@
  * (`apps/web/src/pages/workspace/index.tsx`), since the delivery-verifier
  * has no filesystem and no view of stage 8's working directory.
  *
+ * The manifest also carries `verification` (#129): the deterministic checks
+ * `verify.ts` runs here, where the files are — the archive's own contents
+ * re-hashed against the manifest, and each `web`/`api` target the build
+ * engineer names started and probed over HTTP. Stage 9 reads those results;
+ * it scores nothing itself, and nothing a model says becomes a pass.
+ *
  * When the `hub` credential cannot be resolved (older, non-credential-bound
  * deploys, or a host that never wired the binding), this falls back to the
  * previous behavior: a `data:` URI in the tool result, with `fallback:
@@ -36,9 +42,10 @@ import { defineTool, type BaseEnv } from "@intx/agent";
 import type { RuntimeCapabilities } from "@intx/types/runtime-capabilities";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFile, readdir } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { resolve, relative, isAbsolute, join } from "node:path";
 import { BUILD_EVIDENCE_KIND, DELIVERY_MANIFEST_KIND } from "@solutions-builder/app/artifacts";
+import { hashTree, verifyArchive, type DeliveryVerificationContent, type ManifestFileEntry, type TargetProbe } from "./verify.js";
 
 export const TOOL_NAME = "publish_workspace";
 
@@ -100,9 +107,11 @@ type PublishWorkspaceArgs = {
   exclude: string[];
   /** null when the model named no directory: the tool picks the attempt. */
   dir: string | null;
+  /** The targets to start and probe; none when the model named none. */
+  targets: TargetProbe[];
 };
 
-export type ManifestFileEntry = { path: string; sha256: string; sizeBytes: number };
+export type { ManifestFileEntry } from "./verify.js";
 
 export type DeliveryManifestContent = {
   projectId: string;
@@ -113,6 +122,17 @@ export type DeliveryManifestContent = {
   fileCount: number;
   truncated: boolean;
   generatedAt: string;
+  /** What `verify.ts` established about this archive; absent only for a
+   *  manifest written before #129. */
+  verification?: DeliveryVerificationContent;
+};
+
+/** What the model is told about the checks, in both result shapes. */
+type VerificationSummary = {
+  complete: boolean;
+  /** Paths of required items that are not `verified`. */
+  failed: string[];
+  targets: { target: string; ranSuccessfully: boolean; transcript: string }[];
 };
 
 type UploadResult = {
@@ -123,6 +143,7 @@ type UploadResult = {
   fileCount: number;
   dir: string;
   manifest: { artifactId: string; version: number; fileCount: number; truncated: boolean };
+  verification: VerificationSummary;
 };
 
 type FallbackResult = {
@@ -131,6 +152,11 @@ type FallbackResult = {
   mediaType: string;
   sizeBytes: number;
   dataUri: string;
+  /** The manifest, with its verification, inline: with no upload credential
+   *  there is no artifact to hold it, so the client persists it beside the
+   *  archive the same way it persists the archive itself. */
+  manifest: DeliveryManifestContent;
+  verification: VerificationSummary;
 };
 
 /** Resolves `dir` (e.g. "attempts/3") against `cwd`, refusing anything that
@@ -167,6 +193,28 @@ async function currentAttemptDir(cwd: string): Promise<string> {
   }
 }
 
+/** A target the model names is worth probing only if it says how to start
+ *  it and where it listens; anything less is dropped, not guessed at. A
+ *  command given as one string runs through `sh -c`. */
+export function parseTargetProbe(raw: unknown): TargetProbe | null {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  const target = record["target"];
+  const port = record["port"];
+  const commandRaw = record["command"];
+  const command = Array.isArray(commandRaw)
+    ? commandRaw.filter((entry): entry is string => typeof entry === "string" && entry.length > 0)
+    : typeof commandRaw === "string" && commandRaw.trim().length > 0
+      ? ["sh", "-c", commandRaw]
+      : [];
+  if (typeof target !== "string" || target.length === 0 || command.length === 0) return null;
+  if (typeof port !== "number" || !Number.isInteger(port) || port <= 0 || port > 65_535) return null;
+  const routesRaw = record["routes"];
+  const routes = Array.isArray(routesRaw) ? routesRaw.filter((entry): entry is string => typeof entry === "string" && entry.startsWith("/")) : [];
+  const path = typeof record["path"] === "string" && (record["path"] as string).startsWith("/") ? (record["path"] as string) : undefined;
+  return { target, command, port, routes, ...(path === undefined ? {} : { path }) };
+}
+
 function parseArgs(raw: unknown): PublishWorkspaceArgs {
   const args: Record<string, unknown> = raw !== null && typeof raw === "object" && !Array.isArray(raw)
     ? (raw as Record<string, unknown>)
@@ -177,7 +225,9 @@ function parseArgs(raw: unknown): PublishWorkspaceArgs {
   const extra = Array.isArray(excludeRaw) ? excludeRaw.filter((entry): entry is string => typeof entry === "string") : [];
   const dirRaw = args["dir"];
   const dir = typeof dirRaw === "string" && dirRaw.length > 0 ? dirRaw : null;
-  return { fileName, exclude: [...new Set([...DEFAULT_EXCLUDES, ...extra])], dir };
+  const targetsRaw = args["targets"];
+  const targets = Array.isArray(targetsRaw) ? targetsRaw.map(parseTargetProbe).filter((probe): probe is TargetProbe => probe !== null) : [];
+  return { fileName, exclude: [...new Set([...DEFAULT_EXCLUDES, ...extra])], dir, targets };
 }
 
 /** Runs `tar` over the workspace directory and resolves with the gzip bytes.
@@ -202,28 +252,11 @@ function tarDirectory(cwd: string, exclude: string[]): Promise<Buffer> {
   });
 }
 
-/** Walks `dir` (relative paths from `dir` itself), skipping any path segment
- *  named in `exclude` — the same directories `tarDirectory` above excludes,
- *  so the manifest's file list matches what the archive actually contains. */
-async function walkFiles(dir: string, exclude: ReadonlySet<string>, base: string = dir): Promise<string[]> {
-  const entries = await readdir(dir, { withFileTypes: true });
-  const results: string[] = [];
-  for (const entry of entries) {
-    if (exclude.has(entry.name)) continue;
-    const abs = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      results.push(...(await walkFiles(abs, exclude, base)));
-    } else if (entry.isFile()) {
-      results.push(relative(base, abs));
-    }
-  }
-  return results;
-}
-
 /** Builds the delivery manifest by hashing every file the archive packed —
- *  read straight off disk, not the tar's own listing (which has no hashes).
- *  The file list is capped (`MANIFEST_FILE_CAP`); `fileCount` always reports
- *  the real total. */
+ *  read straight off disk, not the tar's own listing (which has no hashes),
+ *  skipping the same directories `tarDirectory` excludes so the list
+ *  matches what the archive contains. The file list is capped
+ *  (`MANIFEST_FILE_CAP`); `fileCount` always reports the real total. */
 async function buildManifest(
   projectId: string,
   attempt: string,
@@ -231,23 +264,44 @@ async function buildManifest(
   exclude: string[],
   archive: { fileName: string; sizeBytes: number; sha256: string },
 ): Promise<DeliveryManifestContent> {
-  const paths = (await walkFiles(targetDir, new Set(exclude))).sort();
-  const capped = paths.slice(0, MANIFEST_FILE_CAP);
-  const files: ManifestFileEntry[] = await Promise.all(
-    capped.map(async (path): Promise<ManifestFileEntry> => {
-      const bytes = await readFile(join(targetDir, path));
-      return { path, sha256: createHash("sha256").update(bytes).digest("hex"), sizeBytes: bytes.byteLength };
-    }),
-  );
+  const hashed = await hashTree(targetDir, new Set(exclude));
+  const files = hashed.slice(0, MANIFEST_FILE_CAP);
   return {
     projectId,
     stage: 8,
     attempt,
     archive,
     files,
-    fileCount: paths.length,
-    truncated: paths.length > files.length,
+    fileCount: hashed.length,
+    truncated: hashed.length > files.length,
     generatedAt: new Date().toISOString(),
+  };
+}
+
+/** Runs the deterministic checks on the archive bytes and records them on
+ *  the manifest, returning what the model is told. `manifestNodeId` names
+ *  the archive the checks ran against: its artifact, or its hash when no
+ *  artifact exists. */
+async function verifyAndRecord(
+  manifest: DeliveryManifestContent,
+  archiveBytes: Buffer,
+  manifestNodeId: string,
+  args: PublishWorkspaceArgs,
+  targetDir: string,
+): Promise<VerificationSummary> {
+  const verification = await verifyArchive({
+    archiveBytes,
+    manifest: manifest.files,
+    manifestNodeId,
+    probes: args.targets,
+    cwd: targetDir,
+    exclude: new Set(args.exclude),
+  });
+  manifest.verification = verification;
+  return {
+    complete: verification.report.complete,
+    failed: verification.report.failed,
+    targets: verification.targets.map((target) => ({ target: target.target, ranSuccessfully: target.ranSuccessfully, transcript: target.transcript })),
   };
 }
 
@@ -336,7 +390,14 @@ async function publishWorkspaceContent(
       );
     }
     const dataUri = `data:${BUNDLE_MEDIA_TYPE};base64,${bytes.toString("base64")}`;
-    return { fallback: "data-uri", fileName: args.fileName, mediaType: BUNDLE_MEDIA_TYPE, sizeBytes: bytes.byteLength, dataUri };
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    const manifest = await buildManifest(projectId, attemptVariant(dir), targetDir, args.exclude, {
+      fileName: args.fileName,
+      sizeBytes: bytes.byteLength,
+      sha256,
+    });
+    const verification = await verifyAndRecord(manifest, bytes, `sha256:${sha256}`, args, targetDir);
+    return { fallback: "data-uri", fileName: args.fileName, mediaType: BUNDLE_MEDIA_TYPE, sizeBytes: bytes.byteLength, dataUri, manifest, verification };
   }
 
   if (bytes.byteLength > MAX_ARCHIVE_BYTES) {
@@ -372,6 +433,7 @@ async function publishWorkspaceContent(
       sizeBytes: bytes.byteLength,
       sha256,
     });
+    const verification = await verifyAndRecord(manifestContent, bytes, `${created.id}@${String(created.version)}`, args, targetDir);
     const manifestBytes = Buffer.from(JSON.stringify(manifestContent), "utf8");
     const manifestCreated = await uploadArtifact(hub.fetch, env.address, {
       fileName: `${slugify(projectId)}-${variant}-manifest.json`,
@@ -403,6 +465,7 @@ async function publishWorkspaceContent(
         fileCount: manifestContent.fileCount,
         truncated: manifestContent.truncated,
       },
+      verification,
     };
   } finally {
     await hub.dispose();
@@ -425,11 +488,27 @@ const INPUT_SCHEMA = {
       items: { type: "string" },
       description: "Additional path patterns to exclude, beyond node_modules/.git/.venv/__pycache__/dist/.cache/.turbo/.next/coverage.",
     },
+    targets: {
+      type: "array",
+      description:
+        'The web or api targets this build serves, each with the exact command that starts it from the attempt directory and the port it listens on. The tool starts each one and probes it over HTTP; the result is recorded, not your description of it. E.g. [{ "target": "web", "command": ["bun", "run", "start"], "port": 3000 }, { "target": "api", "command": "bun src/server.ts", "port": 8080, "routes": ["/health"] }].',
+      items: {
+        type: "object",
+        properties: {
+          target: { type: "string", description: 'The declared target, e.g. "web" or "api".' },
+          command: { description: "The start command: an argv array, or one shell string.", oneOf: [{ type: "array", items: { type: "string" } }, { type: "string" }] },
+          port: { type: "integer", description: "The port the started process listens on." },
+          routes: { type: "array", items: { type: "string" }, description: 'api: routes to GET once the port is open, e.g. ["/", "/health"].' },
+          path: { type: "string", description: 'web: the page to fetch; "/" when unset.' },
+        },
+        required: ["target", "command", "port"],
+      },
+    },
   },
 } as const;
 
 const DESCRIPTION =
-  "Archives the build attempt and records it as the artifact the person approves. Call it with no arguments: it finds the current attempt itself. Every argument is optional and only overrides that.";
+  "Archives the build attempt, checks it, and records it as the artifact the person approves. It finds the current attempt itself; pass \"targets\" naming each web or api target's real start command and port so the tool can start and probe it. Everything else is optional and only overrides what it works out.";
 
 /**
  * Builds this tool bound to one project. `projectId` is a render-time

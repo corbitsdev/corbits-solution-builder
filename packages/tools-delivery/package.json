@@ -1,6 +1,6 @@
 {
   "name": "@solutions-builder/tools-delivery",
-  "description": "Delivery verification summary as a workflow tool: the sidecar turns a manifest's checked items into the completeness report and blocker sentence the decision queue shows, using the pure delivery evidence in @solutions-builder/app/delivery. Hashing the workspace and reading the manifest stay host-side (they need the build workspace and the database); only the deterministic summarizing moves here.",
+  "description": "Stage 8 and 9 delivery tools for a specialist's sidecar: publish_workspace archives the build attempt, re-hashes the archive against the manifest it writes, starts and probes each named web or api target, and records those checks on the manifest; deliver raises the person's acceptance decision at stage 9. Nothing here takes a model's word for a check.",
   "version": "0.1.0",
   "private": true,
   "type": "module",
