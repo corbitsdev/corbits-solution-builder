@@ -101,10 +101,39 @@ describe("client project tenant writes", () => {
         return json({ id: "g1", roleId: "role-1", principalId: null, resource: "authority:project_owner", action: "hold", effect: "allow", origin: "role" }, 201);
       }
       if (path.includes("/principals/") && method === "POST") return json({ ok: true });
+      // Artifacts: any tenant's listing is empty, and a create answers with a row in that tenant.
+      if (/\/api\/tenants\/[^/]+\/artifacts(\?|$)/.test(path) && method === "GET") return json({ data: [], nextCursor: null });
+      if (/\/api\/tenants\/[^/]+\/artifacts$/.test(path) && method === "POST") {
+        return json({ artifact: { id: `art_${String(calls.length)}`, version: 1, title: "", metadata: JSON.parse(String(init?.body ?? "{}")).metadata ?? null } }, 201);
+      }
       return json({ error: { code: "not_found", message: path } }, 404);
     }) as typeof fetch;
     return { calls, current: () => current };
   }
+
+  // #137: a project's artifacts live in its own tenant since #29. These two
+  // writes still went to the workspace, where any project's bearer could
+  // reach them by label.
+  test("persistBuildEvidence writes the archive and its manifest into the project tenant", async () => {
+    const { calls } = mockHub();
+    await api.persistBuildEvidence("proj-1", {
+      fileName: "alpha-attempt-2.tar.gz",
+      mediaType: "application/gzip",
+      dataUri: "data:application/gzip;base64,AAAA",
+      sizeBytes: 3,
+      manifest: { attempt: "attempt-2", files: [] },
+    });
+    const writes = calls.filter((call) => call.method === "POST" && /\/artifacts$/.test(call.url)).map((call) => call.url);
+    expect(writes).toEqual(["/api/tenants/proj-1/artifacts", "/api/tenants/proj-1/artifacts"]);
+    expect(calls.some((call) => call.url.startsWith("/api/tenants/tnt_ws/artifacts") && call.method === "POST")).toBe(false);
+  });
+
+  test("persistAudiencePackage writes a stakeholder's package into the project tenant", async () => {
+    const { calls } = mockHub();
+    await api.persistAudiencePackage("proj-1", "You", "# Package\n\nHello.");
+    const writes = calls.filter((call) => call.method === "POST" && /\/artifacts$/.test(call.url)).map((call) => call.url);
+    expect(writes).toEqual(["/api/tenants/proj-1/artifacts"]);
+  });
 
   test("updateProject patches the hub tenant, not the host project route", async () => {
     const { calls, current } = mockHub();

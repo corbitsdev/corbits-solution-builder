@@ -2154,7 +2154,7 @@ false,
    * not `producer`, to find stage 5's reviewable material (CL-8892).
    */
   persistAudiencePackage: (projectId: string, audience: string, content: string) =>
-    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+    asWorkspaceOwner(async (transport) => {
       // A package written again supersedes the stakeholder's current head,
       // the way `persistStageDraft` chains a stage's draft -- without it both
       // stayed live and the page showed the stakeholder twice (#122). Best
@@ -2173,7 +2173,7 @@ false,
               .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0],
         )
         .catch(() => undefined);
-      const artifact = await installerCreateArtifact(transport, workspaceTenantId, {
+      const artifact = await installerCreateArtifact(transport, projectId, {
         title: `${audience}'s package`,
         content,
         metadata: {
@@ -2209,12 +2209,12 @@ false,
     bundle: { fileName: string; mediaType: string; dataUri: string; sizeBytes: number; manifest?: { attempt: string } & Record<string, unknown> },
     sourceVersionIds: string[] = [],
   ) =>
-    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+    asWorkspaceOwner(async (transport) => {
       // The attempt the archive and its manifest share, so stage 9 finds the
       // manifest as the archive's companion the way it does for the real
       // upload path (`manifestCompanionOf`).
       const variant = bundle.manifest?.attempt ?? null;
-      const artifact = await installerCreateArtifact(transport, workspaceTenantId, {
+      const artifact = await installerCreateArtifact(transport, projectId, {
         title: bundle.fileName,
         content: bundle.dataUri,
         metadata: {
@@ -2233,7 +2233,7 @@ false,
       // all (#129): the tool had no credential to upload it, so it is
       // written here beside the archive, as the real path would have.
       if (bundle.manifest) {
-        await installerCreateArtifact(transport, workspaceTenantId, {
+        await installerCreateArtifact(transport, projectId, {
           title: `${bundle.fileName.replace(/\.tar\.gz$/, "")}-manifest.json`,
           content: JSON.stringify(bundle.manifest),
           metadata: {
