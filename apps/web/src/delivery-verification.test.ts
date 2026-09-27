@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { AGENT_REPORTED_NOTE, parseDeliveryVerification } from "./delivery-verification.ts";
 
 describe("parseDeliveryVerification", () => {
-  test("reads the delivery_status tool-argument shape", () => {
+  test("reads a report's items shape", () => {
     const result = parseDeliveryVerification({
       manifestNodeId: "art_1",
       checkedAt: "2026-01-01T00:00:00.000Z",
@@ -17,6 +17,48 @@ describe("parseDeliveryVerification", () => {
     ]);
     expect(result.summary).toEqual({ passed: 0, failed: 1, unverified: 1 });
     expect(result.problems).toEqual([]);
+  });
+
+  // #129: `publish_workspace` re-hashes the archive and probes each target
+  // itself, and marks what it checked `checkedBy: "tool"`. That, and only
+  // that, is a pass.
+  test("a tool-checked verified item is a pass, and a tool-checked failure is a failure", () => {
+    const result = parseDeliveryVerification({
+      verification: {
+        checkedBy: "tool",
+        items: [
+          { category: "source", path: "src/index.ts", required: true, status: "verified", checkedBy: "tool" },
+          { category: "source", path: "src/gone.ts", required: true, status: "missing", checkedBy: "tool", detail: "not in the archive" },
+          { category: "receipts", path: "target:web", required: true, status: "failed", checkedBy: "tool", detail: "port 3000 never accepted a connection within 15000ms." },
+          { category: "receipts", path: "target:cli", required: true, status: "inaccessible", checkedBy: "tool", detail: "no cli verifier exists in this repo" },
+        ],
+      },
+    });
+    expect(result.rows.map((row) => [row.path, row.status])).toEqual([
+      ["src/index.ts", "passed"],
+      ["src/gone.ts", "failed"],
+      ["target:web", "failed"],
+      ["target:cli", "unverified"],
+    ]);
+    expect(result.rows[0]?.note).toBeUndefined();
+    expect(result.rows[2]?.note).toContain("never accepted a connection");
+    expect(result.summary).toEqual({ passed: 1, failed: 2, unverified: 1 });
+    expect(result.problems).toEqual([]);
+  });
+
+  test("a claim of tool provenance must be on the item itself, and must say tool", () => {
+    const result = parseDeliveryVerification({
+      verification: {
+        checkedBy: "tool",
+        items: [
+          { category: "source", path: "a.ts", required: true, status: "verified" },
+          { category: "source", path: "b.ts", required: true, status: "verified", checkedBy: "agent" },
+          { category: "source", path: "c.ts", required: true, status: "passed", checkedBy: "model" },
+        ],
+      },
+    });
+    expect(result.rows.map((row) => row.status)).toEqual(["unverified", "unverified", "unverified"]);
+    expect(result.rows.every((row) => row.note?.startsWith(AGENT_REPORTED_NOTE))).toBe(true);
   });
 
   // #32: the agent scores items from the text it was handed; no code checks
@@ -37,7 +79,7 @@ describe("parseDeliveryVerification", () => {
     expect(result.problems).toEqual([]);
   });
 
-  test("reads the delivery_status tool result envelope", () => {
+  test("reads a report envelope", () => {
     const result = parseDeliveryVerification({
       report: {
         manifestNodeId: "art_1",

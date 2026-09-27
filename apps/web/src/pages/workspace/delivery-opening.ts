@@ -17,6 +17,17 @@
 
 export type DeliveryManifestFile = { path: string; sha256: string; sizeBytes: number };
 
+/** What `publish_workspace` established about the archive itself (#129):
+ *  mirrors `tools-delivery/src/verify.ts`'s `DeliveryVerificationContent`. */
+export type DeliveryVerificationContent = {
+  checkedAt: string;
+  checkedBy: "tool";
+  archiveExtras: number;
+  items: { category: string; path: string; required: boolean; status: string; checkedBy?: string; detail?: string }[];
+  targets: { target: string; modality: string; exercised: boolean; ranSuccessfully: boolean; transcript: string }[];
+  report: { complete: boolean; failed: string[] };
+};
+
 export type DeliveryManifestContent = {
   projectId: string;
   stage: 8;
@@ -26,7 +37,35 @@ export type DeliveryManifestContent = {
   fileCount: number;
   truncated: boolean;
   generatedAt: string;
+  verification?: DeliveryVerificationContent;
 };
+
+/** The verification as the verifier reads it: every item the tool checked
+ *  with its status, and each target's transcript. Never summarised into a
+ *  pass; a failed or missing item is listed as such. */
+export function verificationLines(verification: DeliveryVerificationContent | undefined): string[] {
+  if (!verification || verification.checkedBy !== "tool") {
+    return ["Verification recorded by publish_workspace: none. Nothing about this archive was checked by a tool; treat every check as not run."];
+  }
+  const lines = [
+    `Verification recorded by publish_workspace at ${verification.checkedAt} (checked by the tool, not by a model): ${
+      verification.report.complete ? "every required item verified" : `required items not verified: ${verification.report.failed.join(", ")}`
+    }.`,
+  ];
+  for (const item of verification.items) {
+    lines.push(`- ${item.path}: ${item.status}${item.detail ? ` — ${item.detail}` : ""}`);
+  }
+  if (verification.archiveExtras > 0) {
+    lines.push(`- ${String(verification.archiveExtras)} file(s) in the archive are not listed in the manifest and were not checked.`);
+  }
+  if (verification.targets.length === 0) {
+    lines.push("- No web or api target was started or probed.");
+  }
+  for (const target of verification.targets) {
+    lines.push("", `Target "${target.target}" (${target.modality}) ${target.exercised ? (target.ranSuccessfully ? "ran and answered" : "was started and did not pass") : "was not exercised"}:`, target.transcript);
+  }
+  return lines;
+}
 
 /** Parses a manifest artifact's raw content, or null if it does not look
  *  like one — never throws, so a malformed or missing manifest degrades to
@@ -64,8 +103,8 @@ export function deliveryOpeningLine(
 ): string {
   if (!manifest) {
     return [
-      "No delivery manifest artifact is available for this build — stage 8 either used the data-URI fallback (no artifact-upload credential was bound) or no manifest could be read.",
-      'Score every check you cannot confirm yourself as "inaccessible", never a pass.',
+      "No delivery manifest artifact is available for this build — stage 8's publish_workspace result was not recorded, or no manifest could be read.",
+      "No check was run by a tool, so nothing about this archive is verified; say so, never score a pass.",
       "",
       "Checks stage 8 declared:",
       buildStatusBody,
@@ -83,6 +122,7 @@ export function deliveryOpeningLine(
   for (const file of content.files) {
     lines.push(`- ${file.path} — ${String(file.sizeBytes)} bytes — sha256 ${file.sha256}`);
   }
+  lines.push("", ...verificationLines(content.verification));
   lines.push("", "Checks stage 8 declared:", buildStatusBody);
   return lines.join("\n");
 }

@@ -24,6 +24,7 @@ import {
   type PendingApproval,
 } from "../../pending-approvals.ts";
 import { parseDeliveryVerification, type DeliveryVerification } from "../../delivery-verification.ts";
+import { manifestCompanionOf } from "./stage9-opening.ts";
 import { Banner, Button, documentName, shortHash } from "../../components.jsx";
 import { Markdown } from "../../markdown.jsx";
 
@@ -47,10 +48,14 @@ export function extractHowToRun(body: string | null): string | null {
   return `${match[0]}\n${section}`.trim();
 }
 
-/** The node that carries stage 9's per-file check results, newest first: a
- *  dedicated `delivery_verification` record, or the manifest's own embedded
- *  `verification` field. */
-export function findVerificationNode(nodes: ArtifactNode[]): ArtifactNode | null {
+/** The node that carries the per-file check results: the delivery manifest
+ *  `publish_workspace` wrote beside the approved stage 8 archive, whose
+ *  embedded `verification` is what the tool itself established (#129); or,
+ *  failing that, a stage 9 `delivery_verification` record or manifest. */
+export function findVerificationNode(nodes: ArtifactNode[], archiveRef: { artifactId: string; version: number } | null): ArtifactNode | null {
+  const archive = archiveRef ? (nodes.find((node) => node.artifactId === archiveRef.artifactId && node.version === archiveRef.version) ?? null) : null;
+  const companion = archive ? manifestCompanionOf(nodes, archive) : null;
+  if (companion) return companion;
   const active = nodes.filter((node) => node.stage === 9 && node.supersededByNodeId === null);
   return (
     active.find((node) => node.kind === "delivery_verification") ??
@@ -107,6 +112,7 @@ function DeliveryDecision({
   tenantId,
   projectId,
   nodes,
+  archiveRef,
   howToRun,
   onAccept,
   onRejectSendBack,
@@ -114,6 +120,8 @@ function DeliveryDecision({
   tenantId: string;
   projectId: string;
   nodes: ArtifactNode[];
+  /** Stage 8's approved archive, off the workflow's own review record. */
+  archiveRef: { artifactId: string; version: number } | null;
   howToRun: string | null;
   /**
    * Called after the hub's `deliver` tool approval succeeds, to also send
@@ -204,7 +212,7 @@ function DeliveryDecision({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenantId, projectId]);
 
-  const verificationNode = findVerificationNode(nodes);
+  const verificationNode = findVerificationNode(nodes, archiveRef);
   const [verification, setVerification] = useState<DeliveryVerification | null>(null);
 
   useEffect(() => {
@@ -332,12 +340,15 @@ function DeliveryDecision({
 export function DeliveryPanel({
   detail,
   tenantId,
+  archiveRef,
   latestReply,
   onAccept,
   onRejectSendBack,
 }: {
   detail: ProjectDetail;
   tenantId: string;
+  /** Stage 8's approved archive, off the workflow's own review record. */
+  archiveRef: { artifactId: string; version: number } | null;
   latestReply: ChatMessage | null;
   /** Called once the hub's `deliver` tool approval succeeds, to also send
    *  the project workflow its stage 9 `approve` decision. */
@@ -351,6 +362,7 @@ export function DeliveryPanel({
       tenantId={tenantId}
       projectId={detail.project.id}
       nodes={detail.nodes}
+      archiveRef={archiveRef}
       howToRun={extractHowToRun(latestReply?.body ?? null)}
       onAccept={onAccept}
       onRejectSendBack={onRejectSendBack}
