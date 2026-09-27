@@ -30,6 +30,7 @@ import {
   deploymentHasEnded,
   deploymentIsLive,
   ensureWorkflowAsset,
+  pollWhilePlacing,
   pushWorkflowSourceTree,
   waitForPushVisible,
   type SidecarCapability,
@@ -200,7 +201,7 @@ async function ledgerOf(
 }
 
 const TERMINAL_RUN_EVENTS = new Set(["RunCompleted", "RunFailed", "RunCancelled"]);
-/** How long a project with history waits for the hub to replace its dead deployment before deploying its own. */
+/** How long a project with history lets the hub go quiet before deploying its own replacement of a dead deployment. */
 const REPLACEMENT_WAIT_MS = 45_000;
 
 type ProjectRunCandidate = { readonly tenantId: string; readonly deployment: HubDeployment; readonly runId: string };
@@ -479,8 +480,11 @@ function pushProbePath(files: Record<string, string>): { path: string; content: 
 
 /** What `ensureProjectWorkflow` may be told beyond its inputs. */
 export type EnsureProjectWorkflowOptions = {
-  /** How long a project with history waits for the hub's replacement before deploying its own; the default suits a host restart. */
+  /** How long the hub may go without placing anything before a project with
+   *  history deploys its own replacement; the default suits a host restart. */
   readonly replacementWaitMs?: number;
+  /** How often the replacement wait re-reads the hub; tests shorten it. */
+  readonly placementPollMs?: number;
 };
 
 type DeployContext = {
@@ -558,18 +562,24 @@ async function deployFreshRun(context: DeployContext, known: ReadonlySet<string>
  * inherited, so one read of the project tenant's assets finds both, told
  * apart by `asset.tenantId`.
  */
-async function projectWorkflowDeployments(transport: Transport, home: ProjectHome, assetName: string): Promise<DeploymentGroup[]> {
+async function projectWorkflowDeployments(
+  transport: Transport,
+  home: ProjectHome,
+  assetName: string,
+): Promise<{ groups: DeploymentGroup[]; everyDeployment: HubDeployment[] }> {
   const listed = await assetsFor(transport, home.tenantId).list("workflow");
   const groups: DeploymentGroup[] = [];
+  // Every deployment those tenants hold, this project's or not: what a
+  // caller watches to tell that the hub is still placing (#79).
+  const everyDeployment: HubDeployment[] = [];
   for (const tenantId of projectTenants(home)) {
     const asset = listed.find((entry) => entry.name === assetName && entry.tenantId === tenantId);
     if (!asset) continue;
-    const deployments = (await workflowsFor(transport, tenantId).deployments()).filter(
-      (deployment) => deployment.definitionAssetId === asset.id,
-    );
-    groups.push({ tenantId, deployments });
+    const deployments = await workflowsFor(transport, tenantId).deployments();
+    everyDeployment.push(...deployments);
+    groups.push({ tenantId, deployments: deployments.filter((deployment) => deployment.definitionAssetId === asset.id) });
   }
-  return groups;
+  return { groups, everyDeployment };
 }
 
 async function ensureProjectWorkflowOnce(
@@ -599,7 +609,7 @@ async function ensureProjectWorkflowOnce(
   const rendered = { ...renderProjectWorkflowSource(assetName, source), ...vendoredWorkflowMemberFiles };
   const digest = await treeDigest(rendered);
 
-  const everywhere = () => projectWorkflowDeployments(transport, home, assetName);
+  const everywhere = async () => (await projectWorkflowDeployments(transport, home, assetName)).groups;
   const idsOf = (groups: readonly DeploymentGroup[], keep: (deployment: HubDeployment) => boolean = () => true) =>
     new Set(groups.flatMap((group) => group.deployments.filter(keep).map((deployment) => deployment.id)));
   const context = (generation: number): DeployContext => ({
@@ -637,12 +647,26 @@ async function ensureProjectWorkflowOnce(
   // history, within seconds of boot. Deploying afresh before it has is a
   // race two mechanisms lose together, so a project with history and no
   // live run waits for the replacement a while before deploying its own.
+  // The wait is bounded by the hub's progress, not this call's start: with
+  // several dead deployments to restore in turn, the replacement lands well
+  // after any fixed budget counted from here would have run out (#79). The
+  // progress watched spans every tenant the project's deployments live in,
+  // since a legacy workflow's replacement lands in the workspace.
   if (!state.liveCandidates[0] && state.history.length > 0) {
-    const replaced = await pollUntil(options.replacementWaitMs ?? REPLACEMENT_WAIT_MS, 2_000, async () => {
-      groups = await everywhere();
-      state = await projectRunState(transport, groups);
-      return state.liveCandidates[0] ? true : null;
-    });
+    const replaced = await pollWhilePlacing(
+      {
+        deployments: async () => {
+          const found = await projectWorkflowDeployments(transport, home, assetName);
+          groups = found.groups;
+          return found.everyDeployment;
+        },
+      },
+      async () => {
+        state = await projectRunState(transport, groups);
+        return state.liveCandidates[0] ? true : null;
+      },
+      { stallMs: options.replacementWaitMs ?? REPLACEMENT_WAIT_MS, ...(options.placementPollMs === undefined ? {} : { pollMs: options.placementPollMs }) },
+    );
     if (replaced && state.run && state.live && state.code?.digest === digest) return state.run;
   }
   // A live run that has not caught up, or none: the project's history (if
@@ -707,7 +731,7 @@ export async function ensureProjectWorkflow(
  */
 export async function findProjectWorkflow(transport: Transport, projectId: string): Promise<ProjectWorkflowDeployment | null> {
   const home = await projectHome(transport, projectId);
-  const groups = await projectWorkflowDeployments(transport, home, projectWorkflowAssetName(projectId));
+  const { groups } = await projectWorkflowDeployments(transport, home, projectWorkflowAssetName(projectId));
   if (groups.length === 0) return null;
   return (await projectRunState(transport, groups)).run;
 }
