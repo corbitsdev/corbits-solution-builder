@@ -29,7 +29,7 @@ describe("deliveryApprovalFor", () => {
   });
 
   test("ignores a pending approval on a different tool", () => {
-    expect(deliveryApprovalFor([approval({ toolDefinition: { name: "delivery_status" } })], "dep_1")).toBeNull();
+    expect(deliveryApprovalFor([approval({ toolDefinition: { name: "run_shell" } })], "dep_1")).toBeNull();
   });
 });
 

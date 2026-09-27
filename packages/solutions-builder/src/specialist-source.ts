@@ -209,9 +209,9 @@ write, when someone asks for that one audience by name.`;
  * "wait"` and no `timeout` — the same shape `buildAgentDefinitionJson` in
  * `wb/apps/web/src/agent-deploy.ts` builds, so it stays armed across an
  * approval park instead of aborting a run waiting on a person. Stage 5's
- * specialist carries the deck-rendering tool, stage 8's carries posix, and
- * stage 9's carries the delivery-status and deliver tools; every other stage
- * carries none.
+ * specialist carries the deck-rendering tool, stage 8's carries posix and
+ * `publish_workspace`, and stage 9's carries the deliver tool; every other
+ * stage carries none.
  */
 export function specialistEntrySource(options: SpecialistSourceOptions): string {
   const { stage, source, audiences, projectId, assetName, role, roleKey, artifactTools = false } = options;
@@ -238,7 +238,7 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
       : isBuildStage
         ? `import { posix } from ${JSON.stringify("@intx/tools-posix/sidecar-bundle")};\nimport { publishWorkspaceTool } from ${JSON.stringify("@solutions-builder/tools-delivery/publish-workspace")};\nconst publishWorkspace = publishWorkspaceTool(${JSON.stringify(projectId)});\n`
         : stage === DELIVERY_STAGE
-          ? `import { delivery, deliver } from ${JSON.stringify("@solutions-builder/tools-delivery/sidecar-bundle")};\n`
+          ? `import { deliver } from ${JSON.stringify("@solutions-builder/tools-delivery/sidecar-bundle")};\n`
           : "";
   const stageTools =
     stage === PACKAGE_STAGE && !isPrimaryPackageDeployment
@@ -246,7 +246,7 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
       : isBuildStage
         ? "posix, publishWorkspace"
         : stage === DELIVERY_STAGE
-          ? "delivery, deliver"
+          ? "deliver"
           : "";
 
   // CL-8719: every other credential-bound stage specialist writes its draft

@@ -30,7 +30,7 @@ export const SPECIALIST_TOOLS = {
   deck: ["render_deck"],
   posix: ["read_file", "write_file", "edit_file", "run_shell", "search_files", "grep"],
   publishWorkspace: ["publish_workspace"],
-  delivery: ["delivery_status", "deliver"],
+  delivery: ["deliver"],
 } as const;
 
 /** §8: "Default skills remain …" — the ten, verbatim. */
