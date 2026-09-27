@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Transport } from "@intx/hub-client";
-import { ensureProjectWorkflow, findProjectWorkflow, projectWorkflowAssetName, type ProjectWorkflowCode } from "./project-workflow-deploy.js";
+import { createDecisionMemo, ensureProjectWorkflow, findProjectWorkflow, projectWorkflowAssetName, type ProjectWorkflowCode } from "./project-workflow-deploy.js";
 
 const TENANT_ID = "proj_1";
 const PROJECT_ID = "proj_1";
@@ -73,6 +73,8 @@ function fakeHub(fixture: Fixture) {
   const eventsByRun: Record<string, Event[]> = Object.fromEntries(Object.entries(fixture.eventsByRun ?? {}).map(([id, events]) => [id, [...events]]));
   const ledgerByRun: Record<string, LedgerRow[]> = {};
   const posts: { path: string; body: unknown }[] = [];
+  /** Every run event log read, in order: what a memo is meant to spare (#80). */
+  const eventReads: string[] = [];
   let pushedTree: Record<string, string> = {};
   let listings = 0;
   const transport: Transport = {
@@ -120,7 +122,10 @@ function fakeHub(fixture: Fixture) {
       const runs = /^\/api\/tenants\/[^/]+\/workflows\/([^/]+)\/runs$/.exec(pathname!);
       if (method === "GET" && runs) return { runIds: runsByDeployment[runs[1]!] ?? [] } as T;
       const events = /^\/api\/tenants\/[^/]+\/workflows\/[^/]+\/runs\/([^/]+)\/events$/.exec(pathname!);
-      if (method === "GET" && events) return { runId: events[1], events: eventsByRun[events[1]!] ?? [] } as T;
+      if (method === "GET" && events) {
+        eventReads.push(events[1]!);
+        return { runId: events[1], events: eventsByRun[events[1]!] ?? [] } as T;
+      }
       const trigger = /^\/api\/tenants\/[^/]+\/workflows\/([^/]+)\/mail$/.exec(pathname!);
       if (method === "POST" && trigger) {
         runsByDeployment[trigger[1]!] = [...(runsByDeployment[trigger[1]!] ?? []), "run_new"];
@@ -164,7 +169,12 @@ function fakeHub(fixture: Fixture) {
     if (!mail) return null;
     return (JSON.parse((mail.body as { content: string }).content) as { code: ProjectWorkflowCode }).code;
   };
-  return { transport, gitPush, posts, triggeredCode, signalsSent: () => posts.filter((post) => /\/signals$/.test(post.path)).map((post) => post.body as { runId: string; signalName: string; signalId: string; payload: unknown }) };
+  /** The hub moving on its own: a run's iterations and their logs replaced wholesale. */
+  const setRun = (deploymentId: string, runIds: string[], events: Record<string, Event[]>) => {
+    runsByDeployment[deploymentId] = [...runIds];
+    Object.assign(eventsByRun, events);
+  };
+  return { transport, gitPush, posts, eventReads, setRun, triggeredCode, signalsSent: () => posts.filter((post) => /\/signals$/.test(post.path)).map((post) => post.body as { runId: string; signalName: string; signalId: string; payload: unknown }) };
 }
 
 const ensure = (hub: ReturnType<typeof fakeHub>, replacementWaitMs = 0, placementPollMs?: number) =>
@@ -310,6 +320,65 @@ describe("findProjectWorkflow", () => {
       }),
     );
     expect(await findProjectWorkflow(caughtUp.transport, PROJECT_ID)).toEqual({ deploymentId: "dep_upgraded", runId: "run_1", tenantId: TENANT_ID });
+  });
+});
+
+// #80: a page polls `findProjectWorkflow` every few seconds, and each read
+// used to fetch every iteration's event log of every deployment the project
+// ever had. With a memo, an ended deployment's run is read once, and a live
+// run's finished iterations are read once; only its newest iteration, the
+// one that can still take a signal, is read again.
+describe("findProjectWorkflow with a decision memo", () => {
+  const fixture = () =>
+    withAsset({
+      deployments: [
+        { id: "dep_dead", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" },
+        { id: "dep_live", definitionAssetId: ASSET_ID, status: "deployed", createdAt: "2026-01-02T00:00:00.000Z" },
+      ],
+      runsByDeployment: { dep_dead: decidedRun("run_0", [1, 2]).runIds, dep_live: decidedRun("run_1", [1, 2], CURRENT).runIds },
+      eventsByRun: { ...decidedRun("run_0", [1, 2]).events, ...decidedRun("run_1", [1, 2], CURRENT).events },
+    });
+
+  test("a second read with the same memo re-reads only the live run's newest iteration", async () => {
+    const hub = fakeHub(fixture());
+    const memo = createDecisionMemo();
+    const first = await findProjectWorkflow(hub.transport, PROJECT_ID, memo);
+    expect(first).toEqual({ deploymentId: "dep_live", runId: "run_1", tenantId: TENANT_ID });
+    expect(hub.eventReads.length).toBeGreaterThan(2);
+
+    hub.eventReads.length = 0;
+    expect(await findProjectWorkflow(hub.transport, PROJECT_ID, memo)).toEqual(first);
+    // The live run's own RunStarted (its code) and its newest iteration.
+    expect(hub.eventReads).toEqual(["run_1", "run_1__rework__1"]);
+  });
+
+  test("without a memo every read fetches everything, as before", async () => {
+    const hub = fakeHub(fixture());
+    await findProjectWorkflow(hub.transport, PROJECT_ID);
+    const firstReads = [...hub.eventReads];
+    hub.eventReads.length = 0;
+    await findProjectWorkflow(hub.transport, PROJECT_ID);
+    expect(hub.eventReads).toEqual(firstReads);
+  });
+
+  test("a signal the live run takes after the first read is seen on the next", async () => {
+    const hub = fakeHub(
+      withAsset({
+        deployments: [
+          { id: "dep_dead", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" },
+          { id: "dep_live", definitionAssetId: ASSET_ID, status: "deployed", createdAt: "2026-01-02T00:00:00.000Z" },
+        ],
+        runsByDeployment: { dep_dead: decidedRun("run_0", [1, 2]).runIds, dep_live: decidedRun("run_1", [1], CURRENT).runIds },
+        eventsByRun: { ...decidedRun("run_0", [1, 2]).events, ...decidedRun("run_1", [1], CURRENT).events },
+      }),
+    );
+    const memo = createDecisionMemo();
+    // The live run holds only decision 1 of the dead run's two: the dead run is still the project's.
+    expect((await findProjectWorkflow(hub.transport, PROJECT_ID, memo))?.deploymentId).toBe("dep_dead");
+    // Then the live run applies decision 2 in a new iteration.
+    const caughtUp = decidedRun("run_1", [1, 2], CURRENT);
+    hub.setRun("dep_live", caughtUp.runIds, caughtUp.events);
+    expect((await findProjectWorkflow(hub.transport, PROJECT_ID, memo))?.deploymentId).toBe("dep_live");
   });
 });
 

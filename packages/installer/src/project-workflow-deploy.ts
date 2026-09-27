@@ -105,23 +105,66 @@ function iterationRunIds(runId: string, runIds: readonly string[]): string[] {
  * iteration was queued and never applied, so it is not part of the run's
  * state and not part of its history.
  */
+/**
+ * What a reader remembers between polls, so a project's stage is not
+ * re-derived from every iteration's event log every five seconds (#80). An
+ * iteration that is not its run's newest has finished, and its log is
+ * fixed; a run on an ended deployment is fixed whole. Only the newest
+ * iteration of a live run can still take a signal, so only that one is
+ * read again. The caller owns the memo: a page keeps one for its session,
+ * a one-off call passes none and reads everything.
+ */
+export type DecisionMemo = {
+  /** `<deploymentId>/<runId>`: an ended deployment's run, whole. */
+  readonly runs: Map<string, readonly ReceivedDecision[]>;
+  /** `<deploymentId>/<iterationRunId>`: one finished iteration's signals. */
+  readonly iterations: Map<string, readonly ReceivedDecision[]>;
+};
+
+export function createDecisionMemo(): DecisionMemo {
+  return { runs: new Map(), iterations: new Map() };
+}
+
+function signalsOf(events: readonly { seq: number; type: string; body: Record<string, unknown> }[]): ReceivedDecision[] {
+  const received: ReceivedDecision[] = [];
+  for (const event of [...events].sort((a, b) => a.seq - b.seq)) {
+    if (event.type !== "SignalReceived") continue;
+    const { signalName, signalId, payload } = event.body;
+    if (typeof signalName !== "string" || typeof signalId !== "string") continue;
+    received.push({ signalName, signalId, payload });
+  }
+  return received;
+}
+
+/** `settled`: the run's deployment has ended, so nothing about it changes again. */
 async function appliedDecisions(
   workflows: ReturnType<typeof workflowsFor>,
   deploymentId: string,
   runId: string,
+  memo?: DecisionMemo,
+  settled = false,
 ): Promise<ReceivedDecision[]> {
+  const runKey = `${deploymentId}/${runId}`;
+  const remembered = settled ? memo?.runs.get(runKey) : undefined;
+  if (remembered) return [...remembered];
+  const iterations = iterationRunIds(runId, await workflows.runs(deploymentId));
+  const newest = iterations[iterations.length - 1];
   const received: ReceivedDecision[] = [];
   const seen = new Set<string>();
-  for (const id of iterationRunIds(runId, await workflows.runs(deploymentId))) {
-    const { events } = await workflows.runEvents(deploymentId, id);
-    for (const event of [...events].sort((a, b) => a.seq - b.seq)) {
-      if (event.type !== "SignalReceived") continue;
-      const { signalName, signalId, payload } = event.body;
-      if (typeof signalName !== "string" || typeof signalId !== "string" || seen.has(signalId)) continue;
-      seen.add(signalId);
-      received.push({ signalName, signalId, payload });
+  for (const id of iterations) {
+    const key = `${deploymentId}/${id}`;
+    let signals = id === newest && !settled ? undefined : memo?.iterations.get(key);
+    if (!signals) {
+      signals = signalsOf((await workflows.runEvents(deploymentId, id)).events);
+      if (memo && (id !== newest || settled)) memo.iterations.set(key, signals);
+    }
+    for (const decision of signals) {
+      if (seen.has(decision.signalId)) continue;
+      seen.add(decision.signalId);
+      received.push(decision);
     }
   }
+  if (memo && settled) memo.runs.set(runKey, received);
   return received;
 }
 
@@ -272,7 +315,7 @@ type ProjectRunState = {
  * re-opened that stage's review and offered its approval again, both
  * refused as `wrong_stage` (#77).
  */
-async function projectRunState(transport: Transport, groups: readonly DeploymentGroup[]): Promise<ProjectRunState> {
+async function projectRunState(transport: Transport, groups: readonly DeploymentGroup[], memo?: DecisionMemo): Promise<ProjectRunState> {
   const candidates = await candidatesWithRuns(transport, groups);
   const live: { candidate: ProjectRunCandidate; code: ProjectWorkflowCode | null }[] = [];
   for (const candidate of candidates) {
@@ -292,7 +335,13 @@ async function projectRunState(transport: Transport, groups: readonly Deployment
     ...superseded,
   ].sort((a, b) => a.candidate.deployment.createdAt.localeCompare(b.candidate.deployment.createdAt));
   for (const { candidate, code } of folded) {
-    const decisions = await appliedDecisions(workflowsOf(transport, candidate), candidate.deployment.id, candidate.runId);
+    const decisions = await appliedDecisions(
+      workflowsOf(transport, candidate),
+      candidate.deployment.id,
+      candidate.runId,
+      memo,
+      deploymentHasEnded(candidate.deployment),
+    );
     if (decisions.length === 0) continue;
     // `>=`: candidates come oldest first, so a tie goes to the newer run.
     if (fullest === null || decisions.length >= fullest.held) fullest = { candidate, code, held: decisions.length };
@@ -310,7 +359,7 @@ async function projectRunState(transport: Transport, groups: readonly Deployment
   for (const { candidate, code } of newest) {
     if (history.length === 0) return { run: asRef(candidate), live: true, code, liveCandidates, generation, history };
     const held = new Set(
-      (await appliedDecisions(workflowsOf(transport, candidate), candidate.deployment.id, candidate.runId)).map((decision) => decision.signalId),
+      (await appliedDecisions(workflowsOf(transport, candidate), candidate.deployment.id, candidate.runId, memo)).map((decision) => decision.signalId),
     );
     if (history.every((decision) => held.has(decision.signalId))) return { run: asRef(candidate), live: true, code, liveCandidates, generation, history };
   }
@@ -610,6 +659,10 @@ async function ensureProjectWorkflowOnce(
   const digest = await treeDigest(rendered);
 
   const everywhere = async () => (await projectWorkflowDeployments(transport, home, assetName)).groups;
+  // One call's own memo: the replacement wait below re-reads the project's
+  // state every two seconds, and nothing about a finished iteration changes
+  // between those reads.
+  const memo = createDecisionMemo();
   const idsOf = (groups: readonly DeploymentGroup[], keep: (deployment: HubDeployment) => boolean = () => true) =>
     new Set(groups.flatMap((group) => group.deployments.filter(keep).map((deployment) => deployment.id)));
   const context = (generation: number): DeployContext => ({
@@ -626,7 +679,7 @@ async function ensureProjectWorkflowOnce(
   });
 
   let groups = await everywhere();
-  let state = await projectRunState(transport, groups);
+  let state = await projectRunState(transport, groups, memo);
   if (state.run && state.live) {
     if (state.code?.digest === digest) return state.run;
     // The live run is on other code than this render (#51): a reducer fix
@@ -637,7 +690,7 @@ async function ensureProjectWorkflowOnce(
     // cannot end it. Its own applied decisions are the whole history: it
     // held everything the runs before it took, or it would not be the run.
     const from = state.run;
-    const history = await appliedDecisions(workflowsOf(transport, from), from.deploymentId, from.runId);
+    const history = await appliedDecisions(workflowsOf(transport, from), from.deploymentId, from.runId, memo);
     const target = await deployFreshRun(context(state.generation + 1), idsOf(groups));
     await catchUp(transport, target, history);
     return { ...target, replay: await replayOutcome(transport, from, target, history) };
@@ -662,7 +715,7 @@ async function ensureProjectWorkflowOnce(
         },
       },
       async () => {
-        state = await projectRunState(transport, groups);
+        state = await projectRunState(transport, groups, memo);
         return state.liveCandidates[0] ? true : null;
       },
       { stallMs: options.replacementWaitMs ?? REPLACEMENT_WAIT_MS, ...(options.placementPollMs === undefined ? {} : { pollMs: options.placementPollMs }) },
@@ -729,9 +782,9 @@ export async function ensureProjectWorkflow(
  * code is still returned here: only `ensureProjectWorkflow` knows the
  * current code, and replaces it.
  */
-export async function findProjectWorkflow(transport: Transport, projectId: string): Promise<ProjectWorkflowDeployment | null> {
+export async function findProjectWorkflow(transport: Transport, projectId: string, memo?: DecisionMemo): Promise<ProjectWorkflowDeployment | null> {
   const home = await projectHome(transport, projectId);
   const { groups } = await projectWorkflowDeployments(transport, home, projectWorkflowAssetName(projectId));
   if (groups.length === 0) return null;
-  return (await projectRunState(transport, groups)).run;
+  return (await projectRunState(transport, groups, memo)).run;
 }
