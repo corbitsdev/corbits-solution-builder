@@ -63,5 +63,8 @@ describe("SpecialistTurn questions", () => {
     expect(html.match(/class="turn-question"/g)?.length).toBe(2);
     expect(html.match(/class="turn-option"/g)?.length).toBe(4);
     expect(html.indexOf("bystander")).toBeLessThan(html.indexOf("cloud recognition"));
+    // No chip is chosen until tapped (#142).
+    expect(html).toContain('aria-pressed="false"');
+    expect(html).not.toContain('aria-pressed="true"');
   });
 });

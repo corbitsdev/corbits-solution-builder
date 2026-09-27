@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, type ReactNode } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { ChatInput, type ChatMessage as UiChatMessage } from "@corbits/react-ui";
 import { Plus, Send } from "lucide-react";
 import { Markdown } from "../../markdown.jsx";
 import { Dictated } from "../../dictation.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
-import { answerText, segmentsIn } from "./choices.js";
+import { answersDraft, segmentsIn } from "./choices.js";
 import { conversationLead, isHtmlDocument } from "./guidance.js";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
 import { HANDOFF_BUBBLE_TEXT, matchSwitchMarker } from "./use-model-handoff.ts";
@@ -262,20 +262,38 @@ export function SpecialistTurn({
   note,
   onOpenVersion,
   onAnswer,
+  onDraft,
 }: {
   text: string;
   note: TurnNote | null;
   onOpenVersion: (nodeId: string) => void;
-  /** Set while the turn can be answered; a tapped option is sent as the answer. */
+  /** Set while the turn can be answered: sent once every question the turn
+   *  asks has a tapped answer. A lone question sends on its tap. */
   onAnswer?: ((answer: string) => void) | undefined;
+  /** The answers so far, while some question is still unanswered: what the
+   *  message box should hold, so the person sees them gather and can add
+   *  to them (#142). Absent, a partial set is sent as it stands. */
+  onDraft?: ((draft: string) => void) | undefined;
 }) {
   // Every question the turn asks is set apart with its own options -- a
   // turn that lists two under "What I need from you" has asked two, and
   // each must be answerable (`segmentsIn`).
-  const segments = segmentsIn(text);
-  const questions = segments.filter((segment) => segment.kind === "question");
+  const segments = useMemo(() => segmentsIn(text), [text]);
+  const questions = useMemo(() => segments.filter((segment) => segment.kind === "question"), [segments]);
   const question = questions.length > 0;
-  const several = questions.length > 1;
+  // What has been tapped for each question, by its place among the turn's
+  // questions. Local to the turn: once answered, the turn is no longer the
+  // one being answered and its chips go quiet.
+  const [chosen, setChosen] = useState<ReadonlyMap<number, string>>(() => new Map());
+  const choose = (questionIndex: number, option: string) => {
+    const next = new Map(chosen);
+    next.set(questionIndex, option);
+    setChosen(next);
+    const draft = answersDraft(questions, next);
+    if (draft.complete || !onDraft) onAnswer?.(draft.text);
+    else onDraft(draft.text);
+  };
+  let questionIndex = -1;
   return (
     <>
       {note ? (
@@ -289,10 +307,11 @@ export function SpecialistTurn({
           {question ? <span>{note.fresh ? "new round of questions" : "next question"}</span> : null}
         </p>
       ) : null}
-      {segments.map((segment, index) =>
-        segment.kind === "text" ? (
-          <Markdown key={index} source={segment.markdown} />
-        ) : (
+      {segments.map((segment, index) => {
+        if (segment.kind === "text") return <Markdown key={index} source={segment.markdown} />;
+        const at = ++questionIndex;
+        const picked = chosen.get(at);
+        return (
           <div key={index} className="turn-ask">
             <p className="turn-question">{segment.question}</p>
             {segment.options.length > 0 ? (
@@ -303,7 +322,8 @@ export function SpecialistTurn({
                     type="button"
                     className="turn-option"
                     disabled={!onAnswer}
-                    onClick={() => onAnswer?.(answerText(segment.question, option, several))}
+                    aria-pressed={picked === option}
+                    onClick={() => choose(at, option)}
                   >
                     {option}
                   </button>
@@ -311,8 +331,8 @@ export function SpecialistTurn({
               </div>
             ) : null}
           </div>
-        ),
-      )}
+        );
+      })}
     </>
   );
 }
