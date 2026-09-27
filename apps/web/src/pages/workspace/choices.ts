@@ -188,3 +188,24 @@ export function answerText(question: string, option: string, several: boolean): 
   const asked = question.replace(/\s+/g, " ").trim();
   return `On "${asked}": ${option}`;
 }
+
+/**
+ * The turn's answers so far, as one message (#142). A turn that asks
+ * several questions is answered in one reply: each tapped option lands in
+ * the message box, named for its question, in the order the questions were
+ * asked, and the reply goes only once every question has an answer. A
+ * question offered without options can only be typed, so a turn holding
+ * one is never complete by tapping alone.
+ */
+export function answersDraft(
+  questions: readonly { readonly question: string; readonly options: readonly string[] }[],
+  chosen: ReadonlyMap<number, string>,
+): { text: string; complete: boolean } {
+  const several = questions.length > 1;
+  const lines = questions.flatMap((entry, index) => {
+    const option = chosen.get(index);
+    return option === undefined ? [] : [answerText(entry.question, option, several)];
+  });
+  const complete = questions.every((entry, index) => entry.options.length > 0 && chosen.has(index));
+  return { text: lines.join("\n\n"), complete };
+}

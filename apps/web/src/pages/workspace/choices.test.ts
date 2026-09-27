@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { answerText, choicesIn, segmentsIn } from "./choices.ts";
+import { answersDraft, answerText, choicesIn, segmentsIn } from "./choices.ts";
 
 const TWO_QUESTIONS = [
   "## Unknowns",
@@ -58,5 +58,46 @@ describe("answerText", () => {
   });
   test("one of several is named for its question", () => {
     expect(answerText("What should the default be\nfor photos?", "Block saving", true)).toBe('On "What should the default be for photos?": Block saving');
+  });
+});
+
+// #142: several questions are answered in one reply, gathered as they are
+// tapped, sent when the last has an answer.
+describe("answersDraft", () => {
+  const questions = [
+    { question: "Confirm each guess, or save and tidy later?", options: ["Show me the guess", "Save automatically"] },
+    { question: "Only you, or others too?", options: ["Just me", "Me and a coach"] },
+  ];
+
+  test("one answer of two is a draft, named for its question, not complete", () => {
+    expect(answersDraft(questions, new Map([[1, "Just me"]]))).toEqual({ text: 'On "Only you, or others too?": Just me', complete: false });
+  });
+
+  test("every question answered is complete, in the order asked whatever the order tapped", () => {
+    const chosen = new Map([
+      [1, "Just me"],
+      [0, "Save automatically"],
+    ]);
+    expect(answersDraft(questions, chosen)).toEqual({
+      text: 'On "Confirm each guess, or save and tidy later?": Save automatically\n\nOn "Only you, or others too?": Just me',
+      complete: true,
+    });
+  });
+
+  test("a lone question is complete on its tap and sends the option as offered", () => {
+    expect(answersDraft([questions[0]!], new Map([[0, "Show me the guess"]]))).toEqual({ text: "Show me the guess", complete: true });
+  });
+
+  test("a question offered without options can only be typed, so tapping never completes the turn", () => {
+    const withOpen = [...questions, { question: "Anything else?", options: [] }];
+    const chosen = new Map([
+      [0, "Show me the guess"],
+      [1, "Just me"],
+    ]);
+    expect(answersDraft(withOpen, chosen).complete).toBe(false);
+  });
+
+  test("nothing chosen is an empty draft", () => {
+    expect(answersDraft(questions, new Map())).toEqual({ text: "", complete: false });
   });
 });

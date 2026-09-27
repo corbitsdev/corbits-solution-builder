@@ -429,6 +429,13 @@ export function StageDocument({
                       ? (answer) => onRevise(answer, [])
                       : undefined
                   }
+                  // With several questions asked, the answers gather in the
+                  // box until the last is tapped (#142), where the person
+                  // can read them together and add to them.
+                  onDraft={(draft) => {
+                    setMessage(draft);
+                    composer.current?.focus({ preventScroll: true });
+                  }}
                 />
               </>
             ) : (

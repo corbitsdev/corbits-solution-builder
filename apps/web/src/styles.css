@@ -3460,6 +3460,11 @@ button[aria-disabled="true"] {
   opacity: 0.6;
 }
 
+.turn-option[aria-pressed="true"] {
+  border-color: var(--wb-primary);
+  background: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-card));
+}
+
 
 /* --- Pending turn (CL-7602) ------------------------------------------------
    The bubble stamps every message with a relative time. The one turn the host
