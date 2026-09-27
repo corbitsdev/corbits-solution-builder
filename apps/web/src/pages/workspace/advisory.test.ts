@@ -78,6 +78,21 @@ describe("EvaluatorVerdict", () => {
     expect(html).toContain("Success criteria are vague.");
   });
 
+  // #144: the evaluator writes its notes in markdown, like every specialist.
+  test("renders a note's inline markdown instead of its asterisks", () => {
+    const html = render({ status: "verdict", verdict: { ready: true, notes: ["**Problem statement** versus **What I assumed**: one has to move.", "`reps` is a `number`."] } });
+    expect(html).toContain("<strong>Problem statement</strong> versus <strong>What I assumed</strong>: one has to move.");
+    expect(html).toContain("<code>reps</code> is a <code>number</code>.");
+    expect(html).not.toContain("**");
+    expect(html.match(/<li>/g)?.length).toBe(2);
+  });
+
+  test("a note's markup stays text", () => {
+    const html = render({ status: "verdict", verdict: { ready: true, notes: ["<script>alert(1)</script> **b**"] } });
+    expect(html).toContain("&lt;script&gt;");
+    expect(html).toContain("<strong>b</strong>");
+  });
+
   test("says why when it is unavailable, never silently", () => {
     expect(render({ status: "unavailable", reason: "The brief evaluator has not answered yet." })).toContain("unavailable. The brief evaluator has not answered yet.");
   });

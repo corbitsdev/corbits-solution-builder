@@ -168,6 +168,13 @@ function parse(source: string): Block[] {
   return blocks;
 }
 
+/** One line of a model's text with its inline spans rendered -- bold, code,
+ *  italics -- for a place that is not a document: a note in a list, a
+ *  label. Same escaping as `Markdown`: nothing here becomes markup. */
+export function InlineMarkdown({ source }: { source: string }): JSX.Element {
+  return <>{inline(source, "inline")}</>;
+}
+
 export function Markdown({ source }: { source: string }): JSX.Element {
   const blocks = parse(source);
   return (

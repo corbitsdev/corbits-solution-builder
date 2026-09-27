@@ -8,7 +8,7 @@ import type { CSSProperties, ReactNode, Ref } from "react";
 import { ChatInput, Textarea } from "@corbits/react-ui";
 import { Button, stageName } from "../../components.jsx";
 import { Dictated } from "../../dictation.jsx";
-import { Markdown } from "../../markdown.jsx";
+import { InlineMarkdown, Markdown } from "../../markdown.jsx";
 import { RETURN_TO, SendBackPicker, defaultTarget } from "../send-back.jsx";
 import { STAGE_GOAL } from "./gate.jsx";
 import { Elapsed } from "./elapsed.jsx";
@@ -84,7 +84,9 @@ export function EvaluatorVerdict({ evaluator }: { evaluator: StageEvaluator }) {
       {verdict.notes.length > 0 ? (
         <ul>
           {verdict.notes.map((note, index) => (
-            <li key={index}>{note}</li>
+            <li key={index}>
+              <InlineMarkdown source={note} />
+            </li>
           ))}
         </ul>
       ) : null}
