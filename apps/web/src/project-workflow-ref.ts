@@ -12,11 +12,16 @@
  * it has it.
  */
 import type { Transport } from "@intx/hub-client";
-import { findProjectWorkflow, type ProjectWorkflowDeployment } from "@solutions-builder/installer";
+import { createDecisionMemo, findProjectWorkflow, type ProjectWorkflowDeployment } from "@solutions-builder/installer";
 
 const CACHE_TTL_MS = 5_000;
 
 const cache = new Map<string, { ref: ProjectWorkflowDeployment | null; expiresAt: number }>();
+// What every resolution so far has read of finished iterations and ended
+// deployments' runs, kept for the session (#80): each poll then re-reads
+// only the newest iteration of a live run, not every log of every
+// deployment the project ever had.
+const decisions = createDecisionMemo();
 const inFlight = new Map<string, Promise<ProjectWorkflowDeployment | null>>();
 
 export async function resolveProjectWorkflowRef(transport: Transport, projectId: string): Promise<ProjectWorkflowDeployment | null> {
@@ -26,7 +31,7 @@ export async function resolveProjectWorkflowRef(transport: Transport, projectId:
   const pending = inFlight.get(projectId);
   if (pending) return pending;
 
-  const call = findProjectWorkflow(transport, projectId).then((ref) => {
+  const call = findProjectWorkflow(transport, projectId, decisions).then((ref) => {
     cache.set(projectId, { ref, expiresAt: Date.now() + CACHE_TTL_MS });
     return ref;
   });
