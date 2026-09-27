@@ -243,9 +243,9 @@ async function main(): Promise<void> {
       : `\nAsset ${assetId} is already at the current digest; nothing to push.`,
   );
 
-  const app = entries.find((entry) => entry.name === "@solutions-builder/app");
-  if (!app) throw new Error("@solutions-builder/app was not packed");
-  await resolveAndPrintClosure(assetId, `${app.name}@${app.version}`);
+  const runtime = entries.find((entry) => entry.name === "@solutions-builder/specialist-runtime");
+  if (!runtime) throw new Error("@solutions-builder/specialist-runtime was not packed");
+  await resolveAndPrintClosure(assetId, `${runtime.name}@${runtime.version}`);
 
   process.exit(0);
 }

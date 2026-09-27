@@ -13,7 +13,7 @@
  *   the archive it is handed, not the directory the archive was made from.
  * - Each `web`/`api` target the build engineer names, started with the
  *   command and port it gives and probed over HTTP by
- *   `@solutions-builder/app/target-verify`. The port opening and the
+ *   `@solutions-builder/specialist-runtime/target-verify`. The port opening and the
  *   responses that come back are what is recorded; a target whose port
  *   never opens is `failed`. A `cli`, `desktop` or other target has no
  *   verifier in this repo and is `inaccessible`, never assumed.
@@ -27,9 +27,9 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import { summarizeVerification, type VerificationItem, type VerificationReport } from "@solutions-builder/app/delivery";
-import { verifyApiTarget, verifyWebTarget } from "@solutions-builder/app/target-verify";
-import { classifyTarget, type TargetVerification } from "@solutions-builder/app/targets";
+import { summarizeVerification, type VerificationItem, type VerificationReport } from "@solutions-builder/specialist-runtime/delivery";
+import { verifyApiTarget, verifyWebTarget } from "@solutions-builder/specialist-runtime/target-verify";
+import { classifyTarget, type TargetVerification } from "@solutions-builder/specialist-runtime/targets";
 
 export type ManifestFileEntry = { path: string; sha256: string; sizeBytes: number };
 

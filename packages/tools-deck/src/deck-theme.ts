@@ -6,7 +6,7 @@
  * here for what they mean.
  */
 import JSZip from "jszip";
-import type { TemplateTheme } from "@solutions-builder/app/deck";
+import type { TemplateTheme } from "@solutions-builder/specialist-runtime/deck";
 
 export type { TemplateTheme };
 

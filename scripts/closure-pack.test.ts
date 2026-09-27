@@ -81,10 +81,13 @@ describe("buildPackedEntries", () => {
     const entries = await buildPackedEntries();
     expect(entries.length).toBeGreaterThan(10);
     const names = new Set(entries.map((entry) => entry.name));
-    // The three packages #31 found shipping workspace-only specs.
-    for (const name of ["@intx/types", "@solutions-builder/tools-deck", "@solutions-builder/tools-delivery"]) {
+    // The three packages #31 found shipping workspace-only specs, and the
+    // runtime package the tools author with (#42); the app package itself is
+    // no longer part of any specialist's closure.
+    for (const name of ["@intx/types", "@solutions-builder/tools-deck", "@solutions-builder/tools-delivery", "@solutions-builder/specialist-runtime"]) {
       expect(names.has(name)).toBe(true);
     }
+    expect(names.has("@solutions-builder/app")).toBe(false);
     const untouched = new Map<string, string>();
     for (const entry of entries) {
       const files = await extractTarballFiles(entry.bytes);

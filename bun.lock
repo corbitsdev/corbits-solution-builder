@@ -44,6 +44,7 @@
         "@radix-ui/react-tooltip": "^1.2.16",
         "@solutions-builder/app": "workspace:*",
         "@solutions-builder/installer": "workspace:*",
+        "@solutions-builder/specialist-runtime": "workspace:*",
         "@solutions-builder/tools-deck": "workspace:*",
         "@solutions-builder/tools-delivery": "workspace:*",
         "@standard-schema/spec": "^1.0.0",
@@ -160,6 +161,14 @@
       "name": "@solutions-builder/app",
       "version": "0.1.0",
       "dependencies": {
+        "@solutions-builder/specialist-runtime": "workspace:*",
+        "arktype": "catalog:",
+      },
+    },
+    "packages/specialist-runtime": {
+      "name": "@solutions-builder/specialist-runtime",
+      "version": "0.1.0",
+      "dependencies": {
         "arktype": "catalog:",
         "pptxgenjs": "4",
       },
@@ -169,7 +178,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@intx/agent": "0.4.0",
-        "@solutions-builder/app": "workspace:*",
+        "@solutions-builder/specialist-runtime": "workspace:*",
         "jszip": "3",
         "pptxgenjs": "4",
       },
@@ -180,7 +189,7 @@
       "dependencies": {
         "@intx/agent": "0.4.0",
         "@intx/types": "0.4.0",
-        "@solutions-builder/app": "workspace:*",
+        "@solutions-builder/specialist-runtime": "workspace:*",
       },
     },
     "vendor/interchange/apps/sidecar": {
@@ -782,6 +791,8 @@
     "@solutions-builder/hub": ["@solutions-builder/hub@workspace:apps/hub"],
 
     "@solutions-builder/installer": ["@solutions-builder/installer@workspace:packages/installer"],
+
+    "@solutions-builder/specialist-runtime": ["@solutions-builder/specialist-runtime@workspace:packages/specialist-runtime"],
 
     "@solutions-builder/tools-deck": ["@solutions-builder/tools-deck@workspace:packages/tools-deck"],
 

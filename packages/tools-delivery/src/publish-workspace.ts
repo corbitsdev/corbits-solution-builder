@@ -9,7 +9,7 @@
  * credential handle, call the run-scoped route through the mediated fetch)
  * rather than importing that package: this tool ships inside
  * `@solutions-builder/tools-delivery`, which every stage-8 AND stage-9
- * specialist carries unconditionally (`WORKFLOW_PACKAGE_DEPENDENCIES`).
+ * specialist carries (`DELIVERY_TOOL_DEPENDENCIES`).
  * Adding `@corbits/artifacts` as this package's own dependency would make it
  * a real install for every specialist, not just the credential-bound stage-8
  * one — the same class of mistake `ARTIFACT_TOOL_DEPENDENCIES` exists to
@@ -44,7 +44,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readdir } from "node:fs/promises";
 import { resolve, relative, isAbsolute, join } from "node:path";
-import { BUILD_EVIDENCE_KIND, DELIVERY_MANIFEST_KIND } from "@solutions-builder/app/artifacts";
+import { BUILD_EVIDENCE_KIND, DELIVERY_MANIFEST_KIND } from "@solutions-builder/specialist-runtime/artifact-kinds";
 import { hashTree, verifyArchive, type DeliveryVerificationContent, type ManifestFileEntry, type TargetProbe } from "./verify.js";
 
 export const TOOL_NAME = "publish_workspace";

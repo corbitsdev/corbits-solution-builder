@@ -9,7 +9,7 @@
     "./*": "./src/*.ts"
   },
   "dependencies": {
-    "arktype": "catalog:",
-    "pptxgenjs": "4"
+    "@solutions-builder/specialist-runtime": "workspace:*",
+    "arktype": "catalog:"
   }
 }

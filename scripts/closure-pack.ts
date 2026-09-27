@@ -1,8 +1,8 @@
 /**
  * Packs the shared workflow closure into npm-style tarballs, in memory.
  *
- * `@solutions-builder/app`, every vendored `@intx/*` package the deployed
- * workflow imports, and every real npm dependency that closure actually
+ * `@solutions-builder/specialist-runtime`, every vendored `@intx/*` package the
+ * deployed workflow imports, and every real npm dependency that closure actually
  * requires at runtime — the same derivation `scripts/pack-registry-asset.ts`
  * has always used (`WORKFLOW_PACKAGE_DEPENDENCIES` as the honest root set,
  * `vendoredClosure` walking `workspace:*` edges, real `package.json`
@@ -26,7 +26,8 @@ import { ARTIFACT_TOOL_DEPENDENCIES, WORKFLOW_PACKAGE_DEPENDENCIES } from "@solu
 
 export const ROOT_DIR = join(import.meta.dir, "..");
 export const VENDOR_PACKAGES_DIR = join(ROOT_DIR, "vendor", "interchange", "packages");
-export const APP_PACKAGE_DIR = join(ROOT_DIR, "packages", "solutions-builder");
+export const RUNTIME_PACKAGE_DIR = join(ROOT_DIR, "packages", "specialist-runtime");
+export const RUNTIME_PACKAGE_NAME = "@solutions-builder/specialist-runtime";
 
 /**
  * `readManifest`/`distFiles`/`vendoredClosure`/`workspaceCatalog` used to
@@ -224,28 +225,25 @@ function vendoredTarballFiles(shortName: string): { manifest: PackageManifest; f
   return { manifest, files };
 }
 
-/** `@solutions-builder/app`'s own files, packed as-is: its `src/` tree
- *  (there is no build step — the package is consumed as source), with a
- *  `dependencies` field: its own declared externals plus
- *  `WORKFLOW_PACKAGE_DEPENDENCIES`. */
-function appTarballFiles(): { manifest: PackageManifest; files: TarballFiles } {
-  const manifest = JSON.parse(readFileSync(join(APP_PACKAGE_DIR, "package.json"), "utf8")) as PackageManifest;
+/** `@solutions-builder/specialist-runtime`'s own files, packed as-is: its
+ *  `src/` tree less its tests (there is no build step — the package is
+ *  consumed as source), with its own declared dependencies as real ranges. */
+function runtimeTarballFiles(): { manifest: PackageManifest; files: TarballFiles } {
+  const manifest = JSON.parse(readFileSync(join(RUNTIME_PACKAGE_DIR, "package.json"), "utf8")) as PackageManifest;
   const trimmed: PackageManifest = {
     name: manifest.name,
     version: manifest.version,
     type: manifest.type ?? "module",
     ...(manifest.exports !== undefined ? { exports: manifest.exports } : {}),
-    dependencies: rewriteDependencies({
-      ...manifest.dependencies,
-      ...Object.fromEntries(Object.entries(WORKFLOW_PACKAGE_DEPENDENCIES).filter(([name]) => name !== manifest.name)),
-    }),
+    dependencies: rewriteDependencies(manifest.dependencies),
   };
   const files: TarballFiles = { "package.json": encode(`${JSON.stringify(trimmed, null, 2)}\n`) };
-  const srcDir = join(APP_PACKAGE_DIR, "src");
+  const srcDir = join(RUNTIME_PACKAGE_DIR, "src");
   const paths: string[] = [];
   walk(srcDir, paths);
   for (const full of paths) {
-    const rel = relative(APP_PACKAGE_DIR, full).split("\\").join("/"); // "src/..."
+    const rel = relative(RUNTIME_PACKAGE_DIR, full).split("\\").join("/"); // "src/..."
+    if (/\.test\.tsx?$/.test(rel)) continue;
     files[rel] = new Uint8Array(readFileSync(full));
   }
   return { manifest, files };
@@ -286,18 +284,18 @@ function discoverExternalClosure(): ExternalPackage[] {
     }
   }
   // The opt-in artifact tools are packed too, so turning them on needs no rebuild.
-  const appManifest = JSON.parse(readFileSync(join(APP_PACKAGE_DIR, "package.json"), "utf8")) as PackageManifest;
-  for (const name of Object.keys({ ...appManifest.dependencies, ...WORKFLOW_PACKAGE_DEPENDENCIES, ...ARTIFACT_TOOL_DEPENDENCIES })) {
+  const runtimeManifest = JSON.parse(readFileSync(join(RUNTIME_PACKAGE_DIR, "package.json"), "utf8")) as PackageManifest;
+  for (const name of Object.keys({ ...runtimeManifest.dependencies, ...WORKFLOW_PACKAGE_DEPENDENCIES, ...ARTIFACT_TOOL_DEPENDENCIES })) {
     if (isVendored(name)) continue;
     queue.push({ name, fromDirs: [ROOT_DIR] });
   }
 
   while (queue.length > 0) {
     const { name, fromDirs } = queue.shift()!;
-    // The curated app tarball is already packed above, including its source.
-    // Repacking its workspace symlink would overwrite the same filename with
-    // different bytes and invalidate the advertised integrity.
-    if (found.has(name) || isVendored(name) || name === "@solutions-builder/app") continue;
+    // The curated runtime tarball is already packed above, including its
+    // source. Repacking its workspace symlink would overwrite the same
+    // filename with different bytes and invalidate the advertised integrity.
+    if (found.has(name) || isVendored(name) || name === RUNTIME_PACKAGE_NAME) continue;
     const dir = resolveExternalPackageDir(name, fromDirs);
     const manifest = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as PackageManifest;
     found.set(name, { name: manifest.name, version: manifest.version, dir });
@@ -342,17 +340,18 @@ async function pack(name: string, version: string, files: TarballFiles): Promise
   return { name, version, filename: tarballFilename(name, version), bytes };
 }
 
-/** The full packed set: the vendored `@intx/*` closure, `@solutions-builder/app`,
- *  and every real npm package that closure imports at runtime. Sorted by
- *  filename so callers get a stable order. */
+/** The full packed set: the vendored `@intx/*` closure,
+ *  `@solutions-builder/specialist-runtime`, the tool packages, and every real
+ *  npm package that closure imports at runtime. Sorted by filename so callers
+ *  get a stable order. */
 export async function buildPackedEntries(): Promise<PackedEntry[]> {
   const entries: PackedEntry[] = [];
   for (const shortName of vendoredShortNames()) {
     const { manifest, files } = vendoredTarballFiles(shortName);
     entries.push(await pack(manifest.name, manifest.version, files));
   }
-  const app = appTarballFiles();
-  entries.push(await pack(app.manifest.name, app.manifest.version, app.files));
+  const runtime = runtimeTarballFiles();
+  entries.push(await pack(runtime.manifest.name, runtime.manifest.version, runtime.files));
   for (const external of discoverExternalClosure()) {
     entries.push(await pack(external.name, external.version, externalTarballFiles(external)));
   }

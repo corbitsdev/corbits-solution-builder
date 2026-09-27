@@ -1,0 +1,14 @@
+{
+  "name": "@solutions-builder/specialist-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "What a specialist's sidecar tools need from the app, and nothing else: deck authoring, delivery evidence, target verification and the artifact kinds the tools write. Shipped into a specialist's closure only when its entry imports a tool that uses it (#42); the app package re-exports these for the interface.",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "arktype": "catalog:",
+    "pptxgenjs": "4"
+  }
+}

@@ -14,12 +14,12 @@ import { ApiError, type Transport } from "@intx/hub-client";
 import { agentFor, type AgentRole } from "@solutions-builder/app/kit";
 import type { Stage } from "@solutions-builder/app/ledger";
 import {
-  ARTIFACT_TOOL_DEPENDENCIES,
   BUILD_STAGE,
   PACKAGE_STAGE,
   SPECIALIST_ENTRY_PATH,
-  WORKFLOW_PACKAGE_DEPENDENCIES,
+  specialistDependencies,
   specialistEntrySource,
+  specialistTooling,
   type InferenceSourcePin,
 } from "@solutions-builder/app/specialist-source";
 import { ensureWorkflowArtifactsCredential } from "./artifacts-credential.js";
@@ -28,8 +28,8 @@ import { projectHome, projectTenants, type ProjectHome } from "./project-home.js
 import { readProject, readStageSwitch, writeStageSwitch } from "./project-tenant.js";
 import { visibleCatalog } from "./visible-catalog.js";
 import {
-  appMemberFiles,
   artifactsMemberFiles,
+  runtimeMemberFiles,
   toolsDeckMemberFiles,
   toolsDeliveryMemberFiles,
   treeDigest,
@@ -353,7 +353,7 @@ export async function stageSpecialistSourcePin(
  * `actions.js`: a specialist has no `routeMessage` action to wire and no loop
  * body to carry it into.
  */
-async function renderSpecialistSource(
+export async function renderSpecialistSource(
   closure: ClosureSource,
   projectId: string,
   stage: Stage,
@@ -372,16 +372,14 @@ async function renderSpecialistSource(
     workspaces: ["packages/*"],
     catalog: closure.manifest.catalog,
   };
-  // `@corbits/artifacts` and its `@standard-schema/spec` peer are only a real
-  // dependency of this member when the rendered entry actually imports the
-  // generic tool bundle -- with `artifactTools` off, or on stage 8 (which
-  // resolves its "hub" handle through `@solutions-builder/tools-delivery`
-  // instead, see `specialistEntrySource`), dropping them keeps the deployed
-  // package.json (and the closure below) the same shape it was pre-CL-8719.
-  const needsGenericArtifactPackage = artifactTools && stage !== BUILD_STAGE;
-  const dependencies = needsGenericArtifactPackage
-    ? { ...WORKFLOW_PACKAGE_DEPENDENCIES, ...ARTIFACT_TOOL_DEPENDENCIES }
-    : WORKFLOW_PACKAGE_DEPENDENCIES;
+  // The package depends on exactly the members and npm packages its entry
+  // imports (#42): `@corbits/artifacts` and its `@standard-schema/spec` peer
+  // only when the entry carries the generic tool bundle (never on stage 8,
+  // which resolves its "hub" handle through `@solutions-builder/tools-delivery`
+  // instead, see `specialistEntrySource`), the deck or delivery tools and the
+  // runtime package they author with only for the stages that carry them.
+  const tooling = specialistTooling({ stage, roleKey, artifactTools });
+  const dependencies = specialistDependencies(tooling);
   const member = {
     name,
     version: "0.0.0",
@@ -409,16 +407,17 @@ async function renderSpecialistSource(
     // this file back -- so a future slice can declare `modelRequirements` and
     // drop this pin without changing what the specialist runs on.
     [SOURCE_PIN_PATH]: `${JSON.stringify(source, null, 2)}\n`,
-    // The full closure, the same set the lifecycle ships: whichever tool a
-    // given stage's specialist imports (deck, posix, delivery/deliver -- see
-    // `specialistEntrySource`) resolves against a member that is always here.
+    // The members this entry's imports resolve against, and no others (#42):
+    // the vendored workflow always; the runtime package with the deck tool
+    // for a stage 5 audience deployment, or with the delivery tool for
+    // stages 8 and 9; the generic artifact bundle only when the entry
+    // carries it. A stage that imports no tool ships the workflow alone, so
+    // its sidecar materialises a fraction of the closure.
     ...(await vendoredMemberFiles(closure.manifest, closure.fetchTarball)),
-    ...(await appMemberFiles(closure.manifest, closure.fetchTarball)),
-    ...(await toolsDeckMemberFiles(closure.manifest, closure.fetchTarball)),
-    ...(await toolsDeliveryMemberFiles(closure.manifest, closure.fetchTarball)),
-    // Only shipped when the rendered entry actually imports the generic
-    // bundle -- stage 8 never does (see `needsGenericArtifactPackage` above).
-    ...(needsGenericArtifactPackage ? await artifactsMemberFiles(closure.manifest, closure.fetchTarball) : {}),
+    ...(tooling.deck || tooling.delivery ? await runtimeMemberFiles(closure.manifest, closure.fetchTarball) : {}),
+    ...(tooling.deck ? await toolsDeckMemberFiles(closure.manifest, closure.fetchTarball) : {}),
+    ...(tooling.delivery ? await toolsDeliveryMemberFiles(closure.manifest, closure.fetchTarball) : {}),
+    ...(tooling.artifacts ? await artifactsMemberFiles(closure.manifest, closure.fetchTarball) : {}),
   };
   files[DIGEST_PATH] = `${await treeDigest(files)}\n`;
   return files;

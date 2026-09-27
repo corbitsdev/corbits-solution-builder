@@ -6,10 +6,10 @@
  * Unlike the vendored `@intx/*` packages, this one ships as TypeScript
  * source rather than a `tsc` build: Bun evaluates `.ts` directly wherever
  * this package runs, in the workspace and in the deployed sidecar alike,
- * matching how `@solutions-builder/app` itself is consumed (no `dist/`).
+ * matching how `@solutions-builder/specialist-runtime` itself is consumed (no `dist/`).
  *
  * The tool renders a stakeholder's deck outline as PowerPoint bytes by
- * calling the deck authoring that already lives in `@solutions-builder/app/deck`
+ * calling the deck authoring that lives in `@solutions-builder/specialist-runtime/deck`
  * (`deckFrom`, `renderDeck`) — nothing here re-parses markdown or redraws a
  * slide. Illustrations stay out of its surface: drawing them needs a
  * connected image provider and a reader model to pick subjects, which is
@@ -28,7 +28,7 @@ import {
   renderDeck,
   type DeckDesign,
   type TemplateTheme,
-} from "@solutions-builder/app/deck";
+} from "@solutions-builder/specialist-runtime/deck";
 
 /** The tool's name on the wire. */
 export const TOOL_NAME = "render_deck";
