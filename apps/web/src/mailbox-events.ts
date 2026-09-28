@@ -5,7 +5,8 @@
  *
  * Same shape as the legacy un-scoped stream in `inbox.ts`: a `mailbox` event
  * carries only `{ id, op }`, never the row, so every relevant event just
- * triggers a refetch. Unlike `inbox.ts`, the caller decides what "relevant"
+ * triggers a refetch. The id is scoped on this stream, though -- see
+ * `shouldRefetch`. Unlike `inbox.ts`, the caller decides what "relevant"
  * means (`shouldRefetch`) and drives its own reconnect backoff.
  */
 import { hubEventSourceCredentials, hubOrigin } from "./hub-origin.ts";
@@ -19,9 +20,20 @@ export type MailboxEvent = {
 const MAX_BACKOFF_MS = 30_000;
 const BASE_BACKOFF_MS = 1_000;
 
-/** True for a `create` op landing in INBOX — the only kind worth a refetch here. */
+/**
+ * True for a `create` op landing in INBOX — the only kind worth a refetch
+ * here. The folder is the id's second-to-last segment: the un-scoped stream
+ * names a row `<folder>:<uid>`, while the tenant-scoped stream this file
+ * subscribes to names it `<tenant>:<principal>:<folder>:<uid>`
+ * (`@corbits/mailbox`'s `write.ts` and `persist.ts`). Reading only a leading
+ * `INBOX:` dropped every push the tenant stream carried (#159): a
+ * specialist's reply was persisted, published and delivered to the tab, and
+ * then discarded here, so the thread waited on the fallback poll instead.
+ */
 export function shouldRefetch(event: MailboxEvent): boolean {
-  return event.op === "create" && event.id.startsWith("INBOX:");
+  if (event.op !== "create") return false;
+  const parts = event.id.split(":");
+  return parts.length >= 2 && parts[parts.length - 2] === "INBOX";
 }
 
 /** Capped exponential backoff: 1s, 2s, 4s, ... up to 30s. */

@@ -12,8 +12,21 @@ describe("shouldRefetch", () => {
     expect(shouldRefetch({ id: "INBOX:12", op: "create" })).toBe(true);
   });
 
+  // #159: the tenant-scoped stream names a row by tenant and principal too.
+  test("refetches on a create the tenant-scoped stream names by tenant, principal, folder and uid", () => {
+    expect(shouldRefetch({ id: "tnt_1:prn_2:INBOX:12", op: "create" })).toBe(true);
+    expect(shouldRefetch({ id: "acme:user-1:INBOX:1", op: "create" })).toBe(true);
+  });
+
   test("ignores other folders", () => {
     expect(shouldRefetch({ id: "Sent:12", op: "create" })).toBe(false);
+    expect(shouldRefetch({ id: "tnt_1:prn_2:Sent:12", op: "create" })).toBe(false);
+    expect(shouldRefetch({ id: "tnt_1:prn_2:Trash:12", op: "create" })).toBe(false);
+  });
+
+  test("ignores an id with no folder segment", () => {
+    expect(shouldRefetch({ id: "INBOX", op: "create" })).toBe(false);
+    expect(shouldRefetch({ id: "12", op: "create" })).toBe(false);
   });
 
   test("ignores non-create ops", () => {
@@ -102,6 +115,15 @@ describe("subscribeMailbox", () => {
     subscribeMailbox("tnt_1", (event) => nudges.push(event.id), deps);
     sources[0]!.emit("mailbox", JSON.stringify({ id: "INBOX:1", op: "create" }));
     expect(nudges).toEqual(["INBOX:1"]);
+  });
+
+  // #159: what the tenant stream actually sends for a specialist's reply.
+  test("nudges onNudge for a create the tenant stream scopes by tenant and principal", () => {
+    const { sources, deps } = fakeDeps();
+    const nudges: string[] = [];
+    subscribeMailbox("tnt_1", (event) => nudges.push(event.id), deps);
+    sources[0]!.emit("mailbox", JSON.stringify({ id: "tnt_1:prn_2:INBOX:7", op: "create" }));
+    expect(nudges).toEqual(["tnt_1:prn_2:INBOX:7"]);
   });
 
   test("does not nudge for a non-refetch event", () => {
