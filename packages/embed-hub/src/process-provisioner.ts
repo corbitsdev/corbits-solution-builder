@@ -24,7 +24,9 @@ import type {
   EnsureSidecarResult,
   SidecarProvisioner,
 } from "@intx/hub-sessions";
+import type { DB } from "@intx/db";
 import type { SidecarCapabilityDeclaration } from "@intx/types";
+import { sql } from "drizzle-orm";
 
 export const PROCESS_PROVISIONER_ID = "process";
 
@@ -46,10 +48,32 @@ export type ProcessProvisionerOptions = {
   readonly dataDir: string;
   readonly runtimePath: string;
   readonly sidecarEntryPath: string;
-  readonly hubWebSocketUrl: string;
   readonly runner?: SidecarProcessRunner;
   readonly terminationGraceMs?: number;
 };
+
+/**
+ * Rebinds live allocations and probes bound under the legacy
+ * `process:v1:<role>:<entry>:<hub url>` fingerprint to the stable one, so the
+ * hub replaces them instead of leaving them allocated with no provisioner.
+ * Must run before the reconciler starts. Terminal rows keep their history.
+ */
+export async function rebindLegacyProcessAllocations(db: DB["db"]): Promise<void> {
+  for (const role of ["deployment", "probe"] as const) {
+    const stable = `process:v1:${role}`;
+    const legacyPrefix = `${stable}:`;
+    await db.execute(sql`UPDATE "sidecar_allocation"
+      SET "provisioner_binding_fingerprint" = ${stable}, "updated_at" = now()
+      WHERE "provisioner_id" = ${PROCESS_PROVISIONER_ID}
+        AND starts_with("provisioner_binding_fingerprint", ${legacyPrefix})
+        AND "status" NOT IN ('released', 'failed')`);
+    await db.execute(sql`UPDATE "workflow_probe"
+      SET "provisioner_binding_fingerprint" = ${stable}, "updated_at" = now()
+      WHERE "provisioner_id" = ${PROCESS_PROVISIONER_ID}
+        AND starts_with("provisioner_binding_fingerprint", ${legacyPrefix})
+        AND "status" NOT IN ('succeeded', 'failed')`);
+  }
+}
 
 const PID_FILE = "sidecar.pid";
 const ID_FILE = "sidecar.id";
@@ -214,9 +238,11 @@ export function createProcessProvisioner(options: ProcessProvisionerOptions): Si
   return {
     id: PROCESS_PROVISIONER_ID,
     apiVersion: 1,
-    // Unchanged from the Workbench provisioner this replaces, so allocations
-    // it bound are adopted rather than failed as a changed binding.
-    bindingFingerprint: `process:v1:${options.role}:${options.sidecarEntryPath}:${options.hubWebSocketUrl}`,
+    // The entry path and hub URL are read from the current options at every
+    // spawn, so they are not part of what an allocation is bound to. Binding
+    // them stranded every allocation whenever the checkout moved or the port
+    // changed.
+    bindingFingerprint: `process:v1:${options.role}`,
     capabilities: CAPABILITIES,
     ensure: (request) => serialize(request.allocationId, () => ensure(request)),
     destroy: (request) => serialize(request.allocationId, () => destroy(request)),

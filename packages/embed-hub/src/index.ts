@@ -70,7 +70,11 @@ import {
   type SidecarLookups,
   type WsHandle,
 } from "@intx/hub-sessions";
-import { createProcessProvisioner, type ProcessProvisionerRole } from "./process-provisioner.js";
+import {
+  createProcessProvisioner,
+  rebindLegacyProcessAllocations,
+  type ProcessProvisionerRole,
+} from "./process-provisioner.js";
 import {
   createInMemoryMailboxEventBus,
   createMailboxPersist,
@@ -397,7 +401,6 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
       dataDir: join(options.dataDir, role === "probe" ? "process-provisioner-probe" : "process-provisioner"),
       runtimePath: options.sidecarRuntime,
       sidecarEntryPath: options.sidecarEntry,
-      hubWebSocketUrl: options.hubWebSocketUrl,
     });
   const deploymentProvisioner = provisionerFor("deployment");
   const bindingFingerprint = deploymentProvisioner.bindingFingerprint;
@@ -473,6 +476,7 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
       await workflowDispatchService.requeueForReadyAllocation(allocation.anchorRunId);
     },
   });
+  await rebindLegacyProcessAllocations(db.db);
   await workflowAllocationService.initialize?.();
   await sidecarAllocationReconciler.initialize();
   sidecarRouter.events.on("sidecar.disconnect", ({ allocated }) => {
