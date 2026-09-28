@@ -190,7 +190,9 @@ export type SpecialistToolImport = {
  * and the tool package its `credentialBindings` entry names when it carries
  * artifact tools. `specialistEntrySource` renders exactly this and decides
  * nothing about a role itself. Nothing here is the project's: who a stage 5
- * package is for arrives with the request that asks for it (#41 step 3).
+ * package is for arrives with the request that asks for it (#41 step 3),
+ * and the project a document belongs to is the run's own tenant, so the
+ * prompt names no project (#41 step 4).
  */
 export type SpecialistRoleSpec = {
   readonly tooling: SpecialistTooling;
@@ -201,6 +203,14 @@ export type SpecialistRoleSpec = {
   /** The tool package the `hub` credential binding is declared against, or null with no binding. */
   readonly credentialPackage: string | null;
 };
+
+/** What a specialist carrying the artifact tools is told about the document
+ *  it writes (#41 step 4): its stage and the kind `artifact_create` records
+ *  it under, both fixed per role. Which project it belongs to is the run's
+ *  own tenant, never something the prompt names or the model supplies. */
+function stageDocumentNote(stage: Stage, kind: ArtifactKind): string {
+  return `## Stage document\n\nYou are the stage ${stage} specialist. Your document is recorded under the kind \`${kind}\`; pass that kind to artifact_create.`;
+}
 
 /** The `@corbits/artifacts` bundle (`artifact_create`/`artifact_write`), opt-in. */
 const ARTIFACTS_IMPORT: SpecialistToolImport = {
@@ -269,7 +279,7 @@ export function specialistRoleSpec(options: {
       ...(tooling.delivery && !isBuildStage ? [DELIVER_IMPORT] : []),
     ],
     artifactKind: STAGE_ARTIFACT_KIND[stage],
-    promptNotes: [],
+    promptNotes: tooling.artifacts ? [stageDocumentNote(stage, STAGE_ARTIFACT_KIND[stage])] : [],
     // CL-8723: stage 8 binds through `publish_workspace`, which resolves the
     // `hub` handle itself; every other bound stage binds through the
     // generic bundle.
@@ -380,9 +390,6 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
   const credentialName = workflowArtifactsCredentialName(assetName);
 
   let systemPrompt = systemPromptForRole(role, genericArtifactTools);
-  if (genericArtifactTools) {
-    systemPrompt = `${systemPrompt}\n\n## Artifact context\n\nprojectId: ${projectId}\nstage: ${stage}\nkind: ${spec.artifactKind}`;
-  }
   for (const note of spec.promptNotes) {
     systemPrompt = `${systemPrompt}\n\n${note}`;
   }
