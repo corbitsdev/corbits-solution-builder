@@ -16,6 +16,7 @@ import {
   createProject as installerCreateProject,
   delegateMore,
   delegateWorkspaceDefaultsIfSealed,
+  ENDED_DEPLOYMENT_STATUSES,
   ensureProjectWorkflow,
   ensureSpecialistDeployment,
   getArtifact as installerGetArtifact,
@@ -544,6 +545,22 @@ async function projectWorkflowSource(): Promise<{ files: Record<string, string> 
  */
 function specialistHubOrigin(): string {
   return hubOrigin() || window.location.origin;
+}
+
+/**
+ * Whether a deployment this session remembers is still the one to mail
+ * (#167). A memo outlives a host restart, which fails every deployment and
+ * places replacements; mail to the remembered address is then refused as
+ * terminal. The remembered one stands while the live pick is still it; it
+ * is dropped once another deployment is the pick, or once it has ended and
+ * nothing has replaced it yet. A status read that fails keeps the memo, as
+ * `ensureStageAgent` always has.
+ */
+async function memoStillLive(projectId: string, stage: Stage, roleKey: string | undefined, remembered: SpecialistDeployment): Promise<boolean> {
+  const fresh = await asWorkspaceOwner((transport) => stageSpecialistStatus(transport, projectId, stage, roleKey)).catch(() => null);
+  if (!fresh) return true;
+  if (fresh.deploymentId !== remembered.deploymentId) return false;
+  return !ENDED_DEPLOYMENT_STATUSES.has(fresh.status);
 }
 
 const projectRunnableCalls = new Map<string, Promise<void>>();
@@ -1733,12 +1750,9 @@ export const api = {
     const pending = ensureStageAgentCalls.get(key);
     if (pending) {
       return pending.then(async (deployment) => {
-        const fresh = await api.stageAgentStatus(projectId, stage).catch(() => null);
-        if (fresh && fresh.deploymentId !== deployment.deploymentId) {
-          ensureStageAgentCalls.delete(key);
-          return api.ensureStageAgent(projectId, stage);
-        }
-        return deployment;
+        if (await memoStillLive(projectId, stage as Stage, undefined, deployment)) return deployment;
+        ensureStageAgentCalls.delete(key);
+        return api.ensureStageAgent(projectId, stage);
       });
     }
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
@@ -1829,7 +1843,13 @@ false,
    */
   ensureStage1EvaluatorAgent: (projectId: string): Promise<SpecialistDeployment> => {
     const pending = ensureStage1EvaluatorCalls.get(projectId);
-    if (pending) return pending;
+    if (pending) {
+      return pending.then(async (deployment) => {
+        if (await memoStillLive(projectId, 1 as Stage, BRIEF_EVALUATOR_ROLE_KEY, deployment)) return deployment;
+        ensureStage1EvaluatorCalls.delete(projectId);
+        return api.ensureStage1EvaluatorAgent(projectId);
+      });
+    }
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const status = await readyToDeploy(transport, workspaceTenantId, projectId);
       const deployment = await ensureSpecialistDeployment(
@@ -1871,7 +1891,13 @@ false,
    */
   ensureGuideAgent: (projectId: string): Promise<SpecialistDeployment> => {
     const pending = ensureGuideAgentCalls.get(projectId);
-    if (pending) return pending;
+    if (pending) {
+      return pending.then(async (deployment) => {
+        if (await memoStillLive(projectId, 1 as Stage, PRODUCT_GUIDE_ROLE_KEY, deployment)) return deployment;
+        ensureGuideAgentCalls.delete(projectId);
+        return api.ensureGuideAgent(projectId);
+      });
+    }
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const status = await readyToDeploy(transport, workspaceTenantId, projectId);
       const deployment = await ensureSpecialistDeployment(
@@ -1909,7 +1935,13 @@ false,
   ensureStage6RoleAgent: (projectId: string, roleKey: string): Promise<SpecialistDeployment> => {
     const key = `${projectId}:${roleKey}`;
     const pending = ensureStage6RoleAgentCalls.get(key);
-    if (pending) return pending;
+    if (pending) {
+      return pending.then(async (deployment) => {
+        if (await memoStillLive(projectId, 6 as Stage, roleKey, deployment)) return deployment;
+        ensureStage6RoleAgentCalls.delete(key);
+        return api.ensureStage6RoleAgent(projectId, roleKey);
+      });
+    }
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const status = await readyToDeploy(transport, workspaceTenantId, projectId);
       const deployment = await ensureSpecialistDeployment(
@@ -1976,9 +2008,15 @@ false,
    */
   ensureStage5PackageAgent: (projectId: string, audienceIndex: number): Promise<SpecialistDeployment> => {
     const key = `${projectId}:${audienceIndex}`;
-    const pending = ensureStage5PackageAgentCalls.get(key);
-    if (pending) return pending;
     const roleKey = `package-${audienceIndex}`;
+    const pending = ensureStage5PackageAgentCalls.get(key);
+    if (pending) {
+      return pending.then(async (deployment) => {
+        if (await memoStillLive(projectId, 5 as Stage, roleKey, deployment)) return deployment;
+        ensureStage5PackageAgentCalls.delete(key);
+        return api.ensureStage5PackageAgent(projectId, audienceIndex);
+      });
+    }
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const status = await readyToDeploy(transport, workspaceTenantId, projectId);
       const deployment = await ensureSpecialistDeployment(

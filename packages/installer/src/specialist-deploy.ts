@@ -87,7 +87,9 @@ function specialistAssetStagePattern(roleKey: string): RegExp {
   return new RegExp(`-stage-(\\d+)${suffix}$`);
 }
 
-const ENDED_DEPLOYMENT_STATUSES = new Set(["releasing", "released", "failed"]);
+/** A deployment the hub will never place, fire or signal again. Exported
+ *  so a caller holding a remembered deployment can tell it has ended (#167). */
+export const ENDED_DEPLOYMENT_STATUSES: ReadonlySet<string> = new Set(["releasing", "released", "failed"]);
 
 /**
  * Picks one deployment out of several matching the same asset -- concurrent
