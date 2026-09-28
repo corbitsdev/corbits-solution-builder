@@ -68,7 +68,7 @@ import { MATERIAL_KIND, MATERIAL_READING_KIND } from "@solutions-builder/app/art
 import type { Stage } from "@solutions-builder/app/ledger";
 import { STAGE_DRAFT_KIND } from "../../client.js";
 import {
-  EvaluatorVerdict,
+  EvaluatorStance,
   OpeningScreen,
   SendBackPopover,
   StagePanes,
@@ -958,7 +958,7 @@ export function StageWorkspace({
                 ? { ready: evaluator.verdict.ready, notes: [...evaluator.verdict.notes] }
                 : null
             }
-            advisory={stage === 1 ? <EvaluatorVerdict evaluator={evaluator} /> : null}
+            advisory={stage === 1 ? <EvaluatorStance evaluator={evaluator} /> : null}
             onSelectVersion={artifacts.selectVersion}
             onRevise={(message, quotes) => {
               artifacts.selectVersion(null);
