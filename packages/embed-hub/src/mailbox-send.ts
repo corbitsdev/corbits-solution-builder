@@ -9,7 +9,13 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Context, MiddlewareHandler } from "hono";
 import { parseRunAddress } from "@intx/types";
-import type { OutgoingMailboxMessage } from "@corbits/mailbox";
+import {
+  moveNativeMailboxMessage,
+  openNativeMailboxStore,
+  type MailboxDb,
+  type MailboxEventBus,
+  type OutgoingMailboxMessage,
+} from "@corbits/mailbox";
 
 /** The send route's own request, so `deliver` can replay the caller's
  * session against the run-trigger route it has no context for. */
@@ -36,7 +42,53 @@ export type MailboxDeliverOpts = {
     recipients: string[];
     raw: Uint8Array;
   }) => Promise<unknown>;
+  /** The mailbox the send route wrote the Sent copy to, so a refused
+   * trigger can take that copy back (#61). */
+  readonly db: MailboxDb;
+  /** Told when the Sent copy moves, so an open client re-reads. */
+  readonly bus?: MailboxEventBus;
 };
+
+/**
+ * The mailbox owner the send route resolved: the run-mailbox mount reads
+ * the tenant and principal its middleware put on the request, and this
+ * reads the same two, so the Sent copy is looked for where it was written.
+ */
+function mailboxScope(c: Context): { tenantId: string; principalId: string } | null {
+  const get = (c as unknown as { get(key: string): { id: string } | undefined }).get.bind(c);
+  const tenant = get("tenant");
+  const principal = get("principal");
+  if (!tenant?.id || !principal?.id) return null;
+  return { tenantId: tenant.id, principalId: principal.id };
+}
+
+/**
+ * Takes back the Sent copy of a message the hub did not accept (#61). The
+ * mailbox appends to Sent before it hands the message over, so a refused
+ * trigger left the message looking sent: every reply pairing by order then
+ * ran one behind, and the brief evaluator found the undelivered request on
+ * its next mount, never re-sent it, and waited on it for good. The copy
+ * goes to Trash, found by its Message-ID, before the failure is rethrown.
+ * Best-effort: a failure here must not hide the delivery failure itself.
+ */
+export async function withdrawSentCopy(
+  db: MailboxDb,
+  scope: { tenantId: string; principalId: string },
+  messageId: string,
+  bus?: MailboxEventBus,
+): Promise<boolean> {
+  const sent = await openNativeMailboxStore(db, { ...scope, folder: "Sent" });
+  const copy = sent.messages.find((message) => message.envelope.messageId === messageId);
+  if (copy === undefined) return false;
+  const uid = await moveNativeMailboxMessage(db, scope, "Sent", copy.uid, "Trash");
+  try {
+    bus?.publish(scope, { type: "mailbox", id: `Sent:${String(copy.uid)}`, op: "trash" });
+    bus?.publish(scope, { type: "mailbox", id: `Trash:${String(uid)}`, op: "create" });
+  } catch {
+    // The move is durable; a listener that missed the event re-reads on its own.
+  }
+  return true;
+}
 
 export function createMailboxDeliver(
   opts: MailboxDeliverOpts,
@@ -69,6 +121,12 @@ export function createMailboxDeliver(
         });
         if (!response.ok) {
           const detail = await response.text().catch(() => "");
+          const scope = mailboxScope(c);
+          if (scope) {
+            await withdrawSentCopy(opts.db, scope, message.messageId, opts.bus).catch((cause: unknown) => {
+              console.error(`mailbox send: could not withdraw the Sent copy of ${message.messageId}: ${cause instanceof Error ? cause.message : String(cause)}`);
+            });
+          }
           throw new Error(`trigger for ${runId} answered ${String(response.status)}: ${detail}`);
         }
       }

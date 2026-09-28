@@ -776,7 +776,7 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
       return { tenantId: c.get("tenant").id, principalId: c.get("principal").id };
     },
     senderAddressFor: principalAddress,
-    deliver: createMailboxDeliver({ app, persistMail: wrappedPersistMail }),
+    deliver: createMailboxDeliver({ app, persistMail: wrappedPersistMail, db: mailboxDb, bus: mailboxBus }),
   });
   app.route("/api/tenants/:tenantId/mailbox", runMailboxApp);
 
