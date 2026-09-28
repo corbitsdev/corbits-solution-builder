@@ -51,6 +51,7 @@ import {
   registerWorkflowArtifactToken,
 } from "./workflow-artifact-tokens.js";
 import { labelWorkflowArtifacts } from "./workflow-artifact-label.js";
+import { createRetireDeploymentApi } from "./retire-deployment.js";
 import {
   createAgentRepoStore,
   createAssetService,
@@ -693,14 +694,15 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
   // is what makes its routes reachable from outside the host runtime.
   const artifactDb = withPostgresJsResultShape(db.db) as unknown as ArtifactDb;
   await runArtifactMigrations(artifactDb);
+  const requireGrant = createRequireGrant({
+    grantStore: createGrantStore(db.db),
+    conditionRegistry: { time_window: timeWindowEvaluator },
+  });
   const artifactsApi = new Hono<TenantEnv>();
   mountArtifacts(artifactsApi, {
     db: artifactDb,
     contentStore: InlineContentStore,
-    requireGrant: createRequireGrant({
-      grantStore: createGrantStore(db.db),
-      conditionRegistry: { time_window: timeWindowEvaluator },
-    }),
+    requireGrant,
     // The package mints no grants itself (see its README). Without this, a
     // caller who just created an artifact could never revise or archive it —
     // `POST /artifacts/:id/versions` and `/archive` both require a `write`/
@@ -763,6 +765,17 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
     return c.json({ data: { ok: true } }, 201);
   });
   app.route("/api/tenants/:tenantId/workflow-artifact-tokens", workflowArtifactTokensApi);
+
+  // The release the hub's own `DELETE /runs/:runId` does not offer yet
+  // (INTR-454), for a deployment the installer superseded -- see
+  // `retire-deployment.ts`.
+  app.route(
+    "/api/tenants/:tenantId/deployment-retirements",
+    createRetireDeploymentApi(
+      { db: db.db, allocationStore: sidecarAllocationStore, dispatchStore: createWorkflowRunDispatchStore(db.db) },
+      requireGrant,
+    ),
+  );
 
   // Read-only workspace inference spend, folded from `onUsage` above --
   // see `spend.ts` for what it can and cannot answer.
