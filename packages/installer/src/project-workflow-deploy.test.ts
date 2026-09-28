@@ -666,6 +666,34 @@ describe("ensureProjectWorkflow", () => {
     expect(hub.posts.filter((post) => /\/deployments$/.test(post.path))).toEqual([]);
   });
 
+  // A run can end while the hub still lists its deployment as placed: a
+  // workflow whose loop was skipped completed at once (#203). Such a run is
+  // never signalled again; it is history, its generation counts, and the
+  // fresh deploy must not reuse its deployment.
+  test("a completed run on a placed deployment is history: a fresh deploy at the next generation takes its decisions", async () => {
+    const done = decidedRun("run_done", [1, 2], { digest: CURRENT_DIGEST, generation: 2 });
+    done.events.run_done = [...done.events.run_done!, { seq: 3, type: "RunCompleted", body: {} }];
+    const hub = fakeHub(
+      withAsset({
+        deployments: [
+          { id: "dep_live", definitionAssetId: ASSET_ID, status: "deployed", createdAt: "2026-01-01T00:00:00.000Z" },
+          { id: "dep_done", definitionAssetId: ASSET_ID, status: "deployed", createdAt: "2026-01-02T00:00:00.000Z" },
+        ],
+        runsByDeployment: { dep_live: ["run_live"], dep_done: done.runIds },
+        eventsByRun: { run_live: [startedOn(CURRENT), PARKED[1]!], ...done.events },
+      }),
+    );
+    expect(await ensure(hub)).toEqual({
+      deploymentId: "dep_new",
+      runId: "run_new",
+      tenantId: TENANT_ID,
+      replay: { from: { deploymentId: "dep_done", runId: "run_done", tenantId: TENANT_ID }, replayed: 2, refused: [] },
+    });
+    expect(hub.signalsSent().map((sent) => `${sent.runId}:${sent.signalId}`)).toEqual(["run_new:dec-1", "run_new:dec-2"]);
+    expect(hub.triggeredCode()).toEqual({ digest: CURRENT_DIGEST, generation: 3 });
+    expect(await findProjectWorkflow(hub.transport, PROJECT_ID)).toEqual({ deploymentId: "dep_new", runId: "run_new", tenantId: TENANT_ID });
+  });
+
   test("a live run that has not caught up is brought up to the dead run's decisions, not replaced", async () => {
     const hub = fakeHub(
       withAsset({
