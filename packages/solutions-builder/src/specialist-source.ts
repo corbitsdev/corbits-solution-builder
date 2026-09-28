@@ -25,11 +25,12 @@ import { skillTextFor } from "./seed-kit.js";
  *  `apiBaseUrl` the hub's own origin (see `installer/src/artifacts-credential.ts`). */
 export const WORKFLOW_ARTIFACTS_PROVIDER_NAME = "sb-workflow-artifacts";
 
-/** The credential name a specialist asset's `credentialBindings` names — known
- *  before the asset is even deployed, since it derives only from the asset's
- *  own (deterministic) name, never its deployment id. */
-export function workflowArtifactsCredentialName(assetName: string): string {
-  return `workflow-artifacts:${assetName}`;
+/** The credential name a specialist's `credentialBindings` names — fixed
+ *  per role (#41 step 5), so the rendered entry is the same for every
+ *  project. It resolves in the project's own tenant (#29), where the
+ *  installer mints it, so one name per role is one credential per project. */
+export function workflowArtifactsCredentialName(roleId: string): string {
+  return `workflow-artifacts:${roleId}`;
 }
 
 /** Mirrors `apps/web/src/client.ts`'s `STAGE_DRAFT_KIND` — the artifact kind a
@@ -233,26 +234,25 @@ const DELIVER_IMPORT: SpecialistToolImport = {
   tool: "deliver",
 };
 
-/** Stage 8's shell and `publish_workspace`. The latter is built bound to
- *  the project at render time, a constant the model never supplies
+/** Stage 8's shell and `publish_workspace`. The latter records what it
+ *  uploads against the run's own tenant, which is the project (#29); it
+ *  takes no project id and the model never supplies one
  *  (`publishWorkspaceTool` in `tools-delivery/publish-workspace.ts`). */
-function buildStageImports(projectId: string): readonly SpecialistToolImport[] {
-  return [
-    {
-      package: "@intx/tools-posix/sidecar-bundle",
-      lines: [`import { posix } from ${JSON.stringify("@intx/tools-posix/sidecar-bundle")};`],
-      tool: "posix",
-    },
-    {
-      package: "@solutions-builder/tools-delivery/publish-workspace",
-      lines: [
-        `import { publishWorkspaceTool } from ${JSON.stringify("@solutions-builder/tools-delivery/publish-workspace")};`,
-        `const publishWorkspace = publishWorkspaceTool(${JSON.stringify(projectId)});`,
-      ],
-      tool: "publishWorkspace",
-    },
-  ];
-}
+const BUILD_STAGE_IMPORTS: readonly SpecialistToolImport[] = [
+  {
+    package: "@intx/tools-posix/sidecar-bundle",
+    lines: [`import { posix } from ${JSON.stringify("@intx/tools-posix/sidecar-bundle")};`],
+    tool: "posix",
+  },
+  {
+    package: "@solutions-builder/tools-delivery/publish-workspace",
+    lines: [
+      `import { publishWorkspaceTool } from ${JSON.stringify("@solutions-builder/tools-delivery/publish-workspace")};`,
+      `const publishWorkspace = publishWorkspaceTool();`,
+    ],
+    tool: "publishWorkspace",
+  },
+];
 
 /**
  * The spec for one deployment, from the same facts `specialistTooling`
@@ -265,9 +265,8 @@ export function specialistRoleSpec(options: {
   readonly stage: Stage;
   readonly roleKey?: string | undefined;
   readonly artifactTools?: boolean | undefined;
-  readonly projectId: string;
 }): SpecialistRoleSpec {
-  const { stage, roleKey = PRIMARY_ROLE_KEY, artifactTools = false, projectId } = options;
+  const { stage, roleKey = PRIMARY_ROLE_KEY, artifactTools = false } = options;
   const tooling = specialistTooling({ stage, roleKey, artifactTools });
   const isBuildStage = stage === BUILD_STAGE;
   return {
@@ -275,7 +274,7 @@ export function specialistRoleSpec(options: {
     toolImports: [
       ...(tooling.artifacts ? [ARTIFACTS_IMPORT] : []),
       ...(tooling.deck ? [DECK_IMPORT] : []),
-      ...(tooling.posix ? buildStageImports(projectId) : []),
+      ...(tooling.posix ? BUILD_STAGE_IMPORTS : []),
       ...(tooling.delivery && !isBuildStage ? [DELIVER_IMPORT] : []),
     ],
     artifactKind: STAGE_ARTIFACT_KIND[stage],
@@ -302,10 +301,16 @@ export function specialistWorkflowId(stage: Stage): string {
   return `sb-stage-${stage}`;
 }
 
+/**
+ * What a rendered entry depends on: the stage, the model pin, the role and
+ * its key, and whether it carries the artifact tools. Nothing of the
+ * project's (#41 step 5): the same role renders the same entry for every
+ * project, and what is the project's -- the tenant a record lands in, who a
+ * package is for -- arrives with the run and the work.
+ */
 export type SpecialistSourceOptions = {
   readonly stage: Stage;
   readonly source: InferenceSourcePin;
-  readonly projectId: string;
   /** The agent this deployment runs. Passed in rather than derived from
    *  `stage` here (`agentFor(stage)`) so a stage's other roles — the
    *  brief evaluator, the requirements author, a panel principal — can each
@@ -316,10 +321,6 @@ export type SpecialistSourceOptions = {
    *  stage — folded into the deployed asset's name by `specialist-deploy.ts`
    *  (`specialistAssetName`) so each role gets its own asset. */
   readonly roleKey: string;
-  /** This asset's deterministic name (`sb-project-<projectId>-stage-<N>`),
-   *  passed in rather than recomputed here since `specialist-deploy.ts`
-   *  already owns that naming — used only to name the credential binding. */
-  readonly assetName: string;
   /** CL-8719: carry the `@corbits/artifacts` sidecar tool bundle, its
    *  `credentialBindings` entry and the matching grant requirement, and tell
    *  the model to call `artifact_create`/`artifact_write`. Default false —
@@ -363,14 +364,14 @@ function systemPromptForRole(role: AgentRole, artifactTools: boolean): string {
  * this only renders it.
  */
 export function specialistEntrySource(options: SpecialistSourceOptions): string {
-  const { stage, source, projectId, assetName, role, roleKey, artifactTools = false } = options;
+  const { stage, source, role, roleKey, artifactTools = false } = options;
   const workflowId = specialistWorkflowId(stage);
   const triggerAddress = `${workflowId}@solutions-builder.local`;
 
   // Everything this role carries is its spec's (#41 step 1): the imports and
   // the tools handed to the agent come from it in order, so an entry never
   // imports a tool its closure lacks (`specialistTooling` decides both).
-  const spec = specialistRoleSpec({ stage, roleKey, artifactTools, projectId });
+  const spec = specialistRoleSpec({ stage, roleKey, artifactTools });
   const toolImports = spec.toolImports.map((entry) => `${entry.lines.join("\n")}\n`).join("");
   const tools = spec.toolImports.map((entry) => entry.tool).join(", ");
 
@@ -381,13 +382,13 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
   // it declares against a provider/credential the installer ensures at
   // deploy time (`installer/src/artifacts-credential.ts`) before this
   // asset's deployment id even exists, so both names are deterministic from
-  // `assetName` alone. Opt-in (`artifactTools`, default off) — see
+  // the role alone. Opt-in (`artifactTools`, default off) — see
   // `SpecialistSourceOptions`; today only stage 8 turns it on, and
   // `publish_workspace` resolves the same credential itself rather than
   // through the generic bundle, so stage 8 gets the binding without the
   // bundle or the rule telling the model to call `artifact_create`.
   const genericArtifactTools = spec.tooling.artifacts;
-  const credentialName = workflowArtifactsCredentialName(assetName);
+  const credentialName = workflowArtifactsCredentialName(role.id);
 
   let systemPrompt = systemPromptForRole(role, genericArtifactTools);
   for (const note of spec.promptNotes) {

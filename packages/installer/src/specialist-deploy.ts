@@ -391,15 +391,7 @@ export async function renderSpecialistSource(
   const files: Record<string, string> = {
     "package.json": `${JSON.stringify(root, null, 2)}\n`,
     [`${SPECIALIST_DIR}/package.json`]: `${JSON.stringify(member, null, 2)}\n`,
-    [`${SPECIALIST_DIR}/${SPECIALIST_ENTRY_PATH}`]: specialistEntrySource({
-      stage,
-      source,
-      projectId,
-      assetName: name,
-      role,
-      roleKey,
-      artifactTools,
-    }),
+    [`${SPECIALIST_DIR}/${SPECIALIST_ENTRY_PATH}`]: specialistEntrySource({ stage, source, role, roleKey, artifactTools }),
     // CL-8783 verdict: the pin rides along as a reporting artifact only. The
     // deployed entry resolves its model from the hub-resolved inference chain
     // (`sourceOfferingIds` -> `resolveSourcesByOfferingIds`), never by reading
@@ -448,8 +440,6 @@ export async function specialistEntryIsCurrent(
   transport: Transport,
   tenantId: string,
   assetId: string,
-  assetName: string,
-  projectId: string,
   stage: Stage,
   offering: Parameters<typeof sourceFor>[2],
   artifactTools: boolean,
@@ -460,7 +450,7 @@ export async function specialistEntryIsCurrent(
   if (deployed === null) return true;
   const source = await sourceFor(transport, tenantId, offering);
   if (!source) return true;
-  const rendered = specialistEntrySource({ stage, source, projectId, assetName, role, roleKey, artifactTools });
+  const rendered = specialistEntrySource({ stage, source, role, roleKey, artifactTools });
   return rendered === deployed;
 }
 
@@ -572,8 +562,6 @@ async function ensureSpecialistDeploymentOnce(
       transport,
       existing.tenantId,
       existing.assetId,
-      assetName,
-      projectId,
       stage,
       leading,
       artifactTools,
@@ -701,7 +689,7 @@ async function ensureSpecialistDeploymentOnce(
   // The credential is the project's own (#29); the one `sb-workflow-artifacts`
   // provider it names stays on the workspace, resolved through the walk-up.
   if (artifactTools) {
-    await ensureWorkflowArtifactsCredential(transport, tenantId, hubOrigin, assetName, winner.id, home.legacyTenantId ?? tenantId);
+    await ensureWorkflowArtifactsCredential(transport, tenantId, hubOrigin, role.id, winner.id, home.legacyTenantId ?? tenantId);
   }
 
   return { deploymentId: winner.id, address: `${winner.id}@${tenant.domain}`, tenantId };

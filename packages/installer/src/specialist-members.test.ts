@@ -98,6 +98,20 @@ describe("renderSpecialistSource members", () => {
     expect(membersOf(await render(8, "primary", true))).toEqual(["intx-workflow", "specialist-runtime", "tools-delivery"]);
   });
 
+  // #41 step 5: the rendered entry for a role is identical across projects;
+  // only the package's own name carries the project, since the asset is
+  // named for it.
+  test("the same role renders the same entry for two projects", async () => {
+    const closure = await fullClosure();
+    for (const [stage, artifactTools] of [[1, false], [5, false], [8, false], [8, true], [9, true]] as [Stage, boolean][]) {
+      const one = await renderSpecialistSource(closure, "proj_1", stage, { provider: "openai", model: "gpt-5.5" }, artifactTools, "primary", agentFor(stage));
+      const two = await renderSpecialistSource(closure, "proj_2", stage, { provider: "openai", model: "gpt-5.5" }, artifactTools, "primary", agentFor(stage));
+      const entry = "packages/specialist/workflow.js";
+      expect(one[entry]).toBe(two[entry]!);
+      expect(one[entry]).not.toContain("proj_1");
+    }
+  });
+
   test("every member the package depends on is in the tree, and nothing in the tree is undeclared", async () => {
     for (const [stage, roleKey, artifactTools] of [[1, "primary", false], [5, "primary", false], [8, "primary", false], [9, "primary", true]] as [Stage, string, boolean][]) {
       const files = await render(stage, roleKey, artifactTools);

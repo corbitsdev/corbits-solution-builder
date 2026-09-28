@@ -74,8 +74,6 @@ describe("specialistEntrySource", () => {
     specialistEntrySource({
       stage,
       source: { provider: "openai", model: "gpt-5.5" },
-      projectId: "proj_1",
-      assetName: `sb-project-proj_1-stage-${String(stage)}`,
       role: agentFor(stage),
       roleKey,
       artifactTools,
@@ -113,6 +111,15 @@ describe("specialistEntrySource", () => {
     expect(stage2).not.toContain("## Artifact context");
     expect(stage2).not.toContain("projectId:");
     expect(entry(2)).not.toContain("## Stage document");
+  });
+
+  // #41 step 5: the entry takes nothing of the project's. The credential
+  // binding is named for the role, and `publish_workspace` is built with no
+  // project id, so the same role renders the same entry everywhere.
+  test("a credential-bound entry names its binding for the role, and stage 8 builds publish_workspace unbound", () => {
+    expect(entry(2, "primary", true)).toContain('name: "workflow-artifacts:constraints-mapper"');
+    expect(entry(8)).toContain("const publishWorkspace = publishWorkspaceTool();");
+    expect(entry(8, "primary", true)).toContain('name: "workflow-artifacts:build-engineer"');
   });
 
   test("stage 5's entry names no audience", () => {
