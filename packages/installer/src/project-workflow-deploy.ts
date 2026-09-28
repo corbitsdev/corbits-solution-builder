@@ -297,8 +297,13 @@ type ProjectRunState = {
  * project's run until a live run has caught up with it: a live deployment
  * wins once it has received every decision the dead ones took. Reading a
  * live run that has not caught up is how a restart used to reset a project
- * to stage 1. A dead deployment whose run never took a decision holds
- * nothing and is passed over.
+ * to stage 1. A dead deployment whose run never took a decision holds no
+ * history to replay, but it does hold the project's state -- its `init`
+ * output, stage 1 -- so when nothing else does, the newest such run is
+ * still the one read (#161): a card or a page opened after a host restart
+ * shows the stage the project is at, not "unavailable". A caller that
+ * deploys still deploys afresh in that case, since there is nothing to
+ * replay.
  *
  * A live run of an older generation than another live run is superseded
  * (#51): the newer one was deployed to replace it with new code, and the
@@ -330,6 +335,8 @@ async function projectRunState(transport: Transport, groups: readonly Deployment
   const history: ReceivedDecision[] = [];
   const known = new Set<string>();
   let fullest: { candidate: ProjectRunCandidate; code: ProjectWorkflowCode | null; held: number } | null = null;
+  // The newest run that holds state but no decisions: read only when no run holds decisions.
+  let newestDead: { candidate: ProjectRunCandidate; code: ProjectWorkflowCode | null } | null = null;
   const folded = [
     ...candidates.filter((entry) => deploymentHasEnded(entry.deployment)).map((candidate) => ({ candidate, code: null })),
     ...superseded,
@@ -342,7 +349,10 @@ async function projectRunState(transport: Transport, groups: readonly Deployment
       memo,
       deploymentHasEnded(candidate.deployment),
     );
-    if (decisions.length === 0) continue;
+    if (decisions.length === 0) {
+      newestDead = { candidate, code };
+      continue;
+    }
     // `>=`: candidates come oldest first, so a tie goes to the newer run.
     if (fullest === null || decisions.length >= fullest.held) fullest = { candidate, code, held: decisions.length };
     for (const decision of decisions) {
@@ -364,6 +374,7 @@ async function projectRunState(transport: Transport, groups: readonly Deployment
     if (history.every((decision) => held.has(decision.signalId))) return { run: asRef(candidate), live: true, code, liveCandidates, generation, history };
   }
   if (fullest) return { run: asRef(fullest.candidate), live: false, code: fullest.code, liveCandidates, generation, history };
+  if (newestDead) return { run: asRef(newestDead.candidate), live: false, code: newestDead.code, liveCandidates, generation, history };
   return { run: null, live: false, code: null, liveCandidates, generation, history };
 }
 
