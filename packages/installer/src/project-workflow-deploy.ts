@@ -169,10 +169,18 @@ async function appliedDecisions(
 }
 
 /** The code a project workflow run was triggered on: the digest of the
- *  pushed tree it was deployed from, and its generation -- one more than
- *  the run it replaced. Carried on the trigger payload beside `projectId`
- *  and `stages`, and read back off the run's own `RunStarted` event. */
+ *  pushed tree it was deployed from together with the stage authorities it
+ *  was triggered with (#165), and its generation -- one more than the run it
+ *  replaced. Carried on the trigger payload beside `projectId` and
+ *  `stages`, and read back off the run's own `RunStarted` event. */
 export type ProjectWorkflowCode = { readonly digest: string; readonly generation: number };
+
+/** What the trigger carries beside the code, folded into the digest so a
+ *  live run triggered with other authorities than the caller names now is
+ *  replaced the way a run on other code is: the reducer refuses every
+ *  decision from a principal it was not told about, and only a fresh run
+ *  can be told (#165). */
+const TRIGGER_STAGES_PATH = "trigger/stages.json";
 
 /** `null` for a run triggered before code was recorded on the trigger: its
  *  code is unknown, which the caller treats as not current. */
@@ -667,7 +675,7 @@ async function ensureProjectWorkflowOnce(
   const assetName = projectWorkflowAssetName(projectId);
   const assetId = await ensureWorkflowAsset(transport, tenantId, assetName, `${projectId} project workflow`);
   const rendered = { ...renderProjectWorkflowSource(assetName, source), ...vendoredWorkflowMemberFiles };
-  const digest = await treeDigest(rendered);
+  const digest = await treeDigest({ ...rendered, [TRIGGER_STAGES_PATH]: JSON.stringify(stages) });
 
   const everywhere = async () => (await projectWorkflowDeployments(transport, home, assetName)).groups;
   // One call's own memo: the replacement wait below re-reads the project's
