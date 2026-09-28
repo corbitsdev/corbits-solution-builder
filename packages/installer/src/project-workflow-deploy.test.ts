@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Transport } from "@intx/hub-client";
-import { createDecisionMemo, ensureProjectWorkflow, findProjectWorkflow, projectWorkflowAssetName, type ProjectWorkflowCode } from "./project-workflow-deploy.js";
+import { createDecisionMemo, ensureProjectWorkflow, findProjectWorkflow, namerPin, projectWorkflowAssetName, type ProjectWorkflowCode } from "./project-workflow-deploy.js";
 
 const TENANT_ID = "proj_1";
 const PROJECT_ID = "proj_1";
@@ -111,6 +111,7 @@ function fakeHub(fixture: Fixture) {
         return { data: [{ id: "mpv_1", name: "openai", plugin: "openai", disabled: false }], nextCursor: null } as T;
       }
       if (method === "GET" && pathname === `${tenant}/catalog/models`) return { data: [{ id: "mdl_1", canonicalName: "gpt-5.5" }], nextCursor: null } as T;
+      if (method === "GET" && pathname === `${tenant}/models`) return [] as T;
       if (method === "POST" && /git-tokens$/.test(pathname!)) return { id: "gtk_1", secret: "git-token", expiresAt: "2099-01-01T00:00:00.000Z" } as T;
       if (method === "DELETE" && /git-tokens\//.test(pathname!)) return undefined as T;
       if (method === "GET" && pathname === `${tenant}/assets/${ASSET_ID}/blob`) {
@@ -648,5 +649,59 @@ describe("ensureProjectWorkflow", () => {
       );
       expect((await ensure(hub)).replay).toEqual({ from: { deploymentId: "dep_old", runId: "run_old", tenantId: TENANT_ID }, replayed: 1, refused: [] });
     });
+  });
+});
+
+describe("namerPin", () => {
+  const LEAD = { provider: "anthropic", model: "claude-opus-5" };
+  const offering = (offeringId: string, plugin: string, price?: [string, string]) => ({
+    offeringId,
+    plugin,
+    capabilities: ["plain-text"],
+    pricing: price ? [{ currency: "USD", inputTokenPrice: price[0], outputTokenPrice: price[1] }] : [],
+  });
+  const ALL = new Set(["off_opus", "off_haiku", "off_gpt"]);
+
+  test("picks the cheapest priced model of the leading provider", () => {
+    const models = [
+      { canonicalName: "claude-opus-5", offerings: [offering("off_opus", "anthropic", ["15", "75"])] },
+      { canonicalName: "claude-haiku-5", offerings: [offering("off_haiku", "anthropic", ["1", "5"])] },
+      { canonicalName: "gpt-mini", offerings: [offering("off_gpt", "openai", ["0.1", "0.4"])] },
+    ];
+    expect(namerPin(LEAD, ALL, models)).toEqual({ provider: "anthropic", model: "claude-haiku-5" });
+  });
+
+  test("never assumes an unpriced or undeployable model is cheap", () => {
+    const models = [
+      { canonicalName: "claude-opus-5", offerings: [offering("off_opus", "anthropic")] },
+      { canonicalName: "claude-haiku-5", offerings: [offering("off_haiku", "anthropic")] },
+    ];
+    expect(namerPin(LEAD, ALL, models)).toEqual(LEAD);
+    const priced = [{ canonicalName: "claude-haiku-5", offerings: [offering("off_haiku", "anthropic", ["1", "5"])] }];
+    expect(namerPin(LEAD, new Set(["off_opus"]), priced)).toEqual(LEAD);
+  });
+});
+
+describe("ensureProjectWorkflow's name step", () => {
+  test("pins the namer beside workflow.js and hands the opening statement to the trigger", async () => {
+    const hub = fakeHub(withAsset({}));
+    let pushed: Readonly<Record<string, string>> = {};
+    const gitPush = async (args: { tree: Readonly<Record<string, string>> }) => {
+      pushed = args.tree;
+      return hub.gitPush(args);
+    };
+    await ensureProjectWorkflow(
+      hub.transport,
+      { canPlaceSidecars: true },
+      { files: { "workflow.js": "", "actions.js": "", "loops.js": "" } },
+      gitPush as typeof hub.gitPush,
+      PROJECT_ID,
+      [],
+      {},
+      { problemStatement: "Reconcile invoices" },
+    );
+    expect(pushed["packages/project/namer-source.js"]).toBe(`export const NAMER_SOURCE = {"provider":"openai","model":"gpt-5.5"};\n`);
+    const mail = hub.posts.find((post) => /\/mail$/.test(post.path));
+    expect(JSON.parse((mail!.body as { content: string }).content).problemStatement).toBe("Reconcile invoices");
   });
 });

@@ -101,6 +101,7 @@ import { findArtifact, listProjectArtifacts } from "./project-artifacts.ts";
 import { addressesByMailTenant, mailTenantFor, parentTenantOf } from "./project-tenants.ts";
 import { toBase64 } from "./base64.ts";
 import { openCreatedProject } from "./create-project-open.ts";
+import type { Transport } from "@intx/hub-client";
 import { createHubTransport } from "./hub.ts";
 import {
   readStageThread as readStageThreadViaHub,
@@ -451,17 +452,52 @@ const HOSTED_INSTALL: InstallState = {
 const TITLE_MAX = 60;
 const SLUG_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz";
 
+const UNTITLED = "Untitled project";
+const URL_TOKEN = /^(?:[a-z][a-z0-9+.-]*:\/\/|www\.)\S*$/i;
+
 /**
- * The fallback name until the namer agent step names the project for real
- * (`@solutions-builder/app/project-state`'s `projectTitle`, folded from the
- * "name" step's output): the opening statement's first clause, trimmed to
- * about five words, never the whole paragraph.
+ * The fallback name until the project workflow's `name` step names the
+ * project for real (`adoptGeneratedTitle`): the opening statement's first
+ * clause, links dropped, trimmed to about five words, never the whole
+ * paragraph. Links are dropped before the clause is cut, since a URL's own
+ * dots would otherwise end it.
  */
 export function titleFromProblem(problem: string): string {
   const line = problem.trim().split("\n")[0]!.trim();
-  const clause = (line.split(/[.!?]/)[0] ?? line).trim() || line;
+  const words = line.split(/\s+/).filter((word) => word && !URL_TOKEN.test(word)).join(" ");
+  const clause = (words.split(/[.!?]/)[0] ?? words).trim() || words;
   const short = clause.split(/\s+/).filter(Boolean).slice(0, 5).join(" ");
+  if (!short) return UNTITLED;
   return short.length > TITLE_MAX ? `${short.slice(0, TITLE_MAX - 1).trimEnd()}…` : short;
+}
+
+/** The opening problem statement `createProject` stored, or null when it was created without one. */
+async function openingOf(transport: Transport, projectId: string): Promise<{ body: string; createdAt: string } | null> {
+  const graph = await artifactGraphFor(transport, projectId);
+  const node = graph.nodes.find((entry) => entry.kind === MATERIAL_KIND && entry.variant === OPENING_VARIANT);
+  if (!node) return null;
+  // The project's own tenant: where its artifacts live since #29.
+  const artifact = await installerGetArtifact(transport, projectId, node.id);
+  if (!artifact) return null;
+  return { body: artifact.content, createdAt: node.createdAt };
+}
+
+/** Projects whose `name` reply this session has already settled, so a poll does not re-read the record. */
+const titlesSettled = new Set<string>();
+
+/**
+ * Writes the `name` step's reply as the project's title, only while the title
+ * is still the fallback `createProject` derived from the opening: a title a
+ * person chose, or one already adopted, is never overwritten.
+ */
+async function adoptGeneratedTitle(transport: Transport, projectId: string, generated: string): Promise<void> {
+  if (titlesSettled.has(projectId)) return;
+  const [record, opening] = await Promise.all([installerRequireProject(transport, projectId), openingOf(transport, projectId)]);
+  const title = generated.slice(0, TITLE_MAX).trim();
+  if (opening && title && record.title === titleFromProblem(opening.body)) {
+    await installerUpdateProject(transport, projectId, { title });
+  }
+  titlesSettled.add(projectId);
 }
 
 function projectSlug(): string {
@@ -2079,6 +2115,7 @@ false,
         authorizedPrincipalIds,
       }));
       const status = await readyToDeploy(transport, workspaceTenantId, projectId);
+      const opening = await openingOf(transport, projectId);
       const ref = await ensureProjectWorkflow(
         transport,
         sidecarCapabilityOf(status),
@@ -2087,6 +2124,7 @@ false,
         projectId,
         stages,
         await vendoredMemberFiles(await fetchClosureManifestOrThrow(), fetchClosureTarball),
+        opening ? { problemStatement: opening.body } : {},
       );
       const ready = await waitForDeploymentDeployed(transport, ref.tenantId, ref.deploymentId);
       if (!ready) {
@@ -2118,7 +2156,9 @@ false,
     asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const ref = await resolveProjectWorkflowRef(transport, projectId);
       if (!ref) return null;
-      return loadProjectWorkflowView(transport, ref);
+      const view = await loadProjectWorkflowView(transport, ref);
+      if (view.generatedTitle) await adoptGeneratedTitle(transport, projectId, view.generatedTitle);
+      return view;
     }),
   /**
    * Delivers one decision as the loop's `project.decision` signal,
@@ -2175,14 +2215,7 @@ false,
    * open on: the project was created with no problem statement.
    */
   projectOpening: (projectId: string): Promise<{ body: string; createdAt: string } | null> =>
-    asWorkspaceOwner(async (transport) => {
-      const graph = await artifactGraphFor(transport, projectId);
-      const node = graph.nodes.find((entry) => entry.kind === MATERIAL_KIND && entry.variant === OPENING_VARIANT);
-      if (!node) return null;
-      const artifact = await installerGetArtifact(transport, projectId, node.id);
-      if (!artifact) return null;
-      return { body: artifact.content, createdAt: node.createdAt };
-    }),
+    asWorkspaceOwner((transport) => openingOf(transport, projectId)),
   /**
    * The feedback recorded on one design node — read straight off its own
    * artifact's `metadata.sb.feedback` (CL-8620), no lifecycle run to fold

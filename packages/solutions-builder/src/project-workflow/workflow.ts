@@ -1,5 +1,8 @@
-import { action, awaitSignal, defineWorkflow, loop } from "@intx/workflow";
+import { defineAgent } from "@intx/agent";
+import { action, awaitSignal, defineWorkflow, loop, step } from "@intx/workflow";
+import { agentById } from "../kit.js";
 import { projectWorkflowLoopCarry, projectWorkflowLoopWhile } from "./loops.js";
+import { NAMER_SOURCE } from "./namer-source.js";
 
 export { projectWorkflowLoopCarry, projectWorkflowLoopWhile };
 
@@ -14,17 +17,36 @@ export const PROJECT_DECISION_SIGNAL = "project.decision";
  */
 export const MAX_ITERATIONS = 500;
 
+export const NAME_STEP_ID = "name";
+
+const namerRole = agentById("namer");
+if (!namerRole) throw new Error("namer role missing from the kit");
+
+const namerAgent = defineAgent({
+  id: namerRole.id,
+  systemPrompt: namerRole.system,
+  tools: [],
+  capabilities: [],
+  inference: { sources: [NAMER_SOURCE] },
+});
+
 /**
  * ONE top-level loop. Body: awaitSignal -> action. `carry` is the whole
  * ProjectState, threaded as the body's next `trigger.payload`; `while` reads
  * the same state off the iteration's output. No sleep, onTrigger, child
  * workflow, or sibling loop lives in the body.
+ *
+ * `name` runs beside `init`, outside the loop: the kit's namer reads the
+ * trigger payload's `problemStatement` and replies with a title. It gates
+ * nothing, and a failure routes to `nameFailed` so it never fails the run.
  */
 export const projectWorkflow = defineWorkflow({
   id: "sb-project-loop-driven",
   trigger: { type: "manual" },
   steps: {
     init: action({ handler: "initProject", input: { from: "trigger.payload" } }),
+    [NAME_STEP_ID]: step({ agent: namerAgent, input: { from: "trigger.payload" }, onFailure: "nameFailed" }),
+    nameFailed: action({ handler: "recordNameFailed", input: { from: `steps.${NAME_STEP_ID}.output` }, after: [NAME_STEP_ID] }),
     rework: loop({
       body: defineWorkflow({
         id: "sb-project-loop-body",

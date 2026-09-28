@@ -11,9 +11,6 @@ import type { Stage } from "../ledger.js";
 export const STAGE_WORKFLOW_ID = "solutions-builder.stage";
 export const PROJECT_LIFECYCLE_ID = "solutions-builder.project-lifecycle";
 
-/** The naming agent step's id, as it appeared on a run's own step map. */
-export const NAME_STEP_ID = "name";
-
 const FREEZE_STAGE: Stage = 7;
 const BUILD_STAGE: Stage = 8;
 const DELIVERY_STAGE: Stage = 9;
