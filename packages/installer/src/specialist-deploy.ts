@@ -158,18 +158,21 @@ type LocatedAsset = { readonly tenantId: string; readonly asset: HubAsset };
 
 /**
  * A project's `workflow` assets by tenant, own first: the project tenant's
- * own rows, then the workspace's for a project deployed before #29. One
- * listing serves both -- the hub's asset listing is inherited (a child
- * lists its ancestors' assets too), and `asset.tenantId` says whose each
- * row is. Matching on that, never on the name alone, is what keeps a
- * project's deploy from landing a push on the workspace's same-named
- * asset (the `404 no asset workflow/<name>` the name-only lookup produced).
+ * own rows, then the workspace's for a project deployed before #29. Each
+ * tenant's own rows are listed, one listing per tenant: the project
+ * tenant's inherited listing would shadow a workspace asset once the
+ * project tenant declares one of the same name (#195). Matching on
+ * `asset.tenantId`, never on the name alone, is what keeps a project's
+ * deploy from landing a push on the workspace's same-named asset (the
+ * `404 no asset workflow/<name>` the name-only lookup produced).
  */
 async function specialistAssetsIn(transport: Transport, home: ProjectHome): Promise<LocatedAsset[]> {
-  const listed = await assetsFor(transport, home.tenantId).list("workflow");
-  return projectTenants(home).flatMap((tenantId) =>
-    listed.filter((asset) => asset.tenantId === tenantId).map((asset) => ({ tenantId, asset })),
-  );
+  const located: LocatedAsset[] = [];
+  for (const tenantId of projectTenants(home)) {
+    const own = await assetsFor(transport, tenantId).listOwn("workflow");
+    located.push(...own.filter((asset) => asset.tenantId === tenantId).map((asset) => ({ tenantId, asset })));
+  }
+  return located;
 }
 
 /**

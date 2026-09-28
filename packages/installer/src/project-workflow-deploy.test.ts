@@ -11,8 +11,12 @@ type LedgerRow = { decisionId: string; accepted: boolean; reason?: string; kind:
 /** What the fake hub's reducer says to one replayed decision; accepted when absent. */
 type Verdict = { accepted: boolean; reason?: string };
 type Fixture = {
-  assets?: { id: string; name: string }[];
-  deployments?: { id: string; definitionAssetId: string; status: string; createdAt: string }[];
+  /** The project's assets; one with a `tenantId` is the workspace's, for a project deployed before #29. */
+  assets?: { id: string; name: string; tenantId?: string }[];
+  /** The deployments; one with a `tenantId` is the workspace's. */
+  deployments?: { id: string; definitionAssetId: string; status: string; createdAt: string; tenantId?: string }[];
+  /** The workspace the project tenant is a child of; absent for a project with nothing in the workspace. */
+  legacyTenantId?: string;
   runsByDeployment?: Record<string, string[]>;
   /** Each run's event log, by run id; a run left out has an empty log. */
   eventsByRun?: Record<string, Event[]>;
@@ -80,7 +84,8 @@ function decidedRun(runId: string, decisions: readonly number[], code?: ProjectW
  * event log would show it once the sidecar took it. Every POST is logged.
  */
 function fakeHub(fixture: Fixture) {
-  const deployments = (fixture.deployments ?? []).map((entry) => ({ ...entry, tenantId: TENANT_ID }));
+  const deployments = (fixture.deployments ?? []).map((entry) => ({ ...entry, tenantId: entry.tenantId ?? TENANT_ID }));
+  const assets = (fixture.assets ?? []).map((asset) => ({ ...asset, tenantId: asset.tenantId ?? TENANT_ID, kind: "workflow" }));
   const runsByDeployment: Record<string, string[]> = { ...fixture.runsByDeployment };
   const eventsByRun: Record<string, Event[]> = Object.fromEntries(Object.entries(fixture.eventsByRun ?? {}).map(([id, events]) => [id, [...events]]));
   const ledgerByRun: Record<string, LedgerRow[]> = {};
@@ -100,9 +105,24 @@ function fakeHub(fixture: Fixture) {
       const [pathname, query] = path.split("?");
       const tenant = `/api/tenants/${TENANT_ID}`;
       if (method === "POST") posts.push({ path: pathname!, body });
-      if (method === "GET" && pathname === tenant) return { id: TENANT_ID, parentId: null } as T;
-      if (method === "GET" && pathname === `${tenant}/assets`) {
-        return (fixture.assets ?? []).map((asset) => ({ ...asset, tenantId: TENANT_ID, kind: "workflow" })) as T;
+      if (method === "GET" && pathname === tenant) return { id: TENANT_ID, parentId: fixture.legacyTenantId ?? null } as T;
+      if (method === "GET" && fixture.legacyTenantId && pathname === `/api/tenants/${fixture.legacyTenantId}`) return { id: fixture.legacyTenantId, parentId: null } as T;
+      const assetsOf = /^\/api\/tenants\/([^/]+)\/assets$/.exec(pathname!);
+      if (method === "GET" && assetsOf) {
+        const params = new URLSearchParams(query);
+        // Own rows alone, or the inherited listing the real hub serves: the
+        // tenant's rows and its ancestor's, a child's shadowing the
+        // ancestor's of the same name (#195).
+        if (params.get("inherited") === "false") return assets.filter((asset) => asset.tenantId === assetsOf[1]) as T;
+        const visible = assets.filter((asset) => asset.tenantId === assetsOf[1]);
+        for (const inherited of assets.filter((asset) => asset.tenantId !== assetsOf[1])) {
+          if (!visible.some((asset) => asset.name === inherited.name)) visible.push(inherited);
+        }
+        return visible as T;
+      }
+      const deploymentsOf = /^\/api\/tenants\/([^/]+)\/workflows\/deployments$/.exec(pathname!);
+      if (method === "GET" && deploymentsOf && deploymentsOf[1] !== TENANT_ID) {
+        return deployments.filter((entry) => entry.tenantId === deploymentsOf[1]) as T;
       }
       if (method === "GET" && pathname === `${tenant}/workflows/deployments`) {
         listings += 1;
@@ -114,7 +134,7 @@ function fakeHub(fixture: Fixture) {
           if (late.runIds) runsByDeployment[late.deployment.id] = [...late.runIds];
           Object.assign(eventsByRun, late.events ?? {});
         }
-        return deployments as T;
+        return deployments.filter((entry) => entry.tenantId === TENANT_ID) as T;
       }
       if (method === "POST" && pathname === `${tenant}/workflows/deployments`) {
         // The first deploy is `dep_new`, and any later one `dep_new2`,
@@ -126,14 +146,16 @@ function fakeHub(fixture: Fixture) {
         runsByDeployment[id] = [];
         return made as T;
       }
-      if (method === "GET" && pathname === `${tenant}/catalog/offerings`) {
+      // Catalog reads are answered for any tenant: the visible catalog is inherited (#30), so a project with a workspace reads both.
+      const catalogOf = /^\/api\/tenants\/[^/]+\/(catalog\/offerings|catalog\/providers|catalog\/models|models)$/.exec(pathname!)?.[1];
+      if (method === "GET" && catalogOf === "catalog/offerings") {
         return { data: [{ id: "off_1", modelId: "mdl_1", providerId: "mpv_1", priority: 0, disabled: false }], nextCursor: null } as T;
       }
-      if (method === "GET" && pathname === `${tenant}/catalog/providers`) {
+      if (method === "GET" && catalogOf === "catalog/providers") {
         return { data: [{ id: "mpv_1", name: "openai", plugin: "openai", disabled: false }], nextCursor: null } as T;
       }
-      if (method === "GET" && pathname === `${tenant}/catalog/models`) return { data: [{ id: "mdl_1", canonicalName: "gpt-5.5" }], nextCursor: null } as T;
-      if (method === "GET" && pathname === `${tenant}/models`) return [] as T;
+      if (method === "GET" && catalogOf === "catalog/models") return { data: [{ id: "mdl_1", canonicalName: "gpt-5.5" }], nextCursor: null } as T;
+      if (method === "GET" && catalogOf === "models") return [] as T;
       if (method === "POST" && /git-tokens$/.test(pathname!)) return { id: "gtk_1", secret: "git-token", expiresAt: "2099-01-01T00:00:00.000Z" } as T;
       if (method === "DELETE" && /git-tokens\//.test(pathname!)) return undefined as T;
       if (method === "GET" && pathname === `${tenant}/assets/${ASSET_ID}/blob`) {
@@ -592,6 +614,36 @@ describe("ensureProjectWorkflow", () => {
     );
     await expect(ensure(hub, 0, undefined, [], 1, 20)).rejects.toThrow(/stopped applying decisions: run run_new2 made no progress .* around decision dec-1/);
     expect(hub.signalsSent().map((sent) => `${sent.runId}:${sent.signalId}`)).toEqual(["run_new:dec-1", "run_new2:dec-1"]);
+  });
+
+  // A project whose workflow was deployed in the workspace before #29 holds
+  // its history there. The project tenant's inherited asset listing hides
+  // the workspace's asset the moment the project tenant declares one of the
+  // same name, which the ensure step does before it looks, so the lookup
+  // reads each tenant's own rows instead (#195).
+  test("a workflow deployed in the workspace before #29 stays the project's history beside the project tenant's same-named asset", async () => {
+    const WS = "ws_1";
+    const hub = fakeHub({
+      legacyTenantId: WS,
+      assets: [
+        { id: ASSET_ID, name: projectWorkflowAssetName(PROJECT_ID) },
+        { id: "asset_ws", name: projectWorkflowAssetName(PROJECT_ID), tenantId: WS },
+      ],
+      deployments: [
+        { id: "dep_ws", definitionAssetId: "asset_ws", status: "pending", createdAt: "2026-01-01T00:00:00.000Z", tenantId: WS },
+        { id: "dep_p", definitionAssetId: ASSET_ID, status: "deployed", createdAt: "2026-02-01T00:00:00.000Z" },
+      ],
+      runsByDeployment: { dep_ws: decidedRun("run_ws", [1, 2]).runIds, dep_p: ["run_p"] },
+      eventsByRun: { ...decidedRun("run_ws", [1, 2]).events, run_p: [startedOn(CURRENT), PARKED[1]!] },
+    });
+    expect(await ensure(hub)).toEqual({
+      deploymentId: "dep_p",
+      runId: "run_p",
+      tenantId: TENANT_ID,
+      replay: { from: { deploymentId: "dep_ws", runId: "run_ws", tenantId: WS }, replayed: 2, refused: [] },
+    });
+    expect(hub.signalsSent().map((sent) => `${sent.runId}:${sent.signalId}`)).toEqual(["run_p:dec-1", "run_p:dec-2"]);
+    expect(hub.posts.filter((post) => /\/deployments$/.test(post.path))).toEqual([]);
   });
 
   test("a live run that has not caught up is brought up to the dead run's decisions, not replaced", async () => {
