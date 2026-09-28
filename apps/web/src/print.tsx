@@ -9,8 +9,9 @@
  * app underneath are gone and the document is all the page carries.
  *
  * A design is one HTML document of its own and cannot be printed from inside
- * the frame the app reviews it in, so for a design the host serves the page
- * itself with the same bar, and the app goes there.
+ * the frame the app reviews it in, so a design is loaded into a hidden,
+ * script-less sandboxed frame of its own and that frame is printed
+ * (`printPage` below); no bar, and nothing served by the host.
  *
  * In the desktop app `window.print()` is the shell's own print command, which
  * the capability allows; in a browser it is the browser's.

@@ -179,7 +179,6 @@
       "dependencies": {
         "@intx/agent": "0.4.0",
         "@solutions-builder/specialist-runtime": "workspace:*",
-        "jszip": "3",
         "pptxgenjs": "4",
       },
     },

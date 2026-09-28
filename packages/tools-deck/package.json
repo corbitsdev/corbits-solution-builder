@@ -7,18 +7,11 @@
   "exports": {
     "./sidecar-bundle": {
       "default": "./src/sidecar-bundle.ts"
-    },
-    "./print-page": {
-      "default": "./src/print-page.ts"
-    },
-    "./deck-theme": {
-      "default": "./src/deck-theme.ts"
     }
   },
   "dependencies": {
     "@intx/agent": "0.4.0",
     "@solutions-builder/specialist-runtime": "workspace:*",
-    "pptxgenjs": "4",
-    "jszip": "3"
+    "pptxgenjs": "4"
   }
 }
