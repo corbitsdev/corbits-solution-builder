@@ -39,12 +39,11 @@ const namerAgent = defineAgent({
  * `name` runs beside `init`, outside the loop: the kit's namer reads the
  * trigger payload's `problemStatement` and replies with a title. It gates
  * nothing, and a failure routes to `nameFailed` so it never fails the run.
- * The loop starts only once `nameFailed` has settled (skipped when the
- * namer replied, run when it failed): nothing may run beside the loop.
- * The runtime numbers an event when it creates it and a parked run flushes
- * nothing until it wakes, so a step finishing beside a parked loop leaves
- * events buffered under the numbers the next decision's `SignalReceived`
- * takes, and the run dies on that decision (#201).
+ * The loop must NOT be made to wait for `nameFailed`: the runtime settles
+ * an untaken failure handler as skipped and skips its dependents with it,
+ * so the loop would be skipped whenever naming works (#203). That leaves
+ * the namer running beside the loop, which #201 describes: naming has to
+ * leave the run to close that.
  */
 export const projectWorkflow = defineWorkflow({
   id: "sb-project-loop-driven",
@@ -75,7 +74,7 @@ export const projectWorkflow = defineWorkflow({
       input: { from: "steps.init.output" },
       maxIterations: MAX_ITERATIONS,
       onExhausted: "exhausted",
-      after: ["init", "nameFailed"],
+      after: ["init"],
     }),
     exhausted: action({ handler: "recordExhausted", input: { from: "steps.rework.output" }, after: ["rework"] }),
   },

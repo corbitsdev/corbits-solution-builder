@@ -207,16 +207,21 @@ function codeOfTriggerPayload(payload: unknown): ProjectWorkflowCode | null {
   return { digest: code["digest"], generation: code["generation"] };
 }
 
-/** The code `runId` was triggered on, off its top-level `RunStarted` event. */
-async function runCode(
+/** What one read of `runId`'s top-level log says: the code it was triggered
+ *  on, off its `RunStarted` event, and whether it has ended, off a terminal
+ *  event -- ended for good whatever its deployment's status says (#203). */
+async function runFacts(
   workflows: ReturnType<typeof workflowsFor>,
   deploymentId: string,
   runId: string,
-): Promise<ProjectWorkflowCode | null> {
+): Promise<{ code: ProjectWorkflowCode | null; ended: boolean }> {
   const { events } = await workflows.runEvents(deploymentId, runId);
   const started = events.find((event) => event.type === "RunStarted");
   const trigger = started?.body["trigger"];
-  return isRecord(trigger) ? codeOfTriggerPayload(trigger["payload"]) : null;
+  return {
+    code: isRecord(trigger) ? codeOfTriggerPayload(trigger["payload"]) : null,
+    ended: events.some((event) => TERMINAL_RUN_EVENTS.has(event.type)),
+  };
 }
 
 /** One row of the reducer's ledger, as far as a replay needs to read it. */
@@ -334,11 +339,17 @@ type ProjectRunState = {
 async function projectRunState(transport: Transport, groups: readonly DeploymentGroup[], memo?: DecisionMemo): Promise<ProjectRunState> {
   const candidates = await candidatesWithRuns(transport, groups);
   const live: { candidate: ProjectRunCandidate; code: ProjectWorkflowCode | null }[] = [];
+  // A deployment the hub still lists as placed whose run has already
+  // ended: never signalled again, read for its history like a dead one,
+  // and its generation still counts so the next deploy supersedes it (#203).
+  const spent: { candidate: ProjectRunCandidate; code: ProjectWorkflowCode | null }[] = [];
   for (const candidate of candidates) {
     if (deploymentHasEnded(candidate.deployment)) continue;
-    live.push({ candidate, code: await runCode(workflowsOf(transport, candidate), candidate.deployment.id, candidate.runId) });
+    const { code, ended } = await runFacts(workflowsOf(transport, candidate), candidate.deployment.id, candidate.runId);
+    if (ended) spent.push({ candidate, code });
+    else live.push({ candidate, code });
   }
-  const generation = Math.max(0, ...live.map((entry) => entry.code?.generation ?? 0));
+  const generation = Math.max(0, ...[...live, ...spent].map((entry) => entry.code?.generation ?? 0));
   const newest = live.filter((entry) => (entry.code?.generation ?? 0) === generation);
   const liveCandidates = newest.map((entry) => entry.candidate);
   const superseded = live.filter((entry) => (entry.code?.generation ?? 0) < generation);
@@ -350,6 +361,7 @@ async function projectRunState(transport: Transport, groups: readonly Deployment
   let newestDead: { candidate: ProjectRunCandidate; code: ProjectWorkflowCode | null } | null = null;
   const folded = [
     ...candidates.filter((entry) => deploymentHasEnded(entry.deployment)).map((candidate) => ({ candidate, code: null })),
+    ...spent,
     ...superseded,
   ].sort((a, b) => a.candidate.deployment.createdAt.localeCompare(b.candidate.deployment.createdAt));
   for (const { candidate, code } of folded) {
@@ -377,17 +389,19 @@ async function projectRunState(transport: Transport, groups: readonly Deployment
     runId: candidate.runId,
     tenantId: candidate.tenantId,
   });
+  const state = { liveCandidates, generation, history };
   for (const { candidate, code } of newest) {
-    if (history.length === 0) return { run: asRef(candidate), live: true, code, liveCandidates, generation, history };
+    if (history.length === 0) return { run: asRef(candidate), live: true, code, ...state };
     const held = new Set(
       (await appliedDecisions(workflowsOf(transport, candidate), candidate.deployment.id, candidate.runId, memo)).map((decision) => decision.signalId),
     );
-    if (history.every((decision) => held.has(decision.signalId))) return { run: asRef(candidate), live: true, code, liveCandidates, generation, history };
+    if (history.every((decision) => held.has(decision.signalId))) return { run: asRef(candidate), live: true, code, ...state };
   }
-  if (fullest) return { run: asRef(fullest.candidate), live: false, code: fullest.code, liveCandidates, generation, history };
-  if (newestDead) return { run: asRef(newestDead.candidate), live: false, code: newestDead.code, liveCandidates, generation, history };
-  return { run: null, live: false, code: null, liveCandidates, generation, history };
+  if (fullest) return { run: asRef(fullest.candidate), live: false, code: fullest.code, ...state };
+  if (newestDead) return { run: asRef(newestDead.candidate), live: false, code: newestDead.code, ...state };
+  return { run: null, live: false, code: null, ...state };
 }
+
 
 async function pollUntil<T>(timeoutMs: number, intervalMs: number, read: () => Promise<T | null>): Promise<T | null> {
   const deadline = Date.now() + timeoutMs;
@@ -919,7 +933,10 @@ async function ensureProjectWorkflowOnce(
       : target;
   }
   const from = state.run;
-  const target = await broughtUp(await deployFreshRun(context(state.generation + 1), idsOf(groups, deploymentHasEnded)), state.generation + 1, state.history);
+  // Every deployment that exists now is known: an ended one, one whose run
+  // ended (#203), and one a newer generation superseded are all placed and
+  // must not be reused as the fresh run's home.
+  const target = await broughtUp(await deployFreshRun(context(state.generation + 1), idsOf(groups)), state.generation + 1, state.history);
   return from ? { ...target, replay: await replayOutcome(transport, from, target, state.history) } : target;
 }
 
