@@ -41,7 +41,6 @@
     "@corbits/mailbox": "github:corbitsdev/corbits-mailbox",
     "@corbits/oauth-core": "github:corbitsdev/corbits-oauth-core",
     "@corbits/openai-responses": "github:corbitsdev/corbits-openai-responses",
-    "@corbits/process-provisioner": "workspace:*",
     "@corbits/react-ui": "github:corbitsdev/react-ui#feat/chat-input-icon-slots",
     "@corbits/xai-provider": "github:corbitsdev/corbits-xai-provider",
     "@electric-sql/pglite": "^0.3.16",
@@ -116,8 +115,7 @@
     "apps/*",
     "packages/*",
     "vendor/interchange/packages/*",
-    "vendor/interchange/apps/*",
-    "vendor/workbench/packages/*"
+    "vendor/interchange/apps/*"
   ],
   "overrides": {
     "@intx/hub-common": "0.4.0",

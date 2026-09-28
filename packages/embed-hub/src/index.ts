@@ -7,7 +7,7 @@
  * registry, and `createApp` — because the vendored tree has no
  * `createHubServer` that accepts an already-open pglite handle and keychain
  * keys. Sidecars are child processes of this host, placed by
- * `@corbits/process-provisioner`. Nothing here is a product API: no command
+ * `./process-provisioner`. Nothing here is a product API: no command
  * dispatch, projects, proxy, or owner mint.
  */
 import { join } from "node:path";
@@ -70,11 +70,7 @@ import {
   type SidecarLookups,
   type WsHandle,
 } from "@intx/hub-sessions";
-import {
-  createProcessSidecarProvisioner,
-  readProcessProvisionerConfig,
-  type ProcessProvisionerRole,
-} from "@corbits/process-provisioner";
+import { createProcessProvisioner, type ProcessProvisionerRole } from "./process-provisioner.js";
 import {
   createInMemoryMailboxEventBus,
   createMailboxPersist,
@@ -396,20 +392,15 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
     },
   ]);
   const provisionerFor = (role: ProcessProvisionerRole) =>
-    createProcessSidecarProvisioner({
+    createProcessProvisioner({
       role,
-      config: readProcessProvisionerConfig({
-        env: {
-          PROCESS_PROVISIONER_SIDECAR_ENTRY: options.sidecarEntry,
-          PROCESS_PROVISIONER_RUNTIME: options.sidecarRuntime,
-        },
-        dataDir: join(options.dataDir, role === "probe" ? "process-provisioner-probe" : "process-provisioner"),
-        hubWebSocketUrl: options.hubWebSocketUrl,
-      }),
+      dataDir: join(options.dataDir, role === "probe" ? "process-provisioner-probe" : "process-provisioner"),
+      runtimePath: options.sidecarRuntime,
+      sidecarEntryPath: options.sidecarEntry,
+      hubWebSocketUrl: options.hubWebSocketUrl,
     });
   const deploymentProvisioner = provisionerFor("deployment");
-  // The typecheck stub of the provisioner package does not type the field.
-  const bindingFingerprint = String((deploymentProvisioner as { bindingFingerprint?: unknown }).bindingFingerprint ?? "");
+  const bindingFingerprint = deploymentProvisioner.bindingFingerprint;
   const sidecarPlugins = createSidecarPluginRegistry({ provisioners: [deploymentProvisioner] });
   const probeSidecarPlugins = createSidecarPluginRegistry({ provisioners: [provisionerFor("probe")] });
 
