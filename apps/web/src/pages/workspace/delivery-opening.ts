@@ -29,7 +29,6 @@ export type DeliveryVerificationContent = {
 };
 
 export type DeliveryManifestContent = {
-  projectId: string;
   stage: 8;
   attempt: string;
   archive: { fileName: string; sizeBytes: number; sha256: string };
@@ -74,8 +73,10 @@ export function parseDeliveryManifest(content: string): DeliveryManifestContent 
   try {
     const parsed = JSON.parse(content) as Record<string, unknown>;
     const archive = parsed["archive"] as Record<string, unknown> | undefined;
+    // No project id is checked for: a manifest written since #41 step 5
+    // carries none (the project is the tenant it lives in), and one written
+    // before still parses.
     if (
-      typeof parsed["projectId"] !== "string" ||
       !Array.isArray(parsed["files"]) ||
       !archive ||
       typeof archive["fileName"] !== "string" ||

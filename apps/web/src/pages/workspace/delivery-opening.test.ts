@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { deliveryOpeningLine, parseDeliveryManifest, verificationLines, type DeliveryManifestContent } from "./delivery-opening.ts";
 
 const manifest = (verification?: DeliveryManifestContent["verification"]): DeliveryManifestContent => ({
-  projectId: "proj_1",
   stage: 8,
   attempt: "attempt-1",
   archive: { fileName: "proj-attempt-1.tar.gz", sizeBytes: 10, sha256: "a".repeat(64) },

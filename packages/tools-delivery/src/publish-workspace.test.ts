@@ -69,7 +69,7 @@ describe("publish_workspace (fallback path)", () => {
     const cwd = await fixtureWorkspace();
     try {
       const port = 20_000 + Math.floor(Math.random() * 20_000);
-      const tool = publishWorkspaceTool("proj_1")(fallbackEnv(cwd));
+      const tool = publishWorkspaceTool()(fallbackEnv(cwd));
       const result = await tool.run(
         {
           id: "1",
@@ -84,7 +84,6 @@ describe("publish_workspace (fallback path)", () => {
       expect(parsed.dataUri.startsWith("data:application/gzip;base64,")).toBe(true);
 
       const { manifest } = parsed;
-      expect(manifest.projectId).toBe("proj_1");
       expect(manifest.attempt).toBe("attempt-2");
       expect(manifest.files.map((file) => file.path)).toEqual(["README.md", "server.ts", "src/index.ts"]);
       expect(manifest.archive.sizeBytes).toBe(parsed.sizeBytes);
@@ -109,7 +108,7 @@ describe("publish_workspace (fallback path)", () => {
   test("with no targets named, nothing is probed and the manifest says so", async () => {
     const cwd = await fixtureWorkspace();
     try {
-      const tool = publishWorkspaceTool("proj_1")(fallbackEnv(cwd));
+      const tool = publishWorkspaceTool()(fallbackEnv(cwd));
       const result = await tool.run({ id: "2", name: TOOL_NAME, arguments: {} }, new AbortController().signal);
       const parsed = JSON.parse(result.content as string) as FallbackResult;
       expect(parsed.manifest.verification?.targets).toEqual([]);
