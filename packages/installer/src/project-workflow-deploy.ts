@@ -407,8 +407,31 @@ function parkedOn(events: readonly { seq: number; type: string }[]): boolean {
   return newest?.type === "SignalAwaited";
 }
 
-/** How the replay paces itself; `pollMs` is shortened by tests. */
-type CatchUpOptions = { readonly pollMs?: number };
+/** How the replay paces itself and how long it lets the run sit still;
+ *  both shortened by tests. */
+type CatchUpOptions = { readonly pollMs?: number; readonly stallMs?: number };
+
+/** How long a run being replayed onto may go without writing an event, while
+ *  neither parked nor ended, before it counts as lost: its child died (#189).
+ *  The reducer a decision runs is quick, and everything slower writes events. */
+const REPLAY_STALL_MS = 30_000;
+
+/**
+ * A run that stopped taking decisions mid-replay: its log stopped growing
+ * while it was neither parked on its await nor ended. The child dies on a
+ * transition error without writing `RunFailed`, and the hub keeps listing
+ * the deployment as live, so this is the only evidence there is (#189).
+ */
+export class ProjectWorkflowStalled extends Error {
+  constructor(
+    readonly run: ProjectWorkflowDeployment,
+    readonly decisionId: string,
+    stalledForMs: number,
+  ) {
+    super(`the project's workflow stopped applying decisions: run ${run.runId} made no progress for ${String(Math.round(stalledForMs / 1000))}s around decision ${decisionId}`);
+    this.name = "ProjectWorkflowStalled";
+  }
+}
 
 /**
  * Brings `target` up to `history`, one decision at a time: the loop takes
@@ -422,11 +445,14 @@ type CatchUpOptions = { readonly pollMs?: number };
  * treats a byte-identical signal under an id it already holds as a no-op,
  * and one it refuses as a conflict is checked against what the run applied
  * before it counts as a failure, so a replay interrupted halfway resumes
- * cleanly.
+ * cleanly. A run whose log stops growing while it is neither parked nor
+ * ended has lost its child; that is reported as `ProjectWorkflowStalled`
+ * as soon as it is certain, not after the per-decision budget (#189).
  */
 async function catchUp(transport: Transport, target: ProjectWorkflowDeployment, history: readonly ReceivedDecision[], options: CatchUpOptions = {}): Promise<void> {
   if (history.length === 0) return;
   const pollMs = options.pollMs ?? 1_500;
+  const stallMs = options.stallMs ?? REPLAY_STALL_MS;
   const workflows = workflowsOf(transport, target);
   // Placed, and its run started: a replacement reports `running` rather
   // than `deployed`, and either takes a signal once the run is on.
@@ -441,6 +467,20 @@ async function catchUp(transport: Transport, target: ProjectWorkflowDeployment, 
   if (!started) throw new Error("the project's workflow run never started, so its history could not be replayed");
   const applied = async () => new Set((await appliedDecisions(workflows, target.deploymentId, target.runId)).map((decision) => decision.signalId));
   const ended = (events: readonly { type: string }[]) => events.some((event) => TERMINAL_RUN_EVENTS.has(event.type));
+  // Progress is the top-level log growing. Called on every read that finds
+  // the run neither where the replay needs it nor ended.
+  let newestSeq = -1;
+  let movedAt = Date.now();
+  const stillFor = (events: readonly { seq: number }[], decisionId: string) => {
+    const seq = Math.max(0, ...events.map((event) => event.seq));
+    if (seq !== newestSeq) {
+      newestSeq = seq;
+      movedAt = Date.now();
+      return;
+    }
+    const stalledForMs = Date.now() - movedAt;
+    if (stalledForMs >= stallMs) throw new ProjectWorkflowStalled(target, decisionId, stalledForMs);
+  };
   let held = await applied();
   for (const decision of history) {
     if (held.has(decision.signalId)) continue;
@@ -448,7 +488,9 @@ async function catchUp(transport: Transport, target: ProjectWorkflowDeployment, 
     const ready = await pollUntil(90_000, pollMs, async () => {
       const events = await topLevel();
       if (ended(events)) throw new Error("the project's workflow ended while its history was being replayed");
-      return parkedOn(events) ? true : null;
+      if (parkedOn(events)) return true;
+      stillFor(events, decision.signalId);
+      return null;
     });
     if (!ready) throw new Error(`the project's workflow did not park before decision ${decision.signalId} could be replayed`);
     try {
@@ -467,6 +509,7 @@ async function catchUp(transport: Transport, target: ProjectWorkflowDeployment, 
       const events = await topLevel();
       if (held.has(decision.signalId) && (parkedOn(events) || ended(events))) return true;
       if (ended(events)) throw new Error("the project's workflow ended while its history was being replayed");
+      stillFor(events, decision.signalId);
       return null;
     });
     if (!landed) throw new Error(`the project's workflow did not apply decision ${decision.signalId} while catching up`);
@@ -633,6 +676,9 @@ export type EnsureProjectWorkflowOptions = {
   readonly placementPollMs?: number;
   /** How often a history replay re-reads the run it is bringing up; tests shorten it. */
   readonly replayPollMs?: number;
+  /** How long a run being replayed onto may sit still, neither parked nor
+   *  ended, before it counts as lost and is superseded; tests shorten it. */
+  readonly replayStallMs?: number;
   /** The project's opening statement, handed to a fresh run for its `name` step. */
   readonly problemStatement?: string;
 };
@@ -787,7 +833,28 @@ async function ensureProjectWorkflowOnce(
     problemStatement: options.problemStatement,
   });
 
-  const replay: CatchUpOptions = options.replayPollMs === undefined ? {} : { pollMs: options.replayPollMs };
+  const replay: CatchUpOptions = {
+    ...(options.replayPollMs === undefined ? {} : { pollMs: options.replayPollMs }),
+    ...(options.replayStallMs === undefined ? {} : { stallMs: options.replayStallMs }),
+  };
+  /**
+   * Brings `target`, at `generation`, up to `history`. A run that stalls
+   * mid-replay has lost its child (#189): it is superseded by a fresh run at
+   * the next generation, brought up in its place, once. The stalled run
+   * stays placed, since the hub cannot end a deployment, and is never read
+   * or signalled again; `known` keeps the fresh deploy from reusing it.
+   */
+  const broughtUp = async (target: ProjectWorkflowDeployment, generation: number, history: readonly ReceivedDecision[]): Promise<ProjectWorkflowDeployment> => {
+    try {
+      await catchUp(transport, target, history, replay);
+      return target;
+    } catch (cause) {
+      if (!(cause instanceof ProjectWorkflowStalled)) throw cause;
+      const fresh = await deployFreshRun(context(generation + 1), new Set([...idsOf(groups), target.deploymentId]));
+      await catchUp(transport, fresh, history, replay);
+      return fresh;
+    }
+  };
   let groups = await everywhere();
   let state = await projectRunState(transport, groups, memo);
   if (state.run && state.live) {
@@ -801,8 +868,7 @@ async function ensureProjectWorkflowOnce(
     // held everything the runs before it took, or it would not be the run.
     const from = state.run;
     const history = await appliedDecisions(workflowsOf(transport, from), from.deploymentId, from.runId, memo);
-    const target = await deployFreshRun(context(state.generation + 1), idsOf(groups));
-    await catchUp(transport, target, history, replay);
+    const target = await broughtUp(await deployFreshRun(context(state.generation + 1), idsOf(groups)), state.generation + 1, history);
     return { ...target, replay: await replayOutcome(transport, from, target, history) };
   }
   // The hub replaces a dead deployment's sidecar on its own after a host
@@ -838,15 +904,13 @@ async function ensureProjectWorkflowOnce(
   // which takes the replacement path above.
   if (state.liveCandidates[0]) {
     const candidate = state.liveCandidates[0];
-    const target = { deploymentId: candidate.deployment.id, runId: candidate.runId, tenantId: candidate.tenantId };
-    await catchUp(transport, target, state.history, replay);
+    const target = await broughtUp({ deploymentId: candidate.deployment.id, runId: candidate.runId, tenantId: candidate.tenantId }, state.generation, state.history);
     return state.run && state.run.deploymentId !== target.deploymentId
       ? { ...target, replay: await replayOutcome(transport, state.run, target, state.history) }
       : target;
   }
   const from = state.run;
-  const target = await deployFreshRun(context(state.generation + 1), idsOf(groups, deploymentHasEnded));
-  await catchUp(transport, target, state.history, replay);
+  const target = await broughtUp(await deployFreshRun(context(state.generation + 1), idsOf(groups, deploymentHasEnded)), state.generation + 1, state.history);
   return from ? { ...target, replay: await replayOutcome(transport, from, target, state.history) } : target;
 }
 
