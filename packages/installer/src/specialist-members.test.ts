@@ -64,7 +64,6 @@ describe("renderSpecialistSource members", () => {
       artifactTools,
       roleKey,
       agentFor(stage),
-      stage === 5 ? [{ name: "You", role: "project_owner" }] : undefined,
     );
 
   test("a specialist that imports no tool ships the vendored workflow alone", async () => {
@@ -77,12 +76,11 @@ describe("renderSpecialistSource members", () => {
     }
   });
 
-  test("stage 5's primary deployment ships no deck; an audience deployment ships the deck tool and the runtime", async () => {
-    expect(membersOf(await render(5, "primary"))).toEqual(["intx-workflow"]);
-    const audience = await render(5, "package-0");
-    expect(membersOf(audience)).toEqual(["intx-workflow", "specialist-runtime", "tools-deck"]);
-    expect(dependenciesOf(audience)["@solutions-builder/tools-deck"]).toBe("workspace:*");
-    expect(dependenciesOf(audience)["@solutions-builder/tools-delivery"]).toBeUndefined();
+  test("stage 5's one deployment ships the deck tool and the runtime", async () => {
+    const packages = await render(5);
+    expect(membersOf(packages)).toEqual(["intx-workflow", "specialist-runtime", "tools-deck"]);
+    expect(dependenciesOf(packages)["@solutions-builder/tools-deck"]).toBe("workspace:*");
+    expect(dependenciesOf(packages)["@solutions-builder/tools-delivery"]).toBeUndefined();
   });
 
   test("stages 8 and 9 ship the delivery tool and the runtime, and stage 8 alone depends on the shell", async () => {
@@ -101,7 +99,7 @@ describe("renderSpecialistSource members", () => {
   });
 
   test("every member the package depends on is in the tree, and nothing in the tree is undeclared", async () => {
-    for (const [stage, roleKey, artifactTools] of [[1, "primary", false], [5, "package-2", false], [8, "primary", false], [9, "primary", true]] as [Stage, string, boolean][]) {
+    for (const [stage, roleKey, artifactTools] of [[1, "primary", false], [5, "primary", false], [8, "primary", false], [9, "primary", true]] as [Stage, string, boolean][]) {
       const files = await render(stage, roleKey, artifactTools);
       const declaredMembers = Object.entries(dependenciesOf(files))
         .filter(([, spec]) => spec === "workspace:*")

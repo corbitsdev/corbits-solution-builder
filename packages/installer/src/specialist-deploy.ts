@@ -15,7 +15,6 @@ import { agentFor, type AgentRole } from "@solutions-builder/app/kit";
 import type { Stage } from "@solutions-builder/app/ledger";
 import {
   BUILD_STAGE,
-  PACKAGE_STAGE,
   SPECIALIST_ENTRY_PATH,
   specialistDependencies,
   specialistEntrySource,
@@ -25,7 +24,7 @@ import {
 import { ensureWorkflowArtifactsCredential } from "./artifacts-credential.js";
 import { assetsFor, readWorkflowSourceBlob, workflowsFor, type HubAsset, type HubDeployment } from "./hub.js";
 import { projectHome, projectTenants, type ProjectHome } from "./project-home.js";
-import { readProject, readStageSwitch, writeStageSwitch } from "./project-tenant.js";
+import { readStageSwitch, writeStageSwitch } from "./project-tenant.js";
 import { visibleCatalog } from "./visible-catalog.js";
 import {
   artifactsMemberFiles,
@@ -363,7 +362,6 @@ export async function renderSpecialistSource(
   artifactTools: boolean,
   roleKey: string,
   role: AgentRole,
-  audiences?: readonly { readonly name: string; readonly role: string }[],
 ): Promise<Record<string, string>> {
   const name = specialistAssetName(projectId, stage, roleKey);
   const root = {
@@ -401,7 +399,6 @@ export async function renderSpecialistSource(
       role,
       roleKey,
       artifactTools,
-      ...(audiences ? { audiences } : {}),
     }),
     // CL-8783 verdict: the pin rides along as a reporting artifact only. The
     // deployed entry resolves its model from the hub-resolved inference chain
@@ -463,18 +460,7 @@ export async function specialistEntryIsCurrent(
   if (deployed === null) return true;
   const source = await sourceFor(transport, tenantId, offering);
   if (!source) return true;
-  const project = stage === PACKAGE_STAGE ? await readProject(transport, projectId) : null;
-  const audiences = project?.policy.audiences;
-  const rendered = specialistEntrySource({
-    stage,
-    source,
-    projectId,
-    assetName,
-    role,
-    roleKey,
-    artifactTools,
-    ...(audiences ? { audiences } : {}),
-  });
+  const rendered = specialistEntrySource({ stage, source, projectId, assetName, role, roleKey, artifactTools });
   return rendered === deployed;
 }
 
@@ -636,12 +622,10 @@ async function ensureSpecialistDeploymentOnce(
     throw new Error("the tenant's offering does not resolve to a known model");
   }
 
-  // Only stage 5's specialist reads a project's audiences; every other
-  // stage's prompt is stage-fixed and needs no project read at all.
-  const project = stage === PACKAGE_STAGE ? await readProject(transport, projectId) : null;
-  const audiences = project?.policy.audiences;
-
-  const rendered = await renderSpecialistSource(closure, projectId, stage, source, artifactTools, roleKey, role, audiences);
+  // No project read here: a specialist's entry is the same for every
+  // project its role serves, and what is the project's (who a stage 5
+  // package is for) arrives with the request (#41 step 3).
+  const rendered = await renderSpecialistSource(closure, projectId, stage, source, artifactTools, roleKey, role);
   const commitSha = await pushWorkflowSourceTree(
     transport,
     tenantId,

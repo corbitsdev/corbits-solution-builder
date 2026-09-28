@@ -62,19 +62,13 @@ export const PACKAGE_STAGE = 5;
 
 /** Mirrors `installer/src/specialist-deploy.ts`'s `DEFAULT_ROLE_KEY` (kept as
  *  its own literal here rather than imported, since `packages/installer`
- *  depends on this package and not the other way around). Stage 5 deploys
- *  under this key for two different reasons: the shared specialist
- *  `use-opening-dispatch.ts` auto-mails the previous stage's approved draft
- *  to (no audience named — CL-8873), and the per-audience specialists
- *  (`package-<index>`) `AudiencePackages`'s "Write it" deploys and mails one
- *  stakeholder at a time. Only the latter should carry `render_deck`: asked
- *  to write every audience's package with no audience named, the primary
- *  deployment takes the prompt's "for each audience" literally and tries to
- *  render every stakeholder's deck, sequentially, in the one turn that has
- *  to reply before `waitForRunTerminalOrPark`'s fixed backstop -- each deck a
- *  real render plus its base64 PowerPoint bytes back in context. That turn
- *  never finishes, the review it was meant to open never opens, and nothing
- *  past stage 4 can be approved. */
+ *  depends on this package and not the other way around). Stage 5 has one
+ *  deployment per project under this key (#41 step 3): it receives the
+ *  stage's opening (the approved design) and, one request at a time, the
+ *  package asks that name a stakeholder (`AudiencePackages`'s "Write it").
+ *  Its prompt writes one package per request, for the audience the request
+ *  names, and renders that one deck -- never every stakeholder's in the
+ *  one turn (CL-8873). */
 const PRIMARY_ROLE_KEY = "primary";
 
 /** The stage whose specialist checks a delivery manifest. */
@@ -155,7 +149,7 @@ export function specialistTooling(options: {
   const { stage, roleKey = PRIMARY_ROLE_KEY, artifactTools = false } = options;
   const isBuildStage = stage === BUILD_STAGE;
   return {
-    deck: stage === PACKAGE_STAGE && roleKey !== PRIMARY_ROLE_KEY,
+    deck: stage === PACKAGE_STAGE,
     posix: isBuildStage,
     delivery: isBuildStage || stage === DELIVERY_STAGE,
     artifacts: artifactTools && !isBuildStage,
@@ -192,19 +186,17 @@ export type SpecialistToolImport = {
 /**
  * What a role's entry carries beyond its kit prompt, declared as data (#41
  * step 1): the tools it imports and hands to its agent, the artifact kind
- * its stage's document is recorded under, whether its prompt takes the
- * project's audiences, the notes appended to its prompt, and the tool
- * package its `credentialBindings` entry names when it carries artifact
- * tools. `specialistEntrySource` renders exactly this and decides nothing
- * about a role itself.
+ * its stage's document is recorded under, the notes appended to its prompt,
+ * and the tool package its `credentialBindings` entry names when it carries
+ * artifact tools. `specialistEntrySource` renders exactly this and decides
+ * nothing about a role itself. Nothing here is the project's: who a stage 5
+ * package is for arrives with the request that asks for it (#41 step 3).
  */
 export type SpecialistRoleSpec = {
   readonly tooling: SpecialistTooling;
   readonly toolImports: readonly SpecialistToolImport[];
   readonly artifactKind: ArtifactKind;
-  /** Stage 5's specialist is told who each package is for. */
-  readonly takesAudiences: boolean;
-  /** Appended after the kit prompt, its skill text and the audiences, in order. */
+  /** Appended after the kit prompt and its skill text, in order. */
   readonly promptNotes: readonly string[];
   /** The tool package the `hub` credential binding is declared against, or null with no binding. */
   readonly credentialPackage: string | null;
@@ -254,10 +246,9 @@ function buildStageImports(projectId: string): readonly SpecialistToolImport[] {
 
 /**
  * The spec for one deployment, from the same facts `specialistTooling`
- * reads: CL-8873 keeps `render_deck` off stage 5's primary deployment (and
- * tells that deployment so), stage 8's delivery tool is `publish_workspace`
- * where stage 9's is `deliver`, and only a credential-bound deployment
- * declares the `hub` binding. Pure: the same inputs always give the same
+ * reads: stage 5 carries `render_deck`, stage 8's delivery tool is
+ * `publish_workspace` where stage 9's is `deliver`, and only a
+ * credential-bound deployment declares the `hub` binding. Pure: the same inputs always give the same
  * spec, so a render is reproducible for `specialistEntryIsCurrent`.
  */
 export function specialistRoleSpec(options: {
@@ -269,7 +260,6 @@ export function specialistRoleSpec(options: {
   const { stage, roleKey = PRIMARY_ROLE_KEY, artifactTools = false, projectId } = options;
   const tooling = specialistTooling({ stage, roleKey, artifactTools });
   const isBuildStage = stage === BUILD_STAGE;
-  const isPrimaryPackageDeployment = stage === PACKAGE_STAGE && roleKey === PRIMARY_ROLE_KEY;
   return {
     tooling,
     toolImports: [
@@ -279,8 +269,7 @@ export function specialistRoleSpec(options: {
       ...(tooling.delivery && !isBuildStage ? [DELIVER_IMPORT] : []),
     ],
     artifactKind: STAGE_ARTIFACT_KIND[stage],
-    takesAudiences: stage === PACKAGE_STAGE,
-    promptNotes: isPrimaryPackageDeployment ? [PRIMARY_PACKAGE_DEPLOYMENT_NOTE] : [],
+    promptNotes: [],
     // CL-8723: stage 8 binds through `publish_workspace`, which resolves the
     // `hub` handle itself; every other bound stage binds through the
     // generic bundle.
@@ -321,11 +310,6 @@ export type SpecialistSourceOptions = {
    *  passed in rather than recomputed here since `specialist-deploy.ts`
    *  already owns that naming — used only to name the credential binding. */
   readonly assetName: string;
-  /** The project's audience packages, in stage 5 fan-out order — folded into
-   *  a stage-5 specialist's prompt as a reference section so it knows who
-   *  each package is for. Stage 5's fan-out itself stays client-side: each
-   *  round is its own mail turn, not a step this workflow branches on. */
-  readonly audiences?: readonly { readonly name: string; readonly role: string }[];
   /** CL-8719: carry the `@corbits/artifacts` sidecar tool bundle, its
    *  `credentialBindings` entry and the matching grant requirement, and tell
    *  the model to call `artifact_create`/`artifact_write`. Default false —
@@ -359,24 +343,6 @@ function systemPromptForRole(role: AgentRole, artifactTools: boolean): string {
   return renderedPrompt(role, artifactTools);
 }
 
-/** The audience packages, folded into a stage-5 specialist's prompt as a
- *  reference section. */
-function audienceSection(audiences: readonly { readonly name: string; readonly role: string }[]): string {
-  const lines = audiences.map((audience) => `- ${audience.name} (${audience.role})`);
-  return `## Audiences\n\nWrite one package per audience below, in order.\n\n${lines.join("\n")}`;
-}
-
-/** CL-8873: overrides the kit role's "call render_deck ... do not skip it"
- *  instruction for the one deployment that has no `render_deck` tool to call
- *  (see `PRIMARY_ROLE_KEY`'s doc comment). Without this the model either
- *  stalls trying anyway or apologises for a tool it was told exists. */
-const PRIMARY_PACKAGE_DEPLOYMENT_NOTE = `## This reply carries no deck tool
-
-Write every audience's package as markdown only. You have no \`render_deck\`
-tool here and must not attempt to call it -- ignore that instruction above.
-Each stakeholder's slides render separately, on demand, from the package you
-write, when someone asks for that one audience by name.`;
-
 /**
  * The entry module a stage specialist's workflow asset ships, as source: a
  * single-step, mail-triggered, unbounded-turn agent with `drainBehavior:
@@ -387,7 +353,7 @@ write, when someone asks for that one audience by name.`;
  * this only renders it.
  */
 export function specialistEntrySource(options: SpecialistSourceOptions): string {
-  const { stage, source, audiences, projectId, assetName, role, roleKey, artifactTools = false } = options;
+  const { stage, source, projectId, assetName, role, roleKey, artifactTools = false } = options;
   const workflowId = specialistWorkflowId(stage);
   const triggerAddress = `${workflowId}@solutions-builder.local`;
 
@@ -416,9 +382,6 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
   let systemPrompt = systemPromptForRole(role, genericArtifactTools);
   if (genericArtifactTools) {
     systemPrompt = `${systemPrompt}\n\n## Artifact context\n\nprojectId: ${projectId}\nstage: ${stage}\nkind: ${spec.artifactKind}`;
-  }
-  if (spec.takesAudiences && audiences && audiences.length > 0) {
-    systemPrompt = `${systemPrompt}\n\n${audienceSection(audiences)}`;
   }
   for (const note of spec.promptNotes) {
     systemPrompt = `${systemPrompt}\n\n${note}`;

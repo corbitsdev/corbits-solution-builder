@@ -15,7 +15,6 @@ const ROLES: readonly { readonly stage: Stage; readonly roleKey: string; readonl
   ...STAGES.map((stage) => ({ stage, roleKey: "primary", roleId: agentFor(stage).id })),
   { stage: 1, roleKey: "brief-evaluator", roleId: "brief-evaluator" },
   { stage: 1, roleKey: "product-guide", roleId: "product-guide" },
-  { stage: 5, roleKey: "package-0", roleId: agentFor(5).id },
   { stage: 6, roleKey: "requirements-author", roleId: "requirements-author" },
 ];
 
@@ -33,7 +32,6 @@ describe("specialistEntrySource renders each role byte-identically", () => {
           role,
           roleKey,
           artifactTools,
-          ...(stage === 5 ? { audiences: [{ name: "You", role: "project_owner" }, { name: "Finance", role: "budget_approver" }] } : {}),
         });
         expect(rendered).toMatchSnapshot();
       });
