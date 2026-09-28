@@ -753,11 +753,7 @@ async function downloadUploadedArtifact(tenantId: string, artifactId: string): P
 /** In-flight/resolved `ensureStageAgent` calls, keyed `${projectId}:${stage}` --
  *  see that method's doc comment. */
 const ensureStageAgentCalls = new Map<string, Promise<SpecialistDeployment>>();
-const ensureStage5PackageAgentCalls = new Map<string, Promise<SpecialistDeployment>>();
 
-/** Stage 5's specialist role -- every `package-<n>` deployment runs this,
- *  named explicitly so a rename of the kit role fails loudly here rather
- *  than silently deploying the wrong prompt. */
 /** Stage 6's five roles, resolved once so a renamed kit role fails loudly here
  *  rather than silently deploying the architect's prompt under another name. */
 function stage6RoleFor(roleKey: string): AgentRole {
@@ -769,6 +765,10 @@ function stage6RoleFor(roleKey: string): AgentRole {
   return role;
 }
 
+/** Stage 5's specialist role -- the one deployment every stakeholder's
+ *  package is written by (#41 step 3), named explicitly so a rename of the
+ *  kit role fails loudly here rather than silently recording a package
+ *  under the wrong provenance. */
 const STAGE_5_PACKAGE_ROLE = agentById("presentation-creator");
 if (!STAGE_5_PACKAGE_ROLE) {
   throw new Error("kit role \"presentation-creator\" is missing");
@@ -2026,61 +2026,6 @@ false,
    */
   stageAgentAddresses: (projectId: string, stage: number): Promise<string[]> =>
     asWorkspaceOwner((transport) => stageSpecialistAddresses(transport, projectId, stage as Stage)),
-  /**
-   * Makes sure `projectId`'s `audienceIndex`-th stakeholder has its own
-   * stage-5 package specialist deployed, and hands back its mail address --
-   * `ensureStageAgent`'s ensure-and-reuse discipline, but keyed by audience
-   * rather than stage: a project's audience count is dynamic, so this
-   * deploys one `package-<audienceIndex>`-rolekeyed specialist lazily, only
-   * the first time that stakeholder's package is actually requested,
-   * running `STAGE_5_PACKAGE_ROLE` (`ensureSpecialistDeployment` still
-   * resolves stage 5's role internally via `agentFor(5)`, which is the same
-   * role).
-   *
-   * Memoised per `projectId:audienceIndex` for the same reason
-   * `ensureStageAgent` memoises per `projectId:stage`: two mounts racing to
-   * deploy the same audience's agent share the one in-flight promise
-   * instead of each creating a deployment.
-   */
-  ensureStage5PackageAgent: (projectId: string, audienceIndex: number): Promise<SpecialistDeployment> => {
-    const key = `${projectId}:${audienceIndex}`;
-    const roleKey = `package-${audienceIndex}`;
-    const pending = ensureStage5PackageAgentCalls.get(key);
-    if (pending) {
-      return pending.then(async (deployment) => {
-        if (await memoStillLive(projectId, 5 as Stage, roleKey, deployment)) return deployment;
-        ensureStage5PackageAgentCalls.delete(key);
-        return api.ensureStage5PackageAgent(projectId, audienceIndex);
-      });
-    }
-    const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const status = await readyToDeploy(transport, workspaceTenantId, projectId);
-      const deployment = await ensureSpecialistDeployment(
-        transport,
-        sidecarCapabilityOf(status),
-        await lifecycleClosureSource(),
-        lifecycleGitPush,
-        projectId,
-        5 as Stage,
-        specialistHubOrigin(),
-        false,
-        roleKey,
-      );
-      const ready = await waitForDeploymentDeployed(transport, deployment.tenantId, deployment.deploymentId);
-      if (!ready) {
-        throw new ApiFailure({
-          code: "unavailable",
-          message: "That stakeholder's package specialist did not finish starting up.",
-          correlationId: "-",
-          retryable: true,
-        });
-      }
-      return deployment;
-    });
-    call.catch(() => ensureStage5PackageAgentCalls.delete(key));
-    ensureStage5PackageAgentCalls.set(key, call);
-    return call;
-  },
   /**
    * Makes sure `projectId`'s process authority (CL-8721/CL-8687) is deployed
    * and its one manual run triggered, the same ensure-and-reuse discipline

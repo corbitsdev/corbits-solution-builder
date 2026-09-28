@@ -23,6 +23,7 @@ import { deckDesignFor } from "../deck-design-settings.ts";
 import { slidesSource } from "../deck-templates.ts";
 import { SlidePreview } from "../slide-preview.tsx";
 import { packageRequest } from "../package-request.ts";
+import { packageReplyFor } from "../package-reply.ts";
 import { packagesByStakeholder } from "../package-lineages.ts";
 import { deckFrom, packageOutlineProblem, type Deck, type TemplateTheme } from "@solutions-builder/app/deck";
 import { packageRefOf, recordAudienceVote, type StageApprovalDeps } from "../stage-approval.ts";
@@ -49,15 +50,19 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Waits for the reply to the mail just sent — the agent's next turn after
- * everything already in `seenIds`, not a turn already on the thread. This
- * polls the thread itself, since the round-trip `send()` elsewhere uses
- * only reloads once and the reply can take minutes.
+ * Waits for the specialist's answer to the package request just sent for
+ * `name` — the reply paired with that request (`packageReplyFor`), not the
+ * next agent turn on the thread: every stakeholder's package is asked of the
+ * one stage 5 deployment (#41 step 3), so two requests in flight share a
+ * thread and only pairing tells their replies apart. This polls the thread
+ * itself, since the round-trip `send()` elsewhere uses only reloads once and
+ * the reply can take minutes.
  */
-async function awaitAgentReply(
+async function awaitPackageReply(
   tenantId: string,
   agentAddress: string,
   seenIds: ReadonlySet<string>,
+  name: string,
   isCancelled: () => boolean,
 ): Promise<ChatMessage> {
   const deadline = Date.now() + POLL_TIMEOUT_MS;
@@ -69,7 +74,7 @@ async function awaitAgentReply(
       retryable: false,
     });
     const messages = await api.readStageThread(tenantId, [agentAddress]);
-    const reply = [...messages].reverse().find((message) => message.author === "agent" && !seenIds.has(message.id));
+    const reply = packageReplyFor(messages, seenIds, name);
     if (reply) return reply;
     await sleep(POLL_INTERVAL_MS);
   }
@@ -383,35 +388,32 @@ export function AudiencePackages({
   const audiences = youFirst(policy.audiences ?? []);
   const quorum = policy.audienceQuorum ?? 0;
 
-  /** Each audience's index into the stakeholder list `setStakeholders` saved
-   *  — the order the specialists deploy in (`policy.audiences` order, not
-   *  the "you first" display order), so a package is written by its own
-   *  agent whatever the tab order on screen. */
-  const audienceIndex = (name: string) => (policy.audiences ?? []).findIndex((audience) => audience.name === name);
-
   /**
-   * Writes one named stakeholder's package with that stakeholder's own
-   * specialist (`ensureStage5PackageAgent`, deployed lazily on first use),
-   * reading its reply back off its own thread — so one audience's package
-   * never carries another's, the way a single shared agent's combined
-   * reply could.
+   * Writes one named stakeholder's package with the stage's one specialist
+   * (`ensureStageAgent`, the same deployment the stage's thread is with),
+   * asking for that stakeholder by name and role in the request itself and
+   * reading back the reply paired with that request — so one audience's
+   * package never carries another's, and a stakeholder added or renamed
+   * after the stage opened is written for as named now, with no redeploy
+   * (#41 step 3).
    */
   const writeOnePackage = async (name: string) => {
-    const index = audienceIndex(name);
-    if (index === -1) return;
-    const deployment = await api.ensureStage5PackageAgent(detail.project.id, index);
+    const audience = (policy.audiences ?? []).find((entry) => entry.name === name);
+    if (!audience) return;
+    const deployment = await api.ensureStageAgent(detail.project.id, 5);
     const before = await api.readStageThread(tenantId, [deployment.address]);
     const seenIds = new Set(before.map((message) => message.id));
     // The approved design this stage opened with (the review at stage 4
-    // names the exact artifact), read fresh: this stakeholder's specialist
-    // is its own deployment and never had the opening (#115).
+    // names the exact artifact), read fresh and carried in the request: the
+    // specialist's opening turn may be pages back by now, or on an earlier
+    // deployment's thread after a redeploy (#115).
     const designReview = workflowView?.reviews[4];
     const design =
       designReview?.status === "approved"
         ? await api.artifactContent(tenantId, designReview.artifactId).then((result) => result.content, () => null)
         : null;
-    await api.sendStageMail(tenantId, deployment.address, { body: packageRequest(name, design) });
-    const reply = await awaitAgentReply(tenantId, deployment.address, seenIds, () => cancelledRef.current);
+    await api.sendStageMail(tenantId, deployment.address, { body: packageRequest(audience, design) });
+    const reply = await awaitPackageReply(tenantId, deployment.address, seenIds, name, () => cancelledRef.current);
     if (cancelledRef.current) return;
     await api.persistAudiencePackage(detail.project.id, name, reply.body);
   };
