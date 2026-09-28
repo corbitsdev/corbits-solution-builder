@@ -56,9 +56,10 @@ three kinds:
   defaults to the previous stage (delivery rejection).
 
 Every refusal appends `{ accepted:false, reason }`; duplicate `decisionId` is
-refused `duplicate`. `stageRules` (`contracts.ts`) is the seam for later
-per-stage approval rules (stage 5 quorum, stage 7 cost freeze); none are
-registered yet.
+refused `duplicate`. `stageRules` (`contracts.ts`) is the seam for
+per-stage approval rules: stage 5's stakeholder quorum, stage 6's Stack
+section (the plan must carry a `## Stack` block citing minted requirement
+ids, #55) and stage 7's cost/target freeze.
 
 Principal comes ONLY from the hub-stamped top-level `principalId` on the
 signal's output; a nested `principalId` on the decision payload is never read.
@@ -104,5 +105,4 @@ adds `ensureProjectWorkflow`, `projectWorkflowView`, and `decide`.
 
 ## What is NOT done
 
-The UI cutover (a later lane wires the fold into `apps/web/src/pages/**`) and
-registering any `stageRules`.
+The UI cutover (a later lane wires the fold into `apps/web/src/pages/**`).

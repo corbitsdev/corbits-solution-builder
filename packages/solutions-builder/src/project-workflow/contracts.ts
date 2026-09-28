@@ -96,6 +96,15 @@ export interface FrozenReference {
   readonly sha256: string;
 }
 
+/** Stage 6 approve evidence (#55): the Architect's `## Stack` block as the
+ *  client parsed it out of the plan under review, citing only
+ *  `ProjectState.requirements` ids. `stage6Rule` validates it, so a plan with
+ *  no usable Stack section is refused where it is approved, not first
+ *  noticed at stage 7 when there is nothing left to freeze. */
+export interface Stage6Evidence {
+  readonly stack: StackRecord;
+}
+
 /** Stage 7 approve evidence: the chosen build target plus a frozen reference
  *  to every earlier stage's approved review. */
 export interface Stage7Evidence {
@@ -204,10 +213,10 @@ export interface ApprovePayload extends DecisionCommon {
   readonly artifactId: string;
   readonly version: number;
   readonly sha256: string;
-  /** Stage-rule input (`Stage7Evidence`), never read by the reducer's own
-   *  structural/reference checks -- only by `stageRules`. Stage 5 needs
-   *  none: its rule reads `ProjectState.audiencePolicy`/`audienceDecisions`
-   *  directly. */
+  /** Stage-rule input (`Stage6Evidence`, `Stage7Evidence`), never read by
+   *  the reducer's own structural/reference checks -- only by `stageRules`.
+   *  Stage 5 needs none: its rule reads `ProjectState.audiencePolicy`/
+   *  `audienceDecisions` directly. */
   readonly evidence?: unknown;
 }
 
@@ -501,6 +510,11 @@ function isStackRecordShape(value: unknown): value is StackRecord {
   return Array.isArray(value.deferred) && value.deferred.every((d) => typeof d === "string");
 }
 
+/** Structural check for `ApprovePayload["evidence"]` at stage 6. */
+export function isStage6Evidence(value: unknown): value is Stage6Evidence {
+  return isRecord(value) && isStackRecordShape(value.stack);
+}
+
 /** Structural check for `ApprovePayload["evidence"]` at stage 7. */
 export function isStage7Evidence(value: unknown): value is Stage7Evidence {
   if (!isRecord(value)) return false;
@@ -539,13 +553,39 @@ const stage7Rule: StageRule = (state, payload) => {
 };
 
 /**
+ * Stage 6 (#55): the plan being approved must carry a Stack section that
+ * parses and cites only minted requirement ids, the same checks `stage7Rule`
+ * runs on the plan it freezes. Refusing here, where the plan is approved,
+ * is what keeps a project from stranding at stage 7 with a plan it cannot
+ * freeze and a stage 6 that is read-only.
+ *
+ * An approval that carries no `evidence` at all is one recorded before this
+ * rule existed, replayed onto a fresh run (#51) or adopted from a legacy
+ * project: it stands as it was accepted, since refusing it now would move a
+ * project back to a stage it left, and stage 7's own rule still guards the
+ * freeze. Every approval the interface sends carries `Stage6Evidence`
+ * (`stageEvidence`), so a fresh plan with no usable Stack is refused.
+ */
+const stage6Rule: StageRule = (state, payload) => {
+  const evidence = payload.evidence;
+  if (evidence === undefined) return null;
+  if (!isStage6Evidence(evidence)) return "stack_missing";
+  const requirementIds = new Set(state.requirements.map((r) => r.id));
+  const problems = checkStackCitations(evidence.stack, requirementIds);
+  if (problems.length > 0) {
+    return problems.some((p) => p.problem === "unknown_requirement") ? "stack_unknown_requirement" : "stack_uncited";
+  }
+  return null;
+};
+
+/**
  * Seam for stage-specific approval rules, consulted after every
  * structural/reference check on an `approve` decision passes and before the
- * reducer commits the approval: stage 5's stakeholder quorum and stage 7's
- * cost/target freeze (CL-8690/CL-8691).
+ * reducer commits the approval: stage 5's stakeholder quorum, stage 6's
+ * Stack section (#55) and stage 7's cost/target freeze (CL-8690/CL-8691).
  */
 export type StageRule = (state: ProjectState, payload: ApprovePayload, principalId: string) => RefusalCode | null;
-export const stageRules: Readonly<Record<StageNumber, StageRule>> = { 5: stage5Rule, 7: stage7Rule };
+export const stageRules: Readonly<Record<StageNumber, StageRule>> = { 5: stage5Rule, 6: stage6Rule, 7: stage7Rule };
 
 /** Why `allowed.approve` is false, or null once it is true. `no_open_review`
  *  is the ordinary state before the client has named anything reviewable; a
