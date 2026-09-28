@@ -3803,6 +3803,40 @@ describe("createWorkflowSupervisor", () => {
     await wired.supervisor.shutdown();
   });
 
+  test("long-lived: an author-signal park releases the dispatch wait", async () => {
+    const baseDir = await makeTempDir("supervisor-long-lived-author-signal-park-");
+    const wired = await spawnWithRunStart({
+      baseDir,
+      onRunStart: async () =>
+        assembleCredentialsSnapshot({
+          repoStore: createStubRepoStore({ baseDir }),
+          principal: { kind: "supervisor" },
+          stepOrder: ["step-1"],
+          anchorRunId: "run_deployment-x",
+          deriveStepAddress: ({ runId, stepId }) =>
+            `${runId}-${stepId}@example.com`,
+        }),
+    });
+
+    wired.mailBus.deliver(
+      "run_deployment-x@example.com",
+      new TextEncoder().encode("msg-1"),
+    );
+    await waitForTriggerFireRunIds(wired.supervisorToChild, 1);
+    await wired.childSender.send({
+      type: "run.parked",
+      data: { runId: "run_deployment-x" },
+    });
+
+    const address = "run_deployment-x@example.com";
+    await wired.inboxPrimitives.awaitState(
+      () => wired.inboxPrimitives.snapshot(address).consumed.size >= 1,
+    );
+    expect(wired.inboxPrimitives.snapshot(address).consumed.size).toBe(1);
+
+    await wired.supervisor.shutdown();
+  });
+
   test("long-lived: subsequent messages fire signal.deliver after park.notify", async () => {
     const baseDir = await makeTempDir("supervisor-long-lived-signal-");
     await seedStepGrants(

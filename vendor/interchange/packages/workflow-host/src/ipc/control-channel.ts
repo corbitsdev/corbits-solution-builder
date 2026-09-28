@@ -530,6 +530,15 @@ export const ControlPayload = type.or(
     },
   },
   {
+    // Child reports that an author-signal park is durable. This wakes the
+    // supervisor's terminal-or-park wait without registering a correlation at
+    // the hub; unlike `park.notify`, it carries no control-plane correlation.
+    type: "'run.parked'",
+    data: {
+      runId: "string > 0",
+    },
+  },
+  {
     // Child's reply to `parked-correlations.request`. Each entry mirrors
     // `park.notify`'s data -- the child-supplied half of a
     // `SuspensionRegistration` the supervisor stamps its deployment identity

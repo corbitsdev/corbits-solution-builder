@@ -6,6 +6,21 @@ Vendored from `faremeter/interchange` `origin/main` at the revision in
 Every local change is listed here. Keep this file honest: an unlisted change is
 a change nobody can find when the vendor is refreshed.
 
+## `packages/workflow/src/runtime/env.ts`, `runtime/run.ts`, `packages/workflow-host/src/child/run-child.ts`, `supervisor/supervisor.ts`, `ipc/control-channel.ts` — wake dispatch on author-signal parks
+
+**Why.** Issue #150: a top-level loop can durably park its container on a
+`signal-relay` await, but the supervisor only learned about `input` and
+`approval` parks. Its terminal-or-park dispatch wait then sat until the 300 s
+backstop, leaving the triggering mail reclaimable after the run had consumed it.
+
+**What changed.** The production child sends a run-scoped `run.parked` control
+frame after the runtime flushes an author-signal park. The supervisor advances
+the run's park generation and wakes its waiter without registering a hub
+correlation. IPC, child emission, and long-lived dispatch tests cover the path.
+
+**Upstream-able.** Yes; the frame and wakeup behavior belong in Interchange's
+workflow host.
+
 **2026-09-21 refresh (`79adc433` → `5453d0b`, v0.4.0).** No local patch
 dropped. The range was checked file-by-file: `packages/db/src/client.ts`
 is untouched upstream, so no pglite-handle equivalent landed and the

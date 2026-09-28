@@ -267,6 +267,7 @@ function buildEnv(args: {
   repoStore: RepoStore;
   signalChannel: SignalChannel;
   spawnSuspendableChild: SpawnSuspendableChild;
+  onSignalPark?: WorkflowRuntimeEnv["onSignalPark"];
 }): WorkflowRuntimeEnv {
   const clock = (): Date => new Date();
   return {
@@ -283,6 +284,9 @@ function buildEnv(args: {
     invokeStep: noopInvokeStep,
     spawnChild: async () => ({ terminalStatus: "completed" }),
     spawnSuspendableChild: args.spawnSuspendableChild,
+    ...(args.onSignalPark !== undefined
+      ? { onSignalPark: args.onSignalPark }
+      : {}),
     clock,
     newId: (prefix) => `${prefix}-${Math.random().toString(36).slice(2, 8)}`,
     drain: createNoopDrainController(args.def),
@@ -1160,6 +1164,8 @@ describe("runOnTrigger", () => {
     let delivered:
       | { name: string; payload: unknown; signalId: string }
       | undefined;
+    let signalParkAtHook: { runId: string; name: string } | undefined;
+    let logAtSignalParkHook: ReturnType<RepoStore["read"]> | undefined;
     const spawnSuspendableChild: SpawnSuspendableChild = async () => {
       let stage = 0;
       let release: (() => void) | null = null;
@@ -1196,6 +1202,10 @@ describe("runOnTrigger", () => {
         repoStore,
         signalChannel: channel,
         spawnSuspendableChild,
+        onSignalPark: (park) => {
+          signalParkAtHook = park;
+          logAtSignalParkHook = repoStore.read(park.runId);
+        },
       }),
       { runId, triggerPayload: { text: "event-0" } },
     );
@@ -1204,6 +1214,16 @@ describe("runOnTrigger", () => {
     // SAME name. Deliver it and the section relays it (with the original
     // signalId) into the body, which completes and re-arms.
     await waitForPark(repoStore, runId, "signal-relay", 1);
+    await waitUntil(() => signalParkAtHook !== undefined);
+    expect(signalParkAtHook).toEqual({ runId, name: "go" });
+    const eventsAtSignalParkHook = await logAtSignalParkHook;
+    expect(
+      eventsAtSignalParkHook?.some(
+        (event) =>
+          event.kind === "SignalAwaited" &&
+          event.parkKind === "signal-relay",
+      ),
+    ).toBe(true);
     await channel.deliver("go", { ok: true }, "sig-1");
     await waitForPark(repoStore, runId, "input", 1);
 

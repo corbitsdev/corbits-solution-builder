@@ -1450,6 +1450,14 @@ describe("park.notify snapshot validation", () => {
     expect(validated instanceof type.errors).toBe(false);
   });
 
+  test("accepts a run.parked wakeup without a hub correlation", () => {
+    const validated = ControlPayload({
+      type: "run.parked",
+      data: { runId: "run-1" },
+    });
+    expect(validated instanceof type.errors).toBe(false);
+  });
+
   test("rejects a park.notify whose snapshot exceeds the size cap", () => {
     const validated = ControlPayload({
       type: "park.notify",

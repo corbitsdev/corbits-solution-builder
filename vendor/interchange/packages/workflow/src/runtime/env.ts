@@ -462,10 +462,9 @@ export type WorkflowPark = {
  * WorkflowPark}: an author gate carries no correlation and no snapshot, so the
  * host cannot register it at the hub. The suspendable-child seam surfaces it up
  * to `runOnTrigger`, which proxies the body's await as a signal-relay await on
- * its own run and relays the resolved signal back down. A host that is not a
- * suspendable-child body (the container run, runLocal) leaves `onSignalPark`
- * unset, so an author gate outside a section body parks with no notify exactly
- * as before.
+ * its own run and relays the resolved signal back down. A production host may
+ * also wire `onSignalPark` on its top-level run so its supervisor observes a
+ * durable author-signal park; runLocal leaves it unset.
  */
 export type WorkflowSignalPark = {
   runId: string;
@@ -632,9 +631,9 @@ export interface WorkflowRuntimeEnv {
    * container is itself a suspendable child (a loop iteration or onTrigger
    * section nested inside another), so the park composes up one layer at a time.
    * The suspendable-child seam wires it on every body env (loop iteration or
-   * section body); a TOP-LEVEL container run and runLocal leave it unset, so the
-   * outermost relay awaits the run's real channel directly and an author gate
-   * off any suspendable-child path parks silently as before.
+   * section body). A production top-level host may also wire it to notify its
+   * supervisor after an author-signal park is durable; runLocal leaves it unset.
+   * An author gate outside a suspendable-child path otherwise parks silently.
    */
   onSignalPark?: (park: WorkflowSignalPark) => void;
   /**
