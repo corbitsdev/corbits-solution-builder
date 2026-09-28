@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ChatMessage } from "./stage-mail.ts";
 import { workspaceGuidance } from "./pages/workspace/guidance.ts";
-import { applyWithdrawn, pendingTurn } from "./withdrawn-turns.ts";
+import { applyWithdrawn, pairReplies, pendingTurn } from "./withdrawn-turns.ts";
 
 const at = (offset: number) => new Date(Date.UTC(2026, 8, 19, 12, offset)).toISOString();
 const person = (id: string, offset: number): ChatMessage => ({
@@ -17,7 +17,77 @@ const agent = (id: string, offset: number): ChatMessage => ({
   at: at(offset),
 });
 
+/** A person turn the hub accepted, with the trigger id it recorded (#62). */
+const trigger = (id: string, offset: number, triggerMessageId: string): ChatMessage => ({
+  ...person(id, offset),
+  triggerMessageId,
+});
+/** An agent reply that names the trigger it answers. */
+const reply = (id: string, offset: number, inReplyTo: string): ChatMessage => ({
+  ...agent(id, offset),
+  inReplyTo,
+});
+
+describe("pairReplies", () => {
+  // #62: the hub's trigger Message-ID on the Sent row, named by the reply's
+  // In-Reply-To, is what pairs them; order is only the fallback.
+  test("pairs a reply with the turn its In-Reply-To names, not the oldest queued one", () => {
+    const messages = [
+      trigger("m1", 0, "<t1@hub>"),
+      trigger("m2", 1, "<t2@hub>"),
+      reply("a2", 2, "<t2@hub>"),
+    ];
+    const { answeredBy, queue } = pairReplies(messages);
+    expect(answeredBy.get("a2")).toBe("m2");
+    expect(queue.map((message) => message.id)).toEqual(["m1"]);
+  });
+
+  test("a truncated thread still pairs by id: a reply to a turn that fell out of the window pairs with nothing", () => {
+    // Sent was read back from a later cursor than INBOX: m1 is gone, its
+    // reply is not. By order that reply would have been credited to m2.
+    const messages = [reply("a1", 2, "<t1@hub>"), trigger("m2", 3, "<t2@hub>"), reply("a2", 4, "<t2@hub>")];
+    const { answeredBy, queue } = pairReplies(messages);
+    expect(answeredBy.get("a1")).toBeUndefined();
+    expect(answeredBy.get("a2")).toBe("m2");
+    expect(queue).toEqual([]);
+  });
+
+  test("turns sent before the trigger id was recorded still pair by order, around the id-paired ones", () => {
+    const messages = [
+      person("old1", 0),
+      trigger("m2", 1, "<t2@hub>"),
+      agent("legacy1", 2),
+      reply("a2", 3, "<t2@hub>"),
+      person("old3", 4),
+      agent("legacy3", 5),
+    ];
+    const { answeredBy, queue } = pairReplies(messages);
+    expect(answeredBy.get("legacy1")).toBe("old1");
+    expect(answeredBy.get("a2")).toBe("m2");
+    expect(answeredBy.get("legacy3")).toBe("old3");
+    expect(queue).toEqual([]);
+  });
+
+  test("a reply whose In-Reply-To names nothing in the thread falls back on order", () => {
+    const messages = [trigger("m1", 0, "<t1@hub>"), reply("a1", 1, "<elsewhere@hub>")];
+    expect(pairReplies(messages).answeredBy.get("a1")).toBe("m1");
+  });
+
+  test("a second reply to the same trigger answers nothing by id and falls back on order", () => {
+    const messages = [trigger("m1", 0, "<t1@hub>"), reply("a1", 1, "<t1@hub>"), reply("a1b", 2, "<t1@hub>")];
+    const { answeredBy } = pairReplies(messages);
+    expect(answeredBy.get("a1")).toBe("m1");
+    expect(answeredBy.has("a1b")).toBe(false);
+  });
+});
+
 describe("applyWithdrawn", () => {
+  test("hides the reply that names a withdrawn turn even when another turn was queued first", () => {
+    const messages = [trigger("m1", 0, "<t1@hub>"), trigger("m2", 1, "<t2@hub>"), reply("a2", 2, "<t2@hub>"), reply("a1", 3, "<t1@hub>")];
+    const folded = applyWithdrawn(messages, new Set(["m1"]));
+    expect(folded.map((message) => message.id)).toEqual(["m1", "m2", "a2"]);
+  });
+
   test("hides the late answer to a withdrawn turn but shows the reply to the next one", () => {
     // m1 withdrawn, m2 sent before the specialist ever answers m1; its late
     // answer to m1 arrives first (FIFO), then it answers m2.

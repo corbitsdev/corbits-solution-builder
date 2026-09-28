@@ -38,29 +38,46 @@ export type ReplyPairing = {
 };
 
 /**
- * Pairs each agent reply with the person turn it answers by FIFO order —
- * one mail-triggered step at a time, draining the specialist's inbox in the
- * order it arrived. Never by `inReplyTo`: `ChatMessage.id` is a mailbox
- * folder position (`"Sent:<uid>"`/`"INBOX:<uid>"`), not the RFC Message-ID
- * `inReplyTo` actually names, so the two can never match.
+ * Pairs each agent reply with the person turn it answers.
+ *
+ * By id first (#62): the hub mints a Message-ID for the mail it delivers to
+ * the run and records it on the person's Sent copy (`triggerMessageId`), and
+ * the run's reply names that id in `inReplyTo`. A reply whose `inReplyTo`
+ * names a turn in `messages` is that turn's answer, wherever either sits.
+ * `ChatMessage.id` itself is a folder position (`"Sent:<uid>"`), never what
+ * `inReplyTo` names, so it plays no part.
+ *
+ * By order for the rest: one mail-triggered step at a time, draining the
+ * specialist's inbox in the order it arrived, over the turns and replies the
+ * id pass left unpaired. That is what a turn sent before the trigger id was
+ * recorded, or a reply carrying no usable `inReplyTo`, falls back on.
  *
  * An agent message that arrives with nothing queued (the stage's opening
  * reply, or an unsolicited message) answers nothing and is never paired.
- *
- * FIFO holds only while every delivered person turn gets exactly one reply
- * and `messages` is the whole thread. A turn that never reaches the agent but
- * still has a Sent row (#61), or a thread read back cut unevenly by the
- * mailbox's page size, shifts every later pairing by one. Pairing by the
- * trigger's own message id is #62.
  */
 export function pairReplies(messages: readonly ChatMessage[]): ReplyPairing {
-  const queue: ChatMessage[] = [];
   const answeredBy = new Map<string, string>();
+  const byTriggerId = new Map<string, ChatMessage>();
+  for (const message of messages) {
+    if (message.author === "me" && message.triggerMessageId !== undefined) {
+      byTriggerId.set(message.triggerMessageId, message);
+    }
+  }
+  const answered = new Set<string>();
+  for (const message of messages) {
+    if (message.author !== "agent" || message.inReplyTo === undefined) continue;
+    const request = byTriggerId.get(message.inReplyTo);
+    if (request === undefined || answered.has(request.id)) continue;
+    answeredBy.set(message.id, request.id);
+    answered.add(request.id);
+  }
+  const queue: ChatMessage[] = [];
   for (const message of messages) {
     if (message.author === "me") {
-      queue.push(message);
+      if (!answered.has(message.id)) queue.push(message);
       continue;
     }
+    if (answeredBy.has(message.id)) continue;
     const head = queue.shift();
     if (head) answeredBy.set(message.id, head.id);
   }
