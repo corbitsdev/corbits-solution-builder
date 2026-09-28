@@ -30,6 +30,11 @@ type Fixture = {
   parkAfterReads?: number;
   /** The decision on which the run completes instead of parking again. */
   endsRunOn?: string;
+  /** The decision on whose signal a run's child dies: the hub records the
+   *  signal on the top-level log and nothing follows, ever, the way the
+   *  real hub's log looks after a transition error (#189). `once`: only the
+   *  first run signalled that decision dies; a replacement takes it. */
+  stallOn?: { decisionId: string; once: boolean };
 };
 
 const decisionPayload = (n: number) => ({ decision: { decisionId: `dec-${String(n)}`, kind: "approve", stage: n } });
@@ -86,6 +91,8 @@ function fakeHub(fixture: Fixture) {
   const parkedAtSignal: boolean[] = [];
   /** Reads of a run's log still to come before it shows parked again. */
   const parkPending = new Map<string, number>();
+  let deploys = 0;
+  let stalledOnce = false;
   let pushedTree: Record<string, string> = {};
   let listings = 0;
   const transport: Transport = {
@@ -110,9 +117,13 @@ function fakeHub(fixture: Fixture) {
         return deployments as T;
       }
       if (method === "POST" && pathname === `${tenant}/workflows/deployments`) {
-        const made = { id: "dep_new", tenantId: TENANT_ID, definitionAssetId: ASSET_ID, status: "deployed", createdAt: "2026-02-01T00:00:00.000Z" };
+        // The first deploy is `dep_new`, and any later one `dep_new2`,
+        // `dep_new3`: a replacement of a run this same call gave up on.
+        deploys += 1;
+        const id = deploys === 1 ? "dep_new" : `dep_new${String(deploys)}`;
+        const made = { id, tenantId: TENANT_ID, definitionAssetId: ASSET_ID, status: "deployed", createdAt: `2026-02-0${String(deploys)}T00:00:00.000Z` };
         deployments.push(made);
-        runsByDeployment.dep_new = [];
+        runsByDeployment[id] = [];
         return made as T;
       }
       if (method === "GET" && pathname === `${tenant}/catalog/offerings`) {
@@ -148,12 +159,14 @@ function fakeHub(fixture: Fixture) {
       }
       const trigger = /^\/api\/tenants\/[^/]+\/workflows\/([^/]+)\/mail$/.exec(pathname!);
       if (method === "POST" && trigger) {
-        runsByDeployment[trigger[1]!] = [...(runsByDeployment[trigger[1]!] ?? []), "run_new"];
+        // `dep_new`'s run is `run_new`, `dep_new2`'s `run_new2`.
+        const runId = trigger[1]!.replace(/^dep_/, "run_");
+        runsByDeployment[trigger[1]!] = [...(runsByDeployment[trigger[1]!] ?? []), runId];
         const { content } = body as { content: string };
         // Started, and parked on its first await the way the real run is
         // moments later: a replay waits for that park before it signals.
-        eventsByRun.run_new = [{ seq: 1, type: "RunStarted", body: { trigger: { type: "mail", payload: { parts: [{ text: content }] } } } }, PARKED[1]!];
-        return { runId: "run_new", address: "run_new@hub", messageId: "msg_1" } as T;
+        eventsByRun[runId] = [{ seq: 1, type: "RunStarted", body: { trigger: { type: "mail", payload: { parts: [{ text: content }] } } } }, PARKED[1]!];
+        return { runId, address: `${runId}@hub`, messageId: "msg_1" } as T;
       }
       const signal = /^\/api\/tenants\/[^/]+\/workflows\/([^/]+)\/signals$/.exec(pathname!);
       if (method === "POST" && signal) {
@@ -165,6 +178,11 @@ function fakeHub(fixture: Fixture) {
         const input = body as { runId: string; signalName: string; signalId: string; payload: unknown };
         const top = (eventsByRun[input.runId] ??= []);
         parkedAtSignal.push(top.at(-1)?.type === "SignalAwaited");
+        if (fixture.stallOn && fixture.stallOn.decisionId === input.signalId && (!fixture.stallOn.once || !stalledOnce)) {
+          stalledOnce = true;
+          top.push({ seq: top.length + 1, type: "SignalReceived", body: { signalName: input.signalName, signalId: input.signalId, payload: input.payload } });
+          return undefined as T;
+        }
         if (fixture.parkAfterReads !== undefined) {
           top.push({ seq: top.length + 1, type: "SignalReceived", body: { signalName: input.signalName, signalId: input.signalId, payload: input.payload } });
           if (fixture.endsRunOn === input.signalId) top.push({ seq: top.length + 1, type: "RunCompleted", body: {} });
@@ -206,11 +224,12 @@ function fakeHub(fixture: Fixture) {
   return { transport, gitPush, posts, eventReads, parkedAtSignal, setRun, triggeredCode, signalsSent: () => posts.filter((post) => /\/signals$/.test(post.path)).map((post) => post.body as { runId: string; signalName: string; signalId: string; payload: unknown }) };
 }
 
-const ensure = (hub: ReturnType<typeof fakeHub>, replacementWaitMs = 0, placementPollMs?: number, stages: { stage: number; authorizedPrincipalIds: string[] }[] = [], replayPollMs?: number) =>
+const ensure = (hub: ReturnType<typeof fakeHub>, replacementWaitMs = 0, placementPollMs?: number, stages: { stage: number; authorizedPrincipalIds: string[] }[] = [], replayPollMs?: number, replayStallMs?: number) =>
   ensureProjectWorkflow(hub.transport, { canPlaceSidecars: true }, { files: { "workflow.js": "", "actions.js": "", "loops.js": "" } }, hub.gitPush, PROJECT_ID, stages, {}, {
     replacementWaitMs,
     ...(placementPollMs === undefined ? {} : { placementPollMs }),
     ...(replayPollMs === undefined ? {} : { replayPollMs }),
+    ...(replayStallMs === undefined ? {} : { replayStallMs }),
   });
 
 const withAsset = (fixture: Omit<Fixture, "assets">): Fixture => ({ assets: [{ id: ASSET_ID, name: projectWorkflowAssetName(PROJECT_ID) }], ...fixture });
@@ -516,6 +535,63 @@ describe("ensureProjectWorkflow", () => {
     );
     expect(await ensure(hub, 0, undefined, [], 1)).toMatchObject({ deploymentId: "dep_new", runId: "run_new", replay: { replayed: 2 } });
     expect(hub.parkedAtSignal).toEqual([true, true]);
+  });
+
+  // A child that dies on a transition error writes no RunFailed, and the
+  // hub keeps listing its deployment as live. The only evidence is the run's
+  // log standing still while it is neither parked nor ended, so the replay
+  // gives up on it as soon as that is certain and a fresh run at the next
+  // generation takes the whole history in its place (#189).
+  test("a run that stops taking decisions mid-replay is superseded by a fresh one that takes the whole history", async () => {
+    const hub = fakeHub(
+      withAsset({
+        deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" }],
+        runsByDeployment: { dep_1: decidedRun("run_1", [1, 2, 3]).runIds },
+        eventsByRun: decidedRun("run_1", [1, 2, 3]).events,
+        stallOn: { decisionId: "dec-2", once: true },
+      }),
+    );
+    expect(await ensure(hub, 0, undefined, [], 1, 20)).toEqual({
+      deploymentId: "dep_new2",
+      runId: "run_new2",
+      tenantId: TENANT_ID,
+      replay: { from: { deploymentId: "dep_1", runId: "run_1", tenantId: TENANT_ID }, replayed: 3, refused: [] },
+    });
+    expect(hub.signalsSent().map((sent) => `${sent.runId}:${sent.signalId}`)).toEqual(["run_new:dec-1", "run_new:dec-2", "run_new2:dec-1", "run_new2:dec-2", "run_new2:dec-3"]);
+    // The replacement supersedes the stalled run by generation, so every later reader converges on it.
+    const generations = hub.posts.filter((post) => /\/mail$/.test(post.path)).map((post) => (JSON.parse((post.body as { content: string }).content) as { code: ProjectWorkflowCode }).code.generation);
+    expect(generations).toEqual([1, 2]);
+    expect(await findProjectWorkflow(hub.transport, PROJECT_ID)).toEqual({ deploymentId: "dep_new2", runId: "run_new2", tenantId: TENANT_ID });
+  });
+
+  test("a live run that stalls is superseded the same way, not replayed onto again", async () => {
+    const hub = fakeHub(
+      withAsset({
+        deployments: [
+          { id: "dep_old_failed", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" },
+          { id: "dep_live", definitionAssetId: ASSET_ID, status: "deployed", createdAt: "2026-01-02T00:00:00.000Z" },
+        ],
+        runsByDeployment: { dep_old_failed: decidedRun("run_0", [1, 2]).runIds, dep_live: decidedRun("run_1", [1], CURRENT).runIds },
+        eventsByRun: { ...decidedRun("run_0", [1, 2]).events, ...decidedRun("run_1", [1], CURRENT).events },
+        stallOn: { decisionId: "dec-2", once: true },
+      }),
+    );
+    expect(await ensure(hub, 0, undefined, [], 1, 20)).toMatchObject({ deploymentId: "dep_new", runId: "run_new", replay: { from: { deploymentId: "dep_old_failed", runId: "run_0" }, replayed: 2, refused: [] } });
+    expect(hub.signalsSent().map((sent) => `${sent.runId}:${sent.signalId}`)).toEqual(["run_1:dec-2", "run_new:dec-1", "run_new:dec-2"]);
+    expect(hub.triggeredCode()).toEqual({ digest: CURRENT_DIGEST, generation: 2 });
+  });
+
+  test("a replacement that stalls too is reported, not replaced again", async () => {
+    const hub = fakeHub(
+      withAsset({
+        deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" }],
+        runsByDeployment: { dep_1: decidedRun("run_1", [1, 2]).runIds },
+        eventsByRun: decidedRun("run_1", [1, 2]).events,
+        stallOn: { decisionId: "dec-1", once: false },
+      }),
+    );
+    await expect(ensure(hub, 0, undefined, [], 1, 20)).rejects.toThrow(/stopped applying decisions: run run_new2 made no progress .* around decision dec-1/);
+    expect(hub.signalsSent().map((sent) => `${sent.runId}:${sent.signalId}`)).toEqual(["run_new:dec-1", "run_new2:dec-1"]);
   });
 
   test("a live run that has not caught up is brought up to the dead run's decisions, not replaced", async () => {
