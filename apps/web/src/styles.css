@@ -943,7 +943,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 @media (prefers-reduced-motion: reduce) {
   .thread-turns { scroll-behavior: auto; }
   .thread-turns > *:last-child,
-  .preparing-tip,
   .stage-view,
   .stage-gate-dot,
   .guide-live,
@@ -2797,54 +2796,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   height: 14px;
 }
 
-/* The stage before its draft exists. One thing on screen, centred, with the
-   specialist's activity and a rotating tip under it. */
-/* Specific enough to beat the fill region's `gap: 0` on its children. */
-.canvas-body.is-fill > .preparing,
-.preparing {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  display: grid;
-  align-content: center;
-  justify-items: center;
-  gap: var(--space-8);
-  padding: var(--space-12) var(--space-6);
-  text-align: center;
-}
-
-.preparing-head {
-  display: grid;
-  gap: var(--space-2);
-  max-width: 48ch;
-}
-
-.preparing-kicker {
-  margin: 0;
-  font-family: var(--wb-font-mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--wb-muted-foreground);
-}
-
-.preparing-head h2 {
-  font-size: 1.75rem;
-  letter-spacing: -0.01em;
-}
-
-.preparing-goal {
-  margin: 0;
-  color: var(--wb-muted-foreground);
-}
-
-.preparing-activity {
-  display: grid;
-  gap: var(--space-4);
-  justify-items: center;
-  max-width: 52ch;
-}
-
 /* How long the wait has been, and how long is normal. */
 .elapsed {
   margin: 0;
@@ -2856,43 +2807,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   font-variant-numeric: tabular-nums;
   font-weight: 500;
   color: var(--wb-foreground);
-}
-
-/* The running process, boxed: a border and a label say "status", which a
-   line of shimmering text between two tips did not. */
-.preparing-status {
-  display: grid;
-  gap: var(--space-2);
-  justify-items: center;
-  width: 100%;
-  padding: var(--space-4) var(--space-5);
-  border: 1px solid var(--wb-border);
-  border-radius: var(--radius-control);
-  background: var(--wb-card);
-}
-
-.preparing-status-label {
-  margin: 0;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--wb-muted-foreground);
-}
-
-.preparing-tip {
-  margin: 0;
-  min-height: 3em;
-  font-size: 0.9375rem;
-  color: var(--wb-muted-foreground);
-  animation: settle-in 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-/* The draft forming, at reading width, left-aligned like the document. */
-.preparing-draft {
-  width: 100%;
-  max-width: 68ch;
-  text-align: left;
 }
 
 /* The stage's one view at a time. Fills the region and settles in on change. */
@@ -3473,15 +3387,6 @@ button[aria-disabled="true"] {
   display: none;
 }
 
-/* Nothing back from the model for a while: said once, quietly. */
-.preparing-stall {
-  margin: var(--space-3) 0 0;
-  font-size: 0.8125rem;
-  color: var(--wb-muted-foreground);
-  max-width: 44ch;
-  animation: settle-in 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
 /* --- Transcript scrolling (CL-7604) -------------------------------------
    ChatThread owns the scroll box; this wraps it so a way back down can sit
    over its bottom edge without touching the composer. */
@@ -4007,13 +3912,6 @@ button[aria-disabled="true"] {
   margin: 0;
   font-size: 0.8125rem;
   color: var(--wb-okay, var(--wb-muted-foreground));
-}
-
-/* KEEP: preparing silent wait (conv) */
-/* Stalled or silent waits get their own actions, stacked under the note
-   they belong to rather than crowding the status box's single line. */
-.preparing-silent {
-  color: var(--wb-foreground);
 }
 
 .spend-box {
