@@ -179,6 +179,119 @@ export const ARTIFACT_TOOL_DEPENDENCIES: Readonly<Record<string, string>> = {
   "@standard-schema/spec": "^1.0.0",
 };
 
+/** One tool a rendered entry carries: the source lines that import (and,
+ *  where a tool is built rather than imported, construct) it, and the
+ *  identifier the entry hands to `defineAgent`'s `tools`. */
+export type SpecialistToolImport = {
+  /** The tool's module, for a reader; `lines` is what is rendered. */
+  readonly package: string;
+  readonly lines: readonly string[];
+  readonly tool: string;
+};
+
+/**
+ * What a role's entry carries beyond its kit prompt, declared as data (#41
+ * step 1): the tools it imports and hands to its agent, the artifact kind
+ * its stage's document is recorded under, whether its prompt takes the
+ * project's audiences, the notes appended to its prompt, and the tool
+ * package its `credentialBindings` entry names when it carries artifact
+ * tools. `specialistEntrySource` renders exactly this and decides nothing
+ * about a role itself.
+ */
+export type SpecialistRoleSpec = {
+  readonly tooling: SpecialistTooling;
+  readonly toolImports: readonly SpecialistToolImport[];
+  readonly artifactKind: ArtifactKind;
+  /** Stage 5's specialist is told who each package is for. */
+  readonly takesAudiences: boolean;
+  /** Appended after the kit prompt, its skill text and the audiences, in order. */
+  readonly promptNotes: readonly string[];
+  /** The tool package the `hub` credential binding is declared against, or null with no binding. */
+  readonly credentialPackage: string | null;
+};
+
+/** The `@corbits/artifacts` bundle (`artifact_create`/`artifact_write`), opt-in. */
+const ARTIFACTS_IMPORT: SpecialistToolImport = {
+  package: "@corbits/artifacts/sidecar-bundle",
+  lines: [`import { artifacts } from ${JSON.stringify("@corbits/artifacts/sidecar-bundle")};`],
+  tool: "artifacts",
+};
+
+/** Stage 5's `render_deck`. */
+const DECK_IMPORT: SpecialistToolImport = {
+  package: "@solutions-builder/tools-deck/sidecar-bundle",
+  lines: [`import { deck } from ${JSON.stringify("@solutions-builder/tools-deck/sidecar-bundle")};`],
+  tool: "deck",
+};
+
+/** Stage 9's `deliver`. */
+const DELIVER_IMPORT: SpecialistToolImport = {
+  package: "@solutions-builder/tools-delivery/sidecar-bundle",
+  lines: [`import { deliver } from ${JSON.stringify("@solutions-builder/tools-delivery/sidecar-bundle")};`],
+  tool: "deliver",
+};
+
+/** Stage 8's shell and `publish_workspace`. The latter is built bound to
+ *  the project at render time, a constant the model never supplies
+ *  (`publishWorkspaceTool` in `tools-delivery/publish-workspace.ts`). */
+function buildStageImports(projectId: string): readonly SpecialistToolImport[] {
+  return [
+    {
+      package: "@intx/tools-posix/sidecar-bundle",
+      lines: [`import { posix } from ${JSON.stringify("@intx/tools-posix/sidecar-bundle")};`],
+      tool: "posix",
+    },
+    {
+      package: "@solutions-builder/tools-delivery/publish-workspace",
+      lines: [
+        `import { publishWorkspaceTool } from ${JSON.stringify("@solutions-builder/tools-delivery/publish-workspace")};`,
+        `const publishWorkspace = publishWorkspaceTool(${JSON.stringify(projectId)});`,
+      ],
+      tool: "publishWorkspace",
+    },
+  ];
+}
+
+/**
+ * The spec for one deployment, from the same facts `specialistTooling`
+ * reads: CL-8873 keeps `render_deck` off stage 5's primary deployment (and
+ * tells that deployment so), stage 8's delivery tool is `publish_workspace`
+ * where stage 9's is `deliver`, and only a credential-bound deployment
+ * declares the `hub` binding. Pure: the same inputs always give the same
+ * spec, so a render is reproducible for `specialistEntryIsCurrent`.
+ */
+export function specialistRoleSpec(options: {
+  readonly stage: Stage;
+  readonly roleKey?: string | undefined;
+  readonly artifactTools?: boolean | undefined;
+  readonly projectId: string;
+}): SpecialistRoleSpec {
+  const { stage, roleKey = PRIMARY_ROLE_KEY, artifactTools = false, projectId } = options;
+  const tooling = specialistTooling({ stage, roleKey, artifactTools });
+  const isBuildStage = stage === BUILD_STAGE;
+  const isPrimaryPackageDeployment = stage === PACKAGE_STAGE && roleKey === PRIMARY_ROLE_KEY;
+  return {
+    tooling,
+    toolImports: [
+      ...(tooling.artifacts ? [ARTIFACTS_IMPORT] : []),
+      ...(tooling.deck ? [DECK_IMPORT] : []),
+      ...(tooling.posix ? buildStageImports(projectId) : []),
+      ...(tooling.delivery && !isBuildStage ? [DELIVER_IMPORT] : []),
+    ],
+    artifactKind: STAGE_ARTIFACT_KIND[stage],
+    takesAudiences: stage === PACKAGE_STAGE,
+    promptNotes: isPrimaryPackageDeployment ? [PRIMARY_PACKAGE_DEPLOYMENT_NOTE] : [],
+    // CL-8723: stage 8 binds through `publish_workspace`, which resolves the
+    // `hub` handle itself; every other bound stage binds through the
+    // generic bundle.
+    credentialPackage: artifactTools
+      ? isBuildStage
+        ? "@solutions-builder/tools-delivery/publish-workspace"
+        : "@corbits/artifacts/sidecar-bundle"
+      : null,
+  };
+}
+
 /** The entry module path every specialist package ships, same convention as
  *  the lifecycle's `LIFECYCLE_ENTRY_PATH`. */
 export const SPECIALIST_ENTRY_PATH = "workflow.js";
@@ -269,43 +382,25 @@ write, when someone asks for that one audience by name.`;
  * single-step, mail-triggered, unbounded-turn agent with `drainBehavior:
  * "wait"` and no `timeout` — the same shape `buildAgentDefinitionJson` in
  * `wb/apps/web/src/agent-deploy.ts` builds, so it stays armed across an
- * approval park instead of aborting a run waiting on a person. Stage 5's
- * specialist carries the deck-rendering tool, stage 8's carries posix and
- * `publish_workspace`, and stage 9's carries the deliver tool; every other
- * stage carries none.
+ * approval park instead of aborting a run waiting on a person. Which tools,
+ * notes and bindings a deployment carries is `specialistRoleSpec`'s call;
+ * this only renders it.
  */
 export function specialistEntrySource(options: SpecialistSourceOptions): string {
   const { stage, source, audiences, projectId, assetName, role, roleKey, artifactTools = false } = options;
   const workflowId = specialistWorkflowId(stage);
   const triggerAddress = `${workflowId}@solutions-builder.local`;
-  const kind = STAGE_ARTIFACT_KIND[stage];
 
-  // CL-8723: stage 8 publishes its own binary artifact through
-  // `publish_workspace` rather than the generic `artifact_create`/`write`
-  // text-document tools every other credential-bound stage carries — a
-  // `run_shell`-built archive is never a document draft. It still needs the
-  // `hub` credential binding (below), just not the generic bundle or the
-  // rule telling the model to call `artifact_create` for its stage document.
-  const isBuildStage = stage === BUILD_STAGE;
+  // Everything this role carries is its spec's (#41 step 1): the imports and
+  // the tools handed to the agent come from it in order, so an entry never
+  // imports a tool its closure lacks (`specialistTooling` decides both).
+  const spec = specialistRoleSpec({ stage, roleKey, artifactTools, projectId });
+  const toolImports = spec.toolImports.map((entry) => `${entry.lines.join("\n")}\n`).join("");
+  const tools = spec.toolImports.map((entry) => entry.tool).join(", ");
 
-  // What this entry imports, decided once for the entry and its closure
-  // (`specialistTooling`): CL-8873 keeps `render_deck` off stage 5's primary
-  // deployment, and stage 8's delivery tool is `publish_workspace` where
-  // stage 9's is `deliver`.
-  const tooling = specialistTooling({ stage, roleKey, artifactTools });
-  const isPrimaryPackageDeployment = stage === PACKAGE_STAGE && roleKey === PRIMARY_ROLE_KEY;
-  const stageToolImports = tooling.deck
-    ? `import { deck } from ${JSON.stringify("@solutions-builder/tools-deck/sidecar-bundle")};\n`
-    : isBuildStage
-      ? `import { posix } from ${JSON.stringify("@intx/tools-posix/sidecar-bundle")};\nimport { publishWorkspaceTool } from ${JSON.stringify("@solutions-builder/tools-delivery/publish-workspace")};\nconst publishWorkspace = publishWorkspaceTool(${JSON.stringify(projectId)});\n`
-      : tooling.delivery
-        ? `import { deliver } from ${JSON.stringify("@solutions-builder/tools-delivery/sidecar-bundle")};\n`
-        : "";
-  const stageTools = tooling.deck ? "deck" : isBuildStage ? "posix, publishWorkspace" : tooling.delivery ? "deliver" : "";
-
-  // CL-8719: every other credential-bound stage specialist writes its draft
-  // as a real artifact through `@corbits/artifacts`' agent tool bundle,
-  // against the run-scoped mount `mountWorkflowArtifacts` puts on the hub
+  // CL-8719: a credential-bound stage specialist writes its draft as a real
+  // artifact through `@corbits/artifacts`' agent tool bundle, against the
+  // run-scoped mount `mountWorkflowArtifacts` puts on the hub
   // (`embed-hub/src/index.ts`). `credentialBindings` names the `hub` handle
   // it declares against a provider/credential the installer ensures at
   // deploy time (`installer/src/artifacts-credential.ts`) before this
@@ -313,23 +408,20 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
   // `assetName` alone. Opt-in (`artifactTools`, default off) — see
   // `SpecialistSourceOptions`; today only stage 8 turns it on, and
   // `publish_workspace` resolves the same credential itself rather than
-  // through this generic bundle (see `genericArtifactTools` below).
-  const genericArtifactTools = tooling.artifacts;
-  const toolImports = genericArtifactTools
-    ? `import { artifacts } from ${JSON.stringify("@corbits/artifacts/sidecar-bundle")};\n${stageToolImports}`
-    : stageToolImports;
-  const tools = genericArtifactTools ? `artifacts${stageTools ? `, ${stageTools}` : ""}` : stageTools;
+  // through the generic bundle, so stage 8 gets the binding without the
+  // bundle or the rule telling the model to call `artifact_create`.
+  const genericArtifactTools = spec.tooling.artifacts;
   const credentialName = workflowArtifactsCredentialName(assetName);
 
   let systemPrompt = systemPromptForRole(role, genericArtifactTools);
   if (genericArtifactTools) {
-    systemPrompt = `${systemPrompt}\n\n## Artifact context\n\nprojectId: ${projectId}\nstage: ${stage}\nkind: ${kind}`;
+    systemPrompt = `${systemPrompt}\n\n## Artifact context\n\nprojectId: ${projectId}\nstage: ${stage}\nkind: ${spec.artifactKind}`;
   }
-  if (stage === PACKAGE_STAGE && audiences && audiences.length > 0) {
+  if (spec.takesAudiences && audiences && audiences.length > 0) {
     systemPrompt = `${systemPrompt}\n\n${audienceSection(audiences)}`;
   }
-  if (isPrimaryPackageDeployment) {
-    systemPrompt = `${systemPrompt}\n\n${PRIMARY_PACKAGE_DEPLOYMENT_NOTE}`;
+  for (const note of spec.promptNotes) {
+    systemPrompt = `${systemPrompt}\n\n${note}`;
   }
 
   // `package` must match the consumer identity the sidecar's source-ref
@@ -346,11 +438,11 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
   // consumer that never matches the bundle's own consumer identity, so the
   // capability is never assembled and the tool's `resolve("credentials")`
   // fails closed.
-  const credentialBindings = artifactTools
+  const credentialBindings = spec.credentialPackage
     ? `
   credentialBindings: [
     {
-      package: ${JSON.stringify(isBuildStage ? "@solutions-builder/tools-delivery/publish-workspace" : "@corbits/artifacts/sidecar-bundle")},
+      package: ${JSON.stringify(spec.credentialPackage)},
       handle: "hub",
       provider: ${JSON.stringify(WORKFLOW_ARTIFACTS_PROVIDER_NAME)},
       name: ${JSON.stringify(credentialName)},
