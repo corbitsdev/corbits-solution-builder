@@ -50,6 +50,25 @@ export function stageRefusalMessage(reason: string): string {
   return STAGE_REFUSAL_MESSAGES[reason] ?? approveReasonText(reason as ApproveReason, null);
 }
 
+const OPEN_REVIEW_FAILURE_MESSAGES: Readonly<Record<string, string>> = {
+  workflow_unavailable: "The project workflow could not be read.",
+  timed_out: "The project workflow accepted the review but has not shown it open yet.",
+};
+
+/**
+ * What the person is told when `ensureReviewOpen` did not open the review
+ * (#169), or null when there is nothing to tell: the view moved on to
+ * another stage, or another tab landed the same decision first, and the
+ * next look at the workflow settles both. Everything else -- the workflow
+ * unreadable, a refusal of the `open_review` decision, a review accepted
+ * but never applied -- was retried in silence before, leaving a stage with
+ * a draft and no approve button and no word why.
+ */
+export function openReviewFailureMessage(reason: string): string | null {
+  if (reason === "wrong_stage" || reason === "signal_id_conflict") return null;
+  return OPEN_REVIEW_FAILURE_MESSAGES[reason] ?? stageRefusalMessage(reason);
+}
+
 export type StageEvidenceDeps = {
   readonly projectId: string;
   readonly tenantId: string;
