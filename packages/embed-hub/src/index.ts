@@ -57,6 +57,7 @@ import {
   createEventCollectorRegistry,
   createHubSessionLookups,
   createHubSessionOrchestrator,
+  createReconciliationScheduler,
   createSessionService,
   createSidecarAllocationReconciler,
   createSidecarCredentialResolver,
@@ -453,8 +454,15 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
       return row?.address ?? null;
     },
   });
+  // Allocations are placed side by side so a burst (a project's deployments
+  // re-placed after a restart) is ready in the time of its slowest placement,
+  // and a sidecar that never reconnects holds up only its own claim. Every
+  // claim shares pglite's one connection, including its lease renewals, so
+  // the cap stays below the platform's default of 8.
+  const ALLOCATION_CONCURRENCY = 4;
   const sidecarAllocationReconciler = createSidecarAllocationReconciler({
     allocationStore: sidecarAllocationStore,
+    maxConcurrentClaims: ALLOCATION_CONCURRENCY,
     plugins: sidecarPlugins,
     router: sidecarRouter,
     hubWebSocketUrl: options.hubWebSocketUrl,
@@ -509,7 +517,6 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
         nextProbeCleanupAt = Date.now() + REPAIR_MS;
         await workflowAllocationService.reconcileReleasingProbes?.();
       }
-      await sidecarAllocationReconciler.reconcileUntilIdle();
       await workflowDispatchService.reconcileUntilIdle();
       if (Date.now() >= nextRepairAt) {
         nextRepairAt = Date.now() + REPAIR_MS;
@@ -524,6 +531,18 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
     }
   };
   setTimeout(() => void reconcile(), 0).unref();
+  const allocationScheduler = createReconciliationScheduler({
+    name: "Sidecar allocation",
+    // A claim still in flight when `stopReconcile()` runs fails against the
+    // database being torn down; as with the tick above, that is not a failure.
+    reconcileNext: () =>
+      sidecarAllocationReconciler.reconcileNext().catch((cause: unknown) => {
+        if (reconcileStopped) return false;
+        throw cause;
+      }),
+    concurrency: ALLOCATION_CONCURRENCY,
+  });
+  allocationScheduler.start();
 
   // @corbits/mailbox: an open decision's inbox item, and the desktop's
   // notifications bell. Reached over `/api/me/inbox*`; the mounted routes
@@ -824,6 +843,7 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
     sidecarBindingFingerprint: bindingFingerprint,
     stopReconcile: () => {
       reconcileStopped = true;
+      allocationScheduler.stop();
     },
   };
 }
