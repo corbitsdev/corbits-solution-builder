@@ -81,6 +81,24 @@ and why, rather than routing around it.
 - No cloud fallback when a local endpoint is unavailable. Unavailable is a state.
 - An approval names exact versions and their hashes.
 
+## Working alongside other agents
+
+Several agents work this repository at once, each in its own worktree. What
+`.beta/` once recorded about that, kept here because it still costs someone
+an evening when forgotten:
+
+- Never `git stash`. Worktrees share one stash stack, so a stash in one
+  worktree can swallow another's uncommitted work. Commit a WIP instead.
+- Never run `bun run check` at the same time as another agent's. They race on
+  `vendor:build` and produce failures that are not real.
+- After resolving a merge or rebase, check `git status` before committing and
+  run the gate on the committed tree. A gate run against the working tree
+  proves nothing about what was pushed.
+- Never `git checkout --ours <file>` when both sides changed it: that takes the
+  whole file, not the hunk, and silently drops the other side's work.
+- A green gate has never found a defect in the product's own flow. Driving the
+  app end to end is the test; see "Verify before asserting".
+
 ## Conventions
 
 - Commit messages and how to open a PR: see CONTRIBUTING.md. These rules bind
