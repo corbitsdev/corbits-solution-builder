@@ -2098,7 +2098,7 @@ false,
    * a silently wrong success.
    */
   decide: (projectId: string, decision: Record<string, unknown>): Promise<{ ok: true }> =>
-    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+    asWorkspaceOwner(async (transport) => {
       const ref =
         (await ensureProjectWorkflowCalls.get(projectId)) ??
         (await resolveProjectWorkflowRef(transport, projectId));
@@ -2108,7 +2108,12 @@ false,
       // an `ApiError` through `asWorkspaceOwner`'s normal failure path. A
       // byte-identical retry is accepted by the hub as a no-op, so it never
       // reaches this catch at all.
-      await workflowsFor(transport, workspaceTenantId).signal(ref.deploymentId, {
+      //
+      // Signalled in the tenant the ref names (#163): the project's own for
+      // a deployment made since #29, the workspace for a legacy one still
+      // live there. The workspace's route answers 404 for a project-tenant
+      // deployment, which silently left every review unopened.
+      await workflowsFor(transport, ref.tenantId).signal(ref.deploymentId, {
         runId: ref.runId,
         signalName: PROJECT_DECISION_SIGNAL,
         signalId: decision["decisionId"] as string,
