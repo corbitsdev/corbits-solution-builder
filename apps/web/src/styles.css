@@ -2054,6 +2054,73 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   font-size: 0.8125rem;
 }
 
+.composer-approve-lead {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+/* The brief evaluator's stance, one line in the approval bar (#157). Its
+   notes open beneath the pointer or the focus, or on a click, as a popover
+   anchored to the stance rather than a paragraph in the column. */
+.evaluator-stance {
+  position: relative;
+  display: inline-flex;
+}
+
+.composer-approve .evaluator-stance-trigger {
+  font: inherit;
+  padding: 0 var(--space-1);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--wb-muted-foreground);
+  cursor: default;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.evaluator-stance[data-tone="ready"] .evaluator-stance-trigger {
+  color: var(--wb-primary);
+}
+
+.evaluator-stance-trigger:focus-visible {
+  outline: 2px solid var(--wb-primary);
+  outline-offset: 2px;
+}
+
+.evaluator-notes {
+  display: none;
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + var(--space-2));
+  z-index: 30;
+  width: min(48ch, 80vw);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--wb-border-strong);
+  border-radius: var(--radius-panel);
+  background: var(--popover);
+  color: var(--wb-foreground);
+  font-family: var(--wb-font-ui);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--wb-foreground) 10%, transparent);
+}
+
+.evaluator-notes ul {
+  margin: 0;
+  padding-left: var(--space-4);
+  display: grid;
+  gap: var(--space-2);
+}
+
+.evaluator-stance:hover .evaluator-notes,
+.evaluator-stance:focus-within .evaluator-notes,
+.evaluator-stance[data-open] .evaluator-notes {
+  display: block;
+}
+
 /* Quiet until hover — never a filled green pill. Green on hover lives in
    workspace-layout.css so this sheet cannot resurrect the ready fill. */
 .composer-approve .is-ready button {
@@ -2992,42 +3059,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 
 /* Waiting on a decision: one line across the top, not a wall in front of the
    document — the document is still there to be read. */
-.stage-gate {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-4) var(--space-2) var(--space-5);
-  border-bottom: 1px solid var(--wb-border);
-  background: color-mix(in srgb, var(--wb-primary) 8%, var(--wb-background));
-  font-size: 0.875rem;
-}
-
-.stage-gate p {
-  margin: 0;
-  flex: 1;
-  min-width: 0;
-}
-
-.stage-gate-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--wb-primary);
-  animation: gate-pulse 1.6s ease-in-out infinite;
-}
-
-/* The evaluator's verdict on the brief, advisory only: it colours the dot, it
-   never changes what the gate does. */
-.stage-gate-dot.is-ready {
-  background: var(--wb-okay);
-}
-
-/* KEEP: stage guidance banner (conv) */
-/* The stage guidance: a compact banner sized to its content (title, one-line
-   detail, answer chips), not a `Card` — a `Screen` here stretched to fill
-   the flex row it shares with the two-pane layout below it, leaving a large
-   empty region above a squeezed conversation and draft. This sits flush
-   above that layout and never competes with it for height. */
 .stage-guidance {
   flex: none;
   display: grid;

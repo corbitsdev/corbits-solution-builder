@@ -4,7 +4,7 @@
  * presentational — every prop is already resolved by the stage workspace
  * above them.
  */
-import type { CSSProperties, ReactNode, Ref } from "react";
+import { useId, useState, type CSSProperties, type ReactNode, type Ref } from "react";
 import { ChatInput, Textarea } from "@corbits/react-ui";
 import { Button, stageName } from "../../components.jsx";
 import { Dictated } from "../../dictation.jsx";
@@ -60,37 +60,54 @@ export function GuidanceCard({
   );
 }
 
-/** Stage 1's advisory brief-evaluator verdict — never a gate. */
-export function EvaluatorVerdict({ evaluator }: { evaluator: StageEvaluator }) {
+/**
+ * Stage 1's advisory brief-evaluator verdict, as one line in the approval
+ * bar (#157): a stance beside the approve button, with the evaluator's notes
+ * in a popover that opens on hover, on focus, or with a click and closes on
+ * Escape. Never a gate: the approve button's enablement is unchanged. A
+ * full verdict inline above the composer pushed the conversation out of
+ * view, and the gate repeated its notes a second time.
+ */
+export function EvaluatorStance({ evaluator }: { evaluator: StageEvaluator }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
   if (evaluator.status === "idle") return null;
-  if (evaluator.status === "checking") {
-    return (
-      <p className="stage-guidance stage-guidance-evaluator" aria-label="Brief evaluator verdict" aria-live="polite">
-        Brief evaluator (advisory): reading this draft…
-      </p>
-    );
-  }
-  if (evaluator.status === "unavailable") {
-    return (
-      <p className="stage-guidance stage-guidance-evaluator" aria-label="Brief evaluator verdict" aria-live="polite">
-        Brief evaluator (advisory): unavailable. {evaluator.reason}
-      </p>
-    );
-  }
-  const { verdict } = evaluator;
+  const stance =
+    evaluator.status === "checking"
+      ? { label: "Evaluator reading…", tone: "checking", notes: [] as readonly string[] }
+      : evaluator.status === "unavailable"
+        ? { label: "Evaluator unavailable", tone: "unavailable", notes: [evaluator.reason] }
+        : evaluator.verdict.ready
+          ? { label: "Approved by evaluator", tone: "ready", notes: evaluator.verdict.notes }
+          : { label: "Not approved by evaluator", tone: "not-ready", notes: evaluator.verdict.notes };
+  const hasNotes = stance.notes.length > 0;
   return (
-    <div className="stage-guidance stage-guidance-evaluator" aria-label="Brief evaluator verdict" aria-live="polite">
-      <p className="stage-guidance-title">Brief evaluator (advisory): {verdict.ready ? "ready" : "not yet"}</p>
-      {verdict.notes.length > 0 ? (
-        <ul>
-          {verdict.notes.map((note, index) => (
-            <li key={index}>
-              <InlineMarkdown source={note} />
-            </li>
-          ))}
-        </ul>
+    <span className="evaluator-stance" data-tone={stance.tone} data-open={open || undefined} aria-live="polite">
+      <button
+        type="button"
+        className="evaluator-stance-trigger"
+        aria-label="Brief evaluator verdict"
+        aria-expanded={hasNotes ? open : undefined}
+        aria-controls={hasNotes ? id : undefined}
+        onClick={() => setOpen((was) => !was)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") setOpen(false);
+        }}
+      >
+        {stance.label}
+      </button>
+      {hasNotes ? (
+        <div id={id} role="tooltip" className="evaluator-notes">
+          <ul>
+            {stance.notes.map((note, index) => (
+              <li key={index}>
+                <InlineMarkdown source={note} />
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : null}
-    </div>
+    </span>
   );
 }
 

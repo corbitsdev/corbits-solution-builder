@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { answerTo, evaluatorStateOf } from "./use-advisory.ts";
-import { EvaluatorVerdict } from "./workspace-chrome.tsx";
+import { EvaluatorStance } from "./workspace-chrome.tsx";
 import { GuideDock, GuideExplanation } from "../../components.tsx";
 import { budgetVersions, textOf, deterministicGuidance, guidancePrompt, guideStep, guideVersionNodes, parseGuidanceReply, type GuideContext } from "./product-guide.ts";
 import type { ArtifactNode } from "../../client.ts";
@@ -60,22 +60,29 @@ describe("evaluatorStateOf", () => {
   });
 });
 
-describe("EvaluatorVerdict", () => {
-  const render = (evaluator: Parameters<typeof EvaluatorVerdict>[0]["evaluator"]) =>
-    renderToStaticMarkup(createElement(EvaluatorVerdict, { evaluator }));
+describe("EvaluatorStance", () => {
+  const render = (evaluator: Parameters<typeof EvaluatorStance>[0]["evaluator"]) =>
+    renderToStaticMarkup(createElement(EvaluatorStance, { evaluator }));
 
   test("renders nothing when there is no draft to judge", () => {
     expect(render({ status: "idle" })).toBe("");
   });
 
-  test("says it is reading while the verdict is pending", () => {
-    expect(render({ status: "checking" })).toContain("reading this draft");
+  test("says it is reading while the verdict is pending, with nothing to open", () => {
+    const html = render({ status: "checking" });
+    expect(html).toContain("Evaluator reading");
+    expect(html).not.toContain("aria-expanded");
   });
 
-  test("shows the verdict and its notes", () => {
+  // #157: one line in the approval bar, the notes behind a popover.
+  test("shows the stance as one line, with the notes in a popover the trigger controls", () => {
     const html = render({ status: "verdict", verdict: { ready: false, notes: ["Success criteria are vague."] } });
-    expect(html).toContain("not yet");
+    expect(html).toContain("Not approved by evaluator");
+    expect(html).toContain('data-tone="not-ready"');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('role="tooltip"');
     expect(html).toContain("Success criteria are vague.");
+    expect(render({ status: "verdict", verdict: { ready: true, notes: [] } })).toContain("Approved by evaluator");
   });
 
   // #144: the evaluator writes its notes in markdown, like every specialist.
@@ -94,7 +101,9 @@ describe("EvaluatorVerdict", () => {
   });
 
   test("says why when it is unavailable, never silently", () => {
-    expect(render({ status: "unavailable", reason: "The brief evaluator has not answered yet." })).toContain("unavailable. The brief evaluator has not answered yet.");
+    const html = render({ status: "unavailable", reason: "The brief evaluator has not answered yet." });
+    expect(html).toContain("Evaluator unavailable");
+    expect(html).toContain("The brief evaluator has not answered yet.");
   });
 });
 
@@ -240,6 +249,6 @@ describe("the workspace", () => {
     expect(index).toContain("<GuideDock");
     expect(index).toContain("onExplain={() => void guide.explain()}");
     expect(index).toContain("useStageEvaluator(");
-    expect(index).toContain("<EvaluatorVerdict evaluator={evaluator} />");
+    expect(index).toContain("<EvaluatorStance evaluator={evaluator} />");
   });
 });
