@@ -2123,11 +2123,11 @@ false,
    * open on: the project was created with no problem statement.
    */
   projectOpening: (projectId: string): Promise<{ body: string; createdAt: string } | null> =>
-    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+    asWorkspaceOwner(async (transport) => {
       const graph = await artifactGraphFor(transport, projectId);
       const node = graph.nodes.find((entry) => entry.kind === MATERIAL_KIND && entry.variant === OPENING_VARIANT);
       if (!node) return null;
-      const artifact = await installerGetArtifact(transport, workspaceTenantId, node.id);
+      const artifact = await installerGetArtifact(transport, projectId, node.id);
       if (!artifact) return null;
       return { body: artifact.content, createdAt: node.createdAt };
     }),
