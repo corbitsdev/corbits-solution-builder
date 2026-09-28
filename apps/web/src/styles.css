@@ -983,6 +983,37 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   gap: var(--space-2);
   flex: none;
   position: relative;
+  /* However long the text gets, the box stops at a share of the window and
+     the text scrolls inside it (#160): a `flex: none` row that outgrew the
+     column pushed the send, stop, attach and mic controls below the pane's
+     edge, where nothing could reach them. */
+  max-height: 70vh;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* The box itself is a flex column: textarea body above, action row beneath.
+   Capping the box and letting the body scroll keeps the action row pinned
+   at every text length. The textarea's own cap is the library's 200px; a
+   short window gets less. */
+.composer .composer-box {
+  min-height: 0;
+  max-height: min(50vh, 480px);
+}
+
+.composer .composer-box [data-slot="chat-input-body"] {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.composer .composer-box [data-slot="chat-input-footer"] {
+  flex: none;
+}
+
+.composer .composer-box textarea,
+.home-page .composer-box textarea {
+  max-height: min(200px, 30vh);
+  overflow-y: auto;
 }
 
 /* The send-back picker a hold on send raises: floats above the composer,
