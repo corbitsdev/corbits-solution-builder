@@ -50,6 +50,7 @@ import {
   ensureWorkflowArtifactTokensTable,
   registerWorkflowArtifactToken,
 } from "./workflow-artifact-tokens.js";
+import { labelWorkflowArtifacts } from "./workflow-artifact-label.js";
 import {
   createAgentRepoStore,
   createAssetService,
@@ -726,10 +727,17 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
   // purpose-minted bearer rather than the sidecar's own ambient token.
   await ensureWorkflowArtifactTokensTable(db.db);
   const workflowArtifactsApi = new Hono<WorkflowArtifactEnv>();
+  const resolveWorkflowArtifactRunScope = createWorkflowArtifactRunResolver(db.db);
+  // The project a run's record belongs to is the run's tenant (#29): the
+  // label the workspace reads is stamped from the resolved scope, ahead of
+  // the mount's own routes (#41 step 5, `workflow-artifact-label.ts`).
+  const labelFromRunScope = labelWorkflowArtifacts(resolveWorkflowArtifactRunScope);
+  workflowArtifactsApi.use("/artifacts", labelFromRunScope);
+  workflowArtifactsApi.use("/artifacts/binary", labelFromRunScope);
   mountWorkflowArtifacts(workflowArtifactsApi, {
     db: artifactDb,
     contentStore: InlineContentStore,
-    resolveRunScope: createWorkflowArtifactRunResolver(db.db),
+    resolveRunScope: resolveWorkflowArtifactRunScope,
   });
   app.route("/api/workflow-artifacts", workflowArtifactsApi);
 
