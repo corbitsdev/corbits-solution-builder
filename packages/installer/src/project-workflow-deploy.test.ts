@@ -23,6 +23,13 @@ type Fixture = {
   appearAtListing?: Record<number, { deployment: { id: string; definitionAssetId: string; status: string; createdAt: string }; runIds?: string[]; events?: Record<string, Event[]> }[]>;
   /** The new code's reducer, as the fake applies a signal: its verdict on each decision id. */
   reducer?: (decisionId: string) => Verdict;
+  /** How many reads of the top-level run's log follow a signal before the
+   *  run shows parked again; until then the log ends in the hub-written
+   *  `SignalReceived`, the way the real hub's does while the child is still
+   *  writing its turn (#188). Absent, the run parks at once. */
+  parkAfterReads?: number;
+  /** The decision on which the run completes instead of parking again. */
+  endsRunOn?: string;
 };
 
 const decisionPayload = (n: number) => ({ decision: { decisionId: `dec-${String(n)}`, kind: "approve", stage: n } });
@@ -75,6 +82,10 @@ function fakeHub(fixture: Fixture) {
   const posts: { path: string; body: unknown }[] = [];
   /** Every run event log read, in order: what a memo is meant to spare (#80). */
   const eventReads: string[] = [];
+  /** Whether the run named was parked when each signal arrived: what #188 requires of every one. */
+  const parkedAtSignal: boolean[] = [];
+  /** Reads of a run's log still to come before it shows parked again. */
+  const parkPending = new Map<string, number>();
   let pushedTree: Record<string, string> = {};
   let listings = 0;
   const transport: Transport = {
@@ -125,13 +136,23 @@ function fakeHub(fixture: Fixture) {
       const events = /^\/api\/tenants\/[^/]+\/workflows\/[^/]+\/runs\/([^/]+)\/events$/.exec(pathname!);
       if (method === "GET" && events) {
         eventReads.push(events[1]!);
+        const pending = parkPending.get(events[1]!);
+        if (pending !== undefined) {
+          if (pending <= 1) {
+            parkPending.delete(events[1]!);
+            const log = eventsByRun[events[1]!]!;
+            log.push({ ...PARKED[1]!, seq: log.length + 1 });
+          } else parkPending.set(events[1]!, pending - 1);
+        }
         return { runId: events[1], events: eventsByRun[events[1]!] ?? [] } as T;
       }
       const trigger = /^\/api\/tenants\/[^/]+\/workflows\/([^/]+)\/mail$/.exec(pathname!);
       if (method === "POST" && trigger) {
         runsByDeployment[trigger[1]!] = [...(runsByDeployment[trigger[1]!] ?? []), "run_new"];
         const { content } = body as { content: string };
-        eventsByRun.run_new = [{ seq: 1, type: "RunStarted", body: { trigger: { type: "mail", payload: { parts: [{ text: content }] } } } }];
+        // Started, and parked on its first await the way the real run is
+        // moments later: a replay waits for that park before it signals.
+        eventsByRun.run_new = [{ seq: 1, type: "RunStarted", body: { trigger: { type: "mail", payload: { parts: [{ text: content }] } } } }, PARKED[1]!];
         return { runId: "run_new", address: "run_new@hub", messageId: "msg_1" } as T;
       }
       const signal = /^\/api\/tenants\/[^/]+\/workflows\/([^/]+)\/signals$/.exec(pathname!);
@@ -142,6 +163,13 @@ function fakeHub(fixture: Fixture) {
         // output, which is what the real hub's event log shows once the
         // sidecar has taken it.
         const input = body as { runId: string; signalName: string; signalId: string; payload: unknown };
+        const top = (eventsByRun[input.runId] ??= []);
+        parkedAtSignal.push(top.at(-1)?.type === "SignalAwaited");
+        if (fixture.parkAfterReads !== undefined) {
+          top.push({ seq: top.length + 1, type: "SignalReceived", body: { signalName: input.signalName, signalId: input.signalId, payload: input.payload } });
+          if (fixture.endsRunOn === input.signalId) top.push({ seq: top.length + 1, type: "RunCompleted", body: {} });
+          else parkPending.set(input.runId, fixture.parkAfterReads);
+        }
         const runs = (runsByDeployment[signal[1]!] ??= []);
         const index = runs.filter((id) => id.startsWith(`${input.runId}__`)).length;
         const iteration = `${input.runId}__rework__${String(index)}`;
@@ -175,11 +203,15 @@ function fakeHub(fixture: Fixture) {
     runsByDeployment[deploymentId] = [...runIds];
     Object.assign(eventsByRun, events);
   };
-  return { transport, gitPush, posts, eventReads, setRun, triggeredCode, signalsSent: () => posts.filter((post) => /\/signals$/.test(post.path)).map((post) => post.body as { runId: string; signalName: string; signalId: string; payload: unknown }) };
+  return { transport, gitPush, posts, eventReads, parkedAtSignal, setRun, triggeredCode, signalsSent: () => posts.filter((post) => /\/signals$/.test(post.path)).map((post) => post.body as { runId: string; signalName: string; signalId: string; payload: unknown }) };
 }
 
-const ensure = (hub: ReturnType<typeof fakeHub>, replacementWaitMs = 0, placementPollMs?: number, stages: { stage: number; authorizedPrincipalIds: string[] }[] = []) =>
-  ensureProjectWorkflow(hub.transport, { canPlaceSidecars: true }, { files: { "workflow.js": "", "actions.js": "", "loops.js": "" } }, hub.gitPush, PROJECT_ID, stages, {}, { replacementWaitMs, ...(placementPollMs === undefined ? {} : { placementPollMs }) });
+const ensure = (hub: ReturnType<typeof fakeHub>, replacementWaitMs = 0, placementPollMs?: number, stages: { stage: number; authorizedPrincipalIds: string[] }[] = [], replayPollMs?: number) =>
+  ensureProjectWorkflow(hub.transport, { canPlaceSidecars: true }, { files: { "workflow.js": "", "actions.js": "", "loops.js": "" } }, hub.gitPush, PROJECT_ID, stages, {}, {
+    replacementWaitMs,
+    ...(placementPollMs === undefined ? {} : { placementPollMs }),
+    ...(replayPollMs === undefined ? {} : { replayPollMs }),
+  });
 
 const withAsset = (fixture: Omit<Fixture, "assets">): Fixture => ({ assets: [{ id: ASSET_ID, name: projectWorkflowAssetName(PROJECT_ID) }], ...fixture });
 
@@ -449,6 +481,41 @@ describe("ensureProjectWorkflow", () => {
     ]);
     // And from then on, every reader converges on the revived run.
     expect(await findProjectWorkflow(hub.transport, PROJECT_ID)).toEqual({ deploymentId: "dep_new", runId: "run_new", tenantId: TENANT_ID });
+  });
+
+  // The hub appends a delivered signal to the run's log itself. While the
+  // run's child is still writing the rest of its turn -- child completed,
+  // step completed, next step started, next await -- the log ends in that
+  // SignalReceived, and a signal sent then takes the sequence number the
+  // child is about to use and kills the run. So a decision is sent only once
+  // the run is parked, and counts as landed only once the run has parked
+  // again after it (#188).
+  test("replays each decision only once the run has parked again after the one before", async () => {
+    const hub = fakeHub(
+      withAsset({
+        deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" }],
+        runsByDeployment: { dep_1: decidedRun("run_1", [1, 2, 3]).runIds },
+        eventsByRun: decidedRun("run_1", [1, 2, 3]).events,
+        parkAfterReads: 3,
+      }),
+    );
+    expect(await ensure(hub, 0, undefined, [], 1)).toMatchObject({ deploymentId: "dep_new", runId: "run_new", replay: { replayed: 3, refused: [] } });
+    expect(hub.signalsSent().map((sent) => sent.signalId)).toEqual(["dec-1", "dec-2", "dec-3"]);
+    expect(hub.parkedAtSignal).toEqual([true, true, true]);
+  });
+
+  test("a replayed decision on which the run completes counts as landed", async () => {
+    const hub = fakeHub(
+      withAsset({
+        deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" }],
+        runsByDeployment: { dep_1: decidedRun("run_1", [1, 2]).runIds },
+        eventsByRun: decidedRun("run_1", [1, 2]).events,
+        parkAfterReads: 1,
+        endsRunOn: "dec-2",
+      }),
+    );
+    expect(await ensure(hub, 0, undefined, [], 1)).toMatchObject({ deploymentId: "dep_new", runId: "run_new", replay: { replayed: 2 } });
+    expect(hub.parkedAtSignal).toEqual([true, true]);
   });
 
   test("a live run that has not caught up is brought up to the dead run's decisions, not replaced", async () => {
