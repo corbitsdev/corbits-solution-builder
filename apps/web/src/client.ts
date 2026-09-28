@@ -14,33 +14,34 @@ import {
   archiveArtifact as installerArchiveArtifact,
   createArtifact as installerCreateArtifact,
   createProject as installerCreateProject,
-  ensureProjectWorkflow,
-  ensureSpecialistDeployment,
-  switchSpecialistDeployment,
-  waitForDeploymentDeployed,
-  getArtifact as installerGetArtifact,
-  reviseArtifact as installerReviseArtifact,
-  install as installerInstall,
-  installState as installerInstallState,
-  upgradeWorkspace as installerUpgradeWorkspace,
-  installProjectAuthority,
-  InstallerError,
   delegateMore,
   delegateWorkspaceDefaultsIfSealed,
-  liveDelegationStore,
-  workspaceOwnedCredentialIds,
+  ensureProjectWorkflow,
+  ensureSpecialistDeployment,
+  getArtifact as installerGetArtifact,
+  install as installerInstall,
+  InstallerError,
+  installProjectAuthority,
+  installState as installerInstallState,
   listArtifacts,
   listSpecialistDeployments,
+  liveDelegationStore,
   ModelProviderNotDelegatedError,
+  myPrincipalIn,
   pushSourceTree,
   requireProject as installerRequireProject,
   resolveWorkspace,
+  reviseArtifact as installerReviseArtifact,
   revokeAllDelegations,
   stageSpecialistAddresses,
   stageSpecialistStatus,
+  switchSpecialistDeployment,
   updateProject as installerUpdateProject,
+  upgradeWorkspace as installerUpgradeWorkspace,
   vendoredMemberFiles,
+  waitForDeploymentDeployed,
   workflowsFor,
+  workspaceOwnedCredentialIds,
   type ClosureManifest,
   type ClosureSource,
   type EnsuredProjectWorkflow,
@@ -2027,9 +2028,17 @@ false,
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const workspace = await resolveWorkspace(transport);
       if (!workspace) throw new Error("The workspace is not installed yet.");
+      // The same person is a different principal in each tenant, and the
+      // hub stamps a decision with the caller's principal in the tenant it
+      // is signalled in: the project's own since #29. So the owner's
+      // principal there authorises every stage, beside the workspace one a
+      // legacy deployment still live in the workspace is signalled as
+      // (#165).
+      const ownerInProject = await myPrincipalIn(transport, projectId);
+      const authorizedPrincipalIds = [...new Set([...(ownerInProject ? [ownerInProject] : []), workspace.principalId])];
       const stages: ProjectWorkflowStageInput[] = Array.from({ length: 9 }, (_, index) => ({
         stage: index + 1,
-        authorizedPrincipalIds: [workspace.principalId],
+        authorizedPrincipalIds,
       }));
       const status = await readyToDeploy(transport, workspaceTenantId, projectId);
       const ref = await ensureProjectWorkflow(

@@ -177,8 +177,8 @@ function fakeHub(fixture: Fixture) {
   return { transport, gitPush, posts, eventReads, setRun, triggeredCode, signalsSent: () => posts.filter((post) => /\/signals$/.test(post.path)).map((post) => post.body as { runId: string; signalName: string; signalId: string; payload: unknown }) };
 }
 
-const ensure = (hub: ReturnType<typeof fakeHub>, replacementWaitMs = 0, placementPollMs?: number) =>
-  ensureProjectWorkflow(hub.transport, { canPlaceSidecars: true }, { files: { "workflow.js": "", "actions.js": "", "loops.js": "" } }, hub.gitPush, PROJECT_ID, [], {}, { replacementWaitMs, ...(placementPollMs === undefined ? {} : { placementPollMs }) });
+const ensure = (hub: ReturnType<typeof fakeHub>, replacementWaitMs = 0, placementPollMs?: number, stages: { stage: number; authorizedPrincipalIds: string[] }[] = []) =>
+  ensureProjectWorkflow(hub.transport, { canPlaceSidecars: true }, { files: { "workflow.js": "", "actions.js": "", "loops.js": "" } }, hub.gitPush, PROJECT_ID, stages, {}, { replacementWaitMs, ...(placementPollMs === undefined ? {} : { placementPollMs }) });
 
 const withAsset = (fixture: Omit<Fixture, "assets">): Fixture => ({ assets: [{ id: ASSET_ID, name: projectWorkflowAssetName(PROJECT_ID) }], ...fixture });
 
@@ -549,6 +549,35 @@ describe("ensureProjectWorkflow", () => {
   // code it ran, so a reducer fix reached only projects created after it.
   // A live run on other code than the current render is replaced the way
   // a dead one is revived, with its decisions replayed onto the new code.
+  // #165: the authorities a run was triggered with are part of what it runs
+  // on. A run told only the workspace principal refuses every decision the
+  // owner signals from the project tenant, and only a fresh run can be told.
+  test("a live run on the current code but other stage authorities is replaced, its decisions replayed", async () => {
+    const hub = fakeHub(
+      withAsset({
+        deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "deployed", createdAt: "2026-01-01T00:00:00.000Z" }],
+        runsByDeployment: { dep_1: decidedRun("run_1", [1], CURRENT).runIds },
+        eventsByRun: decidedRun("run_1", [1], CURRENT).events,
+      }),
+    );
+    const stages = [{ stage: 1, authorizedPrincipalIds: ["prn_project_owner", "prn_workspace_owner"] }];
+    const ensured = await ensure(hub, 0, undefined, stages);
+    expect(ensured).toMatchObject({ deploymentId: "dep_new", runId: "run_new", replay: { from: { deploymentId: "dep_1", runId: "run_1" }, replayed: 1 } });
+    expect(hub.triggeredCode()).toMatchObject({ generation: 2 });
+    expect(hub.triggeredCode()!.digest).not.toBe(CURRENT_DIGEST);
+    expect(hub.signalsSent().map((sent) => sent.signalId)).toEqual(["dec-1"]);
+    // And the same authorities again are the same code: nothing is replaced twice.
+    const again = fakeHub(
+      withAsset({
+        deployments: [{ id: "dep_2", definitionAssetId: ASSET_ID, status: "deployed", createdAt: "2026-01-02T00:00:00.000Z" }],
+        runsByDeployment: { dep_2: decidedRun("run_2", [1], { digest: hub.triggeredCode()!.digest, generation: 2 }).runIds },
+        eventsByRun: decidedRun("run_2", [1], { digest: hub.triggeredCode()!.digest, generation: 2 }).events,
+      }),
+    );
+    expect(await ensure(again, 0, undefined, stages)).toEqual({ deploymentId: "dep_2", runId: "run_2", tenantId: TENANT_ID });
+    expect(again.posts).toEqual([]);
+  });
+
   describe("a live run on other code than the current render (#51)", () => {
     const outdatedLive = (reducer?: Fixture["reducer"]) =>
       fakeHub(
