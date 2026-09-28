@@ -25,7 +25,7 @@ import { hostIdentity } from "./identity.js";
 import { databaseDirectory, dataDirectory, portFile } from "./paths.js";
 import { stopSpawnedSidecars } from "./sidecar-processes.js";
 import { ensureHub, hubMode, remoteHubOrigin, resolveWorkspace } from "./hub-client.js";
-import { hub, hubWebSocket, setHostPort, SIDECAR_WS_PATH } from "./hub-mount.js";
+import { hub, hubIsMounted, hubWebSocket, setHostPort, SIDECAR_WS_PATH } from "./hub-mount.js";
 import { sessionDoor } from "./door.js";
 import { readSecretResult, secretReference, storeSecret } from "./host-secrets.js";
 import {
@@ -432,6 +432,9 @@ export async function serveHost(options: ServeOptions): Promise<void> {
   async function stop(): Promise<void> {
     if (stopping) return stopping;
     stopping = (async () => {
+      // Before the database closes: a reconcile claim that runs against a
+      // closed pglite fails, and logs as if placement had broken.
+      if (hubIsMounted()) hub().stopReconcile();
       await server.stop(true);
       await stopSpawnedSidecars(join(dataDirectory(), "hub")).catch(() => 0);
       await host.close();
