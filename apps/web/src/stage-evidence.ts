@@ -13,7 +13,7 @@
  */
 import type { ArtifactNode, Remediation } from "./client.ts";
 import type { ProjectWorkflowView } from "./project-workflow.ts";
-import { approveReasonText, type ApproveReason, type Stage7Evidence } from "@solutions-builder/app/project-workflow/contracts";
+import { approveReasonText, type ApproveReason, type Stage6Evidence, type Stage7Evidence } from "@solutions-builder/app/project-workflow/contracts";
 import {
   checkStackCitations,
   parseStackRecord,
@@ -59,6 +59,9 @@ export type StageEvidenceDeps = {
   /** Reads the approved stage-6 build plan's text, to pull its `## Stack`
    *  block out for stage 7's evidence. */
   readonly artifactContent: (tenantId: string, nodeId: string) => Promise<{ content: string }>;
+  /** The plan under review at stage 6, whose `## Stack` block is that
+   *  stage's evidence (#55). Unused at every other stage. */
+  readonly planText?: string;
 };
 
 /** Every earlier stage (1..6) the view shows approved, frozen as a reference
@@ -97,11 +100,32 @@ async function stage7Evidence(deps: StageEvidenceDeps): Promise<Stage7Evidence |
 }
 
 /** Builds the `approve` decision's evidence for a stage, or `undefined` for
- *  a stage with no evidence to carry (every stage but 7 -- stage 5's rule
- *  reads `ProjectState` directly, CL-8870). */
-export async function stageEvidence(stage: number, deps: StageEvidenceDeps): Promise<Stage7Evidence | undefined> {
+ *  a stage with no evidence to carry (every stage but 6 and 7 -- stage 5's
+ *  rule reads `ProjectState` directly, CL-8870). Stage 6 always carries its
+ *  plan's Stack, parsed or not: the reducer's `stage6Rule` is what refuses
+ *  a plan without one (#55), and an approval with no evidence at all is
+ *  what a recorded pre-rule approval looks like, not a fresh one. */
+export async function stageEvidence(stage: number, deps: StageEvidenceDeps): Promise<Stage6Evidence | Stage7Evidence | undefined> {
+  if (stage === 6) return { stack: parseStackRecord(deps.planText ?? "") ?? ({} as StackRecord) };
   if (stage === 7) return stage7Evidence(deps);
   return undefined;
+}
+
+/** A stage 6 refusal in the plan's own terms (#55): the reducer's
+ *  `stack_*` codes name a plan that is not approved yet, so the way out is
+ *  a corrected plan from the architect, not a send-back. Other codes read
+ *  as `stageRefusalMessage` gives them. */
+export function stage6RefusalMessage(reason: string): string {
+  switch (reason) {
+    case "stack_missing":
+      return "The workflow refused this plan: its Stack section is missing or not in the required shape (a fenced JSON block). Ask the architect to resend it before approving.";
+    case "stack_uncited":
+      return "The workflow refused this plan: every part of its Stack section must cite the requirement that forces it. Ask the architect to fix the citations before approving.";
+    case "stack_unknown_requirement":
+      return "The workflow refused this plan: its Stack section cites a requirement id that does not exist. Ask the architect to fix the citations before approving.";
+    default:
+      return stageRefusalMessage(reason);
+  }
 }
 
 /**
