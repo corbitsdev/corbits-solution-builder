@@ -43,8 +43,8 @@ export function useElapsedMs(since?: string | null): number {
  * told the time every second.
  *
  * `stage` is optional so callers that do not know the stage (the thread view,
- * the design page) still render the generic estimate; the preparing view
- * passes its stage for the stage-specific copy.
+ * the design page) still render the generic estimate; a caller that knows
+ * its stage passes it for the stage-specific copy.
  */
 export function Elapsed({ stage, since }: { stage?: number; since?: string | null }) {
   const seconds = Math.floor(useElapsedMs(since) / 1_000);
