@@ -34,6 +34,9 @@ type Fixture = {
   parkAfterReads?: number;
   /** The decision on which the run completes instead of parking again. */
   endsRunOn?: string;
+  /** How many reads of a freshly triggered run's log pass before it shows
+   *  its first park: a namer still replying before the loop starts (#201). */
+  firstParkAfterReads?: number;
   /** The decision on whose signal a run's child dies: the hub records the
    *  signal on the top-level log and nothing follows, ever, the way the
    *  real hub's log looks after a transition error (#189). `once`: only the
@@ -187,7 +190,9 @@ function fakeHub(fixture: Fixture) {
         const { content } = body as { content: string };
         // Started, and parked on its first await the way the real run is
         // moments later: a replay waits for that park before it signals.
-        eventsByRun[runId] = [{ seq: 1, type: "RunStarted", body: { trigger: { type: "mail", payload: { parts: [{ text: content }] } } } }, PARKED[1]!];
+        eventsByRun[runId] = [{ seq: 1, type: "RunStarted", body: { trigger: { type: "mail", payload: { parts: [{ text: content }] } } } }];
+        if (fixture.firstParkAfterReads === undefined) eventsByRun[runId].push(PARKED[1]!);
+        else parkPending.set(runId, fixture.firstParkAfterReads);
         return { runId, address: `${runId}@hub`, messageId: "msg_1" } as T;
       }
       const signal = /^\/api\/tenants\/[^/]+\/workflows\/([^/]+)\/signals$/.exec(pathname!);
@@ -601,6 +606,21 @@ describe("ensureProjectWorkflow", () => {
     expect(await ensure(hub, 0, undefined, [], 1, 20)).toMatchObject({ deploymentId: "dep_new", runId: "run_new", replay: { from: { deploymentId: "dep_old_failed", runId: "run_0" }, replayed: 2, refused: [] } });
     expect(hub.signalsSent().map((sent) => `${sent.runId}:${sent.signalId}`)).toEqual(["run_1:dec-2", "run_new:dec-1", "run_new:dec-2"]);
     expect(hub.triggeredCode()).toEqual({ digest: CURRENT_DIGEST, generation: 2 });
+  });
+
+  test("a fresh run still starting up past the stall bound is waited for, not replaced", async () => {
+    const hub = fakeHub(
+      withAsset({
+        deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" }],
+        runsByDeployment: { dep_1: decidedRun("run_1", [1]).runIds },
+        eventsByRun: decidedRun("run_1", [1]).events,
+        // Hundreds of 1 ms polls before the first park: far past a 20 ms stall bound.
+        firstParkAfterReads: 300,
+      }),
+    );
+    expect(await ensure(hub, 0, undefined, [], 1, 20)).toMatchObject({ deploymentId: "dep_new", runId: "run_new", replay: { replayed: 1, refused: [] } });
+    expect(hub.signalsSent().map((sent) => `${sent.runId}:${sent.signalId}`)).toEqual(["run_new:dec-1"]);
+    expect(hub.posts.filter((post) => /\/deployments$/.test(post.path))).toHaveLength(1);
   });
 
   test("a replacement that stalls too is reported, not replaced again", async () => {

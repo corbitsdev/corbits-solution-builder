@@ -468,10 +468,17 @@ async function catchUp(transport: Transport, target: ProjectWorkflowDeployment, 
   const applied = async () => new Set((await appliedDecisions(workflows, target.deploymentId, target.runId)).map((decision) => decision.signalId));
   const ended = (events: readonly { type: string }[]) => events.some((event) => TERMINAL_RUN_EVENTS.has(event.type));
   // Progress is the top-level log growing. Called on every read that finds
-  // the run neither where the replay needs it nor ended.
+  // the run neither where the replay needs it nor ended. Counted only once
+  // the run has parked at least once: before its first park it is still
+  // starting up, and the namer it waits for (#201) can take longer than
+  // the stall bound with nothing to show for it; the pre-send budget
+  // bounds that wait instead.
   let newestSeq = -1;
   let movedAt = Date.now();
-  const stillFor = (events: readonly { seq: number }[], decisionId: string) => {
+  let parkedOnce = false;
+  const stillFor = (events: readonly { seq: number; type: string }[], decisionId: string) => {
+    parkedOnce ||= events.some((event) => event.type === "SignalAwaited");
+    if (!parkedOnce) return;
     const seq = Math.max(0, ...events.map((event) => event.seq));
     if (seq !== newestSeq) {
       newestSeq = seq;
