@@ -29,7 +29,7 @@ import { Dictated } from "../dictation.jsx";
 import { PrintButton } from "../print.jsx";
 import { Elapsed } from "./workspace/elapsed.jsx";
 import { designOrdinal } from "./workspace/design-history.ts";
-import type { FoldedFeedback } from "@solutions-builder/app/project-state";
+import type { FoldedFeedback } from "@solutions-builder/app/design-prompt";
 import { anchorResolves, shortPromptHash, withFallbackIds, type Disposition } from "../design-disposition.js";
 import { Markdown } from "../markdown.jsx";
 

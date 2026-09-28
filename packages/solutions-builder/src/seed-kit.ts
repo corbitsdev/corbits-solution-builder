@@ -14,14 +14,6 @@
 import type { AgentSeed, CuratedModelBinding, DirectorRecord, KitSeed, PromptRecord, SkillRecord } from "./kit.js";
 import { AGENT_KIT, type AgentRole } from "./kit.js";
 import { PLATFORM_SKILLS } from "./platform-skills.js";
-import {
-  APPROVAL_WORKFLOW_ID,
-  BUILD_SUPERVISION_WORKFLOW_ID,
-  DELIVERY_WORKFLOW_ID,
-  DESIGN_FEEDBACK_WORKFLOW_ID,
-  PROVIDER_SWITCH_WORKFLOW_ID,
-} from "./workflows/concerns.js";
-import { PROJECT_LIFECYCLE_ID, STAGE_WORKFLOW_ID } from "./workflows/stage-ids.js";
 
 /** The tools each tool package gives a specialist, by the names the model
  *  calls. `packages/installer/src/kit-tools.test.ts` checks these against the
@@ -69,7 +61,6 @@ const DIRECTORS: readonly DirectorRecord[] = [
     key: "sb-facilitator",
     title: "Facilitator",
     agents: ["product-guide", "constraints-mapper", "brief-evaluator"],
-    workflows: [PROJECT_LIFECYCLE_ID, STAGE_WORKFLOW_ID, APPROVAL_WORKFLOW_ID],
   },
   {
     key: "sb-specialists",
@@ -88,19 +79,11 @@ const DIRECTORS: readonly DirectorRecord[] = [
       "senior-engineer-platform",
       "senior-engineer-security",
     ],
-    workflows: [
-      STAGE_WORKFLOW_ID,
-      APPROVAL_WORKFLOW_ID,
-      DESIGN_FEEDBACK_WORKFLOW_ID,
-      PROVIDER_SWITCH_WORKFLOW_ID,
-      DELIVERY_WORKFLOW_ID,
-    ],
   },
   {
     key: "sb-supervisor",
     title: "Builder",
     agents: ["build-engineer"],
-    workflows: [BUILD_SUPERVISION_WORKFLOW_ID],
   },
 ];
 

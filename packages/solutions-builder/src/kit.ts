@@ -1116,12 +1116,13 @@ export type SkillRecord = {
   readonly tools: readonly string[];
 };
 
-/** A named group of agents and the workflows they participate in. */
+/** A named group of agents: what an agent seed's `directorKey` names. The
+ *  lifecycle-era workflow ids a director once listed went with the
+ *  lifecycle (#39); nothing reads a director's workflows. */
 export type DirectorRecord = {
   readonly key: string;
   readonly title: string;
   readonly agents: readonly string[];
-  readonly workflows: readonly string[];
 };
 
 /** A purpose, bound to a catalogue entry — never to a vendor model id. */

@@ -73,7 +73,7 @@ import {
   SendBackPopover,
   StagePanes,
 } from "./workspace-chrome.tsx";
-import type { FoldedFeedback } from "@solutions-builder/app/project-state";
+import type { FoldedFeedback } from "@solutions-builder/app/design-prompt";
 
 export { StageDocument, DocumentBody } from "./document.jsx";
 export { ApprovalsRecord, STAGE_GOAL } from "./gate.jsx";
