@@ -132,6 +132,7 @@ export type CreateEmbeddedHubOptions = {
   readonly pglite: PGlite;
   readonly credentialKeyHex: string;
   readonly principalKeyHex: string;
+  readonly sidecarCredentialKeyHex: string;
   readonly signingKey: HubSigningKey;
   /**
    * Where the agent-repo store and the process provisioner keep their state.
@@ -387,8 +388,9 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
 
   // Workflows execute in Interchange's own sidecar, spawned as a child process
   // of this host per allocation. The sidecar seals credentials under a key of
-  // its own; it gets the hub's from the environment the provisioner forwards.
-  process.env["SIDECAR_CREDENTIAL_ENCRYPTION_KEY"] ??= options.credentialKeyHex;
+  // its own, separate from the hub's so a sidecar compromise cannot open the
+  // hub's credential database.
+  process.env["SIDECAR_CREDENTIAL_ENCRYPTION_KEY"] ??= options.sidecarCredentialKeyHex;
   // Responses-only backends (ChatGPT/Codex) are catalog rows on this adapter,
   // configured per offering by quirks.
   process.env["SIDECAR_ADAPTER_MANIFEST"] ??= JSON.stringify([

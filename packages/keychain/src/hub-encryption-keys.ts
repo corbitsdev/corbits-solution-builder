@@ -18,11 +18,17 @@ import { readSecretResult, secretReference, storeSecret } from "./store.js";
 const ACCOUNTS = {
   credential: "hub:credential-encryption-key",
   principal: "hub:principal-key-encryption-key",
+  sidecarCredential: "sidecar:credential-encryption-key",
 } as const;
 
 export type HubEncryptionKeys = {
   credentialKeyHex: string;
   principalKeyHex: string;
+  /**
+   * Seals what the sidecars persist. Never the hub's credential key: a sidecar's
+   * environment is readable by any process running as this user.
+   */
+  sidecarCredentialKeyHex: string;
 };
 
 function mintHexKey(): string {
@@ -64,5 +70,6 @@ export async function hubEncryptionKeys(): Promise<HubEncryptionKeys> {
   return {
     credentialKeyHex: await resolve(ACCOUNTS.credential, "CREDENTIAL_ENCRYPTION_KEY"),
     principalKeyHex: await resolve(ACCOUNTS.principal, "PRINCIPAL_KEY_ENCRYPTION_KEY"),
+    sidecarCredentialKeyHex: await resolve(ACCOUNTS.sidecarCredential, "SIDECAR_CREDENTIAL_ENCRYPTION_KEY"),
   };
 }

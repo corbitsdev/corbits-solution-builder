@@ -19,6 +19,7 @@ configureKeychain({
 
 const CREDENTIAL_ACCOUNT = "hub:credential-encryption-key";
 const PRINCIPAL_ACCOUNT = "hub:principal-key-encryption-key";
+const SIDECAR_ACCOUNT = "sidecar:credential-encryption-key";
 
 function secretPath(dataDir: string, account: string): string {
   return join(dataDir, "credentials", `${encodeURIComponent(account)}.secret`);
@@ -29,6 +30,7 @@ describe("hubEncryptionKeys", () => {
     dataDir: process.env.SOLUTIONS_BUILDER_DATA_DIR,
     credential: process.env.CREDENTIAL_ENCRYPTION_KEY,
     principal: process.env.PRINCIPAL_KEY_ENCRYPTION_KEY,
+    sidecar: process.env.SIDECAR_CREDENTIAL_ENCRYPTION_KEY,
   };
   const dirs: string[] = [];
 
@@ -39,6 +41,8 @@ describe("hubEncryptionKeys", () => {
     else process.env.CREDENTIAL_ENCRYPTION_KEY = previous.credential;
     if (previous.principal === undefined) delete process.env.PRINCIPAL_KEY_ENCRYPTION_KEY;
     else process.env.PRINCIPAL_KEY_ENCRYPTION_KEY = previous.principal;
+    if (previous.sidecar === undefined) delete process.env.SIDECAR_CREDENTIAL_ENCRYPTION_KEY;
+    else process.env.SIDECAR_CREDENTIAL_ENCRYPTION_KEY = previous.sidecar;
     await Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
   });
 
@@ -66,6 +70,7 @@ describe("hubEncryptionKeys", () => {
     process.env.SOLUTIONS_BUILDER_DATA_DIR = dataDir;
     delete process.env.CREDENTIAL_ENCRYPTION_KEY;
     delete process.env.PRINCIPAL_KEY_ENCRYPTION_KEY;
+    delete process.env.SIDECAR_CREDENTIAL_ENCRYPTION_KEY;
 
     const first = await hubEncryptionKeys();
     expect(first.credentialKeyHex).toMatch(/^[0-9a-f]{64}$/);
@@ -73,6 +78,9 @@ describe("hubEncryptionKeys", () => {
     expect(first.credentialKeyHex).not.toBe(first.principalKeyHex);
     expect(await readFile(secretPath(dataDir, CREDENTIAL_ACCOUNT), "utf8")).toBe(first.credentialKeyHex);
     expect(await readFile(secretPath(dataDir, PRINCIPAL_ACCOUNT), "utf8")).toBe(first.principalKeyHex);
+    expect(first.sidecarCredentialKeyHex).toMatch(/^[0-9a-f]{64}$/);
+    expect(first.sidecarCredentialKeyHex).not.toBe(first.credentialKeyHex);
+    expect(await readFile(secretPath(dataDir, SIDECAR_ACCOUNT), "utf8")).toBe(first.sidecarCredentialKeyHex);
 
     const second = await hubEncryptionKeys();
     expect(second).toEqual(first);
