@@ -23,10 +23,13 @@ import { Button, documentName, CopyButton } from "../../components.jsx";
 import { PrintButton } from "../../print.jsx";
 import { BinaryFile, isDataUrl } from "../../binary-file.tsx";
 import { SpecialistTurn, WorkingLabel, type TurnNote } from "./thread.jsx";
+import type { DraftRef } from "./draft-references.ts";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
 import { clearQuotedDraft, loadQuotedDraft, saveQuotedDraft } from "./quote-store.js";
 import { COMPOSER_BOX_CLASS, CONV_SCROLL_CLASS } from "./pane-classes.ts";
 import { StagePanes } from "./workspace-chrome.tsx";
+
+const EMPTY_REFS: ReadonlyMap<string, DraftRef> = new Map();
 
 /**
  * A drafted stage: the document, and the conversation about it.
@@ -51,6 +54,7 @@ export function StageDocument({
   openQuestion,
   evaluation = null,
   advisory = null,
+  draftRefs = EMPTY_REFS,
   onSelectVersion,
   onRevise,
   onAddMaterial,
@@ -87,6 +91,9 @@ export function StageDocument({
    *  the brief evaluator's stance (#157). It never enables or blocks
    *  approval, and shows only while the bar does. */
   advisory?: ReactNode;
+  /** Which version each draft reply became (#158): the conversation shows
+   *  such a reply as one line naming its version, never as its text. */
+  draftRefs?: ReadonlyMap<string, DraftRef>;
   onSelectVersion: (id: string) => void;
   onRevise: (message: string, quotes: Quote[], revise?: boolean) => void;
   /** Hands files over as material, mid-project. Absent where nothing can be added. */
@@ -420,6 +427,7 @@ export function StageDocument({
                 <SpecialistTurn
                   text={(message.parts[0] as { text: string }).text}
                   note={notes.get(message.id) ?? null}
+                  draft={draftRefs.get(message.id) ?? null}
                   onOpenVersion={onSelectVersion}
                   // Tapping a choice sends it, exactly as typing it would. That
                   // holds outside the interview too: a brainstormer proposing

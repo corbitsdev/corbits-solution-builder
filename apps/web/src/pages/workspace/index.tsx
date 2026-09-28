@@ -44,6 +44,7 @@ import { BuildPanel } from "./build.jsx";
 import { TargetPicker } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
 import { interviewProgress, latestDesignReply, workspaceGuidance } from "./guidance.js";
+import { draftReferences } from "./draft-references.ts";
 import { designHistory } from "./design-history.ts";
 import { Flame } from "lucide-react";
 import { useWorkflowView } from "./use-workflow-view.ts";
@@ -291,6 +292,17 @@ export function StageWorkspace({
 
   const draftKind = STAGE_DRAFT_KIND[stage] ?? null;
   const artifacts = useProjectArtifacts(tenantId, stage, detail.nodes, draftMessage);
+  // Each draft reply's version (#158): the conversation shows the reply as a
+  // line naming it, on every document stage and on a reload alike, since
+  // both the mail and the lineage are records.
+  const liveVersions = artifacts.tabs.find((tab) => tab.live)?.versions;
+  const draftRefs = useMemo(
+    () =>
+      DOCUMENT_STAGES.has(stage) && draftKind
+        ? draftReferences(foldedMessages, liveVersions ?? [], documentName(draftKind).toLowerCase())
+        : undefined,
+    [stage, draftKind, foldedMessages, liveVersions],
+  );
   // A done-segment click is a navigation signal, not state — one effect is
   // where it lands.
   useEffect(() => {
@@ -652,6 +664,8 @@ export function StageWorkspace({
       onAttach={(files) => {
         void api.attachMaterial(detail.project.id, [...files]).then(() => void refreshWorkflow());
       }}
+      {...(draftRefs ? { draftRefs } : {})}
+      onOpenVersion={artifacts.openVersion}
     />
   );
 
@@ -959,7 +973,8 @@ export function StageWorkspace({
                 : null
             }
             advisory={stage === 1 ? <EvaluatorStance evaluator={evaluator} /> : null}
-            onSelectVersion={artifacts.selectVersion}
+            {...(draftRefs ? { draftRefs } : {})}
+            onSelectVersion={artifacts.openVersion}
             onRevise={(message, quotes) => {
               artifacts.selectVersion(null);
               const quoted = quotes.map((entry) => `> ${entry.quote}`).join("\n");
