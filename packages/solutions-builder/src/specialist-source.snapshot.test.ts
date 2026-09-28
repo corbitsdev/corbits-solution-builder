@@ -27,8 +27,6 @@ describe("specialistEntrySource renders each role byte-identically", () => {
         const rendered = specialistEntrySource({
           stage,
           source: { provider: "openai", model: "gpt-5.5" },
-          projectId: "tnt_snapshot",
-          assetName: `sb-project-tnt-snapshot-stage-${String(stage)}${roleKey === "primary" ? "" : `-${roleKey}`}`,
           role,
           roleKey,
           artifactTools,

@@ -92,10 +92,9 @@ const DEFAULT_EXCLUDES = [
 /** Sidecar env this tool needs: the workspace directory the run's shell
  *  commands operate on (same key `@intx/tools-posix` declares), plus the
  *  capability registry and run address a credential-bound upload needs.
- *  `projectId` is NOT here — the host has no such env key. It reaches this
- *  tool as a constant closed over by `publishWorkspaceTool` below, rendered
- *  into the entry source at deploy time the same way `specialistEntrySource`
- *  already bakes in `SOURCE`. */
+ *  No project id: the run's own tenant is the project (#29), and the hub's
+ *  run-scoped mount labels what this uploads from that scope
+ *  (`embed-hub/src/workflow-artifact-label.ts`). */
 export interface PublishWorkspaceEnv extends BaseEnv {
   toolCwd: string;
   capabilities: RuntimeCapabilities;
@@ -114,7 +113,6 @@ type PublishWorkspaceArgs = {
 export type { ManifestFileEntry } from "./verify.js";
 
 export type DeliveryManifestContent = {
-  projectId: string;
   stage: 8;
   attempt: string;
   archive: { fileName: string; sizeBytes: number; sha256: string };
@@ -258,7 +256,6 @@ function tarDirectory(cwd: string, exclude: string[]): Promise<Buffer> {
  *  matches what the archive contains. The file list is capped
  *  (`MANIFEST_FILE_CAP`); `fileCount` always reports the real total. */
 async function buildManifest(
-  projectId: string,
   attempt: string,
   targetDir: string,
   exclude: string[],
@@ -267,7 +264,6 @@ async function buildManifest(
   const hashed = await hashTree(targetDir, new Set(exclude));
   const files = hashed.slice(0, MANIFEST_FILE_CAP);
   return {
-    projectId,
     stage: 8,
     attempt,
     archive,
@@ -310,10 +306,6 @@ async function verifyAndRecord(
 function attemptVariant(dir: string): string {
   const match = /(\d+)(?!.*\d)/.exec(dir);
   return `attempt-${match ? match[1] : "1"}`;
-}
-
-function slugify(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "project";
 }
 
 type MediatedFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -366,7 +358,6 @@ async function uploadArtifact(
 
 async function publishWorkspaceContent(
   env: PublishWorkspaceEnv,
-  projectId: string,
   rawArgs: Record<string, unknown>,
 ): Promise<UploadResult | FallbackResult> {
   const args = parseArgs(rawArgs);
@@ -391,7 +382,7 @@ async function publishWorkspaceContent(
     }
     const dataUri = `data:${BUNDLE_MEDIA_TYPE};base64,${bytes.toString("base64")}`;
     const sha256 = createHash("sha256").update(bytes).digest("hex");
-    const manifest = await buildManifest(projectId, attemptVariant(dir), targetDir, args.exclude, {
+    const manifest = await buildManifest(attemptVariant(dir), targetDir, args.exclude, {
       fileName: args.fileName,
       sizeBytes: bytes.byteLength,
       sha256,
@@ -410,14 +401,15 @@ async function publishWorkspaceContent(
   try {
     const variant = attemptVariant(dir);
     const sha256 = createHash("sha256").update(bytes).digest("hex");
-    const title = `${slugify(projectId)}-${variant}.tar.gz`;
+    // The project is the run's tenant; the hub stamps `sb.projectId` from
+    // its resolved run scope, so nothing here names it (#41 step 5).
+    const title = `build-${variant}.tar.gz`;
     const created = await uploadArtifact(hub.fetch, env.address, {
       fileName: title,
       mimeType: BUNDLE_MEDIA_TYPE,
       bytes,
       metadata: {
         sb: {
-          projectId,
           kind: BUILD_EVIDENCE_KIND,
           stage: 8,
           mediaType: BUNDLE_MEDIA_TYPE,
@@ -428,7 +420,7 @@ async function publishWorkspaceContent(
       },
     });
 
-    const manifestContent = await buildManifest(projectId, variant, targetDir, args.exclude, {
+    const manifestContent = await buildManifest(variant, targetDir, args.exclude, {
       fileName: title,
       sizeBytes: bytes.byteLength,
       sha256,
@@ -436,12 +428,11 @@ async function publishWorkspaceContent(
     const verification = await verifyAndRecord(manifestContent, bytes, `${created.id}@${String(created.version)}`, args, targetDir);
     const manifestBytes = Buffer.from(JSON.stringify(manifestContent), "utf8");
     const manifestCreated = await uploadArtifact(hub.fetch, env.address, {
-      fileName: `${slugify(projectId)}-${variant}-manifest.json`,
+      fileName: `build-${variant}-manifest.json`,
       mimeType: MANIFEST_MEDIA_TYPE,
       bytes: manifestBytes,
       metadata: {
         sb: {
-          projectId,
           kind: DELIVERY_MANIFEST_KIND,
           stage: 8,
           mediaType: MANIFEST_MEDIA_TYPE,
@@ -511,12 +502,13 @@ const DESCRIPTION =
   "Archives the build attempt, checks it, and records it as the artifact the person approves. It finds the current attempt itself; pass \"targets\" naming each web or api target's real start command and port so the tool can start and probe it. Everything else is optional and only overrides what it works out.";
 
 /**
- * Builds this tool bound to one project. `projectId` is a render-time
- * constant (see `specialist-source.ts`'s `specialistEntrySource`, which
- * writes `publishWorkspaceTool(${JSON.stringify(projectId)})` into the
- * generated entry source) — never something the model supplies.
+ * Builds this tool. It is bound to no project (#41 step 5, decision A): a
+ * specialist runs in its project's own tenant (#29), so the project is the
+ * run's tenant, stamped onto what this uploads by the hub's run-scoped mount
+ * -- never something the model supplies, and no longer a render-time
+ * constant either, so the same entry serves every project.
  */
-export function publishWorkspaceTool(projectId: string) {
+export function publishWorkspaceTool() {
   return defineTool<PublishWorkspaceEnv>({
     id: "@solutions-builder/tools-delivery/publish-workspace",
     requires: ["toolCwd", "capabilities", "address"],
@@ -526,7 +518,7 @@ export function publishWorkspaceTool(projectId: string) {
       run: async (call, signal) => {
         try {
           signal.throwIfAborted();
-          const result = await publishWorkspaceContent(env, projectId, call.arguments);
+          const result = await publishWorkspaceContent(env, call.arguments);
           return { callId: call.id, content: JSON.stringify(result) };
         } catch (err) {
           return { callId: call.id, content: err instanceof Error ? err.message : String(err), isError: true };

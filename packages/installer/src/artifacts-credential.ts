@@ -20,8 +20,10 @@ import { catalogFor, registerWorkflowArtifactToken, type HubProvider } from "./h
 
 export const WORKFLOW_ARTIFACTS_PROVIDER_NAME = "sb-workflow-artifacts";
 
-export function workflowArtifactsCredentialName(assetName: string): string {
-  return `workflow-artifacts:${assetName}`;
+/** Mirrors `specialist-source.ts`'s: fixed per role (#41 step 5), one
+ *  credential per role in each project's own tenant. */
+export function workflowArtifactsCredentialName(roleId: string): string {
+  return `workflow-artifacts:${roleId}`;
 }
 
 function mintToken(): string {
@@ -83,7 +85,8 @@ export async function ensureWorkflowArtifactsCredential(
    *  credential and the token registration land here, where its run is. */
   tenantId: string,
   hubOrigin: string,
-  assetName: string,
+  /** The kit role the deployment runs: what the credential is named for. */
+  roleId: string,
   anchorRunId: string,
   /** The tenant holding the one `sb-workflow-artifacts` provider: the
    *  workspace. A project-owned credential resolves an inherited provider
@@ -94,7 +97,7 @@ export async function ensureWorkflowArtifactsCredential(
   const catalog = catalogFor(transport, tenantId);
   const provider = await ensureProvider(catalogFor(transport, providerTenantId), hubOrigin);
   const token = mintToken();
-  const name = workflowArtifactsCredentialName(assetName);
+  const name = workflowArtifactsCredentialName(roleId);
   try {
     await catalog.createCredential({ providerId: provider.id, name, type: "other", secret: token });
   } catch (cause) {

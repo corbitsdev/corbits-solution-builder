@@ -52,7 +52,7 @@ export default defineWorkflow({
       package: "@corbits/artifacts/sidecar-bundle",
       handle: "hub",
       provider: "sb-workflow-artifacts",
-      name: "workflow-artifacts:sb-project-tnt-snapshot-stage-1",
+      name: "workflow-artifacts:brainstormer",
       locator: "tenant",
     },
   ],
@@ -120,7 +120,7 @@ export default defineWorkflow({
       package: "@corbits/artifacts/sidecar-bundle",
       handle: "hub",
       provider: "sb-workflow-artifacts",
-      name: "workflow-artifacts:sb-project-tnt-snapshot-stage-2",
+      name: "workflow-artifacts:constraints-mapper",
       locator: "tenant",
     },
   ],
@@ -188,7 +188,7 @@ export default defineWorkflow({
       package: "@corbits/artifacts/sidecar-bundle",
       handle: "hub",
       provider: "sb-workflow-artifacts",
-      name: "workflow-artifacts:sb-project-tnt-snapshot-stage-3",
+      name: "workflow-artifacts:proposer",
       locator: "tenant",
     },
   ],
@@ -256,7 +256,7 @@ export default defineWorkflow({
       package: "@corbits/artifacts/sidecar-bundle",
       handle: "hub",
       provider: "sb-workflow-artifacts",
-      name: "workflow-artifacts:sb-project-tnt-snapshot-stage-4",
+      name: "workflow-artifacts:experience-designer",
       locator: "tenant",
     },
   ],
@@ -326,7 +326,7 @@ export default defineWorkflow({
       package: "@corbits/artifacts/sidecar-bundle",
       handle: "hub",
       provider: "sb-workflow-artifacts",
-      name: "workflow-artifacts:sb-project-tnt-snapshot-stage-5",
+      name: "workflow-artifacts:presentation-creator",
       locator: "tenant",
     },
   ],
@@ -394,7 +394,7 @@ export default defineWorkflow({
       package: "@corbits/artifacts/sidecar-bundle",
       handle: "hub",
       provider: "sb-workflow-artifacts",
-      name: "workflow-artifacts:sb-project-tnt-snapshot-stage-6",
+      name: "workflow-artifacts:architect",
       locator: "tenant",
     },
   ],
@@ -462,7 +462,7 @@ export default defineWorkflow({
       package: "@corbits/artifacts/sidecar-bundle",
       handle: "hub",
       provider: "sb-workflow-artifacts",
-      name: "workflow-artifacts:sb-project-tnt-snapshot-stage-7",
+      name: "workflow-artifacts:estimator",
       locator: "tenant",
     },
   ],
@@ -483,7 +483,7 @@ exports[`specialistEntrySource renders each role byte-identically stage 8 primar
 import { defineAgent } from "@intx/agent";
 import { posix } from "@intx/tools-posix/sidecar-bundle";
 import { publishWorkspaceTool } from "@solutions-builder/tools-delivery/publish-workspace";
-const publishWorkspace = publishWorkspaceTool("tnt_snapshot");
+const publishWorkspace = publishWorkspaceTool();
 
 const SOURCE = {"provider":"openai","model":"gpt-5.5"};
 
@@ -515,7 +515,7 @@ exports[`specialistEntrySource renders each role byte-identically stage 8 primar
 import { defineAgent } from "@intx/agent";
 import { posix } from "@intx/tools-posix/sidecar-bundle";
 import { publishWorkspaceTool } from "@solutions-builder/tools-delivery/publish-workspace";
-const publishWorkspace = publishWorkspaceTool("tnt_snapshot");
+const publishWorkspace = publishWorkspaceTool();
 
 const SOURCE = {"provider":"openai","model":"gpt-5.5"};
 
@@ -535,7 +535,7 @@ export default defineWorkflow({
       package: "@solutions-builder/tools-delivery/publish-workspace",
       handle: "hub",
       provider: "sb-workflow-artifacts",
-      name: "workflow-artifacts:sb-project-tnt-snapshot-stage-8",
+      name: "workflow-artifacts:build-engineer",
       locator: "tenant",
     },
   ],
@@ -605,7 +605,7 @@ export default defineWorkflow({
       package: "@corbits/artifacts/sidecar-bundle",
       handle: "hub",
       provider: "sb-workflow-artifacts",
-      name: "workflow-artifacts:sb-project-tnt-snapshot-stage-9",
+      name: "workflow-artifacts:delivery-verifier",
       locator: "tenant",
     },
   ],
@@ -673,7 +673,7 @@ export default defineWorkflow({
       package: "@corbits/artifacts/sidecar-bundle",
       handle: "hub",
       provider: "sb-workflow-artifacts",
-      name: "workflow-artifacts:sb-project-tnt-snapshot-stage-1-brief-evaluator",
+      name: "workflow-artifacts:brief-evaluator",
       locator: "tenant",
     },
   ],
@@ -741,7 +741,7 @@ export default defineWorkflow({
       package: "@corbits/artifacts/sidecar-bundle",
       handle: "hub",
       provider: "sb-workflow-artifacts",
-      name: "workflow-artifacts:sb-project-tnt-snapshot-stage-1-product-guide",
+      name: "workflow-artifacts:product-guide",
       locator: "tenant",
     },
   ],
@@ -809,7 +809,7 @@ export default defineWorkflow({
       package: "@corbits/artifacts/sidecar-bundle",
       handle: "hub",
       provider: "sb-workflow-artifacts",
-      name: "workflow-artifacts:sb-project-tnt-snapshot-stage-6-requirements-author",
+      name: "workflow-artifacts:requirements-author",
       locator: "tenant",
     },
   ],
