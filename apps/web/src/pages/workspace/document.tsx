@@ -435,7 +435,13 @@ export function StageDocument({
                   // is queued.
                   onAnswer={
                     busy === null && message.id === lastTurnId
-                      ? (answer) => onRevise(answer, [])
+                      ? (answer) => {
+                          // The last tap sends what the box was gathering
+                          // (#186): the box empties, as after any send, so
+                          // the answers cannot go a second time.
+                          setMessage("");
+                          onRevise(answer, []);
+                        }
                       : undefined
                   }
                   // With several questions asked, the answers gather in the
