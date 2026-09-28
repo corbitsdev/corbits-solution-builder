@@ -126,3 +126,19 @@ function detectConflicts(comments: readonly Comment[]): string[] {
         `${label} has ${entries.length} comments; they may conflict and a human must reconcile them.`,
     );
 }
+
+/** A design version's recorded feedback, as the design page and the
+ *  workspace hold it per node: the direction, the overall note, every
+ *  anchored comment, and the revision prompt they rendered to. Kept here,
+ *  beside the vocabulary it is built from, since the lifecycle run fold that
+ *  once produced it is gone (#39); today `sb.feedback` on the artifact is
+ *  the source. */
+export type FoldedFeedback = {
+  readonly runId: string;
+  readonly designNodeId: string;
+  readonly direction: Direction;
+  readonly overallNote: string;
+  readonly comments: readonly { readonly anchor: Anchor; readonly body: string }[];
+  readonly prompt: string;
+  readonly at: string | null;
+};
