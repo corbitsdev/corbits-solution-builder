@@ -1990,6 +1990,22 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   color: var(--wb-foreground);
 }
 
+/* A draft reply's line in the chat (#158): the version it became, opening in
+   the document pane. The draft's own text never repeats here. */
+.turn-draft {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+  font-size: 0.8125rem;
+  color: var(--wb-muted-foreground);
+}
+
+.turn-draft .turn-version {
+  color: var(--wb-foreground);
+  text-decoration-color: var(--wb-primary);
+}
+
 /* The question, apart from the telling that came before it. */
 .turn-question {
   margin: var(--space-3) 0 0;

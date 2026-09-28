@@ -86,17 +86,20 @@ export function isSubstantialDraft(body: string): boolean {
   return headings.length >= 2 && prose.length >= 200;
 }
 
+/** The chat's one-line stand-in for a draft that has no lead of its own. */
+export const DRAFT_POINTER = "First draft is in the document.";
+
 /** What the narrow chat column may show of a specialist turn. A headed draft
  *  is the document pane; chat gets the short lead before the first heading,
  *  or a one-line pointer if there is no lead. */
 export function conversationLead(body: string): string {
   if (!isSubstantialDraft(body)) return body.trim();
-  if (isHtmlDocument(body)) return "First draft is in the document.";
+  if (isHtmlDocument(body)) return DRAFT_POINTER;
   const cut = body.search(/^##\s/m);
   const before = (cut === -1 ? body : body.slice(0, cut)).trim();
   const first = before.split(/\n\s*\n/)[0]?.trim() ?? "";
   if (first.length > 0 && first.length <= 480 && !/^#\s/.test(first)) return first;
-  return "First draft is in the document.";
+  return DRAFT_POINTER;
 }
 
 /** The question now open: the first the turn asks -- the kit orders them

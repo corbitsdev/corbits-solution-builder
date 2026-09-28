@@ -1,11 +1,12 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { ChatInput, type ChatMessage as UiChatMessage } from "@corbits/react-ui";
-import { Plus, Send } from "lucide-react";
+import { FileText, Plus, Send } from "lucide-react";
 import { Markdown } from "../../markdown.jsx";
 import { Dictated } from "../../dictation.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { answersDraft, segmentsIn } from "./choices.js";
-import { conversationLead, isHtmlDocument } from "./guidance.js";
+import { DRAFT_POINTER, conversationLead, isHtmlDocument } from "./guidance.js";
+import type { DraftRef } from "./draft-references.ts";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
 import { HANDOFF_BUBBLE_TEXT, matchSwitchMarker } from "./use-model-handoff.ts";
 import { COMPOSER_BOX_CLASS, CONV_SCROLL_CLASS } from "./pane-classes.ts";
@@ -91,6 +92,8 @@ export function StageConversation({
   rows = null,
   who = "Specialist",
   onAttach,
+  draftRefs = EMPTY_REFS,
+  onOpenVersion,
 }: {
   stage: number;
   messages: readonly ChatMessage[];
@@ -120,6 +123,11 @@ export function StageConversation({
   who?: string;
   /** The paperclip: files join the project as material for the next draft. */
   onAttach?: (files: FileList) => void;
+  /** Which version each draft reply became (#158): such a reply is one line
+   *  naming its version, never the draft itself. */
+  draftRefs?: ReadonlyMap<string, DraftRef>;
+  /** Opens a draft line's version in the document pane. */
+  onOpenVersion?: ((nodeId: string) => void) | undefined;
 }) {
   const uiMessages = useMemo(() => {
     const list = toUiMessages(messages);
@@ -186,6 +194,7 @@ export function StageConversation({
             }
             const text = messageText(message);
             const you = message.role === "user";
+            const draft = you ? null : (draftRefs.get(message.id) ?? null);
             return (
               <div key={message.id} className={you ? "msg you" : "msg"}>
                 <span className="who conv-who">{you ? "You" : who}</span>
@@ -195,6 +204,11 @@ export function StageConversation({
                       <MessageBody text={text} />
                       <span className="turn-withdrawn-note">Stopped before it was answered.</span>
                     </div>
+                  ) : draft ? (
+                    <>
+                      <DraftReference draft={draft} onOpen={onOpenVersion} />
+                      {text === DRAFT_POINTER ? null : <MessageBody text={text} />}
+                    </>
                   ) : (
                     <MessageBody text={text} />
                   )}
@@ -233,6 +247,31 @@ export function StageConversation({
 
 const EMPTY_WITHDRAWN: ReadonlySet<string> = new Set();
 const EMPTY_EVENTS: readonly StageEvent[] = [];
+const EMPTY_REFS: ReadonlyMap<string, DraftRef> = new Map();
+
+/**
+ * A draft reply's line in the chat (#158): "Drafted v2 of the problem
+ * brief", opening that version in the document pane. The draft's own text
+ * and headings never repeat here; the pane is the one place they show. A
+ * draft whose version is not recorded yet is named without a version, and
+ * the line has nothing to open.
+ */
+export function DraftReference({ draft, onOpen }: { draft: DraftRef; onOpen?: ((nodeId: string) => void) | undefined }) {
+  const label = draft.version !== null ? `Drafted v${draft.version} of the ${draft.noun}` : `Drafted the ${draft.noun}`;
+  const nodeId = draft.nodeId;
+  return (
+    <p className="turn-draft">
+      <FileText className="size-3.5" aria-hidden="true" />
+      {nodeId && onOpen ? (
+        <button type="button" className="turn-version" onClick={() => onOpen(nodeId)}>
+          {label}
+        </button>
+      ) : (
+        <span>{label}</span>
+      )}
+    </p>
+  );
+}
 
 /** One calm, honest line while the specialist writes — no cycling phrases
  *  presented as live activity (CL-8726). The turn's own "who" label already
@@ -260,12 +299,17 @@ export type TurnNote = {
 export function SpecialistTurn({
   text,
   note,
+  draft = null,
   onOpenVersion,
   onAnswer,
   onDraft,
 }: {
   text: string;
   note: TurnNote | null;
+  /** Set when the turn is a draft (#158): the chat shows one line naming
+   *  its version and the questions the turn asks, and the draft's text and
+   *  headings stay in the document pane. */
+  draft?: DraftRef | null;
   onOpenVersion: (nodeId: string) => void;
   /** Set while the turn can be answered: sent once every question the turn
    *  asks has a tapped answer. A lone question sends on its tap. */
@@ -294,12 +338,16 @@ export function SpecialistTurn({
     else onDraft(draft.text);
   };
   let questionIndex = -1;
+  // A draft's lead -- the sentence or two before its first heading -- is
+  // conversation and stays; the pointer that stands in when there is no
+  // lead is what the draft line already says.
+  const lead = draft ? conversationLead(text) : null;
   return (
     <>
       {note ? (
         <p className="turn-note">
           {note.answered ? <span>Noted</span> : null}
-          {note.version !== null && note.nodeId ? (
+          {note.version !== null && note.nodeId && !draft ? (
             <button type="button" className="turn-version" onClick={() => onOpenVersion(note.nodeId!)}>
               {note.noun} updated to v{note.version}
             </button>
@@ -307,8 +355,10 @@ export function SpecialistTurn({
           {question ? <span>{note.fresh ? "new round of questions" : "next question"}</span> : null}
         </p>
       ) : null}
+      {draft ? <DraftReference draft={draft} onOpen={onOpenVersion} /> : null}
+      {lead !== null && lead !== DRAFT_POINTER ? <Markdown source={lead} /> : null}
       {segments.map((segment, index) => {
-        if (segment.kind === "text") return <Markdown key={index} source={segment.markdown} />;
+        if (segment.kind === "text") return draft ? null : <Markdown key={index} source={segment.markdown} />;
         const at = ++questionIndex;
         const picked = chosen.get(at);
         return (

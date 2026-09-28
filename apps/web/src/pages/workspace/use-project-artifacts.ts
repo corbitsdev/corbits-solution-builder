@@ -9,7 +9,7 @@
  * stage as it advances. Selecting another artifact switches the right pane
  * to it read-only — only the current stage's draft lineage can be submitted.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, STAGE_DRAFT_KIND, type ArtifactNode } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { documentName, stageName } from "../../components.jsx";
@@ -49,6 +49,10 @@ export type ProjectArtifacts = {
   /** A version newer than the selected one exists. */
   readonly newerVersion: ArtifactNode | null;
   readonly selectVersion: (id: string | null) => void;
+  /** Opens one version wherever it is: the tab holding it is selected as
+   *  well, so a draft line in the conversation (#158) shows its version even
+   *  while another document is up. */
+  readonly openVersion: (id: string) => void;
   /** The selection is the current stage's draft lineage — the only pane the
    *  gate may act on. */
   readonly isStageDraft: boolean;
@@ -142,9 +146,20 @@ export function useProjectArtifacts(
   const selected = tabs.find((tab) => tab.key === (selectedKey ?? draftKey)) ?? tabs.find((tab) => tab.live) ?? null;
 
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
+  // A new tab starts at its head -- unless it was selected for one of its
+  // own versions (`openVersion`), which stays.
   useEffect(() => {
-    setSelectedVersionId(null);
+    setSelectedVersionId((current) => (current !== null && selected?.versions.some((v) => v.id === current) ? current : null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected?.key]);
+  const openVersion = useCallback(
+    (id: string) => {
+      const tab = tabs.find((entry) => entry.versions.some((version) => version.id === id));
+      if (tab) setSelectedKey(tab.key);
+      setSelectedVersionId(id);
+    },
+    [tabs],
+  );
 
   const activeNode = selected
     ? (selected.versions.find((version) => version.id === selectedVersionId) ?? selected.versions.at(-1) ?? null)
@@ -199,6 +214,7 @@ export function useProjectArtifacts(
     activeContent,
     newerVersion,
     selectVersion: setSelectedVersionId,
+    openVersion,
     isStageDraft: selected?.key === draftKey,
   };
 }
