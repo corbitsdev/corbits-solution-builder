@@ -62,6 +62,31 @@ function mailboxScope(c: Context): { tenantId: string; principalId: string } | n
   return { tenantId: tenant.id, principalId: principal.id };
 }
 
+/** The flag a Sent copy carries once the hub has accepted it as a trigger:
+ *  the Message-ID the hub minted for the mail it delivered to the run, which
+ *  is what the run's reply names in `In-Reply-To`. A client pairs a reply
+ *  with the request it answers by it instead of by order (#62). */
+export const TRIGGER_FLAG_PREFIX = "sb-trigger:";
+
+/**
+ * Records the hub's trigger Message-ID on the Sent copy, found by its own
+ * Message-ID. Best-effort: a copy that cannot be found or flagged leaves the
+ * send accepted and that turn's pairing to fall back on order.
+ */
+export async function recordTriggerId(
+  db: MailboxDb,
+  scope: { tenantId: string; principalId: string },
+  messageId: string,
+  triggerMessageId: string,
+): Promise<boolean> {
+  const sent = await openNativeMailboxStore(db, { ...scope, folder: "Sent" });
+  const copy = sent.messages.find((message) => message.envelope.messageId === messageId);
+  if (copy === undefined) return false;
+  sent.addFlags(copy.uid, [`${TRIGGER_FLAG_PREFIX}${triggerMessageId}`]);
+  await sent.settled;
+  return true;
+}
+
 /**
  * Takes back the Sent copy of a message the hub did not accept (#61). The
  * mailbox appends to Sent before it hands the message over, so a refused
@@ -128,6 +153,15 @@ export function createMailboxDeliver(
             });
           }
           throw new Error(`trigger for ${runId} answered ${String(response.status)}: ${detail}`);
+        }
+        // The hub mints its own Message-ID for the mail it delivers to the
+        // run, and the run's reply names that one, not the mailbox's (#62).
+        const accepted = (await response.json().catch(() => null)) as { messageId?: unknown } | null;
+        const scope = mailboxScope(c);
+        if (scope && typeof accepted?.messageId === "string" && accepted.messageId.length > 0) {
+          await recordTriggerId(opts.db, scope, message.messageId, accepted.messageId).catch((cause: unknown) => {
+            console.error(`mailbox send: could not record the trigger id on ${message.messageId}: ${cause instanceof Error ? cause.message : String(cause)}`);
+          });
         }
       }
     }

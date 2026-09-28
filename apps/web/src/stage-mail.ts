@@ -13,8 +13,21 @@ export type ChatMessage = {
   readonly author: "me" | "agent";
   readonly body: string;
   readonly at: string;
+  /** An agent reply: the RFC Message-ID it answers. */
   readonly inReplyTo?: string;
+  /** A person turn the hub accepted as a trigger: the Message-ID the hub
+   *  minted for the mail it delivered, which the reply's `inReplyTo` names
+   *  (#62). Absent for a turn sent before this was recorded, or refused. */
+  readonly triggerMessageId?: string;
 };
+
+/** The flag the hub sets on a Sent copy it delivered as a trigger; see
+ * `packages/embed-hub/src/mailbox-send.ts`. */
+export const TRIGGER_FLAG_PREFIX = "sb-trigger:";
+
+/** How many pages one folder read follows before giving up: a stage's
+ * thread is a few dozen messages; a workspace's folder can hold thousands. */
+const MAX_FOLDER_PAGES = 50;
 
 type Envelope = {
   readonly messageId: string;
@@ -26,8 +39,13 @@ type Envelope = {
   readonly references: readonly string[];
 };
 
-type InboxMessage = { readonly uid: number; readonly envelope: Envelope; readonly raw: string };
-type InboxPage = { readonly messages: readonly InboxMessage[] };
+type InboxMessage = {
+  readonly uid: number;
+  readonly flags?: readonly string[];
+  readonly envelope: Envelope;
+  readonly raw: string;
+};
+type InboxPage = { readonly messages: readonly InboxMessage[]; readonly nextCursor?: string };
 
 function mailboxPath(tenantId: string): string {
   return `/api/tenants/${encodeURIComponent(tenantId)}/mailbox/me/inbox`;
@@ -127,21 +145,37 @@ function participantAddress(
     .find((address) => agentAddresses.has(address.toLowerCase()));
 }
 
+/** The trigger Message-ID a Sent copy's flags record, if the hub set one. */
+function triggerIdOf(flags: readonly string[] | undefined): string | undefined {
+  const flag = flags?.find((entry) => entry.startsWith(TRIGGER_FLAG_PREFIX));
+  return flag === undefined ? undefined : flag.slice(TRIGGER_FLAG_PREFIX.length);
+}
+
+/**
+ * Every message of a folder, following `nextCursor` to the end. One page of
+ * the newest 100 was the whole read once (#62): on a busy workspace one
+ * folder's window then cut off before the other's, and a reply whose request
+ * had fallen out of the Sent window paired with the next request instead.
+ */
 async function readFolder(
   transport: Transport,
   tenantId: string,
   folder: "INBOX" | "Sent",
   agentAddresses: ReadonlySet<string>,
 ): Promise<ChatMessage[]> {
-  const page = await transport.fetch<InboxPage>(
-    "GET",
-    `${mailboxPath(tenantId)}?folder=${folder}&limit=100`,
-  );
-  return page.messages.flatMap((message) => {
-    const address = participantAddress(message.envelope, message.raw, agentAddresses);
-    if (address === undefined) return [];
-    return [
-      {
+  const messages: ChatMessage[] = [];
+  let cursor: string | undefined;
+  for (let pages = 0; pages < MAX_FOLDER_PAGES; pages += 1) {
+    const query = cursor === undefined ? "" : `&cursor=${encodeURIComponent(cursor)}`;
+    const page = await transport.fetch<InboxPage>(
+      "GET",
+      `${mailboxPath(tenantId)}?folder=${folder}&limit=100${query}`,
+    );
+    for (const message of page.messages) {
+      const address = participantAddress(message.envelope, message.raw, agentAddresses);
+      if (address === undefined) continue;
+      const triggerMessageId = folder === "Sent" ? triggerIdOf(message.flags) : undefined;
+      messages.push({
         id: `${folder}:${String(message.uid)}`,
         author: folder === "Sent" ? ("me" as const) : ("agent" as const),
         body: frameBody(message.raw),
@@ -149,9 +183,13 @@ async function readFolder(
         ...(message.envelope.inReplyTo !== undefined
           ? { inReplyTo: message.envelope.inReplyTo }
           : {}),
-      },
-    ];
-  });
+        ...(triggerMessageId !== undefined ? { triggerMessageId } : {}),
+      });
+    }
+    if (page.nextCursor === undefined || page.messages.length === 0) break;
+    cursor = page.nextCursor;
+  }
+  return messages;
 }
 
 /** A stage's full transcript: every mail turn addressed to or from any of

@@ -11,7 +11,7 @@ import {
   type MailboxDb,
   type MailboxEvent,
 } from "@corbits/mailbox";
-import { captureMailboxRequest, createMailboxDeliver, withdrawSentCopy } from "./mailbox-send.js";
+import { captureMailboxRequest, createMailboxDeliver, recordTriggerId, TRIGGER_FLAG_PREFIX, withdrawSentCopy } from "./mailbox-send.js";
 import { withPostgresJsResultShape } from "./pg-compat.js";
 
 const SCOPE = { tenantId: "tnt_1", principalId: "prn_owner" };
@@ -101,6 +101,31 @@ describe("createMailboxDeliver", () => {
     expect(await deliverUnderRequest(deliver, { raw, from: "owner@ws.localhost", to: [RUN_ADDRESS], messageId })).toBeNull();
     expect(await folderIds(db, "Sent")).toEqual([messageId]);
     expect(await folderIds(db, "Trash")).toEqual([]);
+  });
+
+  // #62: the hub mints its own Message-ID for the mail it delivers to the
+  // run; the reply names that one. It is recorded on the Sent copy as a flag
+  // so a client can pair the reply with this request rather than by order.
+  test("an accepted trigger records the hub's Message-ID on the Sent copy", async () => {
+    const messageId = "<delivered@ws.localhost>";
+    const raw = await appendSent(db, messageId);
+    const deliver = createMailboxDeliver({ app: hubAnswering(202, { runId: RUN, address: RUN_ADDRESS, messageId: "<trigger-1@hub.localhost>" }), persistMail: async () => [], db });
+    expect(await deliverUnderRequest(deliver, { raw, from: "owner@ws.localhost", to: [RUN_ADDRESS], messageId })).toBeNull();
+    const sent = await openNativeMailboxStore(db, { ...SCOPE, folder: "Sent" });
+    expect([...sent.messages[0]!.flags]).toEqual([`${TRIGGER_FLAG_PREFIX}<trigger-1@hub.localhost>`]);
+  });
+
+  test("an accepted trigger whose answer carries no Message-ID leaves the Sent copy unflagged", async () => {
+    const messageId = "<delivered@ws.localhost>";
+    const raw = await appendSent(db, messageId);
+    const deliver = createMailboxDeliver({ app: hubAnswering(202, { runId: RUN }), persistMail: async () => [], db });
+    expect(await deliverUnderRequest(deliver, { raw, from: "owner@ws.localhost", to: [RUN_ADDRESS], messageId })).toBeNull();
+    const sent = await openNativeMailboxStore(db, { ...SCOPE, folder: "Sent" });
+    expect([...sent.messages[0]!.flags]).toEqual([]);
+  });
+
+  test("recording a trigger id on a copy that is not in Sent is a no-op", async () => {
+    expect(await recordTriggerId(db, SCOPE, "<never-sent@ws.localhost>", "<t@hub.localhost>")).toBe(false);
   });
 
   test("withdrawing a copy that is not in Sent is a no-op", async () => {
