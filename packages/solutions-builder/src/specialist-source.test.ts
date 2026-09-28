@@ -103,6 +103,18 @@ describe("specialistEntrySource", () => {
   // #41 step 3: who a package is for arrives with the request, so the
   // rendered entry names no stakeholder and needs no redeploy when the
   // project's audiences change.
+  // #41 step 4: what a document-writing specialist needs to know is its
+  // stage and kind, fixed per role; the project is the run's own tenant.
+  test("an entry with the artifact tools names its stage and kind, never a project", () => {
+    const stage2 = entry(2, "primary", true);
+    expect(stage2).toContain("## Stage document");
+    expect(stage2).toContain("stage 2 specialist");
+    expect(stage2).toContain("`solution_constraints`");
+    expect(stage2).not.toContain("## Artifact context");
+    expect(stage2).not.toContain("projectId:");
+    expect(entry(2)).not.toContain("## Stage document");
+  });
+
   test("stage 5's entry names no audience", () => {
     const stage5 = entry(5);
     expect(stage5).not.toContain("## Audiences");

@@ -113,8 +113,8 @@ order, after "In short". No preamble, no sign-off, no restating these rules.
  *  `artifactTools` option) — telling a model to call a tool it was not given
  *  just makes it hallucinate the call. */
 export const ARTIFACT_WRITE_RULE = `
-Your prompt's "Artifact context" section names your projectId, stage, and
-kind. The first time you write your stage document, call artifact_create
+Your prompt's "Stage document" note names the kind your document is recorded
+under. The first time you write your stage document, call artifact_create
 with that kind, a short title, and the full document as content. Revising it
 later (a person's follow-up, a correction) is artifact_write against the
 same artifact id — never a second artifact_create for the same document.
