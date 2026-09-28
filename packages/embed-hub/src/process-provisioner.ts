@@ -13,6 +13,7 @@
  * store is the authority, so the process tree on disk only has to be found
  * again after a restart, not re-derived.
  */
+import { writeFileSync } from "node:fs";
 import { mkdir, readdir, readFile, rm, rmdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
@@ -65,6 +66,7 @@ const CAPABILITIES: readonly SidecarCapabilityDeclaration[] = [
 type Unit = { generation: number; dir: string; pid: number | null; sidecarId: string | null };
 
 export function createProcessProvisioner(options: ProcessProvisionerOptions): SidecarProvisioner {
+  if (!process.env["PATH"]) throw new Error("the host has no PATH to forward; a sidecar cannot resolve its runtime");
   const runner = options.runner ?? bunRunner;
   const graceMs = options.terminationGraceMs ?? 5_000;
   const allocationsDir = join(options.dataDir, "allocations");
@@ -107,12 +109,19 @@ export function createProcessProvisioner(options: ProcessProvisionerOptions): Si
     return found;
   }
 
+  async function exited(pid: number, withinMs: number): Promise<boolean> {
+    const deadline = Date.now() + withinMs;
+    while (runner.isAlive(pid)) {
+      if (Date.now() >= deadline) return false;
+      await Bun.sleep(50);
+    }
+    return true;
+  }
+
   async function stop(unit: Unit): Promise<void> {
     if (unit.pid !== null && runner.isAlive(unit.pid)) {
       runner.signal(unit.pid, "SIGTERM");
-      const deadline = Date.now() + graceMs;
-      while (runner.isAlive(unit.pid) && Date.now() < deadline) await Bun.sleep(100);
-      if (runner.isAlive(unit.pid)) runner.signal(unit.pid, "SIGKILL");
+      if (!(await exited(unit.pid, graceMs))) runner.signal(unit.pid, "SIGKILL");
     }
     await rm(unit.dir, { recursive: true, force: true });
   }
@@ -169,7 +178,9 @@ export function createProcessProvisioner(options: ProcessProvisionerOptions): Si
       return rejected("sidecar_spawn_failed", error instanceof Error ? error.message : String(error), true);
     }
     try {
-      await writeFile(join(dir, PID_FILE), `${pid}\n`, { mode: 0o600 });
+      // Synchronously, so no await separates a live process from its record:
+      // a unit without a pid file cannot be stopped.
+      writeFileSync(join(dir, PID_FILE), `${pid}\n`, { mode: 0o600 });
     } catch (error) {
       await stop({ generation: request.generation, dir, pid, sidecarId: request.sidecarId });
       throw error;
