@@ -1,7 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import type { ArtifactNode } from "./client.ts";
 import type { ProjectWorkflowView } from "./project-workflow.ts";
-import { stage6RefusalMessage, stage6StackProblem, stage7StackProblem, stageEvidence, stageRefusalMessage, type StageEvidenceDeps } from "./stage-evidence.ts";
+import {
+  openReviewFailureMessage,
+  stage6RefusalMessage,
+  stage6StackProblem,
+  stage7StackProblem,
+  stageEvidence,
+  stageRefusalMessage,
+  type StageEvidenceDeps,
+} from "./stage-evidence.ts";
 
 const CHOICE = { choice: "x", reason: "because", cites: ["FR-1"] };
 const STACK = {
@@ -82,6 +90,24 @@ describe("refusal copy", () => {
     expect(stageRefusalMessage("wrong_stage")).toBe("The project has moved to a different stage.");
     expect(stageRefusalMessage("stale_review")).not.toBe("stale_review");
     expect(stageRefusalMessage("something_unknown")).toBe("something_unknown");
+  });
+});
+
+// #169: a review that did not open is said, with its reason.
+describe("openReviewFailureMessage", () => {
+  test("says nothing when the view moved on or another tab landed the same decision", () => {
+    expect(openReviewFailureMessage("wrong_stage")).toBeNull();
+    expect(openReviewFailureMessage("signal_id_conflict")).toBeNull();
+  });
+
+  test("names an unreadable workflow and a review accepted but never applied", () => {
+    expect(openReviewFailureMessage("workflow_unavailable")).toBe("The project workflow could not be read.");
+    expect(openReviewFailureMessage("timed_out")).toContain("has not shown it open");
+  });
+
+  test("reads a refused open_review in the workflow's own words", () => {
+    expect(openReviewFailureMessage("evidence_missing")).toBe("The recorded decisions don't match what this approval expects.");
+    expect(openReviewFailureMessage("stale_review")).toBe(stageRefusalMessage("stale_review"));
   });
 });
 

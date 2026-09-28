@@ -27,6 +27,7 @@ import { buildEvidenceState, currentPublishedBundle } from "./build.jsx";
 import { approvedStage8Archive, composeStage9Opening, manifestCompanionOf } from "./stage9-opening.ts";
 import {
   frozenSummaryLine,
+  openReviewFailureMessage,
   stage6RefusalMessage,
   stage6StackProblem,
   stage7StackProblem,
@@ -74,8 +75,11 @@ export type StageDecisions = {
    *  bundle — a status update is conversation, not a build archive. */
   readonly stage8Evidence: ReturnType<typeof buildEvidenceState> | null;
   /** Persists (if needed) and opens the review for the current material,
-   *  right now — `BuildPanel`'s "Accept as evidence" calls it directly. */
-  readonly openReviewNow: () => Promise<{ readonly ok: true } | { readonly ok: false; readonly reason: string }>;
+   *  right now — `BuildPanel`'s "Accept as evidence" calls it directly.
+   *  `failed` marks an open that was tried and did not land (the hub or the
+   *  workflow refused it, or threw), as against a precondition not met yet;
+   *  the automatic open shows the former in the error banner (#169). */
+  readonly openReviewNow: () => Promise<{ readonly ok: true } | { readonly ok: false; readonly reason: string; readonly failed?: true }>;
   readonly approve: () => Promise<void>;
   /** Stage 9's Accept: the tool approval is resolved in the delivery panel;
    *  this sends the workflow's own stage-9 `approve` — without it `done`
@@ -266,18 +270,27 @@ export function useStageDecisions({
       const packages = policy ? await stage5Packages(policy) : undefined;
       const packagesChanged = packages !== undefined && !packagesEqual(packages, workflowView.audiencePackages);
       if (!sameAsOpen || policyChanged || packagesChanged) {
-        await ensureReviewOpen(stageApprovalDeps, {
+        const opened = await ensureReviewOpen(stageApprovalDeps, {
           projectId: detail.project.id,
           stage,
           ref,
           ...(policy ? { policy } : {}),
           ...(packages ? { packages } : {}),
         });
+        // A refused or unapplied open was reported as success before, and
+        // the stage sat with a draft and no approve button (#169).
+        if (!opened.ok) {
+          const message = openReviewFailureMessage(opened.reason);
+          await refreshWorkflow();
+          return message === null
+            ? { ok: false as const, reason: stageRefusalMessage(opened.reason) }
+            : { ok: false as const, reason: message, failed: true as const };
+        }
       }
       await refreshWorkflow();
       return { ok: true as const };
     } catch (cause) {
-      return { ok: false as const, reason: cause instanceof ApiFailure ? cause.detail.message : String(cause) };
+      return { ok: false as const, reason: cause instanceof ApiFailure ? cause.detail.message : String(cause), failed: true as const };
     }
   }, [workflowView, stage, chosenTarget, reviewMessage, draftKind, stage8Evidence, detail.nodes, detail.project.id, resolveReviewRef, refreshWorkflow, stage5Policy, stage5Packages, latestDraftFor, latestDraftAtFor]);
 
@@ -289,6 +302,9 @@ export function useStageDecisions({
   // fresh draft opens its own review. Idempotent under reload/two tabs:
   // `ensureReviewOpen` itself no-ops once the view shows the same ref open.
   const ensuringReviewKeyRef = useRef<string | null>(null);
+  // Whether the banner is showing a failed open of ours, so the next open
+  // that lands clears it and nothing else's message is touched.
+  const reviewFailureShownRef = useRef(false);
   useEffect(() => {
     if (!workflowView || workflowView.done || stage >= LAST_STAGE) return;
     if (stage === 7 && !chosenTarget) return;
@@ -314,10 +330,24 @@ export function useStageDecisions({
     if (ensuringReviewKeyRef.current === key) return;
     ensuringReviewKeyRef.current = key;
     void openReviewNow().then((result) => {
+      if (result.ok) {
+        if (reviewFailureShownRef.current) {
+          reviewFailureShownRef.current = false;
+          onError(null);
+        }
+        return;
+      }
       // Left as the sentinel on refusal: a later render (a poll, a reply) retries.
-      if (!result.ok) ensuringReviewKeyRef.current = null;
+      ensuringReviewKeyRef.current = null;
+      // A failed open is said, with its reason, rather than retried in
+      // silence (#169): the retry still happens, but the person can see
+      // why the approve button is missing meanwhile.
+      if (result.failed) {
+        reviewFailureShownRef.current = true;
+        onError(`The review could not be opened: ${result.reason}`);
+      }
     });
-  }, [workflowView, stage, chosenTarget, reviewMessage, draftKind, detail.nodes, latestDraftFor, stage8Evidence, openReviewNow]);
+  }, [workflowView, stage, chosenTarget, reviewMessage, draftKind, detail.nodes, latestDraftFor, stage8Evidence, openReviewNow, onError]);
 
   /**
    * Sends the workflow's `approve` decision for this stage's already-open
