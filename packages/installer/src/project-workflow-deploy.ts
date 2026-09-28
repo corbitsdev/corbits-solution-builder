@@ -760,22 +760,24 @@ async function deployFreshRun(context: DeployContext, known: ReadonlySet<string>
 /**
  * A project's workflow deployments wherever they are: on the project
  * tenant's own asset, and -- for a project whose workflow was deployed
- * before #29 -- on the workspace's same-named asset. The listing is
- * inherited, so one read of the project tenant's assets finds both, told
- * apart by `asset.tenantId`.
+ * before #29 -- on the workspace's same-named asset. Each tenant's own
+ * assets are listed, not the project tenant's inherited listing: that
+ * listing shadows the workspace's asset the moment the project tenant
+ * declares one of the same name, which `ensureWorkflowAsset` does before
+ * this is read, and a project's whole history went missing that way (#195).
  */
 async function projectWorkflowDeployments(
   transport: Transport,
   home: ProjectHome,
   assetName: string,
 ): Promise<{ groups: DeploymentGroup[]; everyDeployment: HubDeployment[] }> {
-  const listed = await assetsFor(transport, home.tenantId).list("workflow");
   const groups: DeploymentGroup[] = [];
   // Every deployment those tenants hold, this project's or not: what a
   // caller watches to tell that the hub is still placing (#79).
   const everyDeployment: HubDeployment[] = [];
   for (const tenantId of projectTenants(home)) {
-    const asset = listed.find((entry) => entry.name === assetName && entry.tenantId === tenantId);
+    const own = await assetsFor(transport, tenantId).listOwn("workflow");
+    const asset = own.find((entry) => entry.name === assetName && entry.tenantId === tenantId);
     if (!asset) continue;
     const deployments = await workflowsFor(transport, tenantId).deployments();
     everyDeployment.push(...deployments);

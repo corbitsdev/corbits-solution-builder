@@ -384,8 +384,14 @@ export type HubAsset = { id: string; tenantId: string; kind: string; name: strin
 
 export function assetsFor(transport: Transport, scope: string) {
   return {
-    // Bare array, not a page: this route does not paginate.
+    // Bare array, not a page: this route does not paginate. Inherited: the
+    // tenant's own rows and its ancestors', a descendant's shadowing an
+    // ancestor's of the same kind and name.
     list: (kind: string) => transport.fetch<HubAsset[]>("GET", tenantPathFor(scope, `/assets?kind=${kind}`)),
+    /** The tenant's own rows alone: what a lookup by tenant needs, since an
+     *  ancestor's same-named asset is absent from the inherited listing
+     *  once the tenant declares its own (#195). */
+    listOwn: (kind: string) => transport.fetch<HubAsset[]>("GET", tenantPathFor(scope, `/assets?kind=${kind}&inherited=false`)),
     create: (input: { kind: string; name: string; displayName?: string }) =>
       transport.fetch<HubAsset>("POST", tenantPathFor(scope, "/assets"), input),
     /** Commits a tree of repo-relative files onto an asset's ref in one commit. */

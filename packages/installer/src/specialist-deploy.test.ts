@@ -46,6 +46,8 @@ function fakeTransport(args: {
     async fetch<T>(method: string, path: string): Promise<T> {
       if (method === "GET" && path === `/api/tenants/${TENANT.id}`) return TENANT as T;
       if (method === "GET" && path === `/api/tenants/${project.id}`) return project as T;
+      const own = /^\/api\/tenants\/([^/]+)\/assets\?kind=workflow&inherited=false$/.exec(path);
+      if (method === "GET" && own) return args.assets.filter((row) => row.tenantId === own[1]) as T;
       if (method === "GET" && path.startsWith(`/api/tenants/${project.id}/assets?kind=`)) return args.assets as T;
       const deployments = /^\/api\/tenants\/([^/]+)\/workflows\/deployments$/.exec(path);
       if (method === "GET" && deployments) return args.deployments.filter((row) => row.tenantId === deployments[1]) as T;
