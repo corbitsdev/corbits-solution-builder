@@ -458,6 +458,12 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
     plugins: sidecarPlugins,
     router: sidecarRouter,
     hubWebSocketUrl: options.hubWebSocketUrl,
+    // How long an allocation waits for its sidecar to connect. The platform's
+    // 120s default is sized for remote capacity; a process sidecar connects
+    // within seconds. It also bounds the wait after a restart, when the host
+    // has already killed every sidecar it spawned, so nothing can reconnect
+    // and each allocation would otherwise sit out the full default.
+    connectTimeoutMs: 30_000,
     // Process-provisioned sidecars die with the host. Replacing them lets
     // `restoreWorkflowRunToAllocation` replay each run's hub-held refs onto the
     // new generation; releasing them fails the run and a project restarts at
