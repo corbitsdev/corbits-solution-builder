@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ArtifactNode } from "./client.ts";
 import type { ProjectWorkflowView } from "./project-workflow.ts";
-import { stage6StackProblem, stage7StackProblem, stageRefusalMessage, type StageEvidenceDeps } from "./stage-evidence.ts";
+import { stage6RefusalMessage, stage6StackProblem, stage7StackProblem, stageEvidence, stageRefusalMessage, type StageEvidenceDeps } from "./stage-evidence.ts";
 
 const CHOICE = { choice: "x", reason: "because", cites: ["FR-1"] };
 const STACK = {
@@ -95,5 +95,38 @@ describe("stack refusal copy", () => {
     expect(stageRefusalMessage("stack_missing")).toContain("stage 6");
     expect(stage6StackProblem(PLAN_WITHOUT_STACK, new Set(["FR-1"]))).toContain("build plan");
     expect(stage6StackProblem(PLAN_WITHOUT_STACK, new Set(["FR-1"]))).not.toContain("stack decision");
+  });
+});
+
+// #55: the reducer's stage6Rule decides; the client hands it the plan's Stack
+// and reads its refusal back in the plan's terms.
+describe("stage 6 evidence", () => {
+  const deps = (planText: string): StageEvidenceDeps => ({
+    projectId: "p",
+    tenantId: "t",
+    nodes: [],
+    chosenTarget: null,
+    workflowView: null,
+    artifactContent: async () => ({ content: "" }),
+    planText,
+  });
+
+  test("carries the plan's parsed Stack section", async () => {
+    const evidence = (await stageEvidence(6, deps(planWith(STACK)))) as unknown as { stack: { runtime?: { cites?: string[] } } };
+    expect(evidence.stack.runtime?.cites).toEqual(["FR-1"]);
+  });
+
+  test("still carries evidence when the plan has no Stack, so the workflow refuses it rather than a pre-rule approval passing", async () => {
+    const evidence = (await stageEvidence(6, deps(PLAN_WITHOUT_STACK))) as unknown as { stack: unknown };
+    expect(evidence).toEqual({ stack: {} });
+  });
+
+  test("a stage 6 refusal reads as a plan to correct, not a send-back", () => {
+    for (const code of ["stack_missing", "stack_uncited", "stack_unknown_requirement"]) {
+      const text = stage6RefusalMessage(code);
+      expect(text).toContain("Ask the architect");
+      expect(text).not.toContain("Send the project back");
+    }
+    expect(stage6RefusalMessage("wrong_stage")).toBe(stageRefusalMessage("wrong_stage"));
   });
 });

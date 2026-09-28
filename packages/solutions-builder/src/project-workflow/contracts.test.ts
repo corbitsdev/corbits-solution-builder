@@ -265,6 +265,93 @@ describe("mint_requirements", () => {
   });
 });
 
+// #55: the reducer, not the browser, decides that a stage 6 plan carries a
+// usable Stack section. The client's pre-check only explains the refusal.
+describe("stage6Rule stack citations", () => {
+  const OWNER6 = "owner6";
+  const STACK6: StackRecord = {
+    mode: "plain",
+    runtime: { choice: "TypeScript", reason: "matches the rubric", cites: ["FR-1"] },
+    ui: null,
+    storage: null,
+    auth: null,
+    packaging: { choice: "cli", reason: "matches the rubric", cites: ["FR-1"], kind: "cli" },
+    packages: [],
+    deferred: [],
+  };
+
+  /** Stages 1..5 approved with requirement FR-1 minted, and stage 6's review open on the plan. */
+  function openedAtStage6(): ProjectState {
+    let state = initProjectState({ projectId: "p1", stages: [1, 2, 3, 4, 5, 6, 7].map((stage) => ({ stage, authorizedPrincipalIds: [OWNER6] })) });
+    state = applyDecision(input(state, OWNER6, { decisionId: "mint", kind: "mint_requirements", projectId: "p1", stage: 1, items: [{ kind: "FR", text: "Does a thing." }], at: AT }));
+    for (const stage of [1, 2, 3, 4]) {
+      state = applyDecision(input(state, OWNER6, { decisionId: `o${String(stage)}`, kind: "open_review", projectId: "p1", stage, artifactId: `a${String(stage)}`, version: 1, sha256: `s${String(stage)}`, at: AT }));
+      state = applyDecision(input(state, OWNER6, { decisionId: `ap${String(stage)}`, kind: "approve", projectId: "p1", stage, reviewId: `stage-${String(stage)}-review-1`, artifactId: `a${String(stage)}`, version: 1, sha256: `s${String(stage)}`, at: AT }));
+    }
+    state = applyDecision(input(state, OWNER6, { decisionId: "o5", kind: "open_review", projectId: "p1", stage: 5, artifactId: "a5", version: 1, sha256: "s5", at: AT, policy: { quorum: 0, stakeholders: [] } }));
+    state = applyDecision(input(state, OWNER6, { decisionId: "ap5", kind: "approve", projectId: "p1", stage: 5, reviewId: "stage-5-review-1", artifactId: "a5", version: 1, sha256: "s5", at: AT }));
+    return applyDecision(input(state, OWNER6, { decisionId: "o6", kind: "open_review", projectId: "p1", stage: 6, artifactId: "a6", version: 1, sha256: "s6", at: AT }));
+  }
+
+  const approve6 = (state: ProjectState, evidence: unknown, decisionId = "ap6") =>
+    applyDecision(
+      input(state, OWNER6, {
+        decisionId,
+        kind: "approve",
+        projectId: "p1",
+        stage: 6,
+        reviewId: "stage-6-review-1",
+        artifactId: "a6",
+        version: 1,
+        sha256: "s6",
+        at: AT,
+        ...(evidence === undefined ? {} : { evidence }),
+      }),
+    );
+
+  test("a plan whose Stack cites minted requirements is approved and the project moves to stage 7", () => {
+    const next = approve6(openedAtStage6(), { stack: STACK6 });
+    expect(next.decisions.at(-1)).toMatchObject({ accepted: true, kind: "approve", stage: 6 });
+    expect(next.stage).toBe(7);
+  });
+
+  test("a plan with no usable Stack section is refused stack_missing, at stage 6", () => {
+    for (const evidence of [{}, { stack: null }, { stack: { mode: "plain" } }]) {
+      const next = approve6(openedAtStage6(), evidence);
+      expect(next.decisions.at(-1)).toMatchObject({ accepted: false, reason: "stack_missing" });
+      expect(next.stage).toBe(6);
+    }
+  });
+
+  test("a Stack entry that cites nothing is refused stack_uncited", () => {
+    const next = approve6(openedAtStage6(), { stack: { ...STACK6, runtime: { ...STACK6.runtime, cites: [] } } });
+    expect(next.decisions.at(-1)).toMatchObject({ accepted: false, reason: "stack_uncited" });
+    expect(next.stage).toBe(6);
+  });
+
+  test("a Stack entry that cites a requirement id that does not exist is refused stack_unknown_requirement", () => {
+    const next = approve6(openedAtStage6(), { stack: { ...STACK6, runtime: { ...STACK6.runtime, cites: ["FR-99"] } } });
+    expect(next.decisions.at(-1)).toMatchObject({ accepted: false, reason: "stack_unknown_requirement" });
+  });
+
+  test("a refused approval leaves the review open, and a corrected plan is approved under a new decision", () => {
+    const refused = approve6(openedAtStage6(), { stack: { ...STACK6, runtime: { ...STACK6.runtime, cites: [] } } });
+    expect(refused.reviews[6]?.status).toBe("open");
+    const next = approve6(refused, { stack: STACK6 }, "ap6-again");
+    expect(next.decisions.at(-1)).toMatchObject({ accepted: true });
+    expect(next.stage).toBe(7);
+  });
+
+  // An approval recorded before this rule carries no evidence: replayed onto
+  // a fresh run (#51) or adopted from a legacy project, it stands as it was
+  // accepted rather than moving the project back to stage 6.
+  test("an approval with no evidence at all, as recorded before the rule, still stands", () => {
+    const next = approve6(openedAtStage6(), undefined);
+    expect(next.decisions.at(-1)).toMatchObject({ accepted: true });
+    expect(next.stage).toBe(7);
+  });
+});
+
 describe("stage7Rule stack citations", () => {
   const OWNER7 = "owner7";
 
@@ -320,8 +407,21 @@ describe("stage7Rule stack citations", () => {
       state = applyDecision(
         input(state, OWNER7, { decisionId: `o${String(stage)}`, kind: "open_review", projectId: "p1", stage, artifactId: `a${String(stage)}`, version: 1, sha256: `s${String(stage)}`, at: AT }),
       );
+      // Stage 6 carries the plan's Stack as its evidence (#55); the same
+      // record stage 7 freezes below.
       state = applyDecision(
-        input(state, OWNER7, { decisionId: `ap${String(stage)}`, kind: "approve", projectId: "p1", stage, reviewId: `stage-${String(stage)}-review-1`, artifactId: `a${String(stage)}`, version: 1, sha256: `s${String(stage)}`, at: AT }),
+        input(state, OWNER7, {
+          decisionId: `ap${String(stage)}`,
+          kind: "approve",
+          projectId: "p1",
+          stage,
+          reviewId: `stage-${String(stage)}-review-1`,
+          artifactId: `a${String(stage)}`,
+          version: 1,
+          sha256: `s${String(stage)}`,
+          at: AT,
+          evidence: { stack: STACK },
+        }),
       );
     }
     return state;

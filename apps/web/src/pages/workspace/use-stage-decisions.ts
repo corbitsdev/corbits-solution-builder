@@ -27,6 +27,7 @@ import { buildEvidenceState, currentPublishedBundle } from "./build.jsx";
 import { approvedStage8Archive, composeStage9Opening, manifestCompanionOf } from "./stage9-opening.ts";
 import {
   frozenSummaryLine,
+  stage6RefusalMessage,
   stage6StackProblem,
   stage7StackProblem,
   stageEvidence,
@@ -328,10 +329,9 @@ export function useStageDecisions({
   const approve = async () => {
     if (!reviewMessage || stage >= LAST_STAGE) return;
     if (stage === 7 && !chosenTarget) return;
-    // Stage 6 is read-only once approved and stage 7's own gate is the last
-    // chance to catch a bad stack decision -- checking it here, before the
-    // plan is ever approved, means a project can never end up stuck the way
-    // stage 7's `stack_missing`/`stack_uncited` refusal otherwise leaves it.
+    // The workflow's own `stage6Rule` refuses a plan without a usable Stack
+    // section (#55); this runs the same check first so the person reads
+    // what is wrong in the plan's own terms before the approval is sent.
     if (stage === 6) {
       const requirementIds = new Set((workflowView?.requirements ?? []).map((r) => r.id));
       const problem = stage6StackProblem(reviewMessage.body, requirementIds);
@@ -382,6 +382,7 @@ export function useStageDecisions({
         chosenTarget,
         workflowView,
         artifactContent: (tid, nodeId) => api.artifactContent(tid, nodeId),
+        planText: reviewMessage.body,
       });
       const policy = await stage5Policy();
       const packages = policy ? await stage5Packages(policy) : undefined;
@@ -394,7 +395,7 @@ export function useStageDecisions({
         ...(packages ? { packages } : {}),
       });
       if (!result.ok) {
-        onError(`This stage's approval was refused: ${stageRefusalMessage(result.reason)}`);
+        onError(stage === 6 ? stage6RefusalMessage(result.reason) : `This stage's approval was refused: ${stageRefusalMessage(result.reason)}`);
         await refreshWorkflow();
         return;
       }
