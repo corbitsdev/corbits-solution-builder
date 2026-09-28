@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { api } from "./client.ts";
+import { cacheProjectWorkflowRef } from "./project-workflow-ref.ts";
 
 const POLICY = {
   costTolerancePercent: 10,
@@ -101,6 +102,8 @@ describe("client project tenant writes", () => {
         return json({ id: "g1", roleId: "role-1", principalId: null, resource: "authority:project_owner", action: "hold", effect: "allow", origin: "role" }, 201);
       }
       if (path.includes("/principals/") && method === "POST") return json({ ok: true });
+      // A project workflow signal, in whichever tenant it is sent to.
+      if (/\/workflows\/[^/]+\/signals$/.test(path) && method === "POST") return json({ ok: true }, 202);
       // Artifacts: any tenant's listing is empty, and a create answers with a row in that tenant.
       if (/\/api\/tenants\/[^/]+\/artifacts(\?|$)/.test(path) && method === "GET") return json({ data: [], nextCursor: null });
       if (/\/api\/tenants\/[^/]+\/artifacts$/.test(path) && method === "POST") {
@@ -110,6 +113,24 @@ describe("client project tenant writes", () => {
     }) as typeof fetch;
     return { calls, current: () => current };
   }
+
+  // #163: the workflow deployment lives in the tenant its ref names, the
+  // project's own since #29. Signalling the workspace 404s silently and
+  // no review ever opens.
+  test("decide signals the deployment in the tenant its ref names, not the workspace", async () => {
+    const { calls } = mockHub();
+    cacheProjectWorkflowRef("proj-1", { deploymentId: "dep_1", runId: "run_1", tenantId: "proj-1" });
+    await api.decide("proj-1", { decisionId: "dec-1", kind: "open_review", stage: 1 });
+    const signals = calls.filter((call) => call.method === "POST" && /\/signals$/.test(call.url)).map((call) => call.url);
+    expect(signals).toEqual(["/api/tenants/proj-1/workflows/dep_1/signals"]);
+  });
+
+  test("decide still signals a legacy deployment in the workspace when its ref says so", async () => {
+    const { calls } = mockHub();
+    cacheProjectWorkflowRef("proj-1", { deploymentId: "dep_legacy", runId: "run_0", tenantId: "tnt_ws" });
+    await api.decide("proj-1", { decisionId: "dec-2", kind: "approve", stage: 1 });
+    expect(calls.filter((call) => call.method === "POST" && /\/signals$/.test(call.url)).map((call) => call.url)).toEqual(["/api/tenants/tnt_ws/workflows/dep_legacy/signals"]);
+  });
 
   // #137: a project's artifacts live in its own tenant since #29. These two
   // writes still went to the workspace, where any project's bearer could
