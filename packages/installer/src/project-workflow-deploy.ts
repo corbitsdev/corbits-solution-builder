@@ -16,9 +16,10 @@
  * and a generation number, and the hub's own event log hands both back
  * (`RunStarted.trigger.payload`). That is what tells a reader which of two
  * live runs is the project's: the newer generation, once it has caught up.
- * The hub has no way to end a deployment (`POST /runs/:id/stop` is
- * unsupported upstream), so a superseded run stays placed; it is simply
- * never read or signalled again.
+ * The hub's own stop is unsupported upstream (INTR-454), so a superseded
+ * deployment is retired through the host's release route once the run
+ * replacing it holds its history (`retireSuperseded`); until then it is
+ * still read, and it is never signalled again.
  */
 import { ApiError, type Transport } from "@intx/hub-client";
 import { SPECIALIST_BASE_DEPENDENCIES, type InferenceSourcePin } from "@solutions-builder/app/specialist-source";
@@ -301,6 +302,8 @@ type ProjectRunState = {
   readonly generation: number;
   /** Every decision the dead and superseded runs took, in order, each once: what a live run must hold to be the project's. */
   readonly history: readonly ReceivedDecision[];
+  /** Placed deployments a newer generation superseded, or whose run ended: retired once a live run holds their history. */
+  readonly stale: readonly ProjectWorkflowDeployment[];
 };
 
 /**
@@ -323,7 +326,8 @@ type ProjectRunState = {
  *
  * A live run of an older generation than another live run is superseded
  * (#51): the newer one was deployed to replace it with new code, and the
- * hub cannot end the old one. It counts exactly as a dead one does -- its
+ * old one is retired only once the newer one holds its history. Until
+ * then it counts exactly as a dead one does -- its
  * decisions are history the newer run must hold, and until the newer run
  * holds them the old run is still read, so an upgrade interrupted halfway
  * never shows a project at stage 1.
@@ -389,7 +393,7 @@ async function projectRunState(transport: Transport, groups: readonly Deployment
     runId: candidate.runId,
     tenantId: candidate.tenantId,
   });
-  const state = { liveCandidates, generation, history };
+  const state = { liveCandidates, generation, history, stale: [...spent, ...superseded].map(({ candidate }) => asRef(candidate)) };
   for (const { candidate, code } of newest) {
     if (history.length === 0) return { run: asRef(candidate), live: true, code, ...state };
     const held = new Set(
@@ -419,6 +423,25 @@ async function pollUntil<T>(timeoutMs: number, intervalMs: number, read: () => P
 function parkedOn(events: readonly { seq: number; type: string }[]): boolean {
   const newest = [...events].sort((a, b) => a.seq - b.seq).at(-1);
   return newest?.type === "SignalAwaited";
+}
+
+/**
+ * Ends every deployment in `superseded` but `keep`'s: each one's history is
+ * already on `keep`, so nothing reads it live again. A failed retire is
+ * reported, not raised: the project already runs on `keep`, and the next
+ * call finds the deployment still placed and retires it then.
+ */
+async function retireSuperseded(transport: Transport, superseded: readonly ProjectWorkflowDeployment[], keep: ProjectWorkflowDeployment): Promise<void> {
+  const done = new Set([keep.deploymentId]);
+  for (const ref of superseded) {
+    if (done.has(ref.deploymentId)) continue;
+    done.add(ref.deploymentId);
+    try {
+      await workflowsFor(transport, ref.tenantId).retire(ref.deploymentId);
+    } catch (cause) {
+      console.warn(`could not retire superseded project workflow deployment ${ref.deploymentId}: ${cause instanceof Error ? cause.message : String(cause)}`);
+    }
+  }
 }
 
 /** How the replay paces itself and how long it lets the run sit still;
@@ -863,9 +886,8 @@ async function ensureProjectWorkflowOnce(
   /**
    * Brings `target`, at `generation`, up to `history`. A run that stalls
    * mid-replay has lost its child (#189): it is superseded by a fresh run at
-   * the next generation, brought up in its place, once. The stalled run
-   * stays placed, since the hub cannot end a deployment, and is never read
-   * or signalled again; `known` keeps the fresh deploy from reusing it.
+   * the next generation, brought up in its place, once, and the stalled run
+   * is retired; `known` keeps the fresh deploy from reusing it meanwhile.
    */
   const broughtUp = async (target: ProjectWorkflowDeployment, generation: number, history: readonly ReceivedDecision[]): Promise<ProjectWorkflowDeployment> => {
     try {
@@ -875,24 +897,31 @@ async function ensureProjectWorkflowOnce(
       if (!(cause instanceof ProjectWorkflowStalled)) throw cause;
       const fresh = await deployFreshRun(context(generation + 1), new Set([...idsOf(groups), target.deploymentId]));
       await catchUp(transport, fresh, history, replay);
+      await retireSuperseded(transport, [target], fresh);
       return fresh;
     }
   };
   let groups = await everywhere();
   let state = await projectRunState(transport, groups, memo);
   if (state.run && state.live) {
-    if (state.code?.digest === digest) return state.run;
+    if (state.code?.digest === digest) {
+      await retireSuperseded(transport, state.stale, state.run);
+      return state.run;
+    }
     // The live run is on other code than this render (#51): a reducer fix
     // that never reached this project, or a run from before code was
     // recorded. It is replaced the way a dead run is revived -- a fresh
     // deployment of the current code, brought up to every decision the
-    // live run applied -- and superseded by generation, since the hub
-    // cannot end it. Its own applied decisions are the whole history: it
-    // held everything the runs before it took, or it would not be the run.
+    // live run applied -- superseded by generation, then retired once the
+    // replacement holds it all. Its own applied decisions are the whole
+    // history: it held everything the runs before it took, or it would not
+    // be the run.
     const from = state.run;
     const history = await appliedDecisions(workflowsOf(transport, from), from.deploymentId, from.runId, memo);
     const target = await broughtUp(await deployFreshRun(context(state.generation + 1), idsOf(groups)), state.generation + 1, history);
-    return { ...target, replay: await replayOutcome(transport, from, target, history) };
+    const outcome = await replayOutcome(transport, from, target, history);
+    await retireSuperseded(transport, [from, ...state.stale], target);
+    return { ...target, replay: outcome };
   }
   // The hub replaces a dead deployment's sidecar on its own after a host
   // restart (CL-8784), as a new deployment carrying the run's restored
@@ -919,7 +948,10 @@ async function ensureProjectWorkflowOnce(
       },
       { stallMs: options.replacementWaitMs ?? REPLACEMENT_WAIT_MS, ...(options.placementPollMs === undefined ? {} : { pollMs: options.placementPollMs }) },
     );
-    if (replaced && state.run && state.live && state.code?.digest === digest) return state.run;
+    if (replaced && state.run && state.live && state.code?.digest === digest) {
+      await retireSuperseded(transport, state.stale, state.run);
+      return state.run;
+    }
   }
   // A live run that has not caught up, or none: the project's history (if
   // any) is replayed onto the oldest live run, or onto a fresh one. A live
@@ -928,16 +960,18 @@ async function ensureProjectWorkflowOnce(
   if (state.liveCandidates[0]) {
     const candidate = state.liveCandidates[0];
     const target = await broughtUp({ deploymentId: candidate.deployment.id, runId: candidate.runId, tenantId: candidate.tenantId }, state.generation, state.history);
-    return state.run && state.run.deploymentId !== target.deploymentId
-      ? { ...target, replay: await replayOutcome(transport, state.run, target, state.history) }
-      : target;
+    const replayed = state.run && state.run.deploymentId !== target.deploymentId ? await replayOutcome(transport, state.run, target, state.history) : undefined;
+    await retireSuperseded(transport, state.stale, target);
+    return replayed ? { ...target, replay: replayed } : target;
   }
   const from = state.run;
   // Every deployment that exists now is known: an ended one, one whose run
   // ended (#203), and one a newer generation superseded are all placed and
   // must not be reused as the fresh run's home.
   const target = await broughtUp(await deployFreshRun(context(state.generation + 1), idsOf(groups)), state.generation + 1, state.history);
-  return from ? { ...target, replay: await replayOutcome(transport, from, target, state.history) } : target;
+  const replayed = from ? await replayOutcome(transport, from, target, state.history) : undefined;
+  await retireSuperseded(transport, state.stale, target);
+  return replayed ? { ...target, replay: replayed } : target;
 }
 
 /**

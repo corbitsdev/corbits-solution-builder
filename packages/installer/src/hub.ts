@@ -482,5 +482,10 @@ export function workflowsFor(transport: Transport, scope: string) {
      *  their loop-iteration children (`<runId>__<stepId>__<n>`). */
     runs: (deploymentId: string) => listWorkflowRuns(transport, scope, deploymentId),
     runEvents: (deploymentId: string, runId: string) => readWorkflowRunEvents(transport, scope, deploymentId, runId),
+    /** Ends a deployment this installer superseded: the host's release of
+     *  its allocation (INTR-454 leaves the hub's own stop unsupported). A
+     *  deployment already ended is left as it is. */
+    retire: (deploymentId: string) =>
+      transport.fetch<void>("POST", tenantPathFor(scope, `/deployment-retirements/${encodeURIComponent(deploymentId)}`)),
   };
 }

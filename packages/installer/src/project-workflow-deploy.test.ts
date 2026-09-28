@@ -195,6 +195,13 @@ function fakeHub(fixture: Fixture) {
         else parkPending.set(runId, fixture.firstParkAfterReads);
         return { runId, address: `${runId}@hub`, messageId: "msg_1" } as T;
       }
+      // The host's release of a superseded deployment: ended from the next listing on.
+      const retire = /^\/api\/tenants\/([^/]+)\/deployment-retirements\/([^/]+)$/.exec(pathname!);
+      if (method === "POST" && retire) {
+        const row = deployments.find((entry) => entry.id === retire[2] && entry.tenantId === retire[1]);
+        if (row) row.status = "releasing";
+        return undefined as T;
+      }
       const signal = /^\/api\/tenants\/[^/]+\/workflows\/([^/]+)\/signals$/.exec(pathname!);
       if (method === "POST" && signal) {
         // The loop applies one signal per iteration: the fake spawns the
@@ -248,7 +255,13 @@ function fakeHub(fixture: Fixture) {
     runsByDeployment[deploymentId] = [...runIds];
     Object.assign(eventsByRun, events);
   };
-  return { transport, gitPush, posts, eventReads, parkedAtSignal, setRun, triggeredCode, signalsSent: () => posts.filter((post) => /\/signals$/.test(post.path)).map((post) => post.body as { runId: string; signalName: string; signalId: string; payload: unknown }) };
+  /** Every deployment retired, in order, and how many signals had been sent when each was. */
+  const retired = () =>
+    posts.flatMap((post, index) => {
+      const match = /\/deployment-retirements\/([^/]+)$/.exec(post.path);
+      return match ? [{ deploymentId: match[1]!, afterSignals: posts.slice(0, index).filter((earlier) => /\/signals$/.test(earlier.path)).length }] : [];
+    });
+  return { transport, gitPush, posts, eventReads, retired, parkedAtSignal, setRun, triggeredCode, signalsSent: () => posts.filter((post) => /\/signals$/.test(post.path)).map((post) => post.body as { runId: string; signalName: string; signalId: string; payload: unknown }) };
 }
 
 const ensure = (hub: ReturnType<typeof fakeHub>, replacementWaitMs = 0, placementPollMs?: number, stages: { stage: number; authorizedPrincipalIds: string[] }[] = [], replayPollMs?: number, replayStallMs?: number) =>
@@ -588,6 +601,8 @@ describe("ensureProjectWorkflow", () => {
     // The replacement supersedes the stalled run by generation, so every later reader converges on it.
     const generations = hub.posts.filter((post) => /\/mail$/.test(post.path)).map((post) => (JSON.parse((post.body as { content: string }).content) as { code: ProjectWorkflowCode }).code.generation);
     expect(generations).toEqual([1, 2]);
+    // The stalled run is retired once its replacement holds the whole history; the dead one was already ended.
+    expect(hub.retired()).toEqual([{ deploymentId: "dep_new", afterSignals: 5 }]);
     expect(await findProjectWorkflow(hub.transport, PROJECT_ID)).toEqual({ deploymentId: "dep_new2", runId: "run_new2", tenantId: TENANT_ID });
   });
 
@@ -606,6 +621,7 @@ describe("ensureProjectWorkflow", () => {
     expect(await ensure(hub, 0, undefined, [], 1, 20)).toMatchObject({ deploymentId: "dep_new", runId: "run_new", replay: { from: { deploymentId: "dep_old_failed", runId: "run_0" }, replayed: 2, refused: [] } });
     expect(hub.signalsSent().map((sent) => `${sent.runId}:${sent.signalId}`)).toEqual(["run_1:dec-2", "run_new:dec-1", "run_new:dec-2"]);
     expect(hub.triggeredCode()).toEqual({ digest: CURRENT_DIGEST, generation: 2 });
+    expect(hub.retired()).toEqual([{ deploymentId: "dep_live", afterSignals: 3 }]);
   });
 
   test("a fresh run still starting up past the stall bound is waited for, not replaced", async () => {
@@ -846,11 +862,32 @@ describe("ensureProjectWorkflow", () => {
         { runId: "run_new", signalName: "project.decision", signalId: "dec-1", payload: decisionPayload(1) },
         { runId: "run_new", signalName: "project.decision", signalId: "dec-2", payload: decisionPayload(2) },
       ]);
-      // The old deployment is still live (the hub cannot end it), and every reader now converges on the new run.
+      // The old deployment is retired only once every decision is on the new run, and every reader now converges on it.
+      expect(hub.retired()).toEqual([{ deploymentId: "dep_old", afterSignals: 2 }]);
       expect(await findProjectWorkflow(hub.transport, PROJECT_ID)).toEqual({ deploymentId: "dep_new", runId: "run_new", tenantId: TENANT_ID });
       // And the new run is current: the next call reuses it without deploying again.
       const before = hub.posts.length;
       expect(await ensure(hub)).toEqual({ deploymentId: "dep_new", runId: "run_new", tenantId: TENANT_ID });
+      expect(hub.posts.length).toBe(before);
+    });
+
+    test("a superseded run still placed is retired once the current run holds its decisions, and not before", async () => {
+      const newer: ProjectWorkflowCode = { digest: CURRENT_DIGEST, generation: 2 };
+      const hub = fakeHub(
+        withAsset({
+          deployments: [
+            { id: "dep_old", definitionAssetId: ASSET_ID, status: "deployed", createdAt: "2026-01-01T00:00:00.000Z" },
+            { id: "dep_cur", definitionAssetId: ASSET_ID, status: "deployed", createdAt: "2026-01-02T00:00:00.000Z" },
+          ],
+          runsByDeployment: { dep_old: decidedRun("run_old", [1], OUTDATED).runIds, dep_cur: decidedRun("run_cur", [], newer).runIds },
+          eventsByRun: { ...decidedRun("run_old", [1], OUTDATED).events, ...decidedRun("run_cur", [], newer).events },
+        }),
+      );
+      expect(await ensure(hub)).toMatchObject({ deploymentId: "dep_cur", runId: "run_cur" });
+      expect(hub.retired()).toEqual([{ deploymentId: "dep_old", afterSignals: 1 }]);
+      // Retired, it is history: the next call neither retires nor signals again.
+      const before = hub.posts.length;
+      expect(await ensure(hub)).toEqual({ deploymentId: "dep_cur", runId: "run_cur", tenantId: TENANT_ID });
       expect(hub.posts.length).toBe(before);
     });
 

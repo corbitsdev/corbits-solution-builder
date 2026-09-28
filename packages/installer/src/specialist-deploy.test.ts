@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Transport } from "@intx/hub-client";
-import { leadingOffering, specialistEntryIsCurrent, stageSpecialistAddresses, stageSpecialistStatus } from "./specialist-deploy.js";
+import { leadingOffering, retireSuperseded, specialistEntryIsCurrent, stageSpecialistAddresses, stageSpecialistStatus } from "./specialist-deploy.js";
 import { visibleCatalog } from "./visible-catalog.js";
 import { deployOrExplain, ModelProviderNotDelegatedError, sourceFor } from "./workflow-deploy.js";
 import { ApiError } from "@intx/hub-client";
@@ -263,5 +263,46 @@ describe("deploying into a project tenant", () => {
     const thrown = await deployOrExplain(PROJECT, () => Promise.reject(conflict)).catch((cause: unknown) => cause);
     expect(thrown).toBe(conflict);
     expect(await deployOrExplain(PROJECT, () => Promise.resolve("ok"))).toBe("ok");
+  });
+});
+
+describe("retireSuperseded", () => {
+  /** A hub whose replacement deployment reports each of `statuses` on successive listings; every call is logged. */
+  function placing(statuses: string[]) {
+    const calls: string[] = [];
+    let listings = 0;
+    const transport = {
+      async fetch<T>(method: string, path: string): Promise<T> {
+        calls.push(`${method} ${path}`);
+        if (method === "GET" && path === `/api/tenants/${PROJECT_TENANT.id}/workflows/deployments`) {
+          const status = statuses[Math.min(listings++, statuses.length - 1)]!;
+          return [deploymentRow("dep_old", "a1", "deployed"), deploymentRow("dep_new", "a1", status)] as T;
+        }
+        if (method === "POST" && path === `/api/tenants/${PROJECT_TENANT.id}/deployment-retirements/dep_old`) return undefined as T;
+        throw new Error(`unexpected ${method} ${path}`);
+      },
+    } as Transport;
+    return { transport, calls };
+  }
+  const replacement = { deploymentId: "dep_new", tenantId: PROJECT_TENANT.id };
+  const wait = { pollMs: 1, stallMs: 1_000 };
+
+  test("retires the superseded deployment only once its replacement is placed", async () => {
+    const hub = placing(["pending", "pending", "deployed"]);
+    await retireSuperseded(hub.transport, PROJECT_TENANT.id, "dep_old", replacement, wait);
+    expect(hub.calls.filter((call) => call.startsWith("GET"))).toHaveLength(3);
+    expect(hub.calls.at(-1)).toBe(`POST /api/tenants/${PROJECT_TENANT.id}/deployment-retirements/dep_old`);
+  });
+
+  test("a replacement that never places leaves the superseded deployment alone", async () => {
+    const hub = placing(["pending", "failed"]);
+    await retireSuperseded(hub.transport, PROJECT_TENANT.id, "dep_old", replacement, wait);
+    expect(hub.calls.some((call) => call.startsWith("POST"))).toBe(false);
+  });
+
+  test("never retires the replacement itself", async () => {
+    const hub = placing(["deployed"]);
+    await retireSuperseded(hub.transport, PROJECT_TENANT.id, "dep_new", replacement, wait);
+    expect(hub.calls).toEqual([]);
   });
 });

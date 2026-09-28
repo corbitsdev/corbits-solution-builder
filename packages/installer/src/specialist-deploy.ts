@@ -41,8 +41,10 @@ import {
   pinFor,
   pushWorkflowSourceTree,
   sourceFor,
+  waitForDeploymentDeployed,
   waitForPushVisible,
   type ClosureSource,
+  type PlacementWait,
   type SidecarCapability,
   type WorkflowGitPush,
 } from "./workflow-deploy.js";
@@ -596,6 +598,7 @@ async function ensureSpecialistDeploymentOnce(
       offeringId: leading.id,
       switchedAt: new Date().toISOString(),
     });
+    await retireSuperseded(transport, existing.tenantId, existing.deployment.id, fresh);
     return fresh;
   }
   // A switch reorders the chain so the chosen offering leads -- the same
@@ -741,6 +744,29 @@ export async function ensureSpecialistDeployment(
   }
 }
 
+/**
+ * Ends `superseded` once mail already follows `replacement` and the hub has
+ * placed it, never the replacement itself: a replacement that never places
+ * leaves the old deployment where it was. A failed retire is reported, not
+ * raised: the switch has landed, and the old deployment is only left
+ * placed, as before.
+ */
+export async function retireSuperseded(
+  transport: Transport,
+  tenantId: string,
+  superseded: string,
+  replacement: { readonly deploymentId: string; readonly tenantId: string },
+  wait: PlacementWait = {},
+): Promise<void> {
+  if (superseded === replacement.deploymentId) return;
+  if (!(await waitForDeploymentDeployed(transport, replacement.tenantId, replacement.deploymentId, wait))) return;
+  try {
+    await workflowsFor(transport, tenantId).retire(superseded);
+  } catch (cause) {
+    console.warn(`could not retire superseded specialist deployment ${superseded}: ${cause instanceof Error ? cause.message : String(cause)}`);
+  }
+}
+
 /** In-flight/queued `switchSpecialistDeployment` calls, keyed
  *  `${projectId}:${stage}:${roleKey}` -- see that function's doc comment. */
 const switchQueues = new Map<string, Promise<unknown>>();
@@ -777,8 +803,9 @@ function serialize<T>(key: string, work: () => Promise<T>): Promise<T> {
  * specialist's chain is frozen at deploy (`sourceOfferingIds`), so moving it
  * onto a different offering is a new deployment, never a live rebind.
  *
- * The hub cannot stop the old deployment's run (INTR-454), so it stays live;
- * what makes every subsequent reader of this asset (`stageSpecialistStatus`,
+ * The old deployment is retired through the host's release route once the
+ * switch is recorded (the hub's own stop is unsupported, INTR-454); what
+ * makes every subsequent reader of this asset (`stageSpecialistStatus`,
  * `ensureSpecialistDeployment`'s own existing-check, `useStageAgent`'s poll)
  * converge on the new one is the durable switch record this writes on
  * success (`writeStageSwitch`, on the project tenant's own config --
@@ -817,6 +844,7 @@ export async function switchSpecialistDeployment(
       }
     }
 
+    const prior = await stageSpecialistStatus(transport, projectId, stage, roleKey);
     const attempt = () =>
       ensureSpecialistDeploymentOnce(
         transport,
@@ -843,6 +871,9 @@ export async function switchSpecialistDeployment(
       offeringId,
       switchedAt: new Date().toISOString(),
     });
+    if (prior && !ENDED_DEPLOYMENT_STATUSES.has(prior.status)) {
+      await retireSuperseded(transport, prior.tenantId, prior.deploymentId, result);
+    }
     return result;
   });
 }
