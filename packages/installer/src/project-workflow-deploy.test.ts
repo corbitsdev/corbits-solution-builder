@@ -288,9 +288,36 @@ describe("findProjectWorkflow", () => {
     expect(await findProjectWorkflow(hub.transport, PROJECT_ID)).toEqual({ deploymentId: "dep_new_live", runId: "run_1", tenantId: TENANT_ID });
   });
 
-  test("only a failed deployment whose run never took a decision -> null, so the project deploys afresh", async () => {
-    const hub = fakeHub(withAsset({ deployments: [{ id: "dep_old_failed", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" }], runsByDeployment: { dep_old_failed: ["run_0"] }, eventsByRun: { run_0: PARKED } }));
-    expect(await findProjectWorkflow(hub.transport, PROJECT_ID)).toBeNull();
+  // #161: a dead run with no decisions still holds the project's state (its
+  // init output), so with nothing live it is what a reader folds; a card
+  // after a host restart shows stage 1, not "unavailable". The newest such
+  // run wins.
+  test("only failed deployments whose runs never took a decision -> the newest one is read", async () => {
+    const hub = fakeHub(
+      withAsset({
+        deployments: [
+          { id: "dep_old_failed", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" },
+          { id: "dep_newer_failed", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-02T00:00:00.000Z" },
+        ],
+        runsByDeployment: { dep_old_failed: ["run_0"], dep_newer_failed: ["run_1"] },
+        eventsByRun: { run_0: PARKED, run_1: PARKED },
+      }),
+    );
+    expect(await findProjectWorkflow(hub.transport, PROJECT_ID)).toEqual({ deploymentId: "dep_newer_failed", runId: "run_1", tenantId: TENANT_ID });
+  });
+
+  test("a dead run with decisions is read over a newer dead run without any", async () => {
+    const hub = fakeHub(
+      withAsset({
+        deployments: [
+          { id: "dep_decided", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" },
+          { id: "dep_empty", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-02T00:00:00.000Z" },
+        ],
+        runsByDeployment: { dep_decided: decidedRun("run_0", [1]).runIds, dep_empty: ["run_1"] },
+        eventsByRun: { ...decidedRun("run_0", [1]).events, run_1: PARKED },
+      }),
+    );
+    expect(await findProjectWorkflow(hub.transport, PROJECT_ID)).toEqual({ deploymentId: "dep_decided", runId: "run_0", tenantId: TENANT_ID });
   });
 
   // #51: the hub cannot end a deployment, so a run replaced by a newer
@@ -506,8 +533,16 @@ describe("ensureProjectWorkflow", () => {
 
   test("deploys afresh when the only deployment has ended and its run never took a decision", async () => {
     const hub = fakeHub(withAsset({ deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" }], runsByDeployment: { dep_1: ["run_1"] }, eventsByRun: { run_1: PARKED } }));
-    expect(await ensure(hub)).toEqual({ deploymentId: "dep_new", runId: "run_new", tenantId: TENANT_ID });
+    // Nothing to replay, so no replacement wait and no signals; the dead run
+    // is named as what the fresh one stands in for (#161).
+    expect(await ensure(hub)).toEqual({
+      deploymentId: "dep_new",
+      runId: "run_new",
+      tenantId: TENANT_ID,
+      replay: { from: { deploymentId: "dep_1", runId: "run_1", tenantId: TENANT_ID }, replayed: 0, refused: [] },
+    });
     expect(hub.signalsSent()).toEqual([]);
+    expect(hub.posts.some((post) => post.path.endsWith("/workflows/deployments"))).toBe(true);
   });
 
   // #51: a project's workflow used to be deployed once and reused whatever
