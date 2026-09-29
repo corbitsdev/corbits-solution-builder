@@ -262,7 +262,7 @@ export async function renderDeck(deck: Deck): Promise<Uint8Array> {
   cover.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 0.25, h: H, fill: { color: look.accent } });
   cover.addText(deck.projectTitle, { x: 0.7, y: H * 0.25, w: coverTextWidth, h: 1.4, fontSize: 32, fontFace: look.titleFace, bold: true, color: look.ink, valign: "bottom" });
   cover.addText(`Prepared for ${deck.audience} · ${deck.role}`, { x: 0.7, y: H * 0.25 + 1.5, w: coverTextWidth, h: 0.5, fontSize: 16, fontFace: look.bodyFace, color: look.muted });
-  cover.addText("Is this worth pursuing? Rough figures throughout; a firm estimate follows at stage 7.", {
+  cover.addText("The cost and time figures in this document are placeholders.", {
     x: 0.7,
     y: H * 0.25 + 2.1,
     w: coverTextWidth,
