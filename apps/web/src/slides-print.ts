@@ -1,6 +1,6 @@
 /**
  * A stakeholder's slides as one printable HTML document (#232): one page
- * per slide at the renderer's proportions, drawn the way 
+ * per slide at the renderer's proportions, drawn the way `SlidePreview`
  * draws them, pictures included. Printed through the system print dialog
  * (`print.tsx`), which is how a page becomes a PDF on every platform.
  * Pure: a string in, a string out, so what goes to the printer is testable.
