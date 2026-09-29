@@ -287,6 +287,31 @@ existing grant collection the credential walk already mirrors.
 **Kill date.** 2026-10-16. Tracked as
 [INTR-574](https://linear.app/abklabs/issue/INTR-574).
 
+## `packages/db/src/model-source-resolution.ts`, `packages/hub-sessions/src/workflow-allocation-service.ts` — recovery skips unavailable fallback offerings
+
+**Why.** A stage deploys with an ordered offering chain, and every sidecar
+(re)initialization re-resolves that chain from the catalog. Disabling any
+fallback offering after deploy (selecting a model disables its siblings)
+made every later initialization fail with `Catalog offering <id> is
+unavailable while recovering allocation`, so the stage never came back
+after a restart even though its default still resolved. Reproduced 3/3
+against this host; 3/3 recover with this patch.
+
+**What changed.** `resolveSourcesByOfferingIds` takes
+`opts.skipUnavailable`; with it, an offering that no longer resolves is
+dropped from the chain and the call fails only when nothing resolves.
+Allocation recovery passes it and logs the dropped offering ids. The
+default is not replaced: if it no longer resolves, recovery fails as
+before, because a step may only run on a source the operator approved at
+deploy. Deploy-time resolution stays strict.
+
+**Upstream-able.** Yes; it is
+[faremeter/interchange#205](https://github.com/faremeter/interchange/pull/205).
+Drop this patch when the vendor is refreshed past it.
+
+**Kill date.** 2026-10-29. Tracked as
+[INTR-628](https://linear.app/abklabs/issue/INTR-628).
+
 ## `packages/types/src/catalog.ts`, `packages/db/src/schema/catalog.ts` — operator-registered provider plugins
 
 **Why.** The catalog restricted `model_provider.plugin` to the four built-in

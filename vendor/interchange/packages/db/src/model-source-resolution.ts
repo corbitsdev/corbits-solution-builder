@@ -284,6 +284,10 @@ async function buildSource(
  * This is the recovery counterpart to launch-time source selection: it keeps
  * secrets out of persisted launch specs and rechecks tenant visibility and
  * credential ownership on every launch.
+ *
+ * With `skipUnavailable`, an offering that no longer resolves (disabled,
+ * deleted, or its credential no longer usable) is dropped from the chain
+ * instead of failing it; the chain fails only when nothing resolves.
  */
 export async function resolveSourcesByOfferingIds(
   db: DB["db"],
@@ -295,31 +299,30 @@ export async function resolveSourcesByOfferingIds(
   // See `buildSource`. Catalog rows stay on the ancestor; this does not copy
   // them into the resolving tenant.
   principalId?: string,
+  opts?: { skipUnavailable?: boolean },
 ): Promise<OfferingSourceResolution> {
   const visible = await listVisibleOfferings(db, tenantId);
   const byId = new Map(visible.map((entry) => [entry.offering.id, entry]));
   const sources: InferenceSource[] = [];
+  let firstUnavailable: { offeringId: string; skip?: SourceSkip } | undefined;
   for (const offeringId of offeringIds) {
     const offering = byId.get(offeringId);
-    if (offering === undefined) {
-      return { ok: false, reason: "offering_unavailable", offeringId };
+    const built =
+      offering === undefined
+        ? undefined
+        : await buildSource(db, tenantId, offering, credentialCipher, principalId);
+    if (built?.ok === true) {
+      sources.push(built.source);
+      continue;
     }
-    const built = await buildSource(
-      db,
-      tenantId,
-      offering,
-      credentialCipher,
-      principalId,
-    );
-    if (!built.ok) {
-      return {
-        ok: false,
-        reason: "offering_unavailable",
-        offeringId,
-        skip: built.skip,
-      };
+    const unavailable = built === undefined ? { offeringId } : { offeringId, skip: built.skip };
+    if (opts?.skipUnavailable !== true) {
+      return { ok: false, reason: "offering_unavailable", ...unavailable };
     }
-    sources.push(built.source);
+    firstUnavailable ??= unavailable;
+  }
+  if (sources.length === 0 && firstUnavailable !== undefined) {
+    return { ok: false, reason: "offering_unavailable", ...firstUnavailable };
   }
   return { ok: true, sources };
 }
