@@ -4305,6 +4305,33 @@ button[aria-disabled="true"] {
   margin-bottom: 0.83cqw;
 }
 
+/* The renderer's right-hand picture: on the cover from 58% across, on an
+   item slide from 62%, fitted inside its box (#227). Text beside it narrows
+   the same way the renderer narrows it. */
+.slide-picture {
+  position: absolute;
+  right: 4cqw;
+  top: 15cqw;
+  width: 34cqw;
+  height: calc(var(--slide-h) - 22cqw);
+  object-fit: contain;
+  object-position: center;
+}
+
+.slide-cover .slide-picture {
+  top: 6cqw;
+  width: 38cqw;
+  height: calc(var(--slide-h) - 12cqw);
+}
+
+.slide-cover-text.with-picture {
+  width: 50cqw;
+}
+
+.slide-lines.with-picture {
+  width: 56cqw;
+}
+
 .slide-footer {
   position: absolute;
   left: 5cqw;

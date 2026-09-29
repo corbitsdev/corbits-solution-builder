@@ -9,33 +9,40 @@
  * width units against the renderer's ten-inch slide, which is what lets one
  * component be the large slide and every thumbnail beneath it.
  *
- * Not a rendering of the .pptx bytes: a recorded deck is not re-read here,
- * and pictures, which are drawn only at save time with an image credential,
- * are not shown. The caption says so where it applies.
+ * Not a rendering of the .pptx bytes: a recorded deck is not re-read here.
+ * Pictures the deck already holds -- the approved mockup's screens (#227) --
+ * are shown where the renderer puts them; illustrations drawn only at save
+ * time with an image credential are not, and the caption says so.
  */
 import { useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { lookOf, type Deck, type DeckLook } from "@solutions-builder/app/deck";
+import { toBase64 } from "./base64.ts";
 
 export type PreviewSlide =
-  | { readonly kind: "cover"; readonly title: string; readonly subtitle: string; readonly note: string }
-  | { readonly kind: "item"; readonly title: string; readonly lines: readonly string[]; readonly page: number };
+  | { readonly kind: "cover"; readonly title: string; readonly subtitle: string; readonly note: string; readonly image?: Uint8Array }
+  | { readonly kind: "item"; readonly title: string; readonly lines: readonly string[]; readonly page: number; readonly image?: Uint8Array };
 
 /** The renderer's cover line, verbatim, so the preview and the file agree. */
 export const COVER_NOTE = "Is this worth pursuing? Rough figures throughout; a firm estimate follows at stage 7.";
 
 /** The slides in the order `renderDeck` writes them, with the page each footer carries. */
 export function previewSlides(deck: Deck): PreviewSlide[] {
+  const picture = (key: string): { image: Uint8Array } | {} => {
+    const image = deck.images?.get(key);
+    return image ? { image } : {};
+  };
   const slides: PreviewSlide[] = [
     {
       kind: "cover",
       title: deck.projectTitle,
       subtitle: `Prepared for ${deck.audience} · ${deck.role}`,
       note: COVER_NOTE,
+      ...picture("cover"),
     },
   ];
   deck.slides.forEach((entry, index) => {
-    slides.push({ kind: "item", title: entry.title, lines: entry.bullets, page: index + 2 });
+    slides.push({ kind: "item", title: entry.title, lines: entry.bullets, page: index + 2, ...picture(String(index)) });
   });
   if (deck.decision.length > 0) {
     slides.push({ kind: "item", title: "Decision request", lines: deck.decision, page: deck.slides.length + 2 });
@@ -57,16 +64,22 @@ function slideStyle(look: DeckLook): Record<string, string> {
   };
 }
 
+/** A slide's picture as the renderer places it: the right-hand column, fitted. */
+function Picture({ image, alt }: { image: Uint8Array; alt: string }) {
+  return <img className="slide-picture" alt={alt} src={`data:image/png;base64,${toBase64(image)}`} />;
+}
+
 function Slide({ slide, footer, look }: { slide: PreviewSlide; footer: string; look: DeckLook }) {
   if (slide.kind === "cover") {
     return (
       <div className="slide slide-cover" style={slideStyle(look)}>
         <span className="slide-accent-bar" />
-        <div className="slide-cover-text">
+        <div className={slide.image ? "slide-cover-text with-picture" : "slide-cover-text"}>
           <p className="slide-cover-title">{slide.title}</p>
           <p className="slide-cover-subtitle">{slide.subtitle}</p>
           <p className="slide-cover-note">{slide.note}</p>
         </div>
+        {slide.image ? <Picture image={slide.image} alt="A screen of the approved design" /> : null}
       </div>
     );
   }
@@ -74,7 +87,8 @@ function Slide({ slide, footer, look }: { slide: PreviewSlide; footer: string; l
     <div className="slide slide-item" style={slideStyle(look)}>
       <p className="slide-item-title">{slide.title}</p>
       <span className="slide-rule" />
-      <ul className="slide-lines">
+      {slide.image ? <Picture image={slide.image} alt="A screen of the approved design" /> : null}
+      <ul className={slide.image ? "slide-lines with-picture" : "slide-lines"}>
         {slide.lines.map((line, index) => (
           <li key={index}>{line}</li>
         ))}

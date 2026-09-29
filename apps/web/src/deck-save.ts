@@ -16,6 +16,7 @@
 import { deckFileName, deckFrom, packageOutlineProblem, renderDeck, DECK_MEDIA_TYPE, DECK_THEMES, type DeckDesign, type TemplateTheme } from "@solutions-builder/app/deck";
 import { toBase64 } from "./base64.ts";
 import { artDirection, illustration, illustrationPrompt, type ImageCredential } from "./deck-images.ts";
+import { mockupShots, placeMockups, type Shooter } from "./mockup-shots.ts";
 
 export async function buildPackageDeck(args: {
   projectTitle: string;
@@ -28,6 +29,8 @@ export async function buildPackageDeck(args: {
   theme?: TemplateTheme;
   /** A connected image provider's credential, for this build only; never stored. Absent means no pictures, whatever the design's images policy asks for. */
   imageCredential?: ImageCredential;
+  /** The approved GUI mockup, whose screens fill every slide left without an illustration (#227); `shoot` stands in for the browser's rasteriser in tests. */
+  mockup?: { html: string; shoot?: Shooter };
 }): Promise<{ dataUrl: string; filename: string; imagesNotice: string | null }> {
   const problem = packageOutlineProblem(args.markdown);
   if (problem) {
@@ -62,6 +65,17 @@ export async function buildPackageDeck(args: {
     }
   } else if (policy !== "none") {
     imagesNotice = "no connected provider has an image model, so slides were built without pictures";
+  }
+  // The mockup's screens as filler on every slide still without a picture,
+  // whatever the images policy: a pitch shows the thing being pitched (#227).
+  if (args.mockup?.html.trim()) {
+    try {
+      const shots = await (args.mockup.shoot ?? mockupShots)(args.mockup.html, deck.slides.length + 1);
+      images = placeMockups(images ? { ...deck, images } : deck, shots);
+    } catch (cause) {
+      const reason = `the design's screens could not be captured (${cause instanceof Error ? cause.message : String(cause)})`;
+      imagesNotice = imagesNotice ? `${imagesNotice}; ${reason}` : reason;
+    }
   }
   const bytes = await renderDeck(images ? { ...deck, images } : deck);
   return {
