@@ -194,6 +194,52 @@ export function SendBackPopover({
   );
 }
 
+/**
+ * The reader's way to send the project back to the stage whose document is
+ * open (#248): a card beside the button that names the one target the
+ * button promised, takes an optional reason, and sends on confirm. Not the
+ * composer's picker, which is anchored to the composer and lists every
+ * stage — from a past stage's document, that read as nothing happening.
+ */
+export function SendBackConfirm({
+  target,
+  busy,
+  onConfirm,
+  onCancel,
+}: {
+  target: number;
+  busy: boolean;
+  onConfirm: (reason: string) => void;
+  onCancel: () => void;
+}) {
+  const [reason, setReason] = useState("");
+  return (
+    <div className="sbconfirm" role="dialog" aria-label={`Send back to ${stageName(target)}`}>
+      <p className="sbconfirm-head">
+        Send the project back to stage {target} · {stageName(target)}
+        {RETURN_TO[target] ? `, to ${RETURN_TO[target]}` : ""}. Every review from there on is marked stale; nothing is deleted.
+      </p>
+      <textarea
+        className="sbconfirm-reason"
+        value={reason}
+        onChange={(event) => setReason(event.target.value)}
+        placeholder="What should change, optional"
+        aria-label="Why it is being sent back, optional"
+        rows={3}
+        autoFocus
+      />
+      <div className="sbconfirm-actions">
+        <Button variant="ghost" disabled={busy} onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button variant="primary" loading={busy} doing={`Sending back to ${stageName(target)}`} onClick={() => onConfirm(reason)}>
+          Send back to {stageName(target)}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function capitalize(word: string): string {
   return word.length > 0 ? word.charAt(0).toUpperCase() + word.slice(1) : word;
 }
