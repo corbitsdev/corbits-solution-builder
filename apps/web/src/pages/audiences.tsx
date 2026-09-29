@@ -850,11 +850,26 @@ export function AudiencePackages({
             onSelect={setActive}
             onDecide={(node, decision, note) => decide(node, decision, note)}
           />
-          {requiredQuorum > 0 ? (
-            <p className="inline-note">
-              {proceeded} of {requiredQuorum} required have proceeded.
-            </p>
-          ) : null}
+          {/* The gate and the button it opens, together at the top (#240): a
+              person who has just proceeded reads the tally and acts on it here
+              rather than under the packages and slides. */}
+          <div className="button-row audience-gate">
+            {requiredQuorum > 0 ? (
+              <p className="inline-note">
+                {proceeded} of {requiredQuorum} required have proceeded.
+              </p>
+            ) : null}
+            <Button
+              variant="primary"
+              loading={approving}
+              disabled={!canApprove || packages.length === 0 || !quorumMet}
+              doing="Approving the packages and opening the next stage"
+              onClick={onApprove}
+            >
+              Approve and continue
+            </Button>
+            {approveReasonDisplay ? <p className="inline-note">{approveReasonDisplay}</p> : null}
+          </div>
           <Tabs
             label="Stakeholder packages"
             active={selected?.variant ?? ""}
@@ -978,18 +993,6 @@ export function AudiencePackages({
               </div>
             </>
           ) : null}
-          <div className="button-row">
-            <Button
-              variant="primary"
-              loading={approving}
-              disabled={!canApprove || packages.length === 0 || !quorumMet}
-              doing="Approving the packages and opening the next stage"
-              onClick={onApprove}
-            >
-              Approve and continue
-            </Button>
-            {approveReasonDisplay ? <p className="inline-note">{approveReasonDisplay}</p> : null}
-          </div>
         </>
       ) : null}
     </div>
