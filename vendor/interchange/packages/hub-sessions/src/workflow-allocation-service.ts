@@ -1,6 +1,7 @@
 import { type } from "arktype";
 
 import { sha256 } from "@intx/crypto";
+import { getLogger } from "@intx/log";
 import {
   createSidecarAllocationStore,
   createWorkflowProbeStore,
@@ -56,6 +57,8 @@ import {
   runSidecarOperation,
   type SidecarReconciliationContext,
 } from "./sidecar-allocation/operation";
+
+const logger = getLogger(["hub", "workflow-allocation"]);
 
 export class WorkflowProvisioningError extends Error {
   readonly code: string;
@@ -775,6 +778,7 @@ export function createWorkflowAllocationService({
       // revoked delegation is enforced the next time this run's sidecar
       // connects, not only at the original deploy.
       spec.sourceAuthorityPrincipalId,
+      { skipUnavailable: true },
     );
     if (!resolved.ok) {
       throw new Error(
@@ -788,6 +792,12 @@ export function createWorkflowAllocationService({
       throw new Error(
         `Default offering ${spec.defaultSourceOfferingId} was not resolved for allocation ${allocation.id}`,
       );
+    }
+    const dropped = spec.sourceOfferingIds.filter(
+      (id) => !resolved.sources.some((source) => source.id === id),
+    );
+    if (dropped.length > 0) {
+      logger.warn`Recovering allocation ${allocation.id} without unavailable offerings ${dropped.join(", ")}`;
     }
     const config = createProvisionedHarnessConfig({
       tenantId: allocation.tenantId,
