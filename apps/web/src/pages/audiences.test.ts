@@ -20,6 +20,12 @@ describe("stage 5 audience packages", () => {
     expect(writeOne.indexOf("packageNudge(audience,")).toBeGreaterThan(-1);
     expect(writeOne.indexOf("packageNudge(audience,")).toBeLessThan(writeOne.indexOf("persistAudiencePackage("));
     expect(source).toContain("QuorumChips");
+    // #240: the approve button sits in the gate row at the top, under the chips and before the package tabs.
+    const gate = source.indexOf('className="button-row audience-gate"');
+    expect(gate).toBeGreaterThan(source.indexOf("<QuorumChips"));
+    expect(gate).toBeLessThan(source.indexOf('label="Stakeholder packages"'));
+    expect(source.slice(gate, source.indexOf('label="Stakeholder packages"'))).toContain("Approve and continue");
+    expect(source.lastIndexOf("Approve and continue")).toBeLessThan(source.indexOf('label="Stakeholder packages"'));
     // #232: one export menu with three ways out replaces the one save button.
     expect(source).toContain("exportSlides");
     expect(source).not.toContain("Save slides (.pptx)");
