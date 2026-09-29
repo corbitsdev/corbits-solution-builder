@@ -85,6 +85,16 @@ function isPage(node: ArtifactNode): boolean {
  */
 async function printPage(node: ArtifactNode, tenantId: string, content: string | null): Promise<void> {
   const html = content ?? (await api.artifactContent(tenantId, node.id)).content;
+  printHtmlDocument(html);
+}
+
+/**
+ * Prints one standalone HTML document from a hidden frame of its own, the
+ * way a design is printed: no scripts, same-origin so the frame's print can
+ * be reached, modals allowed for the dialog itself. A stakeholder's slides
+ * print this way too (#232).
+ */
+export function printHtmlDocument(html: string): void {
   const iframe = document.createElement("iframe");
   iframe.setAttribute("sandbox", "allow-same-origin allow-modals");
   iframe.style.position = "fixed";

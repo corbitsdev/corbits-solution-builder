@@ -18,6 +18,8 @@ import { toBase64 } from "./base64.ts";
 import { artDirection, illustration, illustrationPrompt, type ImageCredential } from "./deck-images.ts";
 import { mockupShots, placeMockups, type Shooter } from "./mockup-shots.ts";
 
+export { deckFileName };
+
 export async function buildPackageDeck(args: {
   projectTitle: string;
   audience: string;

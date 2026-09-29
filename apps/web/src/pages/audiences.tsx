@@ -16,9 +16,12 @@ import { api, ApiFailure, type ArtifactNode, type ProjectDetail } from "../clien
 import type { ChatMessage } from "../stage-mail.ts";
 import { Banner, Button, CopyButton, downloadArtifact, Field, StateLabel } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
-import { Tabs, Input } from "@corbits/react-ui";
+import { Tabs, Input, Menu, MenuContent, MenuItem, MenuTrigger } from "@corbits/react-ui";
+import { ChevronDown } from "lucide-react";
+import { printHtmlDocument } from "../print.tsx";
+import { slidesPrintHtml } from "../slides-print.ts";
 import { Markdown } from "../markdown.jsx";
-import { buildPackageDeck } from "../deck-save.ts";
+import { buildPackageDeck, deckFileName } from "../deck-save.ts";
 import { deckDesignFor } from "../deck-design-settings.ts";
 import { slidesSource } from "../deck-templates.ts";
 import { SlidePreview } from "../slide-preview.tsx";
@@ -511,14 +514,19 @@ export function AudiencePackages({
   // `graph.tsx` groups on); otherwise they are built here from the
   // package's own "Deck outline" section. Either way the browser downloads
   // the bytes itself — there is no host route to save them to.
-  const saveSlides = async (packageNodeId: string) => {
+  //
+  // Three ways out of one menu (#232): the PowerPoint file; the same
+  // slides printed one per page, which the system dialog saves as a PDF;
+  // and Google Slides, which gets the PowerPoint saved and Slides opened for
+  // the import, since nothing here is signed in to Google (#233).
+  const exportSlides = async (packageNodeId: string, how: "pptx" | "pdf" | "google") => {
     const pkg = packages.find((node) => node.id === packageNodeId);
     const name = pkg?.variant ?? "this stakeholder";
     setSaving((before) => new Set(before).add(packageNodeId));
     setError(null);
     try {
       if (!pkg) throw new Error("That stakeholder's package could not be found.");
-      const deck = detail.nodes
+      const recorded = detail.nodes
         .filter((node) => node.kind === "audience_deck" && node.variant === pkg.variant && node.supersededByNodeId === null)
         .sort((a, b) => b.version - a.version)[0];
       const role = audiences.find((audience) => audience.name === pkg.variant)?.role ?? "";
@@ -531,9 +539,25 @@ export function AudiencePackages({
           themeNotice = `its style guide could not be read (${cause instanceof ApiFailure ? cause.detail.message : String(cause)}); using the default look`;
         }
       }
-      if (slidesSource({ hasRecordedDeck: Boolean(deck), theme }) === "recorded" && deck) {
-        const result = await api.artifactContent(tenantId, deck.id);
-        downloadArtifact(result.content, `${deck.title}.pptx`);
+      const fileBase = deckFileName(detail.project.title, name).replace(/\.pptx$/, "");
+      if (how === "pdf") {
+        // Drawn from the same outline, design, theme and screens the preview shows.
+        const packageContent = await api.artifactContent(tenantId, packageNodeId);
+        const preferences = await api.deckDesigns();
+        const deck = deckFrom({
+          projectTitle: detail.project.title,
+          audience: name,
+          role,
+          markdown: packageContent.content,
+          design: deckDesignFor(role, preferences),
+          ...(theme ? { theme } : {}),
+        });
+        if (!deck) throw new Error("its deck outline has no slides.");
+        const shots = await designShots();
+        printHtmlDocument(slidesPrintHtml(shots.length > 0 ? { ...deck, images: placeMockups(deck, shots) } : deck, fileBase));
+      } else if (slidesSource({ hasRecordedDeck: Boolean(recorded), theme }) === "recorded" && recorded) {
+        const result = await api.artifactContent(tenantId, recorded.id);
+        downloadArtifact(result.content, `${recorded.title}.pptx`);
       } else {
         const packageContent = await api.artifactContent(tenantId, packageNodeId);
         const preferences = await api.deckDesigns();
@@ -548,7 +572,14 @@ export function AudiencePackages({
         });
         downloadArtifact(built.dataUrl, built.filename);
       }
-      if (themeNotice) setError(`Slides for ${name}: ${themeNotice}.`);
+      if (how === "google") {
+        window.open("https://docs.google.com/presentation/u/0/", "_blank", "noopener");
+        setError(
+          `Slides for ${name}: the PowerPoint is saved. In Google Slides choose File → Import slides and pick ${fileBase}.pptx; nothing here is signed in to Google to upload it for you.`,
+        );
+      } else if (themeNotice) {
+        setError(`Slides for ${name}: ${themeNotice}.`);
+      }
       setSavedNodes((before) => new Set(before).add(packageNodeId));
     } catch (cause) {
       setError(`Slides for ${name}: ${cause instanceof ApiFailure ? cause.detail.message : String(cause)}`);
@@ -921,14 +952,19 @@ export function AudiencePackages({
                 />
               ) : null}
               <div className="button-row">
-                <Button
-                  variant="primary"
-                  loading={saving.has(selected.id)}
-                  doing={`Saving ${selected.variant ?? selected.title}'s slides`}
-                  onClick={() => saveSlides(selected.id)}
-                >
-                  {saving.has(selected.id) ? "Saving slides…" : "Save slides (.pptx)"}
-                </Button>
+                <Menu>
+                  <MenuTrigger asChild>
+                    <Button variant="primary" loading={saving.has(selected.id)} doing={`Exporting ${selected.variant ?? selected.title}'s slides`}>
+                      {saving.has(selected.id) ? "Exporting slides…" : "Export slides"}
+                      <ChevronDown aria-hidden="true" />
+                    </Button>
+                  </MenuTrigger>
+                  <MenuContent align="start">
+                    <MenuItem onSelect={() => void exportSlides(selected.id, "google")}>Open in Google Slides</MenuItem>
+                    <MenuItem onSelect={() => void exportSlides(selected.id, "pptx")}>Save as PPTX</MenuItem>
+                    <MenuItem onSelect={() => void exportSlides(selected.id, "pdf")}>Save as PDF</MenuItem>
+                  </MenuContent>
+                </Menu>
                 {selected.variant ? (
                   <Button
                     loading={writing.has(selected.variant)}
