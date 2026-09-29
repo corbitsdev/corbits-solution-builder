@@ -424,9 +424,9 @@ function parkedOn(events: readonly { seq: number; type: string }[]): boolean {
   return newest?.type === "SignalAwaited";
 }
 
-/** How the replay paces itself and how long it lets the run sit still;
- *  both shortened by tests. */
-type CatchUpOptions = { readonly pollMs?: number; readonly stallMs?: number };
+/** How the replay paces itself, how long it lets the run sit still, and
+ *  how long it waits on the hub to place the target; all shortened by tests. */
+type CatchUpOptions = { readonly pollMs?: number; readonly stallMs?: number; readonly placement?: PlacementWait };
 
 /** How long a run being replayed onto may go without writing an event, while
  *  neither parked nor ended, before it counts as lost: its child died (#189).
@@ -472,12 +472,20 @@ async function catchUp(transport: Transport, target: ProjectWorkflowDeployment, 
   const stallMs = options.stallMs ?? REPLAY_STALL_MS;
   const workflows = workflowsOf(transport, target);
   // Placed, and its run started: a replacement reports `running` rather
-  // than `deployed`, and either takes a signal once the run is on.
-  const placed = await pollUntil(120_000, pollMs, async () => {
-    const found = (await workflows.deployments()).find((entry) => entry.id === target.deploymentId);
-    if (!found || deploymentHasEnded(found)) throw new Error("the project's workflow ended before its history could be replayed");
-    return found.status === "deployed" || found.status === "running" ? true : null;
-  });
+  // than `deployed`, and either takes a signal once the run is on. Waited
+  // for as long as the hub is visibly placing, not a fixed two minutes: a
+  // fresh deployment queues behind the ones the hub is restoring after a
+  // host start, and a clock counted from here ran out while the hub was
+  // still working through them (#238).
+  const placed = await pollWhilePlacing(
+    workflows,
+    (deployments) => {
+      const found = deployments.find((entry) => entry.id === target.deploymentId);
+      if (!found || deploymentHasEnded(found)) throw new Error("the project's workflow ended before its history could be replayed");
+      return found.status === "deployed" || found.status === "running" ? true : null;
+    },
+    options.placement ?? {},
+  );
   if (!placed) throw new Error("the project's workflow was not placed, so its history could not be replayed");
   const topLevel = async () => (await workflows.runEvents(target.deploymentId, target.runId)).events;
   const started = await pollUntil(120_000, pollMs, async () => ((await topLevel()).some((event) => event.type === "RunStarted") ? true : null));
@@ -859,9 +867,17 @@ async function ensureProjectWorkflowOnce(
     problemStatement: options.problemStatement,
   });
 
+  // How long the hub may sit still before this waits no more on it: for
+  // its own replacement of a dead deployment, and for a deployment it is
+  // still placing or restoring (#236).
+  const placementWait: PlacementWait = {
+    stallMs: options.replacementWaitMs ?? REPLACEMENT_WAIT_MS,
+    ...(options.placementPollMs === undefined ? {} : { pollMs: options.placementPollMs }),
+  };
   const replay: CatchUpOptions = {
     ...(options.replayPollMs === undefined ? {} : { pollMs: options.replayPollMs }),
     ...(options.replayStallMs === undefined ? {} : { stallMs: options.replayStallMs }),
+    placement: placementWait,
   };
   /**
    * Brings `target`, at `generation`, up to `history`. A run that stalls
@@ -880,13 +896,6 @@ async function ensureProjectWorkflowOnce(
       await catchUp(transport, fresh, history, replay);
       return fresh;
     }
-  };
-  // How long the hub may sit still before this waits no more on it: for
-  // its own replacement of a dead deployment, and for a deployment it is
-  // still placing or restoring (#236).
-  const placementWait: PlacementWait = {
-    stallMs: options.replacementWaitMs ?? REPLACEMENT_WAIT_MS,
-    ...(options.placementPollMs === undefined ? {} : { pollMs: options.placementPollMs }),
   };
   let groups = await everywhere();
   let state = await projectRunState(transport, groups, memo);
