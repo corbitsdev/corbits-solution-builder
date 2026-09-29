@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import ExcelJS from "exceljs";
-import { readMaterial } from "./material-reading.ts";
+import { deckFrom, renderDeck } from "@solutions-builder/app/deck";
+import { readMaterial, slideXmlText } from "./material-reading.ts";
 
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
@@ -39,6 +40,31 @@ describe("readMaterial", () => {
     expect(text).toContain("B2 =100*2");
     expect(text).toContain("Number formats:");
     expect(text).toContain("$#,##0.00");
+  });
+
+  test("a PowerPoint file is read as its slides' text, in order", async () => {
+    const deck = deckFrom({
+      projectTitle: "Acme",
+      audience: "Finance",
+      role: "budget_approver",
+      markdown: "### Deck outline\n\n1. **The problem** — Costs are rising faster than revenue.\n2. **The plan** — Ship the pilot in Q1.\n\n### Decision request\n\n- Approve the pilot budget.\n",
+    })!;
+    const bytes = await renderDeck(deck);
+    const { text } = await readMaterial({
+      name: "last-year.pptx",
+      mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      bytes,
+    });
+    expect(text).toStartWith("Slide 1 of 4:\nAcme");
+    expect(text).toContain("Slide 2 of 4:\nThe problem");
+    expect(text).toContain("Costs are rising faster than revenue.");
+    expect(text.indexOf("The problem")).toBeLessThan(text.indexOf("The plan"));
+    expect(text).not.toContain("<a:t>");
+  });
+
+  test("slide text joins runs within a paragraph and decodes entities", () => {
+    const xml = '<p:sp><p:txBody><a:p><a:r><a:t>Costs &amp; </a:t></a:r><a:r><a:t>revenue</a:t></a:r></a:p><a:p></a:p><a:p><a:r><a:t xml:space="preserve"> Q1 </a:t></a:r></a:p></p:txBody></p:sp>';
+    expect(slideXmlText(xml)).toBe("Costs & revenue\nQ1");
   });
 
   test("an unreadable type yields a short note with name, type and size", async () => {
