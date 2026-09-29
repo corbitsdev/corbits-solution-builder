@@ -241,6 +241,10 @@ export type MountedHub = {
  * Behaviour matches the previous in-host composition; the host still owns
  * opening the database, minting keys, and serving the socket.
  */
+// Local process sidecars connect in seconds and die with the host; the
+// platform's 120s default is sized for remote capacity.
+const SIDECAR_CONNECT_TIMEOUT_MS = 30_000;
+
 export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Promise<MountedHub> {
   // The handle must be bound to Interchange's schema, not bare: better-auth's
   // drizzle adapter and every `db.query.*` lookup in the hub resolve tables
@@ -416,6 +420,7 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
     credentialCipher,
     allocationRouter: sidecarRouter,
     hubWebSocketUrl: options.hubWebSocketUrl,
+    connectTimeoutMs: SIDECAR_CONNECT_TIMEOUT_MS,
   });
   // `prepareProvisionedDeployment` commits the run's `workflow_run` and
   // `workflow_run_launch_spec` rows before returning -- the same
@@ -458,6 +463,7 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
     plugins: sidecarPlugins,
     router: sidecarRouter,
     hubWebSocketUrl: options.hubWebSocketUrl,
+    connectTimeoutMs: SIDECAR_CONNECT_TIMEOUT_MS,
     // Process-provisioned sidecars die with the host. Replacing them lets
     // `restoreWorkflowRunToAllocation` replay each run's hub-held refs onto the
     // new generation; releasing them fails the run and a project restarts at
