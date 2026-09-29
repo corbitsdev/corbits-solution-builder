@@ -24,7 +24,7 @@ export type PreviewSlide =
   | { readonly kind: "item"; readonly title: string; readonly lines: readonly string[]; readonly page: number; readonly image?: Uint8Array };
 
 /** The renderer's cover line, verbatim, so the preview and the file agree. */
-export const COVER_NOTE = "Is this worth pursuing? Rough figures throughout; a firm estimate follows at stage 7.";
+export const COVER_NOTE = "The cost and time figures in this document are placeholders.";
 
 /** The slides in the order `renderDeck` writes them, with the page each footer carries. */
 export function previewSlides(deck: Deck): PreviewSlide[] {
