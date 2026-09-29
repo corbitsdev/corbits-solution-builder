@@ -5,8 +5,8 @@
   "type": "module",
   "description": "The Solution Builder client.",
   "dependencies": {
-    "@corbits/codex-provider": "github:corbitsdev/corbits-codex-provider",
-    "@corbits/xai-provider": "github:corbitsdev/corbits-xai-provider",
+    "@corbits/codex-provider": "^0.1.2",
+    "@corbits/xai-provider": "^0.1.1",
     "@intx/hub-client": "workspace:*",
     "@solutions-builder/app": "workspace:*",
     "@solutions-builder/installer": "workspace:*"
