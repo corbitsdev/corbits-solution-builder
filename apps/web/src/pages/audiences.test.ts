@@ -20,7 +20,12 @@ describe("stage 5 audience packages", () => {
     expect(writeOne.indexOf("packageNudge(audience,")).toBeGreaterThan(-1);
     expect(writeOne.indexOf("packageNudge(audience,")).toBeLessThan(writeOne.indexOf("persistAudiencePackage("));
     expect(source).toContain("QuorumChips");
-    expect(source).toContain("saveSlides");
+    // #232: one export menu with three ways out replaces the one save button.
+    expect(source).toContain("exportSlides");
+    expect(source).not.toContain("Save slides (.pptx)");
+    for (const item of ["Open in Google Slides", "Save as PPTX", "Save as PDF"]) expect(source).toContain(item);
+    expect(source).toContain('exportSlides(selected.id, "pdf")');
+    expect(source).toContain("printHtmlDocument(slidesPrintHtml(");
     // CL-8870: a stakeholder's vote is its own `project.decision` signal on
     // the project workflow run, not an artifact-metadata write.
     expect(source).toContain("recordAudienceVote");
