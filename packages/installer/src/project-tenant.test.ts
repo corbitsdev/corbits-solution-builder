@@ -77,3 +77,32 @@ describe("updateProject policy versioning", () => {
     expect(record.revision).toBe(8);
   });
 });
+
+// #246: a project's deck settings live in the same config; a project
+// written before they existed reads as the defaults.
+describe("updateProject deck settings", () => {
+  test("a project without saved deck settings uses the workspace's design documents", async () => {
+    const row = seed(1, 1);
+    const record = await updateProject(fakeTransport(row), "tnt_test", { title: "Renamed" });
+    expect(record.deckSettings).toEqual({ useWorkspaceDesignDocuments: true });
+  });
+
+  test("a deck settings write is kept, moves only the revision, and survives the next write", async () => {
+    const row = seed(2, 4);
+    const record = await updateProject(fakeTransport(row), "tnt_test", { deckSettings: { useWorkspaceDesignDocuments: false } });
+    expect(record.deckSettings).toEqual({ useWorkspaceDesignDocuments: false });
+    expect(record.policyVersion).toBe(2);
+    expect(record.revision).toBe(5);
+    const again = await updateProject(fakeTransport(row), "tnt_test", { title: "Still off" });
+    expect(again.deckSettings).toEqual({ useWorkspaceDesignDocuments: false });
+    const stored = row.config.solutionsBuilder as { deckSettings: unknown };
+    expect(stored.deckSettings).toEqual({ useWorkspaceDesignDocuments: false });
+  });
+
+  test("a hand-edited deck setting of the wrong type reads as the default", async () => {
+    const row = seed(1, 1);
+    (row.config.solutionsBuilder as Record<string, unknown>).deckSettings = { useWorkspaceDesignDocuments: "yes" };
+    const record = await updateProject(fakeTransport(row), "tnt_test", { title: "Renamed" });
+    expect(record.deckSettings).toEqual({ useWorkspaceDesignDocuments: true });
+  });
+});

@@ -45,7 +45,7 @@ describe("the slides preview", () => {
     const page = read("./pages/audiences.tsx");
     expect(page).toContain("<SlidePreview key={selected.id} deck={preview.deck} note={preview.note} />");
     expect(page).toContain("packageOutlineProblem(content)");
-    expect(page).toContain("api.deckTemplateThemeForRole(role)");
+    expect(page).toContain("api.deckBrief(detail.project.id, role)");
     expect(page).toContain("deckDesignFor(role, preferences)");
     expect(page).toContain("Pictures are drawn when the slides are saved.");
   });

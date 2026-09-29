@@ -74,7 +74,7 @@ describe("settings page markup language", () => {
 
   test("mockup sections stay, and the extras the mockup cut are gone", async () => {
     const page = await Bun.file(new URL("./settings.tsx", import.meta.url)).text();
-    for (const title of ["Appearance", "Inference", "Designer", "Stakeholder decks", "This computer"]) {
+    for (const title of ["Appearance", "Inference", "Designer", "Stakeholder decks", "Design documents", "This computer"]) {
       expect(page).toContain(title);
     }
     expect(page).toContain("ProviderList");

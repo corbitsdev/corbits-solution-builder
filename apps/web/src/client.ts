@@ -62,8 +62,20 @@ import { importProject as importProjectBundle } from "./project-import.ts";
 import { importLegacyProject, isLegacyBundle, parseLegacyBundle } from "./legacy-import.ts";
 import { ArchiveRefused, expandArchives } from "./material-archive.ts";
 import { replayAdoption } from "./adoption-replay.ts";
-import { DELIVERY_MANIFEST_KIND, MATERIAL_KIND, MATERIAL_READING_KIND } from "@solutions-builder/app/artifacts";
+import { DECK_DESIGN_DOCUMENT_KIND, DECK_DESIGN_READING_KIND, DELIVERY_MANIFEST_KIND, MATERIAL_KIND, MATERIAL_READING_KIND } from "@solutions-builder/app/artifacts";
 import { readMaterial } from "./material-reading.ts";
+import {
+  designDocumentRefusal,
+  designDocumentFormat,
+  designDocumentsFrom,
+  designGuidelinesBlock,
+  designThemeOf,
+  effectiveDesignDocuments,
+  readingIdsFor,
+  type DeckBrief,
+  type DeckDesignDocument,
+  type DesignDocumentScope,
+} from "./deck-design-documents.ts";
 import type { DesignFeedbackDisposition, DesignFeedbackEntry as DesignFeedbackGraphEntry } from "@solutions-builder/app/artifact-graph";
 import type { TemplateTheme } from "@solutions-builder/app/deck";
 import { withDisposition } from "./design-disposition.ts";
@@ -120,7 +132,7 @@ import { openDecisions } from "./decisions-fold.ts";
 import { loadProjectView, toArtifactNode } from "./project-view.ts";
 import { projectUsage, type ProjectUsage, type WorkspaceSpend } from "./project-usage.ts";
 import { designerSettings as loadDesignerSettings, saveDesignerSettings, type DesignerSettings } from "./designer-settings.ts";
-import { deckDesigns as loadDeckDesigns, saveDeckDesignPreference } from "./deck-design-settings.ts";
+import { deckDesigns as loadDeckDesigns, guidanceFor, saveDeckDesignPreference } from "./deck-design-settings.ts";
 import {
   API_KEY_CONNECT_OPTIONS,
   OAUTH_CONNECT_OPTIONS,
@@ -844,6 +856,28 @@ async function deckSettingsArtifact(
   return artifact ? { id: artifact.id, content: artifact.content } : null;
 }
 
+/** The design documents on one tenant — the workspace's, or one project's own — newest first. */
+async function listDesignDocuments(
+  transport: ReturnType<typeof createHubTransport>,
+  tenantId: string,
+  scope: DesignDocumentScope,
+): Promise<DeckDesignDocument[]> {
+  return designDocumentsFrom(await listArtifacts(transport, tenantId), scope);
+}
+
+/** The theme of the style-guide PowerPoint mapped to `role`, read fresh from its bytes; null when none is mapped. */
+async function roleStyleGuideTheme(
+  transport: ReturnType<typeof createHubTransport>,
+  workspaceTenantId: string,
+  role: string,
+): Promise<TemplateTheme | null> {
+  const artifact = await deckSettingsArtifact(transport, workspaceTenantId);
+  const templateArtifactId = artifact ? parseDeckSettings(artifact.content).roles[role] : undefined;
+  if (!templateArtifactId) return null;
+  const { bytes } = await downloadArtifactBytes(workspaceTenantId, templateArtifactId);
+  return await readTemplateTheme(bytes);
+}
+
 function stakeholdersPolicy(
   current: ProjectPolicy,
   payload: { audiences: { name: string; role: string }[]; audienceQuorum: number },
@@ -1505,12 +1539,125 @@ export const api = {
     }),
   /** The role's style guide theme, read fresh from its `.pptx`, or `null` when none is mapped. */
   deckTemplateThemeForRole: (role: string) =>
-    asWorkspaceOwner(async (transport, workspaceTenantId): Promise<TemplateTheme | null> => {
-      const artifact = await deckSettingsArtifact(transport, workspaceTenantId);
-      const templateArtifactId = artifact ? parseDeckSettings(artifact.content).roles[role] : undefined;
-      if (!templateArtifactId) return null;
-      const { bytes } = await downloadArtifactBytes(workspaceTenantId, templateArtifactId);
-      return await readTemplateTheme(bytes);
+    asWorkspaceOwner((transport, workspaceTenantId): Promise<TemplateTheme | null> => roleStyleGuideTheme(transport, workspaceTenantId, role)),
+  /**
+   * The design documents of one scope (#246): the workspace's, which every
+   * project's decks are built against unless a project turns them off, or
+   * one project's own. Newest first.
+   */
+  designDocuments: (projectId?: string) =>
+    asWorkspaceOwner(async (transport, workspaceTenantId) => ({
+      documents: await listDesignDocuments(transport, projectId ?? workspaceTenantId, projectId ? "project" : "workspace"),
+    })),
+  /**
+   * Adds design documents to the workspace or to one project, the way
+   * `attachMaterial` attaches a file: text as a text artifact; a PDF or
+   * PowerPoint through the multipart route, stamped `sb`, with a companion
+   * reading holding its text. A PowerPoint's theme is read here, once, and
+   * saved on its stamp, so drawing a deck never downloads the file again.
+   * A file of another kind is refused by name before anything is written.
+   */
+  addDesignDocuments: (files: File[], projectId?: string) =>
+    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      const tenantId = projectId ?? workspaceTenantId;
+      for (const file of files) {
+        const refusal = designDocumentRefusal(file.name, file.type || "");
+        if (refusal) {
+          throw new ApiFailure({ code: "unsupported_type", message: refusal, correlationId: "-", retryable: false });
+        }
+      }
+      const added = await Promise.all(
+        files.map(async (file) => {
+          const format = designDocumentFormat(file.name, file.type || "")!;
+          const mediaType = file.type || (format === "pptx" ? "application/vnd.openxmlformats-officedocument.presentationml.presentation" : format === "pdf" ? "application/pdf" : "text/plain");
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          const provenance = { producer: "human" as const };
+          if (format === "text") {
+            const artifact = await installerCreateArtifact(transport, tenantId, {
+              title: file.name,
+              content: new TextDecoder("utf-8").decode(bytes),
+              metadata: { sb: { kind: DECK_DESIGN_DOCUMENT_KIND, variant: file.name, mediaType, sourceVersionIds: [], provenance } },
+            });
+            return { id: artifact.id, name: file.name, read: true };
+          }
+          const theme = format === "pptx" ? await readTemplateTheme(bytes).catch(() => null) : null;
+          const uploaded = await uploadArtifactFile(tenantId, file);
+          try {
+            await installerReviseArtifact(transport, tenantId, uploaded.id, {
+              metadata: { sb: { kind: DECK_DESIGN_DOCUMENT_KIND, variant: file.name, mediaType, sourceVersionIds: [], provenance, ...(theme ? { theme } : {}) } },
+            });
+          } catch (cause) {
+            await installerArchiveArtifact(transport, tenantId, uploaded.id).catch(() => {});
+            throw cause;
+          }
+          // The companion reading, as `attachMaterial` writes one: what the
+          // presentation creator is actually handed. Reading failing is not
+          // an add failure — the companion says so instead — and nor is the
+          // companion write itself: the file is kept, and the list shows it
+          // as not read rather than pretending it was.
+          const readingText = await readMaterial({ name: file.name, mediaType, bytes })
+            .then((result) => result.text)
+            .catch((cause) => `(Could not read ${file.name}: ${cause instanceof Error ? cause.message : String(cause)}.)`);
+          const read = await installerCreateArtifact(transport, tenantId, {
+            title: `${file.name} (reading)`,
+            content: readingText,
+            metadata: {
+              sb: { kind: DECK_DESIGN_READING_KIND, variant: file.name, sourceVersionIds: [uploaded.id], provenance, mediaType: "text/plain" },
+            },
+          })
+            .then(() => true)
+            .catch(() => false);
+          return { id: uploaded.id, name: file.name, read };
+        }),
+      );
+      return { added };
+    }),
+  /** Archives a design document and the reading kept beside it. */
+  removeDesignDocument: (documentId: string, projectId?: string) =>
+    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+      const tenantId = projectId ?? workspaceTenantId;
+      const readings = readingIdsFor(await listArtifacts(transport, tenantId), documentId);
+      await installerArchiveArtifact(transport, tenantId, documentId);
+      await Promise.all(readings.map((id) => installerArchiveArtifact(transport, tenantId, id).catch(() => {})));
+      return { removed: documentId };
+    }),
+  /** One project's deck settings — today, whether the workspace's design documents apply to it. */
+  projectDeckSettings: (projectId: string) =>
+    asWorkspaceOwner(async (transport) => (await installerRequireProject(transport, projectId)).deckSettings),
+  setProjectDeckSettings: (projectId: string, settings: { useWorkspaceDesignDocuments: boolean }) =>
+    asWorkspaceOwner(async (transport) => (await installerUpdateProject(transport, projectId, { deckSettings: settings })).deckSettings),
+  /**
+   * What one stakeholder's deck in one project is drafted and drawn against
+   * (#246). The theme: the role's mapped style guide when there is one,
+   * else the first PowerPoint among the design documents that apply — the
+   * project's own before the workspace's — else null for the built-in look.
+   * The guidelines: the role's saved guidance and every applying document's
+   * text, as the block `packageRequest` hands the presentation creator.
+   */
+  deckBrief: (projectId: string, role: string) =>
+    asWorkspaceOwner(async (transport, workspaceTenantId): Promise<DeckBrief> => {
+      const [project, workspace, own, preferences, styleGuide] = await Promise.all([
+        installerRequireProject(transport, projectId),
+        listDesignDocuments(transport, workspaceTenantId, "workspace"),
+        listDesignDocuments(transport, projectId, "project"),
+        loadDeckDesigns(transport).catch(() => ({}) as Record<string, unknown>),
+        roleStyleGuideTheme(transport, workspaceTenantId, role),
+      ]);
+      const documents = effectiveDesignDocuments({ workspace, project: own, settings: project.deckSettings });
+      const readings = await Promise.all(
+        documents
+          .filter((document) => document.readingId !== null)
+          .map(async (document) => {
+            const tenantId = document.scope === "project" ? projectId : workspaceTenantId;
+            const artifact = await installerGetArtifact(transport, tenantId, document.readingId!);
+            return { name: document.name, scope: document.scope, text: artifact?.content ?? "" };
+          }),
+      );
+      return {
+        theme: styleGuide ?? designThemeOf(documents),
+        guidelines: designGuidelinesBlock(readings, guidanceFor(role, preferences)),
+        documents: documents.map((document) => document.name),
+      };
     }),
   /**
    * Persists the mail-chat specialist's approved reply as the stage's own

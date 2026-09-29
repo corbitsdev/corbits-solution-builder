@@ -4,9 +4,9 @@
  * `source-material.ts` (main) so the browser can extract it itself now that
  * uploads go straight to the artifacts package rather than through the hub.
  *
- * `unpdf` and `exceljs` are loaded with dynamic `import()` inside the
- * branches that need them, so a project that never attaches a PDF or a
- * spreadsheet never pays to bundle either reader.
+ * `unpdf`, `exceljs` and `jszip` are loaded with dynamic `import()` inside
+ * the branches that need them, so a project that never attaches a PDF, a
+ * spreadsheet or a PowerPoint never pays to bundle that reader.
  */
 import type ExcelJSNamespace from "exceljs";
 
@@ -24,6 +24,7 @@ const MAX_FORMAT_CELLS = 200;
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 const XLS_MIME = "application/vnd.ms-excel";
 const PDF_MIME = "application/pdf";
+const PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
 function isText(mediaType: string): boolean {
   return mediaType.startsWith("text/") || mediaType === "application/json";
@@ -50,6 +51,10 @@ async function legacyWorkbookToXlsx(bytes: Uint8Array): Promise<Uint8Array> {
 
 function isPdf(name: string, mediaType: string): boolean {
   return mediaType === PDF_MIME || name.toLowerCase().endsWith(".pdf");
+}
+
+function isPptx(name: string, mediaType: string): boolean {
+  return mediaType === PPTX_MIME || name.toLowerCase().endsWith(".pptx");
 }
 
 /** Never a silent cut: what is left out past the cap is always announced. */
@@ -170,13 +175,87 @@ async function pdfText(bytes: Uint8Array): Promise<string> {
   return `${blocks.join("\n\n")}${silent > 0 ? `\n\n(${silent} page${silent === 1 ? "" : "s"} with no text, not shown)` : ""}`;
 }
 
+const XML_ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+
+/** The text of one XML text run, its entities decoded. */
+function decodeXml(text: string): string {
+  return text.replace(/&(#x[0-9a-fA-F]+|#\d+|[a-z]+);/g, (whole, entity: string) => {
+    if (entity.startsWith("#x")) return String.fromCodePoint(Number.parseInt(entity.slice(2), 16));
+    if (entity.startsWith("#")) return String.fromCodePoint(Number(entity.slice(1)));
+    return XML_ENTITIES[entity] ?? whole;
+  });
+}
+
+/** A slide part's text as a person reads it: one line per paragraph, runs joined, empty paragraphs dropped. */
+export function slideXmlText(xml: string): string {
+  const paragraphs = xml.match(/<a:p\b[\s\S]*?<\/a:p>/g) ?? [];
+  return paragraphs
+    .map((paragraph) =>
+      [...paragraph.matchAll(/<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>/g)]
+        .map((run) => decodeXml(run[1] ?? ""))
+        .join("")
+        .trim(),
+    )
+    .filter((line) => line.length > 0)
+    .join("\n");
+}
+
+/**
+ * The slide parts of a PowerPoint file in the order the presentation shows
+ * them: `presentation.xml` lists slide ids, each pointing through the
+ * presentation's relationships at a part. A file whose list cannot be read
+ * falls back to the parts in file-name order, which is the usual order.
+ */
+async function slidePartsInOrder(zip: { files: Record<string, unknown>; file(name: string): { async(type: "string"): Promise<string> } | null }): Promise<string[]> {
+  const byFileName = Object.keys(zip.files)
+    .map((name) => ({ name, number: Number(/^ppt\/slides\/slide(\d+)\.xml$/.exec(name)?.[1]) }))
+    .filter((entry) => Number.isFinite(entry.number))
+    .sort((a, b) => a.number - b.number)
+    .map((entry) => entry.name);
+  const presentation = await zip.file("ppt/presentation.xml")?.async("string");
+  const relationships = await zip.file("ppt/_rels/presentation.xml.rels")?.async("string");
+  if (!presentation || !relationships) return byFileName;
+  const targets = new Map<string, string>();
+  for (const relationship of relationships.matchAll(/<Relationship\b[^>]*>/g)) {
+    const id = /\bId="([^"]+)"/.exec(relationship[0])?.[1];
+    const target = /\bTarget="([^"]+)"/.exec(relationship[0])?.[1];
+    if (id && target) targets.set(id, target.startsWith("/") ? target.slice(1) : `ppt/${target}`);
+  }
+  const ordered = [...presentation.matchAll(/<p:sldId\b[^>]*\br:id="([^"]+)"/g)]
+    .map((match) => targets.get(match[1] ?? ""))
+    .filter((name): name is string => name !== undefined && name in zip.files);
+  return ordered.length > 0 ? ordered : byFileName;
+}
+
+/**
+ * A PowerPoint file's text, slide by slide, in presentation order. Only what
+ * the slides carry as text: a picture-only slide is said to have none, and
+ * speaker notes are not read.
+ */
+async function presentationText(bytes: Uint8Array): Promise<string> {
+  const JSZip = (await import("jszip")).default;
+  const zip = await JSZip.loadAsync(bytes);
+  const parts = await slidePartsInOrder(zip);
+  if (parts.length === 0) return "(A PowerPoint file with no slides.)";
+  const slides: string[] = [];
+  for (const [index, part] of parts.entries()) {
+    const text = slideXmlText(await zip.file(part)!.async("string"));
+    if (text.length > 0) slides.push(`Slide ${index + 1} of ${parts.length}:\n${text}`);
+  }
+  if (slides.length === 0) {
+    return `(${parts.length} slide${parts.length === 1 ? "" : "s"}, none carrying text: pictures only. Nothing here reads images, so ask what they show if that matters.)`;
+  }
+  const silent = parts.length - slides.length;
+  return `${slides.join("\n\n")}${silent > 0 ? `\n\n(${silent} slide${silent === 1 ? "" : "s"} with no text, not shown)` : ""}`;
+}
+
 /**
  * What can be read of one attached file: text of any kind as it is; a
  * spreadsheet, modern or the older binary kind, as one block per sheet; a
- * PDF as its text, page by page; an image, a Word file, a PowerPoint file,
- * or anything else nothing here reads yet, by name, type and size only — a
- * prompt that claims to have read something it has not is worse than one
- * that says so.
+ * PDF as its text, page by page; a PowerPoint file as its slides' text; an
+ * image, a Word file, or anything else nothing here reads yet, by name,
+ * type and size only — a prompt that claims to have read something it has
+ * not is worse than one that says so.
  */
 export async function readMaterial(input: MaterialInput): Promise<{ text: string }> {
   const { name, mediaType, bytes } = input;
@@ -191,6 +270,9 @@ export async function readMaterial(input: MaterialInput): Promise<{ text: string
   }
   if (isPdf(name, mediaType)) {
     return { text: cap(await pdfText(bytes)) };
+  }
+  if (isPptx(name, mediaType)) {
+    return { text: cap(await presentationText(bytes)) };
   }
   const what = mediaType.startsWith("image/") ? "An image" : "A file";
   return { text: describe(name, mediaType, bytes.byteLength, what) };

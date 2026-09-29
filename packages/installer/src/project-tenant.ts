@@ -29,11 +29,24 @@ export type ProjectPolicy = {
   allowExternalProviders: boolean;
 };
 
+/**
+ * How a project's stakeholder decks are drafted and drawn, beyond what the
+ * workspace's settings say. Today one choice: whether the workspace's deck
+ * design documents apply to this project as well as its own. A project's
+ * own documents (artifacts on its tenant) always apply.
+ */
+export type ProjectDeckSettings = {
+  useWorkspaceDesignDocuments: boolean;
+};
+
+export const DEFAULT_PROJECT_DECK_SETTINGS: ProjectDeckSettings = { useWorkspaceDesignDocuments: true };
+
 export type ProjectRecord = {
   id: string;
   title: string;
   policy: ProjectPolicy;
   policyVersion: number;
+  deckSettings: ProjectDeckSettings;
   /** Optimistic concurrency for existing-project mutations. */
   revision: number;
   archivedAt: Date | null;
@@ -49,6 +62,8 @@ type StoredProject = {
   revision: number;
   archivedAt: string | null;
   deletedAt: string | null;
+  /** Absent on a project written before decks had per-project settings: the defaults apply. */
+  deckSettings?: ProjectDeckSettings;
   /** What the owner consented to delegate into this tenant, for audit and revocation. */
   delegation?: DelegationRecord;
   /** CL-8899: which deployment an explicit "Switch model" chose, per stage
@@ -101,10 +116,20 @@ function fromTenant(row: {
     title: row.name,
     policy: stored.policy,
     policyVersion: stored.policyVersion,
+    deckSettings: deckSettingsFrom(stored.deckSettings),
     revision: stored.revision,
     archivedAt: stored.archivedAt ? new Date(stored.archivedAt) : null,
     deletedAt: stored.deletedAt ? new Date(stored.deletedAt) : null,
     createdAt: new Date(row.createdAt),
+  };
+}
+
+/** The saved deck settings, every field validated and defaulted, so a hand-edited or older config never breaks a read. */
+function deckSettingsFrom(stored: unknown): ProjectDeckSettings {
+  const raw = typeof stored === "object" && stored !== null ? (stored as Record<string, unknown>) : {};
+  return {
+    useWorkspaceDesignDocuments:
+      typeof raw.useWorkspaceDesignDocuments === "boolean" ? raw.useWorkspaceDesignDocuments : DEFAULT_PROJECT_DECK_SETTINGS.useWorkspaceDesignDocuments,
   };
 }
 
@@ -113,6 +138,7 @@ function toConfig(record: ProjectRecord, existing: Record<string, unknown> | und
   const stored: StoredProject = {
     policy: record.policy,
     policyVersion: record.policyVersion,
+    deckSettings: record.deckSettings,
     revision: record.revision,
     archivedAt: record.archivedAt?.toISOString() ?? null,
     deletedAt: record.deletedAt?.toISOString() ?? null,
@@ -138,6 +164,7 @@ export async function createProjectRecord(
     title: tenant.name,
     policy: args.policy,
     policyVersion: 1,
+    deckSettings: DEFAULT_PROJECT_DECK_SETTINGS,
     revision: 1,
     archivedAt: null,
     deletedAt: null,
@@ -244,7 +271,7 @@ export async function listProjectRecords(
 export async function updateProject(
   transport: Transport,
   projectId: string,
-  patch: Partial<Pick<ProjectRecord, "title" | "archivedAt" | "deletedAt" | "policy">>,
+  patch: Partial<Pick<ProjectRecord, "title" | "archivedAt" | "deletedAt" | "policy" | "deckSettings">>,
 ): Promise<ProjectRecord> {
   const tenant = await getTenant(transport, projectId);
   const current = tenant ? fromTenant(tenant) : null;

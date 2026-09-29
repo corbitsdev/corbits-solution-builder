@@ -21,6 +21,8 @@ export const INTERNAL_KINDS = new Set([
   "material_reading",
   "deck_template",
   "deck_settings",
+  "deck_design_document",
+  "deck_design_reading",
 ]);
 
 export type ArtifactTab = {

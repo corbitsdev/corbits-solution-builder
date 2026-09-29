@@ -7,9 +7,14 @@
  * no redeploy. It also carries the approved design the packages are built
  * on (#115): the specialist's opening turn may be pages back, or on an
  * earlier deployment's thread after a redeploy, and without the design here
- * it can only ask for it to be pasted.
+ * it can only ask for it to be pasted. And it carries the deck's brief
+ * (#246): the design guidelines that apply to this project and the theme
+ * `render_deck` should draw with, since the specialist's prompt is fixed
+ * at deploy and the mail is the only place a project's own instruction
+ * can reach it.
  */
 import { packageOutlineProblem } from "@solutions-builder/app/deck";
+import { renderDeckThemeLine, type DeckBrief } from "./deck-design-documents.ts";
 import { designHandoff } from "./design-handoff.ts";
 
 export type PackageAudience = { readonly name: string; readonly role: string };
@@ -47,10 +52,13 @@ export function packageNudge(audience: PackageAudience, problem: string): string
   return `${packageAsk(audience.name)}, the ${roleLabel(audience.role)} — again, as the reply itself.\n\nYour last reply was not the package: ${problem}. Reply with the package: the status line, then the five headed sections in Markdown, with the deck outline as numbered slides, in this reply. Markdown handed to render_deck is not read as the package.`;
 }
 
-export function packageRequest(audience: PackageAudience, design: string | null): string {
-  const ask = `${packageAsk(audience.name)}, the ${roleLabel(audience.role)}.`;
-  if (!design || !design.trim()) return ask;
+export function packageRequest(audience: PackageAudience, design: string | null, brief: DeckBrief | null = null): string {
+  const parts = [`${packageAsk(audience.name)}, the ${roleLabel(audience.role)}.`];
   // An HTML mockup goes over as its text, not its markup (#219): mailed
   // verbatim, the model answered with HTML instead of a Markdown package.
-  return `${ask}\n\nThe approved GUI design this package is built on, for reference:\n\n${designHandoff(design)}`;
+  if (design && design.trim()) parts.push(`The approved GUI design this package is built on, for reference:\n\n${designHandoff(design)}`);
+  if (brief?.guidelines) parts.push(brief.guidelines);
+  const themeLine = renderDeckThemeLine(brief?.theme ?? null);
+  if (themeLine) parts.push(themeLine);
+  return parts.join("\n\n");
 }

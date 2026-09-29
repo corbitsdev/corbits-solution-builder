@@ -4040,6 +4040,76 @@ button[aria-disabled="true"] {
   margin-bottom: var(--space-4);
 }
 
+/* Design documents (#246): the same list in Settings and in a project's
+   settings dialog — a file, what is read from it, and Remove. */
+.design-docs {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.settings-page .section-body .design-docs {
+  padding: var(--space-3) var(--space-4);
+}
+
+.design-docs-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+
+.design-docs-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.design-docs-list li:last-child {
+  border-bottom: 0;
+}
+
+.design-doc-k {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.design-doc-k b {
+  font-weight: 600;
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+.design-doc-k span {
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+
+.project-settings {
+  width: min(40rem, calc(100vw - 2rem));
+  max-width: none;
+}
+
+.project-settings h3 {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: 0.9375rem;
+}
+
+.project-settings .check {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.project-settings .check input {
+  margin-top: 3px;
+}
+
 .project-info-heading {
   margin: var(--space-4) 0 var(--space-2);
   font-size: 0.9375rem;
