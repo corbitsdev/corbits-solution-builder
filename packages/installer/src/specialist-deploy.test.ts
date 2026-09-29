@@ -56,6 +56,19 @@ function fakeTransport(args: {
   } as Transport;
 }
 
+// #236: a deployment the hub is still restoring, or whose run has ended, is
+// not reused; the shared usability check decides, within the recovery wait.
+describe("ensureSpecialistDeployment reuse", () => {
+  test("reuses an existing deployment only when it is usable", async () => {
+    const { readFileSync } = await import("node:fs");
+    const source = readFileSync(new URL("./specialist-deploy.ts", import.meta.url), "utf8");
+    const block = source.slice(source.indexOf("const liveExisting = async"), source.indexOf("const existing = switchToOfferingId"));
+    expect(block).toContain('await deploymentUsability(transport, tenantId, own.id, own.id, wait)) === "usable"');
+    expect(block).toContain('await deploymentUsability(transport, legacy.tenantId, pick.id, pick.id, wait)) !== "usable"');
+    expect(block).not.toContain("deploymentIsLive(");
+  });
+});
+
 describe("stageSpecialistAddresses", () => {
   test("collects every deployment's address for the stage's asset, live and ended alike", async () => {
     const transport = fakeTransport({

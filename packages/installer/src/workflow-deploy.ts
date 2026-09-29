@@ -115,6 +115,60 @@ export async function pollWhilePlacing<T>(
   }
 }
 
+/** The events that end a run for good, whatever its deployment's status says. */
+export const RUN_ENDED_EVENTS: ReadonlySet<string> = new Set(["RunCompleted", "RunFailed", "RunCancelled"]);
+
+/** Whether `runId`'s own log holds a terminal event. A run with no log yet has not ended. */
+export async function runHasEnded(transport: Transport, tenantId: string, deploymentId: string, runId: string): Promise<boolean> {
+  try {
+    const { events } = await workflowsFor(transport, tenantId).runEvents(deploymentId, runId);
+    return events.some((event) => RUN_ENDED_EVENTS.has(event.type));
+  } catch (cause) {
+    if (cause instanceof ApiError && cause.status === 404) return false;
+    throw cause;
+  }
+}
+
+export type DeploymentUsability = "usable" | "ended" | "stalled";
+
+/** How long a deployment the hub is still placing or restoring is waited for
+ *  before it is given up on: the hub's own quiet, not a caller's clock. */
+export const RECOVERY_WAIT: PlacementWait = { stallMs: 45_000 };
+
+/**
+ * Whether a deployment can take mail or a signal now (#236): placed, with a
+ * run that has not ended. At boot the hub puts a dead deployment it means
+ * to restore into `recovering`, which is live by status and unplaced, and a
+ * run whose log already holds a terminal event cannot come back whatever
+ * the restore does: mailing it answers 409 `workflow_run_terminal`. So a
+ * deployment not yet placed is waited for within `wait`, the replacement
+ * bounds rather than the fifteen-minute ceiling a placement wait allows,
+ * and one that ends, whose run has ended, or that never places is not
+ * handed back: the caller deploys afresh, as Try again would.
+ */
+export async function deploymentUsability(
+  transport: Transport,
+  tenantId: string,
+  deploymentId: string,
+  runId: string,
+  wait: PlacementWait = RECOVERY_WAIT,
+): Promise<DeploymentUsability> {
+  const workflows = workflowsFor(transport, tenantId);
+  const outcome = await pollWhilePlacing(
+    workflows,
+    (deployments) => {
+      const found = deployments.find((entry: HubDeployment) => entry.id === deploymentId);
+      if (!isLive(found)) return "ended" as const;
+      if (isPlaced(found)) return "placed" as const;
+      return null;
+    },
+    wait,
+  );
+  if (outcome === null) return "stalled";
+  if (outcome === "ended") return "ended";
+  return (await runHasEnded(transport, tenantId, deploymentId, runId)) ? "ended" : "usable";
+}
+
 /**
  * Resolves once the hub reports this deployment placed, so a caller does
  * not mail a run that has no placed sidecar yet. Returns false if it ends,

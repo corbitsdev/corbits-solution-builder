@@ -35,14 +35,17 @@ import {
   vendoredMemberFiles,
 } from "./workflow-closure.js";
 import {
-  deployOrExplain,
   deploymentIsLive,
+  deploymentUsability,
+  deployOrExplain,
   ensureWorkflowAsset,
   pinFor,
   pushWorkflowSourceTree,
+  RECOVERY_WAIT,
   sourceFor,
   waitForPushVisible,
   type ClosureSource,
+  type PlacementWait,
   type SidecarCapability,
   type WorkflowGitPush,
 } from "./workflow-deploy.js";
@@ -491,6 +494,8 @@ async function ensureSpecialistDeploymentOnce(
    *  below both skip when this is set. Undefined for every existing caller,
    *  which keeps their deploy-once-per-asset behavior unchanged. */
   switchToOfferingId: string | undefined,
+  /** How long a deployment the hub is still placing is waited for before a fresh one takes its place (#236); tests shorten it. */
+  wait: PlacementWait = RECOVERY_WAIT,
 ): Promise<SpecialistDeployment> {
   if (!sidecar.canPlaceSidecars) {
     throw new Error("no host is placing sidecars; cannot deploy a stage specialist");
@@ -518,15 +523,20 @@ async function ensureSpecialistDeploymentOnce(
   // project keeps its specialist and its thread; once it has ended, the
   // fresh deploy below lands in the project tenant and it is not looked at
   // again. Not resolved for a switch, which redeploys regardless.
+  // Reused only when usable (#236): placed, with a run that has not ended.
+  // A specialist's anchor run carries its deployment's id (its address is
+  // `<deploymentId>@<domain>`). One the hub is still restoring is waited for
+  // within the recovery bounds; one whose run is terminal answers every
+  // mail 409, so a fresh deployment takes its place.
   const liveExisting = async (): Promise<{ deployment: HubDeployment; tenantId: string; assetId: string; domain: string } | null> => {
     const own = await resolveLiveDeployment(transport, projectId, stage, matching(await workflows.deployments()));
-    if (own && (await deploymentIsLive(transport, tenantId, own.id))) {
+    if (own && (await deploymentUsability(transport, tenantId, own.id, own.id, wait)) === "usable") {
       return { deployment: own, tenantId, assetId, domain: tenant.domain! };
     }
     const legacy = (await specialistDeploymentsIn(transport, home, assetName)).find((entry) => entry.tenantId === home.legacyTenantId);
     if (!legacy) return null;
     const pick = await resolveLiveDeployment(transport, projectId, stage, legacy.deployments);
-    if (!pick || !(await deploymentIsLive(transport, legacy.tenantId, pick.id))) return null;
+    if (!pick || (await deploymentUsability(transport, legacy.tenantId, pick.id, pick.id, wait)) !== "usable") return null;
     return { deployment: pick, tenantId: legacy.tenantId, assetId: legacy.asset.id, domain: legacy.domain };
   };
   const existing = switchToOfferingId ? null : await liveExisting();
@@ -590,6 +600,7 @@ async function ensureSpecialistDeploymentOnce(
       roleKey,
       role,
       leading.id,
+      wait,
     );
     await writeStageSwitch(transport, projectId, stage, {
       deploymentId: fresh.deploymentId,
@@ -718,6 +729,8 @@ export async function ensureSpecialistDeployment(
    *  non-default `roleKey` must pass the matching role or the deployment
    *  would carry that name while running the stage specialist's prompt. */
   role: AgentRole = agentFor(stage),
+  /** How long a deployment the hub is still placing is waited for before a fresh one takes its place (#236); tests shorten it. */
+  wait: PlacementWait = RECOVERY_WAIT,
 ): Promise<SpecialistDeployment> {
   const attempt = () =>
     ensureSpecialistDeploymentOnce(
@@ -732,6 +745,7 @@ export async function ensureSpecialistDeployment(
       roleKey,
       role,
       undefined,
+      wait,
     );
   try {
     return await attempt();

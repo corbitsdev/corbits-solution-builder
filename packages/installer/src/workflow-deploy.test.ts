@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Transport } from "@intx/hub-client";
-import { pollWhilePlacing, waitForDeploymentDeployed } from "./workflow-deploy.js";
+import { deploymentUsability, pollWhilePlacing, waitForDeploymentDeployed } from "./workflow-deploy.js";
 
 const TENANT_ID = "tnt_1";
 type Listed = { id: string; status: string };
@@ -25,6 +25,43 @@ function scriptedHub(listings: readonly (readonly Listed[])[]) {
 }
 
 const FAST = { pollMs: 1 };
+
+// #236: a deployment is handed back only once it can take mail or a signal.
+describe("deploymentUsability", () => {
+  /** `scriptedHub` plus the anchor run's log, so a placed deployment's run can be read. */
+  function hubWithRun(listings: readonly (readonly Listed[])[], events: readonly { seq: number; type: string }[]) {
+    const scripted = scriptedHub(listings);
+    const transport: Transport = {
+      async fetch<T>(method: string, path: string): Promise<T> {
+        if (method === "GET" && /\/workflows\/dep_1\/runs\/dep_1\/events$/.test(path)) return { runId: "dep_1", events: events.map((event) => ({ ...event, body: {} })) } as T;
+        return scripted.transport.fetch<T>(method, path);
+      },
+    } as Transport;
+    return { transport, taken: scripted.taken };
+  }
+
+  test("a placed deployment whose run is parked is usable", async () => {
+    const hub = hubWithRun([[{ id: "dep_1", status: "deployed" }]], [{ seq: 1, type: "RunStarted" }, { seq: 2, type: "SignalAwaited" }]);
+    expect(await deploymentUsability(hub.transport, TENANT_ID, "dep_1", "dep_1", FAST)).toBe("usable");
+  });
+
+  test("a placed deployment whose run has ended is not: mailing it would answer 409", async () => {
+    const hub = hubWithRun([[{ id: "dep_1", status: "deployed" }]], [{ seq: 1, type: "RunStarted" }, { seq: 2, type: "RunCompleted" }]);
+    expect(await deploymentUsability(hub.transport, TENANT_ID, "dep_1", "dep_1", FAST)).toBe("ended");
+  });
+
+  test("a recovering deployment the hub places in time is usable, one that ends is not", async () => {
+    const placed = hubWithRun([[{ id: "dep_1", status: "recovering" }], [{ id: "dep_1", status: "deployed" }]], [{ seq: 1, type: "RunStarted" }]);
+    expect(await deploymentUsability(placed.transport, TENANT_ID, "dep_1", "dep_1", FAST)).toBe("usable");
+    const ended = hubWithRun([[{ id: "dep_1", status: "recovering" }], [{ id: "dep_1", status: "failed" }]], []);
+    expect(await deploymentUsability(ended.transport, TENANT_ID, "dep_1", "dep_1", FAST)).toBe("ended");
+  });
+
+  test("a recovering deployment the hub sits still on is given up as stalled, within the wait's bound", async () => {
+    const hub = hubWithRun([[{ id: "dep_1", status: "recovering" }]], []);
+    expect(await deploymentUsability(hub.transport, TENANT_ID, "dep_1", "dep_1", { ...FAST, stallMs: 20 })).toBe("stalled");
+  });
+});
 
 describe("waitForDeploymentDeployed", () => {
   test("resolves true once the deployment is placed", async () => {
