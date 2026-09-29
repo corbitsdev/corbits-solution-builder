@@ -95,9 +95,7 @@ import { createSpendApi, createSpendStore } from "./spend.js";
 import { listenForUsage } from "./usage-listener.js";
 import {
   createHubMailboxAuthorizeSender,
-  createHubPersistMailWithSessionEnsure,
-  ensureRunSession,
-  type EventCollectorPort,
+  createHubPersistMailSkippingSessionless,
 } from "./mailbox-persist.js";
 import { captureMailboxRequest, createMailboxDeliver } from "./mailbox-send.js";
 
@@ -295,8 +293,11 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
   const mailboxDb = db.db as unknown as Parameters<typeof mountMailbox>[1]["db"];
   const mailboxBus = createInMemoryMailboxEventBus();
 
-  // Created ahead of `lookups` so the persistMail session-ensure wrapper below
-  // can use it.
+  // Required by the orchestrator and `createApp`, but never populated: a
+  // collector writes `inference_turn` rows against an `agent_session`, which
+  // Interchange never creates for a workflow run. So no run has turn rows or
+  // a collector status, and the run health route reports `not_ready`; spend
+  // comes from `listenForUsage` below instead.
   const eventCollectors = createEventCollectorRegistry({ db: db.db });
 
   const lookups: SidecarLookups = {
@@ -321,22 +322,16 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
   // `createSidecarRouter` below closes over `lookups`, so an agent's
   // outbound mail also lands a durable row in every recipient's inbox.
   //
-  // The vendored `persistMail` throws `Endpoint … has no session for
-  // address …` on a run's first outbound reply, since its `agent_session`
-  // doesn't exist until something ensures it. `createHubPersistMailWithSessionEnsure`
-  // (ported from workbench's mailbox-persist.ts) sits between it and the
-  // mailbox dual-write so that throw is swallowed instead of surfacing as a
-  // logged error on every reply.
+  // `createHubPersistMailSkippingSessionless` sits between the vendored
+  // `persistMail` and the mailbox dual-write so the vendored write, which
+  // throws for a run with no `agent_session`, is skipped rather than logged
+  // as an error on every reply.
   const vendoredPersistMail = lookups.persistMail;
   if (vendoredPersistMail === undefined) {
     throw new Error("createHubSessionLookups did not provide persistMail");
   }
   const wrappedPersistMail = createMailboxPersist(mailboxDb, {
-    upstream: createHubPersistMailWithSessionEnsure(
-      db.db,
-      eventCollectors as unknown as EventCollectorPort,
-      vendoredPersistMail,
-    ),
+    upstream: createHubPersistMailSkippingSessionless(db.db, vendoredPersistMail),
     authorizeSender: createHubMailboxAuthorizeSender(db.db),
     bus: mailboxBus,
   });
@@ -424,29 +419,6 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
     hubWebSocketUrl: options.hubWebSocketUrl,
     connectTimeoutMs: SIDECAR_CONNECT_TIMEOUT_MS,
   });
-  // `prepareProvisionedDeployment` commits the run's `workflow_run` and
-  // `workflow_run_launch_spec` rows before returning -- the same
-  // provision-time point workbench records the agent session at. Wrapped
-  // here (as `persistMail` is above) so the run's event collector exists
-  // before its first turn, not only once its first OUTBOUND mail lands.
-  // The mail-triggered call still matters: collectors live in memory, and a
-  // run recovered after a host restart never passes through this again.
-  const vendoredPrepareProvisionedDeployment = workflowAllocationService.prepareProvisionedDeployment;
-  workflowAllocationService.prepareProvisionedDeployment = async (args) => {
-    const result = await vendoredPrepareProvisionedDeployment(args);
-    try {
-      await ensureRunSession({
-        db: db.db,
-        eventCollectors: eventCollectors as unknown as EventCollectorPort,
-        runId: result.anchorRunId,
-      });
-    } catch (err) {
-      console.error(
-        `hub.workflowAllocationService.ensureRunSession failed for ${result.anchorRunId}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-    return result;
-  };
   const sidecarAllocationStore = createSidecarAllocationStore(db.db);
   const workflowDispatchService = createWorkflowDispatchService({
     dispatchStore: createWorkflowRunDispatchStore(db.db),

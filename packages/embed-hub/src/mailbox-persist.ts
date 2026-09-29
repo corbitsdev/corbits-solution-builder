@@ -1,133 +1,34 @@
 /**
  * Ported from corbitsdev/workbench apps/hub/src/mailbox-persist.ts (as of
  * workbench head 29ad6ce): wires @corbits/mailbox's `createMailboxPersist`
- * onto the hub's own `persistMail` lookup so an agent's outbound mail also
- * lands a durable inbox row, not just the sidecar's own session record.
+ * onto the hub's own `persistMail` lookup so an agent's outbound mail lands a
+ * durable row in every recipient's inbox.
  */
 import { sql } from "drizzle-orm";
 import type { DB } from "@intx/db";
 import { resolveMailboxRecipients, type AuthorizeMailboxSender, type MailboxPersistArgs } from "@corbits/mailbox";
 import { resolveRoutableAddress, type SidecarMailPersistedRow } from "@intx/hub-sessions";
 
-/** The `create`/`has` slice of `EventCollectorRegistry` `ensureRunSession`
- * needs (see @intx/hub-sessions's `event-collector-registry.ts`). */
-export type EventCollectorPort = {
-  create(agentAddress: string, tenantId: string, sessionId: string, runId: string): void;
-  has(agentAddress: string): boolean;
-};
-
 /**
- * True upsert of a run's `agent_session`, keyed by the run's own principal
- * once Interchange anchors one. Ported from workbench's
- * packages/workflows/src/launch/agent-session.ts `ensureRunSession` as raw
- * SQL (no `@corbits/workflows` dependency here, and this build's `@intx/db`
- * typecheck surface has no relational query builder for `workflow_run`,
- * `workflow_run_launch_spec`, or `agent_session` — every other lookup in
- * this package goes through `db.execute(sql\`...\`)` for the same reason).
- *
- * Exported so index.ts can also call this right after
- * `workflowAllocationService.prepareProvisionedDeployment` commits, the same
- * provision-time point workbench records the session at. Without that call
- * the event collector below is created only on the run's first OUTBOUND
- * mail, dropping every event a specialist's first turn emits before then.
- */
-export async function ensureRunSession(params: {
-  readonly db: DB["db"];
-  readonly eventCollectors: EventCollectorPort;
-  readonly runId: string;
-}): Promise<string | null> {
-  const { db, eventCollectors, runId } = params;
-  const [runRow] = (await db.execute(
-    sql`SELECT "id", "tenant_id" AS "tenantId", "definition_id" AS "definitionId", "principal_id" AS "principalId", "address"
-        FROM "public"."workflow_run" WHERE "id" = ${runId} LIMIT 1`,
-  )) as unknown as {
-    id: string;
-    tenantId: string;
-    definitionId: string;
-    principalId: string | null;
-    address: string | null;
-  }[];
-  if (runRow === undefined) return null;
-
-  const [launchSpecRow] = (await db.execute(
-    sql`SELECT "session_id" AS "sessionId", "source_authority_principal_id" AS "sourceAuthorityPrincipalId"
-        FROM "public"."workflow_run_launch_spec" WHERE "anchor_run_id" = ${runId} LIMIT 1`,
-  )) as unknown as { sessionId: string; sourceAuthorityPrincipalId: string }[];
-  if (launchSpecRow === undefined) {
-    throw new Error(
-      `ensureRunSession: no workflow_run_launch_spec for run "${runId}" — every launcher records one at provision time`,
-    );
-  }
-  const sessionId = launchSpecRow.sessionId;
-
-  // An anchor run has no principal until its first trigger reconciles one, but
-  // its first turn's events are persisted against this session row before the
-  // first reply. Until then the row belongs to the deploying principal the
-  // launch spec records -- the same principal the provisioned harness config
-  // carries for this session. The reconcile below moves it to the run's own on
-  // the next call, which the mail path makes on the run's first outbound mail.
-  const [sessionRow] = (await db.execute(
-    sql`SELECT "principal_id" AS "principalId" FROM "public"."agent_session" WHERE "id" = ${sessionId} LIMIT 1`,
-  )) as unknown as { principalId: string }[];
-  const now = new Date();
-  if (sessionRow === undefined) {
-    const principalId = runRow.principalId ?? launchSpecRow.sourceAuthorityPrincipalId;
-    await db.execute(
-      sql`INSERT INTO "public"."agent_session"
-            ("id", "tenant_id", "agent_id", "principal_id", "status", "created_at", "updated_at")
-          VALUES (${sessionId}, ${runRow.tenantId}, ${runRow.definitionId}, ${principalId}, 'active', ${now}, ${now})
-          ON CONFLICT ("id") DO NOTHING`,
-    );
-  } else if (runRow.principalId !== null && sessionRow.principalId !== runRow.principalId) {
-    await db.execute(
-      sql`UPDATE "public"."agent_session" SET "principal_id" = ${runRow.principalId}, "updated_at" = ${now} WHERE "id" = ${sessionId}`,
-    );
-  }
-
-  if (runRow.address !== null && !eventCollectors.has(runRow.address)) {
-    eventCollectors.create(runRow.address, runRow.tenantId, sessionId, runRow.id);
-  }
-  return sessionId;
-}
-
-/**
- * Ported from workbench's mailbox-persist.ts
- * `createHubPersistMailWithSessionEnsure`: ensures a run's `agent_session`
- * exists before the first mail-triggered write reaches it, since
- * `workflow_run.principal_id` only reconciles onto the trigger that just
- * fired. Best-effort: a failure here must not block the mail upstream is
- * about to persist regardless.
- *
- * The vendored `persistMail` (hub-session-lookups.ts) throws
- * `Endpoint … has no session for address …` when the sender has no session
- * yet — true for a run's first outbound reply. `@corbits/mailbox`'s
- * `createMailboxPersist` re-throws whatever its upstream throws even after
- * its own durable write succeeds, so that throw surfaces as a logged error
- * in the sidecar handler on every first reply. Skip the vendored write
- * instead of letting it throw; `@corbits/mailbox`'s own write already
- * persisted this frame.
+ * The vendored `persistMail` (hub-session-lookups.ts) keeps its own record of
+ * a run's mail keyed on the run's `agent_session`, which Interchange never
+ * creates for a workflow run, so it throws `Endpoint … has no session for
+ * address …` for every run's reply. `@corbits/mailbox`'s `createMailboxPersist`
+ * re-throws whatever its upstream throws even after its own durable write
+ * succeeds, so skip the vendored write instead of letting it throw;
+ * `@corbits/mailbox`'s own write already persisted this frame.
  *
  * The same holds for a sender that is not a run at all: a person's address
  * (`<ref_id>@domain`) never resolves through `resolveRoutableAddress`, which
  * only reads `workflow_run`, so the vendored write always throws
  * `No active endpoint found for sender address` for it.
  */
-export function createHubPersistMailWithSessionEnsure(
+export function createHubPersistMailSkippingSessionless(
   db: DB["db"],
-  eventCollectors: EventCollectorPort,
   upstream: (args: MailboxPersistArgs) => Promise<SidecarMailPersistedRow[]>,
 ): (args: MailboxPersistArgs) => Promise<SidecarMailPersistedRow[]> {
   return async (args) => {
     const sender = await resolveRoutableAddress(db, args.senderAddress);
-    if (sender !== undefined) {
-      try {
-        await ensureRunSession({ db, eventCollectors, runId: sender.id });
-      } catch (err) {
-        console.error(
-          `hub.mailboxPersist.ensureRunSession failed for ${args.senderAddress}: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-    }
     if (sender === undefined || sender.sessionId === null) {
       return [];
     }
