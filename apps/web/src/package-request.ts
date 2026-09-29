@@ -9,6 +9,7 @@
  * earlier deployment's thread after a redeploy, and without the design here
  * it can only ask for it to be pasted.
  */
+import { packageOutlineProblem } from "@solutions-builder/app/deck";
 import { designHandoff } from "./design-handoff.ts";
 
 export type PackageAudience = { readonly name: string; readonly role: string };
@@ -22,6 +23,19 @@ export function packageAsk(name: string): string {
 /** A role id as a person (or a model) reads it: `budget_approver` → "budget approver". */
 function roleLabel(role: string): string {
   return role.replace(/_/g, " ");
+}
+
+/**
+ * Why a reply to `packageAsk(name)` is not `name`'s package, or null when it
+ * is one (#220). The presentation creator's prompt says a package without a
+ * deck outline is refused and nothing is recorded; the page holds the reply
+ * to that before recording it, since an acknowledgement, a question or a
+ * claim that a deck was rendered is not a package, and recording one left a
+ * stakeholder with a "package" no slides could be built from.
+ */
+export function packageReplyProblem(name: string, body: string): string | null {
+  const problem = packageOutlineProblem(body);
+  return problem ? `${name}'s package was not written: the reply ${problem}. Ask for it again.` : null;
 }
 
 export function packageRequest(audience: PackageAudience, design: string | null): string {

@@ -12,6 +12,10 @@ describe("stage 5 audience packages", () => {
     expect(source).toContain("<Markdown source={content} />");
     expect(source).toContain("writeOnePackage");
     expect(source).toContain("persistAudiencePackage");
+    // #220: a reply with no deck outline is refused before anything is recorded.
+    const writeOne = source.slice(source.indexOf("const writeOnePackage = async ("));
+    expect(writeOne.indexOf("packageReplyProblem(name, reply.body)")).toBeGreaterThan(-1);
+    expect(writeOne.indexOf("packageReplyProblem(name, reply.body)")).toBeLessThan(writeOne.indexOf("persistAudiencePackage("));
     expect(source).toContain("QuorumChips");
     expect(source).toContain("saveSlides");
     // CL-8870: a stakeholder's vote is its own `project.decision` signal on
