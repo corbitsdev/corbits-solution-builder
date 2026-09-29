@@ -95,8 +95,10 @@ presentation creator is handed the text of every document that applies,
 so the deck outline follows them; the first PowerPoint among them lends
 its colours, typefaces and slide size to the slides on screen, in the
 exported file, and in the deck `render_deck` writes. What is read is said
-plainly: text as written, a PDF's text but not its look, a PowerPoint's
-slide text and theme. Nothing is read from an image.
+plainly: text as written; a PDF's text plus its page size and the paper,
+ink and accent colours of its first pages, never a typeface; a PowerPoint's
+slide text and theme. A picture-only file lends its look and no text, and
+its row says so.
 
 The approved design's screens are the slides' pictures. An outline may
 carry a slide titled "What it looks like" with nothing under it, which shows

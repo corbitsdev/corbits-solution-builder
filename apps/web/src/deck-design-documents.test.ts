@@ -23,7 +23,7 @@ function entry(id: string, sb: Record<string, unknown> | null, overrides: Partia
 }
 
 function document(overrides: Partial<DeckDesignDocument>): DeckDesignDocument {
-  return { id: "d", name: "d", mediaType: "text/plain", format: "text", scope: "workspace", theme: null, readingId: "d", createdAt: "2026-09-01T00:00:00.000Z", ...overrides };
+  return { id: "d", name: "d", mediaType: "text/plain", format: "text", scope: "workspace", theme: null, textRead: true, readingId: "d", createdAt: "2026-09-01T00:00:00.000Z", ...overrides };
 }
 
 describe("designDocumentFormat", () => {
@@ -57,7 +57,7 @@ describe("designDocumentsFrom", () => {
     entry("guide", { kind: "deck_design_document", variant: "guide.md", mediaType: "text/markdown" }, { createdAt: "2026-09-01T00:00:00.000Z" }),
     entry("deck", { kind: "deck_design_document", variant: "last-year.pptx", mediaType: PPTX, theme: { accent: "1E3A8A", titleFace: "Georgia" } }, { createdAt: "2026-09-03T00:00:00.000Z" }),
     entry("deck-reading", { kind: "deck_design_reading", variant: "last-year.pptx", sourceVersionIds: ["deck"] }),
-    entry("scan", { kind: "deck_design_document", variant: "scan.pdf", mediaType: "application/pdf" }, { createdAt: "2026-09-02T00:00:00.000Z" }),
+    entry("scan", { kind: "deck_design_document", variant: "scan.pdf", mediaType: "application/pdf", textRead: false, theme: { paper: "F8F8F8", accent: "183888", ratio: 1.78 } }, { createdAt: "2026-09-02T00:00:00.000Z" }),
     entry("gone", { kind: "deck_design_document", variant: "gone.md", mediaType: "text/markdown" }, { archivedAt: "2026-09-04T00:00:00.000Z" }),
     entry("package", { kind: "audience_package", projectId: "p1", variant: "You" }),
     entry("no-sb", null),
@@ -68,10 +68,11 @@ describe("designDocumentsFrom", () => {
     expect(documents.map((document) => document.name)).toEqual(["last-year.pptx", "scan.pdf", "guide.md"]);
     const [deck, scan, guide] = documents as [DeckDesignDocument, DeckDesignDocument, DeckDesignDocument];
     expect(deck).toMatchObject({ format: "pptx", scope: "workspace", readingId: "deck-reading", theme: { accent: "1E3A8A", titleFace: "Georgia" } });
-    // A binary with no reading companion is kept but marked as not read.
-    expect(scan).toMatchObject({ format: "pdf", readingId: null, theme: null });
-    // A text document is its own reading.
-    expect(guide).toMatchObject({ format: "text", readingId: "guide", theme: null });
+    // A picture-only PDF has no reading companion and no text, but its look was read (#254).
+    expect(scan).toMatchObject({ format: "pdf", readingId: null, textRead: false, theme: { paper: "F8F8F8", accent: "183888", ratio: 1.78 } });
+    // A text document is its own reading, and its text always counts as read.
+    expect(guide).toMatchObject({ format: "text", readingId: "guide", theme: null, textRead: true });
+    expect(deck.textRead).toBe(true);
   });
 
   test("the reading companions of a document are what a remove archives beside it", () => {

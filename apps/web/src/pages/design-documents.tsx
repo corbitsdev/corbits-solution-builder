@@ -23,14 +23,19 @@ export function formatLabel(format: DesignDocumentFormat): string {
 }
 
 /** The row's second line: what this document contributes, or that it could not be read. */
-export function documentNote(document: Pick<DeckDesignDocument, "format" | "readingId" | "theme">): string {
-  if (document.readingId === null) {
-    return document.theme
-      ? "Its theme draws the slides; its text could not be read, so the presentation creator is not handed it."
-      : "Kept, but nothing could be read from it, so it is not consulted.";
+export function documentNote(document: Pick<DeckDesignDocument, "format" | "readingId" | "theme" | "textRead">): string {
+  const look = document.format === "pdf" ? "its page size and colours" : "its theme";
+  if (document.readingId === null || !document.textRead) {
+    if (document.theme) {
+      return `No text could be read from it (pictures only), so the presentation creator is not handed any; ${look} still draw${document.format === "pdf" ? "" : "s"} the slides.`;
+    }
+    return "Kept, but nothing could be read from it, so it is not consulted.";
   }
   if (document.format === "pptx" && !document.theme) {
     return "Its slides' text is handed to the presentation creator. It carries no theme to draw the slides with.";
+  }
+  if (document.format === "pdf" && !document.theme) {
+    return "Its text is handed to the presentation creator. No page size or colours could be read from it.";
   }
   return whatIsRead(document.format);
 }

@@ -63,7 +63,8 @@ import { importLegacyProject, isLegacyBundle, parseLegacyBundle } from "./legacy
 import { ArchiveRefused, expandArchives } from "./material-archive.ts";
 import { replayAdoption } from "./adoption-replay.ts";
 import { DECK_DESIGN_DOCUMENT_KIND, DECK_DESIGN_READING_KIND, DELIVERY_MANIFEST_KIND, MATERIAL_KIND, MATERIAL_READING_KIND } from "@solutions-builder/app/artifacts";
-import { readMaterial } from "./material-reading.ts";
+import { readMaterial, readingHasText } from "./material-reading.ts";
+import { pdfLook } from "./pdf-look.ts";
 import {
   designDocumentRefusal,
   designDocumentFormat,
@@ -1580,24 +1581,30 @@ export const api = {
             });
             return { id: artifact.id, name: file.name, read: true };
           }
-          const theme = format === "pptx" ? await readTemplateTheme(bytes).catch(() => null) : null;
+          // The look, read once here: a PowerPoint's theme from its XML, a
+          // PDF's page ratio and colours from its first pages drawn small
+          // (#254). Neither failing stops the add; the stamp just carries none.
+          const theme = format === "pptx" ? await readTemplateTheme(bytes).catch(() => null) : await pdfLook(bytes).catch(() => null);
+          // The text, as `attachMaterial` reads a file: what the presentation
+          // creator is handed. Reading failing is not an add failure — the
+          // companion says so instead — and a picture-only file is stamped as
+          // carrying no text, so the list says so rather than pretending.
+          const readingText = await readMaterial({ name: file.name, mediaType, bytes })
+            .then((result) => result.text)
+            .catch((cause) => `(Could not read ${file.name}: ${cause instanceof Error ? cause.message : String(cause)}.)`);
+          const textRead = readingHasText(readingText);
           const uploaded = await uploadArtifactFile(tenantId, file);
           try {
             await installerReviseArtifact(transport, tenantId, uploaded.id, {
-              metadata: { sb: { kind: DECK_DESIGN_DOCUMENT_KIND, variant: file.name, mediaType, sourceVersionIds: [], provenance, ...(theme ? { theme } : {}) } },
+              metadata: { sb: { kind: DECK_DESIGN_DOCUMENT_KIND, variant: file.name, mediaType, sourceVersionIds: [], provenance, textRead, ...(theme ? { theme } : {}) } },
             });
           } catch (cause) {
             await installerArchiveArtifact(transport, tenantId, uploaded.id).catch(() => {});
             throw cause;
           }
-          // The companion reading, as `attachMaterial` writes one: what the
-          // presentation creator is actually handed. Reading failing is not
-          // an add failure — the companion says so instead — and nor is the
-          // companion write itself: the file is kept, and the list shows it
-          // as not read rather than pretending it was.
-          const readingText = await readMaterial({ name: file.name, mediaType, bytes })
-            .then((result) => result.text)
-            .catch((cause) => `(Could not read ${file.name}: ${cause instanceof Error ? cause.message : String(cause)}.)`);
+          // The companion reading. Its own write failing is not an add
+          // failure either: the file is kept, and the list shows it as not
+          // read rather than pretending it was.
           const read = await installerCreateArtifact(transport, tenantId, {
             title: `${file.name} (reading)`,
             content: readingText,
@@ -1646,7 +1653,8 @@ export const api = {
       const documents = effectiveDesignDocuments({ workspace, project: own, settings: project.deckSettings });
       const readings = await Promise.all(
         documents
-          .filter((document) => document.readingId !== null)
+          // A picture-only file has no text worth handing over; its look still counts below.
+          .filter((document) => document.readingId !== null && document.textRead)
           .map(async (document) => {
             const tenantId = document.scope === "project" ? projectId : workspaceTenantId;
             const artifact = await installerGetArtifact(transport, tenantId, document.readingId!);
