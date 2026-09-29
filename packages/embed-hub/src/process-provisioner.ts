@@ -55,6 +55,7 @@ const PID_FILE = "sidecar.pid";
 const ID_FILE = "sidecar.id";
 const UNIT_PREFIX = "gen-";
 const ALLOCATION_ID = /^[A-Za-z0-9._-]+$/;
+const KILL_WAIT_MS = 2_000;
 
 const CAPABILITIES: readonly SidecarCapabilityDeclaration[] = [
   { capability: "runtime:sidecar", state: "available" },
@@ -118,10 +119,16 @@ export function createProcessProvisioner(options: ProcessProvisionerOptions): Si
     return true;
   }
 
+  /** The unit's directory, and with it its pid file, goes only once its process has. */
   async function stop(unit: Unit): Promise<void> {
     if (unit.pid !== null && runner.isAlive(unit.pid)) {
       runner.signal(unit.pid, "SIGTERM");
-      if (!(await exited(unit.pid, graceMs))) runner.signal(unit.pid, "SIGKILL");
+      if (!(await exited(unit.pid, graceMs))) {
+        runner.signal(unit.pid, "SIGKILL");
+        if (!(await exited(unit.pid, KILL_WAIT_MS))) {
+          throw new Error(`sidecar process ${unit.pid} is still alive after SIGKILL`);
+        }
+      }
     }
     await rm(unit.dir, { recursive: true, force: true });
   }
