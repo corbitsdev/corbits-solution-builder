@@ -694,6 +694,41 @@ describe("ensureProjectWorkflow", () => {
     expect(await findProjectWorkflow(hub.transport, PROJECT_ID)).toEqual({ deploymentId: "dep_new", runId: "run_new", tenantId: TENANT_ID });
   });
 
+  // #236: at boot the hub restores a dead deployment through `recovering`.
+  // A run there holding every decision used to be handed back at once,
+  // unplaced, and the page waited minutes on it. It is waited for within
+  // the replacement bounds, then handed back placed or superseded.
+  test("a recovering run holding every decision is handed back once the hub places it", async () => {
+    const hub = fakeHub(
+      withAsset({
+        deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "recovering", createdAt: "2026-01-01T00:00:00.000Z" }],
+        runsByDeployment: { dep_1: decidedRun("run_1", [1, 2], CURRENT).runIds },
+        eventsByRun: decidedRun("run_1", [1, 2], CURRENT).events,
+        appearAtListing: { 3: [{ deployment: { id: "dep_1", definitionAssetId: ASSET_ID, status: "deployed", createdAt: "2026-01-01T00:00:00.000Z" } }] },
+      }),
+    );
+    expect(await ensure(hub, 60_000, 1)).toEqual({ deploymentId: "dep_1", runId: "run_1", tenantId: TENANT_ID });
+    expect(hub.posts.filter((post) => /\/deployments$/.test(post.path))).toEqual([]);
+  });
+
+  test("a recovering run the hub never places is superseded by a fresh deploy carrying its decisions", async () => {
+    const hub = fakeHub(
+      withAsset({
+        deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "recovering", createdAt: "2026-01-01T00:00:00.000Z" }],
+        runsByDeployment: { dep_1: decidedRun("run_1", [1, 2], CURRENT).runIds },
+        eventsByRun: decidedRun("run_1", [1, 2], CURRENT).events,
+      }),
+    );
+    expect(await ensure(hub, 0, 1)).toEqual({
+      deploymentId: "dep_new",
+      runId: "run_new",
+      tenantId: TENANT_ID,
+      replay: { from: { deploymentId: "dep_1", runId: "run_1", tenantId: TENANT_ID }, replayed: 2, refused: [] },
+    });
+    expect(hub.signalsSent().map((sent) => `${sent.runId}:${sent.signalId}`)).toEqual(["run_new:dec-1", "run_new:dec-2"]);
+    expect(hub.triggeredCode()).toEqual({ digest: CURRENT_DIGEST, generation: 2 });
+  });
+
   test("a live run that has not caught up is brought up to the dead run's decisions, not replaced", async () => {
     const hub = fakeHub(
       withAsset({

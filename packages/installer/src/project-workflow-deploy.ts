@@ -31,11 +31,14 @@ import {
   deployOrExplain,
   deploymentHasEnded,
   deploymentIsLive,
+  deploymentUsability,
   ensureWorkflowAsset,
   pollWhilePlacing,
   pushWorkflowSourceTree,
   waitForPushVisible,
   pinFor,
+  RUN_ENDED_EVENTS,
+  type PlacementWait,
   type SidecarCapability,
   type WorkflowGitPush,
 } from "./workflow-deploy.js";
@@ -259,7 +262,7 @@ async function ledgerOf(
   return null;
 }
 
-const TERMINAL_RUN_EVENTS = new Set(["RunCompleted", "RunFailed", "RunCancelled"]);
+const TERMINAL_RUN_EVENTS = RUN_ENDED_EVENTS;
 /** How long a project with history lets the hub go quiet before deploying its own replacement of a dead deployment. */
 const REPLACEMENT_WAIT_MS = 45_000;
 
@@ -878,10 +881,23 @@ async function ensureProjectWorkflowOnce(
       return fresh;
     }
   };
+  // How long the hub may sit still before this waits no more on it: for
+  // its own replacement of a dead deployment, and for a deployment it is
+  // still placing or restoring (#236).
+  const placementWait: PlacementWait = {
+    stallMs: options.replacementWaitMs ?? REPLACEMENT_WAIT_MS,
+    ...(options.placementPollMs === undefined ? {} : { pollMs: options.placementPollMs }),
+  };
   let groups = await everywhere();
   let state = await projectRunState(transport, groups, memo);
   if (state.run && state.live) {
-    if (state.code?.digest === digest) return state.run;
+    // Live by status is not usable yet (#236): at boot the hub restores a
+    // dead deployment through `recovering`, unplaced, and one whose run has
+    // ended cannot come back at all. Handed back as it is, the page waited
+    // minutes for a placement that never came. It is waited for within the
+    // replacement bounds, then either returned placed or replaced below.
+    const usability = state.code?.digest === digest ? await deploymentUsability(transport, state.run.tenantId, state.run.deploymentId, state.run.runId, placementWait) : "usable";
+    if (state.code?.digest === digest && usability === "usable") return state.run;
     // The live run is on other code than this render (#51): a reducer fix
     // that never reached this project, or a run from before code was
     // recorded. It is replaced the way a dead run is revived -- a fresh
@@ -889,6 +905,7 @@ async function ensureProjectWorkflowOnce(
     // live run applied -- and superseded by generation, since the hub
     // cannot end it. Its own applied decisions are the whole history: it
     // held everything the runs before it took, or it would not be the run.
+    // A run the hub could not bring back (#236) is replaced the same way.
     const from = state.run;
     const history = await appliedDecisions(workflowsOf(transport, from), from.deploymentId, from.runId, memo);
     const target = await broughtUp(await deployFreshRun(context(state.generation + 1), idsOf(groups)), state.generation + 1, history);
@@ -917,16 +934,17 @@ async function ensureProjectWorkflowOnce(
         state = await projectRunState(transport, groups, memo);
         return state.liveCandidates[0] ? true : null;
       },
-      { stallMs: options.replacementWaitMs ?? REPLACEMENT_WAIT_MS, ...(options.placementPollMs === undefined ? {} : { pollMs: options.placementPollMs }) },
+      placementWait,
     );
     if (replaced && state.run && state.live && state.code?.digest === digest) return state.run;
   }
   // A live run that has not caught up, or none: the project's history (if
   // any) is replayed onto the oldest live run, or onto a fresh one. A live
   // run that has caught up but runs other code is left to the next call,
-  // which takes the replacement path above.
-  if (state.liveCandidates[0]) {
-    const candidate = state.liveCandidates[0];
+  // which takes the replacement path above. A candidate the hub cannot
+  // place, or whose run has ended (#236), is passed over for a fresh one.
+  const candidate = state.liveCandidates[0];
+  if (candidate && (await deploymentUsability(transport, candidate.tenantId, candidate.deployment.id, candidate.runId, placementWait)) === "usable") {
     const target = await broughtUp({ deploymentId: candidate.deployment.id, runId: candidate.runId, tenantId: candidate.tenantId }, state.generation, state.history);
     return state.run && state.run.deploymentId !== target.deploymentId
       ? { ...target, replay: await replayOutcome(transport, state.run, target, state.history) }
