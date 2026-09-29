@@ -17,6 +17,7 @@
  * stage 8's own status reply, never the raw stage-8 artifact (it may be the
  * binary archive itself).
  */
+import { designHandoff } from "../../design-handoff.ts";
 import { useEffect, useRef, useState } from "react";
 import {
   api,
@@ -239,15 +240,18 @@ export function useOpeningDispatch({
           // Stage 6's opening leads with the workflow-minted requirement ids
           // (CL-8862) — the Architect may cite only these, never invent one.
           const requirementsBlock = stage === 6 && workflowView ? renderRequirementsBlock(workflowView.requirements) : null;
+          // Stage 5 opens on the stage 4 design, usually an HTML mockup:
+          // handed over as its text, not its markup (#219).
+          const approved = stage === 5 ? designHandoff(result.content) : result.content;
           const body =
             stage === 8 && workflowView?.freeze
               ? `${targetOpeningLine(workflowView.freeze.target)}\n\n${frozenSummaryLine({
                   target: workflowView.freeze.target,
                   frozen: workflowView.freeze.frozen,
-                })}${stackBlock ? `\n\n${stackBlock}` : ""}\n\n${result.content}`
+                })}${stackBlock ? `\n\n${stackBlock}` : ""}\n\n${approved}`
               : requirementsBlock
-                ? `${requirementsBlock}\n\n${result.content}`
-                : result.content;
+                ? `${requirementsBlock}\n\n${approved}`
+                : approved;
           dispatchOpening(body);
         })
         .catch(() => {});

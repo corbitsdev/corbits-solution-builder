@@ -9,6 +9,8 @@
  * earlier deployment's thread after a redeploy, and without the design here
  * it can only ask for it to be pasted.
  */
+import { designHandoff } from "./design-handoff.ts";
+
 export type PackageAudience = { readonly name: string; readonly role: string };
 
 /** The first line of the request for `name`'s package: what the specialist
@@ -25,5 +27,7 @@ function roleLabel(role: string): string {
 export function packageRequest(audience: PackageAudience, design: string | null): string {
   const ask = `${packageAsk(audience.name)}, the ${roleLabel(audience.role)}.`;
   if (!design || !design.trim()) return ask;
-  return `${ask}\n\nThe approved GUI design this package is built on, for reference:\n\n${design}`;
+  // An HTML mockup goes over as its text, not its markup (#219): mailed
+  // verbatim, the model answered with HTML instead of a Markdown package.
+  return `${ask}\n\nThe approved GUI design this package is built on, for reference:\n\n${designHandoff(design)}`;
 }
