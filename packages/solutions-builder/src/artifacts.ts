@@ -13,6 +13,23 @@ export const MATERIAL_KIND = "source_material";
  */
 export const MATERIAL_READING_KIND = "material_reading";
 
+/**
+ * The kind a deck design document is recorded under: design guidelines as
+ * text or Markdown, or an existing presentation as PowerPoint or PDF, that
+ * every stakeholder deck is drafted and drawn against. Kept on the
+ * workspace tenant for every project, or on one project's own tenant for
+ * that project alone; it carries no `projectId`, because the tenant scopes
+ * it and it is a setting, not a stage's work product.
+ */
+export const DECK_DESIGN_DOCUMENT_KIND = "deck_design_document";
+
+/**
+ * The extracted text of a binary deck design document (PDF or PowerPoint),
+ * a companion beside the file the way `material_reading` sits beside
+ * `source_material`. A text document needs none: its content is the text.
+ */
+export const DECK_DESIGN_READING_KIND = "deck_design_reading";
+
 /** The kinds stage 8's `publish_workspace` writes, spelled once in the
  *  runtime package that tool ships with (#42) and read here beside every
  *  other kind. */

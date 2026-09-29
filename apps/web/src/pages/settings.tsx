@@ -5,7 +5,9 @@
  *   2. Inference — live providers: Connect, or Connected plus Refresh models.
  *   3. Designer — surface, design language, output limit.
  *   4. Stakeholder decks — one row per live role; Edit is Theme only.
- *   5. This computer — Connection, Credentials, Data, Version.
+ *   5. Design documents — the guidelines and presentations every deck is
+ *      built against (#246); a project can add its own or turn these off.
+ *   6. This computer — Connection, Credentials, Data, Version.
  *
  * Host and API keep the rest (catalog order, on-limit, templates, start-at-login,
  * diagnostics) as silent defaults. The secret rule still holds: a key field is
@@ -28,6 +30,7 @@ import {
 import { Banner } from "../components.jsx";
 import { deckDesignFor, deckDesignKey } from "../deck-design-settings.ts";
 import { Dictated } from "../dictation.jsx";
+import { DesignDocumentsList } from "./design-documents.jsx";
 import { ProviderList, type ApiKeyProvider, type OAuthCandidate } from "./providers.jsx";
 import "./settings-layout.css";
 
@@ -56,6 +59,7 @@ export function Settings({
       />
       <Designer />
       <StakeholderDecks />
+      <DesignDocuments />
       <ThisComputer status={status} />
     </div>
   );
@@ -397,6 +401,27 @@ function StakeholderDecks() {
             </Fragment>
           );
         })}
+      </div>
+    </Section>
+  );
+}
+
+/* ------------------------------------------------------------ design documents */
+
+/**
+ * The workspace's deck design documents (#246): guidelines and existing
+ * presentations every project's decks are drafted and drawn against, unless
+ * a project turns them off in its own settings. The list itself is shared
+ * with the project settings dialog.
+ */
+function DesignDocuments() {
+  return (
+    <Section
+      title="Design documents"
+      lead="What every stakeholder deck is built against. A project can add its own from its card's menu, or turn these off there."
+    >
+      <div className="section-body">
+        <DesignDocumentsList emptyNote="None yet. Decks use the built-in look and follow the presentation creator's own judgement." />
       </div>
     </Section>
   );

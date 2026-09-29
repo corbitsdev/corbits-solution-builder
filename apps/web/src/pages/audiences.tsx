@@ -458,7 +458,11 @@ export function AudiencePackages({
       designReview?.status === "approved"
         ? await api.artifactContent(tenantId, designReview.artifactId).then((result) => result.content, () => null)
         : null;
-    await api.sendStageMail(tenantId, deployment.address, { body: packageRequest(audience, design) });
+    // The deck's brief (#246): the design documents that apply to this
+    // project and the theme render_deck should draw with. Best effort — a
+    // brief that cannot be read never stops a package being asked for.
+    const brief = await api.deckBrief(detail.project.id, audience.role).catch(() => null);
+    await api.sendStageMail(tenantId, deployment.address, { body: packageRequest(audience, design, brief) });
     let reply = await awaitPackageReply(tenantId, deployment.address, seenIds, name, () => cancelledRef.current);
     if (cancelledRef.current) return;
     // Not every reply is a package (#220): one with no deck outline is
@@ -534,9 +538,11 @@ export function AudiencePackages({
       let themeNotice: string | null = null;
       if (role) {
         try {
-          theme = await api.deckTemplateThemeForRole(role);
+          // The role's style guide, else the first PowerPoint among the
+          // design documents that apply to this project (#246).
+          theme = (await api.deckBrief(detail.project.id, role)).theme;
         } catch (cause) {
-          themeNotice = `its style guide could not be read (${cause instanceof ApiFailure ? cause.detail.message : String(cause)}); using the default look`;
+          themeNotice = `its design documents could not be read (${cause instanceof ApiFailure ? cause.detail.message : String(cause)}); using the default look`;
         }
       }
       const fileBase = deckFileName(detail.project.title, name).replace(/\.pptx$/, "");
@@ -650,8 +656,8 @@ export function AudiencePackages({
         if (!themesRef.current.has(role)) {
           themesRef.current.set(
             role,
-            api.deckTemplateThemeForRole(role).then(
-              (loaded) => ({ theme: loaded, failed: false }),
+            api.deckBrief(detail.project.id, role).then(
+              (loaded) => ({ theme: loaded.theme, failed: false }),
               () => ({ theme: null, failed: true }),
             ),
           );
@@ -677,7 +683,7 @@ export function AudiencePackages({
       if (cancelled) return;
       const pictured = shots.length > 0 ? { ...deck, images: placeMockups(deck, shots) } : deck;
       const notes = [
-        themeFailed ? "Its style guide could not be read, so this is the default look." : null,
+        themeFailed ? "Its design documents could not be read, so this is the default look." : null,
         design.images !== "none" ? "Pictures are drawn when the slides are saved." : null,
         designHtml && shots.length === 0 ? "The design's screens could not be captured for the slides." : null,
       ].filter((line): line is string => line !== null);

@@ -35,6 +35,7 @@ import { readImportPayload } from "../project-import.js";
 import { displayDone, displayStage, displayTurn } from "../project-list.js";
 import { formatUsage } from "../project-usage.js";
 import { DEFAULT_POLICY } from "./onboarding.jsx";
+import { ProjectSettingsDialog } from "./project-settings.jsx";
 import { Dictated } from "../dictation.jsx";
 import "./home-layout.css";
 import {
@@ -369,6 +370,8 @@ function ProjectCard({
   const [infoOpen, setInfoOpen] = useState(false);
   // Rename opens the same dialog with the name field focused.
   const [focusName, setFocusName] = useState(false);
+  // The project's own settings (#246), a dialog of its own beside the info.
+  const [settingsOpen, setSettingsOpen] = useState(false);
   // Deleting takes two clicks, both in the menu: the second item only exists
   // after the first, so a slip cannot remove a project.
   const [confirming, setConfirming] = useState(false);
@@ -382,7 +385,7 @@ function ProjectCard({
   // produces; a fresh press on the face clears it first.
   const dismissing = useRef(false);
   const faceOpens = () =>
-    faceOpensProject({ menuOpen, dialogOpen: infoOpen, dismissingClick: dismissing.current, closedAt: closedAt.current, now: Date.now() });
+    faceOpensProject({ menuOpen, dialogOpen: infoOpen || settingsOpen, dismissingClick: dismissing.current, closedAt: closedAt.current, now: Date.now() });
 
   const act = async (work: () => Promise<unknown>) => {
     try {
@@ -482,6 +485,7 @@ function ProjectCard({
               <MenuContent align="end" onPointerDownOutside={() => (dismissing.current = true)}>
                 <MenuItem onSelect={() => openInfo()}>Project info…</MenuItem>
                 <MenuItem onSelect={() => openInfo(true)}>Rename</MenuItem>
+                <MenuItem onSelect={() => setSettingsOpen(true)}>Settings…</MenuItem>
                 <MenuItem
                   onSelect={() =>
                     void act(async () => {
@@ -531,6 +535,23 @@ function ProjectCard({
               onChanged={onChanged}
               onError={onError}
               onNotice={onNotice}
+            />
+          </div>
+        ) : null}
+        {settingsOpen ? (
+          <div
+            className="card-dialog"
+            onClick={(event) => event.stopPropagation()}
+            onPointerDown={(event) => event.stopPropagation()}
+            onContextMenu={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
+          >
+            <ProjectSettingsDialog
+              project={project}
+              onClose={() => {
+                setSettingsOpen(false);
+                closedAt.current = Date.now();
+              }}
             />
           </div>
         ) : null}

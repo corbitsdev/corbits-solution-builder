@@ -86,6 +86,18 @@ its own PowerPoint file as a style guide; where one is on file, its
 colours, fonts and slide proportions feed `render_deck` instead of the
 built-in look.
 
+Beside those, Settings takes design documents for the workspace: design
+guidelines as text or Markdown, and existing presentations as PowerPoint or
+PDF. A project can add its own from its card's menu, under Settings, and
+choose there whether the workspace's still apply to it; its own always do,
+and come first. Each time a stakeholder's package is asked for, the
+presentation creator is handed the text of every document that applies,
+so the deck outline follows them; the first PowerPoint among them lends
+its colours, typefaces and slide size to the slides on screen, in the
+exported file, and in the deck `render_deck` writes. What is read is said
+plainly: text as written, a PDF's text but not its look, a PowerPoint's
+slide text and theme. Nothing is read from an image.
+
 ## How a stage feels
 
 A specialist asks one question at a time. The document is written while the
