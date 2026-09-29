@@ -65,6 +65,7 @@ import {
   createSidecarRouter,
   createWorkflowAllocationService,
   createWorkflowDispatchService,
+  resolveRoutableAddress,
   WORKSPACE_BUILTINS_REGISTRY,
   type AllocatedSidecarTarget,
   type SidecarLookups,
@@ -90,7 +91,8 @@ import { drizzle } from "drizzle-orm/pglite";
 import * as intxSchema from "@intx/db/schema";
 import { withPostgresJsResultShape } from "./pg-compat.js";
 import { mountProviderOAuth, type CallbackPageCopy } from "./oauth-mount.js";
-import { createSpendApi, createSpendStore, type TurnUsage } from "./spend.js";
+import { createSpendApi, createSpendStore } from "./spend.js";
+import { listenForUsage } from "./usage-listener.js";
 import {
   createHubMailboxAuthorizeSender,
   createHubPersistMailWithSessionEnsure,
@@ -293,20 +295,9 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
   const mailboxDb = db.db as unknown as Parameters<typeof mountMailbox>[1]["db"];
   const mailboxBus = createInMemoryMailboxEventBus();
 
-  // `onUsage` fires once per finished inference turn with the provider,
-  // model and token counts the sidecar reported -- the one place a round's
-  // spend is actually observable (see `spend.ts`). The store it feeds is
-  // process memory, not a ledger row: nothing else in this revision of
-  // Interchange persists a call's tokens, so a restart starts the count over
-  // (the mounted route says so rather than implying continuity).
-  //
-  // Created ahead of `lookups` (moved up from below `createSidecarRouter`) so
-  // the persistMail session-ensure wrapper below can use it.
-  const spendStore = createSpendStore();
-  const eventCollectors = createEventCollectorRegistry({
-    db: db.db,
-    onUsage: (_agentAddress: string, usage: TurnUsage) => spendStore.record(usage),
-  });
+  // Created ahead of `lookups` so the persistMail session-ensure wrapper below
+  // can use it.
+  const eventCollectors = createEventCollectorRegistry({ db: db.db });
 
   const lookups: SidecarLookups = {
     ...createHubSessionLookups({ db: db.db, agentRepoStore }),
@@ -358,6 +349,16 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
       sidecarCredentials.resolve(token),
     validateSidecarIdentity: sidecarCredentials.isCurrent,
     lookups,
+  });
+
+  // Spend is process memory, not a ledger row: nothing else in this revision
+  // of Interchange persists a call's tokens, so a restart starts the count
+  // over (the mounted route says so rather than implying continuity).
+  const spendStore = createSpendStore();
+  listenForUsage({
+    events: sidecarRouter.events,
+    resolveTenantId: async (address) => (await resolveRoutableAddress(db.db, address))?.tenantId ?? null,
+    record: (usage) => spendStore.record(usage),
   });
 
   createHubSessionOrchestrator({

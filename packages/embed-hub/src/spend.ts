@@ -1,9 +1,9 @@
 /**
  * What the workspace has spent on inference, read from the one place it is
- * actually recorded: `EventCollectorRegistry`'s `onUsage` sink
- * (`vendor/interchange/packages/hub-sessions/src/event-collector-registry.ts`),
- * which fires one `TurnUsage` (tenantId, provider, model, token counts) per
- * finished inference turn, for every round a sidecar runs.
+ * actually observable: the sidecar's `inference.usage` / `inference.done`
+ * events, which `usage-listener.ts` turns into one `SpendUsage` (tenantId,
+ * provider, model, token counts) per finished inference turn, for every
+ * round a sidecar runs.
  *
  * Nothing else in this revision of Interchange persists a call's tokens: the
  * `model_pricing` table (`vendor/interchange/packages/db/src/schema/catalog.ts`)
@@ -13,10 +13,10 @@
  * plainly in the mounted response (`sinceRestart: true`) rather than left
  * implicit.
  *
- * Per-project attribution is NOT in scope here: `TurnUsage.runId` names a
- * workflow run, and this codebase has no mapping from a run id to the
- * project id the browser knows (unlike main, which folds usage onto a
- * project's own ledger session). The mount below is workspace-wide only.
+ * Per-project attribution is NOT in scope here: usage is keyed by the
+ * workflow run that produced it, and this codebase has no mapping from a run
+ * to the project id the browser knows. The mount below is workspace-wide
+ * only.
  */
 import { Hono } from "hono";
 import { sql } from "drizzle-orm";
@@ -31,11 +31,8 @@ export type TokenCounts = {
   thinking: number;
 };
 
-export type TurnUsage = {
+export type SpendUsage = {
   tenantId: string;
-  sessionId: string;
-  runId: string;
-  turnId: string;
   provider: string;
   model: string;
   usage: TokenCounts;
@@ -68,11 +65,11 @@ function addTokens(into: TokenCounts, from: TokenCounts): void {
 
 /**
  * The process-lifetime usage store: one map of accumulated per-provider,
- * per-model totals per tenant. `record` is what `onUsage` calls; `forTenant`
- * is what the mounted route reads.
+ * per-model totals per tenant. `record` is what the usage listener calls;
+ * `forTenant` is what the mounted route reads.
  */
 export type SpendStore = {
-  record(usage: TurnUsage): void;
+  record(usage: SpendUsage): void;
   forTenant(tenantId: string): Accumulated[];
 };
 
