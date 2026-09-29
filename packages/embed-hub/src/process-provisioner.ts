@@ -35,6 +35,11 @@ export const PROCESS_PROVISIONER_ID = "process";
  */
 export type ProcessProvisionerRole = "deployment" | "probe";
 
+/**
+ * A sidecar is spawned as the leader of its own process group, so `isAlive`
+ * and `signal` address the whole tree: the sidecar and the workflow processes
+ * it spawns.
+ */
 export interface SidecarProcessRunner {
   spawn(args: { command: readonly string[]; cwd: string; env: Record<string, string> }): number;
   isAlive(pid: number): boolean;
@@ -118,14 +123,14 @@ export function createProcessProvisioner(options: ProcessProvisionerOptions): Si
     return true;
   }
 
-  /** The unit's directory, and with it its pid file, goes only once its process has. */
+  /** The unit's directory, and with it its pid file, goes only once its process tree has. */
   async function stop(unit: Unit): Promise<void> {
     if (unit.pid !== null && runner.isAlive(unit.pid)) {
       runner.signal(unit.pid, "SIGTERM");
       if (!(await exited(unit.pid, graceMs))) {
         runner.signal(unit.pid, "SIGKILL");
         if (!(await exited(unit.pid, KILL_WAIT_MS))) {
-          throw new Error(`sidecar process ${unit.pid} is still alive after SIGKILL`);
+          throw new Error(`sidecar process group ${unit.pid} is still alive after SIGKILL`);
         }
       }
     }
@@ -262,23 +267,38 @@ function errno(error: unknown): unknown {
 
 const bunRunner: SidecarProcessRunner = {
   spawn({ command, cwd, env }) {
-    const child = Bun.spawn([...command], { cwd, env, stdin: "ignore", stdout: "inherit", stderr: "inherit" });
+    const child = Bun.spawn([...command], {
+      cwd,
+      env,
+      detached: true,
+      stdin: "ignore",
+      stdout: "inherit",
+      stderr: "inherit",
+    });
     // Sidecars are stopped by `stopSpawnedSidecars` from their pid files, not
     // by waiting on them here.
     child.unref();
     return child.pid;
   },
   isAlive(pid) {
-    try {
-      process.kill(pid, 0);
-      return true;
-    } catch (error) {
-      if (errno(error) === "ESRCH") return false;
-      if (errno(error) === "EPERM") return true;
-      throw error;
-    }
+    return deliver(-pid, 0);
   },
   signal(pid, signal) {
-    process.kill(pid, signal);
+    deliver(-pid, signal);
   },
 };
+
+/**
+ * False when no group of ours answers. A stale pid file, after a crash or a
+ * reboot, can name a pid since recycled by another user: EPERM means the
+ * group is not ours, so it is treated as gone rather than waited on forever.
+ */
+function deliver(group: number, signal: NodeJS.Signals | 0): boolean {
+  try {
+    process.kill(group, signal);
+    return true;
+  } catch (error) {
+    if (errno(error) === "ESRCH" || errno(error) === "EPERM") return false;
+    throw error;
+  }
+}
