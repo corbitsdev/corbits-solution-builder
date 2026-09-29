@@ -387,10 +387,8 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
   const auth = createAuth(db.db);
 
   // Workflows execute in Interchange's own sidecar, spawned as a child process
-  // of this host per allocation. The sidecar seals credentials under a key of
-  // its own, separate from the hub's so a sidecar compromise cannot open the
-  // hub's credential database.
-  process.env["SIDECAR_CREDENTIAL_ENCRYPTION_KEY"] ??= options.sidecarCredentialKeyHex;
+  // of this host per allocation, sealing credentials under a key of its own.
+  process.env["SIDECAR_CREDENTIAL_ENCRYPTION_KEY"] = options.sidecarCredentialKeyHex;
   // Responses-only backends (ChatGPT/Codex) are catalog rows on this adapter,
   // configured per offering by quirks.
   process.env["SIDECAR_ADAPTER_MANIFEST"] ??= JSON.stringify([
