@@ -41,7 +41,7 @@ import {
   type ResolvedCatalogRow,
 } from "@solutions-builder/installer";
 import type { Stage } from "@solutions-builder/app/ledger";
-import { CODEX_BASE_URL, CODEX_ORIGINATOR, CODEX_RESPONSES_PATH } from "@corbits/codex-provider";
+import { CODEX_BASE_URL, CODEX_DEFAULT_MODELS, CODEX_ORIGINATOR, CODEX_RESPONSES_PATH } from "@corbits/codex-provider";
 import {
   XAI_CLIENT_IDENTIFIER,
   XAI_CLIENT_VERSION,
@@ -113,10 +113,8 @@ export const OAUTH_CONNECT_OPTIONS: ReadonlyArray<{ providerId: string; label: s
 
 /**
  * An OAuth adapter's fixed wire protocol, endpoint and servable models --
- * `@corbits/xai-provider` exports its own model list (`XAI_DEFAULT_MODELS`);
- * `@corbits/codex-provider` exports none, so this carries the current
- * Codex-servable model (`gpt-5.6-sol` — the `-wm` slug with the suffix
- * removed, the spelling the Responses endpoint accepts).
+ * each provider package exports its own model list (`CODEX_DEFAULT_MODELS`,
+ * `XAI_DEFAULT_MODELS`).
  */
 type OAuthTokens = { access: string; refresh: string; expiresAt?: number; accountId?: string };
 
@@ -134,7 +132,7 @@ const OAUTH_ADAPTER_OF: Record<
   "codex-oauth": {
     plugin: "openai-responses",
     baseURL: CODEX_BASE_URL,
-    canonicalNames: ["gpt-5.6-sol"],
+    canonicalNames: [...CODEX_DEFAULT_MODELS],
     quirks: (tokens) => ({
       path: CODEX_RESPONSES_PATH,
       headers: {
