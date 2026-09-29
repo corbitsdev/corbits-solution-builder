@@ -8,7 +8,8 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { api, ApiFailure } from "../../client.js";
 import { subscribeMailbox } from "../../mailbox-events.ts";
 import { Markdown } from "../../markdown.jsx";
-import { Banner, Button } from "../../components.jsx";
+import { Banner, Button, CopyButton } from "../../components.jsx";
+import { DocumentExportMenu, draftNode } from "../../document-export.jsx";
 import { StagePanes } from "./workspace-chrome.tsx";
 import { HowItRuns } from "./how-it-runs.tsx";
 
@@ -33,6 +34,11 @@ const STAGE6_PANEL_ROLES: readonly { key: string; label: string }[] = [
 ];
 
 const STAGE6_REQUIREMENTS_ROLE_KEY = "requirements-author";
+
+/** The artifact kind a stage 6 page's draft is exported under (#242): the requirements as the document they become, a panel review under its own name. */
+function draftKindOf(page: string): string {
+  return page === "requirements" ? "product_requirements" : `build_plan_review_${page}`;
+}
 
 const PAGES: readonly { key: string; label: string }[] = [
   { key: "requirements", label: "Product requirements" },
@@ -245,6 +251,12 @@ export function Stage6Panel({
               {current.status === "done" ? "Request again" : "Request review"}
             </Button>
           ) : null}
+          {current.status === "done" && current.reply ? (
+            <>
+              <CopyButton text={current.reply} />
+              <DocumentExportMenu node={draftNode(draftKindOf(page), 6, currentPage.label)} tenantId={tenantId} content={current.reply} />
+            </>
+          ) : null}
         </div>
         {current.status === "error" ? (
           <Banner tone="error" title={page === "requirements" ? "The requirements could not be drafted" : "This review could not be completed"}>
@@ -288,6 +300,12 @@ export function Stage6Panel({
                   <Button variant="ghost" loading={busy} disabled={!reviewInput || busy} onClick={() => requestReview(page)}>
                     {current.status === "done" ? "Request again" : "Request review"}
                   </Button>
+                ) : null}
+                {current.status === "done" && current.reply ? (
+                  <>
+                    <CopyButton text={current.reply} />
+                    <DocumentExportMenu node={draftNode(draftKindOf(page), 6, currentPage.label)} tenantId={tenantId} content={current.reply} />
+                  </>
                 ) : null}
               </div>
             </div>

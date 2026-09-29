@@ -20,7 +20,7 @@ import { agentFor } from "@solutions-builder/app/kit";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { markChanges } from "../../revisions.js";
 import { Button, documentName, CopyButton } from "../../components.jsx";
-import { PrintButton } from "../../print.jsx";
+import { DocumentExportMenu } from "../../document-export.jsx";
 import { BinaryFile, isDataUrl } from "../../binary-file.tsx";
 import { SpecialistTurn, WorkingLabel, type TurnNote } from "./thread.jsx";
 import type { DraftRef } from "./draft-references.ts";
@@ -653,7 +653,7 @@ export function StageDocument({
                     <span>Changes since v{previous.version}</span>
                   </label>
                 ) : null}
-                {binary ? null : <PrintButton node={node} tenantId={tenantId} content={content || null} />}
+                {binary ? null : <DocumentExportMenu node={node} tenantId={tenantId} content={content} />}
               </div>
             </div>
             {live !== null ? (
