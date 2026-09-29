@@ -16,18 +16,27 @@ export function fitScale(available: number, width: number): number {
   return Math.min(1, available / width);
 }
 
-export function DesktopFrame({ title, children }: { title: string; children: ReactNode }) {
+export function DesktopFrame({
+  title,
+  children,
+  logicalWidth = DESKTOP_WINDOW.width,
+}: {
+  title: string;
+  children: ReactNode;
+  /** The window's own width in logical pixels: 1280, or a design's wider natural width (#268). */
+  logicalWidth?: number;
+}) {
   const box = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   useEffect(() => {
     const element = box.current;
     if (!element) return;
-    const update = () => setScale(fitScale(element.clientWidth, DESKTOP_WINDOW.width));
+    const update = () => setScale(fitScale(element.clientWidth, logicalWidth));
     update();
     const observer = new ResizeObserver(update);
     observer.observe(element);
     return () => observer.disconnect();
-  }, []);
+  }, [logicalWidth]);
   return (
     <figure className="desktop-window" aria-label={`${title}, in a ${DESKTOP_WINDOW.name.toLowerCase()}`}>
       <div className="desktop-chrome" aria-hidden="true">
@@ -41,7 +50,7 @@ export function DesktopFrame({ title, children }: { title: string; children: Rea
       <div ref={box} className="desktop-scale" style={{ height: `${String(Math.round(DESKTOP_WINDOW.height * scale))}px` }}>
         <div
           className="desktop-viewport"
-          style={{ width: `${String(DESKTOP_WINDOW.width)}px`, height: `${String(DESKTOP_WINDOW.height)}px`, transform: `scale(${String(scale)})` }}
+          style={{ width: `${String(logicalWidth)}px`, height: `${String(DESKTOP_WINDOW.height)}px`, transform: `scale(${String(scale)})` }}
         >
           {children}
         </div>

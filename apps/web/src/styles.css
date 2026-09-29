@@ -4585,6 +4585,28 @@ button[aria-disabled="true"] {
   transform-origin: top left;
 }
 
+/* The pane frame fitted to a design wider than the pane (#268): the box
+   keeps the pane frame's own size and border, and the design is drawn at
+   its natural width inside, scaled down from the top-left corner. */
+.design-fit-box {
+  width: 100%;
+  min-width: 0;
+}
+
+.design-fit {
+  position: relative;
+  overflow: hidden;
+  padding: 0;
+}
+
+.design-fit-frame {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border: 0;
+  transform-origin: top left;
+}
+
 .design-desktop-screen {
   display: block;
   width: 100%;
