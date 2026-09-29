@@ -1,6 +1,22 @@
 diff --git a/node_modules/@intx/inference/.bun-tag-29a7a9f43115bbe4 b/.bun-tag-29a7a9f43115bbe4
 new file mode 100644
 index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/node_modules/@intx/inference/.bun-tag-ee4617d82cf8a200 b/.bun-tag-ee4617d82cf8a200
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/dist/adapter.d.ts b/dist/adapter.d.ts
+index b8efba732f85b5d558c681cf9c4676db254a451d..def2b9a01be5f82e15801e4c5ad65c3315c2dbf7 100644
+--- a/dist/adapter.d.ts
++++ b/dist/adapter.d.ts
+@@ -15,6 +15,8 @@ export type ProviderAdapter = {
+     parseJSONResponse: JSONResponseParser;
+     extractRetryAfterMs?: RetryAfterExtractor;
+     extractPacingDelayMs?: PacingExtractor;
++    /** Local patch (faremeter/interchange#198): classify a 2xx whose Content-Type is absent or unrecognised. */
++    classifyResponse?: (headers: Headers) => "sse" | "json" | undefined;
+ };
+ export type AdapterFactory = (source: LastCycleSource, quirks?: unknown) => ProviderAdapter;
+ export type AdapterRegistry = {
 diff --git a/dist/default-director.js b/dist/default-director.js
 index 41a198800efc6b20030556b2888291ceafe303ee..f880bfa81737861fc968231bb3b8cd857870be46 100644
 --- a/dist/default-director.js
@@ -35,6 +51,38 @@ index 67accfde34156a98b7ddead775418e37f7f1c339..9bba5fd0a7ae326fea49674ece36d4e7
      return { category: "fatal", message, statusCode, raw };
  }
  export function classifyNetworkError(cause) {
+diff --git a/dist/harness.js b/dist/harness.js
+index 55aef4d5b0b859e727cd2b74c5e804f0e92c0d53..6ee44d1e9616e00d0ae87c4b0a01c0b5122787db 100644
+--- a/dist/harness.js
++++ b/dist/harness.js
+@@ -325,10 +325,18 @@ async function* runSingleAttempt(opts) {
+         // bare `response.body` re-widens to nullable across the closure).
+         const responseBody = response.body;
+         let responseKind;
++        let mismatch;
+         try {
+             responseKind = detectResponseKind(response.headers);
+         }
+         catch (cause) {
++            // Local patch (faremeter/interchange#198): an adapter that knows
++            // its backend drops or mislabels Content-Type classifies the
++            // response instead of failing it.
++            responseKind = adapter.classifyResponse?.(response.headers);
++            mismatch = cause;
++        }
++        if (responseKind === undefined) {
+             // A 2xx whose Content-Type is neither SSE nor JSON is a protocol
+             // violation, not a transient failure — surface it loudly rather than
+             // pushing unknown bytes through the SSE parser to yield an empty turn.
+@@ -336,7 +344,7 @@ async function* runSingleAttempt(opts) {
+                 type: "inference.error",
+                 seq: nextSeq(),
+                 data: {
+-                    error: classifyProtocolMismatch(cause instanceof Error ? cause.message : String(cause)),
++                    error: classifyProtocolMismatch(mismatch instanceof Error ? mismatch.message : String(mismatch)),
+                     partial: snapshotPartial(partial),
+                 },
+             };
 diff --git a/dist/providers/anthropic.js b/dist/providers/anthropic.js
 index 8ff9e4b54d98a7454c519c9811a710b21e1c6087..4b71fbbfcbcb139f9239db02226f79093596d3e4 100644
 --- a/dist/providers/anthropic.js

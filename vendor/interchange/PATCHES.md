@@ -88,29 +88,6 @@ have a newer upstream equivalent to drop in favor of yet. Each carries a
 kill date and an upstream ask, filed in the `Interchange` Linear team
 (`INTR-*`), linked below.
 
-## `packages/hub-sessions/src/session-service.ts` — pack a source asset at its pinned commit
-
-**Why.** Solution Builder #246 follow-up (a stage 5 specialist "could not be
-started"): `deployWorkflowFromSource` pins a source-asset deploy to
-`source.package.commitSha` and verifies that commit exists, but
-`bindAssetAttachmentResolver` then packed the asset's default ref (`main`)
-fresh at closure-delivery time. The deploy pack carries only the packed
-commit and its tree, and the sidecar reads the closure's subtree at the
-pin — so when a second push moved `main` between the deployer's push and
-the pack (two windows deploying the same stage specialist three seconds
-apart, identical trees), the pin was not in the pack and the sidecar
-failed with `git subtree … could not be read at <pin>: Could not find
-<pin>`.
-
-**What changed.** A source arm's resolver resolves and packs `commitSha`
-itself (isomorphic-git's `resolveRef` accepts an object id); the mount still
-names `refs/heads/main` as its ref. A tarball arm has no pin and packs the
-default ref as before. The install probe rebinds the same resolver, so the
-probe and the deploy pack the same commit.
-
-**Upstream-able.** Yes; the pin the hub already verifies should be the
-commit it ships.
-
 ## `packages/db/src/client.ts` — inject a database handle
 
 **Why.** Upstream's `createDB` opens its own postgres.js socket, which requires
@@ -353,3 +330,28 @@ dependency, set per-role caps on the specialist step, and drop the patch file,
 the `patchedDependencies` entry and this section.
 
 **Kill date.** When `faremeter/interchange#194` is released; tracked as #45.
+
+## `@intx/inference@0.4.0` (npm, not vendored) — adapter-classified responses
+
+**Why.** ChatGPT's Codex backend answers `/codex/responses` with an SSE stream
+and no `Content-Type`. The harness checks the header before any adapter sees
+the response, so every Codex call failed with "Cannot detect response kind:
+response has no Content-Type header". `@corbits/codex-provider`'s own
+`withCodexContentTypeRepair` wraps `fetch`, but the sidecar builds its
+inference dependencies from the global `fetch` with no hook to replace it.
+
+**What changed.** The same `bun patch` adds `faremeter/interchange#198`'s
+harness half, without its tests or capture tooling: `ProviderAdapter` gains an
+optional `classifyResponse(headers)`, consulted only when `detectResponseKind`
+rejects a 2xx; `undefined` keeps the protocol-mismatch error.
+`packages/embed-hub/src/responses-adapter.ts` wraps
+`createOpenAIResponsesAdapter` and classifies as SSE for sources whose quirks
+path is `CODEX_RESPONSES_PATH`; the sidecar adapter manifest points at it.
+
+**Upstream-able.** Yes — it is `faremeter/interchange#198` (INTR-601).
+
+**Removal.** When an `@intx/inference` release includes `#198`, bump the
+dependency, move `classifyResponse` into `@corbits/codex-provider`'s adapter,
+and drop this hunk of the patch, `responses-adapter.ts` and this section.
+
+**Kill date.** When `faremeter/interchange#198` is released.

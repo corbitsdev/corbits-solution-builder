@@ -391,8 +391,8 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
   process.env["SIDECAR_ADAPTER_MANIFEST"] ??= JSON.stringify([
     {
       provider: OPENAI_RESPONSES_PROVIDER,
-      specifier: import.meta.resolve("@corbits/openai-responses"),
-      export: "createOpenAIResponsesAdapter",
+      specifier: import.meta.resolve("./responses-adapter.ts"),
+      export: "createResponsesAdapter",
     },
   ]);
   const provisionerFor = (role: ProcessProvisionerRole) =>
