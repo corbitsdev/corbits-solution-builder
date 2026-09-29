@@ -1070,6 +1070,44 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   background: var(--wb-muted);
 }
 
+/* The reader's send-back confirm (#248): a card under the document's head,
+   beside the button that opened it, naming the one stage it returns to. */
+.sbconfirm {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--wb-border-strong);
+  border-radius: var(--radius-panel);
+  background: var(--popover);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--wb-foreground) 10%, transparent);
+}
+
+.sbconfirm-head {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--wb-foreground);
+}
+
+.sbconfirm-reason {
+  width: 100%;
+  min-height: 3.5rem;
+  resize: vertical;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--wb-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--wb-background);
+  color: var(--wb-foreground);
+  font: inherit;
+  font-size: 0.8125rem;
+}
+
+.sbconfirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
 /* Selecting text in the document floats the comment popover at the cursor —
    a small dialog, gone on Escape or a click away. */
 .sel-pop {

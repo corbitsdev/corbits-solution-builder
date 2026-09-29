@@ -94,8 +94,10 @@ export type StageDecisions = {
   readonly sendingBack: boolean;
   /** Sends this stage back to `target` through the workflow's `send_back`
    *  decision — every review at `target` and above is marked stale, nothing
-   *  is deleted. */
-  readonly sendBack: (target: number) => Promise<void>;
+   *  is deleted. `reason` given here wins over the held `sendReason`: a
+   *  caller that composed the reason in the same click cannot wait for
+   *  state to settle (#248). */
+  readonly sendBack: (target: number, reason?: string) => Promise<void>;
   /** Mints `ProjectState.requirements` from the requirements-author's
    *  accepted PRODUCT_REQUIREMENTS document, once, before the Architect
    *  drafts (CL-8862) — `Stage6Panel` calls this the moment that document's
@@ -486,15 +488,16 @@ export function useStageDecisions({
     }
   };
 
-  const sendBack = async (target: number) => {
+  const sendBack = async (target: number, reason?: string) => {
     setSendingBack(true);
     onError(null);
     try {
+      const said = (reason ?? sendReason).trim();
       const result = await sendBackDecision(stageApprovalDeps, {
         projectId: detail.project.id,
         stage,
         targetStage: target,
-        reason: sendReason.trim() || `Sent back from ${stageName(stage)} to ${stageName(target)}.`,
+        reason: said || `Sent back from ${stageName(stage)} to ${stageName(target)}.`,
       });
       if (!result.ok) {
         onError(`Send-back was refused: ${result.reason}`);

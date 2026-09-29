@@ -57,6 +57,7 @@ import { guideStep } from "./product-guide.ts";
 import { useProjectArtifacts } from "./use-project-artifacts.ts";
 import { loadQuotedDraft } from "./quote-store.js";
 import { useStageDecisions } from "./use-stage-decisions.ts";
+import { composeSendBackReason } from "./send-back-reason.ts";
 import { ArtifactStrip, VersionStrip } from "./artifact-strip.tsx";
 import { stageEvents, switchEvents } from "./stage-events.ts";
 import { useModelSwitch, useModelHandoff } from "./use-model-handoff.ts";
@@ -71,6 +72,7 @@ import { STAGE_DRAFT_KIND } from "../../client.js";
 import {
   EvaluatorStance,
   OpeningScreen,
+  SendBackConfirm,
   SendBackPopover,
   StagePanes,
 } from "./workspace-chrome.tsx";
@@ -460,13 +462,16 @@ export function StageWorkspace({
   const openSendBack = (draft: string) => {
     // Queued passages lead the reason — the send-back is what they were
     // attached for, so they go whether or not a note was typed.
-    const passages = loadQuotedDraft(tenantId, stage).map(
-      (entry) => `> ${entry.note ? `${entry.quote}\n— ${entry.note}` : entry.quote}`,
-    );
-    const reason = [...passages, draft.trim()].filter(Boolean).join("\n\n");
+    const reason = composeSendBackReason(loadQuotedDraft(tenantId, stage), draft);
     if (reason) setSendReason(reason);
     setSendBackOpen(true);
   };
+  // The reader's own send-back (#248): a confirm beside its button, naming
+  // the one stage the open document belongs to, never the composer's picker.
+  const [readerSendBack, setReaderSendBack] = useState(false);
+  useEffect(() => {
+    setReaderSendBack(false);
+  }, [artifacts.selected?.key]);
   const sendBackPopover = (
     <SendBackPopover
       stage={stage}
@@ -613,12 +618,24 @@ export function StageWorkspace({
                 Back to {stageName(stage)}
               </Button>
               {artifacts.activeNode.stage < stage ? (
-                <Button variant="ghost" onClick={() => openSendBack("")}>
+                <Button variant="ghost" disabled={decisions.sendingBack} onClick={() => setReaderSendBack((open) => !open)}>
                   Change it: send back to {stageName(artifacts.activeNode.stage)}…
                 </Button>
               ) : null}
             </div>
           </div>
+          {readerSendBack && artifacts.activeNode.stage < stage ? (
+            <SendBackConfirm
+              target={artifacts.activeNode.stage}
+              busy={decisions.sendingBack}
+              onCancel={() => setReaderSendBack(false)}
+              onConfirm={(typed) => {
+                const target = artifacts.activeNode!.stage;
+                setReaderSendBack(false);
+                void sendBack(target, composeSendBackReason(loadQuotedDraft(tenantId, stage), typed));
+              }}
+            />
+          ) : null}
           {!artifacts.activeContent ? (
             <p className="inline-note">Loading…</p>
           ) : isDataUrl(artifacts.activeContent) ? (
