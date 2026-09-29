@@ -58,6 +58,9 @@ import { useProjectArtifacts } from "./use-project-artifacts.ts";
 import { loadQuotedDraft } from "./quote-store.js";
 import { useStageDecisions } from "./use-stage-decisions.ts";
 import { composeSendBackReason } from "./send-back-reason.ts";
+import { useRecordedDeck } from "./deck-reader.jsx";
+import { DocumentExportMenu } from "../../document-export.jsx";
+import { SlidePreview } from "../../slide-preview.jsx";
 import { ArtifactStrip, VersionStrip } from "./artifact-strip.tsx";
 import { stageEvents, switchEvents } from "./stage-events.ts";
 import { useModelSwitch, useModelHandoff } from "./use-model-handoff.ts";
@@ -466,6 +469,22 @@ export function StageWorkspace({
     if (reason) setSendReason(reason);
     setSendBackOpen(true);
   };
+  // A recorded stakeholder deck opened from the strip (#249): its slides
+  // drawn again from its package, with stage 5's export menu, rather than
+  // a bare file card. No-op unless the open document is such a deck.
+  const readerDeckNode =
+    artifacts.selected !== null && artifacts.selected.stage !== stage && artifacts.activeNode?.kind === "audience_deck" ? artifacts.activeNode : null;
+  const designReview = workflowView?.reviews[4];
+  const recordedDeck = useRecordedDeck({
+    node: readerDeckNode,
+    nodes: detail.nodes,
+    tenantId,
+    projectId: detail.project.id,
+    projectTitle: detail.project.title,
+    audiences: ((detail.project.policy ?? {}) as { audiences?: { name: string; role: string }[] }).audiences ?? [],
+    designRef: designReview?.status === "approved" ? designReview.artifactId : null,
+    content: artifacts.activeContent,
+  });
   // The reader's own send-back (#248): a confirm beside its button, naming
   // the one stage the open document belongs to, never the composer's picker.
   const [readerSendBack, setReaderSendBack] = useState(false);
@@ -614,6 +633,12 @@ export function StageWorkspace({
                 <FrameSelect value={frameMode} onChange={setFrameMode} />
               ) : null}
               <CopyButton text={isDataUrl(artifacts.activeContent) ? null : artifacts.activeContent} />
+              {readerDeckNode ? (
+                recordedDeck.exportMenu
+              ) : artifacts.activeContent && !isDataUrl(artifacts.activeContent) ? (
+                // The same way out every stage document has (#242): Markdown, or the print layer's PDF.
+                <DocumentExportMenu node={artifacts.activeNode} tenantId={tenantId} content={artifacts.activeContent} />
+              ) : null}
               <Button variant="ghost" onClick={() => artifacts.select(null)}>
                 Back to {stageName(stage)}
               </Button>
@@ -636,7 +661,14 @@ export function StageWorkspace({
               }}
             />
           ) : null}
-          {!artifacts.activeContent ? (
+          {recordedDeck.notice ? <p className="inline-note">{recordedDeck.notice}</p> : null}
+          {readerDeckNode ? (
+            recordedDeck.deck ? (
+              <SlidePreview key={readerDeckNode.id} deck={recordedDeck.deck} note={recordedDeck.note} />
+            ) : (
+              <p className="inline-note">{recordedDeck.note ?? "Drawing the slides…"}</p>
+            )
+          ) : !artifacts.activeContent ? (
             <p className="inline-note">Loading…</p>
           ) : isDataUrl(artifacts.activeContent) ? (
             <BinaryFile node={artifacts.activeNode} tenantId={tenantId} content={artifacts.activeContent} />
