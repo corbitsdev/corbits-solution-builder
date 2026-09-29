@@ -64,9 +64,14 @@ function slideStyle(look: DeckLook): Record<string, string> {
   };
 }
 
-/** A slide's picture as the renderer places it: the right-hand column, fitted. */
-function Picture({ image, alt }: { image: Uint8Array; alt: string }) {
-  return <img className="slide-picture" alt={alt} src={`data:image/png;base64,${toBase64(image)}`} />;
+/** Whether an item slide is its picture: no lines to show beside it, so the picture fills the width (#252). */
+export function isShowcase(slide: PreviewSlide): boolean {
+  return slide.kind === "item" && slide.lines.length === 0 && slide.image !== undefined;
+}
+
+/** A slide's picture as the renderer places it: the right-hand column, fitted, or the full width on a showcase slide. */
+function Picture({ image, alt, showcase = false }: { image: Uint8Array; alt: string; showcase?: boolean }) {
+  return <img className={showcase ? "slide-picture showcase" : "slide-picture"} alt={alt} src={`data:image/png;base64,${toBase64(image)}`} />;
 }
 
 function Slide({ slide, footer, look }: { slide: PreviewSlide; footer: string; look: DeckLook }) {
@@ -87,7 +92,7 @@ function Slide({ slide, footer, look }: { slide: PreviewSlide; footer: string; l
     <div className="slide slide-item" style={slideStyle(look)}>
       <p className="slide-item-title">{slide.title}</p>
       <span className="slide-rule" />
-      {slide.image ? <Picture image={slide.image} alt="A screen of the approved design" /> : null}
+      {slide.image ? <Picture image={slide.image} alt="A screen of the approved design" showcase={isShowcase(slide)} /> : null}
       <ul className={slide.image ? "slide-lines with-picture" : "slide-lines"}>
         {slide.lines.map((line, index) => (
           <li key={index}>{line}</li>

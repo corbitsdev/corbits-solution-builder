@@ -2,10 +2,11 @@
  * The approved GUI mockup as pictures for a stakeholder's slides (#227).
  *
  * A stage 4 design is an HTML document with one `[data-surface]` element per
- * screen. Every deck carries those screens as decorative filler, whatever
- * the role's images setting says: the cover shows one, and item slides with
- * no illustration take the others in turn. The renderer already lays out a
- * right-hand picture on the cover and on item slides; this supplies them.
+ * screen. Every deck carries those screens, whatever the role's images
+ * setting says: a "What it looks like" slide is one, the cover shows one,
+ * and the rest go to item slides, spread out and never repeated (#252). The
+ * renderer already lays out a right-hand picture on the cover and on item
+ * slides, and a full-width one on a slide with no lines; this supplies them.
  *
  * `mockupShots` runs in the browser: the design is loaded into a hidden
  * same-origin frame with its scripts removed, each screen is serialised into
@@ -25,22 +26,39 @@ const SHOT_SCALE = 2;
 const LOAD_TIMEOUT_MS = 8_000;
 
 /**
- * The deck's pictures with the mockup's screens filled in: existing
- * illustrations are kept, the cover takes the first screen when it has
- * none, and each item slide without a picture takes the next, cycling
- * through the screens when there are more slides than screens. No screens
- * leaves the pictures as they were.
+ * The deck's pictures with the mockup's screens placed (#252): existing
+ * illustrations are kept; a slide with no lines — the outline's "What it
+ * looks like" — takes a screen first, since the picture is the slide; the
+ * cover takes one when it has none; and the screens left are spread evenly
+ * over the item slides still without a picture. Each screen is used once,
+ * so no two slides in a row carry the same one, and a slide is allowed to
+ * have no picture: running out of screens leaves the rest bare rather than
+ * cycling. No screens leaves the pictures as they were.
  */
 export function placeMockups(deck: Pick<Deck, "slides" | "images">, shots: readonly Uint8Array[]): Map<string, Uint8Array> {
   const images = new Map(deck.images ?? []);
   if (shots.length === 0) return images;
-  let next = 0;
-  const take = () => shots[next++ % shots.length]!;
-  if (!images.has("cover")) images.set("cover", take());
-  deck.slides.forEach((_, index) => {
+  const queue = [...shots];
+  const take = () => queue.shift();
+  deck.slides.forEach((slide, index) => {
     const key = String(index);
-    if (!images.has(key)) images.set(key, take());
+    if (slide.bullets.length === 0 && !images.has(key)) {
+      const shot = take();
+      if (shot) images.set(key, shot);
+    }
   });
+  if (!images.has("cover")) {
+    const shot = take();
+    if (shot) images.set("cover", shot);
+  }
+  const bare = deck.slides.map((_, index) => String(index)).filter((key) => !images.has(key));
+  const count = Math.min(queue.length, bare.length);
+  for (let i = 0; i < count; i += 1) {
+    // The i-th of `count` pictures lands on the slide at that fraction of the
+    // bare ones, so two screens on eight slides sit apart, not both up front.
+    const at = count === bare.length ? i : Math.floor(((i + 0.5) * bare.length) / count);
+    images.set(bare[at]!, take()!);
+  }
   return images;
 }
 

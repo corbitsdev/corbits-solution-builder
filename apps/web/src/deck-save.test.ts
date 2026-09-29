@@ -51,8 +51,9 @@ describe("buildPackageDeck", () => {
     ).rejects.toThrow(/no "### Deck outline" section/);
   });
 
-  // #227: the approved mockup's screens fill the cover and every item slide
-  // without an illustration, whatever the images setting says.
+  // #227: the approved mockup's screens go on the cover and the item slides,
+  // whatever the images setting says; #252: each screen once, spread out, so
+  // with two screens over two item slides the cover and the last slide get one.
   test("the mockup's screens are placed on the cover and the item slides", async () => {
     const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
     const shots: string[] = [];
@@ -67,14 +68,14 @@ describe("buildPackageDeck", () => {
         },
       },
     });
-    // Two outline items plus the cover: three pictures asked for, two screens cycled over them.
+    // Two outline items plus the cover: three pictures asked for, two screens placed once each.
     expect(shots).toEqual([`3:${String("<!doctype html><html><body><section data-surface=\"phone\">a</section><section data-surface=\"web\">b</section></body></html>".length)}`]);
     const base64 = result.dataUrl.split(",")[1]!;
     const zip = await JSZip.loadAsync(base64, { base64: true });
     const media = Object.keys(zip.files).filter((name) => /^ppt\/media\/.*\.png$/.test(name));
     expect(media.length).toBeGreaterThanOrEqual(1);
     expect(await slideXml(result.dataUrl, "ppt/slides/slide1.xml")).toContain("<p:pic>");
-    expect(await slideXml(result.dataUrl, "ppt/slides/slide2.xml")).toContain("<p:pic>");
+    expect(await slideXml(result.dataUrl, "ppt/slides/slide2.xml")).not.toContain("<p:pic>");
     expect(await slideXml(result.dataUrl, "ppt/slides/slide3.xml")).toContain("<p:pic>");
     expect(result.imagesNotice).toBeNull();
   });

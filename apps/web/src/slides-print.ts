@@ -7,7 +7,7 @@
  */
 import { lookOf, type Deck } from "@solutions-builder/app/deck";
 import { toBase64 } from "./base64.ts";
-import { COVER_NOTE, previewSlides } from "./slide-preview.tsx";
+import { COVER_NOTE, isShowcase, previewSlides } from "./slide-preview.tsx";
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -18,14 +18,14 @@ export function slidesPrintHtml(deck: Deck, title: string): string {
   const look = lookOf(deck.design, deck.theme);
   const height = look.wide ? 5.625 : 7.5;
   const footer = `${deck.projectTitle} · for ${deck.audience}`;
-  const picture = (image: Uint8Array | undefined, cover: boolean) =>
-    image ? `<img class="picture${cover ? " cover-picture" : ""}" alt="" src="data:image/png;base64,${toBase64(image)}" />` : "";
+  const picture = (image: Uint8Array | undefined, kind: "cover" | "item" | "showcase") =>
+    image ? `<img class="picture${kind === "cover" ? " cover-picture" : kind === "showcase" ? " showcase" : ""}" alt="" src="data:image/png;base64,${toBase64(image)}" />` : "";
   const pages = previewSlides(deck).map((slide) => {
     if (slide.kind === "cover") {
-      return `<section class="slide cover"><span class="bar"></span><div class="cover-text${slide.image ? " with-picture" : ""}"><h1>${escapeHtml(slide.title)}</h1><p class="subtitle">${escapeHtml(slide.subtitle)}</p><p class="note">${escapeHtml(COVER_NOTE)}</p></div>${picture(slide.image, true)}</section>`;
+      return `<section class="slide cover"><span class="bar"></span><div class="cover-text${slide.image ? " with-picture" : ""}"><h1>${escapeHtml(slide.title)}</h1><p class="subtitle">${escapeHtml(slide.subtitle)}</p><p class="note">${escapeHtml(COVER_NOTE)}</p></div>${picture(slide.image, "cover")}</section>`;
     }
     const lines = slide.lines.map((line) => `<li>${escapeHtml(line)}</li>`).join("");
-    return `<section class="slide item"><h2>${escapeHtml(slide.title)}</h2><span class="rule"></span>${picture(slide.image, false)}<ul class="lines${slide.image ? " with-picture" : ""}">${lines}</ul><p class="footer">${escapeHtml(footer)} · ${String(slide.page)}</p></section>`;
+    return `<section class="slide item"><h2>${escapeHtml(slide.title)}</h2><span class="rule"></span>${picture(slide.image, isShowcase(slide) ? "showcase" : "item")}<ul class="lines${slide.image ? " with-picture" : ""}">${lines}</ul><p class="footer">${escapeHtml(footer)} · ${String(slide.page)}</p></section>`;
   });
   const css = `
     @page { size: 10in ${String(height)}in; margin: 0; }
@@ -46,6 +46,7 @@ export function slidesPrintHtml(deck: Deck, title: string): string {
     .lines li { margin-bottom: 6pt; }
     .picture { position: absolute; left: 6.2in; top: 1.5in; width: 3.4in; height: calc(100% - 2.2in); object-fit: contain; object-position: center; }
     .cover-picture { left: 5.8in; top: 0.6in; width: 3.8in; height: calc(100% - 1.2in); }
+    .picture.showcase { left: 0.5in; width: 9in; }
     .footer { position: absolute; left: 0.5in; bottom: 0.2in; width: 9in; margin: 0; font-size: 9pt; color: #${look.muted}; }
   `;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8" /><title>${escapeHtml(title)}</title><style>${css}</style></head><body>${pages.join("")}</body></html>`;

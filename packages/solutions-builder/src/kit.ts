@@ -542,7 +542,11 @@ one item per slide, the slide's title in bold and what it says under it:
 
 The slides cover problem, proposed solution, value, risks, timeline and
 order-of-magnitude expected cost. Do not write the outline as bullets or
-sub-headings: the slides are built from the numbered items. With the package
+sub-headings: the slides are built from the numbered items. One item may be
+**What it looks like** with nothing under it: that slide shows a screen of
+the approved design and carries no sentences. Pictures are the approved
+design's screens, placed when the slides are drawn: not every slide gets
+one, and no two slides in a row show the same screen. With the package
 in the reply, also call the render_deck tool with that same markdown so that
 one audience's slides exist as a PowerPoint; the call is in addition to the
 reply, never instead of it. Never render a deck for an audience nobody asked

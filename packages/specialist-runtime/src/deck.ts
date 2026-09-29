@@ -124,7 +124,10 @@ function bulletsOf(body: string, most: number): string[] {
 
 /**
  * The deck outline's numbered items: each a title in bold and a body under
- * it. An item without bold text takes its whole first line as the title.
+ * it. An item without bold text takes its whole first line as the title. An
+ * item with nothing under it is kept as a slide with no lines — the
+ * outline's "What it looks like" (#252), which shows a screen and says
+ * nothing else.
  */
 export function outlineSlidesIn(markdown: string, most = DECK_DENSITY[DEFAULT_DECK_DESIGN.density]): DeckSlide[] {
   const section = sectionIn(markdown, OUTLINE_HEADING.toLowerCase());
@@ -278,15 +281,21 @@ export async function renderDeck(deck: Deck): Promise<Uint8Array> {
   const itemSlide = (title: string, lines: readonly string[], notes: string | null, image: Uint8Array | undefined, page: number) => {
     const slide = pptx.addSlide();
     paint(slide);
-    const textWidth = image ? W * 0.56 : W - 1;
     slide.addText(title, { x: 0.5, y: 0.35, w: W - 1, h: 0.9, fontSize: 24, fontFace: look.titleFace, bold: true, color: look.ink, valign: "top" });
     slide.addShape(pptx.ShapeType.line, { x: 0.5, y: 1.3, w: W - 1, h: 0, line: { color: look.accent, width: 1.5 } });
-    slide.addText(
-      lines.map((text) => ({ text, options: { bullet: true, breakLine: true } })),
-      { x: 0.5, y: 1.5, w: textWidth, h: H - 2.2, fontSize: 15, fontFace: look.bodyFace, color: look.ink, valign: "top", paraSpaceAfter: 6 },
-    );
-    if (image) {
-      slide.addImage({ data: pngData(image), x: W * 0.62, y: 1.5, w: W * 0.34, h: H - 2.2, sizing: { type: "contain", w: W * 0.34, h: H - 2.2 } });
+    if (lines.length === 0 && image) {
+      // A slide that is its picture — the outline's "What it looks like"
+      // (#252): the screen fills the width under the title, no bullets.
+      slide.addImage({ data: pngData(image), x: 0.5, y: 1.5, w: W - 1, h: H - 2.2, sizing: { type: "contain", w: W - 1, h: H - 2.2 } });
+    } else {
+      const textWidth = image ? W * 0.56 : W - 1;
+      slide.addText(
+        lines.map((text) => ({ text, options: { bullet: true, breakLine: true } })),
+        { x: 0.5, y: 1.5, w: textWidth, h: H - 2.2, fontSize: 15, fontFace: look.bodyFace, color: look.ink, valign: "top", paraSpaceAfter: 6 },
+      );
+      if (image) {
+        slide.addImage({ data: pngData(image), x: W * 0.62, y: 1.5, w: W * 0.34, h: H - 2.2, sizing: { type: "contain", w: W * 0.34, h: H - 2.2 } });
+      }
     }
     if (notes && deck.design.notes) slide.addNotes(notes);
     footer(slide, page);

@@ -4432,6 +4432,14 @@ button[aria-disabled="true"] {
   height: calc(var(--slide-h) - 12cqw);
 }
 
+/* A slide that is its picture — "What it looks like" (#252): the screen
+   fills the width under the rule, as the renderer draws it. */
+.slide-picture.showcase {
+  left: 5cqw;
+  right: 5cqw;
+  width: 90cqw;
+}
+
 .slide-cover-text.with-picture {
   width: 50cqw;
 }
