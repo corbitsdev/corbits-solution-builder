@@ -41,7 +41,14 @@ import {
 } from "@solutions-builder/installer";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { CODEX_BASE_URL, CODEX_ORIGINATOR, CODEX_RESPONSES_PATH } from "@corbits/codex-provider";
-import { XAI_DEFAULT_MODELS, XAI_OAUTH_PROXY_BASE_URL } from "@corbits/xai-provider";
+import {
+  XAI_CLIENT_IDENTIFIER,
+  XAI_CLIENT_VERSION,
+  XAI_DEFAULT_MODELS,
+  XAI_OAUTH_PROXY_BASE_URL,
+  XAI_RESPONSES_PATH,
+  XAI_USER_AGENT,
+} from "@corbits/xai-provider";
 import type { Transport } from "./hub.ts";
 
 export type ListedProvider = {
@@ -142,7 +149,23 @@ const OAUTH_ADAPTER_OF: Record<
       maxOutputTokens: false,
     }),
   },
-  "xai-oauth": { plugin: "openai-compatible", baseURL: XAI_OAUTH_PROXY_BASE_URL, canonicalNames: [...XAI_DEFAULT_MODELS] },
+  // The CLI proxy speaks only the Responses API and answers 426 to a client
+  // that does not name itself the way the Grok CLI does.
+  "xai-oauth": {
+    plugin: "openai-responses",
+    baseURL: XAI_OAUTH_PROXY_BASE_URL,
+    canonicalNames: [...XAI_DEFAULT_MODELS],
+    quirks: () => ({
+      path: XAI_RESPONSES_PATH,
+      headers: {
+        static: {
+          "user-agent": XAI_USER_AGENT,
+          "x-grok-client-identifier": XAI_CLIENT_IDENTIFIER,
+          "x-grok-client-version": XAI_CLIENT_VERSION,
+        },
+      },
+    }),
+  },
 };
 
 /**
