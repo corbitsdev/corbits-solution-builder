@@ -51,6 +51,43 @@ describe("buildPackageDeck", () => {
     ).rejects.toThrow(/no "### Deck outline" section/);
   });
 
+  // #227: the approved mockup's screens fill the cover and every item slide
+  // without an illustration, whatever the images setting says.
+  test("the mockup's screens are placed on the cover and the item slides", async () => {
+    const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
+    const shots: string[] = [];
+    const result = await buildPackageDeck({
+      ...ARGS,
+      design: BASE_DESIGN,
+      mockup: {
+        html: "<!doctype html><html><body><section data-surface=\"phone\">a</section><section data-surface=\"web\">b</section></body></html>",
+        shoot: async (html, max) => {
+          shots.push(`${String(max)}:${String(html.length)}`);
+          return [png, png];
+        },
+      },
+    });
+    // Two outline items plus the cover: three pictures asked for, two screens cycled over them.
+    expect(shots).toEqual([`3:${String("<!doctype html><html><body><section data-surface=\"phone\">a</section><section data-surface=\"web\">b</section></body></html>".length)}`]);
+    const base64 = result.dataUrl.split(",")[1]!;
+    const zip = await JSZip.loadAsync(base64, { base64: true });
+    const media = Object.keys(zip.files).filter((name) => /^ppt\/media\/.*\.png$/.test(name));
+    expect(media.length).toBeGreaterThanOrEqual(1);
+    expect(await slideXml(result.dataUrl, "ppt/slides/slide1.xml")).toContain("<p:pic>");
+    expect(await slideXml(result.dataUrl, "ppt/slides/slide2.xml")).toContain("<p:pic>");
+    expect(await slideXml(result.dataUrl, "ppt/slides/slide3.xml")).toContain("<p:pic>");
+    expect(result.imagesNotice).toBeNull();
+  });
+
+  test("a mockup that cannot be captured is said, and the deck is still built", async () => {
+    const result = await buildPackageDeck({
+      ...ARGS,
+      mockup: { html: "<!doctype html><html><body></body></html>", shoot: async () => { throw new Error("no canvas"); } },
+    });
+    expect(result.imagesNotice).toBe("the design's screens could not be captured (no canvas)");
+    expect(result.dataUrl.length).toBeGreaterThan(100);
+  });
+
   test("a themed deck's bytes differ from the default deck's", async () => {
     const args = { projectTitle: "Acme Rebuild", audience: "Finance", role: "Approver", markdown: OUTLINE };
     const plain = await buildPackageDeck(args);

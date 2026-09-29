@@ -23,6 +23,8 @@ import { deckDesignFor } from "../deck-design-settings.ts";
 import { slidesSource } from "../deck-templates.ts";
 import { SlidePreview } from "../slide-preview.tsx";
 import { packageNudge, packageReplyProblem, packageRequest } from "../package-request.ts";
+import { mockupShots, placeMockups } from "../mockup-shots.ts";
+import { isHtmlDocument } from "./workspace/guidance.ts";
 import { useBusyWhile } from "../use-busy.ts";
 import { packageReplyFor } from "../package-reply.ts";
 import { packagesByStakeholder } from "../package-lineages.ts";
@@ -398,6 +400,37 @@ export function AudiencePackages({
   const audiences = youFirst(policy.audiences ?? []);
   const quorum = policy.audienceQuorum ?? 0;
 
+  // The approved stage 4 design, read once per approved version: its
+  // screens fill every deck's slides as decorative filler (#227), on screen
+  // and in the file alike. Only an HTML mockup has screens to draw.
+  const designRef = workflowView?.reviews[4]?.status === "approved" ? workflowView.reviews[4].artifactId : null;
+  const [designHtml, setDesignHtml] = useState<string | null>(null);
+  useEffect(() => {
+    if (!designRef) {
+      setDesignHtml(null);
+      return;
+    }
+    let cancelled = false;
+    void api.artifactContent(tenantId, designRef).then(
+      (result) => {
+        if (!cancelled) setDesignHtml(isHtmlDocument(result.content) ? result.content : null);
+      },
+      () => {
+        if (!cancelled) setDesignHtml(null);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [designRef, tenantId]);
+  // The screens, drawn once per design and kept for every preview and save.
+  const shotsRef = useRef<{ key: string; shots: Promise<Uint8Array[]> } | null>(null);
+  const designShots = (): Promise<Uint8Array[]> => {
+    if (!designHtml || !designRef) return Promise.resolve([]);
+    if (shotsRef.current?.key !== designRef) shotsRef.current = { key: designRef, shots: mockupShots(designHtml).catch(() => []) };
+    return shotsRef.current.shots;
+  };
+
   /**
    * Writes one named stakeholder's package with the stage's one specialist
    * (`ensureStageAgent`, the same deployment the stage's thread is with),
@@ -511,6 +544,7 @@ export function AudiencePackages({
           markdown: packageContent.content,
           design: deckDesignFor(role, preferences),
           ...(theme ? { theme } : {}),
+          ...(designHtml ? { mockup: { html: designHtml, shoot: () => designShots() } } : {}),
         });
         downloadArtifact(built.dataUrl, built.filename);
       }
@@ -607,16 +641,21 @@ export function AudiencePackages({
         setPreview({ deck: null, note: "No slides to show yet: the deck outline has no slides." });
         return;
       }
+      // The approved design's screens on the slides, as the file will carry them (#227).
+      const shots = await designShots();
+      if (cancelled) return;
+      const pictured = shots.length > 0 ? { ...deck, images: placeMockups(deck, shots) } : deck;
       const notes = [
         themeFailed ? "Its style guide could not be read, so this is the default look." : null,
         design.images !== "none" ? "Pictures are drawn when the slides are saved." : null,
+        designHtml && shots.length === 0 ? "The design's screens could not be captured for the slides." : null,
       ].filter((line): line is string => line !== null);
-      setPreview({ deck, note: notes.length > 0 ? notes.join(" ") : null });
+      setPreview({ deck: pictured, note: notes.length > 0 ? notes.join(" ") : null });
     })();
     return () => {
       cancelled = true;
     };
-  }, [content, selected?.id, selected?.variant, selected?.title, previewRole, detail.project.title]);
+  }, [content, selected?.id, selected?.variant, selected?.title, previewRole, detail.project.title, designHtml, designRef]);
 
   // The quorum tally is the workflow's own view -- `stage5Quorum`, folded by
   // `foldProjectWorkflow` from the `audiencePolicy` an `open_review` captured
