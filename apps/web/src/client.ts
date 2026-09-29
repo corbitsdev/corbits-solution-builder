@@ -149,7 +149,7 @@ import {
   makeResolvedDefault,
   moveResolvedModel,
   refreshProviderModels,
-  repairProviderBases,
+  settleProviderCatalog,
   resolveActiveModel,
   rerankCatalogViaHub,
   reorderProviders,
@@ -1041,6 +1041,7 @@ export const api = {
     if (status.hub.mode !== "embedded") return;
     try {
       await installerUpgradeWorkspace(createHubTransport());
+      if (await settleProviderCatalog(createHubTransport())) activeModelCacheClear();
     } catch (cause) {
       installerFailure(cause);
     }
@@ -1098,17 +1099,6 @@ export const api = {
       const result = await refreshProviderModels(createHubTransport(), providerId);
       activeModelCacheClear();
       return result;
-    } catch (cause) {
-      installerFailure(cause);
-    }
-  },
-  /** Mends connected rows whose stored base URL predates a fix (an Anthropic
-   *  `…/v1` base, #73): no key needed, no-op when nothing is stale. */
-  repairProviderBases: async (): Promise<string[]> => {
-    try {
-      const repaired = await repairProviderBases(createHubTransport());
-      if (repaired.length > 0) activeModelCacheClear();
-      return repaired;
     } catch (cause) {
       installerFailure(cause);
     }

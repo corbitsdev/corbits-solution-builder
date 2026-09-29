@@ -15,7 +15,7 @@
  */
 import { ApiError } from "@intx/hub-client";
 import type { Transport } from "@intx/hub-client";
-import { catalogFor, type HubCredential, type HubModelProvider, type HubProvider } from "./hub.js";
+import { catalogFor, type HubCredential, type HubModelProvider, type HubOffering, type HubProvider } from "./hub.js";
 import { seededVendorSpec, type SeedOfferingSpec } from "./catalog-seed.js";
 import { ensureOpusDefault } from "./model-default.js";
 
@@ -80,6 +80,22 @@ function seedSnapshotOfferings(vendor: HubProvider): SeedOfferingSpec[] {
   );
 }
 
+/** Within-provider offset the catalog rerank parks unservable offerings at. */
+export const UNSERVABLE_OFFSET = 900;
+
+/**
+ * The priority block (`priority / 1000`, see `setProviderOrder`) a provider's
+ * new offerings go in: the block it already holds, or the one after every
+ * other provider's, so a newly connected provider never shares a block and
+ * the catalog's order matches the listed provider order.
+ */
+function providerBlock(offeringRows: readonly HubOffering[], modelProviderId: string): number {
+  const own = offeringRows.filter((row) => row.providerId === modelProviderId);
+  if (own.length > 0) return Math.floor(Math.min(...own.map((row) => row.priority)) / 1000);
+  const others = offeringRows.filter((row) => row.providerId !== modelProviderId);
+  return others.length === 0 ? 0 : Math.max(...others.map((row) => Math.floor(row.priority / 1000))) + 1;
+}
+
 /**
  * Materializes the vendor row's seeded offering snapshot onto the connected
  * model provider: one created offering per spec, carrying the catalog's model
@@ -110,6 +126,7 @@ async function materializeSeededOfferings(
   const attached = new Map(
     offeringRows.filter((row) => row.providerId === modelProvider.id).map((row) => [row.modelId, row]),
   );
+  const blockBase = providerBlock(offeringRows, modelProvider.id) * 1000;
   for (const offering of wanted) {
     const modelRow = modelRows.find((row) => row.canonicalName === offering.model);
     if (!modelRow) continue;
@@ -118,7 +135,7 @@ async function materializeSeededOfferings(
       attached.set(modelRow.id, await catalog.createOffering({
         modelId: modelRow.id,
         providerId: modelProvider.id,
-        priority: offering.priority,
+        priority: blockBase + offering.priority,
         capabilities: offering.capabilities,
         ...(Object.keys(offering.quirks).length > 0 ? { quirks: offering.quirks } : {}),
       }));
@@ -128,7 +145,7 @@ async function materializeSeededOfferings(
     // when it drifted from the snapshot. Log the drift with the manual repair
     // path so a stale pin is visible instead of silently re-applied.
     if (
-      existing.priority !== offering.priority ||
+      existing.priority % 1000 !== offering.priority ||
       JSON.stringify(existing.capabilities ?? []) !== JSON.stringify(offering.capabilities) ||
       JSON.stringify(existing.quirks ?? {}) !== JSON.stringify(offering.quirks)
     ) {
@@ -333,6 +350,7 @@ export async function registerProviderModels(
   const [modelRows, offeringRows] = await Promise.all([catalog.models(), catalog.offerings()]);
   const existingOfferings = offeringRows.filter((row) => row.providerId === input.modelProviderId);
   const wanted = new Set(input.canonicalNames);
+  const blockBase = providerBlock(offeringRows, input.modelProviderId) * 1000;
 
   for (const [index, canonicalName] of input.canonicalNames.entries()) {
     let modelRow = modelRows.find((row) => row.canonicalName === canonicalName);
@@ -343,7 +361,7 @@ export async function registerProviderModels(
     const offering = existingOfferings.find((row) => row.modelId === modelRow!.id);
     const quirks = input.quirks !== undefined ? { quirks: input.quirks } : {};
     if (!offering) {
-      await catalog.createOffering({ modelId: modelRow.id, providerId: input.modelProviderId, priority: index, ...quirks });
+      await catalog.createOffering({ modelId: modelRow.id, providerId: input.modelProviderId, priority: blockBase + index, ...quirks });
     } else if (offering.disabled || (input.quirks !== undefined && JSON.stringify(offering.quirks) !== JSON.stringify(input.quirks))) {
       await catalog.patchOffering(offering.id, { disabled: false, ...quirks });
     }
@@ -384,10 +402,14 @@ export async function setProviderOrder(
 }
 
 /**
- * Restricts a provider to exactly one model (disabling its other offerings),
- * or clears the restriction (`canonicalName: null`, enabling every offering
- * again) so specialists fail over across all of them in priority order. User
- * choice only — the workspace default never writes here (CL-8781); it is
+ * Makes a provider answer with `canonicalName` first by moving that offering
+ * to the front of the provider's block; every other offering keeps its place
+ * (after it) and its enabled state. Nothing is disabled: a live stage deployed
+ * on another of this provider's models must keep resolving it on restart,
+ * since its model chain is frozen at deploy. New deployments build their chain
+ * from priority, so they pick the chosen model up. `canonicalName: null`
+ * clears a restriction left by an earlier version, re-enabling every offering.
+ * User choice only -- the workspace default never writes here (CL-8781); it is
  * derived from offering priority at read time.
  */
 export async function selectModel(
@@ -398,11 +420,27 @@ export async function selectModel(
 ): Promise<void> {
   const catalog = catalogFor(transport, scope);
   const [modelRows, offeringRows] = await Promise.all([catalog.models(), catalog.offerings()]);
-  for (const offering of offeringRows.filter((row) => row.providerId === modelProviderId)) {
-    const name = modelRows.find((row) => row.id === offering.modelId)?.canonicalName ?? "";
-    const shouldEnable = canonicalName === null || name === canonicalName;
-    if (offering.disabled === shouldEnable) {
-      await catalog.patchOffering(offering.id, { disabled: !shouldEnable });
+  const own = offeringRows
+    .filter((row) => row.providerId === modelProviderId)
+    .sort((a, b) => a.priority - b.priority);
+  const nameOf = (offering: HubOffering) => modelRows.find((row) => row.id === offering.modelId)?.canonicalName ?? "";
+  if (canonicalName === null) {
+    for (const offering of own.filter((row) => row.disabled)) {
+      await catalog.patchOffering(offering.id, { disabled: false });
+    }
+    return;
+  }
+  const chosen = own.find((offering) => nameOf(offering) === canonicalName);
+  if (!chosen) return;
+  const blockBase = providerBlock(offeringRows, modelProviderId) * 1000;
+  // Offerings the rerank parked past the servable range keep their place.
+  const parked = (offering: HubOffering) => offering !== chosen && offering.priority % 1000 >= UNSERVABLE_OFFSET;
+  const ordered = [chosen, ...own.filter((offering) => offering !== chosen && !parked(offering))];
+  for (const [index, offering] of ordered.entries()) {
+    const priority = blockBase + index;
+    const disabled = offering === chosen ? false : offering.disabled;
+    if (offering.priority !== priority || offering.disabled !== disabled) {
+      await catalog.patchOffering(offering.id, { priority, disabled });
     }
   }
 }

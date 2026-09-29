@@ -210,6 +210,54 @@ describe("registerProviderModels", () => {
   });
 });
 
+describe("registerProviderModels provider blocks", () => {
+  test("places a newly connected provider in its own block after the existing ones", async () => {
+    const models: HubModel[] = [{ id: "model_a", canonicalName: "a", displayName: null }];
+    const offerings: HubOffering[] = [
+      { id: "o_first", modelId: "model_a", providerId: "mp_first", priority: 0, capabilities: [], quirks: null, disabled: false },
+      { id: "o_second", modelId: "model_a", providerId: "mp_second", priority: 1001, capabilities: [], quirks: null, disabled: false },
+    ];
+    const { transport, calls } = createMockTransport((call) => {
+      if (call.method === "GET" && call.path.endsWith("/catalog/models?limit=100")) return page(models);
+      if (call.method === "GET" && call.path.endsWith("/catalog/offerings?limit=100")) return page(offerings);
+      if (call.method === "POST" && call.path.endsWith("/catalog/models")) return { id: "model_new", ...(call.body as object) };
+      if (call.method === "POST" && call.path.endsWith("/catalog/offerings")) return { id: "o_new", ...(call.body as object) };
+      throw new Error(`unexpected call: ${call.method} ${call.path}`);
+    });
+
+    await registerProviderModels(transport, SCOPE, { modelProviderId: "mp_new", canonicalNames: ["a", "b"] });
+
+    const created = calls
+      .filter((c) => c.method === "POST" && c.path.endsWith("/catalog/offerings"))
+      .map((c) => (c.body as { priority: number }).priority);
+    expect(created).toEqual([2000, 2001]);
+  });
+
+  test("keeps a reconnected provider in the block it already holds", async () => {
+    const models: HubModel[] = [
+      { id: "model_a", canonicalName: "a", displayName: null },
+      { id: "model_b", canonicalName: "b", displayName: null },
+    ];
+    const offerings: HubOffering[] = [
+      { id: "o_first", modelId: "model_a", providerId: "mp_first", priority: 0, capabilities: [], quirks: null, disabled: false },
+      { id: "o_mine", modelId: "model_a", providerId: "mp_mine", priority: 3000, capabilities: [], quirks: null, disabled: false },
+    ];
+    const { transport, calls } = createMockTransport((call) => {
+      if (call.method === "GET" && call.path.endsWith("/catalog/models?limit=100")) return page(models);
+      if (call.method === "GET" && call.path.endsWith("/catalog/offerings?limit=100")) return page(offerings);
+      if (call.method === "POST" && call.path.endsWith("/catalog/offerings")) return { id: "o_new", ...(call.body as object) };
+      throw new Error(`unexpected call: ${call.method} ${call.path}`);
+    });
+
+    await registerProviderModels(transport, SCOPE, { modelProviderId: "mp_mine", canonicalNames: ["a", "b"] });
+
+    const created = calls
+      .filter((c) => c.method === "POST" && c.path.endsWith("/catalog/offerings"))
+      .map((c) => (c.body as { priority: number }).priority);
+    expect(created).toEqual([3001]);
+  });
+});
+
 describe("setProviderOrder", () => {
   test("rewrites basePriority per provider while preserving within-provider offsets", async () => {
     const offerings: HubOffering[] = [
@@ -232,28 +280,77 @@ describe("setProviderOrder", () => {
 });
 
 describe("selectModel", () => {
-  test("disables every offering but the chosen one, and clearing re-enables all", async () => {
+  function selectFixture(offerings: HubOffering[]) {
     const models: HubModel[] = [
       { id: "m1", canonicalName: "a", displayName: null },
       { id: "m2", canonicalName: "b", displayName: null },
+      { id: "m3", canonicalName: "c", displayName: null },
     ];
-    const offerings: HubOffering[] = [
-      { id: "o1", modelId: "m1", providerId: "mp", priority: 0, capabilities: [], quirks: null, disabled: false },
-      { id: "o2", modelId: "m2", providerId: "mp", priority: 1, capabilities: [], quirks: null, disabled: false },
-    ];
-    const { transport, calls } = createMockTransport((call) => {
+    const mock = createMockTransport((call) => {
       if (call.method === "GET" && call.path.endsWith("/catalog/models?limit=100")) return page(models);
       if (call.method === "GET" && call.path.endsWith("/catalog/offerings?limit=100")) return page(offerings);
       if (call.method === "PATCH") return {};
       throw new Error(`unexpected call: ${call.method} ${call.path}`);
     });
+    const patches = () =>
+      Object.fromEntries(
+        mock.calls.filter((c) => c.method === "PATCH").map((c) => [c.path.split("/").pop()!, c.body]),
+      );
+    return { transport: mock.transport, patches };
+  }
+  const offering = (id: string, modelId: string, priority: number, disabled = false): HubOffering => ({
+    id,
+    modelId,
+    providerId: "mp",
+    priority,
+    capabilities: [],
+    quirks: null,
+    disabled,
+  });
 
-    await selectModel(transport, SCOPE, "mp", "a");
+  test("moves the chosen model to the front of its block and disables nothing", async () => {
+    const { transport, patches } = selectFixture([offering("o1", "m1", 2000), offering("o2", "m2", 2001)]);
 
-    const patches = calls.filter((c) => c.method === "PATCH");
-    expect(patches).toHaveLength(1);
-    expect(patches[0]!.path.endsWith("/o2")).toBe(true);
-    expect(patches[0]!.body).toEqual({ disabled: true });
+    await selectModel(transport, SCOPE, "mp", "b");
+
+    expect(patches()).toEqual({
+      o2: { priority: 2000, disabled: false },
+      o1: { priority: 2001, disabled: false },
+    });
+  });
+
+  test("leaves offerings the rerank parked where they are", async () => {
+    const { transport, patches } = selectFixture([
+      offering("o1", "m1", 0),
+      offering("o2", "m2", 1),
+      offering("o3", "m3", 900, true),
+    ]);
+
+    await selectModel(transport, SCOPE, "mp", "b");
+
+    expect(patches()).toEqual({
+      o2: { priority: 0, disabled: false },
+      o1: { priority: 1, disabled: false },
+    });
+  });
+
+  test("enables a chosen model an earlier restriction disabled", async () => {
+    const { transport, patches } = selectFixture([offering("o1", "m1", 0), offering("o2", "m2", 1, true)]);
+
+    await selectModel(transport, SCOPE, "mp", "b");
+
+    expect(patches()).toEqual({
+      o2: { priority: 0, disabled: false },
+      o1: { priority: 1, disabled: false },
+    });
+  });
+
+  test("clearing re-enables every offering without reordering", async () => {
+    const { transport, patches } = selectFixture([offering("o1", "m1", 0), offering("o2", "m2", 1, true)]);
+
+    await selectModel(transport, SCOPE, "mp", null);
+
+    expect(patches()).toEqual({ o2: { disabled: false } });
   });
 });
 
