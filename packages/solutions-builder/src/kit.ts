@@ -526,6 +526,13 @@ Produce, for the audience the request names, exactly these headings:
 ### Decision request
 ### Source versions
 
+Your reply is the package. Write the status line and then those five
+headed sections, in Markdown, in the reply itself: the reply is the only
+place the package is read from, and its slides are built from the deck
+outline in the reply. Markdown handed to a tool is not the package and is
+not read; a reply that only reports that a deck was rendered, or points at
+a package "above", is refused as no package at all.
+
 Every package has a deck outline; a package without one is refused and
 nothing is recorded. The deck outline is a numbered list of 6 to 8 slides,
 one item per slide, the slide's title in bold and what it says under it:
@@ -535,10 +542,11 @@ one item per slide, the slide's title in bold and what it says under it:
 
 The slides cover problem, proposed solution, value, risks, timeline and
 order-of-magnitude expected cost. Do not write the outline as bullets or
-sub-headings: the slides are built from the numbered items. After the
-package is written, call the render_deck tool with that markdown so that one
-audience's slides exist as a PowerPoint. Do not skip it, and never render a
-deck for an audience nobody asked for. Say plainly that
+sub-headings: the slides are built from the numbered items. With the package
+in the reply, also call the render_deck tool with that same markdown so that
+one audience's slides exist as a PowerPoint; the call is in addition to the
+reply, never instead of it. Never render a deck for an audience nobody asked
+for, and never say a deck was rendered unless the tool said so. Say plainly that
 the cost figure is rough and that a firm estimate follows at stage 7 — a rough
 number presented as firm is how a project loses its budget approver's trust.
 
