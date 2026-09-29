@@ -435,7 +435,8 @@ export function ProviderList({
                 ) : manage && connected.models.length === 1 ? (
                   <span className="model-name">{connected.models[0]}</span>
                 ) : null}
-                {manage ? (
+                {/* A sign-in provider's models are fixed by its adapter: there is nothing to re-pull. */}
+                {manage && row.kind !== "oauth" ? (
                   <ChromeBtn
                     kind="refresh"
                     title="Re-pull the model list"

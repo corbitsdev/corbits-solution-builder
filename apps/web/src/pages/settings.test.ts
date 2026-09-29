@@ -167,6 +167,7 @@ describe("provider and catalog row language", () => {
     expect(source).toContain("Connected");
     expect(source).toContain("Refresh models");
     expect(source).toContain("refreshProviderModels");
+    expect(source).toContain('manage && row.kind !== "oauth"');
     expect(source).toContain("{connected ? \"Reconnect\" : \"Connect\"}");
     expect(source).not.toContain("Disconnect");
     expect(source).not.toContain("StateLabel");
