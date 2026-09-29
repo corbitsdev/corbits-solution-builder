@@ -34,6 +34,10 @@ type Fixture = {
   parkAfterReads?: number;
   /** The decision on which the run completes instead of parking again. */
   endsRunOn?: string;
+  /** The status a fresh deployment is listed with when it is made; `deployed` when absent. */
+  freshStatus?: string;
+  /** How many listings after it was made a fresh deployment shows `deployed`; never, when absent and `freshStatus` is set. */
+  freshPlacedAfterListings?: number;
   /** How many reads of a freshly triggered run's log pass before it shows
    *  its first park: a namer still replying before the loop starts (#201). */
   firstParkAfterReads?: number;
@@ -101,6 +105,8 @@ function fakeHub(fixture: Fixture) {
   const parkPending = new Map<string, number>();
   let deploys = 0;
   let stalledOnce = false;
+  /** Each fresh deployment and the listing count when it was made. */
+  const freshMadeAt = new Map<string, number>();
   let pushedTree: Record<string, string> = {};
   let listings = 0;
   const transport: Transport = {
@@ -129,6 +135,15 @@ function fakeHub(fixture: Fixture) {
       }
       if (method === "GET" && pathname === `${tenant}/workflows/deployments`) {
         listings += 1;
+        // A fresh deployment the hub places a few listings after making it (#238).
+        if (fixture.freshPlacedAfterListings !== undefined) {
+          for (const [id, madeAt] of freshMadeAt) {
+            if (listings - madeAt >= fixture.freshPlacedAfterListings) {
+              const row = deployments.find((entry) => entry.id === id);
+              if (row) row.status = "deployed";
+            }
+          }
+        }
         for (const late of fixture.appearAtListing?.[listings] ?? []) {
           const row = { ...late.deployment, tenantId: TENANT_ID };
           const index = deployments.findIndex((entry) => entry.id === row.id);
@@ -144,7 +159,8 @@ function fakeHub(fixture: Fixture) {
         // `dep_new3`: a replacement of a run this same call gave up on.
         deploys += 1;
         const id = deploys === 1 ? "dep_new" : `dep_new${String(deploys)}`;
-        const made = { id, tenantId: TENANT_ID, definitionAssetId: ASSET_ID, status: "deployed", createdAt: `2026-02-0${String(deploys)}T00:00:00.000Z` };
+        const made = { id, tenantId: TENANT_ID, definitionAssetId: ASSET_ID, status: fixture.freshStatus ?? "deployed", createdAt: `2026-02-0${String(deploys)}T00:00:00.000Z` };
+        freshMadeAt.set(id, listings);
         deployments.push(made);
         runsByDeployment[id] = [];
         return made as T;
@@ -727,6 +743,32 @@ describe("ensureProjectWorkflow", () => {
     });
     expect(hub.signalsSent().map((sent) => `${sent.runId}:${sent.signalId}`)).toEqual(["run_new:dec-1", "run_new:dec-2"]);
     expect(hub.triggeredCode()).toEqual({ digest: CURRENT_DIGEST, generation: 2 });
+  });
+
+  // #238: the replay waits on placement as long as the hub is visibly
+  // placing, and reports a run the hub never places only once the hub has
+  // gone quiet, rather than two minutes counted from itself.
+  test("a fresh run the hub places late is still replayed onto; one it never places is reported once the hub is quiet", async () => {
+    const late = fakeHub(
+      withAsset({
+        deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" }],
+        runsByDeployment: { dep_1: decidedRun("run_1", [1]).runIds },
+        eventsByRun: decidedRun("run_1", [1]).events,
+        freshStatus: "pending",
+        // Listed pending through several polls, then placed.
+        freshPlacedAfterListings: 4,
+      }),
+    );
+    expect(await ensure(late, 40, 1, [], 1)).toMatchObject({ deploymentId: "dep_new", runId: "run_new", replay: { replayed: 1 } });
+    const never = fakeHub(
+      withAsset({
+        deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" }],
+        runsByDeployment: { dep_1: decidedRun("run_1", [1]).runIds },
+        eventsByRun: decidedRun("run_1", [1]).events,
+        freshStatus: "pending",
+      }),
+    );
+    await expect(ensure(never, 0, 1, [], 1)).rejects.toThrow("the project's workflow was not placed, so its history could not be replayed");
   });
 
   test("a live run that has not caught up is brought up to the dead run's decisions, not replaced", async () => {
