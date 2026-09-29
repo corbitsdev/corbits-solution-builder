@@ -18,9 +18,14 @@ describe("the zen garden busy indicator", () => {
     expect(css).toMatch(/\.app \{[^}]*grid-template-rows: auto minmax\(0, 1fr\) auto;/s);
   });
 
-  test("a loading button counts as busy, so every action that spins also rakes", () => {
+  test("a loading button counts as busy and says what it is doing, so every action that spins also rakes and is named", () => {
     const components = read("./components.tsx");
-    expect(components).toContain("if (!loading) return;\n    return beginBusy();");
+    // #223: the control's own words, or what it was told it is doing.
+    expect(components).toContain("const busyLabel = doing ?? controlText(children) ?? undefined;");
+    expect(components).toContain("if (!loading) return;\n    return beginBusy(busyLabel);");
+    const audiences = read("./pages/audiences.tsx");
+    expect(audiences).toContain("useBusyWhile(writingNames.length > 0,");
+    expect(audiences).toContain("doing={packageWork(selected.variant)}");
   });
 
   test("the workspace counts a specialist turn in flight and a thread still loading", () => {
