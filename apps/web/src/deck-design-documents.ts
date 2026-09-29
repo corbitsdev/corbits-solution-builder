@@ -10,9 +10,9 @@
  * guidelines block the presentation creator is handed with each request.
  *
  * What is read from each kind of file is said plainly, here and in the
- * interface: text as it is; a PDF's text but not its look; a PowerPoint's
- * slide text and its theme — colours, typefaces, slide size — which is the
- * only way a document changes how the slides are drawn.
+ * interface: text as it is; a PDF's text plus its page size and colours; a
+ * PowerPoint's slide text and its theme — colours, typefaces, slide size.
+ * The look is the only way a document changes how the slides are drawn.
  */
 import type { TemplateTheme } from "@solutions-builder/app/deck";
 import { DECK_DESIGN_DOCUMENT_KIND, DECK_DESIGN_READING_KIND } from "@solutions-builder/app/artifacts";
@@ -26,8 +26,10 @@ export type DeckDesignDocument = {
   readonly mediaType: string;
   readonly format: DesignDocumentFormat;
   readonly scope: DesignDocumentScope;
-  /** A PowerPoint's theme, read when the file was added; null for text and a PDF, which carry none a renderer can use. */
+  /** The look read when the file was added — a PowerPoint's theme, or a PDF's page ratio and colours (#254); null for text. */
   readonly theme: TemplateTheme | null;
+  /** Whether any text was read from it; false for a picture-only PDF or PowerPoint, whose look may still have been. */
+  readonly textRead: boolean;
   /** The artifact whose content is this document's text: the document itself for text, its reading companion for a binary; null when nothing was read. */
   readonly readingId: string | null;
   readonly createdAt: string;
@@ -74,7 +76,7 @@ export function whatIsRead(format: DesignDocumentFormat): string {
     case "text":
       return "Read as written and handed to the presentation creator.";
     case "pdf":
-      return "Its text is read, page by page, and handed to the presentation creator. Its colours and layout are not read.";
+      return "Its text is handed to the presentation creator, and its page size and colours draw the slides. Typefaces cannot be read from a PDF.";
     case "pptx":
       return "Its slides' text is handed to the presentation creator, and its theme — colours, typefaces and slide size — draws the slides.";
   }
@@ -131,7 +133,8 @@ export function designDocumentsFrom(entries: readonly DesignArtifactEntry[], sco
         mediaType,
         format,
         scope,
-        theme: format === "pptx" ? themeFrom(sb!.theme) : null,
+        theme: format === "text" ? null : themeFrom(sb!.theme),
+        textRead: sb!.textRead !== false,
         readingId: format === "text" ? entry.id : (readings.get(entry.id) ?? null),
         createdAt: entry.createdAt,
       };

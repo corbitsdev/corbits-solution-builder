@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import ExcelJS from "exceljs";
 import { deckFrom, renderDeck } from "@solutions-builder/app/deck";
-import { readMaterial, slideXmlText } from "./material-reading.ts";
+import { readMaterial, readingHasText, slideXmlText } from "./material-reading.ts";
 
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
@@ -65,6 +65,14 @@ describe("readMaterial", () => {
   test("slide text joins runs within a paragraph and decodes entities", () => {
     const xml = '<p:sp><p:txBody><a:p><a:r><a:t>Costs &amp; </a:t></a:r><a:r><a:t>revenue</a:t></a:r></a:p><a:p></a:p><a:p><a:r><a:t xml:space="preserve"> Q1 </a:t></a:r></a:p></p:txBody></p:sp>';
     expect(slideXmlText(xml)).toBe("Costs & revenue\nQ1");
+  });
+
+  test("a reading is text when it was read, not when it is this module's own note", () => {
+    expect(readingHasText("Page 1 of 3:\nHello")).toBe(true);
+    expect(readingHasText("Slide 1 of 2:\nAcme")).toBe(true);
+    expect(readingHasText("(3 pages, none carrying text: a scanned or image-only PDF. Nothing here reads images, so ask what it says if that matters.)")).toBe(false);
+    expect(readingHasText("(Could not read deck.pdf: bad xref.)")).toBe(false);
+    expect(readingHasText("   ")).toBe(false);
   });
 
   test("an unreadable type yields a short note with name, type and size", async () => {

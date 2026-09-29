@@ -57,6 +57,17 @@ function isPptx(name: string, mediaType: string): boolean {
   return mediaType === PPTX_MIME || name.toLowerCase().endsWith(".pptx");
 }
 
+/**
+ * Whether a binary file's reading is text that was read, rather than the
+ * note this module writes when nothing could be: every such note is one
+ * parenthesised sentence, and every read PDF or PowerPoint opens with its
+ * first page or slide.
+ */
+export function readingHasText(reading: string): boolean {
+  const text = reading.trim();
+  return text.length > 0 && !(text.startsWith("(") && text.endsWith(")"));
+}
+
 /** Never a silent cut: what is left out past the cap is always announced. */
 function cap(text: string): string {
   return text.length > MAX_FILE_CHARS
