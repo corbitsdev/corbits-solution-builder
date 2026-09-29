@@ -814,6 +814,43 @@ describe("RepoStore", () => {
     expect(resolved).toBe(commitSha);
   });
 
+  // LOCAL PATCH (solutions-builder, PATCHES.md "pack a source asset at its
+  // pinned commit"): a deploy pinned to a commit must ship that commit even
+  // after another push has moved the ref on.
+  test("createPack at a commit that is no longer the ref's tip packs that commit", async () => {
+    const sourceDir = await makeTempDir("repo-store-pinned-source-");
+    const sourceStore = createRepoStore({
+      dataDir: sourceDir,
+      signingKey,
+      handlers: { "agent-state": createTestHandler() },
+      authorize: allowAll,
+    });
+    const first = await sourceStore.writeTree(principal, repoId, REF, {
+      files: { "deploy/payload.txt": "first" },
+      message: "first",
+    });
+    const second = await sourceStore.writeTree(principal, repoId, REF, {
+      files: { "deploy/payload.txt": "second" },
+      message: "second",
+    });
+    expect(second.commitSha).not.toBe(first.commitSha);
+    expect(await sourceStore.resolveRef(principal, repoId, REF)).toBe(second.commitSha);
+
+    const pinned = await sourceStore.createPack(principal, repoId, first.commitSha);
+    expect(pinned.commitSha).toBe(first.commitSha);
+    expect(await sourceStore.resolveRef(principal, repoId, first.commitSha)).toBe(first.commitSha);
+
+    const targetDir = await makeTempDir("repo-store-pinned-target-");
+    const targetStore = createRepoStore({
+      dataDir: targetDir,
+      signingKey,
+      handlers: { "agent-state": createTestHandler({ allowTopLevelPaths: () => true }) },
+      authorize: allowAll,
+    });
+    await targetStore.receivePack(principal, repoId, REF, pinned.pack, first.commitSha, null);
+    expect(await targetStore.resolveRef(principal, repoId, REF)).toBe(first.commitSha);
+  });
+
   test("resolveRef returns null for a missing ref", async () => {
     const dataDir = await makeTempDir("repo-store-resolve-missing-");
     const handler = createTestHandler();

@@ -1347,12 +1347,22 @@ export function createSessionService(
 
   // Build the git-pack resolver a source/tarball asset arm delivers inline. The
   // pin names one backing asset, so the resolver binds that asset's repo (its
-  // kind fixed by the arm) and its default ref; a request for any OTHER asset id
-  // is a closure that reaches beyond its single backing asset and fails loud
-  // rather than silently packing the wrong repo.
+  // kind fixed by the arm); a request for any OTHER asset id is a closure that
+  // reaches beyond its single backing asset and fails loud rather than
+  // silently packing the wrong repo.
+  //
+  // LOCAL PATCH (solutions-builder, PATCHES.md "pack a source asset at its
+  // pinned commit"): a source arm packs the commit the deploy is pinned to,
+  // not the default ref's tip. The deploy pack carries only the packed
+  // commit and its tree, and the sidecar reads the closure's subtree at the
+  // pin -- so a push that moved the ref between the deployer's push and this
+  // pack left the pin out of the pack and the materialization failed with
+  // "could not be read at <pin>". A tarball arm has no pin and still packs
+  // the default ref.
   function bindAssetAttachmentResolver(
     assetId: string,
     repoKind: RepoKind,
+    pinnedCommitSha?: string,
   ): ResolveAssetAttachmentFn {
     return async (requestedAssetId) => {
       if (requestedAssetId !== assetId) {
@@ -1361,22 +1371,25 @@ export function createSessionService(
         );
       }
       const repoId: RepoId = { kind: repoKind, id: assetId };
+      const at = pinnedCommitSha ?? DEFAULT_ASSET_REF;
       const commitSha = await agentRepoStore.repoStore.resolveRef(
         HUB_PRINCIPAL,
         repoId,
-        DEFAULT_ASSET_REF,
+        at,
       );
       if (commitSha === null) {
         throw new Error(
-          `deployWorkflowFromSource: source asset ${assetId} has no commit on ${DEFAULT_ASSET_REF}`,
+          pinnedCommitSha === undefined
+            ? `deployWorkflowFromSource: source asset ${assetId} has no commit on ${DEFAULT_ASSET_REF}`
+            : `deployWorkflowFromSource: source asset ${assetId} has no commit ${pinnedCommitSha}`,
         );
       }
-      const { pack, ref } = await agentRepoStore.repoStore.createPack(
+      const { pack } = await agentRepoStore.repoStore.createPack(
         HUB_PRINCIPAL,
         repoId,
-        DEFAULT_ASSET_REF,
+        at,
       );
-      return { pack, ref, commitSha };
+      return { pack, ref: DEFAULT_ASSET_REF, commitSha };
     };
   }
 
@@ -1496,12 +1509,10 @@ export function createSessionService(
   function bindSourceAttachmentResolver(
     source: WorkflowDefinitionSource,
   ): ResolveAssetAttachmentFn | null {
-    return source.kind === "asset"
-      ? bindAssetAttachmentResolver(
-          source.assetId,
-          source.package.format === "source" ? "workflow" : "package-registry",
-        )
-      : null;
+    if (source.kind !== "asset") return null;
+    return source.package.format === "source"
+      ? bindAssetAttachmentResolver(source.assetId, "workflow", source.package.commitSha)
+      : bindAssetAttachmentResolver(source.assetId, "package-registry");
   }
 
   // Install + probe + gate + freeze a code-sourced definition, returning the
