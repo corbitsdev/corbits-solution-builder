@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mockupShots, placeMockups } from "./mockup-shots.ts";
+import { mockupShots, placeMockups, shotSvg } from "./mockup-shots.ts";
 
 const a = Uint8Array.of(1);
 const b = Uint8Array.of(2);
@@ -32,6 +32,27 @@ describe("placeMockups", () => {
     const placed = placeMockups(deck(2, drawn), []);
     expect([...placed.entries()]).toEqual([["cover", a]]);
     expect(placed).not.toBe(drawn);
+  });
+});
+
+// #230: the host allows images from 'self' and data: only, and a computed
+// font carries quotes that would end a style attribute early.
+describe("shotSvg", () => {
+  test("is a data: URL whose wrapper look lives in a style rule with the CSS escaped as XML text", () => {
+    const url = shotSvg('<section xmlns="http://www.w3.org/1999/xhtml">x</section>', "a>b{color:red} .q::before{content:\"<\"}", { width: 402.4, height: 600 }, {
+      backgroundColor: "rgb(244, 245, 247)",
+      color: "rgb(22, 24, 29)",
+      font: '15px / 1.45 -apple-system, "Segoe UI", sans-serif',
+    });
+    expect(url).toStartWith("data:image/svg+xml;charset=utf-8,");
+    const svg = decodeURIComponent(url.slice("data:image/svg+xml;charset=utf-8,".length));
+    expect(svg).toStartWith('<svg xmlns="http://www.w3.org/2000/svg" width="403" height="600">');
+    expect(svg).toContain('<div xmlns="http://www.w3.org/1999/xhtml" class="sb-shot">');
+    expect(svg).toContain('.sb-shot{width:403px;height:600px;overflow:hidden;background:rgb(244, 245, 247);color:rgb(22, 24, 29);font:15px / 1.45 -apple-system, "Segoe UI", sans-serif}');
+    expect(svg).toContain("a&gt;b{color:red}".replace("&gt;", ">"));
+    expect(svg).toContain('.q::before{content:"&lt;"}');
+    expect(svg).not.toMatch(/style="[^"]*font:/);
+    expect(svg).toContain('<section xmlns="http://www.w3.org/1999/xhtml">x</section>');
   });
 });
 
