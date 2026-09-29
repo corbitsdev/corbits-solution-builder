@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { CODEX_DEFAULT_MODELS } from "@corbits/codex-provider";
 import {
   droppedSelection,
   isSealedCredentialFailure,
+  missingOAuthModels,
   ProviderRejectedError,
   requireDiscoveredModels,
 } from "./provider-catalog.ts";
@@ -42,5 +44,19 @@ describe("requireDiscoveredModels", () => {
 
   test("throws for an empty list", () => {
     expect(() => requireDiscoveredModels([])).toThrow("The provider returned no models; nothing was changed.");
+  });
+});
+
+describe("missingOAuthModels", () => {
+  test("names the models a Codex connection made with one model lacks", () => {
+    expect(missingOAuthModels("codex-oauth", ["gpt-5.6-sol"])).toEqual(CODEX_DEFAULT_MODELS.filter((name) => name !== "gpt-5.6-sol"));
+  });
+
+  test("is empty once the connection has every model", () => {
+    expect(missingOAuthModels("codex-oauth", [...CODEX_DEFAULT_MODELS])).toEqual([]);
+  });
+
+  test("is empty for a provider that is not a sign-in", () => {
+    expect(missingOAuthModels("anthropic", [])).toEqual([]);
   });
 });
