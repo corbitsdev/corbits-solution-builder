@@ -22,7 +22,7 @@ import { buildPackageDeck } from "../deck-save.ts";
 import { deckDesignFor } from "../deck-design-settings.ts";
 import { slidesSource } from "../deck-templates.ts";
 import { SlidePreview } from "../slide-preview.tsx";
-import { packageRequest } from "../package-request.ts";
+import { packageReplyProblem, packageRequest } from "../package-request.ts";
 import { packageReplyFor } from "../package-reply.ts";
 import { packagesByStakeholder } from "../package-lineages.ts";
 import { deckFrom, packageOutlineProblem, type Deck, type TemplateTheme } from "@solutions-builder/app/deck";
@@ -415,6 +415,10 @@ export function AudiencePackages({
     await api.sendStageMail(tenantId, deployment.address, { body: packageRequest(audience, design) });
     const reply = await awaitPackageReply(tenantId, deployment.address, seenIds, name, () => cancelledRef.current);
     if (cancelledRef.current) return;
+    // Not every reply is a package (#220): one with no deck outline is
+    // refused, said so, and never recorded, so "Write it" stays offered.
+    const problem = packageReplyProblem(name, reply.body);
+    if (problem) throw new Error(problem);
     await api.persistAudiencePackage(detail.project.id, name, reply.body);
   };
 
