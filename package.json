@@ -39,7 +39,7 @@
     "@standard-schema/spec": "^1.0.0",
     "@corbits/codex-provider": "^0.1.2",
     "@corbits/mailbox": "github:corbitsdev/corbits-mailbox",
-    "@corbits/oauth-core": "github:corbitsdev/corbits-oauth-core",
+    "@corbits/oauth-core": "^0.2.0",
     "@corbits/openai-responses": "^0.2.1",
     "@corbits/process-provisioner": "workspace:*",
     "@corbits/react-ui": "github:corbitsdev/react-ui#feat/chat-input-icon-slots",

@@ -6,12 +6,12 @@ import react from "@vitejs/plugin-react";
 
 const require = createRequire(import.meta.url);
 // `@corbits/oauth-core`'s package.json only exposes the "." entry (its
-// `src/index.ts` barrel), which re-exports the desktop-only `browser.ts`
-// (spawns a system browser) and `callback-server.ts` (a loopback HTTP
+// `dist/index.js` barrel), which re-exports the desktop-only `browser.js`
+// (spawns a system browser) and `callback-server.js` (a loopback HTTP
 // server) alongside the token-exchange helpers the providers below actually
 // use. Those Node-only files would drag `node:child_process`/`os`/`http`/
 // `net` into the web bundle, so this resolves the package directory and
-// points a browser-safe shim straight at its `client.ts`/`tokens.ts`.
+// points a browser-safe shim straight at its `client.js`.
 const oauthCoreDir = dirname(require.resolve("@corbits/oauth-core"));
 
 // `@intx/hub-client` ships TypeScript source, not a published `dist/`. Vite
@@ -85,9 +85,9 @@ export const fork = dummy;
  * `@corbits/codex-provider` and `@corbits/xai-provider` import only
  * `exchangeCode`, `refreshTokenRequest`, `baseTokensFromResponse`, and the
  * `BaseTokens`/`OAuthClientConfig` types from `@corbits/oauth-core` — all
- * defined in its Node-free `client.ts`/`tokens.ts`. Redirect the barrel
- * import to a virtual module built from those two files directly, skipping
- * the desktop-only `browser.ts`/`callback-server.ts` re-exports (see above).
+ * defined in its Node-free `client.js`. Redirect the barrel
+ * import to a virtual module built from that file directly, skipping
+ * the desktop-only `browser.js`/`callback-server.js` re-exports (see above).
  */
 function oauthCoreBrowserShim(): Plugin {
   const virtualId = "\0oauth-core-browser-shim";
@@ -107,7 +107,7 @@ function oauthCoreBrowserShim(): Plugin {
   OAuthTokenEndpointError,
   OAuthTokenResponseSchemaError,
   OAuthMissingRefreshTokenError,
-} from ${JSON.stringify(join(oauthCoreDir, "client.ts"))};
+} from ${JSON.stringify(join(oauthCoreDir, "client.js"))};
 `;
     },
   };

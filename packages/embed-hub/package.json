@@ -12,7 +12,7 @@
     "@corbits/artifacts": "github:corbitsdev/corbits-artifacts#031fc9e",
     "@corbits/codex-provider": "^0.1.2",
     "@corbits/mailbox": "github:corbitsdev/corbits-mailbox#8289024",
-    "@corbits/oauth-core": "github:corbitsdev/corbits-oauth-core#03549c9",
+    "@corbits/oauth-core": "^0.2.0",
     "@corbits/process-provisioner": "workspace:*",
     "@corbits/xai-provider": "^0.1.1",
     "@electric-sql/pglite": "^0.3.16",

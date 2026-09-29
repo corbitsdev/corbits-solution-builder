@@ -10,7 +10,7 @@
         "@corbits/embed-hub": "workspace:*",
         "@corbits/keychain": "workspace:*",
         "@corbits/mailbox": "github:corbitsdev/corbits-mailbox",
-        "@corbits/oauth-core": "github:corbitsdev/corbits-oauth-core",
+        "@corbits/oauth-core": "^0.2.0",
         "@corbits/openai-responses": "^0.2.1",
         "@corbits/process-provisioner": "workspace:*",
         "@corbits/react-ui": "github:corbitsdev/react-ui#feat/chat-input-icon-slots",
@@ -107,7 +107,7 @@
         "@corbits/artifacts": "github:corbitsdev/corbits-artifacts#031fc9e",
         "@corbits/codex-provider": "^0.1.2",
         "@corbits/mailbox": "github:corbitsdev/corbits-mailbox#8289024",
-        "@corbits/oauth-core": "github:corbitsdev/corbits-oauth-core#03549c9",
+        "@corbits/oauth-core": "^0.2.0",
         "@corbits/process-provisioner": "workspace:*",
         "@corbits/xai-provider": "^0.1.1",
         "@electric-sql/pglite": "^0.3.16",
@@ -475,7 +475,7 @@
 
     "@corbits/mailbox": ["@corbits/mailbox@github:corbitsdev/corbits-mailbox#8289024", { "dependencies": { "@hono/standard-validator": "0.2.3", "@intx/crypto": "0.4.0", "@standard-community/standard-json": "0.3.5", "@standard-community/standard-openapi": "0.2.9", "arktype": "2.1.29", "hono-openapi": "1.3.1" }, "peerDependencies": { "@intx/log": "^0.4.0", "@intx/mailbox": "^0.4.0", "@intx/mime": "^0.4.0", "@intx/types": "^0.4.0", "drizzle-orm": "^0.45.2", "hono": "^4.12.0", "postgres": "^3.4.0" } }, "corbitsdev-corbits-mailbox-8289024", "sha512-ay5tepO3btBxVxUULY0L684lyaLY3MrZU6zjGy2AbU6at3XMY50skt7nnWrFCfD28vJj4PYjvz1eiQ4CCgASnQ=="],
 
-    "@corbits/oauth-core": ["@corbits/oauth-core@github:corbitsdev/corbits-oauth-core#03549c9", { "dependencies": { "@intx/db": "^0.4.0", "@intx/hub-api": "^0.4.0", "@intx/hub-common": "^0.4.0", "@intx/types": "^0.4.0", "arktype": "2.2.3", "drizzle-orm": "^0.45.2", "hono": "^4.11.9" } }, "corbitsdev-corbits-oauth-core-03549c9", "sha512-HUDc7mqHKrztTdTi4czsFIQOH87Dy78EowLgnu6jKiF/8pdtC2T2B8WcwzUAfLsVhObJRpG2Jg4CdrBr1QWdTw=="],
+    "@corbits/oauth-core": ["@corbits/oauth-core@0.2.0", "", { "dependencies": { "@intx/db": "^0.4.0", "@intx/hub-api": "^0.4.0", "@intx/hub-common": "^0.4.0", "@intx/types": "^0.4.0", "arktype": "^2.2.3", "drizzle-orm": "^0.45.2", "hono": "^4.11.9" } }, "sha512-1pNMfxPUALwwXzpBzate3hDs61DOmv+fWo8/+aWfMhgXTxq8xtqeYk7Ue4uf/mW+FT0fUV/9vC2hZHyrm8+8KA=="],
 
     "@corbits/openai-responses": ["@corbits/openai-responses@0.2.1", "", { "dependencies": { "arktype": "2.2.3" }, "peerDependencies": { "@intx/inference": "^0.4.0", "@intx/types": "^0.4.0" } }, "sha512-jhT1opXhFNoeq+Og8n1j3FaXlqxAsJGfNlVTwuN+2+Ee29z15mU4dzJ4JwY6njAOHVXvBk6mgYCGRu+NjU9rmw=="],
 
