@@ -17,6 +17,7 @@ import {
 } from "@corbits/react-ui";
 import corbitsMark from "./assets/corbits-mark.svg";
 import { beginBusy } from "./busy.ts";
+import { controlText } from "./control-text.ts";
 
 type Tone =
   | "success"
@@ -81,6 +82,7 @@ export function Button({
   onClick,
   children,
   type = "button",
+  doing,
   ...rest
 }: {
   variant?: "primary" | "secondary" | "outline" | "ghost" | "link" | "destructive";
@@ -91,16 +93,23 @@ export function Button({
   onClick?: () => void;
   children: ReactNode;
   type?: "button" | "submit";
+  /** What the busy strip says this control is doing while it loads, when
+   *  its own words are too thin for that ("Writing…" → "Writing Mr
+   *  Finance's package"). Absent, the strip repeats the control's words. */
+  doing?: string;
   /** Anchors the first-run tour. */
   "data-tour"?: string;
 }) {
   const inert = disabled || loading;
   // A loading button is the one mark most actions make, and the busy
-  // indicator at the foot of the window counts every one of them (#93).
+  // indicator at the foot of the window counts every one of them (#93),
+  // saying what each is doing (#223): what the control was told, else the
+  // words it shows.
+  const busyLabel = doing ?? controlText(children) ?? undefined;
   useEffect(() => {
     if (!loading) return;
-    return beginBusy();
-  }, [loading]);
+    return beginBusy(busyLabel);
+  }, [loading, busyLabel]);
   return (
     <UiButton
       type={type}

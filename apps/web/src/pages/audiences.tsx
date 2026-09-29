@@ -23,6 +23,7 @@ import { deckDesignFor } from "../deck-design-settings.ts";
 import { slidesSource } from "../deck-templates.ts";
 import { SlidePreview } from "../slide-preview.tsx";
 import { packageReplyProblem, packageRequest } from "../package-request.ts";
+import { useBusyWhile } from "../use-busy.ts";
 import { packageReplyFor } from "../package-reply.ts";
 import { packagesByStakeholder } from "../package-lineages.ts";
 import { deckFrom, packageOutlineProblem, type Deck, type TemplateTheme } from "@solutions-builder/app/deck";
@@ -337,6 +338,11 @@ function Stakeholders({
   );
 }
 
+/** What the strip says while `name`'s package is being written. */
+function packageWork(name: string): string {
+  return `Writing ${name}'s package`;
+}
+
 export function AudiencePackages({
   detail,
   tenantId,
@@ -379,6 +385,10 @@ export function AudiencePackages({
   // time; the rows say "Writing…" instead of offering another.
   const [writing, setWriting] = useState<ReadonlySet<string>>(new Set());
   const [writeError, setWriteError] = useState<string | null>(null);
+  // The round is work the person waits on whichever tab is open, and the
+  // strip says whose package is being written (#223).
+  const writingNames = [...writing];
+  useBusyWhile(writingNames.length > 0, writingNames.length === 1 ? packageWork(writingNames[0]!) : `Writing ${String(writingNames.length)} packages`);
   const cancelledRef = useRef(false);
   useEffect(() => () => {
     cancelledRef.current = true;
@@ -863,13 +873,19 @@ export function AudiencePackages({
                 />
               ) : null}
               <div className="button-row">
-                <Button variant="primary" loading={saving.has(selected.id)} onClick={() => saveSlides(selected.id)}>
+                <Button
+                  variant="primary"
+                  loading={saving.has(selected.id)}
+                  doing={`Saving ${selected.variant ?? selected.title}'s slides`}
+                  onClick={() => saveSlides(selected.id)}
+                >
                   {saving.has(selected.id) ? "Saving slides…" : "Save slides (.pptx)"}
                 </Button>
                 {selected.variant ? (
                   <Button
                     loading={writing.has(selected.variant)}
                     disabled={writing.size > 0}
+                    doing={packageWork(selected.variant)}
                     onClick={() => void writePackages([selected.variant!])}
                   >
                     {writing.has(selected.variant) ? "Writing…" : "Write it again"}
@@ -883,6 +899,7 @@ export function AudiencePackages({
               variant="primary"
               loading={approving}
               disabled={!canApprove || packages.length === 0 || !quorumMet}
+              doing="Approving the packages and opening the next stage"
               onClick={onApprove}
             >
               Approve and continue
