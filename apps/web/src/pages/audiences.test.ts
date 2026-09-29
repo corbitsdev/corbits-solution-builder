@@ -16,6 +16,9 @@ describe("stage 5 audience packages", () => {
     const writeOne = source.slice(source.indexOf("const writeOnePackage = async ("));
     expect(writeOne.indexOf("packageReplyProblem(name, reply.body)")).toBeGreaterThan(-1);
     expect(writeOne.indexOf("packageReplyProblem(name, reply.body)")).toBeLessThan(writeOne.indexOf("persistAudiencePackage("));
+    // #225: one re-ask in the same thread before the miss is reported.
+    expect(writeOne.indexOf("packageNudge(audience,")).toBeGreaterThan(-1);
+    expect(writeOne.indexOf("packageNudge(audience,")).toBeLessThan(writeOne.indexOf("persistAudiencePackage("));
     expect(source).toContain("QuorumChips");
     expect(source).toContain("saveSlides");
     // CL-8870: a stakeholder's vote is its own `project.decision` signal on
