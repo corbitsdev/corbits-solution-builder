@@ -98,6 +98,11 @@ exported file, and in the deck `render_deck` writes. What is read is said
 plainly: text as written, a PDF's text but not its look, a PowerPoint's
 slide text and theme. Nothing is read from an image.
 
+The approved design's screens are the slides' pictures. An outline may
+carry a slide titled "What it looks like" with nothing under it, which shows
+a screen and no bullets. Not every slide gets a picture, and no two slides in
+a row show the same screen: when the screens run out, the rest go without.
+
 ## How a stage feels
 
 A specialist asks one question at a time. The document is written while the
