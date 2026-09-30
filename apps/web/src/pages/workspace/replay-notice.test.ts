@@ -6,7 +6,7 @@ const FROM = { deploymentId: "dep_old", runId: "run_old", tenantId: "proj_1" };
 describe("describeReplay", () => {
   test("no replay, or one that refused nothing, needs no notice", () => {
     expect(describeReplay(undefined)).toBeNull();
-    expect(describeReplay({ from: FROM, replayed: 3, refused: [] })).toBeNull();
+    expect(describeReplay({ from: FROM, replayed: 3, refused: [], via: "signals" })).toBeNull();
   });
 
   test("names each refused decision with the workflow's own reason, and says the project stands where the new rules put it", () => {
@@ -14,6 +14,7 @@ describe("describeReplay", () => {
       from: FROM,
       replayed: 4,
       refused: [{ decisionId: "dec-1", kind: "approve", stage: 5, reason: "quorum_not_met" }],
+      via: "signals",
     });
     expect(notice?.title).toBe("This project's workflow was updated, and one earlier decision no longer holds under the new rules.");
     expect(notice?.detail).toBe(
@@ -29,6 +30,7 @@ describe("describeReplay", () => {
         { decisionId: "dec-1", kind: "audience", stage: 5, reason: "unknown_audience" },
         { decisionId: "dec-2", kind: null, stage: null, reason: "something_new" },
       ],
+      via: "signals",
     });
     expect(notice?.title).toBe("This project's workflow was updated, and 2 earlier decisions no longer hold under the new rules.");
     expect(notice?.detail).toContain("The stakeholder decision at Concept approval was refused: ");
