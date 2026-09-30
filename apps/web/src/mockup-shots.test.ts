@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mockupShots, placeMockups, shotSvg } from "./mockup-shots.ts";
+import { chooseScreens, mockupShots, placeMockups, shotSvg } from "./mockup-shots.ts";
 
 const a = Uint8Array.of(1);
 const b = Uint8Array.of(2);
@@ -89,5 +89,16 @@ describe("shotSvg", () => {
 describe("mockupShots", () => {
   test("draws nothing outside a browser", async () => {
     expect(await mockupShots("<!doctype html><html><body><section data-surface=\"phone\">x</section></body></html>")).toEqual([]);
+  });
+});
+
+// #284: a design with no surface marks is shot screen by screen, never as
+// one tall page.
+describe("chooseScreens", () => {
+  test("marked surfaces win, then named screens, then top-level sections, and the body only last", () => {
+    expect(chooseScreens({ surfaces: ["s1"], named: ["n1"], sections: ["t1"], body: "body" })).toEqual(["s1"]);
+    expect(chooseScreens({ surfaces: [], named: ["n1", "n2"], sections: ["t1"], body: "body" })).toEqual(["n1", "n2"]);
+    expect(chooseScreens({ surfaces: [], named: [], sections: ["t1", "t2"], body: "body" })).toEqual(["t1", "t2"]);
+    expect(chooseScreens({ surfaces: [], named: [], sections: [], body: "body" })).toEqual(["body"]);
   });
 });

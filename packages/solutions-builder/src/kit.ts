@@ -472,18 +472,21 @@ Requirements the document must meet:
   visually distinct without leaving the single document. A deliverable with
   one surface still gets exactly one such section — do not invent extra
   screens it does not need.
-- **Every screen names its surface, and the constraints decide which.** Mark
-  each screen section \`data-surface="desktop"\`, \`data-surface="phone"\` or
-  \`data-surface="terminal"\`. A deliverable the constraints describe as a
-  web app, a browser app, a hosted console or a desktop program is a
-  **desktop** surface: lay each such screen out for a 1280px-wide window —
-  a real landscape page with a sidebar or top navigation, columns, tables
-  — and draw no browser chrome, since the review window puts every such
-  section inside a browser window of its own and draws the chrome itself.
-  A **phone** surface is only for a deliverable the constraints place on a
-  phone; a desktop app never gets one. Several screens of one app are
-  several such sections, one per screen, in the order a person meets them,
-  all of the same surface.
+- **Every screen is exactly \`<section data-testid="screen-<name>" data-surface="<kind>">\`,
+  and \`<kind>\` is \`desktop\`, \`phone\` or \`terminal\`.** The mark is not
+  optional and goes on the section itself: the review window frames each
+  screen by it, and the slides are shot from it — a screen without it is
+  shown wrong and pictured wrong. The constraints decide the kind. A
+  deliverable they describe as a web app, a browser app, a hosted console
+  or a desktop program is **desktop**: lay each such screen out for a
+  1280px-wide window — a real landscape page with a sidebar or top
+  navigation, columns, tables — and draw no window or browser chrome of
+  your own (no title bar, traffic lights, menu bar or address bar), since
+  the review window puts every such section inside a browser window and
+  draws the chrome itself. **phone** is only for a deliverable the
+  constraints place on a phone; a desktop app never gets one. Several
+  screens of one app are several such sections, one per screen, in the
+  order a person meets them, all of the same kind.
 - **A phone screen is drawn as the screen, never as the phone.** Mark each
   one \`<section data-testid="screen-<name>" data-surface="phone">\`. The
   review window puts every such section inside a real iPhone of its own,

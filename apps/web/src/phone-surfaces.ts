@@ -3,7 +3,8 @@
  * shown inside a phone of its own (#101).
  *
  * The Experience designer marks a phone screen
- * `<section data-testid="screen-<name>" data-surface="phone">` and draws the
+ * `<section data-testid="screen-<name>" data-surface="phone">` (an article
+ * or main so marked counts too, #284) and draws the
  * screen, not the device. This finds each such section, gives it a document
  * of its own that carries the design's `<head>` — the one `<style>` block
  * every screen shares — and returns the design with those sections removed,
@@ -40,7 +41,9 @@ export type SplitSurfaces = SplitDesign & {
 /** The screen the window draws around a phone surface, in CSS pixels. */
 export const PHONE_VIEWPORT_WIDTH = 402;
 
-const SECTION_TAG = /<(\/?)section\b[^>]*>/gi;
+/* A screen is a section, or the article or main a designer reaches for
+   instead (#284); the closing tag of any of them ends the innermost open one. */
+const SECTION_TAG = /<(\/?)(?:section|article|main)\b[^>]*>/gi;
 const PHONE_MARK = /\bdata-surface\s*=\s*["']phone["']/i;
 /** A desktop browser or native window, however the designer spelt it. */
 const DESKTOP_MARK = /\bdata-surface\s*=\s*["'](?:desktop|web|browser|window)["']/i;
@@ -54,13 +57,13 @@ const HEADING = /<h[1-3]\b[^>]*>([\s\S]*?)<\/h[1-3]>/i;
    the wide page, and nothing but the page scrolls. */
 const SCREEN_STYLE =
   "<style>html,body{margin:0;padding:0;min-width:0;width:100%}body{overflow-x:hidden}" +
-  'section[data-surface="phone"]{box-sizing:border-box;width:100%!important;min-width:0!important;max-width:none!important;margin:0!important;border:0!important;border-radius:0!important;box-shadow:none!important}</style>';
+  '[data-surface="phone"]{box-sizing:border-box;width:100%!important;min-width:0!important;max-width:none!important;margin:0!important;border:0!important;border-radius:0!important;box-shadow:none!important}</style>';
 
 /* A desktop screen fills the window's 1280px viewport; anything wider than
    that scrolls rather than being cut, since a window scrolls. */
 const DESKTOP_SCREEN_STYLE =
   "<style>html,body{margin:0;padding:0;min-width:0;width:100%}" +
-  'section[data-surface]{box-sizing:border-box;width:100%!important;min-width:0!important;max-width:none!important;margin:0!important;border:0!important;border-radius:0!important;box-shadow:none!important}</style>';
+  '[data-surface]{box-sizing:border-box;width:100%!important;min-width:0!important;max-width:none!important;margin:0!important;border:0!important;border-radius:0!important;box-shadow:none!important}</style>';
 
 function titleOf(id: string | null, section: string, index: number): string {
   const fromId = id?.replace(/^screen-/, "").replace(/[-_]+/g, " ").trim();
