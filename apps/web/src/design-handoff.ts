@@ -13,15 +13,23 @@ import { isHtmlDocument } from "./pages/workspace/guidance.ts";
  * fenced block that says what it is, with a line saying the full design is
  * the stage 4 artifact of record. A Markdown design passes through as is.
  */
+/** The line that opens the design's text in a hand-off; what the transcript folds on (#301). */
+export const HANDOFF_LEAD = "The approved design is an HTML mockup, on record as the stage 4 artifact. Its text, for reference:";
+
 export function designHandoff(design: string): string {
   if (!isHtmlDocument(design)) return design;
-  return [
-    "The approved design is an HTML mockup, on record as the stage 4 artifact. Its text, for reference:",
-    "",
-    "```text",
-    designAsText(design),
-    "```",
-  ].join("\n");
+  return [HANDOFF_LEAD, "", "```text", designAsText(design), "```"].join("\n");
+}
+
+/**
+ * A message that carries a design hand-off, split for the transcript
+ * (#301): what was asked, and the design's text to fold away. Null for
+ * any other message.
+ */
+export function splitHandoff(text: string): { readonly lead: string; readonly attached: string } | null {
+  const at = text.indexOf(HANDOFF_LEAD);
+  if (at === -1) return null;
+  return { lead: text.slice(0, at).trim(), attached: text.slice(at).trim() };
 }
 
 /** How much of a design's text goes into a mail: enough for every screen's copy, not a whole product's. */

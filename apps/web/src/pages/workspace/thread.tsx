@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { ChatInput, type ChatMessage as UiChatMessage } from "@corbits/react-ui";
 import { FileText, Plus, Send } from "lucide-react";
 import { Markdown } from "../../markdown.jsx";
+import { splitHandoff } from "../../design-handoff.ts";
 import { Dictated } from "../../dictation.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { answersDraft, segmentsIn } from "./choices.js";
@@ -46,15 +47,34 @@ function toUiMessages(messages: readonly ChatMessage[]): UiChatMessage[] {
 /**
  * A message body as the person reads it. A stage after the first opens with
  * the previous stage's approved artifact as the person's own first mail
- * (`use-opening-dispatch.ts`); at stage 5 that is the stage 4 design, an
- * HTML document, which Markdown would show as a wall of markup. It is shown
- * the way the design page shows it: in a frame with no scripts and no
- * same-origin, since a generated design is untrusted. Everything else is
- * Markdown as before.
+ * (`use-opening-dispatch.ts`); at stage 5 that is the stage 4 design, and
+ * each package request carries it again as text (#221). Shown in full it is
+ * a screen-tall block the chat opens on (#301), so the design travels
+ * folded: the ask, then a disclosure that opens on demand. A message that
+ * is itself an HTML document folds the same way, its frame inside, with no
+ * scripts and no same-origin since a generated design is untrusted.
+ * Everything else is Markdown as before.
  */
 function MessageBody({ text }: { text: string }) {
   if (isHtmlDocument(text)) {
-    return <iframe className="bubble-document" title="The approved design" srcDoc={text} sandbox="" />;
+    return (
+      <details className="bubble-fold">
+        <summary>The approved design</summary>
+        <iframe className="bubble-document" title="The approved design" srcDoc={text} sandbox="" />
+      </details>
+    );
+  }
+  const handoff = splitHandoff(text);
+  if (handoff) {
+    return (
+      <>
+        {handoff.lead ? <Markdown source={handoff.lead} /> : null}
+        <details className="bubble-fold">
+          <summary>The approved design, as text</summary>
+          <Markdown source={handoff.attached} />
+        </details>
+      </>
+    );
   }
   return <Markdown source={text} />;
 }
