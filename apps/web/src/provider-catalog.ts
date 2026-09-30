@@ -150,7 +150,10 @@ const OAUTH_ADAPTER_OF: Record<
     }),
   },
   // The CLI proxy speaks only the Responses API and answers 426 to a client
-  // that does not name itself the way the Grok CLI does.
+  // that does not name itself the way the Grok CLI does. A connection made
+  // before this entry changed keeps its stored plugin (the hub cannot change
+  // a provider's plugin) and still gets 426 until it is disconnected and
+  // signed in again.
   "xai-oauth": {
     plugin: "openai-responses",
     baseURL: XAI_OAUTH_PROXY_BASE_URL,
