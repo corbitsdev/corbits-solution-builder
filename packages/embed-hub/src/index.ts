@@ -397,7 +397,6 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
       dataDir: join(options.dataDir, role === "probe" ? "process-provisioner-probe" : "process-provisioner"),
       runtimePath: options.sidecarRuntime,
       sidecarEntryPath: options.sidecarEntry,
-      hubWebSocketUrl: options.hubWebSocketUrl,
     });
   const deploymentProvisioner = provisionerFor("deployment");
   const bindingFingerprint = deploymentProvisioner.bindingFingerprint;

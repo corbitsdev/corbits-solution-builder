@@ -39,7 +39,6 @@ function create(runner: SidecarProcessRunner): SidecarProvisioner {
     dataDir,
     runtimePath: "/bin/bun",
     sidecarEntryPath: "/sidecar/index.ts",
-    hubWebSocketUrl: "ws://127.0.0.1:1/api/sidecars/ws",
     runner,
     terminationGraceMs: 10,
   });
@@ -53,7 +52,6 @@ const ensure = (generation: number, sidecarId: string) =>
     tenantId: "tnt_a",
     anchorRunId: "run_a",
     token: `token-${sidecarId}`,
-    hubWebSocketUrl: "ws://127.0.0.1:1/api/sidecars/ws",
   });
 const destroy = (generation: number, sidecarId: string) =>
   provisioner.destroy({ allocationId: "sal_a", generation, sidecarId });

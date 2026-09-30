@@ -3,7 +3,7 @@ import { type } from "arktype";
 import { sha256 } from "@intx/crypto";
 import type { SidecarAllocation, SidecarAllocationStore } from "@intx/db";
 import { getLogger } from "@intx/log";
-import { hexEncode } from "@intx/types";
+import { hexEncode, type SidecarAllocationStatus } from "@intx/types";
 
 import type {
   AllocatedSidecarTarget,
@@ -391,6 +391,83 @@ export function createSidecarAllocationReconciler({
     );
     if (shouldRetryInitialization)
       await retryInitialization(allocation, leaseId);
+  }
+
+  // No registered provisioner matches the row's binding, so nothing can
+  // ensure, replace or destroy its sidecar. A retry only succeeds once the
+  // operator registers a matching provisioner; with automatic recovery off
+  // the row is released instead, so its runs fail and its deployment stops
+  // counting as live. A row already releasing is marked released without a
+  // destroy: the sidecar, if it still runs, is unreachable either way.
+  async function reconcileWithoutProvisioner(
+    allocation: SidecarAllocation,
+    status: Exclude<
+      SidecarAllocationStatus,
+      "released" | "failed" | "destroy_failed"
+    >,
+    leaseId: string,
+  ): Promise<void> {
+    const message = `Provisioner ${allocation.provisionerId} is unavailable or its binding changed`;
+    if (status === "pending") {
+      const failed = await allocationStore.failWithoutInfrastructure({
+        allocationId: allocation.id,
+        expectedStatus: "pending",
+        expectedGeneration: allocation.generation,
+        code: "provisioner_unavailable",
+        message,
+        expectedLeaseId: leaseId,
+        now: now(),
+      });
+      if (failed !== null) {
+        router.retireAllocation({
+          allocationId: failed.id,
+          generation: failed.generation,
+        });
+      }
+      return;
+    }
+    if (enableAutomaticReplacementRecovery) {
+      await finishReconciliation(allocation.id, () =>
+        allocationStore.scheduleRetry({
+          allocationId: allocation.id,
+          expectedStatus: status,
+          expectedGeneration: allocation.generation,
+          nextAttemptAt: retryAt(
+            allocation.ensureAttempts + allocation.destroyAttempts,
+          ),
+          expectedLeaseId: leaseId,
+          now: now(),
+        }),
+      );
+      return;
+    }
+    if (status === "releasing") {
+      const released = await allocationStore.markReleased({
+        allocationId: allocation.id,
+        generation: allocation.generation,
+        expectedLeaseId: leaseId,
+        now: now(),
+      });
+      if (released !== null) {
+        router.retireAllocation({
+          allocationId: released.id,
+          generation: released.generation,
+        });
+      }
+      return;
+    }
+    const releasing = await allocationStore.beginUnrecoverableRelease({
+      allocationId: allocation.id,
+      expectedStatus: status,
+      expectedGeneration: allocation.generation,
+      expectedLeaseId: leaseId,
+      failureCode: "provisioner_unavailable",
+      failureMessage: `Automatic recovery is disabled: ${message}`,
+      now: now(),
+    });
+    if (releasing !== null) {
+      router.fenceAllocation(releasing.id, releasing.generation);
+    }
   }
 
   async function retryInitialization(
@@ -799,37 +876,7 @@ export function createSidecarAllocationReconciler({
     }
     const provisioner = provisionerFor(allocation);
     if (provisioner === null) {
-      if (allocation.status === "pending") {
-        const failed = await allocationStore.failWithoutInfrastructure({
-          allocationId: allocation.id,
-          expectedStatus: "pending",
-          expectedGeneration: allocation.generation,
-          code: "provisioner_unavailable",
-          message: `Provisioner ${allocation.provisionerId} is unavailable or its binding changed`,
-          expectedLeaseId: leaseId,
-          now: now(),
-        });
-        if (failed !== null) {
-          router.retireAllocation({
-            allocationId: failed.id,
-            generation: failed.generation,
-          });
-        }
-      } else {
-        const status = allocation.status;
-        await finishReconciliation(allocation.id, () =>
-          allocationStore.scheduleRetry({
-            allocationId: allocation.id,
-            expectedStatus: status,
-            expectedGeneration: allocation.generation,
-            nextAttemptAt: retryAt(
-              allocation.ensureAttempts + allocation.destroyAttempts,
-            ),
-            expectedLeaseId: leaseId,
-            now: now(),
-          }),
-        );
-      }
+      await reconcileWithoutProvisioner(allocation, allocation.status, leaseId);
       return;
     }
 
