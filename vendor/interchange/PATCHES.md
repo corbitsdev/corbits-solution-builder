@@ -320,3 +320,28 @@ dependency, set per-role caps on the specialist step, and drop the patch file,
 the `patchedDependencies` entry and this section.
 
 **Kill date.** When `faremeter/interchange#194` is released; tracked as #45.
+
+## `@intx/inference@0.4.0` (npm, not vendored) — adapter-classified responses
+
+**Why.** ChatGPT's Codex backend answers `/codex/responses` with an SSE stream
+and no `Content-Type`. The harness checks the header before any adapter sees
+the response, so every Codex call failed with "Cannot detect response kind:
+response has no Content-Type header". `@corbits/codex-provider`'s own
+`withCodexContentTypeRepair` wraps `fetch`, but the sidecar builds its
+inference dependencies from the global `fetch` with no hook to replace it.
+
+**What changed.** The same `bun patch` adds `faremeter/interchange#198`'s
+harness half, without its tests or capture tooling: `ProviderAdapter` gains an
+optional `classifyResponse(headers)`, consulted only when `detectResponseKind`
+rejects a 2xx; `undefined` keeps the protocol-mismatch error.
+`packages/embed-hub/src/responses-adapter.ts` wraps
+`createOpenAIResponsesAdapter` and classifies as SSE for sources whose quirks
+path is `CODEX_RESPONSES_PATH`; the sidecar adapter manifest points at it.
+
+**Upstream-able.** Yes — it is `faremeter/interchange#198` (INTR-601).
+
+**Removal.** When an `@intx/inference` release includes `#198`, bump the
+dependency, move `classifyResponse` into `@corbits/codex-provider`'s adapter,
+and drop this hunk of the patch, `responses-adapter.ts` and this section.
+
+**Kill date.** When `faremeter/interchange#198` is released.
