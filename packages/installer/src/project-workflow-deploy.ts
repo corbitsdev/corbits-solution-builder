@@ -1040,34 +1040,6 @@ async function ensureProjectWorkflowOnce(
     const history = await appliedDecisions(workflowsOf(transport, from), from.deploymentId, from.runId, memo);
     return revive(from, history, state.generation + 1, idsOf(groups));
   }
-  // The hub replaces a dead deployment's sidecar on its own after a host
-  // restart (CL-8784), as a new deployment carrying the run's restored
-  // history, within seconds of boot. Deploying afresh before it has is a
-  // race two mechanisms lose together, so a project with history and no
-  // live run waits for the replacement a while before deploying its own.
-  // The wait is bounded by the hub's progress, not this call's start: with
-  // several dead deployments to restore in turn, the replacement lands well
-  // after any fixed budget counted from here would have run out (#79). The
-  // progress watched spans every tenant the project's deployments live in,
-  // since a legacy workflow's replacement lands in the workspace.
-  if (!state.liveCandidates[0] && state.history.length > 0) {
-    progress({ phase: "waiting", detail: "hub replacement" });
-    const replaced = await pollWhilePlacing(
-      {
-        deployments: async () => {
-          const found = await projectWorkflowDeployments(transport, home, assetName);
-          groups = found.groups;
-          return found.everyDeployment;
-        },
-      },
-      async () => {
-        state = await projectRunState(transport, groups, memo);
-        return state.liveCandidates[0] ? true : null;
-      },
-      placementWait,
-    );
-    if (replaced && state.run && state.live && state.code?.digest === digest) return state.run;
-  }
   // A live run that has not caught up, or none: the project's history (if
   // any) is replayed onto the oldest live run, or onto a fresh one. A live
   // run that has caught up but runs other code is left to the next call,
