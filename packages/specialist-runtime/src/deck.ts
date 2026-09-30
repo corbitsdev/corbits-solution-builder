@@ -22,7 +22,19 @@ export type DeckSlide = {
   readonly bullets: readonly string[];
   /** What is said: the item's body in full, sources included. */
   readonly notes: string;
+  /** The design screen the item asked for, by name (`(screen: <name>)`), when it did (#302). */
+  readonly screen?: string;
 };
+
+/** The marker an outline item names a screen with, anywhere in its text. */
+const SCREEN_HINT = /\(\s*screen:\s*([^)]+?)\s*\)/i;
+
+/** The screen an item names and the item's text without the marker. */
+export function screenHintOf(text: string): { readonly screen: string | null; readonly text: string } {
+  const match = SCREEN_HINT.exec(text);
+  if (!match) return { screen: null, text };
+  return { screen: match[1]!.trim(), text: text.replace(match[0], "").replace(/\s{2,}/g, " ").trim() };
+}
 
 /** How much a slide carries: the most bullets an outline item is shown as. */
 export const DECK_DENSITY = { sparse: 3, standard: 5, full: 7 } as const;
@@ -152,8 +164,16 @@ export function outlineSlidesIn(markdown: string, most = DECK_DENSITY[DEFAULT_DE
   return items
     .filter((item) => item.title.length > 0)
     .map((item) => {
-      const body = item.body.join(" ");
-      return { title: item.title, bullets: bulletsOf(body, most), notes: plain(body) };
+      // A screen named in the title or the body is the slide's picture, not its words (#302).
+      const inTitle = screenHintOf(item.title);
+      const inBody = screenHintOf(item.body.join(" "));
+      const screen = inTitle.screen ?? inBody.screen;
+      return {
+        title: inTitle.text,
+        bullets: bulletsOf(inBody.text, most),
+        notes: plain(inBody.text),
+        ...(screen ? { screen } : {}),
+      };
     });
 }
 
