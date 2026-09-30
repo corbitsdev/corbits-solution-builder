@@ -48,6 +48,7 @@ import {
   cardFootStage,
   stageTrackSegClass,
 } from "./home-view.js";
+import { prunePlanSummary, type PrunePlan } from "../prune-versions.ts";
 
 function plural(count: number, noun: string): string {
   return `${String(count)} ${noun}${count === 1 ? "" : "s"}`;
@@ -375,6 +376,9 @@ function ProjectCard({
   // Deleting takes two clicks, both in the menu: the second item only exists
   // after the first, so a slip cannot remove a project.
   const [confirming, setConfirming] = useState(false);
+  // "Prune old versions…" shows its plan first and archives on the second
+  // click, the way Delete asks twice (#297).
+  const [pruning, setPruning] = useState<PrunePlan | null>(null);
   const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The face is inert while the options menu or the info dialog is up, and
   // for a moment after either closes (`card-face-guard.ts`): the click that
@@ -473,6 +477,7 @@ function ProjectCard({
                 setMenuOpen(open);
                 if (!open) {
                   setConfirming(false);
+                  setPruning(null);
                   closedAt.current = Date.now();
                 }
               }}
@@ -498,6 +503,28 @@ function ProjectCard({
                 <MenuItem onSelect={() => void act(() => api.updateProject(project.id, { archived: !project.archivedAt }))}>
                   {project.archivedAt ? "Unarchive" : "Archive"}
                 </MenuItem>
+                {pruning ? (
+                  <MenuItem
+                    disabled={pruning.archive.length === 0}
+                    onSelect={() =>
+                      void act(async () => {
+                        const result = await api.pruneProjectVersions(project.id);
+                        onNotice(`Archived ${String(result.archived)} older version${result.archived === 1 ? "" : "s"} of ${project.title}; ${String(result.kept)} kept across ${String(result.lineages)} document${result.lineages === 1 ? "" : "s"}.`);
+                      })
+                    }
+                  >
+                    {pruning.archive.length === 0 ? prunePlanSummary(pruning) : `Yes, ${prunePlanSummary(pruning).replace(/^Archive/, "archive")}`}
+                  </MenuItem>
+                ) : (
+                  <MenuItem
+                    onSelect={(event) => {
+                      event.preventDefault();
+                      void api.pruneProjectPlan(project.id).then(setPruning, onError);
+                    }}
+                  >
+                    Prune old versions…
+                  </MenuItem>
+                )}
                 <MenuSeparator />
                 {confirming ? (
                   <MenuItem className="menu-danger" onSelect={() => void act(() => api.deleteProject(project.id))}>
