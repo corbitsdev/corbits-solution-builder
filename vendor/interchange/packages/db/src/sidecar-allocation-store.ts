@@ -177,6 +177,11 @@ export type BeginSidecarReleaseArgs = {
 
 export type BeginUnrecoverableSidecarReleaseArgs = {
   readonly allocationId: string;
+  /** The live status the row must still hold; `allocated` when omitted. */
+  readonly expectedStatus?: Exclude<
+    BeginSidecarReleaseArgs["expectedStatus"],
+    "pending"
+  >;
   readonly expectedGeneration: number;
   readonly expectedLeaseId: string;
   readonly onlyIfInitializationIncomplete?: boolean;
@@ -932,7 +937,7 @@ export function createSidecarAllocationStore(db: DBHandle) {
         const releasing = await beginRelease(
           {
             ...args,
-            expectedStatus: "allocated",
+            expectedStatus: args.expectedStatus ?? "allocated",
           },
           tx,
         );

@@ -39,7 +39,6 @@ function create(runner: SidecarProcessRunner): SidecarProvisioner {
     dataDir,
     runtimePath: "/bin/bun",
     sidecarEntryPath: "/sidecar/index.ts",
-    hubWebSocketUrl: "ws://127.0.0.1:1/api/sidecars/ws",
     runner,
     terminationGraceMs: 10,
   });

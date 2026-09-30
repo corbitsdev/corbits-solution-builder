@@ -254,6 +254,33 @@ superset.
 **Kill date.** 2026-10-16. Tracked as
 [INTR-573](https://linear.app/abklabs/issue/INTR-573).
 
+## `packages/hub-sessions/src/sidecar-allocation/reconciler.ts`, `packages/db/src/sidecar-allocation-store.ts` — release an allocation whose provisioner binding no longer matches
+
+**Why.** The reconciler drives an allocation only through a provisioner whose
+id, api version and binding fingerprint match the row. When none matches, a
+`pending` row is failed with `provisioner_unavailable`, but a row in any
+other live status is put back on `scheduleRetry` forever: nothing can ensure,
+replace or destroy its sidecar, its runs stay running, and its deployment
+stays live in every listing. The process provisioner's fingerprint used to
+carry the sidecar entry path and the hub port, so every app update stranded
+every live allocation that way (#214); with the stable `process:v1:<role>`
+fingerprint the rows bound under the old shape are the ones left behind.
+
+**What changed.** With `enableAutomaticReplacementRecovery` off (the host's
+setting), an `allocated`, `provisioning` or `replacing` row with no matching
+provisioner is released through `beginUnrecoverableRelease` with
+`provisioner_unavailable`, failing its runs and unsettled dispatches the way
+any other unrecoverable allocation is; a row already `releasing` is marked
+released without a destroy. `BeginUnrecoverableSidecarReleaseArgs` gains an
+optional `expectedStatus` (default `allocated`) so the release can take the
+row's current live status. With recovery on, behaviour is unchanged. Tests in
+`packages/hub-sessions/src/sidecar-allocation/reconciler.test.ts`.
+
+**Upstream-able.** Yes; the same change is upstream as
+[INTR-630](https://linear.app/abklabs/issue/INTR-630).
+
+**Kill date.** 2026-10-30, or the first vendor bump that carries INTR-630.
+
 ## `packages/types/src/catalog.ts`, `packages/db/src/schema/catalog.ts` — operator-registered provider plugins
 
 **Why.** The catalog restricted `model_provider.plugin` to the four built-in
