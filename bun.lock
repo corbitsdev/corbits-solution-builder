@@ -118,6 +118,7 @@
         "@intx/hub-api": "workspace:*",
         "@intx/hub-sessions": "workspace:*",
         "@intx/types": "workspace:*",
+        "arktype": "catalog:",
         "drizzle-orm": "catalog:",
         "hono": "catalog:",
       },

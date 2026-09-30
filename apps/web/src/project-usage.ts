@@ -10,9 +10,9 @@
  * turns from that fold, never a cost.
  *
  * A workspace-wide dollar figure now reaches the client through
- * `packages/embed-hub/src/spend.ts`'s `GET /spend`, wired to
- * `EventCollectorRegistry`'s `onUsage` sink (one `TurnUsage` per finished
- * inference turn, with real provider/model/token counts) and priced against
+ * `packages/embed-hub/src/spend.ts`'s `GET /spend`, fed by the hub's usage
+ * listener (one `SpendUsage` per finished inference turn, with real
+ * provider/model/token counts) and priced against
  * the tenant's own `model_pricing` rows. Two honest limits on it, both
  * stated in the UI rather than hidden:
  *
