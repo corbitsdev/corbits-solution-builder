@@ -46,7 +46,6 @@ export type ProcessProvisionerOptions = {
   readonly dataDir: string;
   readonly runtimePath: string;
   readonly sidecarEntryPath: string;
-  readonly hubWebSocketUrl: string;
   readonly runner?: SidecarProcessRunner;
   readonly terminationGraceMs?: number;
 };
@@ -214,9 +213,11 @@ export function createProcessProvisioner(options: ProcessProvisionerOptions): Si
   return {
     id: PROCESS_PROVISIONER_ID,
     apiVersion: 1,
-    // Unchanged from the Workbench provisioner this replaces, so allocations
-    // it bound are adopted rather than failed as a changed binding.
-    bindingFingerprint: `process:v1:${options.role}:${options.sidecarEntryPath}:${options.hubWebSocketUrl}`,
+    // The entry path and hub URL are read from the current options at every
+    // spawn, so they are not part of what an allocation is bound to. Binding
+    // them stranded every allocation whenever the checkout moved or the port
+    // changed; the hub releases a row bound under the old shape.
+    bindingFingerprint: `process:v1:${options.role}`,
     capabilities: CAPABILITIES,
     ensure: (request) => serialize(request.allocationId, () => ensure(request)),
     destroy: (request) => serialize(request.allocationId, () => destroy(request)),

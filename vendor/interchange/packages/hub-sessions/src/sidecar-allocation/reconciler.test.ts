@@ -3829,3 +3829,140 @@ describe("reconciliation ownership", () => {
     expect(calls).toEqual(["disconnect", "connect"]);
   });
 });
+
+describe("an allocation bound to a provisioner that is no longer registered", () => {
+  // The registered provisioner presents another fingerprint than the row
+  // records, the way a host does after its binding inputs changed.
+  const rebound = testProvisioner({ bindingFingerprint: "test:v2" });
+
+  function stranded(status: SidecarAllocation["status"]): SidecarAllocation {
+    return allocation({
+      status,
+      generation: 3,
+      sidecarId: "sc-old",
+      ensureAcceptedGeneration: 3,
+      reconciliationLeaseId: "lease-1",
+    });
+  }
+
+  function claimOnce(
+    row: SidecarAllocation,
+  ): () => Promise<SidecarAllocation | null> {
+    let claimed = false;
+    return async () => {
+      if (claimed) return null;
+      claimed = true;
+      return row;
+    };
+  }
+
+  test.each(["allocated", "replacing", "provisioning"] as const)(
+    "is released with its runs failed when recovery is off (%s)",
+    async (status) => {
+      const row = stranded(status);
+      let released:
+        | Parameters<AllocationStore["beginUnrecoverableRelease"]>[0]
+        | undefined;
+      const fences: [string, number][] = [];
+      const store = fakeStore({
+        claimNextReconcilable: claimOnce(row),
+        beginUnrecoverableRelease: async (args) => {
+          released = args;
+          return { ...row, status: "releasing", generation: 4 };
+        },
+      });
+      const reconciler = createSidecarAllocationReconciler(
+        deps({ store, provisioner: rebound, fences }),
+      );
+
+      await reconciler.reconcileNext();
+
+      expect(released).toMatchObject({
+        allocationId: "alloc-1",
+        expectedStatus: status,
+        expectedGeneration: 3,
+        expectedLeaseId: "lease-1",
+        failureCode: "provisioner_unavailable",
+        failureMessage:
+          "Automatic recovery is disabled: Provisioner test is unavailable or its binding changed",
+      });
+      expect(fences).toContainEqual(["alloc-1", 4]);
+    },
+  );
+
+  test("a releasing row is marked released without a destroy when recovery is off", async () => {
+    const row = stranded("releasing");
+    let marked: Parameters<AllocationStore["markReleased"]>[0] | undefined;
+    const retired: [string, number][] = [];
+    const store = fakeStore({
+      claimNextReconcilable: claimOnce(row),
+      markReleased: async (args) => {
+        marked = args;
+        return { ...row, status: "released" };
+      },
+    });
+    const reconciler = createSidecarAllocationReconciler(
+      deps({ store, provisioner: rebound, retired }),
+    );
+
+    await reconciler.reconcileNext();
+
+    expect(marked).toMatchObject({
+      allocationId: "alloc-1",
+      generation: 3,
+      expectedLeaseId: "lease-1",
+    });
+    expect(retired).toEqual([["alloc-1", 3]]);
+  });
+
+  test("is retried, not released, when recovery is on", async () => {
+    const row = stranded("allocated");
+    let scheduled: Parameters<AllocationStore["scheduleRetry"]>[0] | undefined;
+    const store = fakeStore({
+      claimNextReconcilable: claimOnce(row),
+      scheduleRetry: async (args) => {
+        scheduled = args;
+        return row;
+      },
+    });
+    const reconciler = createSidecarAllocationReconciler({
+      ...deps({ store, provisioner: rebound }),
+      enableAutomaticReplacementRecovery: true,
+    });
+
+    await reconciler.reconcileNext();
+
+    expect(scheduled).toMatchObject({
+      allocationId: "alloc-1",
+      expectedStatus: "allocated",
+      expectedGeneration: 3,
+      expectedLeaseId: "lease-1",
+    });
+  });
+
+  test("a pending row still fails without infrastructure", async () => {
+    const row = stranded("pending");
+    let failed:
+      | Parameters<AllocationStore["failWithoutInfrastructure"]>[0]
+      | undefined;
+    const retired: [string, number][] = [];
+    const store = fakeStore({
+      claimNextReconcilable: claimOnce(row),
+      failWithoutInfrastructure: async (args) => {
+        failed = args;
+        return { ...row, status: "failed" };
+      },
+    });
+    const reconciler = createSidecarAllocationReconciler(
+      deps({ store, provisioner: rebound, retired }),
+    );
+
+    await reconciler.reconcileNext();
+
+    expect(failed).toMatchObject({
+      code: "provisioner_unavailable",
+      message: "Provisioner test is unavailable or its binding changed",
+    });
+    expect(retired).toEqual([["alloc-1", 3]]);
+  });
+});
