@@ -776,21 +776,7 @@ export function StageWorkspace({
         <Banner
           tone="error"
           title={`The ${stageName(stage).toLowerCase()} specialist could not be started`}
-          action={
-            agent.remediation?.kind === "delegate_providers"
-              ? {
-                  // The project was opened with no workspace provider
-                  // delegated to it (#29): let it use them, then deploy again.
-                  label: agent.remediation.label,
-                  onClick: () => {
-                    void api
-                      .delegateWorkspaceProviders(detail.project.id)
-                      .then(() => agent.retry())
-                      .catch((cause: unknown) => setError(cause instanceof ApiFailure ? cause.detail.message : String(cause)));
-                  },
-                }
-              : { label: "Try again", onClick: agent.retry }
-          }
+          action={{ label: "Try again", onClick: agent.retry }}
         >
           {agent.error}
         </Banner>

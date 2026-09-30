@@ -254,39 +254,6 @@ superset.
 **Kill date.** 2026-10-16. Tracked as
 [INTR-573](https://linear.app/abklabs/issue/INTR-573).
 
-## `packages/db/src/model-source-resolution.ts`, `packages/hub-sessions/src/workflow-allocation-service.ts` — ancestor credentials require `credential:<id>/use`
-
-**Why.** CL-8133: a project tenant already sees its workspace catalog and
-credentials by ancestry (`listVisibleOfferings` / `resolveCredentialById`,
-the cl-8009 walk). `buildSource` then authorized those inherited
-credentials by ownership alone, so a project's deploy could use every
-workspace provider without the project principal holding
-`credential:<id>/use`. Delegation grants minted into the child tenant
-(or an ancestor) were never consulted on this path.
-
-**What changed.** `listVisibleOfferings` still walks the ancestor chain;
-catalog rows stay on the ancestor and are not copied into the project
-tenant. `resolveSourcesByOfferingIds` takes an optional deploying
-`principalId`. When supplied, a credential whose `tenantId` is not the
-resolving tenant (inherited) additionally requires that principal to hold
-`credential:<id>/use`, collected across the tenant ancestor chain
-(`collectGrantsInChain`). A credential the resolving tenant owns itself
-is unchanged. Omitting `principalId` keeps the prior ownership-only rule
-so `resolveModelSources` callers are unaffected. The allocation service
-passes `sourceAuthorityPrincipalId` at prepare and at allocation recover.
-`credentialDelegationAllows` only consults credential-shaped grants
-(`credential:<id>` and `credential:*`), so a child tenant's owner `*/*`
-does not satisfy the check — that grant is what hub-api mints on every
-new tenant, and without the filter default-deny never holds. Tests in
-`packages/db/src/model-source-resolution.test.ts`.
-
-**Upstream-able.** Yes; it is an additive optional argument on the deploy
-resolution path, fail-closed for inherited credentials, and it reuses the
-existing grant collection the credential walk already mirrors.
-
-**Kill date.** 2026-10-16. Tracked as
-[INTR-574](https://linear.app/abklabs/issue/INTR-574).
-
 ## `packages/types/src/catalog.ts`, `packages/db/src/schema/catalog.ts` — operator-registered provider plugins
 
 **Why.** The catalog restricted `model_provider.plugin` to the four built-in

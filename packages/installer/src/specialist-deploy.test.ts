@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { Transport } from "@intx/hub-client";
 import { leadingOffering, specialistEntryIsCurrent, stageSpecialistAddresses, stageSpecialistStatus } from "./specialist-deploy.js";
 import { visibleCatalog } from "./visible-catalog.js";
-import { deployOrExplain, ModelProviderNotDelegatedError, sourceFor } from "./workflow-deploy.js";
+import { sourceFor } from "./workflow-deploy.js";
 import { ApiError } from "@intx/hub-client";
 import { agentFor } from "@solutions-builder/app/kit";
 import { SPECIALIST_ENTRY_PATH, specialistEntrySource } from "@solutions-builder/app/specialist-source";
@@ -253,28 +253,4 @@ describe("deploying into a project tenant", () => {
     expect(catalog.offerings.map((row) => row.id)).toEqual(["off_1"]);
   });
 
-  test("the hub's offering refusal in a project reads as an undelegated provider, not a missing one", async () => {
-    const refusal = new ApiError(409, "source_offering_unavailable", "Catalog offering off_1 cannot be used by the deployment authority");
-    const thrown = await deployOrExplain(PROJECT, () => Promise.reject(refusal)).catch((cause: unknown) => cause);
-    expect(thrown).toBeInstanceOf(ModelProviderNotDelegatedError);
-    expect((thrown as Error).message).toContain("has not been given a model provider");
-    expect((thrown as Error).message).not.toContain("connect a model provider");
-    // Not an `ApiError`: `ensureSpecialistDeployment`'s retry-once-on-409
-    // absorbs races, and must not repeat a refusal that will not change.
-    expect(thrown).not.toBeInstanceOf(ApiError);
-  });
-
-  test("the same refusal in the workspace itself does not blame a delegation", async () => {
-    const refusal = new ApiError(409, "source_offering_unavailable", "Catalog offering off_1 cannot be used by the deployment authority");
-    const thrown = await deployOrExplain(TENANT, () => Promise.reject(refusal)).catch((cause: unknown) => cause);
-    expect(thrown).toBeInstanceOf(ModelProviderNotDelegatedError);
-    expect((thrown as Error).message).not.toContain("project");
-  });
-
-  test("every other deploy failure passes through untouched", async () => {
-    const conflict = new ApiError(409, "conflict", "deployment exists");
-    const thrown = await deployOrExplain(PROJECT, () => Promise.reject(conflict)).catch((cause: unknown) => cause);
-    expect(thrown).toBe(conflict);
-    expect(await deployOrExplain(PROJECT, () => Promise.resolve("ok"))).toBe("ok");
-  });
 });
