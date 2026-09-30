@@ -452,11 +452,12 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
     router: sidecarRouter,
     hubWebSocketUrl: options.hubWebSocketUrl,
     connectTimeoutMs: SIDECAR_CONNECT_TIMEOUT_MS,
-    // Process-provisioned sidecars die with the host. Replacing them lets
-    // `restoreWorkflowRunToAllocation` replay each run's hub-held refs onto the
-    // new generation; releasing them fails the run and a project restarts at
-    // stage 1 (CL-8784).
-    enableAutomaticReplacementRecovery: true,
+    // Process-provisioned sidecars die with the host. Left unreplaced, a
+    // deployment is placed again only when a project is opened, and the
+    // installer supersedes its ended run with a fresh one that replays the
+    // project's decisions (#192, #237). Replacing every one at boot started
+    // ~600 MB of sidecar per live deployment before anything was opened.
+    enableAutomaticReplacementRecovery: false,
     onReady: async (allocation: SidecarAllocation, reconciliation) => {
       await workflowAllocationService.deployReadyAllocation(allocation, reconciliation);
       await workflowDispatchService.requeueForReadyAllocation(allocation.anchorRunId);
