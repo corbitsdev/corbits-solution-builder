@@ -321,7 +321,7 @@ async function ledgerOf(
 }
 
 const TERMINAL_RUN_EVENTS = RUN_ENDED_EVENTS;
-/** How long a project with history lets the hub go quiet before deploying its own replacement of a dead deployment. */
+/** How long the hub may sit still on a placement this call waits for before the wait gives up. */
 const REPLACEMENT_WAIT_MS = 45_000;
 
 type ProjectRunCandidate = { readonly tenantId: string; readonly deployment: HubDeployment; readonly runId: string };
@@ -494,7 +494,7 @@ type CatchUpOptions = {
 
 /** What the ensure step is doing, for a caller that shows work in flight (#295). */
 export type EnsureProgress =
-  | { readonly phase: "waiting"; readonly detail: "hub replacement" | "placement" }
+  | { readonly phase: "waiting"; readonly detail: "placement" }
   | { readonly phase: "deploying" }
   | { readonly phase: "replaying"; readonly done: number; readonly total: number };
 
@@ -787,10 +787,10 @@ function pushProbePath(files: Record<string, string>): { path: string; content: 
 
 /** What `ensureProjectWorkflow` may be told beyond its inputs. */
 export type EnsureProjectWorkflowOptions = {
-  /** How long the hub may go without placing anything before a project with
-   *  history deploys its own replacement; the default suits a host restart. */
+  /** How long the hub may go without placing anything before a wait on a
+   *  placement gives up; the default suits a host start. */
   readonly replacementWaitMs?: number;
-  /** How often the replacement wait re-reads the hub; tests shorten it. */
+  /** How often a placement wait re-reads the hub; tests shorten it. */
   readonly placementPollMs?: number;
   /** How often a history replay re-reads the run it is bringing up; tests shorten it. */
   readonly replayPollMs?: number;
@@ -939,7 +939,7 @@ async function ensureProjectWorkflowOnce(
   const digest = await treeDigest({ ...rendered, [TRIGGER_STAGES_PATH]: JSON.stringify(stages) });
 
   const everywhere = async () => (await projectWorkflowDeployments(transport, home, assetName)).groups;
-  // One call's own memo: the replacement wait below re-reads the project's
+  // One call's own memo: the placement waits below re-read the project's
   // state every two seconds, and nothing about a finished iteration changes
   // between those reads.
   const memo = createDecisionMemo();
@@ -960,9 +960,8 @@ async function ensureProjectWorkflowOnce(
     ...(snapshot ? { snapshot } : {}),
   });
 
-  // How long the hub may sit still before this waits no more on it: for
-  // its own replacement of a dead deployment, and for a deployment it is
-  // still placing or restoring (#236).
+  // How long the hub may sit still before this waits no more on a
+  // deployment it is still placing (#236).
   const placementWait: PlacementWait = {
     stallMs: options.replacementWaitMs ?? REPLACEMENT_WAIT_MS,
     ...(options.placementPollMs === undefined ? {} : { pollMs: options.placementPollMs }),
@@ -1020,11 +1019,11 @@ async function ensureProjectWorkflowOnce(
   };
 
   if (state.run && state.live) {
-    // Live by status is not usable yet (#236): at boot the hub restores a
-    // dead deployment through `recovering`, unplaced, and one whose run has
-    // ended cannot come back at all. Handed back as it is, the page waited
-    // minutes for a placement that never came. It is waited for within the
-    // replacement bounds, then either returned placed or replaced below.
+    // Live by status is not usable yet (#236): a deployment can still be
+    // placing, unplaced, and one whose run has ended cannot come back at
+    // all. Handed back as it is, the page waited minutes for a placement
+    // that never came. It is waited for within the placement bounds, then
+    // either returned placed or replaced below.
     // A repair (#299) never reuses it: the person asked for a rebuild.
     const usability = state.code?.digest === digest && !options.repair ? await deploymentUsability(transport, state.run.tenantId, state.run.deploymentId, state.run.runId, placementWait) : "usable";
     if (state.code?.digest === digest && !options.repair && usability === "usable") return state.run;
@@ -1039,34 +1038,6 @@ async function ensureProjectWorkflowOnce(
     const from = state.run;
     const history = await appliedDecisions(workflowsOf(transport, from), from.deploymentId, from.runId, memo);
     return revive(from, history, state.generation + 1, idsOf(groups));
-  }
-  // The hub replaces a dead deployment's sidecar on its own after a host
-  // restart (CL-8784), as a new deployment carrying the run's restored
-  // history, within seconds of boot. Deploying afresh before it has is a
-  // race two mechanisms lose together, so a project with history and no
-  // live run waits for the replacement a while before deploying its own.
-  // The wait is bounded by the hub's progress, not this call's start: with
-  // several dead deployments to restore in turn, the replacement lands well
-  // after any fixed budget counted from here would have run out (#79). The
-  // progress watched spans every tenant the project's deployments live in,
-  // since a legacy workflow's replacement lands in the workspace.
-  if (!state.liveCandidates[0] && state.history.length > 0) {
-    progress({ phase: "waiting", detail: "hub replacement" });
-    const replaced = await pollWhilePlacing(
-      {
-        deployments: async () => {
-          const found = await projectWorkflowDeployments(transport, home, assetName);
-          groups = found.groups;
-          return found.everyDeployment;
-        },
-      },
-      async () => {
-        state = await projectRunState(transport, groups, memo);
-        return state.liveCandidates[0] ? true : null;
-      },
-      placementWait,
-    );
-    if (replaced && state.run && state.live && state.code?.digest === digest) return state.run;
   }
   // A live run that has not caught up, or none: the project's history (if
   // any) is replayed onto the oldest live run, or onto a fresh one. A live

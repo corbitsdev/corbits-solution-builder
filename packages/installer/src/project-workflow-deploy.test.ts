@@ -786,7 +786,7 @@ describe("ensureProjectWorkflow", () => {
       replayPollMs: 1,
       onProgress: (progress) => heard.push(progress.phase === "replaying" ? `replaying ${String(progress.done)}/${String(progress.total)}` : progress.phase === "waiting" ? `waiting:${progress.detail}` : progress.phase),
     });
-    expect(heard).toEqual(["waiting:hub replacement", "deploying", "waiting:placement", "replaying 0/3", "replaying 1/3", "replaying 2/3", "replaying 3/3"]);
+    expect(heard).toEqual(["deploying", "waiting:placement", "replaying 0/3", "replaying 1/3", "replaying 2/3", "replaying 3/3"]);
   });
 
   // #299: a dead run whose reducer wrote a whole state is revived from
@@ -894,56 +894,6 @@ describe("ensureProjectWorkflow", () => {
   // deployment carrying the run's restored history, within seconds. A
   // project that deployed its own in that window would have two; waiting
   // for the replacement first is what keeps it to one.
-  test("waits for the hub's replacement of a dead deployment rather than deploying its own", async () => {
-    const hub = fakeHub(
-      withAsset({
-        deployments: [{ id: "dep_dead", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" }],
-        runsByDeployment: { dep_dead: decidedRun("run_0", [1, 2]).runIds },
-        eventsByRun: decidedRun("run_0", [1, 2]).events,
-        appearAtListing: {
-          2: [
-            {
-              deployment: { id: "dep_replacement", definitionAssetId: ASSET_ID, status: "running", createdAt: "2026-01-03T00:00:00.000Z" },
-              runIds: decidedRun("run_r", [1, 2], CURRENT).runIds,
-              events: decidedRun("run_r", [1, 2], CURRENT).events,
-            },
-          ],
-        },
-      }),
-    );
-    expect(await ensure(hub, 10_000)).toEqual({ deploymentId: "dep_replacement", runId: "run_r", tenantId: TENANT_ID });
-    expect(hub.posts).toEqual([]);
-  });
-
-  test("keeps waiting for the hub's replacement past the wait bound while the hub is still placing other deployments", async () => {
-    // After a restart the hub restores sidecars one at a time: another
-    // deployment moves on the third listing, and this project's replacement
-    // only appears on the fifth. A bound counted from the call's start
-    // (listing 2) would have run out by the fourth listing; one counted
-    // from the hub's last visible move has not (#79).
-    const other = (status: string) => ({ deployment: { id: "dep_other", definitionAssetId: "asset_other", status, createdAt: "2026-01-02T00:00:00.000Z" } });
-    const hub = fakeHub(
-      withAsset({
-        deployments: [{ id: "dep_dead", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" }],
-        runsByDeployment: { dep_dead: decidedRun("run_0", [1, 2]).runIds },
-        eventsByRun: decidedRun("run_0", [1, 2]).events,
-        appearAtListing: {
-          2: [other("recovering")],
-          3: [other("deployed")],
-          5: [
-            {
-              deployment: { id: "dep_replacement", definitionAssetId: ASSET_ID, status: "running", createdAt: "2026-01-03T00:00:00.000Z" },
-              runIds: decidedRun("run_r", [1, 2], CURRENT).runIds,
-              events: decidedRun("run_r", [1, 2], CURRENT).events,
-            },
-          ],
-        },
-      }),
-    );
-    expect(await ensure(hub, 100, 60)).toEqual({ deploymentId: "dep_replacement", runId: "run_r", tenantId: TENANT_ID });
-    expect(hub.posts).toEqual([]);
-  });
-
   test("deploys its own replacement once the hub has sat still for the wait bound", async () => {
     const hub = fakeHub(
       withAsset({
