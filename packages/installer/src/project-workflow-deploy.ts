@@ -22,6 +22,7 @@
  */
 import { ApiError, type Transport } from "@intx/hub-client";
 import { SPECIALIST_BASE_DEPENDENCIES, type InferenceSourcePin } from "@solutions-builder/app/specialist-source";
+import { isProjectStateSnapshot, type ProjectState } from "@solutions-builder/app/project-workflow/contracts";
 import { assetsFor, workflowsFor, type HubDeployment, type HubTenant } from "./hub.js";
 import { projectHome, projectTenants, type ProjectHome } from "./project-home.js";
 import { isChatCapable } from "./resolved-catalog.js";
@@ -92,7 +93,23 @@ function pickTopLevelRun(runIds: readonly string[]): string | undefined {
 }
 
 /** A decision as a run applied it: the signal to deliver again, verbatim, to a run that has to catch up. */
-type ReceivedDecision = { readonly signalName: string; readonly signalId: string; readonly payload: unknown };
+/** A decision a run took: as a signal it received, replayable as it was
+ *  sent; or as part of the snapshot it was started from (#299), held but
+ *  with no signal of its own to send again. */
+type ReceivedDecision = { readonly signalName: string; readonly signalId: string; readonly payload: unknown; readonly replayable: boolean };
+
+/** The loop's decision signal; `project-workflow/workflow.ts`'s `PROJECT_DECISION_SIGNAL`, not imported to keep the definition's module out of the installer. */
+const PROJECT_DECISION_SIGNAL_NAME = "project.decision";
+
+/** The decisions a run was started holding, off the `snapshot` on its trigger (#299). */
+function snapshotDecisionsOf(events: readonly { type: string; body: Record<string, unknown> }[]): ReceivedDecision[] {
+  const started = events.find((event) => event.type === "RunStarted");
+  const trigger = started?.body["trigger"];
+  const init = isRecord(trigger) ? initOfTriggerPayload(trigger["payload"]) : undefined;
+  const snapshot = isRecord(init) ? init["snapshot"] : undefined;
+  if (!isProjectStateSnapshot(snapshot)) return [];
+  return snapshot.decisions.map((record) => ({ signalName: PROJECT_DECISION_SIGNAL_NAME, signalId: record.decisionId, payload: undefined, replayable: false }));
+}
 
 /** The loop iterations of `runId` among `runIds`, by index: the order the loop applied decisions in. */
 function iterationRunIds(runId: string, runIds: readonly string[]): string[] {
@@ -137,7 +154,7 @@ function signalsOf(events: readonly { seq: number; type: string; body: Record<st
     if (event.type !== "SignalReceived") continue;
     const { signalName, signalId, payload } = event.body;
     if (typeof signalName !== "string" || typeof signalId !== "string") continue;
-    received.push({ signalName, signalId, payload });
+    received.push({ signalName, signalId, payload, replayable: true });
   }
   return received;
 }
@@ -157,6 +174,18 @@ async function appliedDecisions(
   const newest = iterations[iterations.length - 1];
   const received: ReceivedDecision[] = [];
   const seen = new Set<string>();
+  // What the run was started holding, off the snapshot on its trigger
+  // (#299): read once per run, since a trigger never changes.
+  const topKey = `${deploymentId}/${runId}#trigger`;
+  let carried = memo?.iterations.get(topKey);
+  if (!carried) {
+    carried = snapshotDecisionsOf((await workflows.runEvents(deploymentId, runId)).events);
+    memo?.iterations.set(topKey, carried);
+  }
+  for (const decision of carried) {
+    seen.add(decision.signalId);
+    received.push(decision);
+  }
   for (const id of iterations) {
     const key = `${deploymentId}/${id}`;
     let signals = id === newest && !settled ? undefined : memo?.iterations.get(key);
@@ -190,21 +219,27 @@ const TRIGGER_STAGES_PATH = "trigger/stages.json";
 
 /** `null` for a run triggered before code was recorded on the trigger: its
  *  code is unknown, which the caller treats as not current. */
+/** The init payload a run was triggered with: the JSON in the mail's text part for a real run, the payload itself in-process. */
+function initOfTriggerPayload(payload: unknown): unknown {
+  if (isRecord(payload) && Array.isArray(payload["parts"])) {
+    const part = (payload["parts"] as unknown[]).find((p): p is { text: string } => isRecord(p) && typeof p["text"] === "string");
+    if (!part) return undefined;
+    try {
+      return JSON.parse(part.text);
+    } catch {
+      return undefined;
+    }
+  }
+  return payload;
+}
+
 function codeOfTriggerPayload(payload: unknown): ProjectWorkflowCode | null {
   // A REAL deployed run's trigger payload is the decoded mail that fired
   // it, with the JSON in a part's inline `text` (see `actions.ts`'s
   // `initProject`, which reads the same shape); an in-process run's is the
   // payload itself.
-  let init: unknown = payload;
-  if (isRecord(payload) && Array.isArray(payload["parts"])) {
-    const part = (payload["parts"] as unknown[]).find((p): p is { text: string } => isRecord(p) && typeof p["text"] === "string");
-    if (!part) return null;
-    try {
-      init = JSON.parse(part.text);
-    } catch {
-      return null;
-    }
-  }
+  const init = initOfTriggerPayload(payload);
+  if (init === undefined) return null;
   const code = isRecord(init) ? init["code"] : undefined;
   if (!isRecord(code) || typeof code["digest"] !== "string" || typeof code["generation"] !== "number") return null;
   return { digest: code["digest"], generation: code["generation"] };
@@ -245,6 +280,30 @@ function decodeInlineOutput(ref: unknown): unknown {
  * usually parked, waiting; its carried-in state equals the previous
  * iteration's `apply` output). Null when no iteration has applied anything.
  */
+/**
+ * The state a run last wrote, whole: the newest iteration's `apply` output,
+ * else the `hold` output the newest iteration parked with (a run revived
+ * from a snapshot that has taken no decision yet holds only that). What a
+ * fresh run is started from instead of replaying every decision (#299).
+ * Null when no iteration has written a state this workflow recognises.
+ */
+async function latestStateOf(
+  workflows: ReturnType<typeof workflowsFor>,
+  deploymentId: string,
+  runId: string,
+): Promise<ProjectState | null> {
+  const iterations = iterationRunIds(runId, await workflows.runs(deploymentId));
+  for (const id of [...iterations].reverse()) {
+    const { events } = await workflows.runEvents(deploymentId, id);
+    for (const stepId of ["apply", "hold"]) {
+      const completed = [...events].reverse().find((event) => event.type === "StepCompleted" && event.body["stepId"] === stepId);
+      const output = decodeInlineOutput((completed?.body["output"] as { ref?: unknown } | undefined)?.ref);
+      if (isProjectStateSnapshot(output)) return output;
+    }
+  }
+  return null;
+}
+
 async function ledgerOf(
   workflows: ReturnType<typeof workflowsFor>,
   deploymentId: string,
@@ -538,6 +597,8 @@ async function catchUp(transport: Transport, target: ProjectWorkflowDeployment, 
   options.onProgress?.({ phase: "replaying", done, total: history.length });
   for (const decision of history) {
     if (held.has(decision.signalId)) continue;
+    // A decision held only by a snapshot has no signal to send again (#299).
+    if (!decision.replayable) throw new Error(`the project's workflow cannot take decision ${decision.signalId} again: it exists only in a snapshot`);
     // Not before the run is parked: its writer is idle only then.
     const ready = await pollUntil(90_000, pollMs, async () => {
       const events = await topLevel();
@@ -586,6 +647,8 @@ export type ProjectWorkflowReplay = {
   readonly from: ProjectWorkflowDeployment;
   readonly replayed: number;
   readonly refused: readonly ProjectWorkflowReplayRefusal[];
+  /** How the fresh run was brought up: started from `from`'s last state, or every recorded signal sent again (#299). */
+  readonly via: "snapshot" | "signals";
 };
 
 /**
@@ -617,7 +680,7 @@ async function replayOutcome(
       stage: typeof row.stage === "number" ? row.stage : null,
       reason: typeof row.reason === "string" ? row.reason : "refused",
     }));
-  return { from, replayed: history.length, refused };
+  return { from, replayed: history.length, refused, via: "signals" };
 }
 
 /** The bytes a project workflow deploy needs: the compiled
@@ -737,6 +800,9 @@ export type EnsureProjectWorkflowOptions = {
   readonly replayStallMs?: number;
   /** Hears what the ensure step is doing, for a caller that shows work in flight (#295). */
   readonly onProgress?: (progress: EnsureProgress) => void;
+  /** Rebuild the project's run from its recorded decisions rather than its
+   *  last state: a fresh deployment replayed onto, whatever is live (#299). */
+  readonly repair?: boolean;
   /** The project's opening statement, handed to a fresh run for its `name` step. */
   readonly problemStatement?: string;
 };
@@ -754,6 +820,8 @@ type DeployContext = {
   readonly rendered: Record<string, string>;
   readonly code: ProjectWorkflowCode;
   readonly problemStatement: string | undefined;
+  /** The state the fresh run starts from, when it revives a run (#299). */
+  readonly snapshot?: ProjectState;
 };
 
 /**
@@ -809,6 +877,7 @@ async function deployFreshRun(context: DeployContext, known: ReadonlySet<string>
     stages: context.stages,
     code: context.code,
     ...(context.problemStatement ? { problemStatement: context.problemStatement } : {}),
+    ...(context.snapshot ? { snapshot: context.snapshot } : {}),
   };
   const fired = await workflows.trigger(deployment.id, { content: JSON.stringify(payload) });
   const afterTrigger = topLevelRunIds(await workflows.runs(deployment.id));
@@ -879,7 +948,7 @@ async function ensureProjectWorkflowOnce(
   const memo = createDecisionMemo();
   const idsOf = (groups: readonly DeploymentGroup[], keep: (deployment: HubDeployment) => boolean = () => true) =>
     new Set(groups.flatMap((group) => group.deployments.filter(keep).map((deployment) => deployment.id)));
-  const context = (generation: number): DeployContext => ({
+  const context = (generation: number, snapshot?: ProjectState): DeployContext => ({
     transport,
     gitPush,
     tenant,
@@ -891,6 +960,7 @@ async function ensureProjectWorkflowOnce(
     rendered,
     code: { digest, generation },
     problemStatement: options.problemStatement,
+    ...(snapshot ? { snapshot } : {}),
   });
 
   // How long the hub may sit still before this waits no more on it: for
@@ -927,14 +997,40 @@ async function ensureProjectWorkflowOnce(
   };
   let groups = await everywhere();
   let state = await projectRunState(transport, groups, memo);
+  /**
+   * A fresh run in `from`'s place, at `generation`. Started from the state
+   * `from` last wrote when that can be read (#299): nothing to replay, and the
+   * run parks at the project's real stage the moment it starts. Replayed
+   * from the recorded signals otherwise, and always on a repair, which is
+   * the person asking not to trust the last state.
+   */
+  const revive = async (from: ProjectWorkflowDeployment, history: readonly ReceivedDecision[], generation: number, known: ReadonlySet<string>): Promise<EnsuredProjectWorkflow> => {
+    const snapshot = options.repair ? null : await latestStateOf(workflowsOf(transport, from), from.deploymentId, from.runId);
+    if (snapshot) {
+      progress({ phase: "deploying" });
+      const target = await deployFreshRun(context(generation, snapshot), known);
+      return { ...target, replay: { from, replayed: snapshot.decisions.length, refused: [], via: "snapshot" } };
+    }
+    const unsendable = history.filter((decision) => !decision.replayable);
+    if (unsendable.length > 0) {
+      throw new Error(
+        `the project's history cannot be replayed: ${String(unsendable.length)} of its ${String(history.length)} decisions exist only in a snapshot with no signal to send again, and no last state could be read`,
+      );
+    }
+    progress({ phase: "deploying" });
+    const target = await broughtUp(await deployFreshRun(context(generation), known), generation, history);
+    return { ...target, replay: await replayOutcome(transport, from, target, history) };
+  };
+
   if (state.run && state.live) {
     // Live by status is not usable yet (#236): at boot the hub restores a
     // dead deployment through `recovering`, unplaced, and one whose run has
     // ended cannot come back at all. Handed back as it is, the page waited
     // minutes for a placement that never came. It is waited for within the
     // replacement bounds, then either returned placed or replaced below.
-    const usability = state.code?.digest === digest ? await deploymentUsability(transport, state.run.tenantId, state.run.deploymentId, state.run.runId, placementWait) : "usable";
-    if (state.code?.digest === digest && usability === "usable") return state.run;
+    // A repair (#299) never reuses it: the person asked for a rebuild.
+    const usability = state.code?.digest === digest && !options.repair ? await deploymentUsability(transport, state.run.tenantId, state.run.deploymentId, state.run.runId, placementWait) : "usable";
+    if (state.code?.digest === digest && !options.repair && usability === "usable") return state.run;
     // The live run is on other code than this render (#51): a reducer fix
     // that never reached this project, or a run from before code was
     // recorded. It is replaced the way a dead run is revived -- a fresh
@@ -945,8 +1041,7 @@ async function ensureProjectWorkflowOnce(
     // A run the hub could not bring back (#236) is replaced the same way.
     const from = state.run;
     const history = await appliedDecisions(workflowsOf(transport, from), from.deploymentId, from.runId, memo);
-    const target = await broughtUp(await (progress({ phase: "deploying" }), deployFreshRun)(context(state.generation + 1), idsOf(groups)), state.generation + 1, history);
-    return { ...target, replay: await replayOutcome(transport, from, target, history) };
+    return revive(from, history, state.generation + 1, idsOf(groups));
   }
   // The hub replaces a dead deployment's sidecar on its own after a host
   // restart (CL-8784), as a new deployment carrying the run's restored
@@ -982,7 +1077,7 @@ async function ensureProjectWorkflowOnce(
   // which takes the replacement path above. A candidate the hub cannot
   // place, or whose run has ended (#236), is passed over for a fresh one.
   const candidate = state.liveCandidates[0];
-  if (candidate && (await deploymentUsability(transport, candidate.tenantId, candidate.deployment.id, candidate.runId, placementWait)) === "usable") {
+  if (candidate && !options.repair && (await deploymentUsability(transport, candidate.tenantId, candidate.deployment.id, candidate.runId, placementWait)) === "usable") {
     const target = await broughtUp({ deploymentId: candidate.deployment.id, runId: candidate.runId, tenantId: candidate.tenantId }, state.generation, state.history);
     return state.run && state.run.deploymentId !== target.deploymentId
       ? { ...target, replay: await replayOutcome(transport, state.run, target, state.history) }
@@ -992,8 +1087,9 @@ async function ensureProjectWorkflowOnce(
   // Every deployment that exists now is known: an ended one, one whose run
   // ended (#203), and one a newer generation superseded are all placed and
   // must not be reused as the fresh run's home.
+  if (from) return revive(from, state.history, state.generation + 1, idsOf(groups));
   const target = await broughtUp(await (progress({ phase: "deploying" }), deployFreshRun)(context(state.generation + 1), idsOf(groups)), state.generation + 1, state.history);
-  return from ? { ...target, replay: await replayOutcome(transport, from, target, state.history) } : target;
+  return target;
 }
 
 /**
