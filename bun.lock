@@ -12,7 +12,6 @@
         "@corbits/mailbox": "github:corbitsdev/corbits-mailbox",
         "@corbits/oauth-core": "^0.2.0",
         "@corbits/openai-responses": "^0.2.1",
-        "@corbits/process-provisioner": "workspace:*",
         "@corbits/react-ui": "github:corbitsdev/react-ui#feat/chat-input-icon-slots",
         "@corbits/xai-provider": "^0.1.1",
         "@electric-sql/pglite": "^0.3.16",
@@ -109,7 +108,6 @@
         "@corbits/mailbox": "github:corbitsdev/corbits-mailbox#8289024",
         "@corbits/oauth-core": "^0.2.0",
         "@corbits/openai-responses": "^0.2.1",
-        "@corbits/process-provisioner": "workspace:*",
         "@corbits/xai-provider": "^0.1.1",
         "@electric-sql/pglite": "^0.3.16",
         "@intx/authz": "0.4.0",
@@ -342,35 +340,6 @@
         "arktype": "catalog:",
       },
     },
-    "vendor/workbench/packages/error-sink": {
-      "name": "@corbits/error-sink",
-      "version": "0.0.1",
-      "dependencies": {
-        "@intx/log": "0.4.0",
-        "arktype": "catalog:",
-      },
-    },
-    "vendor/workbench/packages/process-provisioner": {
-      "name": "@corbits/process-provisioner",
-      "version": "0.0.1",
-      "dependencies": {
-        "@corbits/error-sink": "workspace:*",
-        "@corbits/sandbox-sidecar": "workspace:*",
-        "@intx/hub-sessions": "0.4.0",
-        "arktype": "catalog:",
-      },
-    },
-    "vendor/workbench/packages/sandbox-sidecar": {
-      "name": "@corbits/sandbox-sidecar",
-      "version": "0.0.1",
-      "dependencies": {
-        "@intx/crypto": "0.4.0",
-        "@intx/hub-sessions": "0.4.0",
-        "@intx/log": "0.4.0",
-        "@intx/types": "0.4.0",
-        "arktype": "catalog:",
-      },
-    },
   },
   "trustedDependencies": [
     "@corbits/react-ui",
@@ -471,8 +440,6 @@
 
     "@corbits/embedded-host": ["@corbits/embedded-host@workspace:packages/embedded-host"],
 
-    "@corbits/error-sink": ["@corbits/error-sink@workspace:vendor/workbench/packages/error-sink"],
-
     "@corbits/keychain": ["@corbits/keychain@workspace:packages/keychain"],
 
     "@corbits/mailbox": ["@corbits/mailbox@github:corbitsdev/corbits-mailbox#8289024", { "dependencies": { "@hono/standard-validator": "0.2.3", "@intx/crypto": "0.4.0", "@standard-community/standard-json": "0.3.5", "@standard-community/standard-openapi": "0.2.9", "arktype": "2.1.29", "hono-openapi": "1.3.1" }, "peerDependencies": { "@intx/log": "^0.4.0", "@intx/mailbox": "^0.4.0", "@intx/mime": "^0.4.0", "@intx/types": "^0.4.0", "drizzle-orm": "^0.45.2", "hono": "^4.12.0", "postgres": "^3.4.0" } }, "corbitsdev-corbits-mailbox-8289024", "sha512-ay5tepO3btBxVxUULY0L684lyaLY3MrZU6zjGy2AbU6at3XMY50skt7nnWrFCfD28vJj4PYjvz1eiQ4CCgASnQ=="],
@@ -481,11 +448,7 @@
 
     "@corbits/openai-responses": ["@corbits/openai-responses@0.2.1", "", { "dependencies": { "arktype": "2.2.3" }, "peerDependencies": { "@intx/inference": "^0.4.0", "@intx/types": "^0.4.0" } }, "sha512-jhT1opXhFNoeq+Og8n1j3FaXlqxAsJGfNlVTwuN+2+Ee29z15mU4dzJ4JwY6njAOHVXvBk6mgYCGRu+NjU9rmw=="],
 
-    "@corbits/process-provisioner": ["@corbits/process-provisioner@workspace:vendor/workbench/packages/process-provisioner"],
-
     "@corbits/react-ui": ["@corbits/react-ui@github:corbitsdev/react-ui#8b34b41", { "dependencies": { "class-variance-authority": "^0.7.1", "clsx": "^2.1.1", "tailwind-merge": "^3.3.1" }, "peerDependencies": { "@radix-ui/react-dialog": "^1.1.15", "@radix-ui/react-dropdown-menu": "^2.1.16", "@radix-ui/react-slot": "^1.2.3", "@radix-ui/react-tooltip": "^1.2.8", "lucide-react": "^0.545.0 || ^1.0.0", "react": "^18.2.0 || ^19.0.0", "react-dom": "^18.2.0 || ^19.0.0", "sonner": "^2.0.7" } }, "corbitsdev-react-ui-8b34b41", "sha512-gIKR6Nd4NN7wXTOWBApT5stcDWffAvH8ApDbmOH7QI1PZ1NoUx8faX5JhkMLUgw9FdBl81h+wHXmGCej4wzK3g=="],
-
-    "@corbits/sandbox-sidecar": ["@corbits/sandbox-sidecar@workspace:vendor/workbench/packages/sandbox-sidecar"],
 
     "@corbits/xai-provider": ["@corbits/xai-provider@0.1.1", "", { "dependencies": { "arktype": "^2.2.3" }, "peerDependencies": { "@corbits/oauth-core": "^0.2.0", "@corbits/openai-responses": "^0.2.0", "@intx/inference": "^0.4.0", "@intx/types": "^0.4.0" } }, "sha512-VbXdu5M300oQYQnP4Q8F0z6/Rm9kYTnIkBfo9svGlSus4rFRqEOArNhncKgFvu3Nwf9Qgooov3i8OU8gQCo/TQ=="],
 
