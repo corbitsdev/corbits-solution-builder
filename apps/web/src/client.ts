@@ -190,6 +190,16 @@ export type ApiError = {
   install?: boolean;
 };
 
+/** The host's Google Drive connection, as `GET /api/google-drive` reports it. */
+export type GoogleDriveStatus = {
+  readonly connected: boolean;
+  readonly email: string | null;
+  readonly clientId: string | null;
+  readonly login: { status: "idle" } | { status: "pending" } | { status: "error"; message: string };
+};
+/** A deck uploaded as a Google Slides document. */
+export type UploadedSlides = { readonly id: string; readonly url: string; readonly name: string };
+
 export class ApiFailure extends Error {
   readonly detail: ApiError;
   /** The HTTP status the host answered with, when the failure came from a response (not a dropped connection). */
@@ -1017,6 +1027,32 @@ export const api = {
    * `/owner/session`). Embedded-only; a remote hub answers with a refusal.
    */
   mintOwner: () => post<{ ok: true }>("/owner/session"),
+  /**
+   * The host's Google Drive connection (#233): one click from a
+   * stakeholder's slides to a Google Slides document. The sign-in is the
+   * host's loopback OAuth flow, so `connect` returns the consent URL the
+   * host also opens in the browser, and `awaitLogin` polls until the
+   * tokens land. Google's tokens never reach this window; `uploadSlides`
+   * posts the PowerPoint and gets the document's link back.
+   */
+  googleDrive: {
+    status: () => request<GoogleDriveStatus>("/google-drive"),
+    connect: (client: { clientId: string; clientSecret: string }) => post<{ authorizeUrl: string }>("/google-drive/connect", client),
+    cancel: () => post<{ status: "idle" }>("/google-drive/cancel"),
+    disconnect: () => post<GoogleDriveStatus>("/google-drive/disconnect"),
+    uploadSlides: (slides: { name: string; pptxBase64: string }) => post<UploadedSlides>("/google-drive/slides", slides),
+    awaitLogin: async (timeoutMs = 180_000): Promise<GoogleDriveStatus> => {
+      const deadline = Date.now() + timeoutMs;
+      for (;;) {
+        const status = await request<GoogleDriveStatus>("/google-drive");
+        if (status.connected && status.login.status !== "pending") return status;
+        if (status.login.status === "error") throw new Error(status.login.message);
+        if (status.login.status === "idle") throw new Error("The sign-in was cancelled.");
+        if (Date.now() >= deadline) throw new Error("Sign-in timed out. Try again.");
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+      }
+    },
+  },
   installState: async (): Promise<InstallState> => {
     const status = await request<HostStatus>("/status");
     if (status.hub.mode !== "embedded") return HOSTED_INSTALL;

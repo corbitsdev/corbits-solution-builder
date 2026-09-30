@@ -62,3 +62,11 @@ export {
   type HostState,
 } from "./lifecycle.js";
 export { HostError, ERROR_CODES, type ErrorCode } from "./errors.js";
+/** The Google Drive connection a product host mounts beside its own routes (#233). */
+export {
+  mountGoogleDrive,
+  type GoogleDriveDeps,
+  type GoogleDriveStatus,
+  type GoogleSecretStore,
+  type UploadedSlides,
+} from "@corbits/embed-hub";

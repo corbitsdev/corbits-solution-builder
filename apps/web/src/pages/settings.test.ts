@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { hostConnectionCopy, hostCredentialsCopy, hostDataCopy, roleLabel, deckThemeLabel, DECK_THEME_CHOICES } from "./settings.tsx";
+import { googleDriveCopy, hostConnectionCopy, hostCredentialsCopy, hostDataCopy, roleLabel, deckThemeLabel, DECK_THEME_CHOICES } from "./settings.tsx";
 import type { HostStatus } from "../client.ts";
 
 function fixtureStatus(overrides: Partial<HostStatus> = {}): HostStatus {
@@ -205,5 +205,18 @@ describe("provider and catalog row language", () => {
       expect(page).not.toContain(action);
     }
     expect(source).not.toContain("<ul className=\"provider-list\"");
+  });
+});
+
+// #233: the Google Drive row says who is connected, or what connecting takes.
+describe("googleDriveCopy", () => {
+  const idle = { status: "idle" as const };
+  test("names the account when connected, and the remembered client when not", () => {
+    expect(googleDriveCopy(null)).toBe("Checking…");
+    expect(googleDriveCopy({ connected: true, email: "brian@example.com", clientId: "c", login: idle })).toBe("Connected as brian@example.com.");
+    expect(googleDriveCopy({ connected: true, email: null, clientId: "c", login: idle })).toBe("Connected.");
+    expect(googleDriveCopy({ connected: false, email: null, clientId: null, login: idle })).toBe("Not connected.");
+    expect(googleDriveCopy({ connected: false, email: null, clientId: "c", login: idle })).toContain("remembered");
+    expect(googleDriveCopy({ connected: false, email: null, clientId: "c", login: { status: "pending" } })).toContain("Finish signing in");
   });
 });

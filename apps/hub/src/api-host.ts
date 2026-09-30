@@ -3,14 +3,41 @@ import {
   credentialBackend,
   dataDirectory,
   ensureHub,
+  hostIdentity,
   hostStatus,
   mintOwnerSetCookie,
+  readSecretResult,
+  secretReference,
   sidecarFacts,
+  storeSecret,
+  mountGoogleDrive,
+  type GoogleSecretStore,
 } from "@corbits/embedded-host";
+
+/**
+ * The Google Drive connection's client and tokens live in the OS keychain
+ * beside the host's own secrets (#233). The keychain has no delete, so a
+ * forgotten secret is written empty, which the store reads as absent.
+ */
+export const keychainSecretStore: GoogleSecretStore = {
+  async read(account) {
+    const read = await readSecretResult(await secretReference(account));
+    if (read.status === "found") return read.secret === "" ? null : read.secret;
+    if (read.status === "missing") return null;
+    throw new Error(`The keychain could not be read: ${read.detail}`);
+  },
+  async write(account, value) {
+    await storeSecret(account, value);
+  },
+};
 
 export const API_VERSION = "1";
 
-export function registerHostRoutes(api: Hono) {
+export function registerHostRoutes(api: Hono, secrets: GoogleSecretStore = keychainSecretStore) {
+  // One click from a stakeholder's slides to Google Slides: the connection
+  // and the upload live here, so nothing of Google's reaches the browser.
+  mountGoogleDrive(api, hostIdentity().oauthPageCopy, secrets);
+
   api.get("/status", async (context) => {
     // Connected inference is read straight from the hub catalog routes by
     // the client (apps/web/src/provider-catalog.ts); this host no longer

@@ -102,6 +102,13 @@ import { captureMailboxRequest, createMailboxDeliver } from "./mailbox-send.js";
 /** The path a sidecar's WebSocket connects to; part of `@intx/hub-api`'s own contract. */
 export const SIDECAR_WS_PATH = "/api/sidecars/ws";
 export type { CallbackPageCopy };
+export {
+  mountGoogleDrive,
+  type GoogleDriveDeps,
+  type GoogleDriveStatus,
+  type SecretStore as GoogleSecretStore,
+  type UploadedSlides,
+} from "./google-drive.js";
 
 /** The text of a mailbox frame this package built: flat, so everything after the header section is the body. */
 function frameBody(raw: Uint8Array): string {
