@@ -87,6 +87,10 @@ export function matchSwitchMarker(line: string): string | null {
  *  was dropped — enough for the new specialist to pick the thread back up
  *  without every hand-off ballooning into the entire stage history. */
 const MAX_HANDOFF_TURNS = 20;
+/** And to this many characters of those turns (#305): twenty replies that
+ *  are each a whole package are still a recap, not a stage history. The
+ *  opening is outside the budget; it is the stage's input and rides whole. */
+export const MAX_HANDOFF_CHARS = 200_000;
 /** What the chat column shows for a hand-off mail in place of its recap:
  *  the recap is for the new specialist, and read back by a person it is
  *  the last twenty turns again, a whole HTML mockup included (#85). The
@@ -109,13 +113,41 @@ function transcriptTurn(message: ChatMessage, opening = false): string {
   return `${who}: ${message.body}`;
 }
 
-function transcriptBlock(messages: readonly ChatMessage[]): string {
+/** Whether a person's message is a hand-off mail: the marker line first. */
+export function isHandoffMessage(message: Pick<ChatMessage, "author" | "body">): boolean {
+  return message.author === "me" && matchSwitchMarker(message.body.split("\n")[0] ?? "") !== null;
+}
+
+/**
+ * The turns a recap quotes: the conversation's own turns, never an earlier
+ * hand-off (#305). A hand-off is a person turn carrying its own recap, so
+ * quoting it nested the recap before it inside this one, and with the
+ * opening quoted whole in each, a stage redeployed 227 times handed its
+ * specialist 24 MB and eight million tokens. The turns a hand-off carried
+ * are in the merged thread already, so leaving it out loses nothing.
+ */
+export function conversationTurns(messages: readonly ChatMessage[]): ChatMessage[] {
+  return messages.filter((message) => !isHandoffMessage(message));
+}
+
+/** The newest of `turns` that fit the count and the character budget, oldest dropped first. */
+function keptTurns(turns: readonly ChatMessage[]): ChatMessage[] {
+  const byCount = turns.length > MAX_HANDOFF_TURNS - 1 ? turns.slice(-(MAX_HANDOFF_TURNS - 1)) : [...turns];
+  let size = byCount.reduce((sum, message) => sum + transcriptTurn(message).length, 0);
+  while (byCount.length > 1 && size > MAX_HANDOFF_CHARS) {
+    size -= transcriptTurn(byCount.shift()!).length;
+  }
+  return byCount;
+}
+
+function transcriptBlock(all: readonly ChatMessage[]): string {
+  const messages = conversationTurns(all);
   if (messages.length === 0) return "(No conversation yet.)";
   const opening = messages[0]!;
   const rest = messages.slice(1);
   // The opening always rides along in full; the condensing applies to
   // what followed it.
-  const kept = rest.length > MAX_HANDOFF_TURNS - 1 ? rest.slice(-(MAX_HANDOFF_TURNS - 1)) : rest;
+  const kept = keptTurns(rest);
   const omitted = rest.length - kept.length;
   const lines = [transcriptTurn(opening, opening.author === "me"), ...kept.map((message) => transcriptTurn(message))];
   return omitted > 0
