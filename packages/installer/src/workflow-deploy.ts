@@ -55,8 +55,8 @@ function isPlaced(deployment: HubDeployment): boolean {
 
 /**
  * How long a wait on the hub's placement may last. Every bound has a
- * default sized for a host restart, when the hub restores each dead
- * deployment's sidecar in turn and each takes a minute or more.
+ * default sized for a host start, when several deployments may be placed
+ * one after another and each can take a minute or more.
  */
 export type PlacementWait = {
   /** How long the hub may go with no deployment in the tenant changing
@@ -83,13 +83,12 @@ function placementFingerprint(deployments: readonly HubDeployment[]): string {
  * Polls the tenant's deployments until `read` settles on a result, and
  * gives up (null) only once the hub has visibly stopped: no deployment in
  * the tenant has appeared or changed status for `stallMs`, or the wait has
- * lasted `ceilingMs`. After a host restart the hub restores every dead
- * deployment's sidecar one at a time, so a deadline counted from the
- * caller's own start ran out while the hub was still working through the
- * ones ahead of this caller's. Counting from the hub's last visible move
- * instead keeps a page opened mid-restart waiting -- honestly, since the
- * hub is still placing -- rather than reporting a failure that a retry a
- * minute later would not see.
+ * lasted `ceilingMs`. The hub places deployments one at a time, so a
+ * deadline counted from the caller's own start ran out while the hub was
+ * still working through the ones ahead of this caller's. Counting from the
+ * hub's last visible move instead keeps a page waiting -- honestly, since
+ * the hub is still placing -- rather than reporting a failure that a retry
+ * a minute later would not see.
  */
 export async function pollWhilePlacing<T>(
   workflows: { deployments: () => Promise<readonly HubDeployment[]> },
