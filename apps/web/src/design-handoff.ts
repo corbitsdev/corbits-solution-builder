@@ -1,3 +1,4 @@
+import { screenNamesOf } from "./mockup-shots.ts";
 import { isHtmlDocument } from "./pages/workspace/guidance.ts";
 
 /**
@@ -18,7 +19,10 @@ export const HANDOFF_LEAD = "The approved design is an HTML mockup, on record as
 
 export function designHandoff(design: string): string {
   if (!isHtmlDocument(design)) return design;
-  return [HANDOFF_LEAD, "", "```text", designAsText(design), "```"].join("\n");
+  // The screens by name, so a slide may ask for one (#302).
+  const screens = screenNamesOf(design);
+  const naming = screens.length > 0 ? [`Its screens, which a slide may name as (screen: <name>): ${screens.join(", ")}.`, ""] : [];
+  return [HANDOFF_LEAD, "", ...naming, "```text", designAsText(design), "```"].join("\n");
 }
 
 /**

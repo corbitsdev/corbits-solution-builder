@@ -64,7 +64,10 @@ describe("buildPackageDeck", () => {
         html: "<!doctype html><html><body><section data-surface=\"phone\">a</section><section data-surface=\"web\">b</section></body></html>",
         shoot: async (html, max) => {
           shots.push(`${String(max)}:${String(html.length)}`);
-          return [png, png];
+          return [
+            { name: "phone", png },
+            { name: "web", png },
+          ];
         },
       },
     });

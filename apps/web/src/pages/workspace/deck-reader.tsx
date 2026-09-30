@@ -19,7 +19,7 @@ import { api, ApiFailure, type ArtifactNode } from "../../client.js";
 import { Button, downloadArtifact } from "../../components.jsx";
 import { deckDesignFor } from "../../deck-design-settings.ts";
 import { deckFileName } from "../../deck-save.ts";
-import { mockupShots, placeMockups } from "../../mockup-shots.ts";
+import { mockupShots, placeMockups, type MockupShot } from "../../mockup-shots.ts";
 import { printHtmlDocument } from "../../print.jsx";
 import { slidesPrintHtml } from "../../slides-print.ts";
 import { isDataUrl } from "../../binary-file.tsx";
@@ -117,7 +117,7 @@ export function useRecordedDeck(args: {
         setBuilt({ forId: nodeId, deck: null, note: "No slides to show: the package's deck outline has no slides." });
         return;
       }
-      const shots = designHtml ? await mockupShots(designHtml).catch(() => [] as Uint8Array[]) : [];
+      const shots = designHtml ? await mockupShots(designHtml).catch(() => [] as MockupShot[]) : [];
       if (cancelled) return;
       const pictured = shots.length > 0 ? { ...deck, images: placeMockups(deck, shots) } : deck;
       const notes = [
