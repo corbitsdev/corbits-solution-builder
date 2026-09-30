@@ -41,7 +41,7 @@ describe("designAsText", () => {
 describe("designHandoff", () => {
   test("hands an HTML design over as its text in a labelled block, never as markup", () => {
     const handoff = designHandoff(MOCKUP);
-    expect(handoff).toStartWith("The approved design is an HTML mockup, on record as the stage 4 artifact. Its text, for reference:\n\n```text\n# Mockup — phone companion");
+    expect(handoff).toStartWith("The approved design is an HTML mockup, on record as the stage 4 artifact. Its text, for reference:\n\nIts screens, which a slide may name as (screen: <name>): phone.\n\n```text\n# Mockup — phone companion");
     expect(handoff).toEndWith("\n```");
     expect(handoff).not.toContain("<section");
     expect(handoff).not.toContain("<!doctype");

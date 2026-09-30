@@ -19,7 +19,43 @@
  */
 import type { Deck } from "@solutions-builder/app/deck";
 
-export type Shooter = (html: string, max: number) => Promise<Uint8Array[]>;
+/** One screen of the mockup: the name a slide may ask for it by, and its picture. */
+export type MockupShot = { readonly name: string; readonly png: Uint8Array };
+
+export type Shooter = (html: string, max: number) => Promise<MockupShot[]>;
+
+/**
+ * The names a design's screens go by (#302): the `screen-`/`view-` test
+ * ids the designer names each section with, as words, each once, in order;
+ * else its `data-surface` values, which are kinds (phone, desktop) rather
+ * than names and so only tell screens apart in a design with one of each.
+ * What the hand-off lists and a slide may name.
+ */
+export function screenNamesOf(html: string): string[] {
+  const names: string[] = [];
+  const add = (raw: string | undefined) => {
+    const name = (raw ?? "").trim();
+    if (name && !names.includes(name)) names.push(name);
+  };
+  for (const match of html.matchAll(/data-testid\s*=\s*(?:"((?:screen|view)-[^"]+)"|'((?:screen|view)-[^']+)')/g)) add(screenNameOfTestId(match[1] ?? match[2] ?? ""));
+  if (names.length > 0) return names;
+  for (const match of html.matchAll(/data-surface\s*=\s*(?:"([^"]+)"|'([^']+)')/g)) add(match[1] ?? match[2]);
+  return names;
+}
+
+/** `screen-phone-home` → "phone home": the test id a designer named a section with, as words. */
+function screenNameOfTestId(testId: string): string {
+  return testId.replace(/^(screen|view)-/, "").replace(/[-_]+/g, " ").trim();
+}
+
+/** A wide screen is captured as a viewport, not a whole page: this much of its width, from the top (#302). */
+const WIDE_SCREEN_MIN_WIDTH = 700;
+const WIDE_SCREEN_HEIGHT_RATIO = 0.75;
+
+/** How tall a screen's capture is: its own height, or a viewport of it when it is a long wide page. */
+export function captureHeight(width: number, height: number): number {
+  return width >= WIDE_SCREEN_MIN_WIDTH ? Math.min(height, Math.round(width * WIDE_SCREEN_HEIGHT_RATIO)) : height;
+}
 
 /** How wide a screen is drawn, in CSS pixels, before the device pixel ratio. */
 const SHOT_SCALE = 2;
@@ -27,19 +63,36 @@ const LOAD_TIMEOUT_MS = 8_000;
 
 /**
  * The deck's pictures with the mockup's screens placed (#252): existing
- * illustrations are kept; a slide with no lines — the outline's "What it
- * looks like" — takes a screen first, since the picture is the slide; the
- * cover takes one when it has none; and the screens left are spread evenly
- * over the item slides still without a picture. Each screen is used once,
- * so no two slides in a row carry the same one, and a slide is allowed to
- * have no picture: running out of screens leaves the rest bare rather than
- * cycling. No screens leaves the pictures as they were.
+ * illustrations are kept; a slide that names a screen, `(screen: <name>)`
+ * in its outline item (#302), takes that one by name or by number; a
+ * slide with no lines — the outline's "What it looks like" — takes a screen
+ * next, since the picture is the slide; the cover takes one when it has
+ * none; and the screens left are spread evenly over the item slides still
+ * without a picture. Each screen is used once, so no two slides in a row
+ * carry the same one, and a slide is allowed to have no picture: running
+ * out of screens leaves the rest bare rather than cycling. No screens
+ * leaves the pictures as they were.
  */
-export function placeMockups(deck: Pick<Deck, "slides" | "images">, shots: readonly Uint8Array[]): Map<string, Uint8Array> {
+export function placeMockups(deck: Pick<Deck, "slides" | "images">, shots: readonly MockupShot[]): Map<string, Uint8Array> {
   const images = new Map(deck.images ?? []);
   if (shots.length === 0) return images;
   const queue = [...shots];
-  const take = () => queue.shift();
+  const byName = (wanted: string): MockupShot | undefined => {
+    const name = wanted.trim().toLowerCase();
+    const number = Number(name);
+    if (Number.isInteger(number) && number >= 1 && number <= shots.length) return shots[number - 1];
+    return shots.find((shot) => shot.name.toLowerCase() === name);
+  };
+  deck.slides.forEach((slide, index) => {
+    const key = String(index);
+    if (!slide.screen || images.has(key)) return;
+    const shot = byName(slide.screen);
+    if (!shot) return;
+    images.set(key, shot.png);
+    const at = queue.indexOf(shot);
+    if (at !== -1) queue.splice(at, 1);
+  });
+  const take = () => queue.shift()?.png;
   deck.slides.forEach((slide, index) => {
     const key = String(index);
     if (slide.bullets.length === 0 && !images.has(key)) {
@@ -79,8 +132,18 @@ export function chooseScreens<T>(candidates: { surfaces: readonly T[]; named: re
   return [candidates.body];
 }
 
-/** The screens of an HTML mockup as PNG bytes, at most `max`; none outside a browser or for a design with nothing to draw. */
-export async function mockupShots(html: string, max = 8): Promise<Uint8Array[]> {
+/** What a captured screen is called: its named test id, else its surface kind, else its first heading, else its place. */
+function screenNameOf(target: HTMLElement, index: number): string {
+  const testId = target.getAttribute("data-testid") ?? "";
+  if (/^(screen|view)-/.test(testId)) return screenNameOfTestId(testId);
+  const surface = target.getAttribute("data-surface")?.trim();
+  if (surface) return surface;
+  const heading = target.querySelector("h1, h2, h3")?.textContent?.trim();
+  return heading || `screen ${String(index + 1)}`;
+}
+
+/** The screens of an HTML mockup, named and drawn, at most `max`; none outside a browser or for a design with nothing to draw. */
+export async function mockupShots(html: string, max = 8): Promise<MockupShot[]> {
   if (typeof document === "undefined" || typeof window === "undefined") return [];
   const frame = document.createElement("iframe");
   // Same-origin so the screens can be read; no scripts, since a generated design is untrusted.
@@ -108,11 +171,11 @@ export async function mockupShots(html: string, max = 8): Promise<Uint8Array[]> 
       body: doc.body,
     }).slice(0, max);
     const styles = [...doc.querySelectorAll("style")].map((style) => style.textContent ?? "").join("\n");
-    const shots: Uint8Array[] = [];
-    for (const target of targets) {
+    const shots: MockupShot[] = [];
+    for (const [index, target] of targets.entries()) {
       const rect = target.getBoundingClientRect();
       if (rect.width < 40 || rect.height < 40) continue;
-      shots.push(await rasterise(target, styles, doc));
+      shots.push({ name: screenNameOf(target, index), png: await rasterise(target, styles, doc) });
     }
     return shots;
   } finally {
@@ -155,7 +218,7 @@ export function shotSvg(markup: string, styles: string, size: { width: number; h
 async function rasterise(target: HTMLElement, styles: string, doc: Document): Promise<Uint8Array> {
   const rect = target.getBoundingClientRect();
   const width = Math.ceil(rect.width);
-  const height = Math.ceil(rect.height);
+  const height = captureHeight(width, Math.ceil(rect.height));
   const computed = doc.defaultView?.getComputedStyle(doc.body);
   const body: BodyLook = {
     backgroundColor: computed?.backgroundColor || "white",

@@ -26,7 +26,7 @@ import { deckDesignFor } from "../deck-design-settings.ts";
 import { slidesSource } from "../deck-templates.ts";
 import { SlidePreview } from "../slide-preview.tsx";
 import { packageNudge, packageReplyProblem, packageRequest } from "../package-request.ts";
-import { mockupShots, placeMockups } from "../mockup-shots.ts";
+import { mockupShots, placeMockups, type MockupShot } from "../mockup-shots.ts";
 import { isHtmlDocument } from "./workspace/guidance.ts";
 import { useBusyWhile } from "../use-busy.ts";
 import { packageReplyFor } from "../package-reply.ts";
@@ -427,8 +427,8 @@ export function AudiencePackages({
     };
   }, [designRef, tenantId]);
   // The screens, drawn once per design and kept for every preview and save.
-  const shotsRef = useRef<{ key: string; shots: Promise<Uint8Array[]> } | null>(null);
-  const designShots = (): Promise<Uint8Array[]> => {
+  const shotsRef = useRef<{ key: string; shots: Promise<MockupShot[]> } | null>(null);
+  const designShots = (): Promise<MockupShot[]> => {
     if (!designHtml || !designRef) return Promise.resolve([]);
     if (shotsRef.current?.key !== designRef) shotsRef.current = { key: designRef, shots: mockupShots(designHtml).catch(() => []) };
     return shotsRef.current.shots;
