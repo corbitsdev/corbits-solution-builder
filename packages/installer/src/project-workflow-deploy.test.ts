@@ -771,6 +771,24 @@ describe("ensureProjectWorkflow", () => {
     await expect(ensure(never, 0, 1, [], 1)).rejects.toThrow("the project's workflow was not placed, so its history could not be replayed");
   });
 
+  // #295: whoever waits on the ensure step can say what it is doing.
+  test("the ensure step reports deploying and each replayed decision", async () => {
+    const hub = fakeHub(
+      withAsset({
+        deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" }],
+        runsByDeployment: { dep_1: decidedRun("run_1", [1, 2, 3]).runIds },
+        eventsByRun: decidedRun("run_1", [1, 2, 3]).events,
+      }),
+    );
+    const heard: string[] = [];
+    await ensureProjectWorkflow(hub.transport, { canPlaceSidecars: true }, { files: { "workflow.js": "", "actions.js": "", "loops.js": "" } }, hub.gitPush, PROJECT_ID, [], {}, {
+      replacementWaitMs: 0,
+      replayPollMs: 1,
+      onProgress: (progress) => heard.push(progress.phase === "replaying" ? `replaying ${String(progress.done)}/${String(progress.total)}` : progress.phase === "waiting" ? `waiting:${progress.detail}` : progress.phase),
+    });
+    expect(heard).toEqual(["waiting:hub replacement", "deploying", "waiting:placement", "replaying 0/3", "replaying 1/3", "replaying 2/3", "replaying 3/3"]);
+  });
+
   test("a live run that has not caught up is brought up to the dead run's decisions, not replaced", async () => {
     const hub = fakeHub(
       withAsset({
