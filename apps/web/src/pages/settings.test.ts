@@ -190,10 +190,9 @@ describe("provider and catalog row language", () => {
     expect(source).toContain("persistOrder(moveBy(order, connected.id, -1))");
     expect(source).toContain("persistOrder(moveTo(order, connected.id, 0))");
     expect(source).toContain("api.reorderProviders(next)");
-    // A row is one provider and one model: a never-chosen provider is restricted to the model its row shows.
-    expect(source).toContain("api.selectProviderModel(provider.id, provider.selectedModel)");
-    // A stale Anthropic base (#73) is mended in the same pass, before anything else.
-    expect(source).toContain("if (staleBase) await api.repairProviderBases();");
+    // Viewing the page writes nothing: legacy repairs run once at app start (`settleProviderCatalog`).
+    expect(source).not.toContain("api.selectProviderModel(provider.id, provider.selectedModel)");
+    expect(source).not.toContain("repairProviderBases");
     const page = await Bun.file(new URL("./settings.tsx", import.meta.url)).text();
     expect(page).toContain("tried first");
   });

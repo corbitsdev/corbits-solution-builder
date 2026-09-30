@@ -28,6 +28,7 @@ import {
   setResolvedModelRestricted as setResolvedModelRestrictedViaHub,
   setResolvedModelShadowed as setResolvedModelShadowedViaHub,
   stageSpecialistSourcePin,
+  UNSERVABLE_OFFSET,
   upsertApiKeyProvider,
   upsertOAuthProvider,
   type HubCredential,
@@ -50,6 +51,7 @@ import {
   XAI_USER_AGENT,
 } from "@corbits/xai-provider";
 import type { Transport } from "./hub.ts";
+import { blocksCollide } from "./pages/provider-order.ts";
 
 export type ListedProvider = {
   id: string;
@@ -178,7 +180,6 @@ const OAUTH_ADAPTER_OF: Record<
 const NOT_A_CHAT_MODEL =
   /embedding|whisper|tts|transcribe|moderation|dall-e|sora|davinci|babbage|-instruct|realtime|audio|-image|search-preview|computer-use|codex|deep-research|-pro\b/;
 const TOO_SMALL_FOR_DOCUMENTS = /^gpt-3\.5|^gpt-4(-\d{4})?$|^gpt-4-32k/;
-const UNSERVABLE_OFFSET = 900;
 
 function isServableModel(canonicalName: string, plugin: string): boolean {
   return plugin !== "openai" || !(NOT_A_CHAT_MODEL.test(canonicalName) || TOO_SMALL_FOR_DOCUMENTS.test(canonicalName));
@@ -584,7 +585,7 @@ export async function reorderProviders(transport: Transport, orderedModelProvide
   await setProviderOrderViaHub(transport, workspace.tenantId, orderedModelProviderIds);
 }
 
-/** Restricts a provider to one model, or clears the restriction (`null`) so specialists fail over across all of them in priority order. User choice only — the workspace default never writes here (CL-8781). */
+/** Makes a provider answer with one model first without disabling its others (see the installer's `selectModel`), or clears an earlier restriction (`null`). User choice only — the workspace default never writes here (CL-8781). */
 export async function selectProviderModel(
   transport: Transport,
   modelProviderId: string,
@@ -827,6 +828,20 @@ export async function repairProviderBases(transport: Transport): Promise<string[
     repaired.push(row.id);
   }
   return repaired;
+}
+
+/**
+ * One-time catalog repairs for rows written by earlier versions, run at app
+ * start rather than on any page view: stale Anthropic bases
+ * (`repairProviderBases`), and providers connected before connect gave each
+ * one its own priority block, which are re-based in their listed order.
+ * Returns whether anything changed.
+ */
+export async function settleProviderCatalog(transport: Transport): Promise<boolean> {
+  const [repaired, providers] = await Promise.all([repairProviderBases(transport), listConnectedProviders(transport)]);
+  const collide = providers.length > 1 && blocksCollide(providers);
+  if (collide) await reorderProviders(transport, providers.map((provider) => provider.id));
+  return repaired.length > 0 || collide;
 }
 
 export async function refreshProviderModels(

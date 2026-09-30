@@ -149,7 +149,7 @@ import {
   makeResolvedDefault,
   moveResolvedModel,
   refreshProviderModels,
-  repairProviderBases,
+  settleProviderCatalog,
   resolveActiveModel,
   rerankCatalogViaHub,
   reorderProviders,
@@ -1080,6 +1080,15 @@ export const api = {
     } catch (cause) {
       installerFailure(cause);
     }
+    // Off the boot screen's clock: the repairs are rare writes, and a page
+    // that reads the catalog before they land sees the rows as they were.
+    void settleProviderCatalog(createHubTransport())
+      .then((changed) => {
+        if (changed) activeModelCacheClear();
+      })
+      .catch((cause: unknown) => {
+        console.warn("provider catalog repairs did not run", cause);
+      });
   },
   providers: async () => {
     try {
@@ -1134,17 +1143,6 @@ export const api = {
       const result = await refreshProviderModels(createHubTransport(), providerId);
       activeModelCacheClear();
       return result;
-    } catch (cause) {
-      installerFailure(cause);
-    }
-  },
-  /** Mends connected rows whose stored base URL predates a fix (an Anthropic
-   *  `…/v1` base, #73): no key needed, no-op when nothing is stale. */
-  repairProviderBases: async (): Promise<string[]> => {
-    try {
-      const repaired = await repairProviderBases(createHubTransport());
-      if (repaired.length > 0) activeModelCacheClear();
-      return repaired;
     } catch (cause) {
       installerFailure(cause);
     }

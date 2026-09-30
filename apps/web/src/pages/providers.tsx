@@ -22,8 +22,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { GripVertical } from "lucide-react";
 import { api, ApiFailure, type Provider, type ResolvedCatalogRow } from "../client.js";
-import { blocksCollide, dropOn, moveBy, moveTo, rankLabel, sameOrder } from "./provider-order.ts";
-import { LOCAL_DEFAULT_BASE_URL, LOCAL_PROVIDER_ID, staleAnthropicBase } from "../provider-catalog.js";
+import { dropOn, moveBy, moveTo, rankLabel, sameOrder } from "./provider-order.ts";
+import { LOCAL_DEFAULT_BASE_URL, LOCAL_PROVIDER_ID } from "../provider-catalog.js";
 import { Banner } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
 
@@ -140,33 +140,6 @@ export function ProviderList({
   }, [providers]);
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
-  // Each row is one combination, a provider and the model it tries, and the
-  // rows are the failover chain: the head is the default and is tried first,
-  // each row below is tried if the one above fails. Two things the stored
-  // catalog can drift from that are settled once, on view: providers
-  // connected before any order was saved share block 0 (so what the list
-  // shows first and what the catalog picks can differ), and a provider
-  // never chosen for still has every model enabled (so the chain would try
-  // all of them before the next row). Saving the order as shown, and
-  // restricting each such provider to the model its row shows, makes the
-  // chain exactly the list.
-  const settledRef = useRef(false);
-  useEffect(() => {
-    if (!manage || settledRef.current || busy !== null || providers.length === 0) return;
-    const unrestricted = providers.filter((provider) => provider.enabledModels.length > 1 && provider.selectedModel !== null);
-    const collide = providers.length > 1 && blocksCollide(providers);
-    // A row connected before its vendor's base-URL fix still carries the
-    // stale base and 404s on every call (#73); mended here, without the key.
-    const staleBase = providers.some((provider) => staleAnthropicBase(provider.providerId, provider.baseUrl) !== null);
-    if (!collide && unrestricted.length === 0 && !staleBase) return;
-    settledRef.current = true;
-    void act("order", async () => {
-      if (staleBase) await api.repairProviderBases();
-      if (collide) await api.reorderProviders(providers.map((provider) => provider.id));
-      for (const provider of unrestricted) await api.selectProviderModel(provider.id, provider.selectedModel);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [manage, providers]);
   const connectedRows = manage
     ? order.map((id) => rows.find((row) => connectedFor(row)?.id === id)).filter((row): row is Row => row !== undefined)
     : [];
@@ -412,9 +385,9 @@ export function ProviderList({
             ) : connected && ready ? (
               <span className="v">
                 {manage && connected.models.length > 1 ? (
-                  // The model this row tries. Choosing one restricts the
-                  // provider to it, so the chain moves on to the next row
-                  // rather than through the provider's other models.
+                  // The model this row tries first. Choosing one moves it to
+                  // the front of the provider; the others stay as fallbacks,
+                  // so a stage deployed on one of them keeps resolving it.
                   <select
                     className="field"
                     aria-label={`${row.name} model`}
