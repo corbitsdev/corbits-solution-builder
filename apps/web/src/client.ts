@@ -14,7 +14,6 @@ import {
   archiveArtifact as installerArchiveArtifact,
   createArtifact as installerCreateArtifact,
   createProject as installerCreateProject,
-  delegateMore,
   delegateWorkspaceDefaultsIfSealed,
   ENDED_DEPLOYMENT_STATUSES,
   ensureProjectWorkflow,
@@ -27,7 +26,6 @@ import {
   listArtifacts,
   listSpecialistDeployments,
   liveDelegationStore,
-  ModelProviderNotDelegatedError,
   myPrincipalIn,
   pushSourceTree,
   requireProject as installerRequireProject,
@@ -165,7 +163,7 @@ export type { DesignerSettings } from "./designer-settings.ts";
 export { createHubTransport } from "./hub.ts";
 
 export type Remediation = {
-  kind: "switch_provider" | "reconnect" | "retry" | "send_back" | "delegate_providers";
+  kind: "switch_provider" | "reconnect" | "retry" | "send_back";
   label: string;
   providerId?: string;
   /** `send_back` only: the stage the way out returns the project to, and
@@ -648,20 +646,6 @@ function installerFailure(cause: unknown): never {
   if (cause instanceof ApiFailure) throw cause;
   if (cause instanceof ArchiveRefused) {
     throw new ApiFailure({ code: "validation_failed", message: cause.message, correlationId: "-", retryable: false });
-  }
-  if (cause instanceof ModelProviderNotDelegatedError) {
-    // The hub refused the deploy's offering chain: in a project, the owner
-    // delegated none of the workspace's providers to it (#29). The way out
-    // is offered, not described: `delegateWorkspaceProviders`.
-    throw new ApiFailure({
-      code: "provider_not_delegated",
-      message: cause.message,
-      correlationId: "-",
-      retryable: true,
-      ...(cause.parentId
-        ? { remediation: { kind: "delegate_providers" as const, label: "Let this project use the workspace's providers" } }
-        : {}),
-    });
   }
   if (cause instanceof InstallerError) {
     throw new ApiFailure({
@@ -1778,18 +1762,6 @@ export const api = {
         ...(title !== undefined ? { title: title.slice(0, 120) } : {}),
         ...(typeof payload.archived === "boolean" ? { archivedAt: payload.archived ? new Date() : null } : {}),
       });
-      return { ok: true as const };
-    }),
-  /**
-   * Lets `projectId` use every workspace-owned credential the workspace
-   * holds (#29): the way out when its specialist cannot deploy because the
-   * project was opened with nothing delegated. Idempotent, additive, and
-   * recorded on the project the way creation-time consent is.
-   */
-  delegateWorkspaceProviders: (projectId: string) =>
-    asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const store = liveDelegationStore(transport, workspaceTenantId);
-      await delegateMore(store, { projectId, delegatedCredentialIds: await workspaceOwnedCredentialIds(store) });
       return { ok: true as const };
     }),
   deleteProject: (projectId: string) =>

@@ -293,48 +293,6 @@ async function mintPushToken(
 }
 
 /**
- * The hub's refusal of a deploy's offering chain: `source_offering_unavailable`
- * (a 409 from `prepareProvisionedDeployment`) means an offering the tenant
- * can see resolves to a credential the deploying principal may not use
- * there. In a project tenant that is the seal working as designed: the
- * owner delegated none of the workspace's model providers to this project
- * (`delegateAtCreation`). Thrown as a plain error, never an `ApiError`, so a
- * caller's "retry once on 409" (a genuine race absorber) does not repeat a
- * refusal that will not change.
- */
-export class ModelProviderNotDelegatedError extends Error {
-  constructor(
-    readonly tenantId: string,
-    readonly parentId: string | null,
-    cause: unknown,
-  ) {
-    super(
-      parentId
-        ? "This project has not been given a model provider. Delegate one of the workspace's connected providers to it, then try again."
-        : "The workspace's model provider cannot be used by this deployment.",
-      { cause },
-    );
-    this.name = "ModelProviderNotDelegatedError";
-  }
-}
-
-/** Runs `deploy`, translating the hub's offering refusal (see
- *  `ModelProviderNotDelegatedError`); every other failure passes through. */
-export async function deployOrExplain<T>(
-  tenant: { readonly id: string; readonly parentId: string | null },
-  deploy: () => Promise<T>,
-): Promise<T> {
-  try {
-    return await deploy();
-  } catch (cause) {
-    if (cause instanceof ApiError && cause.code === "source_offering_unavailable") {
-      throw new ModelProviderNotDelegatedError(tenant.id, tenant.parentId, cause);
-    }
-    throw cause;
-  }
-}
-
-/**
  * Create-or-find a `workflow`-kind asset by name, so a workflow deploy (a
  * stage specialist's) has one to push its rendered source onto. Two browsers
  * opening the same project's stage within seconds both reach this

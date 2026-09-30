@@ -28,8 +28,7 @@ import { isChatCapable } from "./resolved-catalog.js";
 import { treeDigest } from "./workflow-closure.js";
 import { visibleCatalog, type VisibleCatalog } from "./visible-catalog.js";
 import {
-  deployOrExplain,
-  deploymentHasEnded,
+    deploymentHasEnded,
   deploymentIsLive,
   deploymentUsability,
   ensureWorkflowAsset,
@@ -761,14 +760,12 @@ async function deployFreshRun(context: DeployContext, known: ReadonlySet<string>
       throw new Error("connect a model provider before deploying the project workflow");
     }
     const offeringIds = offerings.map((offering) => offering.id);
-    const deployed = await deployOrExplain(context.tenant, () =>
-      workflows.deploy({
+    const deployed = await workflows.deploy({
         source: { kind: "asset", assetId, package: { format: "source", commitSha, packageName: assetName } },
         entry: "./workflow.js",
         sourceOfferingIds: offeringIds,
         defaultSourceOfferingId: offeringIds[0]!,
-      }),
-    );
+      });
     deployment = pickDeployment(matching(await workflows.deployments())) ?? deployed;
   }
 
