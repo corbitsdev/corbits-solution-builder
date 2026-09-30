@@ -4,7 +4,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   HANDOFF_BUBBLE_TEXT,
+  MAX_HANDOFF_CHARS,
   composeModelHandoff,
+  conversationTurns,
+  isHandoffMessage,
   handoffDue,
   handoffId,
   handoffLanded,
@@ -82,6 +85,57 @@ describe("composeModelHandoff keeps the opening", () => {
     expect(recap).toContain("(11 earlier turns omitted.)");
     expect(recap).toContain("turn 29");
     expect(recap).not.toContain("turn 5\n");
+  });
+});
+
+// #305: a hand-off is plumbing, not a turn. Quoting an earlier one nested its
+// recap inside this one, and a stage redeployed 227 times handed its
+// specialist 24 MB.
+describe("composeModelHandoff leaves earlier hand-offs out and keeps the recap bounded", () => {
+  const design = `<!doctype html><html><body>${"<section data-testid=\"screen-gantt\">Gantt</section>".repeat(40)}</body></html>`;
+  const opening: ChatMessage = { id: "opening-design", author: "me", body: design, at };
+  const ask: ChatMessage = { id: "ask", author: "me", body: "Write the package for: Mr Finance.", at };
+  const reply: ChatMessage = { id: "reply", author: "agent", body: "## Package\n\n### Deck outline\n1. Why now", at };
+
+  test("a recap composed against a transcript holding a hand-off quotes the conversation, not the hand-off", () => {
+    const first = composeModelHandoff({ id: "ab1", messages: [opening, ask, reply], draft: reply, providerLabel: null, modelName: null });
+    const handoff: ChatMessage = { id: "handoff-1", author: "me", body: first, at };
+    const later: ChatMessage = { id: "ask-2", author: "me", body: "Put the Gantt chart on the 'What it looks like' slide", at };
+    const second = composeModelHandoff({ id: "ab2", messages: [opening, ask, reply, handoff, later], draft: reply, providerLabel: null, modelName: null });
+    expect(second.split("Here is the conversation so far").length - 1).toBe(1);
+    expect(second.split("[[sb-switch:").length - 1).toBe(1);
+    expect(second.split("<!doctype html>").length - 1).toBe(1);
+    expect(second).toContain(`Person: ${later.body}`);
+    expect(second).toContain("Person: Write the package for: Mr Finance.");
+    expect(second).not.toContain("Person: [[sb-switch:");
+    expect(isHandoffMessage(handoff)).toBe(true);
+    expect(isHandoffMessage(later)).toBe(false);
+    expect(isHandoffMessage({ author: "agent", body: first })).toBe(false);
+    expect(conversationTurns([opening, ask, reply, handoff, later]).map((m) => m.id)).toEqual(["opening-design", "ask", "reply", "ask-2"]);
+  });
+
+  test("two hundred redeploys later the recap is the same size as after one", () => {
+    let messages: ChatMessage[] = [opening, ask, reply];
+    let recap = "";
+    for (let i = 0; i < 200; i += 1) {
+      const body = composeModelHandoff({ id: `a${String(i)}`, messages, draft: reply, providerLabel: "Anthropic", modelName: "claude-fable-5-1" });
+      const past = body.slice(body.indexOf("\n") + 1);
+      if (i === 0) recap = past;
+      expect(past).toBe(recap);
+      messages = [...messages, { id: `handoff-${String(i)}`, author: "me", body, at }];
+    }
+  });
+
+  test("long turns are dropped oldest first until the recap fits the character budget, and the count says so", () => {
+    const long = (i: number): ChatMessage => ({ id: `long-${String(i)}`, author: i % 2 ? "agent" : "me", body: `turn ${String(i)} ${"x".repeat(60_000)}`, at });
+    const turns = Array.from({ length: 10 }, (_, i) => long(i));
+    const body = composeModelHandoff({ id: "ab3", messages: [opening, ...turns], draft: null, providerLabel: null, modelName: null });
+    expect(body.length).toBeLessThan(MAX_HANDOFF_CHARS + design.length + 2_000);
+    expect(body).toContain("(7 earlier turns omitted.)");
+    expect(body).toContain("turn 9 ");
+    expect(body).toContain("turn 7 ");
+    expect(body).not.toContain("turn 6 ");
+    expect(body).toContain(`Person: ${design}`);
   });
 });
 
