@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { DESIGN_TEXT_CAP, designAsText, designHandoff } from "./design-handoff.ts";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { DESIGN_TEXT_CAP, HANDOFF_LEAD, designAsText, designHandoff, splitHandoff } from "./design-handoff.ts";
 
 const MOCKUP = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Mockup — phone companion</title>
@@ -43,6 +45,24 @@ describe("designHandoff", () => {
     expect(handoff).toEndWith("\n```");
     expect(handoff).not.toContain("<section");
     expect(handoff).not.toContain("<!doctype");
+  });
+
+  // #301: the transcript shows the ask and folds the design.
+  test("a message carrying a hand-off splits into its ask and the design's text; any other message does not", () => {
+    const body = `Write the package for: You, the project owner.\n\nThe approved GUI design this package is built on, for reference:\n\n${designHandoff(MOCKUP)}`;
+    const split = splitHandoff(body);
+    expect(split?.lead).toBe("Write the package for: You, the project owner.\n\nThe approved GUI design this package is built on, for reference:");
+    expect(split?.attached.startsWith(HANDOFF_LEAD)).toBe(true);
+    expect(split?.attached).toContain("```text");
+    expect(splitHandoff("Write the package for: You, the project owner.")).toBeNull();
+  });
+
+  test("the transcript folds a hand-off and an HTML document behind a disclosure", () => {
+    const thread = readFileSync(join(import.meta.dir, "pages/workspace/thread.tsx"), "utf8");
+    expect(thread).toContain("const handoff = splitHandoff(text);");
+    expect(thread).toContain('<summary>The approved design, as text</summary>');
+    expect(thread).toContain('<summary>The approved design</summary>');
+    expect(thread.indexOf('<details className="bubble-fold">')).toBeLessThan(thread.indexOf('<iframe className="bubble-document"'));
   });
 
   test("passes a Markdown design through untouched", () => {
