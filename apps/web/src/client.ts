@@ -45,6 +45,7 @@ import {
   workspaceOwnedCredentialIds,
   type ClosureManifest,
   type ClosureSource,
+  type EnsureProgress,
   type EnsuredProjectWorkflow,
   type InstallState as PackageInstallState,
   type ProjectPolicy,
@@ -113,6 +114,7 @@ import { artifactGraphFor } from "./artifact-graph.ts";
 import { findArtifact, listProjectArtifacts } from "./project-artifacts.ts";
 import { addressesByMailTenant, mailTenantFor, parentTenantOf } from "./project-tenants.ts";
 import { toBase64 } from "./base64.ts";
+import { beginBusy } from "./busy.ts";
 import { openCreatedProject } from "./create-project-open.ts";
 import type { Transport } from "@intx/hub-client";
 import { createHubTransport } from "./hub.ts";
@@ -2216,16 +2218,29 @@ false,
       }));
       const status = await readyToDeploy(transport, workspaceTenantId, projectId);
       const opening = await openingOf(transport, projectId);
-      const ref = await ensureProjectWorkflow(
-        transport,
-        sidecarCapabilityOf(status),
-        await projectWorkflowSource(),
-        lifecycleGitPush,
-        projectId,
-        stages,
-        await vendoredMemberFiles(await fetchClosureManifestOrThrow(), fetchClosureTarball),
-        opening ? { problemStatement: opening.body } : {},
-      );
+      // What the ensure step is doing, under the busy strip's clock: a click
+      // that waits on it (a decision, a vote) otherwise showed only its own
+      // name for as long as a history replayed (#295).
+      let release = beginBusy("Starting the project's workflow");
+      const onProgress = (progress: EnsureProgress) => {
+        release();
+        release = beginBusy(ensureProgressLabel(progress));
+      };
+      let ref: EnsuredProjectWorkflow;
+      try {
+        ref = await ensureProjectWorkflow(
+          transport,
+          sidecarCapabilityOf(status),
+          await projectWorkflowSource(),
+          lifecycleGitPush,
+          projectId,
+          stages,
+          await vendoredMemberFiles(await fetchClosureManifestOrThrow(), fetchClosureTarball),
+          { ...(opening ? { problemStatement: opening.body } : {}), onProgress },
+        );
+      } finally {
+        release();
+      }
       const ready = await waitForDeploymentDeployed(transport, ref.tenantId, ref.deploymentId);
       if (!ready) {
         throw new ApiFailure({
@@ -2512,3 +2527,19 @@ false,
       });
     }),
 };
+
+/** The busy strip's line for what the ensure step is doing (#295). */
+export function ensureProgressLabel(progress: EnsureProgress): string {
+  switch (progress.phase) {
+    case "waiting":
+      return progress.detail === "hub replacement"
+        ? "Waiting for the hub to bring the project's workflow back"
+        : "Waiting for the hub to place the project's workflow";
+    case "deploying":
+      return "Deploying the project's workflow";
+    case "replaying":
+      return progress.total > 0
+        ? `Replaying decision ${String(Math.min(progress.done + 1, progress.total))} of ${String(progress.total)} onto the project's workflow`
+        : "Starting the project's workflow";
+  }
+}
