@@ -134,7 +134,8 @@ export function composeModelHandoff(args: {
   const announcement = `${switchMarker(args.id)}\nThis stage continues${onto}.`;
   const recap = `Here is the conversation so far, so you can pick it up without restarting it:\n\n${transcriptBlock(args.messages)}`;
   const draftBlock = args.draft && args.draft.body.trim() ? `The current draft:\n\n${args.draft.body}` : null;
-  return [announcement, recap, draftBlock].filter((part): part is string => part !== null).join("\n\n---\n\n");
+  const reply = "Reply with one line saying you have the conversation and the draft, then wait for the next message.";
+  return [announcement, recap, draftBlock, reply].filter((part): part is string => part !== null).join("\n\n---\n\n");
 }
 
 /**
