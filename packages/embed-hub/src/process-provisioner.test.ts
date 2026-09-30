@@ -102,4 +102,8 @@ describe("process provisioner", () => {
     await ensure(1, "sc_a");
     expect(await ensure(1, "sc_b")).toMatchObject({ kind: "rejected", code: "sidecar_identity_conflict" });
   });
+
+  test("keeps the binding fingerprint allocations were bound under", () => {
+    expect(provisioner.bindingFingerprint).toBe("process:v1:deployment");
+  });
 });
