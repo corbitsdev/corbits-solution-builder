@@ -16,7 +16,7 @@
  * Layout is the mockup's section / section-body / row / k / v language.
  */
 import { useTheme, type ThemeMode } from "@corbits/react-ui";
-import { Fragment, useEffect, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { DEFAULT_DECK_DESIGN, type DeckDesign, type DeckTheme } from "@solutions-builder/app/deck";
 import {
   api,
@@ -24,6 +24,7 @@ import {
   STAKEHOLDER_ROLES,
   type ActiveModel,
   type DesignerSettings,
+  type GoogleDriveStatus,
   type HostStatus,
   type Provider,
 } from "../client.js";
@@ -60,6 +61,7 @@ export function Settings({
       <Designer />
       <StakeholderDecks />
       <DesignDocuments />
+      <GoogleDrive />
       <ThisComputer status={status} />
     </div>
   );
@@ -448,6 +450,134 @@ export function hostCredentialsCopy(status: HostStatus): string {
 
 export function hostDataCopy(status: HostStatus): string | null {
   return status.dataDir ?? null;
+}
+
+/* ------------------------------------------------------------- google drive */
+
+/** What the connection row says: who is connected, or what connecting takes. */
+export function googleDriveCopy(status: GoogleDriveStatus | null): string {
+  if (!status) return "Checking…";
+  if (status.connected) return status.email ? `Connected as ${status.email}.` : "Connected.";
+  if (status.login.status === "pending") return "Finish signing in to Google in your browser.";
+  return status.clientId ? "Not connected. The OAuth client is remembered; connect to sign in again." : "Not connected.";
+}
+
+export const GOOGLE_CLIENT_HOWTO =
+  "In Google Cloud Console, enable the Google Drive API, then under APIs & Services → Credentials create an OAuth client of type Desktop app and paste its client ID and secret here. Only files this app creates are touched.";
+
+/**
+ * One click from a stakeholder's slides to Google Slides (#233). Google
+ * writes to a person's Drive only for an OAuth client of their own, so the
+ * client's id and secret are pasted here once and kept in the keychain; the
+ * sign-in is the host's loopback flow, the same as ChatGPT's.
+ */
+function GoogleDrive() {
+  const [status, setStatus] = useState<GoogleDriveStatus | null>(null);
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
+  const [authorizeUrl, setAuthorizeUrl] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const cancelled = useRef(false);
+
+  const refresh = () =>
+    api.googleDrive
+      .status()
+      .then(setStatus)
+      .catch((cause: unknown) => setError(cause instanceof ApiFailure ? cause.detail.message : String(cause)));
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  const connect = async () => {
+    setBusy(true);
+    setError(null);
+    cancelled.current = false;
+    try {
+      const { authorizeUrl: url } = await api.googleDrive.connect({ clientId: clientId.trim(), clientSecret: clientSecret.trim() });
+      if (!cancelled.current) setAuthorizeUrl(url);
+      const next = await api.googleDrive.awaitLogin();
+      setStatus(next);
+      setClientId("");
+      setClientSecret("");
+    } catch (cause) {
+      if (!cancelled.current) setError(cause instanceof ApiFailure ? cause.detail.message : cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setAuthorizeUrl(null);
+      setBusy(false);
+    }
+  };
+  const cancel = () => {
+    cancelled.current = true;
+    setAuthorizeUrl(null);
+    setBusy(false);
+    void api.googleDrive.cancel().then(() => refresh());
+  };
+  const disconnect = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setStatus(await api.googleDrive.disconnect());
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const canConnect = !busy && (Boolean(status?.clientId) || (clientId.trim().length > 0 && clientSecret.trim().length > 0));
+
+  return (
+    <Section title="Google Drive" lead="Where “Open in Google Slides” puts a stakeholder's deck.">
+      <div className="section-body">
+        {error ? <Banner tone="error" title={error} /> : null}
+        {authorizeUrl ? (
+          <Banner title="Finish signing in, in your browser" action={{ label: "Cancel", onClick: cancel }}>
+            <span className="hash">{authorizeUrl}</span>
+          </Banner>
+        ) : null}
+        <Row label="Connection">
+          <span className="v">{googleDriveCopy(status)}</span>
+          {status?.connected ? (
+            <button type="button" className="btn link" disabled={busy} onClick={() => void disconnect()}>
+              Disconnect
+            </button>
+          ) : null}
+        </Row>
+        {status && !status.connected ? (
+          <>
+            <Row label="OAuth client" hint={GOOGLE_CLIENT_HOWTO}>
+              <input
+                className="field"
+                aria-label="Google OAuth client ID"
+                value={clientId}
+                disabled={busy}
+                placeholder={status.clientId ?? "…apps.googleusercontent.com"}
+                autoComplete="off"
+                onChange={(event) => setClientId(event.target.value)}
+              />
+            </Row>
+            <Row label="Client secret" {...(status.clientId ? { hint: "Leave blank to keep the one remembered." } : {})}>
+              <input
+                className="field"
+                type="password"
+                aria-label="Google OAuth client secret"
+                value={clientSecret}
+                disabled={busy}
+                placeholder={status.clientId ? "(remembered)" : "GOCSPX-…"}
+                autoComplete="off"
+                onChange={(event) => setClientSecret(event.target.value)}
+              />
+            </Row>
+            <Row label="">
+              <button type="button" className="btn" disabled={!canConnect} onClick={() => void connect()}>
+                {busy ? "Connecting…" : "Connect Google Drive"}
+              </button>
+            </Row>
+          </>
+        ) : null}
+      </div>
+    </Section>
+  );
 }
 
 function ThisComputer({ status }: { status: HostStatus | null }) {

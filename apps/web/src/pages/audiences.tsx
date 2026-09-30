@@ -20,6 +20,7 @@ import { Tabs, Input, Menu, MenuContent, MenuItem, MenuTrigger } from "@corbits/
 import { ChevronDown } from "lucide-react";
 import { printHtmlDocument } from "../print.tsx";
 import { slidesPrintHtml } from "../slides-print.ts";
+import { openInGoogleSlides } from "../google-slides.ts";
 import { Markdown } from "../markdown.jsx";
 import { buildPackageDeck, deckFileName } from "../deck-save.ts";
 import { deckDesignFor } from "../deck-design-settings.ts";
@@ -521,11 +522,17 @@ export function AudiencePackages({
   //
   // Three ways out of one menu (#232): the PowerPoint file; the same
   // slides printed one per page, which the system dialog saves as a PDF;
-  // and Google Slides, which gets the PowerPoint saved and Slides opened for
-  // the import, since nothing here is signed in to Google (#233).
+  // and Google Slides, which gets the PowerPoint uploaded through the
+  // host's Google Drive connection, converted, and opened (#233). Without
+  // that connection the PowerPoint is saved and Slides opened for a manual
+  // import, with a word on where to connect.
   const exportSlides = async (packageNodeId: string, how: "pptx" | "pdf" | "google") => {
     const pkg = packages.find((node) => node.id === packageNodeId);
     const name = pkg?.variant ?? "this stakeholder";
+    // Opened now, on the click, so the browser treats it as the person's
+    // own; the upload takes longer than a popup blocker allows.
+    const tab = how === "google" ? window.open("about:blank", "_blank") : null;
+    if (tab) tab.opener = null;
     setSaving((before) => new Set(before).add(packageNodeId));
     setError(null);
     try {
@@ -561,33 +568,40 @@ export function AudiencePackages({
         if (!deck) throw new Error("its deck outline has no slides.");
         const shots = await designShots();
         printHtmlDocument(slidesPrintHtml(shots.length > 0 ? { ...deck, images: placeMockups(deck, shots) } : deck, fileBase));
-      } else if (slidesSource({ hasRecordedDeck: Boolean(recorded), theme }) === "recorded" && recorded) {
-        const result = await api.artifactContent(tenantId, recorded.id);
-        downloadArtifact(result.content, `${recorded.title}.pptx`);
       } else {
-        const packageContent = await api.artifactContent(tenantId, packageNodeId);
-        const preferences = await api.deckDesigns();
-        const built = await buildPackageDeck({
-          projectTitle: detail.project.title,
-          audience: name,
-          role,
-          markdown: packageContent.content,
-          design: deckDesignFor(role, preferences),
-          ...(theme ? { theme } : {}),
-          ...(designHtml ? { mockup: { html: designHtml, shoot: () => designShots() } } : {}),
-        });
-        downloadArtifact(built.dataUrl, built.filename);
+        let pptx: { dataUrl: string; filename: string };
+        if (slidesSource({ hasRecordedDeck: Boolean(recorded), theme }) === "recorded" && recorded) {
+          const result = await api.artifactContent(tenantId, recorded.id);
+          pptx = { dataUrl: result.content, filename: `${recorded.title}.pptx` };
+        } else {
+          const packageContent = await api.artifactContent(tenantId, packageNodeId);
+          const preferences = await api.deckDesigns();
+          const built = await buildPackageDeck({
+            projectTitle: detail.project.title,
+            audience: name,
+            role,
+            markdown: packageContent.content,
+            design: deckDesignFor(role, preferences),
+            ...(theme ? { theme } : {}),
+            ...(designHtml ? { mockup: { html: designHtml, shoot: () => designShots() } } : {}),
+          });
+          pptx = { dataUrl: built.dataUrl, filename: built.filename };
+        }
+        if (how === "google") {
+          const opened = await openInGoogleSlides(pptx, fileBase, tab);
+          if (opened.notice) setError(`Slides for ${name}: ${opened.notice}`);
+        } else {
+          downloadArtifact(pptx.dataUrl, pptx.filename);
+        }
       }
       if (how === "google") {
-        window.open("https://docs.google.com/presentation/u/0/", "_blank", "noopener");
-        setError(
-          `Slides for ${name}: the PowerPoint is saved. In Google Slides choose File → Import slides and pick ${fileBase}.pptx; nothing here is signed in to Google to upload it for you.`,
-        );
+        // Said above, when there was something to say.
       } else if (themeNotice) {
         setError(`Slides for ${name}: ${themeNotice}.`);
       }
       setSavedNodes((before) => new Set(before).add(packageNodeId));
     } catch (cause) {
+      tab?.close();
       setError(`Slides for ${name}: ${cause instanceof ApiFailure ? cause.detail.message : String(cause)}`);
     } finally {
       setSaving((before) => {
