@@ -1041,10 +1041,18 @@ export const api = {
     if (status.hub.mode !== "embedded") return;
     try {
       await installerUpgradeWorkspace(createHubTransport());
-      if (await settleProviderCatalog(createHubTransport())) activeModelCacheClear();
     } catch (cause) {
       installerFailure(cause);
     }
+    // Off the boot screen's clock: the repairs are rare writes, and a page
+    // that reads the catalog before they land sees the rows as they were.
+    void settleProviderCatalog(createHubTransport())
+      .then((changed) => {
+        if (changed) activeModelCacheClear();
+      })
+      .catch((cause: unknown) => {
+        console.warn("provider catalog repairs did not run", cause);
+      });
   },
   providers: async () => {
     try {

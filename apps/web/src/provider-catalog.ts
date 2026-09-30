@@ -812,8 +812,7 @@ export async function repairProviderBases(transport: Transport): Promise<string[
  * Returns whether anything changed.
  */
 export async function settleProviderCatalog(transport: Transport): Promise<boolean> {
-  const repaired = await repairProviderBases(transport);
-  const providers = await listConnectedProviders(transport);
+  const [repaired, providers] = await Promise.all([repairProviderBases(transport), listConnectedProviders(transport)]);
   const collide = providers.length > 1 && blocksCollide(providers);
   if (collide) await reorderProviders(transport, providers.map((provider) => provider.id));
   return repaired.length > 0 || collide;
