@@ -8,13 +8,13 @@
  * on (#115): the specialist's opening turn may be pages back, or on an
  * earlier deployment's thread after a redeploy, and without the design here
  * it can only ask for it to be pasted. And it carries the deck's brief
- * (#246): the design guidelines that apply to this project and the theme
- * `render_deck` should draw with, since the specialist's prompt is fixed
- * at deploy and the mail is the only place a project's own instruction
- * can reach it.
+ * (#246): the design guidelines that apply to this project, since the
+ * specialist's prompt is fixed at deploy and the mail is the only place a
+ * project's own instruction can reach it. The look is the interface's to
+ * apply when it draws the slides (#285), so none of it rides here.
  */
 import { packageOutlineProblem } from "@solutions-builder/app/deck";
-import { renderDeckThemeLine, type DeckBrief } from "./deck-design-documents.ts";
+import type { DeckBrief } from "./deck-design-documents.ts";
 import { designHandoff } from "./design-handoff.ts";
 
 export type PackageAudience = { readonly name: string; readonly role: string };
@@ -58,7 +58,5 @@ export function packageRequest(audience: PackageAudience, design: string | null,
   // verbatim, the model answered with HTML instead of a Markdown package.
   if (design && design.trim()) parts.push(`The approved GUI design this package is built on, for reference:\n\n${designHandoff(design)}`);
   if (brief?.guidelines) parts.push(brief.guidelines);
-  const themeLine = renderDeckThemeLine(brief?.theme ?? null);
-  if (themeLine) parts.push(themeLine);
   return parts.join("\n\n");
 }

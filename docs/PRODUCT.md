@@ -76,14 +76,16 @@ stood.
 
 Every package carries a deck outline — a numbered list of slides under a
 "Deck outline" heading — and one without is refused rather than recorded,
-whoever wrote it. Stage 5's presentation-creator turns that outline into a
-PowerPoint through the `render_deck` tool in the sidecar; the host stores
-those bytes as their own version beside the package and never builds a
-deck on a save. A deck's design — theme, typeface, how much a slide
+whoever wrote it. The slides a person sees, previews and exports are built
+by the app from that outline; stage 5's presentation-creator also calls the
+`render_deck` tool in the sidecar, which checks the outline builds into
+slides and reports the deck's shape — file name, size, slide count and
+digest — never the file itself, so a long stage 5 conversation does not
+fill up with PowerPoint bytes. A deck's design — theme, typeface, how much a slide
 carries, whether it carries speaker notes, and what its outline should
 emphasise — is set once per role in Settings, where a role can also supply
 its own PowerPoint file as a style guide; where one is on file, its
-colours, fonts and slide proportions feed `render_deck` instead of the
+colours, fonts and slide proportions draw the slides instead of the
 built-in look.
 
 Beside those, Settings takes design documents for the workspace: design
@@ -93,8 +95,8 @@ choose there whether the workspace's still apply to it; its own always do,
 and come first. Each time a stakeholder's package is asked for, the
 presentation creator is handed the text of every document that applies,
 so the deck outline follows them; the first PowerPoint among them lends
-its colours, typefaces and slide size to the slides on screen, in the
-exported file, and in the deck `render_deck` writes. What is read is said
+its colours, typefaces and slide size to the slides on screen and in the
+exported file. What is read is said
 plainly: text as written; a PDF's text plus its page size and the paper,
 ink and accent colours of its first pages, never a typeface; a PowerPoint's
 slide text and theme. A picture-only file lends its look and no text, and

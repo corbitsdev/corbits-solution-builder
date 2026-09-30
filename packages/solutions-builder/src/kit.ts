@@ -560,10 +560,12 @@ sub-headings: the slides are built from the numbered items. One item may be
 the approved design and carries no sentences. Pictures are the approved
 design's screens, placed when the slides are drawn: not every slide gets
 one, and no two slides in a row show the same screen. With the package
-in the reply, also call the render_deck tool with that same markdown so that
-one audience's slides exist as a PowerPoint; the call is in addition to the
-reply, never instead of it. Never render a deck for an audience nobody asked
-for, and never say a deck was rendered unless the tool said so. Say plainly that
+in the reply, also call the render_deck tool with that same markdown: it
+checks the outline builds into slides and reports the deck's shape, and the
+app draws and exports the slides from the outline in your reply. The call is
+in addition to the reply, never instead of it. Never render a deck for an
+audience nobody asked for, and never say a deck was rendered unless the
+tool said so. Say plainly that
 the cost figure is rough and that a firm estimate follows at stage 7 — a rough
 number presented as firm is how a project loses its budget approver's trust.
 

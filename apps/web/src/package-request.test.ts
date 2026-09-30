@@ -43,18 +43,19 @@ describe("packageRequest", () => {
     expect(nudge).toContain("Markdown handed to render_deck is not read as the package.");
   });
 
-  // #246: the design documents that apply to the project, and the theme
-  // render_deck should draw with, ride in the request — the specialist's
-  // prompt is fixed at deploy, so the mail is the only way in.
-  test("carries the deck's brief after the design: the guidelines block, then the render_deck theme", () => {
+  // #246: the design documents that apply to the project ride in the
+  // request — the specialist's prompt is fixed at deploy, so the mail is
+  // the only way in. #285: the theme does not; the interface draws with it.
+  test("carries the deck's brief after the design: the guidelines block, and no theme", () => {
     const body = packageRequest(
       { name: "Mr Finance", role: "budget_approver" },
       "## Design\n\nThree tabs.",
       { theme: { accent: "1E3A8A" }, guidelines: "--- DESIGN GUIDELINES FOR THE DECK ---\n\n### house.md (the workspace's)\nNavy and white.", documents: ["house.md"] },
     );
     expect(body).toBe(
-      "Write the package for: Mr Finance, the budget approver.\n\nThe approved GUI design this package is built on, for reference:\n\n## Design\n\nThree tabs.\n\n--- DESIGN GUIDELINES FOR THE DECK ---\n\n### house.md (the workspace's)\nNavy and white.\n\nWhen you call render_deck, pass this as its `theme` argument, exactly, so the slides carry the house look: {\"accent\":\"1E3A8A\"}",
+      "Write the package for: Mr Finance, the budget approver.\n\nThe approved GUI design this package is built on, for reference:\n\n## Design\n\nThree tabs.\n\n--- DESIGN GUIDELINES FOR THE DECK ---\n\n### house.md (the workspace's)\nNavy and white.",
     );
+    expect(body).not.toContain("1E3A8A");
   });
 
   test("a brief with nothing in it adds nothing", () => {

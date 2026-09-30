@@ -10,7 +10,6 @@ import {
   designThemeOf,
   effectiveDesignDocuments,
   readingIdsFor,
-  renderDeckThemeLine,
   themeFrom,
   type DeckDesignDocument,
   type DesignArtifactEntry,
@@ -137,15 +136,5 @@ describe("designGuidelinesBlock", () => {
     expect(block).toContain("### doc0.md");
     expect(block).toContain("### doc1.md");
     expect(block).toContain("(Not shown, for length: doc2.md, doc3.md.)");
-  });
-});
-
-describe("renderDeckThemeLine", () => {
-  test("tells the presentation creator the exact theme to hand render_deck, or nothing", () => {
-    expect(renderDeckThemeLine(null)).toBeNull();
-    expect(renderDeckThemeLine({})).toBeNull();
-    expect(renderDeckThemeLine({ accent: "1E3A8A", ratio: 1.78 })).toBe(
-      'When you call render_deck, pass this as its `theme` argument, exactly, so the slides carry the house look: {"accent":"1E3A8A","ratio":1.78}',
-    );
   });
 });

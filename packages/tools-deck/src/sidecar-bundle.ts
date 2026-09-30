@@ -13,10 +13,17 @@
  * (`deckFrom`, `renderDeck`) — nothing here re-parses markdown or redraws a
  * slide. Illustrations stay out of its surface: drawing them needs a
  * connected image provider and a reader model to pick subjects, which is
- * genuinely host-side work (see `apps/hub/src/deck.ts`), so this renders
- * text-only slides, exactly what `renderDeck` produces for a `Deck` with no
- * `images` map.
+ * host-side work, so this renders text-only slides, exactly what
+ * `renderDeck` produces for a `Deck` with no `images` map.
+ *
+ * What it returns is a report, not the file (#285): the slides a person
+ * sees, previews and exports are built by the interface from the outline in
+ * the package itself, and nothing reads the bytes back from the reply. The
+ * bytes used to ride back as a `data:` URI, and every call left the whole
+ * PowerPoint in the specialist's context, until a long stage 5 thread
+ * overran the model.
  */
+import { createHash } from "node:crypto";
 import { defineTool, type BaseEnv } from "@intx/agent";
 import {
   DECK_MEDIA_TYPE,
@@ -134,10 +141,23 @@ function parseArgs(args: Record<string, unknown>): RenderDeckArgs {
   };
 }
 
-/** Renders the deck and returns it as a `data:` URI — the same inline
- *  encoding `apps/hub/src/deck.ts` stores a deck version's bytes as, so a
- *  caller that has seen a deck artifact before recognises the shape. Throws
- *  the real reason when there is nothing to render, never a placeholder. */
+/** What the tool reports back: the deck's shape and a digest of the file it
+ *  rendered, never the bytes. */
+export type RenderDeckReport = {
+  readonly fileName: string;
+  readonly mediaType: string;
+  /** The rendered PowerPoint's size in bytes. */
+  readonly sizeBytes: number;
+  /** Slides in the file: the cover, one per outline item, and the decision slide when there is one. */
+  readonly slides: number;
+  /** Hex SHA-256 of the rendered file. */
+  readonly sha256: string;
+  /** The look the slides were drawn with. */
+  readonly look: { readonly theme: string; readonly typeface: string; readonly density: string; readonly notes: boolean };
+};
+
+/** Renders the deck and reports its shape (#285). Throws the real reason when
+ *  there is nothing to render, never a placeholder. */
 async function renderDeckContent(rawArgs: Record<string, unknown>): Promise<string> {
   const args = parseArgs(rawArgs);
   const design: DeckDesign = { ...DEFAULT_DECK_DESIGN, ...args.design };
@@ -155,8 +175,15 @@ async function renderDeckContent(rawArgs: Record<string, unknown>): Promise<stri
     );
   }
   const bytes = await renderDeck(built);
-  const dataUri = `data:${DECK_MEDIA_TYPE};base64,${Buffer.from(bytes).toString("base64")}`;
-  return JSON.stringify({ fileName: deckFileName(args.projectTitle, args.audience), mediaType: DECK_MEDIA_TYPE, dataUri });
+  const report: RenderDeckReport = {
+    fileName: deckFileName(args.projectTitle, args.audience),
+    mediaType: DECK_MEDIA_TYPE,
+    sizeBytes: bytes.byteLength,
+    slides: 1 + built.slides.length + (built.decision.length > 0 ? 1 : 0),
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+    look: { theme: design.theme, typeface: design.typeface, density: design.density, notes: design.notes },
+  };
+  return JSON.stringify(report);
 }
 
 /**
@@ -171,7 +198,7 @@ export const deck = defineTool<BaseEnv>({
       {
         name: TOOL_NAME,
         description:
-          'Render a stakeholder deck from a package\'s markdown: a "### Deck outline" section (numbered items become slides) and an optional "### Decision request" section (the closing slide). Returns a JSON object carrying the rendered PowerPoint as a data: URI. Fails when the markdown has no deck outline to build from — no images, look changes only through "design" and "theme".',
+          'Render a stakeholder deck from a package\'s markdown: a "### Deck outline" section (numbered items become slides) and an optional "### Decision request" section (the closing slide). Returns a JSON report of the rendered PowerPoint — file name, size, slide count and SHA-256 — never the file itself: the interface builds and exports the slides from the outline in the package. Fails when the markdown has no deck outline to build from — no images, look changes only through "design" and "theme".',
         inputSchema: {
           type: "object",
           properties: {

@@ -40,7 +40,7 @@ export type ProjectDeckSettings = { readonly useWorkspaceDesignDocuments: boolea
 
 /** What one stakeholder's deck is drafted and drawn against in one project. */
 export type DeckBrief = {
-  /** The theme the slides are drawn with, or null for the built-in look. */
+  /** The theme the interface draws the slides with, or null for the built-in look. */
   readonly theme: TemplateTheme | null;
   /** The block the presentation creator is handed with the request, or null when there is nothing to say. */
   readonly guidelines: string | null;
@@ -218,14 +218,4 @@ export function designGuidelinesBlock(readings: readonly DesignReading[], roleGu
   if (leftOut.length > 0) parts.push(`(Not shown, for length: ${leftOut.join(", ")}.)`);
   if (parts.length === 0) return null;
   return `${DESIGN_GUIDELINES_HEADING}\n\n${parts.join("\n\n")}`;
-}
-
-/**
- * The line that tells the presentation creator what `theme` to hand
- * `render_deck`, so the deck the workflow itself records carries the house
- * look and not the built-in one. Null when there is no theme to pass.
- */
-export function renderDeckThemeLine(theme: TemplateTheme | null): string | null {
-  if (!theme || Object.keys(theme).length === 0) return null;
-  return `When you call render_deck, pass this as its \`theme\` argument, exactly, so the slides carry the house look: ${JSON.stringify(theme)}`;
 }
