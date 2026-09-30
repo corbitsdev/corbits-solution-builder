@@ -41,7 +41,7 @@ import {
   type ResolvedCatalogRow,
 } from "@solutions-builder/installer";
 import type { Stage } from "@solutions-builder/app/ledger";
-import { CODEX_BASE_URL, CODEX_ORIGINATOR, CODEX_RESPONSES_PATH } from "@corbits/codex-provider";
+import { CODEX_BASE_URL, CODEX_DEFAULT_MODELS, CODEX_ORIGINATOR, CODEX_RESPONSES_PATH } from "@corbits/codex-provider";
 import {
   XAI_CLIENT_IDENTIFIER,
   XAI_CLIENT_VERSION,
@@ -113,10 +113,8 @@ export const OAUTH_CONNECT_OPTIONS: ReadonlyArray<{ providerId: string; label: s
 
 /**
  * An OAuth adapter's fixed wire protocol, endpoint and servable models --
- * `@corbits/xai-provider` exports its own model list (`XAI_DEFAULT_MODELS`);
- * `@corbits/codex-provider` exports none, so this carries the current
- * Codex-servable model (`gpt-5.6-sol` — the `-wm` slug with the suffix
- * removed, the spelling the Responses endpoint accepts).
+ * each provider package exports its own model list (`CODEX_DEFAULT_MODELS`,
+ * `XAI_DEFAULT_MODELS`).
  */
 type OAuthTokens = { access: string; refresh: string; expiresAt?: number; accountId?: string };
 
@@ -134,7 +132,7 @@ const OAUTH_ADAPTER_OF: Record<
   "codex-oauth": {
     plugin: "openai-responses",
     baseURL: CODEX_BASE_URL,
-    canonicalNames: ["gpt-5.6-sol"],
+    canonicalNames: [...CODEX_DEFAULT_MODELS],
     quirks: (tokens) => ({
       path: CODEX_RESPONSES_PATH,
       headers: {
@@ -830,18 +828,65 @@ export async function repairProviderBases(transport: Transport): Promise<string[
   return repaired;
 }
 
+/** The models a sign-in provider's adapter now lists that its connection, made
+ *  before the list grew, does not have. Empty for any other provider. */
+export function missingOAuthModels(providerId: string, models: readonly string[]): string[] {
+  const adapter = OAUTH_ADAPTER_OF[providerId];
+  return adapter ? adapter.canonicalNames.filter((name) => !models.includes(name)) : [];
+}
+
+/** Adds `missingOAuthModels` to each sign-in connection, after the models it
+ *  has, with their quirks and rank: a sign-in's quirks carry its account, and
+ *  its rank is its place in the fallback chain. Returns the ids repaired. */
+export async function repairOAuthModels(transport: Transport): Promise<string[]> {
+  const workspace = await resolveWorkspace(transport);
+  if (!workspace) return [];
+  const catalog = catalogFor(transport, workspace.tenantId);
+  const [providers, models, offerings] = await Promise.all([catalog.modelProviders(), catalog.models(), catalog.offerings()]);
+  const repaired: string[] = [];
+  for (const row of providers) {
+    const own = offerings.filter((offering) => offering.providerId === row.id);
+    const template = own[0];
+    if (!template) continue;
+    const have = own.map((offering) => models.find((model) => model.id === offering.modelId)?.canonicalName ?? "");
+    const missing = missingOAuthModels(row.name, have);
+    if (missing.length === 0) continue;
+    const rank = Math.floor(template.priority / 1000) * 1000;
+    for (const [index, canonicalName] of missing.entries()) {
+      let model = models.find((entry) => entry.canonicalName === canonicalName);
+      if (!model) {
+        model = await catalog.createModel({ canonicalName });
+        models.push(model);
+      }
+      await catalog.createOffering({
+        modelId: model.id,
+        providerId: row.id,
+        priority: rank + own.length + index,
+        ...(template.quirks !== undefined && template.quirks !== null ? { quirks: template.quirks } : {}),
+      });
+    }
+    repaired.push(row.id);
+  }
+  return repaired;
+}
+
 /**
  * One-time catalog repairs for rows written by earlier versions, run at app
  * start rather than on any page view: stale Anthropic bases
- * (`repairProviderBases`), and providers connected before connect gave each
- * one its own priority block, which are re-based in their listed order.
- * Returns whether anything changed.
+ * (`repairProviderBases`), sign-in connections missing the models their
+ * adapter lists now (`repairOAuthModels`), and providers connected before
+ * connect gave each one its own priority block, which are re-based in their
+ * listed order. Returns whether anything changed.
  */
 export async function settleProviderCatalog(transport: Transport): Promise<boolean> {
-  const [repaired, providers] = await Promise.all([repairProviderBases(transport), listConnectedProviders(transport)]);
+  const [repaired, models, providers] = await Promise.all([
+    repairProviderBases(transport),
+    repairOAuthModels(transport),
+    listConnectedProviders(transport),
+  ]);
   const collide = providers.length > 1 && blocksCollide(providers);
   if (collide) await reorderProviders(transport, providers.map((provider) => provider.id));
-  return repaired.length > 0 || collide;
+  return repaired.length > 0 || models.length > 0 || collide;
 }
 
 export async function refreshProviderModels(
