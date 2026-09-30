@@ -535,7 +535,7 @@ describe("ensureProjectWorkflow", () => {
       deploymentId: "dep_new",
       runId: "run_new",
       tenantId: TENANT_ID,
-      replay: { from: { deploymentId: "dep_1", runId: "run_1", tenantId: TENANT_ID }, replayed: 2, refused: [] },
+      replay: { from: { deploymentId: "dep_1", runId: "run_1", tenantId: TENANT_ID }, replayed: 2, refused: [], via: "signals" },
     });
     expect(hub.signalsSent()).toEqual([
       { runId: "run_new", signalName: "project.decision", signalId: "dec-1", payload: decisionPayload(1) },
@@ -561,7 +561,7 @@ describe("ensureProjectWorkflow", () => {
         parkAfterReads: 3,
       }),
     );
-    expect(await ensure(hub, 0, undefined, [], 1)).toMatchObject({ deploymentId: "dep_new", runId: "run_new", replay: { replayed: 3, refused: [] } });
+    expect(await ensure(hub, 0, undefined, [], 1)).toMatchObject({ deploymentId: "dep_new", runId: "run_new", replay: { replayed: 3, refused: [], via: "signals" } });
     expect(hub.signalsSent().map((sent) => sent.signalId)).toEqual(["dec-1", "dec-2", "dec-3"]);
     expect(hub.parkedAtSignal).toEqual([true, true, true]);
   });
@@ -598,7 +598,7 @@ describe("ensureProjectWorkflow", () => {
       deploymentId: "dep_new2",
       runId: "run_new2",
       tenantId: TENANT_ID,
-      replay: { from: { deploymentId: "dep_1", runId: "run_1", tenantId: TENANT_ID }, replayed: 3, refused: [] },
+      replay: { from: { deploymentId: "dep_1", runId: "run_1", tenantId: TENANT_ID }, replayed: 3, refused: [], via: "signals" },
     });
     expect(hub.signalsSent().map((sent) => `${sent.runId}:${sent.signalId}`)).toEqual(["run_new:dec-1", "run_new:dec-2", "run_new2:dec-1", "run_new2:dec-2", "run_new2:dec-3"]);
     // The replacement supersedes the stalled run by generation, so every later reader converges on it.
@@ -619,7 +619,7 @@ describe("ensureProjectWorkflow", () => {
         stallOn: { decisionId: "dec-2", once: true },
       }),
     );
-    expect(await ensure(hub, 0, undefined, [], 1, 20)).toMatchObject({ deploymentId: "dep_new", runId: "run_new", replay: { from: { deploymentId: "dep_old_failed", runId: "run_0" }, replayed: 2, refused: [] } });
+    expect(await ensure(hub, 0, undefined, [], 1, 20)).toMatchObject({ deploymentId: "dep_new", runId: "run_new", replay: { from: { deploymentId: "dep_old_failed", runId: "run_0" }, replayed: 2, refused: [], via: "signals" } });
     expect(hub.signalsSent().map((sent) => `${sent.runId}:${sent.signalId}`)).toEqual(["run_1:dec-2", "run_new:dec-1", "run_new:dec-2"]);
     expect(hub.triggeredCode()).toEqual({ digest: CURRENT_DIGEST, generation: 2 });
   });
@@ -634,7 +634,7 @@ describe("ensureProjectWorkflow", () => {
         firstParkAfterReads: 300,
       }),
     );
-    expect(await ensure(hub, 0, undefined, [], 1, 20)).toMatchObject({ deploymentId: "dep_new", runId: "run_new", replay: { replayed: 1, refused: [] } });
+    expect(await ensure(hub, 0, undefined, [], 1, 20)).toMatchObject({ deploymentId: "dep_new", runId: "run_new", replay: { replayed: 1, refused: [], via: "signals" } });
     expect(hub.signalsSent().map((sent) => `${sent.runId}:${sent.signalId}`)).toEqual(["run_new:dec-1"]);
     expect(hub.posts.filter((post) => /\/deployments$/.test(post.path))).toHaveLength(1);
   });
@@ -676,7 +676,7 @@ describe("ensureProjectWorkflow", () => {
       deploymentId: "dep_p",
       runId: "run_p",
       tenantId: TENANT_ID,
-      replay: { from: { deploymentId: "dep_ws", runId: "run_ws", tenantId: WS }, replayed: 2, refused: [] },
+      replay: { from: { deploymentId: "dep_ws", runId: "run_ws", tenantId: WS }, replayed: 2, refused: [], via: "signals" },
     });
     expect(hub.signalsSent().map((sent) => `${sent.runId}:${sent.signalId}`)).toEqual(["run_p:dec-1", "run_p:dec-2"]);
     expect(hub.posts.filter((post) => /\/deployments$/.test(post.path))).toEqual([]);
@@ -703,7 +703,7 @@ describe("ensureProjectWorkflow", () => {
       deploymentId: "dep_new",
       runId: "run_new",
       tenantId: TENANT_ID,
-      replay: { from: { deploymentId: "dep_done", runId: "run_done", tenantId: TENANT_ID }, replayed: 2, refused: [] },
+      replay: { from: { deploymentId: "dep_done", runId: "run_done", tenantId: TENANT_ID }, replayed: 2, refused: [], via: "signals" },
     });
     expect(hub.signalsSent().map((sent) => `${sent.runId}:${sent.signalId}`)).toEqual(["run_new:dec-1", "run_new:dec-2"]);
     expect(hub.triggeredCode()).toEqual({ digest: CURRENT_DIGEST, generation: 3 });
@@ -739,7 +739,7 @@ describe("ensureProjectWorkflow", () => {
       deploymentId: "dep_new",
       runId: "run_new",
       tenantId: TENANT_ID,
-      replay: { from: { deploymentId: "dep_1", runId: "run_1", tenantId: TENANT_ID }, replayed: 2, refused: [] },
+      replay: { from: { deploymentId: "dep_1", runId: "run_1", tenantId: TENANT_ID }, replayed: 2, refused: [], via: "signals" },
     });
     expect(hub.signalsSent().map((sent) => `${sent.runId}:${sent.signalId}`)).toEqual(["run_new:dec-1", "run_new:dec-2"]);
     expect(hub.triggeredCode()).toEqual({ digest: CURRENT_DIGEST, generation: 2 });
@@ -789,6 +789,92 @@ describe("ensureProjectWorkflow", () => {
     expect(heard).toEqual(["waiting:hub replacement", "deploying", "waiting:placement", "replaying 0/3", "replaying 1/3", "replaying 2/3", "replaying 3/3"]);
   });
 
+  // #299: a dead run whose reducer wrote a whole state is revived from
+  // that state, not by sending every decision again.
+  const fullState = (decisions: readonly number[], stage: number) => ({
+    projectId: PROJECT_ID,
+    stage,
+    done: false,
+    reviews: {},
+    decisions: decisions.map((n) => ({ decisionId: `dec-${String(n)}`, kind: "approve", stage: n, accepted: true, principalId: "prn_1" })),
+    authorizedPrincipals: {},
+    stageOrder: [1, 2, 3, 4, 5, 6, 7, 8, 9],
+    reviewCounts: {},
+    freeze: null,
+    requirements: [],
+    audiencePolicy: null,
+    audienceDecisions: {},
+    audiencePackages: {},
+  });
+  /** `decidedRun` whose newest iteration's `apply` output is the whole state, as the real reducer writes it. */
+  function snapshotRun(runId: string, decisions: readonly number[], stage: number) {
+    const run = decidedRun(runId, decisions);
+    const newest = run.runIds[run.runIds.length - 1]!;
+    const events = run.events[newest]!;
+    run.events[newest] = [...events.slice(0, -1), { seq: events.length, type: "StepCompleted", body: { stepId: "apply", attempt: 1, output: { ref: `inline:${JSON.stringify(fullState(decisions, stage))}` } } }];
+    return run;
+  }
+
+  test("revives a dead run from its last state: one trigger carrying the snapshot, nothing replayed, the fresh run holding every decision", async () => {
+    const run = snapshotRun("run_1", [1, 2, 3], 4);
+    const hub = fakeHub(
+      withAsset({
+        deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" }],
+        runsByDeployment: { dep_1: run.runIds },
+        eventsByRun: run.events,
+      }),
+    );
+    expect(await ensure(hub)).toEqual({
+      deploymentId: "dep_new",
+      runId: "run_new",
+      tenantId: TENANT_ID,
+      replay: { from: { deploymentId: "dep_1", runId: "run_1", tenantId: TENANT_ID }, replayed: 3, refused: [], via: "snapshot" },
+    });
+    expect(hub.signalsSent()).toEqual([]);
+    const mail = hub.posts.find((post) => /\/mail$/.test(post.path))!;
+    const payload = JSON.parse((mail.body as { content: string }).content) as { snapshot?: { stage: number; decisions: { decisionId: string }[] } };
+    expect(payload.snapshot?.stage).toBe(4);
+    expect(payload.snapshot?.decisions.map((d) => d.decisionId)).toEqual(["dec-1", "dec-2", "dec-3"]);
+    // Held by the snapshot on its trigger, the fresh run is the project's run from then on, with nothing to catch up.
+    expect(await findProjectWorkflow(hub.transport, PROJECT_ID)).toEqual({ deploymentId: "dep_new", runId: "run_new", tenantId: TENANT_ID });
+    expect(await ensure(hub)).toEqual({ deploymentId: "dep_new", runId: "run_new", tenantId: TENANT_ID });
+  });
+
+  test("a repair rebuilds from the recorded signals even when a state could be read, and refuses when a decision has no signal", async () => {
+    const run = snapshotRun("run_1", [1, 2], 3);
+    const hub = fakeHub(
+      withAsset({
+        deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "deployed", createdAt: "2026-01-01T00:00:00.000Z" }],
+        runsByDeployment: { dep_1: run.runIds },
+        eventsByRun: { ...run.events, run_1: [startedOn(CURRENT), PARKED[1]!] },
+      }),
+    );
+    const repaired = await ensureProjectWorkflow(hub.transport, { canPlaceSidecars: true }, { files: { "workflow.js": "", "actions.js": "", "loops.js": "" } }, hub.gitPush, PROJECT_ID, [], {}, {
+      replacementWaitMs: 0,
+      replayPollMs: 1,
+      repair: true,
+    });
+    expect(repaired).toMatchObject({ deploymentId: "dep_new", runId: "run_new", replay: { replayed: 2, refused: [], via: "signals" } });
+    expect(hub.signalsSent().map((sent) => `${sent.runId}:${sent.signalId}`)).toEqual(["run_new:dec-1", "run_new:dec-2"]);
+
+    // A run that was itself started from a snapshot holds decisions no signal ever carried.
+    const snapshotStarted = fakeHub(
+      withAsset({
+        deployments: [{ id: "dep_s", definitionAssetId: ASSET_ID, status: "failed", createdAt: "2026-01-01T00:00:00.000Z" }],
+        runsByDeployment: { dep_s: ["run_s"] },
+        eventsByRun: {
+          run_s: [
+            { seq: 1, type: "RunStarted", body: { trigger: { type: "mail", payload: { parts: [{ text: JSON.stringify({ projectId: PROJECT_ID, stages: [], code: CURRENT, snapshot: fullState([1, 2], 3) }) }] } } } },
+            PARKED[1]!,
+          ],
+        },
+      }),
+    );
+    await expect(
+      ensureProjectWorkflow(snapshotStarted.transport, { canPlaceSidecars: true }, { files: { "workflow.js": "", "actions.js": "", "loops.js": "" } }, snapshotStarted.gitPush, PROJECT_ID, [], {}, { replacementWaitMs: 0, replayPollMs: 1, repair: true }),
+    ).rejects.toThrow(/exist only in a snapshot with no signal to send again/);
+  });
+
   test("a live run that has not caught up is brought up to the dead run's decisions, not replaced", async () => {
     const hub = fakeHub(
       withAsset({
@@ -800,7 +886,7 @@ describe("ensureProjectWorkflow", () => {
         eventsByRun: { ...decidedRun("run_0", [1, 2]).events, ...decidedRun("run_1", [1]).events },
       }),
     );
-    expect(await ensure(hub)).toMatchObject({ deploymentId: "dep_new_live", runId: "run_1", replay: { from: { deploymentId: "dep_old_failed", runId: "run_0", tenantId: TENANT_ID }, replayed: 2, refused: [] } });
+    expect(await ensure(hub)).toMatchObject({ deploymentId: "dep_new_live", runId: "run_1", replay: { from: { deploymentId: "dep_old_failed", runId: "run_0", tenantId: TENANT_ID }, replayed: 2, refused: [], via: "signals" } });
     expect(hub.signalsSent().map((sent) => sent.signalId)).toEqual(["dec-2"]);
   });
 
@@ -878,7 +964,7 @@ describe("ensureProjectWorkflow", () => {
       deploymentId: "dep_new",
       runId: "run_new",
       tenantId: TENANT_ID,
-      replay: { from: { deploymentId: "dep_1", runId: "run_1", tenantId: TENANT_ID }, replayed: 0, refused: [] },
+      replay: { from: { deploymentId: "dep_1", runId: "run_1", tenantId: TENANT_ID }, replayed: 0, refused: [], via: "signals" },
     });
     expect(hub.signalsSent()).toEqual([]);
     expect(hub.posts.some((post) => post.path.endsWith("/workflows/deployments"))).toBe(true);
@@ -934,7 +1020,7 @@ describe("ensureProjectWorkflow", () => {
         deploymentId: "dep_new",
         runId: "run_new",
         tenantId: TENANT_ID,
-        replay: { from: { deploymentId: "dep_old", runId: "run_old", tenantId: TENANT_ID }, replayed: 2, refused: [] },
+        replay: { from: { deploymentId: "dep_old", runId: "run_old", tenantId: TENANT_ID }, replayed: 2, refused: [], via: "signals" },
       });
       expect(hub.triggeredCode()).toEqual({ digest: CURRENT_DIGEST, generation: 2 });
       expect(hub.signalsSent()).toEqual([
@@ -957,7 +1043,7 @@ describe("ensureProjectWorkflow", () => {
           eventsByRun: decidedRun("run_old", [1]).events,
         }),
       );
-      expect(await ensure(hub)).toMatchObject({ deploymentId: "dep_new", runId: "run_new", replay: { replayed: 1, refused: [] } });
+      expect(await ensure(hub)).toMatchObject({ deploymentId: "dep_new", runId: "run_new", replay: { replayed: 1, refused: [], via: "signals" } });
       expect(hub.triggeredCode()).toEqual({ digest: CURRENT_DIGEST, generation: 1 });
     });
 
@@ -968,6 +1054,7 @@ describe("ensureProjectWorkflow", () => {
         from: { deploymentId: "dep_old", runId: "run_old", tenantId: TENANT_ID },
         replayed: 2,
         refused: [{ decisionId: "dec-2", kind: "approve", stage: 2, reason: "quorum_not_met" }],
+        via: "signals",
       });
       // Both decisions were delivered: a refusal is the reducer's ledger row, not a skipped signal.
       expect(hub.signalsSent().map((sent) => sent.signalId)).toEqual(["dec-1", "dec-2"]);
@@ -985,7 +1072,7 @@ describe("ensureProjectWorkflow", () => {
           reducer: () => ({ accepted: false, reason: "wrong_stage" }),
         }),
       );
-      expect((await ensure(hub)).replay).toEqual({ from: { deploymentId: "dep_old", runId: "run_old", tenantId: TENANT_ID }, replayed: 1, refused: [] });
+      expect((await ensure(hub)).replay).toEqual({ from: { deploymentId: "dep_old", runId: "run_old", tenantId: TENANT_ID }, replayed: 1, refused: [], via: "signals" });
     });
   });
 });

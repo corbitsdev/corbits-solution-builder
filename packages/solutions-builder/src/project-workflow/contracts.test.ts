@@ -792,3 +792,29 @@ describe("stage 5 audience decisions (CL-8870)", () => {
     expect(next.decisions.at(-1)).toMatchObject({ accepted: false, reason: "quorum_not_met" });
   });
 });
+
+// #299: a revived run starts from the state its predecessor last wrote.
+describe("initProjectState with a snapshot", () => {
+  const stages = [1, 2, 3].map((stage) => ({ stage, authorizedPrincipalIds: ["prn_new"] }));
+  const snapshot: ProjectState = {
+    ...initProjectState({ projectId: "p1", stages: [1, 2, 3].map((stage) => ({ stage, authorizedPrincipalIds: ["prn_old"] })) }),
+    stage: 3,
+    decisions: [{ decisionId: "dec-1", kind: "approve", stage: 1, accepted: true, principalId: "prn_old" }],
+    reviewCounts: { 1: 1, 2: 1 },
+  };
+
+  test("adopts the snapshot's stage, decisions and reviews, with this trigger's authorities and order", () => {
+    const state = initProjectState({ projectId: "p1", stages, snapshot });
+    expect(state.stage).toBe(3);
+    expect(state.decisions.map((d) => d.decisionId)).toEqual(["dec-1"]);
+    expect(state.reviewCounts).toEqual({ 1: 1, 2: 1 });
+    expect(state.authorizedPrincipals).toEqual({ 1: ["prn_new"], 2: ["prn_new"], 3: ["prn_new"] });
+    expect(state.stageOrder).toEqual([1, 2, 3]);
+  });
+
+  test("a snapshot of another project, or of no recognisable shape, is refused and the run starts fresh", () => {
+    expect(initProjectState({ projectId: "p2", stages, snapshot }).stage).toBe(1);
+    expect(initProjectState({ projectId: "p1", stages, snapshot: { projectId: "p1" } as unknown as ProjectState }).stage).toBe(1);
+    expect(initProjectState({ projectId: "p1", stages, snapshot }).decisions.length).toBe(1);
+  });
+});

@@ -379,6 +379,9 @@ function ProjectCard({
   // "Prune old versions…" shows its plan first and archives on the second
   // click, the way Delete asks twice (#297).
   const [pruning, setPruning] = useState<PrunePlan | null>(null);
+  // "Repair this project…" asks twice too (#299): it rebuilds the run from
+  // every recorded decision instead of the state the last run wrote.
+  const [repairing, setRepairing] = useState(false);
   const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The face is inert while the options menu or the info dialog is up, and
   // for a moment after either closes (`card-face-guard.ts`): the click that
@@ -478,6 +481,7 @@ function ProjectCard({
                 if (!open) {
                   setConfirming(false);
                   setPruning(null);
+                  setRepairing(false);
                   closedAt.current = Date.now();
                 }
               }}
@@ -523,6 +527,28 @@ function ProjectCard({
                     }}
                   >
                     Prune old versions…
+                  </MenuItem>
+                )}
+                {repairing ? (
+                  <MenuItem
+                    onSelect={() =>
+                      void act(async () => {
+                        const ensured = await api.repairProjectWorkflow(project.id);
+                        const replayed = ensured.replay?.replayed ?? 0;
+                        onNotice(`Rebuilt ${project.title}'s workflow from ${String(replayed)} recorded decision${replayed === 1 ? "" : "s"}.`);
+                      })
+                    }
+                  >
+                    Yes, rebuild it from its decisions
+                  </MenuItem>
+                ) : (
+                  <MenuItem
+                    onSelect={(event) => {
+                      event.preventDefault();
+                      setRepairing(true);
+                    }}
+                  >
+                    Repair this project…
                   </MenuItem>
                 )}
                 <MenuSeparator />

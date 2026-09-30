@@ -950,6 +950,65 @@ function activeModelCacheClear(): void {
   activeModelCache.clear();
 }
 
+/**
+ * One ensure of `projectId`'s workflow, memoised by the callers above:
+ * `extra` carries a repair (#299) or nothing.
+ */
+function ensureProjectWorkflowWith(projectId: string, extra: { repair?: boolean }): Promise<EnsuredProjectWorkflow> {
+  return asWorkspaceOwner(async (transport, workspaceTenantId) => {
+    const workspace = await resolveWorkspace(transport);
+    if (!workspace) throw new Error("The workspace is not installed yet.");
+    // The same person is a different principal in each tenant, and the
+    // hub stamps a decision with the caller's principal in the tenant it
+    // is signalled in: the project's own since #29. So the owner's
+    // principal there authorises every stage, beside the workspace one a
+    // legacy deployment still live in the workspace is signalled as
+    // (#165).
+    const ownerInProject = await myPrincipalIn(transport, projectId);
+    const authorizedPrincipalIds = [...new Set([...(ownerInProject ? [ownerInProject] : []), workspace.principalId])];
+    const stages: ProjectWorkflowStageInput[] = Array.from({ length: 9 }, (_, index) => ({
+      stage: index + 1,
+      authorizedPrincipalIds,
+    }));
+    const status = await readyToDeploy(transport, workspaceTenantId, projectId);
+    const opening = await openingOf(transport, projectId);
+    // What the ensure step is doing, under the busy strip's clock: a click
+    // that waits on it (a decision, a vote) otherwise showed only its own
+    // name for as long as a history replayed (#295).
+    let release = beginBusy("Starting the project's workflow");
+    const onProgress = (progress: EnsureProgress) => {
+      release();
+      release = beginBusy(ensureProgressLabel(progress));
+    };
+    let ref: EnsuredProjectWorkflow;
+    try {
+      ref = await ensureProjectWorkflow(
+        transport,
+        sidecarCapabilityOf(status),
+        await projectWorkflowSource(),
+        lifecycleGitPush,
+        projectId,
+        stages,
+        await vendoredMemberFiles(await fetchClosureManifestOrThrow(), fetchClosureTarball),
+        { ...(opening ? { problemStatement: opening.body } : {}), onProgress, ...extra },
+      );
+    } finally {
+      release();
+    }
+    const ready = await waitForDeploymentDeployed(transport, ref.tenantId, ref.deploymentId);
+    if (!ready) {
+      throw new ApiFailure({
+        code: "unavailable",
+        message: "This project's workflow did not finish starting up.",
+        correlationId: "-",
+        retryable: true,
+      });
+    }
+    cacheProjectWorkflowRef(projectId, ref);
+    return ref;
+  });
+}
+
 export const api = {
   status: () => request<HostStatus>("/status"),
   /**
@@ -2224,61 +2283,23 @@ false,
    * carries a `replay`, whose `refused` names any decision the new rules
    * turned down, for the page to show.
    */
+  /**
+   * Rebuilds the project's run from its recorded decisions (#299): a fresh
+   * deployment, every recorded signal sent again, whatever is live now. For
+   * when the last state is not to be trusted. The memo is dropped first so
+   * this and every later call see the rebuilt run.
+   */
+  repairProjectWorkflow: (projectId: string): Promise<EnsuredProjectWorkflow> => {
+    ensureProjectWorkflowCalls.delete(projectId);
+    const call = ensureProjectWorkflowWith(projectId, { repair: true });
+    ensureProjectWorkflowCalls.set(projectId, call);
+    call.catch(() => ensureProjectWorkflowCalls.delete(projectId));
+    return call;
+  },
   ensureProjectWorkflow: (projectId: string): Promise<EnsuredProjectWorkflow> => {
     const pending = ensureProjectWorkflowCalls.get(projectId);
     if (pending) return pending;
-    const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
-      const workspace = await resolveWorkspace(transport);
-      if (!workspace) throw new Error("The workspace is not installed yet.");
-      // The same person is a different principal in each tenant, and the
-      // hub stamps a decision with the caller's principal in the tenant it
-      // is signalled in: the project's own since #29. So the owner's
-      // principal there authorises every stage, beside the workspace one a
-      // legacy deployment still live in the workspace is signalled as
-      // (#165).
-      const ownerInProject = await myPrincipalIn(transport, projectId);
-      const authorizedPrincipalIds = [...new Set([...(ownerInProject ? [ownerInProject] : []), workspace.principalId])];
-      const stages: ProjectWorkflowStageInput[] = Array.from({ length: 9 }, (_, index) => ({
-        stage: index + 1,
-        authorizedPrincipalIds,
-      }));
-      const status = await readyToDeploy(transport, workspaceTenantId, projectId);
-      const opening = await openingOf(transport, projectId);
-      // What the ensure step is doing, under the busy strip's clock: a click
-      // that waits on it (a decision, a vote) otherwise showed only its own
-      // name for as long as a history replayed (#295).
-      let release = beginBusy("Starting the project's workflow");
-      const onProgress = (progress: EnsureProgress) => {
-        release();
-        release = beginBusy(ensureProgressLabel(progress));
-      };
-      let ref: EnsuredProjectWorkflow;
-      try {
-        ref = await ensureProjectWorkflow(
-          transport,
-          sidecarCapabilityOf(status),
-          await projectWorkflowSource(),
-          lifecycleGitPush,
-          projectId,
-          stages,
-          await vendoredMemberFiles(await fetchClosureManifestOrThrow(), fetchClosureTarball),
-          { ...(opening ? { problemStatement: opening.body } : {}), onProgress },
-        );
-      } finally {
-        release();
-      }
-      const ready = await waitForDeploymentDeployed(transport, ref.tenantId, ref.deploymentId);
-      if (!ready) {
-        throw new ApiFailure({
-          code: "unavailable",
-          message: "This project's workflow did not finish starting up.",
-          correlationId: "-",
-          retryable: true,
-        });
-      }
-      cacheProjectWorkflowRef(projectId, ref);
-      return ref;
-    });
+    const call = ensureProjectWorkflowWith(projectId, {});
     call.catch(() => ensureProjectWorkflowCalls.delete(projectId));
     ensureProjectWorkflowCalls.set(projectId, call);
     return call;

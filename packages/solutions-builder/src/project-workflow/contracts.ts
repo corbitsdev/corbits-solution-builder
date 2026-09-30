@@ -949,15 +949,43 @@ export interface InitProjectStagePayload {
 export interface InitProjectPayload {
   readonly projectId: string;
   readonly stages: readonly InitProjectStagePayload[];
+  /** The state a previous run of this project last wrote, for a run that
+   *  revives it (#299): adopted whole, with the stage authorities and
+   *  order this trigger names. Absent for a project's first run. */
+  readonly snapshot?: ProjectState;
 }
 
-/** Builds the loop's initial carry from the workflow's trigger payload. No
- *  review is open yet -- the first `open_review` decision opens stage 1's. */
+/** Whether `value` is a state this workflow wrote: enough of the shape to carry on from. */
+export function isProjectStateSnapshot(value: unknown): value is ProjectState {
+  if (typeof value !== "object" || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record["projectId"] === "string" &&
+    typeof record["stage"] === "number" &&
+    typeof record["done"] === "boolean" &&
+    Array.isArray(record["decisions"]) &&
+    typeof record["reviews"] === "object" &&
+    record["reviews"] !== null
+  );
+}
+
+/**
+ * Builds the loop's initial carry from the workflow's trigger payload. No
+ * review is open yet -- the first `open_review` decision opens stage 1's.
+ * A trigger carrying a `snapshot` of this same project revives it there
+ * instead (#299): the state is adopted as it was, decisions and all, and
+ * only the stage authorities and stage order come from the new trigger, since
+ * a revived run may be told other principals than the run before it (#165).
+ * A snapshot of another project is refused: the run starts fresh.
+ */
 export function initProjectState(payload: InitProjectPayload): ProjectState {
   const firstStage = payload.stages[0];
   if (!firstStage) throw new Error("initProjectState requires at least one stage");
   const authorizedPrincipals: Record<StageNumber, readonly string[]> = {};
   for (const s of payload.stages) authorizedPrincipals[s.stage] = s.authorizedPrincipalIds;
+  if (isProjectStateSnapshot(payload.snapshot) && payload.snapshot.projectId === payload.projectId) {
+    return { ...payload.snapshot, authorizedPrincipals, stageOrder: payload.stages.map((s) => s.stage) };
+  }
   return {
     projectId: payload.projectId,
     stage: firstStage.stage,
