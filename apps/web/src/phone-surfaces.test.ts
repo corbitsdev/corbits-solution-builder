@@ -37,7 +37,7 @@ describe("splitting phone screens out of a design", () => {
   test("a phone's document carries the design's head and body attributes, and the screen fills its width", () => {
     const [capture] = splitPhoneSurfaces(design).phones;
     expect(capture!.html).toStartWith('<!doctype html><html lang="en"><head><title>Workout Log</title><style>body{font:16px sans-serif}.screen{width:402px}</style>');
-    expect(capture!.html).toContain('section[data-surface="phone"]{box-sizing:border-box;width:100%!important');
+    expect(capture!.html).toContain('[data-surface="phone"]{box-sizing:border-box;width:100%!important');
     expect(capture!.html).toContain('<body class="light"><section data-testid="screen-capture" data-surface="phone" class="screen"><h1>Capture</h1><section data-testid="inner"><p>Nested</p></section></section></body></html>');
   });
 
@@ -105,7 +105,7 @@ describe("desktop surfaces", () => {
     expect(split.main).toContain("design-notes");
     expect(split.main).not.toContain("screen-projects");
     expect(split.desktops[0]!.html).toContain("<style>main{display:grid}</style>");
-    expect(split.desktops[0]!.html).toContain('section[data-surface]{box-sizing:border-box;width:100%!important');
+    expect(split.desktops[0]!.html).toContain('[data-surface]{box-sizing:border-box;width:100%!important');
     expect(split.desktops[0]!.html).not.toContain("overflow-x:hidden");
   });
 
@@ -120,5 +120,21 @@ describe("desktop surfaces", () => {
   test("Desktop window forced puts the whole design in one window", () => {
     const plain = "<!doctype html><html><body><p>Plain</p></body></html>";
     expect(framedDesign(plain, "desktop", "Plain")).toEqual({ phones: [], desktops: [{ id: "whole", title: "Plain", html: plain }], main: null });
+  });
+});
+
+// #284: a designer that reaches for <article> or <main> instead of <section>
+// still gets its screen framed.
+describe("marks on article and main", () => {
+  test("an article marked desktop is lifted like a section, and its screen style covers any tag", () => {
+    const html =
+      '<!doctype html><html><head></head><body><main>' +
+      '<article data-testid="screen-home" data-surface="desktop"><h1>Home</h1></article>' +
+      '<section data-testid="design-notes"><h2>Primary flows</h2></section></main></body></html>';
+    const split = splitSurfaces(html);
+    expect(split.desktops.map((screen) => screen.id)).toEqual(["screen-home"]);
+    expect(split.desktops[0]!.html).toContain('[data-surface]{box-sizing:border-box');
+    expect(split.main).toContain("design-notes");
+    expect(split.main).not.toContain("screen-home");
   });
 });

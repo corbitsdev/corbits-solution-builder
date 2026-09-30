@@ -62,6 +62,23 @@ export function placeMockups(deck: Pick<Deck, "slides" | "images">, shots: reado
   return images;
 }
 
+/** The sections the designer names as screens, whatever surface mark they carry or lack. */
+const NAMED_SCREEN_SELECTOR = ['[data-testid^="screen-"]', '[data-testid^="view-"]'].map((mark) => `section${mark}, article${mark}`).join(", ");
+
+/**
+ * Which elements are the design's screens (#284): the ones marked with a
+ * surface; else the sections the designer named as screens or views; else
+ * the page's own top-level sections, the design notes left out; and only a
+ * design with none of those is shot as its whole page. A nine-view mockup
+ * with no marks is nine landscape pictures, never one tall strip.
+ */
+export function chooseScreens<T>(candidates: { surfaces: readonly T[]; named: readonly T[]; sections: readonly T[]; body: T }): T[] {
+  if (candidates.surfaces.length > 0) return [...candidates.surfaces];
+  if (candidates.named.length > 0) return [...candidates.named];
+  if (candidates.sections.length > 0) return [...candidates.sections];
+  return [candidates.body];
+}
+
 /** The screens of an HTML mockup as PNG bytes, at most `max`; none outside a browser or for a design with nothing to draw. */
 export async function mockupShots(html: string, max = 8): Promise<Uint8Array[]> {
   if (typeof document === "undefined" || typeof window === "undefined") return [];
@@ -82,8 +99,14 @@ export async function mockupShots(html: string, max = 8): Promise<Uint8Array[]> 
     });
     const doc = frame.contentDocument;
     if (!doc?.body) return [];
-    const surfaces = [...doc.querySelectorAll<HTMLElement>("[data-surface]")];
-    const targets = (surfaces.length > 0 ? surfaces : [doc.body]).slice(0, max);
+    const targets = chooseScreens({
+      surfaces: [...doc.querySelectorAll<HTMLElement>("[data-surface]")],
+      named: [...doc.querySelectorAll<HTMLElement>(NAMED_SCREEN_SELECTOR)],
+      sections: [...doc.querySelectorAll<HTMLElement>("body > section, body > main > section, body > article, body > main > article")].filter(
+        (section) => !/^design-notes$/i.test(section.getAttribute("data-testid") ?? ""),
+      ),
+      body: doc.body,
+    }).slice(0, max);
     const styles = [...doc.querySelectorAll("style")].map((style) => style.textContent ?? "").join("\n");
     const shots: Uint8Array[] = [];
     for (const target of targets) {
