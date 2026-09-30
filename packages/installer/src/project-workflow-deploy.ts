@@ -494,7 +494,7 @@ type CatchUpOptions = {
 
 /** What the ensure step is doing, for a caller that shows work in flight (#295). */
 export type EnsureProgress =
-  | { readonly phase: "waiting"; readonly detail: "hub replacement" | "placement" }
+  | { readonly phase: "waiting"; readonly detail: "placement" }
   | { readonly phase: "deploying" }
   | { readonly phase: "replaying"; readonly done: number; readonly total: number };
 

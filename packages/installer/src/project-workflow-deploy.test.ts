@@ -786,7 +786,7 @@ describe("ensureProjectWorkflow", () => {
       replayPollMs: 1,
       onProgress: (progress) => heard.push(progress.phase === "replaying" ? `replaying ${String(progress.done)}/${String(progress.total)}` : progress.phase === "waiting" ? `waiting:${progress.detail}` : progress.phase),
     });
-    expect(heard).toEqual(["waiting:hub replacement", "deploying", "waiting:placement", "replaying 0/3", "replaying 1/3", "replaying 2/3", "replaying 3/3"]);
+    expect(heard).toEqual(["deploying", "waiting:placement", "replaying 0/3", "replaying 1/3", "replaying 2/3", "replaying 3/3"]);
   });
 
   // #299: a dead run whose reducer wrote a whole state is revived from

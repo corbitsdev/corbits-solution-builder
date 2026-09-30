@@ -2585,9 +2585,7 @@ false,
 export function ensureProgressLabel(progress: EnsureProgress): string {
   switch (progress.phase) {
     case "waiting":
-      return progress.detail === "hub replacement"
-        ? "Waiting for the hub to bring the project's workflow back"
-        : "Waiting for the hub to place the project's workflow";
+      return "Waiting for the hub to place the project's workflow";
     case "deploying":
       return "Deploying the project's workflow";
     case "replaying":
