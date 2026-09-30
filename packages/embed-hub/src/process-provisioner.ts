@@ -53,10 +53,12 @@ export type ProcessProvisionerOptions = {
 };
 
 /**
- * Rebinds live allocations and probes bound under the legacy
+ * Rebinds allocations and probes bound under the legacy
  * `process:v1:<role>:<entry>:<hub url>` fingerprint to the stable one, so the
- * hub replaces them instead of leaving them allocated with no provisioner.
- * Must run before the reconciler starts. Terminal rows keep their history.
+ * hub can still drive them -- release a dead one, or replace it -- instead of
+ * leaving them bound to a provisioner that no longer exists. Must run before
+ * the reconciler starts. Rows already ended (released, failed; a probe's
+ * succeeded) keep their history untouched.
  */
 export async function rebindLegacyProcessAllocations(db: DB["db"]): Promise<void> {
   for (const role of ["deployment", "probe"] as const) {
