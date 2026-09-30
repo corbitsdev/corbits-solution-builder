@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -101,4 +101,49 @@ describe("process provisioner", () => {
     await ensure(1, "sc_a");
     expect(await ensure(1, "sc_b")).toMatchObject({ kind: "rejected", code: "sidecar_identity_conflict" });
   });
+
+  test("a destroyed generation leaves none of its process tree running", async () => {
+    // A sidecar that ignores SIGTERM and has a child of its own, as a sidecar
+    // has its workflow processes.
+    const entry = join(dataDir, "sidecar.ts");
+    await writeFile(
+      entry,
+      [
+        'process.on("SIGTERM", () => {});',
+        'const child = Bun.spawn(["sleep", "60"], { stdin: "ignore" });',
+        'await Bun.write(Bun.env.SIDECAR_DATA_DIR + "/child.pid", String(child.pid));',
+        "setInterval(() => {}, 1_000);",
+      ].join("\n"),
+    );
+    provisioner = createProcessProvisioner({
+      role: "deployment",
+      dataDir,
+      runtimePath: process.execPath,
+      sidecarEntryPath: entry,
+      terminationGraceMs: 200,
+    });
+    const accepted = await ensure(1, "sc_old");
+    if (accepted.kind !== "accepted") throw new Error(accepted.message);
+    const sidecarPid = Number(accepted.externalRef?.split(":")[2]);
+    const childPidFile = join(dataDir, "allocations/sal_a/gen-1/data/child.pid");
+    let childPid = 0;
+    for (let i = 0; i < 100 && childPid === 0; i++) {
+      childPid = Number(await readFile(childPidFile, "utf8").catch(() => "0"));
+      if (childPid === 0) await Bun.sleep(50);
+    }
+    expect(childPid).toBeGreaterThan(0);
+
+    expect(await destroy(2, "sc_old")).toEqual({ kind: "destroyed" });
+    expect(isRunning(sidecarPid)).toBe(false);
+    expect(isRunning(childPid)).toBe(false);
+  }, 10_000);
 });
+
+function isRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
