@@ -559,7 +559,10 @@ sub-headings: the slides are built from the numbered items. One item may be
 **What it looks like** with nothing under it: that slide shows a screen of
 the approved design and carries no sentences. Pictures are the approved
 design's screens, placed when the slides are drawn: not every slide gets
-one, and no two slides in a row show the same screen. With the package
+one, and no two slides in a row show the same screen. To put a particular
+screen on a slide, end that item with (screen: <name>), using a name the
+design hand-off lists; items that name none take the remaining screens in
+turn. With the package
 in the reply, also call the render_deck tool with that same markdown: it
 checks the outline builds into slides and reports the deck's shape, and the
 app draws and exports the slides from the outline in your reply. The call is
