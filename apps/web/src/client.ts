@@ -111,6 +111,7 @@ export const STAGE_DRAFT_KIND: Readonly<Record<number, string>> = {
   9: "delivery_manifest",
 };
 import { artifactGraphFor } from "./artifact-graph.ts";
+import { prunePlan, type PrunePlan } from "./prune-versions.ts";
 import { findArtifact, listProjectArtifacts } from "./project-artifacts.ts";
 import { addressesByMailTenant, mailTenantFor, parentTenantOf } from "./project-tenants.ts";
 import { toBase64 } from "./base64.ts";
@@ -1837,6 +1838,31 @@ export const api = {
    * `GET /projects/:id/graph` (CL-8510); nodes come back in the same
    * `ArtifactNode` shape `projectView`'s `nodes` already use.
    */
+  /** What "Prune old versions" would archive for `projectId`, without doing it (#297). */
+  pruneProjectPlan: (projectId: string): Promise<PrunePlan> =>
+    asWorkspaceOwner(async (transport) => {
+      const [graph, view] = await Promise.all([artifactGraphFor(transport, projectId), api.projectWorkflowView(projectId)]);
+      return prunePlan(graph.nodes, view);
+    }),
+  /**
+   * Archives every version `pruneProjectPlan` says can go (#297): the hub
+   * hides an archived version from every listing and read, and deletes
+   * nothing. Each version is archived in the tenant that holds it, the
+   * project's own or the workspace for an older project's record.
+   */
+  pruneProjectVersions: (projectId: string): Promise<{ archived: number; kept: number; lineages: number }> =>
+    asWorkspaceOwner(async (transport) => {
+      const [graph, view] = await Promise.all([artifactGraphFor(transport, projectId), api.projectWorkflowView(projectId)]);
+      const plan = prunePlan(graph.nodes, view);
+      let archived = 0;
+      for (const node of plan.archive) {
+        const found = await findArtifact(transport, projectId, node.id);
+        if (!found) continue;
+        await installerArchiveArtifact(transport, found.tenantId, node.id);
+        archived += 1;
+      }
+      return { archived, kept: plan.keep.length, lineages: plan.lineages };
+    }),
   artifactGraph: (projectId: string) =>
     asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const graph = await artifactGraphFor(transport, projectId);
