@@ -562,6 +562,7 @@ const DOCUMENT_NAMES: Record<string, string> = {
   cost_approval: "Cost",
   build_packet: "Build packet",
   build_evidence: "Build evidence",
+  build_review: "Build review",
   delivery_manifest: "Delivery manifest",
   delivery_verification: "Delivery verification",
 };

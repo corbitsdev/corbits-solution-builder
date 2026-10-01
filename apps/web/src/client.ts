@@ -1871,10 +1871,22 @@ export const api = {
    * documents download carries it.
    */
   persistEngineeringReview: (projectId: string, roleKey: string, reviewer: string, content: string) =>
+    api.persistPanelReview(projectId, 6, roleKey, reviewer, content),
+  /** The stage 6 role's live deployment, read only (#328): what to read a reply back from, never a deploy. */
+  stage6RoleAgentStatus: (projectId: string, roleKey: string): Promise<SpecialistDeploymentStatus | null> => api.stageRoleAgentStatus(projectId, 6, roleKey),
+  /** A stage's companion role's live deployment, read only (#341). */
+  stageRoleAgentStatus: (projectId: string, stage: 6 | 8, roleKey: string): Promise<SpecialistDeploymentStatus | null> =>
+    asWorkspaceOwner((transport) => stageSpecialistStatus(transport, projectId, stage as Stage, roleKey)),
+  /**
+   * Records one panel review (#334, #341): at stage 6 the plan's
+   * engineering_review, at stage 8 the build's build_review, one lineage per
+   * reviewer, the reviewer's role in its provenance.
+   */
+  persistPanelReview: (projectId: string, stage: 6 | 8, roleKey: string, reviewer: string, content: string) =>
     asWorkspaceOwner((transport) =>
       persistDraftOfKind(transport, projectId, {
-        stage: 6,
-        kind: "engineering_review",
+        stage,
+        kind: stage === 8 ? "build_review" : "engineering_review",
         variant: reviewer,
         content,
         sourceVersionIds: [],
@@ -1882,9 +1894,6 @@ export const api = {
         agentRole: stage6RoleFor(roleKey).id,
       }),
     ),
-  /** The stage 6 role's live deployment, read only (#328): what to read a reply back from, never a deploy. */
-  stage6RoleAgentStatus: (projectId: string, roleKey: string): Promise<SpecialistDeploymentStatus | null> =>
-    asWorkspaceOwner((transport) => stageSpecialistStatus(transport, projectId, 6 as Stage, roleKey)),
   /** The stakeholders stage 5 writes for, and the roles one may hold — read off the hub tenant directly. */
   stakeholders: (projectId: string) =>
     asWorkspaceOwner(async (transport) => {
@@ -2280,14 +2289,21 @@ false,
    * is its own asset, deployed lazily the first time that role is needed --
    * never all five up front -- and running its own kit role's prompt.
    */
-  ensureStage6RoleAgent: (projectId: string, roleKey: string): Promise<SpecialistDeployment> => {
-    const key = `${projectId}:${roleKey}`;
+  ensureStage6RoleAgent: (projectId: string, roleKey: string): Promise<SpecialistDeployment> => api.ensureStageRoleAgent(projectId, 6, roleKey),
+  /**
+   * Deploys (or finds) one of a stage's companion roles -- stage 6's
+   * requirements author and panel, stage 8's panel (#341) -- and waits
+   * for it to be placed. Memoised per project, stage and role for as long
+   * as the deployment it remembers is still the live one.
+   */
+  ensureStageRoleAgent: (projectId: string, stage: 6 | 8, roleKey: string): Promise<SpecialistDeployment> => {
+    const key = `${projectId}:${String(stage)}:${roleKey}`;
     const pending = ensureStage6RoleAgentCalls.get(key);
     if (pending) {
       return pending.then(async (deployment) => {
-        if (await memoStillLive(projectId, 6 as Stage, roleKey, deployment)) return deployment;
+        if (await memoStillLive(projectId, stage as Stage, roleKey, deployment)) return deployment;
         ensureStage6RoleAgentCalls.delete(key);
-        return api.ensureStage6RoleAgent(projectId, roleKey);
+        return api.ensureStageRoleAgent(projectId, stage, roleKey);
       });
     }
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
@@ -2298,7 +2314,7 @@ false,
         await lifecycleClosureSource(),
         lifecycleGitPush,
         projectId,
-        6 as Stage,
+        stage as Stage,
         specialistHubOrigin(),
         false,
         roleKey,

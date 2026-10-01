@@ -204,3 +204,11 @@ describe("mockups in the archive", () => {
     expect(notice).toBe("Saved 1 document and 2 mockup pictures of P to p-documents.zip.");
   });
 });
+
+// #341: stage 8's build reviews are documents too, one per reviewer.
+describe("build reviews in the archive", () => {
+  test("a build review is named by stage, kind and reviewer", () => {
+    expect(documentFileName(node({ kind: "build_review", stage: 8, variant: "Security" }), "# r")).toBe("08-build-review-security.md");
+    expect(completedDocuments([node({ kind: "build_review", stage: 8, variant: "Quality" }), node({ kind: "build_evidence", stage: 8 })]).map((n) => n.kind)).toEqual(["build_review"]);
+  });
+});

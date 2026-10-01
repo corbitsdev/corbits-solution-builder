@@ -67,6 +67,8 @@ import { useModelSwitch, useModelHandoff } from "./use-model-handoff.ts";
 import { currentInference, inferenceOptions, orderLeadingWith, type InferenceOption } from "./inference-options.ts";
 import { loadDismissedDefault, saveDismissedDefault } from "./model-nudge-store.ts";
 import { Stage6Panel } from "./stage6.tsx";
+import { PanelReviewsCompanion, reviewNodesOf as panelReviewNodesOf } from "./panel-reviews.tsx";
+import { renderStackBlock } from "./frozen-stack-text.ts";
 
 /** Stage 6's recorded panel reviews, newest unsuperseded version per reviewer (#334). */
 function reviewNodesOf(nodes: readonly ArtifactNode[]): ReadonlyMap<string, ArtifactNode> {
@@ -961,6 +963,26 @@ export function StageWorkspace({
           onAttach={(files) => {
             void api.attachMaterial(detail.project.id, [...files]).then(() => void refreshWorkflow());
           }}
+        />
+      ) : null}
+
+      {agentAddress && stage === 8 ? (
+        // The senior-engineer panel on the build's evidence (#341): asked
+        // against the frozen stack and the build engineer's latest report,
+        // each reply recorded as the reviewer's build_review document.
+        <PanelReviewsCompanion
+          projectId={detail.project.id}
+          tenantId={tenantId}
+          stage={8}
+          reviewInput={
+            latestSpecialistMessage && decisions.stage8Evidence?.ready
+              ? [workflowView?.freeze ? renderStackBlock(workflowView.freeze) : null, "## Build evidence, as the build engineer reported it", latestSpecialistMessage.body]
+                  .filter((part): part is string => part !== null)
+                  .join("\n\n")
+              : null
+          }
+          reviewNodes={panelReviewNodesOf(detail.nodes, 8)}
+          onDocumentsChanged={onChanged}
         />
       ) : null}
 
