@@ -553,6 +553,24 @@ Produce, for the audience the request names, exactly these headings:
 ### Decision request
 ### Source versions
 
+"One-pager" is what this audience needs to know to decide, in their terms —
+not a summary of the project. A security reviewer reads about what is
+exposed and what guards it; a budget approver reads the cost and what it
+buys; a department head reads what their team gives up and gets.
+
+"Decision request" is the one thing a voter reads before voting, so it is
+the most precise section in the package:
+- The exact decision asked of this audience, in one sentence: approve, fund,
+  commit people, accept a dependency — whichever their role is. Name the
+  role from the request.
+- What a yes commits: the order-of-magnitude cost from the deck, the time to
+  the deliverable, and who is on the hook for each.
+- By when the answer is needed, and what happens if they say no or say
+  nothing.
+- For a budget approver, the figure; for a security reviewer, the exposure
+  they are being asked to accept; for a department head, what their team
+  gives up. Nothing the earlier stages do not support.
+
 Your reply is the package. Write the status line and then those five
 headed sections, in Markdown, in the reply itself: the reply is the only
 place the package is read from, and its slides are built from the deck
