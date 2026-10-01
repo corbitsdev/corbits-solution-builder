@@ -11,6 +11,15 @@
 import JSZip from "jszip";
 import type { ArtifactNode } from "./client.js";
 import { documentName } from "./components.jsx";
+import { mockupShots, type MockupShot, type Shooter } from "./mockup-shots.ts";
+
+/** Where the design's screens go, as pictures (#336). */
+export const MOCKUPS_FOLDER = "mockups";
+
+/** `mockups/01-phone-home.png`: the screen's place and name. */
+export function mockupFileName(index: number, shot: Pick<MockupShot, "name">): string {
+  return `${MOCKUPS_FOLDER}/${String(index + 1).padStart(2, "0")}-${slug(shot.name)}.png`;
+}
 
 /** The documents the stages produce for a reader, in process order. */
 export const DOCUMENT_KINDS = [
@@ -109,14 +118,16 @@ function bytesOf(dataUrl: string): Uint8Array {
   return bytes;
 }
 
-export function archiveReadme(projectTitle: string, files: readonly { name: string; node: ArtifactNode }[]): string {
+export function archiveReadme(projectTitle: string, files: readonly { name: string; node: ArtifactNode }[], mockups: readonly string[] = []): string {
   const lines = files.map(({ name, node }) => `- ${name} — ${documentName(node.kind)}${node.variant ? ` for ${node.variant}` : ""}, version ${String(node.version)}, written ${node.createdAt.slice(0, 10)}`);
+  const pictures = mockups.length > 0 ? ["", `The design's screens as pictures, in ${MOCKUPS_FOLDER}/:`, "", ...mockups.map((name) => `- ${name}`)] : [];
   return [
     `# ${projectTitle} — documents`,
     "",
     "The newest version of each finished document, named by stage and document.",
     "",
     ...lines,
+    ...pictures,
     "",
     "For a PDF of any document, open it in Solution Builder and choose Export → Print or save as PDF.",
     "Slides are PowerPoint files; the Export menu on the slides can also save them as PDF or open them in Google Slides.",
@@ -133,10 +144,13 @@ export async function assembleDocumentsArchive(
   projectTitle: string,
   nodes: readonly ArtifactNode[],
   read: (node: ArtifactNode) => Promise<string>,
-): Promise<{ blob: Blob; files: string[]; skipped: string[] }> {
+  /** Draws a design's screens (#336); the browser's rasteriser by default, which draws nothing outside a browser. */
+  shoot: Shooter = mockupShots,
+): Promise<{ blob: Blob; files: string[]; skipped: string[]; mockups: string[] }> {
   const zip = new JSZip();
   const files: { name: string; node: ArtifactNode }[] = [];
   const skipped: string[] = [];
+  const mockups: string[] = [];
   for (const node of completedDocuments(nodes)) {
     let content: string;
     try {
@@ -148,18 +162,30 @@ export async function assembleDocumentsArchive(
     const name = documentFileName(node, content);
     zip.file(name, DATA_URL.test(content) ? bytesOf(content) : content);
     files.push({ name, node });
+    if (node.kind === "design_artifact" && mockups.length === 0) {
+      // The screens as pictures, beside the HTML they are drawn from. A
+      // design that cannot be drawn leaves the folder out; the HTML stands.
+      const shots = await shoot(content, 12).catch((): MockupShot[] => []);
+      shots.forEach((shot, index) => {
+        const picture = mockupFileName(index, shot);
+        zip.file(picture, shot.png);
+        mockups.push(picture);
+      });
+    }
   }
-  let readme = archiveReadme(projectTitle, files);
+  let readme = archiveReadme(projectTitle, files, mockups);
   if (skipped.length > 0) readme += `\nNot included, since they could not be read: ${skipped.join("; ")}.\n`;
   zip.file("README.md", readme);
   const blob = await zip.generateAsync({ type: "blob" });
-  return { blob, files: files.map((file) => file.name), skipped };
+  return { blob, files: files.map((file) => file.name), skipped, mockups };
 }
 
 export type DocumentsArchiveDeps = {
   projectView: (projectId: string) => Promise<{ project: { title: string }; tenantId: string; nodes: ArtifactNode[] }>;
   artifactContent: (tenantId: string, nodeId: string) => Promise<{ content: string }>;
   save: (blob: Blob, name: string) => void;
+  /** Draws the design's screens; the browser's rasteriser when absent. */
+  shoot?: Shooter;
 };
 
 /** Saves the browser's download of a Blob under `name`. */
@@ -175,11 +201,17 @@ export function saveBlob(blob: Blob, name: string): void {
 /** Downloads a project's finished documents as one zip and returns the notice line. */
 export async function downloadProjectDocuments(projectId: string, deps: DocumentsArchiveDeps): Promise<string> {
   const detail = await deps.projectView(projectId);
-  const archive = await assembleDocumentsArchive(detail.project.title, detail.nodes, async (node) => (await deps.artifactContent(detail.tenantId, node.id)).content);
+  const archive = await assembleDocumentsArchive(
+    detail.project.title,
+    detail.nodes,
+    async (node) => (await deps.artifactContent(detail.tenantId, node.id)).content,
+    ...(deps.shoot ? [deps.shoot] : []),
+  );
   const name = documentsArchiveName(detail.project.title);
   if (archive.files.length === 0) return `${detail.project.title} has no finished documents yet.`;
   deps.save(archive.blob, name);
-  const count = `${String(archive.files.length)} document${archive.files.length === 1 ? "" : "s"}`;
+  const pictures = archive.mockups.length > 0 ? ` and ${String(archive.mockups.length)} mockup picture${archive.mockups.length === 1 ? "" : "s"}` : "";
+  const count = `${String(archive.files.length)} document${archive.files.length === 1 ? "" : "s"}${pictures}`;
   return archive.skipped.length > 0
     ? `Saved ${count} of ${detail.project.title} to ${name}; ${String(archive.skipped.length)} could not be read.`
     : `Saved ${count} of ${detail.project.title} to ${name}.`;
