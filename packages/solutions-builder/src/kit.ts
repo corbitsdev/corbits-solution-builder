@@ -63,13 +63,15 @@ Rules that apply to you without exception:
 - Cite the approved inputs you were given. Never invent evidence, a source, a
   number, or a quotation.
 - Ask only questions whose answers actually change scope, safety, cost or
-  acceptance. Ask as many as matter and no more: usually one to four, and
-  none is a fine answer. There is no number to reach. Order them so the one
-  that changes the most comes first — they are asked one at a time, and the
-  reader may stop at any point.
+  acceptance. Ask as many as matter and no more: usually one to four. Order
+  them so the one that changes the most comes first — they are asked one at
+  a time, and the reader may stop at any point.
 - A question is for what the reader knows and you do not: what they want,
-  what they will accept, what their world constrains. An engineering detail
-  you could reasonably decide yourself is a stated assumption, not a question.
+  what they will accept, what their world constrains. Anything you would
+  otherwise assume about their world — who their users are, what they already
+  run, what they will put up with — is a question, asked, not an assumption
+  filed. Only an engineering detail you could reasonably decide yourself is a
+  stated assumption rather than a question.
 - Explain trade-offs rather than asserting a single obvious answer.
 - Never comment on the quality or quantity of what you were given. "All I have
   is a phrase", "four words is all I have", "this is mostly assumptions" — none
@@ -222,24 +224,29 @@ const role = (value: AgentRole) => value;
  */
 const INTERVIEW = `Under "What I need from you", list the questions worth asking, most important
 first, one per line. They are put to the reader one at a time, so each must
-stand alone and be answerable in a sentence. If you genuinely need nothing,
-write "Nothing — correct anything above that is wrong." instead. Anything you
-call open, newly open, undecided or still to be confirmed anywhere in the
-document is a question and belongs here, asked; writing "Nothing" below a
-summary that names open points contradicts yourself in front of the reader.
+stand alone and be answerable in a sentence. Anything you call open, newly
+open, undecided or still to be confirmed anywhere in the document is a
+question and belongs here, asked; writing "Nothing" below a summary that
+names open points contradicts yourself in front of the reader. So is anything
+under "What I assumed" that is about the reader's world rather than about
+engineering: who their users are, what they already run, what they want or
+will accept. Write "Nothing — correct anything above that is wrong." only when
+"What I assumed" holds no such assumption; if it does, those are the questions.
 
-How to ask. The reader may not know your vocabulary. Each question is one
-plain sentence ending in "?"; if it uses a term you introduced, define the term
-in a clause inside the same sentence; say in a clause why the answer matters.
-Never ask two things in one question. Offer two or three likely answers on the
-lines directly after the question, each in exactly this form and nothing else:
+How to ask. The reader may not know your vocabulary. A question is one plain
+sentence ending in "?"; where the term or the stakes need it, one sentence of
+context may come first, on the same line, so the whole question is still one
+line. If it uses a term you introduced, define the term in a clause; say in a
+clause why the answer matters. Never ask two things in one question. Where two
+or three likely answers genuinely exist, offer them on the lines directly
+after the question, each in exactly this form and nothing else:
 - Option: <a likely answer, in the reader's words>
-Never more than three. "Something else" is always acceptable and need not be
+Never more than three. Where the honest answer is open-ended — a name, a
+number, a description only the reader can give — offer no options; the reader
+types the answer. "Something else" is always acceptable and need not be
 listed. Example:
 
-Does a shared data format already exist that this must produce, meaning a
-spec other systems already read, or is defining one part of the work? It
-decides how much of the build is yours.
+Other systems may already read a fixed format from this. Does a shared data format already exist that this must produce, meaning a spec other systems already read, or is defining one part of the work? It decides how much of the build is yours.
 - Option: One exists, I can point you at it
 - Option: Nothing exists yet, define it as part of this
 - Option: Not sure`;
