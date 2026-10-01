@@ -5,7 +5,7 @@
  * `.stage-inner` / `.doc` paper as the other stages.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { api, ApiFailure } from "../../client.js";
+import { api, ApiFailure, STAGE6_REQUIREMENTS_ROLE_KEY as REQUIREMENTS_ROLE_KEY, type ArtifactNode } from "../../client.js";
 import { subscribeMailbox } from "../../mailbox-events.ts";
 import { Markdown } from "../../markdown.jsx";
 import { Banner, Button, CopyButton } from "../../components.jsx";
@@ -22,6 +22,8 @@ type Stage6RoleState = {
   reply: string | null;
   error: string | null;
   requestedAt: number;
+  /** The reply is the project's recorded document already (#328), not a fresh one to record. */
+  recorded?: boolean;
 };
 
 const STAGE6_IDLE_ROLE: Stage6RoleState = { status: "idle", address: null, reply: null, error: null, requestedAt: 0 };
@@ -33,7 +35,7 @@ const STAGE6_PANEL_ROLES: readonly { key: string; label: string }[] = [
   { key: "security", label: "Security" },
 ];
 
-const STAGE6_REQUIREMENTS_ROLE_KEY = "requirements-author";
+const STAGE6_REQUIREMENTS_ROLE_KEY = REQUIREMENTS_ROLE_KEY;
 
 /** The artifact kind a stage 6 page's draft is exported under (#242): the requirements as the document they become, a panel review under its own name. */
 function draftKindOf(page: string): string {
@@ -68,6 +70,7 @@ export function Stage6Panel({
   reviewInput,
   requirementsBlock = null,
   requirementsMinted,
+  requirementsNode = null,
   onRequirementsDrafted,
   strip,
   conversation,
@@ -89,10 +92,15 @@ export function Stage6Panel({
    *  reload, not a fresh ask, so the requirements author must not re-run
    *  (same gate `use-opening-dispatch.ts` holds the Architect's opening to). */
   requirementsMinted: boolean;
+  /** The project's recorded product requirements document, newest version
+   *  (#328): shown on a reload instead of asking or waiting. */
+  requirementsNode?: ArtifactNode | null;
   /** Fires once the requirements author's PRODUCT_REQUIREMENTS document is
-   *  accepted (its reply lands) — `index.tsx` mints the workflow's
-   *  requirement ids from it (CL-8862), before the Architect drafts. */
-  onRequirementsDrafted?: (markdown: string) => void;
+   *  accepted (its reply lands) — `index.tsx` records it as the project's
+   *  document unless `recorded` says it already is (#328), and mints the
+   *  workflow's requirement ids from it (CL-8862), before the Architect
+   *  drafts. */
+  onRequirementsDrafted?: (markdown: string, recorded: boolean) => void;
   strip: ReactNode;
   conversation: ReactNode;
   reader: ReactNode;
@@ -112,8 +120,37 @@ export function Stage6Panel({
     if (requirements.status !== "done" || !requirements.reply) return;
     if (requirementsMintedFor.current === requirements.reply) return;
     requirementsMintedFor.current = requirements.reply;
-    onRequirementsDrafted(requirements.reply);
+    onRequirementsDrafted(requirements.reply, requirements.recorded ?? false);
   }, [requirements, onRequirementsDrafted]);
+
+  // On a reload the author is not asked again, so the document is read
+  // back (#328): the recorded one when the project has it; else, for a
+  // project that minted its ids before the document was ever recorded, the
+  // author's own thread, once, and what it wrote is recorded then.
+  const recoveredFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (requirements.status !== "idle") return;
+    if (requirementsNode) {
+      if (recoveredFor.current === requirementsNode.id) return;
+      recoveredFor.current = requirementsNode.id;
+      void api
+        .artifactContent(tenantId, requirementsNode.id)
+        .then((result) => setRequirements((prev) => (prev.status === "idle" ? { ...prev, status: "done", reply: result.content, recorded: true } : prev)))
+        .catch(() => undefined);
+      return;
+    }
+    if (!requirementsMinted) return;
+    if (recoveredFor.current === `thread:${projectId}`) return;
+    recoveredFor.current = `thread:${projectId}`;
+    void (async () => {
+      const status = await api.stage6RoleAgentStatus(projectId, STAGE6_REQUIREMENTS_ROLE_KEY).catch(() => null);
+      if (!status) return;
+      const thread = await api.readStageThread(tenantId, [status.address]).catch(() => []);
+      const reply = [...thread].reverse().find((message) => message.author === "agent");
+      if (!reply) return;
+      setRequirements((prev) => (prev.status === "idle" ? { ...prev, address: status.address, status: "done", reply: reply.body, recorded: false } : prev));
+    })();
+  }, [requirements.status, requirementsNode, requirementsMinted, projectId, tenantId]);
 
   const runRole = useCallback(
     (roleKey: string, body: string, onUpdate: (updater: (prev: Stage6RoleState) => Stage6RoleState) => void) => {
@@ -223,7 +260,9 @@ export function Stage6Panel({
         : current.status === "error"
           ? "failed"
           : page === "requirements"
-            ? "waiting on opening material"
+            ? requirementsMinted || requirementsNode
+              ? "looking for the requirements document"
+              : "waiting on opening material"
             : reviewInput
               ? "not yet requested"
               : "waiting on a plan draft";
