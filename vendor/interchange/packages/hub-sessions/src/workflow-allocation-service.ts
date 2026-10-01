@@ -302,13 +302,40 @@ export function createWorkflowAllocationService({
       throw new Error(`Workflow probe ${probe.id} is not releasing`);
     }
     const sidecarId = releasing.sidecarId;
-    if (sidecarId !== null) {
-      const provisioner = matchingProvisioner(releasing);
-      if (provisioner === null) {
+    // PATCH (Solution Builder #315): a releasing probe whose binding no
+    // registered provisioner matches cannot be destroyed by anyone, and
+    // throwing here retried it on every tick forever. Its sidecar was a
+    // child of the provisioner that bound it, which this hub no longer
+    // runs, so the row is finished as failed and its claim retired.
+    const provisioner =
+      sidecarId !== null ? matchingProvisioner(releasing) : null;
+    if (sidecarId !== null && provisioner === null) {
+      const completed = await probeStore.transition(
+        releasing.id,
+        ["releasing"],
+        "failed",
+        {
+          failureCode: "provisioner_unavailable",
+          failureMessage: `No registered provisioner matches binding ${releasing.provisionerId}@${releasing.provisionerBindingFingerprint}; the probe's sidecar cannot be destroyed`,
+          now: now(),
+        },
+      );
+      if (completed === null) {
         throw new Error(
-          `Cannot clean up workflow probe ${releasing.id}: provisioner binding ${releasing.provisionerId} is unavailable`,
+          `Workflow probe ${releasing.id} changed before cleanup completed`,
         );
       }
+      allocationRouter.disconnectAllocation({
+        allocationId: releasing.id,
+        generation: releasing.generation,
+      });
+      allocationRouter.retireAllocation({
+        allocationId: releasing.id,
+        generation: releasing.generation,
+      });
+      return;
+    }
+    if (sidecarId !== null && provisioner !== null) {
       const destroyed = parseDestroyResult(
         await runSidecarOperation(
           "Probe destroy",

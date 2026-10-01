@@ -249,6 +249,15 @@ export type MountedHub = {
 // platform's 120s default is sized for remote capacity.
 const SIDECAR_CONNECT_TIMEOUT_MS = 30_000;
 
+/** An error's message, and for an `AggregateError` its causes too: the probe cleanup aggregates and said nothing else (#315). */
+export function describeFailure(cause: unknown): string {
+  if (cause instanceof AggregateError) {
+    const inner = cause.errors.map((error) => describeFailure(error));
+    return inner.length > 0 ? `${cause.message}: ${inner.join("; ")}` : cause.message;
+  }
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
 export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Promise<MountedHub> {
   // The handle must be bound to Interchange's schema, not bare: better-auth's
   // drizzle adapter and every `db.query.*` lookup in the hub resolve tables
@@ -502,7 +511,7 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
       }
     } catch (cause) {
       if (!reconcileStopped) {
-        console.error(`Sidecar reconciliation failed: ${cause instanceof Error ? cause.message : String(cause)}`);
+        console.error(`Sidecar reconciliation failed: ${describeFailure(cause)}`);
       }
     } finally {
       if (!reconcileStopped) setTimeout(() => void reconcile(), RECONCILE_MS).unref();
