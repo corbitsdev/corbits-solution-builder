@@ -214,3 +214,17 @@ describe("the hand-off's close and its recognition", () => {
     expect(withoutSwitchMarker({ id: "s", author: "agent", body, at })).toBe(body);
   });
 });
+
+// A person's mail carrying the recap line is folded even when its marker line
+// did not survive the mail store (#332 follow-up to #327).
+describe("isHandoffBody", () => {
+  test("recognises the recap line without a marker, and ordinary mail as not a hand-off", () => {
+    const body = `Some leading line
+
+Here is the conversation so far, so you can pick it up without restarting it:
+
+Person: hi`;
+    expect(withoutSwitchMarker({ id: "h", author: "me", body, at })).toBe(HANDOFF_BUBBLE_TEXT);
+    expect(withoutSwitchMarker({ id: "p", author: "me", body: "Please resend the plan.", at })).toBe("Please resend the plan.");
+  });
+});

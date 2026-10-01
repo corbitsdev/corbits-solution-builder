@@ -40,6 +40,22 @@ const KIND_ICON: Record<string, ReactNode> = {
 
 /** Which edges of a scrolling strip still hide tabs. Pure, so the rule the
  *  edge controls follow is testable without a DOM. */
+/**
+ * Where the list scrolls so the selected tab is in view, moving as little
+ * as possible: no move when it is already visible, else to its near edge.
+ */
+export function stripScrollLeft(
+  list: { readonly scrollLeft: number; readonly clientWidth: number },
+  tab: { readonly offsetLeft: number; readonly offsetWidth: number },
+): number {
+  const padding = 8;
+  const left = tab.offsetLeft - padding;
+  const right = tab.offsetLeft + tab.offsetWidth + padding;
+  if (left < list.scrollLeft) return Math.max(0, left);
+  if (right > list.scrollLeft + list.clientWidth) return Math.max(0, right - list.clientWidth);
+  return list.scrollLeft;
+}
+
 export function stripOverflow(metrics: {
   readonly scrollLeft: number;
   readonly clientWidth: number;
@@ -91,8 +107,15 @@ export function ArtifactStrip({
   }, [tabs.length]);
 
   useEffect(() => {
-    const selected = list()?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
-    selected?.scrollIntoView({ inline: "nearest", block: "nearest" });
+    const el = list();
+    const selected = el?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+    if (!el || !selected) return;
+    // The list scrolls itself (#332): scrollIntoView would scroll every
+    // scrollable ancestor too, and the fill's hidden overflow counts, so a
+    // tab at the far end dragged the whole two-pane layout left with no
+    // way back short of a reload.
+    const next = stripScrollLeft({ scrollLeft: el.scrollLeft, clientWidth: el.clientWidth }, { offsetLeft: selected.offsetLeft, offsetWidth: selected.offsetWidth });
+    if (next !== el.scrollLeft) el.scrollLeft = next;
   }, [selectedKey, tabs.length]);
 
   if (tabs.length === 0 || selectedKey === null) return null;

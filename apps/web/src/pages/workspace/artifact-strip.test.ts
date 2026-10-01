@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ArtifactStrip, stripOverflow } from "./artifact-strip.tsx";
+import { ArtifactStrip, stripOverflow, stripScrollLeft } from "./artifact-strip.tsx";
 import type { ArtifactTab } from "./use-project-artifacts.ts";
 
 describe("stripOverflow", () => {
@@ -27,5 +27,22 @@ describe("ArtifactStrip", () => {
     expect(html).toContain('aria-label="Show more artifacts"');
     expect(html.match(/class="artifact-strip-scroll[^"]*" hidden=""/g)?.length).toBe(2);
     expect(html).toContain('aria-label="Project artifacts"');
+  });
+});
+
+// #332: the strip scrolls its own list to the selected tab; scrollIntoView
+// would scroll the hidden-overflow canvas too and drag the workspace left.
+describe("stripScrollLeft", () => {
+  test("leaves a visible tab alone and moves just enough for one off either end", () => {
+    const list = { scrollLeft: 100, clientWidth: 500 };
+    expect(stripScrollLeft(list, { offsetLeft: 200, offsetWidth: 80 })).toBe(100);
+    expect(stripScrollLeft(list, { offsetLeft: 900, offsetWidth: 80 })).toBe(900 + 80 + 8 - 500);
+    expect(stripScrollLeft(list, { offsetLeft: 20, offsetWidth: 80 })).toBe(12);
+    expect(stripScrollLeft({ scrollLeft: 50, clientWidth: 500 }, { offsetLeft: 4, offsetWidth: 80 })).toBe(0);
+  });
+
+  test("the strip never calls scrollIntoView", async () => {
+    const source = await Bun.file(new URL("./artifact-strip.tsx", import.meta.url)).text();
+    expect(source).not.toContain("scrollIntoView(");
   });
 });

@@ -9,7 +9,7 @@ import { answersDraft, segmentsIn } from "./choices.js";
 import { DRAFT_POINTER, conversationLead, isHtmlDocument } from "./guidance.js";
 import type { DraftRef } from "./draft-references.ts";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
-import { HANDOFF_BUBBLE_TEXT, handoffMarkerOf } from "./use-model-handoff.ts";
+import { HANDOFF_BUBBLE_TEXT, isHandoffBody } from "./use-model-handoff.ts";
 import { COMPOSER_BOX_CLASS, CONV_SCROLL_CLASS } from "./pane-classes.ts";
 
 /** A model hand-off's `[[sb-switch:<id>]]` marker line, rendered separately
@@ -21,7 +21,7 @@ import { COMPOSER_BOX_CLASS, CONV_SCROLL_CLASS } from "./pane-classes.ts";
  */
 export function withoutSwitchMarker(message: ChatMessage): string {
   if (message.author !== "me") return message.body;
-  if (handoffMarkerOf(message.body) === null) return message.body;
+  if (!isHandoffBody(message.body)) return message.body;
   // The recap and draft it carries are for the new specialist; read back
   // by a person they were the last twenty turns over again, a whole HTML
   // mockup included (#85). One line says what the mail did instead.
