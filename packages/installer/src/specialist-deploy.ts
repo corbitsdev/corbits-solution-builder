@@ -526,16 +526,18 @@ async function ensureSpecialistDeploymentOnce(
   // A specialist's anchor run carries its deployment's id (its address is
   // `<deploymentId>@<domain>`). One the hub is still restoring is waited for
   // within the recovery bounds; one whose run is terminal answers every
-  // mail 409, so a fresh deployment takes its place.
+  // mail 409, so a fresh deployment takes its place. One from before this
+  // host started is not waited for at all (CL-9680): the host that was
+  // placing it is gone.
   const liveExisting = async (): Promise<{ deployment: HubDeployment; tenantId: string; assetId: string; domain: string } | null> => {
     const own = await resolveLiveDeployment(transport, projectId, stage, matching(await workflows.deployments()));
-    if (own && (await deploymentUsability(transport, tenantId, own.id, own.id, wait)) === "usable") {
+    if (own && (await deploymentUsability(transport, tenantId, own.id, own.id, wait, sidecar.sidecarsLostBefore)) === "usable") {
       return { deployment: own, tenantId, assetId, domain: tenant.domain! };
     }
     const legacy = (await specialistDeploymentsIn(transport, home, assetName)).find((entry) => entry.tenantId === home.legacyTenantId);
     if (!legacy) return null;
     const pick = await resolveLiveDeployment(transport, projectId, stage, legacy.deployments);
-    if (!pick || (await deploymentUsability(transport, legacy.tenantId, pick.id, pick.id, wait)) !== "usable") return null;
+    if (!pick || (await deploymentUsability(transport, legacy.tenantId, pick.id, pick.id, wait, sidecar.sidecarsLostBefore)) !== "usable") return null;
     return { deployment: pick, tenantId: legacy.tenantId, assetId: legacy.asset.id, domain: legacy.domain };
   };
   const existing = switchToOfferingId ? null : await liveExisting();
