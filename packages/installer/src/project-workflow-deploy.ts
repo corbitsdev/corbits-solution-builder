@@ -976,9 +976,10 @@ async function ensureProjectWorkflowOnce(
   // A live run not yet placed is waited for under the strip's clock, the
   // way a replay's placement is; one from before this host started is not
   // waited for at all (CL-9680).
-  const usabilityOf = (tenantId: string, deploymentId: string, runId: string) => (
-    progress({ phase: "waiting", detail: "placement" }), deploymentUsability(transport, tenantId, deploymentId, runId, placementWait, sidecar.sidecarsLostBefore)
-  );
+  const usabilityOf = (tenantId: string, deploymentId: string, runId: string) => {
+    progress({ phase: "waiting", detail: "placement" });
+    return deploymentUsability(transport, tenantId, deploymentId, runId, placementWait, sidecar.sidecarsLostBefore);
+  };
   /**
    * Brings `target`, at `generation`, up to `history`. A run that stalls
    * mid-replay has lost its child (#189): it is superseded by a fresh run at
