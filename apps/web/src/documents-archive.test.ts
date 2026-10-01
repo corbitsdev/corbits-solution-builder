@@ -2,12 +2,14 @@ import { describe, expect, test } from "bun:test";
 import JSZip from "jszip";
 import type { ArtifactNode } from "./client.js";
 import {
+  MOCKUPS_FOLDER,
   archiveReadme,
   assembleDocumentsArchive,
   completedDocuments,
   documentFileName,
   documentsArchiveName,
   downloadProjectDocuments,
+  mockupFileName,
 } from "./documents-archive.ts";
 
 const at = "2026-10-01T06:00:00.000Z";
@@ -146,5 +148,55 @@ describe("panel reviews in the archive", () => {
       "06-engineering-review-quality.md",
       "06-engineering-review-security.md",
     ]);
+  });
+});
+
+// #336: the design's screens ride along as pictures, in a folder of their own.
+describe("mockups in the archive", () => {
+  const design = '<!doctype html><html><body><section data-testid="screen-phone-home">a</section><section data-testid="screen-gantt">b</section></body></html>';
+  const shots = [
+    { name: "phone home", png: Uint8Array.of(1, 2) },
+    { name: "gantt", png: Uint8Array.of(3) },
+  ];
+
+  test("each screen is a PNG under mockups/, named by its place and screen, and the README lists them", async () => {
+    const nodes = [node({ kind: "design_artifact", stage: 4, mediaType: "text/html" }), node({ kind: "problem_brief", stage: 1 })];
+    const asked: string[] = [];
+    const archive = await assembleDocumentsArchive(
+      "Inteva Complete",
+      nodes,
+      async (n) => (n.kind === "design_artifact" ? design : "# Brief"),
+      async (html) => {
+        asked.push(html);
+        return shots;
+      },
+    );
+    expect(asked).toEqual([design]);
+    expect(archive.mockups).toEqual([`${MOCKUPS_FOLDER}/01-phone-home.png`, `${MOCKUPS_FOLDER}/02-gantt.png`]);
+    expect(mockupFileName(0, { name: "Phone / Home" })).toBe("mockups/01-phone-home.png");
+    const zip = await JSZip.loadAsync(await archive.blob.arrayBuffer());
+    expect(Object.keys(zip.files).filter((f) => !zip.files[f]!.dir).sort()).toEqual(["01-problem-brief.md", "04-design.html", "README.md", "mockups/01-phone-home.png", "mockups/02-gantt.png"]);
+    expect([...(await zip.file("mockups/02-gantt.png")!.async("uint8array"))]).toEqual([3]);
+    const readme = await zip.file("README.md")!.async("string");
+    expect(readme).toContain("The design's screens as pictures, in mockups/:");
+    expect(readme).toContain("- mockups/01-phone-home.png");
+  });
+
+  test("a design that cannot be drawn leaves the folder out and the HTML stands", async () => {
+    const archive = await assembleDocumentsArchive("P", [node({ kind: "design_artifact", stage: 4, mediaType: "text/html" })], async () => design, async () => {
+      throw new Error("no canvas here");
+    });
+    expect(archive.mockups).toEqual([]);
+    expect(archive.files).toEqual(["04-design.html"]);
+  });
+
+  test("the notice counts the pictures", async () => {
+    const notice = await downloadProjectDocuments("p", {
+      projectView: async () => ({ project: { title: "P" }, tenantId: "t", nodes: [node({ kind: "design_artifact", stage: 4, mediaType: "text/html" })] }),
+      artifactContent: async () => ({ content: design }),
+      save: () => undefined,
+      shoot: async () => shots,
+    });
+    expect(notice).toBe("Saved 1 document and 2 mockup pictures of P to p-documents.zip.");
   });
 });
