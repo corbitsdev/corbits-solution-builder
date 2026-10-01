@@ -364,6 +364,26 @@ function systemPromptForRole(role: AgentRole, artifactTools: boolean): string {
  * notes and bindings a deployment carries is `specialistRoleSpec`'s call;
  * this only renders it.
  */
+/**
+ * What a credential-bound deployment declares: the `hub` binding, and the
+ * use-grant its run needs. Interchange delivers the bound credential's
+ * material but mints no `credential:<id>` / `use` grant (#388), so the
+ * requirement is declared here. `credential:*` because the entry is rendered
+ * before the credential row exists and is the same for every project (#41
+ * step 5); the binding delivers only this one credential, so the wildcard
+ * reaches no further.
+ */
+export function credentialAccess(pkg: string, credentialName: string) {
+  return {
+    credentialBindings: [
+      { package: pkg, handle: "hub", provider: WORKFLOW_ARTIFACTS_PROVIDER_NAME, name: credentialName, locator: "tenant" },
+    ],
+    grantRequirements: [
+      { resource: "credential:*", action: "use", source: "creator", conditions: { tool: `tool:${pkg}` } },
+    ],
+  };
+}
+
 export function specialistEntrySource(options: SpecialistSourceOptions): string {
   const { stage, source, role, roleKey, artifactTools = false } = options;
   const workflowId = specialistWorkflowId(stage);
@@ -396,52 +416,15 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
     systemPrompt = `${systemPrompt}\n\n${note}`;
   }
 
-  // `package` must match the consumer identity the sidecar's source-ref
-  // lineage keys credential capabilities against: a specialist deploys as
-  // `source` (not a pinned `tool-packages-manifest.json`), so
-  // `workflow-substrate-factory.ts`'s `sourceTools` arm sets
-  // `StepToolFactory.packageName` to the bundle's own `defineTool({ id })` --
-  // `SIDECAR_BUNDLE_ID` in `@corbits/artifacts/sidecar-bundle.ts`, or (stage
-  // 8) `publishWorkspaceTool`'s own `defineTool({ id })` in
-  // `tools-delivery/publish-workspace.ts` -- not the bare npm package name
-  // `reconcileDeclaredCredentials`/`toolConsumer` would expect from a pinned
-  // closure. Binding against the bare name here builds a
-  // `tool:@corbits/artifacts` (or `tool:@solutions-builder/tools-delivery`)
-  // consumer that never matches the bundle's own consumer identity, so the
-  // capability is never assembled and the tool's `resolve("credentials")`
-  // fails closed.
-  //
-  // The binding delivers the credential's material to the run; it mints no
-  // grant (#288). The sidecar's credential gate still asks for
-  // `credential:<id>` / `use` on the run principal, conditioned on this
-  // package's consumer identity (`toolConsumer(package)` in `@intx/authz`),
-  // and at this Interchange pin nothing stamps that row: a run's grants are
-  // the frozen walk snapshot plus the definition's declared
-  // `grantRequirements`, resolved against the asset creator at trigger time.
-  // So the requirement is declared here. Its resource is `credential:*`,
-  // never the credential's id: the entry is rendered before the credential
-  // row exists and must stay identical across projects (#41 step 5), and the
-  // wildcard reaches no further than the material the binding delivers --
-  // the only credential this consumer ever holds a handle to.
-  const credentialBindings = spec.credentialPackage
+  // `package` must match the consumer identity the sidecar keys credential
+  // capabilities against: a specialist deploys as `source`, so
+  // `workflow-substrate-factory.ts` sets the consumer to the bundle's own
+  // `defineTool({ id })`, not the bare npm package name.
+  const access = spec.credentialPackage ? credentialAccess(spec.credentialPackage, credentialName) : null;
+  const credentialBindings = access
     ? `
-  credentialBindings: [
-    {
-      package: ${JSON.stringify(spec.credentialPackage)},
-      handle: "hub",
-      provider: ${JSON.stringify(WORKFLOW_ARTIFACTS_PROVIDER_NAME)},
-      name: ${JSON.stringify(credentialName)},
-      locator: "tenant",
-    },
-  ],
-  grantRequirements: [
-    {
-      resource: "credential:*",
-      action: "use",
-      source: "creator",
-      conditions: { tool: ${JSON.stringify(`tool:${spec.credentialPackage}`)} },
-    },
-  ],`
+  credentialBindings: ${JSON.stringify(access.credentialBindings)},
+  grantRequirements: ${JSON.stringify(access.grantRequirements)},`
     : "";
 
   return `import { defineWorkflow, step } from "@intx/workflow/definition";

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { agentFor } from "./kit.js";
 import type { Stage } from "./ledger.js";
 import {
+  credentialAccess,
   ARTIFACT_TOOL_DEPENDENCIES,
   DECK_TOOL_DEPENDENCIES,
   DELIVERY_TOOL_DEPENDENCIES,
@@ -117,9 +118,25 @@ describe("specialistEntrySource", () => {
   // binding is named for the role, and `publish_workspace` is built with no
   // project id, so the same role renders the same entry everywhere.
   test("a credential-bound entry names its binding for the role, and stage 8 builds publish_workspace unbound", () => {
-    expect(entry(2, "primary", true)).toContain('name: "workflow-artifacts:constraints-mapper"');
+    expect(entry(2, "primary", true)).toContain('"name":"workflow-artifacts:constraints-mapper"');
     expect(entry(8)).toContain("const publishWorkspace = publishWorkspaceTool();");
-    expect(entry(8, "primary", true)).toContain('name: "workflow-artifacts:build-engineer"');
+    expect(entry(8, "primary", true)).toContain('"name":"workflow-artifacts:build-engineer"');
+  });
+
+  // #288: the binding delivers the credential, the requirement lets the run
+  // use it, and both name the same consumer -- the bundle's own id.
+  test("a credential-bound entry declares the use-grant its run needs, scoped to the bound package", () => {
+    expect(credentialAccess("@corbits/artifacts/sidecar-bundle", "workflow-artifacts:brainstormer")).toEqual({
+      credentialBindings: [
+        { package: "@corbits/artifacts/sidecar-bundle", handle: "hub", provider: "sb-workflow-artifacts", name: "workflow-artifacts:brainstormer", locator: "tenant" },
+      ],
+      grantRequirements: [
+        { resource: "credential:*", action: "use", source: "creator", conditions: { tool: "tool:@corbits/artifacts/sidecar-bundle" } },
+      ],
+    });
+    expect(entry(2, "primary", true)).toContain('"conditions":{"tool":"tool:@corbits/artifacts/sidecar-bundle"}');
+    expect(entry(8, "primary", true)).toContain('"conditions":{"tool":"tool:@solutions-builder/tools-delivery/publish-workspace"}');
+    expect(entry(2)).not.toContain("grantRequirements");
   });
 
   test("stage 5's entry names no audience", () => {
