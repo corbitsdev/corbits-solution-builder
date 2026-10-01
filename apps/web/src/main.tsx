@@ -1,7 +1,9 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { ThemeProvider } from "@corbits/react-ui";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./app.jsx";
+import { queryClient } from "./queries/client.ts";
 // The Corbits component library first — it carries the Tailwind reset and the
 // shared theme — then our own sheet, which overrides it for surfaces this app
 // owns. Order is the whole contract between the two.
@@ -26,7 +28,9 @@ createRoot(root).render(
         system meant most people met the product in dark, and the reading
         surfaces — a brief, a plan, a manifest — are designed light first. */}
     <ThemeProvider storageKey="solutions-builder-theme" defaultMode="light">
-      <App />
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>
     </ThemeProvider>
   </StrictMode>,
 );
