@@ -1,6 +1,6 @@
 /**
- * The designer's settings, read and saved through the workspace-tenant asset
- * the installer package writes — not host preferences.
+ * The designer's settings, read and saved on the workspace tenant's config
+ * through the installer package — not host preferences.
  */
 import { DEFAULT_DESIGNER_SETTINGS, type DesignerSettings } from "@solutions-builder/app/designer-settings";
 import {

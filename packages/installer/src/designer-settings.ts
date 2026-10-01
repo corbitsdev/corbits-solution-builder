@@ -1,62 +1,39 @@
 /**
- * The designer's settings, read and written as a hub asset on the workspace
- * tenant, the way `skill-assets.ts` treats a curated skill: one asset, kind
- * `designer-settings`, holding a single JSON file at its main ref.
+ * The designer's settings, read and written under their own key in the
+ * workspace tenant's `config` -- the stock per-tenant JSON every Interchange
+ * hub serves through `GET`/`PATCH /api/tenants/:id` -- the way
+ * `project-tenant.ts` keeps the project record. No asset, no kind the hub
+ * has to know about (#358).
  */
 import type { Transport } from "@intx/hub-client";
 import {
-  DEFAULT_DESIGNER_SETTINGS,
-  DESIGNER_SETTINGS_ASSET_KIND,
-  DESIGNER_SETTINGS_ASSET_NAME,
-  DESIGNER_SETTINGS_PATH,
+  DESIGNER_SETTINGS_CONFIG_KEY,
   mergeDesignerSettings,
   parseDesignerSettings,
   type DesignerSettings,
 } from "@solutions-builder/app/designer-settings";
-import { assetsFor, readWorkflowSourceBlob, writeWorkflowSourceTree } from "./hub.js";
+import { getTenant, patchTenant, type HubTenant } from "./hub.js";
 
-async function designerSettingsAssetId(transport: Transport, tenantId: string): Promise<string | null> {
-  const found = (await assetsFor(transport, tenantId).list(DESIGNER_SETTINGS_ASSET_KIND)).find(
-    (asset) => asset.name === DESIGNER_SETTINGS_ASSET_NAME,
-  );
-  return found?.id ?? null;
+function settingsOf(tenant: HubTenant | null): DesignerSettings {
+  return parseDesignerSettings(tenant?.config?.[DESIGNER_SETTINGS_CONFIG_KEY]);
 }
 
 /** The settings as saved on the tenant, with defaults for anything missing or unreadable. */
 export async function readDesignerSettings(transport: Transport, tenantId: string): Promise<DesignerSettings> {
-  const assetId = await designerSettingsAssetId(transport, tenantId);
-  if (!assetId) return DEFAULT_DESIGNER_SETTINGS;
-  const raw = await readWorkflowSourceBlob(transport, tenantId, assetId, DESIGNER_SETTINGS_PATH);
-  return raw === null ? DEFAULT_DESIGNER_SETTINGS : parseDesignerSettings(JSON.parse(raw));
+  return settingsOf(await getTenant(transport, tenantId));
 }
 
-/** Saves a change to one or more settings onto the tenant's asset, refusing a value the type rejects. */
+/** Saves a change to one or more settings onto the tenant's config, refusing a value the type rejects. */
 export async function saveDesignerSettings(
   transport: Transport,
   tenantId: string,
   patch: Partial<DesignerSettings>,
 ): Promise<DesignerSettings> {
-  const assets = assetsFor(transport, tenantId);
-  let assetId = await designerSettingsAssetId(transport, tenantId);
-  const current = assetId
-    ? parseDesignerSettings(
-        JSON.parse((await readWorkflowSourceBlob(transport, tenantId, assetId, DESIGNER_SETTINGS_PATH)) ?? "{}"),
-      )
-    : DEFAULT_DESIGNER_SETTINGS;
-  const next = mergeDesignerSettings(current, patch);
-  if (!assetId) {
-    assetId = (
-      await assets.create({
-        kind: DESIGNER_SETTINGS_ASSET_KIND,
-        name: DESIGNER_SETTINGS_ASSET_NAME,
-        displayName: "Designer settings",
-      })
-    ).id;
-  }
-  await writeWorkflowSourceTree(transport, tenantId, {
-    assetId,
-    files: { [DESIGNER_SETTINGS_PATH]: `${JSON.stringify(next, null, 2)}\n` },
-    message: "Update designer settings",
+  const tenant = await getTenant(transport, tenantId);
+  if (!tenant) throw new Error("The workspace tenant was not found.");
+  const next = mergeDesignerSettings(settingsOf(tenant), patch);
+  await patchTenant(transport, tenantId, {
+    config: { ...(tenant.config ?? {}), [DESIGNER_SETTINGS_CONFIG_KEY]: next },
   });
   return next;
 }
