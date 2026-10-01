@@ -3,18 +3,16 @@
  * how many output tokens a design may use, and what happens when one uses
  * them all.
  *
- * One person's preferences for one workspace tenant, held as a hub asset
- * (kind `DESIGNER_SETTINGS_ASSET_KIND`, a single JSON file) rather than a
- * builder-schema table or a host file. The client writes it through
- * `@solutions-builder/installer`; the stage-4 workflow step reads it off the
- * tenant. This module is the shared shape and validation both sides use, and
- * the prompt text a stage-4 draft carries.
+ * One person's preferences for one workspace tenant, held under
+ * `DESIGNER_SETTINGS_CONFIG_KEY` in the tenant's own `config` -- the stock
+ * per-tenant JSON every Interchange hub carries -- rather than a hub asset,
+ * a builder-schema table or a host file. The client writes it through
+ * `@solutions-builder/installer`. This module is the shared shape and
+ * validation both sides use, and the prompt text a stage-4 draft carries.
  */
 import { type } from "arktype";
 
-export const DESIGNER_SETTINGS_ASSET_KIND = "designer-settings";
-export const DESIGNER_SETTINGS_ASSET_NAME = "designer-settings";
-export const DESIGNER_SETTINGS_PATH = "settings.json";
+export const DESIGNER_SETTINGS_CONFIG_KEY = "sb.designerSettings";
 
 export const DESIGNER_TOKENS_MIN = 1_000;
 export const DESIGNER_TOKENS_MAX = 64_000;
