@@ -111,6 +111,31 @@ probe and the deploy pack the same commit.
 **Upstream-able.** Yes; the pin the hub already verifies should be the
 commit it ships.
 
+## `packages/hub-sessions/src/workflow-allocation-service.ts` — a probe no provisioner can drive is released, not retried forever
+
+**Why.** Solution Builder #315. `cleanUpProbe` threw for a releasing probe
+whose `provisionerBindingFingerprint` no registered provisioner matched, so
+`reconcileReleasingProbes` failed on every tick and the host logged
+"Failed to clean up releasing workflow probes" for good. The Workbench
+provisioner bound probes under `process:v1:<role>:<entry path>:<hub url>`;
+the Interchange-native one binds under `process:v1:<role>`, so every probe
+a Workbench-era host left releasing could never match again.
+
+**What changed.** When no registered provisioner matches the probe's
+binding, the row is finished as `failed` with `provisioner_unavailable`
+and its allocation disconnected and retired, with no destroy: nothing can
+reach that sidecar, and it was a child of a host that has exited. A probe
+with a matching provisioner is destroyed as before.
+
+**Upstream-able.** Yes, beside INTR-630 (the same rule for a live
+allocation): a row no provisioner can drive should be released, not
+retried.
+
+**Removal.** When a vendored Interchange release releases provisioner-less
+probes itself, drop the hunk and this section.
+
+**Kill date.** The vendor bump carrying INTR-630, or 2026-10-30.
+
 ## `packages/db/src/client.ts` — inject a database handle
 
 **Why.** Upstream's `createDB` opens its own postgres.js socket, which requires
