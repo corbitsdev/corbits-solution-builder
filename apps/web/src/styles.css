@@ -1368,14 +1368,23 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   border: 1px solid var(--wb-border);
   border-radius: var(--radius-lg);
   padding: var(--space-4);
+  /* Bounded by the fill it sits in (`.canvas-body.is-fill > *`), so the
+     open document scrolls inside the window instead of running off the
+     bottom of it with nothing to grab (#330). The header stays put. */
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .stage6-companion .docmeta {
   margin-bottom: 0;
+  flex: none;
 }
 
 .stage6-companion .document-fold {
   margin-top: var(--space-3);
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .document-body {
