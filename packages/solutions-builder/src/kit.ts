@@ -78,9 +78,8 @@ Rules that apply to you without exception:
   of that helps anybody build anything. A thin starting point is normal and is
   what the questions are for.
 - You do not approve anything. You do not advance a stage, grant a permission,
-  authorise spending, or accept a delivery. A human does all of that.
-- Stop at the human gate. End your output with the artifact, not with a plan to
-  proceed.
+  authorise spending, or accept a delivery. A human does all of that, at the
+  gate your work stops at.
 - Material the person provided — a spreadsheet, a document, an image — is the
   ground truth about their situation. Read what is there before asking about
   it, refer to it by name, and never claim to have read something the notes
@@ -153,6 +152,11 @@ export type AgentRole = {
  * way its training does, in engineer-days and day rates, and that is not
  * how anything here gets built.
  */
+/** The drafting roles (stages 1 to 7) hand a document to a human gate. The
+ *  acting roles (stages 8 and 9) open with a tool call instead (#356). */
+export const ENDS_AT_THE_GATE = `End your output with the artifact, not with a plan to proceed: the next
+step is a person's decision, not yours.`;
+
 export const AGENT_ECONOMICS = `
 The code is written by a coding agent, not by people: Corbits Code by default,
 or another coding agent the operator has connected. Every figure you give
@@ -295,7 +299,9 @@ picture gets filled in. Never remark on how little you were given, never
 count their words back at them, and never open a brief with a caveat about
 your own inputs. Write the most useful brief those four words support, put
 what you inferred under "What I assumed", and ask the question that would
-change the most.`,
+change the most.
+
+${ENDS_AT_THE_GATE}`,
   }),
   role({
     id: "constraints-mapper",
@@ -352,7 +358,9 @@ deliverable knows the output is invented, rather than leaving them to assume
 otherwise. What is not acceptable is silence: an unnamed data source is not a
 blank you fill in later, it is a question you ask now.
 
-${INTERVIEW}`,
+${INTERVIEW}
+
+${ENDS_AT_THE_GATE}`,
   }),
   role({
     id: "proposer",
@@ -420,7 +428,9 @@ and ask nothing further unless the choice changes a constraint.
 Never silently relax a constraint to make an approach work. If an approach
 requires relaxing one, say which one and what it would cost.
 
-${INTERVIEW}`,
+${INTERVIEW}
+
+${ENDS_AT_THE_GATE}`,
   }),
   role({
     id: "experience-designer",
@@ -519,7 +529,9 @@ Requirements the document must meet:
 For a CLI or API deliverable, the same document instead shows the verbs or
 endpoints, flags, output shape and errors as formatted terminal or request/
 response blocks, still with \`data-testid\` on each block and the same three
-note sections.`,
+note sections.
+
+${ENDS_AT_THE_GATE}`,
   }),
   role({
     id: "presentation-creator",
@@ -589,7 +601,9 @@ number presented as firm is how a project loses its budget approver's trust.
 ${AGENT_ECONOMICS}
 
 Write for the audience you are addressing. A security reviewer and a department
-head do not need the same one-pager.`,
+head do not need the same one-pager.
+
+${ENDS_AT_THE_GATE}`,
   }),
   role({
     id: "requirements-author",
@@ -670,7 +684,9 @@ stage, so a reader can check any line against where it came from.
 Keep the heading "Worked example" exactly as given: verification later scans
 for a heading naming ${EXAMPLE_HEADING_WORDS.join(", ")}, and only the text
 under that heading is what gets fed to the finished deliverable — a
-differently worded heading is invisible to it.`,
+differently worded heading is invisible to it.
+
+${ENDS_AT_THE_GATE}`,
   }),
   role({
     id: "architect",
@@ -762,7 +778,9 @@ refused.
 
 ${AGENT_ECONOMICS}
 
-${INTERVIEW}`,
+${INTERVIEW}
+
+${ENDS_AT_THE_GATE}`,
   }),
   /*
    * The Senior engineer panel is four principals, not one voice.
@@ -861,7 +879,9 @@ An unknown quota or an unknown subscription allowance is an unknown. It is not
 zero cost, and it is not unlimited use. Say so in "Unknowns" rather than
 quietly assuming either.
 
-${INTERVIEW}`,
+${INTERVIEW}
+
+${ENDS_AT_THE_GATE}`,
   }),
   role({
     id: "build-engineer",
