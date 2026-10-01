@@ -764,6 +764,12 @@ export function StageWorkspace({
                       openSendBack(remediation.reason ?? "");
                       return;
                     }
+                    if (remediation.kind === "ask_specialist") {
+                      // The ready-made ask goes to the specialist as the
+                      // person's own message (#325); `send` clears the banner.
+                      void send(remediation.message ?? "");
+                      return;
+                    }
                     onOpenSettings();
                   },
                 },

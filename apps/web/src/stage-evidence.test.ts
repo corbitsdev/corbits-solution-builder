@@ -8,8 +8,7 @@ import {
   stage7StackProblem,
   stageEvidence,
   stageRefusalMessage,
-  type StageEvidenceDeps,
-} from "./stage-evidence.ts";
+  type StageEvidenceDeps, STACK_RESEND_ASK, stage6StackRemediation } from "./stage-evidence.ts";
 
 const CHOICE = { choice: "x", reason: "because", cites: ["FR-1"] };
 const STACK = {
@@ -154,5 +153,18 @@ describe("stage 6 evidence", () => {
       expect(text).not.toContain("Send the project back");
     }
     expect(stage6RefusalMessage("wrong_stage")).toBe(stageRefusalMessage("wrong_stage"));
+  });
+});
+
+// #325: a redraft that says its stack is "unchanged" under the heading has no
+// stack, and the way out is one click that asks the architect for the block.
+describe("stage6StackRemediation", () => {
+  test("a Stack heading with prose and no fenced block is a missing stack, and the remediation sends the ask", () => {
+    const plan = "## In short\n\nx\n\n## Stack\n\nThe approved mode and stack record stand exactly as written.\n\n## Architecture decision records\n";
+    expect(stage6StackProblem(plan, new Set(["FR-1"]))).toContain("Stack section is missing");
+    const remediation = stage6StackRemediation();
+    expect(remediation).toMatchObject({ kind: "ask_specialist", label: "Ask the architect to resend it", message: STACK_RESEND_ASK });
+    expect(STACK_RESEND_ASK).toContain("```json stack");
+    expect(STACK_RESEND_ASK).toContain("even though nothing in it changed");
   });
 });

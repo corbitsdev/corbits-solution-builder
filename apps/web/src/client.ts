@@ -166,7 +166,7 @@ export type { DesignerSettings } from "./designer-settings.ts";
 export { createHubTransport } from "./hub.ts";
 
 export type Remediation = {
-  kind: "switch_provider" | "reconnect" | "retry" | "send_back";
+  kind: "switch_provider" | "reconnect" | "retry" | "send_back" | "ask_specialist";
   label: string;
   providerId?: string;
   /** `send_back` only: the stage the way out returns the project to, and
@@ -174,6 +174,9 @@ export type Remediation = {
    *  pre-check (`stage-evidence.ts`), never by the host. */
   targetStage?: number;
   reason?: string;
+  /** `ask_specialist` only: the message the action sends to the stage's
+   *  specialist on the person's behalf (#325). Client-side as well. */
+  message?: string;
 };
 
 export type ApiError = {
