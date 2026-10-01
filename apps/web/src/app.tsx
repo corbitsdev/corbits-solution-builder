@@ -17,12 +17,14 @@ import {
 } from "./client.js";
 import {
   ArrowLeft,
+  ChevronDown,
   Download,
   Settings as SettingsIcon,
 } from "lucide-react";
 import { Banner, Button, Mark, downloadArtifact, stageName } from "./components.jsx";
 import { PrintView, setPrintProject, usePrintTarget } from "./print.jsx";
 import { Projects } from "./pages/projects.jsx";
+import { ProjectMenu } from "./pages/project-menu.jsx";
 import { Settings } from "./pages/settings.jsx";
 import { StageTour } from "./tour.jsx";
 import {
@@ -220,6 +222,10 @@ export function AppBar({
   onStageSegment,
   viewedStage = null,
   onSettingsClose,
+  onProjectChanged,
+  onProjectDeleted,
+  onNotice,
+  onError,
 }: {
   view: View;
   detail: ProjectDetail | null;
@@ -243,6 +249,12 @@ export function AppBar({
   /** Returns to wherever Settings was opened from. Omitted where Settings
    *  cannot be reached (`scripts/walk-ui.tsx`'s chrome-only render). */
   onSettingsClose?: () => void;
+  /** The title's menu (#323): the same options as the project card's. All
+   *  four omitted where the chrome renders without a live project. */
+  onProjectChanged?: () => void;
+  onProjectDeleted?: () => void;
+  onNotice?: (message: string) => void;
+  onError?: (cause: unknown) => void;
 }) {
   const inProject = view === "project" && detail !== null;
   const inSettings = view === "settings";
@@ -261,7 +273,24 @@ export function AppBar({
               <ArrowLeft aria-hidden="true" />
             </button>
             <Mark size={20} />
-            <span className="wordmark">{detail.project.title}</span>
+            {onProjectChanged && onNotice && onError ? (
+              <ProjectMenu
+                project={detail.project}
+                align="start"
+                trigger={
+                  <button type="button" className="wordmark wordmark-menu" aria-label={`Options for ${detail.project.title}`}>
+                    {detail.project.title}
+                    <ChevronDown aria-hidden="true" />
+                  </button>
+                }
+                onChanged={onProjectChanged}
+                onError={onError}
+                onNotice={onNotice}
+                {...(onProjectDeleted ? { onDeleted: onProjectDeleted } : {})}
+              />
+            ) : (
+              <span className="wordmark">{detail.project.title}</span>
+            )}
           </>
         ) : inSettings ? (
           <>
@@ -403,6 +432,8 @@ export function App() {
 
   const [bellOpen, setBellOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
+  // Where a download landed, said once (#323): the title menu's notices.
+  const [notice, setNotice] = useState<string | null>(null);
   // A done-segment click in the stepper — carries the stage the workspace
   // should open the artifact tab for, with `at` as the repeat-click nonce.
   const [focusArtifact, setFocusArtifact] = useState<{ stage: number; at: number } | null>(null);
@@ -763,6 +794,14 @@ export function App() {
         onOpenProject={openProject}
         exporting={exporting}
         onExport={() => void exportProject()}
+        onProjectChanged={() => void reloadDetail()}
+        onProjectDeleted={() => {
+          setSelected(null);
+          navigate("projects");
+          void refresh();
+        }}
+        onNotice={setNotice}
+        onError={(cause) => setError(cause instanceof ApiFailure ? cause.detail.message : String(cause))}
         viewedStage={viewedStage}
         onStageSegment={(stage) => {
           setFocusArtifact({ stage, at: Date.now() });
@@ -780,6 +819,10 @@ export function App() {
           <Banner tone="error" title="That was refused">
             {error}
           </Banner>
+        ) : null}
+
+        {notice ? (
+          <Banner tone="okay" title={notice} action={{ label: "Dismiss", onClick: () => setNotice(null) }} />
         ) : null}
 
         {view === "projects" ? (

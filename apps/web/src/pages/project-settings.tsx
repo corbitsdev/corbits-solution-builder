@@ -12,7 +12,7 @@ import { Banner, Button } from "../components.jsx";
 import type { ProjectDeckSettings } from "../deck-design-documents.ts";
 import { DesignDocumentsList } from "./design-documents.jsx";
 
-export function ProjectSettingsDialog({ project, onClose }: { project: ProjectSummary; onClose: () => void }) {
+export function ProjectSettingsDialog({ project, onClose }: { project: Pick<ProjectSummary, "id" | "title">; onClose: () => void }) {
   const [settings, setSettings] = useState<ProjectDeckSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
 

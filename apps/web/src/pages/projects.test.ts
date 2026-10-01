@@ -113,29 +113,34 @@ describe("home layout sheet", () => {
 });
 
 describe("project card menu", () => {
-  test("offers info, rename, export, archive and a two-step delete without reaching the card's open handlers", async () => {
+  test("offers info, rename, documents, export, archive and a two-step delete without reaching the card's open handlers (#323: shared with the workspace title)", async () => {
     const page = await Bun.file(new URL("./projects.tsx", import.meta.url)).text();
-    const card = page.slice(page.indexOf("function ProjectCard"), page.indexOf("function ProjectInfoDialog"));
-    expect(card).toContain("<MenuTrigger asChild>");
-    for (const item of ["Project info…", "Rename", "Export…", "Archive", "Unarchive", "Delete…", "Yes, delete it"]) expect(card).toContain(item);
-    expect(card).toContain("exportProjectBundle(project)");
-    expect(card).toContain("api.updateProject(project.id, { archived: !project.archivedAt })");
-    expect(card).toContain("api.deleteProject(project.id)");
+    const menu = await Bun.file(new URL("./project-menu.tsx", import.meta.url)).text();
+    const card = page.slice(page.indexOf("function ProjectCard"));
+    expect(card).toContain("<ProjectMenu");
+    expect(menu).toContain("<MenuTrigger asChild>{trigger}</MenuTrigger>");
+    for (const item of ["Project info…", "Rename", "Settings…", "Download documents…", "Export…", "Archive", "Unarchive", "Prune old versions…", "Repair this project…", "Delete…", "Yes, delete it"]) expect(menu).toContain(item);
+    expect(menu).toContain("exportProjectBundle(project)");
+    expect(menu).toContain("downloadDocuments(project)");
+    expect(menu).toContain("api.updateProject(project.id, { archived: !project.archivedAt })");
+    expect(menu).toContain("api.deleteProject(project.id)");
     // A slip cannot delete: the confirming item only exists after Delete… was chosen, and closing the menu forgets it.
-    expect(card).toContain("setConfirming(true)");
-    expect(card).toMatch(/if \(!open\) \{[^}]*setConfirming\(false\);/);
+    expect(menu).toContain("setConfirming(true)");
+    expect(menu).toMatch(/if \(!open\) \{[^}]*setConfirming\(false\);/);
     // The card face opens the project on click and long-press; the menu must not.
-    const menuWrapper = card.slice(card.indexOf('className="card-menu"'), card.indexOf("<Menu "));
+    const menuWrapper = card.slice(card.indexOf('className="card-menu"'), card.indexOf("<ProjectMenu"));
     for (const handler of ["onClick", "onPointerDown", "onContextMenu", "onKeyDown"]) expect(menuWrapper).toContain(`${handler}={(event) => event.stopPropagation()}`);
     // Nor may the info dialog, portaled but React-nested in the card.
-    const dialogWrapper = card.slice(card.indexOf('className="card-dialog"'), card.indexOf("<ProjectInfoDialog"));
+    const dialogWrapper = menu.slice(menu.indexOf('className="card-dialog"'), menu.indexOf("<ProjectInfoDialog"));
     for (const handler of ["onClick", "onPointerDown", "onContextMenu", "onKeyDown"]) expect(dialogWrapper).toContain(`${handler}={(event) => event.stopPropagation()}`);
     // While the menu or dialog is up, and just after it closes, the face itself is inert (card-face-guard.ts).
     expect(card).toContain("setMenuOpen(open)");
+    expect(card).toContain("setDialogOpen(open)");
     expect(card).toContain("closedAt.current = Date.now()");
     expect(card).toContain("if (opens) onOpen();");
     expect(card).toContain("if (!faceOpens()) return;");
-    expect(card).toContain("onPointerDownOutside={() => (dismissing.current = true)}");
+    expect(card).toContain("dismissing.current = true;");
+    expect(menu).toContain("onPointerDownOutside={() => onDismissPress?.()}");
   });
 
   test("the menu renders closed: only its trigger is in the markup", () => {
@@ -151,7 +156,8 @@ describe("project card menu", () => {
 describe("project info actions", () => {
   test("ProjectInfoDialog, opened by the menu, context menu or long-press, saves the name on Save, exports and archives, and does not delete", async () => {
     const page = await Bun.file(new URL("./projects.tsx", import.meta.url)).text();
-    const dialog = page.slice(page.indexOf("function ProjectInfoDialog"));
+    const menu = await Bun.file(new URL("./project-menu.tsx", import.meta.url)).text();
+    const dialog = menu.slice(menu.indexOf("function ProjectInfoDialog"));
     expect(page).toContain("onContextMenu");
     expect(page).toContain("LONG_PRESS_MS");
     expect(page).toContain("setTimeout(() => openInfo(), LONG_PRESS_MS)");
@@ -162,7 +168,7 @@ describe("project info actions", () => {
     expect(dialog).toContain("disabled={!dirty || saving}");
     expect(dialog).toContain('{saving ? "Saving…" : "Save"}');
     expect(dialog).toContain("exportProjectBundle(project)");
-    expect(page).toContain("assembleBundle(project.id");
+    expect(menu).toContain("assembleBundle(project.id");
     expect(dialog).toContain('api.updateProject(project.id, { archived: !project.archivedAt })');
     expect(dialog).toContain("Export…");
     expect(dialog).toContain("Archive");
