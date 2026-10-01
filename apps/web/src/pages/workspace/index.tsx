@@ -443,6 +443,7 @@ export function StageWorkspace({
     queueOpening: openingDispatch.queueOpening,
     onError: setError,
     onRemediation: setRemediation,
+    onDetailChanged: onChanged,
   });
   const {
     approve,
@@ -960,6 +961,11 @@ export function StageWorkspace({
           reviewInput={draftMessage?.body ?? null}
           requirementsBlock={workflowView ? renderRequirementsBlock(workflowView.requirements) : null}
           requirementsMinted={!!workflowView && workflowView.requirements.length > 0}
+          requirementsNode={
+            detail.nodes
+              .filter((node) => node.kind === "product_requirements" && node.supersededByNodeId === null)
+              .sort((a, b) => b.version - a.version)[0] ?? null
+          }
           onRequirementsDrafted={mintRequirements}
           strip={stripEl}
           conversation={conversation}

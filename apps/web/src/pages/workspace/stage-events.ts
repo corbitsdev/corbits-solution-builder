@@ -11,7 +11,7 @@ import type { DecisionRecord } from "@solutions-builder/app/project-workflow/con
 import type { ChatMessage as UiChatMessage } from "@corbits/react-ui";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { stageName } from "../../components.jsx";
-import { matchSwitchMarker } from "./use-model-handoff.ts";
+import { handoffMarkerOf } from "./use-model-handoff.ts";
 
 export type StageEvent = {
   readonly id: string;
@@ -116,11 +116,11 @@ export function switchEvents(messages: readonly ChatMessage[]): StageEvent[] {
   const seenIds = new Set<string>();
   for (const message of messages) {
     if (message.author !== "me") continue;
-    const firstLine = message.body.slice(0, message.body.indexOf("\n") < 0 ? undefined : message.body.indexOf("\n"));
-    const id = matchSwitchMarker(firstLine);
+    const id = handoffMarkerOf(message.body);
     if (!id || seenIds.has(id)) continue;
     seenIds.add(id);
-    const secondLine = message.body.split("\n")[1]?.trim();
+    const lines = message.body.split("\n").filter((line) => line.trim().length > 0);
+    const secondLine = lines[1]?.trim();
     out.push({ id: `ev:switch:${id}`, at: message.at, text: secondLine || "This stage continued on a different model.", tone: "boundary" });
   }
   return out;

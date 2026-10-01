@@ -1006,6 +1006,62 @@ function ensureProjectWorkflowWith(projectId: string, extra: { repair?: boolean 
   });
 }
 
+/** Stage 6's requirements author, as `stage6.tsx` names it. */
+export const STAGE6_REQUIREMENTS_ROLE_KEY = "requirements-author";
+
+/**
+ * Writes one version of a stage document into the project's artifact graph.
+ * A stage's draft can be persisted more than once (a send-back and
+ * re-approval, or `promote()` restoring an older version forward) -- each
+ * write must supersede the lineage's current head, or the graph fold
+ * (`foldArtifactGraph`) never links them and every write shows up as its
+ * own unrelated version 1 (the "v1 v1 v1" defect). The lookup is
+ * best-effort: a tenant-wide list that fails here must never block the
+ * draft itself from being saved -- falling back to no `supersedes` is
+ * exactly the earlier (already shipped) behavior, not a regression.
+ */
+async function persistDraftOfKind(
+  transport: ReturnType<typeof createHubTransport>,
+  projectId: string,
+  args: { stage: number; kind: string; content: string; sourceVersionIds: string[]; title: string; agentRole?: string; target?: string },
+): Promise<{ artifactId: string; versionId: string; contentHash: string }> {
+  const previousHead = await artifactGraphFor(transport, projectId)
+    .then(
+      (graph) =>
+        graph.nodes
+          .filter((node) => node.stage === args.stage && node.kind === args.kind && node.variant === null && node.supersededByNodeId === null)
+          .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0],
+    )
+    .catch(() => undefined);
+  const artifact = await installerCreateArtifact(transport, projectId, {
+    title: args.title,
+    content: args.content,
+    metadata: {
+      sb: {
+        projectId,
+        kind: args.kind,
+        stage: args.stage,
+        mediaType: "text/markdown",
+        sourceVersionIds: args.sourceVersionIds,
+        provenance: {
+          producer: "agent" as const,
+          ...(args.agentRole ? { agentRole: args.agentRole } : {}),
+        },
+        ...(args.target ? { target: args.target } : {}),
+        ...(previousHead ? { supersedes: previousHead.id } : {}),
+      },
+    },
+  });
+  // Same convention `toArtifactNode` (`project-view.ts`) reads back: the
+  // module revises an artifact in place, so its own id doubles as the
+  // version id, and `<id>@<version>` stands in for a content hash.
+  return {
+    artifactId: artifact.id,
+    versionId: artifact.id,
+    contentHash: `${artifact.id}@${String(artifact.version)}`,
+  };
+}
+
 export const api = {
   status: () => request<HostStatus>("/status"),
   /**
@@ -1764,7 +1820,7 @@ export const api = {
     /** Stage 7 only: the target chosen at freeze time, recorded as `sb.target`. */
     target?: string,
   ) =>
-    asWorkspaceOwner(async (transport, workspaceTenantId) => {
+    asWorkspaceOwner(async (transport) => {
       const kind = STAGE_DRAFT_KIND[stage];
       if (!kind) {
         throw new ApiFailure({
@@ -1774,56 +1830,42 @@ export const api = {
           retryable: false,
         });
       }
-      // A stage's draft can be persisted more than once (a send-back and
-      // re-approval, or `promote()` restoring an older version forward) --
-      // each write must supersede the lineage's current head, or the graph
-      // fold (`foldArtifactGraph`) never links them and every write shows up
-      // as its own unrelated version 1 (the "v1 v1 v1" defect). The lookup
-      // is best-effort: a tenant-wide list that fails here must never block
-      // the draft itself from being saved -- falling back to no `supersedes`
-      // is exactly today's (already shipped) behavior, not a regression.
-      const previousHead = await artifactGraphFor(transport, projectId)
-        .then(
-          (graph) =>
-            graph.nodes
-              .filter((node) => node.stage === stage && node.kind === kind && node.variant === null && node.supersededByNodeId === null)
-              .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0],
-        )
-        .catch(() => undefined);
-      const artifact = await installerCreateArtifact(transport, projectId, {
-        title: `Stage ${stage} draft`,
+      return persistDraftOfKind(transport, projectId, {
+        stage,
+        kind,
         content,
-        metadata: {
-          sb: {
-            projectId,
-            kind,
-            stage,
-            mediaType: "text/markdown",
-            sourceVersionIds,
-            // Stamped with the stage's own specialist so `reviewableArtifact`
-            // recognises the write as the draft's persisted form: found on
-            // the next load instead of persisted again, and superseded only
-            // by a draft the specialist sends later. Stage 8 is left
-            // unstamped on purpose -- there `agentRole` is the mark of
-            // `publish_workspace`'s own archive, never a browser write.
-            provenance: {
-              producer: "agent" as const,
-              ...(stage === 8 ? {} : { agentRole: agentFor(stage as Stage).id }),
-            },
-            ...(target ? { target } : {}),
-            ...(previousHead ? { supersedes: previousHead.id } : {}),
-          },
-        },
+        sourceVersionIds,
+        title: `Stage ${stage} draft`,
+        // Stamped with the stage's own specialist so `reviewableArtifact`
+        // recognises the write as the draft's persisted form: found on
+        // the next load instead of persisted again, and superseded only
+        // by a draft the specialist sends later. Stage 8 is left
+        // unstamped on purpose -- there `agentRole` is the mark of
+        // `publish_workspace`'s own archive, never a browser write.
+        ...(stage === 8 ? {} : { agentRole: agentFor(stage as Stage).id }),
+        ...(target ? { target } : {}),
       });
-      // Same convention `toArtifactNode` (`project-view.ts`) reads back: the
-      // module revises an artifact in place, so its own id doubles as the
-      // version id, and `<id>@<version>` stands in for a content hash.
-      return {
-        artifactId: artifact.id,
-        versionId: artifact.id,
-        contentHash: `${artifact.id}@${String(artifact.version)}`,
-      };
     }),
+  /**
+   * Records stage 6's product requirements document (#328): the
+   * requirements author's reply, which used to live only in its mail
+   * thread and so was gone from the strip, the download and the page after
+   * a reload. One lineage per project; a later reply supersedes.
+   */
+  persistProductRequirements: (projectId: string, content: string) =>
+    asWorkspaceOwner((transport) =>
+      persistDraftOfKind(transport, projectId, {
+        stage: 6,
+        kind: "product_requirements",
+        content,
+        sourceVersionIds: [],
+        title: "Product requirements",
+        agentRole: stage6RoleFor(STAGE6_REQUIREMENTS_ROLE_KEY).id,
+      }),
+    ),
+  /** The stage 6 role's live deployment, read only (#328): what to read a reply back from, never a deploy. */
+  stage6RoleAgentStatus: (projectId: string, roleKey: string): Promise<SpecialistDeploymentStatus | null> =>
+    asWorkspaceOwner((transport) => stageSpecialistStatus(transport, projectId, 6 as Stage, roleKey)),
   /** The stakeholders stage 5 writes for, and the roles one may hold — read off the hub tenant directly. */
   stakeholders: (projectId: string) =>
     asWorkspaceOwner(async (transport) => {

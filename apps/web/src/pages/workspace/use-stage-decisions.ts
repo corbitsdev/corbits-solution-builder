@@ -103,7 +103,7 @@ export type StageDecisions = {
    *  reply lands. Idempotent: a project whose requirements are already
    *  minted (this call, another tab, a retry) resolves without surfacing an
    *  error. */
-  readonly mintRequirements: (markdown: string) => Promise<void>;
+  readonly mintRequirements: (markdown: string, recorded?: boolean) => Promise<void>;
 };
 
 export function useStageDecisions({
@@ -119,6 +119,7 @@ export function useStageDecisions({
   queueOpening,
   onError,
   onRemediation,
+  onDetailChanged,
 }: {
   detail: ProjectDetail;
   tenantId: string;
@@ -132,6 +133,8 @@ export function useStageDecisions({
   queueOpening: (stage: number, body: string) => void;
   onError: (message: string | null) => void;
   onRemediation: (remediation: Remediation | undefined) => void;
+  /** The project's artifact graph changed under the page (#328): re-read it. */
+  onDetailChanged?: () => void;
 }): StageDecisions {
   const [approving, setApproving] = useState(false);
   const [chosenTarget, setChosenTargetState] = useState<string | null>(null);
@@ -518,8 +521,20 @@ export function useStageDecisions({
   };
 
   const mintRequirements = useCallback(
-    async (markdown: string) => {
+    async (markdown: string, recorded = false) => {
       if (stage !== 6) return;
+      // The document itself first (#328): recorded in the project's artifact
+      // graph, so the strip, the download and a reload all have it. A
+      // failure to record is said and does not stop the minting.
+      if (!recorded) {
+        try {
+          await api.persistProductRequirements(detail.project.id, markdown);
+          onDetailChanged?.();
+        } catch (cause) {
+          onError(`The product requirements could not be recorded: ${cause instanceof ApiFailure ? cause.detail.message : String(cause)}`);
+        }
+      }
+      if ((workflowView?.requirements.length ?? 0) > 0) return;
       const items = extractRequirementItems(markdown);
       if (items.length === 0) return;
       const result = await mintRequirementsDecision(stageApprovalDeps, {
@@ -533,7 +548,7 @@ export function useStageDecisions({
       }
       await refreshWorkflow();
     },
-    [stage, detail.project.id, onError, refreshWorkflow],
+    [stage, detail.project.id, onError, refreshWorkflow, onDetailChanged, workflowView],
   );
 
   return {
