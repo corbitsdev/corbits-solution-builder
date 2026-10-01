@@ -30,8 +30,8 @@ Each step up must cite the requirement id that rules out the one below.
 6. **hub** — default whenever multi-person, multi-tenant, expected to move to
    the cloud later, or needs delegated credentials, remote/sandboxed agents,
    capability approval, audit, or mail between principals. \`hubPlacement\`:
-   "embedded" (\`@corbits/embedded-host\` + \`@corbits/embed-hub\` +
-   \`@corbits/process-provisioner\` on one machine, pglite + loopback + keychain)
+   "embedded" (\`@corbits/embedded-host\` + \`@corbits/embed-hub\` on one
+   machine, pglite + loopback + keychain)
    or "cloud". Embedded moves to cloud later without a mode swap.
 
 Seams that change between local and hub (name each one the plan uses):
@@ -66,7 +66,7 @@ L = in-process, no hub. H = mounts onto a hub (embedded-host counts).
 - Evals/analytics: \`@corbits/evals\`, \`@corbits/analytics-core\` (H)
 - Desktop/CLI auth: \`@corbits/oauth-core\` (L)
 - Local secrets: \`@corbits/keychain\` (L)
-- Logging: \`@intx/log\` + \`@corbits/error-sink\`
+- Logging: \`@intx/log\`
 - Tests only: \`@intx/inference-testing\`, \`@corbits/mocks\`
 
 \`@corbits/*\` is the extension surface: mount it, never customize the hub or
