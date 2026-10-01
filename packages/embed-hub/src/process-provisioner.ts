@@ -215,8 +215,12 @@ export function createProcessProvisioner(options: ProcessProvisionerOptions): Si
     id: PROCESS_PROVISIONER_ID,
     apiVersion: 1,
     // Unchanged from the Workbench provisioner this replaces, so allocations
-    // it bound are adopted rather than failed as a changed binding.
-    bindingFingerprint: `process:v1:${options.role}:${options.sidecarEntryPath}:${options.hubWebSocketUrl}`,
+    // it bound are adopted rather than left without a provisioner: the hub
+    // retries an `allocated` row whose binding no longer matches forever,
+    // and never places anything else on the same claim capacity. The entry
+    // path and hub URL stay out: the URL carries the loopback port, which a
+    // restart can change.
+    bindingFingerprint: `process:v1:${options.role}`,
     capabilities: CAPABILITIES,
     ensure: (request) => serialize(request.allocationId, () => ensure(request)),
     destroy: (request) => serialize(request.allocationId, () => destroy(request)),
