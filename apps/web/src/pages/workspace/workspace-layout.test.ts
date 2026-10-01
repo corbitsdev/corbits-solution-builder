@@ -24,6 +24,12 @@ describe("project chrome classes", () => {
     expect(COMPOSER_BOX_CLASS).toBe("composer-box");
   });
 
+  test("stage 6's companion scrolls its open document inside the window (#330)", () => {
+    const css = read("../../styles.css");
+    expect(css).toMatch(/^\.stage6-companion \{[^}]*display: flex;[^}]*flex-direction: column;[^}]*min-height: 0;/m);
+    expect(css).toMatch(/^\.stage6-companion \.document-fold \{[^}]*min-height: 0;[^}]*overflow-y: auto;/m);
+  });
+
   test("the log never scrolls sideways, and each turn is held to the column (#321)", () => {
     const css = read("../workspace-layout.css");
     expect(css).toMatch(/^\.conv-scroll \{[^}]*overflow-x: hidden;/m);
