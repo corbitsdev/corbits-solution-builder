@@ -32,7 +32,7 @@ function roleOf(command: string): SolutionsBuilderProcess["role"] | null {
   if (exe === "bun") {
     if (runs("scripts/dev.ts")) return "launcher";
     if (runs("apps/hub/src/server.ts")) return "host";
-    if (runs("vendor/interchange/apps/sidecar/src/index.ts")) return "sidecar";
+    if (runs("vendor/interchange/apps/sidecar/src/index.ts") || runs("vendor/interchange/apps/sidecar/dist/index.js")) return "sidecar";
     return null;
   }
   if (exe === "bunx" && tokens.slice(1).some((token) => token.startsWith("@tauri-apps/cli")) && tokens.includes("dev")) return "shell";

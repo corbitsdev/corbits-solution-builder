@@ -7,6 +7,7 @@ const PS = [
   "44563 bun /Users/x/solutions-builder-alpha/apps/hub/src/server.ts --open",
   "54830 bun --conditions intx-src apps/hub/src/server.ts --port 0",
   "64807 bun /Users/x/solutions-builder-main/vendor/interchange/apps/sidecar/src/index.ts",
+  "64808 bun /Users/x/solutions-builder-main/vendor/interchange/apps/sidecar/dist/index.js",
   "70001 node /Users/x/other-app/node_modules/.bin/vite build -c apps/web/vite.config.ts",
   "70002 bun scripts/adopt-legacy-projects.ts",
   "70003 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome --type=renderer",
@@ -26,6 +27,7 @@ describe("solutionsBuilderProcesses", () => {
       [44563, "host"],
       [54830, "host"],
       [64807, "sidecar"],
+      [64808, "sidecar"],
       [70001, "watcher"],
       [70004, "shell"],
     ]);
@@ -39,6 +41,6 @@ describe("solutionsBuilderProcesses", () => {
 describe("stopOrder", () => {
   test("launchers and hosts before watchers, sidecars last", () => {
     const ordered = stopOrder(solutionsBuilderProcesses(PS, OWN));
-    expect(ordered.map((entry) => entry.role)).toEqual(["launcher", "shell", "host", "host", "watcher", "watcher", "sidecar"]);
+    expect(ordered.map((entry) => entry.role)).toEqual(["launcher", "shell", "host", "host", "watcher", "watcher", "sidecar", "sidecar"]);
   });
 });

@@ -28,6 +28,7 @@ import { hostIdentity } from "./identity.js";
 import { dataDirectory } from "./paths.js";
 import { hubEncryptionKeys, hubSigningKey } from "./hub-keys.js";
 import { hostStatus } from "./lifecycle.js";
+import { sidecarEntry } from "./sidecar-entry.js";
 
 export type { MountedHub };
 
@@ -85,9 +86,7 @@ export { SIDECAR_WS_PATH };
 /** Bun's WebSocket handler for the sidecar socket; `Bun.serve` needs it beside `fetch`. */
 export { websocket as hubWebSocket };
 
-const SIDECAR_ENTRY = join(
-  import.meta.dir, "..", "..", "..", "vendor", "interchange", "apps", "sidecar", "src", "index.ts",
-);
+const SIDECAR_DIR = join(import.meta.dir, "..", "..", "..", "vendor", "interchange", "apps", "sidecar");
 const SIDECAR_RUNTIME = join(import.meta.dir, "..", "bin", "sidecar-runtime");
 
 export function hub(): MountedHub {
@@ -122,7 +121,7 @@ export async function mountHub(): Promise<MountedHub> {
     signingKey,
     dataDir: hubDataDir,
     hubWebSocketUrl: `ws://127.0.0.1:${hostPort}${SIDECAR_WS_PATH}`,
-    sidecarEntry: SIDECAR_ENTRY,
+    sidecarEntry: sidecarEntry(SIDECAR_DIR),
     sidecarRuntime: SIDECAR_RUNTIME,
     callbackPageCopy: hostIdentity().oauthPageCopy,
     notificationSender: hostIdentity().notificationSender,

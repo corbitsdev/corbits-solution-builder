@@ -148,3 +148,45 @@ await Promise.all(
   }),
 );
 console.log(`vendor-build: ${work.length} emitted, ${all.length - work.length} current`);
+
+/**
+ * The sidecar app, bundled into one file the host spawns instead of its
+ * TypeScript entry (#194): Bun then loads one module instead of resolving
+ * and transpiling the sidecar's `@intx/*` graph on every spawn. The bundle
+ * inlines the packages' `dist/`, so it is stale when any of them is, and
+ * `import.meta.resolve("../bin/…")` in it still finds the child launchers
+ * beside `src/` because `dist/` sits beside them too.
+ */
+const SIDECAR = join(ROOT, "vendor", "interchange", "apps", "sidecar");
+const SIDECAR_BUNDLE = join(SIDECAR, "dist", "index.js");
+
+function sidecarDigest(): string {
+  const hash = createHash("sha256").update(Bun.version);
+  for (const rel of sourceFiles(join(SIDECAR, "src")).sort()) {
+    hash.update(rel).update("\0").update(readFileSync(join(SIDECAR, "src", rel)));
+  }
+  for (const target of all) {
+    hash.update(target.name).update("\0").update(readFileSync(join(target.dir, "dist", STAMP)));
+  }
+  return hash.digest("hex");
+}
+
+async function bundleSidecar(): Promise<boolean> {
+  const digest = sidecarDigest();
+  const stamp = join(SIDECAR, "dist", STAMP);
+  if (existsSync(stamp) && existsSync(SIDECAR_BUNDLE) && readFileSync(stamp, "utf8").trim() === digest) return false;
+  rmSync(join(SIDECAR, "dist"), { recursive: true, force: true });
+  const built = await Bun.build({
+    entrypoints: [join(SIDECAR, "src", "index.ts")],
+    outdir: join(SIDECAR, "dist"),
+    target: "bun",
+    sourcemap: "linked",
+  });
+  if (!built.success) {
+    throw new Error(`vendor-build: bundling the sidecar failed:\n  ${built.logs.map(String).join("\n  ")}`);
+  }
+  writeFileSync(stamp, digest);
+  return true;
+}
+
+console.log(`vendor-build: sidecar bundle ${(await bundleSidecar()) ? "emitted" : "current"}`);
