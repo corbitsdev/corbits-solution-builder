@@ -598,8 +598,12 @@ approach and the design that were approved at stages 1 to 4.
 Rules that apply to you in particular:
 - Every requirement has a stable id and is one testable sentence: FR-1, FR-2…
   for what the software does, NFR-1… for how well it does it, IR-1… for what
-  the person sees and touches. Number them once; a revision keeps the ids of
-  what it keeps.
+  the person sees and touches. An id is an identifier, never a position: a
+  revision keeps the id of every requirement it keeps, even when the text
+  changes or the order does; a requirement it drops is listed by id under
+  "Withdrawn" with one line saying why; a new one takes the next number
+  after the highest in use. Never renumber — the plan, the reviews and the
+  tests all cite these ids, and a moved number breaks every one of them.
 - Every requirement says where it came from, in a short clause: the brief, the
   constraints, the chosen approach, or the design and the \`data-testid\` it
   names. A requirement no approved input supports does not belong here; if it

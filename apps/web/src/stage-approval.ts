@@ -16,6 +16,8 @@
  * on, since `at` differs but the id would not). `attempt` still separates a
  * REFUSED decision from its retry within the same epoch.
  */
+import type { RequirementKind } from "@solutions-builder/app/stack";
+import { mintRequirementEntries } from "@solutions-builder/app/requirements";
 import { samePackage, type AudiencePackageRef, type AudiencePolicy, type DecisionRecord, type ReviewState } from "@solutions-builder/app/project-workflow/contracts";
 import type { ArtifactNode } from "./client.ts";
 import type { ProjectWorkflowView } from "./project-workflow.ts";
@@ -409,9 +411,14 @@ export async function approveStage(deps: StageApprovalDeps, input: ApproveStageI
 export type MintRequirementsInput = {
   readonly projectId: string;
   readonly stage: number;
-  readonly items: readonly { readonly kind: string; readonly text: string }[];
+  readonly items: readonly { readonly kind: RequirementKind; readonly text: string; readonly id?: string }[];
   readonly attempt?: number;
 };
+
+/** Whether the workflow holds exactly these entries, id and text. */
+function sameRequirements(held: readonly { id: string; text: string }[], wanted: readonly { id: string; text: string }[]): boolean {
+  return held.length === wanted.length && held.every((entry, index) => entry.id === wanted[index]!.id && entry.text === wanted[index]!.text);
+}
 
 export type MintRequirementsResult = { readonly ok: true } | { readonly ok: false; readonly reason: string };
 
@@ -427,7 +434,10 @@ export async function mintRequirements(deps: StageApprovalDeps, input: MintRequi
   const attempt = input.attempt ?? 0;
   const view = await deps.view(input.projectId);
   if (!view) return { ok: false, reason: "workflow_unavailable" };
-  if (view.requirements.length > 0) return { ok: true };
+  // Already holding what this document mints to is done; a different set
+  // (a revised document, #347) re-mints while the stage is open.
+  const wanted = mintRequirementEntries(input.items);
+  if (sameRequirements(view.requirements, wanted)) return { ok: true };
   if (view.stage !== input.stage) return { ok: false, reason: "wrong_stage" };
   const epoch = view.decisions.length;
   const id = `dec-${await sha256Hex(`${input.projectId}|${String(input.stage)}|mint_requirements|${String(epoch)}|${String(attempt)}`)}`;
@@ -446,10 +456,12 @@ export async function mintRequirements(deps: StageApprovalDeps, input: MintRequi
   for (;;) {
     const polled = await deps.view(input.projectId);
     if (polled) {
-      if (polled.requirements.length > 0) return { ok: true };
+      if (sameRequirements(polled.requirements, wanted)) return { ok: true };
       const refusal = findOurRefusal(polled.decisions, ourDecisionIds);
       if (refusal) {
-        if (refusal.reason === "requirements_already_minted") return { ok: true };
+        // A workflow deployed before re-minting existed still refuses a
+        // second mint; the ids it holds stand until the project is repaired.
+        if (refusal.reason === "requirements_already_minted") return { ok: false, reason: "requirements_already_minted" };
         return { ok: false, reason: refusal.reason ?? "refused" };
       }
     }

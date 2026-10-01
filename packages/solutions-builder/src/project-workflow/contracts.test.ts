@@ -249,11 +249,23 @@ describe("mint_requirements", () => {
     expect(next.decisions.at(-1)).toMatchObject({ accepted: true, kind: "mint_requirements" });
   });
 
-  test("minting twice is refused", () => {
+  test("minting again while the stage is open replaces the set, and an id the document kept stays (#347)", () => {
     const minted = applyDecision(input(baseState(), OWNER, mintDecision("m1")));
-    const again = applyDecision(input(minted, OWNER, mintDecision("m2")));
-    expect(again.requirements).toEqual(minted.requirements);
-    expect(again.decisions.at(-1)).toMatchObject({ accepted: false, reason: "requirements_already_minted" });
+    const revised = {
+      ...mintDecision("m2"),
+      items: [
+        { kind: "FR", text: "Does another thing.", id: "FR-2" },
+        { kind: "FR", text: "Does a new thing." },
+        { kind: "AC", text: "Proves it.", id: "AC-1" },
+      ],
+    };
+    const again = applyDecision(input(minted, OWNER, revised));
+    expect(again.requirements).toEqual([
+      { id: "FR-2", kind: "FR", text: "Does another thing." },
+      { id: "FR-3", kind: "FR", text: "Does a new thing." },
+      { id: "AC-1", kind: "AC", text: "Proves it." },
+    ]);
+    expect(again.decisions.at(-1)).toMatchObject({ accepted: true, kind: "mint_requirements" });
   });
 
   test("a send-back to stage <= 6 clears minted requirements", () => {
