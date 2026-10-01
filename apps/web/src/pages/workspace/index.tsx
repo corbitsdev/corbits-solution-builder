@@ -458,6 +458,10 @@ export function StageWorkspace({
     onError: setError,
     onRemediation: setRemediation,
     onDetailChanged: onChanged,
+    onRequirementsReminted: (block) =>
+      void send(
+        `The requirements document was revised and the requirement ids were re-issued from it. Cite these ids in the plan from now on; a number from an earlier version may now mean something else.\n\n${block}`,
+      ),
   });
   const {
     approve,

@@ -22,7 +22,7 @@ import {
   type StageApprovalDeps,
 } from "../../stage-approval.ts";
 import { packagesByStakeholder } from "../../package-lineages.ts";
-import { extractRequirementItems } from "@solutions-builder/app/requirements";
+import { extractRequirementItems, requirementsDiffer, mintRequirementEntries, renderRequirementsBlock } from "@solutions-builder/app/requirements";
 import { buildEvidenceState, currentPublishedBundle } from "./build.jsx";
 import { approvedStage8Archive, composeStage9Opening, manifestCompanionOf } from "./stage9-opening.ts";
 import {
@@ -120,6 +120,7 @@ export function useStageDecisions({
   onError,
   onRemediation,
   onDetailChanged,
+  onRequirementsReminted,
 }: {
   detail: ProjectDetail;
   tenantId: string;
@@ -135,6 +136,8 @@ export function useStageDecisions({
   onRemediation: (remediation: Remediation | undefined) => void;
   /** The project's artifact graph changed under the page (#328): re-read it. */
   onDetailChanged?: () => void;
+  /** The requirement ids were re-issued from a revised document (#347): the rendered block, for the architect. */
+  onRequirementsReminted?: (block: string) => void;
 }): StageDecisions {
   const [approving, setApproving] = useState(false);
   const [chosenTarget, setChosenTargetState] = useState<string | null>(null);
@@ -534,21 +537,28 @@ export function useStageDecisions({
           onError(`The product requirements could not be recorded: ${cause instanceof ApiFailure ? cause.detail.message : String(cause)}`);
         }
       }
-      if ((workflowView?.requirements.length ?? 0) > 0) return;
       const items = extractRequirementItems(markdown);
       if (items.length === 0) return;
+      // A revised document re-mints (#347); the same document is a no-op.
+      const held = workflowView?.requirements ?? [];
+      if (held.length > 0 && !requirementsDiffer(items, held)) return;
       const result = await mintRequirementsDecision(stageApprovalDeps, {
         projectId: detail.project.id,
         stage,
         items,
       });
       if (!result.ok) {
-        onError(`Minting the requirement ids was refused: ${stageRefusalMessage(result.reason)}`);
+        onError(
+          result.reason === "requirements_already_minted"
+            ? "The requirements changed, but this project's workflow predates re-minting and kept the earlier ids. Choose Repair this project from the project menu, then reload."
+            : `Minting the requirement ids was refused: ${stageRefusalMessage(result.reason)}`,
+        );
         return;
       }
       await refreshWorkflow();
+      if (held.length > 0) onRequirementsReminted?.(renderRequirementsBlock(mintRequirementEntries(items)));
     },
-    [stage, detail.project.id, onError, refreshWorkflow, onDetailChanged, workflowView],
+    [stage, detail.project.id, onError, refreshWorkflow, onDetailChanged, workflowView, onRequirementsReminted],
   );
 
   return {
