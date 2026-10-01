@@ -6,6 +6,7 @@ import { createWorkflowProbeStore, type DB } from "@intx/db";
 import * as intxSchema from "@intx/db/schema";
 import { createSidecarPluginRegistry, createWorkflowAllocationService, type SidecarProvisioner } from "@intx/hub-sessions";
 import { withPostgresJsResultShape } from "./pg-compat.js";
+import { describeFailure } from "./index.js";
 
 // #315: a releasing probe bound under the Workbench provisioner's binding
 // (`process:v1:probe:<entry>:<hub url>`) can never match the Interchange-
@@ -105,5 +106,14 @@ describe("reconcileReleasingProbes", () => {
     expect((await store.get("wpr_new"))?.status).toBe("succeeded");
     expect(destroyed).toEqual(["sc_wpr_new"]);
     expect(retired).toEqual(["wpr_new"]);
+  });
+});
+
+describe("describeFailure", () => {
+  test("names an AggregateError's causes, which the probe cleanup's log line left out", () => {
+    const failure = new AggregateError([new Error("probe wpr_1: no provisioner"), new Error("probe wpr_2: timed out")], "Failed to clean up releasing workflow probes");
+    expect(describeFailure(failure)).toBe("Failed to clean up releasing workflow probes: probe wpr_1: no provisioner; probe wpr_2: timed out");
+    expect(describeFailure(new Error("plain"))).toBe("plain");
+    expect(describeFailure("text")).toBe("text");
   });
 });
