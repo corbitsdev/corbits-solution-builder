@@ -14,6 +14,7 @@ import { subscribeMailbox } from "../../mailbox-events.ts";
 import { Markdown } from "../../markdown.jsx";
 import { Banner, Button, CopyButton } from "../../components.jsx";
 import { DocumentExportMenu, draftNode } from "../../document-export.jsx";
+import { reviewDocument, type StageDocument } from "./document-mentions.ts";
 
 export const PANEL_ROLES: readonly { key: string; label: string }[] = [
   { key: "application", label: "Application" },
@@ -179,6 +180,7 @@ export function PanelReviewsCompanion({
   reviewInput,
   reviewNodes,
   onDocumentsChanged,
+  onDocuments,
 }: {
   projectId: string;
   tenantId: string;
@@ -186,9 +188,20 @@ export function PanelReviewsCompanion({
   reviewInput: string | null;
   reviewNodes: ReadonlyMap<string, ArtifactNode>;
   onDocumentsChanged?: () => void;
+  /** The reviews as they stand, as documents a message to the stage's specialist may attach. */
+  onDocuments?: (documents: StageDocument[]) => void;
 }) {
   const panel = usePanelReviews({ projectId, tenantId, stage, reviewInput, reviewNodes, ...(onDocumentsChanged ? { onDocumentsChanged } : {}) });
   const [page, setPage] = useState(PANEL_ROLES[0]!.key);
+  const documents = PANEL_ROLES.flatMap((role) => {
+    const state = panel.stateOf(role.key);
+    return state.status === "done" && state.reply ? [reviewDocument(role.label, state.reply, stage === 8 ? "build-review" : "review")] : [];
+  });
+  const documentsKey = documents.map((doc) => `${doc.key}:${String(doc.content.length)}`).join("|");
+  useEffect(() => {
+    onDocuments?.(documents);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [documentsKey]);
   const role = PANEL_ROLES.find((entry) => entry.key === page) ?? PANEL_ROLES[0]!;
   const current = panel.stateOf(role.key);
   const busy = current.status === "starting" || current.status === "waiting";

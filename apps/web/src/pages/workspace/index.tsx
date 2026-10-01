@@ -69,6 +69,7 @@ import { loadDismissedDefault, saveDismissedDefault } from "./model-nudge-store.
 import { Stage6Panel } from "./stage6.tsx";
 import { PanelReviewsCompanion, reviewNodesOf as panelReviewNodesOf } from "./panel-reviews.tsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
+import { withAttachedDocuments, type StageDocument as MentionedDocument } from "./document-mentions.ts";
 
 /** Stage 6's recorded panel reviews, newest unsuperseded version per reviewer (#334). */
 function reviewNodesOf(nodes: readonly ArtifactNode[]): ReadonlyMap<string, ArtifactNode> {
@@ -540,13 +541,19 @@ export function StageWorkspace({
     }
   };
 
+  // The stage's companion documents (#345): named in a message, they go along with it.
+  const [stageDocuments, setStageDocuments] = useState<MentionedDocument[]>([]);
+  useEffect(() => {
+    setStageDocuments([]);
+  }, [stage, detail.project.id]);
+
   const send = async (body: string) => {
     if (!agentAddress || body.trim().length === 0) return;
     setSending(true);
     setError(null);
     setRemediation(undefined);
     try {
-      await api.sendStageMail(tenantId, agentAddress, { body });
+      await api.sendStageMail(tenantId, agentAddress, { body: withAttachedDocuments(body, stageDocuments) });
       await loadThread();
     } catch (cause) {
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
@@ -983,6 +990,7 @@ export function StageWorkspace({
           }
           reviewNodes={panelReviewNodesOf(detail.nodes, 8)}
           onDocumentsChanged={onChanged}
+          onDocuments={setStageDocuments}
         />
       ) : null}
 
@@ -1001,6 +1009,8 @@ export function StageWorkspace({
           }
           reviewNodes={reviewNodesOf(detail.nodes)}
           onDocumentsChanged={onChanged}
+          onDocuments={setStageDocuments}
+          onSendToArchitect={(body) => void send(body)}
           onRequirementsDrafted={mintRequirements}
           strip={stripEl}
           conversation={conversation}

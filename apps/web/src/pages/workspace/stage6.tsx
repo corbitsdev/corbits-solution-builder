@@ -9,6 +9,7 @@ import { api, ApiFailure, STAGE6_REQUIREMENTS_ROLE_KEY as REQUIREMENTS_ROLE_KEY,
 import { subscribeMailbox } from "../../mailbox-events.ts";
 import { Markdown } from "../../markdown.jsx";
 import { Banner, Button, CopyButton } from "../../components.jsx";
+import { documentAsMessage, requirementsDocument, reviewDocument, withAttachedDocuments, type StageDocument } from "./document-mentions.ts";
 import { DocumentExportMenu, draftNode } from "../../document-export.jsx";
 import { StagePanes } from "./workspace-chrome.tsx";
 import { HowItRuns } from "./how-it-runs.tsx";
@@ -73,6 +74,8 @@ export function Stage6Panel({
   requirementsNode = null,
   reviewNodes = null,
   onDocumentsChanged,
+  onDocuments,
+  onSendToArchitect,
   onRequirementsDrafted,
   strip,
   conversation,
@@ -101,6 +104,10 @@ export function Stage6Panel({
   reviewNodes?: ReadonlyMap<string, ArtifactNode> | null;
   /** A document was recorded (#334): the project's artifact graph should be re-read. */
   onDocumentsChanged?: () => void;
+  /** The stage's documents as they stand (#345): what a message to the architect may attach. */
+  onDocuments?: (documents: StageDocument[]) => void;
+  /** "Send to the architect": the document as a message in the architect's thread (#345). */
+  onSendToArchitect?: (body: string) => void;
   /** Fires once the requirements author's PRODUCT_REQUIREMENTS document is
    *  accepted (its reply lands) — `index.tsx` records it as the project's
    *  document unless `recorded` says it already is (#328), and mints the
@@ -213,7 +220,7 @@ export function Stage6Panel({
 
   const runRole = useCallback(
     (roleKey: string, body: string, onUpdate: (updater: (prev: Stage6RoleState) => Stage6RoleState) => void) => {
-      onUpdate((prev) => ({ ...prev, status: "starting", error: null }));
+      onUpdate((prev) => ({ ...prev, status: "starting", error: null, recorded: false }));
       void (async () => {
         try {
           const deployment = await api.ensureStage6RoleAgent(projectId, roleKey);
@@ -308,6 +315,34 @@ export function Stage6Panel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anyWaiting, tenantId]);
 
+  // What the stage has written so far, as documents a message may name (#345).
+  const documents: StageDocument[] = [
+    ...(requirements.status === "done" && requirements.reply ? [requirementsDocument(requirements.reply)] : []),
+    ...STAGE6_PANEL_ROLES.flatMap((role) => {
+      const state = reviews[role.key];
+      return state?.status === "done" && state.reply ? [reviewDocument(role.label, state.reply)] : [];
+    }),
+  ];
+  const documentsKey = documents.map((doc) => `${doc.key}:${String(doc.content.length)}`).join("|");
+  useEffect(() => {
+    onDocuments?.(documents);
+    // Re-reported when a document arrives or changes, not on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [documentsKey]);
+
+  // Addressing a companion specialist directly (#345): the ask, with any
+  // named documents attached, goes to that role's own thread; the reply
+  // becomes the next version of its document through the same paths a
+  // first request takes.
+  const [ask, setAsk] = useState("");
+  const askRole = (roleKey: string) => {
+    const body = withAttachedDocuments(ask.trim(), documents.filter((doc) => doc.key !== (roleKey === STAGE6_REQUIREMENTS_ROLE_KEY ? "requirements" : `review:${roleKey}`)));
+    if (!body) return;
+    setAsk("");
+    if (roleKey === STAGE6_REQUIREMENTS_ROLE_KEY) runRole(roleKey, body, setRequirements);
+    else runRole(roleKey, body, (updater) => setReviews((prev) => ({ ...prev, [roleKey]: updater(prev[roleKey] ?? STAGE6_IDLE_ROLE) })));
+  };
+
   const current = page === "requirements" ? requirements : (reviews[page] ?? STAGE6_IDLE_ROLE);
   const currentPage = PAGES.find((entry) => entry.key === page) ?? PAGES[0]!;
   const busy = current.status === "starting" || current.status === "waiting";
@@ -353,6 +388,17 @@ export function Stage6Panel({
             <>
               <CopyButton text={current.reply} />
               <DocumentExportMenu node={draftNode(draftKindOf(page), 6, currentPage.label)} tenantId={tenantId} content={current.reply} />
+              {onSendToArchitect ? (
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    const doc = page === "requirements" ? requirementsDocument(current.reply!) : reviewDocument(currentPage.label.replace(/ review$/, ""), current.reply!);
+                    onSendToArchitect(documentAsMessage(doc));
+                  }}
+                >
+                  Send to the architect
+                </Button>
+              ) : null}
             </>
           ) : null}
         </div>
@@ -361,6 +407,25 @@ export function Stage6Panel({
             {current.error}
           </Banner>
         ) : null}
+        <div className="companion-ask">
+          <input
+            className="field"
+            aria-label={`Ask the ${page === "requirements" ? "requirements author" : `${currentPage.label.replace(/ review$/, "")} reviewer`}`}
+            placeholder={page === "requirements" ? "Ask the requirements author… (name a review to attach it)" : "Ask this reviewer… (name the PRD or another review to attach it)"}
+            value={ask}
+            disabled={busy}
+            onChange={(event) => setAsk(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                askRole(page === "requirements" ? STAGE6_REQUIREMENTS_ROLE_KEY : page);
+              }
+            }}
+          />
+          <Button variant="ghost" loading={busy} disabled={busy || ask.trim().length === 0} onClick={() => askRole(page === "requirements" ? STAGE6_REQUIREMENTS_ROLE_KEY : page)}>
+            Ask
+          </Button>
+        </div>
         {current.status === "done" && current.reply ? (
           <details className="document-fold">
             <summary className="document-fold-summary">
