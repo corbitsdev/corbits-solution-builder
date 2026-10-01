@@ -24,6 +24,12 @@ describe("project chrome classes", () => {
     expect(COMPOSER_BOX_CLASS).toBe("composer-box");
   });
 
+  test("the log never scrolls sideways, and each turn is held to the column (#321)", () => {
+    const css = read("../workspace-layout.css");
+    expect(css).toMatch(/^\.conv-scroll \{[^}]*overflow-x: hidden;/m);
+    expect(css).toMatch(/\.conv-scroll > \* \{[^}]*min-width: 0;[^}]*max-width: 100%;/);
+  });
+
   test("a message never grows past the column for a wide code block; the block scrolls inside the bubble (#317)", () => {
     const css = read("../workspace-layout.css");
     const msg = css.slice(css.indexOf(".conv .msg {"), css.indexOf("}", css.indexOf(".conv .msg {")));
