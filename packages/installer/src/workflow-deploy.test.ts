@@ -61,6 +61,20 @@ describe("deploymentUsability", () => {
     const hub = hubWithRun([[{ id: "dep_1", status: "recovering" }]], []);
     expect(await deploymentUsability(hub.transport, TENANT_ID, "dep_1", "dep_1", { ...FAST, stallMs: 20 })).toBe("stalled");
   });
+
+  // CL-9680: the embedded host's sidecars die with it and are not placed
+  // again at boot, so an unplaced deployment from before this host started
+  // is stalled on the first read, not after the hub has been quiet 45 s.
+  test("an unplaced deployment from before the host started is stalled at once", async () => {
+    const hub = hubWithRun([[{ id: "dep_1", status: "recovering" }]], []);
+    expect(await deploymentUsability(hub.transport, TENANT_ID, "dep_1", "dep_1", { ...FAST, stallMs: 60_000 }, "2026-01-02T00:00:00.000Z")).toBe("stalled");
+    expect(hub.taken()).toBe(1);
+  });
+
+  test("an unplaced deployment created since the host started is still waited for", async () => {
+    const hub = hubWithRun([[{ id: "dep_1", status: "recovering" }], [{ id: "dep_1", status: "deployed" }]], [{ seq: 1, type: "RunStarted" }]);
+    expect(await deploymentUsability(hub.transport, TENANT_ID, "dep_1", "dep_1", FAST, "2025-12-31T00:00:00.000Z")).toBe("usable");
+  });
 });
 
 describe("waitForDeploymentDeployed", () => {

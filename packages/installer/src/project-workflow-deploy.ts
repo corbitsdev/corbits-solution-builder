@@ -973,6 +973,13 @@ async function ensureProjectWorkflowOnce(
     ...(options.onProgress ? { onProgress: options.onProgress } : {}),
   };
   const progress = options.onProgress ?? (() => {});
+  // A live run not yet placed is waited for under the strip's clock, the
+  // way a replay's placement is; one from before this host started is not
+  // waited for at all (CL-9680).
+  const usabilityOf = (tenantId: string, deploymentId: string, runId: string) => {
+    progress({ phase: "waiting", detail: "placement" });
+    return deploymentUsability(transport, tenantId, deploymentId, runId, placementWait, sidecar.sidecarsLostBefore);
+  };
   /**
    * Brings `target`, at `generation`, up to `history`. A run that stalls
    * mid-replay has lost its child (#189): it is superseded by a fresh run at
@@ -1025,7 +1032,7 @@ async function ensureProjectWorkflowOnce(
     // that never came. It is waited for within the placement bounds, then
     // either returned placed or replaced below.
     // A repair (#299) never reuses it: the person asked for a rebuild.
-    const usability = state.code?.digest === digest && !options.repair ? await deploymentUsability(transport, state.run.tenantId, state.run.deploymentId, state.run.runId, placementWait) : "usable";
+    const usability = state.code?.digest === digest && !options.repair ? await usabilityOf(state.run.tenantId, state.run.deploymentId, state.run.runId) : "usable";
     if (state.code?.digest === digest && !options.repair && usability === "usable") return state.run;
     // The live run is on other code than this render (#51): a reducer fix
     // that never reached this project, or a run from before code was
@@ -1045,7 +1052,7 @@ async function ensureProjectWorkflowOnce(
   // which takes the replacement path above. A candidate the hub cannot
   // place, or whose run has ended (#236), is passed over for a fresh one.
   const candidate = state.liveCandidates[0];
-  if (candidate && !options.repair && (await deploymentUsability(transport, candidate.tenantId, candidate.deployment.id, candidate.runId, placementWait)) === "usable") {
+  if (candidate && !options.repair && (await usabilityOf(candidate.tenantId, candidate.deployment.id, candidate.runId)) === "usable") {
     const target = await broughtUp({ deploymentId: candidate.deployment.id, runId: candidate.runId, tenantId: candidate.tenantId }, state.generation, state.history);
     return state.run && state.run.deploymentId !== target.deploymentId
       ? { ...target, replay: await replayOutcome(transport, state.run, target, state.history) }

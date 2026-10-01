@@ -274,6 +274,8 @@ export type HostStatus = {
   dataDir?: string;
   canPlaceSidecars: boolean;
   sidecarFingerprint: string | null;
+  /** The host's start when its sidecars die with it: a deployment from before then is not waited on. */
+  sidecarsLostBefore: string | null;
   hub: {
     mode: "embedded" | "remote";
     url: string | null;
@@ -548,8 +550,8 @@ export async function rerankCatalogAfterSkillAssets(): Promise<void> {
   }
 }
 
-export function sidecarCapabilityOf(status: Pick<HostStatus, "canPlaceSidecars">): SidecarCapability {
-  return { canPlaceSidecars: status.canPlaceSidecars };
+export function sidecarCapabilityOf(status: Pick<HostStatus, "canPlaceSidecars" | "sidecarsLostBefore">): SidecarCapability {
+  return { canPlaceSidecars: status.canPlaceSidecars, ...(status.sidecarsLostBefore === null ? {} : { sidecarsLostBefore: status.sidecarsLostBefore }) };
 }
 
 /** The static closure manifest `scripts/pack-closure-static.ts` writes to

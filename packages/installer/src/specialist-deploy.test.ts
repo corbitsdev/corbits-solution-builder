@@ -63,8 +63,10 @@ describe("ensureSpecialistDeployment reuse", () => {
     const { readFileSync } = await import("node:fs");
     const source = readFileSync(new URL("./specialist-deploy.ts", import.meta.url), "utf8");
     const block = source.slice(source.indexOf("const liveExisting = async"), source.indexOf("const existing = switchToOfferingId"));
-    expect(block).toContain('await deploymentUsability(transport, tenantId, own.id, own.id, wait)) === "usable"');
-    expect(block).toContain('await deploymentUsability(transport, legacy.tenantId, pick.id, pick.id, wait)) !== "usable"');
+    // CL-9680: both checks carry the host's start, so a deployment from
+    // before it is stalled at once rather than waited on.
+    expect(block).toContain('await deploymentUsability(transport, tenantId, own.id, own.id, wait, sidecar.sidecarsLostBefore)) === "usable"');
+    expect(block).toContain('await deploymentUsability(transport, legacy.tenantId, pick.id, pick.id, wait, sidecar.sidecarsLostBefore)) !== "usable"');
     expect(block).not.toContain("deploymentIsLive(");
   });
 });

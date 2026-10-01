@@ -16,6 +16,7 @@ function fixtureStatus(overrides: Partial<HostStatus> = {}): HostStatus {
     credentialBackend: "keychain",
     canPlaceSidecars: false,
     sidecarFingerprint: null,
+    sidecarsLostBefore: null,
     hub: { mode: "embedded", url: null, ready: true, detail: "" },
     ...overrides,
   };

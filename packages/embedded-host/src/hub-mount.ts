@@ -27,6 +27,7 @@ import { database } from "./db.js";
 import { hostIdentity } from "./identity.js";
 import { dataDirectory } from "./paths.js";
 import { hubEncryptionKeys, hubSigningKey } from "./hub-keys.js";
+import { hostStatus } from "./lifecycle.js";
 
 export type { MountedHub };
 
@@ -57,14 +58,19 @@ export function canPlaceSidecars(): boolean {
  * What GET /status reports about this process's ability to place a sidecar.
  * `sidecarFingerprint` is null until the hub is mounted — there is no binding
  * to name before then.
+ * `sidecarsLostBefore` is this host's start: its sidecars are child processes
+ * that die with it and are not placed again at boot (#283), so a deployment
+ * from before then is never waited on.
  */
 export function sidecarFacts(): {
   readonly canPlaceSidecars: boolean;
   readonly sidecarFingerprint: string | null;
+  readonly sidecarsLostBefore: string | null;
 } {
   return {
     canPlaceSidecars: canPlaceSidecars(),
     sidecarFingerprint: mounted?.sidecarBindingFingerprint ?? null,
+    sidecarsLostBefore: mounted ? hostStatus().startedAt : null,
   };
 }
 

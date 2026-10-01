@@ -143,7 +143,9 @@ export const RECOVERY_WAIT: PlacementWait = { stallMs: 45_000 };
  * deployment not yet placed is waited for within `wait`, the replacement
  * bounds rather than the fifteen-minute ceiling a placement wait allows,
  * and one that ends, whose run has ended, or that never places is not
- * handed back: the caller deploys afresh, as Try again would.
+ * handed back: the caller deploys afresh, as Try again would. One created
+ * before `lostBefore` and unplaced is stalled at once: the host that was
+ * placing it is gone (#283).
  */
 export async function deploymentUsability(
   transport: Transport,
@@ -151,6 +153,7 @@ export async function deploymentUsability(
   deploymentId: string,
   runId: string,
   wait: PlacementWait = RECOVERY_WAIT,
+  lostBefore?: string,
 ): Promise<DeploymentUsability> {
   const workflows = workflowsFor(transport, tenantId);
   const outcome = await pollWhilePlacing(
@@ -159,11 +162,12 @@ export async function deploymentUsability(
       const found = deployments.find((entry: HubDeployment) => entry.id === deploymentId);
       if (!isLive(found)) return "ended" as const;
       if (isPlaced(found)) return "placed" as const;
+      if (lostBefore !== undefined && found.createdAt < lostBefore) return "stalled" as const;
       return null;
     },
     wait,
   );
-  if (outcome === null) return "stalled";
+  if (outcome === null || outcome === "stalled") return "stalled";
   if (outcome === "ended") return "ended";
   return (await runHasEnded(transport, tenantId, deploymentId, runId)) ? "ended" : "usable";
 }
@@ -235,9 +239,12 @@ export async function sourceFor(
 
 /**
  * Whether this host is serving sidecars at all -- passed in rather than
- * reached for, since this package never imports the hub's embedding files.
+ * reached for, since this package never imports the hub's embedding files --
+ * and, when its sidecars die with it and are not placed again at boot (#283),
+ * the instant it started: a deployment created before then and not placed
+ * now never will be, and is not waited on.
  */
-export type SidecarCapability = { canPlaceSidecars: boolean };
+export type SidecarCapability = { canPlaceSidecars: boolean; sidecarsLostBefore?: string };
 
 /**
  * Pushes `tree` onto `main` of the tenant's `<assetKind>/<assetName>` asset
