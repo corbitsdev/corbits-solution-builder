@@ -83,7 +83,7 @@ function Booting({ offline }: { offline: boolean }) {
         offline
           ? "The host is not answering yet."
           : slow
-            ? "Still starting — the first run migrates the database."
+            ? "Still starting. The host is taking longer than usual to bring up the hub."
             : "Starting…"
       }
       brand={<Mark size={26} />}
