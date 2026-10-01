@@ -1,3 +1,4 @@
+import { mintRequirementEntries } from "../requirements.js";
 import { checkStackCitations, type RequirementEntry, type RequirementKind, type StackChoice, type StackRecord } from "../stack.js";
 
 export type StageNumber = number;
@@ -242,7 +243,7 @@ export interface MintRequirementsPayload extends DecisionCommon {
   /** Items the caller parsed from the approved requirements document
    *  (`P/requirements.ts`'s `extractRequirementItems`); the reducer mints
    *  the id, deterministically, per kind in order (`FR-1`, `FR-2`, ...). */
-  readonly items: readonly { readonly kind: RequirementKind; readonly text: string }[];
+  readonly items: readonly { readonly kind: RequirementKind; readonly text: string; readonly id?: string }[];
 }
 
 export type DecisionPayload = OpenReviewPayload | ApprovePayload | SendBackPayload | MintRequirementsPayload | AudiencePayload;
@@ -279,12 +280,13 @@ function isStageNumber(value: unknown): value is StageNumber {
 
 const REQUIREMENT_KINDS: readonly RequirementKind[] = ["FR", "NFR", "IR", "AC"];
 
-function isRequirementItem(value: unknown): value is { kind: RequirementKind; text: string } {
+function isRequirementItem(value: unknown): value is { kind: RequirementKind; text: string; id?: string } {
   return (
     isRecord(value) &&
     typeof value.text === "string" &&
     value.text.length > 0 &&
-    REQUIREMENT_KINDS.includes(value.kind as RequirementKind)
+    REQUIREMENT_KINDS.includes(value.kind as RequirementKind) &&
+    (value.id === undefined || typeof value.id === "string")
   );
 }
 
@@ -361,7 +363,7 @@ export function validateDecisionShape(value: unknown): DecisionPayload | null {
 
   if (value.kind === "mint_requirements") {
     if (!Array.isArray(value.items) || value.items.length === 0 || !value.items.every(isRequirementItem)) return null;
-    return { ...common, kind: "mint_requirements", items: value.items as { kind: RequirementKind; text: string }[] };
+    return { ...common, kind: "mint_requirements", items: value.items as { kind: RequirementKind; text: string; id?: string }[] };
   }
 
   if (value.kind === "audience") {
@@ -749,15 +751,12 @@ export function applyDecision(input: ApplyDecisionInput): ProjectState {
   }
 
   if (payload.kind === "mint_requirements") {
-    if (state.requirements.length > 0) {
-      return refused(state, payload, principalId, "requirements_already_minted");
-    }
-    const counts: Partial<Record<RequirementKind, number>> = {};
-    const requirements: RequirementEntry[] = payload.items.map((item) => {
-      const n = (counts[item.kind] ?? 0) + 1;
-      counts[item.kind] = n;
-      return { id: `${item.kind}-${String(n)}`, kind: item.kind, text: item.text };
-    });
+    // Minted once used to mean minted for good (`requirements_already_minted`),
+    // and a revised requirements document drifted from the ids everyone
+    // cited (#347). While stage 6 is open -- the only stage this
+    // decision is accepted at -- a new document re-mints and replaces the
+    // set; an id the document kept stays the same id (`mintRequirementEntries`).
+    const requirements: RequirementEntry[] = mintRequirementEntries(payload.items);
     const record: DecisionRecord = {
       decisionId: payload.decisionId,
       kind: "mint_requirements",
