@@ -244,6 +244,35 @@ form:has(> div > textarea) textarea:focus-visible {
   white-space: nowrap;
 }
 
+/* The project's title is its options menu (#323): the wordmark's look on a
+   button, with a chevron that says so. */
+.wordmark-menu {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px 2px 6px;
+  margin: -2px 0 -2px -6px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.wordmark-menu:hover,
+.wordmark-menu[data-state="open"] {
+  background: var(--wb-muted);
+}
+
+.wordmark-menu svg {
+  width: 14px;
+  height: 14px;
+  color: var(--wb-muted-foreground);
+  flex: none;
+}
+
 .step-name {
   font-family: var(--wb-font-mono);
   font-size: 0.6875rem;

@@ -6,36 +6,20 @@
 // this lane's client no longer exports SpendRow/SpendTotals (spend now lives
 // in project-usage.ts), so the per-project spend table it backed is adapted
 // below. Import order otherwise verbatim from main.
-import {
-  ChatInput,
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  Input,
-  Menu,
-  MenuContent,
-  MenuItem,
-  MenuSeparator,
-  MenuTrigger,
-} from "@corbits/react-ui";
+import { ChatInput } from "@corbits/react-ui";
 import { Ellipsis, Plus, Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { api, ApiFailure, type ActiveModel, type ImportOutcome, type ProjectInfo, type ProjectSummary } from "../client.js";
+import { api, ApiFailure, type ImportOutcome, type ProjectSummary } from "../client.js";
 import { faceOpensProject } from "./card-face-guard.ts";
-import { Banner, Button, downloadArtifact, stageName } from "../components.jsx";
+import { Banner, Button } from "../components.jsx";
 // INTEGRATE (CL-8756): api.exportProject is gone on this lane — export is
 // assembled in the browser (assembleBundle) and saved via downloadArtifact;
 // stage/turn/done come from project-list.ts helpers and spend copy from
 // project-usage.ts. Behavioral-only wiring; main's order and copy preserved.
-import { assembleBundle, bundleFileName } from "../project-export.js";
 import { readImportPayload } from "../project-import.js";
 import { displayDone, displayStage, displayTurn } from "../project-list.js";
-import { formatUsage } from "../project-usage.js";
 import { DEFAULT_POLICY } from "./onboarding.jsx";
-import { ProjectSettingsDialog } from "./project-settings.jsx";
+import { ProjectMenu, type InfoRequest } from "./project-menu.jsx";
 import { Dictated } from "../dictation.jsx";
 import "./home-layout.css";
 import {
@@ -48,7 +32,6 @@ import {
   cardFootStage,
   stageTrackSegClass,
 } from "./home-view.js";
-import { prunePlanSummary, type PrunePlan } from "../prune-versions.ts";
 
 function plural(count: number, noun: string): string {
   return `${String(count)} ${noun}${count === 1 ? "" : "s"}`;
@@ -287,23 +270,6 @@ export function Projects({
 /** Hold this long on a card to open info; the options menu on the face reaches it too. */
 const LONG_PRESS_MS = 500;
 
-/**
- * Exports one project the way this lane can: the bundle is assembled in the
- * browser (`assembleBundle`) and saved as a download. Returns the notice
- * line; shared by the card's options menu and the Project info dialog.
- */
-async function exportProjectBundle(project: ProjectSummary): Promise<string> {
-  const bundle = await assembleBundle(project.id, {
-    projectView: api.projectView,
-    artifactContent: api.artifactContent,
-    stageAgentStatus: api.stageAgentStatus,
-    readStageThread: api.readStageThread,
-  });
-  downloadArtifact(JSON.stringify(bundle, null, 2), bundleFileName(project.title));
-  const messageCount = bundle.conversations.reduce((total, thread) => total + thread.messages.length, 0);
-  return `Exported ${project.title} to ${bundleFileName(project.title)}: ${bundle.artifacts.length} artifact${bundle.artifacts.length === 1 ? "" : "s"} and ${messageCount} message${messageCount === 1 ? "" : "s"}.`;
-}
-
 function ProjectCard({
   project,
   onOpen,
@@ -368,20 +334,11 @@ function ProjectCard({
     };
   }, [project.id, project.archivedAt, project.needsDecision, stage]);
   const waiting = project.needsDecision;
-  const [infoOpen, setInfoOpen] = useState(false);
-  // Rename opens the same dialog with the name field focused.
-  const [focusName, setFocusName] = useState(false);
-  // The project's own settings (#246), a dialog of its own beside the info.
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  // Deleting takes two clicks, both in the menu: the second item only exists
-  // after the first, so a slip cannot remove a project.
-  const [confirming, setConfirming] = useState(false);
-  // "Prune old versions…" shows its plan first and archives on the second
-  // click, the way Delete asks twice (#297).
-  const [pruning, setPruning] = useState<PrunePlan | null>(null);
-  // "Repair this project…" asks twice too (#299): it rebuilds the run from
-  // every recorded decision instead of the state the last run wrote.
-  const [repairing, setRepairing] = useState(false);
+  // The menu, its two-step items and the dialogs it opens are `ProjectMenu`'s
+  // (#323); the card only needs to know when one of them is up.
+  const [dialogOpen, setDialogOpen] = useState(false);
+  // The context menu and long-press open the info dialog from outside the menu.
+  const [infoRequest, setInfoRequest] = useState<InfoRequest | null>(null);
   const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The face is inert while the options menu or the info dialog is up, and
   // for a moment after either closes (`card-face-guard.ts`): the click that
@@ -392,16 +349,7 @@ function ProjectCard({
   // produces; a fresh press on the face clears it first.
   const dismissing = useRef(false);
   const faceOpens = () =>
-    faceOpensProject({ menuOpen, dialogOpen: infoOpen || settingsOpen, dismissingClick: dismissing.current, closedAt: closedAt.current, now: Date.now() });
-
-  const act = async (work: () => Promise<unknown>) => {
-    try {
-      await work();
-      onChanged();
-    } catch (cause) {
-      onError(cause);
-    }
-  };
+    faceOpensProject({ menuOpen, dialogOpen, dismissingClick: dismissing.current, closedAt: closedAt.current, now: Date.now() });
 
   useEffect(
     () => () => {
@@ -417,14 +365,7 @@ function ProjectCard({
     }
   };
 
-  const openInfo = (withName = false) => {
-    setFocusName(withName);
-    setInfoOpen(true);
-  };
-  const closeInfo = () => {
-    closedAt.current = Date.now();
-    setInfoOpen(false);
-  };
+  const openInfo = (withName = false) => setInfoRequest({ withName, at: Date.now() });
 
   return (
     <article
@@ -475,139 +416,31 @@ function ProjectCard({
             onContextMenu={(event) => event.stopPropagation()}
             onKeyDown={(event) => event.stopPropagation()}
           >
-            <Menu
-              onOpenChange={(open) => {
-                setMenuOpen(open);
-                if (!open) {
-                  setConfirming(false);
-                  setPruning(null);
-                  setRepairing(false);
-                  closedAt.current = Date.now();
-                }
-              }}
-            >
-              <MenuTrigger asChild>
+            <ProjectMenu
+              project={project}
+              trigger={
                 <button type="button" className="project-card-menu" aria-label={`Options for ${project.title}`}>
                   <Ellipsis aria-hidden="true" />
                 </button>
-              </MenuTrigger>
-              <MenuContent align="end" onPointerDownOutside={() => (dismissing.current = true)}>
-                <MenuItem onSelect={() => openInfo()}>Project info…</MenuItem>
-                <MenuItem onSelect={() => openInfo(true)}>Rename</MenuItem>
-                <MenuItem onSelect={() => setSettingsOpen(true)}>Settings…</MenuItem>
-                <MenuItem
-                  onSelect={() =>
-                    void act(async () => {
-                      onNotice(await exportProjectBundle(project));
-                    })
-                  }
-                >
-                  Export…
-                </MenuItem>
-                <MenuItem onSelect={() => void act(() => api.updateProject(project.id, { archived: !project.archivedAt }))}>
-                  {project.archivedAt ? "Unarchive" : "Archive"}
-                </MenuItem>
-                {pruning ? (
-                  <MenuItem
-                    disabled={pruning.archive.length === 0}
-                    onSelect={() =>
-                      void act(async () => {
-                        const result = await api.pruneProjectVersions(project.id);
-                        onNotice(`Archived ${String(result.archived)} older version${result.archived === 1 ? "" : "s"} of ${project.title}; ${String(result.kept)} kept across ${String(result.lineages)} document${result.lineages === 1 ? "" : "s"}.`);
-                      })
-                    }
-                  >
-                    {pruning.archive.length === 0 ? prunePlanSummary(pruning) : `Yes, ${prunePlanSummary(pruning).replace(/^Archive/, "archive")}`}
-                  </MenuItem>
-                ) : (
-                  <MenuItem
-                    onSelect={(event) => {
-                      event.preventDefault();
-                      void api.pruneProjectPlan(project.id).then(setPruning, onError);
-                    }}
-                  >
-                    Prune old versions…
-                  </MenuItem>
-                )}
-                {repairing ? (
-                  <MenuItem
-                    onSelect={() =>
-                      void act(async () => {
-                        const ensured = await api.repairProjectWorkflow(project.id);
-                        const replayed = ensured.replay?.replayed ?? 0;
-                        onNotice(`Rebuilt ${project.title}'s workflow from ${String(replayed)} recorded decision${replayed === 1 ? "" : "s"}.`);
-                      })
-                    }
-                  >
-                    Yes, rebuild it from its decisions
-                  </MenuItem>
-                ) : (
-                  <MenuItem
-                    onSelect={(event) => {
-                      event.preventDefault();
-                      setRepairing(true);
-                    }}
-                  >
-                    Repair this project…
-                  </MenuItem>
-                )}
-                <MenuSeparator />
-                {confirming ? (
-                  <MenuItem className="menu-danger" onSelect={() => void act(() => api.deleteProject(project.id))}>
-                    Yes, delete it
-                  </MenuItem>
-                ) : (
-                  <MenuItem
-                    className="menu-danger"
-                    onSelect={(event) => {
-                      event.preventDefault();
-                      setConfirming(true);
-                    }}
-                  >
-                    Delete…
-                  </MenuItem>
-                )}
-              </MenuContent>
-            </Menu>
-          </div>
-        </div>
-        {infoOpen ? (
-          // Portaled, but React-nested in the card: its events bubble to the
-          // face's handlers unless stopped here, the same as the menu's.
-          <div
-            className="card-dialog"
-            onClick={(event) => event.stopPropagation()}
-            onPointerDown={(event) => event.stopPropagation()}
-            onContextMenu={(event) => event.stopPropagation()}
-            onKeyDown={(event) => event.stopPropagation()}
-          >
-            <ProjectInfoDialog
-              project={project}
-              focusName={focusName}
-              onClose={closeInfo}
+              }
               onChanged={onChanged}
               onError={onError}
               onNotice={onNotice}
-            />
-          </div>
-        ) : null}
-        {settingsOpen ? (
-          <div
-            className="card-dialog"
-            onClick={(event) => event.stopPropagation()}
-            onPointerDown={(event) => event.stopPropagation()}
-            onContextMenu={(event) => event.stopPropagation()}
-            onKeyDown={(event) => event.stopPropagation()}
-          >
-            <ProjectSettingsDialog
-              project={project}
-              onClose={() => {
-                setSettingsOpen(false);
-                closedAt.current = Date.now();
+              onMenuOpenChange={(open) => {
+                setMenuOpen(open);
+                if (!open) closedAt.current = Date.now();
               }}
+              onDialogOpenChange={(open) => {
+                setDialogOpen(open);
+                if (!open) closedAt.current = Date.now();
+              }}
+              onDismissPress={() => {
+                dismissing.current = true;
+              }}
+              infoRequest={infoRequest}
             />
           </div>
-        ) : null}
+        </div>
       </div>
 
       <p className="card-desc">{cardDescription(project)}</p>
@@ -651,8 +484,6 @@ function StageTrack({ stage, done }: { stage: number | null; done: boolean }) {
   );
 }
 
-const formatBytes = (bytes: number): string =>
-  bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 
 /** One project, described: when it began, where it stands, and what it holds. */
 // INTEGRATE (CL-8756): main's info shape is gone on this lane — stage is a
@@ -660,196 +491,3 @@ const formatBytes = (bytes: number): string =>
 // SpendRow) no longer exist — so the dialog keeps main's shell and row order
 // while usage rides formatUsage and decisions get their own row. Every
 // adapted hunk below carries its own note.
-function ProjectInfoDialog({
-  project,
-  focusName = false,
-  onClose,
-  onChanged,
-  onError,
-  onNotice,
-}: {
-  project: ProjectSummary;
-  /** Open with the name field focused (the card menu's Rename). */
-  focusName?: boolean;
-  onClose: () => void;
-  onChanged: () => void;
-  onError: (cause: unknown) => void;
-  onNotice: (message: string) => void;
-}) {
-  const [info, setInfo] = useState<ProjectInfo | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  // INTEGRATE (CL-8756): lane-only wiring — what the usage line names as the
-  // current model. Behavioral-only; main has no equivalent.
-  const [activeModel, setActiveModel] = useState<ActiveModel | null>(null);
-  const [title, setTitle] = useState(project.title);
-  const [saving, setSaving] = useState(false);
-  const [exporting, setExporting] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    void api
-      .projectInfo(project.id)
-      .then((result) => {
-        if (!cancelled) setInfo(result);
-      })
-      .catch((cause) => {
-        if (!cancelled) setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-      });
-    void api.activeModel().then((model) => {
-      if (!cancelled) setActiveModel(model);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [project.id]);
-
-  const act = async (work: () => Promise<unknown>) => {
-    try {
-      await work();
-      onChanged();
-      return true;
-    } catch (cause) {
-      onError(cause);
-      return false;
-    }
-  };
-
-  // Edits are explicit: nothing is written until Save, which then closes
-  // the dialog. Save is offered only once there is a change to keep.
-  const nextTitle = title.trim();
-  const dirty = nextTitle.length > 0 && nextTitle !== project.title;
-  const save = async () => {
-    if (!dirty || saving) return;
-    setSaving(true);
-    const ok = await act(() => api.updateProject(project.id, { title: nextTitle }));
-    setSaving(false);
-    if (ok) onClose();
-  };
-
-  // INTEGRATE (CL-8756): api.exportProject is gone on this lane — the bundle
-  // is assembled in the browser and saved as a download, reported in main's
-  // diction through main's notice line; failures ride main's error Banner.
-  const exportProject = async () => {
-    if (exporting) return;
-    setExporting(true);
-    try {
-      onNotice(await exportProjectBundle(project));
-      onChanged();
-    } catch (cause) {
-      onError(cause);
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  return (
-    <Dialog open onOpenChange={(open) => (open ? undefined : onClose())}>
-      <DialogContent className="project-info">
-        <DialogHeader>
-          <DialogTitle>{project.title}</DialogTitle>
-        </DialogHeader>
-        <DialogBody>
-          {error ? <Banner tone="error" title={error} /> : null}
-          <div className="field">
-            <label htmlFor={`project-name-${project.id}`}>Name</label>
-            <Dictated value={title} onValueChange={setTitle} align="center">
-              <Input
-                id={`project-name-${project.id}`}
-                autoFocus={focusName}
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") void save();
-                  if (event.key === "Escape") setTitle(project.title);
-                }}
-                aria-label="Project name"
-              />
-            </Dictated>
-          </div>
-          {!info && !error ? <p className="inline-note">Loading…</p> : null}
-          {info ? (
-            <>
-              <dl className="version-list project-info-facts">
-                <div>
-                  <dt>Created</dt>
-                  <dd>{new Date(info.project.createdAt).toLocaleString()}</dd>
-                </div>
-                <div>
-                  <dt>Last activity</dt>
-                  <dd>{new Date(info.lastActivityAt).toLocaleString()}</dd>
-                </div>
-                <div>
-                  <dt>Where it stands</dt>
-                  <dd>
-                    {/* INTEGRATE (CL-8756): info.stage is a bare number now —
-                        no run state to name — main's row and archived suffix
-                        kept. */}
-                    {info.stage ? `Stage ${info.stage} of 9 · ${stageName(info.stage)}` : "No run"}
-                    {info.project.archivedAt ? " · archived" : ""}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Artifacts</dt>
-                  <dd>
-                    {info.artifacts.versions} version{info.artifacts.versions === 1 ? "" : "s"} across {info.artifacts.live} live artifact
-                    {info.artifacts.live === 1 ? "" : "s"}, {formatBytes(info.artifacts.bytes)} stored
-                  </dd>
-                </div>
-                <div>
-                  <dt>Runs</dt>
-                  <dd>
-                    {/* INTEGRATE (CL-8756): info.approvals is gone — decisions
-                        get their own row below — main's run/build copy kept. */}
-                    {info.runs.total} run{info.runs.total === 1 ? "" : "s"}, {info.runs.builds} build attempt{info.runs.builds === 1 ? "" : "s"}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Usage</dt>
-                  <dd>
-                    {/* INTEGRATE (CL-8756): lane-only row — per-project spend
-                        has no table anymore, so usage is one formatUsage line
-                        in main's inline-note diction. */}
-                    {formatUsage(info.usage, activeModel ? `${activeModel.providerLabel} · ${activeModel.canonicalName}` : null)}
-                    <br />
-                    <span className="inline-note">
-                      Inference cost is tracked for the workspace as a whole, above the project list; there is no per-project breakdown yet.
-                    </span>
-                  </dd>
-                </div>
-                <div>
-                  <dt>Decisions</dt>
-                  <dd>
-                    {/* INTEGRATE (CL-8756): main folded one approvals count
-                        into Runs — the lane folds the decision log instead. */}
-                    {info.decisions.approved} approved, {info.decisions.sentBack} sent back, {info.decisions.refused} refused
-                  </dd>
-                </div>
-              </dl>
-              {/* INTEGRATE (CL-8756): main's Inference spend section is dropped
-                  here — info.spend and its SortableTable no longer exist — the
-                  Usage row above is what this lane can say per project. */}
-            </>
-          ) : null}
-        </DialogBody>
-        <DialogFooter>
-          <Button disabled={exporting} onClick={() => void exportProject()}>
-            {exporting ? "Exporting…" : "Export…"}
-          </Button>
-          <Button
-            onClick={() =>
-              void act(() => api.updateProject(project.id, { archived: !project.archivedAt })).then((ok) => {
-                if (ok) onClose();
-              })
-            }
-          >
-            {project.archivedAt ? "Unarchive" : "Archive"}
-          </Button>
-          {/* Deleting is the card menu's two-step affair, not part of editing
-              a project's info. */}
-          <Button variant="primary" disabled={!dirty || saving} onClick={() => void save()}>
-            {saving ? "Saving…" : "Save"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
