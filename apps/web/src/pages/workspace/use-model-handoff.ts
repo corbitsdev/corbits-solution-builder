@@ -94,6 +94,14 @@ export function handoffMarkerOf(body: string): string | null {
   return matchSwitchMarker(firstLine);
 }
 
+/** The recap's opening line, the one thing every hand-off mail carries. */
+export const HANDOFF_RECAP_LINE = "Here is the conversation so far, so you can pick it up without restarting it:";
+
+/** Whether a person's mail is a hand-off, by its marker or, failing that, by the recap line it carries. */
+export function isHandoffBody(body: string): boolean {
+  return handoffMarkerOf(body) !== null || body.includes(HANDOFF_RECAP_LINE);
+}
+
 /** Long transcripts are condensed to the last 20 turns plus a count of what
  *  was dropped — enough for the new specialist to pick the thread back up
  *  without every hand-off ballooning into the entire stage history. */
@@ -126,7 +134,7 @@ function transcriptTurn(message: ChatMessage, opening = false): string {
 
 /** Whether a person's message is a hand-off mail: the marker line first. */
 export function isHandoffMessage(message: Pick<ChatMessage, "author" | "body">): boolean {
-  return message.author === "me" && handoffMarkerOf(message.body) !== null;
+  return message.author === "me" && isHandoffBody(message.body);
 }
 
 /**
