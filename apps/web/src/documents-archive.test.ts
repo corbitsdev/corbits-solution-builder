@@ -131,3 +131,20 @@ describe("downloadProjectDocuments", () => {
     expect(notice).toBe("Fresh has no finished documents yet.");
   });
 });
+
+// #334: each panel review is its own document, named for its reviewer.
+describe("panel reviews in the archive", () => {
+  test("four reviewers give four files, in reviewer order after the plan", () => {
+    const nodes = [
+      node({ kind: "build_plan", stage: 6 }),
+      ...["Security", "Application", "Quality", "Platform"].map((who) => node({ kind: "engineering_review", stage: 6, variant: who })),
+    ];
+    expect(completedDocuments(nodes).map((n) => documentFileName(n, "# r"))).toEqual([
+      "06-build-plan.md",
+      "06-engineering-review-application.md",
+      "06-engineering-review-platform.md",
+      "06-engineering-review-quality.md",
+      "06-engineering-review-security.md",
+    ]);
+  });
+});

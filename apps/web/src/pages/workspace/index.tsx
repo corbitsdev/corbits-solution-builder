@@ -67,6 +67,17 @@ import { useModelSwitch, useModelHandoff } from "./use-model-handoff.ts";
 import { currentInference, inferenceOptions, orderLeadingWith, type InferenceOption } from "./inference-options.ts";
 import { loadDismissedDefault, saveDismissedDefault } from "./model-nudge-store.ts";
 import { Stage6Panel } from "./stage6.tsx";
+
+/** Stage 6's recorded panel reviews, newest unsuperseded version per reviewer (#334). */
+function reviewNodesOf(nodes: readonly ArtifactNode[]): ReadonlyMap<string, ArtifactNode> {
+  const byReviewer = new Map<string, ArtifactNode>();
+  for (const node of nodes) {
+    if (node.kind !== "engineering_review" || node.stage !== 6 || node.supersededByNodeId !== null || !node.variant) continue;
+    const held = byReviewer.get(node.variant);
+    if (!held || node.version > held.version) byReviewer.set(node.variant, node);
+  }
+  return byReviewer;
+}
 import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
 import { agentFor } from "@solutions-builder/app/kit";
 import { MATERIAL_KIND, MATERIAL_READING_KIND } from "@solutions-builder/app/artifacts";
@@ -966,6 +977,8 @@ export function StageWorkspace({
               .filter((node) => node.kind === "product_requirements" && node.supersededByNodeId === null)
               .sort((a, b) => b.version - a.version)[0] ?? null
           }
+          reviewNodes={reviewNodesOf(detail.nodes)}
+          onDocumentsChanged={onChanged}
           onRequirementsDrafted={mintRequirements}
           strip={stripEl}
           conversation={conversation}

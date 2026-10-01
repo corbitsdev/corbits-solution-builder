@@ -1023,13 +1023,13 @@ export const STAGE6_REQUIREMENTS_ROLE_KEY = "requirements-author";
 async function persistDraftOfKind(
   transport: ReturnType<typeof createHubTransport>,
   projectId: string,
-  args: { stage: number; kind: string; content: string; sourceVersionIds: string[]; title: string; agentRole?: string; target?: string },
+  args: { stage: number; kind: string; content: string; sourceVersionIds: string[]; title: string; agentRole?: string; target?: string; variant?: string },
 ): Promise<{ artifactId: string; versionId: string; contentHash: string }> {
   const previousHead = await artifactGraphFor(transport, projectId)
     .then(
       (graph) =>
         graph.nodes
-          .filter((node) => node.stage === args.stage && node.kind === args.kind && node.variant === null && node.supersededByNodeId === null)
+          .filter((node) => node.stage === args.stage && node.kind === args.kind && node.variant === (args.variant ?? null) && node.supersededByNodeId === null)
           .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0],
     )
     .catch(() => undefined);
@@ -1041,6 +1041,7 @@ async function persistDraftOfKind(
         projectId,
         kind: args.kind,
         stage: args.stage,
+        ...(args.variant ? { variant: args.variant } : {}),
         mediaType: "text/markdown",
         sourceVersionIds: args.sourceVersionIds,
         provenance: {
@@ -1861,6 +1862,24 @@ export const api = {
         sourceVersionIds: [],
         title: "Product requirements",
         agentRole: stage6RoleFor(STAGE6_REQUIREMENTS_ROLE_KEY).id,
+      }),
+    ),
+  /**
+   * Records one panel review of the build plan (#334): the senior
+   * engineer's reply as the project's engineering_review document for that
+   * reviewer, one lineage per reviewer. The strip shows it and the
+   * documents download carries it.
+   */
+  persistEngineeringReview: (projectId: string, roleKey: string, reviewer: string, content: string) =>
+    asWorkspaceOwner((transport) =>
+      persistDraftOfKind(transport, projectId, {
+        stage: 6,
+        kind: "engineering_review",
+        variant: reviewer,
+        content,
+        sourceVersionIds: [],
+        title: `${reviewer} review`,
+        agentRole: stage6RoleFor(roleKey).id,
       }),
     ),
   /** The stage 6 role's live deployment, read only (#328): what to read a reply back from, never a deploy. */

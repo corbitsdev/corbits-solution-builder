@@ -71,6 +71,8 @@ export function Stage6Panel({
   requirementsBlock = null,
   requirementsMinted,
   requirementsNode = null,
+  reviewNodes = null,
+  onDocumentsChanged,
   onRequirementsDrafted,
   strip,
   conversation,
@@ -95,6 +97,10 @@ export function Stage6Panel({
   /** The project's recorded product requirements document, newest version
    *  (#328): shown on a reload instead of asking or waiting. */
   requirementsNode?: ArtifactNode | null;
+  /** The project's recorded panel reviews, newest version each, by reviewer (#334). */
+  reviewNodes?: ReadonlyMap<string, ArtifactNode> | null;
+  /** A document was recorded (#334): the project's artifact graph should be re-read. */
+  onDocumentsChanged?: () => void;
   /** Fires once the requirements author's PRODUCT_REQUIREMENTS document is
    *  accepted (its reply lands) — `index.tsx` records it as the project's
    *  document unless `recorded` says it already is (#328), and mints the
@@ -151,6 +157,59 @@ export function Stage6Panel({
       setRequirements((prev) => (prev.status === "idle" ? { ...prev, address: status.address, status: "done", reply: reply.body, recorded: false } : prev));
     })();
   }, [requirements.status, requirementsNode, requirementsMinted, projectId, tenantId]);
+
+  // The panel reviews the same way (#334): a recorded review is read
+  // back; a project that reviewed before reviews were recorded has each
+  // reviewer's thread read back once; and a review that lands is recorded.
+  const reviewRecoveredFor = useRef(new Set<string>());
+  useEffect(() => {
+    for (const role of STAGE6_PANEL_ROLES) {
+      const state = reviews[role.key] ?? STAGE6_IDLE_ROLE;
+      if (state.status !== "idle") continue;
+      const node = reviewNodes?.get(role.label) ?? null;
+      const mark = node ? `node:${node.id}` : requirementsMinted ? `thread:${projectId}:${role.key}` : null;
+      if (!mark || reviewRecoveredFor.current.has(mark)) continue;
+      reviewRecoveredFor.current.add(mark);
+      const settle = (reply: string, recorded: boolean, address: string | null) =>
+        setReviews((prev) => {
+          const held = prev[role.key] ?? STAGE6_IDLE_ROLE;
+          return held.status === "idle" ? { ...prev, [role.key]: { ...held, address, status: "done", reply, recorded } } : prev;
+        });
+      if (node) {
+        void api
+          .artifactContent(tenantId, node.id)
+          .then((result) => settle(result.content, true, null))
+          .catch(() => undefined);
+        continue;
+      }
+      void (async () => {
+        const status = await api.stage6RoleAgentStatus(projectId, role.key).catch(() => null);
+        if (!status) return;
+        const thread = await api.readStageThread(tenantId, [status.address]).catch(() => []);
+        const reply = [...thread].reverse().find((message) => message.author === "agent");
+        if (reply) settle(reply.body, false, status.address);
+      })();
+    }
+  }, [reviews, reviewNodes, requirementsMinted, projectId, tenantId]);
+
+  const reviewRecordedFor = useRef(new Set<string>());
+  useEffect(() => {
+    for (const role of STAGE6_PANEL_ROLES) {
+      const state = reviews[role.key];
+      if (!state || state.status !== "done" || !state.reply || state.recorded) continue;
+      const mark = `${role.key}:${String(state.requestedAt)}:${String(state.reply.length)}`;
+      if (reviewRecordedFor.current.has(mark)) continue;
+      reviewRecordedFor.current.add(mark);
+      const reply = state.reply;
+      void api
+        .persistEngineeringReview(projectId, role.key, role.label, reply)
+        .then(() => {
+          setReviews((prev) => (prev[role.key]?.reply === reply ? { ...prev, [role.key]: { ...prev[role.key]!, recorded: true } } : prev));
+          onDocumentsChanged?.();
+        })
+        .catch(() => undefined);
+    }
+  }, [reviews, projectId, onDocumentsChanged]);
 
   const runRole = useCallback(
     (roleKey: string, body: string, onUpdate: (updater: (prev: Stage6RoleState) => Stage6RoleState) => void) => {
