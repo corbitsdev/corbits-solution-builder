@@ -1387,6 +1387,20 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   overflow-y: auto;
 }
 
+/* Addressing the chosen companion specialist (#345): one line and Ask. */
+.stage6-companion .companion-ask {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  margin-top: var(--space-3);
+  flex: none;
+}
+
+.stage6-companion .companion-ask .field {
+  flex: 1;
+  min-width: 0;
+}
+
 .document-body {
   flex: 1;
   min-height: 0;
