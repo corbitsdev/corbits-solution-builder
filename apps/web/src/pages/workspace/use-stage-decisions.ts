@@ -32,8 +32,7 @@ import {
   stage6StackProblem,
   stage7StackProblem,
   stageEvidence,
-  stageRefusalMessage,
-} from "../../stage-evidence.ts";
+  stageRefusalMessage, stage6StackRemediation } from "../../stage-evidence.ts";
 import type { Stage7Evidence } from "@solutions-builder/app/project-workflow/contracts";
 import { targetOpeningLine } from "./freeze.jsx";
 import type { ProjectWorkflowView } from "../../project-workflow.ts";
@@ -369,6 +368,8 @@ export function useStageDecisions({
       const problem = stage6StackProblem(reviewMessage.body, requirementIds);
       if (problem) {
         onError(problem);
+        // One click asks the architect for the block in full (#325).
+        onRemediation(stage6StackRemediation());
         return;
       }
     }

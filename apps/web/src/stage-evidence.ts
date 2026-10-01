@@ -157,6 +157,19 @@ export function stage6RefusalMessage(reason: string): string {
  * fine to approve; anything else is a message for the person to act on,
  * never sent to the workflow.
  */
+/**
+ * What the banner's action sends the architect when a plan version has no
+ * usable Stack (#325): a redraft after an answer tends to say the stack is
+ * "unchanged" or "as approved" under the heading instead of repeating the
+ * JSON block, and each version is read on its own.
+ */
+export const STACK_RESEND_ASK =
+  "Please resend the whole build plan with the \"## Stack\" section carrying its fenced ```json stack block in full: the exact JSON record, even though nothing in it changed. The block is read by machine from each version on its own, so a version that only says the stack is unchanged has no stack.";
+
+export function stage6StackRemediation(): Remediation {
+  return { kind: "ask_specialist", label: "Ask the architect to resend it", message: STACK_RESEND_ASK };
+}
+
 export function stage6StackProblem(planText: string, requirementIds: ReadonlySet<string>): string | null {
   const stack = parseStackRecord(planText);
   if (!stack) {
