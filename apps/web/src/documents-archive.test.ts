@@ -64,8 +64,7 @@ describe("documentFileName", () => {
     expect(documentFileName(node({ kind: "product_requirements", stage: 6 }), "# PRD")).toBe("06-product-requirements.md");
     expect(documentFileName(node({ kind: "design_artifact", stage: 4, mediaType: "text/html" }), "<!doctype html>")).toBe("04-design.html");
     // #338: a design recorded before media types were is still HTML by its content.
-    expect(documentFileName(node({ kind: "design_artifact", stage: 4 }), "<!doctype html>
-<html lang="en">")).toBe("04-design.html");
+    expect(documentFileName(node({ kind: "design_artifact", stage: 4 }), '<!doctype html>\n<html lang="en">')).toBe("04-design.html");
     expect(documentFileName(node({ kind: "design_artifact", stage: 4 }), "  <html>")).toBe("04-design.html");
     expect(documentFileName(node({ kind: "build_plan", stage: 6 }), "# Plan with <html> in prose")).toBe("06-build-plan.md");
     expect(documentFileName(node({ kind: "audience_deck", stage: 5, variant: "Barry Moneyman" }), PPTX)).toBe("05-slides-barry-moneyman.pptx");
