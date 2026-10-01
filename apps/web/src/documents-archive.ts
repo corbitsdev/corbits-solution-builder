@@ -88,9 +88,15 @@ const EXTENSION_OF_MEDIA: Record<string, string> = {
 };
 
 /** The file's extension: from the content's own media type when it is a `data:` URL, else the node's, else Markdown. */
+/** Whether the text is an HTML document, whatever its node says (#338): a design recorded before media types were. */
+function looksLikeHtml(content: string): boolean {
+  return /^\s*(?:<!doctype\s+html|<html[\s>])/i.test(content);
+}
+
 export function documentExtension(node: Pick<ArtifactNode, "kind" | "mediaType">, content: string): string {
   const match = DATA_URL.exec(content);
   if (match?.[1]) return EXTENSION_OF_MEDIA[match[1]] ?? "bin";
+  if (looksLikeHtml(content)) return "html";
   if (node.kind === "audience_deck") return "pptx";
   if (node.mediaType) return EXTENSION_OF_MEDIA[node.mediaType] ?? "md";
   return "md";
