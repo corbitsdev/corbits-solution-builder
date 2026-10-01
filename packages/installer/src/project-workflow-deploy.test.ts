@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Transport } from "@intx/hub-client";
-import { createDecisionMemo, ensureProjectWorkflow, findProjectWorkflow, namerPin, projectWorkflowAssetName, type ProjectWorkflowCode } from "./project-workflow-deploy.js";
+import { createDecisionMemo, ensureProjectWorkflow, findProjectWorkflow, namerPin, projectWorkflowAssetName, type EnsureProgress, type ProjectWorkflowCode } from "./project-workflow-deploy.js";
 
 const TENANT_ID = "proj_1";
 const PROJECT_ID = "proj_1";
@@ -743,6 +743,36 @@ describe("ensureProjectWorkflow", () => {
     });
     expect(hub.signalsSent().map((sent) => `${sent.runId}:${sent.signalId}`)).toEqual(["run_new:dec-1", "run_new:dec-2"]);
     expect(hub.triggeredCode()).toEqual({ digest: CURRENT_DIGEST, generation: 2 });
+  });
+
+  // CL-9680: the embedded host does not place a project's sidecars again at
+  // boot (#283), so a recovering run from before the host started is
+  // superseded at once, under the default replacement wait, with the strip
+  // told what the step waited on.
+  test("a recovering run from before the host started is superseded without the replacement wait", async () => {
+    const hub = fakeHub(
+      withAsset({
+        deployments: [{ id: "dep_1", definitionAssetId: ASSET_ID, status: "recovering", createdAt: "2026-01-01T00:00:00.000Z" }],
+        runsByDeployment: { dep_1: decidedRun("run_1", [1, 2], CURRENT).runIds },
+        eventsByRun: decidedRun("run_1", [1, 2], CURRENT).events,
+      }),
+    );
+    const heard: EnsureProgress[] = [];
+    const started = Date.now();
+    const result = await ensureProjectWorkflow(
+      hub.transport,
+      { canPlaceSidecars: true, sidecarsLostBefore: "2026-01-02T00:00:00.000Z" },
+      { files: { "workflow.js": "", "actions.js": "", "loops.js": "" } },
+      hub.gitPush,
+      PROJECT_ID,
+      [],
+      {},
+      { replayPollMs: 1, onProgress: (progress) => heard.push(progress) },
+    );
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(result).toMatchObject({ deploymentId: "dep_new", runId: "run_new", replay: { replayed: 2, via: "signals" } });
+    expect(heard[0]).toEqual({ phase: "waiting", detail: "placement" });
+    expect(hub.signalsSent().map((sent) => `${sent.runId}:${sent.signalId}`)).toEqual(["run_new:dec-1", "run_new:dec-2"]);
   });
 
   // #238: the replay waits on placement as long as the hub is visibly
