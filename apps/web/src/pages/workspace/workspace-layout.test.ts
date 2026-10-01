@@ -24,6 +24,17 @@ describe("project chrome classes", () => {
     expect(COMPOSER_BOX_CLASS).toBe("composer-box");
   });
 
+  test("a message never grows past the column for a wide code block; the block scrolls inside the bubble (#317)", () => {
+    const css = read("../workspace-layout.css");
+    const msg = css.slice(css.indexOf(".conv .msg {"), css.indexOf("}", css.indexOf(".conv .msg {")));
+    expect(msg).toContain("min-width: 0;");
+    const bubble = css.slice(css.indexOf(".conv .msg .bubble {"), css.indexOf("}", css.indexOf(".conv .msg .bubble {")));
+    expect(bubble).toContain("min-width: 0;");
+    expect(bubble).toContain("max-width: 100%;");
+    expect(bubble).toContain("overflow-wrap: anywhere;");
+    expect(css).toMatch(/\.conv \.msg \.bubble pre \{[^}]*overflow-x: auto;/);
+  });
+
   test("the layout sheet gives the conversation a proportional, resizable column with a 420px floor, conv-scroll, and composer-box", () => {
     const css = read("../workspace-layout.css");
     expect(css).toContain("grid-template-columns: var(--panes-chat-w, minmax(420px, min(40%, 640px))) minmax(0, 1fr)");

@@ -278,6 +278,11 @@
   flex-direction: column;
   gap: 4px;
   max-width: 92%;
+  /* A flex item's floor is its longest unbreakable line, so a code block
+     with long lines widened a message past the column and, for a person's
+     right-aligned message, off the left edge (#317). The bubble holds the
+     column's width and the code block scrolls inside it instead. */
+  min-width: 0;
 }
 
 .conv .msg .who,
@@ -296,6 +301,14 @@
   font-size: 14px;
   line-height: 1.5;
   background: var(--card);
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.conv .msg .bubble pre {
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .conv .msg.you {
