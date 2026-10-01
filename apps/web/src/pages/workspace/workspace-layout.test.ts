@@ -49,7 +49,9 @@ describe("project chrome classes", () => {
 
   test("the layout sheet gives the conversation a proportional, resizable column with a 420px floor, conv-scroll, and composer-box", () => {
     const css = read("../workspace-layout.css");
-    expect(css).toContain("grid-template-columns: var(--panes-chat-w, minmax(420px, min(40%, 640px))) minmax(0, 1fr)");
+    expect(css).toContain("grid-template-columns: minmax(320px, min(var(--panes-chat-w, min(40%, 640px)), calc(100% - 360px))) minmax(0, 1fr)");
+    // #343: the grid never outgrows the canvas, whatever the splitter stored.
+    expect(css).toMatch(/^\.panes > \* \{[^}]*min-width: 0;/m);
     expect(css).toContain(".conv-scroll");
     expect(css).toContain(".composer .composer-box");
     expect(css).toContain(".topbar.topbar-project");
@@ -155,7 +157,7 @@ describe("project chrome paint", () => {
 
   test("the splitter gets its own grid track — StagePanes renders it as a third child", () => {
     expect(css).toContain(
-      ".panes:has(> .panes-splitter) {\n  grid-template-columns: var(--panes-chat-w, minmax(420px, min(40%, 640px))) auto minmax(0, 1fr);",
+      ".panes:has(> .panes-splitter) {\n  grid-template-columns: minmax(320px, min(var(--panes-chat-w, min(40%, 640px)), calc(100% - 360px))) auto minmax(0, 1fr);",
     );
   });
 

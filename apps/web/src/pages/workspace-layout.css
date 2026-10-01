@@ -105,9 +105,19 @@
    on very wide monitors, where the document pane should get the room. */
 .panes {
   display: grid;
-  grid-template-columns: var(--panes-chat-w, minmax(420px, min(40%, 640px))) minmax(0, 1fr);
+  /* The chat track is whatever the splitter chose, but never more than the
+     window leaves for the document (#343): a fixed 720px in a narrower
+     window made the grid wider than the canvas, whose hidden overflow then
+     scrolled to its end and took the chat's left edge off-screen. */
+  grid-template-columns: minmax(320px, min(var(--panes-chat-w, min(40%, 640px)), calc(100% - 360px))) minmax(0, 1fr);
   flex: 1;
   min-height: 0;
+}
+
+/* Neither pane may hold the grid open: a document's version strip or a
+   long line scrolls inside its pane instead. */
+.panes > * {
+  min-width: 0;
 }
 
 /* StagePanes renders the splitter as a third grid child (chat, splitter,
@@ -115,7 +125,7 @@
    sizes to the splitter's own 9px width, and its -4px margins still let it
    overlap the chat/document edge the way the two-column layout did. */
 .panes:has(> .panes-splitter) {
-  grid-template-columns: var(--panes-chat-w, minmax(420px, min(40%, 640px))) auto minmax(0, 1fr);
+  grid-template-columns: minmax(320px, min(var(--panes-chat-w, min(40%, 640px)), calc(100% - 360px))) auto minmax(0, 1fr);
 }
 
 .panes-splitter {
