@@ -4,7 +4,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   HANDOFF_BUBBLE_TEXT,
+  HANDOFF_CLOSE,
   MAX_HANDOFF_CHARS,
+  handoffMarkerOf,
   composeModelHandoff,
   conversationTurns,
   isHandoffMessage,
@@ -191,5 +193,24 @@ describe("handoffLanded and handoffPending", () => {
     expect(dispatch).toContain("if (handoffPending({ address: agentAddress, addresses, threadLoaded: loadedFor === agentAddress, messages })) return;");
     const index = readFileSync(join(import.meta.dir, "index.tsx"), "utf8");
     expect(index).toMatch(/useOpeningDispatch\(\{[^}]*addresses: agent\.addresses,/s);
+  });
+});
+
+// #327: the hand-off asks for nothing, so the new specialist does not answer
+// it with a whole new draft; and a hand-off is recognised however the mail
+// store hands its body back.
+describe("the hand-off's close and its recognition", () => {
+  test("the mail ends by asking for a one-line acknowledgement and no redraft", () => {
+    const mail = composeModelHandoff({ id: "abc1", messages: [head], draft: null, providerLabel: null, modelName: null });
+    expect(mail.endsWith(HANDOFF_CLOSE)).toBe(true);
+    expect(HANDOFF_CLOSE).toContain("Do not rewrite or resend the draft");
+  });
+
+  test("a marker after a blank line or stray spaces still marks a hand-off, in the bubble and the boundary alike", () => {
+    const body = `\n  ${switchMarker("abc1")}  \nThis stage continues on Anthropic · claude-fable-5-1.\n\n---\n\nHere is the conversation so far`;
+    expect(handoffMarkerOf(body)).toBe("abc1");
+    expect(withoutSwitchMarker({ id: "h", author: "me", body, at })).toBe(HANDOFF_BUBBLE_TEXT);
+    expect(handoffMarkerOf("Make it blue")).toBeNull();
+    expect(withoutSwitchMarker({ id: "s", author: "agent", body, at })).toBe(body);
   });
 });

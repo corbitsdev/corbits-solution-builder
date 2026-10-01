@@ -83,6 +83,17 @@ export function matchSwitchMarker(line: string): string | null {
   return MARKER_RE.exec(line.trim())?.[1] ?? null;
 }
 
+/**
+ * The marker id a hand-off mail opens with, read off the body as a thread
+ * hands it back: the first non-blank line, so a leading blank line or a
+ * stray space from the mail store does not turn a hand-off into a 135 KB
+ * bubble of the whole recap (#327). Null for anything else.
+ */
+export function handoffMarkerOf(body: string): string | null {
+  const firstLine = body.split("\n").find((line) => line.trim().length > 0) ?? "";
+  return matchSwitchMarker(firstLine);
+}
+
 /** Long transcripts are condensed to the last 20 turns plus a count of what
  *  was dropped — enough for the new specialist to pick the thread back up
  *  without every hand-off ballooning into the entire stage history. */
@@ -115,7 +126,7 @@ function transcriptTurn(message: ChatMessage, opening = false): string {
 
 /** Whether a person's message is a hand-off mail: the marker line first. */
 export function isHandoffMessage(message: Pick<ChatMessage, "author" | "body">): boolean {
-  return message.author === "me" && matchSwitchMarker(message.body.split("\n")[0] ?? "") !== null;
+  return message.author === "me" && handoffMarkerOf(message.body) !== null;
 }
 
 /**
@@ -155,6 +166,12 @@ function transcriptBlock(all: readonly ChatMessage[]): string {
     : lines.join("\n\n");
 }
 
+/** How the hand-off ends (#327): a specialist is a mail agent and answers
+ *  what it is sent, so a recap that asked nothing was answered with a whole
+ *  new draft at every redeploy. */
+export const HANDOFF_CLOSE =
+  "Nothing is asked of you now. Reply with one sentence saying you have the thread and the current draft, then wait for the person's next message. Do not rewrite or resend the draft until they ask for a change.";
+
 export function composeModelHandoff(args: {
   readonly id: string;
   readonly messages: readonly ChatMessage[];
@@ -166,7 +183,7 @@ export function composeModelHandoff(args: {
   const announcement = `${switchMarker(args.id)}\nThis stage continues${onto}.`;
   const recap = `Here is the conversation so far, so you can pick it up without restarting it:\n\n${transcriptBlock(args.messages)}`;
   const draftBlock = args.draft && args.draft.body.trim() ? `The current draft:\n\n${args.draft.body}` : null;
-  return [announcement, recap, draftBlock].filter((part): part is string => part !== null).join("\n\n---\n\n");
+  return [announcement, recap, draftBlock, HANDOFF_CLOSE].filter((part): part is string => part !== null).join("\n\n---\n\n");
 }
 
 /**
@@ -199,7 +216,7 @@ export function handoffDue(args: {
 export function handoffLanded(address: string, messages: readonly ChatMessage[]): boolean {
   return messages.some((message, index) => {
     if (message.author !== "me") return false;
-    const id = matchSwitchMarker(message.body.split("\n")[0] ?? "");
+    const id = handoffMarkerOf(message.body);
     if (!id) return false;
     return messages.slice(0, index).some((prior) => handoffId(address, prior.id) === id);
   });
