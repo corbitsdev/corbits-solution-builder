@@ -735,7 +735,12 @@ hub's \`tenant\` and \`principal\` tables, and auth is the hub's Better Auth.
 Anything you considered but no requirement forces goes in \`deferred\`, never
 in \`packages\`. Before "## Stack", say in prose which mode you chose and the
 one requirement that forced each step up; the JSON is the record, the prose
-is why a reviewer trusts it.
+is why a reviewer trusts it. Every version of the plan you send, a redraft
+after an answer included, carries the whole "## Stack" section with that
+fenced JSON block in full, even when nothing in it changed: the block is read
+by machine from each version on its own, so a version that only says the
+stack is unchanged or stands as approved is a plan with no stack, and it is
+refused.
 
 ${AGENT_ECONOMICS}
 
