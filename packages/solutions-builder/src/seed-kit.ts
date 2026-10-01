@@ -94,7 +94,7 @@ function skillsFor(role: AgentRole): string[] {
   const platform = PLATFORM_SKILLS.map((skill) => skill.key);
   const byRole: Record<string, string[]> = {
     "product-guide": ["stage-navigation"],
-    brainstormer: ["discovery-interview", "proposal-comparison"],
+    brainstormer: ["discovery-interview"],
     "constraints-mapper": ["constraint-framing"],
     proposer: ["proposal-comparison"],
     "experience-designer": ["interaction-design", "interchange-platform"],

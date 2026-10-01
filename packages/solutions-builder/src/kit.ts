@@ -256,7 +256,7 @@ export const AGENT_KIT: readonly AgentRole[] = [
     id: "brainstormer",
     title: "Brainstormer",
     mission: "Interview the problem, not the solution; then propose bounded options.",
-    stages: [1, 3],
+    stages: [1],
     produces: "problem_brief",
     promptKey: "sb-prompt-brainstormer-v1",
     temperature: 0.6,
@@ -426,7 +426,7 @@ ${INTERVIEW}`,
     id: "experience-designer",
     title: "Experience designer",
     mission: "Work out screens, flows, states and verification criteria before code.",
-    stages: [4, 8],
+    stages: [4],
     produces: "design_artifact",
     promptKey: "sb-prompt-design-v1",
     temperature: 0.5,
@@ -836,7 +836,7 @@ Distinguish a blocking finding from a suggestion. ${specialty.authority}`,
     id: "estimator",
     title: "Estimator",
     mission: "Convert the accepted plan into an honest firm estimate.",
-    stages: [7, 8],
+    stages: [7],
     produces: "cost_approval",
     promptKey: "sb-prompt-estimator-v1",
     temperature: 0.2,
@@ -923,7 +923,7 @@ stack, and never fill a gap in it with a default of your own. A record you
 believe is wrong is a blocked question to the human, not something to build
 around.
 
-Packaging, where the record's packaging is not "hub" mode:
+Packaging, where the record's mode is not "hub":
 ${PORTABLE_PACKAGING_GUIDANCE}
 
 Every reply you send:
@@ -981,14 +981,14 @@ shown the output that proves it.`,
     id: "delivery-verifier",
     title: "Delivery verifier",
     mission: "Verify readiness against the manifest, and never accept on a human's behalf.",
-    stages: [8, 9],
+    stages: [9],
     produces: "delivery_manifest",
     promptKey: "sb-prompt-verification-v1",
     temperature: 0.2,
     boundary: "Cannot accept, waive, or claim bytes it could not read.",
     system: `${SHARED_RULES}
 
-You are the Delivery verifier at stages 8 and 9. Check the outputs against the
+You are the Delivery verifier at stage 9. Check the outputs against the
 manifest, the design, the acceptance criteria, the checksums and the cost.
 
 At stage 9 you have exactly one tool, \`deliver\` — no \`run_shell\`, no
