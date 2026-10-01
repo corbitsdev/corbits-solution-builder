@@ -8,8 +8,10 @@
     bun add @corbits/oauth-core
     bun add @corbits/react-ui
 
-The full list is in the corbits-packages skill. Pin a version when the plan
-needs reproducibility:
+The full list, with versions and what each does, is in the corbits-packages
+skill; a name not on that list is not a package. A deliverable pins exact
+versions in its own `package.json` — the stage 7 freeze names them, and the
+build installs what the freeze names:
 
     bun add @corbits/artifacts@0.2.0
 

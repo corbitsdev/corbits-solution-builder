@@ -40,34 +40,32 @@ Seams that change between local and hub (name each one the plan uses):
 
 ### Step 2 — capabilities: add only when a requirement names the need
 
-L = in-process, no hub. H = mounts onto a hub (embedded-host counts).
+L = in-process, no hub. H = mounts onto a hub (embedded-host counts). The
+\`@corbits/*\` names below are every one published on npm (the
+corbits-packages skill has versions and descriptions); name no other.
 
-- Models: \`@intx/inference-catalog\` (L), \`@corbits/inference-catalog\` (L),
-  \`@corbits/inference-settings\` (H), \`@corbits/provider-pricing\` (L),
-  \`@corbits/catalog-tools\` (L), adapters — \`@corbits/ollama-adapter\`,
+- Models: \`@intx/inference-catalog\` (L); adapters — \`@corbits/ollama-adapter\`,
   \`@corbits/openai-responses\`, \`@corbits/codex-provider\`,
   \`@corbits/xai-provider\` (L)
 - Classification: \`@corbits/system-one\` (L)
 - Retrieval: \`@corbits/embedding\` (L), \`@corbits/reranking\` (L)
-- Knowledge: \`@corbits/knowledge-engine\` (H) + \`@corbits/linear\` source
-- Memory: \`@corbits/memory\` (H); \`memory-hub\`/\`memory-tools\` for workflow
-  access; \`@corbits/mem0\`, \`@corbits/supermemory\` store adapters
-- Artifacts/files: \`@corbits/artifacts\` (H) + \`artifacts-hub\`,
-  \`turn-artifacts\`, \`gotenberg-render\`
-- Mail/inbox: \`@corbits/mailbox\`/\`mailbox-core\` (H), \`inbox\`;
-  \`@intx/tools-mail\`, \`harness\`, \`mailbox\`, \`mime\`
-- Scheduling: \`@corbits/cron\` (H), \`@corbits/routines\`
-- Skills: \`@corbits/skills\` (H), \`skills-tools\`, \`tools-skills\`
-- Agent tools (L): \`tools-posix\`, \`tools-lsp\`, \`@corbits/web-search-tools\`,
-  \`github-tools\`, \`reddit-tools\`, \`connections-tools\`, \`capability-tools\`,
-  \`deferred-tools\`
-- Approvals: \`@corbits/approvals\` (H), \`@intx/authz\`
-- Images: \`@corbits/image\` (L)
-- Evals/analytics: \`@corbits/evals\`, \`@corbits/analytics-core\` (H)
+- Memory: \`@corbits/memory\` (H)
+- Artifacts/files: \`@corbits/artifacts\` (H)
+- Mail/inbox: \`@corbits/mailbox\` (H); \`@intx/tools-mail\`
+- Scheduling and triggers: \`@corbits/cron\` (H), \`@corbits/webhooks\` (H)
+- Agent tools: \`@intx/tools-posix\`, \`@intx/tools-lsp\`
+- Credentials an app or agent presents: \`@corbits/credential-http\` (L),
+  \`@corbits/agent-token\` (H)
+- Approvals: \`@intx/authz\`
 - Desktop/CLI auth: \`@corbits/oauth-core\` (L)
-- Local secrets: \`@corbits/keychain\` (L)
+- Interface: \`@corbits/react-ui\` (L)
 - Logging: \`@intx/log\`
-- Tests only: \`@intx/inference-testing\`, \`@corbits/mocks\`
+- Tests only: \`@intx/inference-testing\`
+
+\`@corbits/embedded-host\`, \`@corbits/embed-hub\` and \`@corbits/keychain\` are
+Solution Builder's own workspace packages, not npm packages: a deliverable
+in "embedded" placement is built on \`@intx/*\` directly, with its secrets
+in local config.
 
 \`@corbits/*\` is the extension surface: mount it, never customize the hub or
 vendor it.
