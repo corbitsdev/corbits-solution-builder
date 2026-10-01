@@ -56,6 +56,14 @@ export default defineWorkflow({
       locator: "tenant",
     },
   ],
+  grantRequirements: [
+    {
+      resource: "credential:*",
+      action: "use",
+      source: "creator",
+      conditions: { tool: "tool:@corbits/artifacts/sidecar-bundle" },
+    },
+  ],
   steps: {
     run: step({
       agent: AGENT,
@@ -122,6 +130,14 @@ export default defineWorkflow({
       provider: "sb-workflow-artifacts",
       name: "workflow-artifacts:constraints-mapper",
       locator: "tenant",
+    },
+  ],
+  grantRequirements: [
+    {
+      resource: "credential:*",
+      action: "use",
+      source: "creator",
+      conditions: { tool: "tool:@corbits/artifacts/sidecar-bundle" },
     },
   ],
   steps: {
@@ -192,6 +208,14 @@ export default defineWorkflow({
       locator: "tenant",
     },
   ],
+  grantRequirements: [
+    {
+      resource: "credential:*",
+      action: "use",
+      source: "creator",
+      conditions: { tool: "tool:@corbits/artifacts/sidecar-bundle" },
+    },
+  ],
   steps: {
     run: step({
       agent: AGENT,
@@ -258,6 +282,14 @@ export default defineWorkflow({
       provider: "sb-workflow-artifacts",
       name: "workflow-artifacts:experience-designer",
       locator: "tenant",
+    },
+  ],
+  grantRequirements: [
+    {
+      resource: "credential:*",
+      action: "use",
+      source: "creator",
+      conditions: { tool: "tool:@corbits/artifacts/sidecar-bundle" },
     },
   ],
   steps: {
@@ -330,6 +362,14 @@ export default defineWorkflow({
       locator: "tenant",
     },
   ],
+  grantRequirements: [
+    {
+      resource: "credential:*",
+      action: "use",
+      source: "creator",
+      conditions: { tool: "tool:@corbits/artifacts/sidecar-bundle" },
+    },
+  ],
   steps: {
     run: step({
       agent: AGENT,
@@ -398,6 +438,14 @@ export default defineWorkflow({
       locator: "tenant",
     },
   ],
+  grantRequirements: [
+    {
+      resource: "credential:*",
+      action: "use",
+      source: "creator",
+      conditions: { tool: "tool:@corbits/artifacts/sidecar-bundle" },
+    },
+  ],
   steps: {
     run: step({
       agent: AGENT,
@@ -464,6 +512,14 @@ export default defineWorkflow({
       provider: "sb-workflow-artifacts",
       name: "workflow-artifacts:estimator",
       locator: "tenant",
+    },
+  ],
+  grantRequirements: [
+    {
+      resource: "credential:*",
+      action: "use",
+      source: "creator",
+      conditions: { tool: "tool:@corbits/artifacts/sidecar-bundle" },
     },
   ],
   steps: {
@@ -539,6 +595,14 @@ export default defineWorkflow({
       locator: "tenant",
     },
   ],
+  grantRequirements: [
+    {
+      resource: "credential:*",
+      action: "use",
+      source: "creator",
+      conditions: { tool: "tool:@solutions-builder/tools-delivery/publish-workspace" },
+    },
+  ],
   steps: {
     run: step({
       agent: AGENT,
@@ -609,6 +673,14 @@ export default defineWorkflow({
       locator: "tenant",
     },
   ],
+  grantRequirements: [
+    {
+      resource: "credential:*",
+      action: "use",
+      source: "creator",
+      conditions: { tool: "tool:@corbits/artifacts/sidecar-bundle" },
+    },
+  ],
   steps: {
     run: step({
       agent: AGENT,
@@ -675,6 +747,14 @@ export default defineWorkflow({
       provider: "sb-workflow-artifacts",
       name: "workflow-artifacts:brief-evaluator",
       locator: "tenant",
+    },
+  ],
+  grantRequirements: [
+    {
+      resource: "credential:*",
+      action: "use",
+      source: "creator",
+      conditions: { tool: "tool:@corbits/artifacts/sidecar-bundle" },
     },
   ],
   steps: {
@@ -745,6 +825,14 @@ export default defineWorkflow({
       locator: "tenant",
     },
   ],
+  grantRequirements: [
+    {
+      resource: "credential:*",
+      action: "use",
+      source: "creator",
+      conditions: { tool: "tool:@corbits/artifacts/sidecar-bundle" },
+    },
+  ],
   steps: {
     run: step({
       agent: AGENT,
@@ -811,6 +899,14 @@ export default defineWorkflow({
       provider: "sb-workflow-artifacts",
       name: "workflow-artifacts:requirements-author",
       locator: "tenant",
+    },
+  ],
+  grantRequirements: [
+    {
+      resource: "credential:*",
+      action: "use",
+      source: "creator",
+      conditions: { tool: "tool:@corbits/artifacts/sidecar-bundle" },
     },
   ],
   steps: {

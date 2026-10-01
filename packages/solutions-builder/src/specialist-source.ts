@@ -322,11 +322,12 @@ export type SpecialistSourceOptions = {
    *  (`specialistAssetName`) so each role gets its own asset. */
   readonly roleKey: string;
   /** CL-8719: carry the `@corbits/artifacts` sidecar tool bundle, its
-   *  `credentialBindings` entry and the matching grant requirement, and tell
-   *  the model to call `artifact_create`/`artifact_write`. Default false —
-   *  with it false the rendered source is byte-for-byte what it was before
-   *  #466. Off until a browser-driven deploy of a credential-bound
-   *  specialist is proven; see `ensureStageAgent` in `apps/web/src/client.ts`. */
+   *  `credentialBindings` entry and the `grantRequirements` entry that lets
+   *  the run use the bound credential (#288), and tell the model to call
+   *  `artifact_create`/`artifact_write`. Default false — with it false the
+   *  rendered source is byte-for-byte what it was before #466. Off until a
+   *  browser-driven deploy of a credential-bound specialist is proven; see
+   *  `ensureStageAgent` in `apps/web/src/client.ts`. */
   readonly artifactTools?: boolean;
 };
 
@@ -409,6 +410,19 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
   // consumer that never matches the bundle's own consumer identity, so the
   // capability is never assembled and the tool's `resolve("credentials")`
   // fails closed.
+  //
+  // The binding delivers the credential's material to the run; it mints no
+  // grant (#288). The sidecar's credential gate still asks for
+  // `credential:<id>` / `use` on the run principal, conditioned on this
+  // package's consumer identity (`toolConsumer(package)` in `@intx/authz`),
+  // and at this Interchange pin nothing stamps that row: a run's grants are
+  // the frozen walk snapshot plus the definition's declared
+  // `grantRequirements`, resolved against the asset creator at trigger time.
+  // So the requirement is declared here. Its resource is `credential:*`,
+  // never the credential's id: the entry is rendered before the credential
+  // row exists and must stay identical across projects (#41 step 5), and the
+  // wildcard reaches no further than the material the binding delivers --
+  // the only credential this consumer ever holds a handle to.
   const credentialBindings = spec.credentialPackage
     ? `
   credentialBindings: [
@@ -418,6 +432,14 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
       provider: ${JSON.stringify(WORKFLOW_ARTIFACTS_PROVIDER_NAME)},
       name: ${JSON.stringify(credentialName)},
       locator: "tenant",
+    },
+  ],
+  grantRequirements: [
+    {
+      resource: "credential:*",
+      action: "use",
+      source: "creator",
+      conditions: { tool: ${JSON.stringify(`tool:${spec.credentialPackage}`)} },
     },
   ],`
     : "";
