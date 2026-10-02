@@ -38,7 +38,8 @@ import {
   updateProject as installerUpdateProject,
   upgradeWorkspace as installerUpgradeWorkspace,
   vendoredMemberFiles,
-  waitForDeploymentDeployed,
+  waitForDeploymentPlacement,
+  type PlacementResult,
   workflowsFor,
   workspaceOwnedCredentialIds,
   type ClosureManifest,
@@ -550,6 +551,26 @@ export async function rerankCatalogAfterSkillAssets(): Promise<void> {
   }
 }
 
+/** The host's placement facts right now, for a pick that must agree with a deploy's (CL-9698). */
+async function hostSidecar(): Promise<SidecarCapability> {
+  return sidecarCapabilityOf(await request<HostStatus>("/status"));
+}
+
+/**
+ * Why a deployment the page waited on is not placed, in the hub's own terms
+ * (CL-9698): released or failed by the hub, no longer listed, or a hub that
+ * placed nothing for the stall bound. Each is a different thing to fix.
+ */
+function placementFailure(what: string, result: Exclude<PlacementResult, { outcome: "placed" }>): ApiFailure {
+  const message =
+    result.outcome === "stalled"
+      ? `The hub stopped placing ${what} before it was ready.`
+      : result.status === "missing"
+        ? `The hub no longer lists ${what}.`
+        : `The hub ended ${what} before it was placed (${result.status}).`;
+  return new ApiFailure({ code: "unavailable", message, correlationId: "-", retryable: true });
+}
+
 export function sidecarCapabilityOf(status: Pick<HostStatus, "canPlaceSidecars" | "sidecarsLostBefore">): SidecarCapability {
   return { canPlaceSidecars: status.canPlaceSidecars, ...(status.sidecarsLostBefore === null ? {} : { sidecarsLostBefore: status.sidecarsLostBefore }) };
 }
@@ -622,7 +643,7 @@ function specialistHubOrigin(): string {
  * `ensureStageAgent` always has.
  */
 async function memoStillLive(projectId: string, stage: Stage, roleKey: string | undefined, remembered: SpecialistDeployment): Promise<boolean> {
-  const fresh = await asWorkspaceOwner((transport) => stageSpecialistStatus(transport, projectId, stage, roleKey)).catch(() => null);
+  const fresh = await asWorkspaceOwner(async (transport) => stageSpecialistStatus(transport, projectId, stage, roleKey, await hostSidecar())).catch(() => null);
   if (!fresh) return true;
   if (fresh.deploymentId !== remembered.deploymentId) return false;
   return !ENDED_DEPLOYMENT_STATUSES.has(fresh.status);
@@ -994,15 +1015,8 @@ function ensureProjectWorkflowWith(projectId: string, extra: { repair?: boolean 
     } finally {
       release();
     }
-    const ready = await waitForDeploymentDeployed(transport, ref.tenantId, ref.deploymentId);
-    if (!ready) {
-      throw new ApiFailure({
-        code: "unavailable",
-        message: "This project's workflow did not finish starting up.",
-        correlationId: "-",
-        retryable: true,
-      });
-    }
+    const placement = await waitForDeploymentPlacement(transport, ref.tenantId, ref.deploymentId);
+    if (placement.outcome !== "placed") throw placementFailure("this project's workflow", placement);
     cacheProjectWorkflowRef(projectId, ref);
     return ref;
   });
@@ -1878,7 +1892,7 @@ export const api = {
   stage6RoleAgentStatus: (projectId: string, roleKey: string): Promise<SpecialistDeploymentStatus | null> => api.stageRoleAgentStatus(projectId, 6, roleKey),
   /** A stage's companion role's live deployment, read only (#341). */
   stageRoleAgentStatus: (projectId: string, stage: 6 | 8, roleKey: string): Promise<SpecialistDeploymentStatus | null> =>
-    asWorkspaceOwner((transport) => stageSpecialistStatus(transport, projectId, stage as Stage, roleKey)),
+    asWorkspaceOwner(async (transport) => stageSpecialistStatus(transport, projectId, stage as Stage, roleKey, await hostSidecar())),
   /**
    * Records one panel review (#334, #341): at stage 6 the plan's
    * engineering_review, at stage 8 the build's build_review, one lineage per
@@ -2134,15 +2148,8 @@ export const api = {
         // the client persists it on approval.
 false,
       );
-      const ready = await waitForDeploymentDeployed(transport, deployment.tenantId, deployment.deploymentId);
-      if (!ready) {
-        throw new ApiFailure({
-          code: "unavailable",
-          message: `The stage ${stage} specialist did not finish starting up.`,
-          correlationId: "-",
-          retryable: true,
-        });
-      }
+      const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
+      if (placement.outcome !== "placed") throw placementFailure(`the stage ${stage} specialist`, placement);
       return deployment;
     });
     call.catch(() => ensureStageAgentCalls.delete(key));
@@ -2175,15 +2182,8 @@ false,
         offeringId,
         false,
       );
-      const ready = await waitForDeploymentDeployed(transport, deployment.tenantId, deployment.deploymentId);
-      if (!ready) {
-        throw new ApiFailure({
-          code: "unavailable",
-          message: `The stage ${stage} specialist did not finish starting up on the new model.`,
-          correlationId: "-",
-          retryable: true,
-        });
-      }
+      const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
+      if (placement.outcome !== "placed") throw placementFailure(`the stage ${stage} specialist on the new model`, placement);
       activeModelCacheClear();
       return deployment;
     });
@@ -2223,15 +2223,8 @@ false,
         BRIEF_EVALUATOR_ROLE_KEY,
         BRIEF_EVALUATOR_ROLE,
       );
-      const ready = await waitForDeploymentDeployed(transport, deployment.tenantId, deployment.deploymentId);
-      if (!ready) {
-        throw new ApiFailure({
-          code: "unavailable",
-          message: "The stage 1 brief evaluator did not finish starting up.",
-          correlationId: "-",
-          retryable: true,
-        });
-      }
+      const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
+      if (placement.outcome !== "placed") throw placementFailure("the stage 1 brief evaluator", placement);
       return deployment;
     });
     call.catch(() => ensureStage1EvaluatorCalls.delete(projectId));
@@ -2271,15 +2264,8 @@ false,
         PRODUCT_GUIDE_ROLE_KEY,
         PRODUCT_GUIDE_ROLE,
       );
-      const ready = await waitForDeploymentDeployed(transport, deployment.tenantId, deployment.deploymentId);
-      if (!ready) {
-        throw new ApiFailure({
-          code: "unavailable",
-          message: "The product guide did not finish starting up.",
-          correlationId: "-",
-          retryable: true,
-        });
-      }
+      const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
+      if (placement.outcome !== "placed") throw placementFailure("the product guide", placement);
       return deployment;
     });
     call.catch(() => ensureGuideAgentCalls.delete(projectId));
@@ -2322,15 +2308,8 @@ false,
         roleKey,
         stage6RoleFor(roleKey),
       );
-      const ready = await waitForDeploymentDeployed(transport, deployment.tenantId, deployment.deploymentId);
-      if (!ready) {
-        throw new ApiFailure({
-          code: "unavailable",
-          message: `The ${roleKey} specialist did not finish starting up.`,
-          correlationId: "-",
-          retryable: true,
-        });
-      }
+      const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
+      if (placement.outcome !== "placed") throw placementFailure(`the ${roleKey} specialist`, placement);
       return deployment;
     });
     call.catch(() => ensureStage6RoleAgentCalls.delete(key));
@@ -2345,7 +2324,7 @@ false,
    * holding an address polling for whether it is still the live one.
    */
   stageAgentStatus: (projectId: string, stage: number): Promise<SpecialistDeploymentStatus | null> =>
-    asWorkspaceOwner((transport) => stageSpecialistStatus(transport, projectId, stage as Stage)),
+    asWorkspaceOwner(async (transport) => stageSpecialistStatus(transport, projectId, stage as Stage, undefined, await hostSidecar())),
   /**
    * Every address `projectId`'s stage-`stage` specialist has ever run at --
    * the input `useStageThread`'s merge needs so a redeploy (restart, model

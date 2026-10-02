@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Transport } from "@intx/hub-client";
-import { deploymentUsability, pollWhilePlacing, waitForDeploymentDeployed } from "./workflow-deploy.js";
+import { deploymentPlaceableHere, deploymentUsability, pollWhilePlacing, waitForDeploymentDeployed, waitForDeploymentPlacement } from "./workflow-deploy.js";
 
 const TENANT_ID = "tnt_1";
 type Listed = { id: string; status: string };
@@ -25,6 +25,39 @@ function scriptedHub(listings: readonly (readonly Listed[])[]) {
 }
 
 const FAST = { pollMs: 1 };
+
+// CL-9698: the re-check after a push adopts only a deployment this host can
+// still bring to a placed sidecar. A `pending` one from before the host
+// started is the one `liveExisting` just declined; the hub releases it soon.
+describe("deploymentPlaceableHere", () => {
+  const started = "2026-01-02T00:00:00.000Z";
+  const row = (status: string, createdAt: string) => ({ id: "dep_1", tenantId: TENANT_ID, definitionAssetId: "asset_1", status, createdAt });
+
+  test("a placed deployment, whenever it was created", () => {
+    expect(deploymentPlaceableHere(row("deployed", "2026-01-01T00:00:00.000Z"), { canPlaceSidecars: true, sidecarsLostBefore: started })).toBe(true);
+    expect(deploymentPlaceableHere(row("running", "2026-01-01T00:00:00.000Z"), { canPlaceSidecars: true, sidecarsLostBefore: started })).toBe(true);
+  });
+
+  test("an unplaced deployment created since the host started: a concurrent caller's, still placing", () => {
+    expect(deploymentPlaceableHere(row("pending", "2026-01-02T00:00:01.000Z"), { canPlaceSidecars: true, sidecarsLostBefore: started })).toBe(true);
+  });
+
+  test("an unplaced deployment from before the host started is not: the host that was placing it is gone", () => {
+    expect(deploymentPlaceableHere(row("pending", "2026-01-01T23:59:59.000Z"), { canPlaceSidecars: true, sidecarsLostBefore: started })).toBe(false);
+    expect(deploymentPlaceableHere(row("recovering", "2026-01-01T23:59:59.000Z"), { canPlaceSidecars: true, sidecarsLostBefore: started })).toBe(false);
+  });
+
+  test("a host that places across restarts reports no loss, and age says nothing", () => {
+    expect(deploymentPlaceableHere(row("pending", "2026-01-01T00:00:00.000Z"), { canPlaceSidecars: true })).toBe(true);
+  });
+
+  test("an ended or missing deployment never is", () => {
+    for (const status of ["releasing", "released", "failed"]) {
+      expect(deploymentPlaceableHere(row(status, "2026-01-02T00:00:01.000Z"), { canPlaceSidecars: true, sidecarsLostBefore: started })).toBe(false);
+    }
+    expect(deploymentPlaceableHere(undefined, { canPlaceSidecars: true })).toBe(false);
+  });
+});
 
 // #236: a deployment is handed back only once it can take mail or a signal.
 describe("deploymentUsability", () => {
@@ -123,6 +156,29 @@ describe("waitForDeploymentDeployed", () => {
     const found = await pollWhilePlacing(busy, () => null, { pollMs: 2, stallMs: 60_000, ceilingMs: 40 });
     expect(found).toBeNull();
     expect(Date.now() - started).toBeGreaterThanOrEqual(40);
+  });
+});
+
+// CL-9698: the page says which of these happened, not one sentence for all.
+describe("waitForDeploymentPlacement", () => {
+  test("placed", async () => {
+    const hub = scriptedHub([[{ id: "dep_1", status: "pending" }], [{ id: "dep_1", status: "deployed" }]]);
+    expect(await waitForDeploymentPlacement(hub.transport, TENANT_ID, "dep_1", FAST)).toEqual({ outcome: "placed" });
+  });
+
+  test("ended by the hub, with the status it ended in", async () => {
+    const hub = scriptedHub([[{ id: "dep_1", status: "pending" }], [{ id: "dep_1", status: "released" }]]);
+    expect(await waitForDeploymentPlacement(hub.transport, TENANT_ID, "dep_1", FAST)).toEqual({ outcome: "ended", status: "released" });
+  });
+
+  test("no longer listed", async () => {
+    const hub = scriptedHub([[]]);
+    expect(await waitForDeploymentPlacement(hub.transport, TENANT_ID, "dep_1", FAST)).toEqual({ outcome: "ended", status: "missing" });
+  });
+
+  test("stalled once the hub has sat still for the bound", async () => {
+    const hub = scriptedHub([[{ id: "dep_1", status: "pending" }]]);
+    expect(await waitForDeploymentPlacement(hub.transport, TENANT_ID, "dep_1", { ...FAST, stallMs: 20 })).toEqual({ outcome: "stalled" });
   });
 });
 

@@ -54,6 +54,20 @@ function isPlaced(deployment: HubDeployment): boolean {
 }
 
 /**
+ * Whether handing this deployment back can end in a placed sidecar: it is
+ * live, and either placed already or created since this host started. An
+ * unplaced one from before then (CL-9680) sits `pending` until the hub's
+ * reconciler gives up on it and lists it `released`, so a caller that adopts
+ * it waits only to be told it ended (CL-9698). `sidecarsLostBefore` absent
+ * means the host places across restarts, and age says nothing.
+ */
+export function deploymentPlaceableHere(deployment: HubDeployment | undefined, sidecar: SidecarCapability): deployment is HubDeployment {
+  if (!isLive(deployment)) return false;
+  if (isPlaced(deployment)) return true;
+  return sidecar.sidecarsLostBefore === undefined || deployment.createdAt >= sidecar.sidecarsLostBefore;
+}
+
+/**
  * How long a wait on the hub's placement may last. Every bound has a
  * default sized for a host start, when several deployments may be placed
  * one after another and each can take a minute or more.
@@ -172,30 +186,50 @@ export async function deploymentUsability(
   return (await runHasEnded(transport, tenantId, deploymentId, runId)) ? "ended" : "usable";
 }
 
+/** How a wait on a deployment's placement ended; see `waitForDeploymentPlacement`. */
+export type PlacementResult =
+  | { readonly outcome: "placed" }
+  /** The hub ended it, or stopped listing it: `status` is the last one read, `missing` if none. */
+  | { readonly outcome: "ended"; readonly status: string }
+  /** The hub placed nothing for the stall bound, or the ceiling passed. */
+  | { readonly outcome: "stalled" };
+
 /**
  * Resolves once the hub reports this deployment placed, so a caller does
- * not mail a run that has no placed sidecar yet. Returns false if it ends,
- * or if the hub stops placing (see `pollWhilePlacing`); the caller decides
- * how loudly to say so.
+ * not mail a run that has no placed sidecar yet. Says how it ended
+ * otherwise (CL-9698): a deployment the hub released and one it merely sat
+ * still on are different failures with different fixes, and one sentence
+ * for both has cost several rounds of guessing.
  */
+export async function waitForDeploymentPlacement(
+  transport: Transport,
+  tenantId: string,
+  deploymentId: string,
+  wait: PlacementWait = {},
+): Promise<PlacementResult> {
+  const workflows = workflowsFor(transport, tenantId);
+  const outcome = await pollWhilePlacing(
+    workflows,
+    (deployments): PlacementResult | null => {
+      const found = deployments.find((entry: HubDeployment) => entry.id === deploymentId);
+      if (found === undefined) return { outcome: "ended", status: "missing" };
+      if (isPlaced(found)) return { outcome: "placed" };
+      if (deploymentHasEnded(found)) return { outcome: "ended", status: found.status };
+      return null;
+    },
+    wait,
+  );
+  return outcome ?? { outcome: "stalled" };
+}
+
+/** `waitForDeploymentPlacement` as a yes or no, for callers that say nothing more. */
 export async function waitForDeploymentDeployed(
   transport: Transport,
   tenantId: string,
   deploymentId: string,
   wait: PlacementWait = {},
 ): Promise<boolean> {
-  const workflows = workflowsFor(transport, tenantId);
-  const outcome = await pollWhilePlacing(
-    workflows,
-    (deployments) => {
-      const found = deployments.find((entry: HubDeployment) => entry.id === deploymentId);
-      if (found && isPlaced(found)) return "placed" as const;
-      if (!isLive(found)) return "ended" as const;
-      return null;
-    },
-    wait,
-  );
-  return outcome === "placed";
+  return (await waitForDeploymentPlacement(transport, tenantId, deploymentId, wait)).outcome === "placed";
 }
 
 /** The closure bytes a workflow deploy needs, fetched from the static
