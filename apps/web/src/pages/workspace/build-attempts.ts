@@ -64,6 +64,8 @@ export type SupervisorBriefInput = {
   readonly archive: { readonly fileName: string; readonly sha256: string; readonly sizeBytes: number };
   /** Why no target was probed, when none was: the actual reason, from `probeDecision`. */
   readonly probeSkipped?: string | null;
+  /** Stage 7's forecast, as the estimator wrote it (`forecastSection`); null when none could be read. */
+  readonly forecast?: string | null;
   readonly verification: {
     readonly complete: boolean;
     readonly failed: readonly string[];
@@ -73,6 +75,25 @@ export type SupervisorBriefInput = {
 
 /** Where the package step's target probes ran: on the host, with the start command the person typed. */
 const PROBE_RAN_ON = "started on this computer by the host, with the start command the person gave";
+
+/**
+ * The `## Forecast` section of stage 7's estimate, the figure the
+ * supervisor's "Cost against forecast" heading is measured against; null
+ * when the estimate has no such section. Read, never computed: the
+ * estimator's own words are what the person approved.
+ */
+export function forecastSection(estimate: string): string | null {
+  const lines = estimate.split("\n");
+  const start = lines.findIndex((line) => /^##\s+forecast\s*$/i.test(line.trim()));
+  if (start < 0) return null;
+  const body: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (/^##\s+/.test(line)) break;
+    body.push(line);
+  }
+  const text = body.join("\n").trim();
+  return text.length > 0 ? text : null;
+}
 
 /**
  * What the record step does with the start command and port fields, and
@@ -136,6 +157,12 @@ export function composeSupervisorBrief(input: SupervisorBriefInput): string {
     `- Archive ${input.archive.fileName}, ${String(input.archive.sizeBytes)} bytes, sha256 ${input.archive.sha256}, recorded as attempt-${String(input.attempt)}.`,
     `- Deterministic checks: ${input.verification.complete ? "complete" : `incomplete — not verified: ${input.verification.failed.join(", ") || "(unnamed)"}`}.`,
     targets,
+    ``,
+    `## Stage 7 forecast`,
+    input.forecast?.trim()
+      ? input.forecast.trim()
+      : "No forecast could be read from stage 7's estimate. Under \"Cost against forecast\", say the forecast is unknown rather than supplying one.",
+    `The worker's own cost is not reported by its interface; say so if you cannot read it from its final text.`,
   ].join("\n");
 }
 

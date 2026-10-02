@@ -31,7 +31,7 @@ import { StagePanes } from "./workspace-chrome.tsx";
 import { clock } from "./elapsed.jsx";
 import { BuildFile } from "../graph.jsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
-import { attemptRecorded, buildArchives, buildEvidenceState, composeSupervisorBrief, probeDecision } from "./build-attempts.ts";
+import { attemptRecorded, buildArchives, buildEvidenceState, composeSupervisorBrief, forecastSection, probeDecision } from "./build-attempts.ts";
 
 const EMPTY_STAGE_EVENTS: readonly StageEvent[] = [];
 
@@ -296,6 +296,10 @@ export function BuildPanel({
       // The target probed is the one stage 7 froze; the fields say how to start it.
       const probe = probeDecision({ startCommand, port, frozenTarget: freeze?.target ?? null });
       const { packaged } = await api.packageBuildAttempt(detail.project.id, attempt.attempt, { targets: [...probe.targets] });
+      // Stage 7's forecast, for the supervisor's "Cost against forecast": the
+      // frozen estimate's own section, or nothing, said as nothing.
+      const estimate = frozenNode(detail.nodes, freeze, "cost_approval");
+      const forecast = estimate ? forecastSection((await api.artifactContent(tenantId, estimate.id).catch(() => ({ content: "" }))).content) : null;
       await api.persistBuildEvidence(detail.project.id, {
         fileName: packaged.fileName,
         mediaType: packaged.mediaType,
@@ -309,6 +313,7 @@ export function BuildPanel({
           outcome: attempt.outcome,
           archive: { fileName: packaged.fileName, sha256: packaged.sha256, sizeBytes: packaged.sizeBytes },
           probeSkipped: probe.skipped,
+          forecast,
           verification: packaged.verification,
         }),
       });

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { attemptOfNode, attemptRecorded, buildEvidenceState, composeSupervisorBrief, probeDecision } from "./build-attempts.ts";
+import { attemptOfNode, attemptRecorded, buildEvidenceState, composeSupervisorBrief, forecastSection, probeDecision } from "./build-attempts.ts";
 import type { ArtifactNode, BridgeOutcome } from "../../client.ts";
 
 function archiveNode(overrides: Partial<ArtifactNode> = {}): ArtifactNode {
@@ -85,6 +85,14 @@ describe("probeDecision", () => {
   });
 });
 
+describe("forecastSection", () => {
+  test("reads the estimate's own Forecast section and nothing past the next heading", () => {
+    const estimate = "## In short\n- x\n\n## Forecast\n- **Build:** $1,200\n- **Inference:** $40\n\n## Scope priced\n- a";
+    expect(forecastSection(estimate)).toBe("- **Build:** $1,200\n- **Inference:** $40");
+    expect(forecastSection("## In short\n- nothing here")).toBeNull();
+  });
+});
+
 describe("composeSupervisorBrief", () => {
   const outcome: BridgeOutcome = {
     bridgeId: "bounded-local-corbits-exec",
@@ -119,6 +127,13 @@ describe("composeSupervisorBrief", () => {
     expect(brief).toContain("Deterministic checks: complete.");
     expect(brief).toContain("- web: responded");
     expect(brief).toContain("no session, steering or checkpoint exists");
+    // Without a forecast the brief says there is none, so the heading is answered honestly.
+    expect(brief).toContain("No forecast could be read from stage 7's estimate");
+  });
+
+  test("stage 7's forecast is carried for the cost heading when it can be read", () => {
+    const brief = composeSupervisorBrief({ attempt: 2, outcome, archive, forecast: "- **Build:** $1,200", verification: { complete: true, failed: [], targets: [] } });
+    expect(brief).toContain("## Stage 7 forecast\n- **Build:** $1,200");
   });
 
   test("a cancelled worker is said by its signal, a failed check by name, and silence as silence", () => {
