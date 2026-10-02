@@ -131,8 +131,11 @@ export function extractRequirementItems(markdown: string): readonly RequirementI
 
 /** Renders the workflow-minted ids as the block every specialist after
  *  stage 6 reads and may cite (`checkStackCitations`'s `requirementIds`). */
+/** The heading the minted ids are rendered under; what a transcript folds on. */
+export const REQUIREMENTS_BLOCK_HEADING = "## Requirements (authoritative ids)";
+
 export function renderRequirementsBlock(requirements: readonly RequirementEntry[]): string {
-  if (requirements.length === 0) return "## Requirements (authoritative ids)\n\n(None minted yet.)";
+  if (requirements.length === 0) return `${REQUIREMENTS_BLOCK_HEADING}\n\n(None minted yet.)`;
   const lines = requirements.map((r) => `- ${r.id}: ${r.text}`);
-  return ["## Requirements (authoritative ids)", "", ...lines].join("\n");
+  return [REQUIREMENTS_BLOCK_HEADING, "", ...lines].join("\n");
 }
