@@ -46,6 +46,23 @@ export function runStateOf(events: readonly RunEventLike[]): SpecialistRun {
   return newest?.run ?? UNKNOWN_RUN;
 }
 
+/**
+ * The run that speaks for a deployment with several top-level runs (a
+ * redeploy's history): a run that has not ended before one that has, and
+ * among those the one whose last word is newest. The hub's list order plays
+ * no part. Unknown when no run said anything.
+ */
+export function newestRun(runs: readonly SpecialistRun[]): SpecialistRun {
+  const known = runs.filter((run) => run.state !== "unknown");
+  const live = known.filter((run) => run.state !== "ended");
+  const pool = live.length > 0 ? live : known;
+  let best: SpecialistRun | null = null;
+  for (const run of pool) {
+    if (best === null || (run.at ?? "") > (best.at ?? "")) best = run;
+  }
+  return best ?? UNKNOWN_RUN;
+}
+
 /** A deployment's top-level run ids: those with no `__` iteration suffix. */
 export function topLevelRunIds(runIds: readonly string[]): string[] {
   return runIds.filter((id) => !id.includes("__"));

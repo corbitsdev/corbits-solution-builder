@@ -6,7 +6,7 @@
  * away), every 20 s otherwise, and once more on every thread change, which
  * is when the mailbox stream has just said something landed.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../../client.js";
 import { UNKNOWN_RUN, type SpecialistRun } from "../../specialist-run-state.ts";
 
@@ -21,8 +21,6 @@ export function useSpecialistRunState(
   threadKey: string,
 ): SpecialistRun {
   const [state, setState] = useState<SpecialistRun>(UNKNOWN_RUN);
-  const stateRef = useRef(state);
-  stateRef.current = state;
 
   useEffect(() => {
     if (!agentAddress) {

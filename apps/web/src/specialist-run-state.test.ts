@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { runStateOf, specialistBusy, topLevelRunIds } from "./specialist-run-state.ts";
+import { newestRun, runStateOf, specialistBusy, topLevelRunIds } from "./specialist-run-state.ts";
 
 const ev = (seq: number, type: string, body: Record<string, unknown> = {}) => ({ seq, type, body: { at: `2026-01-01T00:00:${String(seq).padStart(2, "0")}.000Z`, ...body } });
 const runStateFromEvents = (events: Parameters<typeof runStateOf>[0]) => runStateOf(events).state;
@@ -52,5 +52,18 @@ describe("specialistBusy", () => {
 describe("topLevelRunIds", () => {
   test("drops loop-iteration children", () => {
     expect(topLevelRunIds(["run_a", "run_a__step__1", "run_b"])).toEqual(["run_a", "run_b"]);
+  });
+});
+
+describe("newestRun", () => {
+  test("a live run beats an ended one, and among live runs the newest word wins, whatever the order", () => {
+    const old = { state: "idle" as const, at: "2026-01-01T00:00:10.000Z" };
+    const fresh = { state: "working" as const, at: "2026-01-01T00:00:20.000Z" };
+    const ended = { state: "ended" as const, at: "2026-01-01T00:00:30.000Z" };
+    expect(newestRun([old, fresh, ended])).toBe(fresh);
+    expect(newestRun([ended, fresh, old])).toBe(fresh);
+    expect(newestRun([ended])).toBe(ended);
+    expect(newestRun([{ state: "unknown", at: null }])).toEqual({ state: "unknown", at: null });
+    expect(newestRun([])).toEqual({ state: "unknown", at: null });
   });
 });

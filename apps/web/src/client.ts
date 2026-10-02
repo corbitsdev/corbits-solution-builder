@@ -10,7 +10,7 @@ import { AUTHORITIES, type Authority, type Stage } from "@solutions-builder/app/
 import { agentById, agentFor, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
 import { languageGuidance, type LanguageSettings } from "@solutions-builder/app/language-settings";
 import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
-import { runStateOf, topLevelRunIds, UNKNOWN_RUN, type SpecialistRun } from "./specialist-run-state.ts";
+import { newestRun, runStateOf, topLevelRunIds, UNKNOWN_RUN, type SpecialistRun } from "./specialist-run-state.ts";
 import {
   ApiError as HubApiError,
   archiveArtifact as installerArchiveArtifact,
@@ -2353,7 +2353,8 @@ export const api = {
    * (#445): working, parked for its next mail, ended, or unknown when the
    * run or its log cannot be read. The deployment's top-level run is the
    * specialist's one manual run; with several (a redeploy's history), the
-   * newest that has not ended speaks for it.
+   * one whose last word is newest speaks for it, a live run before an ended
+   * one (`newestRun`), whatever order the hub lists them in.
    */
   stageSpecialistRunState: (projectId: string, stage: number): Promise<SpecialistRun> =>
     asWorkspaceOwner(async (transport) => {
@@ -2361,14 +2362,8 @@ export const api = {
       if (!status || ENDED_DEPLOYMENT_STATUSES.has(status.status)) return UNKNOWN_RUN;
       const workflows = workflowsFor(transport, status.tenantId);
       const runIds = topLevelRunIds(await workflows.runs(status.deploymentId));
-      let run: SpecialistRun = UNKNOWN_RUN;
-      for (const runId of runIds) {
-        const read = runStateOf((await workflows.runEvents(status.deploymentId, runId)).events);
-        if (read.state === "unknown") continue;
-        run = read;
-        if (read.state !== "ended") break;
-      }
-      return run;
+      const runs = await Promise.all(runIds.map(async (runId) => runStateOf((await workflows.runEvents(status.deploymentId, runId)).events)));
+      return newestRun(runs);
     }).catch(() => UNKNOWN_RUN),
   /**
    * Every address `projectId`'s stage-`stage` specialist has ever run at --
