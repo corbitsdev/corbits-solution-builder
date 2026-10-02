@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { attemptOfNode, attemptRecorded, buildEvidenceState, BUILD_EVIDENCE_ROLE, composeSupervisorBrief } from "./build-attempts.ts";
+import { attemptOfNode, attemptRecorded, buildEvidenceState, composeSupervisorBrief } from "./build-attempts.ts";
 import type { ArtifactNode, BridgeOutcome } from "../../client.ts";
 
 function archiveNode(overrides: Partial<ArtifactNode> = {}): ArtifactNode {
@@ -15,7 +15,7 @@ function archiveNode(overrides: Partial<ArtifactNode> = {}): ArtifactNode {
     mediaType: "application/gzip",
     createdAt: "2026-01-01T00:05:00.000Z",
     supersededByNodeId: null,
-    provenance: { producer: "agent", agentRole: BUILD_EVIDENCE_ROLE },
+    provenance: { producer: "host", attempt: 2 },
     ...overrides,
   };
 }

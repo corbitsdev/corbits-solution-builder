@@ -472,7 +472,7 @@ export type ArtifactNode = {
   createdAt: string;
   supersededByNodeId: string | null;
   /** `stepRef` is the stage-thread fold's lookup key: `${iterationRunId}/${stepId}` for the step that wrote this version. */
-  provenance: { producer: string; agentRole?: string; providerId?: string; model?: string; stepRef?: string };
+  provenance: { producer: string; agentRole?: string; attempt?: number; providerId?: string; model?: string; stepRef?: string };
   /** The current version's real content digest, when the mounted package
    *  recorded one (CL-8723) — a sha256 over the actual bytes, unlike
    *  `contentHash` (an `<id>@<version>` pair). Used as a stage approval's
@@ -1955,8 +1955,9 @@ export const api = {
         // recognises the write as the draft's persisted form: found on
         // the next load instead of persisted again, and superseded only
         // by a draft the specialist sends later. Stage 8 is left
-        // unstamped on purpose -- there `agentRole` is the mark of
-        // `publish_workspace`'s own archive, never a browser write.
+        // unstamped on purpose -- its reviewable artifact is the archive
+        // the host packaged (`persistBuildEvidence`, producer "host"),
+        // never a persisted reply.
         ...(stage === 8 ? {} : { agentRole: agentFor(stage as Stage).id }),
         ...(target ? { target } : {}),
       });
@@ -2615,26 +2616,25 @@ export const api = {
       };
     }),
   /**
-   * Persists the stage 8 build specialist's `publish_workspace` tool result
-   * as the stage's real `build_evidence` artifact — bytes and media type,
-   * not the chat text `persistStageDraft` would otherwise write. Without
-   * this the workspace `publish_workspace` tars only ever lived in the tool
-   * result the specialist's own turn saw; the run's warm workspace is gone
-   * once the allocation is released, so this is the only copy that
-   * survives.
+   * Records the archive the host packaged from a build attempt's directory
+   * (`POST /projects/:id/build/attempts/:n/package`) as the stage's real
+   * `build_evidence` artifact — bytes and media type, not the chat text
+   * `persistStageDraft` would otherwise write — and its delivery manifest
+   * beside it. The provenance says what happened: produced by the host,
+   * for the attempt the manifest names; no specialist made it. That is
+   * what `reviewableArtifact` accepts as stage 8's reviewable node.
    */
   persistBuildEvidence: (
     projectId: string,
     bundle: { fileName: string; mediaType: string; dataUri: string; sizeBytes: number; manifest?: { attempt: string } & Record<string, unknown> },
     sourceVersionIds: string[] = [],
-    /** The role the archive is recorded under. Stamped, the node is the stage's reviewable artifact (`reviewableArtifact`). */
-    agentRole?: string,
   ) =>
     asWorkspaceOwner(async (transport) => {
       // The attempt the archive and its manifest share, so stage 9 finds the
-      // manifest as the archive's companion the way it does for the real
-      // upload path (`manifestCompanionOf`).
+      // manifest as the archive's companion (`manifestCompanionOf`).
       const variant = bundle.manifest?.attempt ?? null;
+      const attemptNumber = /^attempt-(\d+)$/.exec(variant ?? "")?.[1];
+      const provenance = { producer: "host" as const, ...(attemptNumber ? { attempt: Number(attemptNumber) } : {}) };
       const artifact = await installerCreateArtifact(transport, projectId, {
         title: bundle.fileName,
         content: bundle.dataUri,
@@ -2646,13 +2646,12 @@ export const api = {
             mediaType: bundle.mediaType,
             ...(variant === null ? {} : { variant }),
             sourceVersionIds,
-            provenance: { producer: "agent" as const, ...(agentRole ? { agentRole } : {}) },
+            provenance,
           },
         },
       });
-      // The fallback result carries the manifest inline, verification and
-      // all (#129): the tool had no credential to upload it, so it is
-      // written here beside the archive, as the real path would have.
+      // The manifest comes back inline with the archive, verification and
+      // all (#129), and is written beside it.
       if (bundle.manifest) {
         await installerCreateArtifact(transport, projectId, {
           title: `${bundle.fileName.replace(/\.tar\.gz$/, "")}-manifest.json`,
@@ -2665,7 +2664,7 @@ export const api = {
               mediaType: "application/json",
               ...(variant === null ? {} : { variant }),
               sourceVersionIds: [artifact.id],
-              provenance: { producer: "agent" as const, ...(agentRole ? { agentRole } : {}) },
+              provenance,
             },
           },
         });

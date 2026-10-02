@@ -467,7 +467,9 @@ async function publishWorkspaceContent(
           mediaType: BUNDLE_MEDIA_TYPE,
           variant,
           sourceVersionIds: [],
-          provenance: { producer: "agent", agentRole: "build-supervisor" },
+          // The run's own principal made this; the hub's run-scoped mount
+          // labels it. No specialist role is claimed for it here.
+          provenance: { producer: "agent" },
         },
       },
     });
@@ -490,7 +492,7 @@ async function publishWorkspaceContent(
           mediaType: MANIFEST_MEDIA_TYPE,
           variant,
           sourceVersionIds: [created.id],
-          provenance: { producer: "agent", agentRole: "build-supervisor" },
+          provenance: { producer: "agent" },
         },
       },
     });

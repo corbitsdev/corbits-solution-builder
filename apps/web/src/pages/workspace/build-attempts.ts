@@ -6,18 +6,15 @@
  * continues, cancels and watches those attempts, and when one has ended,
  * has the host package it (`/package`: the same archive, hashes and target
  * probes `publish_workspace` ran) and records the archive as the stage's
- * `build_evidence`. The stage's specialist, the Build supervisor, is then
- * briefed with what the worker reported and writes the build status.
+ * `build_evidence`, with the host as its producer and the attempt it came
+ * from. The stage's specialist, the Build supervisor, is then briefed with
+ * what the worker reported and writes the build status.
  *
  * Everything here is pure or a thin poll; nothing infers progress from the
  * worker's output. The verdict on a build stays a person's.
  */
 import { useCallback, useEffect, useState } from "react";
 import { api, type ArtifactNode, type BridgeOutcome, type BuildAttempt } from "../../client.js";
-import { agentFor } from "@solutions-builder/app/kit";
-
-/** The role the client stamps on the archive it records, so it is the stage's reviewable artifact. */
-export const BUILD_EVIDENCE_ROLE = agentFor(8).id;
 
 /** The attempt an archive node was recorded for, from its `attempt-<n>` variant; null when it names none. */
 export function attemptOfNode(node: Pick<ArtifactNode, "variant">): number | null {

@@ -13,7 +13,7 @@
  * When an attempt has ended, "Record" has the host package it — the same
  * archive, hashes and target probes `publish_workspace` ran when the build
  * was a sidecar tool — records the archive as the stage's `build_evidence`
- * under the supervisor's role (so it is the reviewable artifact,
+ * with the host as its producer (so it is the reviewable artifact,
  * `stage-approval.ts`'s `reviewableArtifact`), and briefs the supervisor
  * with the record. The supervisor's reply is the build status document;
  * the review opens on the archive (`use-stage-decisions.ts`).
@@ -31,7 +31,7 @@ import { StagePanes } from "./workspace-chrome.tsx";
 import { clock } from "./elapsed.jsx";
 import { BuildFile } from "../graph.jsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
-import { attemptRecorded, buildArchives, BUILD_EVIDENCE_ROLE, buildEvidenceState, composeSupervisorBrief } from "./build-attempts.ts";
+import { attemptRecorded, buildArchives, buildEvidenceState, composeSupervisorBrief } from "./build-attempts.ts";
 
 const EMPTY_STAGE_EVENTS: readonly StageEvent[] = [];
 
@@ -297,12 +297,13 @@ export function BuildPanel({
           ? [{ target: "web", command: startCommand.trim(), port: portNumber }]
           : [];
       const { packaged } = await api.packageBuildAttempt(detail.project.id, attempt.attempt, { targets });
-      await api.persistBuildEvidence(
-        detail.project.id,
-        { fileName: packaged.fileName, mediaType: packaged.mediaType, dataUri: packaged.dataUri, sizeBytes: packaged.sizeBytes, manifest: packaged.manifest },
-        [],
-        BUILD_EVIDENCE_ROLE,
-      );
+      await api.persistBuildEvidence(detail.project.id, {
+        fileName: packaged.fileName,
+        mediaType: packaged.mediaType,
+        dataUri: packaged.dataUri,
+        sizeBytes: packaged.sizeBytes,
+        manifest: packaged.manifest,
+      });
       await api.sendStageMail(tenantId, address, {
         body: composeSupervisorBrief({
           attempt: attempt.attempt,

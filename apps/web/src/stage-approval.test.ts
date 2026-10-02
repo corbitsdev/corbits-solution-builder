@@ -88,6 +88,13 @@ describe("reviewableArtifact", () => {
     expect(result).toMatchObject({ status: "found" });
   });
 
+  test("stage 8's reviewable node is the archive the host packaged, by its producer, never a role stamp", () => {
+    const archive = written({ stage: 8, kind: "build_evidence", provenance: { producer: "host", attempt: 2 } });
+    expect(reviewableArtifact({ nodes: [archive], stage: 8, kind: "build_evidence", latestDraft: null })).toMatchObject({ status: "found", node: { id: "a" } });
+    // A host-produced node is not a reviewable draft at any other stage.
+    expect(reviewableArtifact({ nodes: [written({ stage: 6, kind: "build_plan", provenance: { producer: "host" } })], stage: 6, kind: "build_plan", latestDraft: null })).toEqual({ status: "none" });
+  });
+
   test("signals none when there is no draft and nothing to review", () => {
     expect(reviewableArtifact({ nodes: [], stage: 1, kind: "problem_statement", latestDraft: null })).toEqual({ status: "none" });
   });

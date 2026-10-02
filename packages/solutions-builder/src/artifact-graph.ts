@@ -13,8 +13,10 @@
 
 /** Mirrors the deleted `apps/hub/src/domain.ts`'s `ArtifactDraft.provenance`. */
 export type ArtifactProvenance = {
-  producer: "human" | "agent";
+  /** `host`: packaged by the host from a build attempt's directory and recorded by the client; `attempt` names which. */
+  producer: "human" | "agent" | "host";
   agentRole?: string;
+  attempt?: number;
   providerId?: string;
   model?: string;
   runId?: string;
