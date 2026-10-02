@@ -401,11 +401,17 @@ Requirements the document must meet:
   decide. The review window draws the window or phone chrome itself, so
   draw none: lay a desktop screen out for a 1280px-wide window and a phone
   screen for a 402px-wide single column.
+- **Every desktop or phone screen lays out at both widths.** The review
+  shows each at 1280px and at 402px, so one screen must hold at both: fluid
+  widths above, and a \`@media (max-width: 640px)\` block below that turns a
+  sidebar into a top bar or menu, multi-column grids into one column, and
+  lets a table scroll inside its own panel. Nothing scrolls horizontally at
+  402px.
 - Semantic HTML: real headings, buttons, labels and landmarks. Visible focus
   styles. Interactive targets at least 44px. Every input has a persistent label.
 - **The mockup fits the width it is read at.** It is reviewed in a pane and
   printed on a page, both narrower than a wide monitor, so lay it out to fit
-  any width from 1024px up: fluid columns (\`minmax(0, 1fr)\`, \`min-width: 0\`
+  any width from 402px up: fluid columns (\`minmax(0, 1fr)\`, \`min-width: 0\`
   on grid and flex children), no fixed or minimum width wider than the column
   it sits in, and nothing clipped at the right edge. A container that hides
   its overflow hides the design; something genuinely wide, a data table or a
