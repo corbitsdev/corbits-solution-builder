@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { googleDriveCopy, hostConnectionCopy, hostCredentialsCopy, hostDataCopy, roleLabel, deckThemeLabel, DECK_THEME_CHOICES } from "./settings.tsx";
+import { googleDriveCopy, languageOptionLabel, hostConnectionCopy, hostCredentialsCopy, hostDataCopy, roleLabel, deckThemeLabel, DECK_THEME_CHOICES } from "./settings.tsx";
 import type { HostStatus } from "../client.ts";
 
 function fixtureStatus(overrides: Partial<HostStatus> = {}): HostStatus {
@@ -75,7 +75,7 @@ describe("settings page markup language", () => {
 
   test("mockup sections stay, and the extras the mockup cut are gone", async () => {
     const page = await Bun.file(new URL("./settings.tsx", import.meta.url)).text();
-    for (const title of ["Appearance", "Inference", "Designer", "Stakeholder decks", "Design documents", "This computer"]) {
+    for (const title of ["Appearance", "Language", "Inference", "Designer", "Stakeholder decks", "Design documents", "This computer"]) {
       expect(page).toContain(title);
     }
     expect(page).toContain("ProviderList");
@@ -219,5 +219,14 @@ describe("googleDriveCopy", () => {
     expect(googleDriveCopy({ connected: false, email: null, clientId: null, login: idle })).toBe("Not connected.");
     expect(googleDriveCopy({ connected: false, email: null, clientId: "c", login: idle })).toContain("remembered");
     expect(googleDriveCopy({ connected: false, email: null, clientId: "c", login: { status: "pending" } })).toContain("Finish signing in");
+  });
+});
+
+// #411: the five languages are listed; only the two Englishes can be chosen as output.
+describe("languageOptionLabel", () => {
+  test("marks an output language that is not supported yet, and leaves inputs alone", () => {
+    expect(languageOptionLabel("en-GB", "British English", true)).toBe("British English");
+    expect(languageOptionLabel("fr", "French", true)).toBe("French (not supported yet)");
+    expect(languageOptionLabel("fr", "French", false)).toBe("French");
   });
 });

@@ -8,6 +8,7 @@
 import { APP_VERSION } from "@solutions-builder/app/manifest";
 import { AUTHORITIES, type Authority, type Stage } from "@solutions-builder/app/ledger";
 import { agentById, agentFor, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
+import { languageGuidance, type LanguageSettings } from "@solutions-builder/app/language-settings";
 import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
 import {
   ApiError as HubApiError,
@@ -54,6 +55,8 @@ import {
   type SpecialistDeployment,
   type SpecialistDeploymentStatus,
   type WorkflowGitPush,
+  readLanguageSettings,
+  saveLanguageSettings as installerSaveLanguageSettings,
 } from "@solutions-builder/installer";
 import { loadProjectWorkflowView, type ProjectWorkflowView } from "./project-workflow.ts";
 import { cacheProjectWorkflowRef, resolveProjectWorkflowRef } from "./project-workflow-ref.ts";
@@ -1079,6 +1082,18 @@ async function persistDraftOfKind(
   };
 }
 
+/**
+ * A role with the workspace's output language in its instructions (#411):
+ * what every specialist is deployed with, so documents, replies and the
+ * text of any software it builds come out in that language. Read at deploy
+ * time off the workspace tenant; the default is American English.
+ */
+async function localizedRole(transport: ReturnType<typeof createHubTransport>, workspaceTenantId: string, role: AgentRole): Promise<AgentRole> {
+  const settings = await readLanguageSettings(transport, workspaceTenantId).catch(() => null);
+  if (!settings) return role;
+  return { ...role, system: `${role.system}\n\n${languageGuidance(settings)}` };
+}
+
 export const api = {
   status: () => request<HostStatus>("/status"),
   /**
@@ -1975,6 +1990,11 @@ export const api = {
     if (typeof uploadId !== "string") return { content: found.artifact.content };
     return { content: await downloadUploadedArtifact(found.tenantId, nodeId) };
   },
+  /** The workspace's languages (#411); American English both ways until set. */
+  languageSettings: (): Promise<LanguageSettings> =>
+    asWorkspaceOwner((transport, workspaceTenantId) => readLanguageSettings(transport, workspaceTenantId)),
+  saveLanguageSetting: <K extends keyof LanguageSettings>(key: K, value: LanguageSettings[K]): Promise<LanguageSettings> =>
+    asWorkspaceOwner((transport, workspaceTenantId) => installerSaveLanguageSettings(transport, workspaceTenantId, { [key]: value } as Partial<LanguageSettings>)),
   designerSettings: () => loadDesignerSettings(createHubTransport()),
   deckDesigns: () => loadDeckDesigns(createHubTransport()),
   saveDeckDesignPreference: (key: string, value: unknown) =>
@@ -2146,7 +2166,9 @@ export const api = {
         // with it never produced a run, while every unbound stage does.
         // `publish_workspace` falls back to returning the archive inline and
         // the client persists it on approval.
-false,
+        false,
+        undefined,
+        await localizedRole(transport, workspaceTenantId, agentFor(stage as Stage)),
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure(`the stage ${stage} specialist`, placement);
@@ -2221,7 +2243,7 @@ false,
         specialistHubOrigin(),
         false,
         BRIEF_EVALUATOR_ROLE_KEY,
-        BRIEF_EVALUATOR_ROLE,
+        await localizedRole(transport, workspaceTenantId, BRIEF_EVALUATOR_ROLE),
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure("the stage 1 brief evaluator", placement);
@@ -2262,7 +2284,7 @@ false,
         specialistHubOrigin(),
         false,
         PRODUCT_GUIDE_ROLE_KEY,
-        PRODUCT_GUIDE_ROLE,
+        await localizedRole(transport, workspaceTenantId, PRODUCT_GUIDE_ROLE),
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure("the product guide", placement);
@@ -2306,7 +2328,7 @@ false,
         specialistHubOrigin(),
         false,
         roleKey,
-        stage6RoleFor(roleKey),
+        await localizedRole(transport, workspaceTenantId, stage6RoleFor(roleKey)),
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure(`the ${roleKey} specialist`, placement);
