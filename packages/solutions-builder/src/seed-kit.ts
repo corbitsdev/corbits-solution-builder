@@ -89,21 +89,24 @@ const DIRECTORS: readonly DirectorRecord[] = [
 
 /** Which skills a role carries. Read off the stages it serves. */
 function skillsFor(role: AgentRole): string[] {
-  // The platform skills' five keys, spread where a role needs the reference
-  // rather than the one-line summary `interchange-platform` gives.
+  // The platform reference (the five platform skills, and the
+  // `interchange-platform` summary) is carried only by the roles that decide
+  // or review the architecture: the Architect in full, the panel reviewers
+  // the summary. Every other role is told what the stack is by the stage
+  // that decided it, and reads nothing about the platform.
   const platform = PLATFORM_SKILLS.map((skill) => skill.key);
   const byRole: Record<string, string[]> = {
     "product-guide": ["stage-navigation"],
     brainstormer: ["discovery-interview", "proposal-comparison"],
     "constraints-mapper": ["constraint-framing"],
     proposer: ["proposal-comparison"],
-    "experience-designer": ["interaction-design", "interchange-platform"],
-    "presentation-creator": ["approval-packaging", "interchange-platform"],
-    "requirements-author": ["requirements-authoring", "interchange-platform"],
+    "experience-designer": ["interaction-design"],
+    "presentation-creator": ["approval-packaging"],
+    "requirements-author": ["requirements-authoring"],
     architect: ["build-planning", "interchange-platform", ...platform],
-    estimator: ["cost-estimation", "interchange-platform"],
-    "build-engineer": ["build-engineering", "interchange-platform", ...platform],
-    "delivery-verifier": ["delivery-verification", "interchange-platform"],
+    estimator: ["cost-estimation"],
+    "build-engineer": ["build-engineering"],
+    "delivery-verifier": ["delivery-verification"],
     "brief-evaluator": ["brief-evaluation"],
   };
   if (role.id.startsWith("senior-engineer-")) {
