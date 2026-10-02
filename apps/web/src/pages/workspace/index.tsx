@@ -62,7 +62,7 @@ import { useRecordedDeck } from "./deck-reader.jsx";
 import { DocumentExportMenu } from "../../document-export.jsx";
 import { SlidePreview } from "../../slide-preview.jsx";
 import { ArtifactStrip, VersionStrip } from "./artifact-strip.tsx";
-import { stageEvents, switchEvents } from "./stage-events.ts";
+import { stageEvents, switchEvents, type StageEvent } from "./stage-events.ts";
 import { useModelSwitch, useModelHandoff } from "./use-model-handoff.ts";
 import { currentInference, inferenceOptions, orderLeadingWith, type InferenceOption } from "./inference-options.ts";
 import { loadDismissedDefault, saveDismissedDefault } from "./model-nudge-store.ts";
@@ -70,6 +70,7 @@ import { Stage6Panel } from "./stage6.tsx";
 import { PanelReviewsCompanion, reviewNodesOf as panelReviewNodesOf } from "./panel-reviews.tsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
 import { withAttachedDocuments, type StageDocument as MentionedDocument } from "./document-mentions.ts";
+import { askKind, requirementsRequest, routedLine } from "./message-intent.ts";
 
 /** Stage 6's recorded panel reviews, newest unsuperseded version per reviewer (#334). */
 function reviewNodesOf(nodes: readonly ArtifactNode[]): ReadonlyMap<string, ArtifactNode> {
@@ -243,7 +244,7 @@ export function StageWorkspace({
   const stopTurn = withdrawn.stop;
   // A specialist turn in flight is the longest wait in the product; the
   // busy indicator at the foot of the window counts it alongside the flame.
-  useBusyWhile(pending !== null, specialistActivity(stage));
+  useBusyWhile(pending !== null, specialistActivity(stage, askKind(pending?.body ?? null, foldedMessages.some((message) => message.author === "agent"))));
 
   const openingDispatch = useOpeningDispatch({
     detail,
@@ -340,12 +341,22 @@ export function StageWorkspace({
   // The transcript's quiet record: boundaries, versions, decisions, aborted
   // turns and a model switch's own announcement, folded in beside the mail
   // as system lines.
+  // Messages this session routed to the requirements author instead of the
+  // architect (#407): a line in the chat says so, where the message would
+  // have been.
+  const [routedEvents, setRoutedEvents] = useState<StageEvent[]>([]);
+  const [requirementsAsk, setRequirementsAsk] = useState<{ body: string; at: number } | null>(null);
+  useEffect(() => {
+    setRoutedEvents([]);
+    setRequirementsAsk(null);
+  }, [stage, detail.project.id]);
   const events = useMemo(
     () => [
       ...stageEvents(stage, workflowView?.decisions ?? [], detail.nodes, withdrawn.marks),
       ...switchEvents(foldedMessages),
+      ...routedEvents,
     ],
-    [stage, workflowView?.decisions, detail.nodes, withdrawn.marks, foldedMessages],
+    [stage, workflowView?.decisions, detail.nodes, withdrawn.marks, foldedMessages, routedEvents],
   );
 
   // CL-8899: the current stage's provider/model, reporting-only (read off
@@ -553,6 +564,15 @@ export function StageWorkspace({
 
   const send = async (body: string) => {
     if (!agentAddress || body.trim().length === 0) return;
+    // A requirements request is the requirements author's (#407): it
+    // goes to the companion's author with any named review attached, and
+    // the chat says so where the message would have been.
+    if (stage === 6 && requirementsRequest(body)) {
+      const at = new Date().toISOString();
+      setRequirementsAsk({ body, at: Date.now() });
+      setRoutedEvents((prev) => [...prev, { id: `ev:routed:${String(prev.length)}`, at, text: `"${body.trim().slice(0, 80)}" — ${routedLine()}`, tone: "line" }]);
+      return;
+    }
     setSending(true);
     setError(null);
     setRemediation(undefined);
@@ -1015,6 +1035,7 @@ export function StageWorkspace({
           onDocumentsChanged={onChanged}
           onDocuments={setStageDocuments}
           onSendToArchitect={(body) => void send(body)}
+          requirementsAsk={requirementsAsk}
           onRequirementsDrafted={mintRequirements}
           strip={stripEl}
           conversation={conversation}
