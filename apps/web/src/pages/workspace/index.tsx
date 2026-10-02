@@ -45,6 +45,7 @@ import { TargetPicker } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
 import { interviewProgress, isHtmlDocument, latestDesignReply, workspaceGuidance } from "./guidance.js";
 import { repairedChoiceDraft } from "./choice-repair.ts";
+import { repairedStackDraft } from "./stack-repair.ts";
 import { revisionRequest } from "@solutions-builder/app/stage-prompt";
 import { draftReferences } from "./draft-references.ts";
 import { designHistory } from "./design-history.ts";
@@ -273,7 +274,13 @@ export function StageWorkspace({
   // "## Chosen approach" would leave them choosing again (#430): the
   // section is written in deterministically, as alpha main did, before the
   // pane or the gate reads the draft.
-  const draftMessage = useMemo(() => repairedChoiceDraft(stage, foldedMessages, guidance.draft), [stage, foldedMessages, guidance.draft]);
+  // A stage 6 revision that dropped the plan's Stack block gets the last
+  // valid one carried in (#437), so the gate's banner is for a plan that
+  // never had one.
+  const draftMessage = useMemo(
+    () => repairedStackDraft(stage, foldedMessages, repairedChoiceDraft(stage, foldedMessages, guidance.draft)),
+    [stage, foldedMessages, guidance.draft],
+  );
 
   // Stage 1's brief evaluator reads each new draft; the Product guide answers
   // when asked, on any stage. Both are advisory and never touch the gate.
