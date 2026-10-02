@@ -24,7 +24,7 @@
 import type { Hono } from "hono";
 import { type } from "arktype";
 import { HostError, projectTenantExists } from "@corbits/embedded-host";
-import { attemptVariant, packageAttempt, parseTargetProbe, type TargetProbe } from "@solutions-builder/tools-delivery/publish-workspace";
+import { attemptVariant, packageAttempt, parseTargetProbe, type TargetProbe } from "@solutions-builder/specialist-runtime/package-attempt";
 import { BRIDGE_CAPABILITIES, BRIDGE_ID, bridgeAvailable } from "./corbits-exec.js";
 import { BUILD_WORKERS, buildWorkerSettings, hostPlatform, saveBuildWorkerSettings } from "./build-worker.js";
 import {

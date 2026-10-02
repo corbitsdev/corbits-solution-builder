@@ -7,7 +7,6 @@
   "dependencies": {
     "@corbits/embedded-host": "workspace:*",
     "@solutions-builder/specialist-runtime": "workspace:*",
-    "@solutions-builder/tools-delivery": "workspace:*",
     "arktype": "catalog:",
     "hono": "catalog:"
   }
