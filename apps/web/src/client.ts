@@ -8,6 +8,7 @@
 import { APP_VERSION } from "@solutions-builder/app/manifest";
 import { AUTHORITIES, type Authority, type Stage } from "@solutions-builder/app/ledger";
 import { agentById, agentFor, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
+import { stageUsesArtifactTools } from "@solutions-builder/app/specialist-source";
 import { languageGuidance, type LanguageSettings } from "@solutions-builder/app/language-settings";
 import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
 import { newestRun, runStateOf, topLevelRunIds, UNKNOWN_RUN, type SpecialistRun } from "./specialist-run-state.ts";
@@ -2246,11 +2247,10 @@ export const api = {
         projectId,
         stage as Stage,
         specialistHubOrigin(),
-        // No hub credential binding: a stage 8 deployed with one never
-        // produced a run, while every unbound stage does. Nothing needs it
-        // now — the build runs on the host and the archive is recorded by
-        // the build panel, not uploaded from a sidecar.
-        false,
+        // Drafting stages write the document with artifact tools, so a warm
+        // revision can name the id. The origin is the page's when the hub is
+        // same-origin; an empty one leaves the deployment pending with no run.
+        stageUsesArtifactTools(stage as Stage),
         undefined,
         await localizedRole(transport, workspaceTenantId, agentFor(stage as Stage)),
       );
@@ -2286,7 +2286,7 @@ export const api = {
         stage as Stage,
         specialistHubOrigin(),
         offeringId,
-        false,
+        stageUsesArtifactTools(stage as Stage),
       );
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure(`the stage ${stage} specialist on the new model`, placement);

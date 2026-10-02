@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ensureChoiceSection, revisionRequest, splitRevision, withChoiceReminder } from "./stage-prompt.js";
+import { ensureChoiceSection, personAsk, revisionMail, revisionRequest, splitRevision, standingDirections, withChoiceReminder } from "./stage-prompt.js";
 
 describe("withChoiceReminder records a stage-3 choice in the document", () => {
   test("a stage-3 choice names the Chosen approach section the approval gate reads", () => {
@@ -56,5 +56,61 @@ describe("revisionRequest carries the current version, as alpha main's round did
     expect(out.indexOf("Revise the current version above")).toBeLessThan(out.indexOf("Drop the mobile form."));
     expect(splitRevision(out)).toEqual({ document: "## In short\n- fine", ask: "Drop the mobile form." });
     expect(splitRevision("Drop the mobile form.")).toBeNull();
+  });
+});
+
+describe("revisionMail names an artifact instead of pasting it", () => {
+  const document = "## In short\n- The brief stays.\n\n## Problem statement\nA long document that must not ride in the mail.";
+
+  test("a warm turn is the id, the version, and the sentence", () => {
+    const out = revisionMail({
+      artifactId: "art_123",
+      version: 6,
+      userInput: "Keep reviews human.",
+      cold: false,
+      directions: ["100% agent driven."],
+      interviewing: false,
+    });
+    expect(out).toContain("Current version: art_123 v6.");
+    expect(out).toContain("Do not call artifact_read.");
+    expect(out).toContain("Keep reviews human.");
+    expect(out).not.toContain("100% agent driven.");
+    expect(out).not.toContain(document);
+    expect(out).not.toContain("STANDING DIRECTIONS");
+  });
+
+  test("a cold turn reads once and states the earlier sentences once", () => {
+    const out = revisionMail({
+      artifactId: "art_123",
+      version: 6,
+      userInput: "Keep reviews human.",
+      cold: true,
+      directions: ["100% agent driven.", "No auto-merge."],
+      interviewing: true,
+    });
+    expect(out).toContain("Call artifact_read on it once");
+    expect(out).toContain("- 100% agent driven.");
+    expect(out).toContain("- No auto-merge.");
+    expect(out).toContain("Fold this answer into the document.");
+    expect(out).not.toContain(document);
+  });
+
+  test("personAsk keeps the sentence and drops the fold line", () => {
+    const mail = revisionMail({
+      artifactId: "art_123",
+      version: 6,
+      userInput: "Keep reviews human.",
+      cold: false,
+      directions: [],
+      interviewing: true,
+    });
+    expect(personAsk(mail)).toBe("Keep reviews human.");
+    expect(personAsk("Drop the mobile form.")).toBe("Drop the mobile form.");
+  });
+
+  test("standing directions keep the newest asks that fit", () => {
+    const out = standingDirections(["one", "x".repeat(3990), "last"]);
+    expect(out).toBe(`- ${"x".repeat(3990)}\n- last`);
+    expect(out).not.toContain("one");
   });
 });

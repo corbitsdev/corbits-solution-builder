@@ -220,6 +220,12 @@ function stageDocumentNote(stage: Stage, kind: ArtifactKind): string {
   return `## Stage document\n\nYou are the stage ${stage} specialist. Your document is recorded under the kind \`${kind}\`; pass that kind to artifact_create.`;
 }
 
+/** Drafting stages whose document is an artifact the specialist writes.
+ *  Stage 4's design stays the HTML reply. Stages 8 and 9 keep their own tools. */
+export function stageUsesArtifactTools(stage: Stage): boolean {
+  return stage <= 7 && stage !== 4;
+}
+
 /** The `@corbits/artifacts` bundle (`artifact_create`/`artifact_write`), opt-in. */
 const ARTIFACTS_IMPORT: SpecialistToolImport = {
   package: "@corbits/artifacts/sidecar-bundle",
@@ -308,10 +314,9 @@ export type SpecialistSourceOptions = {
   readonly roleKey: string;
   /** CL-8719: carry the `@corbits/artifacts` sidecar tool bundle, its
    *  `credentialBindings` entry and the matching grant requirement, and tell
-   *  the model to call `artifact_create`/`artifact_write`. Default false —
-   *  with it false the rendered source is byte-for-byte what it was before
-   *  #466. Off until a browser-driven deploy of a credential-bound
-   *  specialist is proven; see `ensureStageAgent` in `apps/web/src/client.ts`. */
+   *  the model to call `artifact_create`/`artifact_write`. Default false.
+   *  Drafting stages opt in through `stageUsesArtifactTools`; an empty hub
+   *  origin is refused before a credential-bound deploy can sit pending. */
   readonly artifactTools?: boolean;
 };
 
@@ -368,10 +373,10 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
   // deploy time (`installer/src/artifacts-credential.ts`) before this
   // asset's deployment id even exists, so both names are deterministic from
   // the role alone. Opt-in (`artifactTools`, default off) — see
-  // `SpecialistSourceOptions`; today only stage 8 turns it on, and
-  // `publish_workspace` resolves the same credential itself rather than
-  // through the generic bundle, so stage 8 gets the binding without the
-  // bundle or the rule telling the model to call `artifact_create`.
+  // `SpecialistSourceOptions`. The primary drafter for every stage except 4,
+  // 8 and 9 opts in (`stageUsesArtifactTools`). Stage 8's publish path
+  // resolves the same credential itself rather than through the generic
+  // bundle, so it gets no rule telling the model to call `artifact_create`.
   const genericArtifactTools = spec.tooling.artifacts;
   const credentialName = workflowArtifactsCredentialName(role.id);
 

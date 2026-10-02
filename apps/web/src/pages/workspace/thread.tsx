@@ -9,7 +9,7 @@ import { splitRevision } from "@solutions-builder/app/stage-prompt";
 import { Dictated } from "../../dictation.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { answersDraft, segmentsIn } from "./choices.js";
-import { DRAFT_POINTER, conversationLead, isHtmlDocument } from "./guidance.js";
+import { DRAFT_POINTER, conversationLead, isHtmlDocument, isSubstantialDraft } from "./guidance.js";
 import type { DraftRef } from "./draft-references.ts";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
 import { HANDOFF_BUBBLE_TEXT, isHandoffBody } from "./use-model-handoff.ts";
@@ -403,8 +403,10 @@ export function SpecialistTurn({
   let questionIndex = -1;
   // A draft's lead -- the sentence or two before its first heading -- is
   // conversation and stays; the pointer that stands in when there is no
-  // lead is what the draft line already says.
-  const lead = draft ? conversationLead(text) : null;
+  // lead is what the draft line already says. A spoken line is not a
+  // document, so its prose stays even when the version line is beside it.
+  const hideDocument = draft !== null && isSubstantialDraft(text);
+  const lead = hideDocument ? conversationLead(text) : null;
   return (
     <>
       {note ? (
@@ -421,7 +423,7 @@ export function SpecialistTurn({
       {draft ? <DraftReference draft={draft} onOpen={onOpenVersion} /> : null}
       {lead !== null && lead !== DRAFT_POINTER ? <Markdown source={lead} /> : null}
       {segments.map((segment, index) => {
-        if (segment.kind === "text") return draft ? null : <Markdown key={index} source={segment.markdown} />;
+        if (segment.kind === "text") return hideDocument ? null : <Markdown key={index} source={segment.markdown} />;
         const at = ++questionIndex;
         const picked = chosen.get(at);
         return (

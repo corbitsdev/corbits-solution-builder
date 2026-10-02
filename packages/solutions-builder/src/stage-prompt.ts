@@ -63,6 +63,84 @@ export function revisionRequest(args: { stage: number; userInput: string; curren
   ].join("\n");
 }
 
+export const DIRECTIONS_LEAD = "--- STANDING DIRECTIONS FROM THE PERSON (these still apply) ---";
+/** Newest asks kept, in order. A warm turn does not resend these; a cold run does, once. */
+export const DIRECTIONS_BUDGET = 4_000;
+export const INTERVIEW_FOLD = "Fold this answer into the document. Keep the remaining questions. Do not add new ones.";
+
+/** Earlier sentences the person sent, newest last, cut to `DIRECTIONS_BUDGET`. */
+export function standingDirections(asks: readonly string[]): string {
+  const kept: string[] = [];
+  let used = 0;
+  for (let index = asks.length - 1; index >= 0; index -= 1) {
+    const ask = asks[index]?.trim() ?? "";
+    if (ask.length === 0) continue;
+    const line = `- ${ask}`;
+    if (kept.length > 0 && used + line.length + 1 > DIRECTIONS_BUDGET) break;
+    kept.unshift(line);
+    used += line.length + 1;
+  }
+  return kept.join("\n");
+}
+
+const APPLY_LEAD = "Apply only this:\n";
+
+/** The person's own words out of a mail, revision envelope or not. */
+export function personAsk(body: string): string {
+  const revision = splitRevision(body);
+  if (revision) return revision.ask.trim();
+  // A revision mail stores the whole instruction. The sentence is what follows
+  // "Apply only this:"; the fold line under it is the host's, not theirs.
+  if (body.startsWith("Current version:")) {
+    const at = body.lastIndexOf(APPLY_LEAD);
+    if (at !== -1) {
+      const ask = body.slice(at + APPLY_LEAD.length).trim();
+      const foldAt = ask.endsWith(INTERVIEW_FOLD) ? ask.lastIndexOf(`\n\n${INTERVIEW_FOLD}`) : -1;
+      return (foldAt === -1 ? ask : ask.slice(0, foldAt)).trim();
+    }
+  }
+  return body.trim();
+}
+
+/**
+ * The mail for a revision whose document is already an artifact.
+ *
+ * A warm turn names the id and the version. The bytes are already in the
+ * session, so the mail does not carry them and does not re-list the person's
+ * earlier sentences. A cold turn, the first mail of a run that does not have
+ * that prefix, reads the artifact once and states those sentences once.
+ */
+export function revisionMail(args: {
+  readonly artifactId: string;
+  readonly version: number;
+  readonly userInput: string;
+  readonly cold: boolean;
+  readonly directions: readonly string[];
+  readonly interviewing: boolean;
+}): string {
+  const ask = args.userInput.trim();
+  const apply = [ask, args.interviewing ? INTERVIEW_FOLD : ""].filter((part) => part.length > 0).join("\n\n");
+  const versionLine = `Current version: ${args.artifactId} v${args.version}.`;
+  if (!args.cold) {
+    return [
+      versionLine,
+      "Revise it with artifact_write on that same id. It is already in this conversation. Do not call artifact_read.",
+      "",
+      "Apply only this:",
+      apply,
+    ].join("\n");
+  }
+  const directions = standingDirections(args.directions);
+  return [
+    versionLine,
+    "Call artifact_read on it once, then artifact_write the revision on that same id.",
+    "",
+    ...(directions.length > 0 ? [DIRECTIONS_LEAD, directions, ""] : []),
+    "Apply only this:",
+    apply,
+  ].join("\n");
+}
+
 /** A revision turn taken apart: the document it carried, and the person's ask. Null for any other message. */
 export function splitRevision(text: string): { readonly document: string; readonly ask: string } | null {
   if (!text.startsWith(REVISION_LEAD)) return null;

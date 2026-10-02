@@ -84,6 +84,41 @@ export function questionsIn(document: string): string[] {
 
 const OPTION_LINE = /^option:\s*(.+)$/i;
 const MAX_OPTIONS = 3;
+const ARTIFACT_LINE = /^Artifact:\s+(\S+)\s+v(\d+)\s*$/i;
+
+/** The artifact a reply says it wrote, from the last `Artifact: <id> v<n>` line. */
+export function artifactRefIn(text: string): { readonly id: string; readonly version: number } | null {
+  let found: { readonly id: string; readonly version: number } | null = null;
+  for (const line of text.split("\n")) {
+    const match = ARTIFACT_LINE.exec(line.trim());
+    if (match?.[1] && match[2]) found = { id: match[1], version: Number(match[2]) };
+  }
+  return found;
+}
+
+function withoutArtifactLine(text: string): string {
+  return text
+    .split("\n")
+    .filter((line) => !ARTIFACT_LINE.test(line.trim()))
+    .join("\n")
+    .trim();
+}
+
+/**
+ * What the chat says about a specialist reply. A document stays in the pane:
+ * the bubble is its first question, or its "In short" lines when nothing
+ * remains to ask. A short reply, the artifact line removed, passes through.
+ */
+export function spokenReply(body: string): string {
+  const text = withoutArtifactLine(body);
+  const question = questionsIn(text)[0];
+  if (question) return `The draft is beside this. Before I revise it:\n\n${question}`;
+  const summary = summaryIn(text);
+  const askedNothing = /^#{1,4}\s+(open questions?\b|what i need\b|the one thing i need\b)/im.test(text);
+  const headed = text.length >= 240 && (text.match(/^#{1,3}\s+\S/gm) ?? []).length >= 2;
+  if (summary && (headed || askedNothing)) return `${summary}\n\nNothing I need to ask. Anything to change before you approve it?`;
+  return text;
+}
 
 /** A question body taken apart: the sentence asked, and the answers offered. */
 export function splitOptions(body: string): { question: string; options: string[] } {

@@ -98,12 +98,22 @@ section.
  *  just makes it hallucinate the call. */
 export const ARTIFACT_WRITE_RULE = `
 Your prompt's "Stage document" note names the kind your document is recorded
-under. The first time you write your stage document, call artifact_create
-with that kind, a short title, and the full document as content. Revising it
-later (a person's follow-up, a correction) is artifact_write against the
-same artifact id — never a second artifact_create for the same document.
-Always end your mail reply with a line naming the artifact id and version
-you just wrote, e.g. "Artifact: art_123 v2".
+under. The document and the mail are different texts.
+
+The mail is one spoken line. It never contains the document. On the first
+draft, say who you are and what happens next in two sentences at most, then
+the one question you need answered. On a revision, the mail names that
+question, or says nothing more is needed. Put every "- Option:" line for
+that question in the mail, and no other question.
+
+The document is the artifact. The first time you write it, call
+artifact_create with the stage kind, a short title, and the full document
+as content. Revising it is artifact_write against that same artifact id —
+never a second artifact_create. When the mail says the current version is
+already in this conversation, do not call artifact_read. When it tells you
+to read once, call artifact_read once, then write.
+
+End the mail with a line naming what you wrote, exactly "Artifact: <id> v<n>".
 `.trim();
 
 export type AgentRole = {

@@ -44,10 +44,12 @@ import { BuildPanel } from "./build.jsx";
 import { useBuildAttempts } from "./build-attempts.ts";
 import { TargetPicker } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
-import { interviewProgress, isHtmlDocument, latestDesignReply, workspaceGuidance } from "./guidance.js";
+import { interviewProgress, isHtmlDocument, isSubstantialDraft, latestDesignReply, workspaceGuidance } from "./guidance.js";
 import { repairedChoiceDraft } from "./choice-repair.ts";
 import { repairedStackDraft } from "./stack-repair.ts";
-import { revisionRequest } from "@solutions-builder/app/stage-prompt";
+import { artifactRefIn, questionsIn, spokenReply } from "@solutions-builder/app/document";
+import { personAsk, revisionMail, revisionRequest } from "@solutions-builder/app/stage-prompt";
+import { stageUsesArtifactTools } from "@solutions-builder/app/specialist-source";
 import { draftReferences } from "./draft-references.ts";
 import { designHistory } from "./design-history.ts";
 import { Flame } from "lucide-react";
@@ -69,7 +71,7 @@ import { DocumentExportMenu } from "../../document-export.jsx";
 import { SlidePreview } from "../../slide-preview.jsx";
 import { ArtifactStrip, VersionStrip } from "./artifact-strip.tsx";
 import { stageEvents, switchEvents, type StageEvent } from "./stage-events.ts";
-import { useModelSwitch, useModelHandoff } from "./use-model-handoff.ts";
+import { isHandoffBody, useModelSwitch, useModelHandoff } from "./use-model-handoff.ts";
 import { currentInference, inferenceOptions, orderLeadingWith, type InferenceOption } from "./inference-options.ts";
 import { loadDismissedDefault, saveDismissedDefault } from "./model-nudge-store.ts";
 import { Stage6Panel } from "./stage6.tsx";
@@ -278,6 +280,37 @@ export function StageWorkspace({
   // draft separate from the latest conversational turn so an acknowledgement
   // or a follow-up question never replaces the document being reviewed.
   const guidance = useMemo(() => workspaceGuidance(stage, foldedMessages), [stage, foldedMessages]);
+  // The latest reply that names an artifact. Its content, once read, is the
+  // document; the mail itself is only what the chat says.
+  const artifactPointer = useMemo(() => {
+    for (let index = foldedMessages.length - 1; index >= 0; index -= 1) {
+      const message = foldedMessages[index];
+      if (!message || message.author !== "agent") continue;
+      const ref = artifactRefIn(message.body);
+      if (ref) return { message, index, ref };
+    }
+    return null;
+  }, [foldedMessages]);
+  const [artifactBody, setArtifactBody] = useState<{ key: string; body: string } | null>(null);
+  useEffect(() => {
+    if (!artifactPointer) {
+      setArtifactBody(null);
+      return;
+    }
+    const key = `${artifactPointer.ref.id}@${String(artifactPointer.ref.version)}`;
+    let cancelled = false;
+    void api.artifactContent(tenantId, artifactPointer.ref.id).then(
+      (result) => {
+        if (!cancelled) setArtifactBody({ key, body: result.content });
+      },
+      () => {
+        if (!cancelled) setArtifactBody(null);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [artifactPointer, tenantId]);
   // A stage 3 draft that absorbed the person's choice anywhere but under
   // "## Chosen approach" would leave them choosing again (#430): the
   // section is written in deterministically, as alpha main did, before the
@@ -285,9 +318,29 @@ export function StageWorkspace({
   // A stage 6 revision that dropped the plan's Stack block gets the last
   // valid one carried in (#437), so the gate's banner is for a plan that
   // never had one.
-  const draftMessage = useMemo(
+  const mailDraft = useMemo(
     () => repairedStackDraft(stage, foldedMessages, repairedChoiceDraft(stage, foldedMessages, guidance.draft)),
     [stage, foldedMessages, guidance.draft],
+  );
+  const artifactDraft = useMemo(() => {
+    if (!artifactPointer || !artifactBody) return null;
+    if (artifactBody.key !== `${artifactPointer.ref.id}@${String(artifactPointer.ref.version)}`) return null;
+    if (!isSubstantialDraft(artifactBody.body)) return null;
+    const carried: ChatMessage = { ...artifactPointer.message, body: artifactBody.body };
+    return repairedStackDraft(stage, foldedMessages, repairedChoiceDraft(stage, foldedMessages, carried));
+  }, [artifactPointer, artifactBody, stage, foldedMessages]);
+  const draftMessage = artifactDraft ?? mailDraft;
+  // The chat speaks the document. The stored mail stays the draft for the
+  // pane, the version line, and approval.
+  const shownMessages = useMemo(
+    () =>
+      foldedMessages.map((message) => {
+        if (message.author !== "agent") return message;
+        const document = artifactPointer?.message.id === message.id && artifactDraft ? artifactDraft.body : message.body;
+        const spoken = spokenReply(document);
+        return spoken === message.body ? message : { ...message, body: spoken };
+      }),
+    [foldedMessages, artifactPointer, artifactDraft],
   );
 
   // Stage 1's brief evaluator reads each new draft; the Product guide answers
@@ -313,14 +366,13 @@ export function StageWorkspace({
   useBusyWhile(!threadLoaded, "Loading the conversation");
   const latestDesign = useMemo(() => latestDesignReply(foldedMessages), [foldedMessages]);
   const reviewMessage = !threadLoaded ? null : DOCUMENT_STAGES.has(stage) ? draftMessage : stage === 4 ? latestDesign : latestSpecialistMessage;
-  const progress = useMemo(() => interviewProgress(foldedMessages), [foldedMessages]);
+  const progress = useMemo(() => interviewProgress(shownMessages), [shownMessages]);
 
-  // Mail turns as StageDocument's turn shape: it wants who spoke and what
-  // was said, nothing this contract tracks beyond that (no per-turn quotes
-  // or result-node bookkeeping under mail-chat).
+  // Mail turns as StageDocument's turn shape. The body the person reads is
+  // the spoken line; the mail the specialist was sent stays in foldedMessages.
   const turns: StageTurn[] = useMemo(
     () =>
-      foldedMessages.map((message) => ({
+      shownMessages.map((message) => ({
         id: message.id,
         role: message.author === "me" ? "human" : "specialist",
         body: message.body,
@@ -329,7 +381,7 @@ export function StageWorkspace({
         questions: null,
         createdAt: message.at,
       })),
-    [foldedMessages],
+    [shownMessages],
   );
 
   const draftKind = STAGE_DRAFT_KIND[stage] ?? null;
@@ -338,12 +390,20 @@ export function StageWorkspace({
   // line naming it, on every document stage and on a reload alike, since
   // both the mail and the lineage are records.
   const liveVersions = artifacts.tabs.find((tab) => tab.live)?.versions;
+  // A short mail that names an artifact is still the draft the version line
+  // opens. The lineage's unpersisted head is that same message.
+  const referenceMessages = useMemo(() => {
+    if (!artifactDraft || !artifactPointer) return foldedMessages;
+    return foldedMessages.map((message) =>
+      message.id === artifactPointer.message.id ? { ...message, body: artifactDraft.body } : message,
+    );
+  }, [foldedMessages, artifactDraft, artifactPointer]);
   const draftRefs = useMemo(
     () =>
       DOCUMENT_STAGES.has(stage) && draftKind
-        ? draftReferences(foldedMessages, liveVersions ?? [], documentName(draftKind).toLowerCase())
+        ? draftReferences(referenceMessages, liveVersions ?? [], documentName(draftKind).toLowerCase())
         : undefined,
-    [stage, draftKind, foldedMessages, liveVersions],
+    [stage, draftKind, referenceMessages, liveVersions],
   );
   // A done-segment click is a navigation signal, not state — one effect is
   // where it lands.
@@ -605,12 +665,34 @@ export function StageWorkspace({
     setError(null);
     setRemediation(undefined);
     try {
-      // With a Markdown draft on the table, the turn carries it and the
-      // instruction to revise it, as alpha main's rounds did (#431); a design
-      // (HTML) has its own feedback path, and stages 8 and 9 revise nothing.
-      const revising = draftMessage && stage <= 7 && !isHtmlDocument(draftMessage.body);
+      // A named artifact is revised by id. The document is already in the
+      // session, so a warm mail does not paste it. A hand-off after that
+      // name starts a run with an empty prefix, and that one mail reads the
+      // artifact and restates what the person already said. With no artifact
+      // yet, a Markdown draft still travels whole, so a specialist deployed
+      // before tools does not re-roll the brief.
       const turn = withAttachedDocuments(body, stageDocuments);
-      const mail = revising ? revisionRequest({ stage, userInput: turn, currentDocument: draftMessage.body }) : turn;
+      const ref = artifactPointer?.ref ?? null;
+      const cold =
+        artifactPointer !== null &&
+        foldedMessages.slice(artifactPointer.index + 1).some((message) => isHandoffBody(message.body));
+      const interviewing = draftMessage !== null && !isHtmlDocument(draftMessage.body) && questionsIn(draftMessage.body).length > 0;
+      const directions = foldedMessages
+        .filter((message) => message.author === "me" && !isHandoffBody(message.body))
+        .map((message) => personAsk(message.body));
+      const mail =
+        stageUsesArtifactTools(stage as Stage) && ref
+          ? revisionMail({
+              artifactId: ref.id,
+              version: ref.version,
+              userInput: turn,
+              cold,
+              directions,
+              interviewing,
+            })
+          : draftMessage && stage <= 7 && !isHtmlDocument(draftMessage.body)
+            ? revisionRequest({ stage, userInput: turn, currentDocument: draftMessage.body })
+            : turn;
       await api.sendStageMail(tenantId, agentAddress, { body: mail });
       await loadThread();
     } catch (cause) {
@@ -784,7 +866,7 @@ export function StageWorkspace({
   const conversation = (
     <StageConversation
       stage={stage}
-      messages={foldedMessages}
+      messages={shownMessages}
       value={composer}
       onValueChange={setComposer}
       onSend={() => {
