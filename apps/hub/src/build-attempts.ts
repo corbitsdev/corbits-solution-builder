@@ -169,7 +169,12 @@ const inFlight = new Map<string, InFlight>();
  * synchronously, before the first await of a start, so two starts that
  * land together cannot both pass the running check and claim one number.
  */
-const starting = new Set<string>();
+const starting = new Map<string, Promise<unknown>>();
+
+const RUNNING_CONFLICT = "A build attempt is already running for this project. Cancel it, or wait for it to end.";
+
+/** Set by `stopBuildAttempts`: from then on no attempt starts on this host. */
+let stopping = false;
 
 function key(projectId: string, attempt: number): string {
   return `${projectId}:${String(attempt)}`;
@@ -260,16 +265,25 @@ export async function cancelBuildAttempt(projectId: string, attempt: number): Pr
  * signal rather than found lost on the next start.
  */
 export async function stopBuildAttempts(): Promise<void> {
+  stopping = true;
+  // A start between its reservation and its registration is not in flight
+  // yet; it is waited for, so the worker it is about to spawn is ended too.
+  await Promise.allSettled([...starting.values()]);
   const running = [...inFlight.values()];
   for (const live of running) live.controller.abort();
   await Promise.all(running.map((live) => live.done));
 }
 
-/** True while this host is running any attempt for the project. */
-export function projectHasRunningAttempt(projectId: string): boolean {
+/**
+ * True while any attempt for the project is running on this host: one this
+ * host is driving or setting up, or one an earlier run of the host started
+ * that is still alive (`detached`) — a second worker beside it would write
+ * into the same project's builds.
+ */
+export async function projectHasRunningAttempt(projectId: string): Promise<boolean> {
   if (starting.has(projectId)) return true;
   for (const entry of inFlight.keys()) if (entry.startsWith(`${projectId}:`)) return true;
-  return false;
+  return (await listAttempts(projectId)).some((record) => record.state === "detached");
 }
 
 /**
@@ -287,12 +301,17 @@ export async function startBuildAttempt(args: {
   if (args.prompt.planText.trim().length === 0) {
     throw new HostError("validation_failed", "The approved plan has no text to build from. Stage 6's plan must be readable before an attempt can start.");
   }
-  if (projectHasRunningAttempt(projectId)) {
-    throw new HostError("conflict", "A build attempt is already running for this project. Cancel it, or wait for it to end.", {}, false);
+  if (stopping) throw new HostError("validation_failed", "The host is stopping; no build attempt can start.");
+  if (starting.has(projectId) || [...inFlight.keys()].some((entry) => entry.startsWith(`${projectId}:`))) {
+    throw new HostError("conflict", RUNNING_CONFLICT, {}, false);
   }
-  starting.add(projectId);
+  // Reserved synchronously, before the first await, and the reservation is
+  // the start itself so a stop can wait for it. A detached worker is
+  // looked for inside, once the project is this call's.
+  const reserved = startReserved(args);
+  starting.set(projectId, reserved.catch(() => undefined));
   try {
-    return await startReserved(args);
+    return await reserved;
   } finally {
     starting.delete(projectId);
   }
@@ -301,6 +320,9 @@ export async function startBuildAttempt(args: {
 /** The start proper, once the project is reserved to this call. */
 async function startReserved(args: { projectId: string; prompt: BuildPromptInput; continueFrom?: number | undefined }): Promise<AttemptRecord> {
   const { projectId } = args;
+  if ((await listAttempts(projectId)).some((record) => record.state === "detached")) {
+    throw new HostError("conflict", RUNNING_CONFLICT, {}, false);
+  }
   const directory = projectBuildsDirectory(projectId);
   await mkdir(directory, { recursive: true });
   const existing = await attemptNumbers(projectId);

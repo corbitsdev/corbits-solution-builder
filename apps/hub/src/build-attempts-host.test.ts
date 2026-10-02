@@ -48,23 +48,6 @@ async function until(check: () => Promise<boolean>, timeoutMs: number): Promise<
 }
 
 describe("the host's build attempts", () => {
-  onlyOnPosix("the worker's pid and group are recorded once it is up, and stopping the host ends it as cancelled", async () => {
-    const { startBuildAttempt, attemptRecord, stopBuildAttempts, projectBuildsDirectory } = await import("./build-attempts.js");
-    const started = await startBuildAttempt({ projectId: "proj_stop", prompt: PROMPT });
-    expect(started.state).toBe("running");
-    const startedFile = join(projectBuildsDirectory("proj_stop"), "1.started.json");
-    await until(async () => typeof (JSON.parse(await readFile(startedFile, "utf8")) as { pid: unknown }).pid === "number", 5_000);
-    const recorded = JSON.parse(await readFile(startedFile, "utf8")) as { pid: number; pgid: number };
-    expect(recorded.pgid).toBe(recorded.pid);
-
-    await stopBuildAttempts();
-    const record = await attemptRecord("proj_stop", 1);
-    expect(record?.state).toBe("ended");
-    expect(record?.outcome?.signal).toBe("SIGTERM");
-    // And the worker is gone, not left to run on without a host.
-    expect(() => process.kill(recorded.pid, 0)).toThrow();
-  }, CANCEL_GRACE_MS + 15_000);
-
   onlyOnPosix("an empty plan is refused before anything is written", async () => {
     const { startBuildAttempt, listAttempts } = await import("./build-attempts.js");
     await expect(startBuildAttempt({ projectId: "proj_empty", prompt: { ...PROMPT, planText: "  \n" } })).rejects.toThrow(/approved plan has no text/);
@@ -72,7 +55,7 @@ describe("the host's build attempts", () => {
   });
 
   onlyOnPosix("two starts that land together get one attempt, not two with the same number", async () => {
-    const { startBuildAttempt, listAttempts, stopBuildAttempts } = await import("./build-attempts.js");
+    const { startBuildAttempt, listAttempts, cancelBuildAttempt, attemptRecord } = await import("./build-attempts.js");
     const results = await Promise.allSettled([
       startBuildAttempt({ projectId: "proj_race", prompt: PROMPT }),
       startBuildAttempt({ projectId: "proj_race", prompt: PROMPT }),
@@ -80,11 +63,13 @@ describe("the host's build attempts", () => {
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
     expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
     expect((await listAttempts("proj_race")).map((record) => record.attempt)).toEqual([1]);
-    await stopBuildAttempts();
+    // Ended by cancel, not by stopping the host: a stopped host starts nothing more.
+    expect(await cancelBuildAttempt("proj_race", 1)).toBe(true);
+    await until(async () => (await attemptRecord("proj_race", 1))?.state === "ended", CANCEL_GRACE_MS + 5_000);
   }, CANCEL_GRACE_MS + 15_000);
 
   onlyOnPosix("an attempt an earlier host run started is detached while its group lives, lost once it is gone, and cancel reaches it", async () => {
-    const { attemptRecord, cancelBuildAttempt, projectBuildsDirectory } = await import("./build-attempts.js");
+    const { attemptRecord, cancelBuildAttempt, projectBuildsDirectory, projectHasRunningAttempt } = await import("./build-attempts.js");
     const directory = projectBuildsDirectory("proj_restart");
     await mkdir(join(directory, "1"), { recursive: true });
     // Stands in for the worker a previous host run left behind: alive, in its own group.
@@ -92,6 +77,8 @@ describe("the host's build attempts", () => {
     const pgid = orphan.pid!;
     await writeFile(join(directory, "1.started.json"), JSON.stringify({ startedAt: new Date().toISOString(), continuedFrom: null, pid: pgid, pgid }));
     expect((await attemptRecord("proj_restart", 1))?.state).toBe("detached");
+    // A live detached worker counts as running: no second worker beside it.
+    expect(await projectHasRunningAttempt("proj_restart")).toBe(true);
 
     expect(await cancelBuildAttempt("proj_restart", 1)).toBe(true);
     await until(async () => (await attemptRecord("proj_restart", 1))?.state === "lost", CANCEL_GRACE_MS + 5_000);
@@ -102,4 +89,30 @@ describe("the host's build attempts", () => {
     expect((await attemptRecord("proj_restart", 2))?.state).toBe("lost");
     expect(await cancelBuildAttempt("proj_restart", 2)).toBe(false);
   }, CANCEL_GRACE_MS + 15_000);
+  onlyOnPosix("the worker's pid and group are recorded once it is up; stopping the host ends every attempt, one just starting too, and nothing starts after", async () => {
+    const { startBuildAttempt, attemptRecord, stopBuildAttempts, projectBuildsDirectory } = await import("./build-attempts.js");
+    const started = await startBuildAttempt({ projectId: "proj_stop", prompt: PROMPT });
+    expect(started.state).toBe("running");
+    const startedFile = join(projectBuildsDirectory("proj_stop"), "1.started.json");
+    await until(async () => typeof (JSON.parse(await readFile(startedFile, "utf8")) as { pid: unknown }).pid === "number", 5_000);
+    const recorded = JSON.parse(await readFile(startedFile, "utf8")) as { pid: number; pgid: number };
+    expect(recorded.pgid).toBe(recorded.pid);
+
+    // A second start lands in the same tick as the stop: reserved, not yet in flight.
+    const justStarting = startBuildAttempt({ projectId: "proj_stopstart", prompt: PROMPT });
+    await stopBuildAttempts();
+    await justStarting;
+
+    for (const projectId of ["proj_stop", "proj_stopstart"]) {
+      const record = await attemptRecord(projectId, 1);
+      expect(record?.state).toBe("ended");
+      expect(record?.outcome?.signal).toBe("SIGTERM");
+      const { pid } = JSON.parse(await readFile(join(projectBuildsDirectory(projectId), "1.started.json"), "utf8")) as { pid: number | null };
+      // And the worker is gone, not left to run on without a host.
+      if (pid !== null) expect(() => process.kill(pid, 0)).toThrow();
+    }
+    // Nothing starts once the host is stopping.
+    await expect(startBuildAttempt({ projectId: "proj_after_stop", prompt: PROMPT })).rejects.toThrow(/host is stopping/);
+  }, CANCEL_GRACE_MS + 20_000);
+
 });
