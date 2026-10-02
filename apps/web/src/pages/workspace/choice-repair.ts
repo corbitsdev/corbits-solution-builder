@@ -6,11 +6,11 @@
  * in when the draft lacks it. Pure, so the rule is testable without React.
  */
 import type { ChatMessage } from "../../stage-mail.ts";
-import { ensureChoiceSection } from "@solutions-builder/app/stage-prompt";
+import { ensureChoiceSection, splitRevision } from "@solutions-builder/app/stage-prompt";
 
 /** The person's words in a turn, whatever the app wrapped around them. */
 function askOf(message: ChatMessage): string {
-  return message.body.trim();
+  return (splitRevision(message.body)?.ask ?? message.body).trim();
 }
 
 export function repairedChoiceDraft(stage: number, messages: readonly ChatMessage[], draft: ChatMessage | null): ChatMessage | null {
