@@ -359,15 +359,19 @@ export function createSidecarAllocationReconciler({
     // Only an `allocated` worker is ever a recovery question: a
     // `provisioning` one never finished its first start and is replaced
     // regardless, as before. Its provisioner answers first, when it can.
-    const decision: ReplacementRecoveryDecision =
-      allocation.status !== "allocated"
-        ? "replace"
-        : (provisionerFor(allocation)?.recoverLostWorker?.({
+    const asked =
+      allocation.status === "allocated"
+        ? provisionerFor(allocation)?.recoverLostWorker?.({
             allocationId: allocation.id,
             tenantId: allocation.tenantId,
             anchorRunId: allocation.anchorRunId,
             generation: allocation.generation,
-          }) ?? (enableAutomaticReplacementRecovery ? "replace" : "release"));
+          })
+        : undefined;
+    const decision: ReplacementRecoveryDecision =
+      allocation.status !== "allocated"
+        ? "replace"
+        : (asked ?? (enableAutomaticReplacementRecovery ? "replace" : "release"));
     if (decision === "defer") {
       await allocationStore.parkReconciliation(allocation.id, leaseId, {
         kind: "retry-after-error",
@@ -399,9 +403,15 @@ export function createSidecarAllocationReconciler({
                     : "provisioning",
                 expectedGeneration: allocation.generation,
                 expectedLeaseId: leaseId,
-                nextAttemptAt: retryAt(
-                  allocation.ensureAttempts + allocation.destroyAttempts,
-                ),
+                // A replacement the provisioner asked for is wanted now; the
+                // backoff is for a provisioner that keeps failing, not one
+                // that answered.
+                nextAttemptAt:
+                  asked === "replace"
+                    ? now()
+                    : retryAt(
+                        allocation.ensureAttempts + allocation.destroyAttempts,
+                      ),
                 failureCode: code,
                 failureMessage: message,
                 now: now(),

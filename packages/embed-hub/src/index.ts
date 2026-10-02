@@ -470,24 +470,6 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
   // claim shares pglite's one connection, including its lease renewals, so
   // the cap stays below the platform's default of 8.
   const ALLOCATION_CONCURRENCY = 4;
-  // Once the reconciler has moved a recovered allocation to `replacing`, it
-  // schedules the replacement itself under the allocation's own backoff --
-  // several seconds for one that failed before. The host asked for this
-  // placement now, so the wait is cut: the row is woken as soon as it is
-  // `replacing`. Bounded, and harmless if the reconciler got there first.
-  const wakeOnceReplacing = async (allocationId: string, generationBefore: number) => {
-    const deadline = Date.now() + 15_000;
-    while (Date.now() < deadline) {
-      await Bun.sleep(200);
-      const row = await sidecarAllocationStore.findById(allocationId).catch(() => null);
-      if (row === null || row.generation !== generationBefore + 1) {
-        if (row === null) return;
-        continue;
-      }
-      if (row.status === "replacing") await sidecarAllocationStore.wakeReconciliation(row.id, row.generation);
-      return;
-    }
-  };
   const sidecarAllocationReconciler = createSidecarAllocationReconciler({
     allocationStore: sidecarAllocationStore,
     maxConcurrentClaims: ALLOCATION_CONCURRENCY,
@@ -894,7 +876,6 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
               );
             }
             placing.push(allocation.anchorRunId);
-            void wakeOnceReplacing(allocation.id, allocation.generation);
             await sidecarAllocationStore.wakeReconciliation(allocation.id, allocation.generation);
           }
         }

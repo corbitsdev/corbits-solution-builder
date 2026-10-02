@@ -110,8 +110,10 @@ reconciler asks it for an `allocated` worker that will not reconnect, and
 falls back to the boolean as before when the provisioner has no answer;
 `defer` keeps the allocation `allocated` and parks its reconciliation for
 `deferredRecoveryMs` (default 60 s), after which it is asked again;
-`wakeReconciliation` asks sooner. A `provisioning` worker is still replaced
-regardless, as before. Two tests cover the hook.
+`wakeReconciliation` asks sooner. A replacement the provisioner asked for is
+scheduled at once rather than under the allocation's accumulated backoff. A
+`provisioning` worker is still replaced regardless, as before. Two tests
+cover the hook.
 
 **Upstream-able.** Yes (INTR-636). The decision belongs to the provisioner,
 which knows whether its workers' state survives them and when they are
