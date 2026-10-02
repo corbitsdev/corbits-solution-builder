@@ -31,7 +31,7 @@ import { StagePanes } from "./workspace-chrome.tsx";
 import { clock } from "./elapsed.jsx";
 import { BuildFile } from "../graph.jsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
-import { attemptRecorded, buildArchives, buildEvidenceState, composeSupervisorBrief } from "./build-attempts.ts";
+import { attemptRecorded, buildArchives, buildEvidenceState, composeSupervisorBrief, probeDecision } from "./build-attempts.ts";
 
 const EMPTY_STAGE_EVENTS: readonly StageEvent[] = [];
 
@@ -291,12 +291,9 @@ export function BuildPanel({
   const record = (attempt: BuildAttempt) =>
     run("record", async () => {
       if (!address || !attempt.outcome) return;
-      const portNumber = Number(port);
-      const targets =
-        startCommand.trim().length > 0 && Number.isInteger(portNumber) && portNumber > 0
-          ? [{ target: "web", command: startCommand.trim(), port: portNumber }]
-          : [];
-      const { packaged } = await api.packageBuildAttempt(detail.project.id, attempt.attempt, { targets });
+      // The target probed is the one stage 7 froze; the fields say how to start it.
+      const probe = probeDecision({ startCommand, port, frozenTarget: freeze?.target ?? null });
+      const { packaged } = await api.packageBuildAttempt(detail.project.id, attempt.attempt, { targets: [...probe.targets] });
       await api.persistBuildEvidence(detail.project.id, {
         fileName: packaged.fileName,
         mediaType: packaged.mediaType,
@@ -309,6 +306,7 @@ export function BuildPanel({
           attempt: attempt.attempt,
           outcome: attempt.outcome,
           archive: { fileName: packaged.fileName, sha256: packaged.sha256, sizeBytes: packaged.sizeBytes },
+          probeSkipped: probe.skipped,
           verification: packaged.verification,
         }),
       });
@@ -443,7 +441,7 @@ export function BuildPanel({
                     <input
                       className="field"
                       aria-label="Start command"
-                      placeholder="Start command to probe, e.g. npm start (optional)"
+                      placeholder={`Start command for the ${freeze?.target?.trim() || "web"} target, e.g. npm start (optional)`}
                       value={startCommand}
                       onChange={(event) => setStartCommand(event.target.value)}
                     />

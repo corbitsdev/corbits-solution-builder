@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { attemptOfNode, attemptRecorded, buildEvidenceState, composeSupervisorBrief } from "./build-attempts.ts";
+import { attemptOfNode, attemptRecorded, buildEvidenceState, composeSupervisorBrief, probeDecision } from "./build-attempts.ts";
 import type { ArtifactNode, BridgeOutcome } from "../../client.ts";
 
 function archiveNode(overrides: Partial<ArtifactNode> = {}): ArtifactNode {
@@ -65,6 +65,26 @@ describe("buildEvidenceState", () => {
   });
 });
 
+describe("probeDecision", () => {
+  test("blank fields start nothing, and the reason is that they were blank", () => {
+    const decision = probeDecision({ startCommand: "", port: "", frozenTarget: "api" });
+    expect(decision.targets).toEqual([]);
+    expect(decision.skipped).toContain("no start command and port were given");
+  });
+
+  test("the target probed is the one stage 7 froze, so an api target is probed as an api", () => {
+    const decision = probeDecision({ startCommand: "bun run start", port: "8080", frozenTarget: "api" });
+    expect(decision.targets).toEqual([{ target: "api", command: "bun run start", port: 8080 }]);
+    expect(decision.skipped).toBeNull();
+    expect(probeDecision({ startCommand: "npm start", port: "3000", frozenTarget: null }).targets[0]?.target).toBe("web");
+  });
+
+  test("a port that is not one is said, not guessed", () => {
+    expect(probeDecision({ startCommand: "npm start", port: "eighty", frozenTarget: "web" }).skipped).toContain("not a port");
+    expect(probeDecision({ startCommand: "", port: "3000", frozenTarget: "web" }).skipped).toContain("no start command");
+  });
+});
+
 describe("composeSupervisorBrief", () => {
   const outcome: BridgeOutcome = {
     bridgeId: "bounded-local-corbits-exec",
@@ -106,6 +126,7 @@ describe("composeSupervisorBrief", () => {
       attempt: 3,
       outcome: { ...outcome, exitStatus: null, signal: "SIGTERM", finalText: "", stderrTail: "killed", turns: null, toolCalls: null },
       archive,
+      probeSkipped: "No target was started or probed: no start command and port were given when this attempt was recorded.",
       verification: { complete: false, failed: ["src/index.ts"], targets: [] },
     });
     expect(brief).toContain("ended by SIGTERM");
@@ -113,7 +134,8 @@ describe("composeSupervisorBrief", () => {
     expect(brief).toContain("(the worker wrote nothing to stdout)");
     expect(brief).toContain("Last lines of stderr\nkilled");
     expect(brief).toContain("incomplete — not verified: src/index.ts");
-    expect(brief).toContain("No target was started or probed");
+    expect(brief).toContain("no start command and port were given when this attempt was recorded");
+    expect(brief).not.toContain("the plan declared none");
   });
 
   test("a long final text keeps its tail, which is where a worker sums up", () => {

@@ -62,6 +62,8 @@ export type SupervisorBriefInput = {
   readonly attempt: number;
   readonly outcome: BridgeOutcome;
   readonly archive: { readonly fileName: string; readonly sha256: string; readonly sizeBytes: number };
+  /** Why no target was probed, when none was: the actual reason, from `probeDecision`. */
+  readonly probeSkipped?: string | null;
   readonly verification: {
     readonly complete: boolean;
     readonly failed: readonly string[];
@@ -71,6 +73,30 @@ export type SupervisorBriefInput = {
 
 /** Where the package step's target probes ran: on the host, with the start command the person typed. */
 const PROBE_RAN_ON = "started on this computer by the host, with the start command the person gave";
+
+/**
+ * What the record step does with the start command and port fields, and
+ * why: the target probed is the one stage 7 froze, so an api target is
+ * probed as an api and a cli target is reported as one the host cannot
+ * probe; blank fields mean nothing is started, and that is said as such
+ * rather than as the plan having declared nothing.
+ */
+export function probeDecision(input: { readonly startCommand: string; readonly port: string; readonly frozenTarget: string | null }): {
+  readonly targets: readonly { target: string; command: string; port: number }[];
+  readonly skipped: string | null;
+} {
+  const command = input.startCommand.trim();
+  const portNumber = Number(input.port.trim());
+  if (command.length === 0 && input.port.trim().length === 0) {
+    return { targets: [], skipped: "No target was started or probed: no start command and port were given when this attempt was recorded." };
+  }
+  if (command.length === 0) return { targets: [], skipped: "No target was started or probed: a port was given but no start command." };
+  if (!Number.isInteger(portNumber) || portNumber <= 0 || portNumber > 65_535) {
+    return { targets: [], skipped: `No target was started or probed: "${input.port.trim() || "(blank)"}" is not a port the host can wait on.` };
+  }
+  const target = input.frozenTarget?.trim() || "web";
+  return { targets: [{ target, command, port: portNumber }], skipped: null };
+}
 
 const FINAL_TEXT_KEEP = 20_000;
 
@@ -92,7 +118,7 @@ export function composeSupervisorBrief(input: SupervisorBriefInput): string {
   const finalText = outcome.finalText.length > FINAL_TEXT_KEEP ? `…${outcome.finalText.slice(-FINAL_TEXT_KEEP)}` : outcome.finalText;
   const targets =
     input.verification.targets.length === 0
-      ? "- No target was started or probed: the plan declared none the host could run."
+      ? `- ${input.probeSkipped ?? "No target was started or probed."}`
       : input.verification.targets.map((target) => `- ${target.target}: ${target.ranSuccessfully ? "responded" : "did not respond"} (${PROBE_RAN_ON}).`).join("\n");
   return [
     `Build attempt ${String(input.attempt)} has ended and its work is recorded. Write the build status from this record.`,
