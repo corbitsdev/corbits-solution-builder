@@ -15,6 +15,7 @@ case "$1" in
     echo "to stderr" >&2
     if [ -f ./SLEEP ]; then sleep 30; fi
     if [ -f ./BACKGROUND ]; then sleep 20 & echo $! > ./BG_PID; fi
+    if [ -f ./ENV ]; then env > ./ENV_SEEN; fi
     if [ -f ./FAIL ]; then exit 3; fi
     exit 0 ;;
 esac
@@ -115,6 +116,24 @@ describe("runBuildAttempt", () => {
     // Well under the sleep: the tree was ended, by SIGTERM or the SIGKILL after the grace.
     expect(Date.now() - started).toBeLessThan(CANCEL_GRACE_MS + 5_000);
   }, CANCEL_TIMEOUT_MS);
+
+  onlyOnPosix("the worker sees the allowlisted environment and never a host secret", async () => {
+    const workspace = join(root, "env");
+    await runBuildAttempt({ workspace, prompt: "x", turnLog: join(root, "e.turns.jsonl") });
+    await writeFile(join(workspace, "ENV"), "");
+    process.env.HUB_REPO_SIGNING_KEY = "canary-must-not-leak";
+    process.env.CORBITS_TEST_SIGN_IN = "worker-needs-this";
+    try {
+      await runBuildAttempt({ workspace, prompt: "show env", turnLog: join(root, "e.turns.jsonl") });
+    } finally {
+      delete process.env.HUB_REPO_SIGNING_KEY;
+      delete process.env.CORBITS_TEST_SIGN_IN;
+    }
+    const seen = await readFile(join(workspace, "ENV_SEEN"), "utf8");
+    expect(seen).toMatch(/^PATH=/m);
+    expect(seen).toContain("CORBITS_TEST_SIGN_IN=worker-needs-this");
+    expect(seen).not.toContain("canary-must-not-leak");
+  });
 
   onlyOnPosix("the attempt ends when the worker exits, even when a process it left behind holds the pipes", async () => {
     const workspace = join(root, "background");

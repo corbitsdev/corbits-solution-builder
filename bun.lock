@@ -84,6 +84,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@corbits/embedded-host": "workspace:*",
+        "@solutions-builder/specialist-runtime": "workspace:*",
         "@solutions-builder/tools-delivery": "workspace:*",
         "arktype": "catalog:",
         "hono": "catalog:",

@@ -16,6 +16,7 @@
  * HTTP and never renders anything, and says so in its transcript rather
  * than implying a browser check that is not there.
  */
+import { inheritedEnvironment } from "./host-environment.js";
 import type { TargetVerification } from "./targets.js";
 
 const DEFAULT_START_TIMEOUT_MS = 15_000;
@@ -26,6 +27,7 @@ export interface ProcessTarget {
   readonly command: readonly string[];
   readonly cwd: string;
   readonly port: number;
+  /** Set on top of the allowlisted environment (`host-environment.ts`); the host's own is never passed through. */
   readonly env?: Readonly<Record<string, string>>;
   /** How long to wait for the port to open before giving up. Defaults to 15s. */
   readonly startTimeoutMs?: number;
@@ -87,7 +89,8 @@ export async function verifyApiTarget(target: string, input: ApiVerificationInpu
     cwd: input.cwd,
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, ...input.env },
+    // Never the host's own environment: see host-environment.ts.
+    env: { ...inheritedEnvironment(), ...input.env },
   });
   try {
     const opened = await waitForPort(input.port, input.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS);
@@ -151,7 +154,8 @@ export async function verifyWebTarget(target: string, input: WebVerificationInpu
     cwd: input.cwd,
     stdout: "pipe",
     stderr: "pipe",
-    env: { ...process.env, ...input.env },
+    // Never the host's own environment: see host-environment.ts.
+    env: { ...inheritedEnvironment(), ...input.env },
   });
   try {
     const opened = await waitForPort(input.port, input.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS);

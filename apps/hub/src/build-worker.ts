@@ -36,6 +36,12 @@ export type BuildWorkerKind = {
   /** Arguments that run one attempt on a prompt and end. Never a permission-skipping flag. */
   readonly run: (prompt: string) => readonly string[];
   /**
+   * The host's environment variables this worker needs for its own sign-in
+   * and configuration, by name or by `PREFIX_*`. Nothing else of the host's
+   * environment reaches it (`@solutions-builder/specialist-runtime/host-environment`).
+   */
+  readonly environment: readonly string[];
+  /**
    * How the worker reports each turn while it runs, where it can: the files
    * to place in its working directory so its own lifecycle hook appends every
    * turn to the log at `log`. Null for a worker with no such interface, whose
@@ -95,6 +101,7 @@ export const BUILD_WORKERS: readonly BuildWorkerKind[] = [
     probe: ["--help"],
     probeExpects: "exec",
     run: (prompt) => ["exec", prompt],
+    environment: ["CORBITS_*"],
     turnReports: { install: corbitsTurnHook },
     // Not on npm, and not meant to be: a binary from GitHub releases
     // (macOS and Linux tarballs, Debian packages; no Windows build) and the
@@ -108,6 +115,7 @@ export const BUILD_WORKERS: readonly BuildWorkerKind[] = [
     probe: ["--version"],
     probeExpects: null,
     run: (prompt) => ["-p", prompt],
+    environment: ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CONFIG_DIR"],
     turnReports: null,
     install: { kind: "npm", package: "@anthropic-ai/claude-code" },
   },
@@ -118,6 +126,7 @@ export const BUILD_WORKERS: readonly BuildWorkerKind[] = [
     probe: ["--version"],
     probeExpects: null,
     run: (prompt) => ["exec", prompt],
+    environment: ["OPENAI_API_KEY", "OPENAI_BASE_URL", "CODEX_HOME"],
     turnReports: null,
     install: { kind: "npm", package: "@openai/codex" },
   },

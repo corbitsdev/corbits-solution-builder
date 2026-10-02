@@ -25,6 +25,9 @@
  *   permissions    inherits the operator's own CLI configuration; the bridge
  *                  never passes --dangerously-skip-permissions or any other
  *                  permission-skipping flag
+ *   environment    PATH, HOME, the locale and temp directory, and the
+ *                  variables the worker names for its sign-in; never the
+ *                  host's own environment, which holds the hub's secrets
  *   linkage        every attempt is one numbered directory under the
  *                  project's builds, with its prompt and outcome beside it
  *
@@ -37,6 +40,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { cp, mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { inheritedEnvironment } from "@solutions-builder/specialist-runtime/host-environment";
 import { buildWorker, hostPlatform, installInstruction, type BuildWorker, type InstallInstruction } from "./build-worker.js";
 import { followTurnLog } from "./turn-reports.js";
 
@@ -103,6 +107,7 @@ export async function bridgeAvailable(): Promise<BridgeAvailability> {
     probe = Bun.spawnSync([worker.command, ...worker.probe], {
       stdout: "pipe",
       stderr: "pipe",
+      env: inheritedEnvironment(worker.environment),
     });
   } catch (cause) {
     // Absent is the commonest way to be unavailable, and it surfaces as a
@@ -247,7 +252,9 @@ export async function runBuildAttempt(args: {
   const child = spawn(worker.command, [...worker.run(args.prompt)], {
     cwd: workspace,
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env },
+    // The host's own environment carries the hub's secrets; the worker gets
+    // what it needs to run and sign in, and nothing else.
+    env: inheritedEnvironment(worker.environment),
     detached: process.platform !== "win32",
   });
   const ended = new Promise<{ exitStatus: number | null; signal: string | null }>((resolve) => {

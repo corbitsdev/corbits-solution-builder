@@ -24,6 +24,7 @@ Bun.serve({
     }
     if (url.pathname === "/style.css") return new Response("body{}", { headers: { "content-type": "text/css" } });
     if (url.pathname === "/health") return new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json" } });
+    if (url.pathname === "/env") return new Response(JSON.stringify(process.env), { headers: { "content-type": "application/json" } });
     return new Response("not found", { status: 404 });
   },
 });
@@ -55,6 +56,32 @@ describe("verifyApiTarget", () => {
       expect(result.transcript).toContain("GET / -> 200");
       expect(result.transcript).toContain("GET /health -> 200");
     } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  test("the started process sees the allowlisted environment and never a host secret", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "target-verify-api-"));
+    process.env.SIDECAR_CREDENTIAL_ENCRYPTION_KEY = "canary-must-not-leak";
+    const envFile = join(dir, "seen.json");
+    try {
+      await writeFile(
+        join(dir, "server.ts"),
+        `
+const port = Number(process.env.FIXTURE_PORT);
+await Bun.write(${JSON.stringify(envFile)}, JSON.stringify(process.env));
+Bun.serve({ port, fetch: () => new Response("ok") });
+`,
+      );
+      const port = freePort();
+      const result = await verifyApiTarget("api", { command: ["bun", "run", join(dir, "server.ts")], cwd: dir, port, env: { FIXTURE_PORT: String(port) }, routes: ["/"] });
+      expect(result.ranSuccessfully).toBe(true);
+      const seen = JSON.parse(await Bun.file(envFile).text()) as Record<string, string>;
+      expect(seen.FIXTURE_PORT).toBe(String(port));
+      expect(seen.PATH).toBeDefined();
+      expect(JSON.stringify(seen)).not.toContain("canary-must-not-leak");
+    } finally {
+      delete process.env.SIDECAR_CREDENTIAL_ENCRYPTION_KEY;
       await rm(dir, { recursive: true, force: true });
     }
   }, 15_000);

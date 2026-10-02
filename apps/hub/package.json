@@ -6,6 +6,7 @@
   "description": "The Solution Builder host: the product's identity and routes composed onto @corbits/embedded-host's runtime.",
   "dependencies": {
     "@corbits/embedded-host": "workspace:*",
+    "@solutions-builder/specialist-runtime": "workspace:*",
     "@solutions-builder/tools-delivery": "workspace:*",
     "arktype": "catalog:",
     "hono": "catalog:"
