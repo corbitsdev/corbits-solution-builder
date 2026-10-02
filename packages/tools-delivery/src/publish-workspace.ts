@@ -76,10 +76,14 @@ const MANIFEST_FILE_CAP = 200;
 const WORKFLOW_ARTIFACTS_BASE_PATH = "/api/workflow-artifacts";
 const HUB_CREDENTIAL_HANDLE = "hub";
 
-/** Directories never worth shipping: reproducible, huge, generated, or not part of the deliverable. */
+/** Directories never worth shipping: reproducible, huge, generated, or not
+ *  part of the deliverable. `.corbits` is the worker's own: the turn hook
+ *  and the prompt packet the bridge places there for one attempt are the
+ *  host's plumbing, not the built software. */
 const DEFAULT_EXCLUDES = [
   "node_modules",
   ".git",
+  ".corbits",
   ".venv",
   "__pycache__",
   "dist",
@@ -531,7 +535,7 @@ const INPUT_SCHEMA = {
     exclude: {
       type: "array",
       items: { type: "string" },
-      description: "Additional path patterns to exclude, beyond node_modules/.git/.venv/__pycache__/dist/.cache/.turbo/.next/coverage.",
+      description: "Additional path patterns to exclude, beyond node_modules/.git/.corbits/.venv/__pycache__/dist/.cache/.turbo/.next/coverage.",
     },
     targets: {
       type: "array",
