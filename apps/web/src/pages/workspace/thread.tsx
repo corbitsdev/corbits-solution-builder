@@ -3,6 +3,7 @@ import { ChatInput, type ChatMessage as UiChatMessage } from "@corbits/react-ui"
 import { FileText, Plus, Send } from "lucide-react";
 import { Markdown } from "../../markdown.jsx";
 import { splitHandoff } from "../../design-handoff.ts";
+import { splitChain } from "./approved-chain.ts";
 import { Dictated } from "../../dictation.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { answersDraft, segmentsIn } from "./choices.js";
@@ -60,6 +61,21 @@ function MessageBody({ text }: { text: string }) {
         <summary>The approved design</summary>
         <iframe className="bubble-document" title="The approved design" srcDoc={text} sandbox="" />
       </details>
+    );
+  }
+  // An opening that carries the approved chain (#423) folds it the same
+  // way: the record on demand, then what this stage opens with.
+  const chain = splitChain(text);
+  if (chain) {
+    return (
+      <>
+        {chain.before ? <Markdown source={chain.before} /> : null}
+        <details className="bubble-fold">
+          <summary>What was approved before this stage</summary>
+          <Markdown source={chain.chain} />
+        </details>
+        {chain.after ? <MessageBody text={chain.after} /> : null}
+      </>
     );
   }
   const handoff = splitHandoff(text);
