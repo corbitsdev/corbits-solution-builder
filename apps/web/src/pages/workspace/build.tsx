@@ -118,7 +118,9 @@ function attemptLabel(attempt: BuildAttempt): { label: string; tone: "warning" |
   const outcome = attempt.outcome;
   if (!outcome) return { label: "ended", tone: "info" };
   if (outcome.signal) return { label: `ended by ${outcome.signal}`, tone: "warning" };
-  return { label: `exited ${String(outcome.exitStatus ?? "?")}`, tone: outcome.exitStatus === 0 ? "success" : "warning" };
+  // An exit status is reported, never coloured: zero is not evidence the
+  // build is right, and a person reads the record, not a tick.
+  return { label: `exited ${String(outcome.exitStatus ?? "?")}`, tone: outcome.exitStatus === 0 ? "info" : "warning" };
 }
 
 export function BuildPanel({
