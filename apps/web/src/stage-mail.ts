@@ -209,7 +209,11 @@ export async function readStageThread(
     readFolder(transport, tenantId, "INBOX", addresses),
     readFolder(transport, tenantId, "Sent", addresses),
   ]);
-  return [...inbox, ...sent].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  // Oldest first; on the same second a person turn sorts before a reply,
+  // so the reply that answers it is never read as the earlier of the two.
+  return [...inbox, ...sent].sort(
+    (a, b) => Date.parse(a.at) - Date.parse(b.at) || (a.author === b.author ? 0 : a.author === "me" ? -1 : 1),
+  );
 }
 
 /** Sends (or replies in) a stage conversation: the same send seam a

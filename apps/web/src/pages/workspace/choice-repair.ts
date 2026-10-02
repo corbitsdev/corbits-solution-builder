@@ -9,7 +9,7 @@ import type { ChatMessage } from "../../stage-mail.ts";
 import { ensureChoiceSection, splitRevision } from "@solutions-builder/app/stage-prompt";
 
 /** The person's words in a turn, whatever the app wrapped around them. */
-function askOf(message: ChatMessage): string {
+export function askOf(message: Pick<ChatMessage, "body">): string {
   return (splitRevision(message.body)?.ask ?? message.body).trim();
 }
 

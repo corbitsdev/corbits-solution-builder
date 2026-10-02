@@ -74,6 +74,13 @@ describe("readStageThread", () => {
     expect(sentReads[2]).toContain("cursor=51");
   });
 
+  test("a person turn sorts before a reply with the same timestamp, so the reply is never read as earlier (#438)", async () => {
+    // Same `date` for both rows: `at(uid)` keyed on the same uid.
+    mockMailbox({ Sent: [sentRow(7)], INBOX: [{ ...inboxRow(7), uid: 70 }] });
+    const thread = await readStageThread("tnt_ws", [AGENT]);
+    expect(thread.map((message) => message.author)).toEqual(["me", "agent"]);
+  });
+
   test("carries the hub's trigger id from a Sent row's flags, and a reply's In-Reply-To", async () => {
     mockMailbox({ Sent: [sentRow(1, "<t1@hub>"), sentRow(2)], INBOX: [inboxRow(3, "<t1@hub>")] });
     const thread = await readStageThread("tnt_ws", [AGENT]);

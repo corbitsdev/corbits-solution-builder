@@ -44,8 +44,8 @@ import { BuildPanel } from "./build.jsx";
 import { TargetPicker } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
 import { interviewProgress, isHtmlDocument, latestDesignReply, workspaceGuidance } from "./guidance.js";
-import { repairedChoiceDraft } from "./choice-repair.ts";
-import { revisionRequest, splitRevision } from "@solutions-builder/app/stage-prompt";
+import { askOf, repairedChoiceDraft } from "./choice-repair.ts";
+import { revisionRequest } from "@solutions-builder/app/stage-prompt";
 import { draftReferences } from "./draft-references.ts";
 import { designHistory } from "./design-history.ts";
 import { Flame } from "lucide-react";
@@ -247,7 +247,8 @@ export function StageWorkspace({
   const stopTurn = withdrawn.stop;
   // A specialist turn in flight is the longest wait in the product; the
   // busy indicator at the foot of the window counts it alongside the flame.
-  useBusyWhile(pending !== null, specialistActivity(stage, askKind(pending ? (splitRevision(pending.body)?.ask ?? pending.body) : null, foldedMessages.some((message) => message.author === "agent"))));
+  const pendingAsk = pending ? askOf(pending) : null;
+  useBusyWhile(pending !== null, specialistActivity(stage, askKind(pendingAsk, foldedMessages.some((message) => message.author === "agent"))));
 
   const openingDispatch = useOpeningDispatch({
     detail,
