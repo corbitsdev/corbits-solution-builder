@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bridgeAvailable, CANCEL_GRACE_MS, runBuildAttempt } from "./corbits-exec.js";
+import { bridgeAvailable, CANCEL_GRACE_MS, PIPE_GRACE_MS, runBuildAttempt } from "./corbits-exec.js";
 
 // A stand-in for the worker: answers the probe with the verb the bridge
 // looks for, echoes its prompt as final text, and exits the way the test
@@ -14,6 +14,7 @@ case "$1" in
     echo "final text for: $2"
     echo "to stderr" >&2
     if [ -f ./SLEEP ]; then sleep 30; fi
+    if [ -f ./BACKGROUND ]; then sleep 20 & echo $! > ./BG_PID; fi
     if [ -f ./FAIL ]; then exit 3; fi
     exit 0 ;;
 esac
@@ -113,6 +114,23 @@ describe("runBuildAttempt", () => {
     expect(outcome.exitStatus).toBeNull();
     // Well under the sleep: the tree was ended, by SIGTERM or the SIGKILL after the grace.
     expect(Date.now() - started).toBeLessThan(CANCEL_GRACE_MS + 5_000);
+  }, CANCEL_TIMEOUT_MS);
+
+  onlyOnPosix("the attempt ends when the worker exits, even when a process it left behind holds the pipes", async () => {
+    const workspace = join(root, "background");
+    await runBuildAttempt({ workspace, prompt: "x", turnLog: join(root, "b.turns.jsonl") });
+    await writeFile(join(workspace, "BACKGROUND"), "");
+    const started = Date.now();
+    const seen: string[] = [];
+    const outcome = await runBuildAttempt({ workspace, prompt: "leave one behind", turnLog: join(root, "b.turns.jsonl"), onOutput: (chunk) => seen.push(chunk) });
+    // The worker's own exit is what is recorded, not the sleep's end.
+    expect(outcome.exitStatus).toBe(0);
+    expect(Date.now() - started).toBeLessThan(PIPE_GRACE_MS + CANCEL_GRACE_MS + 5_000);
+    expect(seen.join("")).toContain("left processes running in its group; they were ended");
+    // And what it left behind is gone, so the attempt directory is no longer in use.
+    const left = Number((await readFile(join(workspace, "BG_PID"), "utf8")).trim());
+    await new Promise((resolve) => setTimeout(resolve, CANCEL_GRACE_MS + 500));
+    expect(() => process.kill(left, 0)).toThrow();
   }, CANCEL_TIMEOUT_MS);
 
   onlyOnPosix("a continued attempt copies the earlier one without the hook directory or caches", async () => {

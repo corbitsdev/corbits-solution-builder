@@ -18,8 +18,10 @@
  *   failure        non-zero exit, or the binary being absent. No timeout: a
  *                  build takes as long as it takes, and cancel is the control
  *   cancel         SIGTERM to the worker's whole process group, so what it
- *                  spawned ends with it; the exit status and signal are
- *                  recorded as they were
+ *                  spawned ends with it, SIGKILL to what remains after a
+ *                  grace; the exit status and signal are recorded as they
+ *                  were. The attempt ends when the worker exits: a process
+ *                  it left behind holding its pipes is ended, not waited for
  *   permissions    inherits the operator's own CLI configuration; the bridge
  *                  never passes --dangerously-skip-permissions or any other
  *                  permission-skipping flag
@@ -263,11 +265,23 @@ export async function runBuildAttempt(args: {
   if (args.signal?.aborted) killTree(child);
   args.signal?.addEventListener("abort", () => killTree(child), { once: true });
 
-  const [stdout, stderr] = await Promise.all([
+  const draining = Promise.all([
     drain(child.stdout, (chunk) => args.onOutput?.(chunk, "stdout")),
     drain(child.stderr, (chunk) => args.onOutput?.(chunk, "stderr")),
   ]);
+  // The attempt ends when the worker exits. Its pipes may stay open past
+  // that — a dev server it backgrounded inherits them — and nothing that
+  // outlives the worker belongs to the attempt, so after a short grace the
+  // group is ended and the pipes are closed from this side.
   const { exitStatus, signal } = await ended;
+  const drained = await Promise.race([draining.then(() => true), new Promise<false>((resolve) => setTimeout(() => resolve(false), PIPE_GRACE_MS).unref())]);
+  if (!drained) {
+    args.onOutput?.(`${worker.label} exited but left processes running in its group; they were ended.\n`, "stderr");
+    killTree(child);
+    child.stdout?.destroy();
+    child.stderr?.destroy();
+  }
+  const [stdout, stderr] = await draining;
   const tally = following ? await following.stop() : null;
 
   return {
@@ -293,6 +307,19 @@ export async function runBuildAttempt(args: {
 /** How long the worker's tree gets to end on SIGTERM before SIGKILL. */
 export const CANCEL_GRACE_MS = 3_000;
 
+/** How long the pipes get to close after the worker itself has exited. */
+export const PIPE_GRACE_MS = 1_500;
+
+/** Whether any process in the group `pgid` leads is still there. */
+export function groupAlive(pgid: number): boolean {
+  try {
+    process.kill(-pgid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Ends the worker and everything it started: SIGTERM to the group it
  * leads, then SIGKILL to whatever is still there after the grace. The
@@ -301,10 +328,21 @@ export const CANCEL_GRACE_MS = 3_000;
  * and would keep the attempt's pipes, and its directory, in use.
  */
 export function killTree(child: ChildProcess): void {
-  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
-  const pid = child.pid;
+  if (child.pid === undefined) return;
+  killGroup(child.pid, (signal) => child.exitCode === null && child.signalCode === null && child.kill(signal));
+}
+
+/**
+ * Signals the group `pgid` leads, SIGTERM then SIGKILL after the grace;
+ * `fallback` is tried with the same signal when the group is already gone
+ * (the leader alone, when it is still known). The group is signalled
+ * whether or not its leader has exited: the leader exiting is exactly the
+ * case in which what it left behind must be reached.
+ */
+export function killGroup(pgid: number, fallback: (signal: NodeJS.Signals) => unknown = () => undefined): void {
+  const pid = pgid;
   if (process.platform === "win32") {
-    spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" }).once("error", () => child.kill());
+    spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" }).once("error", () => fallback("SIGKILL"));
     return;
   }
   const signalGroup = (signal: NodeJS.Signals) => {
@@ -316,9 +354,9 @@ export function killTree(child: ChildProcess): void {
       return false;
     }
   };
-  if (!signalGroup("SIGTERM")) child.kill("SIGTERM");
+  if (!signalGroup("SIGTERM")) fallback("SIGTERM");
   const timer = setTimeout(() => {
-    if (!signalGroup("SIGKILL")) child.kill("SIGKILL");
+    if (!signalGroup("SIGKILL")) fallback("SIGKILL");
   }, CANCEL_GRACE_MS);
   // The group may linger past the worker's own exit; the timer stands
   // either way, and never keeps the host up by itself.
@@ -330,11 +368,16 @@ async function drain(stream: NodeJS.ReadableStream | null, onChunk: (text: strin
   if (!stream) return "";
   const decoder = new TextDecoder();
   const parts: string[] = [];
-  for await (const chunk of stream) {
-    const text = decoder.decode(chunk as Uint8Array, { stream: true });
-    if (text.length === 0) continue;
-    parts.push(text);
-    onChunk(text);
+  try {
+    for await (const chunk of stream) {
+      const text = decoder.decode(chunk as Uint8Array, { stream: true });
+      if (text.length === 0) continue;
+      parts.push(text);
+      onChunk(text);
+    }
+  } catch {
+    // Destroyed from this side once the worker exited and its group was
+    // ended: what was read stands.
   }
   const rest = decoder.decode();
   if (rest.length > 0) {
