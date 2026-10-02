@@ -36,6 +36,8 @@ async function fixtureWorkspace(): Promise<string> {
   await writeFile(join(attempt, "src", "index.ts"), "export const x = 1;\n");
   await writeFile(join(attempt, "README.md"), "# fixture\n");
   await writeFile(join(attempt, "node_modules", "dep", "index.js"), "module.exports = 1;\n");
+  await mkdir(join(attempt, ".corbits", "hooks"), { recursive: true });
+  await writeFile(join(attempt, ".corbits", "hooks", "solution-builder-turns.sh"), "#!/bin/sh\n");
   await writeFile(
     join(attempt, "server.ts"),
     `Bun.serve({ port: Number(process.env.FIXTURE_PORT), fetch: () => new Response("<html><body>ok</body></html>", { headers: { "content-type": "text/html" } }) });\n`,
@@ -85,6 +87,7 @@ describe("publish_workspace (fallback path)", () => {
 
       const { manifest } = parsed;
       expect(manifest.attempt).toBe("attempt-2");
+      // The bridge's hook directory is the host's plumbing, never shipped or listed.
       expect(manifest.files.map((file) => file.path)).toEqual(["README.md", "server.ts", "src/index.ts"]);
       expect(manifest.archive.sizeBytes).toBe(parsed.sizeBytes);
 

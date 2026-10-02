@@ -78,6 +78,7 @@ describe("hashTree and extractArchive", () => {
         probes: [],
         cwd: dir,
         exclude: new Set(["node_modules"]),
+        ranOn: "sidecar",
       });
       expect(verification.checkedBy).toBe("tool");
       expect(verification.items.map((item) => [item.path, item.status])).toEqual([

@@ -27,19 +27,19 @@ describe("specialistTooling", () => {
 
   test("stage 5 carries no tool: the app draws slides from the outline in the reply (#435)", () => {
     expect(specialistTooling({ stage: 5 })).toEqual(NONE);
-    expect(specialistTooling({ stage: 5, roleKey: "primary" })).toEqual(NONE);
+    expect(specialistTooling({ stage: 5, artifactTools: true })).toEqual({ ...NONE, artifacts: true });
   });
 
-  test("stage 8 carries the shell and the delivery tool, and never the generic artifact bundle", () => {
-    expect(specialistTooling({ stage: 8 })).toEqual({ ...NONE, posix: true, delivery: true });
-    expect(specialistTooling({ stage: 8, artifactTools: true })).toEqual({ ...NONE, posix: true, delivery: true });
+  test("stage 8 carries no tool: the build runs through the host's bridge and its specialist reviews the report", () => {
+    expect(specialistTooling({ stage: 8 })).toEqual(NONE);
+    expect(specialistTooling({ stage: 8, artifactTools: true })).toEqual({ ...NONE, artifacts: true });
   });
 
   test("stage 9 carries the delivery tool alone", () => {
     expect(specialistTooling({ stage: 9 })).toEqual({ ...NONE, delivery: true });
   });
 
-  test("the generic artifact bundle is opt-in on any stage but 8", () => {
+  test("the generic artifact bundle is opt-in on any stage", () => {
     expect(specialistTooling({ stage: 2, artifactTools: true })).toEqual({ ...NONE, artifacts: true });
     expect(specialistTooling({ stage: 9, artifactTools: true })).toEqual({ ...NONE, delivery: true, artifacts: true });
   });
@@ -55,7 +55,8 @@ describe("specialistDependencies", () => {
   test("each tool brings its own set, and the runtime package comes with the deck or delivery tool", () => {
     expect(specialistDependencies(specialistTooling({ stage: 5 }))).toEqual(SPECIALIST_BASE_DEPENDENCIES);
     expect(specialistDependencies({ deck: true, posix: false, delivery: false, artifacts: false })).toEqual({ ...SPECIALIST_BASE_DEPENDENCIES, ...DECK_TOOL_DEPENDENCIES });
-    expect(specialistDependencies(specialistTooling({ stage: 8 }))).toEqual({ ...SPECIALIST_BASE_DEPENDENCIES, ...POSIX_TOOL_DEPENDENCIES, ...DELIVERY_TOOL_DEPENDENCIES });
+    expect(specialistDependencies(specialistTooling({ stage: 8 }))).toEqual(SPECIALIST_BASE_DEPENDENCIES);
+    expect(specialistDependencies({ deck: false, posix: true, delivery: false, artifacts: false })).toEqual({ ...SPECIALIST_BASE_DEPENDENCIES, ...POSIX_TOOL_DEPENDENCIES });
     expect(specialistDependencies(specialistTooling({ stage: 9 }))).toEqual({ ...SPECIALIST_BASE_DEPENDENCIES, ...DELIVERY_TOOL_DEPENDENCIES });
     expect(specialistDependencies(specialistTooling({ stage: 3, artifactTools: true }))).toEqual({ ...SPECIALIST_BASE_DEPENDENCIES, ...ARTIFACT_TOOL_DEPENDENCIES });
     expect(DECK_TOOL_DEPENDENCIES["@solutions-builder/specialist-runtime"]).toBe("workspace:*");
@@ -89,8 +90,8 @@ describe("specialistEntrySource", () => {
     expect(entry(5)).not.toContain("tools-deck");
 
     const stage8 = entry(8);
-    expect(stage8).toContain('from "@intx/tools-posix/sidecar-bundle"');
-    expect(stage8).toContain('from "@solutions-builder/tools-delivery/publish-workspace"');
+    expect(stage8).not.toContain("@intx/tools-posix");
+    expect(stage8).not.toContain("@solutions-builder/");
     expect(stage8).not.toContain("@corbits/artifacts/sidecar-bundle");
 
     expect(entry(9)).toContain('from "@solutions-builder/tools-delivery/sidecar-bundle"');
@@ -115,12 +116,12 @@ describe("specialistEntrySource", () => {
   });
 
   // #41 step 5: the entry takes nothing of the project's. The credential
-  // binding is named for the role, and `publish_workspace` is built with no
-  // project id, so the same role renders the same entry everywhere.
-  test("a credential-bound entry names its binding for the role, and stage 8 builds publish_workspace unbound", () => {
+  // binding is named for the role, so the same role renders the same entry
+  // everywhere.
+  test("a credential-bound entry names its binding for the role", () => {
     expect(entry(2, "primary", true)).toContain('name: "workflow-artifacts:constraints-mapper"');
-    expect(entry(8)).toContain("const publishWorkspace = publishWorkspaceTool();");
-    expect(entry(8, "primary", true)).toContain('name: "workflow-artifacts:build-engineer"');
+    expect(entry(8)).not.toContain("publishWorkspaceTool");
+    expect(entry(8, "primary", true)).toContain('name: "workflow-artifacts:build-supervisor"');
   });
 
   test("stage 5's entry names no audience", () => {

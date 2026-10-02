@@ -16,6 +16,7 @@ import { dirname, join } from "node:path";
 import { serveHost } from "@corbits/embedded-host";
 import { initSolutionsBuilderHost } from "./identity.js";
 import { API_VERSION, createApi } from "./api.js";
+import { stopBuildAttempts } from "./build-attempts.js";
 
 initSolutionsBuilderHost();
 
@@ -34,6 +35,8 @@ await serveHost({
   api: createApi(),
   apiVersion: API_VERSION,
   selfAuthenticatingPaths: [WORKFLOW_ARTIFACTS_MOUNT_PATH],
+  // A build worker the host started ends with the host, recorded as cancelled.
+  onStop: stopBuildAttempts,
   distDirs: [
     // What the desktop shell passes (Tauri bundles `dist/` as a resource),
     // a `dist/` beside the executable for a standalone binary, and the web

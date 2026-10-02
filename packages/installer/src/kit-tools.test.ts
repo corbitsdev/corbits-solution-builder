@@ -23,9 +23,10 @@ describe("the kit's tool names", () => {
 
   test("a role's skills name only tools its stage's deployment carries", () => {
     // Mirrors `specialistEntrySource`'s per-stage tool imports; stage 5
-    // carries none since #435 (the app draws slides from the outline).
+    // carries none since #435 (the app draws slides from the outline), and
+    // stage 8 none since the build moved to the host's bridge.
     const toolsByStage: Record<number, readonly string[]> = {
-      [BUILD_STAGE]: [...SPECIALIST_TOOLS.posix, ...SPECIALIST_TOOLS.publishWorkspace],
+      [BUILD_STAGE]: [],
       [DELIVERY_STAGE]: SPECIALIST_TOOLS.delivery,
     };
     for (const agent of kitSeed().agents) {

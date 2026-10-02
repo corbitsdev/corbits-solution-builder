@@ -248,7 +248,7 @@ describe("project chrome paint", () => {
     expect(build).toContain('className="ev"');
     expect(build).toContain("Build Evidence");
     expect(build).toContain("Start the build attempt");
-    expect(build).toContain("Accept as evidence");
+    expect(build).toContain("Record attempt");
     expect(build).not.toContain("Build supervision");
     expect(build).not.toContain("<Screen");
     expect(build).not.toContain("Starting the build specialist");
