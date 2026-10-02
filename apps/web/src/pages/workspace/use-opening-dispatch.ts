@@ -37,6 +37,7 @@ import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
 import { languageLead } from "@solutions-builder/app/language-settings";
 import { sendBackResumeCue } from "./send-back-cue.ts";
 import { handoffPending } from "./use-model-handoff.ts";
+import { composeApprovedChain } from "./approved-chain.ts";
 
 export type OpeningDispatch = {
   /** The opening send failed — surfaced with a retry, never retried forever. */
@@ -188,27 +189,30 @@ export function useOpeningDispatch({
     const dispatchOpening = (opening: string) => {
       if (cancelled || openedRef.current === key || inFlightRef.current === key) return;
       inFlightRef.current = key;
-      // The workspace's output language leads every opening (#411), so a
-      // running specialist hears a changed setting without a redeploy.
-      const body = languageLeadRef.current ? `${languageLeadRef.current}\n\n${opening}` : opening;
       void markerAlreadySent(createHubTransport(), tenantId, marker)
-        .then((already) => {
-          if (cancelled) return undefined;
+        .then(async (already) => {
+          if (cancelled) return;
           if (already) {
             openedRef.current = key;
-            return reloadThread();
+            await reloadThread();
+            return;
           }
-          return api
-            .sendStageMail(tenantId, agentAddress, { body, subject: `${marker} ${stageName(stage)}` })
-            .then(() => {
-              if (cancelled) return undefined;
-              // Marked as opened only now that the send is confirmed —
-              // a throw above skips this, so a failed send is retried
-              // rather than silently treated as sent.
-              openedRef.current = key;
-              setError(null);
-              return reloadThread();
-            });
+          // Every approved artifact before this stage, and the person's
+          // material, go ahead of the stage's own lead (#423): the
+          // specialist reads the record, not only the last document.
+          const chain = await composeApprovedChain({ tenantId, nodes: detail.nodes, reviews: workflowView?.reviews ?? {}, stage });
+          const led = chain ? `${chain}\n\n${opening}` : opening;
+          // The workspace's output language leads every opening (#411), so a
+          // running specialist hears a changed setting without a redeploy.
+          const body = languageLeadRef.current ? `${languageLeadRef.current}\n\n${led}` : led;
+          await api.sendStageMail(tenantId, agentAddress, { body, subject: `${marker} ${stageName(stage)}` });
+          if (cancelled) return;
+          // Marked as opened only now that the send is confirmed —
+          // a throw above skips this, so a failed send is retried
+          // rather than silently treated as sent.
+          openedRef.current = key;
+          setError(null);
+          await reloadThread();
         })
         .catch((cause: unknown) => {
           if (cancelled) return;
@@ -224,7 +228,6 @@ export function useOpeningDispatch({
           if (inFlightRef.current === key) inFlightRef.current = null;
         });
     };
-
     if (stage === 1) {
       if (opening?.body) dispatchOpening(opening.body);
     } else if (stage === 6 && (!workflowView || workflowView.requirements.length === 0)) {
