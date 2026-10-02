@@ -44,6 +44,7 @@ import { BuildPanel } from "./build.jsx";
 import { TargetPicker } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
 import { interviewProgress, latestDesignReply, workspaceGuidance } from "./guidance.js";
+import { repairedChoiceDraft } from "./choice-repair.ts";
 import { draftReferences } from "./draft-references.ts";
 import { designHistory } from "./design-history.ts";
 import { Flame } from "lucide-react";
@@ -267,7 +268,11 @@ export function StageWorkspace({
   // draft separate from the latest conversational turn so an acknowledgement
   // or a follow-up question never replaces the document being reviewed.
   const guidance = useMemo(() => workspaceGuidance(stage, foldedMessages), [stage, foldedMessages]);
-  const draftMessage = guidance.draft;
+  // A stage 3 draft that absorbed the person's choice anywhere but under
+  // "## Chosen approach" would leave them choosing again (#430): the
+  // section is written in deterministically, as alpha main did, before the
+  // pane or the gate reads the draft.
+  const draftMessage = useMemo(() => repairedChoiceDraft(stage, foldedMessages, guidance.draft), [stage, foldedMessages, guidance.draft]);
 
   // Stage 1's brief evaluator reads each new draft; the Product guide answers
   // when asked, on any stage. Both are advisory and never touch the gate.
