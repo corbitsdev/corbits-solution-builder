@@ -40,35 +40,10 @@ Seams that change between local and hub (name each one the plan uses):
 
 ### Step 2 — capabilities: add only when a requirement names the need
 
-L = in-process, no hub. H = mounts onto a hub (embedded-host counts). The
-\`@corbits/*\` names below are every one published on npm (the
-corbits-packages skill has versions and descriptions); name no other.
-
-- Models: \`@intx/inference-catalog\` (L); adapters — \`@corbits/ollama-adapter\`,
-  \`@corbits/openai-responses\`, \`@corbits/codex-provider\`,
-  \`@corbits/xai-provider\` (L)
-- Classification: \`@corbits/system-one\` (L)
-- Retrieval: \`@corbits/embedding\` (L), \`@corbits/reranking\` (L)
-- Memory: \`@corbits/memory\` (H)
-- Artifacts/files: \`@corbits/artifacts\` (H)
-- Mail/inbox: \`@corbits/mailbox\` (H); \`@intx/tools-mail\`
-- Scheduling and triggers: \`@corbits/cron\` (H), \`@corbits/webhooks\` (H)
-- Agent tools: \`@intx/tools-posix\`, \`@intx/tools-lsp\`
-- Credentials an app or agent presents: \`@corbits/credential-http\` (L),
-  \`@corbits/agent-token\` (H)
-- Approvals: \`@intx/authz\`
-- Desktop/CLI auth: \`@corbits/oauth-core\` (L)
-- Interface: \`@corbits/react-ui\` (L)
-- Logging: \`@intx/log\`
-- Tests only: \`@intx/inference-testing\`
-
-\`@corbits/embedded-host\`, \`@corbits/embed-hub\` and \`@corbits/keychain\` are
-Solution Builder's own workspace packages, not npm packages: a deliverable
-in "embedded" placement is built on \`@intx/*\` directly, with its secrets
-in local config.
-
-\`@corbits/*\` is the extension surface: mount it, never customize the hub or
-vendor it.
+Name a capability package only from the corbits-packages skill's list or
+the \`@intx/*\` packages on npm; nothing else exists to install. Where a
+requirement names the need, pick the package that meets it and cite the
+requirement; where none fits, scope the gap rather than inventing a name.
 
 Anything not forced by a requirement is a deferred option, never a build
 item.
