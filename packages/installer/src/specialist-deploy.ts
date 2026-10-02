@@ -35,7 +35,7 @@ import {
   vendoredMemberFiles,
 } from "./workflow-closure.js";
 import {
-  deploymentIsLive,
+  deploymentPlaceableHere,
   deploymentUsability,
   ensureWorkflowAsset,
   pinFor,
@@ -110,13 +110,18 @@ export const ENDED_DEPLOYMENT_STATUSES: ReadonlySet<string> = new Set(["releasin
  * picked exactly as it always was, with no special-casing for CL-8899 at
  * this layer at all.
  */
-function pickDeployment(deployments: readonly HubDeployment[]): HubDeployment | undefined {
-  return [...deployments].sort((a, b) => {
-    const aLive = !ENDED_DEPLOYMENT_STATUSES.has(a.status);
-    const bLive = !ENDED_DEPLOYMENT_STATUSES.has(b.status);
-    if (aLive !== bLive) return aLive ? -1 : 1;
-    return a.createdAt.localeCompare(b.createdAt);
-  })[0];
+function pickDeployment(deployments: readonly HubDeployment[], sidecar?: SidecarCapability): HubDeployment | undefined {
+  // CL-9698: with the host's placement facts known, a live deployment this
+  // host can still bring to a placed sidecar outranks one it never will --
+  // an unplaced deployment from before the host started, which the hub
+  // lists `released` once its reconciler gives up. Oldest-wins otherwise
+  // stands, so a fresh deploy beside a dead one is the pick, not the dead one.
+  const rank = (deployment: HubDeployment): number => {
+    if (ENDED_DEPLOYMENT_STATUSES.has(deployment.status)) return 2;
+    if (sidecar && !deploymentPlaceableHere(deployment, sidecar)) return 1;
+    return 0;
+  };
+  return [...deployments].sort((a, b) => rank(a) - rank(b) || a.createdAt.localeCompare(b.createdAt))[0];
 }
 
 /**
@@ -138,13 +143,18 @@ async function resolveLiveDeployment(
   projectId: string,
   stage: Stage,
   deployments: readonly HubDeployment[],
+  /** The host's placement facts, when the caller has them; see `pickDeployment`. */
+  sidecar?: SidecarCapability,
 ): Promise<HubDeployment | undefined> {
   const switched = await readStageSwitch(transport, projectId, stage);
   if (switched) {
     const target = deployments.find((deployment) => deployment.id === switched.deploymentId);
-    if (target && !ENDED_DEPLOYMENT_STATUSES.has(target.status)) return target;
+    // The same terms as `pickDeployment`'s first rank: a switch target this
+    // host will never place is dead to it as well (CL-9698).
+    const standing = sidecar ? deploymentPlaceableHere(target, sidecar) : target !== undefined && !ENDED_DEPLOYMENT_STATUSES.has(target.status);
+    if (standing) return target;
   }
-  return pickDeployment(deployments);
+  return pickDeployment(deployments, sidecar);
 }
 
 export type SpecialistDeploymentRef = {
@@ -292,6 +302,8 @@ export async function stageSpecialistStatus(
   projectId: string,
   stage: Stage,
   roleKey: string = DEFAULT_ROLE_KEY,
+  /** The host's placement facts, so the pick agrees with a deploy's (CL-9698). */
+  sidecar?: SidecarCapability,
 ): Promise<SpecialistDeploymentStatus | null> {
   const home = await projectHome(transport, projectId);
   const located = await specialistDeploymentsIn(transport, home, specialistAssetName(projectId, stage, roleKey));
@@ -300,7 +312,7 @@ export async function stageSpecialistStatus(
   // reported (so an attach sees it is not `deployed`), then the legacy one.
   let ended: SpecialistDeploymentStatus | null = null;
   for (const { tenantId, domain, deployments } of located) {
-    const winner = await resolveLiveDeployment(transport, projectId, stage, deployments);
+    const winner = await resolveLiveDeployment(transport, projectId, stage, deployments, sidecar);
     if (!winner) continue;
     const status = { deploymentId: winner.id, address: `${winner.id}@${domain}`, status: winner.status, tenantId };
     if (!ENDED_DEPLOYMENT_STATUSES.has(winner.status)) return status;
@@ -530,13 +542,13 @@ async function ensureSpecialistDeploymentOnce(
   // host started is not waited for at all (CL-9680): the host that was
   // placing it is gone.
   const liveExisting = async (): Promise<{ deployment: HubDeployment; tenantId: string; assetId: string; domain: string } | null> => {
-    const own = await resolveLiveDeployment(transport, projectId, stage, matching(await workflows.deployments()));
+    const own = await resolveLiveDeployment(transport, projectId, stage, matching(await workflows.deployments()), sidecar);
     if (own && (await deploymentUsability(transport, tenantId, own.id, own.id, wait, sidecar.sidecarsLostBefore)) === "usable") {
       return { deployment: own, tenantId, assetId, domain: tenant.domain! };
     }
     const legacy = (await specialistDeploymentsIn(transport, home, assetName)).find((entry) => entry.tenantId === home.legacyTenantId);
     if (!legacy) return null;
-    const pick = await resolveLiveDeployment(transport, projectId, stage, legacy.deployments);
+    const pick = await resolveLiveDeployment(transport, projectId, stage, legacy.deployments, sidecar);
     if (!pick || (await deploymentUsability(transport, legacy.tenantId, pick.id, pick.id, wait, sidecar.sidecarsLostBefore)) !== "usable") return null;
     return { deployment: pick, tenantId: legacy.tenantId, assetId: legacy.asset.id, domain: legacy.domain };
   };
@@ -652,10 +664,13 @@ async function ensureSpecialistDeploymentOnce(
   // once more right before deploying so we don't create a second live
   // deployment for the same asset. Skipped for a switch: a live deployment
   // existing here is expected (the one being switched away from), not a race
-  // to fold into.
+  // to fold into. On the same terms as `liveExisting` above (CL-9698): a
+  // `pending` deployment from before this host started is the one that check
+  // just declined to wait on, not a concurrent caller's, and the hub lists
+  // it `released` moments later.
   if (!switchToOfferingId) {
-    const justDeployed = await resolveLiveDeployment(transport, projectId, stage, matching(await workflows.deployments()));
-    if (justDeployed && (await deploymentIsLive(transport, tenantId, justDeployed.id))) {
+    const justDeployed = await resolveLiveDeployment(transport, projectId, stage, matching(await workflows.deployments()), sidecar);
+    if (deploymentPlaceableHere(justDeployed, sidecar)) {
       return { deploymentId: justDeployed.id, address: `${justDeployed.id}@${tenant.domain}`, tenantId };
     }
   }
@@ -686,7 +701,7 @@ async function ensureSpecialistDeploymentOnce(
   // deployment this call itself just created is unambiguously the answer.
   const winner = switchToOfferingId
     ? deployment
-    : ((await resolveLiveDeployment(transport, projectId, stage, matching(await workflows.deployments()))) ?? deployment);
+    : ((await resolveLiveDeployment(transport, projectId, stage, matching(await workflows.deployments()), sidecar)) ?? deployment);
 
   // CL-8719: the credential the winning deployment's `credentialBindings`
   // names must exist -- and be scoped to the winning anchor run -- before

@@ -69,6 +69,14 @@ describe("ensureSpecialistDeployment reuse", () => {
     expect(block).toContain('await deploymentUsability(transport, legacy.tenantId, pick.id, pick.id, wait, sidecar.sidecarsLostBefore)) !== "usable"');
     expect(block).not.toContain("deploymentIsLive(");
   });
+
+  test("the re-check after the push adopts only a deployment this host can still place (CL-9698)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const source = readFileSync(new URL("./specialist-deploy.ts", import.meta.url), "utf8");
+    const block = source.slice(source.indexOf("const justDeployed = await resolveLiveDeployment"), source.indexOf("const offeringIds = offerings.map"));
+    expect(block).toContain("deploymentPlaceableHere(justDeployed, sidecar)");
+    expect(source).not.toContain("deploymentIsLive(");
+  });
 });
 
 describe("stageSpecialistAddresses", () => {
@@ -135,6 +143,36 @@ describe("stageSpecialistStatus across the project tenant and the workspace", ()
       status: "deployed",
       tenantId: TENANT.id,
     });
+  });
+
+  // CL-9698: with the host's placement facts, a fresh deployment beside an
+  // unplaced one from before the host started is the pick -- the dead one
+  // is older, and oldest-wins alone would hand it back until the hub
+  // releases it. Without the facts, oldest-wins stands as before.
+  test("a deployment this host can still place outranks an older unplaced one from before it started", async () => {
+    const stale = { ...deploymentRow("dep_stale", "asset_own", "pending"), createdAt: "2026-01-01T00:00:00.000Z" };
+    const fresh = { ...deploymentRow("dep_fresh", "asset_own", "pending"), createdAt: "2026-01-03T00:00:00.000Z" };
+    const transport = withConfig(fakeTransport({ assets, deployments: [stale, fresh] }));
+    const sidecar = { canPlaceSidecars: true, sidecarsLostBefore: "2026-01-02T00:00:00.000Z" };
+    expect((await stageSpecialistStatus(transport, "p1", 1, undefined, sidecar))?.deploymentId).toBe("dep_fresh");
+    expect((await stageSpecialistStatus(transport, "p1", 1))?.deploymentId).toBe("dep_stale");
+  });
+
+  test("a switch record pointing at an unplaced pre-restart deployment no longer stands once the host's facts are known", async () => {
+    const stale = { ...deploymentRow("dep_stale", "asset_own", "pending"), createdAt: "2026-01-01T00:00:00.000Z" };
+    const fresh = { ...deploymentRow("dep_fresh", "asset_own", "pending"), createdAt: "2026-01-03T00:00:00.000Z" };
+    const base = fakeTransport({ assets, deployments: [stale, fresh] });
+    const transport = {
+      async fetch<T>(method: string, path: string, body?: unknown): Promise<T> {
+        if (method === "GET" && path === `/api/tenants/${PROJECT_TENANT.id}`) {
+          return { ...PROJECT_TENANT, config: { solutionsBuilder: { modelSwitch: { "1": { deploymentId: "dep_stale", offeringId: "off_1" } } } } } as T;
+        }
+        return base.fetch<T>(method, path, body);
+      },
+    } as Transport;
+    const sidecar = { canPlaceSidecars: true, sidecarsLostBefore: "2026-01-02T00:00:00.000Z" };
+    expect((await stageSpecialistStatus(transport, "p1", 1, undefined, sidecar))?.deploymentId).toBe("dep_fresh");
+    expect((await stageSpecialistStatus(transport, "p1", 1))?.deploymentId).toBe("dep_stale");
   });
 
   test("a live deployment in the project tenant wins over an ended legacy one", async () => {
