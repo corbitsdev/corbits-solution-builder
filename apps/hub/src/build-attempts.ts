@@ -153,6 +153,13 @@ type InFlight = {
 /** Keyed `<projectId>:<attempt>`; memory only, see the module doc. */
 const inFlight = new Map<string, InFlight>();
 
+/**
+ * Projects whose next attempt is being set up and has no number yet. Taken
+ * synchronously, before the first await of a start, so two starts that
+ * land together cannot both pass the running check and claim one number.
+ */
+const starting = new Set<string>();
+
 function key(projectId: string, attempt: number): string {
   return `${projectId}:${String(attempt)}`;
 }
@@ -249,6 +256,7 @@ export async function stopBuildAttempts(): Promise<void> {
 
 /** True while this host is running any attempt for the project. */
 export function projectHasRunningAttempt(projectId: string): boolean {
+  if (starting.has(projectId)) return true;
   for (const entry of inFlight.keys()) if (entry.startsWith(`${projectId}:`)) return true;
   return false;
 }
@@ -268,6 +276,17 @@ export async function startBuildAttempt(args: {
   if (projectHasRunningAttempt(projectId)) {
     throw new HostError("conflict", "A build attempt is already running for this project. Cancel it, or wait for it to end.", {}, false);
   }
+  starting.add(projectId);
+  try {
+    return await startReserved(args);
+  } finally {
+    starting.delete(projectId);
+  }
+}
+
+/** The start proper, once the project is reserved to this call. */
+async function startReserved(args: { projectId: string; prompt: BuildPromptInput; continueFrom?: number | undefined }): Promise<AttemptRecord> {
+  const { projectId } = args;
   const directory = projectBuildsDirectory(projectId);
   await mkdir(directory, { recursive: true });
   const existing = await attemptNumbers(projectId);

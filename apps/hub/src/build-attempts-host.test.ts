@@ -67,6 +67,18 @@ describe("the host's build attempts", () => {
     expect(() => process.kill(recorded.pid, 0)).toThrow();
   }, CANCEL_GRACE_MS + 15_000);
 
+  onlyOnPosix("two starts that land together get one attempt, not two with the same number", async () => {
+    const { startBuildAttempt, listAttempts, stopBuildAttempts } = await import("./build-attempts.js");
+    const results = await Promise.allSettled([
+      startBuildAttempt({ projectId: "proj_race", prompt: PROMPT }),
+      startBuildAttempt({ projectId: "proj_race", prompt: PROMPT }),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect((await listAttempts("proj_race")).map((record) => record.attempt)).toEqual([1]);
+    await stopBuildAttempts();
+  }, CANCEL_GRACE_MS + 15_000);
+
   onlyOnPosix("an attempt an earlier host run started is detached while its group lives, lost once it is gone, and cancel reaches it", async () => {
     const { attemptRecord, cancelBuildAttempt, projectBuildsDirectory } = await import("./build-attempts.js");
     const directory = projectBuildsDirectory("proj_restart");
