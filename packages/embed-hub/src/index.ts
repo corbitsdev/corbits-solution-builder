@@ -204,8 +204,9 @@ export type MountedHub = {
      * allocations' connect grace is ended now and their reconciliation woken,
      * so the reconciler replaces each dead sidecar with a new one running the
      * same frozen bundle and resuming the same run. The tenant's other dead
-     * workers are woken to be released, as before. Returns the ids it is
-     * placing, so a caller can wait for them before reading or mailing them.
+     * workers are left to their own connect deadline and released then, as
+     * before. Returns the ids it is placing, so a caller can wait for them
+     * before reading or mailing them.
      */
     recoverDeployments(tenantId: string, deploymentIds: readonly string[]): Promise<string[]>;
   };
@@ -872,7 +873,12 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
         const now = new Date();
         for (const allocation of await sidecarAllocationStore.listActive()) {
           if (allocation.tenantId !== tenantId || allocation.status !== "allocated") continue;
-          if (deploymentIds.includes(allocation.anchorRunId)) {
+          // Only the wanted rows are touched. The tenant's other dead workers
+          // reach their own connect deadline and are released then (the
+          // policy above): woken early, each would hold a reconciler slot
+          // for the whole wait and queue the wanted placement behind it.
+          if (!deploymentIds.includes(allocation.anchorRunId)) continue;
+          {
             // The worker is known dead (the caller checked it is unplaced and
             // from before this host started), so its connect grace ends now
             // rather than at the deadline boot gave it; the reconciler then
@@ -889,8 +895,8 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
             }
             placing.push(allocation.anchorRunId);
             void wakeOnceReplacing(allocation.id, allocation.generation);
+            await sidecarAllocationStore.wakeReconciliation(allocation.id, allocation.generation);
           }
-          await sidecarAllocationStore.wakeReconciliation(allocation.id, allocation.generation);
         }
         return placing;
       },
