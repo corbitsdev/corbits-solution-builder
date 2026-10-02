@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ensureChoiceSection, withChoiceReminder } from "./stage-prompt.js";
+import { ensureChoiceSection, revisionRequest, splitRevision, withChoiceReminder } from "./stage-prompt.js";
 
 describe("withChoiceReminder records a stage-3 choice in the document", () => {
   test("a stage-3 choice names the Chosen approach section the approval gate reads", () => {
@@ -46,5 +46,15 @@ describe("ensureChoiceSection repairs a draft that ignored the reminder", () => 
   test("ordinary replies and other stages pass through untouched", () => {
     expect(ensureChoiceSection(3, "Use Postgres.", draft)).toBe(draft);
     expect(ensureChoiceSection(2, "Chosen: Approach A (Extend the worker)", draft)).toBe(draft);
+  });
+});
+
+describe("revisionRequest carries the current version, as alpha main's round did", () => {
+  test("the document, the revise instruction and the ask, in that order, and the split finds them again", () => {
+    const out = revisionRequest({ stage: 2, userInput: "Drop the mobile form.", currentDocument: "## In short\n- fine\n" });
+    expect(out.indexOf("## In short")).toBeLessThan(out.indexOf("Revise the current version above"));
+    expect(out.indexOf("Revise the current version above")).toBeLessThan(out.indexOf("Drop the mobile form."));
+    expect(splitRevision(out)).toEqual({ document: "## In short\n- fine", ask: "Drop the mobile form." });
+    expect(splitRevision("Drop the mobile form.")).toBeNull();
   });
 });

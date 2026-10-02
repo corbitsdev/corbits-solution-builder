@@ -1,12 +1,11 @@
 /**
  * The prose a stage specialist actually reads.
  *
- * Pure rendering: turning approved inputs, the current document, the
- * conversation so far and the person's own words into the one prompt string
- * a drafting round hands to its agent step. Nothing here touches the
- * database, an inference call, or Interchange — the host builds the pieces
- * (`apps/hub`'s `stage-runs.ts` and `agent-conversation.ts`) and this module
- * only renders them.
+ * Pure rendering: the approved inputs a stage opens with (`renderInputs`,
+ * read by `apps/web`'s approved chain), a revision turn that carries the
+ * current version (`revisionRequest`), and the stage 3 choice reminder and
+ * repair. Nothing here touches a database, an inference call or
+ * Interchange; the client composes the mail and this renders the pieces.
  */
 import { MATERIAL_KIND } from "./artifacts.js";
 
@@ -25,36 +24,6 @@ export type StageTurn = {
   readonly failed?: true;
 };
 
-export type StageContext = { brief: string | null; recent: StageTurn[] };
-
-/** Renders one turn for the compactor's prompt, and for the draft prompt. */
-export function renderTurns(turns: StageTurn[]): string {
-  return turns
-    .map((turn) => {
-      if (turn.role === "specialist") return `SPECIALIST: ${turn.body}`;
-      const quoted = turn.quotes
-        .map((entry) => `  (about this passage: "${entry.quote}")`)
-        .join("\n");
-      return `PERSON: ${turn.body}${quoted ? `\n${quoted}` : ""}`;
-    })
-    .join("\n\n");
-}
-
-/** The conversation section of a draft prompt. Empty when there is none. */
-export function renderStageContext(context: StageContext): string {
-  const sections: string[] = [];
-  if (context.brief) {
-    sections.push(
-      "--- STANDING DIRECTIONS FROM THE PERSON (these still apply) ---",
-      context.brief,
-    );
-  }
-  if (context.recent.length > 0) {
-    sections.push("--- THE CONVERSATION SO FAR ---", renderTurns(context.recent));
-  }
-  return sections.join("\n\n");
-}
-
 export type Inputs = { node: { id: string; title: string; kind: string; stage: number }; content: string }[];
 
 /** The inputs as the specialist reads them. A document written this stage is not yet approved, and is labelled as such. */
@@ -71,47 +40,37 @@ export function renderInputs(inputs: Inputs, stage: number): string {
     .join("\n\n");
 }
 
-/**
- * The draft prompt.
- *
- * Pure, and exported, so the two properties that matter can be checked without
- * a provider: that a revision carries the document it is revising, and that
- * the standing directions travel with it.
- *
- * Without the current version in the prompt the model re-rolls the stage from
- * scratch and version two is a different draft rather than a better one, which
- * is not what "revise" means to anyone.
- */
-export function buildDraftPrompt(args: {
-  projectTitle: string;
-  stage: number;
-  inputs: string;
-  userInput: string;
-  currentDocument?: string;
-  context?: StageContext;
-}): string {
-  const revising = (args.currentDocument ?? "").trim().length > 0;
-  const conversation = args.context ? renderStageContext(args.context) : "";
+export const REVISION_LEAD = "--- THE CURRENT VERSION OF THIS DOCUMENT ---";
+export const REVISION_ASK = "--- WHAT THE PERSON IS ASKING FOR NOW ---";
 
+/**
+ * A revision turn as alpha main sent one (#431): the current version of the
+ * document, the instruction to revise it rather than start over, then the
+ * person's own words. Without the current version in the turn the model
+ * re-rolls the stage and version two is a different draft rather than a
+ * better one, which is not what "revise" means to anyone. The chat shows
+ * only the person's words; `splitRevision` is how it finds them.
+ */
+export function revisionRequest(args: { stage: number; userInput: string; currentDocument: string }): string {
   return [
-    `Project: ${args.projectTitle}`,
+    REVISION_LEAD,
+    args.currentDocument.trim(),
     "",
-    args.inputs,
-    ...(revising
-      ? ["", "--- THE CURRENT VERSION OF THIS DOCUMENT ---", args.currentDocument!.trim()]
-      : []),
-    ...(conversation ? ["", conversation] : []),
+    `Produce the next version of the stage ${args.stage} artifact. Revise the current version above rather than starting over: keep every part that was not objected to, apply what is asked for, and honour the standing directions. Use exactly the structure and format your instructions specify.`,
     "",
-    "--- WHAT THE PERSON IS ASKING FOR NOW ---",
-    args.userInput.trim() ||
-      (revising
-        ? "(No further instruction. Improve the current version without changing what was agreed.)"
-        : "(The user gave no further input; work from the approved inputs above.)"),
-    "",
-    revising
-      ? `Produce the next version of the stage ${args.stage} artifact. Revise the current version above rather than starting over: keep every part that was not objected to, apply what is asked for, and honour the standing directions. Use exactly the structure and format your instructions specify.`
-      : `Produce the stage ${args.stage} artifact now, using exactly the structure and format your instructions specify.`,
+    REVISION_ASK,
+    args.userInput.trim() || "(No further instruction. Improve the current version without changing what was agreed.)",
   ].join("\n");
+}
+
+/** A revision turn taken apart: the document it carried, and the person's ask. Null for any other message. */
+export function splitRevision(text: string): { readonly document: string; readonly ask: string } | null {
+  if (!text.startsWith(REVISION_LEAD)) return null;
+  const at = text.indexOf(REVISION_ASK);
+  if (at === -1) return null;
+  const inner = text.slice(REVISION_LEAD.length, at).trim();
+  const cut = inner.lastIndexOf("\n\nProduce the next version");
+  return { document: (cut === -1 ? inner : inner.slice(0, cut)).trim(), ask: text.slice(at + REVISION_ASK.length).trim() };
 }
 
 /**

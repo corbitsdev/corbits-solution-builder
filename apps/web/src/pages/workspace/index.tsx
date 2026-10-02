@@ -43,8 +43,9 @@ import { StageDocument } from "./document.jsx";
 import { BuildPanel } from "./build.jsx";
 import { TargetPicker } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
-import { interviewProgress, latestDesignReply, workspaceGuidance } from "./guidance.js";
+import { interviewProgress, isHtmlDocument, latestDesignReply, workspaceGuidance } from "./guidance.js";
 import { repairedChoiceDraft } from "./choice-repair.ts";
+import { revisionRequest } from "@solutions-builder/app/stage-prompt";
 import { draftReferences } from "./draft-references.ts";
 import { designHistory } from "./design-history.ts";
 import { Flame } from "lucide-react";
@@ -583,7 +584,13 @@ export function StageWorkspace({
     setError(null);
     setRemediation(undefined);
     try {
-      await api.sendStageMail(tenantId, agentAddress, { body: withAttachedDocuments(body, stageDocuments) });
+      // With a Markdown draft on the table, the turn carries it and the
+      // instruction to revise it, as alpha main's rounds did (#431); a design
+      // (HTML) has its own feedback path, and stages 8 and 9 revise nothing.
+      const revising = draftMessage && stage <= 7 && !isHtmlDocument(draftMessage.body);
+      const turn = withAttachedDocuments(body, stageDocuments);
+      const mail = revising ? revisionRequest({ stage, userInput: turn, currentDocument: draftMessage.body }) : turn;
+      await api.sendStageMail(tenantId, agentAddress, { body: mail });
       await loadThread();
     } catch (cause) {
       if (isTerminalRunRefusal(cause)) {

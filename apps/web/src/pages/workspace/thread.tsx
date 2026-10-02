@@ -5,6 +5,7 @@ import { Markdown } from "../../markdown.jsx";
 import { splitHandoff } from "../../design-handoff.ts";
 import { splitChain } from "./approved-chain.ts";
 import { composedMailFold } from "./composed-mail.ts";
+import { splitRevision } from "@solutions-builder/app/stage-prompt";
 import { Dictated } from "../../dictation.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { answersDraft, segmentsIn } from "./choices.js";
@@ -76,6 +77,20 @@ function MessageBody({ text }: { text: string }) {
           <Markdown source={chain.chain} />
         </details>
         {chain.after ? <MessageBody text={chain.after} /> : null}
+      </>
+    );
+  }
+  // A revision turn carries the version it revises (#431); the chat shows
+  // the person's words and keeps the version behind a fold.
+  const revision = splitRevision(text);
+  if (revision) {
+    return (
+      <>
+        <Markdown source={revision.ask} />
+        <details className="bubble-fold">
+          <summary>The version this revises</summary>
+          <Markdown source={revision.document} />
+        </details>
       </>
     );
   }
