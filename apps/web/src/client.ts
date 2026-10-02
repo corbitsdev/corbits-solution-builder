@@ -205,6 +205,69 @@ export type GoogleDriveStatus = {
 /** A deck uploaded as a Google Slides document. */
 export type UploadedSlides = { readonly id: string; readonly url: string; readonly name: string };
 
+/** `GET /api/build/worker`: which coding agent stage 8 runs, and whether it is on this host. */
+export type BuildWorkerStatus = {
+  bridge: string;
+  capabilities: Record<string, boolean>;
+  platform: "macos" | "linux" | "windows";
+  settings: { worker: string; executable: string };
+  worker: { id: string; label: string; command: string };
+  workers: { id: string; label: string; executable: string }[];
+  available: boolean;
+  detail: string;
+  /** How to get the worker on this host, when it is absent; null when it is present or failing for another reason. */
+  install: {
+    platform: "macos" | "linux" | "windows";
+    binary: string;
+    text: string;
+    command: string | null;
+    url: string | null;
+    verified: boolean;
+  } | null;
+  checkedAt: string;
+};
+
+/** What the bounded bridge reported when a worker ended: final text and an exit status, nothing synthesised. */
+export type BridgeOutcome = {
+  bridgeId: string;
+  worker: string;
+  command: string;
+  available: boolean;
+  exitStatus: number | null;
+  signal: string | null;
+  finalText: string;
+  stderrTail: string;
+  workspace: string;
+  turnLog: string | null;
+  turns: number | null;
+  toolCalls: number | null;
+  startedAt: string;
+  endedAt: string;
+  checkpointRef: null;
+};
+
+/** One build attempt as the host records it (`apps/hub/src/build-attempts.ts`). */
+export type BuildAttempt = {
+  attempt: number;
+  /** `lost`: started on some host and never ended on this one. */
+  state: "running" | "ended" | "unavailable" | "lost";
+  startedAt: string | null;
+  endedAt: string | null;
+  continuedFrom: number | null;
+  outcome: BridgeOutcome | null;
+  workspace: string;
+};
+
+/** The frozen material the host assembles the worker's prompt from. */
+export type BuildPromptMaterial = {
+  planText: string;
+  requirementsText: string;
+  designText: string;
+  stackBlock: string;
+  target: string;
+  planRef: string;
+};
+
 export class ApiFailure extends Error {
   readonly detail: ApiError;
   /** The HTTP status the host answered with, when the failure came from a response (not a dropped connection). */
@@ -1096,6 +1159,26 @@ async function localizedRole(transport: ReturnType<typeof createHubTransport>, w
 
 export const api = {
   status: () => request<HostStatus>("/status"),
+  /** The build lane: the chosen worker, whether it is on this host, and how to get it when not. */
+  buildWorker: () => request<BuildWorkerStatus>("/build/worker"),
+  setBuildWorker: (patch: { worker?: string; executable?: string }) =>
+    request<BuildWorkerStatus>("/build/worker", { method: "PUT", body: JSON.stringify(patch) }),
+  buildAttempts: (projectId: string) => request<{ attempts: BuildAttempt[] }>(`/projects/${projectId}/build/attempts`),
+  startBuildAttempt: (projectId: string, prompt: BuildPromptMaterial, continueFrom?: number) =>
+    request<{ attempt: BuildAttempt }>(`/projects/${projectId}/build/attempts`, {
+      method: "POST",
+      body: JSON.stringify({ prompt, ...(continueFrom === undefined ? {} : { continueFrom }) }),
+    }),
+  buildAttempt: (projectId: string, attempt: number) =>
+    request<{ attempt: BuildAttempt; log: string; prompt: string | null }>(`/projects/${projectId}/build/attempts/${String(attempt)}`),
+  cancelBuildAttempt: (projectId: string, attempt: number) =>
+    request<{ ok: true }>(`/projects/${projectId}/build/attempts/${String(attempt)}/cancel`, { method: "POST", body: "{}" }),
+  /** Archives, hashes and probes an ended attempt on the host; the bytes come back inline for the client to record as the build archive. */
+  packageBuildAttempt: (projectId: string, attempt: number, body: { fileName?: string; targets?: unknown[] }) =>
+    request<{ packaged: { fileName: string; mediaType: string; sizeBytes: number; sha256: string; dataUri: string; manifest: { attempt: string } & Record<string, unknown>; verification: { complete: boolean; failed: string[]; targets: { target: string; ranSuccessfully: boolean; transcript: string }[] } } }>(
+      `/projects/${projectId}/build/attempts/${String(attempt)}/package`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
   /**
    * Mints the embedded owner and signs this browser in as them, via a
    * `Set-Cookie` the host attaches to this response (`apps/hub/src/api-host.ts`'s
@@ -2544,6 +2627,8 @@ export const api = {
     projectId: string,
     bundle: { fileName: string; mediaType: string; dataUri: string; sizeBytes: number; manifest?: { attempt: string } & Record<string, unknown> },
     sourceVersionIds: string[] = [],
+    /** The role the archive is recorded under. Stamped, the node is the stage's reviewable artifact (`reviewableArtifact`). */
+    agentRole?: string,
   ) =>
     asWorkspaceOwner(async (transport) => {
       // The attempt the archive and its manifest share, so stage 9 finds the
@@ -2561,7 +2646,7 @@ export const api = {
             mediaType: bundle.mediaType,
             ...(variant === null ? {} : { variant }),
             sourceVersionIds,
-            provenance: { producer: "agent" as const },
+            provenance: { producer: "agent" as const, ...(agentRole ? { agentRole } : {}) },
           },
         },
       });
@@ -2580,7 +2665,7 @@ export const api = {
               mediaType: "application/json",
               ...(variant === null ? {} : { variant }),
               sourceVersionIds: [artifact.id],
-              provenance: { producer: "agent" as const },
+              provenance: { producer: "agent" as const, ...(agentRole ? { agentRole } : {}) },
             },
           },
         });

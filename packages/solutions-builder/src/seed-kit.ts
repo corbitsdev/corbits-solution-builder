@@ -36,7 +36,7 @@ const SKILLS: readonly { id: string; instructions: string; tools: readonly strin
   { id: "requirements-authoring", instructions: "Gather what the approved stages agreed into one requirements document: every requirement traceable to an input, every acceptance criterion testable. Add nothing the inputs do not support.", tools: [] },
   { id: "build-planning", instructions: "Turn an approved concept into a plan a code builder can execute, with owners and acceptance conditions.", tools: [] },
   { id: "cost-estimation", instructions: "Produce a reproducible estimate from immutable inputs, with assumptions stated. Never spend.", tools: [] },
-  { id: "build-engineering", instructions: "Build the software yourself with the shell tool, in small verified steps: scaffold, install, implement, typecheck, run, fix, report. Every reply carries the real commands run and their real output. Humans decide permissions, material changes and evidence.", tools: [...SPECIALIST_TOOLS.posix, ...SPECIALIST_TOOLS.publishWorkspace] },
+  { id: "worker-supervision", instructions: "Coordinate a build without writing its code. Humans decide permissions, material changes and evidence.", tools: [] },
   {
     id: "interchange-platform",
     instructions: [
@@ -78,7 +78,7 @@ const DIRECTORS: readonly DirectorRecord[] = [
   {
     key: "sb-supervisor",
     title: "Builder",
-    agents: ["build-engineer"],
+    agents: ["build-supervisor"],
   },
 ];
 
@@ -100,7 +100,7 @@ function skillsFor(role: AgentRole): string[] {
     "requirements-author": ["requirements-authoring"],
     architect: ["build-planning", "interchange-platform", ...platform],
     estimator: ["cost-estimation"],
-    "build-engineer": ["build-engineering", "using-interchange", "using-corbits-packages"],
+    "build-supervisor": ["worker-supervision", "interchange-platform"],
     "delivery-verifier": ["delivery-verification"],
     "brief-evaluator": ["brief-evaluation"],
   };

@@ -7,7 +7,7 @@ describe("specialistActivity", () => {
   test("names the stage's specialist and its task", () => {
     expect(specialistActivity(4)).toBe("Experience designer is drawing the design");
     expect(specialistActivity(5)).toBe("Presentation creator is writing the stakeholder packages and their slides");
-    expect(specialistActivity(8)).toBe("Build engineer is building the software");
+    expect(specialistActivity(8)).toBe("Build supervisor is reviewing the build");
   });
 
   test("a stage it does not know still says something true", () => {

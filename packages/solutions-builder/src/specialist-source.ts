@@ -55,7 +55,9 @@ export const STAGE_ARTIFACT_KIND: Readonly<Record<Stage, ArtifactKind>> = {
  */
 export type InferenceSourcePin = { readonly provider: string; readonly model: string };
 
-/** The stage whose rounds run the build agent. */
+/** The stage whose specialist supervises the build. The build itself runs
+ *  through the host's bounded bridge (`apps/hub/src/corbits-exec.ts`), not
+ *  in this specialist's sidecar: it carries no shell and no delivery tool. */
 export const BUILD_STAGE = 8;
 
 /** The stage whose rounds write one package per stakeholder, each behind its own gate. */
@@ -89,7 +91,9 @@ export const SPECIALIST_BASE_DEPENDENCIES: Readonly<Record<string, string>> = {
   hono: "^4.0.0",
 };
 
-/** Stage 8's shell: `run_shell` and the file tools the build engineer works with. */
+/** `@intx/tools-posix`: the shell and file tools. No stage carries it
+ *  today; it stays in the packed union so a closure that ships it is
+ *  unchanged. */
 export const POSIX_TOOL_DEPENDENCIES: Readonly<Record<string, string>> = {
   "@intx/tools-posix": "0.4.0",
 };
@@ -134,11 +138,11 @@ export const WORKFLOW_PACKAGE_DEPENDENCIES: Readonly<Record<string, string>> = {
 export type SpecialistTooling = {
   /** `render_deck`: a stage 5 per-audience deployment, never the primary one (CL-8873). */
   readonly deck: boolean;
-  /** `@intx/tools-posix`: stage 8's shell. */
+  /** `@intx/tools-posix`: the shell. No stage carries it; the build runs on the host. */
   readonly posix: boolean;
-  /** `@solutions-builder/tools-delivery`: stage 8's `publish_workspace`, stage 9's `deliver`. */
+  /** `@solutions-builder/tools-delivery`: stage 9's `deliver`. */
   readonly delivery: boolean;
-  /** `@corbits/artifacts`' generic bundle: opt-in, never on stage 8 (CL-8723). */
+  /** `@corbits/artifacts`' generic bundle: opt-in. */
   readonly artifacts: boolean;
 };
 
@@ -148,15 +152,17 @@ export function specialistTooling(options: {
   readonly artifactTools?: boolean | undefined;
 }): SpecialistTooling {
   const { stage, roleKey = PRIMARY_ROLE_KEY, artifactTools = false } = options;
-  const isBuildStage = stage === BUILD_STAGE;
+  void roleKey;
   return {
     // The app draws and exports a stakeholder's slides from the deck outline
     // in the reply; a rendered file nothing reads only cost the model a turn
     // in which it reported the render instead of the package (#435).
     deck: false,
-    posix: isBuildStage,
-    delivery: isBuildStage || stage === DELIVERY_STAGE,
-    artifacts: artifactTools && !isBuildStage,
+    // Stage 8 builds through the host's bridge; its specialist reviews the
+    // worker's report and carries no shell.
+    posix: false,
+    delivery: stage === DELIVERY_STAGE,
+    artifacts: artifactTools,
   };
 }
 
@@ -237,31 +243,17 @@ const DELIVER_IMPORT: SpecialistToolImport = {
   tool: "deliver",
 };
 
-/** Stage 8's shell and `publish_workspace`. The latter records what it
- *  uploads against the run's own tenant, which is the project (#29); it
- *  takes no project id and the model never supplies one
- *  (`publishWorkspaceTool` in `tools-delivery/publish-workspace.ts`). */
-const BUILD_STAGE_IMPORTS: readonly SpecialistToolImport[] = [
-  {
-    package: "@intx/tools-posix/sidecar-bundle",
-    lines: [`import { posix } from ${JSON.stringify("@intx/tools-posix/sidecar-bundle")};`],
-    tool: "posix",
-  },
-  {
-    package: "@solutions-builder/tools-delivery/publish-workspace",
-    lines: [
-      `import { publishWorkspaceTool } from ${JSON.stringify("@solutions-builder/tools-delivery/publish-workspace")};`,
-      `const publishWorkspace = publishWorkspaceTool();`,
-    ],
-    tool: "publishWorkspace",
-  },
-];
+/** The shell, for a tooling that asks for it; none does today. */
+const POSIX_IMPORT: SpecialistToolImport = {
+  package: "@intx/tools-posix/sidecar-bundle",
+  lines: [`import { posix } from ${JSON.stringify("@intx/tools-posix/sidecar-bundle")};`],
+  tool: "posix",
+};
 
 /**
  * The spec for one deployment, from the same facts `specialistTooling`
- * reads: stage 5 carries `render_deck`, stage 8's delivery tool is
- * `publish_workspace` where stage 9's is `deliver`, and only a
- * credential-bound deployment declares the `hub` binding. Pure: the same inputs always give the same
+ * reads: stage 9 carries `deliver`, and only a credential-bound deployment
+ * declares the `hub` binding. Pure: the same inputs always give the same
  * spec, so a render is reproducible for `specialistEntryIsCurrent`.
  */
 export function specialistRoleSpec(options: {
@@ -271,25 +263,17 @@ export function specialistRoleSpec(options: {
 }): SpecialistRoleSpec {
   const { stage, roleKey = PRIMARY_ROLE_KEY, artifactTools = false } = options;
   const tooling = specialistTooling({ stage, roleKey, artifactTools });
-  const isBuildStage = stage === BUILD_STAGE;
   return {
     tooling,
     toolImports: [
       ...(tooling.artifacts ? [ARTIFACTS_IMPORT] : []),
       ...(tooling.deck ? [DECK_IMPORT] : []),
-      ...(tooling.posix ? BUILD_STAGE_IMPORTS : []),
-      ...(tooling.delivery && !isBuildStage ? [DELIVER_IMPORT] : []),
+      ...(tooling.posix ? [POSIX_IMPORT] : []),
+      ...(tooling.delivery ? [DELIVER_IMPORT] : []),
     ],
     artifactKind: STAGE_ARTIFACT_KIND[stage],
     promptNotes: tooling.artifacts ? [stageDocumentNote(stage, STAGE_ARTIFACT_KIND[stage])] : [],
-    // CL-8723: stage 8 binds through `publish_workspace`, which resolves the
-    // `hub` handle itself; every other bound stage binds through the
-    // generic bundle.
-    credentialPackage: artifactTools
-      ? isBuildStage
-        ? "@solutions-builder/tools-delivery/publish-workspace"
-        : "@corbits/artifacts/sidecar-bundle"
-      : null,
+    credentialPackage: artifactTools ? "@corbits/artifacts/sidecar-bundle" : null,
   };
 }
 

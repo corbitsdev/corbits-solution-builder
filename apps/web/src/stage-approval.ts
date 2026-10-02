@@ -39,20 +39,18 @@ export type ReviewableArtifact = { readonly status: "found"; readonly node: Arti
  * (`pages/workspace/index.tsx`'s `approve()`, via `persistStageDraft` --
  * CL-8687), and THAT reference is what goes into `open_review`.
  *
- * Stage 8 is different (CL-8723): `publish_workspace` uploads the build
- * archive itself through the run-scoped artifacts routes, stamping
- * `metadata.sb` the same way `persistStageDraft` does. `source.origin` is
- * NOT the signal this discriminates on -- the mounted module's own
- * `/artifacts/binary` route does not tag a run-scoped binary upload
+ * Stage 8 is different: the build archive is the host's packaging of an
+ * attempt, recorded by the build panel (`persistBuildEvidence`, stamped
+ * with the supervisor's role, `agentFor(BUILD_STAGE).id`) -- never the
+ * supervisor's own reply, which is the status document, not the archive.
+ * `source.origin` is NOT the signal this discriminates on -- the mounted
+ * module's own `/artifacts/binary` route does not tag a binary upload
  * `"workflow"` the way its text route does, so every binary upload reads
- * back `"imported"` regardless of who made it. `provenance.agentRole` is:
- * only `publish_workspace`'s own write sets it (`"build-engineer"`,
- * `specialist-source.ts`'s `agentFor(BUILD_STAGE).id`); the browser's own
- * `persistBuildEvidence` fallback write never does. The newest such node --
- * this project/stage/kind, not yet superseded -- IS the reviewable
- * artifact; approving it needs no browser write at all, and it is preferred
- * over `persist_needed` even when a chat draft (a status update, not the
- * archive) also exists.
+ * back `"imported"` regardless of who made it. `provenance.agentRole` is.
+ * The newest such node -- this project/stage/kind, not yet superseded --
+ * IS the reviewable artifact; approving it needs no browser write at all,
+ * and it is preferred over `persist_needed` even when a chat draft (a
+ * status update, not the archive) also exists.
  *
  * On every other stage the newest written node is found the same way: a
  * draft `persistStageDraft` wrote (stamped with the stage's specialist) or

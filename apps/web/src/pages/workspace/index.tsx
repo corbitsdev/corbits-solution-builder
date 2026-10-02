@@ -41,6 +41,7 @@ import { DeliveryPanel } from "./delivery.jsx";
 import { StageConversation } from "./thread.jsx";
 import { StageDocument } from "./document.jsx";
 import { BuildPanel } from "./build.jsx";
+import { useBuildAttempts } from "./build-attempts.ts";
 import { TargetPicker } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
 import { interviewProgress, isHtmlDocument, latestDesignReply, workspaceGuidance } from "./guidance.js";
@@ -462,6 +463,10 @@ export function StageWorkspace({
     modelName: activeModel?.canonicalName ?? null,
     reloadThread: loadThread,
   });
+  // Stage 8's attempts live on the host (`apps/hub/src/build-attempts.ts`);
+  // the panel drives them and the gate reads whether the recorded archive
+  // is the current attempt's.
+  const builds = useBuildAttempts(detail.project.id, stage === 8);
   const decisions = useStageDecisions({
     detail,
     tenantId,
@@ -470,6 +475,7 @@ export function StageWorkspace({
     reviewMessage,
     draftKind,
     foldedMessages,
+    buildAttempts: builds.attempts,
     refreshWorkflow: workflow.refresh,
     markStage: workflow.markStage,
     queueOpening: openingDispatch.queueOpening,
@@ -1005,13 +1011,14 @@ export function StageWorkspace({
         <BuildPanel
           detail={detail}
           tenantId={tenantId}
+          freeze={workflowView?.freeze ?? null}
+          attempts={builds.attempts}
+          refreshAttempts={builds.refresh}
           onChanged={() => void refreshWorkflow()}
           onOpenSettings={onOpenSettings}
           onApprove={approve}
           approving={approving || workflow.refreshingAfterAction}
           canApprove={approveAllowed}
-          onAcceptEvidence={openReviewNow}
-          {...(onOpenDecisions ? { onOpenDecisions } : {})}
           strip={stripEl}
           reader={reader}
           stageEvents={events}
@@ -1025,7 +1032,7 @@ export function StageWorkspace({
 
       {agentAddress && stage === 8 ? (
         // The senior-engineer panel on the build's evidence (#341): asked
-        // against the frozen stack and the build engineer's latest report,
+        // against the frozen stack and the build supervisor's latest status,
         // each reply recorded as the reviewer's build_review document.
         <PanelReviewsCompanion
           projectId={detail.project.id}
@@ -1033,7 +1040,7 @@ export function StageWorkspace({
           stage={8}
           reviewInput={
             latestSpecialistMessage && decisions.stage8Evidence?.ready
-              ? [workflowView?.freeze ? renderStackBlock(workflowView.freeze) : null, "## Build evidence, as the build engineer reported it", latestSpecialistMessage.body]
+              ? [workflowView?.freeze ? renderStackBlock(workflowView.freeze) : null, "## Build evidence, as the build supervisor reported it", latestSpecialistMessage.body]
                   .filter((part): part is string => part !== null)
                   .join("\n\n")
               : null

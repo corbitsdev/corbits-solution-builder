@@ -110,7 +110,7 @@ type PublishWorkspaceArgs = {
   targets: TargetProbe[];
 };
 
-export type { ManifestFileEntry } from "./verify.js";
+export type { ManifestFileEntry, TargetProbe } from "./verify.js";
 
 export type DeliveryManifestContent = {
   stage: 8;
@@ -126,7 +126,7 @@ export type DeliveryManifestContent = {
 };
 
 /** What the model is told about the checks, in both result shapes. */
-type VerificationSummary = {
+export type VerificationSummary = {
   complete: boolean;
   /** Paths of required items that are not `verified`. */
   failed: string[];
@@ -303,9 +303,60 @@ async function verifyAndRecord(
 
 /** Pulls the attempt number out of a `dir` like "attempts/3" for the
  *  artifact's `variant`/title; "1" when `dir` names no attempt (e.g. "."). */
-function attemptVariant(dir: string): string {
+export function attemptVariant(dir: string): string {
   const match = /(\d+)(?!.*\d)/.exec(dir);
   return `attempt-${match ? match[1] : "1"}`;
+}
+
+/** An attempt directory packaged, hashed and checked, with the bytes inline. */
+export type PackagedAttempt = {
+  fileName: string;
+  mediaType: string;
+  sizeBytes: number;
+  sha256: string;
+  dataUri: string;
+  manifest: DeliveryManifestContent;
+  verification: VerificationSummary;
+};
+
+/**
+ * Packages one attempt directory and runs the deterministic checks on the
+ * archive: the same archive, hashes and target probes whether this runs in
+ * a specialist's sidecar (the tool's data-URI fallback below) or on the
+ * host, where the bounded build bridge keeps its attempts. The archive
+ * comes back inline as a `data:` URI with its manifest, which is the shape
+ * the client already persists as the stage's `build_evidence`.
+ */
+export async function packageAttempt(input: {
+  /** The attempt directory, absolute. */
+  dir: string;
+  /** The attempt's variant, e.g. "attempt-3". */
+  attempt: string;
+  fileName?: string;
+  exclude?: readonly string[];
+  targets?: readonly TargetProbe[];
+  /** Refused above this many archive bytes; the fallback's cap when unset. */
+  maxBytes?: number;
+}): Promise<PackagedAttempt> {
+  const fileName = input.fileName ?? "build.tar.gz";
+  const exclude = [...new Set([...DEFAULT_EXCLUDES, ...(input.exclude ?? [])])];
+  const targets = [...(input.targets ?? [])];
+  const maxBytes = input.maxBytes ?? FALLBACK_MAX_ARCHIVE_BYTES;
+  const bytes = await tarDirectory(input.dir, exclude);
+  if (bytes.byteLength === 0) {
+    throw new Error("publish_workspace: the tar produced no bytes — is the workspace empty?");
+  }
+  if (bytes.byteLength > maxBytes) {
+    throw new Error(
+      `publish_workspace: the archive is ${bytes.byteLength} bytes, over the ${maxBytes}-byte limit — ` +
+        `exclude node_modules/build output and retry.`,
+    );
+  }
+  const dataUri = `data:${BUNDLE_MEDIA_TYPE};base64,${bytes.toString("base64")}`;
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  const manifest = await buildManifest(input.attempt, input.dir, exclude, { fileName, sizeBytes: bytes.byteLength, sha256 });
+  const verification = await verifyAndRecord(manifest, bytes, `sha256:${sha256}`, { fileName, exclude, dir: null, targets }, input.dir);
+  return { fileName, mediaType: BUNDLE_MEDIA_TYPE, sizeBytes: bytes.byteLength, sha256, dataUri, manifest, verification };
 }
 
 type MediatedFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -366,29 +417,26 @@ async function publishWorkspaceContent(
   // wrong, so an unnamed directory is worked out here instead of refused.
   const dir = args.dir ?? (await currentAttemptDir(env.toolCwd));
   const targetDir = resolveDir(env.toolCwd, dir);
-  const bytes = await tarDirectory(targetDir, args.exclude);
-  if (bytes.byteLength === 0) {
-    throw new Error("publish_workspace: the tar produced no bytes — is the workspace empty?");
-  }
 
   const hub = await resolveHubFetch(env.capabilities);
   if (!hub) {
-    if (bytes.byteLength > FALLBACK_MAX_ARCHIVE_BYTES) {
-      throw new Error(
-        `publish_workspace: the archive is ${bytes.byteLength} bytes, over the ${FALLBACK_MAX_ARCHIVE_BYTES}-byte fallback limit ` +
-          `(no artifact-upload credential is available, so it would have to be pasted into a mail reply) — ` +
-          `exclude node_modules/build output and retry.`,
-      );
-    }
-    const dataUri = `data:${BUNDLE_MEDIA_TYPE};base64,${bytes.toString("base64")}`;
-    const sha256 = createHash("sha256").update(bytes).digest("hex");
-    const manifest = await buildManifest(attemptVariant(dir), targetDir, args.exclude, {
-      fileName: args.fileName,
-      sizeBytes: bytes.byteLength,
-      sha256,
-    });
-    const verification = await verifyAndRecord(manifest, bytes, `sha256:${sha256}`, args, targetDir);
-    return { fallback: "data-uri", fileName: args.fileName, mediaType: BUNDLE_MEDIA_TYPE, sizeBytes: bytes.byteLength, dataUri, manifest, verification };
+    // No artifact-upload credential, so the archive would have to be pasted
+    // into a mail reply: the lower cap applies.
+    const packaged = await packageAttempt({ dir: targetDir, attempt: attemptVariant(dir), fileName: args.fileName, exclude: args.exclude, targets: args.targets });
+    return {
+      fallback: "data-uri",
+      fileName: packaged.fileName,
+      mediaType: packaged.mediaType,
+      sizeBytes: packaged.sizeBytes,
+      dataUri: packaged.dataUri,
+      manifest: packaged.manifest,
+      verification: packaged.verification,
+    };
+  }
+
+  const bytes = await tarDirectory(targetDir, args.exclude);
+  if (bytes.byteLength === 0) {
+    throw new Error("publish_workspace: the tar produced no bytes — is the workspace empty?");
   }
 
   if (bytes.byteLength > MAX_ARCHIVE_BYTES) {
@@ -415,7 +463,7 @@ async function publishWorkspaceContent(
           mediaType: BUNDLE_MEDIA_TYPE,
           variant,
           sourceVersionIds: [],
-          provenance: { producer: "agent", agentRole: "build-engineer" },
+          provenance: { producer: "agent", agentRole: "build-supervisor" },
         },
       },
     });
@@ -438,7 +486,7 @@ async function publishWorkspaceContent(
           mediaType: MANIFEST_MEDIA_TYPE,
           variant,
           sourceVersionIds: [created.id],
-          provenance: { producer: "agent", agentRole: "build-engineer" },
+          provenance: { producer: "agent", agentRole: "build-supervisor" },
         },
       },
     });

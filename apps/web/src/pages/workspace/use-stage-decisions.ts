@@ -8,7 +8,7 @@
  */
 import { stageName } from "../../components.jsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, ApiFailure, type ProjectDetail, type Remediation } from "../../client.js";
+import { api, ApiFailure, type BuildAttempt, type ProjectDetail, type Remediation } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
 import {
   approveStage,
@@ -23,7 +23,7 @@ import {
 } from "../../stage-approval.ts";
 import { packagesByStakeholder } from "../../package-lineages.ts";
 import { extractRequirementItems, requirementsDiffer, mintRequirementEntries, renderRequirementsBlock } from "@solutions-builder/app/requirements";
-import { buildEvidenceState, currentPublishedBundle } from "./build.jsx";
+import { buildEvidenceState } from "./build-attempts.ts";
 import { approvedStage8Archive, composeStage9Opening, manifestCompanionOf } from "./stage9-opening.ts";
 import {
   frozenSummaryLine,
@@ -65,17 +65,13 @@ export type StageDecisions = {
    *  re-derived from chat or artifact presence. */
   readonly approveAllowed: boolean;
   readonly approving: boolean;
-  /** The current attempt's `publish_workspace` fallback bundle, when some
-   *  reply since the last "Start"/"Continue" mail carries one (CL-8739) —
-   *  not only the latest reply, so a specialist that ran the tool then kept
-   *  talking doesn't lose the bundle a prior reply already carried. */
-  readonly publishedBundle: ReturnType<typeof currentPublishedBundle>;
-  /** Stage 8's own readiness rule (CL-8723): a review may only open once the
-   *  current attempt has published an archive or carries the fallback
-   *  bundle — a status update is conversation, not a build archive. */
+  /** Stage 8's own readiness rule: a review may only open once the host has
+   *  packaged an ended attempt and the archive is recorded, with no worker
+   *  running and no later attempt since — a status update is conversation,
+   *  not a build archive. */
   readonly stage8Evidence: ReturnType<typeof buildEvidenceState> | null;
   /** Persists (if needed) and opens the review for the current material,
-   *  right now — `BuildPanel`'s "Accept as evidence" calls it directly.
+   *  right now — opened automatically once the material is ready.
    *  `failed` marks an open that was tried and did not land (the hub or the
    *  workflow refused it, or threw), as against a precondition not met yet;
    *  the automatic open shows the former in the error banner (#169). */
@@ -122,6 +118,7 @@ export function useStageDecisions({
   onRemediation,
   onDetailChanged,
   onRequirementsReminted,
+  buildAttempts = [],
 }: {
   detail: ProjectDetail;
   tenantId: string;
@@ -139,6 +136,8 @@ export function useStageDecisions({
   onDetailChanged?: () => void;
   /** The requirement ids were re-issued from a revised document (#347): the rendered block, for the architect. */
   onRequirementsReminted?: (block: string) => void;
+  /** Stage 8: the host's attempts (`useBuildAttempts`), which say whether the recorded archive is current. */
+  buildAttempts?: readonly BuildAttempt[];
 }): StageDecisions {
   const [approving, setApproving] = useState(false);
   const [chosenTarget, setChosenTargetState] = useState<string | null>(null);
@@ -152,20 +151,16 @@ export function useStageDecisions({
     setChosenTargetState(null);
   }, [stage]);
 
-  const publishedBundle = useMemo(
-    () => (stage === 8 ? currentPublishedBundle(foldedMessages) : null),
-    [stage, foldedMessages],
-  );
   const stage8Evidence = useMemo(
-    () => (stage === 8 ? buildEvidenceState(foldedMessages, detail.nodes, publishedBundle !== null) : null),
-    [stage, foldedMessages, detail.nodes, publishedBundle],
+    () => (stage === 8 ? buildEvidenceState(detail.nodes, buildAttempts) : null),
+    [stage, detail.nodes, buildAttempts],
   );
 
   /**
    * The reviewable version as `{artifactId, version, sha256}`: finds or
    * persists the material, never judges whether it is "ready". Stage 8
-   * (CL-8723) reads the archive `publish_workspace` already uploaded — no
-   * browser write. Every other stage persists the specialist's reply as the
+   * reads the archive the build panel already recorded from the host's
+   * packaging — never the supervisor's reply. Every other stage persists the specialist's reply as the
    * draft when nothing else wrote one. Stage 7's chosen target rides along
    * in the same artifact write (`sb.target`) so `approve()`'s opening mail
    * can quote it without re-deriving it from the plan.
@@ -176,8 +171,8 @@ export function useStageDecisions({
   // is never a fallback draft here, so a stage-5 approve/open-review can
   // never persist that reply as a nameless package (CL-8892).
   const latestDraftFor = useCallback(
-    (): unknown => (stage === 8 ? publishedBundle : stage === 5 ? null : reviewMessage),
-    [stage, publishedBundle, reviewMessage],
+    (): unknown => (stage === 8 || stage === 5 ? null : reviewMessage),
+    [stage, reviewMessage],
   );
   // When the chat reply is the draft, when it was sent: `reviewableArtifact`
   // persists a reply newer than the newest persisted version instead of
@@ -201,15 +196,13 @@ export function useStageDecisions({
       };
     }
     if (reviewable.status !== "persist_needed") return null;
-    const persisted = publishedBundle
-      ? await api.persistBuildEvidence(detail.project.id, publishedBundle, materials)
-      : await api.persistStageDraft(
-          detail.project.id,
-          stage,
-          reviewMessage.body,
-          materials,
-          stage === 7 ? (chosenTarget ?? undefined) : undefined,
-        );
+    const persisted = await api.persistStageDraft(
+      detail.project.id,
+      stage,
+      reviewMessage.body,
+      materials,
+      stage === 7 ? (chosenTarget ?? undefined) : undefined,
+    );
     const version = Number(persisted.contentHash.slice(persisted.contentHash.lastIndexOf("@") + 1));
     const sha256 = await digestOf(reviewMessage.body);
     return { artifactId: persisted.artifactId, version, sha256 };
@@ -569,7 +562,6 @@ export function useStageDecisions({
   return {
     approveAllowed: workflowView?.allowed.approve ?? false,
     approving,
-    publishedBundle,
     stage8Evidence,
     openReviewNow,
     approve,

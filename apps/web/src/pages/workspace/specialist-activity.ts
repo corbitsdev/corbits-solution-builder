@@ -16,7 +16,7 @@ const STAGE_ACTIVITY: Record<number, string> = {
   5: "writing the stakeholder packages and their slides",
   6: "writing the build plan",
   7: "preparing the estimate",
-  8: "building the software",
+  8: "reviewing the build",
   9: "verifying the delivery",
 };
 
