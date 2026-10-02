@@ -18,6 +18,7 @@
 import { useTheme, type ThemeMode } from "@corbits/react-ui";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { DEFAULT_DECK_DESIGN, type DeckDesign, type DeckTheme } from "@solutions-builder/app/deck";
+import { LANGUAGES, SUPPORTED_OUTPUT_LANGUAGES, type LanguageId, type LanguageSettings } from "@solutions-builder/app/language-settings";
 import {
   api,
   ApiFailure,
@@ -52,6 +53,7 @@ export function Settings({
     <div className="settings-page">
       <h1>Settings</h1>
       <Appearance />
+      <Language />
       <Inference
         providers={providers}
         apiKeyProviders={apiKeyProviders}
@@ -164,6 +166,76 @@ function Appearance() {
 }
 
 /* ---------------------------------------------------------------- inference */
+
+/* ----------------------------------------------------------------- language */
+
+/** What the Output language select says of a language that cannot be chosen yet. */
+export function languageOptionLabel(id: LanguageId, label: string, forOutput: boolean): string {
+  return forOutput && !SUPPORTED_OUTPUT_LANGUAGES.includes(id) ? `${label} (not supported yet)` : label;
+}
+
+/**
+ * The workspace's languages (#411): what you write in, and what every
+ * specialist writes in, documents and the software it builds alike. Only
+ * the two Englishes are offered as output for now; the rest are listed so
+ * the choice is visible, and disabled.
+ */
+function Language() {
+  const [settings, setSettings] = useState<LanguageSettings | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .languageSettings()
+      .then((loaded) => {
+        if (!cancelled) setSettings(loaded);
+      })
+      .catch((cause) => {
+        if (!cancelled) setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const save = async <K extends keyof LanguageSettings>(key: K, value: LanguageSettings[K]) => {
+    if (!settings) return;
+    setError(null);
+    const before = settings;
+    setSettings({ ...settings, [key]: value });
+    try {
+      setSettings(await api.saveLanguageSetting(key, value));
+    } catch (cause) {
+      setSettings(before);
+      setError(cause instanceof ApiFailure ? cause.detail.message : cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+  const select = (key: keyof LanguageSettings, label: string) => (
+    <select
+      className="field"
+      aria-label={label}
+      value={settings?.[key] ?? "en-US"}
+      disabled={!settings}
+      onChange={(event) => void save(key, event.target.value as LanguageId)}
+    >
+      {LANGUAGES.map((language) => (
+        <option key={language.id} value={language.id} disabled={key === "output" && !SUPPORTED_OUTPUT_LANGUAGES.includes(language.id)}>
+          {languageOptionLabel(language.id, language.label, key === "output")}
+        </option>
+      ))}
+    </select>
+  );
+  return (
+    <Section title="Language" lead="What you write in, and what the specialists write in. American English unless you say otherwise.">
+      <div className="section-body">
+        {error ? <Banner tone="error" title={error} /> : null}
+        <Row label="Input language" hint="The language of your messages and material">{select("input", "Input language")}</Row>
+        <Row label="Output language" hint="Every document, reply, and the text of any software built. American English and British English for now.">
+          {select("output", "Output language")}
+        </Row>
+      </div>
+    </Section>
+  );
+}
 
 function Inference({
   providers,

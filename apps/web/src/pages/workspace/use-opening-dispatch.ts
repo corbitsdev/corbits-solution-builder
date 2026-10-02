@@ -34,6 +34,7 @@ import { targetOpeningLine } from "./freeze.jsx";
 import { composeStage9Opening } from "./stage9-opening.ts";
 import { renderStackBlock } from "./frozen-stack-text.ts";
 import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
+import { languageLead } from "@solutions-builder/app/language-settings";
 import { sendBackResumeCue } from "./send-back-cue.ts";
 import { handoffPending } from "./use-model-handoff.ts";
 
@@ -133,6 +134,21 @@ export function useOpeningDispatch({
     return { artifactId: review.artifactId, version: review.version };
   })();
 
+  // The language line for openings (#411), read once per workspace.
+  const languageLeadRef = useRef<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .languageSettings()
+      .then((settings) => {
+        if (!cancelled) languageLeadRef.current = languageLead(settings);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const [stage6Material, setStage6Material] = useState<string | null>(null);
   useEffect(() => {
     if (stage !== 6 || !previousApproved) {
@@ -169,9 +185,12 @@ export function useOpeningDispatch({
     // keyed to this project's stage rather than a decision id, so two tabs
     // that both load an empty stage N+1 thread never both send its opening.
     const marker = `[opening:${detail.project.id}:${stage}]`;
-    const dispatchOpening = (body: string) => {
+    const dispatchOpening = (opening: string) => {
       if (cancelled || openedRef.current === key || inFlightRef.current === key) return;
       inFlightRef.current = key;
+      // The workspace's output language leads every opening (#411), so a
+      // running specialist hears a changed setting without a redeploy.
+      const body = languageLeadRef.current ? `${languageLeadRef.current}\n\n${opening}` : opening;
       void markerAlreadySent(createHubTransport(), tenantId, marker)
         .then((already) => {
           if (cancelled) return undefined;
