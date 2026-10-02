@@ -9,9 +9,11 @@
  *
  *   owner          Solution Builder host (this file)
  *   purpose        run one coding-agent attempt on the approved plan
- *   interface      one CLI's non-interactive form — `corbits exec <prompt>`
- *                  by default; the worker is chosen in Settings (build-worker.ts)
- *   inputs         one prompt string and a working directory
+ *   interface      one CLI's non-interactive form — `corbits exec` by
+ *                  default; the worker is chosen in Settings (build-worker.ts)
+ *   inputs         one prompt packet and a working directory; the packet
+ *                  goes by stdin or by a file the worker is pointed at,
+ *                  never as one argument (Linux caps one at 128 KiB)
  *   outputs        final text on stdout, and an exit status; while it runs,
  *                  its stdout and stderr as written, and — where the worker
  *                  has a lifecycle hook — its own report of each turn
@@ -255,15 +257,25 @@ export async function runBuildAttempt(args: {
   // itself; a plain kill of the parent leaves those running in the attempt
   // directory, still writing to it. On Windows there are no groups: the
   // tree is taken down by pid instead.
-  const child = spawn(worker.command, [...worker.run(args.prompt)], {
+  if (worker.prompt.via === "file") {
+    const path = join(workspace, worker.prompt.path);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, args.prompt);
+  }
+  const child = spawn(worker.command, [...worker.prompt.args], {
     cwd: workspace,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: [worker.prompt.via === "stdin" ? "pipe" : "ignore", "pipe", "pipe"],
     // The host's own environment carries the hub's secrets; the worker gets
     // what it needs to run and sign in, and nothing else.
     env: inheritedEnvironment(worker.environment),
     detached: process.platform !== "win32",
   });
   if (child.pid !== undefined) args.onStarted?.({ pid: child.pid, pgid: process.platform === "win32" ? null : child.pid });
+  if (worker.prompt.via === "stdin" && child.stdin) {
+    // A worker that dies before reading gets EPIPE here; its exit is the record.
+    child.stdin.on("error", () => undefined);
+    child.stdin.end(args.prompt);
+  }
   const ended = new Promise<{ exitStatus: number | null; signal: string | null }>((resolve) => {
     child.once("exit", (code, signal) => resolve({ exitStatus: code, signal }));
     // A spawn failure after the probe passed (the binary vanished, a

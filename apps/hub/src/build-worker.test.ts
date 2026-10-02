@@ -8,17 +8,21 @@ describe("the build worker registry", () => {
     expect(workerKind("not-a-worker").id).toBe("corbits-code");
   });
 
-  test("each worker runs its non-interactive form and never a permission-skipping flag", () => {
+  test("each worker takes the packet by stdin or by file, never as one argument, and never a permission-skipping flag", () => {
     for (const worker of BUILD_WORKERS) {
-      const args = worker.run("build it");
-      expect(args).toContain("build it");
-      for (const arg of args) {
+      for (const arg of worker.prompt.args) {
         expect(arg).not.toMatch(/skip-permissions|yolo|full-auto|bypass/i);
       }
     }
-    expect(workerKind("corbits-code").run("p")).toEqual(["exec", "p"]);
-    expect(workerKind("claude-code").run("p")).toEqual(["-p", "p"]);
-    expect(workerKind("codex").run("p")).toEqual(["exec", "p"]);
+    const corbits = workerKind("corbits-code").prompt;
+    expect(corbits.via).toBe("file");
+    if (corbits.via === "file") {
+      expect(corbits.path).toBe(".corbits/solution-builder-prompt.md");
+      expect(corbits.args[0]).toBe("exec");
+      expect(corbits.args[1]).toContain(corbits.path);
+    }
+    expect(workerKind("claude-code").prompt).toEqual({ via: "stdin", args: ["-p"] });
+    expect(workerKind("codex").prompt).toEqual({ via: "stdin", args: ["exec", "-"] });
   });
 
   test("only Corbits Code places a turn hook, and the hook reads every other payload to its end", () => {

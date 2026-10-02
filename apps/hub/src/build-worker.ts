@@ -33,8 +33,15 @@ export type BuildWorkerKind = {
   readonly probe: readonly string[];
   /** A word the probe's output must contain, where the version alone would not prove the verb exists. */
   readonly probeExpects: string | null;
-  /** Arguments that run one attempt on a prompt and end. Never a permission-skipping flag. */
-  readonly run: (prompt: string) => readonly string[];
+  /**
+   * How one attempt's prompt reaches the worker, and the arguments that
+   * run it and end. Never as one argument: a packet of a plan, requirements
+   * and a design runs past the 128 KiB a single argument may be on Linux
+   * (E2BIG). `stdin` writes the packet to the worker's standard input;
+   * `file` writes it to `path` under the working directory and names it in
+   * a short prompt. Never a permission-skipping flag.
+   */
+  readonly prompt: { readonly via: "stdin"; readonly args: readonly string[] } | { readonly via: "file"; readonly path: string; readonly args: readonly string[] };
   /**
    * The host's environment variables this worker needs for its own sign-in
    * and configuration, by name or by `PREFIX_*`. Nothing else of the host's
@@ -100,7 +107,15 @@ export const BUILD_WORKERS: readonly BuildWorkerKind[] = [
     executable: "corbits",
     probe: ["--help"],
     probeExpects: "exec",
-    run: (prompt) => ["exec", prompt],
+    // `corbits exec` takes its prompt as a positional and reads none from
+    // stdin, so the packet is a file in the hook directory the bridge
+    // already places (never shipped: `.corbits` is excluded from the
+    // archive and from a continued copy) and the prompt names it.
+    prompt: {
+      via: "file",
+      path: ".corbits/solution-builder-prompt.md",
+      args: ["exec", "Read the file .corbits/solution-builder-prompt.md in the current directory and do exactly what it says. It is the approved build packet: the plan, the requirements it cites, the design and the frozen stack."],
+    },
     environment: ["CORBITS_*"],
     turnReports: { install: corbitsTurnHook },
     // Not on npm, and not meant to be: a binary from GitHub releases
@@ -114,7 +129,8 @@ export const BUILD_WORKERS: readonly BuildWorkerKind[] = [
     executable: "claude",
     probe: ["--version"],
     probeExpects: null,
-    run: (prompt) => ["-p", prompt],
+    // `claude -p` with no prompt argument reads the prompt from stdin.
+    prompt: { via: "stdin", args: ["-p"] },
     environment: ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CONFIG_DIR"],
     turnReports: null,
     install: { kind: "npm", package: "@anthropic-ai/claude-code" },
@@ -125,7 +141,8 @@ export const BUILD_WORKERS: readonly BuildWorkerKind[] = [
     executable: "codex",
     probe: ["--version"],
     probeExpects: null,
-    run: (prompt) => ["exec", prompt],
+    // `codex exec -` reads the prompt from stdin.
+    prompt: { via: "stdin", args: ["exec", "-"] },
     environment: ["OPENAI_API_KEY", "OPENAI_BASE_URL", "CODEX_HOME"],
     turnReports: null,
     install: { kind: "npm", package: "@openai/codex" },

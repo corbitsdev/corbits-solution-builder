@@ -273,6 +273,9 @@ export async function startBuildAttempt(args: {
   continueFrom?: number | undefined;
 }): Promise<AttemptRecord> {
   const { projectId } = args;
+  if (args.prompt.planText.trim().length === 0) {
+    throw new HostError("validation_failed", "The approved plan has no text to build from. Stage 6's plan must be readable before an attempt can start.");
+  }
   if (projectHasRunningAttempt(projectId)) {
     throw new HostError("conflict", "A build attempt is already running for this project. Cancel it, or wait for it to end.", {}, false);
   }

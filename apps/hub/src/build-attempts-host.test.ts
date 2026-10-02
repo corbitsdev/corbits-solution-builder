@@ -10,7 +10,7 @@ import { CANCEL_GRACE_MS } from "./corbits-exec.js";
 const STAND_IN = `#!/bin/sh
 case "$1" in
   --help) echo "usage: corbits exec <prompt>"; exit 0 ;;
-  exec) echo "working on: $2"; sleep 30; exit 0 ;;
+  exec) echo "working on: $(cat .corbits/solution-builder-prompt.md)"; sleep 30; exit 0 ;;
 esac
 `;
 
@@ -18,7 +18,12 @@ let root: string;
 const previous = { bin: process.env.SOLUTIONS_BUILDER_WORKER_BIN, data: process.env.SOLUTIONS_BUILDER_DATA_DIR };
 
 beforeAll(async () => {
-  initSolutionsBuilderHost();
+  // Once per process: another test file in the same run may have declared it.
+  try {
+    initSolutionsBuilderHost();
+  } catch {
+    // Already declared.
+  }
   root = await mkdtemp(join(tmpdir(), "build-attempts-host-"));
   const binary = join(root, "corbits-stand-in");
   await writeFile(binary, STAND_IN);
@@ -66,6 +71,12 @@ describe("the host's build attempts", () => {
     // And the worker is gone, not left to run on without a host.
     expect(() => process.kill(recorded.pid, 0)).toThrow();
   }, CANCEL_GRACE_MS + 15_000);
+
+  onlyOnPosix("an empty plan is refused before anything is written", async () => {
+    const { startBuildAttempt, listAttempts } = await import("./build-attempts.js");
+    await expect(startBuildAttempt({ projectId: "proj_empty", prompt: { ...PROMPT, planText: "  \n" } })).rejects.toThrow(/approved plan has no text/);
+    expect(await listAttempts("proj_empty")).toEqual([]);
+  });
 
   onlyOnPosix("two starts that land together get one attempt, not two with the same number", async () => {
     const { startBuildAttempt, listAttempts, stopBuildAttempts } = await import("./build-attempts.js");
