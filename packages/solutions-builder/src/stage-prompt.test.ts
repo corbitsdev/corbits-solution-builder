@@ -56,5 +56,7 @@ describe("revisionRequest carries the current version, as alpha main's round did
     expect(out.indexOf("Revise the current version above")).toBeLessThan(out.indexOf("Drop the mobile form."));
     expect(splitRevision(out)).toEqual({ document: "## In short\n- fine", ask: "Drop the mobile form." });
     expect(splitRevision("Drop the mobile form.")).toBeNull();
+    expect(splitRevision(`\n ${out}`)?.ask).toBe("Drop the mobile form.");
+    expect(splitRevision(`I saw the words ${out}`)).toBeNull();
   });
 });

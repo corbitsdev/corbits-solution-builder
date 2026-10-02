@@ -65,10 +65,13 @@ export function revisionRequest(args: { stage: number; userInput: string; curren
 
 /** A revision turn taken apart: the document it carried, and the person's ask. Null for any other message. */
 export function splitRevision(text: string): { readonly document: string; readonly ask: string } | null {
-  if (!text.startsWith(REVISION_LEAD)) return null;
-  const at = text.indexOf(REVISION_ASK);
+  // Anchored at the first non-blank character: a person's message that
+  // merely quotes the marker mid-text is their message, not a revision turn.
+  const start = text.length - text.trimStart().length;
+  if (!text.startsWith(REVISION_LEAD, start)) return null;
+  const at = text.indexOf(REVISION_ASK, start);
   if (at === -1) return null;
-  const inner = text.slice(REVISION_LEAD.length, at).trim();
+  const inner = text.slice(start + REVISION_LEAD.length, at).trim();
   const cut = inner.lastIndexOf("\n\nProduce the next version");
   return { document: (cut === -1 ? inner : inner.slice(0, cut)).trim(), ask: text.slice(at + REVISION_ASK.length).trim() };
 }

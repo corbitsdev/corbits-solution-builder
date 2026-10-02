@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, ApiFailure, type ArtifactNode } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
+import { splitRevision } from "@solutions-builder/app/stage-prompt";
 import {
   applyWithdrawn,
   parseWithdrawnTurns,
@@ -72,7 +73,9 @@ export function useWithdrawnTurns(
   const stop = async () => {
     if (!pending) return;
     const withdrawn = pending;
-    restoreDraft(withdrawn.body);
+    // The composer gets the person's words back, not the version the
+    // revision turn wrapped around them (#431).
+    restoreDraft(splitRevision(withdrawn.body)?.ask ?? withdrawn.body);
     try {
       await api.withdrawTurn(projectId, tenantId, { messageId: withdrawn.id, stage });
       setMarks((current) => [...current, { messageId: withdrawn.id, stage, at: new Date().toISOString() }]);

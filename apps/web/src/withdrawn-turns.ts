@@ -106,18 +106,19 @@ export function applyWithdrawn(
 }
 
 /**
- * The person turn a Stop button can act on: the oldest turn still waiting
- * on a reply once every earlier turn has been paired off — normally the
- * latest person message, since the specialist answers one step at a time.
- * Null once that turn is already withdrawn, so an already-stopped turn
- * never offers Stop again.
+ * The person turn a Stop button can act on, and the one the chat shows as
+ * awaiting a reply: the thread's last message, when it is a person turn
+ * (#438). A specialist reply after a turn means nothing is pending, whatever
+ * happened to earlier turns: a reply the hub dropped once left its turn at
+ * the head of the pairing queue for good, and the chat spun on "Working on
+ * it" through every later answer. Null once that turn is withdrawn, so an
+ * already-stopped turn never offers Stop again.
  */
 export function pendingTurn(
   messages: readonly ChatMessage[],
   withdrawnIds: ReadonlySet<string>,
 ): ChatMessage | null {
-  const { queue } = pairReplies(messages);
-  const head = queue[0];
-  if (!head || withdrawnIds.has(head.id)) return null;
-  return head;
+  const last = messages.at(-1);
+  if (!last || last.author !== "me" || withdrawnIds.has(last.id)) return null;
+  return last;
 }

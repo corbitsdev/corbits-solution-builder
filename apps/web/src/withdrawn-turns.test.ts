@@ -145,9 +145,14 @@ describe("pendingTurn", () => {
     expect(pendingTurn(messages, new Set())?.id).toBe("m2");
   });
 
-  test("is the oldest unanswered turn when more than one is queued", () => {
+  test("is the last turn when more than one is queued", () => {
     const messages = [person("m1", 0), person("m2", 1)];
-    expect(pendingTurn(messages, new Set())?.id).toBe("m1");
+    expect(pendingTurn(messages, new Set())?.id).toBe("m2");
+  });
+
+  test("an earlier turn that never got a reply does not keep the chat pending (#438)", () => {
+    const messages = [person("m1", 0), person("m2", 1), agent("a2", 2)];
+    expect(pendingTurn(messages, new Set())).toBeNull();
   });
 
   test("is null once the specialist has answered", () => {
