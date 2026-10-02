@@ -71,6 +71,7 @@ import { PanelReviewsCompanion, reviewNodesOf as panelReviewNodesOf } from "./pa
 import { renderStackBlock } from "./frozen-stack-text.ts";
 import { withAttachedDocuments, type StageDocument as MentionedDocument } from "./document-mentions.ts";
 import { askKind, requirementsRequest, routedLine } from "./message-intent.ts";
+import { TERMINAL_RUN_NOTICE, isTerminalRunRefusal } from "./terminal-run.ts";
 
 /** Stage 6's recorded panel reviews, newest unsuperseded version per reviewer (#334). */
 function reviewNodesOf(nodes: readonly ArtifactNode[]): ReadonlyMap<string, ArtifactNode> {
@@ -580,6 +581,19 @@ export function StageWorkspace({
       await api.sendStageMail(tenantId, agentAddress, { body: withAttachedDocuments(body, stageDocuments) });
       await loadThread();
     } catch (cause) {
+      if (isTerminalRunRefusal(cause)) {
+        // The specialist's run has ended (#413): ask for it again, which
+        // drops the dead deployment and places a fresh one, refresh the live
+        // address, and hand the message back. The redeploy hand-off carries
+        // the conversation to the new specialist before it is sent again.
+        setComposer(body);
+        setError(TERMINAL_RUN_NOTICE);
+        void api
+          .ensureStageAgent(detail.project.id, stage)
+          .then(() => agent.retry())
+          .catch((again: unknown) => setError(again instanceof ApiFailure ? again.detail.message : String(again)));
+        return;
+      }
       setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
       setRemediation(cause instanceof ApiFailure ? cause.detail.remediation : undefined);
     } finally {
