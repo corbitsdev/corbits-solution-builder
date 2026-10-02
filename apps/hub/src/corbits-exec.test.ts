@@ -3,8 +3,6 @@ import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bridgeAvailable, CANCEL_GRACE_MS, PIPE_GRACE_MS, runBuildAttempt } from "./corbits-exec.js";
-import { buildWorkerSettingsFile } from "./build-worker.js";
-import { initSolutionsBuilderHost } from "./identity.js";
 
 // A stand-in for the worker: answers the probe with the verb the bridge
 // looks for, echoes its prompt as final text, and exits the way the test
@@ -28,17 +26,9 @@ esac
 let root: string;
 let binary: string;
 const previous = process.env.SOLUTIONS_BUILDER_WORKER_BIN;
-const previousData = process.env.SOLUTIONS_BUILDER_DATA_DIR;
 
 beforeAll(async () => {
-  // Once per process: another test file in the same run may have declared it.
-  try {
-    initSolutionsBuilderHost();
-  } catch {
-    // Already declared.
-  }
   root = await mkdtemp(join(tmpdir(), "bridge-"));
-  process.env.SOLUTIONS_BUILDER_DATA_DIR = join(root, "data");
   binary = join(root, "corbits-stand-in");
   await writeFile(binary, STAND_IN);
   await chmod(binary, 0o755);
@@ -48,8 +38,6 @@ beforeAll(async () => {
 afterAll(async () => {
   if (previous === undefined) delete process.env.SOLUTIONS_BUILDER_WORKER_BIN;
   else process.env.SOLUTIONS_BUILDER_WORKER_BIN = previous;
-  if (previousData === undefined) delete process.env.SOLUTIONS_BUILDER_DATA_DIR;
-  else process.env.SOLUTIONS_BUILDER_DATA_DIR = previousData;
   await rm(root, { recursive: true, force: true });
 });
 
@@ -109,8 +97,8 @@ describe("runBuildAttempt", () => {
   });
 
   onlyOnPosix("a worker that takes the packet on stdin gets it whole", async () => {
-    // Chosen as Claude Code in Settings, with the stand-in as its executable.
-    await Bun.write(buildWorkerSettingsFile(), JSON.stringify({ worker: "claude-code", executable: binary }));
+    // Claude Code, with the stand-in as its executable.
+    process.env.SOLUTIONS_BUILDER_WORKER = "claude-code";
     try {
       const workspace = join(root, "stdin");
       const prompt = `start ${"y".repeat(200_000)} end`;
@@ -120,7 +108,7 @@ describe("runBuildAttempt", () => {
       expect(outcome.finalText).toBe(`final text for: ${prompt}\n`);
       expect(await Bun.file(join(workspace, ".corbits/solution-builder-prompt.md")).exists()).toBe(false);
     } finally {
-      await rm(buildWorkerSettingsFile(), { force: true });
+      delete process.env.SOLUTIONS_BUILDER_WORKER;
     }
   });
 

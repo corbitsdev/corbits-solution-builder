@@ -3,7 +3,6 @@ import { spawn } from "node:child_process";
 import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { initSolutionsBuilderHost } from "./identity.js";
 import { CANCEL_GRACE_MS } from "./corbits-exec.js";
 
 // A stand-in worker: answers the probe, then sleeps until it is signalled.
@@ -15,27 +14,21 @@ esac
 `;
 
 let root: string;
-const previous = { bin: process.env.SOLUTIONS_BUILDER_WORKER_BIN, data: process.env.SOLUTIONS_BUILDER_DATA_DIR };
+const previous = { bin: process.env.SOLUTIONS_BUILDER_WORKER_BIN, builds: process.env.SOLUTIONS_BUILDER_BUILDS_DIR };
 
 beforeAll(async () => {
-  // Once per process: another test file in the same run may have declared it.
-  try {
-    initSolutionsBuilderHost();
-  } catch {
-    // Already declared.
-  }
   root = await mkdtemp(join(tmpdir(), "build-attempts-host-"));
   const binary = join(root, "corbits-stand-in");
   await writeFile(binary, STAND_IN);
   await chmod(binary, 0o755);
   process.env.SOLUTIONS_BUILDER_WORKER_BIN = binary;
-  process.env.SOLUTIONS_BUILDER_DATA_DIR = join(root, "data");
+  process.env.SOLUTIONS_BUILDER_BUILDS_DIR = join(root, "builds");
 });
 
 afterAll(async () => {
   for (const [name, value] of [
     ["SOLUTIONS_BUILDER_WORKER_BIN", previous.bin],
-    ["SOLUTIONS_BUILDER_DATA_DIR", previous.data],
+    ["SOLUTIONS_BUILDER_BUILDS_DIR", previous.builds],
   ] as const) {
     if (value === undefined) delete process.env[name];
     else process.env[name] = value;

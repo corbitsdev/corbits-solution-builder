@@ -274,13 +274,15 @@ export function workerKind(id: string): BuildWorkerKind {
 }
 
 /**
- * Resolves the chosen worker. The executable is, in order, the environment's
- * override (what a smoke uses to stand in a worker), the path saved in
- * Settings, or the worker's own name on PATH.
+ * Resolves the chosen worker. The kind is the environment's
+ * `SOLUTIONS_BUILDER_WORKER` when set, else the saved choice; the
+ * executable is, in order, the environment's `SOLUTIONS_BUILDER_WORKER_BIN`
+ * (what a smoke uses to stand in a worker), the path saved in Settings, or
+ * the worker's own name on PATH.
  */
 export async function buildWorker(): Promise<BuildWorker> {
   const settings = await buildWorkerSettings();
-  const kind = workerKind(settings.worker);
+  const kind = workerKind(process.env.SOLUTIONS_BUILDER_WORKER?.trim() || settings.worker);
   const override = process.env.SOLUTIONS_BUILDER_WORKER_BIN?.trim();
   return { ...kind, command: override || settings.executable || kind.executable };
 }

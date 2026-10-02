@@ -2248,7 +2248,7 @@ export const api = {
         // No hub credential binding: a stage 8 deployed with one never
         // produced a run, while every unbound stage does. Nothing needs it
         // now — the build runs on the host and the archive is recorded by
-        // the client (`persistBuildEvidence`), not uploaded from a sidecar.
+        // the build panel, not uploaded from a sidecar.
         false,
         undefined,
         await localizedRole(transport, workspaceTenantId, agentFor(stage as Stage)),

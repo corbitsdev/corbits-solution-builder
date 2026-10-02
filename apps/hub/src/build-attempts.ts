@@ -11,6 +11,7 @@
  * Every attempt is one directory under the project's builds:
  *
  *   <data>/builds/<projectId>/attempts/<n>/           the worker's cwd
+ *                                                     (`buildsRoot`)
  *   <data>/builds/<projectId>/attempts/<n>.prompt.txt what it was handed
  *   <data>/builds/<projectId>/attempts/<n>.log        stdout, stderr and
  *                                                     turn reports, in order
@@ -37,9 +38,19 @@ import { BRIDGE_CAPABILITIES, BRIDGE_ID, groupAlive, killGroup, runBuildAttempt,
 /** Enough to read the last stretch of a long build in a window; the file has it all. */
 const TRANSCRIPT_KEEP = 200_000;
 
+/**
+ * Where every project's attempts live: `SOLUTIONS_BUILDER_BUILDS_DIR` when
+ * set (a build directory grows large, and a different disk is a reasonable
+ * choice; a smoke points it at a scratch directory), else `builds/` under
+ * the host's data directory.
+ */
+export function buildsRoot(): string {
+  return process.env.SOLUTIONS_BUILDER_BUILDS_DIR?.trim() || join(dataDirectory(), "builds");
+}
+
 export function projectBuildsDirectory(projectId: string): string {
   if (!/^[A-Za-z0-9_-]+$/.test(projectId)) throw new HostError("validation_failed", "That is not a project id.");
-  return join(dataDirectory(), "builds", projectId, "attempts");
+  return join(buildsRoot(), projectId, "attempts");
 }
 
 export function attemptWorkspace(projectId: string, attempt: number): string {
