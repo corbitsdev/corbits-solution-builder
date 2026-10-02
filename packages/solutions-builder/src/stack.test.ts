@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { describeOperation, parseStackRecord, type StackMode, type StackRecord } from "./stack.js";
+import { describeOperation, parseStackRecord, stackSectionOf, type StackMode, type StackRecord } from "./stack.js";
 
 const CHOICE = { choice: "x", reason: "because", cites: ["FR-1"] };
 
@@ -66,6 +66,30 @@ describe("parseStackRecord", () => {
     const parsed = parseStackRecord(markdown);
     expect(parsed).not.toBeNull();
     expect(parsed?.mode).toBe("plain");
+  });
+});
+
+describe("parseStackRecord tolerates a model's harmless slips (#437)", () => {
+  test("a deeper or decorated heading, a JSON or jsonc fence, and a trailing comma", () => {
+    const stack = record();
+    const body = JSON.stringify(stack, null, 2).replace(/\n}$/, ",\n}");
+    const markdown = ["# Plan", "", "### Stack (frozen)", "", "```JSON", body, "```", ""].join("\n");
+    expect(parseStackRecord(markdown)?.mode).toBe("plain");
+    const jsonc = ["## Stack record", "```jsonc stack", JSON.stringify(stack), "```"].join("\n");
+    expect(parseStackRecord(jsonc)?.mode).toBe("plain");
+  });
+
+  test("a shape that is still wrong after the slips are forgiven is still null", () => {
+    const markdown = ["## Stack", "```json", "{ \"mode\": \"plain\", }", "```"].join("\n");
+    expect(parseStackRecord(markdown)).toBeNull();
+  });
+
+  test("stackSectionOf returns the heading through the closing fence", () => {
+    const section = stackSectionOf(planWithStack(record()));
+    expect(section?.startsWith("## Stack")).toBe(true);
+    expect(section?.trimEnd().endsWith("```")).toBe(true);
+    expect(section).not.toContain("## Other section");
+    expect(stackSectionOf("no stack here")).toBeNull();
   });
 });
 

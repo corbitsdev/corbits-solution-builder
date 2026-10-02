@@ -114,12 +114,28 @@ const StackRecordSchema = type({
   deferred: "string[]",
 });
 
-const STACK_HEADING_RE = /^##\s+Stack\s*$/m;
+// "## Stack", or a model's harmless variants (#437): a deeper heading level,
+// trailing words such as "## Stack (frozen)", or "Stack record".
+const STACK_HEADING_RE = /^#{2,4}\s+Stack\b[^\n]*$/m;
 // The prompt asks for the fence opened with "```json stack" (`kit.ts`), but a
-// specialist sometimes drops the " stack" tag and just writes "```json" --
-// the tag carries no data, so that variant is accepted too. The JSON body
-// itself is never touched.
-const STACK_BLOCK_RE = /```json(?:\s+stack)?\r?\n([\s\S]*?)```/;
+// specialist sometimes drops the " stack" tag, writes "```JSON", or "```jsonc"
+// -- the tag carries no data, so those are accepted too (#437). The JSON body
+// itself is parsed strictly first; only a trailing comma before a closing
+// bracket, the one slip a model makes that JSON refuses, is repaired before a
+// second try. Nothing else in the body is touched.
+const STACK_BLOCK_RE = /```(?:json|jsonc|JSON)(?:[ \t]+stack)?[ \t]*\r?\n([\s\S]*?)```/;
+
+function parseJsonLeniently(text: string): unknown | undefined {
+  try {
+    return JSON.parse(text);
+  } catch {
+    try {
+      return JSON.parse(text.replace(/,(\s*[}\]])/g, "$1"));
+    } catch {
+      return undefined;
+    }
+  }
+}
 
 /**
  * Finds the fenced JSON block (```json stack, or plain ```json) under the
@@ -127,17 +143,23 @@ const STACK_BLOCK_RE = /```json(?:\s+stack)?\r?\n([\s\S]*?)```/;
  * Anything short of a clean parse -- no heading, no fence, invalid JSON, or
  * a shape arktype rejects -- is `null`, never a best-effort guess.
  */
+/** The "## Stack" section of a plan, heading through the closing fence, or null. */
+export function stackSectionOf(markdown: string): string | null {
+  const headingIndex = markdown.search(STACK_HEADING_RE);
+  if (headingIndex < 0) return null;
+  const rest = markdown.slice(headingIndex);
+  const match = STACK_BLOCK_RE.exec(rest);
+  if (!match || match.index === undefined) return null;
+  return rest.slice(0, match.index + match[0].length);
+}
+
 export function parseStackRecord(markdown: string): StackRecord | null {
   const headingIndex = markdown.search(STACK_HEADING_RE);
   if (headingIndex < 0) return null;
   const match = STACK_BLOCK_RE.exec(markdown.slice(headingIndex));
   if (!match) return null;
-  let json: unknown;
-  try {
-    json = JSON.parse(match[1]!);
-  } catch {
-    return null;
-  }
+  const json = parseJsonLeniently(match[1]!);
+  if (json === undefined) return null;
   const parsed = StackRecordSchema(json);
   return parsed instanceof type.errors ? null : (parsed as StackRecord);
 }
