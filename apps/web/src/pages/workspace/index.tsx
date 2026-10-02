@@ -54,6 +54,8 @@ import { useWorkflowView } from "./use-workflow-view.ts";
 import { useStageAgent } from "./use-stage-agent.ts";
 import { useStageThread } from "./use-stage-thread.ts";
 import { useWithdrawnTurns } from "./use-withdrawn-turns.ts";
+import { useSpecialistRunState } from "./use-specialist-run-state.ts";
+import { specialistBusy } from "../../specialist-run-state.ts";
 import { useOpeningDispatch } from "./use-opening-dispatch.ts";
 import { useProductGuide, useStageEvaluator } from "./use-advisory.ts";
 import { guideStep } from "./product-guide.ts";
@@ -246,9 +248,14 @@ export function StageWorkspace({
   const withdrawnIds = withdrawn.ids;
   const pending = withdrawn.pending;
   const stopTurn = withdrawn.stop;
+  // Whether the specialist is working comes from its run (#445); the mailbox
+  // (a person turn with no reply) speaks only when the run cannot be read.
+  const threadKey = `${String(foldedMessages.length)}:${foldedMessages.at(-1)?.id ?? ""}`;
+  const runState = useSpecialistRunState(detail.project.id, stage, agentAddress, pending !== null, threadKey);
+  const busy = specialistBusy(runState, pending?.at ?? null);
   // A specialist turn in flight is the longest wait in the product; the
   // busy indicator at the foot of the window counts it alongside the flame.
-  useBusyWhile(pending !== null, specialistActivity(stage, askKind(pending?.body ?? null, foldedMessages.some((message) => message.author === "agent"))));
+  useBusyWhile(busy, specialistActivity(stage, askKind(pending?.body ?? null, foldedMessages.some((message) => message.author === "agent"))));
 
   const openingDispatch = useOpeningDispatch({
     detail,
@@ -781,7 +788,7 @@ export function StageWorkspace({
       working={sending}
       disabled={!agentAddress}
       withdrawnIds={withdrawnIds}
-      pending={pending !== null}
+      pending={busy}
       onStop={() => void stopTurn()}
       onSendHold={() => openSendBack(composer)}
       popover={sendBackPopover}
@@ -877,10 +884,10 @@ export function StageWorkspace({
       ) : null}
 
       {agentAddress ? (
-        <div className="stage-model-row" data-inference-pending={pending !== null ? "" : undefined}>
+        <div className="stage-model-row" data-inference-pending={busy ? "" : undefined}>
           {/* The flame burns while a specialist turn is in flight and sits
               still otherwise (#87); the text keeps the state readable. */}
-          <span className="inference-flame" role="img" aria-label={pending !== null ? "Inference running" : "Inference idle"}>
+          <span className="inference-flame" role="img" aria-label={busy ? "Inference running" : "Inference idle"}>
             <Flame aria-hidden="true" />
           </span>
           <span className="inline-note">
@@ -969,7 +976,7 @@ export function StageWorkspace({
       ) : null}
 
       {agentAddress && stage === 4 ? (
-        <StagePanes strip={stripEl} conversation={conversation} busy={pending !== null}>
+        <StagePanes strip={stripEl} conversation={conversation} busy={busy}>
           {reader ?? (
             <DesignPanel
               detail={detail}
@@ -985,7 +992,7 @@ export function StageWorkspace({
       ) : null}
 
       {agentAddress && stage === 5 ? (
-        <StagePanes strip={stripEl} conversation={conversation} busy={pending !== null}>
+        <StagePanes strip={stripEl} conversation={conversation} busy={busy}>
           {reader ?? (
             <div className="stage-inner">
               <AudiencePackages
@@ -1086,7 +1093,7 @@ export function StageWorkspace({
           conversation={conversation}
           solo
           className="chat-first"
-          busy={pending !== null}
+          busy={busy}
         >
           {reader}
         </StagePanes>
@@ -1095,7 +1102,7 @@ export function StageWorkspace({
       {/* A past stage opened from the stepper while this stage has a draft:
           the reader, not this stage's document and its approve gate. */}
       {agentAddress && DOCUMENT_STAGES.has(stage) && draftMessage && viewedStage !== null ? (
-        <StagePanes strip={stripEl} conversation={conversation} busy={pending !== null}>
+        <StagePanes strip={stripEl} conversation={conversation} busy={busy}>
           {reader}
         </StagePanes>
       ) : null}
@@ -1143,7 +1150,7 @@ export function StageWorkspace({
             live={null}
             seed={stopSeed}
             withdrawnIds={withdrawnIds}
-            pending={pending !== null}
+            pending={busy}
             onStop={() => void stopTurn()}
             onSendHold={openSendBack}
             composerPopover={sendBackPopover}
@@ -1163,7 +1170,7 @@ export function StageWorkspace({
       ) : null}
 
       {agentAddress && stage === 9 ? (
-        <StagePanes strip={stripEl} conversation={conversation} busy={pending !== null}>
+        <StagePanes strip={stripEl} conversation={conversation} busy={busy}>
           {reader ?? (
             <div className="stage-inner">
               <DeliveryPanel

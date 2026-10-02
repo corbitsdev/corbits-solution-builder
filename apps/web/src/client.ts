@@ -10,6 +10,7 @@ import { AUTHORITIES, type Authority, type Stage } from "@solutions-builder/app/
 import { agentById, agentFor, panelPrincipals, type AgentRole } from "@solutions-builder/app/kit";
 import { languageGuidance, type LanguageSettings } from "@solutions-builder/app/language-settings";
 import type { Quote, StageTurn } from "@solutions-builder/app/stage-prompt";
+import { runStateOf, topLevelRunIds, UNKNOWN_RUN, type SpecialistRun } from "./specialist-run-state.ts";
 import {
   ApiError as HubApiError,
   archiveArtifact as installerArchiveArtifact,
@@ -2347,6 +2348,28 @@ export const api = {
    */
   stageAgentStatus: (projectId: string, stage: number): Promise<SpecialistDeploymentStatus | null> =>
     asWorkspaceOwner(async (transport) => stageSpecialistStatus(transport, projectId, stage as Stage, undefined, await hostSidecar())),
+  /**
+   * What `projectId`'s stage-`stage` specialist is doing, read from its run
+   * (#445): working, parked for its next mail, ended, or unknown when the
+   * run or its log cannot be read. The deployment's top-level run is the
+   * specialist's one manual run; with several (a redeploy's history), the
+   * newest that has not ended speaks for it.
+   */
+  stageSpecialistRunState: (projectId: string, stage: number): Promise<SpecialistRun> =>
+    asWorkspaceOwner(async (transport) => {
+      const status = await stageSpecialistStatus(transport, projectId, stage as Stage, undefined, await hostSidecar());
+      if (!status || ENDED_DEPLOYMENT_STATUSES.has(status.status)) return UNKNOWN_RUN;
+      const workflows = workflowsFor(transport, status.tenantId);
+      const runIds = topLevelRunIds(await workflows.runs(status.deploymentId));
+      let run: SpecialistRun = UNKNOWN_RUN;
+      for (const runId of runIds) {
+        const read = runStateOf((await workflows.runEvents(status.deploymentId, runId)).events);
+        if (read.state === "unknown") continue;
+        run = read;
+        if (read.state !== "ended") break;
+      }
+      return run;
+    }).catch(() => UNKNOWN_RUN),
   /**
    * Every address `projectId`'s stage-`stage` specialist has ever run at --
    * the input `useStageThread`'s merge needs so a redeploy (restart, model
