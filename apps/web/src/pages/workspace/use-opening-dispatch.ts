@@ -34,7 +34,6 @@ import { targetOpeningLine } from "./freeze.jsx";
 import { composeStage9Opening } from "./stage9-opening.ts";
 import { renderStackBlock } from "./frozen-stack-text.ts";
 import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
-import { languageLead } from "@solutions-builder/app/language-settings";
 import { sendBackResumeCue } from "./send-back-cue.ts";
 import { handoffPending } from "./use-model-handoff.ts";
 import { composeApprovedChain } from "./approved-chain.ts";
@@ -135,21 +134,6 @@ export function useOpeningDispatch({
     return { artifactId: review.artifactId, version: review.version };
   })();
 
-  // The language line for openings (#411), read once per workspace.
-  const languageLeadRef = useRef<string | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    void api
-      .languageSettings()
-      .then((settings) => {
-        if (!cancelled) languageLeadRef.current = languageLead(settings);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const [stage6Material, setStage6Material] = useState<string | null>(null);
   useEffect(() => {
     if (stage !== 6 || !previousApproved) {
@@ -201,10 +185,10 @@ export function useOpeningDispatch({
           // material, go ahead of the stage's own lead (#423): the
           // specialist reads the record, not only the last document.
           const chain = await composeApprovedChain({ tenantId, nodes: detail.nodes, reviews: workflowView?.reviews ?? {}, stage });
-          const led = chain ? `${chain}\n\n${opening}` : opening;
-          // The workspace's output language leads every opening (#411), so a
-          // running specialist hears a changed setting without a redeploy.
-          const body = languageLeadRef.current ? `${languageLeadRef.current}\n\n${led}` : led;
+          // The workspace's language is in the specialist's own instructions
+          // (`localizedRole`, client.ts), where a changed setting redeploys
+          // it; the mail carries the record and the stage's lead, nothing else.
+          const body = chain ? `${chain}\n\n${opening}` : opening;
           await api.sendStageMail(tenantId, agentAddress, { body, subject: `${marker} ${stageName(stage)}` });
           if (cancelled) return;
           // Marked as opened only now that the send is confirmed —

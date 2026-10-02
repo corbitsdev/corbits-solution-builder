@@ -76,8 +76,3 @@ export function languageGuidance(settings: LanguageSettings): string {
   }
   return lines.join(" ");
 }
-
-/** The one line that leads a stage's opening mail, so a running specialist hears a changed setting at once. */
-export function languageLead(settings: LanguageSettings): string {
-  return `Language: ${languageGuidance(settings)}`;
-}

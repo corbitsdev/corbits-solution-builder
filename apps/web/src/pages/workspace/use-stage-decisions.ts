@@ -35,6 +35,7 @@ import {
   stageRefusalMessage, stage6StackRemediation } from "../../stage-evidence.ts";
 import type { Stage7Evidence } from "@solutions-builder/app/project-workflow/contracts";
 import { targetOpeningLine } from "./freeze.jsx";
+import { designHandoff } from "../../design-handoff.ts";
 import type { ProjectWorkflowView } from "../../project-workflow.ts";
 import { clearQuotedDraft } from "./quote-store.js";
 
@@ -451,7 +452,11 @@ export function useStageDecisions({
                 archiveRef: { artifactId: ref.artifactId, version: ref.version },
                 fallbackBuildStatusBody: reviewMessage.body,
               })
-            : reviewMessage.body;
+            : stage === 4
+              ? // The design goes to the presentation creator as its text, not
+                // its markup (#219), in session exactly as on reload (#418).
+                designHandoff(reviewMessage.body)
+              : reviewMessage.body;
       queueOpening(result.stage, openingBody);
     } catch (cause) {
       onError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
