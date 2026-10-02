@@ -41,7 +41,7 @@
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { cp, mkdir, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { inheritedEnvironment } from "@solutions-builder/specialist-runtime/host-environment";
 import { buildWorker, hostPlatform, installInstruction, type BuildWorker, type InstallInstruction } from "./build-worker.js";
 import { followTurnLog } from "./turn-reports.js";
@@ -255,7 +255,8 @@ export async function runBuildAttempt(args: {
     for (const file of worker.turnReports.install(turnLog)) {
       const path = join(workspace, file.path);
       await mkdir(dirname(path), { recursive: true });
-      await writeFile(path, file.content);
+      // Executable: a CLI that runs its hooks directly, not through a shell, needs the bit.
+      await writeFile(path, file.content, { mode: 0o755 });
     }
   }
   const following = turnLog ? followTurnLog(turnLog, (text) => args.onOutput?.(text, "turn")) : null;
@@ -269,6 +270,8 @@ export async function runBuildAttempt(args: {
     const path = join(workspace, worker.prompt.path);
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, args.prompt);
+    // Ignored by git beside it, so a worker's `git add -A` never commits the packet.
+    await writeFile(join(dirname(path), ".gitignore"), `${basename(path)}\n`);
   }
   const child = spawn(worker.command, [...worker.prompt.args], {
     cwd: workspace,
@@ -303,15 +306,19 @@ export async function runBuildAttempt(args: {
     drain(child.stdout, (chunk) => args.onOutput?.(chunk, "stdout")),
     drain(child.stderr, (chunk) => args.onOutput?.(chunk, "stderr")),
   ]);
-  // The attempt ends when the worker exits. Its pipes may stay open past
-  // that — a dev server it backgrounded inherits them — and nothing that
-  // outlives the worker belongs to the attempt, so after a short grace the
-  // group is ended and the pipes are closed from this side.
+  // The attempt ends when the worker exits, and nothing that outlives the
+  // worker belongs to the attempt: a dev server it backgrounded would keep
+  // writing into the directory that is about to be packaged. The pipes get
+  // a short grace to close (a child that inherited them holds them open),
+  // then the group is ended whether or not anything held a pipe — a child
+  // with its output redirected holds none and is just as much there.
   const { exitStatus, signal } = await ended;
   const drained = await Promise.race([draining.then(() => true), new Promise<false>((resolve) => setTimeout(() => resolve(false), PIPE_GRACE_MS).unref())]);
-  if (!drained) {
+  if (child.pid !== undefined && groupAlive(child.pid)) {
     args.onOutput?.(`${worker.label} exited but left processes running in its group; they were ended.\n`, "stderr");
-    killTree(child);
+  }
+  killTree(child);
+  if (!drained) {
     child.stdout?.destroy();
     child.stderr?.destroy();
   }

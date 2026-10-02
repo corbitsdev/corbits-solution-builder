@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bridgeAvailable, CANCEL_GRACE_MS, PIPE_GRACE_MS, runBuildAttempt } from "./corbits-exec.js";
@@ -17,6 +17,7 @@ case "$1" in
     echo "to stderr" >&2
     if [ -f ./SLEEP ]; then sleep 30; fi
     if [ -f ./BACKGROUND ]; then sleep 20 & echo $! > ./BG_PID; fi
+    if [ -f ./QUIET ]; then ( sleep 25 > /dev/null 2>&1 < /dev/null & echo $! > ./BG_PID ); fi
     if [ -f ./ENV ]; then env > ./ENV_SEEN; fi
     if [ -f ./FAIL ]; then exit 3; fi
     exit 0 ;;
@@ -177,6 +178,24 @@ describe("runBuildAttempt", () => {
     await new Promise((resolve) => setTimeout(resolve, CANCEL_GRACE_MS + 500));
     expect(() => process.kill(left, 0)).toThrow();
   }, CANCEL_TIMEOUT_MS);
+
+  onlyOnPosix("a process the worker left behind is ended even when it holds no pipe", async () => {
+    const workspace = join(root, "quiet");
+    await runBuildAttempt({ workspace, prompt: "x", turnLog: join(root, "q.turns.jsonl") });
+    await writeFile(join(workspace, "QUIET"), "");
+    const outcome = await runBuildAttempt({ workspace, prompt: "leave a quiet one", turnLog: join(root, "q.turns.jsonl") });
+    expect(outcome.exitStatus).toBe(0);
+    const left = Number((await readFile(join(workspace, "BG_PID"), "utf8")).trim());
+    await new Promise((resolve) => setTimeout(resolve, CANCEL_GRACE_MS + 1_000));
+    expect(() => process.kill(left, 0)).toThrow();
+  }, CANCEL_TIMEOUT_MS);
+
+  onlyOnPosix("the placed hook is executable and the packet is ignored by git", async () => {
+    const workspace = join(root, "ok");
+    const hook = await stat(join(workspace, ".corbits/hooks/solution-builder-turns.sh"));
+    expect(hook.mode & 0o111).toBe(0o111);
+    expect(await readFile(join(workspace, ".corbits/.gitignore"), "utf8")).toContain("solution-builder-prompt.md");
+  });
 
   onlyOnPosix("a continued attempt copies the earlier one without the hook directory or caches", async () => {
     const from = join(root, "from");
