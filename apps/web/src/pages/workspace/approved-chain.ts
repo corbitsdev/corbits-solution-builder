@@ -37,11 +37,13 @@ export function approvedChainNodes(
   reviews: Readonly<Record<number, ReviewState | undefined>>,
   stage: number,
 ): ChainNode[] {
+  // Stage 1 opens on the problem statement itself, so the record never
+  // repeats it there; from stage 2 on it is material like any other.
   const material = nodes
     .filter(
       (node) =>
         node.supersededByNodeId === null &&
-        ((node.kind === MATERIAL_KIND && node.variant === OPENING_VARIANT) || node.kind === MATERIAL_READING_KIND),
+        ((stage > 1 && node.kind === MATERIAL_KIND && node.variant === OPENING_VARIANT) || node.kind === MATERIAL_READING_KIND),
     )
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const approved: ChainNode[] = [];

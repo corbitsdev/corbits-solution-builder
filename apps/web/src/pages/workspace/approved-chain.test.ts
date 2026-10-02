@@ -44,6 +44,15 @@ describe("approvedChainNodes", () => {
     ];
     expect(approvedChainNodes(nodes, { 1: approved("art_brief", 1) }, 3).map((entry) => entry.id)).toEqual(["opening", "reading", "brief"]);
   });
+
+  test("stage 1 opens on the problem statement itself, so its record carries only the readings", () => {
+    const nodes = [
+      node({ id: "opening", kind: "source_material", stage: 1, variant: "__opening__" }),
+      node({ id: "reading", kind: "material_reading", stage: 1, variant: "deck.pdf" }),
+    ];
+    expect(approvedChainNodes(nodes, {}, 1).map((entry) => entry.id)).toEqual(["reading"]);
+    expect(approvedChainNodes([nodes[0]!], {}, 1)).toEqual([]);
+  });
 });
 
 describe("renderApprovedChain", () => {
