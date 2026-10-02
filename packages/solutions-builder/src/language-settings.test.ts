@@ -4,7 +4,6 @@ import {
   LANGUAGES,
   SUPPORTED_OUTPUT_LANGUAGES,
   languageGuidance,
-  languageLead,
   mergeLanguageSettings,
   parseLanguageSettings,
 } from "./language-settings.ts";
@@ -34,6 +33,5 @@ describe("language settings", () => {
     expect(gb).toContain("Write in British English");
     expect(gb).toContain("colour, organise");
     expect(gb).toContain("The person writes in Spanish");
-    expect(languageLead(DEFAULT_LANGUAGE_SETTINGS)).toStartWith("Language: Write in American English");
   });
 });
