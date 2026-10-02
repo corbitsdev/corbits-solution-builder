@@ -15,6 +15,7 @@ import { DEFAULT_SIDECAR_ALLOCATION_CONCURRENCY } from "../reconciliation-schedu
 import {
   DestroySidecarResult,
   EnsureSidecarResult,
+  type ReplacementRecoveryDecision,
   type SidecarProvisioner,
 } from "./contracts";
 import type { SidecarPluginRegistry } from "./plugin-registry";
@@ -49,9 +50,6 @@ type AllocationStore = Pick<
   | "wakeReconciliation"
 >;
 
-/** What to do with an allocated worker that will not reconnect; see `enableAutomaticReplacementRecovery`. */
-export type ReplacementRecoveryDecision = "replace" | "release" | "defer";
-
 export type SidecarAllocationReconcilerDeps = {
   readonly allocationStore: AllocationStore;
   readonly plugins: SidecarPluginRegistry;
@@ -80,18 +78,13 @@ export type SidecarAllocationReconcilerDeps = {
    * Replace an allocated worker after its reconnect grace expires. Disabled by
    * default because Hub recovery does not restore arbitrary sidecar or
    * isolation-container filesystem state, so automatic continuation could run
-   * without state the previous worker produced.
-   *
-   * A function decides per allocation: `replace` as `true` does, `release` as
-   * `false` does, and `defer` leaves the allocation `allocated` and parks its
-   * reconciliation for `deferredRecoveryMs`, so an embedder can replace a
-   * worker only once something wants it (a user opening the project it
-   * serves) without a whole host's dead workers restarting at boot.
+   * without state the previous worker produced. A provisioner that knows
+   * better answers for its own workers through `recoverLostWorker`, and may
+   * `defer` the question: the allocation stays `allocated`, parked for
+   * `deferredRecoveryMs` or until woken.
    */
-  readonly enableAutomaticReplacementRecovery?:
-    | boolean
-    | ((allocation: SidecarAllocation) => ReplacementRecoveryDecision);
-  /** How long a `defer` decision parks an allocation before it is asked again. */
+  readonly enableAutomaticReplacementRecovery?: boolean;
+  /** How long a provisioner's `defer` parks an allocation before it is asked again. */
   readonly deferredRecoveryMs?: number;
   readonly leaseDurationMs?: number;
   readonly connectTimeoutMs?: number;
@@ -365,15 +358,16 @@ export function createSidecarAllocationReconciler({
       : {};
     // Only an `allocated` worker is ever a recovery question: a
     // `provisioning` one never finished its first start and is replaced
-    // regardless, as before.
+    // regardless, as before. Its provisioner answers first, when it can.
     const decision: ReplacementRecoveryDecision =
       allocation.status !== "allocated"
         ? "replace"
-        : typeof enableAutomaticReplacementRecovery === "function"
-          ? enableAutomaticReplacementRecovery(allocation)
-          : enableAutomaticReplacementRecovery
-            ? "replace"
-            : "release";
+        : (provisionerFor(allocation)?.recoverLostWorker?.({
+            allocationId: allocation.id,
+            tenantId: allocation.tenantId,
+            anchorRunId: allocation.anchorRunId,
+            generation: allocation.generation,
+          }) ?? (enableAutomaticReplacementRecovery ? "replace" : "release"));
     if (decision === "defer") {
       await allocationStore.parkReconciliation(allocation.id, leaseId, {
         kind: "retry-after-error",

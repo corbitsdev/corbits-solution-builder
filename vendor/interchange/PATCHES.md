@@ -88,7 +88,7 @@ have a newer upstream equivalent to drop in favor of yet. Each carries a
 kill date and an upstream ask, filed in the `Interchange` Linear team
 (`INTR-*`), linked below.
 
-## `packages/hub-sessions/src/sidecar-allocation/reconciler.ts` — recovery of a dead worker decided per allocation
+## `packages/hub-sessions/src/sidecar-allocation/contracts.ts`, `reconciler.ts` — a provisioner decides what becomes of its lost worker
 
 **Why.** Solution Builder CL-9700. The embedded host's sidecars are child
 processes that die with it. `enableAutomaticReplacementRecovery` is one
@@ -101,17 +101,21 @@ decisions into a new run, and left a dead `pending` row behind each time
 frozen approval bundle and launch spec are durable, the `replacing` path
 places them on a new sidecar with no probe, and the run resumes. What was
 missing was a way to say "not now" for a worker nobody has asked for yet.
+Upstream's own rule (PR 199's docs) is that provisioners own capacity reuse
+policy, so the decision is asked of the provisioner.
 
-**What changed.** The option also accepts a function of the allocation
-returning `replace`, `release` or `defer`. `defer` keeps the allocation
-`allocated` and parks its reconciliation for `deferredRecoveryMs` (default
-60 s), after which it is asked again; `wakeReconciliation` asks sooner. A
-boolean behaves exactly as before, and a `provisioning` worker is still
-replaced regardless, as before. Two tests cover the function form.
+**What changed.** `SidecarProvisioner` gains an optional
+`recoverLostWorker(worker)` returning `replace`, `release` or `defer`. The
+reconciler asks it for an `allocated` worker that will not reconnect, and
+falls back to the boolean as before when the provisioner has no answer;
+`defer` keeps the allocation `allocated` and parks its reconciliation for
+`deferredRecoveryMs` (default 60 s), after which it is asked again;
+`wakeReconciliation` asks sooner. A `provisioning` worker is still replaced
+regardless, as before. Two tests cover the hook.
 
-**Upstream-able.** Yes (INTR issue on the embedder's recovery policy). The
-decision belongs to the embedder, which knows what its workers' state is
-and when it is wanted; the reconciler only needed to let it say so.
+**Upstream-able.** Yes (INTR-636). The decision belongs to the provisioner,
+which knows whether its workers' state survives them and when they are
+wanted; the reconciler only needed to ask.
 
 ## `packages/hub-sessions/src/session-service.ts` — pack a source asset at its pinned commit
 

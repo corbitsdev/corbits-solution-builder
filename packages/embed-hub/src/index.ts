@@ -412,6 +412,16 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
       export: "createResponsesAdapter",
     },
   ]);
+  // Per tenant whose project has been opened since boot: the anchor runs
+  // (deployments) the page asked to have placed again. Process-provisioned
+  // sidecars die with the host. Replacing every one at boot started ~600 MB
+  // of sidecar per live deployment before anything was opened (CL-9540);
+  // releasing them made every open a full redeploy and a replay of the
+  // project's decisions (#192, #237, CL-9700). So a dead worker of a tenant
+  // nobody has opened is deferred; of an opened one, replaced if the page
+  // asked for it (the frozen bundle lands on a new sidecar with no probe and
+  // the run resumes) and released otherwise, as every dead worker was before.
+  const recoverable = new Map<string, Set<string>>();
   const provisionerFor = (role: ProcessProvisionerRole) =>
     createProcessProvisioner({
       role,
@@ -419,6 +429,11 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
       runtimePath: options.sidecarRuntime,
       sidecarEntryPath: options.sidecarEntry,
       hubWebSocketUrl: options.hubWebSocketUrl,
+      recoverLostWorker: (worker) => {
+        const wanted = recoverable.get(worker.tenantId);
+        if (wanted === undefined) return "defer";
+        return wanted.has(worker.anchorRunId) ? "replace" : "release";
+      },
     });
   const deploymentProvisioner = provisionerFor("deployment");
   const bindingFingerprint = deploymentProvisioner.bindingFingerprint;
@@ -454,11 +469,6 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
   // claim shares pglite's one connection, including its lease renewals, so
   // the cap stays below the platform's default of 8.
   const ALLOCATION_CONCURRENCY = 4;
-  // Per tenant whose project has been opened since boot: the anchor runs
-  // (deployments) the page asked to have placed again. A dead worker of an
-  // opened tenant that was not asked for is released, as every dead worker
-  // was before; one of a tenant nobody has opened is deferred.
-  const recoverable = new Map<string, Set<string>>();
   // Once the reconciler has moved a recovered allocation to `replacing`, it
   // schedules the replacement itself under the allocation's own backoff --
   // several seconds for one that failed before. The host asked for this
@@ -484,18 +494,9 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
     router: sidecarRouter,
     hubWebSocketUrl: options.hubWebSocketUrl,
     connectTimeoutMs: SIDECAR_CONNECT_TIMEOUT_MS,
-    // Process-provisioned sidecars die with the host. Replacing every one at
-    // boot started ~600 MB of sidecar per live deployment before anything
-    // was opened (CL-9540); releasing them made every open a full redeploy
-    // and a replay of the project's decisions (#192, #237, CL-9700). So a
-    // dead worker is deferred until its project is opened (`recoverDeployments`),
-    // then replaced: the frozen bundle lands on a new sidecar with no probe,
-    // and the run resumes where it was.
-    enableAutomaticReplacementRecovery: (allocation) => {
-      const wanted = recoverable.get(allocation.tenantId);
-      if (wanted === undefined) return "defer";
-      return wanted.has(allocation.anchorRunId) ? "replace" : "release";
-    },
+    // The process provisioner answers for its own lost workers
+    // (`recoverLostWorker`, above); this stays off for any worker it does not.
+    enableAutomaticReplacementRecovery: false,
     onReady: async (allocation: SidecarAllocation, reconciliation) => {
       await workflowAllocationService.deployReadyAllocation(allocation, reconciliation);
       await workflowDispatchService.requeueForReadyAllocation(allocation.anchorRunId);

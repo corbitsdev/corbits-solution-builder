@@ -79,7 +79,26 @@ export interface SidecarProvisioner {
    * succeed without an externalRef; that value is only an optional optimization.
    */
   destroy(request: DestroySidecarRequest): Promise<DestroySidecarResult>;
+  /**
+   * What to do with an allocated worker that will not reconnect: `replace`
+   * it on new capacity, `release` the allocation, or `defer` the question
+   * (the allocation stays `allocated` and is asked again after a while, or
+   * sooner when woken). Provisioners own capacity reuse policy, and only the
+   * provisioner knows whether the worker's state survives it; absent, the
+   * reconciler's `enableAutomaticReplacementRecovery` decides as before.
+   */
+  recoverLostWorker?(worker: LostSidecarWorker): ReplacementRecoveryDecision;
 }
+
+/** The worker `recoverLostWorker` is asked about. */
+export type LostSidecarWorker = {
+  readonly allocationId: string;
+  readonly tenantId: string;
+  readonly anchorRunId: string;
+  readonly generation: number;
+};
+
+export type ReplacementRecoveryDecision = "replace" | "release" | "defer";
 
 export type SidecarCredentialIdentity =
   | {

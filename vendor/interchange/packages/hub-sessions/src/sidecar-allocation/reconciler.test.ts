@@ -756,7 +756,7 @@ describe("createSidecarAllocationReconciler", () => {
     });
   });
 
-  test("a recovery policy decides per allocation: defer parks the dead worker instead of releasing or replacing it", async () => {
+  test("the provisioner decides what becomes of its lost worker: defer parks it instead of releasing or replacing it", async () => {
     const allocated = allocation({
       status: "allocated",
       generation: 1,
@@ -774,12 +774,14 @@ describe("createSidecarAllocationReconciler", () => {
         return true;
       },
     });
-    const reconciler = createSidecarAllocationReconciler({
-      ...deps({ store, ready: false, waitError: new Error("connect timeout") }),
-      enableAutomaticReplacementRecovery: (row) => {
-        decisions.push(row.tenantId);
+    const provisioner = testProvisioner({
+      recoverLostWorker: (worker) => {
+        decisions.push(worker.tenantId);
         return "defer";
       },
+    });
+    const reconciler = createSidecarAllocationReconciler({
+      ...deps({ store, provisioner, ready: false, waitError: new Error("connect timeout") }),
       deferredRecoveryMs: 60_000,
     });
 
@@ -789,7 +791,7 @@ describe("createSidecarAllocationReconciler", () => {
     expect(parked).toEqual({ kind: "retry-after-error", notBefore: new Date(NOW.getTime() + 60_000) });
   });
 
-  test("a recovery policy answering replace replaces, exactly as `true` does", async () => {
+  test("a provisioner answering replace replaces, exactly as `true` does, with recovery otherwise off", async () => {
     const allocated = allocation({
       status: "allocated",
       generation: 1,
@@ -806,9 +808,9 @@ describe("createSidecarAllocationReconciler", () => {
         return null;
       },
     });
+    const provisioner = testProvisioner({ recoverLostWorker: () => "replace" });
     const reconciler = createSidecarAllocationReconciler({
-      ...deps({ store, ready: false, waitError: new Error("connect timeout") }),
-      enableAutomaticReplacementRecovery: () => "replace",
+      ...deps({ store, provisioner, ready: false, waitError: new Error("connect timeout") }),
     });
     await reconciler.reconcileNext();
     expect(replaced).toBe(true);

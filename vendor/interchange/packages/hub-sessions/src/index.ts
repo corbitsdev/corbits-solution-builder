@@ -99,7 +99,6 @@ export {
   type SidecarProvisionerChooser,
   type SidecarAllocationReconciler,
   type SidecarAllocationReconcilerDeps,
-  type ReplacementRecoveryDecision,
   type SidecarReconciliationContext,
 } from "./sidecar-allocation";
 export { ensureWorkflowDefinitionForAsset } from "./workflow-definition-ensure";
