@@ -84,6 +84,12 @@ describe("parseStackRecord tolerates a model's harmless slips (#437)", () => {
     expect(parseStackRecord(markdown)).toBeNull();
   });
 
+  test("a json fence in a later section is never read as the stack", () => {
+    const markdown = ["## Stack", "", "The stack is unchanged.", "", "## Components", "```json", JSON.stringify(record()), "```"].join("\n");
+    expect(parseStackRecord(markdown)).toBeNull();
+    expect(stackSectionOf(markdown)).toBeNull();
+  });
+
   test("stackSectionOf returns the heading through the closing fence", () => {
     const section = stackSectionOf(planWithStack(record()));
     expect(section?.startsWith("## Stack")).toBe(true);

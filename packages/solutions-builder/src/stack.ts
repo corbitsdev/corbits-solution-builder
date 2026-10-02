@@ -143,20 +143,34 @@ function parseJsonLeniently(text: string): unknown | undefined {
  * Anything short of a clean parse -- no heading, no fence, invalid JSON, or
  * a shape arktype rejects -- is `null`, never a best-effort guess.
  */
+/**
+ * The text of the plan's Stack section: from its heading to the next heading
+ * of the same or a higher level, or the end. Bounded, so a fence in a later
+ * section is never read as the stack.
+ */
+function stackSectionText(markdown: string): { readonly start: number; readonly text: string } | null {
+  const heading = STACK_HEADING_RE.exec(markdown);
+  if (!heading || heading.index === undefined) return null;
+  const level = /^#+/.exec(heading[0])![0].length;
+  const rest = markdown.slice(heading.index);
+  const next = new RegExp(`^#{1,${String(level)}}\\s`, "m").exec(rest.slice(heading[0].length));
+  const end = next && next.index !== undefined ? heading[0].length + next.index : rest.length;
+  return { start: heading.index, text: rest.slice(0, end) };
+}
+
 /** The "## Stack" section of a plan, heading through the closing fence, or null. */
 export function stackSectionOf(markdown: string): string | null {
-  const headingIndex = markdown.search(STACK_HEADING_RE);
-  if (headingIndex < 0) return null;
-  const rest = markdown.slice(headingIndex);
-  const match = STACK_BLOCK_RE.exec(rest);
+  const section = stackSectionText(markdown);
+  if (!section) return null;
+  const match = STACK_BLOCK_RE.exec(section.text);
   if (!match || match.index === undefined) return null;
-  return rest.slice(0, match.index + match[0].length);
+  return section.text.slice(0, match.index + match[0].length);
 }
 
 export function parseStackRecord(markdown: string): StackRecord | null {
-  const headingIndex = markdown.search(STACK_HEADING_RE);
-  if (headingIndex < 0) return null;
-  const match = STACK_BLOCK_RE.exec(markdown.slice(headingIndex));
+  const section = stackSectionText(markdown);
+  if (!section) return null;
+  const match = STACK_BLOCK_RE.exec(section.text);
   if (!match) return null;
   const json = parseJsonLeniently(match[1]!);
   if (json === undefined) return null;

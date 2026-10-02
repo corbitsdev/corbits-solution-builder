@@ -18,7 +18,8 @@ const AFTER_HEADINGS = [/^##\s+Components and interfaces\b/m, /^##\s+Data flow\b
 /** `draft` with `section` as its Stack section: replacing a present but unusable one, else inserted where the plan's headings put it. */
 export function withStackSection(draft: string, section: string): string {
   const present = stackSectionOf(draft);
-  if (present) return draft.replace(present, section);
+  // A function replacement: a "$" in the block's own text is never a pattern.
+  if (present) return draft.replace(present, () => section);
   // A "## Stack" heading with prose and no fence ("the stack is unchanged")
   // is replaced through to its next heading, so the plan never carries two.
   const bare = /^#{2,4}\s+Stack\b[^\n]*\n[\s\S]*?(?=^#{1,4}\s|(?![\s\S]))/m.exec(draft);

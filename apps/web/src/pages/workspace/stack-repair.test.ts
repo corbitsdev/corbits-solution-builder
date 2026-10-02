@@ -32,6 +32,16 @@ describe("repairedStackDraft", () => {
     expect(repairedStackDraft(3, [msg("1", "agent", v1), msg("2", "agent", v2NoStack)], msg("2", "agent", v2NoStack))).toEqual(msg("2", "agent", v2NoStack));
   });
 
+  test("a dollar sign in the block's text is written in verbatim, and a later fence is left alone", () => {
+    const dollar = STACK.replace('"reason":"r"', () => '"reason":"costs $$ and $& more"');
+    const out = withStackSection(v2Unchanged, dollar);
+    expect(out).toContain('"reason":"costs $$ and $& more"');
+    const later = headed("## Stack\n\nunchanged\n\n") + "```json\n{}\n```\n";
+    const repaired = withStackSection(later, STACK);
+    expect(repaired).toContain("## Components and interfaces");
+    expect(repaired.split("```json").length).toBe(3);
+  });
+
   test("withStackSection appends when no later heading exists", () => {
     expect(withStackSection("## In short\n- a\n", STACK).trimEnd().endsWith("```")).toBe(true);
   });
