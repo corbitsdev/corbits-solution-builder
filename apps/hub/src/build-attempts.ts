@@ -18,16 +18,21 @@
  *   <data>/builds/<projectId>/attempts/<n>.json       the outcome, once ended
  *
  * The files are the record; they are what a host that restarts reads. The
- * process itself is memory: a host that restarts knows nothing of an
- * attempt it was running, and says so (`state: "lost"`) rather than calling
- * it running or ended. `attempts/<n>/` is the convention `publish_workspace`
- * reads (`packages/tools-delivery`), kept so the archive and manifest it
- * writes name the attempt the same way.
+ * process itself is memory, so a host that stops cancels every attempt it
+ * is running (`stopBuildAttempts`, from the host's own stop) and records
+ * each as ended by the signal. An attempt that was started and never
+ * recorded as ended — the host was killed outright — is read back from
+ * `<n>.started.json`: when the process group it names is still alive the
+ * attempt is `detached` (running, but not followed by this host; cancel
+ * still reaches it by group), and when it is gone the attempt is `lost`.
+ * `attempts/<n>/` is the convention `publish_workspace` reads
+ * (`packages/tools-delivery`), kept so the archive and manifest it writes
+ * name the attempt the same way.
  */
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { dataDirectory, HostError } from "@corbits/embedded-host";
-import { BRIDGE_CAPABILITIES, BRIDGE_ID, runBuildAttempt, type BridgeOutcome } from "./corbits-exec.js";
+import { BRIDGE_CAPABILITIES, BRIDGE_ID, groupAlive, killGroup, runBuildAttempt, type BridgeOutcome } from "./corbits-exec.js";
 
 /** Enough to read the last stretch of a long build in a window; the file has it all. */
 const TRANSCRIPT_KEEP = 200_000;
@@ -107,7 +112,12 @@ export function assembleBuildPrompt(input: BuildPromptInput): string {
   ].join("\n");
 }
 
-export type AttemptState = "running" | "ended" | "unavailable" | "lost";
+/**
+ * `running`: this host is driving the worker. `detached`: a worker an
+ * earlier run of the host started is still alive, and this host only knows
+ * its process group. `lost`: started, never recorded as ended, and gone.
+ */
+export type AttemptState = "running" | "ended" | "unavailable" | "detached" | "lost";
 
 export type AttemptRecord = {
   readonly attempt: number;
@@ -123,14 +133,21 @@ export type AttemptRecord = {
 /** What is written as `<n>.json` when the worker ends. */
 type OutcomeFile = { readonly outcome: BridgeOutcome; readonly continuedFrom: number | null; readonly capabilities: typeof BRIDGE_CAPABILITIES };
 
-/** What is written as `<n>.started.json` the moment an attempt starts, so a lost attempt still has its start. */
-type StartedFile = { readonly startedAt: string; readonly continuedFrom: number | null };
+/**
+ * What is written as `<n>.started.json` the moment an attempt starts, and
+ * again once the worker is up with its pid and process group: a host that
+ * restarts reads it to tell a worker that is still there from one that is
+ * gone, and to reach the former.
+ */
+type StartedFile = { readonly startedAt: string; readonly continuedFrom: number | null; readonly pid: number | null; readonly pgid: number | null };
 
 type InFlight = {
   readonly controller: AbortController;
   readonly startedAt: string;
   readonly continuedFrom: number | null;
   transcript: string;
+  /** Settles once the record is written and the entry removed. */
+  done: Promise<unknown>;
 };
 
 /** Keyed `<projectId>:<attempt>`; memory only, see the module doc. */
@@ -168,9 +185,10 @@ export async function attemptRecord(projectId: string, attempt: number): Promise
   }
   const started = await readJson<StartedFile>(attemptFile(projectId, attempt, ".started.json"));
   if (!started) return null;
-  // Started on some host, never ended on this one: the process went with
-  // whatever host was running it.
-  return { attempt, state: "lost", startedAt: started.startedAt, endedAt: null, continuedFrom: started.continuedFrom, outcome: null, workspace };
+  // Started by some run of the host and never recorded as ended. The
+  // process group says whether the worker is still there.
+  const alive = typeof started.pgid === "number" && groupAlive(started.pgid);
+  return { attempt, state: alive ? "detached" : "lost", startedAt: started.startedAt, endedAt: null, continuedFrom: started.continuedFrom, outcome: null, workspace };
 }
 
 export async function listAttempts(projectId: string): Promise<AttemptRecord[]> {
@@ -199,12 +217,34 @@ export async function attemptPrompt(projectId: string, attempt: number): Promise
   }
 }
 
-/** Stops the worker for an attempt, if one is running on this host. True when there was one. */
-export function cancelBuildAttempt(projectId: string, attempt: number): boolean {
+/**
+ * Stops the worker for an attempt: the one this host is driving, or the
+ * group a detached one still runs in. True when there was one to stop.
+ */
+export async function cancelBuildAttempt(projectId: string, attempt: number): Promise<boolean> {
   const live = inFlight.get(key(projectId, attempt));
-  if (!live) return false;
-  live.controller.abort();
+  if (live) {
+    live.controller.abort();
+    return true;
+  }
+  const record = await attemptRecord(projectId, attempt);
+  if (record?.state !== "detached") return false;
+  const started = await readJson<StartedFile>(attemptFile(projectId, attempt, ".started.json"));
+  if (typeof started?.pgid !== "number") return false;
+  killGroup(started.pgid);
   return true;
+}
+
+/**
+ * Cancels every attempt this host is running and waits for each record to
+ * be written: the host's own stop calls this, so a worker never outlives
+ * the host that started it and the attempt is recorded as ended by the
+ * signal rather than found lost on the next start.
+ */
+export async function stopBuildAttempts(): Promise<void> {
+  const running = [...inFlight.values()];
+  for (const live of running) live.controller.abort();
+  await Promise.all(running.map((live) => live.done));
 }
 
 /** True while this host is running any attempt for the project. */
@@ -242,7 +282,10 @@ export async function startBuildAttempt(args: {
   const prompt = assembleBuildPrompt({ ...args.prompt, continuing: continueFrom !== null });
   const startedAt = new Date().toISOString();
   await writeFile(attemptFile(projectId, attempt, ".prompt.txt"), prompt);
-  await writeFile(attemptFile(projectId, attempt, ".started.json"), `${JSON.stringify({ startedAt, continuedFrom: continueFrom } satisfies StartedFile)}\n`);
+  const startedFile = attemptFile(projectId, attempt, ".started.json");
+  const writeStarted = (process: { pid: number | null; pgid: number | null }) =>
+    writeFile(startedFile, `${JSON.stringify({ startedAt, continuedFrom: continueFrom, ...process } satisfies StartedFile)}\n`);
+  await writeStarted({ pid: null, pgid: null });
   const logPath = attemptFile(projectId, attempt, ".log");
   await writeFile(logPath, "");
 
@@ -255,6 +298,7 @@ export async function startBuildAttempt(args: {
     startedAt,
     continuedFrom: continueFrom,
     transcript: "",
+    done: Promise.resolve(),
   };
   inFlight.set(key(projectId, attempt), live);
   const done = (async () => {
@@ -277,6 +321,7 @@ export async function startBuildAttempt(args: {
           log.write(chunk);
           void log.flush();
         },
+        onStarted: (process) => void writeStarted(process).catch(() => undefined),
       });
       await record(outcome);
       return outcome;
@@ -312,7 +357,7 @@ export async function startBuildAttempt(args: {
       inFlight.delete(key(projectId, attempt));
     }
   })();
-  void done;
+  live.done = done;
 
   return { attempt, state: "running", startedAt, endedAt: null, continuedFrom: continueFrom, outcome: null, workspace };
 }

@@ -112,7 +112,8 @@ function evMark(tone: keyof typeof EV_TONE): string {
 
 function attemptLabel(attempt: BuildAttempt): { label: string; tone: "warning" | "selected" | "success" | "info" | "error" } {
   if (attempt.state === "running") return { label: "working", tone: "selected" };
-  if (attempt.state === "lost") return { label: "lost with a host restart", tone: "error" };
+  if (attempt.state === "detached") return { label: "still running from before the host restarted; not followed here", tone: "warning" };
+  if (attempt.state === "lost") return { label: "lost: the host was stopped without ending it, and the worker is gone", tone: "error" };
   if (attempt.state === "unavailable") return { label: "could not run", tone: "error" };
   const outcome = attempt.outcome;
   if (!outcome) return { label: "ended", tone: "info" };
@@ -221,6 +222,8 @@ export function BuildPanel({
 
   const latest = attempts.at(-1) ?? null;
   const running = attempts.find((entry) => entry.state === "running") ?? null;
+  // A detached worker can still be cancelled: the host signals its group.
+  const cancellable = running ?? attempts.find((entry) => entry.state === "detached") ?? null;
   const current = useMemo(() => attempts.find((entry) => entry.attempt === selected) ?? latest, [attempts, selected, latest]);
 
   // The log of the attempt in view: polled while it runs, read once when it
@@ -396,7 +399,7 @@ export function BuildPanel({
               >
                 {lastEnded ? `Continue from attempt ${String(lastEnded.attempt)}` : "Continue from the last attempt"}
               </Button>
-              <Button variant="destructive" loading={busy === "cancel"} disabled={!running || busy !== null} onClick={() => running && void cancel(running.attempt)}>
+              <Button variant="destructive" loading={busy === "cancel"} disabled={!cancellable || busy !== null} onClick={() => cancellable && void cancel(cancellable.attempt)}>
                 Cancel the build attempt
               </Button>
               <Button variant="primary" loading={approving} disabled={!canApprove || !address} onClick={onApprove}>

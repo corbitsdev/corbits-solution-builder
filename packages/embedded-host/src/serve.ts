@@ -51,6 +51,13 @@ export interface ServeOptions {
    * product declares them; this skeleton knows none. See `door.ts`.
    */
   selfAuthenticatingPaths?: readonly string[];
+  /**
+   * Runs first when the host stops, before the server and the database
+   * close: what the product has in flight that must not outlive the
+   * process — a build worker it started, say — is ended here. Awaited; an
+   * error is logged and the stop goes on.
+   */
+  onStop?: () => Promise<void>;
 }
 
 function numberFlag(name: string): number | undefined {
@@ -435,6 +442,7 @@ export async function serveHost(options: ServeOptions): Promise<void> {
       // Before the database closes: a reconcile claim that runs against a
       // closed pglite fails, and logs as if placement had broken.
       if (hubIsMounted()) hub().stopReconcile();
+      await options.onStop?.().catch((cause: unknown) => console.error("Stopping the product's own work failed:", cause));
       await server.stop(true);
       await stopSpawnedSidecars(join(dataDirectory(), "hub")).catch(() => 0);
       await host.close();

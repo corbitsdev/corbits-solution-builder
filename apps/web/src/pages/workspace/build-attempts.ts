@@ -49,7 +49,7 @@ export function buildEvidenceState(
 ): { ready: boolean; reason: string | null } {
   const archive = buildArchives(nodes)[0];
   if (!archive) return { ready: false, reason: "No build archive has been recorded yet — package an ended attempt first." };
-  if (attempts.some((entry) => entry.state === "running")) {
+  if (attempts.some((entry) => entry.state === "running" || entry.state === "detached")) {
     return { ready: false, reason: "A build attempt is still running. Its work can be packaged once the worker has ended." };
   }
   const recordedFor = attemptOfNode(archive);
@@ -151,7 +151,7 @@ export function useBuildAttempts(projectId: string, enabled: boolean): {
     void refresh();
   }, [enabled, refresh]);
 
-  const running = attempts.some((entry) => entry.state === "running");
+  const running = attempts.some((entry) => entry.state === "running" || entry.state === "detached");
   useEffect(() => {
     if (!enabled) return;
     const timer = setInterval(() => void refresh(), running ? 2_000 : 10_000);

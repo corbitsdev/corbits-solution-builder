@@ -249,8 +249,8 @@ export type BridgeOutcome = {
 /** One build attempt as the host records it (`apps/hub/src/build-attempts.ts`). */
 export type BuildAttempt = {
   attempt: number;
-  /** `lost`: started on some host and never ended on this one. */
-  state: "running" | "ended" | "unavailable" | "lost";
+  /** `detached`: a worker an earlier run of the host started is still alive, known only by its process group. `lost`: started, never recorded as ended, and gone. */
+  state: "running" | "ended" | "unavailable" | "detached" | "lost";
   startedAt: string | null;
   endedAt: string | null;
   continuedFrom: number | null;

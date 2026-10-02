@@ -139,7 +139,7 @@ export function registerBuildRoutes(api: Hono) {
     const attempt = attemptParam(context.req.param("n"));
     const record = await attemptRecord(projectId, attempt);
     if (!record) throw new HostError("not_found", `Attempt ${String(attempt)} was not found.`);
-    const cancelled = cancelBuildAttempt(projectId, attempt);
+    const cancelled = await cancelBuildAttempt(projectId, attempt);
     if (!cancelled) {
       throw new HostError("conflict", `Attempt ${String(attempt)} is not running on this host (${record.state}).`, {}, false);
     }

@@ -196,6 +196,12 @@ export async function runBuildAttempt(args: {
    * progress is inferred. A turn report is the worker's own.
    */
   onOutput?: (chunk: string, channel: "stdout" | "stderr" | "turn") => void;
+  /**
+   * The worker's pid and the process group it leads (null on Windows, which
+   * has none), once it is up: what a host that restarts needs to know
+   * whether the worker is still there, and what to signal if it is.
+   */
+  onStarted?: (process: { pid: number; pgid: number | null }) => void;
 }): Promise<BridgeOutcome> {
   const startedAt = new Date().toISOString();
   const workspace = args.workspace;
@@ -257,6 +263,7 @@ export async function runBuildAttempt(args: {
     env: inheritedEnvironment(worker.environment),
     detached: process.platform !== "win32",
   });
+  if (child.pid !== undefined) args.onStarted?.({ pid: child.pid, pgid: process.platform === "win32" ? null : child.pid });
   const ended = new Promise<{ exitStatus: number | null; signal: string | null }>((resolve) => {
     child.once("exit", (code, signal) => resolve({ exitStatus: code, signal }));
     // A spawn failure after the probe passed (the binary vanished, a
