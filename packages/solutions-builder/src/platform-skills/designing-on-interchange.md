@@ -1,41 +1,28 @@
 # designing-on-interchange
 
-Reference material for when a brief actually needs the platform. Most
-deliverables are ordinary product software — a CRM, a CLI, a service — and
-should be designed as that, not forced into one of the shapes below.
+Interchange offers a range of shapes. Pick the smallest one the requirements
+force; the stack rubric names the modes and the requirement that steps up.
 
-**The common case: ordinary product software on the control plane.** The
-product is built on the house stack (Bun, TypeScript, Hono, React + Vite +
-React Router, TanStack Query, Better Auth, Postgres + Drizzle) and runs on
-the Interchange hub's database as its control plane: the product's own
-tables live in their own Postgres schema and foreign-key into the hub's
-`tenant` and `principal` tables for tenancy and users, and login is the
-hub's Better Auth. This gives durability, tenancy and room for agents or
-workflows later, without the product being one. Do not add a workflow, an
-agent or a bespoke permission system to a brief that only asked for an app.
+- **Local libraries.** The app imports `@intx/inference`, `@intx/agent` or
+  `@intx/workflow` and runs them in its own process: a CLI, a desktop app, a
+  single-user service. No hub, no sidecar; credentials from the app's own
+  config. The simplest shape, and the default for an app one person runs.
+- **Durable local.** The same, with `@intx/workflow-host` so a run survives a
+  restart and a human gate can wait for days.
+- **Control plane.** A hub (an HTTP API over Postgres) owns tenants,
+  principals, credentials, assets and deployments, and agents and workflows
+  run in sidecars the hub isolates from each other and from the app. The app
+  is a client of the hub. This is the shape for several people, several
+  tenants, delegated credentials, approvals, audit, or maximum isolation of
+  what an agent can reach.
 
-Where a brief genuinely calls for agents, workflows, approvals or mail, it
-takes one of these shapes instead:
+Whichever shape, an ordinary product stays an ordinary product: its own
+screens, routes, schema and logic, written plainly. An agent, a workflow or an
+approval gate appears only where a requirement names the need, and then it is
+defined with the platform's constructs — an agent step, a drafting `loop`, a
+gate on `awaitSignal` — not orchestrated by hand. On the control plane,
+whatever acts acts under a principal and grants gate it; never build a second
+user or permission system beside the hub's.
 
-- **A workflow deployment** — a package a hub deploys and runs. Agents are
-  workflow definitions; the package's own directors, loops, actions and
-  tools come from its `interchange.*` package.json fields.
-- **A desktop host embedding the hub** — a host mounts the hub in-process
-  and drives it for one operator. The hub and the sidecar are the
-  platform's; the app is the client.
-- **A hosted hub** — the same hub standing on the network, tenants and
-  principals doing the multi-user work.
-
-When building one of those agentic shapes:
-
-- Define, don't orchestrate. An agent step, a drafting `loop`, a human gate
-  on `awaitSignal` — all definition constructs, not bespoke machinery.
-- Whatever acts acts under a principal — a person, a deployed agent, a
-  workflow run — and grants gate it. Never build a second permission system.
-- Skills, tools and directors are platform assets. Reach for them before
-  new machinery.
-- `apps/` holds clients that talk to a hub through `@intx/hub-client` or
-  embed it; `packages/` holds what they share. The hub itself is never an
-  app this build writes.
-- Package what a hub would deploy so a deploy can name it: published to
-  npm, or a git repository checked out at a pinned commit.
+Package what a hub would deploy so a deploy can name it: published to npm, or
+a git repository checked out at a pinned commit.

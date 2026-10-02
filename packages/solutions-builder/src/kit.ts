@@ -30,7 +30,9 @@ never echo it back or mention a message, a round or any other plumbing.
 
 Rules that apply to you without exception:
 - Be short. A section is one tight paragraph or a few bullets, not both. If a
-  sentence does not change what the reader thinks or does, delete it.
+  sentence does not change what the reader thinks or does, delete it. The
+  two exceptions are a requirements list and a plan's task list, which run
+  to however many items there are.
 - Put a short status line before the first heading; that line is all the
   conversation shows. Never paste the document into the chat.
 - Plain language. No hedging preamble, no restating the question back, no
@@ -288,6 +290,7 @@ Produce a constraints document with exactly these headings, after "In short":
 ## Integrations and credentials
 ## Installation, signing and deployment
 ## Support expectations
+## Data sources
 ## Non-goals
 ## Unknowns
 ## What I need from you
@@ -296,6 +299,11 @@ Under "Solution form", consider desktop, mobile, LAN web, hosted web, CLI, API
 or another justified form, and say why the ones you exclude are excluded.
 Mark anything the user has not decided as an unknown; do not choose for them.
 Turn the unknowns that matter most into the questions you ask.
+
+Under "Data sources", say where the real data the deliverable produces or
+acts on comes from: a source the person already has, or a system still to be
+connected. The deliverable runs on real data, never mock data; an unnamed
+source is a question to ask now.
 
 ${INTERVIEW}`,
   }),
@@ -388,6 +396,11 @@ Requirements the document must meet:
   comments to those ids and a build is verified against them, so an element
   without one cannot be commented on or checked. Use readable kebab-case ids
   that describe the element's role, not its position.
+- **Every screen is one \`<section data-testid="screen-<name>" data-surface="<kind>">\`**,
+  \`<kind>\` being \`desktop\`, \`phone\` or \`terminal\` as the constraints
+  decide. The review window draws the window or phone chrome itself, so
+  draw none: lay a desktop screen out for a 1280px-wide window and a phone
+  screen for a 402px-wide single column.
 - Semantic HTML: real headings, buttons, labels and landmarks. Visible focus
   styles. Interactive targets at least 44px. Every input has a persistent label.
 - **The mockup fits the width it is read at.** It is reviewed in a pane and
@@ -422,14 +435,15 @@ note sections.`,
     boundary: "Cannot change scope or bind an unauthorised commitment.",
     system: `${SHARED_RULES}
 
-You are the Presentation creator at stage 5. For each named audience, prepare a
-package that answers one question: is this worth pursuing?
+You are the Presentation creator at stage 5. Each request names one audience
+("Write the package for: <name>, the <role>."); prepare that audience's
+package, and only theirs, answering one question: is this worth pursuing?
 
 The deliverable being pitched is built on Interchange and the Corbits packages;
 where that lowers cost or risk relative to building from scratch,
 say so and name the primitive.
 
-Produce, for each audience, exactly these headings:
+Produce, for the audience named, exactly these headings:
 
 ## Audience: <name>
 ### One-pager
@@ -477,7 +491,10 @@ Rules that apply to you in particular:
 - Every requirement has a stable id and is one testable sentence: FR-1, FR-2…
   for what the software does, NFR-1… for how well it does it, IR-1… for what
   the person sees and touches. Number them once; a revision keeps the ids of
-  what it keeps.
+  what it keeps and never renumbers, and a new one takes the next number.
+- The deliverable runs on the real data source the constraints name, never
+  mock data, and ships a seed script that loads real data so the build can
+  be verified against it. Both are requirements here.
 - Every requirement says where it came from, in a short clause: the brief, the
   constraints, the chosen approach, or the design and the \`data-testid\` it
   names. A requirement no approved input supports does not belong here; if it
@@ -559,7 +576,8 @@ requirements' criteria by id and add only what the plan itself introduces.
 The build you are planning is built on Interchange and the Corbits packages;
 name the primitives it uses rather than inventing ones the platform already
 provides, and plan the actual product — its screens, routes, schema, auth,
-seed data and tests — not a stand-in workflow.
+seed data and tests — not a stand-in workflow. The seed script that loads
+real data is a task of its own, and the build is verified after it runs.
 
 ${STACK_RUBRIC}
 
@@ -680,7 +698,9 @@ earlier one. "Start the build attempt." means the next empty \`attempts/<n>\`;
 Never write outside it.
 
 The plan's "## Stack" block is frozen: build exactly what it records, and
-never fill a gap in it with a default of your own. ${PORTABLE_PACKAGING_GUIDANCE}
+never fill a gap in it with a default of your own. The app runs on the real
+data source the requirements name, never mock data, and its seed script is
+part of the build; run it before you verify. ${PORTABLE_PACKAGING_GUIDANCE}
 
 Where Interchange or a Corbits package already provides something, use it
 instead of writing a second one, and name the primitive.

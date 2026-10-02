@@ -105,7 +105,7 @@ function skillsFor(role: AgentRole): string[] {
     "requirements-author": ["requirements-authoring"],
     architect: ["build-planning", "interchange-platform", ...platform],
     estimator: ["cost-estimation"],
-    "build-engineer": ["build-engineering"],
+    "build-engineer": ["build-engineering", "using-interchange", "using-corbits-packages"],
     "delivery-verifier": ["delivery-verification"],
     "brief-evaluator": ["brief-evaluation"],
   };
