@@ -22,6 +22,8 @@ export type DeliveryManifestFile = { path: string; sha256: string; sizeBytes: nu
 export type DeliveryVerificationContent = {
   checkedAt: string;
   checkedBy: "tool";
+  /** Where the targets were started: the sidecar, or the host; absent on an older manifest. */
+  ranOn?: "sidecar" | "host";
   archiveExtras: number;
   items: { category: string; path: string; required: boolean; status: string; checkedBy?: string; detail?: string }[];
   targets: { target: string; modality: string; exercised: boolean; ranSuccessfully: boolean; transcript: string }[];
@@ -61,7 +63,8 @@ export function verificationLines(verification: DeliveryVerificationContent | un
     lines.push("- No web or api target was started or probed.");
   }
   for (const target of verification.targets) {
-    lines.push("", `Target "${target.target}" (${target.modality}) ${target.exercised ? (target.ranSuccessfully ? "ran and answered" : "was started and did not pass") : "was not exercised"}:`, target.transcript);
+    const where = verification.ranOn === "host" ? " on the host, with the start command the person gave" : "";
+    lines.push("", `Target "${target.target}" (${target.modality}) ${target.exercised ? (target.ranSuccessfully ? `ran${where} and answered` : `was started${where} and did not pass`) : "was not exercised"}:`, target.transcript);
   }
   return lines;
 }

@@ -52,6 +52,11 @@ export type TargetProbe = {
 export type DeliveryVerificationContent = {
   checkedAt: string;
   checkedBy: "tool";
+  /** Where the targets were started and probed: in a specialist's sidecar,
+   *  or on the host itself, where the bounded build bridge keeps its
+   *  attempts and a person's own start command runs. Absent on a manifest
+   *  written before this was recorded (a sidecar run). */
+  ranOn?: "sidecar" | "host";
   /** Files in the archive the manifest does not list (past its cap, or not
    *  on disk when the manifest was built). Counted, never claimed. */
   archiveExtras: number;
@@ -185,6 +190,7 @@ export async function verifyArchive(input: {
   /** Where the targets start: the attempt directory. */
   cwd: string;
   exclude: ReadonlySet<string>;
+  ranOn: "sidecar" | "host";
 }): Promise<DeliveryVerificationContent> {
   const extracted = await extractArchive(input.archiveBytes);
   let compared: { items: VerificationItem[]; extras: number };
@@ -199,6 +205,7 @@ export async function verifyArchive(input: {
   return {
     checkedAt: checkedAt.toISOString(),
     checkedBy: "tool",
+    ranOn: input.ranOn,
     archiveExtras: compared.extras,
     items,
     targets: probed.targets,

@@ -16,6 +16,7 @@
  * HTTP and never renders anything, and says so in its transcript rather
  * than implying a browser check that is not there.
  */
+import { spawn, type ChildProcess } from "node:child_process";
 import { inheritedEnvironment } from "./host-environment.js";
 import type { TargetVerification } from "./targets.js";
 
@@ -59,11 +60,57 @@ async function waitForPort(port: number, timeoutMs: number): Promise<boolean> {
   }
 }
 
-async function killProcess(child: Bun.Subprocess): Promise<void> {
-  child.kill();
-  const timer = setTimeout(() => child.kill("SIGKILL"), 2_000);
-  await child.exited;
+/**
+ * Starts a target as the leader of its own process group, so ending it
+ * ends what it started too: a start command given as one shell string runs
+ * through `sh -c`, and ending only the shell left the server it started
+ * listening on the port, in the attempt directory. On Windows there are no
+ * groups; the tree is taken down by pid.
+ */
+function startTarget(input: ProcessTarget): { child: ChildProcess; exited: Promise<void> } {
+  const [command, ...rest] = input.command;
+  const child = spawn(command ?? "", rest, {
+    cwd: input.cwd,
+    stdio: ["ignore", "pipe", "pipe"],
+    // Never the host's own environment: see host-environment.ts.
+    env: { ...inheritedEnvironment(), ...input.env },
+    detached: process.platform !== "win32",
+  });
+  // Drained and discarded: a target that fills its pipe would otherwise stall.
+  child.stdout?.resume();
+  child.stderr?.resume();
+  const exited = new Promise<void>((resolve) => {
+    child.once("exit", () => resolve());
+    child.once("error", () => resolve());
+  });
+  return { child, exited };
+}
+
+async function killProcess(target: { child: ChildProcess; exited: Promise<void> }): Promise<void> {
+  const { child, exited } = target;
+  if (child.pid === undefined) return;
+  const pid = child.pid;
+  if (process.platform === "win32") {
+    spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" }).once("error", () => child.kill("SIGKILL"));
+    await exited;
+    return;
+  }
+  const signalGroup = (signal: NodeJS.Signals) => {
+    try {
+      process.kill(-pid, signal);
+    } catch {
+      if (child.exitCode === null && child.signalCode === null) child.kill(signal);
+    }
+  };
+  signalGroup("SIGTERM");
+  const timer = setTimeout(() => signalGroup("SIGKILL"), 2_000);
+  await exited;
   clearTimeout(timer);
+  // The leader is gone; what it started may not be. One more pass, then
+  // the hard one after the same grace, so a backgrounded server never
+  // outlives its probe.
+  signalGroup("SIGTERM");
+  setTimeout(() => signalGroup("SIGKILL"), 2_000).unref();
 }
 
 /**
@@ -85,13 +132,7 @@ export async function verifyApiTarget(target: string, input: ApiVerificationInpu
       transcript: "no routes were declared to check — nothing to verify against a running process.",
     };
   }
-  const child = Bun.spawn([...input.command], {
-    cwd: input.cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-    // Never the host's own environment: see host-environment.ts.
-    env: { ...inheritedEnvironment(), ...input.env },
-  });
+  const child = startTarget(input);
   try {
     const opened = await waitForPort(input.port, input.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS);
     if (!opened) {
@@ -150,13 +191,7 @@ function resolveAsset(base: string, assetPath: string): string | null {
  */
 export async function verifyWebTarget(target: string, input: WebVerificationInput): Promise<TargetVerification> {
   const path = input.path ?? "/";
-  const child = Bun.spawn([...input.command], {
-    cwd: input.cwd,
-    stdout: "pipe",
-    stderr: "pipe",
-    // Never the host's own environment: see host-environment.ts.
-    env: { ...inheritedEnvironment(), ...input.env },
-  });
+  const child = startTarget(input);
   try {
     const opened = await waitForPort(input.port, input.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS);
     if (!opened) {

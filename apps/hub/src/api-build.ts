@@ -23,7 +23,7 @@
  */
 import type { Hono } from "hono";
 import { type } from "arktype";
-import { HostError } from "@corbits/embedded-host";
+import { HostError, projectTenantExists } from "@corbits/embedded-host";
 import { attemptVariant, packageAttempt, parseTargetProbe, type TargetProbe } from "@solutions-builder/tools-delivery/publish-workspace";
 import { BRIDGE_CAPABILITIES, BRIDGE_ID, bridgeAvailable } from "./corbits-exec.js";
 import { BUILD_WORKERS, buildWorkerSettings, hostPlatform, saveBuildWorkerSettings } from "./build-worker.js";
@@ -67,6 +67,18 @@ function parsed<T>(result: T | type.errors): T {
   return result;
 }
 
+/**
+ * The project the route names, checked to exist before anything is read or
+ * written under its id: the attempts live on disk under `builds/<id>/`, and
+ * an id that is nobody's project must not grow a directory there.
+ */
+async function projectParam(context: { req: { param: (name: "id") => string } }): Promise<string> {
+  const projectId = context.req.param("id");
+  if (!/^[A-Za-z0-9_-]+$/.test(projectId)) throw new HostError("validation_failed", "That is not a project id.");
+  if (!(await projectTenantExists(projectId))) throw new HostError("not_found", "That project was not found.");
+  return projectId;
+}
+
 function attemptParam(raw: string): number {
   if (!/^\d+$/.test(raw)) throw new HostError("validation_failed", "An attempt is numbered.");
   return Number(raw);
@@ -99,13 +111,14 @@ export function registerBuildRoutes(api: Hono) {
   });
 
   api.get("/projects/:id/build/attempts", async (context) => {
-    return context.json({ attempts: await listAttempts(context.req.param("id")) });
+    return context.json({ attempts: await listAttempts(await projectParam(context)) });
   });
 
   api.post("/projects/:id/build/attempts", async (context) => {
+    const projectId = await projectParam(context);
     const body = parsed(StartBody(await context.req.json().catch(() => ({}))));
     const started = await startBuildAttempt({
-      projectId: context.req.param("id"),
+      projectId,
       prompt: { ...body.prompt, continuing: body.continueFrom !== undefined },
       continueFrom: body.continueFrom,
     });
@@ -113,7 +126,7 @@ export function registerBuildRoutes(api: Hono) {
   });
 
   api.get("/projects/:id/build/attempts/:n", async (context) => {
-    const projectId = context.req.param("id");
+    const projectId = await projectParam(context);
     const attempt = attemptParam(context.req.param("n"));
     const record = await attemptRecord(projectId, attempt);
     if (!record) throw new HostError("not_found", `Attempt ${String(attempt)} was not found.`);
@@ -122,7 +135,7 @@ export function registerBuildRoutes(api: Hono) {
   });
 
   api.post("/projects/:id/build/attempts/:n/cancel", async (context) => {
-    const projectId = context.req.param("id");
+    const projectId = await projectParam(context);
     const attempt = attemptParam(context.req.param("n"));
     const record = await attemptRecord(projectId, attempt);
     if (!record) throw new HostError("not_found", `Attempt ${String(attempt)} was not found.`);
@@ -134,7 +147,7 @@ export function registerBuildRoutes(api: Hono) {
   });
 
   api.post("/projects/:id/build/attempts/:n/package", async (context) => {
-    const projectId = context.req.param("id");
+    const projectId = await projectParam(context);
     const attempt = attemptParam(context.req.param("n"));
     const record = await attemptRecord(projectId, attempt);
     if (!record) throw new HostError("not_found", `Attempt ${String(attempt)} was not found.`);
@@ -150,6 +163,8 @@ export function registerBuildRoutes(api: Hono) {
         ...(body.fileName ? { fileName: body.fileName } : {}),
         targets,
         maxBytes: HOST_PACKAGE_MAX_BYTES,
+        // A person's own start command, run here on the host: the manifest says so.
+        ranOn: "host",
       });
       return context.json({ packaged });
     } catch (cause) {

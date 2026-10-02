@@ -72,6 +72,9 @@ export type SupervisorBriefInput = {
   };
 };
 
+/** Where the package step's target probes ran: on the host, with the start command the person typed. */
+const PROBE_RAN_ON = "started on this computer by the host, with the start command the person gave";
+
 const FINAL_TEXT_KEEP = 20_000;
 
 /**
@@ -93,7 +96,7 @@ export function composeSupervisorBrief(input: SupervisorBriefInput): string {
   const targets =
     input.verification.targets.length === 0
       ? "- No target was started or probed: the plan declared none the host could run."
-      : input.verification.targets.map((target) => `- ${target.target}: ${target.ranSuccessfully ? "responded" : "did not respond"}`).join("\n");
+      : input.verification.targets.map((target) => `- ${target.target}: ${target.ranSuccessfully ? "responded" : "did not respond"} (${PROBE_RAN_ON}).`).join("\n");
   return [
     `Build attempt ${String(input.attempt)} has ended and its work is recorded. Write the build status from this record.`,
     ``,

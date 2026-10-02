@@ -126,6 +126,35 @@ Bun.serve({ port, fetch: () => new Response("ok") });
   }, 15_000);
 });
 
+describe("ending a probed target", () => {
+  test("a server started through a shell string is ended with the shell, not left on its port", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "target-verify-group-"));
+    try {
+      const server = await writeFixtureServer(dir);
+      const port = freePort();
+      // The shell starts the server in the background and waits on it, the
+      // shape a person's "npm start" style command takes once a tool spawns it.
+      const result = await verifyApiTarget("api", {
+        command: ["sh", "-c", `FIXTURE_PORT=${String(port)} bun run ${JSON.stringify(server)} & wait`],
+        cwd: dir,
+        port,
+        routes: ["/health"],
+      });
+      expect(result.ranSuccessfully).toBe(true);
+      await new Promise((resolve) => setTimeout(resolve, 2_500));
+      let stillListening = true;
+      try {
+        await fetch(`http://127.0.0.1:${String(port)}/health`, { signal: AbortSignal.timeout(500) });
+      } catch {
+        stillListening = false;
+      }
+      expect(stillListening).toBe(false);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }, 20_000);
+});
+
 describe("verifyWebTarget", () => {
   test("loads the page and one referenced asset over HTTP, and says this is not a browser check", async () => {
     const dir = await mkdtemp(join(tmpdir(), "target-verify-web-"));

@@ -284,6 +284,7 @@ async function verifyAndRecord(
   manifestNodeId: string,
   args: PublishWorkspaceArgs,
   targetDir: string,
+  ranOn: "sidecar" | "host",
 ): Promise<VerificationSummary> {
   const verification = await verifyArchive({
     archiveBytes,
@@ -292,6 +293,7 @@ async function verifyAndRecord(
     probes: args.targets,
     cwd: targetDir,
     exclude: new Set(args.exclude),
+    ranOn,
   });
   manifest.verification = verification;
   return {
@@ -337,6 +339,8 @@ export async function packageAttempt(input: {
   targets?: readonly TargetProbe[];
   /** Refused above this many archive bytes; the fallback's cap when unset. */
   maxBytes?: number;
+  /** Where this runs, recorded on the manifest: the sidecar unless the host says otherwise. */
+  ranOn?: "sidecar" | "host";
 }): Promise<PackagedAttempt> {
   const fileName = input.fileName ?? "build.tar.gz";
   const exclude = [...new Set([...DEFAULT_EXCLUDES, ...(input.exclude ?? [])])];
@@ -355,7 +359,7 @@ export async function packageAttempt(input: {
   const dataUri = `data:${BUNDLE_MEDIA_TYPE};base64,${bytes.toString("base64")}`;
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   const manifest = await buildManifest(input.attempt, input.dir, exclude, { fileName, sizeBytes: bytes.byteLength, sha256 });
-  const verification = await verifyAndRecord(manifest, bytes, `sha256:${sha256}`, { fileName, exclude, dir: null, targets }, input.dir);
+  const verification = await verifyAndRecord(manifest, bytes, `sha256:${sha256}`, { fileName, exclude, dir: null, targets }, input.dir, input.ranOn ?? "sidecar");
   return { fileName, mediaType: BUNDLE_MEDIA_TYPE, sizeBytes: bytes.byteLength, sha256, dataUri, manifest, verification };
 }
 
@@ -473,7 +477,7 @@ async function publishWorkspaceContent(
       sizeBytes: bytes.byteLength,
       sha256,
     });
-    const verification = await verifyAndRecord(manifestContent, bytes, `${created.id}@${String(created.version)}`, args, targetDir);
+    const verification = await verifyAndRecord(manifestContent, bytes, `${created.id}@${String(created.version)}`, args, targetDir, "sidecar");
     const manifestBytes = Buffer.from(JSON.stringify(manifestContent), "utf8");
     const manifestCreated = await uploadArtifact(hub.fetch, env.address, {
       fileName: `build-${variant}-manifest.json`,
