@@ -1,28 +1,27 @@
 # designing-on-interchange
 
-Interchange offers a range of shapes. Pick the smallest one the requirements
-force; the stack rubric names the modes and the requirement that steps up.
+The shapes Interchange offers, smallest first. The stack rubric in the
+Architect's own instructions is what chooses between them.
 
 - **Local libraries.** The app imports `@intx/inference`, `@intx/agent` or
   `@intx/workflow` and runs them in its own process: a CLI, a desktop app, a
   single-user service. No hub, no sidecar; credentials from the app's own
-  config. The simplest shape, and the default for an app one person runs.
-- **Durable local.** The same, with `@intx/workflow-host` so a run survives a
-  restart and a human gate can wait for days.
+  config.
+- **Durable local.** The same, with `@intx/workflow-host`: a run survives a
+  restart, and a human gate can wait for days.
 - **Control plane.** A hub (an HTTP API over Postgres) owns tenants,
-  principals, credentials, assets and deployments, and agents and workflows
-  run in sidecars the hub isolates from each other and from the app. The app
-  is a client of the hub. This is the shape for several people, several
-  tenants, delegated credentials, approvals, audit, or maximum isolation of
-  what an agent can reach.
+  principals, credentials, assets and deployments, and runs agents and
+  workflows in sidecars isolated from each other and from the app. The app
+  is a client of the hub. Several people, several tenants, delegated
+  credentials, approvals, audit and isolation of what an agent can reach
+  are what this shape provides.
 
-Whichever shape, an ordinary product stays an ordinary product: its own
-screens, routes, schema and logic, written plainly. An agent, a workflow or an
-approval gate appears only where a requirement names the need, and then it is
-defined with the platform's constructs — an agent step, a drafting `loop`, a
-gate on `awaitSignal` — not orchestrated by hand. On the control plane,
-whatever acts acts under a principal and grants gate it; never build a second
-user or permission system beside the hub's.
+How the platform's pieces fit, whichever shape:
 
-Package what a hub would deploy so a deploy can name it: published to npm, or
-a git repository checked out at a pinned commit.
+- An agent, a workflow or an approval gate is a definition construct: an
+  agent `step`, a drafting `loop`, a gate on `awaitSignal`.
+- On the control plane, whatever acts acts as a principal (a person, a
+  deployed agent, a workflow run), and grants decide what it may do. The
+  hub's tenants and principals are the user and permission model.
+- A hub deploys a package it can name: published to npm, or a git repository
+  checked out at a pinned commit.
