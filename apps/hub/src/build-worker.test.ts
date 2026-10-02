@@ -63,13 +63,29 @@ describe("installInstruction", () => {
     expect(installInstruction(workerKind("codex"), "windows").text).toContain("PowerShell");
   });
 
-  test("Corbits Code, absent from npm, gets its repository as an unverified pointer and no command", () => {
-    const instruction = installInstruction(workerKind("corbits-code"), "linux");
-    expect(instruction.binary).toBe("corbits");
-    expect(instruction.command).toBeNull();
-    expect(instruction.url).toBe("https://github.com/corbitsdev/corbits-code");
-    expect(instruction.verified).toBe(false);
-    expect(instruction.text).toContain("not published on npm");
-    expect(instruction.text).toContain("unverified");
+  test("Corbits Code comes from the Homebrew tap on macOS and Linux, with the release tarball and the .deb as alternatives", () => {
+    const releases = "https://github.com/corbitsdev/corbits-code/releases/latest";
+    const macos = installInstruction(workerKind("corbits-code"), "macos");
+    expect(macos.binary).toBe("corbits");
+    expect(macos.command).toBe("brew install corbitsdev/tap/corbits-code");
+    expect(macos.url).toBe(releases);
+    expect(macos.verified).toBe(true);
+    expect(macos.text).toContain("macOS tarball");
+    expect(macos.text).not.toContain("npm");
+    expect(macos.text).not.toContain("unverified");
+
+    const linux = installInstruction(workerKind("corbits-code"), "linux");
+    expect(linux.command).toBe("brew install corbitsdev/tap/corbits-code");
+    expect(linux.text).toContain("sudo dpkg -i corbits_<version>_<arch>.deb");
+    expect(linux.text).toContain("Linux tarball");
+  });
+
+  test("Corbits Code is not published for Windows, and the instruction says so instead of inventing a command", () => {
+    const windows = installInstruction(workerKind("corbits-code"), "windows");
+    expect(windows.command).toBeNull();
+    expect(windows.url).toBe("https://github.com/corbitsdev/corbits-code/releases/latest");
+    expect(windows.verified).toBe(true);
+    expect(windows.text).toContain("not published for Windows");
+    expect(windows.text).toContain("Claude Code or Codex");
   });
 });

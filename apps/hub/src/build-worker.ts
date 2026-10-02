@@ -14,8 +14,8 @@
  *
  * When the binary is absent the host also says how to get it, for the
  * operating system it is running on. An instruction is only offered where
- * the package it names was seen to exist; where it was not, the pointer is
- * marked unverified rather than dressed up as an install command.
+ * the source it names was seen to exist: an npm package `npm view`
+ * answered for, or a release and a Homebrew tap that were read.
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -47,14 +47,14 @@ export type BuildWorkerKind = {
 };
 
 /**
- * How a worker is obtained. `npm` names a package `npm view` answered for;
- * `download` is a page to read, offered only when no package was found,
- * and said to be unverified because nothing here has confirmed what it
- * hosts.
+ * How a worker is obtained. `npm` names a package `npm view` answered for.
+ * `release` names a Homebrew formula (macOS and Linux) and the GitHub
+ * releases page that carries the tarballs and Debian packages; no Windows
+ * build is published there.
  */
 export type WorkerInstall =
   | { readonly kind: "npm"; readonly package: string }
-  | { readonly kind: "download"; readonly url: string; readonly verified: false };
+  | { readonly kind: "release"; readonly brew: string; readonly releases: string; readonly deb: boolean };
 
 /**
  * Corbits Code discovers shell hooks in `.corbits/hooks/` under its working
@@ -96,10 +96,10 @@ export const BUILD_WORKERS: readonly BuildWorkerKind[] = [
     probeExpects: "exec",
     run: (prompt) => ["exec", prompt],
     turnReports: { install: corbitsTurnHook },
-    // `npm view @corbits/code version` answered 404 when this was written:
-    // there is no package to install, so the pointer is the repository, and
-    // it is said to be unverified.
-    install: { kind: "download", url: "https://github.com/corbitsdev/corbits-code", verified: false },
+    // Not on npm, and not meant to be: a binary from GitHub releases
+    // (macOS and Linux tarballs, Debian packages; no Windows build) and the
+    // `corbits-code` formula in the corbitsdev/homebrew-tap tap.
+    install: { kind: "release", brew: "corbitsdev/tap/corbits-code", releases: "https://github.com/corbitsdev/corbits-code/releases/latest", deb: true },
   },
   {
     id: "claude-code",
@@ -144,9 +144,9 @@ export type InstallInstruction = {
   readonly text: string;
   /** A command to run, where one is known to exist. */
   readonly command: string | null;
-  /** A page to read instead, where no command is known. */
+  /** A page to read as well, or instead where no command is known. */
   readonly url: string | null;
-  /** False when the pointer was never confirmed to host an installable release. */
+  /** False only for a pointer that was never confirmed to host an installable release; none today. */
   readonly verified: boolean;
 };
 
@@ -174,14 +174,15 @@ export function installInstruction(worker: BuildWorkerKind, platform: HostPlatfo
       text: `\`${worker.executable}\` was not found on this ${os} computer. Install ${worker.label} by running \`${command}\` in ${where} (it needs ${node}), then check again.`,
     };
   }
-  return {
-    platform,
-    binary: worker.executable,
-    command: null,
-    url: worker.install.url,
-    verified: false,
-    text: `\`${worker.executable}\` was not found on this ${os} computer. ${worker.label} is not published on npm, so there is no install command to offer; its repository is ${worker.install.url} (unverified: nothing here has confirmed that page hosts a release for ${os}). Once it is installed and on PATH — or its full path is given above — check again.`,
-  };
+  const { brew, releases, deb } = worker.install;
+  const command = platform === "windows" ? null : `brew install ${brew}`;
+  const text =
+    platform === "macos"
+      ? `\`${worker.executable}\` was not found on this macOS computer. Install ${worker.label} with Homebrew by running \`${command}\` in a terminal, or download the macOS tarball (arm64 or x64) from ${releases}, unpack it and put \`${worker.executable}\` on PATH. Then check again.`
+      : platform === "linux"
+        ? `\`${worker.executable}\` was not found on this Linux computer. Install ${worker.label} with Homebrew by running \`${command}\` in a terminal${deb ? `, or on Debian or Ubuntu download the .deb from ${releases} and run \`sudo dpkg -i corbits_<version>_<arch>.deb\`` : ""}, or download the Linux tarball (arm64 or x64) from the same page, unpack it and put \`${worker.executable}\` on PATH. Then check again.`
+        : `\`${worker.executable}\` was not found on this Windows computer, and ${worker.label} is not published for Windows: ${releases} carries macOS and Linux builds only. Choose Claude Code or Codex here, or run the host on macOS or Linux.`;
+  return { platform, binary: worker.executable, command, url: releases, verified: true, text };
 }
 
 const Settings = type({

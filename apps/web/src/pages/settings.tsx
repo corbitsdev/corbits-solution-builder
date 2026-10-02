@@ -243,7 +243,6 @@ function BuildWorker() {
                     <a href={status.install.url} target="_blank" rel="noreferrer">
                       {status.install.url}
                     </a>
-                    {status.install.verified ? null : " (unverified)"}
                   </>
                 ) : null}
               </>
