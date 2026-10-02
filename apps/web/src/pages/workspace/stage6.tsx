@@ -340,8 +340,22 @@ export function Stage6Panel({
   // first request takes.
   const [ask, setAsk] = useState("");
   const askRole = (roleKey: string, text = ask) => {
-    const body = withAttachedDocuments(text.trim(), documents.filter((doc) => doc.key !== (roleKey === STAGE6_REQUIREMENTS_ROLE_KEY ? "requirements" : `review:${roleKey}`)));
-    if (!body) return;
+    const asked = withAttachedDocuments(text.trim(), documents.filter((doc) => doc.key !== (roleKey === STAGE6_REQUIREMENTS_ROLE_KEY ? "requirements" : `review:${roleKey}`)));
+    if (!asked) return;
+    // A companion role sees only what it is sent, and after a redeploy it
+    // remembers nothing (#409): the author always gets the approved
+    // inputs and the current document as the prior revision; a reviewer
+    // gets the ids and the plan, as a first request does.
+    const body =
+      roleKey === STAGE6_REQUIREMENTS_ROLE_KEY
+        ? [
+            asked,
+            requirements.reply ? `---\n\n## Attached: Product requirements (prior revision, keep its ids)\n\n${requirements.reply.trim()}` : null,
+            requirementsInput ? `---\n\n## Attached: Approved inputs this document is drawn from\n\n${requirementsInput.trim()}` : null,
+          ]
+            .filter((part): part is string => part !== null)
+            .join("\n\n")
+        : [asked, requirementsBlock, reviewInput ? `---\n\n## Attached: The build plan under review\n\n${reviewInput.trim()}` : null].filter((part): part is string => part !== null).join("\n\n");
     setAsk("");
     if (roleKey === STAGE6_REQUIREMENTS_ROLE_KEY) runRole(roleKey, body, setRequirements);
     else runRole(roleKey, body, (updater) => setReviews((prev) => ({ ...prev, [roleKey]: updater(prev[roleKey] ?? STAGE6_IDLE_ROLE) })));
