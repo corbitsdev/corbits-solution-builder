@@ -4,8 +4,8 @@
  * CL-8612 contract v6: there is no lifecycle run to park a gate/freeze/
  * evidence step on any more, so what a project can wait on is a stock hub
  * approval on one of its stage specialists' own tool calls (CL-8566) —
- * stage 9's `deliver`, or any other stage's tool (e.g. stage 8's
- * `run_shell`) — read straight off `pending-approvals.ts`. Specialists
+ * stage 9's `deliver`, or any other tool a stage's specialist carries —
+ * read straight off `pending-approvals.ts`. Specialists
  * deploy into the PROJECT tenant (`ensureSpecialistDeployment`, #29), and
  * a project older than that may still run one in the workspace, so
  * approvals are read from each tenant a project's specialists run in --

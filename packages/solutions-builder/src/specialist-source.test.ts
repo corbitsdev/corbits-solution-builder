@@ -27,7 +27,7 @@ describe("specialistTooling", () => {
 
   test("stage 5 carries no tool: the app draws slides from the outline in the reply (#435)", () => {
     expect(specialistTooling({ stage: 5 })).toEqual(NONE);
-    expect(specialistTooling({ stage: 5, roleKey: "primary" })).toEqual(NONE);
+    expect(specialistTooling({ stage: 5, artifactTools: true })).toEqual({ ...NONE, artifacts: true });
   });
 
   test("stage 8 carries no tool: the build runs through the host's bridge and its specialist reviews the report", () => {

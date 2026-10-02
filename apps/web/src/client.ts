@@ -1956,8 +1956,8 @@ export const api = {
         // the next load instead of persisted again, and superseded only
         // by a draft the specialist sends later. Stage 8 is left
         // unstamped on purpose -- its reviewable artifact is the archive
-        // the host packaged (`persistBuildEvidence`, producer "host"),
-        // never a persisted reply.
+        // the host packaged, recorded by the build panel with producer
+        // "host", never a persisted reply.
         ...(stage === 8 ? {} : { agentRole: agentFor(stage as Stage).id }),
         ...(target ? { target } : {}),
       });
@@ -2245,11 +2245,10 @@ export const api = {
         projectId,
         stage as Stage,
         specialistHubOrigin(),
-        // The hub credential binding for `publish_workspace`'s real upload is
-        // off until a run has been seen to start with it: a stage 8 deployed
-        // with it never produced a run, while every unbound stage does.
-        // `publish_workspace` falls back to returning the archive inline and
-        // the client persists it on approval.
+        // No hub credential binding: a stage 8 deployed with one never
+        // produced a run, while every unbound stage does. Nothing needs it
+        // now — the build runs on the host and the archive is recorded by
+        // the client (`persistBuildEvidence`), not uploaded from a sidecar.
         false,
         undefined,
         await localizedRole(transport, workspaceTenantId, agentFor(stage as Stage)),

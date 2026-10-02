@@ -148,11 +148,9 @@ export type SpecialistTooling = {
 
 export function specialistTooling(options: {
   readonly stage: Stage;
-  readonly roleKey?: string | undefined;
   readonly artifactTools?: boolean | undefined;
 }): SpecialistTooling {
-  const { stage, roleKey = PRIMARY_ROLE_KEY, artifactTools = false } = options;
-  void roleKey;
+  const { stage, artifactTools = false } = options;
   return {
     // The app draws and exports a stakeholder's slides from the deck outline
     // in the reply; a rendered file nothing reads only cost the model a turn
@@ -262,7 +260,7 @@ export function specialistRoleSpec(options: {
   readonly artifactTools?: boolean | undefined;
 }): SpecialistRoleSpec {
   const { stage, roleKey = PRIMARY_ROLE_KEY, artifactTools = false } = options;
-  const tooling = specialistTooling({ stage, roleKey, artifactTools });
+  const tooling = specialistTooling({ stage, artifactTools });
   return {
     tooling,
     toolImports: [

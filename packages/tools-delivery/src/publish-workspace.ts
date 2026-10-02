@@ -4,6 +4,11 @@
  * route, so the archive survives past the run's release and shows up among
  * the project's artifacts the same way any other stage's draft does.
  *
+ * No stage deploys this tool today: stage 8's build runs on the host
+ * through the bounded bridge, and the host's build route packages the
+ * attempt with the same code (`@solutions-builder/specialist-runtime/
+ * package-attempt`). The tool is kept for closures that already ship it.
+ *
  * This mirrors `@corbits/artifacts/sidecar-bundle`'s own resolve-and-call
  * shape (`requires: ["capabilities", "address"]`, resolve the `hub`
  * credential handle, call the run-scoped route through the mediated fetch)

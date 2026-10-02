@@ -3,22 +3,23 @@
  *
  * The delivery-verifier has no filesystem and no view of stage 8's working
  * directory (`kit.ts`'s stage-9 prompt): everything it can check comes from
- * plain text in its opening message. `publish_workspace`
- * (`@solutions-builder/tools-delivery`) uploads a companion delivery
- * manifest artifact alongside the build archive — this module turns that
- * manifest's content, once read back, into the exact text the prompt
- * promises: the manifest node id, the archive's file name/size/sha256, the
- * capped file list with hashes, and the checks stage 8 declared (its own
- * chat reply). Deliberately NOT importing `@solutions-builder/tools-delivery`
- * here — this type mirrors `publish-workspace.ts`'s `DeliveryManifestContent`
- * rather than importing it, so the web bundle never pulls in a sidecar tool
- * package's `node:child_process`/`node:fs` runtime code.
+ * plain text in its opening message. The host's packaging of a build
+ * attempt (`@solutions-builder/specialist-runtime/package-attempt`, run by
+ * the build route) produces a delivery manifest beside the build archive,
+ * which the client records with it — this module turns that manifest's
+ * content, once read back, into the exact text the prompt promises: the
+ * manifest node id, the archive's file name/size/sha256, the capped file
+ * list with hashes, and the checks stage 8 declared (the supervisor's own
+ * status reply). Deliberately NOT importing the runtime package here — this
+ * type mirrors `package-attempt.ts`'s `DeliveryManifestContent` rather than
+ * importing it, so the web bundle never pulls in `node:child_process`/
+ * `node:fs` runtime code.
  */
 
 export type DeliveryManifestFile = { path: string; sha256: string; sizeBytes: number };
 
-/** What `publish_workspace` established about the archive itself (#129):
- *  mirrors `tools-delivery/src/verify.ts`'s `DeliveryVerificationContent`. */
+/** What the packaging's checks established about the archive itself (#129):
+ *  mirrors `specialist-runtime/src/verify.ts`'s `DeliveryVerificationContent`. */
 export type DeliveryVerificationContent = {
   checkedAt: string;
   checkedBy: "tool";
@@ -46,10 +47,10 @@ export type DeliveryManifestContent = {
  *  pass; a failed or missing item is listed as such. */
 export function verificationLines(verification: DeliveryVerificationContent | undefined): string[] {
   if (!verification || verification.checkedBy !== "tool") {
-    return ["Verification recorded by publish_workspace: none. Nothing about this archive was checked by a tool; treat every check as not run."];
+    return ["Verification recorded with the archive: none. Nothing about this archive was checked by a tool; treat every check as not run."];
   }
   const lines = [
-    `Verification recorded by publish_workspace at ${verification.checkedAt} (checked by the tool, not by a model): ${
+    `Verification recorded with the archive at ${verification.checkedAt} (checked by the tool, not by a model): ${
       verification.report.complete ? "every required item verified" : `required items not verified: ${verification.report.failed.join(", ")}`
     }.`,
   ];
@@ -107,7 +108,7 @@ export function deliveryOpeningLine(
 ): string {
   if (!manifest) {
     return [
-      "No delivery manifest artifact is available for this build — stage 8's publish_workspace result was not recorded, or no manifest could be read.",
+      "No delivery manifest artifact is available for this build — stage 8's archive was recorded without one, or no manifest could be read.",
       "No check was run by a tool, so nothing about this archive is verified; say so, never score a pass.",
       "",
       "Checks stage 8 declared:",

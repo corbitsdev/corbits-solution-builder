@@ -187,16 +187,28 @@ export function BuildPanel({
       .catch((cause: unknown) => {
         if (!cancelled) setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
       });
-    api
-      .buildWorker()
-      .then((status) => {
-        if (!cancelled) setWorker(status);
-      })
-      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
   }, [detail.project.id]);
+
+  // The worker's presence is the host's word, asked for on open and again
+  // whenever the window regains focus: a person installs the tool in a
+  // terminal, or changes it in Settings, and comes back expecting the
+  // panel to know.
+  const checkWorker = useCallback(async () => {
+    try {
+      setWorker(await api.buildWorker());
+    } catch {
+      // The banner keeps the last answer; the next check says.
+    }
+  }, []);
+  useEffect(() => {
+    void checkWorker();
+    const onFocus = () => void checkWorker();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [checkWorker]);
 
   const load = useCallback(async () => {
     if (!address) return;
@@ -390,7 +402,10 @@ export function BuildPanel({
             </div>
             {worker && !worker.available ? (
               <Banner tone="error" title={worker.detail} action={{ label: "Open Settings", onClick: onOpenSettings }}>
-                {worker.install ? worker.install.text : "Choose a coding agent that is installed, or give its path, in Settings."}
+                {worker.install ? worker.install.text : "Choose a coding agent that is installed, or give its path, in Settings."}{" "}
+                <button type="button" className="btn link" onClick={() => void checkWorker()}>
+                  Check again
+                </button>
               </Banner>
             ) : null}
             <div className="document-tools">
@@ -442,6 +457,16 @@ export function BuildPanel({
                         (current.outcome.turns !== null ? ` after ${String(current.outcome.turns)} turns and ${String(current.outcome.toolCalls ?? 0)} tool calls.` : ".")
                       : current.outcome.stderrTail}
                   </p>
+                ) : null}
+                {current.state === "ended" && current.outcome?.available && current.outcome.finalText.trim().length === 0 ? (
+                  // Ended with nothing to report: what is in the directory is
+                  // still there, and the way on is to continue from it.
+                  <div className="document-tools">
+                    <p className="inline-note">The worker ended without a report. Its directory is kept; a new attempt can continue from it.</p>
+                    <Button variant="primary" loading={busy === "continue"} disabled={!!running || busy !== null} onClick={() => void start(current.attempt)}>
+                      Continue from attempt {String(current.attempt)}'s directory
+                    </Button>
+                  </div>
                 ) : null}
                 {canRecord ? (
                   <div className="document-tools">

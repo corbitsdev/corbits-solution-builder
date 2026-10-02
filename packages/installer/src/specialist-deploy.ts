@@ -395,7 +395,7 @@ export async function renderSpecialistSource(
   // which resolves its "hub" handle through `@solutions-builder/tools-delivery`
   // instead, see `specialistEntrySource`), the deck or delivery tools and the
   // runtime package they author with only for the stages that carry them.
-  const tooling = specialistTooling({ stage, roleKey, artifactTools });
+  const tooling = specialistTooling({ stage, artifactTools });
   const dependencies = specialistDependencies(tooling);
   const member = {
     name,

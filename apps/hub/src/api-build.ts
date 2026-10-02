@@ -24,6 +24,7 @@
 import type { Hono } from "hono";
 import { type } from "arktype";
 import { HostError, projectTenantExists } from "@corbits/embedded-host";
+import { parsed } from "./validation.js";
 import { attemptVariant, packageAttempt, parseTargetProbe, type TargetProbe } from "@solutions-builder/specialist-runtime/package-attempt";
 import { BRIDGE_CAPABILITIES, BRIDGE_ID, bridgeAvailable } from "./corbits-exec.js";
 import { BUILD_WORKERS, buildWorkerSettings, hostPlatform, saveBuildWorkerSettings } from "./build-worker.js";
@@ -61,11 +62,6 @@ const PackageBody = type({
   "fileName?": "string",
   "targets?": "unknown[]",
 });
-
-function parsed<T>(result: T | type.errors): T {
-  if (result instanceof type.errors) throw new HostError("validation_failed", result.summary);
-  return result;
-}
 
 /**
  * The project the route names, checked to exist before anything is read or
