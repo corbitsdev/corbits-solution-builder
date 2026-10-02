@@ -1,7 +1,7 @@
 # using-interchange
 
-`@intx/*` is on npm, latest 0.4.0. A generated app installs the versioned
-packages from the registry and pins them in its own `package.json`:
+`@intx/*` is on npm, latest 0.4.0. Install the versioned packages and pin
+them in `package.json`:
 
     bun add @intx/inference@0.4.0 @intx/agent@0.4.0 @intx/workflow@0.4.0
 

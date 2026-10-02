@@ -1,6 +1,6 @@
 # corbits-packages
 
-`@corbits/*` packages are published on npm and install with `bun add @corbits/<name>`; source at github.com/corbitsdev/corbits-<name>. Every package below is on npm as of 2026-10-02 at the version shown; a name not listed here is not a package a deliverable can build on.
+`@corbits/*` packages are published on npm and install with `bun add @corbits/<name>`; source at github.com/corbitsdev/corbits-<name>. Every package below is on npm as of 2026-10-02 at the version shown; the list is complete.
 
 Mount onto a hub (an embedded host counts):
 
@@ -48,7 +48,6 @@ Inference adapters:
   provider: OpenAI-compatible and Anthropic messages factories, one reasoning
   setting, think-tag stripping, inline tool JSON repair.
 
-Not on npm, and not for a generated stack: `@corbits/embedded-host`,
-`@corbits/embed-hub` and `@corbits/keychain` are Solution Builder's own
-workspace packages, the process this tool itself runs in. A deliverable that
-needs an embedded hub is built on `@intx/*` directly.
+Not on npm: `@corbits/embedded-host`, `@corbits/embed-hub` and
+`@corbits/keychain` are Solution Builder's own workspace packages, the
+process this tool itself runs in.

@@ -7,8 +7,7 @@ Source: github.com/faremeter/interchange, packages scoped `@intx/*`.
   principals, credentials, assets, sessions and deployments.
 - **Tenants and principals** — a tenant owns data and credentials. A
   principal is whatever acts: a person, a deployed agent, a workflow run.
-  Grants decide what a principal may do. Never model a parallel user or
-  permission system.
+  Grants decide what a principal may do.
 - **Workflows** — the unit of deployed work: a durable, resumable run that
   can park on a human's signal. An agent is deployed as a workflow
   definition, not a row in a table.
