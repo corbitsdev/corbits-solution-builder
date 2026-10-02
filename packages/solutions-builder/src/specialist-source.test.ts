@@ -78,6 +78,7 @@ describe("specialistEntrySource", () => {
       role: agentFor(stage),
       roleKey,
       artifactTools,
+      ...(artifactTools ? { artifactCredentialId: "crd_test" } : {}),
     });
 
   test("imports exactly the tools the tooling matrix names", () => {
@@ -126,17 +127,19 @@ describe("specialistEntrySource", () => {
   // #288: the binding delivers the credential, the requirement lets the run
   // use it, and both name the same consumer -- the bundle's own id.
   test("a credential-bound entry declares the use-grant its run needs, scoped to the bound package", () => {
-    expect(credentialAccess("@corbits/artifacts/sidecar-bundle", "workflow-artifacts:brainstormer")).toEqual({
+    expect(credentialAccess("@corbits/artifacts/sidecar-bundle", "workflow-artifacts:brainstormer", "crd_1")).toEqual({
       credentialBindings: [
         { package: "@corbits/artifacts/sidecar-bundle", handle: "hub", provider: "sb-workflow-artifacts", name: "workflow-artifacts:brainstormer", locator: "tenant" },
       ],
       grantRequirements: [
-        { resource: "credential:*", action: "use", source: "creator", conditions: { tool: "tool:@corbits/artifacts/sidecar-bundle" } },
+        { resource: "credential:crd_1", action: "use", source: "creator", conditions: { tool: "tool:@corbits/artifacts/sidecar-bundle" } },
       ],
     });
     expect(entry(2, "primary", true)).toContain('"conditions":{"tool":"tool:@corbits/artifacts/sidecar-bundle"}');
     expect(entry(8, "primary", true)).toContain('"conditions":{"tool":"tool:@solutions-builder/tools-delivery/publish-workspace"}');
+    expect(entry(2, "primary", true)).toContain('"resource":"credential:crd_test"');
     expect(entry(2)).not.toContain("grantRequirements");
+    expect(() => specialistEntrySource({ stage: 2, source: { provider: "openai", model: "gpt-5.5" }, role: agentFor(2), roleKey: "primary", artifactTools: true })).toThrow(/credential/);
   });
 
   test("stage 5's entry names no audience", () => {

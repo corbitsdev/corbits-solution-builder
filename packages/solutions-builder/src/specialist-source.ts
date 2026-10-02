@@ -329,6 +329,10 @@ export type SpecialistSourceOptions = {
    *  browser-driven deploy of a credential-bound specialist is proven; see
    *  `ensureStageAgent` in `apps/web/src/client.ts`. */
   readonly artifactTools?: boolean;
+  /** The id of the project tenant's `workflowArtifactsCredentialName(role.id)`
+   *  credential, which the entry's use-grant names (#288). Required whenever
+   *  the deployment is credential-bound; the row must exist before render. */
+  readonly artifactCredentialId?: string;
 };
 
 /**
@@ -366,26 +370,26 @@ function systemPromptForRole(role: AgentRole, artifactTools: boolean): string {
  */
 /**
  * What a credential-bound deployment declares: the `hub` binding, and the
- * use-grant its run needs. Interchange delivers the bound credential's
- * material but mints no `credential:<id>` / `use` grant (#388), so the
- * requirement is declared here. `credential:*` because the entry is rendered
- * before the credential row exists and is the same for every project (#41
- * step 5); the binding delivers only this one credential, so the wildcard
- * reaches no further.
+ * use-grant its run needs on exactly that credential. Interchange delivers
+ * the bound credential's material but mints no `credential:<id>` / `use`
+ * grant (#388), so the requirement is declared here, scoped to the package
+ * the binding is for. The credential row exists before the entry is
+ * rendered (`specialist-deploy.ts` ensures it first), so the entry names its
+ * id: the one thing in a rendered entry that is the project's.
  */
-export function credentialAccess(pkg: string, credentialName: string) {
+export function credentialAccess(pkg: string, credentialName: string, credentialId: string) {
   return {
     credentialBindings: [
       { package: pkg, handle: "hub", provider: WORKFLOW_ARTIFACTS_PROVIDER_NAME, name: credentialName, locator: "tenant" },
     ],
     grantRequirements: [
-      { resource: "credential:*", action: "use", source: "creator", conditions: { tool: `tool:${pkg}` } },
+      { resource: `credential:${credentialId}`, action: "use", source: "creator", conditions: { tool: `tool:${pkg}` } },
     ],
   };
 }
 
 export function specialistEntrySource(options: SpecialistSourceOptions): string {
-  const { stage, source, role, roleKey, artifactTools = false } = options;
+  const { stage, source, role, roleKey, artifactTools = false, artifactCredentialId } = options;
   const workflowId = specialistWorkflowId(stage);
   const triggerAddress = `${workflowId}@solutions-builder.local`;
 
@@ -420,7 +424,10 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
   // capabilities against: a specialist deploys as `source`, so
   // `workflow-substrate-factory.ts` sets the consumer to the bundle's own
   // `defineTool({ id })`, not the bare npm package name.
-  const access = spec.credentialPackage ? credentialAccess(spec.credentialPackage, credentialName) : null;
+  if (spec.credentialPackage && !artifactCredentialId) {
+    throw new Error(`stage ${stage} ${roleKey} is credential-bound: its entry needs the artifacts credential's id`);
+  }
+  const access = spec.credentialPackage && artifactCredentialId ? credentialAccess(spec.credentialPackage, credentialName, artifactCredentialId) : null;
   const credentialBindings = access
     ? `
   credentialBindings: ${JSON.stringify(access.credentialBindings)},

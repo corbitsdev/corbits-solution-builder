@@ -48,7 +48,7 @@ export default defineWorkflow({
   id: "sb-stage-1",
   triggers: [{ type: "mail", to: "sb-stage-1@solutions-builder.local" }],
   credentialBindings: [{"package":"@corbits/artifacts/sidecar-bundle","handle":"hub","provider":"sb-workflow-artifacts","name":"workflow-artifacts:brainstormer","locator":"tenant"}],
-  grantRequirements: [{"resource":"credential:*","action":"use","source":"creator","conditions":{"tool":"tool:@corbits/artifacts/sidecar-bundle"}}],
+  grantRequirements: [{"resource":"credential:crd_snapshot","action":"use","source":"creator","conditions":{"tool":"tool:@corbits/artifacts/sidecar-bundle"}}],
   steps: {
     run: step({
       agent: AGENT,
@@ -109,7 +109,7 @@ export default defineWorkflow({
   id: "sb-stage-2",
   triggers: [{ type: "mail", to: "sb-stage-2@solutions-builder.local" }],
   credentialBindings: [{"package":"@corbits/artifacts/sidecar-bundle","handle":"hub","provider":"sb-workflow-artifacts","name":"workflow-artifacts:constraints-mapper","locator":"tenant"}],
-  grantRequirements: [{"resource":"credential:*","action":"use","source":"creator","conditions":{"tool":"tool:@corbits/artifacts/sidecar-bundle"}}],
+  grantRequirements: [{"resource":"credential:crd_snapshot","action":"use","source":"creator","conditions":{"tool":"tool:@corbits/artifacts/sidecar-bundle"}}],
   steps: {
     run: step({
       agent: AGENT,
@@ -170,7 +170,7 @@ export default defineWorkflow({
   id: "sb-stage-3",
   triggers: [{ type: "mail", to: "sb-stage-3@solutions-builder.local" }],
   credentialBindings: [{"package":"@corbits/artifacts/sidecar-bundle","handle":"hub","provider":"sb-workflow-artifacts","name":"workflow-artifacts:proposer","locator":"tenant"}],
-  grantRequirements: [{"resource":"credential:*","action":"use","source":"creator","conditions":{"tool":"tool:@corbits/artifacts/sidecar-bundle"}}],
+  grantRequirements: [{"resource":"credential:crd_snapshot","action":"use","source":"creator","conditions":{"tool":"tool:@corbits/artifacts/sidecar-bundle"}}],
   steps: {
     run: step({
       agent: AGENT,
@@ -231,7 +231,7 @@ export default defineWorkflow({
   id: "sb-stage-4",
   triggers: [{ type: "mail", to: "sb-stage-4@solutions-builder.local" }],
   credentialBindings: [{"package":"@corbits/artifacts/sidecar-bundle","handle":"hub","provider":"sb-workflow-artifacts","name":"workflow-artifacts:experience-designer","locator":"tenant"}],
-  grantRequirements: [{"resource":"credential:*","action":"use","source":"creator","conditions":{"tool":"tool:@corbits/artifacts/sidecar-bundle"}}],
+  grantRequirements: [{"resource":"credential:crd_snapshot","action":"use","source":"creator","conditions":{"tool":"tool:@corbits/artifacts/sidecar-bundle"}}],
   steps: {
     run: step({
       agent: AGENT,
@@ -294,7 +294,7 @@ export default defineWorkflow({
   id: "sb-stage-5",
   triggers: [{ type: "mail", to: "sb-stage-5@solutions-builder.local" }],
   credentialBindings: [{"package":"@corbits/artifacts/sidecar-bundle","handle":"hub","provider":"sb-workflow-artifacts","name":"workflow-artifacts:presentation-creator","locator":"tenant"}],
-  grantRequirements: [{"resource":"credential:*","action":"use","source":"creator","conditions":{"tool":"tool:@corbits/artifacts/sidecar-bundle"}}],
+  grantRequirements: [{"resource":"credential:crd_snapshot","action":"use","source":"creator","conditions":{"tool":"tool:@corbits/artifacts/sidecar-bundle"}}],
   steps: {
     run: step({
       agent: AGENT,
@@ -355,7 +355,7 @@ export default defineWorkflow({
   id: "sb-stage-6",
   triggers: [{ type: "mail", to: "sb-stage-6@solutions-builder.local" }],
   credentialBindings: [{"package":"@corbits/artifacts/sidecar-bundle","handle":"hub","provider":"sb-workflow-artifacts","name":"workflow-artifacts:architect","locator":"tenant"}],
-  grantRequirements: [{"resource":"credential:*","action":"use","source":"creator","conditions":{"tool":"tool:@corbits/artifacts/sidecar-bundle"}}],
+  grantRequirements: [{"resource":"credential:crd_snapshot","action":"use","source":"creator","conditions":{"tool":"tool:@corbits/artifacts/sidecar-bundle"}}],
   steps: {
     run: step({
       agent: AGENT,
@@ -416,7 +416,7 @@ export default defineWorkflow({
   id: "sb-stage-7",
   triggers: [{ type: "mail", to: "sb-stage-7@solutions-builder.local" }],
   credentialBindings: [{"package":"@corbits/artifacts/sidecar-bundle","handle":"hub","provider":"sb-workflow-artifacts","name":"workflow-artifacts:estimator","locator":"tenant"}],
-  grantRequirements: [{"resource":"credential:*","action":"use","source":"creator","conditions":{"tool":"tool:@corbits/artifacts/sidecar-bundle"}}],
+  grantRequirements: [{"resource":"credential:crd_snapshot","action":"use","source":"creator","conditions":{"tool":"tool:@corbits/artifacts/sidecar-bundle"}}],
   steps: {
     run: step({
       agent: AGENT,
@@ -482,7 +482,7 @@ export default defineWorkflow({
   id: "sb-stage-8",
   triggers: [{ type: "mail", to: "sb-stage-8@solutions-builder.local" }],
   credentialBindings: [{"package":"@solutions-builder/tools-delivery/publish-workspace","handle":"hub","provider":"sb-workflow-artifacts","name":"workflow-artifacts:build-engineer","locator":"tenant"}],
-  grantRequirements: [{"resource":"credential:*","action":"use","source":"creator","conditions":{"tool":"tool:@solutions-builder/tools-delivery/publish-workspace"}}],
+  grantRequirements: [{"resource":"credential:crd_snapshot","action":"use","source":"creator","conditions":{"tool":"tool:@solutions-builder/tools-delivery/publish-workspace"}}],
   steps: {
     run: step({
       agent: AGENT,
@@ -545,7 +545,7 @@ export default defineWorkflow({
   id: "sb-stage-9",
   triggers: [{ type: "mail", to: "sb-stage-9@solutions-builder.local" }],
   credentialBindings: [{"package":"@corbits/artifacts/sidecar-bundle","handle":"hub","provider":"sb-workflow-artifacts","name":"workflow-artifacts:delivery-verifier","locator":"tenant"}],
-  grantRequirements: [{"resource":"credential:*","action":"use","source":"creator","conditions":{"tool":"tool:@corbits/artifacts/sidecar-bundle"}}],
+  grantRequirements: [{"resource":"credential:crd_snapshot","action":"use","source":"creator","conditions":{"tool":"tool:@corbits/artifacts/sidecar-bundle"}}],
   steps: {
     run: step({
       agent: AGENT,
@@ -606,7 +606,7 @@ export default defineWorkflow({
   id: "sb-stage-1",
   triggers: [{ type: "mail", to: "sb-stage-1@solutions-builder.local" }],
   credentialBindings: [{"package":"@corbits/artifacts/sidecar-bundle","handle":"hub","provider":"sb-workflow-artifacts","name":"workflow-artifacts:brief-evaluator","locator":"tenant"}],
-  grantRequirements: [{"resource":"credential:*","action":"use","source":"creator","conditions":{"tool":"tool:@corbits/artifacts/sidecar-bundle"}}],
+  grantRequirements: [{"resource":"credential:crd_snapshot","action":"use","source":"creator","conditions":{"tool":"tool:@corbits/artifacts/sidecar-bundle"}}],
   steps: {
     run: step({
       agent: AGENT,
@@ -667,7 +667,7 @@ export default defineWorkflow({
   id: "sb-stage-1",
   triggers: [{ type: "mail", to: "sb-stage-1@solutions-builder.local" }],
   credentialBindings: [{"package":"@corbits/artifacts/sidecar-bundle","handle":"hub","provider":"sb-workflow-artifacts","name":"workflow-artifacts:product-guide","locator":"tenant"}],
-  grantRequirements: [{"resource":"credential:*","action":"use","source":"creator","conditions":{"tool":"tool:@corbits/artifacts/sidecar-bundle"}}],
+  grantRequirements: [{"resource":"credential:crd_snapshot","action":"use","source":"creator","conditions":{"tool":"tool:@corbits/artifacts/sidecar-bundle"}}],
   steps: {
     run: step({
       agent: AGENT,
@@ -728,7 +728,7 @@ export default defineWorkflow({
   id: "sb-stage-6",
   triggers: [{ type: "mail", to: "sb-stage-6@solutions-builder.local" }],
   credentialBindings: [{"package":"@corbits/artifacts/sidecar-bundle","handle":"hub","provider":"sb-workflow-artifacts","name":"workflow-artifacts:requirements-author","locator":"tenant"}],
-  grantRequirements: [{"resource":"credential:*","action":"use","source":"creator","conditions":{"tool":"tool:@corbits/artifacts/sidecar-bundle"}}],
+  grantRequirements: [{"resource":"credential:crd_snapshot","action":"use","source":"creator","conditions":{"tool":"tool:@corbits/artifacts/sidecar-bundle"}}],
   steps: {
     run: step({
       agent: AGENT,

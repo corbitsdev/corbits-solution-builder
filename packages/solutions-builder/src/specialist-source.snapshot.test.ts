@@ -30,6 +30,7 @@ describe("specialistEntrySource renders each role byte-identically", () => {
           role,
           roleKey,
           artifactTools,
+          ...(artifactTools ? { artifactCredentialId: "crd_snapshot" } : {}),
         });
         expect(rendered).toMatchSnapshot();
       });

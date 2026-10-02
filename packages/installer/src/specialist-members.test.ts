@@ -64,6 +64,7 @@ describe("renderSpecialistSource members", () => {
       artifactTools,
       roleKey,
       agentFor(stage),
+      artifactTools ? "crd_test" : undefined,
     );
 
   test("a specialist that imports no tool ships the vendored workflow alone", async () => {
@@ -100,14 +101,15 @@ describe("renderSpecialistSource members", () => {
 
   // #41 step 5: the rendered entry for a role is identical across projects;
   // only the package's own name carries the project, since the asset is
-  // named for it.
-  test("the same role renders the same entry for two projects", async () => {
+  // named for it. The one exception is the id of the project's own artifacts
+  // credential, which a credential-bound entry's use-grant names (#288).
+  test("the same role renders the same entry for two projects, up to the credential id", async () => {
     const closure = await fullClosure();
     for (const [stage, artifactTools] of [[1, false], [5, false], [8, false], [8, true], [9, true]] as [Stage, boolean][]) {
-      const one = await renderSpecialistSource(closure, "proj_1", stage, { provider: "openai", model: "gpt-5.5" }, artifactTools, "primary", agentFor(stage));
-      const two = await renderSpecialistSource(closure, "proj_2", stage, { provider: "openai", model: "gpt-5.5" }, artifactTools, "primary", agentFor(stage));
+      const one = await renderSpecialistSource(closure, "proj_1", stage, { provider: "openai", model: "gpt-5.5" }, artifactTools, "primary", agentFor(stage), artifactTools ? "crd_one" : undefined);
+      const two = await renderSpecialistSource(closure, "proj_2", stage, { provider: "openai", model: "gpt-5.5" }, artifactTools, "primary", agentFor(stage), artifactTools ? "crd_two" : undefined);
       const entry = "packages/specialist/workflow.js";
-      expect(one[entry]).toBe(two[entry]!);
+      expect(one[entry]!.replaceAll("crd_one", "crd_x")).toBe(two[entry]!.replaceAll("crd_two", "crd_x"));
       expect(one[entry]).not.toContain("proj_1");
     }
   });
