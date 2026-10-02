@@ -100,17 +100,25 @@ export type BridgeAvailability = {
   readonly install: InstallInstruction | null;
 };
 
-/** Whether the chosen worker's CLI is actually present. */
+/**
+ * Whether the chosen worker's CLI is actually present. Asked on every
+ * `/build/worker` read and every start, so the probe is awaited rather than
+ * run synchronously: a synchronous spawn would hold the host's event loop
+ * for as long as the worker took to answer.
+ */
 export async function bridgeAvailable(): Promise<BridgeAvailability> {
   const worker = await buildWorker();
   const probeCommand = [worker.command, ...worker.probe].join(" ");
-  let probe: ReturnType<typeof Bun.spawnSync>;
+  let probe: { exitCode: number | null; signalCode: string | null; stdout: string };
   try {
-    probe = Bun.spawnSync([worker.command, ...worker.probe], {
+    const child = Bun.spawn([worker.command, ...worker.probe], {
+      stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",
       env: inheritedEnvironment(worker.environment),
     });
+    const [stdout, exitCode] = await Promise.all([new Response(child.stdout).text(), child.exited]);
+    probe = { exitCode: child.signalCode ? null : exitCode, signalCode: child.signalCode, stdout };
   } catch (cause) {
     // Absent is the commonest way to be unavailable, and it surfaces as a
     // spawn failure rather than an exit status.
@@ -141,10 +149,10 @@ export async function bridgeAvailable(): Promise<BridgeAvailability> {
       available: false,
       worker,
       install: null,
-      detail: `\`${probeCommand}\` exited ${probe.exitCode}. The build lane is unavailable.`,
+      detail: `\`${probeCommand}\` exited ${String(probe.exitCode)}. The build lane is unavailable.`,
     };
   }
-  const answer = probe.stdout?.toString() ?? "";
+  const answer = probe.stdout;
   if (worker.probeExpects !== null && !answer.includes(worker.probeExpects)) {
     return {
       available: false,
