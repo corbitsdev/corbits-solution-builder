@@ -119,6 +119,7 @@ export function useStageDecisions({
   onDetailChanged,
   onRequirementsReminted,
   buildAttempts = [],
+  buildAttemptsLoaded = true,
 }: {
   detail: ProjectDetail;
   tenantId: string;
@@ -138,6 +139,8 @@ export function useStageDecisions({
   onRequirementsReminted?: (block: string) => void;
   /** Stage 8: the host's attempts (`useBuildAttempts`), which say whether the recorded archive is current. */
   buildAttempts?: readonly BuildAttempt[];
+  /** Whether those attempts have been read yet: the review never opens on an archive before the host has said what is running. */
+  buildAttemptsLoaded?: boolean;
 }): StageDecisions {
   const [approving, setApproving] = useState(false);
   const [chosenTarget, setChosenTargetState] = useState<string | null>(null);
@@ -152,8 +155,8 @@ export function useStageDecisions({
   }, [stage]);
 
   const stage8Evidence = useMemo(
-    () => (stage === 8 ? buildEvidenceState(detail.nodes, buildAttempts) : null),
-    [stage, detail.nodes, buildAttempts],
+    () => (stage === 8 ? buildEvidenceState(detail.nodes, buildAttempts, buildAttemptsLoaded) : null),
+    [stage, detail.nodes, buildAttempts, buildAttemptsLoaded],
   );
 
   /**

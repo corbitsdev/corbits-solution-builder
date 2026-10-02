@@ -476,6 +476,7 @@ export function StageWorkspace({
     draftKind,
     foldedMessages,
     buildAttempts: builds.attempts,
+    buildAttemptsLoaded: builds.loaded,
     refreshWorkflow: workflow.refresh,
     markStage: workflow.markStage,
     queueOpening: openingDispatch.queueOpening,

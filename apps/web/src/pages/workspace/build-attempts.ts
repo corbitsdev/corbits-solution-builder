@@ -43,7 +43,10 @@ export function attemptRecorded(nodes: readonly ArtifactNode[], attempt: number)
 export function buildEvidenceState(
   nodes: readonly ArtifactNode[],
   attempts: readonly Pick<BuildAttempt, "attempt" | "state">[],
+  /** Whether `attempts` has been read from the host at all: before that, an empty list says nothing. */
+  loaded = true,
 ): { ready: boolean; reason: string | null } {
+  if (!loaded) return { ready: false, reason: "Reading the host's build attempts…" };
   const archive = buildArchives(nodes)[0];
   if (!archive) return { ready: false, reason: "No build archive has been recorded yet — package an ended attempt first." };
   if (attempts.some((entry) => entry.state === "running" || entry.state === "detached")) {

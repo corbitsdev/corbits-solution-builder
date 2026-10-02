@@ -35,6 +35,12 @@ describe("buildEvidenceState", () => {
     expect(state.reason).toContain("No build archive");
   });
 
+  test("not ready before the host's attempts have been read: an empty list is not yet an answer", () => {
+    const state = buildEvidenceState([archiveNode()], [], false);
+    expect(state.ready).toBe(false);
+    expect(buildEvidenceState([archiveNode()], [{ attempt: 2, state: "ended" }], true).ready).toBe(true);
+  });
+
   test("ready once the ended attempt's archive is recorded", () => {
     expect(buildEvidenceState([archiveNode()], [{ attempt: 2, state: "ended" }])).toEqual({ ready: true, reason: null });
   });
