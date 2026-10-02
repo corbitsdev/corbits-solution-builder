@@ -149,7 +149,10 @@ async function resolveLiveDeployment(
   const switched = await readStageSwitch(transport, projectId, stage);
   if (switched) {
     const target = deployments.find((deployment) => deployment.id === switched.deploymentId);
-    if (target && !ENDED_DEPLOYMENT_STATUSES.has(target.status)) return target;
+    // The same terms as `pickDeployment`'s first rank: a switch target this
+    // host will never place is dead to it as well (CL-9698).
+    const standing = sidecar ? deploymentPlaceableHere(target, sidecar) : target !== undefined && !ENDED_DEPLOYMENT_STATUSES.has(target.status);
+    if (standing) return target;
   }
   return pickDeployment(deployments, sidecar);
 }
