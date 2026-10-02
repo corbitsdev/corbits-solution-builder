@@ -76,10 +76,10 @@ describe("renderSpecialistSource members", () => {
     }
   });
 
-  test("stage 5's one deployment ships the deck tool and the runtime", async () => {
+  test("stage 5's one deployment ships no tool: the app draws slides from the outline (#435)", async () => {
     const packages = await render(5);
-    expect(membersOf(packages)).toEqual(["intx-workflow", "specialist-runtime", "tools-deck"]);
-    expect(dependenciesOf(packages)["@solutions-builder/tools-deck"]).toBe("workspace:*");
+    expect(membersOf(packages)).toEqual(["intx-workflow"]);
+    expect(dependenciesOf(packages)["@solutions-builder/tools-deck"]).toBeUndefined();
     expect(dependenciesOf(packages)["@solutions-builder/tools-delivery"]).toBeUndefined();
   });
 

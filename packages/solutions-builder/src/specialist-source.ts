@@ -150,7 +150,10 @@ export function specialistTooling(options: {
   const { stage, roleKey = PRIMARY_ROLE_KEY, artifactTools = false } = options;
   const isBuildStage = stage === BUILD_STAGE;
   return {
-    deck: stage === PACKAGE_STAGE,
+    // The app draws and exports a stakeholder's slides from the deck outline
+    // in the reply; a rendered file nothing reads only cost the model a turn
+    // in which it reported the render instead of the package (#435).
+    deck: false,
     posix: isBuildStage,
     delivery: isBuildStage || stage === DELIVERY_STAGE,
     artifacts: artifactTools && !isBuildStage,

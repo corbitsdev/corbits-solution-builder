@@ -7,7 +7,7 @@ import { describe, expect, test } from "bun:test";
 import { TOOL_NAMES as POSIX_TOOL_NAMES } from "@intx/tools-posix";
 import { AGENT_KIT } from "@solutions-builder/app/kit";
 import { SPECIALIST_TOOLS, kitSeed } from "@solutions-builder/app/seed-kit";
-import { BUILD_STAGE, DELIVERY_STAGE, PACKAGE_STAGE } from "@solutions-builder/app/specialist-source";
+import { BUILD_STAGE, DELIVERY_STAGE } from "@solutions-builder/app/specialist-source";
 import { TOOL_NAME as RENDER_DECK } from "@solutions-builder/tools-deck/sidecar-bundle";
 import { DELIVER_TOOL_NAME } from "@solutions-builder/tools-delivery/sidecar-bundle";
 import { TOOL_NAME as PUBLISH_WORKSPACE } from "@solutions-builder/tools-delivery/publish-workspace";
@@ -22,10 +22,9 @@ describe("the kit's tool names", () => {
   });
 
   test("a role's skills name only tools its stage's deployment carries", () => {
-    // Mirrors `specialistEntrySource`'s per-stage tool imports; stage 5's
-    // per-audience deployments carry the deck, its primary one carries none.
+    // Mirrors `specialistEntrySource`'s per-stage tool imports; stage 5
+    // carries none since #435 (the app draws slides from the outline).
     const toolsByStage: Record<number, readonly string[]> = {
-      [PACKAGE_STAGE]: SPECIALIST_TOOLS.deck,
       [BUILD_STAGE]: [...SPECIALIST_TOOLS.posix, ...SPECIALIST_TOOLS.publishWorkspace],
       [DELIVERY_STAGE]: SPECIALIST_TOOLS.delivery,
     };
