@@ -26,6 +26,7 @@ export {
   createSidecarAllocationReconciler,
   type SidecarAllocationReconciler,
   type SidecarAllocationReconcilerDeps,
+  type ReplacementRecoveryDecision,
 } from "./reconciler";
 
 export type { SidecarReconciliationContext } from "./operation";

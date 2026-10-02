@@ -49,6 +49,9 @@ type AllocationStore = Pick<
   | "wakeReconciliation"
 >;
 
+/** What to do with an allocated worker that will not reconnect; see `enableAutomaticReplacementRecovery`. */
+export type ReplacementRecoveryDecision = "replace" | "release" | "defer";
+
 export type SidecarAllocationReconcilerDeps = {
   readonly allocationStore: AllocationStore;
   readonly plugins: SidecarPluginRegistry;
@@ -78,8 +81,18 @@ export type SidecarAllocationReconcilerDeps = {
    * default because Hub recovery does not restore arbitrary sidecar or
    * isolation-container filesystem state, so automatic continuation could run
    * without state the previous worker produced.
+   *
+   * A function decides per allocation: `replace` as `true` does, `release` as
+   * `false` does, and `defer` leaves the allocation `allocated` and parks its
+   * reconciliation for `deferredRecoveryMs`, so an embedder can replace a
+   * worker only once something wants it (a user opening the project it
+   * serves) without a whole host's dead workers restarting at boot.
    */
-  readonly enableAutomaticReplacementRecovery?: boolean;
+  readonly enableAutomaticReplacementRecovery?:
+    | boolean
+    | ((allocation: SidecarAllocation) => ReplacementRecoveryDecision);
+  /** How long a `defer` decision parks an allocation before it is asked again. */
+  readonly deferredRecoveryMs?: number;
   readonly leaseDurationMs?: number;
   readonly connectTimeoutMs?: number;
   readonly operationTimeoutMs?: number;
@@ -121,6 +134,7 @@ class ReconciliationLeaseLostError extends Error {
 
 const DEFAULT_LEASE_DURATION_MS = 60_000;
 const DEFAULT_CONNECT_TIMEOUT_MS = 120_000;
+const DEFAULT_DEFERRED_RECOVERY_MS = 60_000;
 const MAX_RETRY_BACKOFF_ATTEMPT = 5;
 
 function randomHex(bytes: number): string {
@@ -162,6 +176,7 @@ export function createSidecarAllocationReconciler({
   onInitializationRecovery,
   onReady,
   enableAutomaticReplacementRecovery = false,
+  deferredRecoveryMs = DEFAULT_DEFERRED_RECOVERY_MS,
   leaseDurationMs = DEFAULT_LEASE_DURATION_MS,
   connectTimeoutMs = DEFAULT_CONNECT_TIMEOUT_MS,
   operationTimeoutMs = DEFAULT_SIDECAR_OPERATION_TIMEOUT_MS,
@@ -348,13 +363,30 @@ export function createSidecarAllocationReconciler({
             : {}),
         }
       : {};
+    // Only an `allocated` worker is ever a recovery question: a
+    // `provisioning` one never finished its first start and is replaced
+    // regardless, as before.
+    const decision: ReplacementRecoveryDecision =
+      allocation.status !== "allocated"
+        ? "replace"
+        : typeof enableAutomaticReplacementRecovery === "function"
+          ? enableAutomaticReplacementRecovery(allocation)
+          : enableAutomaticReplacementRecovery
+            ? "replace"
+            : "release";
+    if (decision === "defer") {
+      await allocationStore.parkReconciliation(allocation.id, leaseId, {
+        kind: "retry-after-error",
+        notBefore: new Date(now().getTime() + deferredRecoveryMs),
+      });
+      return;
+    }
     let shouldRetryInitialization = false;
     await queueReconciliationStep(
       { allocationId: allocation.id, generation: allocation.generation },
       async () => {
         const updated =
-          allocation.status === "allocated" &&
-          !enableAutomaticReplacementRecovery
+          decision === "release"
             ? await allocationStore.beginUnrecoverableRelease({
                 ...initializationCheck,
                 allocationId: allocation.id,

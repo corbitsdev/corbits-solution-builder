@@ -199,6 +199,15 @@ export type MountedHub = {
   readonly sidecars: {
     fence(allocationId: string, generation: number): void;
     connected(): string[];
+    /**
+     * Places the named dead deployments of `tenantId` again (CL-9700): their
+     * allocations' connect grace is ended now and their reconciliation woken,
+     * so the reconciler replaces each dead sidecar with a new one running the
+     * same frozen bundle and resuming the same run. The tenant's other dead
+     * workers are woken to be released, as before. Returns the ids it is
+     * placing, so a caller can wait for them before reading or mailing them.
+     */
+    recoverDeployments(tenantId: string, deploymentIds: readonly string[]): Promise<string[]>;
   };
   /**
    * The sidecar router's event emitter, re-emitting frames such as
@@ -445,6 +454,29 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
   // claim shares pglite's one connection, including its lease renewals, so
   // the cap stays below the platform's default of 8.
   const ALLOCATION_CONCURRENCY = 4;
+  // Per tenant whose project has been opened since boot: the anchor runs
+  // (deployments) the page asked to have placed again. A dead worker of an
+  // opened tenant that was not asked for is released, as every dead worker
+  // was before; one of a tenant nobody has opened is deferred.
+  const recoverable = new Map<string, Set<string>>();
+  // Once the reconciler has moved a recovered allocation to `replacing`, it
+  // schedules the replacement itself under the allocation's own backoff --
+  // several seconds for one that failed before. The host asked for this
+  // placement now, so the wait is cut: the row is woken as soon as it is
+  // `replacing`. Bounded, and harmless if the reconciler got there first.
+  const wakeOnceReplacing = async (allocationId: string, generationBefore: number) => {
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      await Bun.sleep(200);
+      const row = await sidecarAllocationStore.findById(allocationId).catch(() => null);
+      if (row === null || row.generation !== generationBefore + 1) {
+        if (row === null) return;
+        continue;
+      }
+      if (row.status === "replacing") await sidecarAllocationStore.wakeReconciliation(row.id, row.generation);
+      return;
+    }
+  };
   const sidecarAllocationReconciler = createSidecarAllocationReconciler({
     allocationStore: sidecarAllocationStore,
     maxConcurrentClaims: ALLOCATION_CONCURRENCY,
@@ -452,12 +484,18 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
     router: sidecarRouter,
     hubWebSocketUrl: options.hubWebSocketUrl,
     connectTimeoutMs: SIDECAR_CONNECT_TIMEOUT_MS,
-    // Process-provisioned sidecars die with the host. Left unreplaced, a
-    // deployment is placed again only when a project is opened, and the
-    // installer supersedes its ended run with a fresh one that replays the
-    // project's decisions (#192, #237). Replacing every one at boot started
-    // ~600 MB of sidecar per live deployment before anything was opened.
-    enableAutomaticReplacementRecovery: false,
+    // Process-provisioned sidecars die with the host. Replacing every one at
+    // boot started ~600 MB of sidecar per live deployment before anything
+    // was opened (CL-9540); releasing them made every open a full redeploy
+    // and a replay of the project's decisions (#192, #237, CL-9700). So a
+    // dead worker is deferred until its project is opened (`recoverDeployments`),
+    // then replaced: the frozen bundle lands on a new sidecar with no probe,
+    // and the run resumes where it was.
+    enableAutomaticReplacementRecovery: (allocation) => {
+      const wanted = recoverable.get(allocation.tenantId);
+      if (wanted === undefined) return "defer";
+      return wanted.has(allocation.anchorRunId) ? "replace" : "release";
+    },
     onReady: async (allocation: SidecarAllocation, reconciliation) => {
       await workflowAllocationService.deployReadyAllocation(allocation, reconciliation);
       await workflowDispatchService.requeueForReadyAllocation(allocation.anchorRunId);
@@ -825,6 +863,36 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
     sidecars: {
       fence: (allocationId, generation) => socketRouter.fenceAllocation(allocationId, generation),
       connected: () => socketRouter.getConnectedSidecars(),
+      recoverDeployments: async (tenantId, deploymentIds) => {
+        const wanted = recoverable.get(tenantId) ?? new Set<string>();
+        for (const id of deploymentIds) wanted.add(id);
+        recoverable.set(tenantId, wanted);
+        const placing: string[] = [];
+        const now = new Date();
+        for (const allocation of await sidecarAllocationStore.listActive()) {
+          if (allocation.tenantId !== tenantId || allocation.status !== "allocated") continue;
+          if (deploymentIds.includes(allocation.anchorRunId)) {
+            // The worker is known dead (the caller checked it is unplaced and
+            // from before this host started), so its connect grace ends now
+            // rather than at the deadline boot gave it; the reconciler then
+            // replaces it on its next pass.
+            const ended = await sidecarAllocationStore.markConnectionLost({ allocationId: allocation.id, generation: allocation.generation, connectDeadline: now, now });
+            if (ended === null) {
+              // The row is not one whose grace can be ended (its last ensure
+              // was never accepted, or it moved meanwhile); the reconciler
+              // reaches it at its own deadline instead. Said, so a slow
+              // recovery can be read off the log rather than guessed at.
+              console.info(
+                `recover: ${allocation.anchorRunId} keeps its own connect deadline (status ${allocation.status}, generation ${String(allocation.generation)}, accepted ${String(allocation.ensureAcceptedGeneration)}, deadline ${allocation.connectDeadline?.toISOString() ?? "none"})`,
+              );
+            }
+            placing.push(allocation.anchorRunId);
+            void wakeOnceReplacing(allocation.id, allocation.generation);
+          }
+          await sidecarAllocationStore.wakeReconciliation(allocation.id, allocation.generation);
+        }
+        return placing;
+      },
     },
     events: sidecarRouter.events,
     sidecarBindingFingerprint: bindingFingerprint,

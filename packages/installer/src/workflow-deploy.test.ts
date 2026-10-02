@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Transport } from "@intx/hub-client";
-import { deploymentPlaceableHere, deploymentUsability, pollWhilePlacing, waitForDeploymentDeployed, waitForDeploymentPlacement } from "./workflow-deploy.js";
+import { deploymentPlaceableHere, deploymentUsability, deploymentUsabilityFor, pollWhilePlacing, waitForDeploymentDeployed, waitForDeploymentPlacement } from "./workflow-deploy.js";
 
 const TENANT_ID = "tnt_1";
 type Listed = { id: string; status: string };
@@ -25,6 +25,18 @@ function scriptedHub(listings: readonly (readonly Listed[])[]) {
 }
 
 const FAST = { pollMs: 1 };
+
+/** `scriptedHub` whose `dep_1` run answers its event log with `events`. */
+function hubWithRun(listings: readonly (readonly Listed[])[], events: readonly { seq: number; type: string }[]) {
+  const scripted = scriptedHub(listings);
+  const transport: Transport = {
+    async fetch<T>(method: string, path: string): Promise<T> {
+      if (method === "GET" && /\/workflows\/dep_1\/runs\/dep_1\/events$/.test(path)) return { runId: "dep_1", events: events.map((event) => ({ ...event, body: {} })) } as T;
+      return scripted.transport.fetch<T>(method, path);
+    },
+  } as Transport;
+  return { transport, taken: scripted.taken };
+}
 
 // CL-9698: the re-check after a push adopts only a deployment this host can
 // still bring to a placed sidecar. A `pending` one from before the host
@@ -62,17 +74,6 @@ describe("deploymentPlaceableHere", () => {
 // #236: a deployment is handed back only once it can take mail or a signal.
 describe("deploymentUsability", () => {
   /** `scriptedHub` plus the anchor run's log, so a placed deployment's run can be read. */
-  function hubWithRun(listings: readonly (readonly Listed[])[], events: readonly { seq: number; type: string }[]) {
-    const scripted = scriptedHub(listings);
-    const transport: Transport = {
-      async fetch<T>(method: string, path: string): Promise<T> {
-        if (method === "GET" && /\/workflows\/dep_1\/runs\/dep_1\/events$/.test(path)) return { runId: "dep_1", events: events.map((event) => ({ ...event, body: {} })) } as T;
-        return scripted.transport.fetch<T>(method, path);
-      },
-    } as Transport;
-    return { transport, taken: scripted.taken };
-  }
-
   test("a placed deployment whose run is parked is usable", async () => {
     const hub = hubWithRun([[{ id: "dep_1", status: "deployed" }]], [{ seq: 1, type: "RunStarted" }, { seq: 2, type: "SignalAwaited" }]);
     expect(await deploymentUsability(hub.transport, TENANT_ID, "dep_1", "dep_1", FAST)).toBe("usable");
@@ -156,6 +157,46 @@ describe("waitForDeploymentDeployed", () => {
     const found = await pollWhilePlacing(busy, () => null, { pollMs: 2, stallMs: 60_000, ceilingMs: 40 });
     expect(found).toBeNull();
     expect(Date.now() - started).toBeGreaterThanOrEqual(40);
+  });
+});
+
+// CL-9700: a dead deployment the host can place again is recovered and
+// waited for, and its run resumes; one the host cannot is as before.
+describe("deploymentUsabilityFor", () => {
+  const started = "2026-01-02T00:00:00.000Z";
+  // The scripted hub stamps every row created 2026-01-01: before the host started.
+  const capability = (recover?: (tenantId: string, ids: readonly string[]) => Promise<readonly string[]>) => ({
+    canPlaceSidecars: true,
+    sidecarsLostBefore: started,
+    ...(recover ? { recover } : {}),
+  });
+
+  test("asks the host to place an unplaced pre-restart deployment again, waits, and it is usable once placed", async () => {
+    const asked: string[][] = [];
+    const hub = hubWithRun([[{ id: "dep_1", status: "pending" }], [{ id: "dep_1", status: "pending" }], [{ id: "dep_1", status: "recovering" }], [{ id: "dep_1", status: "deployed" }]], [{ seq: 1, type: "RunStarted" }]);
+    const recover = async (_tenantId: string, ids: readonly string[]) => {
+      asked.push([...ids]);
+      return ids;
+    };
+    expect(await deploymentUsabilityFor(hub.transport, TENANT_ID, "dep_1", "dep_1", FAST, capability(recover))).toBe("usable");
+    expect(asked).toEqual([["dep_1"]]);
+  });
+
+  test("a host that does not take it up leaves the old answer: stalled at once", async () => {
+    const hub = hubWithRun([[{ id: "dep_1", status: "pending" }]], []);
+    expect(await deploymentUsabilityFor(hub.transport, TENANT_ID, "dep_1", "dep_1", { ...FAST, stallMs: 20 }, capability(async () => []))).toBe("stalled");
+  });
+
+  test("without a recover hook, exactly deploymentUsability", async () => {
+    const hub = hubWithRun([[{ id: "dep_1", status: "pending" }]], []);
+    expect(await deploymentUsabilityFor(hub.transport, TENANT_ID, "dep_1", "dep_1", { ...FAST, stallMs: 20 }, capability())).toBe("stalled");
+  });
+
+  test("a placed deployment is never handed to the host", async () => {
+    let asked = false;
+    const hub = hubWithRun([[{ id: "dep_1", status: "deployed" }]], [{ seq: 1, type: "RunStarted" }]);
+    expect(await deploymentUsabilityFor(hub.transport, TENANT_ID, "dep_1", "dep_1", FAST, capability(async () => { asked = true; return []; }))).toBe("usable");
+    expect(asked).toBe(false);
   });
 });
 

@@ -756,6 +756,64 @@ describe("createSidecarAllocationReconciler", () => {
     });
   });
 
+  test("a recovery policy decides per allocation: defer parks the dead worker instead of releasing or replacing it", async () => {
+    const allocated = allocation({
+      status: "allocated",
+      generation: 1,
+      sidecarId: "sc-current",
+      ensureAcceptedGeneration: 1,
+      connectDeadline: NOW,
+      reconciliationLeaseId: "lease-1",
+    });
+    let parked: Parameters<AllocationStore["parkReconciliation"]>[2] | undefined;
+    const decisions: string[] = [];
+    const store = fakeStore({
+      claimNextReconcilable: async () => allocated,
+      parkReconciliation: async (_allocationId, _leaseId, policy) => {
+        parked = policy;
+        return true;
+      },
+    });
+    const reconciler = createSidecarAllocationReconciler({
+      ...deps({ store, ready: false, waitError: new Error("connect timeout") }),
+      enableAutomaticReplacementRecovery: (row) => {
+        decisions.push(row.tenantId);
+        return "defer";
+      },
+      deferredRecoveryMs: 60_000,
+    });
+
+    await reconciler.reconcileNext();
+
+    expect(decisions).toEqual([allocated.tenantId]);
+    expect(parked).toEqual({ kind: "retry-after-error", notBefore: new Date(NOW.getTime() + 60_000) });
+  });
+
+  test("a recovery policy answering replace replaces, exactly as `true` does", async () => {
+    const allocated = allocation({
+      status: "allocated",
+      generation: 1,
+      sidecarId: "sc-current",
+      ensureAcceptedGeneration: 1,
+      connectDeadline: NOW,
+      reconciliationLeaseId: "lease-1",
+    });
+    let replaced = false;
+    const store = fakeStore({
+      claimNextReconcilable: async () => allocated,
+      beginReplacement: async () => {
+        replaced = true;
+        return null;
+      },
+    });
+    const reconciler = createSidecarAllocationReconciler({
+      ...deps({ store, ready: false, waitError: new Error("connect timeout") }),
+      enableAutomaticReplacementRecovery: () => "replace",
+    });
+    await reconciler.reconcileNext();
+    expect(replaced).toBe(true);
+  });
+
   test("retries when identity validation fails inside the connection wait", async () => {
     const allocated = allocation({
       status: "allocated",
