@@ -11,15 +11,15 @@ const read = (relative: string) => readFileSync(join(here, relative), "utf8");
 describe("inference activity", () => {
   test("the inference row carries the pending state and a flame that names it", () => {
     const index = read("./index.tsx");
-    expect(index).toContain('<div className="stage-model-row" data-inference-pending={pending !== null ? "" : undefined}>');
-    expect(index).toContain('aria-label={pending !== null ? "Inference running" : "Inference idle"}');
+    expect(index).toContain('<div className="stage-model-row" data-inference-pending={busy ? "" : undefined}>');
+    expect(index).toContain('aria-label={busy ? "Inference running" : "Inference idle"}');
   });
 
   test("every pane layout passes the pending state on, and the conversation column carries it", () => {
     const index = read("./index.tsx");
     const panes = index.match(/<StagePanes\b[^>]*>/gs) ?? [];
     expect(panes.length).toBeGreaterThan(0);
-    for (const usage of panes) expect(usage).toContain("busy={pending !== null}");
+    for (const usage of panes) expect(usage).toContain("busy={busy}");
     expect(read("./workspace-chrome.tsx")).toContain('data-inference-pending={busy ? "" : undefined}');
   });
 
