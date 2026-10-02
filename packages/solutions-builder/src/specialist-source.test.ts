@@ -25,9 +25,9 @@ describe("specialistTooling", () => {
     }
   });
 
-  test("stage 5 carries the deck: its one deployment renders every stakeholder's slides (#41 step 3)", () => {
-    expect(specialistTooling({ stage: 5 })).toEqual({ ...NONE, deck: true });
-    expect(specialistTooling({ stage: 5, roleKey: "primary" })).toEqual({ ...NONE, deck: true });
+  test("stage 5 carries no tool: the app draws slides from the outline in the reply (#435)", () => {
+    expect(specialistTooling({ stage: 5 })).toEqual(NONE);
+    expect(specialistTooling({ stage: 5, roleKey: "primary" })).toEqual(NONE);
   });
 
   test("stage 8 carries the shell and the delivery tool, and never the generic artifact bundle", () => {
@@ -53,7 +53,8 @@ describe("specialistDependencies", () => {
   });
 
   test("each tool brings its own set, and the runtime package comes with the deck or delivery tool", () => {
-    expect(specialistDependencies(specialistTooling({ stage: 5 }))).toEqual({ ...SPECIALIST_BASE_DEPENDENCIES, ...DECK_TOOL_DEPENDENCIES });
+    expect(specialistDependencies(specialistTooling({ stage: 5 }))).toEqual(SPECIALIST_BASE_DEPENDENCIES);
+    expect(specialistDependencies({ deck: true, posix: false, delivery: false, artifacts: false })).toEqual({ ...SPECIALIST_BASE_DEPENDENCIES, ...DECK_TOOL_DEPENDENCIES });
     expect(specialistDependencies(specialistTooling({ stage: 8 }))).toEqual({ ...SPECIALIST_BASE_DEPENDENCIES, ...POSIX_TOOL_DEPENDENCIES, ...DELIVERY_TOOL_DEPENDENCIES });
     expect(specialistDependencies(specialistTooling({ stage: 9 }))).toEqual({ ...SPECIALIST_BASE_DEPENDENCIES, ...DELIVERY_TOOL_DEPENDENCIES });
     expect(specialistDependencies(specialistTooling({ stage: 3, artifactTools: true }))).toEqual({ ...SPECIALIST_BASE_DEPENDENCIES, ...ARTIFACT_TOOL_DEPENDENCIES });
@@ -85,7 +86,7 @@ describe("specialistEntrySource", () => {
     expect(stage1).not.toContain("@intx/tools-posix");
     expect(stage1).not.toContain("@corbits/artifacts");
 
-    expect(entry(5)).toContain('from "@solutions-builder/tools-deck/sidecar-bundle"');
+    expect(entry(5)).not.toContain("tools-deck");
 
     const stage8 = entry(8);
     expect(stage8).toContain('from "@intx/tools-posix/sidecar-bundle"');

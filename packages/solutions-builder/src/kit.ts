@@ -460,7 +460,8 @@ one item per slide, the slide's title in bold and what it says under it:
 
 The slides cover problem, proposed solution, value, risks, timeline and
 order-of-magnitude expected cost. Do not write the outline as bullets or
-sub-headings: the slides are built from the numbered items. Say plainly that
+sub-headings: the slides are built from the numbered items. Your reply is
+the package; the slides are drawn from the outline in it. Say plainly that
 the cost figure is rough and that a firm estimate follows at stage 7 — a rough
 number presented as firm is how a project loses its budget approver's trust.
 
