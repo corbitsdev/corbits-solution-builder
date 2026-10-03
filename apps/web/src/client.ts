@@ -559,11 +559,10 @@ const UNTITLED = "Untitled project";
 const URL_TOKEN = /^(?:[a-z][a-z0-9+.-]*:\/\/|www\.)\S*$/i;
 
 /**
- * The fallback name until the project workflow's `name` step names the
- * project for real (`adoptGeneratedTitle`): the opening statement's first
- * clause, links dropped, trimmed to about five words, never the whole
- * paragraph. Links are dropped before the clause is cut, since a URL's own
- * dots would otherwise end it.
+ * The fallback name until the host's naming call names the project for real
+ * (`nameProject`): the opening statement's first clause, links dropped,
+ * trimmed to about five words, never the whole paragraph. Links are dropped
+ * before the clause is cut, since a URL's own dots would otherwise end it.
  */
 export function titleFromProblem(problem: string): string {
   const line = problem.trim().split("\n")[0]!.trim();
@@ -585,22 +584,43 @@ async function openingOf(transport: Transport, projectId: string): Promise<{ bod
   return { body: artifact.content, createdAt: node.createdAt };
 }
 
-/** Projects whose `name` reply this session has already settled, so a poll does not re-read the record. */
-const titlesSettled = new Set<string>();
+/**
+ * The namer's reply as a title, or null when it is not one: its first line,
+ * a "Title:"-style prefix, quotes and trailing punctuation stripped, and
+ * three to eight words long.
+ */
+export function titleFromReply(reply: string): string | null {
+  const line = reply.trim().split("\n")[0]!.trim();
+  const title = line
+    .replace(/^(?:project\s+)?(?:title|name)\s*:\s*/i, "")
+    .replace(/^["'“‘`*_]+|["'”’`*_]+$/g, "")
+    .replace(/[\s.,;:!?]+$/, "")
+    .trim();
+  const words = title.split(/\s+/).filter(Boolean).length;
+  if (words < 3 || words > 8 || title.length > TITLE_MAX) return null;
+  return title;
+}
 
 /**
- * Writes the `name` step's reply as the project's title, only while the title
- * is still the fallback `createProject` derived from the opening: a title a
- * person chose, or one already adopted, is never overwritten.
+ * Names a just-created project from its opening statement through the host's
+ * one inference call (`POST /projects/:id/title`), and writes the title
+ * through the installer only while the record still carries `fallback`: a
+ * title a person chose meanwhile is never overwritten. Any failure leaves
+ * `fallback`.
  */
-async function adoptGeneratedTitle(transport: Transport, projectId: string, generated: string): Promise<void> {
-  if (titlesSettled.has(projectId)) return;
-  const [record, opening] = await Promise.all([installerRequireProject(transport, projectId), openingOf(transport, projectId)]);
-  const title = generated.slice(0, TITLE_MAX).trim();
-  if (opening && title && record.title === titleFromProblem(opening.body)) {
-    await installerUpdateProject(transport, projectId, { title });
+async function nameProject(transport: Transport, projectId: string, problem: string, fallback: string): Promise<void> {
+  try {
+    const { reply } = await request<{ reply: string }>(`/projects/${encodeURIComponent(projectId)}/title`, {
+      method: "POST",
+      body: JSON.stringify({ problemStatement: problem }),
+    });
+    const title = titleFromReply(reply);
+    if (!title) return;
+    const record = await installerRequireProject(transport, projectId);
+    if (record.title === fallback) await installerUpdateProject(transport, projectId, { title });
+  } catch (cause) {
+    console.warn("[projects] the project keeps its fallback title:", cause);
   }
-  titlesSettled.add(projectId);
 }
 
 function projectSlug(): string {
@@ -1064,7 +1084,6 @@ function ensureProjectWorkflowWith(projectId: string, extra: { repair?: boolean 
       authorizedPrincipalIds,
     }));
     const status = await readyToDeploy(transport, workspaceTenantId, projectId);
-    const opening = await openingOf(transport, projectId);
     // What the ensure step is doing, under the busy strip's clock: a click
     // that waits on it (a decision, a vote) otherwise showed only its own
     // name for as long as a history replayed (#295).
@@ -1083,7 +1102,7 @@ function ensureProjectWorkflowWith(projectId: string, extra: { repair?: boolean 
         projectId,
         stages,
         await vendoredMemberFiles(await fetchClosureManifestOrThrow(), fetchClosureTarball),
-        { ...(opening ? { problemStatement: opening.body } : {}), onProgress, ...extra },
+        { onProgress, ...extra },
       );
     } finally {
       release();
@@ -1490,7 +1509,7 @@ export const api = {
       // written straight to the workspace tenant's own artifact store, the
       // same way `attachMaterial` writes any other material, so
       // `projectOpening` can read it back with no run to fold.
-      return await openCreatedProject({
+      const opened = await openCreatedProject({
         projectId: project.id,
         open: async () => {
           if (problem) {
@@ -1517,6 +1536,10 @@ export const api = {
         },
         retryable: (cause) => cause instanceof ApiFailure && cause.detail.retryable,
       });
+      // Not awaited: the project opens under its fallback title, and the
+      // project list's poll picks up the generated one when it lands.
+      if (problem && !payload.title?.trim()) void nameProject(transport, project.id, problem, title);
+      return opened;
     } catch (cause) {
       installerFailure(cause);
     }
@@ -2533,9 +2556,7 @@ export const api = {
     asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const ref = await resolveProjectWorkflowRef(transport, projectId);
       if (!ref) return null;
-      const view = await loadProjectWorkflowView(transport, ref);
-      if (view.generatedTitle) await adoptGeneratedTitle(transport, projectId, view.generatedTitle);
-      return view;
+      return loadProjectWorkflowView(transport, ref);
     }),
   /**
    * Delivers one decision as the loop's `project.decision` signal,

@@ -28,7 +28,6 @@ function view(partial: Partial<ProjectWorkflowView>): ProjectWorkflowView {
     audienceDecisions: {},
     audiencePackages: {},
     stage5Quorum: null,
-    generatedTitle: null,
     ...partial,
   } as ProjectWorkflowView;
 }
