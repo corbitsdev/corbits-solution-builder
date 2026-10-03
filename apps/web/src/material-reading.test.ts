@@ -182,3 +182,54 @@ describe("wordXmlText", () => {
     expect(wordXmlText("<w:p><w:r><w:t>R&amp;D &#8212; 5 &lt; 6 &#x2713;</w:t></w:r></w:p>")).toBe("R&D — 5 < 6 ✓");
   });
 });
+
+/**
+ * A PDF with one page per entry, each showing its text in Helvetica; an
+ * empty entry is a page with nothing on it, as a scan's page has no text.
+ * Written by hand so the test reads a real file without a writer to trust.
+ */
+function pdfBytes(pages: readonly string[]): Uint8Array {
+  const objects: string[] = [];
+  const pageIds = pages.map((_page, index) => 4 + index * 2);
+  objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
+  objects[2] = `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pages.length} >>`;
+  objects[3] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>";
+  pages.forEach((text, index) => {
+    const escaped = text.replace(/[\\()]/g, (char) => `\\${char}`);
+    const stream = text.length > 0 ? `BT /F1 12 Tf 72 720 Td (${escaped}) Tj ET` : "";
+    objects[pageIds[index]!] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${pageIds[index]! + 1} 0 R >>`;
+    objects[pageIds[index]! + 1] = `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`;
+  });
+  let file = "%PDF-1.4\n";
+  const offsets: number[] = [];
+  for (let id = 1; id < objects.length; id += 1) {
+    offsets[id] = file.length;
+    file += `${id} 0 obj\n${objects[id]!}\nendobj\n`;
+  }
+  const xref = file.length;
+  file += `xref\n0 ${objects.length}\n0000000000 65535 f \n`;
+  for (let id = 1; id < objects.length; id += 1) file += `${String(offsets[id]).padStart(10, "0")} 00000 n \n`;
+  file += `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return new TextEncoder().encode(file);
+}
+
+describe("readMaterial, PDF files", () => {
+  test("a PDF is read as its text, page by page, and a page with none is counted rather than shown", async () => {
+    const bytes = pdfBytes(["Leads go cold in two days.", "", "Signed off by finance (Q3)."]);
+    const { text } = await readMaterial({ name: "brief.pdf", mediaType: "application/pdf", bytes });
+    expect(text).toBe("Page 1 of 3:\nLeads go cold in two days.\n\nPage 3 of 3:\nSigned off by finance (Q3).\n\n(1 page with no text, not shown)");
+    expect(readingHasText(text)).toBe(true);
+  });
+
+  test("a PDF the browser gave no type for is known by its name", async () => {
+    const { text } = await readMaterial({ name: "Brief.PDF", mediaType: "application/octet-stream", bytes: pdfBytes(["By name."]) });
+    expect(text).toBe("Page 1 of 1:\nBy name.");
+  });
+
+  test("a PDF whose pages carry no text says it is a scan, in a note rather than as blank pages", async () => {
+    const { text } = await readMaterial({ name: "scan.pdf", mediaType: "application/pdf", bytes: pdfBytes(["", ""]) });
+    expect(text).toBe("(2 pages, none carrying text: a scanned or image-only PDF. Nothing here reads images, so ask what it says if that matters.)");
+    expect(readingHasText(text)).toBe(false);
+  });
+});
+
