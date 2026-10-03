@@ -1046,7 +1046,7 @@ export function StageWorkspace({
       }}
       working={sending}
       disabled={!agentAddress}
-      draftPane={stage !== 5}
+      draftPane={DOCUMENT_STAGES.has(stage) || stage === 4}
       ended={!!workflowView?.done}
       withdrawnIds={withdrawnIds}
       pending={busy}

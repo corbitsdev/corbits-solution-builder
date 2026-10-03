@@ -194,9 +194,9 @@ export function StageConversation({
   onAnswer?: ((answer: string) => void) | undefined;
   /** What the column says before the thread has a turn; by default, that the specialist is getting ready. */
   empty?: string;
-  /** Whether a reply's draft has a pane that shows it. Stage 5's pane holds
-   *  only the packages its requests write, so a draft-shaped reply there is
-   *  shown whole, never pointed at. */
+  /** Whether a reply's draft has a pane that shows it. Stage 5's packages,
+   *  stage 8's build and stage 9's delivery are not the reply's draft, so a
+   *  draft-shaped reply there is shown whole, never pointed at. */
   draftPane?: boolean;
 }) {
   const lastAgentId = [...messages].reverse().find((message) => message.author === "agent")?.id;

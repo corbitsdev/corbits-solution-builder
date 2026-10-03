@@ -363,6 +363,7 @@ export function BuildPanel({
           ) : null}
           <StageConversation
             messages={messages}
+            draftPane={false}
             value={composer}
             onValueChange={setComposer}
             onSend={(attached) => {
