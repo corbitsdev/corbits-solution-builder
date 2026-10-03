@@ -87,7 +87,6 @@ import { askKind, requirementsRequest, routedLine } from "./message-intent.ts";
 import { TERMINAL_RUN_NOTICE, isTerminalRunRefusal } from "./terminal-run.ts";
 import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
 import { agentFor, evaluatorFor } from "@solutions-builder/app/kit";
-import { MATERIAL_KIND, MATERIAL_READING_KIND } from "@solutions-builder/app/artifacts";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { STAGE_DRAFT_KIND, type StageWorkArtifact } from "../../client.js";
 import {
@@ -751,14 +750,8 @@ export function StageWorkspace({
     }
   };
 
-  // Whether this project already has history to catch up on — the only
-  // honest basis for the reconnect copy below. A brand-new project already
-  // has its opening statement (and, if it attached a file, the extracted
-  // reading beside it), so those two kinds don't count as history; anything
-  // else — a draft, a turn — means there's something to resume.
-  const resuming =
-    detail.nodes.some((node) => node.kind !== MATERIAL_KIND && node.kind !== MATERIAL_READING_KIND) ||
-    detail.stage > 1;
+  // Only a stage whose specialist has run before is being reconnected to.
+  const resuming = agent.addresses.length > 0;
 
   // The confirmed current stage for the opening screen's own reads: the
   // resolved workflow stage once known, else the same non-deploying
@@ -1105,25 +1098,6 @@ export function StageWorkspace({
         />
       ) : null}
 
-      {!agentAddress && agent.error ? (
-        <Banner
-          tone="error"
-          title={`The ${stageName(stage).toLowerCase()} specialist could not be started`}
-          action={{ label: "Try again", onClick: agent.retry }}
-        >
-          {agent.error}
-        </Banner>
-      ) : null}
-
-      {!agentAddress && !agent.error ? (
-        <OpeningScreen
-          resuming={resuming}
-          who={openingWho}
-          opening={openingStatement}
-          draft={openingDraft}
-        />
-      ) : null}
-
       {!agent.error ? (
         <div className="stage-model-row" data-inference-pending={busy ? "" : undefined}>
           {/* The flame burns while a specialist turn is in flight and sits
@@ -1169,6 +1143,26 @@ export function StageWorkspace({
           </select>
         </div>
       ) : null}
+
+      {!agentAddress && agent.error ? (
+        <Banner
+          tone="error"
+          title={`The ${stageName(stage).toLowerCase()} specialist could not be started`}
+          action={{ label: "Try again", onClick: agent.retry }}
+        >
+          {agent.error}
+        </Banner>
+      ) : null}
+
+      {!agentAddress && !agent.error ? (
+        <OpeningScreen
+          resuming={resuming}
+          who={openingWho}
+          opening={openingStatement}
+          draft={openingDraft}
+        />
+      ) : null}
+
 
       {/* A calm inline prompt, never a modal wall, and never a redeploy the
           person did not choose. "Don't ask again" turns either answer into
