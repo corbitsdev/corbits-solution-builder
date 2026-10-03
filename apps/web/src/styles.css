@@ -161,12 +161,14 @@ input[type="file"]:not(:disabled) {
   outline: none;
 }
 
-/* The design's approval floats at the foot of the pane, where reading ends. */
+/* The design's approval floats at the foot of the pane, where reading ends,
+   clear of the round busy indicator in the window's corner. */
 .pane-approve {
   position: sticky;
   bottom: var(--space-4);
   display: flex;
   justify-content: flex-end;
+  padding-right: 72px;
   margin-top: var(--space-4);
   pointer-events: none;
 }
