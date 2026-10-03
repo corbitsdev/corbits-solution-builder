@@ -1,0 +1,13 @@
+{
+  "name": "@solutions-builder/specialist-build-supervisor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The Build and test build supervisor: its role and prompt.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@solutions-builder/specialist-shared": "workspace:*"
+  }
+}

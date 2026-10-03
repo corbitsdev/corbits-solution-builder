@@ -1,0 +1,13 @@
+{
+  "name": "@solutions-builder/specialist-plan-review",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The Senior engineer panel: four independent principals reviewing the build plan.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@solutions-builder/specialist-shared": "workspace:*"
+  }
+}
