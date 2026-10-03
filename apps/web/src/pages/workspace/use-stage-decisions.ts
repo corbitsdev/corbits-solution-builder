@@ -61,8 +61,9 @@ const stageApprovalDeps: StageApprovalDeps = {
 };
 
 export type StageDecisions = {
-  /** The Approve control's ONE gate — the workflow's own verdict, never
-   *  re-derived from chat or artifact presence. */
+  /** The workflow's own verdict on approving, never re-derived from chat or
+   *  artifact presence. The Approve control also accepts a settled version
+   *  whose review is still opening, since approving opens one itself. */
   readonly approveAllowed: boolean;
   readonly approving: boolean;
   /** Stage 8's own readiness rule: a review may only open once the host has
