@@ -104,6 +104,9 @@ describe("client project tenant writes", () => {
       if (path.includes("/principals/") && method === "POST") return json({ ok: true });
       // A project workflow signal, in whichever tenant it is sent to.
       if (/\/workflows\/[^/]+\/signals$/.test(path) && method === "POST") return json({ ok: true }, 202);
+      // Its run, parked on its await: a decision waits for that (`waitForPark`).
+      const runEvents = /\/workflows\/[^/]+\/runs\/([^/]+)\/events$/.exec(path);
+      if (runEvents && method === "GET") return json({ runId: runEvents[1], events: [{ seq: 1, type: "SignalAwaited", body: {} }] });
       // Artifacts: any tenant's listing is empty, and a create answers with a row in that tenant.
       if (/\/api\/tenants\/[^/]+\/artifacts(\?|$)/.test(path) && method === "GET") return json({ data: [], nextCursor: null });
       if (/\/api\/tenants\/[^/]+\/artifacts$/.test(path) && method === "POST") {
