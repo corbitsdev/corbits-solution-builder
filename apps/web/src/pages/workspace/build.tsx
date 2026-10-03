@@ -27,6 +27,7 @@ import { Markdown } from "../../markdown.jsx";
 import { agentFor } from "@solutions-builder/app/kit";
 import type { StageEvent } from "./stage-events.ts";
 import { StageConversation } from "./thread.jsx";
+import { sendAttachedDocuments, type AttachedDocument } from "./attach-documents.tsx";
 import { StagePanes } from "./workspace-chrome.tsx";
 import { clock } from "./elapsed.jsx";
 import { BuildFile } from "../graph.jsx";
@@ -140,6 +141,7 @@ export function BuildPanel({
   onSendHold,
   popover = null,
   onAttach,
+  documents,
 }: {
   detail: ProjectDetail;
   /** The workspace tenant artifacts are recorded under. */
@@ -163,8 +165,10 @@ export function BuildPanel({
   /** Holding send raises the send-back picker. */
   onSendHold?: (draft: string) => void;
   popover?: ReactNode;
-  /** The paperclip: files join the project as material. */
+  /** "Upload a file": files join the project as material. */
   onAttach?: (files: FileList) => void;
+  /** The project's documents the (+) menu offers to attach. */
+  documents?: readonly AttachedDocument[];
 }) {
   const [address, setAddress] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -361,11 +365,12 @@ export function BuildPanel({
             messages={messages}
             value={composer}
             onValueChange={setComposer}
-            onSend={() => {
+            onSend={(attached) => {
               const body = composer;
               setComposer("");
               void run("message", async () => {
                 if (!address) return;
+                await sendAttachedDocuments(tenantId, address, attached);
                 await api.sendStageMail(tenantId, address, { body });
                 await load();
               });
@@ -376,6 +381,7 @@ export function BuildPanel({
             who={agentFor(8).title}
             {...(onSendHold ? { onSendHold: () => onSendHold(composer) } : {})}
             {...(onAttach ? { onAttach } : {})}
+            {...(documents ? { documents } : {})}
             popover={popover}
           />
         </>

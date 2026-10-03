@@ -1,10 +1,11 @@
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { ChatInput, type ChatMessage as UiChatMessage } from "@corbits/react-ui";
-import { FileText, Plus, Send } from "lucide-react";
+import { FileText, Send } from "lucide-react";
 import { Markdown } from "../../markdown.jsx";
 import { splitHandoff } from "../../design-handoff.ts";
 import { splitChain } from "./approved-chain.ts";
-import { composedMailFold, isStageOpening } from "./composed-mail.ts";
+import { attachedLine, composedMailFold, isStageOpening } from "./composed-mail.ts";
+import { AttachMenu, attachmentChips, type AttachedDocument } from "./attach-documents.tsx";
 import { Dictated } from "../../dictation.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { answersDraft, segmentsIn } from "./choices.js";
@@ -127,6 +128,7 @@ export function StageConversation({
   rows = null,
   who = "Specialist",
   onAttach,
+  documents = EMPTY_DOCUMENTS,
   draftRefs = EMPTY_REFS,
   onOpenVersion,
   onAnswer,
@@ -135,7 +137,8 @@ export function StageConversation({
   messages: readonly ChatMessage[];
   value: string;
   onValueChange: (value: string) => void;
-  onSend: () => void;
+  /** Sends the composer's words, with the documents attached to them. */
+  onSend: (attached: readonly AttachedDocument[]) => void;
   /** The specialist has not replied to the last turn yet. */
   working?: boolean;
   disabled?: boolean;
@@ -157,8 +160,10 @@ export function StageConversation({
   rows?: ReactNode;
   /** The specialist's name on its turns. */
   who?: string;
-  /** The paperclip: files join the project as material for the next draft. */
+  /** "Upload a file": files join the project as material for the next draft. */
   onAttach?: (files: FileList) => void;
+  /** The project's documents the (+) menu offers to attach. */
+  documents?: readonly AttachedDocument[];
   /** Which version each draft reply became (#158): such a reply is one line
    *  naming its version, never the draft itself. */
   draftRefs?: ReadonlyMap<string, DraftRef>;
@@ -185,6 +190,7 @@ export function StageConversation({
     return eventMessages(list, events);
   }, [messages, pending, events]);
   const eventById = useMemo(() => new Map(events.map((event) => [event.id, event])), [events]);
+  const [attached, setAttached] = useState<AttachedDocument[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pinnedRef = useRef(true);
 
@@ -237,6 +243,14 @@ export function StageConversation({
             // the person never said it, and the document strip already shows
             // what it carried.
             if (source && isStageOpening(source)) return null;
+            const attachment = source ? attachedLine(source) : null;
+            if (attachment) {
+              return (
+                <div key={message.id} className="event conv-event">
+                  {attachment}
+                </div>
+              );
+            }
             const text = messageText(message);
             const you = message.role === "user";
             const draft = you ? null : (draftRefs.get(message.id) ?? null);
@@ -286,14 +300,28 @@ export function StageConversation({
           className={COMPOSER_BOX_CLASS}
           value={value}
           onValueChange={onValueChange}
-          onSend={onSend}
+          onSend={() => {
+            onSend(attached);
+            setAttached([]);
+          }}
           working={working || pending}
           {...(pending && onStop ? { onStop } : {})}
           {...(onSendHold ? { onSendHold } : {})}
-          {...(onAttach ? { onAttach } : {})}
-          attachIcon={<Plus className="size-4" aria-hidden="true" />}
+          attachments={attachmentChips(attached)}
+          onRemoveAttachment={(chip) => setAttached(attached.filter((entry) => entry.artifactId !== chip.id))}
           sendIcon={<Send className="size-4" aria-hidden="true" />}
-          leadingTools={mic}
+          leadingTools={
+            <>
+              <AttachMenu
+                documents={documents}
+                attached={attached}
+                onAttachDocument={(document) => setAttached([...attached, document])}
+                onUpload={onAttach}
+                disabled={disabled}
+              />
+              {mic}
+            </>
+          }
           disabled={disabled}
           placeholder={placeholder}
         />
@@ -308,6 +336,7 @@ export function StageConversation({
 const EMPTY_WITHDRAWN: ReadonlySet<string> = new Set();
 const EMPTY_EVENTS: readonly StageEvent[] = [];
 const EMPTY_REFS: ReadonlyMap<string, DraftRef> = new Map();
+const EMPTY_DOCUMENTS: readonly AttachedDocument[] = [];
 
 /**
  * A draft reply's line in the chat (#158): "Drafted v2 of the problem

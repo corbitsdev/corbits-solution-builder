@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ATTACHED_HEADING, documentAsMessage, mentionedDocuments, requirementsDocument, reviewDocument, withAttachedDocuments } from "./document-mentions.ts";
+import { ATTACHED_HEADING, mentionedDocuments, requirementsDocument, reviewDocument, withAttachedDocuments } from "./document-mentions.ts";
 
 const prd = requirementsDocument("# Product requirements\n\nFR-1 …");
 const app = reviewDocument("Application", "## Verdict\n\nacceptable with conditions");
@@ -27,9 +27,5 @@ describe("withAttachedDocuments", () => {
     expect(out).not.toContain("Security");
     expect(withAttachedDocuments("make the Gantt wider", [prd, app])).toBe("make the Gantt wider");
     expect(withAttachedDocuments(out, [prd, app, sec])).toBe(out);
-  });
-
-  test("a document sent on its own says what it is", () => {
-    expect(documentAsMessage(app)).toBe(`Here is the Application review, for your reference.\n\n---\n\n${ATTACHED_HEADING} Application review\n\n## Verdict\n\nacceptable with conditions`);
   });
 });

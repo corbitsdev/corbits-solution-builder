@@ -179,12 +179,13 @@ describe("project chrome paint", () => {
     expect(sbpick).not.toContain("--wb-card");
   });
 
-  test("the conversation composer slots the Dictated mic into ChatInput leadingTools", () => {
+  test("the conversation composer slots the attach menu and the Dictated mic into ChatInput leadingTools", () => {
     const thread = read("./thread.tsx");
     expect(thread).toContain("<Dictated");
     expect(thread).toContain("ChatInput");
-    expect(thread).toContain("leadingTools={mic}");
-    expect(thread).toContain("attachIcon");
+    expect(thread).toContain("leadingTools={");
+    expect(thread).toContain("<AttachMenu");
+    expect(thread).toContain("{mic}");
     expect(thread).toContain("sendIcon");
   });
 

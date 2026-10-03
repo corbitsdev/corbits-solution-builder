@@ -2087,14 +2087,15 @@ export const api = {
     if (!artifact) throw new Error(`The stage document ${written.id} could not be read.`);
     return { id: artifact.id, version: artifact.version, content: artifact.content };
   },
-  artifactContent: async (tenantId: string, nodeId: string): Promise<{ content: string }> => {
+  artifactContent: async (tenantId: string, nodeId: string): Promise<{ content: string; version?: number }> => {
     // The project's own tenant, else the workspace for an older project's
     // artifact still recorded there (#29, `findArtifact`).
     const found = await findArtifact(createHubTransport(), tenantId, nodeId);
     if (!found) return { content: "" };
+    const { version } = found.artifact;
     const uploadId = (found.artifact.source as { upload?: { id?: unknown } }).upload?.id;
-    if (typeof uploadId !== "string") return { content: found.artifact.content };
-    return { content: await downloadUploadedArtifact(found.tenantId, nodeId) };
+    if (typeof uploadId !== "string") return { content: found.artifact.content, version };
+    return { content: await downloadUploadedArtifact(found.tenantId, nodeId), version };
   },
   /** The workspace's languages (#411); American English both ways until set. */
   languageSettings: (): Promise<LanguageSettings> =>

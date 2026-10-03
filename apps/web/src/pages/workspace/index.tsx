@@ -48,7 +48,8 @@ import { TargetPicker } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
 import { interviewProgress, latestDesignReply, workspaceGuidance } from "./guidance.js";
 import { repairedChoiceDraft } from "./choice-repair.ts";
-import { artifactTag } from "./composed-mail.ts";
+import { artifactTag, attachedLine } from "./composed-mail.ts";
+import { attachableDocuments, sendAttachedDocuments, type AttachedDocument } from "./attach-documents.tsx";
 import { repairedStackDraft } from "./stack-repair.ts";
 import { stageUsesArtifactTools } from "@solutions-builder/app/specialist-source";
 import { draftReferences } from "./draft-references.ts";
@@ -364,7 +365,7 @@ export function StageWorkspace({
   // or result-node bookkeeping under mail-chat).
   const turns: StageTurn[] = useMemo(
     () =>
-      foldedMessages.map((message) => ({
+      foldedMessages.filter((message) => attachedLine(message) === null).map((message) => ({
         id: message.id,
         role: message.author === "me" ? "human" : "specialist",
         body: message.body,
@@ -432,6 +433,18 @@ export function StageWorkspace({
       ...routedEvents,
     ],
     [stage, workflowView?.decisions, detail.nodes, withdrawn.marks, foldedMessages, routedEvents],
+  );
+  // The document pane's transcript is built from `turns`, which carry no
+  // subject: an attached document is one line there as in the chat.
+  const documentEvents = useMemo(
+    () => [
+      ...events,
+      ...foldedMessages.flatMap((message) => {
+        const text = attachedLine(message);
+        return text ? [{ id: `ev:attached:${message.id}`, at: message.at, text, tone: "line" as const }] : [];
+      }),
+    ],
+    [events, foldedMessages],
   );
 
   // CL-8899: the current stage's provider/model, reporting-only (read off
@@ -637,12 +650,13 @@ export function StageWorkspace({
     }
   };
 
-  const send = async (body: string) => {
+  const send = async (body: string, attached: readonly AttachedDocument[] = []) => {
     if (!agentAddress || body.trim().length === 0) return;
     // A requirements request is the requirements author's (#407): it
     // goes to the companion's author with any named review attached, and
-    // the chat says so where the message would have been.
-    if (stage === 6 && requirementsRequest(body)) {
+    // the chat says so where the message would have been. One with
+    // documents attached was addressed to the architect, and goes there.
+    if (stage === 6 && attached.length === 0 && requirementsRequest(body)) {
       const at = new Date().toISOString();
       setRequirementsAsk({ body, at: Date.now() });
       setRoutedEvents((prev) => [...prev, { id: `ev:routed:${String(prev.length)}`, at, text: `"${body.trim().slice(0, 80)}" — ${routedLine()}`, tone: "line" }]);
@@ -656,6 +670,7 @@ export function StageWorkspace({
       // stage's document travels in the subject, so a specialist that never
       // wrote it, such as one taking over after a model hand-off, revises it
       // instead of starting a second.
+      await sendAttachedDocuments(tenantId, agentAddress, attached);
       await api.sendStageMail(tenantId, agentAddress, {
         body,
         ...(work?.state === "ready" ? { subject: `${artifactTag(work.artifact)} ${body.slice(0, 60)}` } : {}),
@@ -829,16 +844,17 @@ export function StageWorkspace({
       </div>
     ) : null;
 
+  const attachDocuments = attachableDocuments(artifacts.tabs);
   const conversation = (
     <StageConversation
       stage={stage}
       messages={foldedMessages}
       value={composer}
       onValueChange={setComposer}
-      onSend={() => {
+      onSend={(attached) => {
         const body = composer;
         setComposer("");
-        void send(body);
+        void send(body, attached);
       }}
       onAnswer={(answer) => {
         setComposer("");
@@ -857,6 +873,7 @@ export function StageWorkspace({
       onAttach={(files) => {
         void api.attachMaterial(detail.project.id, [...files]).then(() => void refreshWorkflow());
       }}
+      documents={attachDocuments}
       {...(draftRefs ? { draftRefs } : {})}
       onOpenVersion={artifacts.openVersion}
     />
@@ -1099,6 +1116,7 @@ export function StageWorkspace({
           onAttach={(files) => {
             void api.attachMaterial(detail.project.id, [...files]).then(() => void refreshWorkflow());
           }}
+          documents={attachDocuments}
         />
       ) : null}
 
@@ -1137,7 +1155,6 @@ export function StageWorkspace({
           }
           reviewNodes={reviewNodesOf(detail.nodes)}
           onDocumentsChanged={onChanged}
-          onSendToArchitect={(body) => void send(body)}
           requirementsAsk={requirementsAsk}
           onRequirementsDrafted={mintRequirements}
           strip={stripEl}
@@ -1195,11 +1212,12 @@ export function StageWorkspace({
             advisory={stage === 1 ? <EvaluatorStance evaluator={evaluator} /> : null}
             {...(draftRefs ? { draftRefs } : {})}
             onSelectVersion={artifacts.openVersion}
-            onRevise={(message, quotes) => {
+            onRevise={(message, quotes, _revise, attached) => {
               artifacts.selectVersion(null);
               const quoted = quotes.map((entry) => `> ${entry.quote}`).join("\n");
-              void send(quoted ? `${quoted}\n\n${message}` : message);
+              void send(quoted ? `${quoted}\n\n${message}` : message, attached);
             }}
+            documents={attachDocuments}
             onAddMaterial={async (files) => {
               await api.attachMaterial(detail.project.id, files);
               void refreshWorkflow();
@@ -1217,7 +1235,7 @@ export function StageWorkspace({
             onStop={() => void stopTurn()}
             onSendHold={openSendBack}
             composerPopover={sendBackPopover}
-            events={events}
+            events={documentEvents}
             strip={stripEl}
             promote={
               superseded

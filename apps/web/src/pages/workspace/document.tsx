@@ -12,7 +12,7 @@ import {
   Switch,
   type ChatMessage,
 } from "@corbits/react-ui";
-import { ArrowDown, ArrowUp, Check, Plus, Send } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, Send } from "lucide-react";
 import { Markdown } from "../../markdown.jsx";
 import { Dictated } from "../../dictation.jsx";
 import { approachName, sectionsIn } from "@solutions-builder/app/document";
@@ -28,6 +28,7 @@ import { eventMessages, type StageEvent } from "./stage-events.ts";
 import { clearQuotedDraft, loadQuotedDraft, saveQuotedDraft } from "./quote-store.js";
 import { COMPOSER_BOX_CLASS, CONV_SCROLL_CLASS } from "./pane-classes.ts";
 import { StagePanes } from "./workspace-chrome.tsx";
+import { AttachMenu, attachmentChips, type AttachedDocument } from "./attach-documents.tsx";
 
 const EMPTY_REFS: ReadonlyMap<string, DraftRef> = new Map();
 
@@ -58,6 +59,7 @@ export function StageDocument({
   onSelectVersion,
   onRevise,
   onAddMaterial,
+  documents = [],
   onSubmit,
   soloApproval,
   canSubmit,
@@ -95,9 +97,11 @@ export function StageDocument({
    *  such a reply as one line naming its version, never as its text. */
   draftRefs?: ReadonlyMap<string, DraftRef>;
   onSelectVersion: (id: string) => void;
-  onRevise: (message: string, quotes: Quote[], revise?: boolean) => void;
+  onRevise: (message: string, quotes: Quote[], revise?: boolean, attached?: readonly AttachedDocument[]) => void;
   /** Hands files over as material, mid-project. Absent where nothing can be added. */
   onAddMaterial?: ((files: File[]) => Promise<void>) | undefined;
+  /** The project's documents the (+) menu offers to attach. */
+  documents?: readonly AttachedDocument[];
   onSubmit: () => void;
   soloApproval: boolean;
   canSubmit: boolean;
@@ -136,6 +140,7 @@ export function StageDocument({
 }) {
   const [message, setMessage] = useState("");
   const [attached, setAttached] = useState<AttachedQuote[]>([]);
+  const [attachedDocuments, setAttachedDocuments] = useState<AttachedDocument[]>([]);
   useEffect(() => {
     if (seed && seed.text.trim()) setMessage(seed.text);
   }, [seed?.at]);
@@ -362,9 +367,12 @@ export function StageDocument({
       attached.map((entry) =>
         entry.note ? { quote: `${entry.quote}\n— ${entry.note}` } : { quote: entry.quote },
       ),
+      false,
+      attachedDocuments,
     );
     setMessage("");
     setAttached([]);
+    setAttachedDocuments([]);
     setRedrafting(false);
     // After the pending turn has rendered, so the scroll reaches it.
     requestAnimationFrame(scrollToBottom);
@@ -579,21 +587,26 @@ export function StageDocument({
                     ? "Message the specialist…"
                     : "What should change? Add as much as you like."
             }
-            attachments={attached.map((entry, index) => ({
-              id: `${index}`,
-              name: entry.quote,
-            }))}
-            onRemoveAttachment={(entry) =>
-              setAttached(attached.filter((_, at) => `${at}` !== entry.id))
-            }
-            {...(onAddMaterial ? { onAttach: (files) => void onAddMaterial([...files]) } : {})}
-            attachIcon={
-              <span title="Add documents or images, or drop files anywhere here — the specialists read them with their next draft.">
-                <Plus className="size-4" aria-hidden="true" />
-              </span>
-            }
+            attachments={[
+              ...attached.map((entry, index) => ({ id: `${index}`, name: entry.quote })),
+              ...attachmentChips(attachedDocuments),
+            ]}
+            onRemoveAttachment={(entry) => {
+              setAttached(attached.filter((_, at) => `${at}` !== entry.id));
+              setAttachedDocuments(attachedDocuments.filter((document) => document.artifactId !== entry.id));
+            }}
             sendIcon={<Send className="size-4" aria-hidden="true" />}
-            leadingTools={mic}
+            leadingTools={
+              <>
+                <AttachMenu
+                  documents={documents}
+                  attached={attachedDocuments}
+                  onAttachDocument={(document) => setAttachedDocuments([...attachedDocuments, document])}
+                  onUpload={onAddMaterial ? (files) => void onAddMaterial([...files]) : undefined}
+                />
+                {mic}
+              </>
+            }
             textareaRef={composer}
             {...(onSendHold ? { onSendHold: () => onSendHold(message) } : {})}
           />

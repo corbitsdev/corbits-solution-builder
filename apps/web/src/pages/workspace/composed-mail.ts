@@ -22,11 +22,24 @@ export type ComposedFold = {
 };
 
 const OPENING_SUBJECT = /^\[opening:[^\]]+:(\d+)\]/;
+const ATTACHED_SUBJECT = /^\[attached:[^\]]+:(\d+)\] (.+)$/;
 const SEND_BACK_REF = /\s*\[ref:[^\]]+\]\s*$/;
 
 /** The stage artifact a message revises and its version, as the specialist's prompt reads them in a subject. */
 export function artifactTag(artifact: { readonly id: string; readonly version: number }): string {
   return `[artifact:${artifact.id}:${String(artifact.version)}]`;
+}
+
+/** A project document the person attached to a message, pinned to the version they saw. */
+export function attachedTag(document: { readonly artifactId: string; readonly version: number }): string {
+  return `[attached:${document.artifactId}:${String(document.version)}]`;
+}
+
+/** The chat's one line for a document the person attached; null for any other mail. */
+export function attachedLine(message: Pick<ChatMessage, "author" | "subject">): string | null {
+  if (message.author !== "me" || !message.subject) return null;
+  const tag = ATTACHED_SUBJECT.exec(message.subject);
+  return tag ? `Attached: ${tag[2]!}, version ${tag[1]!}` : null;
 }
 
 /** The send-back cue's sentence, its marker gone. */
