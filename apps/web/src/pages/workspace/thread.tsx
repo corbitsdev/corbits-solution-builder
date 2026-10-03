@@ -80,6 +80,10 @@ export function MessageBody({ text }: { text: string }) {
       </>
     );
   }
+  // A model hand-off quotes the earlier turns, revision markers included,
+  // so it is named for what it is before anything reads it for the person's
+  // words.
+  if (isHandoffBody(text)) return <Markdown source={HANDOFF_BUBBLE_TEXT} />;
   // A message the app composed around the person's words (the version it
   // revises, an attached document, a choice reminder) shows only those
   // words; what the app added stays behind a fold.
