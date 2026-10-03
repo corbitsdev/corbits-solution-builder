@@ -6,6 +6,7 @@
  */
 import { useId, useState, type CSSProperties, type ReactNode, type Ref } from "react";
 import { ChatInput, Textarea } from "@corbits/react-ui";
+import { Check } from "lucide-react";
 import { Button, stageName } from "../../components.jsx";
 import { Dictated } from "../../dictation.jsx";
 import { InlineMarkdown, Markdown } from "../../markdown.jsx";
@@ -108,6 +109,43 @@ export function EvaluatorStance({ evaluator }: { evaluator: StageEvaluator }) {
         </div>
       ) : null}
     </span>
+  );
+}
+
+/**
+ * A stage's approval, one row above the composer: the evaluator's stance and
+ * anything approving waits on to the left, Continue to the right. One click
+ * approves; an evaluator that has not approved makes it "Continue anyway".
+ */
+export function ApproveRow({
+  evaluator = null,
+  waiting = null,
+  busy = false,
+  onApprove,
+}: {
+  /** Null, or idle, on a stage no evaluator reads. */
+  evaluator?: StageEvaluator | null;
+  /** A stage's own gate, said in words; the button waits while it is set. */
+  waiting?: ReactNode;
+  busy?: boolean;
+  onApprove: () => void;
+}) {
+  const approved = evaluator?.status === "verdict" && evaluator.verdict.ready;
+  const ready = !evaluator || evaluator.status === "idle" || approved;
+  return (
+    <div className="stage-action composer-approve">
+      <span className="composer-approve-lead">
+        {evaluator ? <EvaluatorStance evaluator={evaluator} /> : null}
+        {waiting ? <span className="composer-approve-waiting">{waiting}</span> : null}
+      </span>
+      <span data-tour="submit" data-ready={approved ? "true" : undefined} className={approved ? "is-ready approve" : "approve"}>
+        {ready ? <span>Happy with this?</span> : null}
+        <Button variant="ghost" loading={busy} disabled={Boolean(waiting)} onClick={onApprove}>
+          <Check aria-hidden="true" />
+          {ready ? "Continue" : "Continue anyway"}
+        </Button>
+      </span>
+    </div>
   );
 }
 

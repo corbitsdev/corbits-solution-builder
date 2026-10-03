@@ -64,7 +64,8 @@ import { splitMaterialMail } from "./attached-material.ts";
 import { useProductGuide, useStageEvaluator } from "./use-advisory.ts";
 import { guideStep } from "./product-guide.ts";
 import { useProjectArtifacts } from "./use-project-artifacts.ts";
-import { loadQuotedDraft } from "./quote-store.js";
+import { clearQuotedDraft, loadQuotedDraft } from "./quote-store.js";
+import { stage6StackRemediation } from "../../stage-evidence.ts";
 import { useStageDecisions } from "./use-stage-decisions.ts";
 import { composeSendBackReason } from "./send-back-reason.ts";
 import { useRecordedDeck } from "./deck-reader.jsx";
@@ -97,7 +98,7 @@ import { agentFor } from "@solutions-builder/app/kit";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { STAGE_DRAFT_KIND } from "../../client.js";
 import {
-  EvaluatorStance,
+  ApproveRow,
   OpeningScreen,
   SendBackConfirm,
   SendBackPopover,
@@ -511,6 +512,7 @@ export function StageWorkspace({
     approve,
     acceptDelivery,
     approveAllowed,
+    stackProblem,
     approving,
     openReviewNow,
     chosenTarget,
@@ -810,6 +812,33 @@ export function StageWorkspace({
       </div>
     ) : null;
 
+  const stackAsk = stage6StackRemediation();
+  const approveRow = (
+    <ApproveRow
+      evaluator={evaluator}
+      waiting={
+        stackProblem ? (
+          <>
+            {stackProblem}{" "}
+            {/* One click asks the architect for the block in full (#325). */}
+            <button type="button" className="btn link" onClick={() => void send(stackAsk.message ?? "")}>
+              {stackAsk.label}
+            </button>
+          </>
+        ) : stage === 7 && !chosenTarget ? (
+          "Choose how the finished build will be used first."
+        ) : null
+      }
+      busy={approving || workflow.refreshingAfterAction}
+      onApprove={() => {
+        // Quoted passages are for the stage being approved; once it is,
+        // nothing is left to restore.
+        clearQuotedDraft(tenantId, stage);
+        void approve();
+      }}
+    />
+  );
+
   const conversation = (
     <StageConversation
       stage={stage}
@@ -832,7 +861,12 @@ export function StageWorkspace({
       who={stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title : "Specialist"}
       placeholder={`Message the ${stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title.toLowerCase() : "specialist"}…`}
       onAttach={(files) => void addMaterial([...files])}
-      rows={attachNote ? <p className="warning-note" role="alert">{attachNote}</p> : null}
+      rows={
+        <>
+          {attachNote ? <p className="warning-note" role="alert">{attachNote}</p> : null}
+          {stage === 4 && approveAllowed ? approveRow : null}
+        </>
+      }
       {...(draftRefs ? { draftRefs } : {})}
       onOpenVersion={artifacts.openVersion}
     />
@@ -1014,10 +1048,8 @@ export function StageWorkspace({
               detail={detail}
               tenantId={tenantId}
               onChanged={() => void refreshWorkflow()}
-              onApprove={approve}
               onRevise={(prompt) => send(prompt)}
               latestReply={latestDesign}
-              canApprove={approveAllowed}
             />
           )}
         </StagePanes>
@@ -1152,12 +1184,6 @@ export function StageWorkspace({
                 ? { text: guidance.question.text, ordinal: progress?.ordinal ?? null, total: progress?.total ?? null }
                 : null
             }
-            evaluation={
-              stage === 1 && evaluator.status === "verdict"
-                ? { ready: evaluator.verdict.ready, notes: [...evaluator.verdict.notes] }
-                : null
-            }
-            advisory={stage === 1 ? <EvaluatorStance evaluator={evaluator} /> : null}
             {...(draftRefs ? { draftRefs } : {})}
             onSelectVersion={artifacts.openVersion}
             onRevise={(message, quotes) => {
@@ -1167,8 +1193,7 @@ export function StageWorkspace({
             }}
             onAddMaterial={addMaterial}
             attachNote={attachNote}
-            onSubmit={() => void approve()}
-            soloApproval={detail.soloApproval}
+            approve={approveRow}
             canSubmit={approveAllowed && artifacts.isStageDraft && !superseded}
             busy={sending ? "draft" : approving || workflow.refreshingAfterAction ? "submit" : null}
             draftOpen={draftOpen}
@@ -1233,23 +1258,17 @@ function DesignPanel({
   detail,
   tenantId,
   onChanged,
-  onApprove,
   onRevise,
   latestReply,
-  canApprove,
 }: {
   detail: ProjectDetail;
   /** The workspace tenant artifacts are recorded under. */
   tenantId: string;
   onChanged: () => void;
-  /** Persists the specialist's latest reply and advances to stage 5. */
-  onApprove: () => Promise<unknown>;
   /** Sends free-form feedback text to the stage-4 specialist's mail thread. */
   onRevise: (prompt: string) => Promise<unknown>;
   /** The specialist's latest unpersisted reply — the mockup, before approval. */
   latestReply: ChatMessage | null;
-  /** The project workflow's own verdict — the only gate on the Approve button. */
-  canApprove: boolean;
 }) {
   // The design history is just this project's `design_artifact` nodes —
   // already on `detail`, so no route of its own is needed to read it. Under
@@ -1311,11 +1330,6 @@ function DesignPanel({
         feedbackByNode={new Map<string, FoldedFeedback>()}
         contentByNode={contentByNode}
         tenantId={tenantId}
-        approval={{
-          soloApproval: detail.soloApproval,
-          canApprove,
-          onApprove: () => onApprove(),
-        }}
         revise={(_feedback, prompt) => onRevise(prompt)}
         onChanged={() => {
           void load();

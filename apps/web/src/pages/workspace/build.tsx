@@ -27,7 +27,7 @@ import { Markdown } from "../../markdown.jsx";
 import { agentFor } from "@solutions-builder/app/kit";
 import type { StageEvent } from "./stage-events.ts";
 import { StageConversation } from "./thread.jsx";
-import { StagePanes } from "./workspace-chrome.tsx";
+import { ApproveRow, StagePanes } from "./workspace-chrome.tsx";
 import { clock } from "./elapsed.jsx";
 import { BuildFile } from "../graph.jsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
@@ -360,7 +360,14 @@ export function BuildPanel({
           ) : null}
           <StageConversation
             stage={8}
-            rows={attachNote ? <p className="warning-note" role="alert">{attachNote}</p> : null}
+            rows={
+              <>
+                {attachNote ? <p className="warning-note" role="alert">{attachNote}</p> : null}
+                {address && (canApprove || evidence.reason) ? (
+                  <ApproveRow waiting={canApprove ? null : evidence.reason} busy={approving} onApprove={onApprove} />
+                ) : null}
+              </>
+            }
             messages={messages}
             value={composer}
             onValueChange={setComposer}
@@ -425,9 +432,6 @@ export function BuildPanel({
               </Button>
               <Button variant="destructive" loading={busy === "cancel"} disabled={!cancellable || busy !== null} onClick={() => cancellable && void cancel(cancellable.attempt)}>
                 Cancel the build attempt
-              </Button>
-              <Button variant="primary" loading={approving} disabled={!canApprove || !address} onClick={onApprove}>
-                Approve and continue
               </Button>
             </div>
             {attempts.length > 0 ? (
@@ -505,7 +509,6 @@ export function BuildPanel({
                 <Markdown source={status.body} />
               </>
             ) : null}
-            {!canApprove && evidence.reason ? <p className="inline-note">{evidence.reason}</p> : null}
           </div>
         </div>
       )}

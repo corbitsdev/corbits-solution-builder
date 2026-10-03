@@ -1,4 +1,3 @@
-import { Check } from "lucide-react";
 import {
   Textarea,
   Table,
@@ -80,17 +79,6 @@ export function anchorLabel(anchor: Anchor): string {
 }
 
 /**
- * How the design on screen moves on. `canApprove` is false while the stage is
- * not open for it — waiting on a decision already, or routed back — and the
- * row is not drawn then.
- */
-export type DesignApproval = {
-  soloApproval: boolean;
-  canApprove: boolean;
-  onApprove: (design: ArtifactNode) => Promise<unknown>;
-};
-
-/**
  * One anchored comment as the submitted-state table renders it, with its
  * disposition (CL-8699). `addressable` is false for a row carried over from
  * before ids existed — `id` is then a positional fallback for rendering
@@ -135,7 +123,6 @@ export function DesignFeedbackView({
   designs,
   contentByNode,
   tenantId,
-  approval,
   onChanged,
   revise,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -152,7 +139,6 @@ export function DesignFeedbackView({
   contentByNode: Map<string, string>;
   /** The workspace tenant artifacts are recorded under. */
   tenantId: string;
-  approval: DesignApproval;
   onChanged: () => void;
   /**
    * Delivers the feedback and its deterministic revision prompt to the run
@@ -325,17 +311,6 @@ export function DesignFeedbackView({
             <FrameSelect value={frameMode} onChange={setFrameMode} />
             <CopyButton text={content || null} />
             {design ? <PrintButton node={design} tenantId={tenantId} content={content || null} /> : null}
-            {design && approval.canApprove ? (
-              <Button
-                variant="primary"
-                loading={busy === "approve"}
-                disabled={busy !== null && busy !== "approve"}
-                onClick={() => run("approve", () => approval.onApprove(design))}
-              >
-                <Check aria-hidden="true" />
-                {approval.soloApproval ? "Approve and continue" : "Send for approval"}
-              </Button>
-            ) : null}
           </div>
         </div>
 

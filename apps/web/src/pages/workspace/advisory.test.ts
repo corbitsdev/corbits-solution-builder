@@ -249,6 +249,6 @@ describe("the workspace", () => {
     expect(index).toContain("<GuideDock");
     expect(index).toContain("onExplain={() => void guide.explain()}");
     expect(index).toContain("useStageEvaluator(");
-    expect(index).toContain("<EvaluatorStance evaluator={evaluator} />");
+    expect(index).toContain("<ApproveRow\n      evaluator={evaluator}");
   });
 });

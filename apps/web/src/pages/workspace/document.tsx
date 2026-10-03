@@ -3,7 +3,6 @@ import { withChoiceReminder } from "@solutions-builder/app/stage-prompt";
 import {
   api,
   type ArtifactNode,
-  type Evaluation,
   type Quote,
   type StageTurn,
 } from "../../client.js";
@@ -13,7 +12,7 @@ import {
   Switch,
   type ChatMessage,
 } from "@corbits/react-ui";
-import { ArrowDown, ArrowUp, Check, Plus, Send } from "lucide-react";
+import { ArrowDown, ArrowUp, Plus, Send } from "lucide-react";
 import { Markdown } from "../../markdown.jsx";
 import { Dictated } from "../../dictation.jsx";
 import { approachName, sectionsIn } from "@solutions-builder/app/document";
@@ -27,7 +26,7 @@ import { ComposedMail, SpecialistTurn, WorkingLabel, type TurnNote } from "./thr
 import { materialMailFold } from "./composed-mail.ts";
 import type { DraftRef } from "./draft-references.ts";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
-import { clearQuotedDraft, loadQuotedDraft, saveQuotedDraft } from "./quote-store.js";
+import { loadQuotedDraft, saveQuotedDraft } from "./quote-store.js";
 import { COMPOSER_BOX_CLASS, CONV_SCROLL_CLASS } from "./pane-classes.ts";
 import { StagePanes } from "./workspace-chrome.tsx";
 
@@ -54,15 +53,12 @@ export function StageDocument({
   tenantId,
   turns,
   openQuestion,
-  evaluation = null,
-  advisory = null,
   draftRefs = EMPTY_REFS,
   onSelectVersion,
   onRevise,
   onAddMaterial,
   attachNote = null,
-  onSubmit,
-  soloApproval,
+  approve,
   canSubmit,
   busy,
   draftOpen = true,
@@ -90,12 +86,6 @@ export function StageDocument({
    *  counts it among the questions already answered this stage; `total` is
    *  set only when the specialist's own text states how many there are. */
   openQuestion: { text: string; ordinal?: number | null; total?: number | null } | null;
-  /** The stage-1 brief evaluator's verdict, advisory only. Null off stage 1. */
-  evaluation?: Evaluation | null;
-  /** Advice shown in the approval bar beside the approve control, such as
-   *  the brief evaluator's stance (#157). It never enables or blocks
-   *  approval, and shows only while the bar does. */
-  advisory?: ReactNode;
   /** Which version each draft reply became (#158): the conversation shows
    *  such a reply as one line naming its version, never as its text. */
   draftRefs?: ReadonlyMap<string, DraftRef>;
@@ -104,8 +94,8 @@ export function StageDocument({
   /** Hands files over as material, mid-project. Absent where nothing can be added. */
   onAddMaterial?: ((files: File[]) => Promise<void>) | undefined;
   attachNote?: string | null;
-  onSubmit: () => void;
-  soloApproval: boolean;
+  /** The stage's approve row, drawn while `canSubmit`. */
+  approve: ReactNode;
   canSubmit: boolean;
   busy: string | null;
   /** The draft pane beside the conversation; the header's toggle. */
@@ -545,31 +535,7 @@ export function StageDocument({
               </Button>
             </div>
           ) : canSubmit ? (
-            <div className="stage-action composer-approve">
-              <span className="composer-approve-lead">
-                <span>{soloApproval ? "Happy with it?" : "Nothing more to say?"}</span>
-                {advisory}
-              </span>
-              <span
-                data-tour="submit"
-                data-ready={evaluation?.ready ? "true" : undefined}
-                className={evaluation?.ready ? "is-ready approve" : "approve"}
-              >
-                <Button
-                  variant="ghost"
-                  loading={busy === "submit"}
-                  onClick={() => {
-                    // Quoted passages are for the stage being sent for
-                    // approval; once it is, nothing is left to restore.
-                    clearQuotedDraft(tenantId, node.stage);
-                    onSubmit();
-                  }}
-                >
-                  <Check aria-hidden="true" />
-                  {soloApproval ? "Approve and continue" : "Send for approval"}
-                </Button>
-              </span>
-            </div>
+            approve
           ) : null}
           {attached.length > 0 ? (
             <p className="composer-cue">
