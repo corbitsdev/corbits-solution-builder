@@ -13,10 +13,3 @@ export function designHistory(nodes: readonly ArtifactNode[]): ArtifactNode[] {
     .filter((node) => node.kind === "design_artifact")
     .sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt) || left.version - right.version);
 }
-
-/** The label a design gets in the history: its place in the order, which is
- *  what a person means by "version 3", not the artifact's own counter. */
-export function designOrdinal(designs: readonly ArtifactNode[], design: ArtifactNode): number {
-  const index = designs.findIndex((entry) => entry.id === design.id);
-  return index < 0 ? design.version : index + 1;
-}

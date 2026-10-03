@@ -8,6 +8,7 @@ function node(overrides: Partial<ArtifactNode> & Pick<ArtifactNode, "id" | "kind
     stage: 5,
     title: overrides.id,
     version: 1,
+    position: 1,
     artifactId: overrides.id,
     contentHash: "",
     supersededByNodeId: null,

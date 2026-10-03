@@ -10,7 +10,10 @@
  * to it read-only — only the current stage's draft lineage can be submitted.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { skipToken, useQuery } from "@tanstack/react-query";
 import { api, STAGE_DRAFT_KIND, type ArtifactNode } from "../../client.js";
+import { keys } from "../../queries/keys.ts";
+import { digestOf } from "../../stage-approval.ts";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { documentName, stageName } from "../../components.jsx";
 
@@ -68,33 +71,24 @@ export function useProjectArtifacts(
 ): ProjectArtifacts {
   const draftKind = STAGE_DRAFT_KIND[stage] ?? null;
   const draftBody = draftMessage?.body ?? null;
-  const [draftDigest, setDraftDigest] = useState<{ body: string; sha256: string } | null>(null);
-  useEffect(() => {
-    if (draftBody === null) return;
-    let cancelled = false;
-    void crypto.subtle.digest("SHA-256", new TextEncoder().encode(draftBody)).then((buffer) => {
-      const sha256 = [...new Uint8Array(buffer)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-      if (!cancelled) setDraftDigest({ body: draftBody, sha256 });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [draftBody]);
+  const { data: draftDigest } = useQuery({
+    queryKey: keys.contentDigest.of(draftBody ?? ""),
+    queryFn: draftBody === null ? skipToken : () => digestOf(draftBody),
+    staleTime: Infinity,
+  });
   // The specialist's latest unpersisted reply stands in as the next version
   // of its stage's draft lineage — nothing writes an artifact for a stage's
   // draft before it is approved.
   const draftNode: ArtifactNode | null = useMemo(() => {
     if (!draftMessage || draftKind === null) return null;
-    // A saved draft's own version is 1 wherever it sits, so the newest is
-    // found by when it was written.
     const head = nodes
-      .filter((node) => node.stage === stage && node.kind === draftKind)
-      .sort((a, b) => a.version - b.version || Date.parse(a.createdAt) - Date.parse(b.createdAt))
+      .filter((node) => node.stage === stage && node.kind === draftKind && node.variant === null)
+      .sort((a, b) => a.position - b.position)
       .at(-1);
     // Opening the reply's review saves it as a version just after it lands;
     // once saved, the reply is that version, not one past it. Matched on the
     // content's digest: the hub's timestamps do not all share one clock.
-    if (head?.contentSha256 && draftDigest?.body === draftMessage.body && head.contentSha256 === draftDigest.sha256) return null;
+    if (head?.contentSha256 && head.contentSha256 === draftDigest) return null;
     return {
       id: `reply:${draftMessage.id}`,
       kind: draftKind,
@@ -102,7 +96,7 @@ export function useProjectArtifacts(
       stage,
       title: stageName(stage),
       version: (head?.version ?? 0) + 1,
-      position: nodes.filter((node) => node.stage === stage && node.kind === draftKind && node.variant === null).length + 1,
+      position: (head?.position ?? 0) + 1,
       artifactId: `reply:${draftMessage.id}`,
       contentHash: "",
       sizeBytes: draftMessage.body.length,
@@ -130,9 +124,7 @@ export function useProjectArtifacts(
     const draftKind = STAGE_DRAFT_KIND[stage] ?? null;
     return [...groups.entries()]
       .map(([key, versions]) => {
-        const sorted = [...versions].sort(
-          (a, b) => a.version - b.version || Date.parse(a.createdAt) - Date.parse(b.createdAt),
-        );
+        const sorted = [...versions].sort((a, b) => a.position - b.position);
         // The newest non-superseded node, not the first — a lineage written
         // before every write chained `sb.supersedes` can have more than one
         // node with no successor; the most recent of those is still the
@@ -187,7 +179,7 @@ export function useProjectArtifacts(
     ? (selected.versions.find((version) => version.id === selectedVersionId) ?? selected.versions.at(-1) ?? null)
     : null;
   const newerVersion =
-    selected && activeNode ? selected.versions.find((v) => v.version > activeNode.version) ?? null : null;
+    selected && activeNode ? selected.versions.find((v) => v.position > activeNode.position) ?? null : null;
 
   const [activeContent, setActiveContent] = useState("");
   useEffect(() => {

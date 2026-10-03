@@ -11,6 +11,7 @@ function node(over: Partial<ArtifactNode>): ArtifactNode {
     stage: 1,
     title: "Problem brief",
     version: 1,
+    position: 1,
     artifactId: "a",
     contentHash: "",
     sizeBytes: 10,

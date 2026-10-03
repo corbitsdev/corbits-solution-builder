@@ -61,10 +61,7 @@ export function draftReferences(
         return at >= from && at < until;
       }) ??
       null;
-    // The lineage's position, as the version strip numbers it: a saved
-    // draft's own `version` is 1 wherever it sits in the lineage.
-    const position = node ? versions.indexOf(node) + 1 : 0;
-    refs.set(draft.id, { version: position > 0 ? position : null, nodeId: node?.id ?? null, noun });
+    refs.set(draft.id, { version: node?.position ?? null, nodeId: node?.id ?? null, noun });
   });
   return refs;
 }

@@ -30,6 +30,7 @@ import { eventMessages, type StageEvent } from "./stage-events.ts";
 import { clearQuotedDraft, loadQuotedDraft, saveQuotedDraft } from "./quote-store.js";
 import { COMPOSER_BOX_CLASS, CONV_SCROLL_CLASS } from "./pane-classes.ts";
 import { StagePanes } from "./workspace-chrome.tsx";
+import { BusyLine } from "../../zen-garden.tsx";
 
 const EMPTY_REFS: ReadonlyMap<string, DraftRef> = new Map();
 
@@ -79,6 +80,7 @@ export function StageDocument({
   events = EMPTY_EVENTS,
   documentLead = null,
   composerLead = null,
+  tools = null,
 }: {
   node: ArtifactNode;
   versions: ArtifactNode[];
@@ -122,9 +124,8 @@ export function StageDocument({
   pending?: boolean;
   /** Restores that turn to the composer and records the withdrawal. */
   onStop?: () => void;
-  /** The artifact strip, rendered at the head of the document pane. Its
-   *  presence also hands version paging to the strip, so the header's own
-   *  picker hides rather than duplicating it. */
+  /** The artifact strip, rendered at the head of the document pane; its
+   *  version select is the one place a version is picked and named. */
   strip?: ReactNode;
   /** Set when the person is reading a superseded version of the stage's
    *  draft: the composer's gate offers "make this the active version"
@@ -146,6 +147,8 @@ export function StageDocument({
   /** A question the stage itself asks the person, in the chat column above
    *  the box: Cost approval's "How will this be used?" (#619). */
   composerLead?: ReactNode;
+  /** The stage's own actions on this document, in its toolbar. */
+  tools?: ReactNode;
 }) {
   const [message, setMessage] = useState("");
   const [attached, setAttached] = useState<AttachedQuote[]>([]);
@@ -182,7 +185,7 @@ export function StageDocument({
   // Against the version before this one, like tracked changes: what a revision
   // did is otherwise something the reader has to find by rereading the whole
   // document.
-  const previous = versions.find((entry) => entry.version === node.version - 1) ?? null;
+  const previous = versions.find((entry) => entry.position === node.position - 1) ?? null;
   const [showChanges, setShowChanges] = useState(true);
   const [previousContent, setPreviousContent] = useState<string | null>(null);
   useEffect(() => {
@@ -499,6 +502,7 @@ export function StageDocument({
         </div>
 
         <div className="composer" data-tour="composer" data-working={busy === "draft" || undefined}>
+          <BusyLine />
           {attachNote ? <p className="warning-note" role="alert">{attachNote}</p> : null}
           {composerLead}
           {/* The specialist has gone quiet without asking anything. Whose move
@@ -632,41 +636,28 @@ export function StageDocument({
           <div className="doc" data-tour="document-body" onMouseUp={openSelection}>
             <div className="docmeta">
               <span>
-                v{node.position ?? node.version} · {documentName(node.kind)}
+                {documentName(node.kind)}
                 {node.supersededByNodeId ? " · superseded" : ""}
                 {node.provenance.agentRole ? ` · ${node.provenance.agentRole}` : ""}
               </span>
               {live !== null ? (
-                <span className="thinking">Writing version {node.version + 1}</span>
+                <span className="thinking">Writing version {node.position + 1}</span>
               ) : newer ? (
                 <button type="button" className="newer-version" onClick={() => onSelectVersion(newer.id)}>
                   <ArrowUp aria-hidden="true" />
-                  Version {newer.position ?? newer.version} is ready
+                  Version {newer.position} is ready
                 </button>
               ) : null}
               <div className="document-tools">
                 {!binary ? <CopyButton text={content} /> : null}
-                {versions.length > 1 && strip === null ? (
-                  <select
-                    aria-label="Version"
-                    value={node.id}
-                    onChange={(event) => onSelectVersion(event.target.value)}
-                  >
-                    {versions.map((version) => (
-                      <option key={version.id} value={version.id}>
-                        Version {version.position ?? version.version}
-                        {version.supersededByNodeId ? " (superseded)" : ""}
-                      </option>
-                    ))}
-                  </select>
-                ) : null}
                 {previous && !binary ? (
                   <label className="changes-toggle" htmlFor="show-changes">
                     <Switch id="show-changes" checked={showChanges} onCheckedChange={setShowChanges} />
-                    <span>Changes since v{previous.position ?? previous.version}</span>
+                    <span>Changes since v{previous.position}</span>
                   </label>
                 ) : null}
                 {binary ? null : <DocumentExportMenu node={node} tenantId={tenantId} content={content} />}
+                {tools}
               </div>
             </div>
             {live !== null ? (
