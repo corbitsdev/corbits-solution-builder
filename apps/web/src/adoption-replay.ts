@@ -106,7 +106,7 @@ export async function replayAdoption(deps: StageApprovalDeps, plan: AdoptionPlan
     const stage5 = { ...(step.policy ? { policy: step.policy } : {}), ...(step.packages ? { packages: step.packages } : {}) };
     const opened = await ensureReviewOpen(deps, { projectId: plan.projectId, stage: step.stage, ref: step.ref, ...stage5 });
     if (!opened.ok) return { landed: current.stage, stopped: `opening the ${stageName(step.stage)} review was refused: ${opened.reason}` };
-    const approved = await approveStage(deps, { projectId: plan.projectId, stage: step.stage, ref: step.ref, ...stage5 });
+    const approved = await approveStage(deps, { projectId: plan.projectId, stage: step.stage, ref: step.ref, ...stage5, ...(step.surface ? { evidence: { surface: step.surface } } : {}) });
     if (!approved.ok) return { landed: current.stage, stopped: `approving ${stageName(step.stage)} was refused: ${approved.reason}` };
     current = (await view()) ?? current;
   }

@@ -26,10 +26,10 @@ import {
 } from "@corbits/react-ui";
 import { useEffect, useState, type ReactElement } from "react";
 import { api, ApiFailure, type ActiveModel, type ProjectInfo } from "../client.js";
-import { Banner, Button, downloadArtifact, stageName } from "../components.jsx";
+import { Banner, Button, stageName } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
 import { downloadProjectDocuments, saveBlob } from "../documents-archive.ts";
-import { assembleBundle, bundleFileName } from "../project-export.js";
+import { archiveBundle, assembleBundle, bundleFileName } from "../project-export.js";
 import { formatUsage } from "../project-usage.js";
 import { ProjectSettingsDialog } from "./project-settings.jsx";
 import { prunePlanSummary, type PrunePlan } from "../prune-versions.ts";
@@ -41,9 +41,10 @@ export type MenuProject = { id: string; title: string; archivedAt: string | null
 export type InfoRequest = { withName: boolean; at: number };
 
 /**
- * Exports one project: the bundle is assembled in the
- * browser (`assembleBundle`) and saved as a download. Returns the notice
- * line; shared by the options menu and the Project info dialog.
+ * Exports one project: the bundle is assembled in the browser
+ * (`assembleBundle`), packed with its artifacts and builds as files
+ * (`archiveBundle`), and saved as a download. Returns the notice line;
+ * shared by the options menu and the Project info dialog.
  */
 export async function exportProjectBundle(project: MenuProject): Promise<string> {
   const bundle = await assembleBundle(project.id, {
@@ -51,10 +52,19 @@ export async function exportProjectBundle(project: MenuProject): Promise<string>
     artifactContent: api.artifactContent,
     stageAgentAddresses: api.stageAgentAddresses,
     readStageThread: api.readStageThread,
+    projectWorkflowView: api.projectWorkflowView,
   });
-  downloadArtifact(JSON.stringify(bundle, null, 2), bundleFileName(project.title));
-  const messageCount = bundle.conversations.reduce((total, thread) => total + thread.messages.length, 0);
-  return `Exported ${project.title} to ${bundleFileName(project.title)}: ${bundle.artifacts.length} artifact${bundle.artifacts.length === 1 ? "" : "s"} and ${messageCount} message${messageCount === 1 ? "" : "s"}.`;
+  const name = bundleFileName(project.title);
+  saveBlob(await archiveBundle(bundle).generateAsync({ type: "blob" }), name);
+  const versions = bundle.artifacts.reduce((total, artifact) => total + artifact.versions.length, 0);
+  const builds = bundle.artifacts.filter(({ node }) => node.kind === "build_evidence" && node.mediaType === "application/gzip").length;
+  const messages = bundle.conversations.reduce((total, thread) => total + thread.messages.length, 0);
+  const parts = [plural(bundle.artifacts.length, "artifact"), plural(versions, "version"), plural(builds, "build"), plural(messages, "message")];
+  return `Exported ${project.title} to ${name}: ${parts.join(", ")}.`;
+}
+
+export function plural(count: number, noun: string): string {
+  return `${String(count)} ${noun}${count === 1 ? "" : "s"}`;
 }
 
 /** The finished documents as one zip (#323); the notice says what went in. */

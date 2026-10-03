@@ -25,10 +25,10 @@ function node(overrides: Partial<ArtifactNode> = {}): ArtifactNode {
 function bundle(overrides: Partial<ProjectBundle> = {}): ProjectBundle {
   return {
     format: "solutions-builder.project",
-    version: 2,
+    version: 3,
     exportedAt: "2026-01-02T00:00:00.000Z",
     project: { id: "proj_1", title: "Renew the lease", policy: { audiences: [] } },
-    artifacts: [{ node: node(), content: "the brief" }],
+    artifacts: [{ node: node(), versions: [{ version: 1, content: "the brief" }] }],
     conversations: [
       {
         stage: 1,
@@ -38,7 +38,7 @@ function bundle(overrides: Partial<ProjectBundle> = {}): ProjectBundle {
         ],
       },
     ],
-    notes: "workflow events are not included yet",
+    workflow: null,
     ...overrides,
   };
 }
@@ -46,7 +46,8 @@ function bundle(overrides: Partial<ProjectBundle> = {}): ProjectBundle {
 function deps(overrides: Partial<ImportDeps> = {}): ImportDeps {
   return {
     createProject: async ({ title }) => ({ projectId: `new:${title}` }),
-    createArtifact: async (write: ImportWrite) => ({ id: `art:${write.title}` }),
+    createArtifact: async (write: ImportWrite) => ({ id: `art:${write.title}`, version: 1 }),
+    reviseArtifact: async () => ({ version: 2 }),
     ...overrides,
   };
 }
@@ -61,14 +62,13 @@ describe("importPlan", () => {
   test("re-keys each artifact's sb metadata to the new project, never carrying approvedAt", () => {
     const plan = importPlan(bundle(), "proj_new");
     expect(plan.artifacts).toHaveLength(1);
-    const write = plan.artifacts[0]!;
+    const write = plan.artifacts[0]!.versions[0]!.write;
     expect(write.title).toBe("Stage 1 draft");
     expect(write.content).toBe("the brief");
     expect(write.sb).toEqual({
       projectId: "proj_new",
       kind: "problem_brief",
       stage: 1,
-      variant: null,
       sourceVersionIds: [],
       provenance: { producer: "agent", agentRole: "specialist" },
     });
@@ -76,9 +76,9 @@ describe("importPlan", () => {
   });
 
   test("keeps a mediaType when the original node had one", () => {
-    const plan = importPlan(bundle({ artifacts: [{ node: node({ mediaType: "image/png" }), content: "data:image/png;base64,AAAA" }] }), "proj_new");
-    expect(plan.artifacts[0]!.sb["mediaType"]).toBe("image/png");
-    expect(plan.artifacts[0]!.content).toBe("data:image/png;base64,AAAA");
+    const plan = importPlan(bundle({ artifacts: [{ node: node({ mediaType: "image/png" }), versions: [{ version: 1, content: "data:image/png;base64,AAAA" }] }] }), "proj_new");
+    expect(plan.artifacts[0]!.versions[0]!.write.sb["mediaType"]).toBe("image/png");
+    expect(plan.artifacts[0]!.versions[0]!.write.content).toBe("data:image/png;base64,AAAA");
   });
 
   test("recreates each conversation as one read-only transcript artifact per stage", () => {
@@ -111,7 +111,7 @@ describe("importProject", () => {
       }),
     );
     expect(created).toEqual([{ title: "Renew the lease (imported)", policy: { audiences: [] } }]);
-    expect(result).toEqual({ projectId: "proj_new", artifacts: 1, conversations: 1 });
+    expect(result).toMatchObject({ projectId: "proj_new", artifacts: 1, versions: 1, conversations: 1 });
   });
 
   test("writes every artifact and conversation, and reports progress as it goes", async () => {
@@ -122,7 +122,7 @@ describe("importProject", () => {
       deps({
         createArtifact: async (write) => {
           writes.push(write.title);
-          return { id: write.title };
+          return { id: write.title, version: 1 };
         },
         onProgress: (done, total) => progress.push([done, total]),
       }),
@@ -154,7 +154,7 @@ describe("readImportPayload", () => {
         createProject: async () => ({ projectId: "proj_from_zip" }),
       }),
     );
-    expect(result).toEqual({ projectId: "proj_from_zip", artifacts: 1, conversations: 1 });
+    expect(result).toMatchObject({ projectId: "proj_from_zip", artifacts: 1, conversations: 1 });
   });
 });
 
