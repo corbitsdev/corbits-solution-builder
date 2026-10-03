@@ -19,6 +19,7 @@
  * stays here is the wiring between them and the stage-specific composition.
  */
 import { isStageOpening } from "./composed-mail.ts";
+import { OPENING_VARIANT } from "../../project-list.ts";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { keepPreviousData, skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
 import { keys } from "../../queries/keys.ts";
@@ -197,7 +198,10 @@ export function StageWorkspace({
   // instead of serially after it, without ever guessing a stage for a
   // project with history.
   // A workflow at stage 0 has not written its first state: nothing is confirmed yet.
-  const confirmedStage = detail.stage > 1 || (detail.stage === 1 && detail.nodes.length === 0) ? detail.stage : null;
+  // The opening statement `createProject` writes is no stage work, so a
+  // brand-new project still starts its specialist early.
+  const noStageWork = detail.nodes.every((node) => node.variant === OPENING_VARIANT);
+  const confirmedStage = detail.stage > 1 || (detail.stage === 1 && noStageWork) ? detail.stage : null;
 
   const agent = useStageAgent(detail.project.id, stage, workflowResolved, confirmedStage);
   const agentAddress = agent.address;
