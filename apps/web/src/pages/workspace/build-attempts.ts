@@ -17,6 +17,7 @@ import { useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, type ArtifactNode, type BridgeOutcome, type BuildAttempt } from "../../client.js";
 import { keys } from "../../queries/keys.ts";
+import type { ChatMessage } from "../../stage-mail.ts";
 
 /** The attempt an archive node was recorded for, from its `attempt-<n>` variant; null when it names none. */
 export function attemptOfNode(node: Pick<ArtifactNode, "variant">): number | null {
@@ -126,6 +127,27 @@ export function probeDecision(input: { readonly startCommand: string; readonly p
 
 const FINAL_TEXT_KEEP = 20_000;
 
+const BRIEF_LEAD = "has ended and its work is recorded. Write the build status from this record.";
+
+/**
+ * The build status as it stands: the supervisor's reply to the latest
+ * recorded attempt's brief, or that it has not replied yet. Before any
+ * attempt is recorded there is no status; what the supervisor said until
+ * then is conversation, written without a worker result to read.
+ */
+export function supervisorStatus(
+  messages: readonly ChatMessage[],
+): { attempt: number; reply: ChatMessage | null } | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]!;
+    const brief = message.author === "me" ? /^Build attempt (\d+) (.*)/.exec(message.body) : null;
+    if (!brief || brief[2] !== BRIEF_LEAD) continue;
+    const reply = [...messages.slice(index + 1)].reverse().find((later) => later.author === "agent") ?? null;
+    return { attempt: Number(brief[1]), reply };
+  }
+  return null;
+}
+
 /**
  * The brief the supervisor is mailed when an attempt is recorded: what the
  * worker was, how it ended, what it said, and what the deterministic checks
@@ -147,7 +169,7 @@ export function composeSupervisorBrief(input: SupervisorBriefInput): string {
       ? `- ${input.probeSkipped ?? "No target was started or probed."}`
       : input.verification.targets.map((target) => `- ${target.target}: ${target.ranSuccessfully ? "responded" : "did not respond"} (${PROBE_RAN_ON}).`).join("\n");
   return [
-    `Build attempt ${String(input.attempt)} has ended and its work is recorded. Write the build status from this record.`,
+    `Build attempt ${String(input.attempt)} ${BRIEF_LEAD}`,
     ``,
     `## What the worker reported`,
     `- Worker: ${outcome.worker} (\`${outcome.command}\`), ${ended}; ${reported}.`,
