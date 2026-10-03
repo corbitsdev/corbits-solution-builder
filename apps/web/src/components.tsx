@@ -230,6 +230,18 @@ export function Banner({
   );
 }
 
+/** A read that failed, said in one line where its content would be. */
+export function FailedRead({ what, detail, onRetry }: { what: string; detail: string; onRetry: () => void }) {
+  return (
+    <p className="warning-note" role="alert" title={detail}>
+      {what} ·{" "}
+      <button type="button" className="link-button" onClick={onRetry}>
+        Try again
+      </button>
+    </p>
+  );
+}
+
 export function Field({
   label,
   helper,

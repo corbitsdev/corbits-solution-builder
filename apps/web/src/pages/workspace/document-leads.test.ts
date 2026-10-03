@@ -5,6 +5,7 @@
  * two together took the window from the conversation and the document.
  */
 import { describe, expect, test } from "bun:test";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ArtifactNode } from "../../client.js";
@@ -29,21 +30,25 @@ const NODE: ArtifactNode = {
 
 function render(leads: { documentLead?: ReactNode; composerLead?: ReactNode }): string {
   return renderToStaticMarkup(
-    createElement(StageDocument, {
-      node: NODE,
-      versions: [NODE],
-      content: "## In short\n\nThe estimate's own text.",
-      tenantId: "t",
-      turns: [],
-      openQuestion: null,
-      onSelectVersion: () => undefined,
-      onRevise: () => undefined,
-      onSubmit: () => undefined,
-      soloApproval: true,
-      canSubmit: false,
-      busy: null,
-      ...leads,
-    }),
+    createElement(
+      QueryClientProvider,
+      { client: new QueryClient() },
+      createElement(StageDocument, {
+        node: NODE,
+        versions: [NODE],
+        content: "## In short\n\nThe estimate's own text.",
+        tenantId: "t",
+        turns: [],
+        openQuestion: null,
+        onSelectVersion: () => undefined,
+        onRevise: () => undefined,
+        onSubmit: () => undefined,
+        soloApproval: true,
+        canSubmit: false,
+        busy: null,
+        ...leads,
+      }),
+    ),
   );
 }
 

@@ -28,7 +28,7 @@ import {
 } from "../../pending-approvals.ts";
 import { parseDeliveryVerification, type DeliveryVerification } from "../../delivery-verification.ts";
 import { manifestCompanionOf } from "./stage9-opening.ts";
-import { Banner, Button, documentName, shortHash } from "../../components.jsx";
+import { Banner, Button, FailedRead, documentName, shortHash } from "../../components.jsx";
 import { Markdown } from "../../markdown.jsx";
 import { downloadBuild } from "../graph.jsx";
 
@@ -230,7 +230,6 @@ function DeliveryDecision({
     staleTime: Infinity,
   });
   const verification = verificationNode ? (verificationRead.data ?? null) : parseDeliveryVerification(null);
-  const verificationError = verificationRead.error ? `The verification record could not be read: ${verificationRead.error.message}` : null;
 
   if (!loaded) return null;
 
@@ -304,9 +303,6 @@ function DeliveryDecision({
         </>
       ) : null}
       {error ? <Banner tone="error" title={error} /> : null}
-      {verificationError ? (
-        <Banner tone="error" title={verificationError} action={{ label: "Try again", onClick: () => void verificationRead.refetch() }} />
-      ) : null}
       {!pending && !delivered ? <p className="inline-note">Waiting on {VERIFIER} to submit a delivery for review.</p> : null}
       {summary ? <p>{summary}</p> : null}
       {artifacts.length > 0 ? (
@@ -322,6 +318,12 @@ function DeliveryDecision({
           <h2>{documentName("delivery_verification")}</h2>
           <VerificationList verification={verification} />
         </>
+      ) : verificationRead.error ? (
+        <FailedRead
+          what="Couldn't load the verification record"
+          detail={verificationRead.error.message}
+          onRetry={() => void verificationRead.refetch()}
+        />
       ) : null}
       {howToRun ? <Markdown source={howToRun} /> : null}
       {delivered ? (

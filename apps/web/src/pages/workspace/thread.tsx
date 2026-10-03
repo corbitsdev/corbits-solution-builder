@@ -164,6 +164,7 @@ export function StageConversation({
   popover = null,
   events = EMPTY_EVENTS,
   rows = null,
+  notice = null,
   who = "Specialist",
   onAttach,
   draftRefs = EMPTY_REFS,
@@ -193,6 +194,8 @@ export function StageConversation({
   events?: readonly StageEvent[];
   /** Quiet rows above the box: the open gate, a pending capability grant. */
   rows?: ReactNode;
+  /** A failure, said where the next turn would appear. */
+  notice?: ReactNode;
   /** The specialist's name on its turns. */
   who?: string;
   /** The paperclip: files join the project as material for the next draft. */
@@ -234,7 +237,7 @@ export function StageConversation({
     <div className="stage-conversation">
       {uiMessages.length === 0 ? (
         <div className={CONV_SCROLL_CLASS}>
-          <p className="inline-note">No messages yet.</p>
+          {notice ?? <p className="inline-note">No messages yet.</p>}
         </div>
       ) : (
         <div
@@ -296,6 +299,7 @@ export function StageConversation({
               </div>
             );
           })}
+          {notice}
           {opening ? (
             <>
               {rows}

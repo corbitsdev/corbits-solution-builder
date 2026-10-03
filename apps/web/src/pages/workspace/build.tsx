@@ -144,6 +144,7 @@ export function BuildPanel({
   popover = null,
   onAttach,
   attachNote = null,
+  notice = null,
 }: {
   detail: ProjectDetail;
   /** The workspace tenant artifacts are recorded under. */
@@ -176,6 +177,8 @@ export function BuildPanel({
   /** The paperclip: files join the project as material. */
   onAttach?: (files: FileList) => void;
   attachNote?: string | null;
+  /** A failure, said in the conversation where the next turn would appear. */
+  notice?: ReactNode;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -332,6 +335,7 @@ export function BuildPanel({
           <StageConversation
             stage={8}
             rows={attachNote ? <p className="warning-note" role="alert">{attachNote}</p> : null}
+            notice={notice}
             messages={messages}
             value={composer}
             onValueChange={setComposer}

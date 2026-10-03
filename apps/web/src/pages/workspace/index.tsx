@@ -34,7 +34,7 @@ import { BinaryFile, isDataUrl } from "../../binary-file.tsx";
 import { AudiencePackages } from "../audiences.jsx";
 import { DesignFeedbackView } from "../design.jsx";
 import { Tabs } from "@corbits/react-ui";
-import { Banner, Button, CopyButton, GuideDock, Screen, StateLabel, documentName, stageName, versionDigest } from "../../components.jsx";
+import { Banner, Button, CopyButton, FailedRead, GuideDock, Screen, StateLabel, documentName, stageName, versionDigest } from "../../components.jsx";
 import { useBusyWhile } from "../../use-busy.ts";
 import { DesignFrames, FrameSelect, framedDesign, type FrameMode } from "../../design-frames.tsx";
 import { specialistActivity } from "./specialist-activity.ts";
@@ -713,25 +713,39 @@ export function StageWorkspace({
     );
   }
 
+  const workflowFailure = workflow.startError ? (
+    <FailedRead what="Couldn't start the project workflow" detail={workflow.startError} onRetry={workflow.retryOpening} />
+  ) : workflow.viewError ? (
+    <FailedRead what="Couldn't load the project workflow" detail={workflow.viewError} onRetry={workflow.retryOpening} />
+  ) : null;
+  const openingFailure =
+    agentAddress && openingDispatch.error ? (
+      <FailedRead what="Couldn't send the opening message" detail={openingDispatch.error} onRetry={openingDispatch.retry} />
+    ) : null;
+
   // The strip and conversation are the same on every stage; only the right
   // pane's surface changes. Selecting a tab for another stage reads that
   // artifact — the stage's own surface only owns its own tab.
-  const stripEl = artifacts.selected ? (
-    <>
-      <ArtifactStrip
-        tabs={artifacts.tabs}
-        selectedKey={artifacts.selected.key}
-        onSelect={artifacts.select}
-      />
-      {artifacts.activeNode ? (
-        <VersionSelect
-          tab={artifacts.selected}
-          activeId={artifacts.activeNode.id}
-          onSelect={artifacts.selectVersion}
-        />
-      ) : null}
-    </>
-  ) : null;
+  const stripEl =
+    artifacts.selected || workflowFailure ? (
+      <>
+        {artifacts.selected ? (
+          <ArtifactStrip
+            tabs={artifacts.tabs}
+            selectedKey={artifacts.selected.key}
+            onSelect={artifacts.select}
+          />
+        ) : null}
+        {artifacts.selected && artifacts.activeNode ? (
+          <VersionSelect
+            tab={artifacts.selected}
+            activeId={artifacts.activeNode.id}
+            onSelect={artifacts.selectVersion}
+          />
+        ) : null}
+        {workflowFailure}
+      </>
+    ) : null;
 
   // A past stage's document, opened from the stepper: read as what it is
   // (a design is a page in a sandbox, a file is a file), headed by which
@@ -941,6 +955,7 @@ export function StageWorkspace({
       placeholder={`Message the ${stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title.toLowerCase() : "specialist"}…`}
       onAttach={(files) => void addMaterial([...files])}
       rows={attachNote ? <p className="warning-note" role="alert">{attachNote}</p> : null}
+      notice={openingFailure}
       {...(draftRefs ? { draftRefs } : {})}
       onOpenVersion={artifacts.openVersion}
     />
@@ -948,18 +963,6 @@ export function StageWorkspace({
 
   return (
     <div className="stage-view">
-
-      {openingFailed ? (
-        <Banner
-          tone="error"
-          title={
-            workflow.startError
-              ? `The project workflow could not be started: ${workflow.startError}`
-              : `The project workflow could not be read: ${workflow.viewError}`
-          }
-          action={{ label: "Try again", onClick: workflow.retryOpening }}
-        />
-      ) : null}
 
       {workflow.replayNotice ? (
         <Banner tone="warning" title={workflow.replayNotice.title}>
@@ -1061,6 +1064,7 @@ export function StageWorkspace({
           who={openingWho}
           opening={openingStatement}
           draft={openingDraft}
+          failure={workflowFailure}
         />
       ) : null}
 
@@ -1114,16 +1118,6 @@ export function StageWorkspace({
         note={guide.note}
         now={agentAddress ? { title: guidance.title, detail: guidance.detail } : null}
       />
-
-      {agentAddress && openingDispatch.error ? (
-        <Banner
-          tone="error"
-          title="The opening message could not be sent"
-          action={{ label: "Try again", onClick: openingDispatch.retry }}
-        >
-          {openingDispatch.error}
-        </Banner>
-      ) : null}
 
       {agentAddress && stage === 4 ? (
         <StagePanes strip={stripEl} conversation={conversation} busy={busy}>
@@ -1188,6 +1182,7 @@ export function StageWorkspace({
           popover={sendBackPopover}
           onAttach={(files) => void addMaterial([...files])}
           attachNote={attachNote}
+          notice={openingFailure}
         />
       ) : null}
 

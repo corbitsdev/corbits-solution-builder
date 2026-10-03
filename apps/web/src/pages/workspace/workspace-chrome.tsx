@@ -264,6 +264,7 @@ export function OpeningScreen({
   who,
   opening,
   draft,
+  failure = null,
 }: {
   resuming?: boolean;
   /** The specialist's name, lowercased, for the reconnect line — e.g.
@@ -274,6 +275,8 @@ export function OpeningScreen({
   /** The current stage's latest persisted draft, already on `detail.nodes`
    *  — null while none exists yet (a brand-new project) or none is selected. */
   draft?: { title: string; version: number; content: string } | null | undefined;
+  /** Why the specialist is not getting ready, in place of the line saying it is. */
+  failure?: ReactNode;
 }) {
   const specialist = capitalize(who);
   return (
@@ -292,14 +295,18 @@ export function OpeningScreen({
                   </div>
                 </div>
               ) : null}
-              <div className="think" role="status">
-                <span className="who conv-who">{specialist}</span>
-                <span className="thinking">
-                  {resuming ? `Reconnecting to the ${specialist}…` : `The ${specialist} is getting ready…`}
-                </span>
-              </div>
-              <BusyLine />
-              <WaitingTips />
+              {failure ?? (
+                <>
+                  <div className="think" role="status">
+                    <span className="who conv-who">{specialist}</span>
+                    <span className="thinking">
+                      {resuming ? `Reconnecting to the ${specialist}…` : `The ${specialist} is getting ready…`}
+                    </span>
+                  </div>
+                  <BusyLine />
+                  <WaitingTips />
+                </>
+              )}
             </div>
           </div>
         }
