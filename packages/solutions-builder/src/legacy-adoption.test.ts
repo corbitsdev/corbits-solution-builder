@@ -121,7 +121,7 @@ describe("adoptionPlan", () => {
     const five = plan.steps[4]!;
     expect(five.votes).toEqual({ You: { decision: "proceed", note: "" } });
     expect(five.packages).toEqual({ You: { artifactId: "art_package", version: 1, sha256: "sha-package" } });
-    expect(plan.notes).toEqual(["Stage 5: Finance's vote names no package the old approval recorded, so it is not replayed; they decide again here."]);
+    expect(plan.notes).toEqual(["Concept approval: Finance's vote names no package the old approval recorded, so it is not replayed; they decide again here."]);
   });
 
   test("a project past stage 6 is landed at stage 7 and told why", () => {
@@ -141,14 +141,14 @@ describe("adoptionPlan", () => {
     const plan = adoptionPlan({ projectId: "p", position: legacyPosition(built), nodes: more, policy, readContent: () => null });
     expect(plan.legacyStage).toBe(8);
     expect(plan.steps.map((step) => step.stage)).toEqual([1, 2, 3, 4, 5, 6]);
-    expect(plan.notes.some((note) => note.includes("stage 7 needs a delivery target"))).toBe(true);
+    expect(plan.notes.some((note) => note.includes("Cost approval needs a delivery target"))).toBe(true);
   });
 
   test("stops before a stage the old ledger never approved", () => {
     const gap = inteva.filter((command) => !(command.command === "stage.approve" && command.stage === 2));
     const plan = adoptionPlan({ projectId: "p", position: legacyPosition(gap), nodes, policy, readContent: () => null });
     expect(plan.steps.map((step) => step.stage)).toEqual([1]);
-    expect(plan.notes[0]).toContain("Stage 2 has no approval");
+    expect(plan.notes[0]).toContain("Solution shape has no approval");
   });
 });
 
