@@ -820,7 +820,7 @@ export function StageWorkspace({
   return (
     <div className="stage-view">
       {workflowView?.done ? (
-        <Banner tone="okay" title="This project is delivered — stage 9's approval was recorded and the workflow has finished." />
+        <Banner tone="okay" title="This project is delivered. Its delivery was approved and the workflow has finished." />
       ) : null}
 
       {openingFailed ? (

@@ -217,7 +217,7 @@ export function SendBackConfirm({
   return (
     <div className="sbconfirm" role="dialog" aria-label={`Send back to ${stageName(target)}`}>
       <p className="sbconfirm-head">
-        Send the project back to stage {target} · {stageName(target)}
+        Send the project back to {stageName(target)}
         {RETURN_TO[target] ? `, to ${RETURN_TO[target]}` : ""}. Every review from there on is marked stale; nothing is deleted.
       </p>
       <textarea
