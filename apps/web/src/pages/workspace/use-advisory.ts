@@ -31,7 +31,7 @@ import type { ArtifactNode } from "../../client.js";
 import { evaluatorFor } from "@solutions-builder/app/kit";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { evaluationRequest, evaluatorNotesAsk } from "@solutions-builder/app/stage-prompt";
-import { evaluationTag, evaluatorNotesSubject, isEvaluatorNotes } from "./composed-mail.ts";
+import { evaluationTag, evaluatorNotesSubject, isStageOpening } from "./composed-mail.ts";
 import type { GuideGuidance } from "../../components.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { pairReplies } from "../../withdrawn-turns.ts";
@@ -204,10 +204,8 @@ export function useStageEvaluator(
 
 /**
  * The subject to send the evaluator's notes on `draft` under, when they are
- * owed to the specialist now; null when not. They are owed once per draft,
- * and only for a draft the person has not answered and that is not itself
- * the revision earlier notes asked for, so the round never loops. A stage
- * under review is left alone: the person is deciding on that version.
+ * owed to the specialist now; null when not. They are owed only on the
+ * stage's first draft, before the person has said anything in it.
  */
 export function evaluatorRevisionDue(args: {
   readonly stage: number;
@@ -219,13 +217,11 @@ export function evaluatorRevisionDue(args: {
   if (stage === 1 || draft === null) return null;
   if (evaluator.status !== "verdict" || evaluator.verdict.ready || evaluator.verdict.notes.length === 0) return null;
   if (messages.at(-1)?.author !== "agent") return null;
-  // One round per stage: the measured gain is on the first draft, and a round
-  // on every later turn doubles each wait.
-  if (messages.some(isEvaluatorNotes)) return null;
-  const lastAsk = messages.findLast((message) => message.author === "me");
-  if (lastAsk && isEvaluatorNotes(lastAsk)) return null;
-  const subject = evaluatorNotesSubject(stage, draft);
-  return messages.some((message) => message.subject?.startsWith(subject)) ? null : subject;
+  // One round per stage, on its first draft: the measured gain is there, and
+  // once the person has said anything a round lands mid-conversation and
+  // doubles that wait. The notes themselves are such a message.
+  if (messages.some((message) => message.author === "me" && !isStageOpening(message))) return null;
+  return evaluatorNotesSubject(stage, draft);
 }
 
 /**
