@@ -1,9 +1,9 @@
 {
-  "name": "@solutions-builder/specialist-companions",
+  "name": "@solutions-builder/specialist-senior-engineer-security",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "The roles that sit beside the stages: the product guide, the namer and the Problem discovery brief evaluator.",
+  "description": "The Senior engineer panel's Security principal: data, authorisation, credential and dependency exposure.",
   "exports": {
     ".": "./src/index.ts"
   },

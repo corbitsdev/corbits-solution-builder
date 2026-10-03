@@ -1,0 +1,13 @@
+{
+  "name": "@solutions-builder/specialist-requirements-author",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The Requirements author: gathers the approved stages into the one requirements document the Build plan is written against.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@solutions-builder/specialist-shared": "workspace:*"
+  }
+}

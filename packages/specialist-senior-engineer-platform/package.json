@@ -1,0 +1,13 @@
+{
+  "name": "@solutions-builder/specialist-senior-engineer-platform",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The Senior engineer panel's Platform principal: target feasibility, clean install and upgrade, packaging and signing.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@solutions-builder/specialist-shared": "workspace:*"
+  }
+}

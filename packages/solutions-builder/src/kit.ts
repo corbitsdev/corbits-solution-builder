@@ -10,19 +10,26 @@
  * can widen a grant or spend.
  *
  * Each role lives in its own `packages/specialist-*` package with its own
- * prompt; this file assembles them and keeps the kit's public surface.
+ * prompt, one role to a package; this file assembles them and keeps the
+ * kit's public surface.
  */
-import { architect, requirementsAuthor } from "@solutions-builder/specialist-architect";
+import { architect } from "@solutions-builder/specialist-architect";
 import { brainstormer } from "@solutions-builder/specialist-brainstormer";
+import { briefEvaluator } from "@solutions-builder/specialist-brief-evaluator";
 import { buildSupervisor } from "@solutions-builder/specialist-build-supervisor";
-import { briefEvaluator, namer, productGuide } from "@solutions-builder/specialist-companions";
 import { constraintsMapper } from "@solutions-builder/specialist-constraints-mapper";
 import { deliveryVerifier } from "@solutions-builder/specialist-delivery-verifier";
 import { estimator } from "@solutions-builder/specialist-estimator";
 import { experienceDesigner } from "@solutions-builder/specialist-experience-designer";
-import { PANEL_ROLES } from "@solutions-builder/specialist-plan-review";
+import { namer } from "@solutions-builder/specialist-namer";
 import { presentationCreator } from "@solutions-builder/specialist-presentation-creator";
+import { productGuide } from "@solutions-builder/specialist-product-guide";
 import { proposer } from "@solutions-builder/specialist-proposer";
+import { requirementsAuthor } from "@solutions-builder/specialist-requirements-author";
+import { seniorEngineerApplication } from "@solutions-builder/specialist-senior-engineer-application";
+import { seniorEngineerPlatform } from "@solutions-builder/specialist-senior-engineer-platform";
+import { seniorEngineerQuality } from "@solutions-builder/specialist-senior-engineer-quality";
+import { seniorEngineerSecurity } from "@solutions-builder/specialist-senior-engineer-security";
 import type { AgentRole as SharedAgentRole } from "@solutions-builder/specialist-shared";
 import { ARTIFACT_KINDS, type ArtifactKind } from "./artifacts.js";
 import type { Stage } from "./ledger.js";
@@ -39,6 +46,18 @@ function kind(entry: SharedAgentRole): AgentRole {
   }
   return entry as AgentRole;
 }
+
+/*
+ * The Senior engineer panel is four principals, not one voice.
+ *
+ * Section 8 is explicit that the panel is "coordination expanded into four
+ * independent principals, not a single synthetic reviewer", and section 4
+ * rules out a "synthetic single reviewer/team proxy" for acceptance. So each
+ * has its own package, prompt key, model binding, run and artifact. A prompt
+ * that asks one model to hold four opinions is the proxy the plan forbids,
+ * and it cannot produce four independent findings however it is worded.
+ */
+const PANEL_ROLES = [seniorEngineerApplication, seniorEngineerQuality, seniorEngineerPlatform, seniorEngineerSecurity];
 
 export const AGENT_KIT: readonly AgentRole[] = [
   brainstormer,
