@@ -40,6 +40,7 @@ import { StageWorkspace } from "./pages/workspace.jsx";
 import { firstRunScreen, type HubAuthState } from "./first-run.ts";
 import { getHubSession } from "./hub-auth.ts";
 import { useBusyWhile } from "./use-busy.ts";
+import { useMountEffect } from "./use-mount-effect.ts";
 import { ZenGarden } from "./zen-garden.tsx";
 
 /**
@@ -51,8 +52,21 @@ type View = "projects" | "project" | "settings";
 
 const VIEWS: View[] = ["projects", "project", "settings"];
 
+/** The open project lives in the hash, so a reload keeps it and Back returns to the list. */
+function projectInUrl(): string | null {
+  const [, projectId] = /^#\/project\/(.+)$/.exec(window.location.hash) ?? [];
+  return projectId ? decodeURIComponent(projectId) : null;
+}
+
+function writeProjectUrl(projectId: string | null): void {
+  const hash = projectId ? `#/project/${encodeURIComponent(projectId)}` : "";
+  if (window.location.hash === hash) return;
+  window.history.pushState(null, "", hash || window.location.pathname + window.location.search);
+}
+
 /** Deep link, so a screen can be opened directly: `/?view=settings`. */
 function initialView(): View {
+  if (projectInUrl()) return "project";
   const requested = new URLSearchParams(window.location.search).get("view");
   return VIEWS.includes(requested as View) ? (requested as View) : "projects";
 }
@@ -470,9 +484,10 @@ export function AppBar({
 export function App() {
   const [view, setShownView] = useState<View>(initialView);
   // What one page said, a download's notice or a refusal, is not carried onto the next.
-  const setView = (next: View) => {
+  const setView = (next: View, projectId = selected) => {
     setNotice(null);
     setError(null);
+    writeProjectUrl(next === "project" ? projectId : null);
     setShownView(next);
   };
   // Where Settings was opened from, so its back control and the gear's
@@ -517,7 +532,16 @@ export function App() {
   const offline = home.error !== null && !signedOut(home.error);
   const refresh = useCallback(() => queryClient.invalidateQueries({ queryKey: keys.home }), [queryClient]);
 
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(projectInUrl);
+  useMountEffect(() => {
+    const follow = () => {
+      const projectId = projectInUrl();
+      if (projectId) setSelected(projectId);
+      setShownView((current) => (projectId ? "project" : current === "project" ? "projects" : current));
+    };
+    window.addEventListener("popstate", follow);
+    return () => window.removeEventListener("popstate", follow);
+  });
   // A switch to a different project never shows the one that was open: the
   // read is keyed by project. A failed re-read of the SAME project keeps it
   // on screen with the failure surfaced (CL-8874): swallowing the failure
@@ -675,7 +699,7 @@ export function App() {
 
   const openProject = (projectId: string) => {
     setSelected(projectId);
-    setView("project");
+    setView("project", projectId);
   };
 
   /** The same export, and the same notice, as the project menu's. */
