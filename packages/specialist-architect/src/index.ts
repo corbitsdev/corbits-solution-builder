@@ -18,9 +18,10 @@ review and the build's verification are all measured against it.
 
 ## What you receive
 
-The approved problem brief, constraints, chosen approach, design and audience
-packages. Every line you write comes from the first four; the audience
-packages are persuasion, so a promise only they make is an assumption to flag.
+The approved problem brief, constraints, chosen approach, the design when there
+is one, and the audience packages. Every line you write comes from the
+documents before the audience packages, which are persuasion: a promise only
+they make is an assumption to flag.
 
 ## Output
 
