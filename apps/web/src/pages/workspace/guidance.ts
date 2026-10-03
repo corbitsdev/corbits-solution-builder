@@ -89,20 +89,24 @@ export function isSubstantialDraft(body: string): boolean {
 /** The chat's one-line stand-in for a draft that has no lead of its own. */
 export const DRAFT_POINTER = "First draft is in the document.";
 
-/** What the narrow chat column may show of a specialist turn. A headed draft
- *  is the document pane; chat gets the paragraph before the first heading,
- *  which the shared rules make the specialist's reply to the person, or a
- *  one-line pointer if there is none. */
+/** What the narrow chat column may show of a specialist turn: the whole
+ *  turn, or for a headed draft (which is the document pane) the paragraph
+ *  before its first heading, which the shared rules make the specialist's
+ *  reply to the person. Null for a draft with no lead. */
 const LEAD_LIMIT = 1200;
 
-export function conversationLead(body: string): string {
+export function turnLead(body: string): string | null {
   if (!isSubstantialDraft(body)) return body.trim();
-  if (isHtmlDocument(body)) return DRAFT_POINTER;
+  if (isHtmlDocument(body)) return null;
   const cut = body.search(/^##\s/m);
   const before = (cut === -1 ? body : body.slice(0, cut)).trim();
   const first = before.split(/\n\s*\n/)[0]?.trim() ?? "";
-  if (first.length > 0 && first.length <= LEAD_LIMIT && !/^#\s/.test(first)) return first;
-  return DRAFT_POINTER;
+  return first.length > 0 && first.length <= LEAD_LIMIT && !/^#\s/.test(first) ? first : null;
+}
+
+/** `turnLead`, with the one-line pointer standing in for a missing lead. */
+export function conversationLead(body: string): string {
+  return turnLead(body) ?? DRAFT_POINTER;
 }
 
 /** The question now open: the first the turn asks -- the kit orders them

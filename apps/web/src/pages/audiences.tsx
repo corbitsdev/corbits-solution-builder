@@ -33,7 +33,7 @@ import { appSubject } from "./workspace/composed-mail.ts";
 import { useBusyWhile } from "../use-busy.ts";
 import { packageReplyFor } from "../package-reply.ts";
 import { packagesByStakeholder } from "../package-lineages.ts";
-import { deckFrom, packageOutlineProblem, type Deck, type TemplateTheme } from "@solutions-builder/app/deck";
+import { deckFrom, packageOutlineProblem, roleLabel, type Deck, type TemplateTheme } from "@solutions-builder/app/deck";
 import { packageRefOf, recordAudienceVote, type StageApprovalDeps } from "../stage-approval.ts";
 import { stageRefusalMessage } from "../stage-evidence.ts";
 import type { ProjectWorkflowView } from "../project-workflow.ts";
@@ -103,8 +103,9 @@ function youFirst<T extends { name: string }>(list: readonly T[]): T[] {
   return [...list.filter(isYou), ...list.filter((entry) => !isYou(entry))];
 }
 
-function roleLabel(role: string): string {
-  return role.replace(/_/g, " ");
+/** A stakeholder as the waiting line names them: "You (project owner)". */
+function whoLabel(audience: { name: string; role: string }): string {
+  return `${audience.name} (${roleLabel(audience.role).toLowerCase()})`;
 }
 
 const DECISION_LABEL: Record<AudienceVote["decision"], string> = {
@@ -112,6 +113,19 @@ const DECISION_LABEL: Record<AudienceVote["decision"], string> = {
   revise: "Needs revision",
   reject: "Reject",
 };
+
+/** Proceed / Needs revision / Reject for one package. */
+function DecisionButtons({ busy, onDecide }: { busy: AudienceVote["decision"] | null; onDecide: (decision: AudienceVote["decision"]) => void }) {
+  return (
+    <div className="aud-btns">
+      {(["proceed", "revise", "reject"] as const).map((decision) => (
+        <Button key={decision} variant="ghost" loading={busy === decision} disabled={busy !== null} onClick={() => onDecide(decision)}>
+          {DECISION_LABEL[decision]}
+        </Button>
+      ))}
+    </div>
+  );
+}
 
 /** One chip per stakeholder, coloured by their latest recorded vote (read
     off the workflow view, `ProjectWorkflowView.audienceDecisions`) — the
@@ -334,7 +348,7 @@ function Stakeholders({
       ) : (
         <div className="button-row">
           <p className="inline-note">
-            {audiences.map((audience) => audience.name).join(" · ") || "No stakeholders"} · {quorum} must proceed
+            {audiences.map((audience) => audience.name).join(" · ") || "No stakeholders"} · {quorum} of {audiences.length} must say Proceed
           </p>
           <Button variant="ghost" onClick={() => setEditing(true)}>
             Manage stakeholders
@@ -730,14 +744,22 @@ export function AudiencePackages({
   // quorum verdict holds the button until an approve could be committed.
   const quorumMet = workflowView?.stage5Quorum?.met === true;
   const quorumWaiting = Math.max(requiredQuorum - proceeded, 0);
+  // Who has not said Proceed on their current package, and so could close the gap.
+  const awaited = audiences.filter((audience) => votesByAudience[audience.name]?.decision !== "proceed" || staleVoters.has(audience.name));
+  const voteNode = quorumMet
+    ? null
+    : (awaited.map((audience) => packages.find((node) => node.variant === audience.name)).find((node) => node !== undefined) ?? null);
+  const [gateBusy, setGateBusy] = useState<AudienceVote["decision"] | null>(null);
   const quorumReason = quorumMet
     ? null
     : blockedBy.length > 0
       ? `${blockedBy.join(" and ")} ${blockedBy.length === 1 ? "has" : "have"} blocked this.`
       : staleBy.length > 0
         ? `${staleBy.join(" and ")} decided on an earlier package and ${staleBy.length === 1 ? "needs" : "need"} to decide again.`
-        : `Waiting for ${quorumWaiting} stakeholder${quorumWaiting === 1 ? "" : "s"} to proceed.`;
-  const approveReasonDisplay = reason ?? quorumReason;
+        : `Waiting for ${awaited.map(whoLabel).join(awaited.length > quorumWaiting ? " or " : " and ")} to say Proceed.`;
+  // The workflow's own verdict explains an approve it refused; until quorum is
+  // met the live tally is the more useful line.
+  const approveReasonDisplay = quorumMet ? reason : (quorumReason ?? reason);
 
   const decide = async (node: (typeof packages)[number], decision: AudienceVote["decision"], note: string) => {
     if (!node.variant) return;
@@ -787,17 +809,26 @@ export function AudiencePackages({
     setInlineNote("");
     setInlineBusy(null);
   }, [selected?.variant]);
-  const recordInlineDecision = async (decision: AudienceVote["decision"]) => {
-    if (!selected) return;
-    setInlineBusy(decision);
+  const recordDecision = async (
+    node: (typeof packages)[number],
+    decision: AudienceVote["decision"],
+    note: string,
+    setBusy: (busy: AudienceVote["decision"] | null) => void,
+  ): Promise<boolean> => {
+    setBusy(decision);
     try {
-      await decide(selected, decision, inlineNote);
-      setInlineNote("");
+      await decide(node, decision, note);
+      return true;
     } catch {
       // decide() already surfaced the error via setError.
+      return false;
     } finally {
-      setInlineBusy(null);
+      setBusy(null);
     }
+  };
+  const recordInlineDecision = async (decision: AudienceVote["decision"]) => {
+    if (!selected) return;
+    if (await recordDecision(selected, decision, inlineNote, setInlineBusy)) setInlineNote("");
   };
   const selectedVote = selected?.variant ? (votesByAudience[selected.variant] ?? null) : null;
   const selectedVoteStale = selected?.variant ? staleVoters.has(selected.variant) : false;
@@ -883,6 +914,15 @@ export function AudiencePackages({
               Approve and continue
             </Button>
             {approveReasonDisplay ? <p className="inline-note">{approveReasonDisplay}</p> : null}
+            {voteNode?.variant ? (
+              <p className="inline-note audience-gate-vote">Record {voteNode.variant}'s decision:</p>
+            ) : null}
+            {voteNode?.variant ? (
+              <DecisionButtons
+                busy={gateBusy}
+                onDecide={(decision) => void recordDecision(voteNode, decision, "", setGateBusy)}
+              />
+            ) : null}
           </div>
           <Tabs
             label="Stakeholder packages"
@@ -937,32 +977,7 @@ export function AudiencePackages({
                     placeholder="Their note, optional"
                     onChange={(event) => setInlineNote(event.target.value)}
                   />
-                  <div className="aud-btns">
-                    <Button
-                      variant="ghost"
-                      loading={inlineBusy === "proceed"}
-                      disabled={inlineBusy !== null}
-                      onClick={() => void recordInlineDecision("proceed")}
-                    >
-                      Proceed
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      loading={inlineBusy === "revise"}
-                      disabled={inlineBusy !== null}
-                      onClick={() => void recordInlineDecision("revise")}
-                    >
-                      Needs revision
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      loading={inlineBusy === "reject"}
-                      disabled={inlineBusy !== null}
-                      onClick={() => void recordInlineDecision("reject")}
-                    >
-                      Reject
-                    </Button>
-                  </div>
+                  <DecisionButtons busy={inlineBusy} onDecide={(decision) => void recordInlineDecision(decision)} />
                 </div>
               ) : null}
               {savedNodes.has(selected.id) ? (

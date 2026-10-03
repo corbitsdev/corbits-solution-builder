@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { stageName } from "../components.js";
 import {
-  HOME_CARD_STAGE_NAMES,
   HOME_COMPOSER_PLACEHOLDER,
   HOME_EMPTY_DESCRIPTION,
   HOME_EMPTY_TITLE,
@@ -79,28 +78,11 @@ describe("stageTrackSegClass", () => {
 
 describe("cardFootStage", () => {
   test("names the live stage, delivered, or a failed read — never a fake time", () => {
-    expect(cardFootStage(1, false, false)).toBe("Problem Discovery");
-    expect(cardFootStage(3, false, false)).toBe("Proposal");
-    expect(cardFootStage(8, false, false)).toBe("Build & Test");
+    expect(cardFootStage(1, false, false)).toBe(stageName(1));
+    expect(cardFootStage(3, false, false)).toBe("Solution proposal");
+    expect(cardFootStage(8, false, false)).toBe("Build and test");
     expect(cardFootStage(9, true, false)).toBe("Delivered");
     expect(cardFootStage(4, false, true)).toBe("Status unavailable");
     expect(cardFootStage(null, false, false)).toBe("Not started");
-  });
-
-  test("home Title Case does not rewrite workspace stage names", () => {
-    expect([...HOME_CARD_STAGE_NAMES]).toEqual([
-      "Problem Discovery",
-      "Solution Shape",
-      "Proposal",
-      "GUI Design",
-      "Concept Approval",
-      "Build Plan",
-      "Cost Approval",
-      "Build & Test",
-      "Deliver",
-    ]);
-    expect(stageName(1)).toBe("Problem discovery");
-    expect(stageName(3)).toBe("Solution proposal");
-    expect(stageName(8)).toBe("Build and test");
   });
 });
