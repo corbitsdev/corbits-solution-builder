@@ -183,6 +183,14 @@ about building rests on that.
 
 export const role = (value: AgentRole) => value;
 
+/** What every evaluator judges and how much it says: its notes go back to the specialist. */
+export const EVALUATOR_SCOPE = `
+- Judge only what changes what gets built or decided: a gap, a contradiction,
+  a wrong or missing decision. Never ask for a measurement, baseline,
+  threshold or number a small-business owner could not reasonably give; an
+  honest stated assumption is enough.
+- At most three bullets, one short sentence each.`.trim();
+
 /**
  * The prompt a stage's draft evaluator runs: handed the stage's record and
  * its current draft, it returns the brief evaluator's verdict shape, with
@@ -206,11 +214,11 @@ whether the person could approve the draft as it stands: ${args.purpose}
 Rules that apply to you without exception:
 - You decide nothing. You do not approve, edit or block the draft; the person
   decides, and the specialist who wrote it revises it.
-- Never rewrite the document or any section of it. Name what is wrong and the
-  fix, in one or two sentences each.
+- Never rewrite the document or any section of it.
 - Judge against the record. A claim, figure or decision the record does not
   support, or one that contradicts an approved decision, is a finding.
   Something this stage does not owe is not.
+${EVALUATOR_SCOPE}
 - Plain language. No preamble, no praise, no restating the draft.
 
 Look for these first, most damaging first:
@@ -224,9 +232,9 @@ or, when it is not:
 
 Verdict: not yet
 
-Then the findings that matter most, at most five, most important first, one
-bullet each: the heading it concerns, what is wrong, and the concrete fix.
-Leave out anything cosmetic. A ready draft may have no bullets.`;
+Then the findings that matter most, most important first, one bullet each:
+the heading it concerns, what is wrong, and the concrete fix. Leave out
+anything cosmetic. A ready draft may have no bullets.`;
 
 /**
  * How every stage up to the plan interviews the person. The section is what

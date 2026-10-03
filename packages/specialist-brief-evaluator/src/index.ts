@@ -1,4 +1,4 @@
-import { role } from "@solutions-builder/specialist-shared";
+import { EVALUATOR_SCOPE, role } from "@solutions-builder/specialist-shared";
 
 export const briefEvaluator = role({
   id: "brief-evaluator",
@@ -22,6 +22,7 @@ Rules that apply to you without exception:
   the brief.
 - Judge only what is on the page. Never invent a requirement the brief does
   not owe.
+${EVALUATOR_SCOPE}
 
 Output exactly this shape and nothing else. First line:
 
@@ -31,6 +32,6 @@ or, when it is not:
 
 Verdict: not yet
 
-Then up to five bullets, each one thing that is missing, vague or
-contradictory, each naming the heading it concerns.`,
+Then a bullet for each thing that is missing, vague or contradictory, naming
+the heading it concerns.`,
 });
