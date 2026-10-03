@@ -657,6 +657,71 @@
   .panes-splitter {
     display: none;
   }
+
+  /* A lone conversation runs to the window's right edge, where the guide's
+     button is fixed: the composer keeps clear of it (44px plus its inset). */
+  .panes.is-solo .composer,
+  .panes.chat-first .composer {
+    padding-right: calc(var(--space-4) + 44px + var(--space-6));
+  }
+}
+
+/* Phone widths, from 402px: the bar keeps its controls whole and lets the
+   title give way, and every pane takes the 16px gutter. */
+@media (max-width: 640px) {
+  .topbar.topbar-project {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: var(--space-2);
+    padding: 0 var(--space-3);
+  }
+
+  .topbar-project .stepper li > span,
+  .topbar-project .stepper li > button {
+    width: 12px;
+  }
+
+  .topbar-project .stepper li[aria-current="step"] > span {
+    width: 18px;
+  }
+
+  .topbar-project .step-name {
+    max-width: 40vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .stage-model-row {
+    padding: var(--space-1) var(--space-3);
+  }
+
+  .conv-scroll {
+    padding: var(--space-4);
+  }
+
+  .composer {
+    padding: var(--space-2) var(--space-3) var(--space-3);
+  }
+
+  .artifact-strip {
+    padding: var(--space-2) var(--space-4) 0;
+  }
+
+  .artifact-strip .version-note {
+    display: none;
+  }
+
+  .stage-inner {
+    padding: var(--space-4) var(--space-4) var(--space-8);
+  }
+
+  .doc {
+    padding: var(--space-4);
+  }
+
+  .stage-view > .stage-lead {
+    margin: var(--space-3) var(--space-4) 0;
+    padding: var(--space-3) var(--space-4);
+  }
 }
 
 /* ---- artifact strip: ghost tabs, selected = pane paper, live = primary ---- */

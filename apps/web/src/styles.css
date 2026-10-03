@@ -638,12 +638,13 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
    fold; the library collapses to a 56px icon rail and keeps its labels for
    screen readers. */
 @media (max-width: 1080px) {
-  .app { grid-template-columns: auto minmax(0, 1fr); }
   .span-4, .span-6, .span-8 { grid-column: span 12; }
 }
 
 @media (max-width: 640px) {
   .canvas { padding: var(--space-4) var(--space-4) var(--space-8); }
+  /* A filling surface (the workspace) is the page itself, edge to edge. */
+  .canvas:has(> .canvas-body.is-fill) { padding: 0; }
   .artifact pre { font-size: 0.75rem; }
   .queue-item,
   .version-list { grid-template-columns: 1fr; }
@@ -1697,19 +1698,9 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 }
 
 @media (max-width: 1080px) {
-  .document-layout {
-    grid-template-columns: 1fr;
-  }
-  /* Stacked, the conversation goes under the document: you read, then react. */
-  .stage-thread {
-    position: static;
-    height: auto;
-    order: 2;
-  }
-  .thread-turns {
-    max-height: 320px;
-  }
-  .document {
+  /* Stacked, the artifact library's document goes above its list. The
+     workspace's panes stack on their own terms in workspace-layout.css. */
+  .library-layout .document {
     order: 1;
   }
   .library-layout {
@@ -1724,11 +1715,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
      measure so it still reads as a question. */
   .turn-question {
     max-width: 60ch;
-  }
-  /* Stacked, the composer runs to the window edge where the guide dock is
-     fixed. Reserve the dock (44px button plus its offset) on the right. */
-  .composer {
-    padding-right: calc(var(--space-4) + 44px + var(--space-6));
   }
 }
 
