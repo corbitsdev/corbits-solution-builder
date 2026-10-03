@@ -95,8 +95,20 @@ export type BuildPromptInput = {
   readonly continuing: boolean;
 };
 
+/** The host scans the recorded archive for the first four rules (`quality-scan.ts`), and the supervisor judges the rest. */
+const QUALITY_BAR = [
+  `--- QUALITY BAR (the work is judged against every rule) ---`,
+  `- No stubs: no TODO, FIXME, XXX, "not implemented", placeholder or lorem ipsum text or data in the delivered files (an input's placeholder attribute is fine). Finish it or leave it out and say so.`,
+  `- No swallowed errors: no empty catch, \`.catch(() => {})\` or \`except: pass\`. Handle the error or let it propagate; use async/await with try/catch.`,
+  `- No unused code, no needless fallbacks; prefer the language's and platform's own primitives over new code.`,
+  `- Every requirement id above is implemented and exercised by at least one test that names it; package.json \`scripts.test\` (or the stack's equivalent) runs them all.`,
+  `- Run the tests yourself and end your final message with the exact command and its real output. Never claim a pass you did not see.`,
+  `- The interface uses the design's components, states and copy, including its empty, loading and error states.`,
+  `- A README says what it is, how to install, run and test it, and anything left unbuilt.`,
+].join("\n");
+
 /**
- * The prompt the worker is handed: the plan says what to do, the
+ * The prompt the worker is handed:the plan says what to do, the
  * requirements it cites say when it is done, the design says what it looks
  * like, and the frozen stack says what it is built with. Assembled once per
  * attempt and written beside the attempt's directory, so the packet an
@@ -117,6 +129,8 @@ export function assembleBuildPrompt(input: BuildPromptInput): string {
     ...(input.designText ? [`--- DESIGN ---`, input.designText, ``] : []),
     `--- PLAN ---`,
     input.planText,
+    ``,
+    QUALITY_BAR,
     ``,
     `Approved plan: ${input.planRef || "unknown"}.`,
     `Target: ${input.target || "unknown"}.`,
