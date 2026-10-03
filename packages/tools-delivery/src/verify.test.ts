@@ -85,9 +85,10 @@ describe("hashTree and extractArchive", () => {
         ["README.md", "verified"],
         ["src/index.ts", "hash_mismatch"],
         ["src/new.ts", "missing"],
+        ["tests", "failed"],
       ]);
       expect(verification.report.complete).toBe(false);
-      expect(verification.report.failed).toEqual(["src/index.ts", "src/new.ts"]);
+      expect(verification.report.failed).toEqual(["src/index.ts", "src/new.ts", "tests"]);
       expect(verification.targets).toEqual([]);
     } finally {
       await rm(dir, { recursive: true, force: true });

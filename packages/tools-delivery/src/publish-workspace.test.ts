@@ -98,11 +98,13 @@ describe("publish_workspace (fallback path)", () => {
         ["README.md", "verified", "tool"],
         ["server.ts", "verified", "tool"],
         ["src/index.ts", "verified", "tool"],
+        ["tests", "failed", "tool"],
         ["target:web", "verified", "tool"],
       ]);
       expect(verification.targets[0]?.transcript).toContain("port " + String(port) + " opened.");
-      expect(verification.report.complete).toBe(true);
-      expect(parsed.verification).toEqual({ complete: true, failed: [], targets: [{ target: "web", ranSuccessfully: true, transcript: verification.targets[0]!.transcript }] });
+      // The fixture names no test command: the quality bar's one unmet check.
+      expect(verification.report.failed).toEqual(["tests"]);
+      expect(parsed.verification.targets).toEqual([{ target: "web", ranSuccessfully: true, transcript: verification.targets[0]!.transcript }]);
     } finally {
       await rm(cwd, { recursive: true, force: true });
     }
@@ -115,7 +117,7 @@ describe("publish_workspace (fallback path)", () => {
       const result = await tool.run({ id: "2", name: TOOL_NAME, arguments: {} }, new AbortController().signal);
       const parsed = JSON.parse(result.content as string) as FallbackResult;
       expect(parsed.manifest.verification?.targets).toEqual([]);
-      expect(parsed.manifest.verification?.items.every((item) => item.status === "verified" && item.checkedBy === "tool")).toBe(true);
+      expect(parsed.manifest.verification?.items.every((item) => (item.status === "verified" || item.path === "tests") && item.checkedBy === "tool")).toBe(true);
       expect(parsed.verification.targets).toEqual([]);
     } finally {
       await rm(cwd, { recursive: true, force: true });

@@ -14,6 +14,7 @@
  */
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import type { VerificationItem } from "./delivery.js";
 import { hashTree, verifyArchive, type DeliveryVerificationContent, type ManifestFileEntry, type TargetProbe } from "./verify.js";
 
 export type { ManifestFileEntry, TargetProbe } from "./verify.js";
@@ -69,6 +70,8 @@ export type VerificationSummary = {
   complete: boolean;
   /** Paths of required items that are not `verified`. */
   failed: string[];
+  /** Those items in full: what was checked, its status and the tool's detail. */
+  unverified: VerificationItem[];
   targets: { target: string; ranSuccessfully: boolean; transcript: string }[];
 };
 
@@ -176,6 +179,7 @@ export async function verifyAndRecord(
   return {
     complete: verification.report.complete,
     failed: verification.report.failed,
+    unverified: verification.items.filter((item) => item.required && item.status !== "verified"),
     targets: verification.targets.map((target) => ({ target: target.target, ranSuccessfully: target.ranSuccessfully, transcript: target.transcript })),
   };
 }

@@ -124,7 +124,7 @@ describe("composeSupervisorBrief", () => {
       attempt: 2,
       outcome,
       archive,
-      verification: { complete: true, failed: [], targets: [{ target: "web", ranSuccessfully: true, transcript: "" }] },
+      verification: { complete: true, unverified: [], targets: [{ target: "web", ranSuccessfully: true, transcript: "" }] },
     });
     expect(brief).toContain("Build attempt 2 has ended");
     expect(brief).toContain("corbits-code (`corbits`), exited 0; 14 turns, 31 tool calls");
@@ -138,7 +138,7 @@ describe("composeSupervisorBrief", () => {
   });
 
   test("stage 7's forecast is carried for the cost heading when it can be read", () => {
-    const brief = composeSupervisorBrief({ attempt: 2, outcome, archive, forecast: "- **Build:** $1,200", verification: { complete: true, failed: [], targets: [] } });
+    const brief = composeSupervisorBrief({ attempt: 2, outcome, archive, forecast: "- **Build:** $1,200", verification: { complete: true, unverified: [], targets: [] } });
     expect(brief).toContain("## Stage 7 forecast\n- **Build:** $1,200");
   });
 
@@ -148,19 +148,19 @@ describe("composeSupervisorBrief", () => {
       outcome: { ...outcome, exitStatus: null, signal: "SIGTERM", finalText: "", stderrTail: "killed", turns: null, toolCalls: null },
       archive,
       probeSkipped: "No target was started or probed: no start command and port were given when this attempt was recorded.",
-      verification: { complete: false, failed: ["src/index.ts"], targets: [] },
+      verification: { complete: false, unverified: [{ path: "src/index.ts:4", status: "failed", detail: "stub marker: // TODO" }], targets: [] },
     });
     expect(brief).toContain("ended by SIGTERM");
     expect(brief).toContain("no turn reports");
     expect(brief).toContain("(the worker wrote nothing to stdout)");
     expect(brief).toContain("Last lines of stderr\nkilled");
-    expect(brief).toContain("incomplete — not verified: src/index.ts");
+    expect(brief).toContain("  - src/index.ts:4: failed — stub marker: // TODO");
     expect(brief).toContain("no start command and port were given when this attempt was recorded");
     expect(brief).not.toContain("the plan declared none");
   });
 
   test("a long final text keeps its tail, which is where a worker sums up", () => {
-    const brief = composeSupervisorBrief({ attempt: 1, outcome: { ...outcome, finalText: `${"x".repeat(30_000)}END` }, archive, verification: { complete: true, failed: [], targets: [] } });
+    const brief = composeSupervisorBrief({ attempt: 1, outcome: { ...outcome, finalText: `${"x".repeat(30_000)}END` }, archive, verification: { complete: true, unverified: [], targets: [] } });
     expect(brief).toContain("…");
     expect(brief).toContain("END");
     expect(brief.length).toBeLessThan(22_000);

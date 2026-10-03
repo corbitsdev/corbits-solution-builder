@@ -4,7 +4,7 @@
  * (`package-attempt.ts`), or in a sidecar by `publish_workspace`. Nothing
  * here takes a model's word for anything.
  *
- * Two checks, both recorded as `VerificationItem`s with `checkedBy: "tool"`:
+ * Three checks, all recorded as `VerificationItem`s with `checkedBy: "tool"`:
  *
  * - The archive's contents against the manifest. The gzip bytes that will be
  *   uploaded are extracted again into a scratch directory and every file
@@ -18,6 +18,10 @@
  *   never opens is `failed`. A `cli`, `desktop` or other target has no
  *   verifier in this repo and is `inaccessible`, never assumed.
  *
+ * - The quality bar's scan (`quality-scan.ts`): stub markers, placeholder
+ *   content and dropped errors, each a failed item at its path and line, and
+ *   whether a test command exists. The tests are never run here.
+ *
  * What is NOT checked is said as plainly: files past the manifest's cap are
  * not listed and not claimed, and a web probe is an HTTP response check with
  * no browser (its transcript says so).
@@ -28,6 +32,7 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { summarizeVerification, type VerificationItem, type VerificationReport } from "./delivery.js";
+import { qualityItems, scanQuality, type QualityScan } from "./quality-scan.js";
 import { verifyApiTarget, verifyWebTarget } from "./target-verify.js";
 import { classifyTarget, type TargetVerification } from "./targets.js";
 
@@ -62,6 +67,8 @@ export type DeliveryVerificationContent = {
   archiveExtras: number;
   items: VerificationItem[];
   targets: TargetVerification[];
+  /** The quality bar's scan of the archive's files; absent on a manifest written before it. */
+  quality?: QualityScan;
   report: VerificationReport;
 };
 
@@ -194,13 +201,16 @@ export async function verifyArchive(input: {
 }): Promise<DeliveryVerificationContent> {
   const extracted = await extractArchive(input.archiveBytes);
   let compared: { items: VerificationItem[]; extras: number };
+  let quality: QualityScan;
   try {
-    compared = compareArchiveToManifest(input.manifest, await hashTree(extracted, input.exclude));
+    const archive = await hashTree(extracted, input.exclude);
+    compared = compareArchiveToManifest(input.manifest, archive);
+    quality = await scanQuality(extracted, archive.map((entry) => entry.path));
   } finally {
     await rm(extracted, { recursive: true, force: true });
   }
   const probed = await probeTargets(input.probes, input.cwd);
-  const items = [...compared.items, ...probed.items];
+  const items = [...compared.items, ...qualityItems(quality), ...probed.items];
   const checkedAt = new Date();
   return {
     checkedAt: checkedAt.toISOString(),
@@ -209,6 +219,7 @@ export async function verifyArchive(input: {
     archiveExtras: compared.extras,
     items,
     targets: probed.targets,
+    quality,
     report: summarizeVerification(input.manifestNodeId, items, checkedAt),
   };
 }
