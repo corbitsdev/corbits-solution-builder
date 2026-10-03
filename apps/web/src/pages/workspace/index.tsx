@@ -1014,11 +1014,14 @@ export function StageWorkspace({
           <span className="inference-flame" role="img" aria-label={busy ? "Inference running" : "Inference idle"}>
             <Flame aria-hidden="true" />
           </span>
-          <span className="inline-note">
-            Inference:{" "}
-            {activeModel ? `${activeModel.providerLabel} · ${activeModel.canonicalName}` : "Loading…"}
-          </span>
+          <label className="stage-model-label" htmlFor="stage-inference">
+            Inference
+          </label>
+          {/* The select is the one place the running model is named: it
+              shows the running row, or, when no Settings row matches it,
+              the running model itself as the unchosen first option. */}
           <select
+            id="stage-inference"
             aria-label="Switch this stage's inference"
             title="The provider and model rows from Settings, in their order. Choosing one makes it the default there and switches this stage to it."
             disabled={modelSwitch.switching || inferenceProviders === null}
@@ -1029,7 +1032,11 @@ export function StageWorkspace({
             }}
           >
             <option value="" disabled>
-              {modelSwitch.switching ? "Switching…" : "Switch inference…"}
+              {modelSwitch.switching
+                ? "Switching…"
+                : activeModel
+                  ? `${activeModel.providerLabel} · ${activeModel.canonicalName}`
+                  : "Loading…"}
             </option>
             {inferenceChoices.map((option) => (
               <option key={option.providerRowId} value={option.providerRowId}>

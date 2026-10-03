@@ -274,6 +274,8 @@ form:has(> div > textarea) textarea:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 2px;
+  min-width: 0;
+  max-width: 100%;
   padding: 2px 4px 2px 6px;
   margin: -2px 0 -2px -6px;
   border: 0;
@@ -288,6 +290,14 @@ form:has(> div > textarea) textarea:focus-visible {
 .wordmark-menu:hover,
 .wordmark-menu[data-state="open"] {
   background: var(--wb-muted);
+}
+
+/* A flex container never draws an ellipsis itself; the title's own box does. */
+.wordmark-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wordmark-menu svg {
@@ -3164,7 +3174,39 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  min-height: 40px;
+  min-width: 0;
+  /* The bar's own gutter, so the flame sits under the back arrow. */
   padding: var(--space-1) var(--space-4);
+  border-bottom: 1px solid var(--wb-border);
+  background: var(--wb-background);
+}
+
+.stage-model-label {
+  font-family: var(--wb-font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--wb-muted-foreground);
+  cursor: pointer;
+}
+
+.stage-model-row select {
+  height: 28px;
+  min-width: 0;
+  max-width: min(360px, 100%);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--radius-control);
+  background: var(--wb-background);
+  color: var(--wb-foreground);
+  font-size: 0.8125rem;
+  text-overflow: ellipsis;
+  transition: border-color 150ms var(--ease-out, ease);
+}
+
+.stage-model-row select:hover:not(:disabled) {
+  border-color: var(--wb-border-strong);
 }
 
 /* Inference activity (#87): the flame in the inference row burns while a
@@ -3202,7 +3244,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   flex-wrap: wrap;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-4);
-  margin: 0 var(--space-4);
+  margin: var(--space-2) var(--space-4) 0;
   border: 1px solid var(--wb-border);
   border-radius: 8px;
   background: var(--wb-card);
