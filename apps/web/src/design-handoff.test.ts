@@ -34,14 +34,14 @@ describe("designAsText", () => {
     const long = `<!doctype html><html><body><p>${"copy ".repeat(4_000)}</p></body></html>`;
     const text = designAsText(long);
     expect(text.length).toBeLessThan(DESIGN_TEXT_CAP + 120);
-    expect(text).toEndWith("[… the design's text continues; the full mockup is the stage 4 artifact]");
+    expect(text).toEndWith("[… the design's text continues; the full mockup is the GUI design artifact]");
   });
 });
 
 describe("designHandoff", () => {
   test("hands an HTML design over as its text in a labelled block, never as markup", () => {
     const handoff = designHandoff(MOCKUP);
-    expect(handoff).toStartWith("The approved design is an HTML mockup, on record as the stage 4 artifact. Its text, for reference:\n\nIts screens, which a slide may name as (screen: <name>): phone.\n\n```text\n# Mockup — phone companion");
+    expect(handoff).toStartWith("The approved design is an HTML mockup, on record as the GUI design artifact. Its text, for reference:\n\nIts screens, which a slide may name as (screen: <name>): phone.\n\n```text\n# Mockup — phone companion");
     expect(handoff).toEndWith("\n```");
     expect(handoff).not.toContain("<section");
     expect(handoff).not.toContain("<!doctype");

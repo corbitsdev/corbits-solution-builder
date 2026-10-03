@@ -18,6 +18,7 @@
  * and each render block a focused component (`workspace-chrome.tsx`). What
  * stays here is the wiring between them and the stage-specific composition.
  */
+import { toast } from "sonner";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   api,
@@ -58,6 +59,8 @@ import { useWithdrawnTurns } from "./use-withdrawn-turns.ts";
 import { useSpecialistRunState } from "./use-specialist-run-state.ts";
 import { specialistBusy } from "../../specialist-run-state.ts";
 import { useOpeningDispatch } from "./use-opening-dispatch.ts";
+import { useMaterialDispatch } from "./use-material-dispatch.ts";
+import { splitMaterialMail } from "./attached-material.ts";
 import { useProductGuide, useStageEvaluator } from "./use-advisory.ts";
 import { guideStep } from "./product-guide.ts";
 import { useProjectArtifacts } from "./use-project-artifacts.ts";
@@ -238,7 +241,10 @@ export function StageWorkspace({
     stage,
     detail.nodes,
     thread.messages,
-    (body) => {
+    (stopped) => {
+      // A stopped material mail (#607) is not something the person typed:
+      // nothing of it goes back into the box.
+      const body = splitMaterialMail(stopped) ? "" : stopped;
       setComposer(body);
       setStopSeed({ text: body, at: Date.now() });
     },
@@ -589,6 +595,36 @@ export function StageWorkspace({
     setStageDocuments([]);
   }, [stage, detail.project.id]);
 
+  const addMaterial = async (files: File[]) => {
+    try {
+      await api.attachMaterial(detail.project.id, files);
+      void refreshWorkflow();
+    } catch (cause) {
+      toast.error(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    }
+  };
+  // A file attached once the stage has opened is mailed to its specialist
+  // (#607): the opening that would have carried it has already gone. The
+  // refresh above is what brings the new file into `detail.nodes`.
+  const materialDispatch = useMaterialDispatch({
+    tenantId,
+    stage,
+    nodes: detail.nodes,
+    agentAddress,
+    addresses: agent.addresses,
+    messages: thread.messages,
+    loadedFor: thread.loadedFor,
+    busy: busy || sending,
+    revising: draftMessage && stage <= 7 && !isHtmlDocument(draftMessage.body) ? draftMessage.body : null,
+    reloadThread: loadThread,
+  });
+  // Said where a refused attachment is said: the file is kept, and the
+  // specialist has not been sent it.
+  const attachNote =
+    (materialDispatch.error
+      ? `The attached material is saved, and could not be sent to the ${stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title.toLowerCase() : "specialist"}: ${materialDispatch.error}`
+      : null);
+
   const send = async (body: string) => {
     if (!agentAddress || body.trim().length === 0) return;
     // A requirements request is the requirements author's (#407): it
@@ -795,9 +831,8 @@ export function StageWorkspace({
       events={events}
       who={stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title : "Specialist"}
       placeholder={`Message the ${stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title.toLowerCase() : "specialist"}…`}
-      onAttach={(files) => {
-        void api.attachMaterial(detail.project.id, [...files]).then(() => void refreshWorkflow());
-      }}
+      onAttach={(files) => void addMaterial([...files])}
+      rows={attachNote ? <p className="warning-note" role="alert">{attachNote}</p> : null}
       {...(draftRefs ? { draftRefs } : {})}
       onOpenVersion={artifacts.openVersion}
     />
@@ -805,9 +840,6 @@ export function StageWorkspace({
 
   return (
     <div className="stage-view">
-      {workflowView?.done ? (
-        <Banner tone="okay" title="This project is delivered — stage 9's approval was recorded and the workflow has finished." />
-      ) : null}
 
       {openingFailed ? (
         <Banner
@@ -998,6 +1030,7 @@ export function StageWorkspace({
               <AudiencePackages
                 detail={detail}
                 tenantId={tenantId}
+                messages={foldedMessages}
                 onChanged={() => {
                   void refreshWorkflow();
                   void loadThread();
@@ -1032,9 +1065,8 @@ export function StageWorkspace({
           stageEvents={events}
           onSendHold={openSendBack}
           popover={sendBackPopover}
-          onAttach={(files) => {
-            void api.attachMaterial(detail.project.id, [...files]).then(() => void refreshWorkflow());
-          }}
+          onAttach={(files) => void addMaterial([...files])}
+          attachNote={attachNote}
         />
       ) : null}
 
@@ -1109,11 +1141,6 @@ export function StageWorkspace({
       ) : null}
 
       {agentAddress && DOCUMENT_STAGES.has(stage) && draftMessage && viewedStage === null && artifacts.activeNode && artifacts.selected ? (
-        <>
-          {stage === 7 ? (
-            <EstimateView body={draftMessage.body} freeze={workflowView?.freeze ?? null} />
-          ) : null}
-          {stage === 7 ? <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} /> : null}
           <StageDocument
             node={artifacts.activeNode}
             versions={artifacts.selected.versions}
@@ -1138,10 +1165,8 @@ export function StageWorkspace({
               const quoted = quotes.map((entry) => `> ${entry.quote}`).join("\n");
               void send(quoted ? `${quoted}\n\n${message}` : message);
             }}
-            onAddMaterial={async (files) => {
-              await api.attachMaterial(detail.project.id, files);
-              void refreshWorkflow();
-            }}
+            onAddMaterial={addMaterial}
+            attachNote={attachNote}
             onSubmit={() => void approve()}
             soloApproval={detail.soloApproval}
             // A settled version with no reply in flight can be approved while
@@ -1168,8 +1193,17 @@ export function StageWorkspace({
                   }
                 : null
             }
+            // Cost approval's two leads, each in the pane it is about (#619):
+            // the summary heads the Cost document it is read from, and only
+            // that document; the target question sits with the chat's other
+            // questions, above the box.
+            documentLead={
+              stage === 7 && artifacts.isStageDraft ? (
+                <EstimateView body={artifacts.activeContent} freeze={workflowView?.freeze ?? null} />
+              ) : null
+            }
+            composerLead={stage === 7 ? <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} /> : null}
           />
-        </>
       ) : null}
 
       {agentAddress && stage === 9 ? (
@@ -1340,7 +1374,7 @@ export function ProductRequirements({
   return (
     <Screen
       title="Product requirements"
-      description="What stages 1 to 4 agreed, gathered into the one document the plan is written against. The plan cites its ids."
+      description="What the stages through GUI design agreed, gathered into the one document the plan is written against. The plan cites its ids."
       status={<StateLabel tone="info">Version {node.version}</StateLabel>}
       tight
     >
