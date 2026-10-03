@@ -395,7 +395,8 @@ export function createWorkflowRunTrigger(deps: TriggerWorkflowRunDeps) {
       cc: undefined,
       date: new Date(),
       messageId,
-      subject: undefined,
+      // A caller's line break would end the header and start another.
+      subject: body.subject?.replace(/[\r\n]+/g, " "),
       inReplyTo:
         body.inReplyTo !== undefined && isMessageId(body.inReplyTo)
           ? body.inReplyTo

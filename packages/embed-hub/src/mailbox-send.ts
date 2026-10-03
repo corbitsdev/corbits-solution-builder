@@ -140,13 +140,13 @@ export function createMailboxDeliver(
       const content = frameBody(message.raw);
       // The send route stamps In-Reply-To/References on the frame; the run's
       // connector router continues its thread only on those (#62).
-      const { inReplyTo, references } = buildMessageHeaders(parseHeaderSection(message.raw).headers);
+      const { subject, inReplyTo, references } = buildMessageHeaders(parseHeaderSection(message.raw).headers);
       for (const runId of runs) {
         const path = `/api/tenants/${encodeURIComponent(tenantId)}/workflows/${encodeURIComponent(runId)}/mail`;
         const response = await opts.app.request(path, {
           method: "POST",
           headers,
-          body: JSON.stringify({ content, inReplyTo, references }),
+          body: JSON.stringify({ content, subject, inReplyTo, references }),
         });
         if (!response.ok) {
           const detail = await response.text().catch(() => "");
