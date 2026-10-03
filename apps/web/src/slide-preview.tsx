@@ -16,7 +16,7 @@
  */
 import { useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { lookOf, type Deck, type DeckLook } from "@solutions-builder/app/deck";
+import { lookOf, preparedFor, type Deck, type DeckLook } from "@solutions-builder/app/deck";
 import { toBase64 } from "./base64.ts";
 
 export type PreviewSlide =
@@ -24,7 +24,7 @@ export type PreviewSlide =
   | { readonly kind: "item"; readonly title: string; readonly lines: readonly string[]; readonly page: number; readonly image?: Uint8Array };
 
 /** The renderer's cover line, verbatim, so the preview and the file agree. */
-export const COVER_NOTE = "The cost and time figures in this document are placeholders.";
+export const COVER_NOTE = "Cost is estimated after the build plan.";
 
 /** The slides in the order `renderDeck` writes them, with the page each footer carries. */
 export function previewSlides(deck: Deck): PreviewSlide[] {
@@ -36,7 +36,7 @@ export function previewSlides(deck: Deck): PreviewSlide[] {
     {
       kind: "cover",
       title: deck.projectTitle,
-      subtitle: `Prepared for ${deck.audience} · ${deck.role}`,
+      subtitle: preparedFor(deck),
       note: COVER_NOTE,
       ...picture("cover"),
     },

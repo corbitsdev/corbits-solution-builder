@@ -28,7 +28,7 @@ describe("the slides preview", () => {
     expect(slides[0]).toEqual({
       kind: "cover",
       title: "Workout Log",
-      subtitle: "Prepared for Finance · cfo",
+      subtitle: "Prepared for Finance · Cfo",
       note: COVER_NOTE,
     });
     expect(slides[1]).toEqual({ kind: "item", title: "The problem", lines: ["Sets are lost between the rack and the phone"], page: 2 });

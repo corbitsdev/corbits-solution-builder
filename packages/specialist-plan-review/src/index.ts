@@ -70,7 +70,7 @@ export const PANEL_ROLES = PANEL_SPECIALTIES.map((specialty) =>
 
 ${PLATFORM_RULES}
 
-You are the Senior engineer (${specialty.title}) reviewing the stage-6 build
+You are the Senior engineer (${specialty.title}) reviewing the build
 plan. You are one of four independent principals. You review your specialty
 only: say nothing about the others' territory, and do not summarise the plan
 back.

@@ -14,12 +14,12 @@ export const requirementsAuthor = role({
 
 ${PLATFORM_RULES}
 
-You are the Requirements author at stage 6. Write PRODUCT_REQUIREMENTS.md: the
+You are the Requirements author at Build plan. Write PRODUCT_REQUIREMENTS.md: the
 single document that says what is being built and how anyone will know it is
 done. The Architect writes the build plan against it, the panel reviews the
 plan against it, and the build is verified against it. Nothing in it is new:
 every line is drawn from the problem brief, the constraints, the chosen
-approach and the design that were approved at stages 1 to 4.
+approach and the design that were approved before it.
 
 Rules that apply to you in particular:
 - Every requirement has a stable id and is one testable sentence: FR-1, FR-2…
@@ -60,7 +60,7 @@ Produce a requirements document with exactly these headings, after "In short":
 ## Source versions
 
 Under "Source versions", list the approved documents you drew on, by title and
-stage, so a reader can check any line against where it came from.`,
+the stage's name, so a reader can check any line against where it came from.`,
 });
 
 export const architect = role({
@@ -76,9 +76,9 @@ export const architect = role({
 
 ${PLATFORM_RULES}
 
-You are the Architect at stage 6. Write BUILD_PLAN.md for the code builder, not
-for a reader who needs persuading. It must be specific enough that construction
-never has to re-litigate stages 1 to 4.
+You are the Architect at Build plan. Write BUILD_PLAN.md for the code builder,
+not for a reader who needs persuading. It must be specific enough that
+construction never has to re-litigate what was approved before it.
 
 You are handed the product requirements written this stage beside the approved
 inputs, led by a block headed "## Requirements (authoritative ids)". Those are

@@ -17,7 +17,7 @@
  */
 import type { ArtifactKind } from "./artifacts.js";
 import { ARTIFACT_WRITE_RULE, type AgentRole } from "./kit.js";
-import type { Stage } from "./ledger.js";
+import { STAGE_TITLES, type Stage } from "./ledger.js";
 import { skillTextFor } from "./seed-kit.js";
 
 /** CL-8719: the `http` provider every specialist's `@corbits/artifacts/sidecar-bundle`
@@ -217,7 +217,7 @@ export type SpecialistRoleSpec = {
  *  it under, both fixed per role. Which project it belongs to is the run's
  *  own tenant, never something the prompt names or the model supplies. */
 function stageDocumentNote(stage: Stage, kind: ArtifactKind): string {
-  return `## Stage document\n\nYou are the stage ${stage} specialist. Your document is recorded under the kind \`${kind}\`; pass that kind to artifact_write when you create it.`;
+  return `## Stage document\n\nYou are the ${STAGE_TITLES[stage]} specialist. Your document is recorded under the kind \`${kind}\`; pass that kind to artifact_write when you create it.`;
 }
 
 /** Stages whose output is one artifact the specialist writes, so its reply
