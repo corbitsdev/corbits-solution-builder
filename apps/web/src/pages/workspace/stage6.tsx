@@ -5,7 +5,6 @@
  * `.stage-inner` / `.doc` paper as the other stages.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
 import { Menu, MenuContent, MenuItem, MenuTrigger } from "@corbits/react-ui";
 import { ChevronDown, Users } from "lucide-react";
 import { api, ApiFailure, STAGE6_REQUIREMENTS_ROLE_KEY as REQUIREMENTS_ROLE_KEY, type ArtifactNode } from "../../client.js";
@@ -85,7 +84,7 @@ export function Stage6Panel({
   conversation,
   reader,
   pane,
-  toolsSlot = null,
+  planDocument = null,
 }: {
   tenantId: string;
   projectId: string;
@@ -124,8 +123,8 @@ export function Stage6Panel({
   reader: ReactNode;
   /** When false, the plan's StageDocument already fills the right pane. */
   pane: boolean;
-  /** A place in the plan's own toolbar for the panel's request control. */
-  toolsSlot?: HTMLElement | null;
+  /** The plan's document, given the panel's request control for its toolbar. */
+  planDocument?: ((reviewMenu: ReactNode) => ReactNode) | null;
 }) {
   const [requirements, setRequirements] = useState<Stage6RoleState>(STAGE6_IDLE_ROLE);
   const [reviews, setReviews] = useState<Record<string, Stage6RoleState>>({});
@@ -421,32 +420,29 @@ export function Stage6Panel({
             {failure.error}
           </Banner>
         ))}
-        {toolsSlot
-          ? createPortal(
-              <Menu>
-                <MenuTrigger asChild>
-                  <Button variant="ghost" disabled={!reviewInput}>
-                    <Users aria-hidden="true" />
-                    Request review
-                    <ChevronDown aria-hidden="true" />
-                  </Button>
-                </MenuTrigger>
-                <MenuContent align="end">
-                  {STAGE6_PANEL_ROLES.map((role) => {
-                    const state = reviews[role.key] ?? STAGE6_IDLE_ROLE;
-                    const working = state.status === "starting" || state.status === "waiting";
-                    return (
-                      <MenuItem key={role.key} disabled={working} onSelect={() => requestReview(role.key)}>
-                        {role.label} review
-                        {working ? " · reviewing…" : state.status === "done" ? " · ask again" : ""}
-                      </MenuItem>
-                    );
-                  })}
-                </MenuContent>
-              </Menu>,
-              toolsSlot,
-            )
-          : null}
+        {planDocument?.(
+          <Menu>
+            <MenuTrigger asChild>
+              <Button variant="ghost" disabled={!reviewInput}>
+                <Users aria-hidden="true" />
+                Request review
+                <ChevronDown aria-hidden="true" />
+              </Button>
+            </MenuTrigger>
+            <MenuContent align="end">
+              {STAGE6_PANEL_ROLES.map((role) => {
+                const state = reviews[role.key] ?? STAGE6_IDLE_ROLE;
+                const working = state.status === "starting" || state.status === "waiting";
+                return (
+                  <MenuItem key={role.key} disabled={working} onSelect={() => requestReview(role.key)}>
+                    {role.label} review
+                    {working ? " · reviewing…" : state.status === "done" ? " · ask again" : ""}
+                  </MenuItem>
+                );
+              })}
+            </MenuContent>
+          </Menu>,
+        )}
       </>
     );
   }

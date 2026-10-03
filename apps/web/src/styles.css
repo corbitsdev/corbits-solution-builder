@@ -1529,12 +1529,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   font-size: 0.8125rem;
 }
 
-/* A slot another component portals its controls into: laid out as if the
-   controls were the toolbar's own. */
-.document-tools-slot {
-  display: contents;
-}
-
 /* Every control in a document's header is one size: 32px tall, the same
    inset, the same 14px glyph before its label. Buttons, selects and the
    changes toggle came in at three heights and two type sizes. */

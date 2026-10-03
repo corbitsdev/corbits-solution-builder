@@ -19,7 +19,7 @@
  * stays here is the wiring between them and the stage-specific composition.
  */
 import { isStageOpening } from "./composed-mail.ts";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import {
   api,
   ApiFailure,
@@ -446,8 +446,6 @@ export function StageWorkspace({
   // have been.
   const [routedEvents, setRoutedEvents] = useState<StageEvent[]>([]);
   const [requirementsAsk, setRequirementsAsk] = useState<{ body: string; at: number } | null>(null);
-  // Where stage 6's panel puts its request control: the plan's own toolbar.
-  const [stage6Tools, setStage6Tools] = useState<HTMLElement | null>(null);
   useEffect(() => {
     setRoutedEvents([]);
     setRequirementsAsk(null);
@@ -886,11 +884,9 @@ export function StageWorkspace({
       </div>
     ) : null;
 
-  // Stage 6's documents beside the plan: the plan's toolbar holds the
-  // panel's request control; the requirements and each review can be handed
+  // A requirements document or a review open beside the plan can be handed
   // to the architect as a message (#345).
-  const stage6DocumentTools = () => {
-    if (artifacts.isStageDraft) return <span ref={setStage6Tools} className="document-tools-slot" />;
+  const sendToArchitect = () => {
     const node = artifacts.activeNode;
     const content = artifacts.activeContent;
     if (!node || !content) return null;
@@ -908,6 +904,76 @@ export function StageWorkspace({
       </Button>
     );
   };
+
+  // The stage's document with its gate. Stage 6's panel renders it, so the
+  // plan's toolbar can hold the panel's review menu.
+  const activeNode = artifacts.activeNode;
+  const selectedTab = artifacts.selected;
+  const stageDocument =
+    agentAddress && DOCUMENT_STAGES.has(stage) && draftMessage && viewedStage === null && activeNode && selectedTab
+      ? (reviewMenu: ReactNode) => (
+          <>
+            {stage === 7 ? (
+              <EstimateView body={draftMessage.body} freeze={workflowView?.freeze ?? null} />
+            ) : null}
+            {stage === 7 ? <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} /> : null}
+            <StageDocument
+              node={activeNode}
+              versions={selectedTab.versions}
+              content={artifacts.activeContent}
+              tenantId={tenantId}
+              turns={turns}
+              openQuestion={
+                guidance.question
+                  ? { text: guidance.question.text, ordinal: progress?.ordinal ?? null, total: progress?.total ?? null }
+                  : null
+              }
+              evaluation={
+                stage === 1 && evaluator.status === "verdict"
+                  ? { ready: evaluator.verdict.ready, notes: [...evaluator.verdict.notes] }
+                  : null
+              }
+              advisory={stage === 1 ? <EvaluatorStance evaluator={evaluator} /> : null}
+              {...(draftRefs ? { draftRefs } : {})}
+              onSelectVersion={artifacts.openVersion}
+              onRevise={(message, quotes) => {
+                artifacts.selectVersion(null);
+                const quoted = quotes.map((entry) => `> ${entry.quote}`).join("\n");
+                void send(quoted ? `${quoted}\n\n${message}` : message);
+              }}
+              onAddMaterial={async (files) => {
+                await api.attachMaterial(detail.project.id, files);
+                void refreshWorkflow();
+              }}
+              onSubmit={() => void approve()}
+              soloApproval={detail.soloApproval}
+              canSubmit={approveAllowed && artifacts.isStageDraft && !superseded}
+              busy={sending ? "draft" : approving || workflow.refreshingAfterAction ? "submit" : null}
+              draftOpen={draftOpen}
+              newer={artifacts.newerVersion}
+              live={null}
+              seed={stopSeed}
+              withdrawnIds={withdrawnIds}
+              pending={busy}
+              onStop={() => void stopTurn()}
+              onSendHold={openSendBack}
+              composerPopover={sendBackPopover}
+              events={events}
+              strip={stripEl}
+              tools={stage !== 6 ? null : artifacts.isStageDraft ? reviewMenu : sendToArchitect()}
+              promote={
+                superseded
+                  ? {
+                      label: `${selectedTab.label} v${activeNode.position} · superseded by v${selectedTab.versions.length}`,
+                      run: () => void promote(),
+                      busy: promoting,
+                    }
+                  : null
+              }
+            />
+          </>
+        )
+      : null;
 
   const conversation = (
     <StageConversation
@@ -1228,7 +1294,7 @@ export function StageWorkspace({
           conversation={conversation}
           reader={reader}
           pane={!(draftMessage && artifacts.activeNode && artifacts.selected)}
-          toolsSlot={stage6Tools}
+          planDocument={stageDocument}
         />
       ) : null}
 
@@ -1255,68 +1321,7 @@ export function StageWorkspace({
         </StagePanes>
       ) : null}
 
-      {agentAddress && DOCUMENT_STAGES.has(stage) && draftMessage && viewedStage === null && artifacts.activeNode && artifacts.selected ? (
-        <>
-          {stage === 7 ? (
-            <EstimateView body={draftMessage.body} freeze={workflowView?.freeze ?? null} />
-          ) : null}
-          {stage === 7 ? <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} /> : null}
-          <StageDocument
-            node={artifacts.activeNode}
-            versions={artifacts.selected.versions}
-            content={artifacts.activeContent}
-            tenantId={tenantId}
-            turns={turns}
-            openQuestion={
-              guidance.question
-                ? { text: guidance.question.text, ordinal: progress?.ordinal ?? null, total: progress?.total ?? null }
-                : null
-            }
-            evaluation={
-              stage === 1 && evaluator.status === "verdict"
-                ? { ready: evaluator.verdict.ready, notes: [...evaluator.verdict.notes] }
-                : null
-            }
-            advisory={stage === 1 ? <EvaluatorStance evaluator={evaluator} /> : null}
-            {...(draftRefs ? { draftRefs } : {})}
-            onSelectVersion={artifacts.openVersion}
-            onRevise={(message, quotes) => {
-              artifacts.selectVersion(null);
-              const quoted = quotes.map((entry) => `> ${entry.quote}`).join("\n");
-              void send(quoted ? `${quoted}\n\n${message}` : message);
-            }}
-            onAddMaterial={async (files) => {
-              await api.attachMaterial(detail.project.id, files);
-              void refreshWorkflow();
-            }}
-            onSubmit={() => void approve()}
-            soloApproval={detail.soloApproval}
-            canSubmit={approveAllowed && artifacts.isStageDraft && !superseded}
-            busy={sending ? "draft" : approving || workflow.refreshingAfterAction ? "submit" : null}
-            draftOpen={draftOpen}
-            newer={artifacts.newerVersion}
-            live={null}
-            seed={stopSeed}
-            withdrawnIds={withdrawnIds}
-            pending={busy}
-            onStop={() => void stopTurn()}
-            onSendHold={openSendBack}
-            composerPopover={sendBackPopover}
-            events={events}
-            strip={stripEl}
-            tools={stage === 6 ? stage6DocumentTools() : null}
-            promote={
-              superseded
-                ? {
-                    label: `${artifacts.selected.label} v${artifacts.activeNode.position} · superseded by v${artifacts.selected.versions.length}`,
-                    run: () => void promote(),
-                    busy: promoting,
-                  }
-                : null
-            }
-          />
-        </>
-      ) : null}
+      {stage === 6 ? null : stageDocument?.(null)}
 
       {agentAddress && stage === 9 ? (
         <StagePanes strip={stripEl} conversation={conversation} busy={busy}>
