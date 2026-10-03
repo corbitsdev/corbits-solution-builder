@@ -13,7 +13,7 @@ import {
   Switch,
   type ChatMessage,
 } from "@corbits/react-ui";
-import { ArrowDown, ArrowUp, Check, Plus, Send } from "lucide-react";
+import { ArrowDown, ArrowUp, Plus, Send } from "lucide-react";
 import { Markdown } from "../../markdown.jsx";
 import { Dictated } from "../../dictation.jsx";
 import { approachName, sectionsIn } from "@solutions-builder/app/document";
@@ -21,6 +21,7 @@ import { agentFor } from "@solutions-builder/app/kit";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { markChanges } from "../../revisions.js";
 import { Button, documentName, CopyButton } from "../../components.jsx";
+import { ApproveControl } from "./approve-control.tsx";
 import { DocumentExportMenu } from "../../document-export.jsx";
 import { BinaryFile, isDataUrl } from "../../binary-file.tsx";
 import { SpecialistTurn, WorkingLabel, type TurnNote } from "./thread.jsx";
@@ -535,28 +536,25 @@ export function StageDocument({
             </div>
           ) : canSubmit ? (
             <div className="stage-action composer-approve">
-              <span className="composer-approve-lead">
-                <span>{soloApproval ? "Happy with it?" : "Nothing more to say?"}</span>
-                {advisory}
-              </span>
+              <span className="composer-approve-lead">{advisory}</span>
               <span
                 data-tour="submit"
                 data-ready={evaluation?.ready ? "true" : undefined}
                 className={evaluation?.ready ? "is-ready approve" : "approve"}
               >
-                <Button
+                <ApproveControl
+                  label={soloApproval ? "Approve" : "Send for approval"}
+                  evaluatorPending={Boolean(advisory) && !evaluation?.ready}
+                  busy={busy === "submit"}
                   variant="ghost"
-                  loading={busy === "submit"}
-                  onClick={() => {
+                  lead={soloApproval ? "Happy with it?" : "Nothing more to say?"}
+                  onApprove={() => {
                     // Quoted passages are for the stage being sent for
                     // approval; once it is, nothing is left to restore.
                     clearQuotedDraft(tenantId, node.stage);
                     onSubmit();
                   }}
-                >
-                  <Check aria-hidden="true" />
-                  {soloApproval ? "Approve and continue" : "Send for approval"}
-                </Button>
+                />
               </span>
             </div>
           ) : null}

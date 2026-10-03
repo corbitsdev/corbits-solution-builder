@@ -313,7 +313,8 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
-  max-width: 92%;
+  max-width: 85%;
+  align-self: flex-start;
   /* A flex item's floor is its longest unbreakable line, so a code block
      with long lines widened a message past the column and, for a person's
      right-aligned message, off the left edge (#317). The bubble holds the
@@ -345,6 +346,14 @@
 .conv .msg .bubble pre {
   max-width: 100%;
   overflow-x: auto;
+}
+
+/* The chat reads as a back-and-forth: each turn takes at most 85% of the
+   column, the person's on the right and the specialist's on the left. The
+   split view's thread comes from the shared chat component, whose own cap
+   is wider than this column. */
+.thread-turns :is(.items-start, .items-end) > div {
+  max-width: 85%;
 }
 
 .conv .msg.you {

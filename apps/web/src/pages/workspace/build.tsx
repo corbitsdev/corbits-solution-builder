@@ -23,6 +23,7 @@ import { api, ApiFailure, type ArtifactNode, type BuildAttempt, type BuildPrompt
 import type { ChatMessage } from "../../stage-mail.ts";
 import type { Freeze } from "@solutions-builder/app/project-workflow/contracts";
 import { Banner, Button, StateLabel } from "../../components.jsx";
+import { ApproveControl } from "./approve-control.tsx";
 import { Markdown } from "../../markdown.jsx";
 import { agentFor } from "@solutions-builder/app/kit";
 import type { StageEvent } from "./stage-events.ts";
@@ -423,9 +424,7 @@ export function BuildPanel({
               <Button variant="destructive" loading={busy === "cancel"} disabled={!cancellable || busy !== null} onClick={() => cancellable && void cancel(cancellable.attempt)}>
                 Cancel the build attempt
               </Button>
-              <Button variant="primary" loading={approving} disabled={!canApprove || !address} onClick={onApprove}>
-                Approve and continue
-              </Button>
+              <ApproveControl label="Approve" busy={approving} disabled={!canApprove || !address} onApprove={onApprove} />
             </div>
             {attempts.length > 0 ? (
               <div className="ev">
