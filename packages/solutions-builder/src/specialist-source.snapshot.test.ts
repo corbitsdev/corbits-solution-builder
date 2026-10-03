@@ -28,7 +28,6 @@ describe("specialistEntrySource renders each role byte-identically", () => {
           stage,
           source: { provider: "openai", model: "gpt-5.5" },
           role,
-          roleKey,
           artifactTools,
         });
         expect(rendered).toMatchSnapshot();

@@ -1,3 +1,4 @@
+import { decodeEntities } from "./html-entities.ts";
 import { screenNamesOf } from "./mockup-shots.ts";
 import { isHtmlDocument } from "./pages/workspace/guidance.ts";
 
@@ -38,15 +39,6 @@ export function splitHandoff(text: string): { readonly lead: string; readonly at
 
 /** How much of a design's text goes into a mail: enough for every screen's copy, not a whole product's. */
 export const DESIGN_TEXT_CAP = 12_000;
-
-const NAMED_ENTITIES: Readonly<Record<string, string>> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", mdash: "—", ndash: "–", hellip: "…", rsquo: "’", lsquo: "‘", rdquo: "”", ldquo: "“" };
-
-function decodeEntities(text: string): string {
-  return text
-    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => String.fromCodePoint(Number.parseInt(hex, 16)))
-    .replace(/&#(\d+);/g, (_, dec: string) => String.fromCodePoint(Number(dec)))
-    .replace(/&([a-z]+);/gi, (whole, name: string) => NAMED_ENTITIES[name.toLowerCase()] ?? whole);
-}
 
 /**
  * The readable text of an HTML document, as Markdown: `<title>` and

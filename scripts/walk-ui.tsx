@@ -15,7 +15,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { ComponentProps, ReactNode } from "react";
 import type { ChatMessage } from "@corbits/react-ui";
 import { GuideDock } from "../apps/web/src/components.js";
-import { StageDocument } from "../apps/web/src/pages/workspace.js";
+import { StageDocument } from "../apps/web/src/pages/workspace/document.jsx";
 import { ArtifactStrip, VersionStrip } from "../apps/web/src/pages/workspace/artifact-strip.jsx";
 import { ArtifactGraph } from "../apps/web/src/pages/graph.js";
 import { AppBar } from "../apps/web/src/app.js";

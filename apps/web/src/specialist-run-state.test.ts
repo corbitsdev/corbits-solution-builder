@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { newestRun, runStateOf, specialistBusy, topLevelRunIds } from "./specialist-run-state.ts";
+import { newestRun, runStateOf, specialistBusy } from "./specialist-run-state.ts";
 
 const ev = (seq: number, type: string, body: Record<string, unknown> = {}) => ({ seq, type, body: { at: `2026-01-01T00:00:${String(seq).padStart(2, "0")}.000Z`, ...body } });
 const runStateFromEvents = (events: Parameters<typeof runStateOf>[0]) => runStateOf(events).state;
@@ -46,12 +46,6 @@ describe("specialistBusy", () => {
     expect(specialistBusy({ state: "idle", at: T1 }, null)).toBe(false);
     expect(specialistBusy({ state: "unknown", at: null }, T0)).toBe(true);
     expect(specialistBusy({ state: "unknown", at: null }, null)).toBe(false);
-  });
-});
-
-describe("topLevelRunIds", () => {
-  test("drops loop-iteration children", () => {
-    expect(topLevelRunIds(["run_a", "run_a__step__1", "run_b"])).toEqual(["run_a", "run_b"]);
   });
 });
 

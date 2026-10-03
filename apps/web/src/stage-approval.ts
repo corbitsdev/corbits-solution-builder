@@ -524,9 +524,8 @@ export type RecordAudienceVoteResult = { readonly ok: true } | { readonly ok: fa
 
 /**
  * Records one stakeholder's own proceed/revise/reject as the loop's own
- * `project.decision` `audience` signal (CL-8870) -- the mail-agent-shaped
- * replacement for the deleted `recordAudienceDecision` artifact-metadata
- * write. Polls (same bounds as the other stage decisions) until the
+ * `project.decision` `audience` signal (CL-8870). Polls (same bounds as the
+ * other stage decisions) until the
  * workflow's own view shows this exact `decisionId` recorded against that
  * audience, or a refusal for it lands.
  */

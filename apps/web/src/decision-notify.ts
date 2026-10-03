@@ -36,6 +36,7 @@ import type { Transport } from "@intx/hub-client";
 import { APPROVAL_RESOURCE, grantHolders } from "@solutions-builder/installer";
 import type { Wait } from "./client.ts";
 import { createHubTransport } from "./hub.ts";
+import { mailboxPath } from "./stage-mail.ts";
 
 export type NotifiableDecision = Omit<Wait, "projectTitle">;
 
@@ -52,10 +53,6 @@ const ADDRESS = /^[^\s@]+@[^\s@]+$/;
 
 function markerFor(id: string): string {
   return `[decision:${id}]`;
-}
-
-function mailboxPath(tenantId: string): string {
-  return `/api/tenants/${encodeURIComponent(tenantId)}/mailbox/me/inbox`;
 }
 
 /**

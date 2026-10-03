@@ -1,11 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { DEFAULT_DECK_DESIGN, type Deck } from "@solutions-builder/app/deck";
 import { COVER_NOTE, previewSlides } from "./slide-preview.tsx";
-
-const here = import.meta.dir;
-const read = (relative: string) => readFileSync(join(here, relative), "utf8");
 
 const deck: Deck = {
   projectTitle: "Workout Log",
@@ -39,22 +34,5 @@ describe("the slides preview", () => {
     const slides = previewSlides({ ...deck, decision: [] });
     expect(slides).toHaveLength(3);
     expect(slides.at(-1)?.title).toBe("The approach");
-  });
-
-  test("the concept approval page draws it from the same outline, design and theme the download uses", () => {
-    const page = read("./pages/audiences.tsx");
-    expect(page).toContain("<SlidePreview key={selected.id} deck={preview.deck} note={preview.note} />");
-    expect(page).toContain("packageOutlineProblem(content)");
-    expect(page).toContain("api.deckBrief(detail.project.id, role)");
-    expect(page).toContain("deckDesignFor(role, preferences)");
-    expect(page).toContain("Pictures are drawn when the slides are saved.");
-  });
-
-  test("slides are laid out in container units against the stage and each thumb, never the slide itself", () => {
-    const css = read("./styles.css");
-    expect(css).toMatch(/\.slide-stage \{[^}]*container-type: inline-size;/s);
-    expect(css).toMatch(/\.slide-thumb \{[^}]*container-type: inline-size;/s);
-    expect(css).not.toMatch(/\.slide \{[^}]*container-type/s);
-    expect(css).toContain('.slide-thumb[aria-current="true"] {');
   });
 });

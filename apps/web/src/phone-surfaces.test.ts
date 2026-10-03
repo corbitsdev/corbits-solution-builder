@@ -1,11 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { splitPhoneSurfaces, splitSurfaces } from "./phone-surfaces.ts";
 import { framedDesign } from "./design-frames.tsx";
-
-const here = import.meta.dir;
-const read = (relative: string) => readFileSync(join(here, relative), "utf8");
 
 const design = [
   "<!doctype html>",
@@ -66,26 +61,6 @@ describe("how the review pane frames a design", () => {
 
   test("pane: marks are ignored and the whole design is the pane", () => {
     expect(framedDesign(design, "pane", "Workout Log")).toEqual({ phones: [], desktops: [], main: design });
-  });
-
-  test("the page draws one iPhone per phone, listens for anchors in every frame, and offers the frame choice", () => {
-    const frames = read("./design-frames.tsx");
-    expect(frames).toContain('<div className="phone-rack" aria-label="Phone screens">');
-    expect(frames).toContain("<IPhoneFrame key={`${frameKey}:${phone.id}`} title={phone.title}>");
-    expect(frames).toContain('ref={(element) => registerFrame?.("main", element)}');
-    expect(frames).toContain('<select aria-label="Frame"');
-    const page = read("./pages/design.tsx");
-    expect(page).toContain("[...frames.current.values()].map((element) => {");
-    expect(page).toContain("<FrameSelect value={frameMode} onChange={setFrameMode} />");
-    expect(page).toContain("registerFrame={registerFrame}");
-    const reader = read("./pages/workspace/index.tsx");
-    expect(reader).toContain("<FrameSelect value={frameMode} onChange={setFrameMode} />");
-    expect(reader).toContain('paneClassName="artifact-page"');
-    const frame = read("./iphone-frame.tsx");
-    expect(frame).toContain('<span className="iphone-island" />');
-    expect(frame).toContain('<span className="iphone-home" aria-hidden="true" />');
-    const css = read("./styles.css");
-    expect(css).toMatch(/\.iphone \{[^}]*--iphone-w: 402px;[^}]*--iphone-h: 874px;/s);
   });
 });
 

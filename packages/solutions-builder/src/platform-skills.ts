@@ -60,16 +60,3 @@ export const PLATFORM_SKILLS: readonly PlatformSkill[] = [
     tools: [],
   },
 ];
-
-/** One skill as its SKILL.md: frontmatter the hub's skill schema accepts, then the body. */
-export function platformSkillMarkdown(skill: PlatformSkill): string {
-  return [
-    "---",
-    `name: ${skill.key}`,
-    `description: ${JSON.stringify(skill.description)}`,
-    "version: 1",
-    "---",
-    "",
-    skill.body,
-  ].join("\n");
-}
