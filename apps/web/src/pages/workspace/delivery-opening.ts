@@ -16,6 +16,11 @@
  * `node:fs` runtime code.
  */
 
+// The person reads local time beside these texts; a specialist must quote the same moment.
+export function zonedTime(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, { timeZoneName: "short" });
+}
+
 export type DeliveryManifestFile = { path: string; sha256: string; sizeBytes: number };
 
 /** What the packaging's checks established about the archive itself (#129):
@@ -50,7 +55,7 @@ export function verificationLines(verification: DeliveryVerificationContent | un
     return ["Verification recorded with the archive: none. Nothing about this archive was checked by a tool; treat every check as not run."];
   }
   const lines = [
-    `Verification recorded with the archive at ${new Date(verification.checkedAt).toLocaleString(undefined, { timeZoneName: "short" })} (checked by the tool, not by a model): ${
+    `Verification recorded with the archive at ${zonedTime(verification.checkedAt)} (checked by the tool, not by a model): ${
       verification.report.complete ? "every required item verified" : `required items not verified: ${verification.report.failed.join(", ")}`
     }.`,
   ];
