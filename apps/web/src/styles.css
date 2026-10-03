@@ -4542,6 +4542,11 @@ button[aria-disabled="true"] {
   margin-right: auto;
 }
 
+.audience-gate > .audience-gate-vote,
+.audience-gate > .aud-btns {
+  flex-basis: 100%;
+}
+
 .slide-footer {
   position: absolute;
   left: 5cqw;
