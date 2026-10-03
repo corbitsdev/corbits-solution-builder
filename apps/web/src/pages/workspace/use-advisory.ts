@@ -30,8 +30,8 @@ import { keys } from "../../queries/keys.ts";
 import { api, ApiFailure } from "../../client.js";
 import type { ArtifactNode } from "../../client.js";
 import { evaluatorFor } from "@solutions-builder/app/kit";
-import type { Stage } from "@solutions-builder/app/ledger";
-import { evaluationRequest, evaluatorNotesAsk } from "@solutions-builder/app/stage-prompt";
+import { STAGE_TITLES, type Stage } from "@solutions-builder/app/ledger";
+import { classifierRequest, evaluationRequest, evaluatorNotesAsk } from "@solutions-builder/app/stage-prompt";
 import { evaluationTag, evaluatorNotesSubject, isEvaluatorNotes } from "./composed-mail.ts";
 import type { GuideGuidance } from "../../components.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
@@ -124,8 +124,26 @@ export type StageEvaluator =
 const IDLE: StageEvaluator = { status: "idle" };
 const CHECKING: StageEvaluator = { status: "checking" };
 
-/** The state an evaluator reply puts the verdict in. */
-export function evaluatorStateOf(reply: ChatMessage): StageEvaluator {
+/** A classifier's reply is the System One decision it was asked for, as JSON: its probability, or null. */
+function classifierScore(body: string): number | null {
+  let decision: unknown;
+  try {
+    decision = JSON.parse(body);
+  } catch {
+    return null;
+  }
+  const noul = typeof decision === "object" && decision !== null ? (decision as { noul?: unknown }).noul : undefined;
+  return typeof noul === "number" ? noul : null;
+}
+
+/** The state an evaluator reply puts the verdict in; `readyAt` is set when the evaluator is a classifier. */
+export function evaluatorStateOf(reply: ChatMessage, readyAt: number | null = null): StageEvaluator {
+  if (readyAt !== null) {
+    const score = classifierScore(reply.body.trim());
+    return score === null
+      ? { status: "unavailable", reason: `The classifier gave no score: ${firstLine(reply.body)}` }
+      : { status: "verdict", verdict: { ready: score >= readyAt, notes: [], score } };
+  }
   const verdict = evaluatorVerdict([reply]);
   return verdict
     ? { status: "verdict", verdict }
@@ -148,9 +166,11 @@ export async function judgeDraft(
     readonly tag: string;
     readonly body: string;
     readonly signal: AbortSignal;
+    /** Set when the evaluator is a classifier: the score it must reach. */
+    readonly readyAt?: number | null;
   },
 ): Promise<StageEvaluator> {
-  const { projectId, tenantId, stage, tag, body, signal } = input;
+  const { projectId, tenantId, stage, tag, body, signal, readyAt = null } = input;
   const { address } = await deps.ensureEvaluator(projectId, stage);
   let answer = taggedAnswer(await deps.readThread(tenantId, [address]), tag);
   if (!answer) {
@@ -164,7 +184,7 @@ export async function judgeDraft(
     signal.throwIfAborted();
     answer = taggedAnswer(await deps.readThread(tenantId, [address]), tag);
   }
-  return evaluatorStateOf(answer.reply);
+  return evaluatorStateOf(answer.reply, readyAt);
 }
 
 /**
@@ -181,24 +201,32 @@ export function useStageEvaluator(
   draft: string | null,
   record: string | null,
 ): StageEvaluator {
+  const classifier = useQuery({ queryKey: keys.classifier.all, queryFn: () => api.classifier() });
   const tag = draft !== null && evaluatorFor(stage) !== null ? evaluationTag(stage, draft) : null;
+  const scorer = classifier.data ?? null;
   const query = useQuery({
-    queryKey: keys.evaluation.of(projectId, tag ?? ""),
+    queryKey: keys.evaluation.of(projectId, `${tag ?? ""}${scorer ? `:${scorer.offeringId}:${scorer.readyAt}` : ""}`),
     queryFn: ({ signal }) =>
       judgeDraft(liveDeps, {
         projectId,
         tenantId,
         stage,
         tag: tag ?? "",
-        body: stage === 1 ? (draft ?? "") : evaluationRequest({ record, draft: draft ?? "" }),
+        body: scorer
+          ? classifierRequest(STAGE_TITLES[stage], draft ?? "")
+          : stage === 1
+            ? (draft ?? "")
+            : evaluationRequest({ record, draft: draft ?? "" }),
         signal,
+        readyAt: scorer?.readyAt ?? null,
       }),
-    enabled: tag !== null,
+    enabled: tag !== null && classifier.isSuccess,
     staleTime: Number.POSITIVE_INFINITY,
     // "Not answered yet" is looked at again: a slow model's verdict replaces it.
     refetchInterval: (current) => (current.state.data?.status === "unavailable" ? LATE_VERDICT_MS : false),
   });
   if (tag === null) return IDLE;
+  if (classifier.error) return { status: "unavailable", reason: `Which evaluator to ask could not be read: ${reasonOf(classifier.error)}` };
   if (query.error) return { status: "unavailable", reason: `The evaluator could not be reached: ${reasonOf(query.error)}` };
   return query.data ?? CHECKING;
 }

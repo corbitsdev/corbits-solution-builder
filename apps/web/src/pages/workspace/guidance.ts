@@ -159,6 +159,8 @@ export function latestDesignReply(messages: readonly ChatMessage[]): ChatMessage
 export type EvaluatorVerdict = {
   readonly ready: boolean;
   readonly notes: readonly string[];
+  /** A classifier's probability that the draft is ready; absent from a language model's verdict. */
+  readonly score?: number;
 };
 
 /**

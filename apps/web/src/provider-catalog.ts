@@ -18,6 +18,9 @@ import {
   ApiError,
   buildResolvedCatalogRows,
   catalogFor,
+  CLASSIFIER_PLUGIN,
+  CLASSIFIER_READY_AT_QUIRK,
+  visibleCatalog,
   disconnectProvider as disconnectProviderViaHub,
   makeResolvedModelDefault,
   moveResolvedModel as moveResolvedModelViaHub,
@@ -252,7 +255,7 @@ function toListedProvider(
   };
 }
 
-/** Connected providers in the workspace catalog, empty before a tenant exists. */
+/** Connected providers in the workspace catalog, empty before a tenant exists. A classifier is its own setting, not one of them. */
 export async function listConnectedProviders(transport: Transport): Promise<ListedProvider[]> {
   const workspace = await resolveWorkspace(transport);
   if (!workspace) return [];
@@ -266,6 +269,7 @@ export async function listConnectedProviders(transport: Transport): Promise<List
       catalog.providers(),
     ]);
     return providerRows
+      .filter((row) => row.plugin !== CLASSIFIER_PLUGIN)
       .map((row) => toListedProvider(row, credentialRows, modelRows, offeringRows, vendorRows))
       .sort((a, b) => a.priority - b.priority);
   } catch (cause) {
@@ -576,6 +580,86 @@ export async function disconnectProvider(transport: Transport, modelProviderId: 
   await disconnectProviderViaHub(transport, workspace.tenantId, modelProviderId);
 }
 
+// --- System One classifier --------------------------------------------------
+
+/** Where a local System One classifier answers: Ollama's decision route. */
+const OLLAMA_ORIGIN = "http://localhost:11434";
+const CLASSIFIER_PROVIDER_ID = "system-one";
+export const DEFAULT_READY_AT = 0.7;
+
+/** The one question every stage's draft is scored on; the stage's own document arrives as the state. */
+const CLASSIFIER_QUESTIONS = [
+  {
+    id: "ready",
+    type: "boolean",
+    instructions:
+      "The state is a stage document from a software project. Could a person approve it as it stands, as the basis for the next stage: specific, consistent, and with nothing only they could supply left missing?",
+    criteria: {
+      true: "specific, consistent and complete enough to act on",
+      false: "vague, contradictory or missing what the stage owes",
+    },
+  },
+];
+
+export type Classifier = {
+  readonly modelProviderId: string;
+  readonly offeringId: string;
+  readonly model: string;
+  /** The score a draft must reach for the evaluator to approve it. */
+  readonly readyAt: number;
+};
+
+async function ollama<T>(path: string, body?: unknown): Promise<T> {
+  const response = await fetch(`${OLLAMA_ORIGIN}${path}`, body === undefined ? {} : { method: "POST", body: JSON.stringify(body) });
+  if (!response.ok) throw new Error(`Ollama answered HTTP ${response.status} for ${path}.`);
+  return (await response.json()) as T;
+}
+
+/** The local models Ollama says can make System One decisions. */
+export async function localClassifierModels(): Promise<string[]> {
+  const { models } = await ollama<{ models: { name: string }[] }>("/api/tags");
+  const shown = await Promise.all(
+    models.map(async ({ name }) => ({ name, capabilities: (await ollama<{ capabilities?: string[] }>("/api/show", { model: name })).capabilities ?? [] })),
+  );
+  return shown.filter((entry) => entry.capabilities.includes("decision")).map((entry) => entry.name);
+}
+
+/** The workspace's classifier, or null when its evaluators are language models. */
+export async function readClassifier(transport: Transport): Promise<Classifier | null> {
+  const workspace = await resolveWorkspace(transport);
+  if (!workspace) return null;
+  const catalog = await visibleCatalog(transport, workspace.tenantId);
+  const offering = catalog.classifiers[0];
+  if (!offering) return null;
+  const readyAt = offering.quirks?.[CLASSIFIER_READY_AT_QUIRK];
+  return {
+    modelProviderId: offering.providerId,
+    offeringId: offering.id,
+    model: catalog.models.find((row) => row.id === offering.modelId)?.canonicalName ?? "",
+    readyAt: typeof readyAt === "number" ? readyAt : DEFAULT_READY_AT,
+  };
+}
+
+/** Makes `model` the workspace's classifier, approving a draft at `readyAt`. */
+export async function connectClassifier(transport: Transport, input: { model: string; readyAt: number }): Promise<void> {
+  const workspace = await resolveWorkspace(transport);
+  if (!workspace) throw new Error("The workspace is not installed yet.");
+  const url = `${OLLAMA_ORIGIN}/v1/systemone`;
+  const { modelProviderId } = await upsertApiKeyProvider(transport, workspace.tenantId, {
+    providerId: CLASSIFIER_PROVIDER_ID,
+    label: "System One",
+    plugin: CLASSIFIER_PLUGIN,
+    baseURL: url,
+    apiKey: "",
+    keyless: true,
+  });
+  await registerProviderModels(transport, workspace.tenantId, {
+    modelProviderId,
+    canonicalNames: [input.model],
+    quirks: { endpoint: { kind: "custom", url, model: input.model }, questions: CLASSIFIER_QUESTIONS, [CLASSIFIER_READY_AT_QUIRK]: input.readyAt },
+  });
+}
+
 /** Reorders connected providers, most preferred first. User order only — the workspace default comes from offering priority (CL-8781). */
 export async function reorderProviders(transport: Transport, orderedModelProviderIds: readonly string[]): Promise<void> {
   const workspace = await resolveWorkspace(transport);
@@ -658,7 +742,16 @@ export async function listResolvedCatalog(transport: Transport): Promise<Resolve
       catalog.modelProviders(),
       catalog.credentials(),
     ]);
-    return buildResolvedCatalogRows({ resolved, models, offerings, modelProviders, credentials });
+    const classifiers = new Set(modelProviders.filter((row) => row.plugin === CLASSIFIER_PLUGIN).map((row) => row.id));
+    return buildResolvedCatalogRows({
+      resolved: resolved
+        .map((model) => ({ ...model, offerings: model.offerings.filter((offering) => !classifiers.has(offering.providerId)) }))
+        .filter((model) => model.offerings.length > 0),
+      models,
+      offerings,
+      modelProviders,
+      credentials,
+    });
   } catch (cause) {
     if (cause instanceof ApiError && cause.status >= 400 && cause.status < 500) return [];
     throw cause;

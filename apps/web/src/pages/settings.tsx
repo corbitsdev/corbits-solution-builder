@@ -16,12 +16,14 @@
  * Layout is the mockup's section / section-body / row / k / v language.
  */
 import { useTheme, type ThemeMode } from "@corbits/react-ui";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { DEFAULT_DECK_DESIGN, roleLabel, type DeckDesign, type DeckTheme } from "@solutions-builder/app/deck";
 import { LANGUAGES, SUPPORTED_OUTPUT_LANGUAGES, type LanguageId, type LanguageSettings } from "@solutions-builder/app/language-settings";
 import {
   api,
   ApiFailure,
+  DEFAULT_READY_AT,
   STAKEHOLDER_ROLES,
   type ActiveModel,
   type BuildWorkerStatus,
@@ -31,6 +33,7 @@ import {
   type Provider,
 } from "../client.js";
 import { Banner, StateLabel } from "../components.jsx";
+import { keys } from "../queries/keys.ts";
 import { deckDesignFor, deckDesignKey } from "../deck-design-settings.ts";
 import { Dictated } from "../dictation.jsx";
 import { useZenGarden, writeZenGarden, type ZenGardenChoice } from "../zen-garden-setting.ts";
@@ -63,6 +66,7 @@ export function Settings({
         oauthCandidates={oauthCandidates}
         onChanged={onChanged}
       />
+      <Evaluator />
       <Designer />
       <BuildWorker />
       <StakeholderDecks />
@@ -294,6 +298,75 @@ function Appearance() {
             ]}
           />
         </Row>
+      </div>
+    </Section>
+  );
+}
+
+/* ---------------------------------------------------------------- evaluator */
+
+const failureOf = (cause: unknown) => (cause instanceof ApiFailure ? cause.detail.message : cause instanceof Error ? cause.message : String(cause));
+
+/**
+ * What judges a finished draft. Unset, each stage's language-model evaluator
+ * reads it and writes notes; set, a local System One classifier scores it,
+ * and a draft at or over the threshold reads as approved.
+ */
+function Evaluator() {
+  const client = useQueryClient();
+  const classifier = useQuery({ queryKey: keys.classifier.all, queryFn: () => api.classifier() });
+  const local = useQuery({ queryKey: [...keys.classifier.all, "local"], queryFn: () => api.localClassifierModels(), retry: false });
+  const save = useMutation({
+    mutationFn: async (next: { model: string; readyAt: number } | null) => {
+      if (next) await api.connectClassifier(next);
+      else if (classifier.data) await api.disconnectProvider(classifier.data.modelProviderId);
+    },
+    onSettled: () => client.invalidateQueries({ queryKey: keys.classifier.all }),
+  });
+  const current = classifier.data ?? null;
+  const readyAt = current?.readyAt ?? DEFAULT_READY_AT;
+  const models = [...new Set([...(current ? [current.model] : []), ...(local.data ?? [])])];
+  return (
+    <Section title="Evaluator" lead="A System One classifier scores each finished draft in a moment instead of writing notes on it.">
+      <div className="section-body">
+        {save.error ? <Banner tone="error" title={failureOf(save.error)} /> : null}
+        <Row
+          label="System One classifier"
+          hint={local.error ? `Ollama could not be read: ${failureOf(local.error)}` : "Local models that report the decision capability"}
+        >
+          <select
+            className="field"
+            aria-label="System One classifier"
+            value={current?.model ?? ""}
+            disabled={!classifier.isSuccess || save.isPending}
+            onChange={(event) => save.mutate(event.target.value ? { model: event.target.value, readyAt } : null)}
+          >
+            <option value="">None: language-model evaluators</option>
+            {models.map((model) => (
+              <option key={model} value={model}>
+                {model}
+              </option>
+            ))}
+          </select>
+        </Row>
+        {current ? (
+          <Row label="Approve at" hint="The score, in percent, a draft must reach">
+            <input
+              key={current.readyAt}
+              className="field"
+              type="number"
+              min={1}
+              max={99}
+              aria-label="Approve at, percent"
+              defaultValue={Math.round(current.readyAt * 100)}
+              disabled={save.isPending}
+              onBlur={(event) => {
+                const next = Number(event.target.value) / 100;
+                if (next > 0 && next < 1 && next !== current.readyAt) save.mutate({ model: current.model, readyAt: next });
+              }}
+            />
+          </Row>
+        ) : null}
       </div>
     </Section>
   );

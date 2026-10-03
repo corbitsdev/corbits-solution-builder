@@ -6,6 +6,7 @@
  * Nothing here touches a database, an inference call or Interchange.
  */
 import { MATERIAL_KIND } from "./artifacts.js";
+import { sectionsIn } from "./document.js";
 
 export type Quote = { readonly quote: string };
 
@@ -47,6 +48,22 @@ export function renderInputs(inputs: Inputs, stage: number): string {
 export function evaluationRequest(args: { record: string | null; draft: string }): string {
   if (!args.record) return args.draft;
   return ["--- THE RECORD THE DRAFT WAS WRITTEN FROM ---", args.record.trim(), "", "--- THE DRAFT TO JUDGE ---", args.draft.trim()].join("\n");
+}
+
+/** The sections a classifier scores: the conclusions and what they rest on. */
+const DECISION_SECTIONS = new Set(["In short", "What I assumed", "Assumptions"]);
+/** About 1,000 tokens: a classifier like tev1 holds ~2k with its instructions and never truncates. */
+const CLASSIFIER_BUDGET_CHARS = 4_000;
+
+/**
+ * What a stage's classifier is mailed. Its context holds a fraction of a
+ * draft, so it scores the draft's decision-bearing sections, `## In short`
+ * and its assumptions; a draft with neither is scored on its opening.
+ */
+export function classifierRequest(stageTitle: string, draft: string): string {
+  const kept = sectionsIn(draft).filter((section) => DECISION_SECTIONS.has(section.heading));
+  const body = kept.length > 0 ? kept.map((section) => `## ${section.heading}\n${section.body.trim()}`).join("\n\n") : draft.trim();
+  return `${stageTitle}: the draft's summary and assumptions.\n\n${body}`.slice(0, CLASSIFIER_BUDGET_CHARS);
 }
 
 /** The evaluator's notes, as the one revision the app asks the specialist for before the person reviews. */

@@ -506,6 +506,8 @@ async function ensureSpecialistDeploymentOnce(
   switchToOfferingId: string | undefined,
   /** How long a deployment the hub is still placing is waited for before a fresh one takes its place (#236); tests shorten it. */
   wait: PlacementWait = RECOVERY_WAIT,
+  /** The classifier an evaluator runs instead of a language model: its whole chain, with no fallback. */
+  classifierOfferingId?: string,
 ): Promise<SpecialistDeployment> {
   if (!sidecar.canPlaceSidecars) {
     throw new Error("no host is placing sidecars; cannot deploy a stage specialist");
@@ -570,9 +572,19 @@ async function ensureSpecialistDeploymentOnce(
   // deploying principal may use an inherited offering's credential is the
   // hub's call at deploy time, below -- no delegation is judged here.
   const catalog = await visibleCatalog(transport, tenant);
-  const catalogOfferings = [...catalog.offerings].sort((a, b) => a.priority - b.priority);
+  const catalogOfferings = classifierOfferingId
+    ? catalog.classifiers.filter((offering) => offering.id === classifierOfferingId)
+    : [...catalog.offerings].sort((a, b) => a.priority - b.priority);
   if (catalogOfferings.length === 0) {
-    throw new Error("connect a model provider before deploying a stage specialist");
+    throw new Error(
+      classifierOfferingId ? "the chosen classifier is no longer connected" : "connect a model provider before deploying a stage specialist",
+    );
+  }
+
+  // A classifier never reads the prompt a kit revision changes, and its asset
+  // is its model's own, so a live one is always the one to use.
+  if (existing && classifierOfferingId) {
+    return { deploymentId: existing.deployment.id, address: `${existing.deployment.id}@${existing.domain}`, tenantId: existing.tenantId };
   }
 
   if (existing) {
@@ -768,6 +780,38 @@ export async function ensureSpecialistDeployment(
       undefined,
       wait,
     );
+  try {
+    return await attempt();
+  } catch (cause) {
+    if (cause instanceof ApiError && cause.status === 409) return await attempt();
+    throw cause;
+  }
+}
+
+/** The role key an evaluator runs a classifier offering under. */
+export function classifierRoleKey(roleId: string, classifierOfferingId: string): string {
+  return `${roleId}-${normalizedProjectId(classifierOfferingId)}`;
+}
+
+/**
+ * A stage's evaluator on a classifier: its own asset per classifier offering,
+ * so choosing another model deploys beside the old one rather than switching
+ * it, and never touches the stage's own switch record.
+ */
+export async function ensureClassifierDeployment(
+  transport: Transport,
+  sidecar: SidecarCapability,
+  closure: ClosureSource,
+  gitPush: WorkflowGitPush,
+  projectId: string,
+  stage: Stage,
+  hubOrigin: string,
+  role: AgentRole,
+  classifierOfferingId: string,
+): Promise<SpecialistDeployment> {
+  const roleKey = classifierRoleKey(role.id, classifierOfferingId);
+  const attempt = () =>
+    ensureSpecialistDeploymentOnce(transport, sidecar, closure, gitPush, projectId, stage, hubOrigin, roleKey, role, undefined, RECOVERY_WAIT, classifierOfferingId);
   try {
     return await attempt();
   } catch (cause) {

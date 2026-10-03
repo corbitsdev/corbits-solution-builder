@@ -27,7 +27,13 @@ export function EvaluatorStance({ evaluator, notesError = null }: { evaluator: S
       ? { label: "Evaluator reading…", tone: "checking", notes: [] as readonly string[] }
       : evaluator.status === "unavailable"
         ? { label: "Evaluator unavailable", tone: "unavailable", notes: [evaluator.reason] }
-        : evaluator.verdict.ready
+        : evaluator.verdict.score !== undefined
+          ? {
+              label: `Evaluator ${Math.round(evaluator.verdict.score * 100)}%`,
+              tone: evaluator.verdict.ready ? "ready" : "not-ready",
+              notes: evaluator.verdict.notes,
+            }
+          : evaluator.verdict.ready
           ? { label: "Evaluator approved", tone: "ready", notes: evaluator.verdict.notes }
           : { label: "Evaluator: not yet", tone: "not-ready", notes: evaluator.verdict.notes };
   const notes = notesError ? [...judged.notes, `These notes could not be sent to the specialist: ${notesError}`] : judged.notes;

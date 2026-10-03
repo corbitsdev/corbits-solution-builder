@@ -21,6 +21,8 @@ import {
   delegateWorkspaceDefaultsIfSealed,
   ENDED_DEPLOYMENT_STATUSES,
   ensureProjectWorkflow,
+  classifierRoleKey,
+  ensureClassifierDeployment,
   ensureSpecialistDeployment,
   getArtifact as installerGetArtifact,
   install as installerInstall,
@@ -150,7 +152,10 @@ import {
   API_KEY_CONNECT_OPTIONS,
   OAUTH_CONNECT_OPTIONS,
   connectApiKeyProvider,
+  connectClassifier,
   connectLocalProvider,
+  localClassifierModels,
+  readClassifier,
   connectOAuthProvider,
   disconnectProvider,
   listConnectedProviders,
@@ -166,12 +171,14 @@ import {
   setResolvedRestricted,
   setResolvedShadowed,
   type ActiveModel,
+  type Classifier,
   type ModelMoveDirection,
   type ResolvedCatalogRow,
 } from "./provider-catalog.ts";
 import { stageName } from "./stage-names.ts";
 
-export type { ActiveModel, ResolvedCatalogRow } from "./provider-catalog.ts";
+export type { ActiveModel, Classifier, ResolvedCatalogRow } from "./provider-catalog.ts";
+export { DEFAULT_READY_AT } from "./provider-catalog.ts";
 
 export type { DesignerSettings } from "./designer-settings.ts";
 
@@ -1314,6 +1321,15 @@ export const api = {
       installerFailure(cause);
     }
   },
+  classifier: (): Promise<Classifier | null> => readClassifier(createHubTransport()),
+  localClassifierModels: (): Promise<string[]> => localClassifierModels(),
+  connectClassifier: async (input: { model: string; readyAt: number }): Promise<void> => {
+    try {
+      await connectClassifier(createHubTransport(), input);
+    } catch (cause) {
+      installerFailure(cause);
+    }
+  },
   disconnectProvider: async (providerId: string): Promise<void> => {
     try {
       await disconnectProvider(createHubTransport(), providerId);
@@ -2323,27 +2339,22 @@ export const api = {
   ensureEvaluatorAgent: async (projectId: string, stage: Stage): Promise<SpecialistDeployment> => {
     const role = evaluatorFor(stage);
     if (!role) throw new Error(`No evaluator reads stage ${stage}.`);
-    const key = `${projectId}:${stage}`;
+    const classifier = await readClassifier(createHubTransport());
+    const roleKey = classifier ? classifierRoleKey(role.id, classifier.offeringId) : role.id;
+    const key = `${projectId}:${stage}:${roleKey}`;
     const pending = ensureEvaluatorCalls.get(key);
     if (pending) {
       const deployment = await pending;
-      if (await memoStillLive(projectId, stage, role.id, deployment)) return deployment;
+      if (await memoStillLive(projectId, stage, roleKey, deployment)) return deployment;
       ensureEvaluatorCalls.delete(key);
       return api.ensureEvaluatorAgent(projectId, stage);
     }
     const call = asWorkspaceOwner(async (transport, workspaceTenantId) => {
       const status = await readyToDeploy(transport, workspaceTenantId, projectId);
-      const deployment = await ensureSpecialistDeployment(
-        transport,
-        sidecarCapabilityOf(status),
-        await lifecycleClosureSource(),
-        lifecycleGitPush,
-        projectId,
-        stage,
-        specialistHubOrigin(),
-        role.id,
-        await localizedRole(transport, workspaceTenantId, role),
-      );
+      const deploy = [transport, sidecarCapabilityOf(status), await lifecycleClosureSource(), lifecycleGitPush, projectId, stage, specialistHubOrigin()] as const;
+      const deployment = classifier
+        ? await ensureClassifierDeployment(...deploy, role, classifier.offeringId)
+        : await ensureSpecialistDeployment(...deploy, role.id, await localizedRole(transport, workspaceTenantId, role));
       const placement = await waitForDeploymentPlacement(transport, deployment.tenantId, deployment.deploymentId);
       if (placement.outcome !== "placed") throw placementFailure(`the ${stageName(stage)} evaluator`, placement);
       return deployment;

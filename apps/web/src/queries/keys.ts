@@ -95,6 +95,9 @@ export const keys = {
     all: ["evaluation"] as const,
     of: (projectId: string, tag: string) => ["evaluation", projectId, tag] as const,
   },
+  classifier: {
+    all: ["classifier"] as const,
+  },
   evaluatorNotes: {
     all: ["evaluatorNotes"] as const,
     of: (subject: string) => ["evaluatorNotes", subject] as const,

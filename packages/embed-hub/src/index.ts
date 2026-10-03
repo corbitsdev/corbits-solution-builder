@@ -80,6 +80,7 @@ import {
   type InboxItem,
 } from "@corbits/mailbox";
 import { OPENAI_RESPONSES_PROVIDER } from "@corbits/openai-responses";
+import { SYSTEM_ONE_PROVIDER } from "@corbits/system-one";
 import { upgradeWebSocket } from "hono/bun";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
@@ -391,12 +392,17 @@ export async function createEmbeddedHub(options: CreateEmbeddedHubOptions): Prom
   // its own; it gets the hub's from the environment the provisioner forwards.
   process.env["SIDECAR_CREDENTIAL_ENCRYPTION_KEY"] ??= options.credentialKeyHex;
   // Responses-only backends (ChatGPT/Codex) are catalog rows on this adapter,
-  // configured per offering by quirks.
+  // configured per offering by quirks; so are System One classifiers.
   process.env["SIDECAR_ADAPTER_MANIFEST"] ??= JSON.stringify([
     {
       provider: OPENAI_RESPONSES_PROVIDER,
       specifier: import.meta.resolve("./responses-adapter.ts"),
       export: "createResponsesAdapter",
+    },
+    {
+      provider: SYSTEM_ONE_PROVIDER,
+      specifier: import.meta.resolve("./system-one-adapter.ts"),
+      export: "createClassifierAdapter",
     },
   ]);
   // Per tenant whose project has been opened since boot: the anchor runs

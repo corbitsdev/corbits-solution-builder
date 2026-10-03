@@ -20,9 +20,16 @@
 import type { Transport } from "@intx/hub-client";
 import { catalogFor, getTenant, type HubModel, type HubModelProvider, type HubOffering, type HubTenant } from "./hub.js";
 
+/** The plugin of a System One classifier: it scores a draft, it never writes one. */
+export const CLASSIFIER_PLUGIN = "corbits-system-one";
+/** The classifier offering's quirk naming the score a draft must reach. */
+export const CLASSIFIER_READY_AT_QUIRK = "readyAt";
+
 export type VisibleCatalog = {
-  /** Enabled offerings, nearest tenant's row first per identity. */
+  /** Enabled offerings, nearest tenant's row first per identity; never a classifier. */
   readonly offerings: readonly HubOffering[];
+  /** Enabled classifier offerings: only an evaluator runs one. */
+  readonly classifiers: readonly HubOffering[];
   readonly modelProviders: readonly HubModelProvider[];
   readonly models: readonly HubModel[];
 };
@@ -101,5 +108,11 @@ export async function visibleCatalog(transport: Transport, tenant: HubTenant | s
     const provider = providerNameById.get(row.providerId);
     return model !== undefined && provider !== undefined && visibleModels.has(model) && visibleProviders.has(provider);
   });
-  return { offerings, modelProviders, models };
+  const classifierIds = new Set(modelProviders.filter((row) => row.plugin === CLASSIFIER_PLUGIN).map((row) => row.id));
+  return {
+    offerings: offerings.filter((row) => !classifierIds.has(row.providerId)),
+    classifiers: offerings.filter((row) => classifierIds.has(row.providerId)),
+    modelProviders,
+    models,
+  };
 }

@@ -19,8 +19,8 @@ import { catalogFor, type HubCredential, type HubModelProvider, type HubOffering
 import { seededVendorSpec, type SeedOfferingSpec } from "./catalog-seed.js";
 import { ensureOpusDefault } from "./model-default.js";
 
-/** `@intx/types`' built-in `modelProviderPlugins`, plus `openai-responses`, which embed-hub registers in the sidecar's adapter manifest. */
-export type ModelProviderPlugin = "anthropic" | "openai" | "openai-compatible" | "google-genai" | "openai-responses";
+/** `@intx/types`' built-in `modelProviderPlugins`, plus `openai-responses` and `corbits-system-one`, which embed-hub registers in the sidecar's adapter manifest. */
+export type ModelProviderPlugin = "anthropic" | "openai" | "openai-compatible" | "google-genai" | "openai-responses" | "corbits-system-one";
 
 export type UpsertApiKeyProviderInput = {
   /** Vendor provider name, e.g. "anthropic" -- also the model-provider's own name. */
