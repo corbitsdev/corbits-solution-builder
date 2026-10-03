@@ -99,6 +99,7 @@ Bun.serve({ port, fetch: () => new Response("ok") });
         routes: ["/missing"],
       });
       expect(result.exercised).toBe(true);
+      expect(result.ranSuccessfully).toBe(false);
       expect(result.transcript).toContain("GET /missing -> 404");
     } finally {
       await rm(dir, { recursive: true, force: true });
