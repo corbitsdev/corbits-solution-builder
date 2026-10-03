@@ -61,7 +61,7 @@ import { useSpecialistRunState } from "./use-specialist-run-state.ts";
 import { specialistBusy } from "../../specialist-run-state.ts";
 import { useOpeningDispatch } from "./use-opening-dispatch.ts";
 import { useEvaluatorRevision, useProductGuide, useStageEvaluator } from "./use-advisory.ts";
-import { isStageOpening } from "./composed-mail.ts";
+import { isEvaluatorNotes, isStageOpening } from "./composed-mail.ts";
 import { markerAlreadySent } from "../../decision-notify.ts";
 import { guideStep } from "./product-guide.ts";
 import { useProjectArtifacts } from "./use-project-artifacts.ts";
@@ -267,7 +267,11 @@ export function StageWorkspace({
   const busy = specialistBusy(runState, pending?.at ?? null);
   // A specialist turn in flight is the longest wait in the product; the
   // busy indicator at the foot of the window counts it alongside the flame.
-  useBusyWhile(busy, specialistActivity(stage, askKind(pending?.body ?? null, foldedMessages.some((message) => message.author === "agent"))));
+  const lastFromPerson = foldedMessages.findLast((message) => message.author === "me");
+  const ask = lastFromPerson && isEvaluatorNotes(lastFromPerson)
+    ? "review"
+    : askKind(pending?.body ?? null, foldedMessages.some((message) => message.author === "agent"));
+  useBusyWhile(busy, specialistActivity(stage, ask));
 
   const openingDispatch = useOpeningDispatch({
     detail,

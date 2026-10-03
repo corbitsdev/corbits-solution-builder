@@ -24,7 +24,7 @@ export function routedLine(): string {
   return "Sent to the requirements author, whose document this is; its reply appears under Product requirements above.";
 }
 
-export type AskKind = "question" | "redraft" | "draft";
+export type AskKind = "question" | "redraft" | "draft" | "review";
 
 /** What the person asked for, from their words and whether a draft exists yet. */
 export function askKind(body: string | null, hasDraft: boolean): AskKind {
