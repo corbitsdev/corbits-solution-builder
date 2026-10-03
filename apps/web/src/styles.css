@@ -2069,6 +2069,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
    box — not in a bar of its own three rows up. */
 .composer-approve {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
@@ -2106,13 +2107,18 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 .composer-approve .approve,
 .composer-approve .approve-confirm {
   margin-left: auto;
+  flex: none;
+  white-space: nowrap;
 }
 
+/* At the chat's narrow width the lead gives way first: the stance shortens
+   to an ellipsis, and the action drops to its own line rather than breaking. */
 .composer-approve-lead {
   white-space: nowrap;
   display: inline-flex;
   align-items: center;
   gap: var(--space-3);
+  flex: 1 1 12ch;
   min-width: 0;
 }
 
@@ -2127,6 +2133,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 .evaluator-stance {
   position: relative;
   display: inline-flex;
+  min-width: 0;
 }
 
 .composer-approve .evaluator-stance-trigger {
@@ -2139,6 +2146,9 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   cursor: default;
   text-decoration: underline dotted;
   text-underline-offset: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .evaluator-stance[data-tone="ready"] .evaluator-stance-trigger {
