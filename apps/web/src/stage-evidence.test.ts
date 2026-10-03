@@ -60,7 +60,7 @@ describe("stage7StackProblem", () => {
     const problem = await stage7StackProblem(deps({ planText: PLAN_WITHOUT_STACK }));
     expect(problem).not.toBeNull();
     expect(problem!.message).toContain("build plan");
-    expect(problem!.message).toContain("stage 6");
+    expect(problem!.message).toContain("Build plan");
     expect(problem!.message).not.toContain("stack decision");
     expect(problem!.remediation).toMatchObject({ kind: "send_back", targetStage: 6 });
     expect(problem!.remediation!.reason).toContain("Stack section");
@@ -69,7 +69,7 @@ describe("stage7StackProblem", () => {
   test("a Stack section citing an unknown requirement is reported with the detail and the same way out", async () => {
     const problem = await stage7StackProblem(deps({ requirementIds: ["FR-9"] }));
     expect(problem!.message).toContain("FR-1");
-    expect(problem!.message).toContain("stage 6");
+    expect(problem!.message).toContain("Build plan");
     expect(problem!.remediation).toMatchObject({ kind: "send_back", targetStage: 6 });
   });
 
@@ -117,7 +117,7 @@ describe("stack refusal copy", () => {
       expect(text).toContain("build plan");
       expect(text).not.toContain("stack decision");
     }
-    expect(stageRefusalMessage("stack_missing")).toContain("stage 6");
+    expect(stageRefusalMessage("stack_missing")).toContain("Build plan");
     expect(stage6StackProblem(PLAN_WITHOUT_STACK, new Set(["FR-1"]))).toContain("build plan");
     expect(stage6StackProblem(PLAN_WITHOUT_STACK, new Set(["FR-1"]))).not.toContain("stack decision");
   });
@@ -166,5 +166,13 @@ describe("stage6StackRemediation", () => {
     expect(remediation).toMatchObject({ kind: "ask_specialist", label: "Ask the architect to resend it", message: STACK_RESEND_ASK });
     expect(STACK_RESEND_ASK).toContain("```json stack");
     expect(STACK_RESEND_ASK).toContain("even though nothing in it changed");
+  });
+
+  // #617: an architect that never wrote a valid block is told its shape.
+  test("the ask carries the record's shape, field by field", () => {
+    for (const field of ["mode", "hubPlacement", "runtime", "ui", "storage", "auth", "packaging", "kind", "packages", "name", "deferred", "choice", "reason", "cites"]) {
+      expect(STACK_RESEND_ASK).toContain(`"${field}"`);
+    }
+    expect(STACK_RESEND_ASK).toContain("Do not add, rename or leave out a field");
   });
 });

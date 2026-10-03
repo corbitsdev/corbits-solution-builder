@@ -31,7 +31,7 @@ describe("the zen garden busy indicator", () => {
   test("the workspace counts a specialist turn in flight and a thread still loading", () => {
     const index = read("./pages/workspace/index.tsx");
     expect(index).toContain("useBusyWhile(busy, specialistActivity(stage, askKind(");
-    expect(index).toContain('useBusyWhile(!threadLoaded, "Loading the conversation");');
+    expect(index).toContain('useBusyWhile(!threadLoaded, "Opening the conversation");');
   });
 
   test("the garden names its state, keeps the clock out of the live region, and is hidden from readers as decoration", () => {

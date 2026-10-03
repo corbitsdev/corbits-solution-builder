@@ -1046,7 +1046,13 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 }
 
 /* The send-back picker a hold on send raises: floats above the composer,
-   anchored to it rather than the viewport. */
+   anchored to it rather than the viewport. The composer scrolls its own
+   overflow (#160), which would clip the picker above it, so it stops while
+   the picker is open. */
+.composer:has(> .sbpick) {
+  overflow: visible;
+}
+
 .sbpick-backdrop {
   position: fixed;
   inset: 0;
@@ -1645,6 +1651,30 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 .prose pre code {
   background: none;
   padding: 0;
+}
+
+/* A wide table scrolls inside its own box rather than widening the page. */
+.prose-table {
+  overflow-x: auto;
+  margin: 1em 0;
+}
+
+.prose table {
+  border-collapse: collapse;
+  font-size: 0.9375em;
+}
+
+.prose th,
+.prose td {
+  border: 1px solid var(--wb-border);
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  vertical-align: top;
+}
+
+.prose th {
+  background: var(--wb-muted);
+  font-weight: 600;
 }
 
 .prose hr {
@@ -3098,22 +3128,27 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   flex: none;
 }
 
-/* Stage 7's lead cards -- the estimate summary and the target question --
-   sit above the panes as paper on the ground, not as bare text. They keep
-   the gutter the conversation gives its turns (`.conv-scroll`), so a card's
-   left edge lines up with the box beneath it and its right edge sits the
-   same distance from the window. */
-.stage-view > .stage-lead {
-  flex: none;
-  margin: var(--space-4) var(--space-5) 0;
+/* Cost approval's lead cards (#619), each in the pane it is about: the
+   estimate summary heads the document pane above the text, and the target
+   question sits in the chat column above the box. Paper on the ground, not
+   bare text; the pane's own grid (`.stage-inner`, `.composer`) spaces them,
+   so nothing sits above the panes and takes the window from both. */
+.stage-lead {
   padding: var(--space-4) var(--space-5);
   border: 1px solid var(--wb-border);
   border-radius: var(--radius-lg);
   background: var(--wb-card);
 }
 
-.stage-view > .stage-lead + .stage-lead {
-  margin-top: var(--space-2);
+/* A wide summary scrolls inside its card, never the pane sideways. */
+.stage-inner > .estimate-view {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+/* The question is short; in the chat column it gives the turns the room. */
+.composer > .target-picker {
+  padding: var(--space-3) var(--space-4);
 }
 
 .target-picker {
