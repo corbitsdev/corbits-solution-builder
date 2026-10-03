@@ -10,6 +10,7 @@ function archiveNode(overrides: Partial<ArtifactNode> = {}): ArtifactNode {
     stage: 8,
     title: "build.tar.gz",
     version: 1,
+    position: 1,
     artifactId: "art_1",
     contentHash: "art_1@1",
     mediaType: "application/gzip",

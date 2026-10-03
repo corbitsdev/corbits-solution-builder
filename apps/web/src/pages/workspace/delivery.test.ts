@@ -10,6 +10,7 @@ function node(overrides: Partial<ArtifactNode> = {}): ArtifactNode {
     stage: 9,
     title: "Delivery manifest",
     version: 1,
+    position: 1,
     artifactId: "art_1",
     contentHash: "sha256:abc",
     mediaType: "application/json",

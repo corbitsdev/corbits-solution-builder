@@ -162,9 +162,9 @@ export function ArtifactStrip({
   );
 }
 
-/** The selected artifact's versions: quiet chips with prev/next paging and
- *  the head's timestamp — the superseded-version gate reads off this. */
-export function VersionStrip({
+/** The selected artifact's one version control and label (#641): each
+ *  version named by its place in the lineage, bound to the version shown. */
+export function VersionSelect({
   tab,
   activeId,
   onSelect,
@@ -173,55 +173,19 @@ export function VersionStrip({
   activeId: string;
   onSelect: (id: string) => void;
 }) {
-  const versions = tab.versions;
-  if (versions.length === 0) return null;
-  const index = versions.findIndex((v) => v.id === activeId);
-  const active = versions[index] ?? versions.at(-1)!;
-  const step = (delta: number) => {
-    const next = versions[index + delta];
-    if (next) onSelect(next.id);
-  };
+  if (tab.versions.length === 0) return null;
   return (
     <div className="version-strip">
-      <button
-        type="button"
-        className="ver-nav"
-        disabled={index <= 0}
-        title="Previous version"
-        aria-label="Previous version"
-        onClick={() => step(-1)}
-      >
-        ‹
-      </button>
-      {versions.map((v, i) => (
-        // The lineage's position, not `v.version` — a superseded draft is
-        // superseded by stamping a fresh artifact (`sb.supersedes`), so each
-        // node's own `version` field is 1 regardless of where it sits in the
-        // chain; the chips would otherwise all read "v1".
-        <button
-          key={v.id}
-          type="button"
-          className={v.id === active.id ? "ver on" : "ver"}
-          onClick={() => onSelect(v.id)}
-          title={v.supersededByNodeId ? `v${i + 1} · superseded` : `v${i + 1}`}
-        >
-          v{i + 1}
-        </button>
-      ))}
-      <button
-        type="button"
-        className="ver-nav"
-        disabled={index >= versions.length - 1}
-        title="Next version"
-        aria-label="Next version"
-        onClick={() => step(1)}
-      >
-        ›
-      </button>
-      <span className="version-note">
-        {new Date(active.createdAt).toLocaleDateString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}
-        {active.supersededByNodeId ? " · superseded" : ""}
-      </span>
+      <select aria-label="Version" value={activeId} onChange={(event) => onSelect(event.target.value)}>
+        {tab.versions.map((version) => (
+          <option key={version.id} value={version.id}>
+            v{version.position}
+            {version.supersededByNodeId ? " · superseded" : ""}
+            {" · "}
+            {new Date(version.createdAt).toLocaleDateString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }

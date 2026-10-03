@@ -204,8 +204,8 @@ export function saveBlob(blob: Blob, name: string): void {
   setTimeout(() => URL.revokeObjectURL(href), 10_000);
 }
 
-/** Downloads a project's finished documents as one zip and returns the notice line. */
-export async function downloadProjectDocuments(projectId: string, deps: DocumentsArchiveDeps): Promise<string> {
+/** Downloads a project's finished documents as one zip and says what went in; `complete` is false when nothing or not everything was saved. */
+export async function downloadProjectDocuments(projectId: string, deps: DocumentsArchiveDeps): Promise<{ message: string; complete: boolean }> {
   const detail = await deps.projectView(projectId);
   const archive = await assembleDocumentsArchive(
     detail.project.title,
@@ -214,11 +214,11 @@ export async function downloadProjectDocuments(projectId: string, deps: Document
     ...(deps.shoot ? [deps.shoot] : []),
   );
   const name = documentsArchiveName(detail.project.title);
-  if (archive.files.length === 0) return `${detail.project.title} has no finished documents yet.`;
+  if (archive.files.length === 0) return { message: `${detail.project.title} has no finished documents yet.`, complete: false };
   deps.save(archive.blob, name);
   const pictures = archive.mockups.length > 0 ? ` and ${String(archive.mockups.length)} mockup picture${archive.mockups.length === 1 ? "" : "s"}` : "";
   const count = `${String(archive.files.length)} document${archive.files.length === 1 ? "" : "s"}${pictures}`;
   return archive.skipped.length > 0
-    ? `Saved ${count} of ${detail.project.title} to ${name}; ${String(archive.skipped.length)} could not be read.`
-    : `Saved ${count} of ${detail.project.title} to ${name}.`;
+    ? { message: `Saved ${count} of ${detail.project.title} to ${name}; ${String(archive.skipped.length)} could not be read.`, complete: false }
+    : { message: `Saved ${count} of ${detail.project.title} to ${name}.`, complete: true };
 }
