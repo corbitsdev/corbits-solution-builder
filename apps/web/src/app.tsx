@@ -40,6 +40,7 @@ import { assembleBundle, bundleFileName } from "./project-export.ts";
 import { firstRunScreen, type HubAuthState } from "./first-run.ts";
 import { getHubSession } from "./hub-auth.ts";
 import { useBusyWhile } from "./use-busy.ts";
+import { useMountEffect } from "./use-mount-effect.ts";
 import { ZenGarden } from "./zen-garden.tsx";
 
 /**
@@ -51,8 +52,21 @@ type View = "projects" | "project" | "settings";
 
 const VIEWS: View[] = ["projects", "project", "settings"];
 
+/** The open project lives in the hash, so a reload keeps it and Back returns to the list. */
+function projectInUrl(): string | null {
+  const [, projectId] = /^#\/project\/(.+)$/.exec(window.location.hash) ?? [];
+  return projectId ? decodeURIComponent(projectId) : null;
+}
+
+function writeProjectUrl(projectId: string | null): void {
+  const hash = projectId ? `#/project/${encodeURIComponent(projectId)}` : "";
+  if (window.location.hash === hash) return;
+  window.history.pushState(null, "", hash || window.location.pathname + window.location.search);
+}
+
 /** Deep link, so a screen can be opened directly: `/?view=settings`. */
 function initialView(): View {
+  if (projectInUrl()) return "project";
   const requested = new URLSearchParams(window.location.search).get("view");
   return VIEWS.includes(requested as View) ? (requested as View) : "projects";
 }
@@ -410,7 +424,11 @@ export function AppBar({
 }
 
 export function App() {
-  const [view, setView] = useState<View>(initialView);
+  const [view, setShownView] = useState<View>(initialView);
+  const setView = (next: View) => {
+    writeProjectUrl(next === "project" ? selected : null);
+    setShownView(next);
+  };
   // Where Settings was opened from, so its back control and the gear's
   // toggle-to-close return there rather than always landing on the projects
   // list.
@@ -451,7 +469,16 @@ export function App() {
   const [oauthCandidates, setOauthCandidates] = useState<
     { providerId: string; label: string; redirectUri: string }[]
   >([]);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(projectInUrl);
+  useMountEffect(() => {
+    const follow = () => {
+      const projectId = projectInUrl();
+      if (projectId) setSelected(projectId);
+      setShownView((current) => (projectId ? "project" : current === "project" ? "projects" : current));
+    };
+    window.addEventListener("popstate", follow);
+    return () => window.removeEventListener("popstate", follow);
+  });
   const [detail, setDetail] = useState<ProjectDetail | null>(null);
   // A project failing to load is never the same as no project being open
   // (CL-8874): swallowing the failure and leaving `detail` null made a
@@ -672,8 +699,9 @@ export function App() {
   }, []);
 
   const openProject = (projectId: string) => {
+    writeProjectUrl(projectId);
     setSelected(projectId);
-    setView("project");
+    setShownView("project");
   };
 
   /**
