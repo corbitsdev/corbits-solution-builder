@@ -87,7 +87,7 @@ function marked(text: string, keyPrefix: string, state: { open: string | null })
 type Block =
   | { kind: "heading"; level: 2 | 3 | 4; text: string }
   | { kind: "paragraph"; text: string }
-  | { kind: "list"; ordered: boolean; items: string[] }
+  | { kind: "list"; ordered: boolean; start: number; items: string[] }
   | { kind: "quote"; text: string }
   | { kind: "code"; text: string }
   | { kind: "table"; head: string[]; rows: string[][] }
@@ -104,7 +104,7 @@ function parse(source: string): Block[] {
   const lines = source.replace(/\r\n/g, "\n").split("\n");
   const blocks: Block[] = [];
   let paragraph: string[] = [];
-  let list: { ordered: boolean; items: string[] } | null = null;
+  let list: { ordered: boolean; start: number; items: string[] } | null = null;
 
   const flushParagraph = () => {
     if (paragraph.length > 0) {
@@ -182,15 +182,17 @@ function parse(source: string): Block[] {
     }
 
     const bullet = /^\s*[-*+]\s+(.*)$/.exec(line);
-    const numbered = /^\s*\d+[.)]\s+(.*)$/.exec(line);
+    const numbered = /^\s*(\d+)[.)]\s+(.*)$/.exec(line);
     if (bullet || numbered) {
       flushParagraph();
       const ordered = numbered !== null;
-      const item = (bullet ?? numbered)![1]!;
+      const item = bullet ? bullet[1]! : numbered![2]!;
       if (list && list.ordered === ordered) list.items.push(item);
       else {
         flushList();
-        list = { ordered, items: [item] };
+        // A model separates numbered items with blank lines or nested bullets,
+        // which splits the list; its own numbers keep the count going.
+        list = { ordered, start: numbered ? Number(numbered[1]) : 1, items: [item] };
       }
       continue;
     }
@@ -223,7 +225,7 @@ export function Markdown({ source }: { source: string }): JSX.Element {
           }
           case "list":
             return block.ordered ? (
-              <ol key={key}>
+              <ol key={key} start={block.start}>
                 {block.items.map((item, at) => (
                   <li key={`${key}-${at}`}>{inline(item, `${key}-${at}`)}</li>
                 ))}

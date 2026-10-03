@@ -6,9 +6,11 @@
 // this lane's client no longer exports SpendRow/SpendTotals (spend now lives
 // in project-usage.ts), so the per-project spend table it backed is adapted
 // below. Import order otherwise verbatim from main.
+import { toast } from "sonner";
 import { ChatInput } from "@corbits/react-ui";
 import { Ellipsis, Plus, Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { api, ApiFailure, type ImportOutcome, type ProjectSummary } from "../client.js";
 import { faceOpensProject } from "./card-face-guard.ts";
 import { Banner, Button, stageName } from "../components.jsx";
@@ -17,7 +19,8 @@ import { Banner, Button, stageName } from "../components.jsx";
 // stage/turn/done come from project-list.ts helpers and spend copy from
 // project-usage.ts. Behavioral-only wiring; main's order and copy preserved.
 import { readImportPayload } from "../project-import.js";
-import { displayDone, displayStage, displayTurn } from "../project-list.js";
+import { displayTurn } from "../project-list.js";
+import { keys } from "../queries/keys.ts";
 import { DEFAULT_POLICY } from "./onboarding.jsx";
 import { ProjectMenu, type InfoRequest } from "./project-menu.jsx";
 import { Dictated } from "../dictation.jsx";
@@ -81,31 +84,29 @@ export function Projects({
     const next = [...files].filter((file) => !material.some((held) => held.name === file.name && held.size === file.size));
     if (next.length > 0) setMaterial([...material, ...next]);
   };
-  // Where an export landed, or what an import brought in: said once, here.
-  const [notice, setNotice] = useState<string | null>(null);
   const importInput = useRef<HTMLInputElement>(null);
 
   /** Reads the chosen export and brings it in as a new project. */
   const importFile = async (file: File) => {
-    setNotice("Importing…");
+    const importing = toast.loading(`Importing ${file.name}…`);
     setBusy(true);
-    setError(null);
     try {
       const bundle: unknown = await readImportPayload(file);
       // INTEGRATE (CL-8756): this lane's importProject validates the bundle
       // itself and reports artifacts/conversations, not nodes/commands — main's
       // diction kept, fields mapped to what the client returns.
       const brought = await api.importProject(bundle);
-      setNotice(importNotice(file.name, brought));
+      toast.success(importNotice(file.name, brought), { id: importing });
       onChanged();
       onOpen(brought.projectId);
     } catch (cause) {
-      setError(
+      toast.error(
         cause instanceof ApiFailure
           ? cause.detail.message
           : cause instanceof SyntaxError
             ? `${file.name} is not a JSON file.`
             : String(cause),
+        { id: importing },
       );
     } finally {
       setBusy(false);
@@ -175,7 +176,6 @@ export function Projects({
         }}
       >
         {error ? <Banner tone="error" title={error} /> : null}
-        {notice ? <p className="inline-note">{notice}</p> : null}
         <p id="home-composer-hint" className="visually-hidden">
           At least ten characters to start a project.
         </p>
@@ -237,7 +237,7 @@ export function Projects({
                 onOpen={() => onOpen(project.id)}
                 onChanged={onChanged}
                 onError={failed}
-                onNotice={setNotice}
+                onNotice={(message) => toast.success(message)}
               />
             ))}
           </div>
@@ -257,7 +257,7 @@ export function Projects({
                 onOpen={() => onOpen(project.id)}
                 onChanged={onChanged}
                 onError={failed}
-                onNotice={setNotice}
+                onNotice={(message) => toast.success(message)}
               />
             ))}
           </div>
@@ -283,34 +283,17 @@ function ProjectCard({
   onError: (cause: unknown) => void;
   onNotice: (message: string) => void;
 }) {
-  // INTEGRATE (CL-8756): the list no longer carries a stage — the project
-  // workflow is the only authority, so each card resolves its own stage
-  // read-only (displayStage) plus done (displayDone) and whose turn it is off
-  // the stage mail thread (displayTurn). `null` while unresolved or when the
-  // workflow could not be read at all; `stageFailed` tells those apart so the
-  // card offers a Retry rather than showing a stage number.
-  const [stage, setStage] = useState<number | null>(null);
-  const [stageFailed, setStageFailed] = useState(false);
-  const [stageAttempt, setStageAttempt] = useState(0);
-  const [done, setDone] = useState(false);
-  useEffect(() => {
-    setStage(null);
-    setStageFailed(false);
-    setDone(false);
-    let cancelled = false;
-    void displayStage(project.id, api.projectWorkflowView).then((resolved) => {
-      if (cancelled) return;
-      if (resolved === null) {
-        setStageFailed(true);
-        return;
-      }
-      setStage(resolved);
-      setDone(displayDone(project.id));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [project.id, stageAttempt]);
+  // The list carries no stage: the project workflow is the only authority,
+  // so each card reads it. No workflow yet, or a run that has not written its
+  // first state (stage 0), has not started; a read that failed offers Retry.
+  const workflow = useQuery({
+    queryKey: keys.workflowView.card(project.id),
+    queryFn: () => api.projectWorkflowView(project.id),
+    retry: false,
+  });
+  const stage = workflow.data && workflow.data.stage >= 1 ? workflow.data.stage : null;
+  const done = workflow.data?.done ?? false;
+  const stageFailed = workflow.isError;
   // INTEGRATE (CL-8756): main's turn arms are dropped here too — the summary
   // turn is only "writing"|"idle" — so the card reads whose turn it is off the
   // current stage's mail thread instead. Never for an archived project or
@@ -449,7 +432,7 @@ function ProjectCard({
 
       <div className="card-foot">
         <span>
-          {cardFootStage(stage, done, stageFailed)}
+          {workflow.isPending ? null : cardFootStage(stage, done, stageFailed)}
           {stageFailed ? (
             <>
               {" "}
@@ -458,7 +441,7 @@ function ProjectCard({
                 className="link-button"
                 onClick={(event) => {
                   event.stopPropagation();
-                  setStageAttempt((attempt) => attempt + 1);
+                  void workflow.refetch();
                 }}
               >
                 Retry
