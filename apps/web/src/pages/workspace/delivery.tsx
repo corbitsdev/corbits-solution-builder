@@ -145,7 +145,8 @@ function DeliveryDecision({
   const [pending, setPending] = useState<PendingApproval | null>(null);
   const [delivered, setDelivered] = useState<PendingApproval | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const [busy, setBusy] = useState<"approve" | "reject" | "download" | null>(null);
+  const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
+  const [downloading, setDownloading] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [error, setError] = useState<string | null>(null);
   // The last pending approval id seen this session, so a resolved delivery
@@ -284,13 +285,13 @@ function DeliveryDecision({
   };
 
   const download = async (node: ArtifactNode) => {
-    setBusy("download");
+    setDownloading(true);
     try {
       await downloadBuild(tenantId, node);
     } catch (cause) {
       toast.error(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     } finally {
-      setBusy(null);
+      setDownloading(false);
     }
   };
 
@@ -308,12 +309,12 @@ function DeliveryDecision({
       {archive ? (
         <>
           <div className="button-row">
-            <Button variant="primary" loading={busy === "download"} onClick={() => void download(archive)}>
+            <Button variant="primary" loading={downloading} onClick={() => void download(archive)}>
               Download the app (.tar.gz)
             </Button>
           </div>
           <p className="inline-note">
-            Unpack it with <code>tar -xzf {archive.title}.tar.gz</code>, then follow its README.
+            Unpack it with <code>tar -xzf {archive.title}</code>, then follow its README.
           </p>
         </>
       ) : null}

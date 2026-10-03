@@ -413,16 +413,16 @@ function DeckFile({ node, tenantId }: { node: ArtifactNode; tenantId: string }) 
   );
 }
 
-/**
- * The completed build, as the person accepted it: one archive of the
- * attempt's workspace, named after the project. Saved, not shown — a
- * source tree is not a document.
- */
+// The archive's title is its file name, extension included.
 export async function downloadBuild(tenantId: string, node: ArtifactNode): Promise<void> {
   const result = await api.artifactContent(tenantId, node.id);
-  downloadArtifact(result.content, `${node.title}.tar.gz`);
+  downloadArtifact(result.content, node.title);
 }
 
+/**
+ * The completed build, as the person accepted it: one archive of the
+ * attempt's workspace. Saved, not shown — a source tree is not a document.
+ */
 export function BuildFile({ node, tenantId }: { node: ArtifactNode; tenantId: string }) {
   const [state, setState] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
   const size = formatSize(node.sizeBytes);
