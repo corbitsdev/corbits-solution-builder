@@ -612,7 +612,6 @@ const ensureNamer = async (): Promise<Namer> => {
       workspaceTenantId,
       1 as Stage,
       specialistHubOrigin(),
-      false,
       NAMER_ROLE_KEY,
       await localizedRole(transport, workspaceTenantId, NAMER_ROLE),
     );
