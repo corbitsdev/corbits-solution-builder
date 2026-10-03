@@ -5,7 +5,10 @@
  * then a refresh, so what the interface shows is what the host durably holds
  * rather than an optimistic guess.
  */
-import { useCallback, useEffect, useState, useRef } from "react";
+import { keys } from "./queries/keys.ts";
+import { useQuery } from "@tanstack/react-query";
+import { Toaster, toast } from "sonner";
+import { useCallback, useEffect, useState, useRef, useSyncExternalStore } from "react";
 import {
   api,
   ApiFailure,
@@ -30,6 +33,7 @@ import { StageTour } from "./tour.jsx";
 import {
   BootScreen,
   NotificationsBell,
+  useTheme,
   type WorkflowStep,
 } from "@corbits/react-ui";
 import { subscribeInbox, type InboxState } from "./inbox.ts";
@@ -51,8 +55,26 @@ type View = "projects" | "project" | "settings";
 
 const VIEWS: View[] = ["projects", "project", "settings"];
 
+/** The open project lives in the hash, so a reload keeps it and Back returns to the list. */
+function projectInUrl(): string | null {
+  const [, projectId] = /^#\/project\/(.+)$/.exec(window.location.hash) ?? [];
+  return projectId ? decodeURIComponent(projectId) : null;
+}
+
+function writeProjectUrl(projectId: string | null): void {
+  const hash = projectId ? `#/project/${encodeURIComponent(projectId)}` : "";
+  if (window.location.hash === hash) return;
+  window.history.pushState(null, "", hash || window.location.pathname + window.location.search);
+}
+
+function subscribeToHistory(onChange: () => void): () => void {
+  window.addEventListener("popstate", onChange);
+  return () => window.removeEventListener("popstate", onChange);
+}
+
 /** Deep link, so a screen can be opened directly: `/?view=settings`. */
 function initialView(): View {
+  if (projectInUrl()) return "project";
   const requested = new URLSearchParams(window.location.search).get("view");
   return VIEWS.includes(requested as View) ? (requested as View) : "projects";
 }
@@ -257,6 +279,13 @@ export function AppBar({
   onError?: (cause: unknown) => void;
 }) {
   const inProject = view === "project" && detail !== null;
+  // The same read the home card makes, so a finished project's track says so.
+  const workflow = useQuery({
+    queryKey: keys.workflowView.card(detail?.project.id ?? ""),
+    queryFn: () => api.projectWorkflowView(detail!.project.id),
+    enabled: inProject,
+    retry: false,
+  });
   const inSettings = view === "settings";
   return (
     <header className={inProject ? "topbar topbar-project" : "topbar"}>
@@ -325,7 +354,9 @@ export function AppBar({
             <span className="step-name">
               {viewedStage !== null && viewedStage !== detail.stage
                 ? `${stageName(viewedStage)} · viewing · at ${stageName(detail.stage)}`
-                : stageName(detail.stage)}
+                : workflow.data?.done
+                  ? "Delivered"
+                  : stageName(detail.stage)}
             </span>
           </>
         ) : null}
@@ -410,7 +441,16 @@ export function AppBar({
 }
 
 export function App() {
-  const [view, setView] = useState<View>(initialView);
+  const { resolvedMode } = useTheme();
+  const [shownView, setShownView] = useState<View>(initialView);
+  // The hash decides whether a project is open, so Back leaves it and Forward returns.
+  const urlProject = useSyncExternalStore(subscribeToHistory, projectInUrl);
+  const view: View = urlProject ? "project" : shownView === "project" ? "projects" : shownView;
+  const setView = (next: View) => {
+    setError(null);
+    writeProjectUrl(next === "project" ? selected : null);
+    setShownView(next);
+  };
   // Where Settings was opened from, so its back control and the gear's
   // toggle-to-close return there rather than always landing on the projects
   // list.
@@ -432,8 +472,6 @@ export function App() {
 
   const [bellOpen, setBellOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
-  // Where a download landed, said once (#323): the title menu's notices.
-  const [notice, setNotice] = useState<string | null>(null);
   // A done-segment click in the stepper — carries the stage the workspace
   // should open the artifact tab for, with `at` as the repeat-click nonce.
   const [focusArtifact, setFocusArtifact] = useState<{ stage: number; at: number } | null>(null);
@@ -451,7 +489,8 @@ export function App() {
   const [oauthCandidates, setOauthCandidates] = useState<
     { providerId: string; label: string; redirectUri: string }[]
   >([]);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [chosen, setSelected] = useState<string | null>(projectInUrl);
+  const selected = urlProject ?? chosen;
   const [detail, setDetail] = useState<ProjectDetail | null>(null);
   // A project failing to load is never the same as no project being open
   // (CL-8874): swallowing the failure and leaving `detail` null made a
@@ -672,8 +711,9 @@ export function App() {
   }, []);
 
   const openProject = (projectId: string) => {
+    writeProjectUrl(projectId);
     setSelected(projectId);
-    setView("project");
+    setShownView("project");
   };
 
   /**
@@ -687,7 +727,7 @@ export function App() {
       const bundle = await assembleBundle(detail.project.id, {
         projectView: api.projectView,
         artifactContent: api.artifactContent,
-        stageAgentStatus: api.stageAgentStatus,
+        stageAgentAddresses: api.stageAgentAddresses,
         readStageThread: api.readStageThread,
       });
       downloadArtifact(JSON.stringify(bundle, null, 2), bundleFileName(detail.project.title));
@@ -800,7 +840,7 @@ export function App() {
           navigate("projects");
           void refresh();
         }}
-        onNotice={setNotice}
+        onNotice={(message) => toast.success(message)}
         onError={(cause) => setError(cause instanceof ApiFailure ? cause.detail.message : String(cause))}
         viewedStage={viewedStage}
         onStageSegment={(stage) => {
@@ -808,6 +848,7 @@ export function App() {
         }}
       />
 
+      <Toaster theme={resolvedMode} richColors closeButton />
       <main className="canvas">
         <div className={fills ? "canvas-body is-fill" : "canvas-body"}>
 
@@ -821,9 +862,6 @@ export function App() {
           </Banner>
         ) : null}
 
-        {notice ? (
-          <Banner tone="okay" title={notice} action={{ label: "Dismiss", onClick: () => setNotice(null) }} />
-        ) : null}
 
         {view === "projects" ? (
           <Projects projects={projects} onOpen={openProject} onChanged={refresh} />
@@ -850,7 +888,7 @@ export function App() {
             </>
           ) : detailError ? (
             <ProjectLoadFailure detail={detailError} onRetry={retryDetail} onBackToProjects={() => navigate("projects")} />
-          ) : (
+          ) : selected ? null : (
             <Banner title="No project open" />
           )
         ) : null}
