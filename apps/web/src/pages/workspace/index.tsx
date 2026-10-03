@@ -70,7 +70,7 @@ import { composeSendBackReason } from "./send-back-reason.ts";
 import { useRecordedDeck } from "./deck-reader.jsx";
 import { DocumentExportMenu } from "../../document-export.jsx";
 import { SlidePreview } from "../../slide-preview.jsx";
-import { ArtifactStrip, VersionStrip } from "./artifact-strip.tsx";
+import { ArtifactStrip, VersionSelect } from "./artifact-strip.tsx";
 import { stageEvents, switchEvents, type StageEvent } from "./stage-events.ts";
 import { useModelSwitch, useModelHandoff } from "./use-model-handoff.ts";
 import { currentInference, inferenceOptions, orderLeadingWith, type InferenceOption } from "./inference-options.ts";
@@ -725,7 +725,7 @@ export function StageWorkspace({
         onSelect={artifacts.select}
       />
       {artifacts.activeNode ? (
-        <VersionStrip
+        <VersionSelect
           tab={artifacts.selected}
           activeId={artifacts.activeNode.id}
           onSelect={artifacts.selectVersion}
@@ -754,8 +754,7 @@ export function StageWorkspace({
         <div className="doc reader-doc">
           <div className="docmeta">
             <span>
-              <b>{stageName(artifacts.activeNode.stage)}</b> · {documentName(artifacts.activeNode.kind)} · v
-              {artifacts.activeNode.position}
+              <b>{stageName(artifacts.activeNode.stage)}</b> · {documentName(artifacts.activeNode.kind)}
               {artifacts.activeNode.supersededByNodeId ? " · superseded" : " · viewing"}
             </span>
             <div className="document-tools">
@@ -1431,7 +1430,7 @@ export function ProductRequirements({
     <Screen
       title="Product requirements"
       description="What the stages through GUI design agreed, gathered into the one document the plan is written against. The plan cites its ids."
-      status={<StateLabel tone="info">Version {node.version}</StateLabel>}
+      status={<StateLabel tone="info">Version {node.position}</StateLabel>}
       tight
     >
       <details className="document-fold">

@@ -162,7 +162,6 @@ export function DesignFeedbackView({
     prompt: string,
   ) => Promise<unknown>;
 }) {
-  const [selectedId, setSelectedId] = useState<string | null>(designs.at(-1)?.id ?? null);
   const [feedbackMode, setFeedbackMode] = useState(false);
   const [pending, setPending] = useState<PendingComment[]>([]);
   const [draftAnchor, setDraftAnchor] = useState<Anchor | null>(null);
@@ -180,7 +179,8 @@ export function DesignFeedbackView({
     else frames.current.delete(id);
   };
 
-  const design = designs.find((entry) => entry.id === selectedId) ?? designs.at(-1) ?? null;
+  // The head: picking another version in the strip opens it in the reader.
+  const design = designs.at(-1) ?? null;
   const content = design ? (contentByNode.get(design.id) ?? "") : "";
   const framed = useMemo(
     () => (content && looksLikeHtmlDocument(content) ? framedDesign(content, frameMode, design?.title ?? "Design") : null),
@@ -297,22 +297,9 @@ export function DesignFeedbackView({
       <div className="doc" data-tour="design-feedback">
         <div className="docmeta">
           <span>
-            v{design?.position ?? ""} · {documentName(design?.kind ?? "design_artifact")}
+            {documentName(design?.kind ?? "design_artifact")}
           </span>
           <div className="document-tools">
-            {designs.length > 1 ? (
-              <select
-                aria-label="Version"
-                value={design?.id ?? ""}
-                onChange={(event) => setSelectedId(event.target.value)}
-              >
-                {designs.map((entry) => (
-                  <option key={entry.id} value={entry.id}>
-                    Version {entry.position}
-                  </option>
-                ))}
-              </select>
-            ) : null}
             <select
               aria-label="Mode"
               value={feedbackMode ? "feedback" : "preview"}

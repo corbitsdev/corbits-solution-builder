@@ -16,7 +16,7 @@ import type { ComponentProps, ReactNode } from "react";
 import type { ChatMessage } from "@corbits/react-ui";
 import { GuideDock } from "../apps/web/src/components.js";
 import { StageDocument } from "../apps/web/src/pages/workspace.js";
-import { ArtifactStrip, VersionStrip } from "../apps/web/src/pages/workspace/artifact-strip.jsx";
+import { ArtifactStrip, VersionSelect } from "../apps/web/src/pages/workspace/artifact-strip.jsx";
 import { ArtifactGraph } from "../apps/web/src/pages/graph.js";
 import { AppBar } from "../apps/web/src/app.js";
 import { ThemeProvider } from "@corbits/react-ui";
@@ -216,7 +216,7 @@ const stripTabs = [
 const strip = (
   <>
     <ArtifactStrip tabs={stripTabs} selectedKey="1:problem_brief:" onSelect={() => {}} />
-    <VersionStrip tab={stripTabs[0] as never} activeId={(currentBrief as { id: string }).id} onSelect={() => {}} />
+    <VersionSelect tab={stripTabs[0] as never} activeId={(currentBrief as { id: string }).id} onSelect={() => {}} />
   </>
 );
 

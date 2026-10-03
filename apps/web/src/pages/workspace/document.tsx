@@ -124,9 +124,8 @@ export function StageDocument({
   pending?: boolean;
   /** Restores that turn to the composer and records the withdrawal. */
   onStop?: () => void;
-  /** The artifact strip, rendered at the head of the document pane. Its
-   *  presence also hands version paging to the strip, so the header's own
-   *  picker hides rather than duplicating it. */
+  /** The artifact strip, rendered at the head of the document pane; its
+   *  version select is the one place a version is picked and named. */
   strip?: ReactNode;
   /** Set when the person is reading a superseded version of the stage's
    *  draft: the composer's gate offers "make this the active version"
@@ -637,7 +636,7 @@ export function StageDocument({
           <div className="doc" data-tour="document-body" onMouseUp={openSelection}>
             <div className="docmeta">
               <span>
-                v{node.position} · {documentName(node.kind)}
+                {documentName(node.kind)}
                 {node.supersededByNodeId ? " · superseded" : ""}
                 {node.provenance.agentRole ? ` · ${node.provenance.agentRole}` : ""}
               </span>
@@ -651,20 +650,6 @@ export function StageDocument({
               ) : null}
               <div className="document-tools">
                 {!binary ? <CopyButton text={content} /> : null}
-                {versions.length > 1 && strip === null ? (
-                  <select
-                    aria-label="Version"
-                    value={node.id}
-                    onChange={(event) => onSelectVersion(event.target.value)}
-                  >
-                    {versions.map((version) => (
-                      <option key={version.id} value={version.id}>
-                        Version {version.position}
-                        {version.supersededByNodeId ? " (superseded)" : ""}
-                      </option>
-                    ))}
-                  </select>
-                ) : null}
                 {previous && !binary ? (
                   <label className="changes-toggle" htmlFor="show-changes">
                     <Switch id="show-changes" checked={showChanges} onCheckedChange={setShowChanges} />

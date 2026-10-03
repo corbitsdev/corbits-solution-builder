@@ -1268,79 +1268,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   flex: none;
 }
 
-.ver {
-  display: inline-flex;
-  align-items: center;
-  height: 24px;
-  font-family: var(--wb-font-mono);
-  font-size: 0.6875rem;
-  color: var(--wb-muted-foreground);
-  padding: 0 var(--space-2);
-  border-radius: 999px;
-  border: 1px solid transparent;
-  background: transparent;
-  cursor: pointer;
-  transition:
-    color 150ms var(--ease-out, ease),
-    background-color 150ms var(--ease-out, ease);
-}
-
-.ver:hover {
-  color: var(--wb-foreground);
-  background: var(--wb-muted);
-}
-
-.ver:focus-visible,
-.ver-nav:focus-visible {
-  outline-offset: -2px;
-}
-
-.ver.on,
-.ver.on:hover {
-  border-color: var(--wb-border-strong);
-  background: var(--wb-background);
-  color: var(--wb-foreground);
-  font-weight: 700;
-}
-
-.ver-nav {
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--wb-muted-foreground);
-  cursor: pointer;
-}
-
-.ver-nav:hover:not(:disabled) {
-  background: var(--wb-muted);
-  color: var(--wb-foreground);
-}
-
-.ver-nav:disabled {
-  opacity: 0.4;
-  background: transparent;
-  cursor: default;
-}
-
-.ver-nav svg {
-  width: 14px;
-  height: 14px;
-}
-
-.version-note {
-  font-family: var(--wb-font-mono);
-  font-size: 0.6875rem;
-  color: var(--wb-muted-foreground);
-  margin-left: var(--space-2);
-  white-space: nowrap;
-}
-
 .document {
   border: 1px solid var(--wb-border);
   background: var(--wb-card);
@@ -1533,7 +1460,8 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 }
 
 .docmeta select,
-.document-tools select {
+.document-tools select,
+.version-strip select {
   height: 32px;
   max-width: 100%;
   padding: 0 var(--space-2);
@@ -1547,7 +1475,8 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 }
 
 .docmeta select:hover:not(:disabled),
-.document-tools select:hover:not(:disabled) {
+.document-tools select:hover:not(:disabled),
+.version-strip select:hover:not(:disabled) {
   border-color: var(--wb-border-strong);
 }
 

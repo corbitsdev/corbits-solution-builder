@@ -745,10 +745,6 @@
     padding: var(--space-2) var(--space-4) 0;
   }
 
-  .artifact-strip .version-note {
-    display: none;
-  }
-
   .stage-inner {
     padding: var(--space-4) var(--space-4) var(--space-8);
   }
@@ -920,6 +916,7 @@
 
 .artifact-strip .version-strip > * {
   flex: none;
+  max-width: 100%;
 }
 
 /* ---- send-back popover: popover paper, not card ---- */
