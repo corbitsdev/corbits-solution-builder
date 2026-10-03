@@ -418,6 +418,11 @@ function DeckFile({ node, tenantId }: { node: ArtifactNode; tenantId: string }) 
  * attempt's workspace, named after the project. Saved, not shown — a
  * source tree is not a document.
  */
+export async function downloadBuild(tenantId: string, node: ArtifactNode): Promise<void> {
+  const result = await api.artifactContent(tenantId, node.id);
+  downloadArtifact(result.content, `${node.title}.tar.gz`);
+}
+
 export function BuildFile({ node, tenantId }: { node: ArtifactNode; tenantId: string }) {
   const [state, setState] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
   const size = formatSize(node.sizeBytes);
@@ -432,15 +437,14 @@ export function BuildFile({ node, tenantId }: { node: ArtifactNode; tenantId: st
         <Button
           variant="primary"
           loading={state.busy}
-          onClick={() => {
+          onClick={async () => {
             setState({ busy: true, error: null });
-            api
-              .artifactContent(tenantId, node.id)
-              .then((result) => {
-                downloadArtifact(result.content, `${node.title}.tar.gz`);
-                setState({ busy: false, error: null });
-              })
-              .catch((cause) => setState({ busy: false, error: cause instanceof ApiFailure ? cause.detail.message : String(cause) }));
+            try {
+              await downloadBuild(tenantId, node);
+              setState({ busy: false, error: null });
+            } catch (cause) {
+              setState({ busy: false, error: cause instanceof ApiFailure ? cause.detail.message : String(cause) });
+            }
           }}
         >
           Download the build (.tar.gz)
