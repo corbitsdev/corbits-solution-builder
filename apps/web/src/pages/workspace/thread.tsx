@@ -144,6 +144,7 @@ export function StageConversation({
   onAttach,
   draftRefs = EMPTY_REFS,
   onOpenVersion,
+  empty,
 }: {
   stage: number;
   messages: readonly ChatMessage[];
@@ -178,6 +179,8 @@ export function StageConversation({
   draftRefs?: ReadonlyMap<string, DraftRef>;
   /** Opens a draft line's version in the document pane. */
   onOpenVersion?: ((nodeId: string) => void) | undefined;
+  /** What the column says before the thread has a turn; by default, that the specialist is getting ready. */
+  empty?: string;
 }) {
   const byId = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
   const uiMessages = useMemo(() => {
@@ -209,7 +212,7 @@ export function StageConversation({
     <div className="stage-conversation">
       {uiMessages.length === 0 ? (
         <div className={CONV_SCROLL_CLASS}>
-          <p className="inline-note">No messages yet.</p>
+          <p className="inline-note">{empty ?? `The ${who.toLowerCase()} is getting ready…`}</p>
         </div>
       ) : (
         <div

@@ -812,7 +812,8 @@ export function StageWorkspace({
 
   return (
     <div className="stage-view">
-      {workflowView?.done ? (
+      {/* Stage 9 says this in its own pane, where it does not push the panes down. */}
+      {workflowView?.done && (stage !== 9 || !agentAddress) ? (
         <Banner tone="okay" title="This project is delivered — stage 9's approval was recorded and the workflow has finished." />
       ) : null}
 
@@ -1045,10 +1046,11 @@ export function StageWorkspace({
         />
       ) : null}
 
-      {agentAddress && stage === 8 ? (
+      {agentAddress && stage === 8 && (decisions.stage8Evidence?.ready || panelReviewNodesOf(detail.nodes, 8).size > 0) ? (
         // The senior-engineer panel on the build's evidence (#341): asked
         // against the frozen stack and the build supervisor's latest status,
-        // each reply recorded as the reviewer's build_review document.
+        // each reply recorded as the reviewer's build_review document. Absent
+        // until there is a recorded build for it to read.
         <PanelReviewsCompanion
           projectId={detail.project.id}
           tenantId={tenantId}
@@ -1190,6 +1192,7 @@ export function StageWorkspace({
                     : null
                 }
                 latestReply={latestSpecialistMessage}
+                finished={!!workflowView?.done}
                 onAccept={acceptDelivery}
                 onRejectSendBack={() => void sendBack(8)}
               />

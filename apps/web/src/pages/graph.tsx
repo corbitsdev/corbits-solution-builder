@@ -13,6 +13,8 @@ import { AddMaterial, Banner, Button, documentName, downloadArtifact, stageName 
 import { PrintButton } from "../print.jsx";
 import { WITHDRAWN_TURNS_KIND } from "../withdrawn-turns.ts";
 import { IMPORTED_CONVERSATION_KIND } from "../project-import.ts";
+import { manifestCompanionOf } from "./workspace/stage9-opening.ts";
+import { parseDeliveryManifest } from "./workspace/delivery-opening.ts";
 
 type ArtifactEdge = { childNodeId: string; sourceNodeId: string };
 
@@ -312,7 +314,7 @@ function ArtifactReader({
           ) : node.kind === "audience_deck" ? (
             <DeckFile node={node} tenantId={tenantId} />
           ) : node.kind === "build_evidence" ? (
-            <BuildFile node={node} tenantId={tenantId} />
+            <BuildFile node={node} nodes={nodes} tenantId={tenantId} />
           ) : node.kind === "design_feedback" ? (
             <FeedbackRecord content={content} />
           ) : node.mediaType === "text/html" || node.kind === "design_artifact" ? (
@@ -418,13 +420,35 @@ function DeckFile({ node, tenantId }: { node: ArtifactNode; tenantId: string }) 
  * attempt's workspace, named after the project. Saved, not shown — a
  * source tree is not a document.
  */
-export function BuildFile({ node, tenantId }: { node: ArtifactNode; tenantId: string }) {
+/**
+ * A recorded build archive. It is written as a data URI, so its node carries
+ * no upload size; the manifest packaged beside it names the archive's real
+ * size, and that is the one shown.
+ */
+export function BuildFile({ node, nodes, tenantId }: { node: ArtifactNode; nodes: readonly ArtifactNode[]; tenantId: string }) {
   const [state, setState] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
-  const size = formatSize(node.sizeBytes);
+  const manifestId = node.sizeBytes === undefined ? (manifestCompanionOf(nodes, node)?.id ?? null) : null;
+  const [recordedSize, setRecordedSize] = useState<number | undefined>(undefined);
+  useEffect(() => {
+    setRecordedSize(undefined);
+    if (!manifestId) return;
+    let cancelled = false;
+    api
+      .artifactContent(tenantId, manifestId)
+      .then((result) => {
+        const sizeBytes = parseDeliveryManifest(result.content)?.archive.sizeBytes;
+        if (!cancelled && typeof sizeBytes === "number") setRecordedSize(sizeBytes);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, manifestId]);
+  const sizeBytes = node.sizeBytes ?? recordedSize;
   return (
     <div className="deck-file">
       <p className="inline-note">
-        {node.title} · tar.gz archive · about {size} stored. The build attempt's workspace as the worker left it,
+        {node.title} · tar.gz archive · {sizeBytes === undefined ? "size not recorded" : `${formatSize(sizeBytes)} stored`}. The build attempt's workspace as the worker left it,
         without installed dependencies; it unpacks into a directory named for the project. Its bytes are what delivery
         review verifies once accepted.
       </p>
