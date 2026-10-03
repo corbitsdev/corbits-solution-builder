@@ -2769,12 +2769,12 @@ export const api = {
 export function ensureProgressLabel(progress: EnsureProgress): string {
   switch (progress.phase) {
     case "waiting":
-      return "Waiting for the hub to place the project's workflow";
+      return "Setting up the project";
     case "deploying":
-      return "Deploying the project's workflow";
+      return "Setting up the project";
     case "replaying":
       return progress.total > 0
-        ? `Replaying decision ${String(Math.min(progress.done + 1, progress.total))} of ${String(progress.total)} onto the project's workflow`
-        : "Starting the project's workflow";
+        ? `Restoring the project's decisions, ${String(Math.min(progress.done + 1, progress.total))} of ${String(progress.total)}`
+        : "Setting up the project";
   }
 }
