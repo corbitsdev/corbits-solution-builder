@@ -8,6 +8,11 @@
  * Selection defaults to the current stage's draft document and follows the
  * stage as it advances. Selecting another artifact switches the right pane
  * to it read-only — only the current stage's draft lineage can be submitted.
+ *
+ * A stage whose specialist keeps its document in one artifact passes that
+ * artifact's versions (`documentVersions`): they follow whatever the lineage
+ * held before, the newest standing in as the head, and the artifact's own
+ * graph node is not listed again.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, STAGE_DRAFT_KIND, type ArtifactNode } from "../../client.js";
@@ -65,12 +70,15 @@ export function useProjectArtifacts(
   stage: number,
   nodes: readonly ArtifactNode[],
   draftMessage: ChatMessage | null,
+  document: readonly ArtifactNode[] | null = null,
 ): ProjectArtifacts {
   const draftKind = STAGE_DRAFT_KIND[stage] ?? null;
   // The specialist's latest unpersisted reply stands in as the next version
   // of its stage's draft lineage — nothing writes an artifact for a stage's
-  // draft before it is approved.
+  // draft before it is approved. A document kept in an artifact has its
+  // newest version there instead.
   const draftNode: ArtifactNode | null = useMemo(() => {
+    if (document) return document.at(-1) ?? null;
     if (!draftMessage || draftKind === null) return null;
     const head = nodes
       .filter((node) => node.stage === stage && node.kind === draftKind)
@@ -91,28 +99,26 @@ export function useProjectArtifacts(
       supersededByNodeId: null,
       provenance: { producer: "specialist" },
     };
-  }, [draftMessage, draftKind, stage, nodes]);
+  }, [document, draftMessage, draftKind, stage, nodes]);
   const tabs = useMemo<ArtifactTab[]>(() => {
     const groups = new Map<string, ArtifactNode[]>();
+    const documentId = document?.[0]?.artifactId ?? null;
     for (const node of nodes) {
-      if (INTERNAL_KINDS.has(node.kind)) continue;
+      if (INTERNAL_KINDS.has(node.kind) || node.artifactId === documentId) continue;
       const key = `${node.stage}:${node.kind}:${node.variant ?? ""}`;
       const group = groups.get(key);
       if (group) group.push(node);
       else groups.set(key, [node]);
     }
-    if (draftNode) {
-      const key = `${draftNode.stage}:${draftNode.kind}:`;
-      const group = groups.get(key);
-      if (group) group.push(draftNode);
-      else groups.set(key, [draftNode]);
-    }
+    const liveKey = draftNode ? `${draftNode.stage}:${draftNode.kind}:` : null;
+    if (liveKey) groups.set(liveKey, groups.get(liveKey) ?? []);
     const draftKind = STAGE_DRAFT_KIND[stage] ?? null;
     return [...groups.entries()]
       .map(([key, versions]) => {
-        const sorted = [...versions].sort(
-          (a, b) => a.version - b.version || Date.parse(a.createdAt) - Date.parse(b.createdAt),
-        );
+        const sorted = [
+          ...[...versions].sort((a, b) => a.version - b.version || Date.parse(a.createdAt) - Date.parse(b.createdAt)),
+          ...(key === liveKey ? (document ?? [draftNode!]) : []),
+        ];
         // The newest non-superseded node, not the first — a lineage written
         // before every write chained `sb.supersedes` can have more than one
         // node with no successor; the most recent of those is still the
@@ -137,7 +143,7 @@ export function useProjectArtifacts(
         };
       })
       .sort((a, b) => a.stage - b.stage || Date.parse(a.head.createdAt) - Date.parse(b.head.createdAt));
-  }, [nodes, draftNode, stage, draftKind]);
+  }, [nodes, document, draftNode, stage, draftKind]);
 
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   useEffect(() => {
@@ -166,8 +172,7 @@ export function useProjectArtifacts(
   const activeNode = selected
     ? (selected.versions.find((version) => version.id === selectedVersionId) ?? selected.versions.at(-1) ?? null)
     : null;
-  const newerVersion =
-    selected && activeNode ? selected.versions.find((v) => v.version > activeNode.version) ?? null : null;
+  const newerVersion = selected && activeNode ? (selected.versions[selected.versions.indexOf(activeNode) + 1] ?? null) : null;
 
   const [activeContent, setActiveContent] = useState("");
   useEffect(() => {

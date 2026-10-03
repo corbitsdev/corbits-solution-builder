@@ -109,6 +109,7 @@ export function useStageDecisions({
   stage,
   workflowView,
   reviewMessage,
+  documentRef = null,
   draftKind,
   foldedMessages,
   refreshWorkflow,
@@ -126,6 +127,9 @@ export function useStageDecisions({
   stage: number;
   workflowView: ProjectWorkflowView | null;
   reviewMessage: ChatMessage | null;
+  /** The stage document's exact version when the specialist keeps it in an
+   *  artifact: that version is the reviewable material, nothing is persisted. */
+  documentRef?: { readonly artifactId: string; readonly version: number; readonly contentSha256: string | null } | null;
   draftKind: string | null;
   foldedMessages: ChatMessage[];
   refreshWorkflow: () => Promise<void>;
@@ -184,29 +188,16 @@ export function useStageDecisions({
     (): string | null => (stage === 8 || stage === 5 ? null : (reviewMessage?.at ?? null)),
     [stage, reviewMessage],
   );
-  // The review draft's digest, so a draft is judged new by its content rather
-  // than by a timestamp from another clock. Null while it is computed.
-  const reviewBody = stage === 8 || stage === 5 ? null : (reviewMessage?.body ?? null);
-  const [reviewDigest, setReviewDigest] = useState<{ body: string; sha256: string } | null>(null);
-  useEffect(() => {
-    if (reviewBody === null) return;
-    let cancelled = false;
-    void crypto.subtle.digest("SHA-256", new TextEncoder().encode(reviewBody)).then((buffer) => {
-      const sha256 = [...new Uint8Array(buffer)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-      if (!cancelled) setReviewDigest({ body: reviewBody, sha256 });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [reviewBody]);
-  const latestDraftSha256 = reviewBody === null ? undefined : reviewDigest?.body === reviewBody ? reviewDigest.sha256 : null;
 
   const resolveReviewRef = useCallback(async (): Promise<{ artifactId: string; version: number; sha256: string } | null> => {
     if (!reviewMessage || draftKind === null) return null;
+    if (documentRef) {
+      return { artifactId: documentRef.artifactId, version: documentRef.version, sha256: await digestOf(reviewMessage.body, documentRef.contentSha256) };
+    }
     if (stage === 8 && !stage8Evidence?.ready) return null;
     const materials = detail.nodes.filter((node) => node.kind === "source_material").map((node) => node.id);
     const latestDraft = latestDraftFor();
-    const reviewable = reviewableArtifact({ nodes: detail.nodes, stage, kind: draftKind, latestDraft, latestDraftAt: latestDraftAtFor(), latestDraftSha256 });
+    const reviewable = reviewableArtifact({ nodes: detail.nodes, stage, kind: draftKind, latestDraft, latestDraftAt: latestDraftAtFor() });
     if (reviewable.status === "found") {
       return {
         artifactId: reviewable.node.artifactId,
@@ -225,7 +216,7 @@ export function useStageDecisions({
     const version = Number(persisted.contentHash.slice(persisted.contentHash.lastIndexOf("@") + 1));
     const sha256 = await digestOf(reviewMessage.body);
     return { artifactId: persisted.artifactId, version, sha256 };
-  }, [reviewMessage, draftKind, detail.nodes, detail.project.id, stage, chosenTarget, stage8Evidence, latestDraftFor, latestDraftAtFor, latestDraftSha256]);
+  }, [reviewMessage, documentRef, draftKind, detail.nodes, detail.project.id, stage, chosenTarget, stage8Evidence, latestDraftFor, latestDraftAtFor]);
 
   // Stage 5's quorum policy, read fresh off the project's policy right
   // before it is captured onto an `open_review` decision (CL-8870) -- never
@@ -269,8 +260,8 @@ export function useStageDecisions({
       return { ok: false as const, reason: "Stakeholders need to be named, with a reachable quorum, before a review can open." };
     }
     const latestDraft = latestDraftFor();
-    const reviewable = reviewableArtifact({ nodes: detail.nodes, stage, kind: draftKind, latestDraft, latestDraftAt: latestDraftAtFor(), latestDraftSha256 });
-    if (reviewable.status === "none") return { ok: false as const, reason: "There is nothing to review yet." };
+    const reviewable = reviewableArtifact({ nodes: detail.nodes, stage, kind: draftKind, latestDraft, latestDraftAt: latestDraftAtFor() });
+    if (!documentRef && reviewable.status === "none") return { ok: false as const, reason: "There is nothing to review yet." };
     try {
       const ref = await resolveReviewRef();
       if (!ref) return { ok: false as const, reason: "There is nothing to review yet." };
@@ -312,7 +303,7 @@ export function useStageDecisions({
     } catch (cause) {
       return { ok: false as const, reason: cause instanceof ApiFailure ? cause.detail.message : String(cause), failed: true as const };
     }
-  }, [workflowView, stage, chosenTarget, reviewMessage, draftKind, stage8Evidence, detail.nodes, detail.project.id, resolveReviewRef, refreshWorkflow, stage5Policy, stage5Packages, latestDraftFor, latestDraftAtFor, latestDraftSha256]);
+  }, [workflowView, stage, chosenTarget, reviewMessage, documentRef, draftKind, stage8Evidence, detail.nodes, detail.project.id, resolveReviewRef, refreshWorkflow, stage5Policy, stage5Packages, latestDraftFor, latestDraftAtFor]);
 
   // Opens the review the moment this stage's material is ready rather than
   // at the instant of approval — a review that only opens inside `approve()`
@@ -331,8 +322,8 @@ export function useStageDecisions({
     if (!reviewMessage || draftKind === null) return;
     if (stage === 8 && !stage8Evidence?.ready) return;
     const latestDraft = latestDraftFor();
-    const reviewable = reviewableArtifact({ nodes: detail.nodes, stage, kind: draftKind, latestDraft, latestDraftAt: latestDraftAtFor(), latestDraftSha256 });
-    if (reviewable.status === "none") return;
+    const reviewable = reviewableArtifact({ nodes: detail.nodes, stage, kind: draftKind, latestDraft, latestDraftAt: latestDraftAtFor() });
+    if (!documentRef && reviewable.status === "none") return;
     // Stage 5 keys on every live package, not only the newest: a rewrite
     // of any stakeholder's package must re-open the review naming it (#50).
     const packagesKey =
@@ -343,8 +334,9 @@ export function useStageDecisions({
             .sort()
             .join(",")
         : "";
-    const key =
-      reviewable.status === "found"
+    const key = documentRef
+      ? `${String(stage)}:${documentRef.artifactId}@${String(documentRef.version)}`
+      : reviewable.status === "found"
         ? `${String(stage)}:${reviewable.node.artifactId}@${String(reviewable.node.version)}:${packagesKey}`
         : `${String(stage)}:draft:${reviewMessage.id}`;
     if (ensuringReviewKeyRef.current === key) return;
@@ -367,7 +359,7 @@ export function useStageDecisions({
         onError(`The review could not be opened: ${result.reason}`);
       }
     });
-  }, [workflowView, stage, chosenTarget, reviewMessage, draftKind, detail.nodes, latestDraftFor, stage8Evidence, openReviewNow, onError]);
+  }, [workflowView, stage, chosenTarget, reviewMessage, documentRef, draftKind, detail.nodes, latestDraftFor, stage8Evidence, openReviewNow, onError]);
 
   /**
    * Sends the workflow's `approve` decision for this stage's already-open

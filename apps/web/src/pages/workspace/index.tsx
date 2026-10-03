@@ -46,11 +46,10 @@ import { TargetPicker } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
 import { interviewProgress, isHtmlDocument, latestDesignReply, workspaceGuidance } from "./guidance.js";
 import { repairedChoiceDraft } from "./choice-repair.ts";
-import { newestSavedPlanId, repairedStackDraft } from "./stack-repair.ts";
-import { parseStackRecord } from "@solutions-builder/app/stack";
+import { repairedStackDraft } from "./stack-repair.ts";
 import { revisionRequest } from "@solutions-builder/app/stage-prompt";
 import { stageUsesArtifactTools } from "@solutions-builder/app/specialist-source";
-import { draftReferences } from "./draft-references.ts";
+import { documentVersions, draftReferences, type DraftRef } from "./draft-references.ts";
 import { designHistory } from "./design-history.ts";
 import { Flame } from "lucide-react";
 import { useWorkflowView } from "./use-workflow-view.ts";
@@ -95,7 +94,7 @@ import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
 import { agentFor } from "@solutions-builder/app/kit";
 import { MATERIAL_KIND, MATERIAL_READING_KIND } from "@solutions-builder/app/artifacts";
 import type { Stage } from "@solutions-builder/app/ledger";
-import { STAGE_DRAFT_KIND } from "../../client.js";
+import { STAGE_DRAFT_KIND, type StageWorkArtifact } from "../../client.js";
 import {
   EvaluatorStance,
   OpeningScreen,
@@ -117,12 +116,7 @@ const DOCUMENT_STAGES = new Set([1, 2, 3, 6, 7]);
  *  read, or it exists and could not be read, which is shown, not hidden. */
 type WorkArtifact =
   | { readonly state: "none" }
-  | {
-      readonly state: "ready";
-      readonly artifact: { readonly id: string; readonly version: number; readonly content: string; readonly updatedAt: string };
-      /** Stage 6's newest saved plan, read when the artifact has no Stack block to carry one forward (#437). */
-      readonly savedPlan: string | null;
-    }
+  | { readonly state: "ready"; readonly artifact: StageWorkArtifact }
   | { readonly state: "unreadable"; readonly message: string };
 
 /** Stands in for a version that would not load, so it never reads as empty. */
@@ -292,13 +286,6 @@ export function StageWorkspace({
   // draft separate from the latest conversational turn so an acknowledgement
   // or a follow-up question never replaces the document being reviewed.
   const guidance = useMemo(() => workspaceGuidance(stage, foldedMessages), [stage, foldedMessages]);
-  // A stage 3 draft that absorbed the person's choice anywhere but under
-  // "## Chosen approach" would leave them choosing again (#430): the
-  // section is written in deterministically, as alpha main did, before the
-  // pane or the gate reads the draft.
-  // A stage 6 revision that dropped the plan's Stack block gets the last
-  // valid one carried in (#437), so the gate's banner is for a plan that
-  // never had one.
   // A drafting stage with artifact tools keeps its document in an artifact
   // the specialist writes; the host reads the newest one of the stage's kind
   // rather than trusting what the reply says it wrote. It is read again as
@@ -308,8 +295,11 @@ export function StageWorkspace({
   const usesArtifact = stageUsesArtifactTools(stage as Stage);
   const workKind = STAGE_DRAFT_KIND[stage] ?? null;
   const awaitingReply = foldedMessages.at(-1)?.author === "me";
-  const [work, setWork] = useState<WorkArtifact | null>(null);
-  const savedPlanId = useMemo(() => (stage === 6 ? newestSavedPlanId(detail.nodes) : null), [stage, detail.nodes]);
+  // Keyed by what was read, so the previous stage's or project's document
+  // never stands in for this one's while it loads.
+  const workKey = `${tenantId}:${workKind ?? ""}`;
+  const [workRead, setWorkRead] = useState<{ readonly key: string; readonly work: WorkArtifact } | null>(null);
+  const work = usesArtifact && workRead?.key === workKey ? workRead.work : null;
   const [workTick, setWorkTick] = useState(0);
   useEffect(() => {
     if (!usesArtifact || !awaitingReply) return;
@@ -317,53 +307,41 @@ export function StageWorkspace({
     return () => clearInterval(timer);
   }, [usesArtifact, awaitingReply]);
   useEffect(() => {
-    if (!usesArtifact || !workKind) {
-      setWork(null);
-      return;
-    }
+    if (!usesArtifact || !workKind) return;
     let cancelled = false;
     const load = async () => {
       try {
         const artifact = await api.stageWorkArtifact(tenantId, workKind);
-        if (!artifact) {
-          if (!cancelled) setWork({ state: "none" });
-          return;
-        }
-        // Read once the reply has landed, not on every poll while it is pending.
-        const savedPlan =
-          savedPlanId && !awaitingReply && !parseStackRecord(artifact.content)
-            ? (await api.artifactContent(tenantId, savedPlanId)).content
-            : null;
-        if (!cancelled) setWork({ state: "ready", artifact, savedPlan });
+        if (!cancelled) setWorkRead({ key: workKey, work: artifact ? { state: "ready", artifact } : { state: "none" } });
       } catch (cause) {
-        if (!cancelled) setWork({ state: "unreadable", message: cause instanceof Error ? cause.message : String(cause) });
+        if (!cancelled) setWorkRead({ key: workKey, work: { state: "unreadable", message: cause instanceof Error ? cause.message : String(cause) } });
       }
     };
     void load();
     return () => {
       cancelled = true;
     };
-  }, [usesArtifact, workKind, tenantId, savedPlanId, awaitingReply, foldedMessages, workTick]);
+  }, [usesArtifact, workKind, workKey, tenantId, foldedMessages, workTick]);
   const workDraft = useMemo(() => {
     if (!usesArtifact || work === null || work.state === "none") return guidance.draft;
     if (work.state === "unreadable" || !latestSpecialistMessage) return null;
-    // Dated by its last write, not by the reply it follows: a write made
-    // while the next reply is pending is newer than any saved version.
-    return { ...latestSpecialistMessage, body: work.artifact.content, at: work.artifact.updatedAt };
+    return { ...latestSpecialistMessage, body: work.artifact.content };
   }, [usesArtifact, work, guidance.draft, latestSpecialistMessage]);
   const workUnreadable = work?.state === "unreadable" ? work.message : null;
   useEffect(() => {
     if (workUnreadable) setError(`${workUnreadable} Approval waits until it can be read.`);
   }, [workUnreadable]);
+  // A draft that lives in the mail is repaired before the pane or the gate
+  // reads it, and that repaired text is what approval records: a stage 3
+  // choice absorbed anywhere but under "## Chosen approach" is written in
+  // (#430), and a stage 6 plan that dropped its Stack block gets the last
+  // valid one carried in (#437). A document kept in an artifact is shown
+  // and approved exactly as the specialist wrote it, so it is not.
+  const artifactBacked = usesArtifact && work !== null && work.state !== "none";
   const draftMessage = useMemo(
     () =>
-      repairedStackDraft(
-        stage,
-        foldedMessages,
-        repairedChoiceDraft(stage, foldedMessages, workDraft),
-        work?.state === "ready" ? work.savedPlan : null,
-      ),
-    [stage, foldedMessages, workDraft, work],
+      artifactBacked ? workDraft : repairedStackDraft(stage, foldedMessages, repairedChoiceDraft(stage, foldedMessages, workDraft)),
+    [artifactBacked, stage, foldedMessages, workDraft],
   );
 
   // Stage 1's brief evaluator reads each new draft; the Product guide answers
@@ -399,6 +377,16 @@ export function StageWorkspace({
         : stage === 4
           ? latestDesign
           : latestSpecialistMessage;
+  // A document kept in an artifact is reviewed as the exact version the
+  // pane shows once the reply that left it has landed; nothing is copied.
+  const documentArtifact = reviewMessage && work?.state === "ready" ? work.artifact : null;
+  const documentRef = useMemo(
+    () =>
+      documentArtifact
+        ? { artifactId: documentArtifact.id, version: documentArtifact.version, contentSha256: documentArtifact.contentSha256 }
+        : null,
+    [documentArtifact],
+  );
   const progress = useMemo(() => interviewProgress(foldedMessages), [foldedMessages]);
 
   // Mail turns as StageDocument's turn shape: it wants who spoke and what
@@ -419,32 +407,32 @@ export function StageWorkspace({
   );
 
   const draftKind = STAGE_DRAFT_KIND[stage] ?? null;
-  const artifacts = useProjectArtifacts(tenantId, stage, detail.nodes, draftMessage);
+  // The artifact's versions as the person saw them, one per reply.
+  const versions = useMemo(
+    () =>
+      work?.state === "ready" && draftKind && work.artifact.versions.length > 0
+        ? documentVersions(foldedMessages, work.artifact, stage, draftKind, stageName(stage))
+        : null,
+    [work, draftKind, foldedMessages, stage],
+  );
+  const versionNodes = useMemo(() => versions?.map((entry) => entry.node) ?? null, [versions]);
+  const artifacts = useProjectArtifacts(tenantId, stage, detail.nodes, draftMessage, versionNodes);
   // Each draft reply's version (#158): the conversation shows the reply as a
   // line naming it, on every document stage and on a reload alike, since
-  // both the mail and the lineage are records.
+  // both the mail and the lineage are records. A reply that revised an
+  // artifact names the version it left, numbered by its place in the lineage.
   const liveVersions = artifacts.tabs.find((tab) => tab.live)?.versions;
-  // A reply that wrote the artifact is short; the version line it carries is
-  // still the artifact's, so the lineage is matched against the document.
-  const referenceMessages = useMemo(
-    () =>
-      work?.state === "ready" && latestSpecialistMessage
-        ? foldedMessages.map((message) => (message.id === latestSpecialistMessage.id ? { ...message, body: work.artifact.content } : message))
-        : foldedMessages,
-    [work, latestSpecialistMessage, foldedMessages],
-  );
-  const draftRefs = useMemo(
-    () =>
-      DOCUMENT_STAGES.has(stage) && draftKind
-        ? draftReferences(
-            usesArtifact ? foldedMessages : referenceMessages,
-            liveVersions ?? [],
-            documentName(draftKind).toLowerCase(),
-            usesArtifact && work?.state === "ready",
-          )
-        : undefined,
-    [stage, draftKind, referenceMessages, foldedMessages, liveVersions, usesArtifact, work],
-  );
+  const draftRefs = useMemo(() => {
+    if (!DOCUMENT_STAGES.has(stage) || !draftKind) return undefined;
+    const noun = documentName(draftKind).toLowerCase();
+    if (!versions) return draftReferences(foldedMessages, liveVersions ?? [], noun);
+    const lineage = liveVersions ?? [];
+    return new Map<string, DraftRef>(
+      versions.flatMap(({ node, replyId }) =>
+        replyId ? [[replyId, { version: lineage.findIndex((entry) => entry.id === node.id) + 1, nodeId: node.id, noun }] as const] : [],
+      ),
+    );
+  }, [stage, draftKind, versions, foldedMessages, liveVersions]);
   // A done-segment click is a navigation signal, not state — one effect is
   // where it lands.
   useEffect(() => {
@@ -587,6 +575,8 @@ export function StageWorkspace({
     stage,
     workflowView,
     reviewMessage,
+    // The exact version the pane shows, once the reply that left it has landed.
+    documentRef,
     draftKind,
     foldedMessages,
     buildAttempts: builds.attempts,
@@ -663,7 +653,8 @@ export function StageWorkspace({
 
   // Reading a superseded version of the stage's draft: the gate swaps
   // approve for "make this the active version" — restoring writes the old
-  // content forward as the new head, versions are append-only.
+  // content forward as the new head, versions are append-only. A document
+  // kept in an artifact gets it as that artifact's next version.
   const [promoting, setPromoting] = useState(false);
   const superseded =
     artifacts.isStageDraft && artifacts.selected !== null && artifacts.activeNode !== null &&
@@ -673,8 +664,13 @@ export function StageWorkspace({
     setPromoting(true);
     setError(null);
     try {
-      const materials = detail.nodes.filter((node) => node.kind === "source_material").map((node) => node.id);
-      await api.persistStageDraft(detail.project.id, stage, artifacts.activeContent, materials);
+      if (work?.state === "ready") {
+        await api.restoreStageDocument(tenantId, work.artifact.id, artifacts.activeContent, work.artifact.version);
+        setWorkTick((tick) => tick + 1);
+      } else {
+        const materials = detail.nodes.filter((node) => node.kind === "source_material").map((node) => node.id);
+        await api.persistStageDraft(detail.project.id, stage, artifacts.activeContent, materials);
+      }
       await refreshWorkflow();
       artifacts.select(null);
     } catch (cause) {
@@ -712,12 +708,7 @@ export function StageWorkspace({
       // main's rounds did (#431); stages 8 and 9 revise nothing.
       const revising = draftMessage && stage <= 7 && !isHtmlDocument(draftMessage.body);
       const turn = withAttachedDocuments(body, stageDocuments);
-      const mail =
-        usesArtifact && work !== null && work.state !== "none"
-          ? turn
-          : revising
-            ? revisionRequest({ stage, userInput: turn, currentDocument: draftMessage.body })
-            : turn;
+      const mail = !artifactBacked && revising ? revisionRequest({ stage, userInput: turn, currentDocument: draftMessage.body }) : turn;
       await api.sendStageMail(tenantId, agentAddress, { body: mail });
       await loadThread();
     } catch (cause) {
@@ -1274,7 +1265,7 @@ export function StageWorkspace({
             promote={
               superseded
                 ? {
-                    label: `${artifacts.selected.label} v${artifacts.activeNode.version} · superseded by v${artifacts.selected.versions.at(-1)?.version}`,
+                    label: `${artifacts.selected.label} v${artifacts.selected.versions.indexOf(artifacts.activeNode) + 1} · superseded by v${artifacts.selected.versions.length}`,
                     run: () => void promote(),
                     busy: promoting,
                   }

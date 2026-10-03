@@ -26,6 +26,7 @@ import {
   installProjectAuthority,
   installState as installerInstallState,
   listArtifacts,
+  listArtifactVersions,
   listSpecialistDeployments,
   liveDelegationStore,
   myPrincipalIn,
@@ -48,6 +49,7 @@ import {
   type ClosureSource,
   type EnsureProgress,
   type EnsuredProjectWorkflow,
+  type ArtifactVersionItem,
   type InstallState as PackageInstallState,
   type ProjectPolicy,
   type ProjectWorkflowDeployment,
@@ -81,7 +83,7 @@ import {
   type DeckDesignDocument,
   type DesignDocumentScope,
 } from "./deck-design-documents.ts";
-import type { DesignFeedbackDisposition, DesignFeedbackEntry as DesignFeedbackGraphEntry } from "@solutions-builder/app/artifact-graph";
+import { parseVersionId, type DesignFeedbackDisposition, type DesignFeedbackEntry as DesignFeedbackGraphEntry } from "@solutions-builder/app/artifact-graph";
 import type { TemplateTheme } from "@solutions-builder/app/deck";
 import { withDisposition } from "./design-disposition.ts";
 import {
@@ -455,6 +457,16 @@ export type ImportOutcome = {
    *  replay (null when there was nothing to replay or it never started),
    *  why the replay stopped short, and what the plan could not do. */
   readonly landing?: { readonly landed: number | null; readonly stopped: string | null; readonly notes: readonly string[] };
+};
+
+/** A drafting stage's document as its specialist keeps it (`api.stageWorkArtifact`). */
+export type StageWorkArtifact = {
+  readonly id: string;
+  readonly version: number;
+  readonly content: string;
+  readonly contentSha256: string | null;
+  /** Oldest first. */
+  readonly versions: readonly ArtifactVersionItem[];
 };
 
 export type ArtifactNode = {
@@ -1927,6 +1939,8 @@ export const api = {
    * document, written the same way `attachMaterial` writes straight to the
    * mounted `@corbits/artifacts` module. Called once, right before the
    * approval signal, so the run's own gate always names a real version.
+   * Only for a draft that lives in the mail: a document the specialist keeps
+   * in an artifact is reviewed as that artifact's own version, never copied.
    */
   persistStageDraft: (
     projectId: string,
@@ -1963,6 +1977,9 @@ export const api = {
         ...(target ? { target } : {}),
       });
     }),
+  /** Writes an earlier version of a stage document kept in an artifact forward as its next version; refused if the artifact has moved past `expectedVersion`. */
+  restoreStageDocument: (tenantId: string, artifactId: string, content: string, expectedVersion: number) =>
+    asWorkspaceOwner((transport) => installerReviseArtifact(transport, tenantId, artifactId, { content, expectedVersion })),
   /**
    * Records stage 6's product requirements document (#328): the
    * requirements author's reply, which used to live only in its mail
@@ -2058,42 +2075,51 @@ export const api = {
   /** The workspace tenant artifacts are recorded under; resolved once and threaded down as a prop. */
   workspaceTenantId: () => resolveWorkspace(createHubTransport()).then((workspace) => workspace?.tenantId ?? null),
   /**
-   * An artifact's current content, over the mounted `@corbits/artifacts`
-   * module — no host route left. A file uploaded through `/artifacts/upload`
-   * keeps its bytes in the module's own blob store, not `content`, so those
-   * are fetched through the package's own `GET /artifacts/:id/download` and
-   * re-wrapped as the same `data:` URL convention data-URL-backed artifacts
-   * already return, so every reader downstream (inline preview, download)
-   * stays on one code path.
-   */
-  /**
    * The document a drafting stage's specialist keeps with the artifact tools:
    * the newest artifact of the stage's kind that a workflow run wrote in the
-   * project's tenant. Null when there is none yet. A read that fails throws,
-   * so the workspace can say the document is unavailable rather than fall
-   * back to an older draft.
+   * project's tenant, and its versions oldest first. Null when there is none
+   * yet. A read that fails throws, so the workspace can say the document is
+   * unavailable rather than fall back to an older draft.
    */
-  stageWorkArtifact: async (
-    tenantId: string,
-    kind: string,
-  ): Promise<{ id: string; version: number; content: string; updatedAt: string } | null> => {
+  stageWorkArtifact: async (tenantId: string, kind: string): Promise<StageWorkArtifact | null> => {
     const transport = createHubTransport();
     const written = (await listArtifacts(transport, tenantId, { kind }))
       .filter((item) => item.archivedAt === null && item.source.origin === "workflow")
       .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
     if (!written) return null;
-    const artifact = await installerGetArtifact(transport, tenantId, written.id);
+    const [artifact, versions] = await Promise.all([
+      installerGetArtifact(transport, tenantId, written.id),
+      listArtifactVersions(transport, tenantId, written.id),
+    ]);
     if (!artifact) throw new Error(`The stage document ${written.id} could not be read.`);
-    return { id: artifact.id, version: artifact.version, content: artifact.content, updatedAt: artifact.updatedAt };
+    return {
+      id: artifact.id,
+      version: artifact.version,
+      content: artifact.content,
+      contentSha256: artifact.contentSha256,
+      versions,
+    };
   },
+  /**
+   * An artifact's content, over the mounted `@corbits/artifacts` module — no
+   * host route left: the current version for an artifact id, or exactly the
+   * version a `versionIdFor` id names. A file uploaded through
+   * `/artifacts/upload` keeps its bytes in the module's own blob store, not
+   * `content`, so those are fetched through the package's own
+   * `GET /artifacts/:id/download` and re-wrapped as the same `data:` URL
+   * convention data-URL-backed artifacts already return, so every reader
+   * downstream (inline preview, download) stays on one code path.
+   */
   artifactContent: async (tenantId: string, nodeId: string): Promise<{ content: string }> => {
+    const pinned = parseVersionId(nodeId);
+    const artifactId = pinned?.artifactId ?? nodeId;
     // The project's own tenant, else the workspace for an older project's
     // artifact still recorded there (#29, `findArtifact`).
-    const found = await findArtifact(createHubTransport(), tenantId, nodeId);
+    const found = await findArtifact(createHubTransport(), tenantId, artifactId, pinned?.version);
     if (!found) return { content: "" };
     const uploadId = (found.artifact.source as { upload?: { id?: unknown } }).upload?.id;
     if (typeof uploadId !== "string") return { content: found.artifact.content };
-    return { content: await downloadUploadedArtifact(found.tenantId, nodeId) };
+    return { content: await downloadUploadedArtifact(found.tenantId, artifactId) };
   },
   /** The workspace's languages (#411); American English both ways until set. */
   languageSettings: (): Promise<LanguageSettings> =>

@@ -71,11 +71,6 @@ export function reviewableArtifact(input: {
    *  and 8): when it was sent, so a draft newer than the newest persisted
    *  version is persisted rather than the old version being reviewed again. */
   readonly latestDraftAt?: string | null;
-  /** The chat draft's content digest: undefined where it is not used, null
-   *  while it is still being computed. Compared with the saved version's
-   *  digest, it decides whether the draft is new, since the hub's
-   *  timestamps do not all share one clock. */
-  readonly latestDraftSha256?: string | null | undefined;
 }): ReviewableArtifact {
   const written = input.nodes
     .filter(
@@ -98,13 +93,11 @@ export function reviewableArtifact(input: {
           (input.stage === 8 && node.provenance.producer === "host")),
     )
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
-  if (input.latestDraft && input.latestDraftSha256 === null) return { status: "none" };
   const draftIsNewer =
     !!input.latestDraft &&
+    typeof input.latestDraftAt === "string" &&
     written !== undefined &&
-    (typeof input.latestDraftSha256 === "string" && written.contentSha256
-      ? input.latestDraftSha256 !== written.contentSha256
-      : typeof input.latestDraftAt === "string" && Date.parse(input.latestDraftAt) > Date.parse(written.createdAt));
+    Date.parse(input.latestDraftAt) > Date.parse(written.createdAt);
   if (written && !draftIsNewer) return { status: "found", node: written };
   if (input.latestDraft) return { status: "persist_needed" };
   return { status: "none" };

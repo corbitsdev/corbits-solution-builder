@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { api, ApiFailure, type ArtifactNode, type BuildAttempt, type BuildPromptMaterial, type BuildWorkerStatus, type ProjectDetail } from "../../client.js";
 import type { ChatMessage } from "../../stage-mail.ts";
 import type { Freeze } from "@solutions-builder/app/project-workflow/contracts";
+import { versionIdFor } from "@solutions-builder/app/artifact-graph";
 import { Banner, Button, StateLabel } from "../../components.jsx";
 import { Markdown } from "../../markdown.jsx";
 import { agentFor } from "@solutions-builder/app/kit";
@@ -35,10 +36,14 @@ import { attemptRecorded, buildArchives, buildEvidenceState, composeSupervisorBr
 
 const EMPTY_STAGE_EVENTS: readonly StageEvent[] = [];
 
-/** The frozen version of a kind, when the freeze names one; else the live node. */
+/** The frozen version of a kind, when the freeze names one, as a node that
+ *  reads exactly that version (a document kept in one artifact may have
+ *  moved past it); else the live node. */
 function frozenNode(nodes: readonly ArtifactNode[], freeze: Freeze | null, kind: string): ArtifactNode | undefined {
-  const frozen = freeze?.frozen.find((ref) => nodes.some((node) => node.artifactId === ref.artifactId && node.version === ref.version && node.kind === kind));
-  if (frozen) return nodes.find((node) => node.artifactId === frozen.artifactId && node.version === frozen.version);
+  for (const ref of freeze?.frozen ?? []) {
+    const held = nodes.find((node) => node.artifactId === ref.artifactId && node.kind === kind);
+    if (held) return { ...held, id: versionIdFor(ref.artifactId, ref.version), version: ref.version };
+  }
   return nodes
     .filter((node) => node.kind === kind && node.supersededByNodeId === null)
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
