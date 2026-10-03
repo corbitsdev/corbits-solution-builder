@@ -6,7 +6,7 @@
   "description": "The Solution Builder client.",
   "dependencies": {
     "@corbits/codex-provider": "^0.1.2",
-    "@corbits/xai-provider": "^0.1.1",
+    "@corbits/xai-provider": "^0.1.2",
     "@intx/hub-client": "workspace:*",
     "@solutions-builder/app": "workspace:*",
     "@solutions-builder/installer": "workspace:*"
