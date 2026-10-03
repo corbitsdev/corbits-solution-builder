@@ -1,9 +1,9 @@
 {
-  "name": "@solutions-builder/specialist-companions",
+  "name": "@solutions-builder/specialist-product-guide",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "The namer role that sits beside the stages.",
+  "description": "The product guide: its role and prompt.",
   "exports": {
     ".": "./src/index.ts"
   },
