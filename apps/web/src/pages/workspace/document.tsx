@@ -62,6 +62,7 @@ export function StageDocument({
   onSubmit,
   soloApproval,
   canSubmit,
+  targetPending = false,
   busy,
   draftOpen = true,
   newer = null,
@@ -102,6 +103,8 @@ export function StageDocument({
   onSubmit: () => void;
   soloApproval: boolean;
   canSubmit: boolean;
+  /** Stage 3 target is not picked yet: approving waits, and so does choosing an approach. */
+  targetPending?: boolean;
   busy: string | null;
   /** The draft pane beside the conversation; the header's toggle. */
   draftOpen?: boolean;
@@ -488,40 +491,45 @@ export function StageDocument({
         <div className="composer" data-tour="composer" data-working={busy === "draft" || undefined}>
           {/* The specialist has gone quiet without asking anything. Whose move
               it is has to be said, or the screen reads as stuck. */}
-          {canSubmit && !openQuestion && busy === null && turns.at(-1)?.role === "specialist" && !turns.at(-1)!.body.trimEnd().endsWith("?") ? (
+          {canSubmit && !targetPending && !openQuestion && busy === null && turns.at(-1)?.role === "specialist" && !turns.at(-1)!.body.trimEnd().endsWith("?") ? (
             <p className="composer-cue">
               Nothing more to ask. Approve it, or say what should change and it will redraft.
             </p>
           ) : null}
           {canSubmit && choosing ? (
             <div className="stage-action composer-approve composer-choose">
-              <span>Which approach?</span>
-              {approaches.map((section) => {
-                const letter = /^approach\s+([ab])/i.exec(section.heading)?.[1]?.toUpperCase() ?? "A";
-                const name = approachName(section.heading) ?? `Approach ${letter}`;
-                return (
-                  <Button
-                    key={section.heading}
-                    variant="primary"
-                    disabled={busy !== null}
-                    onClick={() =>
-                      onRevise(withChoiceReminder(3, `Chosen: Approach ${letter} (${name}).`), [], true)
-                    }
-                  >
-                    {name}
-                  </Button>
-                );
-              })}
-              <Button
-                variant="ghost"
-                disabled={busy !== null}
-                onClick={() => {
-                  setRedrafting(true);
-                  composer.current?.focus();
-                }}
-              >
-                Neither, redraft
-              </Button>
+              <span className="composer-approve-lead">
+                <span>Which approach?</span>
+                {targetPending ? <span className="composer-note">Pick how it will be used first.</span> : null}
+              </span>
+              <span className="composer-choices">
+                {approaches.map((section) => {
+                  const letter = /^approach\s+([ab])/i.exec(section.heading)?.[1]?.toUpperCase() ?? "A";
+                  const name = approachName(section.heading) ?? `Approach ${letter}`;
+                  return (
+                    <Button
+                      key={section.heading}
+                      variant="primary"
+                      disabled={busy !== null || targetPending}
+                      onClick={() =>
+                        onRevise(withChoiceReminder(3, `Chosen: Approach ${letter} (${name}).`), [], true)
+                      }
+                    >
+                      {name}
+                    </Button>
+                  );
+                })}
+                <Button
+                  variant="ghost"
+                  disabled={busy !== null}
+                  onClick={() => {
+                    setRedrafting(true);
+                    composer.current?.focus();
+                  }}
+                >
+                  Neither, redraft
+                </Button>
+              </span>
             </div>
           ) : promote ? (
             <div className="stage-action composer-approve">
@@ -530,7 +538,7 @@ export function StageDocument({
                 Make it the active version
               </Button>
             </div>
-          ) : canSubmit ? (
+          ) : canSubmit && !targetPending ? (
             <div className="stage-action composer-approve">
               <span className="composer-approve-lead">
                 <span>{soloApproval ? "Happy with it?" : "Nothing more to say?"}</span>

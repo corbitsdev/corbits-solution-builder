@@ -68,6 +68,13 @@
   opacity: 0.5;
 }
 
+/* Not applicable to what is being built: hollow, so it reads as passed
+   over rather than done or still ahead. */
+.topbar-project .stepper li[data-skipped] > span {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--wb-border);
+}
+
 /* The segment being looked at, when a done stage was opened from the
    track: ringed in the primary colour. The pointer stays on the current
    stage and the ink on the done ones, so progress still reads. */

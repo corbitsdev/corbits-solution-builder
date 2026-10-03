@@ -56,7 +56,7 @@ function openingArtifactId(
   return null;
 }
 
-const workflowStageCache = new Map<string, { stage: number; done: boolean; at: number }>();
+const workflowStageCache = new Map<string, { stage: number; done: boolean; skipped: readonly number[]; at: number }>();
 // 5s — the same cadence `app.tsx`'s own `refresh()` polls the project list
 // at, so a card remounted (returning from the workspace after an approval)
 // never reads a cached stage that is already stale by the time the list
@@ -77,13 +77,13 @@ const WORKFLOW_STAGE_CACHE_MS = 5_000;
  */
 export async function displayStage(
   projectId: string,
-  readView: (projectId: string) => Promise<{ stage: number; done: boolean } | null>,
+  readView: (projectId: string) => Promise<{ stage: number; done: boolean; skipped: readonly number[] } | null>,
 ): Promise<number | null> {
   const cached = workflowStageCache.get(projectId);
   if (cached && Date.now() - cached.at < WORKFLOW_STAGE_CACHE_MS) return cached.stage;
   const view = await readView(projectId).catch(() => null);
   if (!view) return null;
-  workflowStageCache.set(projectId, { stage: view.stage, done: view.done, at: Date.now() });
+  workflowStageCache.set(projectId, { stage: view.stage, done: view.done, skipped: view.skipped, at: Date.now() });
   return view.stage;
 }
 
@@ -92,6 +92,11 @@ export async function displayStage(
  *  once, which every caller does before this (`ProjectCard`'s own effect). */
 export function displayDone(projectId: string): boolean {
   return workflowStageCache.get(projectId)?.done ?? false;
+}
+
+/** The stages the project's surface made not applicable, per the same read as `displayDone`. */
+export function displaySkipped(projectId: string): readonly number[] {
+  return workflowStageCache.get(projectId)?.skipped ?? [];
 }
 
 const turnCache = new Map<string, { label: string | null; at: number }>();

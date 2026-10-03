@@ -58,7 +58,9 @@ export async function buildPromptMaterial(
 ): Promise<BuildPromptMaterial> {
   const plan = frozenNode(nodes, freeze, "build_plan");
   const requirements = frozenNode(nodes, freeze, "product_requirements");
-  const design = frozenNode(nodes, freeze, "design_artifact");
+  // A freeze with no stage 4 reference had GUI design skipped: a design left
+  // from before the project's surface changed is not material.
+  const design = freeze && !freeze.frozen.some((ref) => ref.stage === 4) ? undefined : frozenNode(nodes, freeze, "design_artifact");
   const [planText, requirementsText, designText] = await Promise.all([
     plan ? read(plan.id) : Promise.resolve(""),
     requirements ? read(requirements.id) : Promise.resolve(""),
