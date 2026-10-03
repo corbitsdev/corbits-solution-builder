@@ -402,6 +402,15 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
   // consumer that never matches the bundle's own consumer identity, so the
   // capability is never assembled and the tool's `resolve("credentials")`
   // fails closed.
+  //
+  // The binding delivers the credential's material; using it needs a
+  // `credential:{id}` / `use` grant whose `{ tool }` condition names this
+  // bundle, checked at the tool's first resolve. This Interchange revision
+  // mints no such grant per run, so without the requirement below every
+  // artifact write is refused (`no_matching_grant`). The id is the
+  // credential's, minted at deploy after this source renders, so the
+  // requirement names any credential and the condition narrows it to the one
+  // consumer; it is delegated from the deploying owner's authority.
   const credentialBindings = spec.credentialPackage
     ? `
   credentialBindings: [
@@ -411,6 +420,14 @@ export function specialistEntrySource(options: SpecialistSourceOptions): string 
       provider: ${JSON.stringify(WORKFLOW_ARTIFACTS_PROVIDER_NAME)},
       name: ${JSON.stringify(credentialName)},
       locator: "tenant",
+    },
+  ],
+  grantRequirements: [
+    {
+      resource: "credential:*",
+      action: "use",
+      source: "creator",
+      conditions: { tool: ${JSON.stringify(`tool:${spec.credentialPackage}`)} },
     },
   ],`
     : "";
