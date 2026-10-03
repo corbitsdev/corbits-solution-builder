@@ -56,7 +56,7 @@ function toUiMessages(messages: readonly ChatMessage[]): UiChatMessage[] {
  * scripts and no same-origin since a generated design is untrusted.
  * Everything else is Markdown as before.
  */
-function MessageBody({ text }: { text: string }) {
+export function MessageBody({ text }: { text: string }) {
   if (isHtmlDocument(text)) {
     return (
       <details className="bubble-fold">
