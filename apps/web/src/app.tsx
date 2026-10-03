@@ -146,9 +146,8 @@ function ProjectLoadFailure({
 }
 
 /**
- * The nine stages as a whisper track: done segments in ink and clickable,
- * the current one wider in the primary colour with the pointer beneath, the
- * rest hairline. The segment being looked at, when it is a done stage
+ * The nine stages as blocks: done ones in ink and clickable, the current
+ * one widened into a pill that carries its name, the rest quiet. The segment being looked at, when it is a done stage
  * opened from here, is ringed -- the track still says how far the project
  * has come; the ring says where the eyes are.
  */
@@ -175,7 +174,7 @@ function StageStepper({
             </button>
           ) : (
             <span title={step.label}>
-              <span className="sr-only">{step.label}</span>
+              <span className={step.status === "current" ? undefined : "sr-only"}>{step.label}</span>
             </span>
           )}
         </li>
@@ -322,11 +321,9 @@ export function AppBar({
               viewed={viewedStage !== null && viewedStage !== detail.stage ? viewedStage : null}
               {...(onStageSegment ? { onStepClick: onStageSegment } : {})}
             />
-            <span className="step-name">
-              {viewedStage !== null && viewedStage !== detail.stage
-                ? `${stageName(viewedStage)} · viewing · at ${stageName(detail.stage)}`
-                : stageName(detail.stage)}
-            </span>
+            {viewedStage !== null && viewedStage !== detail.stage ? (
+              <span className="step-name">Viewing {stageName(viewedStage)}</span>
+            ) : null}
           </>
         ) : null}
       </div>
