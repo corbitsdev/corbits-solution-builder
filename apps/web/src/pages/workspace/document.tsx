@@ -447,7 +447,7 @@ export function StageDocument({
                   // options is asking for a choice, whether or not a question
                   // is queued.
                   onAnswer={
-                    busy === null && message.id === lastTurnId
+                    message.id === lastTurnId
                       ? (answer) => {
                           // The last tap sends what the box was gathering
                           // (#186): the box empties, as after any send, so
@@ -457,6 +457,7 @@ export function StageDocument({
                         }
                       : undefined
                   }
+                  busy={busy !== null}
                   // With several questions asked, the answers gather in the
                   // box until the last is tapped (#142), where the person
                   // can read them together and add to them.

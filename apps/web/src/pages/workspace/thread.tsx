@@ -372,6 +372,7 @@ export function SpecialistTurn({
   draft = null,
   onOpenVersion,
   onAnswer,
+  busy = false,
   onDraft,
 }: {
   text: string;
@@ -386,6 +387,9 @@ export function SpecialistTurn({
    *  lone question sends on its tap. Absent, the questions show without
    *  their options: an answered turn offers nothing to tap. */
   onAnswer?: ((answer: string) => void) | undefined;
+  /** Set while the page is working on something else, such as an approval:
+   *  the latest turn's options stay on screen but cannot be tapped. */
+  busy?: boolean;
   /** The answers so far, while some question is still unanswered: what the
    *  message box should hold, so the person sees them gather and can add
    *  to them (#142). Absent, a partial set is sent as it stands. */
@@ -437,16 +441,20 @@ export function SpecialistTurn({
           <div key={index} className="turn-ask">
             <p className="turn-question">{segment.question}</p>
             {segment.options.length > 0 && onAnswer ? (
-              <>
-                <div className="turn-options" role="group" aria-label="Likely answers">
-                  {segment.options.map((option) => (
-                    <button key={option} type="button" className="turn-option" aria-pressed={picked === option} onClick={() => choose(at, option)}>
-                      {option}
-                    </button>
-                  ))}
-                </div>
-                <p className="turn-option-hint">Or type your own answer below.</p>
-              </>
+              <div className="turn-options" role="group" aria-label="Likely answers">
+                {segment.options.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    className="turn-option"
+                    disabled={busy}
+                    aria-pressed={picked === option}
+                    onClick={() => choose(at, option)}
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
             ) : null}
           </div>
         );

@@ -3568,8 +3568,13 @@ button[aria-disabled="true"] {
   text-align: left;
 }
 
-.turn-option:hover {
+.turn-option:hover:not(:disabled) {
   border-color: var(--wb-primary);
+}
+
+.turn-option:disabled {
+  cursor: default;
+  opacity: 0.6;
 }
 
 .turn-option[aria-pressed="true"] {
