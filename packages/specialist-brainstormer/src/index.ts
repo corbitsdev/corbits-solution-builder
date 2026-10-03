@@ -46,7 +46,6 @@ A problem brief with these headings, after \`## In short\`:
   line each in their terms.
 - \`## What I assumed\`: one line per thing you filled in, for the person to
   correct.
-- \`## What I need from you\`
 
 ${interview(`Which costs you more today: the hours spent chasing late invoices, or the
 invoices that are never paid? My guess is the unpaid ones, since each is lost

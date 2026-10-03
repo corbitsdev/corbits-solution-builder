@@ -113,7 +113,6 @@ A build plan with these headings, after \`## In short\`:
 - \`## Worker placement\`
 - \`## Architecture decision records\`
 - \`## Risks, unknowns and non-goals\`
-- \`## What I need from you\`
 
 ${STACK_RUBRIC}
 

@@ -258,14 +258,13 @@ the fix rather than rewriting the section. Plain language, no preamble, praise
 or restating the draft, nothing cosmetic. A ready draft may have no bullets.`;
 
 /**
- * How every stage up to the plan interviews the person. The section is what
- * the conversation is built from: its lines are asked one at a time, and a
- * stage without it drafts once and falls silent.
+ * How every stage up to the plan interviews the person. The reply's
+ * questions are what the conversation is built from; the document carries
+ * none, since later stages read an approved one as settled.
  */
-export const interview = (example: string) => `Under \`## What I need from you\`, list your questions in the form the Questions
-section gives, one after another; anything the document calls open is asked
-there. If you need nothing, write "Nothing — correct anything above that is
-wrong."
+export const interview = (example: string) => `End the reply with your questions, in the form the Questions section gives,
+one after another. The document never holds a question: what it leaves open
+is asked in the reply. With nothing to ask, end the reply without one.
 
 For example:
 

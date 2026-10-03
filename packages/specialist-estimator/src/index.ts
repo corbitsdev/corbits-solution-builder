@@ -49,7 +49,6 @@ A cost approval with these headings, after \`## In short\`:
   each as written above. The approver's summary table is drawn from this
   block alone, so a line left out of it is missing from the summary.
 - \`## Tolerance and material-change policy\`
-- \`## What I need from you\`
 
 ${interview(`Is the coding agent paid per token, or covered by a subscription you already have?
 My guess is a subscription, since that is how most people building alone run one.
