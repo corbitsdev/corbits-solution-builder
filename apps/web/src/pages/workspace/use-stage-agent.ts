@@ -69,7 +69,8 @@ export function useStageAgent(
     queryKey: statusKey,
     queryFn: async () => {
       const held = queryClient.getQueryData<string | null>(statusKey) ?? null;
-      const current = await api.stageAgentStatus(projectId, deployStage!).catch(() => null);
+      // A failed read is the query's error and keeps the address held; `ensureStageAgent` reports the failure.
+      const current = await api.stageAgentStatus(projectId, deployStage!);
       if (!current) return held;
       return held !== null || current.status === "deployed" ? current.address : null;
     },
@@ -89,17 +90,18 @@ export function useStageAgent(
     const key = keys.stageAgent.status(projectId, deployStage);
     setError(null);
     setRemediation(undefined);
-    api
-      .ensureStageAgent(projectId, deployStage)
-      .then(async (deployment) => {
+    const ensure = async () => {
+      try {
+        const deployment = await api.ensureStageAgent(projectId, deployStage);
         await queryClient.cancelQueries({ queryKey: key });
         queryClient.setQueryData(key, deployment.address);
-      })
-      .catch((cause: unknown) => {
+      } catch (cause) {
         if (cancelled) return;
         setError(describeFailure(cause));
         setRemediation(cause instanceof ApiFailure ? cause.detail.remediation : undefined);
-      });
+      }
+    };
+    void ensure();
     return () => {
       cancelled = true;
     };

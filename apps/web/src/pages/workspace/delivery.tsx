@@ -170,9 +170,7 @@ function DeliveryDecision({
         lastSeenApprovalId.current = found.id;
         return { pending: found, delivered: null };
       }
-      const resolved = lastSeenApprovalId.current
-        ? await approvalById(approvalTenant.current, lastSeenApprovalId.current, transport).catch(() => null)
-        : null;
+      const resolved = lastSeenApprovalId.current ? await approvalById(approvalTenant.current, lastSeenApprovalId.current, transport) : null;
       return { pending: null, delivered: resolved?.status === "approved" ? resolved : null };
     },
     refetchInterval: (current) => (current.state.data?.delivered ? false : POLL_INTERVAL_MS),

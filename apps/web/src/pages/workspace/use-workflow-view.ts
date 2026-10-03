@@ -52,14 +52,14 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
   const [attempt, setAttempt] = useState(0);
   const [refreshingAfterAction, setRefreshingAfterAction] = useState(false);
 
-  // A run that has not written its first state (stage 0) or a failed read
-  // never replaces a view already held. The cache outlives the mount, so
+  // A run that has not written its first state (stage 0) never replaces a
+  // view already held; a failed read is the query's error and keeps it too. The cache outlives the mount, so
   // re-entering a project paints its last view at once while this re-reads.
   const key = keys.workflowView.of(projectId);
   const query = useQuery({
     queryKey: key,
     queryFn: async () => {
-      const next = await api.projectWorkflowView(projectId).catch(() => null);
+      const next = await api.projectWorkflowView(projectId);
       return next && next.stage >= 1 ? next : (queryClient.getQueryData<ProjectWorkflowView | null>(key) ?? null);
     },
     refetchInterval: BACKSTOP_MS,
