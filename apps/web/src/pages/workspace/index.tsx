@@ -25,7 +25,6 @@ import { keys } from "../../queries/keys.ts";
 import {
   api,
   ApiFailure,
-  createHubTransport,
   type ArtifactNode,
   type ProjectDetail,
   type StageTurn,
@@ -47,7 +46,7 @@ import { BuildPanel } from "./build.jsx";
 import { useBuildAttempts } from "./build-attempts.ts";
 import { TargetPicker } from "./freeze.jsx";
 import { EstimateView } from "./estimate.jsx";
-import { interviewProgress, latestDesignReply, workspaceGuidance } from "./guidance.js";
+import { interviewProgress, latestDesignReply, openQuestionTurn, workspaceGuidance } from "./guidance.js";
 import { repairedChoiceDraft } from "./choice-repair.ts";
 import { appSubject, artifactTag, isEvaluatorNotes, taggedSubject } from "./composed-mail.ts";
 import { attachableDocuments, attachedIn, attachedSubjectTags, type AttachedDocument } from "./attach-documents.tsx";
@@ -66,7 +65,6 @@ import { useSpecialistRunState } from "./use-specialist-run-state.ts";
 import { specialistBusy } from "../../specialist-run-state.ts";
 import { useOpeningDispatch } from "./use-opening-dispatch.ts";
 import { useEvaluatorRevision, useProductGuide, useStageEvaluator } from "./use-advisory.ts";
-import { markerAlreadySent } from "../../decision-notify.ts";
 import { guideStep } from "./product-guide.ts";
 import { useProjectArtifacts } from "./use-project-artifacts.ts";
 import { clearQuotedDraft, loadQuotedDraft } from "./quote-store.js";
@@ -418,6 +416,7 @@ export function StageWorkspace({
     [documentArtifact],
   );
   const progress = useMemo(() => interviewProgress(foldedMessages), [foldedMessages]);
+  const openTurn = useMemo(() => openQuestionTurn(foldedMessages), [foldedMessages]);
 
   // Mail turns as StageDocument's turn shape: it wants who spoke and what
   // was said, nothing this contract tracks beyond that (no per-turn quotes
@@ -697,8 +696,9 @@ export function StageWorkspace({
     messages: foldedMessages,
     send: async (ask, subject) => {
       if (!agentAddress) throw new Error("The specialist is not reachable yet.");
-      // Another tab may already have sent these notes.
-      if (await markerAlreadySent(createHubTransport(), tenantId, subject)) return;
+      // One round per stage, read from the stage's own thread: notes sent on
+      // an earlier draft's subject, or by another tab, stand this down.
+      if ((await api.readStageThread(tenantId, [...agent.addresses])).some(isEvaluatorNotes)) return;
       // Their own mail, not the person's: the notes' tag leads the subject
       // and the stage document's artifact tag rides after it.
       await api.sendStageMail(tenantId, agentAddress, {
@@ -970,8 +970,8 @@ export function StageWorkspace({
               tenantId={tenantId}
               turns={turns}
               openQuestion={
-                guidance.question
-                  ? { text: guidance.question.text, ordinal: progress?.ordinal ?? null, total: progress?.total ?? null }
+                openTurn && guidance.question
+                  ? { turnId: openTurn.id, text: guidance.question.text, ordinal: progress?.ordinal ?? null, total: progress?.total ?? null }
                   : null
               }
               advisory={evaluated ? <EvaluatorStance evaluator={evaluator} notesError={notesError} /> : null}
