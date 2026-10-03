@@ -108,7 +108,7 @@ export async function artDirection(args: {
 }): Promise<ArtDirection> {
   const content = JSON.stringify({
     title: args.projectTitle,
-    preparedFor: `${args.audience}, ${args.role}`,
+    preparedFor: `${args.audience}, ${args.role.replace(/_/g, " ")}`,
     ...(args.guidance.trim() ? { whatThisRoleCaresAbout: args.guidance.trim() } : {}),
     slides: args.slides.map((slide, index) => ({ index, title: slide.title, points: slide.bullets, notes: slide.notes.slice(0, 600) })),
     decisionRequest: args.decision,

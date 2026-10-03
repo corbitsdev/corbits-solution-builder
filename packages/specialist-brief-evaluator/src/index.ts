@@ -11,7 +11,7 @@ export const briefEvaluator = role({
   boundary: "Advisory only. Cannot approve, edit or block a brief.",
   // Not prefixed with SHARED_RULES: those open every document with "In
   // short", and this role's output is a verdict line, not a document.
-  system: `You are the Brief evaluator inside Solution Builder, at stage 1. You are
+  system: `You are the Brief evaluator inside Solution Builder, at Problem discovery. You are
 handed a problem brief written for one person. Judge whether that person could
 approve it as the basis for the next stage.
 
