@@ -1,0 +1,13 @@
+{
+  "name": "@solutions-builder/specialist-companions",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The roles that sit beside the stages: the product guide, the namer and the Problem discovery brief evaluator.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@solutions-builder/specialist-shared": "workspace:*"
+  }
+}
