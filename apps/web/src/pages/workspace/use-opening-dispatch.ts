@@ -19,6 +19,9 @@
  */
 import { designHandoff } from "../../design-handoff.ts";
 import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { keys } from "../../queries/keys.ts";
+import { describeFailure } from "./failure-message.ts";
 import {
   api,
   ApiFailure,
@@ -95,22 +98,12 @@ export function useOpeningDispatch({
   const [retryAttempt, setRetryAttempt] = useState(0);
 
   // Stage 1's own opening problem statement.
-  const [opening, setOpening] = useState<{ body: string } | null | undefined>(undefined);
-  useEffect(() => {
-    if (stage !== 1) return;
-    let cancelled = false;
-    api
-      .projectOpening(detail.project.id)
-      .then((result) => {
-        if (!cancelled) setOpening(result);
-      })
-      .catch(() => {
-        if (!cancelled) setOpening(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [detail.project.id, stage]);
+  const opening = useQuery({
+    queryKey: keys.projectOpening.of(detail.project.id),
+    queryFn: async () => (await api.projectOpening(detail.project.id))?.body ?? null,
+    staleTime: Infinity,
+    enabled: stage === 1,
+  });
 
   // The previous project's opening state must never leak into a newly opened
   // one even if the keyed remount ever regresses.
@@ -170,6 +163,9 @@ export function useOpeningDispatch({
     // keyed to this project's stage rather than a decision id, so two tabs
     // that both load an empty stage N+1 thread never both send its opening.
     const marker = `[opening:${detail.project.id}:${stage}]`;
+    const fail = (cause: unknown) => {
+      if (!cancelled) setError(describeFailure(cause));
+    };
     const dispatchOpening = (opening: string) => {
       if (cancelled || openedRef.current === key || inFlightRef.current === key) return;
       inFlightRef.current = key;
@@ -213,7 +209,7 @@ export function useOpeningDispatch({
         });
     };
     if (stage === 1) {
-      if (opening?.body) dispatchOpening(opening.body);
+      if (opening.data) dispatchOpening(opening.data);
     } else if (stage === 6 && (!workflowView || workflowView.requirements.length === 0)) {
       // The Architect must not draft before `mint_requirements` has run for
       // this project (CL-8862) — `Stage6Panel` mints them off the
@@ -232,7 +228,7 @@ export function useOpeningDispatch({
     } else if (stage === 9) {
       const review = workflowView?.reviews[8];
       const archiveRef = review?.status === "approved" ? { artifactId: review.artifactId, version: review.version } : null;
-      void composeStage9Opening({ tenantId, projectId: detail.project.id, nodes: detail.nodes, archiveRef }).then(dispatchOpening);
+      void composeStage9Opening({ tenantId, projectId: detail.project.id, nodes: detail.nodes, archiveRef }).then(dispatchOpening).catch(fail);
     } else if (previousApproved) {
       void api
         .artifactContent(tenantId, previousApproved.artifactId)
@@ -260,7 +256,7 @@ export function useOpeningDispatch({
                 : approved;
           dispatchOpening(body);
         })
-        .catch(() => {});
+        .catch(fail);
     }
     return () => {
       cancelled = true;
@@ -272,7 +268,7 @@ export function useOpeningDispatch({
     stage,
     detail.project.id,
     detail.nodes,
-    opening,
+    opening.data,
     pendingOpening,
     previousApproved,
     tenantId,
@@ -308,16 +304,23 @@ export function useOpeningDispatch({
     cueInFlightRef.current = cue.marker;
     void api
       .sendStageMail(tenantId, agentAddress, { body: cue.body })
-      .then(() => reloadThread())
-      .catch(() => {
-        // Not marked as sent: the next thread or view change retries.
+      .then(() => {
+        setError(null);
+        return reloadThread();
+      })
+      .catch((cause: unknown) => {
+        // Not marked as sent: the next thread or view change, or Try again, retries.
         cueInFlightRef.current = null;
+        setError(describeFailure(cause));
       });
-  }, [stage, agentAddress, addresses, loadedFor, messages, workflowView, tenantId, reloadThread]);
+  }, [stage, agentAddress, addresses, loadedFor, messages, workflowView, tenantId, reloadThread, retryAttempt]);
 
   return {
-    error,
-    retry: () => setRetryAttempt((attempt) => attempt + 1),
+    error: error ?? (opening.error ? describeFailure(opening.error) : null),
+    retry: () => {
+      if (opening.error) void opening.refetch();
+      setRetryAttempt((attempt) => attempt + 1);
+    },
     queueOpening: (nextStage, body) => setPendingOpening({ stage: nextStage, body }),
     stage6Material,
   };

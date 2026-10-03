@@ -9,7 +9,9 @@
  * stage, instead of making the person leave for the queue.
  */
 import { useEffect, useRef, useState } from "react";
+import { skipToken, useQuery } from "@tanstack/react-query";
 import { Textarea } from "@corbits/react-ui";
+import { keys } from "../../queries/keys.ts";
 import { listSpecialistDeployments } from "@solutions-builder/installer";
 import { agentFor } from "@solutions-builder/app/kit";
 import { api, ApiFailure, type ArtifactNode, type ProjectDetail } from "../../client.js";
@@ -213,31 +215,15 @@ function DeliveryDecision({
   }, [tenantId, projectId]);
 
   const verificationNode = findVerificationNode(nodes, archiveRef);
-  const [verification, setVerification] = useState<DeliveryVerification | null>(null);
-
-  useEffect(() => {
-    if (!verificationNode) {
-      setVerification(parseDeliveryVerification(null));
-      return;
-    }
-    let cancelled = false;
-    void api
-      .artifactContent(tenantId, verificationNode.id)
-      .then((result) => {
-        if (cancelled) return;
-        try {
-          setVerification(parseDeliveryVerification(JSON.parse(result.content)));
-        } catch {
-          setVerification(parseDeliveryVerification(undefined));
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setVerification(parseDeliveryVerification(undefined));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [tenantId, verificationNode?.id]);
+  const verificationRead = useQuery({
+    queryKey: keys.artifact.of(tenantId, verificationNode?.id ?? ""),
+    queryFn: verificationNode ? async () => (await api.artifactContent(tenantId, verificationNode.id)).content : skipToken,
+    select: (content) => parseDeliveryVerification(JSON.parse(content)),
+    staleTime: Infinity,
+  });
+  const verification = verificationNode ? (verificationRead.data ?? null) : parseDeliveryVerification(null);
+  const verificationError = verificationRead.error ? `The verification record could not be read: ${verificationRead.error.message}` : null;
+  const shownError = error ?? verificationError;
 
   if (!loaded) return null;
 
@@ -287,7 +273,7 @@ function DeliveryDecision({
     <div className="doc" data-tour="document-body">
       <h1>{documentName("delivery_manifest")}</h1>
       <p className="docmeta">{meta}</p>
-      {error ? <Banner tone="error" title={error} /> : null}
+      {shownError ? <Banner tone="error" title={shownError} /> : null}
       {!pending && !delivered ? <p className="inline-note">Waiting on {VERIFIER} to submit a delivery for review.</p> : null}
       {summary ? <p>{summary}</p> : null}
       {artifacts.length > 0 ? (

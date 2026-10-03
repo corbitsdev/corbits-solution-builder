@@ -39,6 +39,9 @@ export const keys = {
     all: ["projectView"] as const,
     of: (projectId: string) => ["projectView", projectId] as const,
   },
+  projectOpening: {
+    of: (projectId: string) => ["projectOpening", projectId] as const,
+  },
   projects: ["projects"] as const,
   decisions: ["decisions"] as const,
   thread: {
