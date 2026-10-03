@@ -223,6 +223,9 @@ export function evaluatorRevisionDue(args: {
   if (stage === 1 || draft === null) return null;
   if (evaluator.status !== "verdict" || evaluator.verdict.ready || evaluator.verdict.notes.length === 0) return null;
   if (messages.at(-1)?.author !== "agent") return null;
+  // One round per stage: the measured gain is on the first draft, and a round
+  // on every later turn doubles each wait.
+  if (messages.some(isEvaluatorNotes)) return null;
   const lastAsk = messages.findLast((message) => message.author === "me");
   if (lastAsk && isEvaluatorNotes(lastAsk)) return null;
   const subject = evaluatorNotesSubject(stage, draft);
