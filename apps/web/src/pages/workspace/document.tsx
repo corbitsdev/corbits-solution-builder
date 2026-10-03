@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   api,
   type ArtifactNode,
-  type Evaluation,
   type Quote,
   type StageTurn,
 } from "../../client.js";
@@ -23,13 +22,12 @@ import { agentFor } from "@solutions-builder/app/kit";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { markChanges } from "../../revisions.js";
 import { Button, documentName, CopyButton } from "../../components.jsx";
-import { ApproveControl } from "./approve-control.tsx";
 import { DocumentExportMenu } from "../../document-export.jsx";
 import { BinaryFile, isDataUrl } from "../../binary-file.tsx";
 import { MessageBody, SpecialistTurn, WorkingLabel, type TurnNote } from "./thread.jsx";
 import type { DraftRef } from "./draft-references.ts";
 import { eventMessages, type StageEvent } from "./stage-events.ts";
-import { clearQuotedDraft, loadQuotedDraft, saveQuotedDraft } from "./quote-store.js";
+import { loadQuotedDraft, saveQuotedDraft } from "./quote-store.js";
 import { COMPOSER_BOX_CLASS, CONV_SCROLL_CLASS } from "./pane-classes.ts";
 import { StagePanes } from "./workspace-chrome.tsx";
 import { BusyLine } from "../../zen-garden.tsx";
@@ -58,7 +56,6 @@ export function StageDocument({
   tenantId,
   turns,
   openQuestion,
-  evaluation = null,
   advisory = null,
   lead = null,
   draftRefs = EMPTY_REFS,
@@ -68,8 +65,7 @@ export function StageDocument({
   onAddMaterial,
   documents = [],
   attachedByTurn = EMPTY_ATTACHED,
-  onSubmit,
-  soloApproval,
+  approve = null,
   canSubmit,
   targetPending = false,
   busy,
@@ -97,11 +93,8 @@ export function StageDocument({
    *  counts it among the questions already answered this stage; `total` is
    *  set only when the specialist's own text states how many there are. */
   openQuestion: { text: string; ordinal?: number | null; total?: number | null } | null;
-  /** The stage evaluator's verdict, advisory only. Null on a stage no evaluator reads. */
-  evaluation?: Evaluation | null;
-  /** Advice shown in the approval bar beside the approve control, such as
-   *  the brief evaluator's stance (#157). It never enables or blocks
-   *  approval, and shows only while the bar does. */
+  /** The evaluator's stance beside the choice of approach (#157). It never
+   *  enables or blocks the choice. */
   advisory?: ReactNode;
   /** What the stage asks beside its document, such as stage 7's target and
    *  cost summary: at the head of the document pane, above the document. */
@@ -118,8 +111,8 @@ export function StageDocument({
   onAddMaterial?: ((files: File[]) => Promise<void>) | undefined;
   documents?: readonly AttachedDocument[];
   attachedByTurn?: ReadonlyMap<string, readonly AttachedDocument[]>;
-  onSubmit: () => void;
-  soloApproval: boolean;
+  /** The stage's approve row, drawn while `canSubmit`. */
+  approve?: ReactNode;
   canSubmit: boolean;
   /** Stage 3's target is not picked yet: approving waits, and so does choosing an approach. */
   targetPending?: boolean;
@@ -580,28 +573,7 @@ export function StageDocument({
               </Button>
             </div>
           ) : canSubmit && !targetPending ? (
-            <div className="stage-action composer-approve">
-              <span className="composer-approve-lead">{advisory}</span>
-              <span
-                data-tour="submit"
-                data-ready={evaluation?.ready ? "true" : undefined}
-                className={evaluation?.ready ? "is-ready approve" : "approve"}
-              >
-                <ApproveControl
-                  label={soloApproval ? "Approve" : "Send for approval"}
-                  evaluatorPending={Boolean(advisory) && !evaluation?.ready}
-                  busy={busy === "submit"}
-                  variant="ghost"
-                  lead={soloApproval ? "Happy with it?" : "Nothing more to say?"}
-                  onApprove={() => {
-                    // Quoted passages are for the stage being sent for
-                    // approval; once it is, nothing is left to restore.
-                    clearQuotedDraft(tenantId, node.stage);
-                    onSubmit();
-                  }}
-                />
-              </span>
-            </div>
+            approve
           ) : null}
           {attached.length > 0 ? (
             <p className="composer-cue">

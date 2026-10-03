@@ -383,6 +383,11 @@ export function BuildPanel({
             {...(documents ? { documents } : {})}
             {...(documentLabels ? { documentLabels } : {})}
             popover={popover}
+            rows={
+              canApprove || evidence.reason ? (
+                <ApproveControl waiting={canApprove ? null : evidence.reason} busy={approving} onApprove={onApprove} />
+              ) : null
+            }
           />
         </>
       }
@@ -433,9 +438,6 @@ export function BuildPanel({
                   ) : null}
                 </>
               )}
-              {canApprove ? (
-                <ApproveControl label="Approve" busy={approving} disabled={!address} onApprove={onApprove} />
-              ) : null}
             </div>
             {attempts.length > 0 ? (
               <div className="ev">
@@ -528,7 +530,6 @@ export function BuildPanel({
                 )}
               </>
             ) : null}
-            {!canApprove && evidence.reason ? <p className="inline-note">{evidence.reason}</p> : null}
           </div>
         </div>
       )}
