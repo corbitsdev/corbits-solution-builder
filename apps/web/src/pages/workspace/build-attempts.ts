@@ -71,7 +71,8 @@ export type SupervisorBriefInput = {
   readonly forecast?: string | null;
   readonly verification: {
     readonly complete: boolean;
-    readonly failed: readonly string[];
+    /** The required items the host's checks did not verify, each with its detail. */
+    readonly unverified: readonly { path: string; status: string; detail?: string }[];
     readonly targets: readonly { target: string; ranSuccessfully: boolean; transcript: string }[];
   };
 };
@@ -158,7 +159,8 @@ export function composeSupervisorBrief(input: SupervisorBriefInput): string {
     ``,
     `## Evidence recorded`,
     `- Archive ${input.archive.fileName}, ${String(input.archive.sizeBytes)} bytes, sha256 ${input.archive.sha256}, recorded as attempt-${String(input.attempt)}.`,
-    `- Deterministic checks: ${input.verification.complete ? "complete" : `incomplete — not verified: ${input.verification.failed.join(", ") || "(unnamed)"}`}.`,
+    `- Deterministic checks: ${input.verification.complete ? "complete." : "incomplete. Each item below failed or was not run:"}`,
+    ...input.verification.unverified.map((item) => `  - ${item.path}: ${item.status}${item.detail ? ` — ${item.detail}` : ""}`),
     targets,
     ``,
     `## Stage 7 forecast`,

@@ -28,6 +28,8 @@ export type DeliveryVerificationContent = {
   archiveExtras: number;
   items: { category: string; path: string; required: boolean; status: string; checkedBy?: string; detail?: string }[];
   targets: { target: string; modality: string; exercised: boolean; ranSuccessfully: boolean; transcript: string }[];
+  /** The quality bar's scan; absent on a manifest written before it. */
+  quality?: { scannedFiles: number; skippedFiles: number };
   report: { complete: boolean; failed: string[] };
 };
 
@@ -57,6 +59,11 @@ export function verificationLines(verification: DeliveryVerificationContent | un
   for (const item of verification.items) {
     lines.push(`- ${item.path}: ${item.status}${item.detail ? ` — ${item.detail}` : ""}`);
   }
+  lines.push(
+    verification.quality
+      ? `- Quality bar: ${String(verification.quality.scannedFiles)} file(s) scanned for stub markers, placeholder content and dropped errors, each finding listed above at its path and line; ${String(verification.quality.skippedFiles)} binary, oversized or lock file(s) not read.`
+      : "- Quality bar: not scanned when this archive was recorded; no stub, placeholder or error-handling check ran.",
+  );
   if (verification.archiveExtras > 0) {
     lines.push(`- ${String(verification.archiveExtras)} file(s) in the archive are not listed in the manifest and were not checked.`);
   }
