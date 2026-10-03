@@ -67,15 +67,34 @@ export function useProjectArtifacts(
   draftMessage: ChatMessage | null,
 ): ProjectArtifacts {
   const draftKind = STAGE_DRAFT_KIND[stage] ?? null;
+  const draftBody = draftMessage?.body ?? null;
+  const [draftDigest, setDraftDigest] = useState<{ body: string; sha256: string } | null>(null);
+  useEffect(() => {
+    if (draftBody === null) return;
+    let cancelled = false;
+    void crypto.subtle.digest("SHA-256", new TextEncoder().encode(draftBody)).then((buffer) => {
+      const sha256 = [...new Uint8Array(buffer)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+      if (!cancelled) setDraftDigest({ body: draftBody, sha256 });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [draftBody]);
   // The specialist's latest unpersisted reply stands in as the next version
   // of its stage's draft lineage — nothing writes an artifact for a stage's
   // draft before it is approved.
   const draftNode: ArtifactNode | null = useMemo(() => {
     if (!draftMessage || draftKind === null) return null;
+    // A saved draft's own version is 1 wherever it sits, so the newest is
+    // found by when it was written.
     const head = nodes
       .filter((node) => node.stage === stage && node.kind === draftKind)
-      .sort((a, b) => a.version - b.version)
+      .sort((a, b) => a.version - b.version || Date.parse(a.createdAt) - Date.parse(b.createdAt))
       .at(-1);
+    // Opening the reply's review saves it as a version just after it lands;
+    // once saved, the reply is that version, not one past it. Matched on the
+    // content's digest: the hub's timestamps do not all share one clock.
+    if (head?.contentSha256 && draftDigest?.body === draftMessage.body && head.contentSha256 === draftDigest.sha256) return null;
     return {
       id: `reply:${draftMessage.id}`,
       kind: draftKind,
@@ -83,6 +102,7 @@ export function useProjectArtifacts(
       stage,
       title: stageName(stage),
       version: (head?.version ?? 0) + 1,
+      position: nodes.filter((node) => node.stage === stage && node.kind === draftKind && node.variant === null).length + 1,
       artifactId: `reply:${draftMessage.id}`,
       contentHash: "",
       sizeBytes: draftMessage.body.length,
@@ -91,7 +111,7 @@ export function useProjectArtifacts(
       supersededByNodeId: null,
       provenance: { producer: "specialist" },
     };
-  }, [draftMessage, draftKind, stage, nodes]);
+  }, [draftMessage, draftKind, stage, nodes, draftDigest]);
   const tabs = useMemo<ArtifactTab[]>(() => {
     const groups = new Map<string, ArtifactNode[]>();
     for (const node of nodes) {

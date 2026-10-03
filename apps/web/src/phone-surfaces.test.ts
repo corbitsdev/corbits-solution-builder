@@ -109,11 +109,12 @@ describe("desktop surfaces", () => {
     expect(split.desktops[0]!.html).not.toContain("overflow-x:hidden");
   });
 
-  test("every screen at phone width puts the desktop screens in phones too, notes still in the pane (#417)", () => {
+  test("every screen at phone width puts the desktop screens in phones too, and the notes stay out of the preview (#417)", () => {
     const framed = framedDesign(desktop, "narrow", "Inteva");
     expect(framed.desktops).toEqual([]);
     expect(framed.phones.map((screen) => screen.id)).toEqual(["screen-projects", "screen-review"]);
-    expect(framed.main).toContain("design-notes");
+    expect(framed.main).toBeNull();
+    expect(framedDesign(desktop, "pane", "Inteva").main).toContain("design-notes");
     const plain = "<!doctype html><html><body><p>hi</p></body></html>";
     expect(framedDesign(plain, "narrow", "Plain")).toEqual({ phones: [{ id: "whole", title: "Plain", html: plain }], desktops: [], main: null });
   });
@@ -122,7 +123,7 @@ describe("desktop surfaces", () => {
     const framed = framedDesign(desktop, "auto", "Inteva");
     expect(framed.desktops.length).toBe(2);
     expect(framed.phones).toEqual([]);
-    expect(framed.main).toContain("design-notes");
+    expect(framed.main).toBeNull();
     expect(splitPhoneSurfaces(desktop).phones).toEqual([]);
   });
 

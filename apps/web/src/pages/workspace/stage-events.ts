@@ -10,8 +10,9 @@ import type { WithdrawnMark } from "../../withdrawn-turns.ts";
 import type { DecisionRecord } from "@solutions-builder/app/project-workflow/contracts";
 import type { ChatMessage as UiChatMessage } from "@corbits/react-ui";
 import type { ChatMessage } from "../../stage-mail.ts";
-import { stageName } from "../../components.jsx";
+import { documentName, stageName } from "../../components.jsx";
 import { handoffMarkerOf } from "./use-model-handoff.ts";
+import { OPENING_VARIANT } from "../../project-list.ts";
 
 export type StageEvent = {
   readonly id: string;
@@ -22,66 +23,61 @@ export type StageEvent = {
   readonly tone: "boundary" | "line";
 };
 
-/** The lines one stage's conversation shows, in time order after the
- *  stage's boundary. */
+/** The record lines one stage's conversation shows among its turns. */
 export function stageEvents(
   stage: number,
   decisions: readonly DecisionRecord[],
   nodes: readonly ArtifactNode[],
   marks: readonly WithdrawnMark[],
 ): StageEvent[] {
-  const titleOf = new Map(nodes.map((node) => [node.artifactId, node.title]));
-  // A brand-new project at stage 1 has nothing before it to bound -- its
-  // only nodes are the opening statement and, if it attached a file, the
-  // extracted reading beside it. The hairline rule and heading are only
-  // worth showing once there's something they're separating.
-  const freshProject =
-    stage === 1 &&
-    decisions.length === 0 &&
-    marks.length === 0 &&
-    nodes.every((node) => node.kind === "source_material" || node.kind === "material_reading");
-  const out: StageEvent[] = freshProject
-    ? []
-    : [
-        {
-          id: "ev:boundary",
-          at: "",
-          text: `Stage ${stage} · ${stageName(stage)}`,
-          tone: "boundary",
-        },
-      ];
+  // Read by anyone the project is shared with, so each line says who acted
+  // and names the document as its tab does. The owner is the only actor: the
+  // workflow authorises only the owner's principals at every stage
+  // (`ensureProjectWorkflowWith`, client.ts) and records anyone else's
+  // decision as refused, and a stakeholder's vote is an `audience` decision
+  // the owner records, which no line here shows.
+  const out: StageEvent[] = [];
+  const approved = (decision: DecisionRecord): string => {
+    const node = nodes.find((entry) => entry.artifactId === decision.artifactId && entry.version === decision.version);
+    if (!node) return `The owner approved ${stageName(stage)}`;
+    return `The owner approved the ${documentName(node.kind).toLowerCase()}, version ${String(node.version)}`;
+  };
+  const because = (reason: string | undefined) => (reason ? `: “${reason}”` : "");
 
   for (const node of nodes) {
-    if (node.stage !== stage || node.kind !== "source_material") continue;
+    // The opening statement is the person's first message, already shown as theirs.
+    if (node.stage !== stage || node.kind !== "source_material" || node.variant === OPENING_VARIANT) continue;
     out.push({
       id: `ev:node:${node.id}`,
       at: node.createdAt,
-      text: `Attached · ${node.title}`,
+      text: `Attached: ${node.title}`,
       tone: "line",
     });
   }
 
   for (const decision of decisions) {
+    // A refused decision changed nothing; the approval bar gives its reason.
+    if (!decision.accepted) continue;
     const at = decision.at ?? "";
     if (decision.kind === "approve" && decision.stage === stage) {
       out.push({
         id: `ev:${decision.decisionId}`,
         at,
-        text: `Approved · ${decision.artifactId ? `${titleOf.get(decision.artifactId) ?? "the stage"} v${decision.version ?? ""}` : `stage ${stage}`}`,
+        text: approved(decision),
         tone: "line",
       });
     } else if (decision.kind === "send_back" && decision.stage === stage) {
       out.push({
         id: `ev:${decision.decisionId}`,
         at,
-        text: `Sent back${decision.targetStage ? ` · to ${stageName(decision.targetStage)}` : ""}${decision.reason ? ` · “${decision.reason}”` : ""}`,
+        text: `The owner sent this stage back${decision.targetStage ? ` to ${stageName(decision.targetStage)}` : ""}${because(decision.reason)}`,
         tone: "line",
       });
     } else if (decision.kind === "send_back" && decision.targetStage === stage) {
       out.push({
         id: `ev:${decision.decisionId}:in`,
         at,
-        text: `Returned · sent back from ${stageName(decision.stage)}${decision.reason ? ` · “${decision.reason}”` : ""}`,
+        text: `The owner sent this back here from ${stageName(decision.stage)}${because(decision.reason)}`,
         tone: "line",
       });
     }
@@ -89,7 +85,7 @@ export function stageEvents(
 
   for (const mark of marks) {
     if (mark.stage !== stage) continue;
-    out.push({ id: `ev:mark:${mark.messageId}`, at: mark.at, text: "Turn aborted", tone: "line" });
+    out.push({ id: `ev:mark:${mark.messageId}`, at: mark.at, text: "The owner stopped this reply", tone: "line" });
   }
 
   return out;
