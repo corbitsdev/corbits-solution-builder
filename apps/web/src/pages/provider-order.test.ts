@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { blocksCollide, dropOn, moveBy, moveTo, rankLabel, sameOrder } from "./provider-order.ts";
+import { blocksCollide, moveTo, PRIMARY, rankLabel, sameOrder } from "./provider-order.ts";
 
 const ORDER = ["anthropic", "openai", "xai", "ollama"];
 
@@ -9,23 +9,13 @@ describe("provider order moves", () => {
     expect(moveTo(ORDER, "anthropic", 99)).toEqual(["openai", "xai", "ollama", "anthropic"]);
     expect(moveTo(ORDER, "nope", 0)).toEqual(ORDER);
   });
-  test("moveBy steps up or down; the head cannot go higher", () => {
-    expect(moveBy(ORDER, "xai", -1)).toEqual(["anthropic", "xai", "openai", "ollama"]);
-    expect(moveBy(ORDER, "xai", 1)).toEqual(["anthropic", "openai", "ollama", "xai"]);
-    expect(moveBy(ORDER, "anthropic", -1)).toEqual(ORDER);
-  });
-  test("dropOn takes the target's place, shifting the target down; onto itself is no change", () => {
-    expect(dropOn(ORDER, "ollama", "openai")).toEqual(["anthropic", "ollama", "openai", "xai"]);
-    expect(dropOn(ORDER, "anthropic", "xai")).toEqual(["openai", "anthropic", "xai", "ollama"]);
-    expect(dropOn(ORDER, "xai", "xai")).toEqual(ORDER);
-  });
   test("sameOrder is positional equality", () => {
     expect(sameOrder(ORDER, [...ORDER])).toBe(true);
-    expect(sameOrder(ORDER, moveBy(ORDER, "xai", -1))).toBe(false);
+    expect(sameOrder(ORDER, moveTo(ORDER, "xai", 0))).toBe(false);
   });
 });
 
-describe("where the default comes from", () => {
+describe("priority blocks", () => {
   const providers = [
     { id: "anthropic", priority: 0, selectedModel: null },
     { id: "openai", priority: 0, selectedModel: "gpt-5.5" },
@@ -38,8 +28,8 @@ describe("where the default comes from", () => {
 });
 
 describe("rankLabel", () => {
-  test("the head is the default and tried first; the rest say when they are tried", () => {
-    expect(rankLabel(0, true)).toBe("Default · tried first");
+  test("the head is the primary; the rest say when they are tried", () => {
+    expect(rankLabel(0, true)).toBe(PRIMARY);
     expect(rankLabel(1, true)).toBe("Tried 2nd if the one above fails");
     expect(rankLabel(2, true)).toBe("Tried 3rd if the one above fails");
     expect(rankLabel(3, true)).toBe("Tried 4th if the one above fails");

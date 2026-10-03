@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Provider } from "../../client.ts";
-import { currentInference, inferenceOptions, orderLeadingWith } from "./inference-options.ts";
+import { currentInference, inferenceOptions } from "./inference-options.ts";
 
 function provider(over: Partial<Provider>): Provider {
   return {
@@ -27,8 +27,5 @@ describe("inference options", () => {
     expect(currentInference({ providerLabel: "OpenAI", canonicalName: "gpt-5.5" }, options)?.providerRowId).toBe("mp-o");
     expect(currentInference({ providerLabel: "OpenAI", canonicalName: "gpt-4" }, options)).toBeNull();
     expect(currentInference(null, options)).toBeNull();
-  });
-  test("choosing an option is the settings order with that row moved to the top", () => {
-    expect(orderLeadingWith(PROVIDERS, "mp-o")).toEqual(["mp-o", "mp-a", "mp-x", "mp-e"]);
   });
 });

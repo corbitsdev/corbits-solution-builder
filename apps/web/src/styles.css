@@ -2477,9 +2477,26 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   background: var(--wb-card);
 }
 
+.model-nudge-text {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--wb-foreground);
+}
+
 .model-nudge-actions {
   display: flex;
+  align-items: center;
   gap: var(--space-2);
+}
+
+.model-nudge-remember {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: var(--space-2);
+  font-size: 0.8125rem;
+  color: var(--wb-muted-foreground);
+  cursor: pointer;
 }
 
 /* The plain conversation stages (no fill panel of their own): the

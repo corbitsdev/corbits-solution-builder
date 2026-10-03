@@ -251,6 +251,8 @@ export function handoffPending(args: {
 export type ModelSwitchState = {
   readonly switching: boolean;
   readonly error: string | null;
+  /** The offering last switched to, whether or not it succeeded. */
+  readonly target: string | null;
   readonly switchTo: (offeringId: string) => Promise<void>;
 };
 
@@ -266,8 +268,10 @@ export function useModelSwitch(args: {
 }): ModelSwitchState {
   const [switching, setSwitching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [target, setTarget] = useState<string | null>(null);
 
   const switchTo = async (offeringId: string) => {
+    setTarget(offeringId);
     setSwitching(true);
     setError(null);
     try {
@@ -279,7 +283,7 @@ export function useModelSwitch(args: {
     }
   };
 
-  return { switching, error, switchTo };
+  return { switching, error, target, switchTo };
 }
 
 /**

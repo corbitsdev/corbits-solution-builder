@@ -1,11 +1,10 @@
 /**
- * Reordering the connected providers, as pure list moves.
+ * The order of the connected providers, as pure list moves.
  *
- * The order is the whole rule: the provider at the head is where the default
- * model comes from (`setProviderOrder` re-bases every provider's offering
- * priorities into rank-sized blocks, so the catalog's fallback order and the
- * deploy-time default follow it). Dragging, the arrow keys on a row's handle
- * and "Use as default" all reduce to these moves.
+ * The order is the whole rule: the first provider with a model enabled is the
+ * primary (`setProviderOrder` re-bases every provider's offering priorities
+ * into rank-sized blocks, so the catalog's fallback order and the deploy-time
+ * model follow it). "Make primary" reduces to `moveTo(order, id, 0)`.
  */
 
 /** `id` moved to `index`, clamped to the list; unknown ids leave it alone. */
@@ -16,25 +15,6 @@ export function moveTo(order: readonly string[], id: string, index: number): str
   const at = Math.max(0, Math.min(index, next.length));
   next.splice(at, 0, id);
   return next;
-}
-
-/** `id` moved by `delta` places (negative is up). */
-export function moveBy(order: readonly string[], id: string, delta: number): string[] {
-  const from = order.indexOf(id);
-  if (from < 0) return [...order];
-  return moveTo(order, id, from + delta);
-}
-
-/** `draggedId` dropped onto `targetId`: it takes the target's place, the
- *  target and what follows shift down. Dropping onto itself changes nothing. */
-export function dropOn(order: readonly string[], draggedId: string, targetId: string): string[] {
-  if (draggedId === targetId) return [...order];
-  const target = order.indexOf(targetId);
-  if (target < 0 || !order.includes(draggedId)) return [...order];
-  const without = order.filter((entry) => entry !== draggedId);
-  const at = without.indexOf(targetId);
-  without.splice(at, 0, draggedId);
-  return without;
 }
 
 export function sameOrder(left: readonly string[], right: readonly string[]): boolean {
@@ -67,12 +47,14 @@ export function blocksCollide(providers: readonly OrderedProvider[]): boolean {
   return false;
 }
 
-/** What a row's place in the order means, in the person's words: the head
- *  is the default and is tried first; each row below is tried if the one
- *  above fails. `null` for a row that has no model enabled: it is skipped. */
+export const PRIMARY = "Primary";
+
+/** What a row's place among the providers with a model enabled means, in the
+ *  person's words: the first is the primary; each one after it is tried if
+ *  the one above fails. `null` for a row with no model enabled: it is skipped. */
 export function rankLabel(position: number, hasModel: boolean): string | null {
   if (!hasModel) return null;
-  if (position === 0) return "Default · tried first";
+  if (position === 0) return PRIMARY;
   const n = position + 1;
   const suffix = n === 2 ? "nd" : n === 3 ? "rd" : "th";
   return `Tried ${n}${suffix} if the one above fails`;

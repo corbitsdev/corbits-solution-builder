@@ -88,11 +88,12 @@ export type DelegationRecord = {
  * window reads the same tenant), unlike a browser-local preference.
  *
  * `specialist-deploy.ts`'s deployment resolution prefers this over its
- * default oldest-live-wins pick ONLY while `deploymentId` is still live --
- * once the hub ends it (including a restart-driven replacement, which never
- * itself writes this record), resolution falls back to oldest-wins exactly
- * as before the switch ever happened, so a restart never "redirects" an
- * active session onto stale switch intent.
+ * default oldest-live-wins pick ONLY while `deploymentId` is still live, so
+ * mail never routes to an ended deployment. The model a person picked
+ * outlives that deployment: once it ends (a restart ends them all), the
+ * stage's next deployment leads with `offeringId` again while that offering
+ * is still connected, and with the primary once it is not. Picking again
+ * replaces it.
  */
 export type StageModelSwitchRecord = {
   readonly deploymentId: string;
@@ -101,6 +102,9 @@ export type StageModelSwitchRecord = {
    *  the asset's own pin. */
   readonly offeringId: string;
   readonly switchedAt: string;
+  /** A person chose `offeringId` for this stage. Absent on a record a kit
+   *  refresh wrote for a stage that was only following the primary. */
+  readonly picked?: boolean;
 };
 
 function fromTenant(row: {
