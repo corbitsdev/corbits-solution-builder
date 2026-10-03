@@ -18,6 +18,7 @@ import {
 import corbitsMark from "./assets/corbits-mark.svg";
 import { beginBusy } from "./busy.ts";
 import { controlText } from "./control-text.ts";
+import { localTime } from "./local-time.ts";
 
 type Tone =
   | "success"
@@ -522,7 +523,7 @@ const DOCUMENT_NAMES: Record<string, string> = {
 
 /** What a folded document says for itself: its version, when it was written, and, when known, how long it is. */
 export function versionDigest(node: { position: number; createdAt: string; sizeBytes?: number }): string {
-  const stamp = `Version ${node.position} · written ${new Date(node.createdAt).toLocaleString()}`;
+  const stamp = `Version ${node.position} · written ${localTime(node.createdAt)}`;
   if (node.sizeBytes === undefined) return stamp;
   const length = node.sizeBytes < 1024 ? `${node.sizeBytes} B` : `${(node.sizeBytes / 1024).toFixed(1)} kB`;
   return `${stamp} · ${length}`;

@@ -46,7 +46,7 @@ describe("verificationLines", () => {
 describe("deliveryOpeningLine", () => {
   test("carries the manifest, then the tool's verification, then stage 8's own words", () => {
     const body = deliveryOpeningLine(
-      { artifactId: "art_m", version: 2, content: manifest({ checkedAt: "t", checkedBy: "tool", archiveExtras: 0, items: [], targets: [], report: { complete: true, failed: [] } }) },
+      { artifactId: "art_m", version: 2, content: manifest({ checkedAt: "2026-01-01T00:01:00.000Z", checkedBy: "tool", archiveExtras: 0, items: [], targets: [], report: { complete: true, failed: [] } }) },
       "## Commands run and output\nbun test",
     );
     const at = (needle: string) => body.indexOf(needle);
