@@ -32,6 +32,7 @@ import { isHtmlDocument } from "./workspace/guidance.ts";
 import { useBusyWhile } from "../use-busy.ts";
 import { packageReplyFor } from "../package-reply.ts";
 import { packagesByStakeholder } from "../package-lineages.ts";
+import { unrecordedPackageRevisions } from "../package-revisions.ts";
 import { deckFrom, packageOutlineProblem, type Deck, type TemplateTheme } from "@solutions-builder/app/deck";
 import { packageRefOf, recordAudienceVote, type StageApprovalDeps } from "../stage-approval.ts";
 import { stageRefusalMessage } from "../stage-evidence.ts";
@@ -360,8 +361,11 @@ export function AudiencePackages({
   lastRefusal,
   workflowView,
   onStakeholdersSaved,
+  messages = [],
 }: {
   detail: ProjectDetail;
+  /** The stage's thread (#597): a package rewritten on request in the chat is recorded from it. */
+  messages?: readonly ChatMessage[];
   /** The workspace tenant artifacts are recorded under. */
   tenantId: string;
   onChanged: () => void;
@@ -503,6 +507,25 @@ export function AudiencePackages({
   // the tabs and the decisions table read the same way, the person's own
   // first (#122).
   const packages = packagesByStakeholder(detail.nodes, audiences);
+
+  // A package the presentation creator rewrote on request in the chat is
+  // recorded as the stakeholder's next version (#597); until now only
+  // the "Write package" flow's own reply was, and the slides kept the first
+  // version however many times the person asked. Each reply is recorded
+  // once; a stakeholder whose package is being written is left to that flow.
+  const recordedReplies = useRef(new Set<string>());
+  useEffect(() => {
+    for (const revision of unrecordedPackageRevisions(messages, detail.nodes, audiences)) {
+      if (writing.has(revision.name) || recordedReplies.current.has(revision.message.id)) continue;
+      recordedReplies.current.add(revision.message.id);
+      void api
+        .persistAudiencePackage(detail.project.id, revision.name, revision.message.body)
+        .then(() => onChanged())
+        .catch(() => recordedReplies.current.delete(revision.message.id));
+    }
+    // `audiences` is derived from `detail`; `onChanged` is the page's own.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, detail.nodes, writing]);
   // The open tab is a stakeholder, not a version: writing a package again
   // gives it a new version id, and a tab keyed on the id fell back to the
   // first stakeholder the moment the rewrite landed.

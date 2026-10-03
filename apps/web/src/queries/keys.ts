@@ -30,6 +30,8 @@ export const keys = {
   workflowView: {
     all: ["workflowView"] as const,
     of: (projectId: string) => ["workflowView", projectId] as const,
+    /** A project card's raw read: a run that has not written its first state reports stage 0, which the workspace's own entry never holds. */
+    card: (projectId: string) => ["workflowView", projectId, "card"] as const,
   },
   runEvents: {
     all: ["runEvents"] as const,
@@ -61,6 +63,10 @@ export const keys = {
   artifact: {
     all: ["artifact"] as const,
     of: (tenantId: string, id: string) => ["artifact", tenantId, id] as const,
+  },
+  approvedChain: {
+    all: ["approvedChain"] as const,
+    of: (tenantId: string, stage: number, nodeIds: readonly string[]) => ["approvedChain", tenantId, stage, [...nodeIds]] as const,
   },
   designerSettings: ["designerSettings"] as const,
   deckDesigns: ["deckDesigns"] as const,

@@ -13,6 +13,7 @@
  * the first refusal and says why, leaving the workflow wherever it got to.
  */
 import type { AdoptionPlan } from "@solutions-builder/app/legacy-adoption";
+import { stageName } from "./components.jsx";
 import type { ProjectWorkflowView } from "./project-workflow.ts";
 import { approveStage, ensureReviewOpen, mintRequirements, type StageApprovalDeps } from "./stage-approval.ts";
 
@@ -72,7 +73,7 @@ export async function replayAdoption(deps: StageApprovalDeps, plan: AdoptionPlan
 
   for (const step of plan.steps) {
     if (current.stage > step.stage) continue;
-    if (current.stage < step.stage) return { landed: current.stage, stopped: `the workflow is at stage ${String(current.stage)}, not ${String(step.stage)}` };
+    if (current.stage < step.stage) return { landed: current.stage, stopped: `the workflow is at ${stageName(current.stage)}, not ${stageName(step.stage)}` };
 
     if (step.stage === 5 && step.votes) {
       for (const [audience, vote] of Object.entries(step.votes)) {
@@ -104,9 +105,9 @@ export async function replayAdoption(deps: StageApprovalDeps, plan: AdoptionPlan
     }
     const stage5 = { ...(step.policy ? { policy: step.policy } : {}), ...(step.packages ? { packages: step.packages } : {}) };
     const opened = await ensureReviewOpen(deps, { projectId: plan.projectId, stage: step.stage, ref: step.ref, ...stage5 });
-    if (!opened.ok) return { landed: current.stage, stopped: `opening stage ${String(step.stage)}'s review was refused: ${opened.reason}` };
+    if (!opened.ok) return { landed: current.stage, stopped: `opening ${stageName(step.stage)}'s review was refused: ${opened.reason}` };
     const approved = await approveStage(deps, { projectId: plan.projectId, stage: step.stage, ref: step.ref, ...stage5 });
-    if (!approved.ok) return { landed: current.stage, stopped: `approving stage ${String(step.stage)} was refused: ${approved.reason}` };
+    if (!approved.ok) return { landed: current.stage, stopped: `approving ${stageName(step.stage)} was refused: ${approved.reason}` };
     current = (await view()) ?? current;
   }
   return { landed: current.stage, stopped: null };
