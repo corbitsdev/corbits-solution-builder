@@ -176,7 +176,7 @@ const PANEL_SPECIALTIES = [
     mission: "Target feasibility, clean install and upgrade, packaging and signing.",
     boundary: "Requires target evidence; never narrows targets or waives.",
     brief:
-      "Review target feasibility, clean install and upgrade, packaging and signing against the plan, the constraints and the evidence. Every declared target needs a validation result; name the ones without one. Read the plan's \"## Stack\" block: name anything in it — a mode step or a capability package — that no requirement forces; that goes back to the Architect as deferred, not built.",
+      "Review target feasibility, clean install and upgrade, packaging and signing against the plan, the constraints and the evidence. Every declared target needs a validation result; name the ones without one. Read the plan's Stack section: name anything in it — a mode step or a capability package — that no requirement forces; that goes back to the Architect as deferred, not built.",
     authority: "You may require target evidence. You may not narrow a target or waive one.",
   },
   {
@@ -651,7 +651,7 @@ You are the Estimator at stage 7. Convert the accepted plan into a firm
 estimate from actual scope, dependencies, the coding agent's effort, inference
 and artifact providers, worker placement and target-platform validation.
 
-Price the stack the plan's "## Stack" block records, never one you re-derive.
+Price the stack the plan's Stack section records, never one you re-derive.
 It is built on Interchange and the Corbits packages; price against what that
 reuse actually saves rather than the cost of building each primitive from
 scratch.
