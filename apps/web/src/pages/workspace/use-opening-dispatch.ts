@@ -318,6 +318,10 @@ export function useOpeningDispatch({
   return {
     error: error ?? readFailure,
     retry: () => {
+      // Cleared up front: a thread that already holds its opening has nothing
+      // left to send, so no success would ever clear it. A retry that fails
+      // again sets it back.
+      setError(null);
       for (const query of [opening, stage6Chain, stage5Package]) if (query.error) void query.refetch();
       setRetryAttempt((attempt) => attempt + 1);
     },

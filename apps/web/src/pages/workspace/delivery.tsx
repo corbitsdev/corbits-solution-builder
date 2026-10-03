@@ -231,7 +231,6 @@ function DeliveryDecision({
   });
   const verification = verificationNode ? (verificationRead.data ?? null) : parseDeliveryVerification(null);
   const verificationError = verificationRead.error ? `The verification record could not be read: ${verificationRead.error.message}` : null;
-  const shownError = error ?? verificationError;
 
   if (!loaded) return null;
 
@@ -304,7 +303,10 @@ function DeliveryDecision({
           </p>
         </>
       ) : null}
-      {shownError ? <Banner tone="error" title={shownError} /> : null}
+      {error ? <Banner tone="error" title={error} /> : null}
+      {verificationError ? (
+        <Banner tone="error" title={verificationError} action={{ label: "Try again", onClick: () => void verificationRead.refetch() }} />
+      ) : null}
       {!pending && !delivered ? <p className="inline-note">Waiting on {VERIFIER} to submit a delivery for review.</p> : null}
       {summary ? <p>{summary}</p> : null}
       {artifacts.length > 0 ? (
