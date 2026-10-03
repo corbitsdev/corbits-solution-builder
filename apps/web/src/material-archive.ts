@@ -65,7 +65,7 @@ export async function filesInZip(archive: File, depth = 1): Promise<File[]> {
   try {
     zip = await JSZip.loadAsync(await archive.arrayBuffer());
   } catch {
-    throw new ArchiveRefused(`${archive.name} could not be read as a zip archive.`);
+    throw new ArchiveRefused(`Couldn't open ${archive.name}: it isn't a readable zip file.`);
   }
   const files: File[] = [];
   const entries = Object.values(zip.files)
@@ -87,7 +87,7 @@ export async function filesInZip(archive: File, depth = 1): Promise<File[]> {
     files.push(new File([await entry.async("arraybuffer")], path, { type }));
   }
   if (files.length === 0) {
-    throw new ArchiveRefused(`${archive.name} holds nothing this can keep. Documents, spreadsheets, and PNG, JPEG, GIF or WebP images are.`);
+    throw new ArchiveRefused(`Couldn't attach ${archive.name}: it has no files the specialists can read. Attach documents, spreadsheets or images (PNG, JPEG, GIF, WebP).`);
   }
   return files;
 }

@@ -48,8 +48,8 @@ describe("stageEvents", () => {
       [],
     );
     expect(events[0]?.tone).toBe("boundary");
-    expect(events[0]?.text).toContain("Stage 1");
-    expect(events.map((e) => e.text)).toEqual(["Stage 1 · Problem discovery"]);
+    expect(events[0]?.text).toContain("Problem discovery");
+    expect(events.map((e) => e.text)).toEqual(["Problem discovery"]);
   });
 
   test("scopes nodes to the stage and hides internal kinds", () => {
@@ -63,7 +63,7 @@ describe("stageEvents", () => {
       ],
       [],
     );
-    expect(events.map((e) => e.text)).toEqual(["Stage 2 · Solution shape", "Attached · brand.pdf"]);
+    expect(events.map((e) => e.text)).toEqual(["Solution shape", "Attached · brand.pdf"]);
   });
 
   test("send-back reads differently on the sending and receiving stage", () => {
@@ -80,7 +80,7 @@ describe("stageEvents", () => {
       { messageId: "m2", stage: 2, at: "2026-01-01T09:00:00.000Z" },
     ];
     expect(stageEvents(1, [], [], marks).map((e) => e.text)).toEqual([
-      "Stage 1 · Problem discovery",
+      "Problem discovery",
       "Turn aborted",
     ]);
   });
