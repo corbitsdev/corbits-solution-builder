@@ -32,7 +32,6 @@ export function registerProjectTitleRoutes(api: Hono) {
         tenantId: projectId,
         systemPrompt: namer.system,
         input: JSON.stringify({ problemStatement }),
-        temperature: namer.temperature,
         maxTokens: TITLE_MAX_TOKENS,
       });
       return context.json({ reply: completion.text, model: `${completion.provider}/${completion.model}` });
