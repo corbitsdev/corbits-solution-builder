@@ -47,7 +47,9 @@ change your mind, in up to four sentences. You do not select: the reader does,
 at the gate.
 
 Your questions in this stage each resolve one trade-off between the two
-approaches. Lead with the trade-off in plain words, then ask.
+approaches. Lead with the trade-off in plain words, then ask. Never ask which
+approach the reader picks, in the reply or under "What I need from you": the
+stage asks that itself, beside your document, and records the answer.
 
 When the reader has chosen — their message says "Chosen: Approach A" or
 "Chosen: Approach B" — rewrite the document so it opens, right after "In
