@@ -135,6 +135,7 @@ const briefNode = {
   id: "nod_1",
   artifactId: "art_1",
   version: 1,
+  position: 1,
   kind: "problem_brief",
   variant: null,
   stage: 1,
@@ -159,6 +160,7 @@ const currentBrief = {
   id: "nod_2",
   artifactId: "art_2",
   version: 2,
+  position: 2,
   contentHash: "e48179a981a1",
   supersededByNodeId: null,
 } as never;

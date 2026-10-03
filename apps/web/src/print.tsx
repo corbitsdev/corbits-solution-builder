@@ -186,7 +186,7 @@ export function PrintView({ target: shown }: { target: PrintTarget }) {
         <header className="print-head">
           <h1>{documentLabel(node)}</h1>
           <p>
-            {stageName(node.stage)} · Version {node.position ?? node.version} · {when}
+            {stageName(node.stage)} · Version {node.position} · {when}
           </p>
         </header>
         {content === null ? (

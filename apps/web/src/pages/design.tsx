@@ -28,7 +28,6 @@ import { Banner, Button, CopyButton, Field, StateLabel, documentName } from "../
 import { Dictated } from "../dictation.jsx";
 import { PrintButton } from "../print.jsx";
 import { Elapsed } from "./workspace/elapsed.jsx";
-import { designOrdinal } from "./workspace/design-history.ts";
 import type { FoldedFeedback } from "@solutions-builder/app/design-prompt";
 import { anchorResolves, shortPromptHash, withFallbackIds, type Disposition } from "../design-disposition.js";
 import { Markdown } from "../markdown.jsx";
@@ -298,7 +297,7 @@ export function DesignFeedbackView({
       <div className="doc" data-tour="design-feedback">
         <div className="docmeta">
           <span>
-            v{design ? designOrdinal(designs, design) : ""} · {documentName(design?.kind ?? "design_artifact")}
+            v{design?.position ?? ""} · {documentName(design?.kind ?? "design_artifact")}
           </span>
           <div className="document-tools">
             {designs.length > 1 ? (
@@ -309,7 +308,7 @@ export function DesignFeedbackView({
               >
                 {designs.map((entry) => (
                   <option key={entry.id} value={entry.id}>
-                    Version {designOrdinal(designs, entry)}
+                    Version {entry.position}
                   </option>
                 ))}
               </select>
@@ -350,7 +349,7 @@ export function DesignFeedbackView({
           <DesignFrames
             framed={framed}
             frameKey={design?.id ?? ""}
-            title={`Design preview: ${design?.title ?? ""} v${design ? designOrdinal(designs, design) : ""}`}
+            title={`Design preview: ${design?.title ?? ""} v${design?.position ?? ""}`}
             paneClassName="design-preview"
             registerFrame={registerFrame}
           />

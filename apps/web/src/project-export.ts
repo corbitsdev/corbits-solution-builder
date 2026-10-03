@@ -11,7 +11,9 @@ import type { ChatMessage } from "./stage-mail.ts";
 export const BUNDLE_FORMAT = "solutions-builder.project" as const;
 export const BUNDLE_VERSION = 2 as const;
 
-export type ExportedArtifact = { node: ArtifactNode; content: string };
+/** A node as recorded; its lineage position is derived when a project is read. */
+export type ExportedNode = Omit<ArtifactNode, "position">;
+export type ExportedArtifact = { node: ExportedNode; content: string };
 export type ExportedConversation = { stage: number; messages: ChatMessage[] };
 
 export type ProjectBundle = {
@@ -40,7 +42,7 @@ export type BundleDeps = {
 /** Only the fields a document node is documented to carry -- an explicit
  *  whitelist, not a spread, so an unexpected field on the read (a stray
  *  credential, say) can never ride along into the bundle. */
-function pickNode(node: ArtifactNode): ArtifactNode {
+function pickNode(node: ArtifactNode): ExportedNode {
   return {
     id: node.id,
     kind: node.kind,

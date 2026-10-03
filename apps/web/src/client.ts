@@ -136,7 +136,7 @@ import {
 import { hubCredentials, hubOrigin } from "./hub-origin.ts";
 import { listProjectSummaries, OPENING_VARIANT } from "./project-list.ts";
 import { openDecisions } from "./decisions-fold.ts";
-import { loadProjectView, toArtifactNode } from "./project-view.ts";
+import { artifactNodesOf, loadProjectView } from "./project-view.ts";
 import { projectUsage, type ProjectUsage } from "./project-usage.ts";
 import { designerSettings as loadDesignerSettings, saveDesignerSettings, type DesignerSettings } from "./designer-settings.ts";
 import { deckDesigns as loadDeckDesigns, guidanceFor, saveDeckDesignPreference } from "./deck-design-settings.ts";
@@ -469,7 +469,7 @@ export type ArtifactNode = {
   version: number;
   /** Where the node sits in its lineage, counting from 1: what a person is
    *  shown as its version. */
-  position?: number;
+  position: number;
   artifactId: string;
   contentHash: string;
   /** Unknown unless the version is a package upload record; never a misleading 0. */
@@ -2124,7 +2124,7 @@ export const api = {
   artifactGraph: (projectId: string) =>
     asWorkspaceOwner(async (transport) => {
       const graph = await artifactGraphFor(transport, projectId);
-      return { nodes: graph.nodes.map(toArtifactNode), edges: graph.edges };
+      return { nodes: artifactNodesOf(graph.nodes), edges: graph.edges };
     }),
 
   sendStageMail: async (

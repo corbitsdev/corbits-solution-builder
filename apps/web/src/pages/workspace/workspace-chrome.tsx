@@ -4,8 +4,7 @@
  * presentational — every prop is already resolved by the stage workspace
  * above them.
  */
-import { useEffect, useId, useState, type CSSProperties, type ReactNode, type Ref } from "react";
-import { flushSync } from "react-dom";
+import { useId, useState, type CSSProperties, type ReactNode, type Ref } from "react";
 import { ChatInput } from "@corbits/react-ui";
 import { Button, stageName } from "../../components.jsx";
 import { InlineMarkdown, Markdown } from "../../markdown.jsx";
@@ -270,23 +269,9 @@ export function StagePanes({
   paneTour?: string;
   tour?: string;
 }) {
-  // The first draft turns the centered conversation into the side-by-side
-  // view. The layout lags one render so the change runs inside a view
-  // transition: the conversation slides over and the document arrives,
-  // rather than the page jumping.
-  const [layout, setLayout] = useState(className);
-  useEffect(() => {
-    if (layout === className) return;
-    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    if (reduced || typeof document.startViewTransition !== "function") {
-      setLayout(className);
-      return;
-    }
-    document.startViewTransition(() => flushSync(() => setLayout(className)));
-  }, [className, layout]);
-  const split = !solo && layout !== "chat-first";
+  const split = !solo && className !== "chat-first";
   const panesWidth = usePanesWidth();
-  const panesClass = [PANES_CLASS, solo ? "is-solo" : null, layout].filter(Boolean).join(" ");
+  const panesClass = [PANES_CLASS, solo ? "is-solo" : null, className].filter(Boolean).join(" ");
   return (
     <div
       className={panesClass}

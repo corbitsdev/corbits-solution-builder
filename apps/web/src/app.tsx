@@ -303,7 +303,7 @@ export function AppBar({
                 align="start"
                 trigger={
                   <button type="button" className="wordmark wordmark-menu" aria-label={`Options for ${detail.project.title}`}>
-                    {detail.project.title}
+                    <span className="wordmark-text">{detail.project.title}</span>
                     <ChevronDown aria-hidden="true" />
                   </button>
                 }

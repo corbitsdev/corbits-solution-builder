@@ -74,6 +74,10 @@ export const keys = {
     all: ["stageWork"] as const,
     of: (tenantId: string, kind: string) => ["stageWork", tenantId, kind] as const,
   },
+  /** A document's sha256, computed in the browser. */
+  contentDigest: {
+    of: (content: string) => ["contentDigest", content] as const,
+  },
   artifact: {
     all: ["artifact"] as const,
     of: (tenantId: string, id: string) => ["artifact", tenantId, id] as const,

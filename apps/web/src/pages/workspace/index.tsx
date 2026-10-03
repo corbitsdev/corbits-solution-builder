@@ -19,7 +19,7 @@
  * stays here is the wiring between them and the stage-specific composition.
  */
 import { isStageOpening } from "./composed-mail.ts";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
 import { keys } from "../../queries/keys.ts";
 import {
@@ -54,7 +54,7 @@ import { parseStackRecord } from "@solutions-builder/app/stack";
 import { stageUsesArtifactTools } from "@solutions-builder/app/specialist-source";
 import { draftReferences } from "./draft-references.ts";
 import { designHistory } from "./design-history.ts";
-import { Flame } from "lucide-react";
+import { ArrowLeft, Flame, Send, Undo2 } from "lucide-react";
 import { useWorkflowView } from "./use-workflow-view.ts";
 import { useStageAgent } from "./use-stage-agent.ts";
 import { useStageThread } from "./use-stage-thread.ts";
@@ -80,6 +80,7 @@ import { useMountEffect } from "../../use-mount-effect.ts";
 import { Stage6Panel } from "./stage6.tsx";
 import { PanelReviewsCompanion, reviewNodesOf } from "./panel-reviews.tsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
+import { documentAsMessage, requirementsDocument, reviewDocument } from "./document-mentions.ts";
 import { askKind, requirementsRequest, routedLine } from "./message-intent.ts";
 import { TERMINAL_RUN_NOTICE, isTerminalRunRefusal } from "./terminal-run.ts";
 import { renderRequirementsBlock } from "@solutions-builder/app/requirements";
@@ -737,14 +738,24 @@ export function StageWorkspace({
   // (a design is a page in a sandbox, a file is a file), headed by which
   // stage it belongs to, with the two things a person can do from here --
   // go back to this stage's work, or send the project back to change it.
+  // A stage whose pane is a panel of its own (the design, the packages, the
+  // build, the delivery) shows only its own lineage's newest version there,
+  // so a tab or a version chip naming anything else read as doing nothing:
+  // the reader shows it instead, as it does another stage's.
+  const panelCannotShow =
+    artifacts.selected !== null &&
+    artifacts.activeNode !== null &&
+    artifacts.selected.stage === stage &&
+    !DOCUMENT_STAGES.has(stage) &&
+    (artifacts.selected.kind !== STAGE_DRAFT_KIND[stage] || artifacts.activeNode.id !== artifacts.selected.versions.at(-1)?.id);
   const reader =
-    artifacts.selected !== null && artifacts.selected.stage !== stage && artifacts.activeNode ? (
+    artifacts.selected !== null && (artifacts.selected.stage !== stage || panelCannotShow) && artifacts.activeNode ? (
       <div className="stage-inner">
         <div className="doc reader-doc">
           <div className="docmeta">
             <span>
               <b>{stageName(artifacts.activeNode.stage)}</b> · {documentName(artifacts.activeNode.kind)} · v
-              {artifacts.activeNode.position ?? artifacts.activeNode.version}
+              {artifacts.activeNode.position}
               {artifacts.activeNode.supersededByNodeId ? " · superseded" : " · viewing"}
             </span>
             <div className="document-tools">
@@ -758,11 +769,19 @@ export function StageWorkspace({
                 // The same way out every stage document has (#242): Markdown, or the print layer's PDF.
                 <DocumentExportMenu node={artifacts.activeNode} tenantId={tenantId} content={artifacts.activeContent} />
               ) : null}
-              <Button variant="ghost" onClick={() => artifacts.select(null)}>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  artifacts.select(null);
+                  artifacts.selectVersion(null);
+                }}
+              >
+                <ArrowLeft aria-hidden="true" />
                 Back to {stageName(stage)}
               </Button>
               {artifacts.activeNode.stage < stage ? (
                 <Button variant="ghost" disabled={decisions.sendingBack} onClick={() => setReaderSendBack((open) => !open)}>
+                  <Undo2 aria-hidden="true" />
                   Change it: send back to {stageName(artifacts.activeNode.stage)}…
                 </Button>
               ) : null}
@@ -798,7 +817,7 @@ export function StageWorkspace({
             <DesignFrames
               framed={framedDesign(artifacts.activeContent, frameMode, artifacts.activeNode.title)}
               frameKey={artifacts.activeNode.id}
-              title={`${stageName(artifacts.activeNode.stage)} v${artifacts.activeNode.position ?? artifacts.activeNode.version}`}
+              title={`${stageName(artifacts.activeNode.stage)} v${artifacts.activeNode.position}`}
               paneClassName="artifact-page"
             />
           ) : (
@@ -807,6 +826,99 @@ export function StageWorkspace({
         </div>
       </div>
     ) : null;
+
+  // A requirements document or a review open beside the plan can be handed
+  // to the architect as a message (#345).
+  const sendToArchitect = () => {
+    const node = artifacts.activeNode;
+    const content = artifacts.activeContent;
+    if (!node || !content) return null;
+    const doc =
+      node.kind === "product_requirements"
+        ? requirementsDocument(content)
+        : node.kind === "engineering_review" && node.variant
+          ? reviewDocument(node.variant, content)
+          : null;
+    if (!doc) return null;
+    return (
+      <Button variant="ghost" disabled={sending} onClick={() => void send(documentAsMessage(doc))}>
+        <Send aria-hidden="true" />
+        Send to the architect
+      </Button>
+    );
+  };
+
+  // The stage's document with its gate. Stage 6's panel renders it, so the
+  // plan's toolbar can hold the panel's review menu.
+  const activeNode = artifacts.activeNode;
+  const selectedTab = artifacts.selected;
+  const stageDocument =
+    agentAddress && DOCUMENT_STAGES.has(stage) && draftMessage && viewedStage === null && activeNode && selectedTab
+      ? (reviewMenu: ReactNode) => (
+          <StageDocument
+              node={activeNode}
+              versions={selectedTab.versions}
+              content={artifacts.activeContent}
+              tenantId={tenantId}
+              turns={turns}
+              openQuestion={
+                guidance.question
+                  ? { text: guidance.question.text, ordinal: progress?.ordinal ?? null, total: progress?.total ?? null }
+                  : null
+              }
+              evaluation={
+                stage === 1 && evaluator.status === "verdict"
+                  ? { ready: evaluator.verdict.ready, notes: [...evaluator.verdict.notes] }
+                  : null
+              }
+              advisory={stage === 1 ? <EvaluatorStance evaluator={evaluator} /> : null}
+              lead={
+                stage === 7 ? (
+                  <>
+                    <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} />
+                    <EstimateView body={draftMessage.body} freeze={workflowView?.freeze ?? null} />
+                  </>
+                ) : null
+              }
+              {...(draftRefs ? { draftRefs } : {})}
+              onSelectVersion={artifacts.openVersion}
+              onRevise={(message, quotes) => {
+                artifacts.selectVersion(null);
+                const quoted = quotes.map((entry) => `> ${entry.quote}`).join("\n");
+                void send(quoted ? `${quoted}\n\n${message}` : message);
+              }}
+              onAddMaterial={async (files) => {
+                await api.attachMaterial(detail.project.id, files);
+                void refreshWorkflow();
+              }}
+              onSubmit={() => void approve()}
+              soloApproval={detail.soloApproval}
+              canSubmit={approveAllowed && artifacts.isStageDraft && !superseded}
+              busy={sending ? "draft" : approving || workflow.refreshingAfterAction ? "submit" : null}
+              draftOpen={draftOpen}
+              newer={artifacts.newerVersion}
+              live={null}
+              seed={stopSeed}
+              withdrawnIds={withdrawnIds}
+              pending={busy}
+              onStop={() => void stopTurn()}
+              onSendHold={openSendBack}
+              composerPopover={sendBackPopover}
+              events={events}
+              strip={stripEl}
+              tools={stage !== 6 ? null : artifacts.isStageDraft ? reviewMenu : sendToArchitect()}
+              promote={
+                superseded
+                  ? {
+                      label: `${selectedTab.label} v${activeNode.position} · superseded by v${selectedTab.versions.length}`,
+                      run: () => void promote(),
+                      busy: promoting,
+                    }
+                  : null
+              }
+            />
+        )
+      : null;
 
   const conversation = (
     <StageConversation
@@ -933,12 +1045,14 @@ export function StageWorkspace({
           <span className="inference-flame" role="img" aria-label={busy ? "Inference running" : "Inference idle"}>
             <Flame aria-hidden="true" />
           </span>
-          <span className="inline-note">
-            Inference:{" "}
-            {activeModel ? `${activeModel.providerLabel} · ${activeModel.canonicalName}` : "Loading…"}
-            {runningRemoved ? " · provider removed, choose another" : null}
-          </span>
+          <label className="stage-model-label" htmlFor="stage-inference">
+            Inference
+          </label>
+          {/* The select is the one place the running model is named: it
+              shows the running row, or, when no Settings row matches it,
+              the running model itself as the unchosen first option. */}
           <select
+            id="stage-inference"
             aria-label="Switch this stage's inference"
             title={
               busy
@@ -953,7 +1067,11 @@ export function StageWorkspace({
             }}
           >
             <option value="" disabled>
-              {modelSwitch.switching ? "Switching…" : "Switch inference…"}
+              {modelSwitch.switching
+                ? "Switching…"
+                : activeModel
+                  ? `${activeModel.providerLabel} · ${activeModel.canonicalName}${runningRemoved ? " · provider removed, choose another" : ""}`
+                  : "Loading…"}
             </option>
             {inferenceChoices.map((option) => (
               <option key={option.providerRowId} value={option.providerRowId}>
@@ -1027,6 +1145,7 @@ export function StageWorkspace({
         guidance={guide.guidance}
         explaining={guide.explaining}
         note={guide.note}
+        now={agentAddress ? { title: guidance.title, detail: guidance.detail } : null}
       />
 
       {agentAddress && openingDispatch.error ? (
@@ -1138,13 +1257,13 @@ export function StageWorkspace({
           }
           reviewNodes={reviewNodesOf(detail.nodes, 6)}
           onDocumentsChanged={onChanged}
-          onSendToArchitect={(body) => void send(body)}
           requirementsAsk={requirementsAsk}
           onRequirementsDrafted={mintRequirements}
           strip={stripEl}
           conversation={conversation}
           reader={reader}
           pane={!(draftMessage && artifacts.activeNode && artifacts.selected)}
+          planDocument={stageDocument}
         />
       ) : null}
 
@@ -1171,71 +1290,7 @@ export function StageWorkspace({
         </StagePanes>
       ) : null}
 
-      {agentAddress && DOCUMENT_STAGES.has(stage) && draftMessage && viewedStage === null && artifacts.activeNode && artifacts.selected ? (
-        <>
-          <StageDocument
-            node={artifacts.activeNode}
-            versions={artifacts.selected.versions}
-            content={artifacts.activeContent}
-            tenantId={tenantId}
-            turns={turns}
-            openQuestion={
-              guidance.question
-                ? { text: guidance.question.text, ordinal: progress?.ordinal ?? null, total: progress?.total ?? null }
-                : null
-            }
-            evaluation={
-              stage === 1 && evaluator.status === "verdict"
-                ? { ready: evaluator.verdict.ready, notes: [...evaluator.verdict.notes] }
-                : null
-            }
-            advisory={stage === 1 ? <EvaluatorStance evaluator={evaluator} /> : null}
-            lead={
-              stage === 7 ? (
-                <>
-                  <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} />
-                  <EstimateView body={draftMessage.body} freeze={workflowView?.freeze ?? null} />
-                </>
-              ) : null
-            }
-            {...(draftRefs ? { draftRefs } : {})}
-            onSelectVersion={artifacts.openVersion}
-            onRevise={(message, quotes) => {
-              artifacts.selectVersion(null);
-              const quoted = quotes.map((entry) => `> ${entry.quote}`).join("\n");
-              void send(quoted ? `${quoted}\n\n${message}` : message);
-            }}
-            onAddMaterial={async (files) => {
-              await api.attachMaterial(detail.project.id, files);
-              void refreshWorkflow();
-            }}
-            onSubmit={() => void approve()}
-            soloApproval={detail.soloApproval}
-            canSubmit={approveAllowed && artifacts.isStageDraft && !superseded}
-            busy={sending ? "draft" : approving || workflow.refreshingAfterAction ? "submit" : null}
-            draftOpen={draftOpen}
-            newer={artifacts.newerVersion}
-            live={null}
-            seed={stopSeed}
-            withdrawnIds={withdrawnIds}
-            pending={busy}
-            onStop={() => void stopTurn()}
-            onSendHold={openSendBack}
-            composerPopover={sendBackPopover}
-            events={events}
-            strip={stripEl}
-            promote={
-              superseded
-                ? {
-                    label: `${artifacts.selected.label} v${artifacts.activeNode.position ?? artifacts.activeNode.version} · superseded by v${artifacts.selected.versions.length}`,
-                    run: () => void promote(),
-                    busy: promoting,
-                  }
-                : null
-            }
-          />
-        </>
-      ) : null}
+      {stage === 6 ? null : stageDocument?.(null)}
 
       {agentAddress && stage === 9 ? (
         <StagePanes strip={stripEl} conversation={conversation} busy={busy}>
@@ -1305,6 +1360,7 @@ function DesignPanel({
         stage: 4,
         title: stageName(4),
         version: (persisted.at(-1)?.version ?? 0) + 1,
+        position: (persisted.at(-1)?.position ?? 0) + 1,
         artifactId: `reply:${latestReply.id}`,
         contentHash: "",
         sizeBytes: latestReply.body.length,
