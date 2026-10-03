@@ -319,7 +319,7 @@
 .conv .msg {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
   max-width: 92%;
   /* A flex item's floor is its longest unbreakable line, so a code block
      with long lines widened a message past the column and, for a person's
@@ -405,7 +405,7 @@
 .conv [data-slot="message-bubble"] {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
   max-width: 92%;
 }
 
@@ -608,7 +608,10 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  padding: 0 var(--space-1) var(--space-2);
+  min-height: 32px;
+  /* The composer's grid gap spaces it from the box; this only lines its
+     words up with the text inside the box. */
+  padding: 0 0 0 var(--space-4);
 }
 
 .composer .approve button,
@@ -616,8 +619,10 @@
   background: transparent;
   border-color: transparent;
   color: var(--wb-muted-foreground);
-  padding: 4px 8px;
-  font-size: 11.5px;
+  height: 32px;
+  padding: 0 var(--space-3);
+  gap: 6px;
+  font-size: 0.8125rem;
   font-weight: 550;
   border-radius: var(--radius-md);
   transition:

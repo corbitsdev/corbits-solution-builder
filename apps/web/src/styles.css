@@ -168,8 +168,8 @@ input[type="file"]:not(:disabled) {
   bottom: var(--space-4);
   display: flex;
   justify-content: flex-end;
-  padding-right: 72px;
-  margin-top: var(--space-4);
+  /* The guide's 44px button and its 24px inset, plus a step of air. */
+  padding-right: calc(44px + var(--space-6) + var(--space-2));
   pointer-events: none;
 }
 
@@ -820,9 +820,12 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 
 /* The record between turns — boundaries, versions, decisions, aborts — as
    quiet mono lines; the stage's boundary is the only one with a rule. */
+/* The line itself carries its inset and, at a boundary, its rule (see
+   workspace-layout.css), so both transcripts space it alike; the library's
+   bubble around it adds neither. */
 [data-slot="message-bubble"]:has(.conv-event) {
   text-align: left;
-  padding: var(--space-1) 0;
+  padding: 0;
 }
 
 .conv-event {
@@ -830,12 +833,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   font-size: 0.65625rem;
   letter-spacing: 0.02em;
   color: var(--wb-muted-foreground);
-}
-
-[data-slot="message-bubble"]:has(.conv-boundary) {
-  border-top: 1px solid var(--wb-border);
-  padding-top: var(--space-3);
-  margin-top: var(--space-2);
 }
 
 .conv-boundary {
@@ -1021,6 +1018,8 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 }
 
 .thread-empty {
+  max-width: 44ch;
+  margin: 0 auto;
   text-align: center;
   color: var(--wb-muted-foreground);
   font-size: 0.875rem;
@@ -2239,6 +2238,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
 
 .composer-cue {
   margin: 0;
+  padding: 0 var(--space-4);
   font-size: 0.8125rem;
   color: var(--wb-muted-foreground);
   animation: settle-in 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
