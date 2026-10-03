@@ -136,8 +136,8 @@ export async function displayTurn(
   const cached = turnCache.get(key);
   if (cached && Date.now() - cached.at < TURN_CACHE_MS) return cached.label;
   const tenantId = await deps.workspaceTenantId();
-  const status = tenantId ? await deps.stageAgentStatus(projectId, stage).catch(() => null) : null;
-  const messages = status && tenantId ? await deps.readStageThread(tenantId, [status.address]).catch(() => []) : [];
+  const status = tenantId ? await deps.stageAgentStatus(projectId, stage) : null;
+  const messages = status && tenantId ? await deps.readStageThread(tenantId, [status.address]) : [];
   const label = turnLabel(stage, messages, hasPendingApproval);
   turnCache.set(key, { label, at: Date.now() });
   return label;
@@ -164,24 +164,22 @@ export async function listProjectSummaries(transport: Transport = createHubTrans
   const pendingIn = (tenantId: string) => {
     let read = pendingByTenant.get(tenantId);
     if (!read) {
-      read = pendingApprovals(tenantId, transport)
-        .then((approvals) => approvals.filter((approval) => approval.status === "pending"))
-        .catch(() => [] as readonly PendingApproval[]);
+      read = (async () => (await pendingApprovals(tenantId, transport)).filter((approval) => approval.status === "pending"))();
       pendingByTenant.set(tenantId, read);
     }
     return read;
   };
   return Promise.all(
     records.map(async (record): Promise<ProjectSummary> => {
-      const deployments = await listSpecialistDeployments(transport, record.id).catch(() => []);
+      const deployments = await listSpecialistDeployments(transport, record.id);
       const deploymentIds = new Set(deployments.map((deployment) => deployment.deploymentId));
       const tenantIds = [...new Set(deployments.map((deployment) => deployment.tenantId))];
       const pending = (await Promise.all(tenantIds.map(pendingIn))).flat();
       const needsDecision = pending.some((approval) => deploymentIds.has(approval.anchorRunId));
       // The project's own material, plus what an older project still has in the workspace.
-      const materials = await listProjectArtifacts(transport, record.id, { kind: MATERIAL_KIND }).catch(() => []);
+      const materials = await listProjectArtifacts(transport, record.id, { kind: MATERIAL_KIND });
       const openingId = openingArtifactId(materials, record.id);
-      const opening = openingId ? await findArtifact(transport, record.id, openingId).catch(() => null) : null;
+      const opening = openingId ? await findArtifact(transport, record.id, openingId) : null;
       return {
         id: record.id,
         revision: record.revision,

@@ -78,7 +78,7 @@ export async function filesInZip(archive: File, depth = 1): Promise<File[]> {
     if (extension === ".zip") {
       if (depth < MAX_ZIP_DEPTH) {
         const inner = new File([await entry.async("arraybuffer")], path, { type: "application/zip" });
-        files.push(...(await filesInZip(inner, depth + 1).catch(() => [])));
+        files.push(...(await filesInZip(inner, depth + 1)));
       }
       continue;
     }

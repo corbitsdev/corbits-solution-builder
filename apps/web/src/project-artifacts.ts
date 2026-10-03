@@ -22,8 +22,6 @@ function projectOf(entry: ArtifactListItem): string | undefined {
 /**
  * Every artifact of `projectId`: the project tenant's own list, plus the
  * workspace's records still labelled with this project (older projects).
- * The workspace read is best-effort: a project with everything in its own
- * tenant loses nothing if the workspace list fails.
  */
 export async function listProjectArtifacts(
   transport: Transport,
@@ -32,7 +30,7 @@ export async function listProjectArtifacts(
 ): Promise<ArtifactListItem[]> {
   const [own, parentId] = await Promise.all([listArtifacts(transport, projectId, filters), parentTenantOf(transport, projectId)]);
   if (!parentId) return own;
-  const legacy = await listArtifacts(transport, parentId, filters).catch(() => [] as ArtifactListItem[]);
+  const legacy = await listArtifacts(transport, parentId, filters);
   const seen = new Set(own.map((entry) => entry.id));
   return [...own, ...legacy.filter((entry) => projectOf(entry) === projectId && !seen.has(entry.id))];
 }
@@ -47,7 +45,7 @@ export type FoundArtifact = { readonly artifact: Artifact; readonly tenantId: st
 export async function findArtifact(transport: Transport, tenantId: string, artifactId: string): Promise<FoundArtifact | null> {
   const own = await getArtifact(transport, tenantId, artifactId);
   if (own) return { artifact: own, tenantId };
-  const parentId = await parentTenantOf(transport, tenantId).catch(() => null);
+  const parentId = await parentTenantOf(transport, tenantId);
   if (!parentId) return null;
   const legacy = await getArtifact(transport, parentId, artifactId);
   return legacy ? { artifact: legacy, tenantId: parentId } : null;

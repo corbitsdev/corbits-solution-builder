@@ -199,8 +199,8 @@ export function BuildPanel({
   const checkWorker = useCallback(async () => {
     try {
       setWorker(await api.buildWorker());
-    } catch {
-      // The banner keeps the last answer; the next check says.
+    } catch (cause) {
+      setError(cause instanceof ApiFailure ? cause.detail.message : String(cause));
     }
   }, []);
   useEffect(() => {

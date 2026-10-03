@@ -1372,6 +1372,7 @@ export function PanelReviews({ reviews, tenantId }: { reviews: ArtifactNode[]; t
     let cancelled = false;
     void Promise.all(
       live.map(async (node) => {
+        // An unreadable review says so on itself, as the design history does.
         const result = await api.artifactContent(tenantId, node.id).catch(() => null);
         return [node.id, result?.content ?? UNREADABLE] as const;
       }),
