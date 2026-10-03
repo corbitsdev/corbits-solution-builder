@@ -81,11 +81,9 @@ export function useProjectArtifacts(
   // draft before it is approved.
   const draftNode: ArtifactNode | null = useMemo(() => {
     if (!draftMessage || draftKind === null) return null;
-    // A saved draft's own version is 1 wherever it sits, so the newest is
-    // found by when it was written.
     const head = nodes
-      .filter((node) => node.stage === stage && node.kind === draftKind)
-      .sort((a, b) => a.version - b.version || Date.parse(a.createdAt) - Date.parse(b.createdAt))
+      .filter((node) => node.stage === stage && node.kind === draftKind && node.variant === null)
+      .sort((a, b) => a.position - b.position)
       .at(-1);
     // Opening the reply's review saves it as a version just after it lands;
     // once saved, the reply is that version, not one past it. Matched on the
@@ -98,7 +96,7 @@ export function useProjectArtifacts(
       stage,
       title: stageName(stage),
       version: (head?.version ?? 0) + 1,
-      position: nodes.filter((node) => node.stage === stage && node.kind === draftKind && node.variant === null).length + 1,
+      position: (head?.position ?? 0) + 1,
       artifactId: `reply:${draftMessage.id}`,
       contentHash: "",
       sizeBytes: draftMessage.body.length,
@@ -126,9 +124,7 @@ export function useProjectArtifacts(
     const draftKind = STAGE_DRAFT_KIND[stage] ?? null;
     return [...groups.entries()]
       .map(([key, versions]) => {
-        const sorted = [...versions].sort(
-          (a, b) => a.version - b.version || Date.parse(a.createdAt) - Date.parse(b.createdAt),
-        );
+        const sorted = [...versions].sort((a, b) => a.position - b.position);
         // The newest non-superseded node, not the first — a lineage written
         // before every write chained `sb.supersedes` can have more than one
         // node with no successor; the most recent of those is still the
@@ -183,7 +179,7 @@ export function useProjectArtifacts(
     ? (selected.versions.find((version) => version.id === selectedVersionId) ?? selected.versions.at(-1) ?? null)
     : null;
   const newerVersion =
-    selected && activeNode ? selected.versions.find((v) => v.version > activeNode.version) ?? null : null;
+    selected && activeNode ? selected.versions.find((v) => v.position > activeNode.position) ?? null : null;
 
   const [activeContent, setActiveContent] = useState("");
   useEffect(() => {

@@ -619,7 +619,7 @@ export function StageDocument({
           <div className="doc" data-tour="document-body" onMouseUp={openSelection}>
             <div className="docmeta">
               <span>
-                v{node.position ?? node.version} · {documentName(node.kind)}
+                v{node.position} · {documentName(node.kind)}
                 {node.supersededByNodeId ? " · superseded" : ""}
                 {node.provenance.agentRole ? ` · ${node.provenance.agentRole}` : ""}
               </span>
@@ -628,7 +628,7 @@ export function StageDocument({
               ) : newer ? (
                 <button type="button" className="newer-version" onClick={() => onSelectVersion(newer.id)}>
                   <ArrowUp aria-hidden="true" />
-                  Version {newer.position ?? newer.version} is ready
+                  Version {newer.position} is ready
                 </button>
               ) : null}
               <div className="document-tools">
@@ -641,7 +641,7 @@ export function StageDocument({
                   >
                     {versions.map((version) => (
                       <option key={version.id} value={version.id}>
-                        Version {version.position ?? version.version}
+                        Version {version.position}
                         {version.supersededByNodeId ? " (superseded)" : ""}
                       </option>
                     ))}
@@ -650,7 +650,7 @@ export function StageDocument({
                 {previous && !binary ? (
                   <label className="changes-toggle" htmlFor="show-changes">
                     <Switch id="show-changes" checked={showChanges} onCheckedChange={setShowChanges} />
-                    <span>Changes since v{previous.position ?? previous.version}</span>
+                    <span>Changes since v{previous.position}</span>
                   </label>
                 ) : null}
                 {binary ? null : <DocumentExportMenu node={node} tenantId={tenantId} content={content} />}

@@ -814,7 +814,7 @@ export function StageWorkspace({
           <div className="docmeta">
             <span>
               <b>{stageName(artifacts.activeNode.stage)}</b> · {documentName(artifacts.activeNode.kind)} · v
-              {artifacts.activeNode.position ?? artifacts.activeNode.version}
+              {artifacts.activeNode.position}
               {artifacts.activeNode.supersededByNodeId ? " · superseded" : " · viewing"}
             </span>
             <div className="document-tools">
@@ -876,7 +876,7 @@ export function StageWorkspace({
             <DesignFrames
               framed={framedDesign(artifacts.activeContent, frameMode, artifacts.activeNode.title)}
               frameKey={artifacts.activeNode.id}
-              title={`${stageName(artifacts.activeNode.stage)} v${artifacts.activeNode.position ?? artifacts.activeNode.version}`}
+              title={`${stageName(artifacts.activeNode.stage)} v${artifacts.activeNode.position}`}
               paneClassName="artifact-page"
             />
           ) : (
@@ -1308,7 +1308,7 @@ export function StageWorkspace({
             promote={
               superseded
                 ? {
-                    label: `${artifacts.selected.label} v${artifacts.activeNode.position ?? artifacts.activeNode.version} · superseded by v${artifacts.selected.versions.length}`,
+                    label: `${artifacts.selected.label} v${artifacts.activeNode.position} · superseded by v${artifacts.selected.versions.length}`,
                     run: () => void promote(),
                     busy: promoting,
                   }
@@ -1379,6 +1379,7 @@ function DesignPanel({
         stage: 4,
         title: stageName(4),
         version: (persisted.at(-1)?.version ?? 0) + 1,
+        position: (persisted.at(-1)?.position ?? 0) + 1,
         artifactId: `reply:${latestReply.id}`,
         contentHash: "",
         sizeBytes: latestReply.body.length,
