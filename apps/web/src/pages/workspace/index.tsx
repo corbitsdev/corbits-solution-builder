@@ -1138,6 +1138,7 @@ export function StageWorkspace({
               onApprove={approve}
               onRevise={(prompt) => send(prompt)}
               latestReply={latestDesign}
+              versions={versionNodes}
               canApprove={approveAllowed}
             />
           )}
@@ -1355,6 +1356,7 @@ function DesignPanel({
   onApprove,
   onRevise,
   latestReply,
+  versions,
   canApprove,
 }: {
   detail: ProjectDetail;
@@ -1367,6 +1369,8 @@ function DesignPanel({
   onRevise: (prompt: string) => Promise<unknown>;
   /** The specialist's latest unpersisted reply — the mockup, before approval. */
   latestReply: ChatMessage | null;
+  /** The design's own versions when the designer keeps it in an artifact. */
+  versions: ArtifactNode[] | null;
   /** The project workflow's own verdict — the only gate on the Approve button. */
   canApprove: boolean;
 }) {
@@ -1374,8 +1378,9 @@ function DesignPanel({
   // already on `detail`, so no route of its own is needed to read it. Under
   // the mail-chat contract nothing writes one of these until approval, so
   // the specialist's latest reply stands in as a not-yet-persisted design
-  // while none exists yet.
-  const persisted = useMemo(() => designHistory(detail.nodes), [detail.nodes]);
+  // while none exists yet. A design kept in an artifact is one node there,
+  // so its history is read as that artifact's versions instead.
+  const persisted = useMemo(() => versions ?? designHistory(detail.nodes), [versions, detail.nodes]);
   const draftNode: ArtifactNode | null = latestReply
     ? {
         id: `reply:${latestReply.id}`,
