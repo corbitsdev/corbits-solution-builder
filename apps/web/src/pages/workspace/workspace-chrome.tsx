@@ -4,7 +4,8 @@
  * presentational — every prop is already resolved by the stage workspace
  * above them.
  */
-import { useId, useState, type CSSProperties, type ReactNode, type Ref } from "react";
+import { useEffect, useId, useState, type CSSProperties, type ReactNode, type Ref } from "react";
+import { flushSync } from "react-dom";
 import { ChatInput, Textarea } from "@corbits/react-ui";
 import { Button, stageName } from "../../components.jsx";
 import { Dictated } from "../../dictation.jsx";
@@ -457,17 +458,30 @@ export function StagePanes({
   children: ReactNode;
   /** Draft closed: conversation takes the width. */
   solo?: boolean;
-  /** A specialist turn is in flight: the conversation column breathes
-   *  (`.conv[data-inference-pending]`, #87) until the reply lands. */
+  /** A specialist turn is in flight (#87), until the reply lands. */
   busy?: boolean;
   conversationRef?: Ref<HTMLElement>;
   className?: string;
   paneTour?: string;
   tour?: string;
 }) {
-  const split = !solo && className !== "chat-first";
+  // The first draft turns the centered conversation into the side-by-side
+  // view. The layout lags one render so the change runs inside a view
+  // transition: the conversation slides over and the document arrives,
+  // rather than the page jumping.
+  const [layout, setLayout] = useState(className);
+  useEffect(() => {
+    if (layout === className) return;
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (reduced || typeof document.startViewTransition !== "function") {
+      setLayout(className);
+      return;
+    }
+    document.startViewTransition(() => flushSync(() => setLayout(className)));
+  }, [className, layout]);
+  const split = !solo && layout !== "chat-first";
   const panesWidth = usePanesWidth();
-  const panesClass = [PANES_CLASS, solo ? "is-solo" : null, className].filter(Boolean).join(" ");
+  const panesClass = [PANES_CLASS, solo ? "is-solo" : null, layout].filter(Boolean).join(" ");
   return (
     <div
       className={panesClass}

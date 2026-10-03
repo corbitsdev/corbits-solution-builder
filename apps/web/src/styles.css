@@ -1007,9 +1007,7 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   .turn-note,
   .thinking { animation: none; }
   .thinking { color: var(--wb-muted-foreground); -webkit-text-fill-color: currentColor; }
-  .stage-model-row[data-inference-pending] .inference-flame,
-  .conv[data-inference-pending] { animation: none; }
-  .conv[data-inference-pending] { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--inference-flame, #e8590c) 60%, transparent); }
+  .stage-model-row[data-inference-pending] .inference-flame { animation: none; }
 }
 
 .thread-empty {
@@ -3124,13 +3122,6 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   0%, 100% { transform: scale(1) rotate(-2deg); opacity: 0.85; }
   35% { transform: scale(1.12) rotate(2deg); opacity: 1; }
   70% { transform: scale(0.94) rotate(-1deg); opacity: 0.9; }
-}
-.conv[data-inference-pending] {
-  animation: inference-breathe 2.6s ease-in-out infinite;
-}
-@keyframes inference-breathe {
-  0%, 100% { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--inference-flame, #e8590c) 30%, transparent); }
-  50% { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--inference-flame, #e8590c) 75%, transparent), inset 0 0 18px 0 color-mix(in srgb, var(--inference-flame, #e8590c) 18%, transparent); }
 }
 
 .model-nudge {
