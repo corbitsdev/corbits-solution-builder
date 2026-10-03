@@ -186,9 +186,9 @@ export const role = (value: AgentRole) => value;
 /** What every evaluator judges and how much it says: its notes go back to the specialist. */
 export const EVALUATOR_SCOPE = `
 - Judge only what changes what gets built or decided: a gap, a contradiction,
-  a wrong or missing decision. Never ask for a measurement, baseline,
-  threshold or number a small-business owner could not reasonably give; an
-  honest stated assumption is enough.
+  something unclear, or something only the person can supply that is missing.
+  Never ask for a measurement, baseline, threshold or number a small-business
+  owner could not reasonably give; there an honest stated assumption is enough.
 - At most three bullets, one short sentence each.`.trim();
 
 /**
