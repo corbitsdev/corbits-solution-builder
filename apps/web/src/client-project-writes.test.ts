@@ -102,6 +102,9 @@ describe("client project tenant writes", () => {
         return json({ id: "g1", roleId: "role-1", principalId: null, resource: "authority:project_owner", action: "hold", effect: "allow", origin: "role" }, 201);
       }
       if (path.includes("/principals/") && method === "POST") return json({ ok: true });
+      // A project workflow run, parked on its decision await in whichever tenant it lives.
+      const events = /\/workflows\/[^/]+\/runs\/([^/]+)\/events$/.exec(path);
+      if (events && method === "GET") return json({ runId: events[1], events: [{ seq: 1, type: "SignalAwaited", body: {} }] });
       // A project workflow signal, in whichever tenant it is sent to.
       if (/\/workflows\/[^/]+\/signals$/.test(path) && method === "POST") return json({ ok: true }, 202);
       // Artifacts: any tenant's listing is empty, and a create answers with a row in that tenant.
