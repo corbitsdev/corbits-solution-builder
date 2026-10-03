@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, ApiFailure, type ImportOutcome, type ProjectSummary } from "../client.js";
 import { faceOpensProject } from "./card-face-guard.ts";
-import { Banner, Button, stageName } from "../components.jsx";
+import { Banner, Button, notify, stageName } from "../components.jsx";
 // INTEGRATE (CL-8756): api.exportProject is gone on this lane — export is
 // assembled in the browser (assembleBundle) and saved via downloadArtifact;
 // stage/turn/done come from project-list.ts helpers and spend copy from
@@ -237,7 +237,7 @@ export function Projects({
                 onOpen={() => onOpen(project.id)}
                 onChanged={onChanged}
                 onError={failed}
-                onNotice={(message) => toast.success(message)}
+                onNotice={notify}
               />
             ))}
           </div>
@@ -257,7 +257,7 @@ export function Projects({
                 onOpen={() => onOpen(project.id)}
                 onChanged={onChanged}
                 onError={failed}
-                onNotice={(message) => toast.success(message)}
+                onNotice={notify}
               />
             ))}
           </div>
@@ -281,7 +281,7 @@ function ProjectCard({
   onOpen: () => void;
   onChanged: () => void;
   onError: (cause: unknown) => void;
-  onNotice: (message: string) => void;
+  onNotice: (message: string, complete?: boolean) => void;
 }) {
   // The list carries no stage: the project workflow is the only authority,
   // so each card reads it. No workflow yet, or a run that has not written its

@@ -25,7 +25,6 @@ import {
   MenuTrigger,
 } from "@corbits/react-ui";
 import { useEffect, useState, type ReactElement } from "react";
-import { toast } from "sonner";
 import { api, ApiFailure, type ActiveModel, type ProjectInfo } from "../client.js";
 import { Banner, Button, downloadArtifact, stageName } from "../components.jsx";
 import { Dictated } from "../dictation.jsx";
@@ -82,7 +81,7 @@ export function ProjectMenu({
   align?: "start" | "end";
   onChanged: () => void;
   onError: (cause: unknown) => void;
-  onNotice: (message: string) => void;
+  onNotice: (message: string, complete?: boolean) => void;
   /** The project is gone; a host showing it should leave. */
   onDeleted?: () => void;
   onMenuOpenChange?: (open: boolean) => void;
@@ -154,8 +153,7 @@ export function ProjectMenu({
             onSelect={() =>
               void act(async () => {
                 const { message, complete } = await downloadDocuments(project);
-                if (complete) onNotice(message);
-                else toast(message);
+                onNotice(message, complete);
               })
             }
           >

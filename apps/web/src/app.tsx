@@ -24,7 +24,7 @@ import {
   Download,
   Settings as SettingsIcon,
 } from "lucide-react";
-import { Banner, Button, Mark, downloadArtifact, stageName } from "./components.jsx";
+import { Banner, Button, Mark, downloadArtifact, notify, stageName } from "./components.jsx";
 import { PrintView, setPrintProject, usePrintTarget } from "./print.jsx";
 import { Projects } from "./pages/projects.jsx";
 import { ProjectMenu } from "./pages/project-menu.jsx";
@@ -257,7 +257,7 @@ export function AppBar({
    *  four omitted where the chrome renders without a live project. */
   onProjectChanged?: () => void;
   onProjectDeleted?: () => void;
-  onNotice?: (message: string) => void;
+  onNotice?: (message: string, complete?: boolean) => void;
   onError?: (cause: unknown) => void;
 }) {
   const inProject = view === "project" && detail !== null;
@@ -816,7 +816,7 @@ export function App() {
           navigate("projects");
           void refresh();
         }}
-        onNotice={(message) => toast.success(message)}
+        onNotice={notify}
         onError={(cause) => toast.error(cause instanceof ApiFailure ? cause.detail.message : String(cause))}
         viewedStage={viewedStage}
         onStageSegment={(stage) => {

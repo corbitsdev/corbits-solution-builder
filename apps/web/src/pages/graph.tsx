@@ -376,6 +376,22 @@ function ArtifactReader({
   );
 }
 
+/** Saves an artifact's bytes under a file name; a failure is a toast. */
+function useFileDownload(tenantId: string, node: ArtifactNode, fileName: string) {
+  const [busy, setBusy] = useState(false);
+  const download = async () => {
+    setBusy(true);
+    try {
+      downloadArtifact((await api.artifactContent(tenantId, node.id)).content, fileName);
+    } catch (cause) {
+      toast.error(cause instanceof ApiFailure ? cause.detail.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return { busy, download };
+}
+
 /**
  * A file the person handed over, shown as what it is: an image as the image,
  * text as text, anything else by name, type and size. Never rendered as
@@ -383,18 +399,8 @@ function ArtifactReader({
  */
 /** A stakeholder's slides: bytes, not a page, so what is offered is a save. */
 function DeckFile({ node, tenantId }: { node: ArtifactNode; tenantId: string }) {
-  const [busy, setBusy] = useState(false);
+  const { busy, download } = useFileDownload(tenantId, node, `${node.title}.pptx`);
   const size = formatSize(node.sizeBytes);
-  const download = async () => {
-    setBusy(true);
-    try {
-      downloadArtifact((await api.artifactContent(tenantId, node.id)).content, `${node.title}.pptx`);
-    } catch (cause) {
-      toast.error(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
-  };
   return (
     <div className="deck-file">
       <p className="inline-note">
@@ -420,18 +426,8 @@ function DeckFile({ node, tenantId }: { node: ArtifactNode; tenantId: string }) 
  * source tree is not a document.
  */
 export function BuildFile({ node, tenantId }: { node: ArtifactNode; tenantId: string }) {
-  const [busy, setBusy] = useState(false);
+  const { busy, download } = useFileDownload(tenantId, node, `${node.title}.tar.gz`);
   const size = formatSize(node.sizeBytes);
-  const download = async () => {
-    setBusy(true);
-    try {
-      downloadArtifact((await api.artifactContent(tenantId, node.id)).content, `${node.title}.tar.gz`);
-    } catch (cause) {
-      toast.error(cause instanceof ApiFailure ? cause.detail.message : String(cause));
-    } finally {
-      setBusy(false);
-    }
-  };
   return (
     <div className="deck-file">
       <p className="inline-note">
