@@ -40,7 +40,7 @@ export function specialistActivity(stage: number, ask: AskKind = "draft"): strin
   // The label follows what was asked (#407), not only the stage: a
   // question is answered, an existing draft is redrafted, a first draft is
   // the stage's own task.
-  if (ask === "review") return `${who} is improving the draft with the reviewer's notes`;
+  if (ask === "review") return `${who} is improving the draft with the evaluator's notes`;
   if (ask === "question") return `${who} is answering`;
   if (ask === "redraft") return `${who} is redrafting ${STAGE_DOCUMENT[stage] ?? "the draft"}`;
   const doing = STAGE_ACTIVITY[stage] ?? "working on this stage";

@@ -66,6 +66,7 @@ export function StageDocument({
   documents = [],
   attachedByTurn = EMPTY_ATTACHED,
   approve = null,
+  evaluatorHold = null,
   canSubmit,
   targetPending = false,
   busy,
@@ -114,6 +115,9 @@ export function StageDocument({
   attachedByTurn?: ReadonlyMap<string, readonly AttachedDocument[]>;
   /** The stage's approve row, drawn while `canSubmit`. */
   approve?: ReactNode;
+  /** The evaluator holds the draft back: its notes are still going to the
+   *  specialist ("revising"), or its rounds are spent ("reservations"). */
+  evaluatorHold?: "revising" | "reservations" | null;
   canSubmit: boolean;
   /** Stage 3's target is not picked yet: approving waits, and so does choosing an approach. */
   targetPending?: boolean;
@@ -516,11 +520,18 @@ export function StageDocument({
         <div className="composer" data-tour="composer" data-working={busy === "draft" || undefined}>
           <BusyLine />
           {/* The specialist has gone quiet without asking anything. Whose move
-              it is has to be said, or the screen reads as stuck. */}
+              it is has to be said, or the screen reads as stuck; while the
+              evaluator's notes are still going back, it is not the person's. */}
           {canSubmit && !targetPending && !openQuestion && busy === null && turns.at(-1)?.role === "specialist" && !turns.at(-1)!.body.trimEnd().endsWith("?") ? (
-            <p className="composer-cue">
-              Nothing more to ask. Approve it, or say what should change and it will redraft.
-            </p>
+            evaluatorHold === "reservations" ? (
+              <p className="composer-cue">
+                The evaluator still has reservations. You can continue anyway, or say what should change and it will redraft.
+              </p>
+            ) : evaluatorHold === "revising" ? null : (
+              <p className="composer-cue">
+                Nothing more to ask. Approve it, or say what should change and it will redraft.
+              </p>
+            )
           ) : null}
           {canSubmit && choosing ? (
             <div className="stage-action composer-approve composer-choose">

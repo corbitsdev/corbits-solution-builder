@@ -7,7 +7,8 @@
  * deployment (`api.ensureEvaluatorAgent`), mailed each new draft with the
  * record the stage opened on; its reply is read back as an advisory verdict
  * beside the approve control. Its notes go to the stage specialist as one
- * revision (`evaluatorRevisionDue`), never more than once per draft.
+ * revision (`evaluatorRevisionDue`), once per draft and at most
+ * `EVALUATOR_ROUNDS` times per stage.
  *
  * The Product guide (CL-8737): calm orientation across the nine stages,
  * asked for rather than shown, through its own deployment
@@ -31,7 +32,7 @@ import type { ArtifactNode } from "../../client.js";
 import { evaluatorFor } from "@solutions-builder/app/kit";
 import type { Stage } from "@solutions-builder/app/ledger";
 import { evaluationRequest, evaluatorNotesAsk } from "@solutions-builder/app/stage-prompt";
-import { evaluationTag, evaluatorNotesSubject, isStageOpening } from "./composed-mail.ts";
+import { evaluationTag, evaluatorNotesSubject, isEvaluatorNotes } from "./composed-mail.ts";
 import type { GuideGuidance } from "../../components.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
 import { pairReplies } from "../../withdrawn-turns.ts";
@@ -202,10 +203,19 @@ export function useStageEvaluator(
   return query.data ?? CHECKING;
 }
 
+/** Automatic revision rounds a stage's evaluator gets; after them the person decides. */
+export const EVALUATOR_ROUNDS = 2;
+
+/** Whether the evaluator may still send the specialist a revision round this stage. */
+export function evaluatorRoundLeft(messages: readonly ChatMessage[]): boolean {
+  return messages.filter(isEvaluatorNotes).length < EVALUATOR_ROUNDS;
+}
+
 /**
  * The subject to send the evaluator's notes on `draft` under, when they are
- * owed to the specialist now; null when not. They are owed only on the
- * stage's first draft, before the person has said anything in it.
+ * owed to the specialist now; null when not. They are owed on any draft the
+ * evaluator holds back, once the specialist has answered and while the
+ * stage has a round left.
  */
 export function evaluatorRevisionDue(args: {
   readonly stage: number;
@@ -216,11 +226,7 @@ export function evaluatorRevisionDue(args: {
   const { stage, evaluator, draft, messages } = args;
   if (stage === 1 || draft === null) return null;
   if (evaluator.status !== "verdict" || evaluator.verdict.ready || evaluator.verdict.notes.length === 0) return null;
-  if (messages.at(-1)?.author !== "agent") return null;
-  // One round per stage, on its first draft: the measured gain is there, and
-  // once the person has said anything a round lands mid-conversation and
-  // doubles that wait. The notes themselves are such a message.
-  if (messages.some((message) => message.author === "me" && !isStageOpening(message))) return null;
+  if (messages.at(-1)?.author !== "agent" || !evaluatorRoundLeft(messages)) return null;
   return evaluatorNotesSubject(stage, draft);
 }
 

@@ -57,7 +57,9 @@ Markdown.
   does not change what the reader thinks or does. Only a requirements list and
   a task list run as long as they need.
 - Say each thing once, in the section it belongs to. Only \`## In short\`
-  repeats.
+  repeats. An assumption is stated once, plainly, under the assumptions
+  heading; everywhere else write the decision or default directly, with no
+  qualifier such as "provisional", "assumed" or "planning range".
 - Write each answer the person gives into the document as a decision, in the
   section it settles, in place of the assumption or provisional figure it
   settles: later stages read the approved documents, never this conversation.
@@ -68,11 +70,10 @@ Markdown.
 ## Figures and sources
 
 - Every figure has a basis: a number the person or an input gave, arithmetic
-  from those shown in one line, or a range from general experience labelled as
-  one. When a missing number decides something, put a number on it anyway: a
-  labelled range with its one line of arithmetic, then ask for the real
-  figure. "Not quantified" or "can't be sized yet" is not an answer. Estimate
-  only what decides something.
+  from those shown in one line, or general experience, stated as an
+  assumption. When a missing number decides something, put a number on it
+  anyway, then ask for the real figure. "Not quantified" or "can't be sized
+  yet" is not an answer. Estimate only what decides something.
 - Cite an input where it settles a point the reader might question, not on
   every sentence or section. Evidence, sources, quotations, ids and versions
   come only from the record.
@@ -207,6 +208,14 @@ building rests on that:
 
 export const role = (value: AgentRole) => value;
 
+/** What every evaluator judges and how much it says: its notes go back to the specialist. */
+export const EVALUATOR_SCOPE = `
+- Judge only what changes what gets built or decided: a gap, a contradiction,
+  a wrong or missing decision. Never ask for a measurement, baseline,
+  threshold or number a small-business owner could not reasonably give; an
+  honest stated assumption is enough.
+- At most three bullets, one short sentence each.`.trim();
+
 /**
  * The prompt a stage's draft evaluator runs: handed the stage's record and
  * its current draft, it returns the brief evaluator's verdict shape, with
@@ -238,7 +247,10 @@ documents approved at earlier stages) and the current draft.
 
 Judge against the record: a claim, figure or decision it does not support, or
 one that contradicts an approved decision, is a finding; something this stage
-does not owe is not. Look for these first, most damaging first:
+does not owe is not.
+${EVALUATOR_SCOPE}
+
+Look for these first, most damaging first:
 ${args.checks}
 
 ## Output
@@ -251,10 +263,10 @@ or, when it is not:
 
 Verdict: not yet
 
-Then at most five "- " bullets, most important first, each naming the heading
-it concerns, what is wrong and the concrete fix in one or two sentences. Name
-the fix rather than rewriting the section. Plain language, no preamble, praise
-or restating the draft, nothing cosmetic. A ready draft may have no bullets.`;
+Then "- " bullets, most important first, each naming the heading it concerns,
+what is wrong and the concrete fix. Name the fix rather than rewriting the
+section. Plain language, no preamble, praise or restating the draft, nothing
+cosmetic. A ready draft may have no bullets.`;
 
 /**
  * How every stage up to the plan interviews the person. The reply's

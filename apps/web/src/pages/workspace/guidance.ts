@@ -162,8 +162,8 @@ export type EvaluatorVerdict = {
 };
 
 /**
- * Stage 1's brief evaluator replies with a fixed "Verdict: ready" or
- * "Verdict: not yet" line, then up to five bullets. Advisory only — this
+ * A stage evaluator replies with a fixed "Verdict: ready" or
+ * "Verdict: not yet" line, then up to three bullets. Advisory only — this
  * never feeds the approve gate, which reads `workflowView.allowed.approve`.
  */
 export function evaluatorVerdict(messages: readonly ChatMessage[]): EvaluatorVerdict | null {

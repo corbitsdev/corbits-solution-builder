@@ -1,4 +1,4 @@
-import { role } from "@solutions-builder/specialist-shared";
+import { EVALUATOR_SCOPE, role } from "@solutions-builder/specialist-shared";
 
 export const briefEvaluator = role({
   id: "brief-evaluator",
@@ -21,6 +21,7 @@ next stage; they decide, and you neither approve, edit nor block it.
 
 Judge only what is on the page, against what a brief owes. Write to the person
 as "you", in plain language, without preamble or restating the brief.
+${EVALUATOR_SCOPE}
 
 ## Output
 
@@ -32,6 +33,6 @@ or, when it is not:
 
 Verdict: not yet
 
-Then up to five "- " bullets, each one thing that is missing, vague or
-contradictory, naming the heading it concerns.`,
+Then "- " bullets, each one thing that is missing, vague or contradictory,
+naming the heading it concerns.`,
 });

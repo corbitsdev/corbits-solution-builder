@@ -64,7 +64,7 @@ import { useWithdrawnTurns } from "./use-withdrawn-turns.ts";
 import { useSpecialistRunState } from "./use-specialist-run-state.ts";
 import { specialistBusy } from "../../specialist-run-state.ts";
 import { useOpeningDispatch } from "./use-opening-dispatch.ts";
-import { useEvaluatorRevision, useProductGuide, useStageEvaluator } from "./use-advisory.ts";
+import { evaluatorRoundLeft, useEvaluatorRevision, useProductGuide, useStageEvaluator } from "./use-advisory.ts";
 import { guideStep } from "./product-guide.ts";
 import { useProjectArtifacts } from "./use-project-artifacts.ts";
 import { clearQuotedDraft, loadQuotedDraft } from "./quote-store.js";
@@ -687,8 +687,8 @@ export function StageWorkspace({
     }
   };
 
-  // The evaluator's notes on a draft go to the specialist as one revision
-  // before the person reviews it, folded in the chat as an event line.
+  // The evaluator's notes on a draft it holds back go to the specialist as a
+  // revision, folded in the chat as an event line.
   const notesError = useEvaluatorRevision({
     stage,
     evaluator,
@@ -696,9 +696,10 @@ export function StageWorkspace({
     messages: foldedMessages,
     send: async (ask, subject) => {
       if (!agentAddress) throw new Error("The specialist is not reachable yet.");
-      // One round per stage, read from the stage's own thread: notes sent on
-      // an earlier draft's subject, or by another tab, stand this down.
-      if ((await api.readStageThread(tenantId, [...agent.addresses])).some(isEvaluatorNotes)) return;
+      // Read from the stage's own thread: notes on this draft sent by another
+      // tab, or a stage out of rounds, stand this down.
+      const sent = await api.readStageThread(tenantId, [...agent.addresses]);
+      if (sent.some((message) => message.subject === subject) || !evaluatorRoundLeft(sent)) return;
       // Their own mail, not the person's: the notes' tag leads the subject
       // and the stage document's artifact tag rides after it.
       await api.sendStageMail(tenantId, agentAddress, {
@@ -974,6 +975,13 @@ export function StageWorkspace({
                   : null
               }
               advisory={evaluated ? <EvaluatorStance evaluator={evaluator} notesError={notesError} /> : null}
+              evaluatorHold={
+                evaluated && evaluator.status === "verdict" && !evaluator.verdict.ready
+                  ? stage !== 1 && notesError === null && evaluator.verdict.notes.length > 0 && evaluatorRoundLeft(foldedMessages)
+                    ? "revising"
+                    : "reservations"
+                  : null
+              }
               lead={
                 stage === 3 ? (
                   <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} note={SURFACE_NOTE} />
