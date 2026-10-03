@@ -10,6 +10,7 @@
  * read-only text artifact instead, `sb.kind: "imported_conversation"`.
  */
 import JSZip from "jszip";
+import { stageName } from "./components.jsx";
 import type { ProjectBundle } from "./project-export.ts";
 
 export const IMPORTED_CONVERSATION_KIND = "imported_conversation";
@@ -66,7 +67,7 @@ export function importPlan(bundle: ProjectBundle, newProjectId: string): ImportP
 /** The transcript artifact one bundled conversation becomes under `newProjectId`. */
 export function conversationWrite({ stage, messages }: ProjectBundle["conversations"][number], newProjectId: string): ImportWrite {
   return {
-    title: `Stage ${stage} conversation (imported)`,
+    title: `${stageName(stage)} conversation (imported)`,
     content: transcript(messages),
     sb: {
       projectId: newProjectId,

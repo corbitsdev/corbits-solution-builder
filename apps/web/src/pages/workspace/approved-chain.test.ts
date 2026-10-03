@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { approvedChainNodes, chainContent, renderApprovedChain, splitChain, type ChainNode } from "./approved-chain.ts";
+import { approvedChainNodes, chainContent, handedContent, renderApprovedChain, splitChain, type ChainNode } from "./approved-chain.ts";
 
 const node = (over: Partial<ChainNode> & Pick<ChainNode, "id" | "kind" | "stage">): ChainNode => ({
   title: over.id,
@@ -52,6 +52,50 @@ describe("approvedChainNodes", () => {
     ];
     expect(approvedChainNodes(nodes, {}, 1).map((entry) => entry.id)).toEqual(["reading"]);
     expect(approvedChainNodes([nodes[0]!], {}, 1)).toEqual([]);
+  });
+});
+
+describe("approvedChainNodes, attached text files (#605)", () => {
+  test("a text file is handed as itself, beside the readings of the files that are not text", () => {
+    const nodes = [
+      node({ id: "notes", kind: "source_material", stage: 1, variant: "notes.md", mediaType: "text/markdown", createdAt: "2026-01-01T00:00:01.000Z" }),
+      node({ id: "data", kind: "source_material", stage: 1, variant: "data.json", mediaType: "application/json", createdAt: "2026-01-01T00:00:02.000Z" }),
+      node({ id: "upload", kind: "source_material", stage: 1, variant: "deck.pdf", mediaType: "application/pdf", createdAt: "2026-01-01T00:00:03.000Z" }),
+      node({ id: "reading", kind: "material_reading", stage: 1, variant: "deck.pdf", mediaType: "text/plain", createdAt: "2026-01-01T00:00:04.000Z" }),
+    ];
+    expect(approvedChainNodes(nodes, {}, 1).map((entry) => entry.id)).toEqual(["notes", "data", "reading"]);
+  });
+
+  test("a binary upload is never handed as itself, and neither is a file of unknown type", () => {
+    const nodes = [
+      node({ id: "upload", kind: "source_material", stage: 1, variant: "scan.png", mediaType: "image/png" }),
+      node({ id: "untyped", kind: "source_material", stage: 1, variant: "old.bin" }),
+    ];
+    expect(approvedChainNodes(nodes, {}, 2)).toEqual([]);
+  });
+
+  test("a replaced version of a text file is not handed, and stage 1 still leaves its own opening statement out", () => {
+    const nodes = [
+      node({ id: "opening", kind: "source_material", stage: 1, variant: "__opening__", mediaType: "text/plain" }),
+      node({ id: "notes-v1", kind: "source_material", stage: 1, variant: "notes.md", mediaType: "text/markdown", supersededByNodeId: "notes-v2" }),
+      node({ id: "notes-v2", kind: "source_material", stage: 1, variant: "notes.md", mediaType: "text/markdown", version: 2 }),
+    ];
+    expect(approvedChainNodes(nodes, {}, 1).map((entry) => entry.id)).toEqual(["notes-v2"]);
+  });
+});
+
+describe("handedContent", () => {
+  test("a long text file is cut at the cap a reading has, and says how much was left out", () => {
+    const file = node({ id: "notes", kind: "source_material", stage: 1, variant: "notes.md", mediaType: "text/markdown" });
+    const handed = handedContent(file, "x".repeat(40_010));
+    expect(handed.startsWith("x".repeat(40_000))).toBe(true);
+    expect(handed.endsWith("(10 more characters not shown)")).toBe(true);
+    expect(handedContent(file, "short")).toBe("short");
+  });
+
+  test("an approved document is handed whole", () => {
+    const brief = node({ id: "brief", kind: "problem_brief", stage: 1 });
+    expect(handedContent(brief, "y".repeat(40_010))).toHaveLength(40_010);
   });
 });
 
