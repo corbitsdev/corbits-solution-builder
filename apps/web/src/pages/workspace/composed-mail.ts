@@ -76,3 +76,28 @@ export function composedMailFold(message: Pick<ChatMessage, "author" | "body" | 
   const { ids, rest } = splitIdsBlock(stripped);
   return { summary: "The requirement ids, as minted", body: ids, lead: rest || null };
 }
+
+/** Mail the app sends a specialist on its own account names itself in its
+ *  subject: the chat shows it, and the reply `pairReplies` pairs with it, as
+ *  one event line, without reading either body. */
+const APP_SUBJECT = "[app:";
+const APP_LINES = new Map<string, readonly [(about: string) => string, ((about: string) => string) | null]>([
+  ["package", [(audience) => `Asked for the package for ${audience}`, (audience) => `Answered the package request for ${audience}`]],
+  ["brief", [(attempt) => `Recorded attempt ${attempt} for the build supervisor`, null]],
+]);
+
+export function appSubject(kind: "package" | "brief", about: string): string {
+  return `${APP_SUBJECT}${kind}] ${about}`;
+}
+
+/** The line a message shows as instead of a bubble, or null. Only a
+ *  person-side subject is read: nothing a specialist writes becomes one. */
+export function appEventLine(message: Pick<ChatMessage, "author" | "subject">, answers: Pick<ChatMessage, "author" | "subject"> | undefined): string | null {
+  const subject = (message.author === "me" ? message : answers?.author === "me" ? answers : undefined)?.subject ?? "";
+  const close = subject.startsWith(APP_SUBJECT) ? subject.indexOf("] ") : -1;
+  const lines = close < 0 ? undefined : APP_LINES.get(subject.slice(APP_SUBJECT.length, close));
+  if (!lines) return null;
+  const [sent, answer] = lines;
+  const about = subject.slice(close + 2);
+  return message.author === "me" ? sent(about) : (answer?.(about) ?? null);
+}

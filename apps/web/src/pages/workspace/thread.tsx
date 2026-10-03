@@ -4,7 +4,8 @@ import { FileText, Plus, Send } from "lucide-react";
 import { Markdown } from "../../markdown.jsx";
 import { splitHandoff } from "../../design-handoff.ts";
 import { splitChain } from "./approved-chain.ts";
-import { composedMailFold, isStageOpening } from "./composed-mail.ts";
+import { appEventLine, composedMailFold, isStageOpening } from "./composed-mail.ts";
+import { pairReplies } from "../../withdrawn-turns.ts";
 import { personWordsIn, REVISION_LEAD } from "@solutions-builder/app/stage-prompt";
 import { Dictated } from "../../dictation.jsx";
 import type { ChatMessage } from "../../stage-mail.ts";
@@ -130,7 +131,6 @@ function messageText(message: UiChatMessage): string {
  * working-and-Stop behavior.
  */
 export function StageConversation({
-  stage,
   messages,
   value,
   onValueChange,
@@ -151,7 +151,6 @@ export function StageConversation({
   onOpenVersion,
   onAnswer,
 }: {
-  stage: number;
   messages: readonly ChatMessage[];
   value: string;
   onValueChange: (value: string) => void;
@@ -189,6 +188,7 @@ export function StageConversation({
 }) {
   const lastAgentId = [...messages].reverse().find((message) => message.author === "agent")?.id;
   const byId = useMemo(() => new Map(messages.map((message) => [message.id, message])), [messages]);
+  const answeredBy = useMemo(() => pairReplies(messages).answeredBy, [messages]);
   const uiMessages = useMemo(() => {
     const list = toUiMessages(messages);
     // A turn in flight has no row of its own yet, so the transcript would sit
@@ -270,6 +270,14 @@ export function StageConversation({
             if (source && isStageOpening(source)) return null;
             const text = messageText(message);
             const you = message.role === "user";
+            const line = source ? appEventLine(source, byId.get(answeredBy.get(message.id) ?? "")) : null;
+            if (line) {
+              return (
+                <div key={message.id} className="event conv-event">
+                  {line}
+                </div>
+              );
+            }
             const draft = you ? null : (draftRefs.get(message.id) ?? null);
             const composed = source ? composedMailFold(source) : null;
             return (

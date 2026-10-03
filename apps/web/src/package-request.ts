@@ -19,9 +19,8 @@ import { designHandoff } from "./design-handoff.ts";
 
 export type PackageAudience = { readonly name: string; readonly role: string };
 
-/** The first line of the request for `name`'s package: what the specialist
- *  is told to write, and what `packageReplyFor` finds the request by. */
-export function packageAsk(name: string): string {
+/** The first line of the request for `name`'s package. */
+function packageAsk(name: string): string {
   return `Write the package for: ${name}`;
 }
 
@@ -45,8 +44,7 @@ export function packageReplyProblem(name: string, body: string): string | null {
 
 /**
  * The one follow-up sent when a reply to `packageAsk(name)` was not a
- * package (#225): what was missing and where the package has to be. Opens
- * with the same ask line, so the reply to it is found the same way.
+ * package (#225): what was missing and where the package has to be.
  */
 export function packageNudge(audience: PackageAudience, problem: string): string {
   return `${packageAsk(audience.name)}, the ${roleLabel(audience.role)} — again, as the reply itself.\n\nYour last reply was not the package: ${problem}. Reply with the package: the status line, then the five headed sections in Markdown, with the deck outline as numbered slides, in this reply. Markdown handed to render_deck is not read as the package.`;
