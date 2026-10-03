@@ -52,7 +52,7 @@ import { artifactRevisionRequest, revisionRequest } from "@solutions-builder/app
 import { stageUsesArtifactTools } from "@solutions-builder/app/specialist-source";
 import { draftReferences } from "./draft-references.ts";
 import { designHistory } from "./design-history.ts";
-import { ArrowLeft, Flame, Undo2 } from "lucide-react";
+import { ArrowLeft, Flame, Send, Undo2 } from "lucide-react";
 import { useWorkflowView } from "./use-workflow-view.ts";
 import { useStageAgent } from "./use-stage-agent.ts";
 import { useStageThread } from "./use-stage-thread.ts";
@@ -77,7 +77,7 @@ import { loadDismissedDefault, saveDismissedDefault } from "./model-nudge-store.
 import { Stage6Panel } from "./stage6.tsx";
 import { PanelReviewsCompanion, reviewNodesOf as panelReviewNodesOf } from "./panel-reviews.tsx";
 import { renderStackBlock } from "./frozen-stack-text.ts";
-import { withAttachedDocuments, type StageDocument as MentionedDocument } from "./document-mentions.ts";
+import { documentAsMessage, requirementsDocument, reviewDocument, withAttachedDocuments, type StageDocument as MentionedDocument } from "./document-mentions.ts";
 import { askKind, requirementsRequest, routedLine } from "./message-intent.ts";
 import { TERMINAL_RUN_NOTICE, isTerminalRunRefusal } from "./terminal-run.ts";
 
@@ -446,6 +446,8 @@ export function StageWorkspace({
   // have been.
   const [routedEvents, setRoutedEvents] = useState<StageEvent[]>([]);
   const [requirementsAsk, setRequirementsAsk] = useState<{ body: string; at: number } | null>(null);
+  // Where stage 6's panel puts its request control: the plan's own toolbar.
+  const [stage6Tools, setStage6Tools] = useState<HTMLElement | null>(null);
   useEffect(() => {
     setRoutedEvents([]);
     setRequirementsAsk(null);
@@ -884,6 +886,29 @@ export function StageWorkspace({
       </div>
     ) : null;
 
+  // Stage 6's documents beside the plan: the plan's toolbar holds the
+  // panel's request control; the requirements and each review can be handed
+  // to the architect as a message (#345).
+  const stage6DocumentTools = () => {
+    if (artifacts.isStageDraft) return <span ref={setStage6Tools} className="document-tools-slot" />;
+    const node = artifacts.activeNode;
+    const content = artifacts.activeContent;
+    if (!node || !content) return null;
+    const doc =
+      node.kind === "product_requirements"
+        ? requirementsDocument(content)
+        : node.kind === "engineering_review" && node.variant
+          ? reviewDocument(node.variant, content)
+          : null;
+    if (!doc) return null;
+    return (
+      <Button variant="ghost" disabled={sending} onClick={() => void send(documentAsMessage(doc))}>
+        <Send aria-hidden="true" />
+        Send to the architect
+      </Button>
+    );
+  };
+
   const conversation = (
     <StageConversation
       stage={stage}
@@ -1196,13 +1221,13 @@ export function StageWorkspace({
           reviewNodes={reviewNodesOf(detail.nodes)}
           onDocumentsChanged={onChanged}
           onDocuments={setStageDocuments}
-          onSendToArchitect={(body) => void send(body)}
           requirementsAsk={requirementsAsk}
           onRequirementsDrafted={mintRequirements}
           strip={stripEl}
           conversation={conversation}
           reader={reader}
           pane={!(draftMessage && artifacts.activeNode && artifacts.selected)}
+          toolsSlot={stage6Tools}
         />
       ) : null}
 
@@ -1278,6 +1303,7 @@ export function StageWorkspace({
             composerPopover={sendBackPopover}
             events={events}
             strip={stripEl}
+            tools={stage === 6 ? stage6DocumentTools() : null}
             promote={
               superseded
                 ? {
