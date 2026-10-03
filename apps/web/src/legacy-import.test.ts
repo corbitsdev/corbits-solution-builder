@@ -121,9 +121,9 @@ describe("legacyImportPlan", () => {
   test("writes every version oldest first, each with the graph metadata its node row described", () => {
     const plan = legacyImportPlan(bundle(), "proj_new");
     expect(plan.versions.map((write) => [write.artifactKey, write.version])).toEqual([
-      ["brief", 1],
-      ["brief", 2],
-      ["constraints", 1],
+      ["1:problem_brief:", 1],
+      ["1:problem_brief:", 2],
+      ["2:solution_constraints:", 1],
     ]);
     expect(plan.versions[0]!.sb).toEqual({
       projectId: "proj_new",
@@ -143,13 +143,13 @@ describe("legacyImportPlan", () => {
     expect(plan.versions[0]!.sb.mediaType).toBe("application/vnd.ms-powerpoint");
   });
 
-  test("names the artifact a node superseded when the successor is another artifact", () => {
+  test("writes a lineage that was several artifacts as successive versions of one", () => {
     const old = node({ id: "nod_old", artifactId: "old", supersededByNodeId: "nod_new", createdAt: "2026-09-17T21:00:00.000Z" });
     const replacement = node({ id: "nod_new", artifactId: "new", createdAt: "2026-09-17T21:30:00.000Z" });
     const plan = legacyImportPlan(bundle({ artifacts: { nodes: [replacement, old], edges: [] } }), "proj_new");
-    expect(plan.versions.map((write) => [write.artifactKey, write.supersedes])).toEqual([
-      ["old", null],
-      ["new", "old"],
+    expect(plan.versions.map((write) => [write.artifactKey, write.version, write.from])).toEqual([
+      ["1:problem_brief:", 1, { artifactKey: "old", version: 1 }],
+      ["1:problem_brief:", 2, { artifactKey: "new", version: 1 }],
     ]);
   });
 
@@ -171,7 +171,7 @@ describe("legacyImportPlan", () => {
 
 describe("legacyAdoptionPlan", () => {
   test("points each stage's approval at the artifact written here, keeping the version and the digest", () => {
-    const plan = legacyAdoptionPlan(bundle(), "proj_new", new Map([["brief", "art_1"], ["constraints", "art_2"]]));
+    const plan = legacyAdoptionPlan(bundle(), "proj_new", new Map([["brief@2", { artifactId: "art_1", version: 2 }], ["constraints@1", { artifactId: "art_2", version: 1 }]]));
     expect(plan.legacyStage).toBe(3);
     expect(plan.steps.map((step) => step.ref)).toEqual([
       { artifactId: "art_1", version: 2, sha256: "hash_brief_2" },
@@ -181,7 +181,7 @@ describe("legacyAdoptionPlan", () => {
   });
 
   test("stops before an approval naming an artifact the bundle does not carry", () => {
-    const plan = legacyAdoptionPlan(bundle(), "proj_new", new Map([["brief", "art_1"]]));
+    const plan = legacyAdoptionPlan(bundle(), "proj_new", new Map([["brief@2", { artifactId: "art_1", version: 2 }]]));
     expect(plan.steps.map((step) => step.stage)).toEqual([1]);
     expect(plan.notes).toEqual(["The Solution shape approval names an artifact the bundle does not carry; replay stops before it."]);
   });
