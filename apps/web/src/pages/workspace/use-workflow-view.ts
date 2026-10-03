@@ -38,8 +38,9 @@ export type WorkflowViewState = {
   /** The quiet re-read: polls and nudges go through this, no busy flag. */
   readonly reload: () => Promise<ProjectWorkflowView | null>;
   /** Optimistically land a stage the workflow just confirmed (approve /
-   *  send-back) ahead of the re-read, so the view never flashes backwards. */
-  readonly markStage: (stage: number) => void;
+   *  send-back) ahead of the re-read, so the view never flashes backwards;
+   *  `done` when that approve finished the project. */
+  readonly markStage: (stage: number, done?: boolean) => void;
 };
 
 /** A backstop only: this client's own decisions refresh on the spot, and the mailbox stream nudges on a run event. */
@@ -54,14 +55,17 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
   const [refreshingAfterAction, setRefreshingAfterAction] = useState(false);
 
   // A run that has not written its first state (stage 0) never replaces a
-  // view already held; a failed read is the query's error and keeps it too. The cache outlives the mount, so
-  // re-entering a project paints its last view at once while this re-reads.
+  // view already held, nor does any read replace a finished one: delivery is
+  // terminal, and a read racing the run's end must not reopen the stage. A
+  // failed read is the query's error and keeps it too. The cache outlives the
+  // mount, so re-entering a project paints its last view at once while this re-reads.
   const key = keys.workflowView.of(projectId);
   const query = useQuery({
     queryKey: key,
     queryFn: async () => {
       const next = await api.projectWorkflowView(projectId);
-      return next && next.stage >= 1 ? next : (queryClient.getQueryData<ProjectWorkflowView | null>(key) ?? null);
+      const held = queryClient.getQueryData<ProjectWorkflowView | null>(key) ?? null;
+      return next && next.stage >= 1 && (next.done || !held?.done) ? next : held;
     },
     refetchInterval: BACKSTOP_MS,
     gcTime: Infinity,
@@ -88,7 +92,8 @@ export function useWorkflowView(projectId: string, onArtifactsChanged: () => voi
   }, []);
 
   const markStage = useCallback(
-    (stage: number) => queryClient.setQueryData<ProjectWorkflowView | null>(key, (current) => (current ? { ...current, stage } : current)),
+    (stage: number, done?: boolean) =>
+      queryClient.setQueryData<ProjectWorkflowView | null>(key, (current) => (current ? { ...current, stage, done: done ?? current.done } : current)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [queryClient, projectId],
   );
