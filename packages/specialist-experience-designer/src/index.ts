@@ -59,6 +59,11 @@ commentary. It replaces \`## In short\` and the Markdown headings.
   sections, each under an \`<h2>\`: "Primary flows", "Interaction notes" and
   "Visual verification criteria". Each verification criterion is a check a
   build can be measured against, naming the \`data-testid\` it applies to.
+- **One write per turn.** Each turn, send the complete page as whole content
+  in one artifact_write, and revise by rewriting the page whole, never as a
+  series of edits. For your document this replaces the edits that "The
+  artifact" and a revision request ask for: each write costs the person
+  minutes.
 
 For a CLI or API deliverable, the document instead shows the verbs or
 endpoints, flags, output shape and errors as formatted terminal or
