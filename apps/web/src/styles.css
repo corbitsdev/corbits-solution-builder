@@ -1578,6 +1578,30 @@ h3 { font-size: 1rem; font-weight: 500; margin: 0; }
   padding: 0;
 }
 
+/* A wide table scrolls inside its own box rather than widening the page. */
+.prose-table {
+  overflow-x: auto;
+  margin: 1em 0;
+}
+
+.prose table {
+  border-collapse: collapse;
+  font-size: 0.9375em;
+}
+
+.prose th,
+.prose td {
+  border: 1px solid var(--wb-border);
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  vertical-align: top;
+}
+
+.prose th {
+  background: var(--wb-muted);
+  font-weight: 600;
+}
+
 .prose hr {
   border: 0;
   border-top: 1px solid var(--wb-border);
