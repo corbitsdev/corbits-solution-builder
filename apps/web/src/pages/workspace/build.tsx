@@ -360,7 +360,7 @@ export function BuildPanel({
           ) : null}
           <StageConversation
             stage={8}
-            rows={attachNote ? <p className="inline-note" role="status">{attachNote}</p> : null}
+            rows={attachNote ? <p className="warning-note" role="alert">{attachNote}</p> : null}
             messages={messages}
             value={composer}
             onValueChange={setComposer}

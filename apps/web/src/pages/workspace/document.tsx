@@ -488,7 +488,7 @@ export function StageDocument({
         </div>
 
         <div className="composer" data-tour="composer" data-working={busy === "draft" || undefined}>
-          {attachNote ? <p className="composer-cue" role="status">{attachNote}</p> : null}
+          {attachNote ? <p className="warning-note" role="alert">{attachNote}</p> : null}
           {/* The specialist has gone quiet without asking anything. Whose move
               it is has to be said, or the screen reads as stuck. */}
           {canSubmit && !openQuestion && busy === null && turns.at(-1)?.role === "specialist" && !turns.at(-1)!.body.trimEnd().endsWith("?") ? (

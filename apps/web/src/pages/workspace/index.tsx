@@ -807,7 +807,7 @@ export function StageWorkspace({
       who={stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title : "Specialist"}
       placeholder={`Message the ${stage >= 1 && stage <= 9 ? agentFor(stage as Stage).title.toLowerCase() : "specialist"}…`}
       onAttach={(files) => void addMaterial([...files])}
-      rows={attachNote ? <p className="inline-note" role="status">{attachNote}</p> : null}
+      rows={attachNote ? <p className="warning-note" role="alert">{attachNote}</p> : null}
       {...(draftRefs ? { draftRefs } : {})}
       onOpenVersion={artifacts.openVersion}
     />
