@@ -208,6 +208,17 @@ export function StageConversation({
     if (node === null || !pinnedRef.current) return;
     node.scrollTop = node.scrollHeight;
   }, [uiMessages]);
+  // The column shrinks when the busy strip opens at the window's foot; a
+  // thread read at its newest turn stays there instead of losing it below.
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (node === null || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (pinnedRef.current) node.scrollTop = node.scrollHeight;
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [uiMessages.length > 0]);
 
   return (
     <div className="stage-conversation">
