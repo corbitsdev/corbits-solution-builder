@@ -7,9 +7,9 @@
  * each stage's conversation as turns, and the ledger the project's
  * position lived in.
  *
- * The import keeps all of it. Every artifact is recreated with its versions
- * written in order, so the version numbers the old approvals name are the
- * version numbers here, each version carrying the `sb` metadata the graph
+ * The import keeps all of it. Each lineage is recreated as one artifact with
+ * the versions of every artifact in it written in order, so a lineage that
+ * was several artifacts numbers its versions 1 to N, each version carrying the `sb` metadata the graph
  * reads (`legacy-adoption.ts`'s shape, re-keyed to the new project and to
  * the new artifact ids). Each conversation becomes the same read-only
  * transcript a version 2 import writes. The ledger is folded into an
@@ -21,6 +21,7 @@ import {
   adoptionPlan,
   legacyPosition,
   legacyProvenance,
+  type AdoptedReference,
   type AdoptionPlan,
   type AdoptionStep,
   type LegacyCommand,
@@ -28,7 +29,7 @@ import {
   type LegacyNode,
 } from "@solutions-builder/app/legacy-adoption";
 import { BUNDLE_FORMAT } from "./project-export.ts";
-import { conversationWrite, type ImportWrite } from "./project-import.ts";
+import { conversationWrite, lineageOf, type ImportedVersions, type ImportWrite } from "./project-import.ts";
 import { stageName } from "./stage-names.ts";
 
 export const LEGACY_BUNDLE_VERSION = 1;
@@ -167,17 +168,17 @@ export type LegacyVersionKey = { readonly artifactKey: string; readonly version:
 
 /**
  * One version write, in the order the writes happen. The first write of an
- * `artifactKey` creates the artifact; each later one revises it, and the
- * store numbers them 1, 2, 3… the way `main` did. `sources` and
- * `supersedes` name other bundled artifacts by `main`'s ids, for the
- * importer to translate once those artifacts exist here.
+ * `artifactKey`, a lineage, creates the artifact; each later one revises it,
+ * and the store numbers them 1, 2, 3…. `from` is the version `main` had, and
+ * `sources` name other bundled versions the same way, for the importer to
+ * translate once those versions exist here.
  */
 export type LegacyVersionWrite = LegacyVersionKey & {
+  readonly from: LegacyVersionKey;
   readonly title: string;
   readonly content: string;
   readonly sb: Omit<ArtifactGraphMetadata, "sourceVersionIds" | "supersedes">;
   readonly sources: readonly LegacyVersionKey[];
-  readonly supersedes: string | null;
 };
 
 export type LegacyImportPlan = {
@@ -194,9 +195,8 @@ export function importedLegacyTitle(bundle: LegacyBundle): string {
  * The pure write plan for one bundle under a freshly created project id.
  * Versions are written oldest first across every artifact, so a draft's
  * sources exist before it does; within one artifact that is also version
- * order, which is what gives each version the number `main` gave it. A
- * version whose number would not come out that way is refused here rather
- * than numbered wrong, since the old approvals name those numbers.
+ * order. An artifact whose versions skip a number is refused here rather
+ * than numbered wrong.
  */
 export function legacyImportPlan(bundle: LegacyBundle, newProjectId: string): LegacyImportPlan {
   const nodes = [...bundle.artifacts.nodes].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.version - b.version);
@@ -209,24 +209,28 @@ export function legacyImportPlan(bundle: LegacyBundle, newProjectId: string): Le
     list.push({ artifactKey: source.artifactId, version: source.version });
     sourcesOf.set(edge.childNodeId, list);
   }
-  // The graph's `supersedes` points from the newer artifact to the one it
-  // replaced; the old rows pointed the other way. Only a successor in
-  // another artifact is a supersession the graph needs to hear about.
+  // The old rows pointed from the replaced artifact to its successor; a
+  // successor in another artifact continues the same lineage.
   const supersedes = new Map<string, string>();
   for (const node of nodes) {
     const successor = node.supersededByNodeId ? byId.get(node.supersededByNodeId) : undefined;
-    if (successor && successor.artifactId !== node.artifactId) supersedes.set(successor.id, node.artifactId);
+    if (successor && successor.artifactId !== node.artifactId) supersedes.set(successor.artifactId, node.artifactId);
   }
   const written = new Map<string, number>();
+  const numbered = new Map<string, number>();
   const versions: LegacyVersionWrite[] = nodes.map((node) => {
     const expected = (written.get(node.artifactId) ?? 0) + 1;
     if (node.version !== expected) {
       throw new Error(`project bundle's artifact ${node.artifactId} has version ${String(node.version)} where version ${String(expected)} was expected`);
     }
     written.set(node.artifactId, expected);
+    const artifactKey = lineageOf({ ...node, id: node.artifactId }, supersedes);
+    const version = (numbered.get(artifactKey) ?? 0) + 1;
+    numbered.set(artifactKey, version);
     return {
-      artifactKey: node.artifactId,
-      version: node.version,
+      artifactKey,
+      version,
+      from: { artifactKey: node.artifactId, version: node.version },
       title: node.title,
       content: node.content,
       sb: {
@@ -238,7 +242,6 @@ export function legacyImportPlan(bundle: LegacyBundle, newProjectId: string): Le
         mediaType: node.mediaType,
       },
       sources: sourcesOf.get(node.id) ?? [],
-      supersedes: supersedes.get(node.id) ?? null,
     };
   });
   const conversations = bundle.conversations
@@ -255,9 +258,6 @@ export function legacyImportPlan(bundle: LegacyBundle, newProjectId: string): Le
   return { versions, conversations };
 }
 
-/** How the bundle's `main` artifact ids map to the artifacts written here. */
-export type ImportedArtifactIds = ReadonlyMap<string, string>;
-
 function legacyPolicy(policy: unknown): { audiences: { name: string }[]; audienceQuorum: number } {
   const record = isRecord(policy) ? policy : {};
   const audiences = Array.isArray(record.audiences)
@@ -268,13 +268,12 @@ function legacyPolicy(policy: unknown): { audiences: { name: string }[]; audienc
 
 /**
  * The adoption plan for the imported project: the old ledger folded to its
- * position, each stage's approval re-pointed at the artifact written here
- * for the one it named. The version number and the digest are unchanged,
- * since the versions were written in `main`'s order and the digest is over
- * the same content. An approval naming an artifact the bundle does not
+ * position, each stage's approval re-pointed at the version written here
+ * for the one it named. The digest is unchanged, since it is over the same
+ * content. An approval naming an artifact the bundle does not
  * carry ends the replay before that stage, and the plan's notes say so.
  */
-export function legacyAdoptionPlan(bundle: LegacyBundle, newProjectId: string, ids: ImportedArtifactIds): AdoptionPlan {
+export function legacyAdoptionPlan(bundle: LegacyBundle, newProjectId: string, ids: ImportedVersions): AdoptionPlan {
   const nodes: LegacyNode[] = bundle.artifacts.nodes.map((node) => ({
     id: node.id,
     projectId: newProjectId,
@@ -297,13 +296,23 @@ export function legacyAdoptionPlan(bundle: LegacyBundle, newProjectId: string, i
   });
   const steps: AdoptionStep[] = [];
   const notes = [...plan.notes];
+  const repoint = (ref: AdoptedReference): AdoptedReference | null => {
+    const written = ids.get(versionIdFor(ref.artifactId, ref.version));
+    return written ? { ...written, sha256: ref.sha256 } : null;
+  };
   for (const step of plan.steps) {
-    const artifactId = ids.get(step.ref.artifactId);
-    if (!artifactId) {
+    const ref = repoint(step.ref);
+    if (!ref) {
       notes.push(`The ${stageName(step.stage)} approval names an artifact the bundle does not carry; replay stops before it.`);
       break;
     }
-    steps.push({ ...step, ref: { ...step.ref, artifactId } });
+    const packages = step.packages
+      ? Object.fromEntries(Object.entries(step.packages).flatMap(([audience, reviewed]) => {
+          const written = repoint(reviewed);
+          return written ? [[audience, written]] : [];
+        }))
+      : undefined;
+    steps.push({ ...step, ref, ...(packages ? { packages } : {}) });
   }
   return { ...plan, steps, notes };
 }
@@ -331,25 +340,23 @@ export type LegacyImportResult = {
 /**
  * Creates the new project and writes `legacyImportPlan`'s versions and
  * conversations into it, one write at a time, translating each version's
- * sources and supersession to the artifacts written before it. A store that
- * numbers a version differently from `main` is an error, not a silent
- * mismatch: the old approvals name those numbers.
+ * sources to the versions written before it. A store that numbers a version
+ * other than the plan's is an error, not a silent mismatch: the replayed
+ * approvals name those numbers.
  */
 export async function importLegacyProject(bundle: LegacyBundle, deps: LegacyImportDeps): Promise<LegacyImportResult> {
   const { projectId } = await deps.createProject({ title: importedLegacyTitle(bundle), policy: bundle.project.policy });
   const plan = legacyImportPlan(bundle, projectId);
   const total = plan.versions.length + plan.conversations.length;
   const ids = new Map<string, string>();
+  const versions = new Map<string, { artifactId: string; version: number }>();
   let done = 0;
   for (const write of plan.versions) {
-    const sourceVersionIds = write.sources
-      .map((source) => {
-        const id = ids.get(source.artifactKey);
-        return id ? versionIdFor(id, source.version) : null;
-      })
-      .filter((id): id is string => id !== null);
-    const superseded = write.supersedes ? ids.get(write.supersedes) : undefined;
-    const sb: ArtifactGraphMetadata = { ...write.sb, sourceVersionIds, ...(superseded ? { supersedes: superseded } : {}) };
+    const sourceVersionIds = write.sources.flatMap((source) => {
+      const written = versions.get(versionIdFor(source.artifactKey, source.version));
+      return written ? [versionIdFor(written.artifactId, written.version)] : [];
+    });
+    const sb: ArtifactGraphMetadata = { ...write.sb, sourceVersionIds };
     const existing = ids.get(write.artifactKey);
     let version: number;
     if (existing) {
@@ -362,6 +369,7 @@ export async function importLegacyProject(bundle: LegacyBundle, deps: LegacyImpo
     if (version !== write.version) {
       throw new Error(`the artifact store numbered "${write.title}" version ${String(write.version)} as ${String(version)}`);
     }
+    versions.set(versionIdFor(write.from.artifactKey, write.from.version), { artifactId: ids.get(write.artifactKey)!, version });
     done += 1;
     deps.onProgress?.(done, total);
   }
@@ -375,6 +383,6 @@ export async function importLegacyProject(bundle: LegacyBundle, deps: LegacyImpo
     artifacts: ids.size,
     versions: plan.versions.length,
     conversations: plan.conversations.length,
-    plan: legacyAdoptionPlan(bundle, projectId, ids),
+    plan: legacyAdoptionPlan(bundle, projectId, versions),
   };
 }

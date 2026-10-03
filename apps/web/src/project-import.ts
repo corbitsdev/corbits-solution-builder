@@ -1,9 +1,9 @@
 /**
  * Importing a project `project-export.ts` exported (CL-8725) as a NEW
- * project. Every artifact is recreated with its versions written in order,
- * oldest artifact first, so each keeps its own version number and its place
- * in its lineage; build archives are artifacts too, so earlier attempts come
- * along. The approvals the workflow had recorded are folded into an adoption
+ * project. Each lineage is recreated as one artifact, the versions of every
+ * bundled artifact in it written in order, oldest first, so a lineage that
+ * was several artifacts numbers its versions 1 to N; build archives are
+ * artifacts too, so earlier attempts come along. The approvals the workflow had recorded are folded into an adoption
  * plan (`adoption-replay.ts` lands it once the new project's workflow runs).
  *
  * Mail history cannot be recreated (there is no mailbox to write into before
@@ -11,7 +11,8 @@
  * read-only text artifact instead, `sb.kind: "imported_conversation"`.
  */
 import JSZip from "jszip";
-import { LAST_ADOPTED_STAGE, type AdoptedReference, type AdoptionPlan, type AdoptionStep, type AudienceVote } from "@solutions-builder/app/legacy-adoption";
+import { versionIdFor } from "@solutions-builder/app/artifact-graph";
+import { LAST_ADOPTED_STAGE, LEGACY_STAGE_DRAFT_KIND, type AdoptedReference, type AdoptionPlan, type AdoptionStep, type AudienceVote } from "@solutions-builder/app/legacy-adoption";
 import { toBase64 } from "./base64.ts";
 import { ARCHIVE_STATE_FILE, type ExportedWorkflow, type ProjectBundle } from "./project-export.ts";
 import { stageName } from "./stage-names.ts";
@@ -24,12 +25,32 @@ export type ImportWrite = {
   readonly sb: Record<string, unknown>;
 };
 
-/** One bundled artifact: its versions in order, and the bundled artifact it supersedes. */
+/** One artifact to write: its versions in order, each naming the bundled version (`versionIdFor`) it was. */
 export type ArtifactImport = {
-  readonly key: string;
-  readonly supersedes: string | null;
-  readonly versions: readonly { readonly version: number; readonly write: ImportWrite }[];
+  readonly versions: readonly { readonly from: string; readonly write: ImportWrite }[];
 };
+
+/** Where each bundled version (`versionIdFor`) was written here. */
+export type ImportedVersions = ReadonlyMap<string, { readonly artifactId: string; readonly version: number }>;
+
+/**
+ * The artifact a bundled one is written into: a stage's own document by its
+ * stage, kind and variant, anything else by the oldest artifact of the chain
+ * that supersedes it, so a lineage that was several artifacts becomes one.
+ */
+export function lineageOf(
+  artifact: { readonly id: string; readonly stage: number; readonly kind: string; readonly variant: string | null },
+  supersedes: ReadonlyMap<string, string>,
+): string {
+  if (LEGACY_STAGE_DRAFT_KIND[artifact.stage] === artifact.kind) return `${String(artifact.stage)}:${artifact.kind}:${artifact.variant ?? ""}`;
+  const seen = new Set<string>();
+  let root = artifact.id;
+  while (supersedes.has(root) && !seen.has(root)) {
+    seen.add(root);
+    root = supersedes.get(root)!;
+  }
+  return root;
+}
 
 export type ImportPlan = {
   readonly artifacts: readonly ArtifactImport[];
@@ -50,8 +71,8 @@ export function transcript(messages: ProjectBundle["conversations"][number]["mes
 
 /**
  * The pure write plan for one bundle under a freshly created project id: no
- * network, nothing minted here. Artifacts come oldest first, since a
- * version's place in its lineage is read off when it was written; each
+ * network, nothing minted here. Lineages come oldest first, and within one
+ * every bundled artifact's versions in the order they were written; each
  * carries `kind`/`stage`/`variant`/`mediaType`/`provenance` from the bundled
  * node, re-keyed to `newProjectId`, with `sourceVersionIds` reset to none.
  * Content, including a `data:` URL for a binary original, is kept exactly.
@@ -61,15 +82,16 @@ export function importPlan(bundle: ProjectBundle, newProjectId: string): ImportP
   for (const { node } of bundle.artifacts) {
     if (node.supersededByNodeId) supersedes.set(node.supersededByNodeId, node.id);
   }
-  const artifacts = [...bundle.artifacts]
-    .sort((a, b) => Date.parse(a.node.createdAt) - Date.parse(b.node.createdAt))
-    .map(({ node, versions }): ArtifactImport => ({
-      key: node.id,
-      supersedes: supersedes.get(node.id) ?? null,
-      versions: [...versions]
+  const lineages = new Map<string, ArtifactImport["versions"][number][]>();
+  for (const { node, versions } of [...bundle.artifacts].sort((a, b) => Date.parse(a.node.createdAt) - Date.parse(b.node.createdAt))) {
+    const key = lineageOf(node, supersedes);
+    const lineage = lineages.get(key) ?? [];
+    lineages.set(key, lineage);
+    lineage.push(
+      ...[...versions]
         .sort((a, b) => a.version - b.version)
         .map(({ version, content }) => ({
-          version,
+          from: versionIdFor(node.id, version),
           write: {
             title: node.title,
             content,
@@ -84,9 +106,10 @@ export function importPlan(bundle: ProjectBundle, newProjectId: string): ImportP
             },
           },
         })),
-    }));
+    );
+  }
 
-  return { artifacts, conversations: bundle.conversations.map((conversation) => conversationWrite(conversation, newProjectId)) };
+  return { artifacts: [...lineages.values()].map((versions) => ({ versions })), conversations: bundle.conversations.map((conversation) => conversationWrite(conversation, newProjectId)) };
 }
 
 /** The transcript artifact one bundled conversation becomes under `newProjectId`. */
@@ -109,20 +132,20 @@ export function conversationWrite({ stage, messages }: ProjectBundle["conversati
 /**
  * The approvals the exported workflow recorded, as a replay on the new
  * project: each stage's approved review re-pointed at the artifact written
- * here, version and digest unchanged since the versions were written in
- * order with the same content. Stage 5 carries its policy, votes and
+ * here, at the version that holds the same content, so the digest is
+ * unchanged. Stage 5 carries its policy, votes and
  * packages; stage 6 its requirement items; stage 3 its surface, whose
  * skipped stages are not replayed. It stops where the record does,
  * and at `LAST_ADOPTED_STAGE`, as the legacy import's replay does.
  */
-export function workflowAdoptionPlan(workflow: ExportedWorkflow | null, newProjectId: string, ids: ReadonlyMap<string, string>): AdoptionPlan {
+export function workflowAdoptionPlan(workflow: ExportedWorkflow | null, newProjectId: string, ids: ImportedVersions): AdoptionPlan {
   const plan = { projectId: newProjectId, legacyStage: workflow?.stage ?? 1, legacyDone: workflow?.done ?? false };
   if (!workflow) return { ...plan, steps: [], notes: [] };
   const notes: string[] = [];
   const steps: AdoptionStep[] = [];
   const repoint = (ref: AdoptedReference): AdoptedReference | null => {
-    const artifactId = ids.get(ref.artifactId);
-    return artifactId ? { artifactId, version: ref.version, sha256: ref.sha256 } : null;
+    const written = ids.get(versionIdFor(ref.artifactId, ref.version));
+    return written ? { ...written, sha256: ref.sha256 } : null;
   };
   const reached = workflow.done ? Infinity : workflow.stage;
   if (reached > LAST_ADOPTED_STAGE + 1) {
@@ -184,37 +207,30 @@ export type ImportResult = {
  * Creates the new project, then writes `importPlan`'s versions and
  * conversations into it one at a time -- an artifact-store write has no
  * batch form here, the same as `attachMaterial`. A store that numbers a
- * version differently from the export is an error, not a silent mismatch:
- * the recorded approvals name those numbers.
+ * version other than its place in the plan is an error, not a silent
+ * mismatch: the replayed approvals name those numbers.
  */
 export async function importProject(bundle: ProjectBundle, deps: ImportDeps): Promise<ImportResult> {
   const { projectId } = await deps.createProject({ title: importedProjectTitle(bundle), policy: bundle.project.policy });
   const plan = importPlan(bundle, projectId);
   const versions = plan.artifacts.reduce((total, artifact) => total + artifact.versions.length, 0);
   const total = versions + plan.conversations.length;
-  const ids = new Map<string, string>();
+  const ids = new Map<string, { artifactId: string; version: number }>();
   let done = 0;
   const step = () => {
     done += 1;
     deps.onProgress?.(done, total);
   };
   for (const artifact of plan.artifacts) {
-    const superseded = artifact.supersedes ? ids.get(artifact.supersedes) : undefined;
     let id: string | undefined;
-    for (const { version: expected, write } of artifact.versions) {
-      const sb = { ...write.sb, ...(superseded ? { supersedes: superseded } : {}) };
+    for (const [index, { from, write }] of artifact.versions.entries()) {
       let version: number;
-      if (id) {
-        ({ version } = await deps.reviseArtifact(id, { ...write, sb }));
-      } else {
-        const created = await deps.createArtifact({ ...write, sb });
-        id = created.id;
-        version = created.version;
-      }
-      if (version !== expected) throw new Error(`the artifact store numbered "${write.title}" version ${String(expected)} as ${String(version)}`);
+      if (id) ({ version } = await deps.reviseArtifact(id, write));
+      else ({ id, version } = await deps.createArtifact(write));
+      if (version !== index + 1) throw new Error(`the artifact store numbered "${write.title}" version ${String(index + 1)} as ${String(version)}`);
+      ids.set(from, { artifactId: id, version });
       step();
     }
-    if (id) ids.set(artifact.key, id);
   }
   for (const write of plan.conversations) {
     await deps.createArtifact(write);
@@ -222,7 +238,7 @@ export async function importProject(bundle: ProjectBundle, deps: ImportDeps): Pr
   }
   return {
     projectId,
-    artifacts: ids.size,
+    artifacts: plan.artifacts.length,
     versions,
     conversations: plan.conversations.length,
     plan: workflowAdoptionPlan(bundle.workflow, projectId, ids),
