@@ -500,11 +500,6 @@ export function GuideDock({
       >
         <span key={step.title} className="guide-live">
           {stage ? <StageRing stage={stage} /> : <Compass aria-hidden="true" />}
-          {stage ? (
-            <span className="guide-fab-stage" aria-hidden="true">
-              {stage}
-            </span>
-          ) : null}
         </span>
         {/* Closed, it is the ring and nothing else, sitting out of the way.
             The words are in the card it opens, so the corner of the window is
