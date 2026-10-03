@@ -1123,7 +1123,7 @@ export function StageWorkspace({
           {stage === 7 ? (
             <EstimateView body={draftMessage.body} freeze={workflowView?.freeze ?? null} />
           ) : null}
-          {stage === 3 ? <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} note={SURFACE_NOTE} /> : null}
+          {stage === 3 ? <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} note={SURFACE_NOTE} verification={false} /> : null}
           {stage === 7 ? <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} /> : null}
           <StageDocument
             node={artifacts.activeNode}
