@@ -166,6 +166,7 @@
       "dependencies": {
         "@solutions-builder/specialist-architect": "workspace:*",
         "@solutions-builder/specialist-brainstormer": "workspace:*",
+        "@solutions-builder/specialist-brief-evaluator": "workspace:*",
         "@solutions-builder/specialist-build-supervisor": "workspace:*",
         "@solutions-builder/specialist-companions": "workspace:*",
         "@solutions-builder/specialist-constraints-mapper": "workspace:*",
@@ -174,6 +175,7 @@
         "@solutions-builder/specialist-experience-designer": "workspace:*",
         "@solutions-builder/specialist-plan-review": "workspace:*",
         "@solutions-builder/specialist-presentation-creator": "workspace:*",
+        "@solutions-builder/specialist-product-guide": "workspace:*",
         "@solutions-builder/specialist-proposer": "workspace:*",
         "@solutions-builder/specialist-runtime": "workspace:*",
         "@solutions-builder/specialist-shared": "workspace:*",
@@ -189,6 +191,13 @@
     },
     "packages/specialist-brainstormer": {
       "name": "@solutions-builder/specialist-brainstormer",
+      "version": "0.1.0",
+      "dependencies": {
+        "@solutions-builder/specialist-shared": "workspace:*",
+      },
+    },
+    "packages/specialist-brief-evaluator": {
+      "name": "@solutions-builder/specialist-brief-evaluator",
       "version": "0.1.0",
       "dependencies": {
         "@solutions-builder/specialist-shared": "workspace:*",
@@ -245,6 +254,13 @@
     },
     "packages/specialist-presentation-creator": {
       "name": "@solutions-builder/specialist-presentation-creator",
+      "version": "0.1.0",
+      "dependencies": {
+        "@solutions-builder/specialist-shared": "workspace:*",
+      },
+    },
+    "packages/specialist-product-guide": {
+      "name": "@solutions-builder/specialist-product-guide",
       "version": "0.1.0",
       "dependencies": {
         "@solutions-builder/specialist-shared": "workspace:*",
@@ -856,6 +872,8 @@
 
     "@solutions-builder/specialist-brainstormer": ["@solutions-builder/specialist-brainstormer@workspace:packages/specialist-brainstormer"],
 
+    "@solutions-builder/specialist-brief-evaluator": ["@solutions-builder/specialist-brief-evaluator@workspace:packages/specialist-brief-evaluator"],
+
     "@solutions-builder/specialist-build-supervisor": ["@solutions-builder/specialist-build-supervisor@workspace:packages/specialist-build-supervisor"],
 
     "@solutions-builder/specialist-companions": ["@solutions-builder/specialist-companions@workspace:packages/specialist-companions"],
@@ -871,6 +889,8 @@
     "@solutions-builder/specialist-plan-review": ["@solutions-builder/specialist-plan-review@workspace:packages/specialist-plan-review"],
 
     "@solutions-builder/specialist-presentation-creator": ["@solutions-builder/specialist-presentation-creator@workspace:packages/specialist-presentation-creator"],
+
+    "@solutions-builder/specialist-product-guide": ["@solutions-builder/specialist-product-guide@workspace:packages/specialist-product-guide"],
 
     "@solutions-builder/specialist-proposer": ["@solutions-builder/specialist-proposer@workspace:packages/specialist-proposer"],
 

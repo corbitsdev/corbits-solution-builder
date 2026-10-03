@@ -15,7 +15,8 @@
 import { PANEL_ROLES } from "@solutions-builder/specialist-plan-review";
 import { architect, requirementsAuthor } from "@solutions-builder/specialist-architect";
 import { brainstormer } from "@solutions-builder/specialist-brainstormer";
-import { briefEvaluator, productGuide } from "@solutions-builder/specialist-companions";
+import { briefEvaluator } from "@solutions-builder/specialist-brief-evaluator";
+import { productGuide } from "@solutions-builder/specialist-product-guide";
 import { constraintsMapper } from "@solutions-builder/specialist-constraints-mapper";
 import { deliveryVerifier } from "@solutions-builder/specialist-delivery-verifier";
 import { buildSupervisor } from "@solutions-builder/specialist-build-supervisor";
