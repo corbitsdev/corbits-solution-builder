@@ -47,7 +47,7 @@ const SWALLOWED: readonly RegExp[] = [
 
 function isTestFile(path: string): boolean {
   const name = basename(path);
-  return /[._-](test|spec)\.\w+$/.test(name) || /^test_.+\.py$/.test(name) || path.split("/").some((part) => part === "test" || part === "tests" || part === "__tests__");
+  return /[._-](test|spec)\.\w+$/.test(name) || /^test_.+\.py$/.test(name) || /Tests?\.swift$/.test(name) || path.split("/").some((part) => /^(tests?|__tests__)$/i.test(part));
 }
 
 function lineAt(text: string, index: number): number {
