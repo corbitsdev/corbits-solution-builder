@@ -167,19 +167,12 @@
   min-height: 0;
 }
 
-/* The centered conversation and the side-by-side view are different
-   layouts; the switch between them runs as a view transition, with the
-   conversation and the document pane named so each moves as one piece. */
-.panes > .conv {
-  view-transition-name: stage-conversation;
-}
-
-.panes > .stage-pane {
-  view-transition-name: stage-document;
-}
-
-::view-transition-new(stage-document) {
-  animation: stage-document-in 320ms ease-out both;
+/* The side-by-side view replaces the centered conversation when the first
+   draft arrives; its document pane slides in rather than the page jumping. */
+@media (prefers-reduced-motion: no-preference) {
+  .panes:not(.chat-first):not(.is-solo) > .stage-pane {
+    animation: stage-document-in 320ms ease-out both;
+  }
 }
 
 @keyframes stage-document-in {
