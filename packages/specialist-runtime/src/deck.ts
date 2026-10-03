@@ -52,6 +52,12 @@ export type DeckTheme = keyof typeof DECK_THEMES;
 export const DECK_TYPEFACES = ["Calibri", "Georgia", "Arial", "Helvetica"] as const;
 export type DeckTypeface = (typeof DECK_TYPEFACES)[number];
 
+/** A role key as a person reads it: `project_owner` is "Project owner". */
+export function roleLabel(role: string): string {
+  const words = role.replace(/_/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 /** The look and content choices a deck is built with; the host resolves these from a role's saved settings. */
 export type DeckDesign = {
   theme: DeckTheme;
@@ -204,6 +210,12 @@ export function packageOutlineProblem(markdown: string): string | null {
   return null;
 }
 
+/** The cover's audience line, in the words a reader uses: a role key such as `project_owner` never reaches a slide. */
+export function preparedFor(deck: Pick<Deck, "audience" | "role">): string {
+  if (deck.audience.trim().toLowerCase() === "you") return "Prepared for you";
+  return `Prepared for ${deck.audience} · ${roleLabel(deck.role)}`;
+}
+
 export function deckFrom(args: {
   projectTitle: string;
   audience: string;
@@ -284,7 +296,7 @@ export async function renderDeck(deck: Deck): Promise<Uint8Array> {
   const coverTextWidth = coverImage ? W * 0.52 : W - 1.4;
   cover.addShape(pptx.ShapeType.rect, { x: 0, y: 0, w: 0.25, h: H, fill: { color: look.accent } });
   cover.addText(deck.projectTitle, { x: 0.7, y: H * 0.25, w: coverTextWidth, h: 1.4, fontSize: 32, fontFace: look.titleFace, bold: true, color: look.ink, valign: "bottom" });
-  cover.addText(`Prepared for ${deck.audience} · ${deck.role}`, { x: 0.7, y: H * 0.25 + 1.5, w: coverTextWidth, h: 0.5, fontSize: 16, fontFace: look.bodyFace, color: look.muted });
+  cover.addText(preparedFor(deck), { x: 0.7, y: H * 0.25 + 1.5, w: coverTextWidth, h: 0.5, fontSize: 16, fontFace: look.bodyFace, color: look.muted });
   cover.addText("The cost and time figures in this document are placeholders.", {
     x: 0.7,
     y: H * 0.25 + 2.1,

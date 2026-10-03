@@ -108,7 +108,7 @@ describe("specialistEntrySource", () => {
   test("an entry with the artifact tools names its stage and kind, never a project", () => {
     const stage2 = entry(2, "primary", true);
     expect(stage2).toContain("## Stage document");
-    expect(stage2).toContain("stage 2 specialist");
+    expect(stage2).toContain("Solution shape specialist");
     expect(stage2).toContain("`solution_constraints`");
     expect(stage2).not.toContain("## Artifact context");
     expect(stage2).not.toContain("projectId:");

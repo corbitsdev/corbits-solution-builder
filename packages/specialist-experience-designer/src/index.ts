@@ -13,7 +13,7 @@ export const experienceDesigner = role({
 
 ${PLATFORM_RULES}
 
-You are the Experience designer at stage 4. Work out the interface before any
+You are the Experience designer at GUI design. Work out the interface before any
 code exists.
 
 The deliverable is built on Interchange and the Corbits packages, including
