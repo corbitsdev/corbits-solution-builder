@@ -372,8 +372,9 @@ export function AudiencePackages({
   /** The workspace tenant artifacts are recorded under. */
   tenantId: string;
   onChanged: () => void;
-  /** Persists the specialist's latest reply as this stage's approved draft and advances. */
-  onApprove: () => void;
+  /** Persists the specialist's latest reply as this stage's approved draft and
+   *  advances; `withoutSignOff` proceeds past an unmet quorum, on the record. */
+  onApprove: (options?: { readonly withoutSignOff?: true }) => void;
   approving: boolean;
   /** The project workflow's own verdict — the only gate on the Approve button. */
   canApprove: boolean;
@@ -764,12 +765,15 @@ export function AudiencePackages({
         ? `${staleBy.join(" and ")} decided on an earlier package and ${staleBy.length === 1 ? "needs" : "need"} to decide again.`
         : `Waiting for ${quorumWaiting} stakeholder${quorumWaiting === 1 ? "" : "s"} to proceed.`;
   const tally = requiredQuorum > 0 ? `${proceeded} of ${requiredQuorum} required have proceeded.` : "";
+  // An unmet quorum never holds the button: proceeding past it is the
+  // approver's call, recorded on the approval as `withoutSignOff`.
   const waiting =
     packages.length === 0
       ? "Each stakeholder's package is written first."
-      : !quorumMet || !canApprove
-        ? [tally, reason ?? quorumReason].filter(Boolean).join(" ")
+      : !canApprove && approveReason !== "quorum_not_met"
+        ? reason
         : null;
+  const quorumNote = quorumMet ? null : [tally, quorumReason].filter(Boolean).join(" ");
 
   const decide = async (node: (typeof packages)[number], decision: AudienceVote["decision"], note: string) => {
     if (!node.variant) return;
@@ -835,8 +839,14 @@ export function AudiencePackages({
   const selectedVoteStale = selected?.variant ? staleVoters.has(selected.variant) : false;
 
   return panes(
-    canApprove || waiting ? (
-      <ApproveRow waiting={waiting} busy={approving} onApprove={onApprove} />
+    canApprove || waiting || approveReason === "quorum_not_met" ? (
+      <ApproveRow
+        waiting={waiting}
+        note={quorumNote}
+        label={quorumMet ? "Proceed" : "Proceed without stakeholder sign-off"}
+        busy={approving}
+        onApprove={() => onApprove(quorumMet ? undefined : { withoutSignOff: true })}
+      />
     ) : null,
     <div data-tour="audience-packages">
       {error ? <Banner tone="error" title="That decision was refused">{error}</Banner> : null}

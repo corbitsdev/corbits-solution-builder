@@ -21,7 +21,8 @@ describe("stage 5 audience packages", () => {
     expect(writeOne.indexOf("packageNudge(audience,")).toBeLessThan(writeOne.indexOf("persistAudiencePackage("));
     expect(source).toContain("QuorumChips");
     // Approving is the one row above the composer, with the tally as its waiting reason; none in the pane.
-    expect(source).toContain("<ApproveRow waiting={waiting}");
+    expect(source).toContain("<ApproveRow\n        waiting={waiting}");
+    expect(source).toContain(`"Proceed without stakeholder sign-off"`);
     expect(source).not.toContain("audience-gate");
     expect(source).not.toContain("Approve and continue");
     // #232: one export menu with three ways out replaces the one save button.

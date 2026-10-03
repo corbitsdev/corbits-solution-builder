@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { applyDecision, approveReasonText, initProjectState, type ApplyDecisionInput, type ProjectState } from "./contracts.js";
+import { applyDecision, approveReasonText, initProjectState, type ApplyDecisionInput, type ProjectState, validateDecisionShape } from "./contracts.js";
 import type { StackRecord } from "../stack.js";
 
 const OWNER = "owner-principal";
@@ -690,9 +690,17 @@ describe("stage 5 audience decisions (CL-8870)", () => {
     expect(short.decisions.at(-1)).toMatchObject({ accepted: false, reason: "quorum_not_met" });
     expect(short.decisions.at(-1)).toMatchObject({ quorum: { proceeded: 1, required: 2, blocked: [] } });
 
+    const overridden = applyDecision(
+      input(state, OWNER5, { decisionId: "ap0", kind: "approve", projectId: "p1", stage: 5, reviewId: "stage-5-review-1", artifactId: "a5", version: 1, sha256: "s5", at: AT, withoutSignOff: true }),
+    );
+    expect(overridden.decisions.at(-1)).toMatchObject({ accepted: true, withoutSignOff: true, quorum: { proceeded: 1, required: 2 } });
+    expect(overridden.done).toBe(true);
+    expect(validateDecisionShape({ decisionId: "x", kind: "approve", projectId: "p1", stage: 5, reviewId: "r", artifactId: "a", version: 1, sha256: "s", at: AT, withoutSignOff: false })).toBeNull();
+
     state = vote(state, "v2", "bob", "proceed");
     const met = approve5(state, "ap2");
     expect(met.decisions.at(-1)).toMatchObject({ accepted: true, kind: "approve" });
+    expect(met.decisions.at(-1)).not.toHaveProperty("withoutSignOff");
     expect(met.done).toBe(true);
   });
 

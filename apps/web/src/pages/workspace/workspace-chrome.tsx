@@ -123,6 +123,8 @@ export type Panes = (row: ReactNode, pane: ReactNode) => ReactNode;
 export function ApproveRow({
   evaluator = null,
   waiting = null,
+  note = null,
+  label,
   busy = false,
   onApprove,
 }: {
@@ -130,6 +132,10 @@ export function ApproveRow({
   evaluator?: StageEvaluator | null;
   /** A stage's own gate, said in words; the button waits while it is set. */
   waiting?: ReactNode;
+  /** Status beside the stance that does not hold the button. */
+  note?: ReactNode;
+  /** The button's words, where the stage names its own. */
+  label?: string;
   busy?: boolean;
   onApprove: () => void;
 }) {
@@ -139,13 +145,13 @@ export function ApproveRow({
     <div className="stage-action composer-approve">
       <span className="composer-approve-lead">
         {evaluator ? <EvaluatorStance evaluator={evaluator} /> : null}
-        {waiting ? <span className="composer-approve-waiting">{waiting}</span> : null}
+        {waiting ?? note ? <span className="composer-approve-waiting">{waiting ?? note}</span> : null}
       </span>
       <span data-tour="submit" data-ready={approved ? "true" : undefined} className={approved ? "is-ready approve" : "approve"}>
         {ready ? <span>Happy with this?</span> : null}
-        <Button variant="ghost" loading={busy} disabled={Boolean(waiting)} onClick={onApprove}>
+        <Button variant="ghost" loading={busy} disabled={Boolean(waiting)} onClick={() => onApprove()}>
           <Check aria-hidden="true" />
-          {ready ? "Continue" : "Continue anyway"}
+          {label ?? (ready ? "Continue" : "Continue anyway")}
         </Button>
       </span>
     </div>

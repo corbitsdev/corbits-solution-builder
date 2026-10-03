@@ -41,6 +41,9 @@ export interface DecisionRecord {
      *  current one, so it is not counted (#50). */
     readonly stale?: readonly string[];
   };
+  /** Stage 5 approvals only: set when the approve proceeded with the quorum
+   *  above unmet, by the approver's explicit override. */
+  readonly withoutSignOff?: true;
   /** Stage 7 approvals only: the target the freeze was made for. */
   readonly target?: string;
   /** `audience` decisions only: which stakeholder, and their own
@@ -219,6 +222,10 @@ export interface ApprovePayload extends DecisionCommon {
    *  Stage 5 needs none: its rule reads `ProjectState.audiencePolicy`/
    *  `audienceDecisions` directly. */
   readonly evidence?: unknown;
+  /** Stage 5 only: proceed although the stakeholder quorum is not met. The
+   *  approval records it, so the trail shows the stage left without
+   *  sign-off. */
+  readonly withoutSignOff?: true;
 }
 
 export interface AudiencePayload extends DecisionCommon {
@@ -340,7 +347,8 @@ export function validateDecisionShape(value: unknown): DecisionPayload | null {
       typeof value.reviewId !== "string" ||
       typeof value.artifactId !== "string" ||
       !isStageNumber(value.version) ||
-      typeof value.sha256 !== "string"
+      typeof value.sha256 !== "string" ||
+      (value.withoutSignOff !== undefined && value.withoutSignOff !== true)
     ) {
       return null;
     }
@@ -352,6 +360,7 @@ export function validateDecisionShape(value: unknown): DecisionPayload | null {
       version: value.version,
       sha256: value.sha256,
       ...(value.evidence !== undefined ? { evidence: value.evidence } : {}),
+      ...(value.withoutSignOff === true ? { withoutSignOff: true } : {}),
     };
   }
 
@@ -473,9 +482,11 @@ export function quorumState(
  *  `open_review` captured and the votes recorded since -- never the
  *  approve's own `evidence` (CL-8870: an edit to the stakeholder list after
  *  a review opens can never change the gate that review is checked
- *  against). */
-const stage5Rule: StageRule = (state) => {
+ *  against). An approve that says `withoutSignOff` proceeds past an unmet
+ *  quorum, and its approval records that it did. */
+const stage5Rule: StageRule = (state, payload) => {
   if (!state.audiencePolicy) return "evidence_missing";
+  if (payload.withoutSignOff) return null;
   return quorumState(state.audiencePolicy, state.audienceDecisions, state.audiencePackages).met ? null : "quorum_not_met";
 };
 
@@ -883,6 +894,7 @@ export function applyDecision(input: ApplyDecisionInput): ProjectState {
       version: payload.version,
       sha256: payload.sha256,
       ...(quorum ? { quorum: { proceeded: quorum.proceeded, required: quorum.required, blocked: quorum.blocked, stale: quorum.stale } } : {}),
+      ...(quorum && !quorum.met && payload.withoutSignOff ? { withoutSignOff: true } : {}),
       ...(freeze && freeze !== state.freeze ? { target: freeze.target } : {}),
     };
     const currentIndex = state.stageOrder.indexOf(state.stage);

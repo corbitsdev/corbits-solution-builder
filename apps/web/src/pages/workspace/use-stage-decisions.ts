@@ -78,7 +78,8 @@ export type StageDecisions = {
    *  workflow refused it, or threw), as against a precondition not met yet;
    *  the automatic open shows the former in the error banner (#169). */
   readonly openReviewNow: () => Promise<{ readonly ok: true } | { readonly ok: false; readonly reason: string; readonly failed?: true }>;
-  readonly approve: () => Promise<void>;
+  /** `withoutSignOff`: stage 5 proceeds past an unmet stakeholder quorum. */
+  readonly approve: (options?: { readonly withoutSignOff?: true }) => Promise<void>;
   /** Stage 9's Accept: the tool approval is resolved in the delivery panel;
    *  this sends the workflow's own stage-9 `approve` — without it `done`
    *  never fires and the project never finishes. */
@@ -370,7 +371,7 @@ export function useStageDecisions({
    * — the workflow is the process authority. On a refusal the error shows
    * the reason and the next stage's opening mail is never sent.
    */
-  const approve = async () => {
+  const approve = async (options?: { readonly withoutSignOff?: true }) => {
     if (!reviewMessage || stage >= LAST_STAGE) return;
     if (stage === 7 && !chosenTarget) return;
     if (stackProblem) return;
@@ -427,6 +428,7 @@ export function useStageDecisions({
         evidence,
         ...(policy ? { policy } : {}),
         ...(packages ? { packages } : {}),
+        ...(stage === 5 && options?.withoutSignOff ? { withoutSignOff: true } : {}),
       });
       if (!result.ok) {
         onError(stage === 6 ? stage6RefusalMessage(result.reason) : `This stage's approval was refused: ${stageRefusalMessage(result.reason)}`);

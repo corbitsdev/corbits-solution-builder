@@ -363,6 +363,8 @@ export type ApproveStageInput = {
   readonly policy?: AudiencePolicy;
   /** Stage 5 only: forwarded with `policy`. */
   readonly packages?: Readonly<Record<string, AudiencePackageRef>>;
+  /** Stage 5 only: proceed past an unmet quorum, recorded on the approval. */
+  readonly withoutSignOff?: true;
 };
 
 /**
@@ -404,6 +406,7 @@ export async function approveStage(deps: StageApprovalDeps, input: ApproveStageI
     sha256: input.ref.sha256,
     at: deps.now(),
     ...(input.evidence !== undefined ? { evidence: input.evidence } : {}),
+    ...(input.withoutSignOff ? { withoutSignOff: true } : {}),
   });
   if (!sentApprove.ok) return sentApprove;
 
