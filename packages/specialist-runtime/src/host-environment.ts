@@ -57,3 +57,22 @@ export function inheritedEnvironment(named: readonly string[] = [], host: NodeJS
   }
   return env;
 }
+
+/** Every outbound connection refused but those to this machine. */
+const LOCAL_NETWORK_PROFILE =
+  '(version 1)(allow default)(deny network-outbound)(allow network-outbound (remote ip "localhost:*"))(allow network-outbound (remote unix-socket))';
+
+/**
+ * `command` confined to this machine's network where the platform can do
+ * it: macOS's `sandbox-exec`. Elsewhere it runs as given, and `confined`
+ * says so for the caller to record.
+ */
+export function localNetworkOnly(command: readonly string[]): { command: string[]; confined: boolean } {
+  if (process.platform !== "darwin") return { command: [...command], confined: false };
+  return { command: ["/usr/bin/sandbox-exec", "-p", LOCAL_NETWORK_PROFILE, ...command], confined: true };
+}
+
+/** The transcript's line for what a started process could connect to. */
+export function networkLine(confined: boolean): string {
+  return confined ? "network: this machine only (sandbox-exec)." : `network: not confined; there is no confinement on ${process.platform} here.`;
+}

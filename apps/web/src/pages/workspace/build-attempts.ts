@@ -82,8 +82,8 @@ export type SupervisorBriefInput = {
   };
 };
 
-/** Where the package step's target probes ran: on the host, with the start command the person typed. */
-const PROBE_RAN_ON = "started on this computer by the host, with the start command the person gave";
+/** Where the package step's target probes ran: on the host, with the attempt's declared command or the one the person typed. */
+const PROBE_RAN_ON = "run on this computer by the host, with the command in its transcript";
 
 /**
  * The `## Forecast` section of stage 7's estimate, the figure the

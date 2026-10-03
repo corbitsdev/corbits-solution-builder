@@ -96,7 +96,7 @@ export type BuildPromptInput = {
   readonly continuing: boolean;
 };
 
-/** The host scans the recorded archive for the first four rules (`quality-scan.ts`), and the supervisor judges the rest. */
+/** The host scans the recorded archive for the first four rules (`quality-scan.ts`) and runs what run.json declares (`run-declared.ts`); the supervisor judges the rest. */
 const QUALITY_BAR = [
   `--- QUALITY BAR (the work is judged against every rule) ---`,
   `- No stubs: no TODO, FIXME, XXX, "not implemented", placeholder or lorem ipsum text or data in the delivered files (an input's placeholder attribute is fine). Finish it or leave it out and say so.`,
@@ -104,6 +104,7 @@ const QUALITY_BAR = [
   `- No unused code, no needless fallbacks; prefer the language's and platform's own primitives over new code.`,
   `- Every requirement id above is implemented and exercised by at least one test that names it; package.json \`scripts.test\` (or the stack's equivalent) runs them all.`,
   `- Run the tests yourself and end your final message with the exact command and its real output. Never claim a pass you did not see.`,
+  `- Write .solutions-builder/run.json: {"test": "<command that runs every test>", "start": "<command that starts the app>", "port": <port it listens on at 127.0.0.1>, "routes": ["/", "<each route to GET>"], "smoke": "<optional: a command-line app's check, else start --help is run>"}. When you end, the host runs \`test\` and starts \`start\` itself from this directory, with nothing installed beyond what is here and no network but this machine's, then GETs each route (a command-line app: runs \`smoke\`). Each must pass as declared; port and routes are for a web app or service.`,
   `- The interface uses the design's components, states and copy, including its empty, loading and error states.`,
   `- A README says what it is, how to install, run and test it, and anything left unbuilt.`,
   `- A .gitignore names the toolchain's build output, caches and installed dependencies: what it ignores is left out of the delivered archive.`,
