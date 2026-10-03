@@ -1141,11 +1141,6 @@ export function StageWorkspace({
       ) : null}
 
       {agentAddress && DOCUMENT_STAGES.has(stage) && draftMessage && viewedStage === null && artifacts.activeNode && artifacts.selected ? (
-        <>
-          {stage === 7 ? (
-            <EstimateView body={draftMessage.body} freeze={workflowView?.freeze ?? null} />
-          ) : null}
-          {stage === 7 ? <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} /> : null}
           <StageDocument
             node={artifacts.activeNode}
             versions={artifacts.selected.versions}
@@ -1196,8 +1191,17 @@ export function StageWorkspace({
                   }
                 : null
             }
+            // Cost approval's two leads, each in the pane it is about (#619):
+            // the summary heads the Cost document it is read from, and only
+            // that document; the target question sits with the chat's other
+            // questions, above the box.
+            documentLead={
+              stage === 7 && artifacts.isStageDraft ? (
+                <EstimateView body={artifacts.activeContent} freeze={workflowView?.freeze ?? null} />
+              ) : null
+            }
+            composerLead={stage === 7 ? <TargetPicker chosen={chosenTarget} onChange={setChosenTarget} /> : null}
           />
-        </>
       ) : null}
 
       {agentAddress && stage === 9 ? (
